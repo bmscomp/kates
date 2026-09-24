@@ -44,17 +44,31 @@ topics:
       config:
         retention.ms: "2592000000"
         cleanup.policy: delete
+    # A dead letter queue keeps every failed record, not the latest per key:
+    # compaction would drop earlier failures that share a key, and a
+    # compacted topic refuses records without one. No time limit, as before,
+    # so an upgrade from the compacted topic deletes nothing; the brokers'
+    # log.retention.bytes bounds each partition. Set retention.ms to age
+    # failures out once triage has a deadline.
     kates-dlq:
       partitions: 3
       config:
         retention.ms: "-1"
-        cleanup.policy: compact
+        cleanup.policy: delete
     # Debezium CDC internal topics
+    #
+    # The schema history is Debezium's own log of every DDL statement, read
+    # back in full on restart. Debezium writes it without record keys and
+    # checks for delete, unlimited retention and one partition: a compacted
+    # topic refuses those writes, and time or size retention would delete
+    # history the connector cannot rebuild. retention.bytes overrides the
+    # broker's log.retention.bytes.
     cdc-schema-history:
       partitions: 1
       config:
-        cleanup.policy: compact
+        cleanup.policy: delete
         retention.ms: "-1"
+        retention.bytes: "-1"
     cdc-heartbeat:
       partitions: 1
       config:

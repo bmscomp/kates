@@ -2,10 +2,11 @@ apiVersion: v2
 name: kafka-cluster
 description: A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability
 type: application
-# Patch: Helm tests 02 and 11 run on the Kafka 4.x CLI that kates-tester now
-# ships — the console producer takes --bootstrap-server, and the tiered-storage
-# read-back counts records instead of stdout bytes. Values are unchanged.
-version: 1.0.3
+# Patch: the platform profile stops compacting kates-dlq and
+# cdc-schema-history — both are delete topics with unlimited time retention,
+# the schema history with unlimited size retention too. Templates and base
+# values are unchanged.
+version: 1.0.4
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -39,6 +40,10 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The platform profile's cdc-schema-history topic was compacted. Debezium writes its schema history without record keys, and a compacted topic refuses keyless records, so a connector that keeps a schema history — the Connect image's MySQL and SQL Server connectors — failed on its first schema write. The topic is cleanup.policy=delete with retention.ms=-1 and retention.bytes=-1 — the settings Debezium checks for — so no history is ever deleted; the broker's 10 GiB log.retention.bytes no longer applies to it"
+    - kind: changed
+      description: "The platform profile's kates-dlq topic moves from compact to delete, keeping its unlimited retention.ms. Compaction kept only the latest failure per key and refused keyless records. On upgrade the Topic Operator applies the new policy to the existing topic and deletes no record by age; the brokers' log.retention.bytes (10 GiB per partition) is now the only bound. Set retention.ms under topics.items.kates-dlq.config to age failures out"
     - kind: fixed
       description: "Helm test 02 (produce/consume) passed --broker-list to kafka-console-producer.sh, which Kafka 4.0 removed, so on a 4.x CLI — kates-tester from the next release, or the Strimzi image the tests fall back to when testImages.kafka is empty — the producer exited 1 and the test always failed. It passes --bootstrap-server, which the 3.x CLI accepts too"
     - kind: fixed

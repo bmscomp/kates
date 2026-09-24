@@ -251,6 +251,11 @@
         "path": {
           "type": "string"
         },
+        "targetPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
         "podSelector": {
           "type": "object",
           "additionalProperties": {

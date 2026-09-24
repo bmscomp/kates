@@ -15,7 +15,7 @@ After this chapter, you can:
 
 - Deploy the cluster with `kates deploy` or direct Helm commands, layering the right environment overlay
 - Verify health from the `Kafka` CR, node pools, topics, and user Secrets
-- Connect clients from inside the cluster and through the external NodePort listener
+- Connect clients from inside the cluster and through the external listener
 - Customize topics, users, listeners, and broker pools in `values.yaml`
 
 ---
@@ -72,9 +72,10 @@ Why `--dry-run=client | apply`? This is an idempotent pattern — it creates the
 
 ### 1.4 Monitoring Stack (Optional but Recommended)
 
-If you want metrics, dashboards, and alerts, install the local monitoring wrapper chart first. It is `kates-monitoring` 1.2.0, and it wraps kube-prometheus-stack with the Kates dashboards and scrape configuration:
+If you want metrics, dashboards, and alerts, install the local monitoring wrapper chart first. It is `kates-monitoring` (versions in the [Version & Compatibility Matrix](appendix-d-versions.md)), and it wraps kube-prometheus-stack with the Kates dashboards and scrape configuration:
 
 ```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm dependency build charts/monitoring
 helm upgrade --install monitoring charts/monitoring \
   -f charts/monitoring/values-generic.yaml \
@@ -84,7 +85,7 @@ helm upgrade --install monitoring charts/monitoring \
 The kafka-cluster chart then creates the `PodMonitor` and `PrometheusRule` resources the Prometheus operator discovers.
 
 ::: {.callout-important}
-**Whatever namespace you choose, tell kafka-cluster about it.** The broker NetworkPolicy admits Prometheus on 9404 from `networkPolicy.monitoring.namespace`, which defaults to `monitoring` — so the command above works out of the box. The repository's own path does not use it: `make monitoring` and `scripts/deploy-monitoring.sh` install the release into `kafka`, alongside the brokers, and [Observability & Monitoring](09-observability.md) documents that form. If you follow them, add `--set networkPolicy.monitoring.namespace=kafka` to the kafka-cluster install, or the scrape is dropped the moment network policies are on (staging and prod; they are off in `values-dev.yaml` and `values-kind.yaml`, which is why the mismatch is invisible locally).
+**Whatever namespace you choose, tell kafka-cluster about it.** The chart's NetworkPolicies admit Prometheus from `networkPolicy.monitoring.namespace`, which defaults to `monitoring` — so the command above works out of the box. The repository's own path does not use it: `make monitoring` and `scripts/deploy-monitoring.sh` install the release into `kafka`, alongside the brokers, and [Observability & Monitoring](09-observability.md) documents that form. If you follow them, add `--set networkPolicy.monitoring.namespace=kafka` to the kafka-cluster install. Otherwise, wherever the chart's policies render (not under `values-dev.yaml` or `values-kind.yaml`, which is why the mismatch is invisible locally), the Kafka Exporter and Entity Operator scrapes are dropped: those pods sit under the chart's deny-all, and only the chart's policies admit Prometheus to them. The brokers' metrics port stays open to every pod through the policy Strimzi generates (section 11.1).
 :::
 
 **Nothing to decide about boards.** Chart 1.3.0 deleted the nine hand-written Kafka and Strimzi boards, along with the `legacyKafkaDashboards.enabled` key that used to gate them; setting that key now does nothing and the chart's NOTES say so on upgrade. They read series names that kafka-cluster 1.0's exporter rules (Strimzi's own) do not produce, so they rendered empty panels.
@@ -124,6 +125,35 @@ The Kates backend chart (`charts/kates`) ships additional `ClusterPolicy` resour
 
 ::: {.callout-tip}
 Start with `kyvernoPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Security & Compliance](17-security.md) for details on each policy.
+:::
+
+### 1.6 Production Prerequisites
+
+`values-prod.yaml`, the overlay of the production install in sections 3.5 and 6.3, asks for more than the Strimzi operator. Put these in place first — without them the install fails, or succeeds with backups that never run:
+
+| Prerequisite | What asks for it | Without it |
+|---|---|---|
+| Velero with its CRDs, running in the `velero` namespace | `backup.enabled` renders a `velero.io/v1` `Schedule` in `backup.veleroNamespace` (`velero`), and a pre-upgrade `Backup` hook | `helm upgrade --install` fails with `no matches for kind "Schedule" in version "velero.io/v1"` — the chart does not check for the API first |
+| A `BackupStorageLocation` named `seaweedfs` in `velero`, whose bucket exists and whose credentials the store accepts | `backup.storageLocation: seaweedfs` | the install succeeds and every backup ends `FailedValidation` |
+| Velero's node agent | `backup.volumes: fs-backup` | the backups keep the objects but not the broker and controller volume data |
+| A Secret `kafka-seaweedfs-credentials` in `kafka`, with keys `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` | `seaweedfs.s3.existingSecret`, so the chart renders no credentials Secret of its own | nothing reads it while tiered storage is off; with tiered storage on, the brokers cannot start |
+| amd64 nodes, or the subchart's pin to them cleared | the SeaweedFS subchart, which gives its master, volume and filer pods `nodeSelector: kubernetes.io/arch: amd64` | on a cluster with no amd64 nodes the SeaweedFS pods stay `Pending` and the `--wait` of section 3.5 times out. The SeaweedFS image is multi-arch, so setting `seaweedfs.master.nodeSelector`, `seaweedfs.volume.nodeSelector` and `seaweedfs.filer.nodeSelector` to `""` lets them run on arm64 too |
+| Kyverno (section 1.5) | `kyvernoPolicy.enabled` with `action: Enforce` | no error: the chart renders its `ClusterPolicy` only where the `kyverno.io/v1` API exists, and the release notes report it `not rendered`. With Kyverno present, read the warning below first |
+| The Prometheus operator's CRDs (section 1.4) | the PodMonitors and the `PrometheusRule` | the same: both are skipped, and the release notes say so |
+| cert-manager | the strimzi-operator chart's `values-prod.yaml` (section 3.2), whose drain cleaner takes its certificate from cert-manager — kafka-cluster itself does not use it | that operator install fails on the kinds `Issuer` and `Certificate`; `make cert-manager` installs it |
+
+Nothing in the repository creates the storage location for you, and `make velero` does not match what the overlay expects: it installs Velero into the `kafka` namespace, with a MinIO-backed location called `default` and no node agent. The SeaweedFS the overlay deploys creates no bucket, keeps its data in `hostPath` directories on whichever nodes its pods land on, and, with authentication on, does not accept the keys in `kafka-seaweedfs-credentials` — section 13.4 explains all three before you point a storage location at it.
+
+`helm dependency build` downloads the SeaweedFS subchart, so the machine that installs needs the `helm repo add seaweedfs` of section 3.3 and a route to `https://seaweedfs.github.io/seaweedfs/helm`.
+
+::: {.callout-warning}
+With Kyverno installed, the `Enforce` policy of `values-prod.yaml` — and of `values-staging.yaml` — refuses pods that the same release depends on. Its checks are patterns on the Pod spec, and only pods labelled `strimzi.io/kind` are exempt from some of them:
+
+- The SeaweedFS pods `values-prod.yaml` enables — master, volume and filer, and the bucket hook of section 13.4 — set no security context at all, so they fail the non-root, capabilities, seccomp and privilege-escalation checks. Their StatefulSets never get a pod, and the `--wait` of section 3.5 times out.
+- `require-seccomp` exempts no pod and wants a pod-level `seccompProfile`. Of the Strimzi pods, the chart gives one to the node pools only, so the Entity Operator, Cruise Control and Kafka Exporter pods are refused — and without the Entity Operator no topic or user is ever created.
+- Two `helm test` pods, `krafter-test-produce-consume` and `krafter-test-performance`, drop no capabilities and fail `restrict-capabilities`.
+
+Until the chart's own workloads satisfy the policy, layer a file with `kyvernoPolicy.action: Audit` after the overlay, and read `kubectl get policyreport -n kafka` for what `Enforce` would refuse.
 :::
 
 ---
@@ -226,7 +256,7 @@ The CLI decides three things before it installs anything, and each has a flag:
 | Operator version | `--strimzi-version` | the repository pin (`charts/strimzi-operator` `appVersion`); `latest` for the newest published | `kates versions strimzi` — the Strimzi Helm index |
 | Kafka version | `--kafka-version` | the newest the selected operator supports | `kates versions kafka --strimzi-version …` — read from that operator's chart |
 
-Under cluster scope, only the Kafka versions in the one operator's window can run under Strimzi; asking for another is refused with the window and the ways out (the `legacy-kafka` provider through `kates migrate`, or namespace scope). Under namespace scope, the primary's operator watches only the primary's namespaces, and an older Kafka line can later run beside it under an operator of its own. `kates deploy --dry-run` prints the whole resolution — operator, window, Kafka version, metadata version, what the installed operator allows — and installs nothing.
+Under cluster scope, only the Kafka versions in the one operator's window can run under Strimzi; asking for another is refused with the window and the ways out (the `legacy-kafka` provider through `kates migrate`, or namespace scope). Under namespace scope, the primary's operator watches only the primary's namespaces, and an older Kafka line can later run beside it under an operator of its own. `kates deploy --dry-run` prints the whole resolution — operator, window, Kafka version, metadata version, what the installed operator allows — and installs nothing. The Kafka and metadata versions apply when the Kafka release is first installed: a later run skips a release that is already deployed, and section 14.2 upgrades it.
 
 ```bash
 kates versions                                            # what this cluster can run today
@@ -256,7 +286,7 @@ done
 
 ### 3.2 Step 2 — Install the Strimzi Operator
 
-The kafka-cluster chart creates Strimzi custom resources, but it does **not** bundle the Strimzi operator — the operator must already be running in the cluster. If you deploy with `kates deploy` (section 3.5), the CLI installs the operator for you. To install it manually, use the repository's wrapper chart, `charts/strimzi-operator` (chart 0.3.0, Strimzi 1.2.0):
+The kafka-cluster chart creates Strimzi custom resources, but it does **not** bundle the Strimzi operator — the operator must already be running in the cluster. If you deploy with `kates deploy` (section 3.5), the CLI installs the operator for you. To install it manually, use the repository's wrapper chart, `charts/strimzi-operator` (its chart and Strimzi versions are in the [Version & Compatibility Matrix](appendix-d-versions.md)):
 
 ```bash
 helm dependency build charts/strimzi-operator
@@ -314,11 +344,14 @@ kafka-cluster 1.0 has two Helm dependencies, and Helm refuses to render the char
 | `kafka-common` 0.1.0 | `file://../kafka-common` | always — it is the library chart holding the shared names, rails, Kafka client authentication, `KafkaUser`, NetworkPolicy and monitoring fragments |
 | `seaweedfs` 3.68.0 | `https://seaweedfs.github.io/seaweedfs/helm` | `seaweedfs.enabled` |
 
-So every install, upgrade or `helm template` of this chart is preceded by `helm dependency build`. Both deploy scripts run it unconditionally rather than testing for it — it is idempotent and cheap, and an empty or stale `charts/` directory fails the render outright:
+So every install, upgrade or `helm template` of this chart is preceded by `helm dependency build`. Both deploy scripts run it unconditionally rather than testing for it — it is idempotent and cheap, and an empty or stale `charts/` directory fails the render outright. Add the SeaweedFS repository once per machine first:
 
 ```bash
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm dependency build charts/kafka-cluster
 ```
+
+The `helm repo add` matters from the second build on. The first `build` finds no `Chart.lock`, falls back to `update` and fetches the chart straight from its URL; once the lock exists, `build` accepts only a repository Helm has configured and stops with `no repository definition for https://seaweedfs.github.io/seaweedfs/helm`.
 
 ::: {.callout-note}
 `build` resolves from `Chart.lock`, which is what keeps the pinned SeaweedFS version from drifting. If you are coming from a kafka-cluster 0.4 checkout, that lock file predates the `kafka-common` dependency and `build` refuses it — run `helm dependency update charts/kafka-cluster` once to regenerate the lock, then go back to `build`. Both deploy scripts do exactly this: `helm dependency build … || helm dependency update …`.
@@ -413,7 +446,7 @@ Use `kates deploy` for interactive development. Use direct Helm commands (below)
 
 **Alternative — Direct Helm installation:**
 
-With the Strimzi operator already installed (section 3.2), build the dependencies and install the chart with the full values chain — the platform profile first, one environment overlay second:
+With the Strimzi operator already installed (section 3.2) and the production prerequisites in place (section 1.6), build the dependencies and install the chart with the full values chain — the platform profile first, one environment overlay second:
 
 ```bash
 helm dependency build charts/kafka-cluster
@@ -464,7 +497,7 @@ The initial deployment takes **3–8 minutes**. The operator generates TLS certi
 
 ### 3.7 Step 7 — Install Kafka Connect (Optional)
 
-Kafka Connect is a separate Helm release from a separate chart, `charts/connect-cluster` (chart 2.0.0, Kafka 4.3.1). Keeping it separate is deliberate: Connect upgrades never roll the brokers, and several Connect groups can share one Kafka cluster. It needs the same Strimzi operator (section 3.2) and a Kafka cluster that is already `Ready` (section 4.1).
+Kafka Connect is a separate Helm release from a separate chart, `charts/connect-cluster` (versions in the [Version & Compatibility Matrix](appendix-d-versions.md)). Keeping it separate is deliberate: Connect upgrades never roll the brokers, and several Connect groups can share one Kafka cluster. It needs the same Strimzi operator (section 3.2) and a Kafka cluster that is already `Ready` (section 4.1).
 
 Build its dependency — connect-cluster 2.0 is built on the same `kafka-common` library chart as kafka-cluster — then install it with one environment overlay. There is no profile layer here; that concept belongs to kafka-cluster:
 
@@ -527,6 +560,9 @@ connectors:                      # a MAP keyed by name in 2.0, not a list
     tasksMax: 1
     state: running
     config:
+      database.hostname: postgresql.database.svc
+      database.dbname: orders
+      topic.prefix: cdc          # the chart refuses a Debezium source without these three
       database.password: "${secrets:database/pg-credentials:password}"
 
 monitoring:
@@ -643,7 +679,7 @@ Section 13.10 has the full tier table. Raise the timeout to `--timeout 15m` when
 
 ### 5.1 From Inside the Cluster
 
-Any pod in an allowed namespace can connect using the internal bootstrap address:
+Pods inside the cluster connect through the internal bootstrap address. As the charts ship, every pod can reach it (section 11.1):
 
 ```text
 krafter-kafka-bootstrap.kafka.svc:9092  (plain + SCRAM)
@@ -670,17 +706,20 @@ bin/kafka-topics.sh --bootstrap-server krafter-kafka-bootstrap:9092 --list \
   --command-config /tmp/client.properties
 ```
 
-### 5.2 From Outside the Cluster (NodePort)
+### 5.2 From Outside the Cluster
 
-The `external` listener is exposed as a NodePort service — Kubernetes assigns the port:
+External clients use the `external` listener on port 9094, where the values chain declares one. Two things declare it. The `kafka.externalAccess` preset is off in the base values and the dev, staging and Kind overlays, and `values-prod.yaml` turns it on as a TLS NodePort. `kates deploy` and `scripts/deploy-kafka-generic.sh` start their chain with the `.build/values-detected.yaml` they generate, which declares `external` on every cluster but kind: a NodePort, or a LoadBalancer on EKS, GKE and AKS, with the exposure section 9.3 describes. List the listeners a running cluster has:
 
 ```bash
-# Get the node IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+kubectl get kafka krafter -n kafka -o jsonpath='{.spec.kafka.listeners[*].name}'
+```
 
-# Get the assigned NodePort of the external bootstrap service
-NODE_PORT=$(kubectl get service krafter-kafka-external-bootstrap -n kafka \
-  -o jsonpath='{.spec.ports[0].nodePort}')
+If `external` is among them, the cluster's status carries the address to bootstrap from — node addresses and the port Kubernetes assigned for a NodePort, the load balancer's address for a LoadBalancer:
+
+```bash
+# The external listener's bootstrap address
+BOOTSTRAP=$(kubectl get kafka krafter -n kafka \
+  -o jsonpath='{.status.listeners[?(@.name=="external")].bootstrapServers}')
 
 # Extract the cluster CA certificate
 kubectl get secret krafter-cluster-ca-cert -n kafka \
@@ -690,7 +729,7 @@ kubectl get secret krafter-cluster-ca-cert -n kafka \
 PASSWORD=$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d)
 
 # Connect with kafkacat/kcat
-kcat -b ${NODE_IP}:${NODE_PORT} -X security.protocol=SASL_SSL \
+kcat -b ${BOOTSTRAP} -X security.protocol=SASL_SSL \
   -X sasl.mechanism=SCRAM-SHA-512 \
   -X sasl.username=kates-backend \
   -X sasl.password=${PASSWORD} \
@@ -728,6 +767,8 @@ helm upgrade --install kafka-cluster charts/kafka-cluster \
 
 ### 6.2 Staging
 
+The staging overlay turns the Velero backup on too, so it needs Velero with its CRDs and node agent in the `velero` namespace and a `BackupStorageLocation` named `default` there (the Velero rows of section 1.6), and its Kyverno policy is in `Enforce` (the warning in section 1.6).
+
 ```bash
 helm dependency build charts/kafka-cluster
 helm upgrade --install kafka-cluster charts/kafka-cluster \
@@ -736,9 +777,11 @@ helm upgrade --install kafka-cluster charts/kafka-cluster \
   --namespace kafka
 ```
 
-**What it changes:** Three controllers and three broker pools of one broker each (`kates detect` supplies the zone pins; the overlay itself only spreads by topology), 4Gi brokers on 100Gi volumes, network policies and alerts on, Kyverno in `Enforce`, and a daily Velero backup with a 7-day TTL onto its own PVC.
+**What it changes:** Three controllers and three broker pools of one broker each (`kates detect` supplies the zone pins; the overlay itself only spreads by topology), 4Gi brokers on 100Gi volumes, network policies and alerts on, Kyverno in `Enforce`, and a daily Velero backup with a 7-day TTL to the storage location `default`. It also renders a 50Gi PVC, `krafter-backup-storage`, which nothing mounts: Velero writes to the storage location, not to it.
 
 ### 6.3 Production
+
+The production overlay needs Velero, a storage location and the other prerequisites in section 1.6 before it installs.
 
 ```bash
 helm dependency build charts/kafka-cluster
@@ -764,58 +807,87 @@ This changes the name of the `Kafka` CR, all pod prefixes, and service names. Ev
 
 ### 7.2 Add a New Topic
 
-Add an entry to the `topics` array:
+Topics live under `topics.items`, a map keyed by topic name:
 
 ```yaml
 topics:
-  - name: my-new-topic
-    partitions: 12
-    replicas: 3
-    config:
-      retention.ms: "604800000"   # 7 days
-      min.insync.replicas: "2"
-      cleanup.policy: delete
+  items:
+    my-new-topic:
+      partitions: 12
+      replicas: 3
+      config:
+        retention.ms: "604800000"   # 7 days
+        min.insync.replicas: "2"
+        cleanup.policy: delete
 ```
 
-Then run `helm upgrade` — the Topic Operator will create the topic automatically.
+Because it is a map, your entries merge by name with the platform profile's topics and with those of any earlier values file, so you list only the topics you add or change. Save it in a file of your own — `my-values.yaml` in section 14.1 — and pass that file last in the upgrade; the Topic Operator then creates the topic. `kates deploy` takes no values file, so it cannot apply this change.
 
 ### 7.3 Add a New User with ACLs
 
+Users live under `users.items`, keyed by the principal name:
+
 ```yaml
 users:
-  - name: my-service
-    authentication:
-      type: scram-sha-512
-    quotas:
-      producerByteRate: 10485760    # 10 MB/s
-      consumerByteRate: 20971520    # 20 MB/s
-    authorization:
-      type: simple
-      acls:
-        - resource:
-            type: topic
-            name: "my-new-topic"
-            patternType: literal
-          operations: ["Read", "Write", "Describe"]
-          host: "*"
-        - resource:
-            type: group
-            name: "my-service-"
-            patternType: prefix
-          operations: ["Read", "Describe"]
-          host: "*"
+  items:
+    my-service:
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 10485760    # 10 MB/s
+        consumerByteRate: 20971520    # 20 MB/s
+      authorization:
+        type: simple
+        acls:
+          - resource:
+              type: topic
+              name: "my-new-topic"
+              patternType: literal
+            operations: ["Read", "Write", "Describe"]
+            host: "*"
+          - resource:
+              type: group
+              name: "my-service-"
+              patternType: prefix
+            operations: ["Read", "Describe"]
+            host: "*"
 ```
 
-After `helm upgrade`, Strimzi creates a Kubernetes Secret named `my-service` containing the auto-generated password.
+Put it in the same file of your own and upgrade as in section 14.1. Strimzi then creates a Kubernetes Secret named `my-service` containing the auto-generated password.
+
+::: {.callout-important}
+`topics` and `users` are maps, not lists. A values file that writes `topics:` or `users:` as a list of `- name:` entries fails the chart's schema check, and Helm applies nothing. The 0.4 form — a list one level down, under `topics.items` or `users.items` — still renders in 1.x and is named in the release notes' `DEPRECATED` list; write new values as maps.
+:::
 
 ### 7.4 Scale Brokers
 
-To add a fourth broker in a new zone:
+This example is for a release built on section 3.4's pools; a release that `kates deploy` or `make kafka` installed carries the 0.4 `controllerPools` and `brokerPools` from `values-detected.yaml`, which the chart refuses beside `nodePools.pools`, so scale that one as [The Cluster Under Test](03-cluster.md#testing-with-more-brokers) describes.
+
+`nodePools.pools` is a list, and Helm replaces a list instead of merging it. The file that adds a pool therefore repeats every pool the cluster already runs, under the same names — `kubectl get kafkanodepools -n kafka -l strimzi.io/cluster=krafter` lists them. With the zone pools from section 3.4, a fourth broker in a new zone is:
 
 ```yaml
 nodePools:
   pools:
-    # ... existing pools ...
+    - name: controllers
+      roles: [controller]
+    - name: brokers-alpha
+      roles: [broker]
+      zone: alpha
+      replicas: 1
+      storage:
+        volumes: [{ id: 0, size: 50Gi, class: local-storage-alpha }]
+    - name: brokers-sigma
+      roles: [broker]
+      zone: sigma
+      replicas: 1
+      storage:
+        volumes: [{ id: 0, size: 50Gi, class: local-storage-sigma }]
+    - name: brokers-gamma
+      roles: [broker]
+      zone: gamma
+      replicas: 1
+      storage:
+        volumes: [{ id: 0, size: 50Gi, class: local-storage-gamma }]
     - name: brokers-delta
       roles: [broker]
       zone: delta
@@ -823,6 +895,10 @@ nodePools:
       storage:
         volumes: [{ id: 0, size: 50Gi, class: local-storage-delta }]
 ```
+
+::: {.callout-warning}
+A pool left out of the list is not deleted — every `KafkaNodePool` carries `helm.sh/resource-policy: keep` — but the release stops managing it, and the chart's checks (replication factors against the broker count, the controller quorum) see only the pools it renders. Render the chain with `helm template` and compare the `KafkaNodePool` names with the running ones before you upgrade.
+:::
 
 After upgrading, the new broker joins, and Cruise Control's auto-rebalance moves partitions onto it using the chart's `krafter-add-brokers-template`. For a full rebalance, set `rebalance.full.enabled: true` and approve the proposal:
 
@@ -839,12 +915,14 @@ cruiseControl:
 kafkaExporter:
   enabled: false
 
-networkPolicies:
+networkPolicy:
   enabled: false
 
 alerts:
   enabled: false
 ```
+
+`productionMode` — on in `values-prod.yaml` — refuses `networkPolicy.enabled: false`, so drop that block when the file is layered over the production overlay.
 
 ---
 
@@ -934,18 +1012,18 @@ Kafka *listeners* define how clients connect to the cluster. Each listener has i
 
 ### 9.1 Default Listener Configuration
 
-The chart configures three listeners out of the box:
+The base values configure two internal listeners. A third, `external`, comes from one of two places: the `kafka.externalAccess` preset, off in the base values and a TLS NodePort in `values-prod.yaml`, or the `.build/values-detected.yaml` that `kates deploy` and `scripts/deploy-kafka-generic.sh` generate, which declares it on every cluster but kind — a NodePort, or a LoadBalancer on EKS, GKE and AKS. `kubectl get kafka krafter -n kafka -o jsonpath='{.spec.kafka.listeners[*].name}'` lists the listeners a running cluster has.
 
 | Listener | Port | Protocol | Authentication | TLS | Use Case |
 |----------|:----:|----------|---------------|:---:|----------|
 | `plain` | 9092 | Plaintext | SCRAM-SHA-512 | ✗ | Internal services within the cluster (fast, no TLS overhead) |
 | `tls` | 9093 | TLS | mTLS (certificate) | ✓ | Secure internal communication (mutual TLS — both client and server present certificates) |
-| `external` | 9094 | TLS + NodePort | SCRAM-SHA-512 | ✓ | External clients outside the Kubernetes cluster |
+| `external` | 9094 | TLS + NodePort or LoadBalancer | SCRAM-SHA-512 | ✓ | External clients outside the Kubernetes cluster — where the preset or the generated values declare it |
 
 **Why three listeners?** Different clients have different security requirements:
-- **Internal microservices** use `plain:9092` — SCRAM authentication without TLS encryption. This is acceptable within a trusted network because Kubernetes NetworkPolicies restrict which pods can reach this port.
+- **Internal microservices** use `plain:9092` — SCRAM authentication without TLS encryption. Keep it to a network you trust: as the charts ship, every pod in the cluster can reach this port, because Strimzi's generated NetworkPolicy admits all sources to a listener without `networkPolicyPeers` (section 11.1).
 - **Security-sensitive services** use `tls:9093` — full mTLS ensures both authentication and encryption.
-- **External tools** (monitoring dashboards, development laptops) use `external:9094` — NodePort with TLS so traffic is encrypted over the public network.
+- **External tools** (monitoring dashboards, development laptops) use `external:9094` — TLS, so traffic is encrypted on networks you do not control. Every source that reaches the port can try to connect (section 11.1), so keep it off the internet unless you mean it to be there (section 9.3).
 
 ### 9.2 Listener Configuration in values.yaml
 
@@ -958,7 +1036,6 @@ kafka:
       tls: false
       authentication:
         type: scram-sha-512   # Username/password via SCRAM
-
     - name: tls
       port: 9093
       type: internal
@@ -966,50 +1043,114 @@ kafka:
       authentication:
         type: tls             # Client certificate (mTLS)
 
-    - name: external
-      port: 9094
-      type: nodeport          # Exposed via NodePort on each node
-      tls: true
-      authentication:
-        type: scram-sha-512
-      configuration: {}       # NodePort settings (overrides per node)
+  # The external listener preset, appended to `listeners`
+  externalAccess:
+    type: none                # none | nodeport | loadbalancer | ingress
+    name: external
+    port: 9094
+    tls: true
+    authentication:
+      type: scram-sha-512
+    configuration: {}         # passed to the listener's `configuration`
+    allowedCidrs: []          # narrows the chart's NetworkPolicy rule only (section 11.1)
 ```
+
+`values-prod.yaml` sets `externalAccess.type: nodeport`. The chart appends the listener, replacing any listener in `kafka.listeners` with the same name or port, such as the `external` one the generated values declare; it gives the listener an ingress rule in the broker NetworkPolicy, and under `productionMode` refuses a NodePort without TLS.
 
 ### 9.3 Customizing Listeners
 
-**Add an OAuth 2.0 listener** for services using token-based authentication:
+**Expose the cluster through a LoadBalancer** (cloud clusters) by changing the preset's type rather than the listener list. Keep the load balancers internal, reachable only from inside the VPC, and admit only the ranges your clients run in. On EKS, with the AWS Load Balancer Controller installed:
+
+```yaml
+# my-values.yaml
+kafka:
+  externalAccess:
+    type: loadbalancer        # replaces the external listener values-prod.yaml or kates deploy declares
+    tls: true
+    configuration:
+      # Who may connect, on the bootstrap and every broker
+      loadBalancerSourceRanges:
+        - 10.0.0.0/16
+      bootstrap:
+        annotations:
+          service.beta.kubernetes.io/aws-load-balancer-type: "external"
+          service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+          service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+      # Every per-broker Service, whatever its node ID
+      perBrokerAnnotationsTemplate:
+        service.beta.kubernetes.io/aws-load-balancer-type: "external"
+        service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+        service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+```
+
+The chart passes `configuration` to the Strimzi listener unchanged. Strimzi creates one LoadBalancer Service for the bootstrap and one per broker, and each needs the provider's annotations: `bootstrap.annotations` covers the first, `perBrokerAnnotationsTemplate` every broker, and `loadBalancerSourceRanges` applies to all of them. `aws-load-balancer-type: external` hands each Service to the AWS Load Balancer Controller (without it the Services stay pending), `nlb-target-type: ip` sends traffic straight to the pod, and `scheme: internal` keeps the NLB inside the VPC. `10.0.0.0/16` stands for your VPC range; add the peered or on-premises ranges your clients run in. `perBrokerAnnotationsTemplate` needs Strimzi 1.1.0 or newer; on 1.0.x, annotate the brokers one by one under `configuration.brokers`, a `broker` node ID and its `annotations` per entry. GKE and AKS take their own internal annotation, on the bootstrap and in `perBrokerAnnotationsTemplate` alike: `networking.gke.io/load-balancer-type: "Internal"` on GKE, and on AKS `service.beta.kubernetes.io/azure-load-balancer-internal: "true"` together with `service.beta.kubernetes.io/azure-deny-all-except-load-balancer-source-ranges: "true"`, without which the Network Security Group still admits the whole VNet. The Kafka overlays of [Deployment Guide](12-deployment.md#cloud-deployment) show each in full. A LoadBalancer Service without provider annotations usually gets a public address.
+
+::: {.callout-important}
+Open the load balancers to the internet only on purpose: set `aws-load-balancer-scheme: internet-facing` and list the public ranges of the clients that need it in `loadBalancerSourceRanges`, since on a public load balancer empty ranges mean `0.0.0.0/0`. `kafka.externalAccess.allowedCidrs` does not replace them. It narrows the chart's NetworkPolicy rule for the listener, but Strimzi's generated policy admits port 9094 from anywhere, because the preset sets no `networkPolicyPeers` (section 11.1), and behind a load balancer the address a NetworkPolicy sees is often a node or the load balancer rather than the client.
+:::
+
+Writing the external listener into `kafka.listeners` instead replaces the whole list — Helm does not merge lists — so `plain` and `tls` disappear, and with the platform profile the render stops at its first client rule: `networkPolicy.clients "kates" names listener "plain", which kafka.listeners does not have`.
+
+::: {.callout-important}
+**`kates deploy` publishes port 9094 on EKS, GKE and AKS.** There, `.build/values-detected.yaml` declares `external` as a LoadBalancer with one annotation, on the bootstrap Service only — `aws-load-balancer-type: nlb` on EKS, `cloud.google.com/l4-rbs: enabled` on GKE, `azure-load-balancer-internal: "true"` on AKS — and with no `loadBalancerSourceRanges`. Every broker's load balancer gets the provider's default, usually a public address, and on EKS and GKE so does the bootstrap's. TLS and SCRAM-SHA-512 still guard the port, but anyone who reaches it can probe the TLS stack and try passwords. `scripts/deploy-kafka-generic.sh` generates the same listener, unless an overlay in its chain sets `kafka.externalAccess`.
+:::
+
+`my-values.yaml`, with your provider's annotations, fixes that on such a release too: the preset replaces a listener of the same name, so an upgrade over the values the release runs with, as in section 14.1, makes `external` internal. It replaces the listener, though, not its load balancers: Strimzi changes the annotations of the Services that exist. On EKS the in-tree provider then leaves those Services to the AWS Load Balancer Controller and keeps the public load balancers it created, still forwarding to the brokers, while the controller creates internal ones beside them; on GKE and AKS the upgrade would switch live load balancers from public to internal in place. So take the listener away first, and add the file's once its load balancers are gone. Build the chart's dependencies as in section 14.1, then:
+
+```bash
+# Every value the release was installed with — its files and its --set flags
+helm get values krafter -n kafka -o yaml > krafter-current.yaml
+```
+
+In `krafter-current.yaml`, delete the entry of `kafka.listeners` whose `name` is `external`. It is the last entry, and Helm writes each entry's keys in alphabetical order, so it runs from its `- authentication:` line to its `type: loadbalancer` line; leave `plain` and `tls` as they are. Upgrade from the edited file alone and list the cluster's Services:
+
+```bash
+helm upgrade krafter charts/kafka-cluster -n kafka -f krafter-current.yaml
+
+kubectl get svc -n kafka -l strimzi.io/cluster=krafter
+```
+
+The brokers roll to drop the listener, and Strimzi deletes its Services. Wait until the list shows no Service of type `LoadBalancer`, and check in the provider's console or CLI that their load balancers are gone too. Then upgrade with your file last:
+
+```bash
+helm upgrade krafter charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  -f my-values.yaml
+
+kubectl get kafka krafter -n kafka \
+  -o jsonpath='{.status.listeners[?(@.name=="external")].bootstrapServers}'
+```
+
+The brokers roll again, and Strimzi creates the listener's Services afresh, with your annotations from the start. External clients get a new bootstrap address, which the `kubectl get kafka` prints once the brokers are ready. For a release `scripts/deploy-kafka-generic.sh` installed, write `kafka-cluster` for `krafter` in the `helm` commands.
+
+**Add an internal listener** by writing the whole list, `plain` and `tls` included. This one adds SCRAM over TLS on 9095:
 
 ```yaml
 kafka:
   listeners:
-    # ... existing listeners ...
-    - name: oauth
+    - name: plain
+      port: 9092
+      type: internal
+      tls: false
+      authentication:
+        type: scram-sha-512
+    - name: tls
+      port: 9093
+      type: internal
+      tls: true
+      authentication:
+        type: tls
+    - name: scramtls
       port: 9095
       type: internal
       tls: true
       authentication:
-        type: oauth
-        validIssuerUri: https://keycloak.example.com/realms/kafka
-        jwksEndpointUri: https://keycloak.example.com/realms/kafka/protocol/openid-connect/certs
-        userNameClaim: preferred_username
-```
-
-**Change the external listener to LoadBalancer** (cloud clusters):
-
-```yaml
-kafka:
-  listeners:
-    - name: external
-      port: 9094
-      type: loadbalancer      # Cloud LB instead of NodePort
-      tls: true
-      authentication:
         type: scram-sha-512
-      configuration:
-        bootstrap:
-          annotations:
-            service.beta.kubernetes.io/aws-load-balancer-type: nlb
 ```
+
+The chart's policy admits a client to a new listener once a `networkPolicy.clients` entry names it (section 11.4); Strimzi's generated policy admits every pod to it until the listener carries `networkPolicyPeers` (section 11.1). Listener names are at most 11 lowercase letters and digits, and ports start at 9092, except 9404 and 9999, which Strimzi keeps for metrics and JMX.
+
+**Authentication types.** The Strimzi `v1` API accepts three listener authentication types: `tls`, `scram-sha-512` and `custom`. It has no `oauth` type, and the API server rejects a `Kafka` resource that names one. OAuth 2.0, like any other SASL mechanism, goes through `type: custom` with `sasl: true` and the mechanism's broker settings under `listenerConfig`, as Strimzi's documentation for your operator version describes.
 
 ::: {.callout-warning}
 When adding or removing listeners, the Strimzi operator performs a **rolling restart** of all brokers. Plan listener changes during a maintenance window.
@@ -1023,7 +1164,7 @@ Each listener gets its own bootstrap service. Use these addresses in your client
 |----------|---------------------------|-----------------|
 | `plain` | `krafter-kafka-bootstrap.kafka.svc:9092` | N/A |
 | `tls` | `krafter-kafka-bootstrap.kafka.svc:9093` | N/A |
-| `external` | N/A | `<node-ip>:<nodeport>` |
+| `external` | N/A | `<node-ip>:<nodeport>` for a NodePort listener, the load balancer's address for a LoadBalancer one (section 5.2 reads it from the cluster's status) |
 
 ---
 
@@ -1041,8 +1182,8 @@ The chart creates 8 topics, each designed for a specific data pipeline:
 | `kates-results` | 12 | 3 | 7 days | lz4 | delete | Detailed test results with payloads (high throughput) |
 | `kates-metrics` | 6 | 3 | 1 day | lz4 | delete | Real-time metrics pipeline (latency, throughput, resource usage) |
 | `kates-audit` | 3 | 3 | 30 days | — | delete | Audit trail for compliance (who ran what, when) |
-| `kates-dlq` | 3 | 3 | forever | — | compact | Dead letter queue for failed messages (compacted to keep latest per key) |
-| `cdc-schema-history` | 1 | 3 | forever | — | compact | Debezium schema history for CDC connectors |
+| `kates-dlq` | 3 | 3 | unlimited | — | delete | Dead letter queue for failed messages |
+| `cdc-schema-history` | 1 | 3 | forever, no size limit | — | delete | Debezium schema history for CDC connectors |
 | `cdc-heartbeat` | 1 | 3 | 1 day | — | delete | CDC liveness heartbeats (detects stalled connectors) |
 | `test-sink-topic` | 3 | 3 | 1 day | — | delete | Sink target for Kafka Connect sink connector validation |
 
@@ -1050,8 +1191,12 @@ The chart creates 8 topics, each designed for a specific data pipeline:
 
 - **Partitions** scale with expected throughput — `kates-results` has 12 partitions because it handles the highest message volume.
 - **Replicas: 3** ensures data survives the loss of any single broker (`min.insync.replicas: 2` across all topics).
-- **Compact cleanup** on `kates-dlq` and `cdc-schema-history` means Kafka keeps only the latest value per key, acting as a key-value store.
+- **Delete cleanup everywhere, compaction nowhere.** Debezium writes its schema history without record keys, which a compacted topic refuses, and replays all of it on restart — so `cdc-schema-history` keeps `retention.ms: -1` and `retention.bytes: -1`, the settings Debezium checks for. `kates-dlq` is a delete topic because compaction keeps only the latest failure per key and refuses records without one. It has no time limit because it keeps the retention it had as a compacted topic, so an upgrade from that topic deletes nothing by age; only the brokers' 10 GiB `log.retention.bytes` bounds each partition. Set a `retention.ms` under `topics.items.kates-dlq.config` to age failures out.
 - **lz4 compression** on high-volume topics reduces storage and network I/O with minimal CPU overhead.
+
+::: {.callout-caution}
+An existing `kates-dlq` that was created compacted takes `cleanup.policy: delete` on the next upgrade and keeps its records: `retention.ms` stays unlimited, so nothing is deleted by age. Under delete, the brokers' `log.retention.bytes` — 10 GiB per partition in the chart's values — applies to it as well, so only a partition already over that size loses its oldest segments.
+:::
 
 To list all topics using the kates CLI:
 
@@ -1104,7 +1249,7 @@ Secrets are only created after the Kafka cluster reaches `Ready` state. If secre
 
 ## 11. Network Policies
 
-Network policies enforce the principle of **least privilege** at the network layer. Without them, any pod in the cluster can connect to Kafka — with them, only explicitly allowed namespaces and pods can reach specific ports.
+Network policies decide which pods can reach the brokers at all, a layer below SCRAM and ACLs. As the charts ship, they close the brokers' internal ports but leave the client listeners open to every pod in the cluster; section 11.1 shows why, and where to go to close them.
 
 ### 11.1 Why Network Policies Matter
 
@@ -1113,9 +1258,24 @@ In a shared Kubernetes cluster, Kafka is a high-value target:
 - It has administrative APIs (port 9090) that can modify cluster state
 - Unauthorized produce/consume can corrupt data pipelines
 
-The chart's default-deny + explicit-allow approach means you must **opt in** to connectivity — nothing is open by default.
+Two sets of policies select the brokers: the chart's, and one the Strimzi Cluster Operator generates for every Kafka cluster, `krafter-network-policy-kafka`, unless its `STRIMZI_NETWORK_POLICY_GENERATION` is off (it is on by default). NetworkPolicies are additive: a connection is allowed when **any** policy that selects the pod allows it. In Strimzi's policy, a listener without `networkPolicyPeers` admits every pod in every namespace, and no listener in the chart's values or in the values `kates deploy` generates has them. As the charts ship, whatever the values chain, this is who can connect:
+
+| Port | Who Can Connect |
+|------|-----------------|
+| 9090, 9091, 8443 | Only the cluster's own pods and pods labelled as the Cluster Operator: Strimzi's policy closes them in every profile |
+| 9092 (`plain`), 9093 (`tls`) | Every pod in the cluster |
+| 9404 (metrics) | Every pod in the cluster, while `metrics.enabled` is on, as it is by default |
+| 9094 (`external`), wherever a listener declares it | Every source. `kafka.externalAccess.allowedCidrs` narrows only the chart's rule |
+
+Port 9094 is declared by `values-prod.yaml` and, on every cluster but kind, by the values `kates deploy` generates (section 9.1).
+
+Strimzi's policy recognizes the Cluster Operator by the label `strimzi.io/kind: cluster-operator`, in any namespace, unless the operator knows the labels of its own namespace: set `strimzi-kafka-operator.image.operatorNamespaceLabels` on the `strimzi-operator` release, for example to `kubernetes.io/metadata.name=strimzi-operator`, to hold those rules to that namespace.
+
+What the chart's policies add, where they render, is a limit on the egress of the brokers, controllers, Cruise Control, the Entity Operator and the Kafka Exporter, and a deny-all, `krafter-default-deny`, under which Cruise Control, the Entity Operator and the Kafka Exporter accept only what a policy allows them. They do not render under `values-dev.yaml` or `values-kind.yaml`, nor where `kates deploy` could not identify the cluster's CNI, except on EKS, GKE and AKS. So neither `krafter-default-deny` nor `networkPolicy.clients` keeps anyone off the listeners on its own: until you close them, SCRAM authentication and ACLs are what stand between an arbitrary pod and your data. Giving every listener `networkPolicyPeers` closes them and makes `networkPolicy.clients` the allow list; [Security & Compliance](17-security.md#network-policies) shows how, over the values the release already has, and how to test the result.
 
 ### 11.2 Traffic Flow Diagram
+
+The solid edges are the chart's rules; the dashed ones are Strimzi's generated policy, which admits every pod whatever the chart's rules say.
 
 ```mermaid
 graph LR
@@ -1135,8 +1295,13 @@ graph LR
     subgraph "Client namespaces"
         CL["networkPolicy.clients<br/>kates, litmus, kafka-ui,<br/>apicurio, Connect, MM2"]
     end
+    subgraph "Any namespace"
+        ANY["Any pod"]
+    end
 
     CL -->|"9092, 9093"| B
+    ANY -.->|"9092, 9093<br/>until the listeners<br/>carry networkPolicyPeers"| B
+    ANY -.->|"9404<br/>while metrics are on"| B
     P -->|"9404"| B
     P -->|"9404"| CC
     P -->|"9404"| KE
@@ -1157,21 +1322,23 @@ Every policy is named `<clusterName>-…`, which is what lets two Kafka clusters
 |--------|-------------|--------|---------------|
 | `krafter-default-deny` | `app.kubernetes.io/part-of: strimzi-krafter` | Nothing — the baseline deny-all for ingress and egress | `networkPolicy.defaultDeny.enabled` |
 | `krafter-allow-dns` | the same selector | DNS egress (53 UDP/TCP) to any namespace | `networkPolicy.dns.enabled` |
-| `krafter-kafka` | `strimzi.io/name: krafter-kafka` — brokers **and** controllers, which share this label in KRaft | Ingress: the cluster's own pods on 9090–9093; the Cluster Operator on 9090, 9091, 8443, 9092, 9093; each `networkPolicy.clients` entry on the ports of the listeners it names; Helm test pods on the listener ports; Prometheus on 9404; and any source on the external listener's port where one is configured (9094 under `values-prod.yaml`, which the first two rules pick up as well). Egress: the cluster's own pods on any port, plus the API server | always |
+| `krafter-kafka` | `strimzi.io/name: krafter-kafka` — brokers **and** controllers, which share this label in KRaft | Ingress: the cluster's own pods on 9090–9093; the Cluster Operator on 9090, 9091, 8443, 9092, 9093; each `networkPolicy.clients` entry on the ports of the listeners it names; Helm test pods on the listener ports; Prometheus on 9404; and any source on the external listener's port where one is configured (9094 under `values-prod.yaml` or in a `kates deploy` release outside kind, which the first two rules pick up as well). Egress: the cluster's own pods on any port, plus the API server | always |
 | `krafter-cruise-control` | `strimzi.io/name: krafter-cruise-control` | Ingress: the Cluster Operator on 9090, Prometheus on 9404. Egress: the cluster's pods, plus the API server | `cruiseControl.enabled` |
 | `krafter-entity-operator` | `strimzi.io/name: krafter-entity-operator` | Ingress: Prometheus on 8080 and 8081. Egress: the cluster's pods, plus the API server | always |
 | `krafter-kafka-exporter` | `strimzi.io/name: krafter-kafka-exporter` | Ingress: Prometheus on 9404. Egress: the cluster's pods, plus the API server | `kafkaExporter.enabled` |
-| `krafter-test-egress` | `kates.io/test-pod: true` | Egress to the cluster's pods on 9090–9093 — and on every configured listener port, so 9090–9094 under `values-prod.yaml` — plus DNS and the API server, because the Helm tests run `kubectl` | `networkPolicy.enabled`; carries `helm.sh/resource-policy: keep` so a later `helm test` of a reinstalled release still works |
+| `krafter-test-egress` | `kates.io/test-pod: true` | Egress to the cluster's pods on 9090–9093 — and on every configured listener port, so 9090–9094 wherever an `external` listener is declared — plus DNS and the API server, because the Helm tests run `kubectl` | `networkPolicy.enabled`; carries `helm.sh/resource-policy: keep` so a later `helm test` of a reinstalled release still works |
 
 There is no separate controller policy: in KRaft every node-pool pod carries `strimzi.io/name: <cluster>-kafka`, so `krafter-kafka` covers both roles.
 
+Strimzi's `krafter-network-policy-kafka` sits beside these in every profile, including those where the chart renders none. `krafter-default-deny` allows nothing, so for the pods it selects, whatever no other policy allows is dropped; it does not outvote an allow, so the ingress rules of `krafter-kafka` and of Strimzi's policy add up.
+
 ::: {.callout-note}
-kafka-cluster 1.0 stopped rendering the policies that selected **other releases'** pods — the Cluster Operator's, the drain cleaner's, kafka-ui's, MirrorMaker 2's and Connect's. The operator's and the drain cleaner's belong to `charts/strimzi-operator` (section 3.2); kafka-ui, connect-cluster and mirror-maker2 each render their own. Those releases still reach the brokers, but through `networkPolicy.clients` below rather than through a policy this chart writes into their namespace.
+kafka-cluster 1.0 stopped rendering the policies that selected **other releases'** pods — the Cluster Operator's, the drain cleaner's, kafka-ui's, MirrorMaker 2's and Connect's. The operator's and the drain cleaner's belong to `charts/strimzi-operator` (section 3.2); kafka-ui, connect-cluster and mirror-maker2 each render their own. The chart's rule for those releases' traffic to the brokers is a `networkPolicy.clients` entry below rather than a policy this chart writes into their namespace.
 :::
 
 ### 11.4 Granting Clients Access
 
-Who may reach which listener is one list, `networkPolicy.clients`. Each entry names the listeners it needs by **name**, and the chart derives the ports from `kafka.listeners` — so a listener that moves ports does not leave a stale number behind:
+Which workloads the chart's own `krafter-kafka` policy admits to which listener is one list, `networkPolicy.clients`. Each entry names the listeners it needs by **name**, and the chart derives the ports from `kafka.listeners` — so a listener that moves ports does not leave a stale number behind. The list becomes the allow list for the listeners only once they carry `networkPolicyPeers` (section 11.1); until then Strimzi's policy admits every pod to them, entry or none:
 
 ```yaml
 networkPolicy:
@@ -1183,20 +1350,27 @@ networkPolicy:
       listeners: [tls]             # renders ingress on 9093
 ```
 
-The platform profile already grants `kates`, `litmus`, `kafka-ui` (in both the `kates` and `kafka-ui` namespaces), `apicurio-registry`, Connect and MirrorMaker 2, each on `[plain, tls]`. Entries merge **by name**, so naming one of those changes it in place instead of adding a second rule. To push `kates` onto the TLS listener only:
+The platform profile already grants `kates`, `litmus`, `kafka-ui` (in both the `kates` and `kafka-ui` namespaces), `apicurio-registry`, Connect and MirrorMaker 2, each on `[plain, tls]`. The chart merges your entries with the profile's **by name**: an entry named like one of those changes that grant in place, keeping the fields you leave out, and any other name is appended. Keep `plain` in the grant of a client that authenticates with SCRAM, as every user the profile creates does, `kates-backend` included. The `tls` listener accepts only client certificates, so such a client narrowed to `[tls]` loses the brokers once the listeners are closed.
 
-```bash
-helm upgrade --install kafka-cluster charts/kafka-cluster \
-  --namespace kafka \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-prod.yaml \
-  --set 'networkPolicy.clients[0].name=kates' \
-  --set 'networkPolicy.clients[0].listeners={tls}'
+Between values files, though, `networkPolicy.clients` is a list, and Helm replaces a list rather than merging it: your file's list replaces the one the release has, so restate the entries `helm get values` shows under it — a `kates deploy` release has one, `connect` — and add yours. To grant `my-app` on a release that is already installed, put this in your own file and upgrade as in section 14.1:
+
+```yaml
+# my-values.yaml
+networkPolicy:
+  clients:
+    # kates deploy sets this entry: keep it, with the namespace you gave --connect-ns
+    - name: connect
+      namespace: connect
+    - name: my-app
+      namespace: apps
+      podSelector:
+        app.kubernetes.io/name: my-app
+      listeners: [tls]
 ```
 
-Its ingress rule goes from 9092 and 9093 to 9093 alone, and every other grant the profile brought is untouched. A name the profile does not use — `my-app` above — is appended instead.
+The chart appends a rule for `my-app` on 9093, and every grant the profile brought is untouched. On the `tls` listener, `my-app` authenticates with the certificate of a `KafkaUser` whose `authentication.type` is `tls`.
 
-Pods labelled `kates.io/test-pod: true` in the release namespace are always allowed — that is how the Helm tests and the CLI's client pods reach the brokers without an entry of their own.
+The chart's policy always admits pods labelled `kates.io/test-pod: true` in the release namespace — that is how the Helm tests and the CLI's client pods keep the brokers without an entry of their own once the listeners are closed.
 
 ::: {.callout-caution}
 A client entry needs a `podSelector`: the chart refuses to render without one, because an empty selector would admit every pod of that namespace. Name the workload you mean.
@@ -1217,10 +1391,10 @@ networkPolicy:
   enabled: false
 ```
 
-Both `values-dev.yaml` and `values-kind.yaml` already set this, which is why a dev or Kind install renders no policies at all.
+Both `values-dev.yaml` and `values-kind.yaml` already set this, which is why a dev or Kind install renders none of the chart's policies. Strimzi's generated policy stays, so the internal ports remain closed to other workloads, and the listeners are open to every pod, as in every other profile.
 
 ::: {.callout-warning}
-Never disable network policies in production. They are a critical layer of defense-in-depth.
+Never disable network policies in production. They are a critical layer of defense-in-depth, and `productionMode` refuses to render without them.
 :::
 
 ### 11.6 The 0.4 Key Names
@@ -1380,24 +1554,32 @@ graph LR
     S3 -->|"on-demand fetch"| C
 ```
 
-- **Local retention**: 1 day (`log.local.retention.ms: 86400000`)
+- **Local retention**: 1 day (`tieredStorage.localRetentionMs`, rendered as `log.local.retention.ms`)
 - **Remote retention**: Follows the topic's `retention.ms` setting
 - **Backend**: Any S3-compatible store — SeaweedFS (built-in), AWS S3, MinIO
+
+Layered over `values-prod.yaml`, which already runs SeaweedFS, the chart's side of turning it on is the file below. The store's side has to be ready first, and section 13.4 covers both parts of it: the `kafka-tiered-storage` bucket, which nothing creates for you, and an S3 gateway that accepts the keys in `kafka-seaweedfs-credentials` — with the authentication `values-prod.yaml` turns on, it accepts only keys it generated itself. Without them no segment leaves local disk, and tier 11 of `helm test` fails.
 
 ```yaml
 tieredStorage:
   enabled: true
-  s3:
-    bucketName: kafka-tiered-storage
-    region: us-east-1
-    endpointUrl: ""              # Auto-resolves to SeaweedFS when seaweedfs.enabled=true
-    pathStyleAccessEnabled: true
-  retention:
-    localRetentionMs: 86400000   # 1 day on local disk
+  image: registry.example.com/kafka-tiered:1.2.0-kafka-4.3.1   # a Kafka image that carries the plugin
+  remoteStorageManager:
+    className: io.aiven.kafka.tieredstorage.RemoteStorageManager
+    classPath: /opt/kafka/plugins/tiered-storage/*
+    config:                      # prefixed with rsm.config. by Strimzi
+      storage.backend.class: io.aiven.kafka.tieredstorage.storage.s3.S3Storage
+      chunk.size: "4194304"
+  credentials:
+    existingSecret: ""           # empty with seaweedfs.enabled: the SeaweedFS credentials Secret
+  localRetentionMs: 86400000     # 1 day on local disk
+  topicDefault: true             # remote.storage.enable=true on every chart-managed topic
 ```
 
-::: {.callout-warning}
-Tiered storage requires Kafka 3.6+. Enabling it on older versions will cause broker startup failures.
+The chart renders `spec.kafka.tieredStorage` (`type: custom`) with that class, path and config, sets `spec.kafka.image`, and hands the credentials to the brokers as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. With `seaweedfs.enabled` it fills in `storage.s3.endpoint.url`, the bucket, the region and path-style access; anything you set under `config` wins. `helm test` then adds tier 11, which proves segments leave local disk and are read back (section 13.10).
+
+::: {.callout-important}
+Strimzi's Kafka image carries no remote storage manager plugin, and this repository does not build one, which is why `values-prod.yaml` keeps tiered storage off. The chart refuses `tieredStorage.enabled` without `image`, with the stock `quay.io/strimzi/kafka` image, without `className` and `classPath`, or without credentials. The 0.4 keys `tieredStorage.s3.*` and `tieredStorage.retention.*` still translate, with a `DEPRECATED` line in the release notes.
 :::
 
 ### 13.4 SeaweedFS
@@ -1406,49 +1588,96 @@ Tiered storage requires Kafka 3.6+. Enabling it on older versions will cause bro
 
 **Two roles in the Kates stack:**
 1. **Tiered Storage backend** — Kafka's Remote Log Storage Manager writes cold segments here
-2. **Velero backup target** — Velero stores CRD and controller PVC backups here
+2. **Velero backup target** — a `BackupStorageLocation` can point Velero here (section 13.5)
 
 ```yaml
 seaweedfs:
-  enabled: false    # Enable in staging/prod overlays
+  enabled: false                    # values-prod.yaml turns it on
   s3:
-    accessKeyId: "kates-kafka"
-    secretAccessKey: "change-me-in-prod"
+    existingSecret: ""              # Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (recommended)
+    accessKeyId: "kates-kafka"      # rendered into a Secret only without existingSecret
+    secretAccessKey: "change-me-in-prod"   # placeholder: refused with enableAuth or productionMode
+    region: "us-east-1"
+  buckets:
+    tieredStorage: "kafka-tiered-storage"
+    velero: "velero-backups"
   master:
-    replicas: 1     # 3 for production HA
+    replicas: 1                     # 3 in values-prod.yaml
   volume:
-    replicas: 1     # 3 for production HA
-    storage: 100Gi  # 500Gi+ in prod
+    replicas: 1                     # 3 in values-prod.yaml
+    storage: 100Gi                  # read by neither chart (see the caution below)
   filer:
-    replicas: 1
+    replicas: 1                     # 2 in values-prod.yaml
     s3:
       enabled: true
       port: 8333
+      enableAuth: false             # true in values-prod.yaml
 ```
+
+The chart publishes the S3 endpoint, the region, both bucket names and the credentials Secret's name in the `krafter-object-store` ConfigMap. It creates neither bucket; the SeaweedFS subchart does that only for the buckets listed in its own `seaweedfs.filer.s3.createBuckets`, from a post-install hook — so on the release's first install only. Together with the identities of the warning below, the file layered over `values-prod.yaml` looks like this:
+
+```yaml
+seaweedfs:
+  filer:
+    s3:
+      createBuckets:                                 # created by the post-install hook
+        - name: kafka-tiered-storage
+        - name: velero-backups
+      existingConfigSecret: seaweedfs-s3-identities  # identities that include the brokers' keys
+```
+
+::: {.callout-warning}
+With `filer.s3.enableAuth: true`, as in `values-prod.yaml`, the SeaweedFS S3 gateway accepts only the identities in the subchart's `seaweedfs-s3-secret`, whose keys it generates at random on install — not the keys in `seaweedfs.s3.existingSecret`, which is what the brokers and the object-store ConfigMap use. The chart does not connect the two. Give the gateway identities that include those keys with `seaweedfs.filer.s3.existingConfigSecret` (a Secret whose `seaweedfs_s3_config` key holds SeaweedFS's identities JSON), or hand the keys from `seaweedfs-s3-secret` to whatever writes to the store.
+:::
+
+::: {.callout-caution}
+The SeaweedFS subchart keeps its data in `hostPath` directories — under `/ssd` for the master and volume servers, `/storage` for the filer — on whichever node each pod runs, and nothing reads `seaweedfs.volume.storage`. A pod rescheduled onto another node starts empty there, and a lost node takes its share of the offloaded segments and backups with it. For data you intend to keep, put the data directories on PersistentVolumeClaims:
+
+```yaml
+seaweedfs:
+  master:
+    data:
+      type: persistentVolumeClaim
+      size: 10Gi
+  volume:
+    dataDirs:
+      - name: data1
+        type: persistentVolumeClaim
+        size: 500Gi
+        maxVolumes: 0
+  filer:
+    data:
+      type: persistentVolumeClaim
+      size: 20Gi
+```
+
+Kubernetes does not let an existing StatefulSet gain a claim template, so choose before the first install.
+:::
 
 ### 13.5 Velero Backup
 
 **Why it exists:** Even with replicated data, you need to back up the *cluster topology* — the CRDs, Secrets, and ConfigMaps that define your Kafka cluster. Without them, you'd have to recreate every topic, user, and ACL from scratch after a disaster.
 
-**What gets backed up:**
-- Strimzi CRs (`Kafka`, `KafkaNodePool`, `KafkaTopic`, `KafkaUser`)
-- Secrets (SCRAM passwords, CA certificates)
-- Controller PVCs (KRaft metadata logs — small, ~1 GB each)
+**What gets backed up:** the daily `Schedule`, `krafter-daily-backup` in the Velero namespace, covers:
+- This cluster's Strimzi CRs (`Kafka`, `KafkaNodePool`, `KafkaTopic`, `KafkaUser`, `KafkaRebalance`)
+- The Secrets, ConfigMaps, PVCs and PVs labelled `strimzi.io/cluster=krafter` (SCRAM passwords, CA certificates)
+- Volume data, as `backup.volumes` says: `fs-backup` (the default) copies every volume — controllers and brokers — file by file with Velero's node agent; `snapshot` takes CSI snapshots; `none` keeps the objects only
 
-**What does NOT get backed up:**
-- Broker PVCs — intentionally excluded. Broker data is recoverable via replication (`replication.factor: 3`) and tiered storage. Snapshotting broker PVCs would be redundant, wasteful, and unsafe (crash-consistent snapshots can contain partially flushed segments).
+While tiered storage is active, broker-only pools drop out of the volume backup, because their closed segments are already in object storage; controller volumes, which hold the KRaft metadata log, are always in. `productionMode` refuses `volumes: none` without tiered storage, since nothing but replication would then protect broker data.
 
 ```yaml
 backup:
   enabled: true
-  schedule: "0 2 * * *"         # Daily at 2 AM
-  ttl: 168h0m0s                 # 7-day retention
-  snapshotVolumes: false        # MUST be false — see above
-  storageLocation: default      # Points to SeaweedFS BSL
+  schedule: "0 2 * * *"         # daily at 02:00
+  ttl: 336h0m0s                 # 14 days, as in values-prod.yaml
+  veleroNamespace: velero       # the Schedule and Backups are created here
+  storageLocation: seaweedfs    # a BackupStorageLocation that must exist (section 1.6)
+  volumes: fs-backup            # fs-backup | snapshot | none
+  preUpgrade: true              # a Backup before every helm upgrade, kept 30 days
 ```
 
 ::: {.callout-caution}
-Do **not** set `snapshotVolumes: true`. Broker PVC snapshots are crash-consistent and can corrupt data on restore. See the section "Why NetBackup is Incompatible with Kafka" in the chart's README (`charts/kafka-cluster/README.md`) for the full rationale.
+`volumes: snapshot` takes crash-consistent CSI snapshots of broker volumes: a segment captured mid-write can be truncated on restore, and the restored broker then re-fetches it from its replicas. See the section "Why NetBackup is Incompatible with Kafka" in the chart's README (`charts/kafka-cluster/README.md`) for the full rationale. The 0.4 keys `snapshotVolumes` and `defaultVolumesToFsBackup` are read as `volumes` and named in the release notes' `DEPRECATED` list.
 :::
 
 ### 13.6 External Secrets Operator
@@ -1505,6 +1734,8 @@ kyvernoPolicy:
   excludeStrimziPods: true  # Don't mutate Strimzi-managed pods (operator handles them)
 ```
 
+`values-staging.yaml` and `values-prod.yaml` set `action: Enforce`, which some of the chart's own pods do not pass; section 1.6 names them.
+
 ::: {.callout-tip}
 Always start with `action: Audit`. Run `kubectl get policyreport -A` to see which pods would be blocked, then fix them before switching to `Enforce`.
 :::
@@ -1513,12 +1744,13 @@ Always start with `action: Audit`. Run `kubectl get policyreport -A` to see whic
 
 **Why it exists:** When you add or remove brokers, partitions don't automatically redistribute. Cruise Control continuously monitors broker load and generates optimal partition assignment plans.
 
-**Two KafkaRebalance resources:**
+**The KafkaRebalance resources:**
 
 | Name | Mode | Trigger |
 |------|------|---------|
-| `full-rebalance` | `full` | Manual — annotate to approve a full cluster rebalance |
-| `add-broker-rebalance` | `add-brokers` | Automatic — Cruise Control detects new brokers and generates a plan |
+| `krafter-add-brokers-template` | template (no mode) | Automatic — when brokers are added, the operator runs an `add-brokers` rebalance with these settings (`cruiseControl.autoRebalance`) |
+| `krafter-remove-brokers-template` | template (no mode) | Automatic — before brokers are removed, the same for `remove-brokers` |
+| `krafter-full-rebalance` | `full` | Manual — rendered only with `rebalance.full.enabled`; Cruise Control computes a proposal you approve |
 
 **8 optimization goals** (in priority order):
 
@@ -1531,14 +1763,17 @@ Always start with `action: Audit`. Run `kubectl get policyreport -A` to see whic
 7. `TopicReplicaDistributionGoal` — Spread topic replicas evenly
 8. `LeaderBytesInDistributionGoal` — Balance leader write load
 
-**Trigger a manual rebalance:**
+**Trigger a manual rebalance** (with `rebalance.full.enabled: true`):
 
 ```bash
-# Generate a rebalance proposal
-kubectl annotate kafkarebalance full-rebalance strimzi.io/rebalance=approve -n kafka
+# Check the proposal status — wait for ProposalReady
+kubectl get kafkarebalance krafter-full-rebalance -n kafka -o jsonpath='{.status.conditions}'
 
-# Check the proposal status
-kubectl get kafkarebalance full-rebalance -n kafka -o jsonpath='{.status.conditions}'
+# Approve the proposal: Cruise Control starts moving partitions
+kubectl annotate kafkarebalance krafter-full-rebalance strimzi.io/rebalance=approve -n kafka
+
+# Ask for a fresh proposal later
+kubectl annotate kafkarebalance krafter-full-rebalance strimzi.io/rebalance=refresh -n kafka --overwrite
 ```
 
 ### 13.9 Certificate Authority
@@ -1627,36 +1862,71 @@ If tier 2 (produce/consume) fails but tier 1 passes, the issue is usually authen
 
 ### 14.1 Upgrading Chart Values
 
-When changing configuration (topics, users, resources):
+When changing configuration (topics, users, resources), upgrade the release starting from the values it runs with, and put your own file last:
 
 ```bash
-# Preferred — use the kates CLI
-kates deploy --topology isolated
-
-# Alternative — direct Helm command
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm dependency build charts/kafka-cluster
+
+# Every value the release was installed with — its files and its --set flags
+helm get values kafka-cluster -n kafka -o yaml > kafka-cluster-current.yaml
+
 helm upgrade kafka-cluster charts/kafka-cluster \
   --namespace kafka \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-prod.yaml \
+  -f kafka-cluster-current.yaml \
+  -f my-values.yaml \
   --timeout 600s
 ```
 
-An upgrade takes the same values chain as the install, in the same order — the profile, then the environment overlay. Helm merges `-f` files left to right within one command, but an upgrade that supplies any values at all *replaces* the previous release's set rather than adding to it. Pass the whole chain every time, or the platform profile quietly disappears on the next upgrade that sets one unrelated value.
+`kafka-cluster` is the release that the Helm install of sections 3.5 and 6 and both deploy scripts create. `kates deploy` names its release after the cluster: for a cluster it installed, write `krafter` for `kafka-cluster` in the `helm get values` and the `helm upgrade`. `kates deploy` itself is not an upgrade path for the Kafka cluster. Once the release is deployed, a later run prints `Kafka Cluster already deployed. Skipping.` and leaves it as it is, whatever flags you pass, and it takes no values file of yours. The `helm repo add` is the one of section 3.3: once a `Chart.lock` exists, and `kates deploy` writes one, `helm dependency build` stops at the SeaweedFS repository until Helm has it configured.
+
+Helm merges `-f` files left to right within one command, but an upgrade that supplies any values at all *replaces* the previous release's set rather than adding to it. `helm get values` hands that set back — the platform profile, the environment overlay, your earlier files and every `--set` flag — so none of it disappears on an upgrade that sets one unrelated value.
+
+::: {.callout-caution}
+Do not rebuild the values chain from the repository's files. `kates deploy` and `scripts/deploy-kafka-generic.sh` install the release with `.build/values-detected.yaml` first — the node pools, their zones and storage classes come from it — and `kates deploy` adds `--set` flags no file records, the Kafka and metadata versions among them. A chain without them renders other pool names: a pool's name is its identity, so each renamed pool is a new pool with new, empty volumes, while the old pools drop out of the release but keep running with the data (the chart marks them `helm.sh/resource-policy: keep`). If you do keep the values in files, re-run the exact chain the install used, generated file included, with your file last.
+:::
+
+A release installed from the repository's files alone, as in sections 3.5 and 6, records no `kafkaVersion`, and only `values-kind.yaml` sets a `kafka.metadataVersion`. The chart you upgrade with supplies what is missing, so from a newer checkout a configuration change can upgrade Kafka as well. Unless you mean it to, put the versions the cluster runs in your file as `kafkaVersion` and `kafka.metadataVersion`; this prints them:
+
+```bash
+kubectl get kafka krafter -n kafka \
+  -o jsonpath='{.spec.kafka.version} {.status.kafkaMetadataVersion}{"\n"}'
+```
 
 The operator performs a **rolling restart** — one broker at a time, maintaining availability throughout.
 
 ### 14.2 Upgrading Kafka Version
 
-1. Update `values.yaml` with the new version (it must be supported by the installed Strimzi operator):
-   ```yaml
-   kafkaVersion: "<new-version>"
-   ```
-2. Run `helm upgrade` or `kates deploy --topology isolated`
-3. Monitor the rolling update:
-   ```bash
-   kubectl get pods -n kafka -w
-   ```
+The Kafka version is a chart value, not a hand-edited CR: `kafkaVersion` renders `spec.kafka.version`, and `kafka.metadataVersion` renders `spec.kafka.metadataVersion`. Start from the values the release runs with, as in section 14.1, set the new version, and pin the metadata version the cluster runs now:
+
+```bash
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+helm dependency build charts/kafka-cluster
+
+# Every value the release was installed with — its files and its --set flags
+helm get values kafka-cluster -n kafka -o yaml > kafka-cluster-current.yaml
+
+# The metadata version the cluster runs now
+kubectl get kafka krafter -n kafka -o jsonpath='{.status.kafkaMetadataVersion}{"\n"}'
+
+# The running operator's Kafka window, which must contain <new-version>
+kates versions
+
+helm upgrade kafka-cluster charts/kafka-cluster \
+  --namespace kafka \
+  -f kafka-cluster-current.yaml \
+  --set-string kafkaVersion=<new-version> \
+  --set-string kafka.metadataVersion=<current-metadata-version> \
+  --timeout 600s
+```
+
+For a cluster `kates deploy` installed, write `krafter` for `kafka-cluster`, as in section 14.1. `kafka.metadataVersion` stays at the version the cluster runs, which is what keeps a rollback possible; [Upgrade Playbook](18-upgrade-playbook.md#kafka-version-rollback) has the rollback and its KRaft metadata caveat. `kates deploy --kafka-version` does not upgrade a running cluster: it skips a Kafka release that is already deployed, whatever version you pass.
+
+Monitor the rolling update:
+
+```bash
+kubectl get pods -n kafka -w
+```
 
 The operator upgrades brokers one at a time, waiting for ISR to heal before proceeding to the next broker.
 
@@ -1768,7 +2038,7 @@ kates kafka brokers
 # Run the 9-tier Helm test suite
 kates test helm
 
-# Deploy / upgrade the cluster
+# Deploy the stack (a Kafka release that already exists is skipped; section 14.1 upgrades it)
 kates deploy --topology isolated
 
 # ── kubectl / helm (for CI or debugging) ─────────────────────────
@@ -1807,7 +2077,7 @@ helm test kafka-cluster -n kafka
 | `kafka.config` | *see values.yaml* | Kafka broker configuration |
 | `kafka.externalAccess.type` | `none` | `nodeport`, `loadbalancer` or `ingress` |
 | `topics.items`, `users.items` | none (8 and 6 with the profile) | Managed topics and users, by name |
-| `networkPolicy.enabled` | `true` | Default-deny plus allow rules; `networkPolicy.clients` grants access |
+| `networkPolicy.enabled` | `true` | The chart's policies: a deny-all for the cluster's pods, egress limits, and `networkPolicy.clients`, which admits clients to the listeners but keeps no one off them until the listeners carry `networkPolicyPeers` (section 11.1) |
 | `alerts.enabled` | `true` | PrometheusRule alerts (where the API exists) |
 | `monitoring.podMonitor.enabled` | `true` | PodMonitors (where the API exists) |
 | `cruiseControl.enabled` | `true` | Deploy Cruise Control |
@@ -1840,7 +2110,7 @@ Each resource shows `Ready` as `True`, and the Helm test suite passes tier by ti
 
 ## Summary
 
-- The chart creates declarative Strimzi CRs — the operator, not Helm, creates the pods. You edit `values.yaml`, run `helm upgrade` (or `kates deploy`), and the operator reconciles with rolling restarts.
+- The chart creates declarative Strimzi CRs — the operator, not Helm, creates the pods. You put your changes in a values file of your own, run `helm upgrade` over the release's current values (`helm get values`), and the operator reconciles with rolling restarts. `kates deploy` installs the cluster but skips it once it exists.
 - `kates deploy --topology isolated` handles Strimzi operator install, zone detection, overlay selection, and readiness waiting; direct `helm upgrade --install` gives CI pipelines fine-grained control.
 - One broker pool per zone with `min.insync.replicas: 2` keeps the cluster serving reads and writes through the loss of a full zone.
 - Verification is layered: the `Kafka` CR `Ready` condition, node pool and topic status, user Secrets, then `kates test helm` for produce/consume and authorization round-trips.

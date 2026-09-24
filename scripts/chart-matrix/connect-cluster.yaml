@@ -328,6 +328,43 @@ renders:
         name: connect-cluster-connect-extra
         path: spec/egress/*/ports/*/port
         equals: 4318
+      - why: "a worker-level schema.registry.url reaches no converter"
+        kind: KafkaConnect
+        path: spec/config/schema.registry.url
+        exists: false
+      - why: "the JSON converters get no registry URL"
+        kind: KafkaConnect
+        path: spec/config/value.converter.apicurio.registry.url
+        exists: false
+  - name: schema registry with the Apicurio converters
+    set:
+      - schemaRegistry.enabled=true
+      - config.keyConverter=io.apicurio.registry.utils.converter.AvroConverter
+      - config.valueConverter=io.apicurio.registry.utils.converter.AvroConverter
+      - extraConfig.value\.converter\.apicurio\.registry\.auto-register=true
+    assert:
+      - why: "Connect configures a converter from its own prefix only, and Apicurio reads apicurio.registry.url"
+        kind: KafkaConnect
+        path: spec/config/value.converter.apicurio.registry.url
+        equals: http://apicurio-apicurio-registry.connect.svc.cluster.local:80/apis/registry/v3
+      - kind: KafkaConnect
+        path: spec/config/key.converter.apicurio.registry.url
+        equals: http://apicurio-apicurio-registry.connect.svc.cluster.local:80/apis/registry/v3
+      - why: "NetworkPolicy matches the registry pod's port, not the Service's"
+        kind: NetworkPolicy
+        name: connect-cluster-connect-extra
+        path: spec/egress/*/ports/*/port
+        equals: 8080
+  - name: schema registry URL set in extraConfig wins
+    set:
+      - schemaRegistry.enabled=true
+      - config.valueConverter=io.apicurio.registry.utils.converter.AvroConverter
+      - extraConfig.value\.converter\.apicurio\.registry\.url=http://registry.example.com/apis/registry/v3
+    assert:
+      - why: "one key, not two: the chart steps aside for an explicit value"
+        kind: KafkaConnect
+        path: spec/config/value.converter.apicurio.registry.url
+        equals: http://registry.example.com/apis/registry/v3
   - name: rest api ingress
     set: [restApi.ingress.enabled=true, "restApi.ingress.hosts[0].host=connect.example.com", "restApi.ingress.hosts[0].paths[0].path=/", "restApi.ingress.hosts[0].paths[0].pathType=Prefix"]
   - name: connectors map, dead letter queue, secrets in two namespaces
@@ -567,6 +604,12 @@ rails:
   - name: a misspelled key
     want: "Additional property replica is not allowed"
     set: [replica=2]
+  - name: the ccompat registry path beside an Apicurio converter
+    want: "which calls the core API and finds no schema there"
+    set:
+      - schemaRegistry.enabled=true
+      - schemaRegistry.path=/apis/ccompat/v7
+      - config.valueConverter=io.apicurio.registry.utils.converter.AvroConverter
 
 rules:
   set: [alerts.enabled=true, alerts.sourceIdle.enabled=true, alerts.slo.enabled=true]

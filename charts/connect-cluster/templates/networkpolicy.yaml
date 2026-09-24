@@ -152,9 +152,18 @@ spec:
           podSelector:
             matchLabels:
               {{- .Values.schemaRegistry.podSelector | default (dict "app.kubernetes.io/name" "apicurio-registry") | toYaml | nindent 14 }}
+      {{- /* NetworkPolicy sees the pod's port, after the Service has
+             translated it, so the registry's targetPort is the one that
+             matters; the Service port stays for pods that listen on it. */}}
+      {{- $srTarget := int (.Values.schemaRegistry.targetPort | default 8080) }}
+      {{- $srPort := int (.Values.schemaRegistry.port | default 80) }}
       ports:
-        - port: {{ .Values.schemaRegistry.port | default 80 }}
+        - port: {{ $srTarget }}
           protocol: TCP
+        {{- if ne $srPort $srTarget }}
+        - port: {{ $srPort }}
+          protocol: TCP
+        {{- end }}
     {{- end }}
     {{- $tr := $np.tracing | default dict }}
     {{- if and .Values.tracing.enabled .Values.tracing.endpoint (include "kafka-common.enabled" (list $tr.enabled true)) }}

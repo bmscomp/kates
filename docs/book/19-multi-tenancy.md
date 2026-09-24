@@ -65,7 +65,7 @@ Each tenant gets:
 - Lowercase, hyphen-separated
 - Always prefix with the service name
 - Use `__` prefix for framework/infrastructure topics
-- Dead letter queues use `-dlq` suffix with `compact` cleanup
+- Dead letter queues use the `-dlq` suffix, `delete` cleanup and a bounded retention — never `compact`, which keeps only the latest failure per key and refuses records without one
 
 ## Onboarding a New Service
 
@@ -87,8 +87,8 @@ topics:
     my-service-dlq:
       partitions: 3
       config:
-        retention.ms: "-1"
-        cleanup.policy: compact
+        retention.ms: "604800000"       # 7 days to inspect and replay
+        cleanup.policy: delete
 ```
 
 ### Step 2 — Create User with Scoped ACLs

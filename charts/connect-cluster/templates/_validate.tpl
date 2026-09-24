@@ -45,6 +45,18 @@ Included once, from kafka-connect.yaml.
 {{- if hasKey ($v.extraConfig | default dict) "exactly.once.source.support" -}}
 {{- fail "connect-cluster: extraConfig sets exactly.once.source.support. It is exactlyOnce.enabled now: the switch also decides the transactional-ID grants of a managed KafkaUser, and every worker of the group must agree. Remove it from extraConfig." -}}
 {{- end -}}
+{{- /* The Apicurio converters call the registry's core API. On the
+       Confluent-compatible path the URL the chart renders for them reaches
+       no schema, so a path carried over from an older values file is
+       refused rather than rendered. */ -}}
+{{- $sr := $v.schemaRegistry | default dict -}}
+{{- if and $sr.enabled (contains "/apis/ccompat/" ($sr.path | default "")) -}}
+{{- range $side := list "key" "value" -}}
+{{- if and (hasPrefix "io.apicurio." (index $v.config (printf "%sConverter" $side) | default "")) (not (hasKey ($v.extraConfig | default dict) (printf "%s.converter.apicurio.registry.url" $side))) -}}
+{{- fail (printf "connect-cluster: schemaRegistry.path is %s, Apicurio Registry's Confluent-compatible API, but config.%sConverter is an Apicurio converter, which calls the core API and finds no schema there. Set schemaRegistry.path to /apis/registry/v3 (the default), or remove it." $sr.path $side) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $topics := include "connect-cluster.internalTopics" . | fromYaml -}}
 {{- if or (eq $topics.offsets $topics.configs) (eq $topics.offsets $topics.status) (eq $topics.configs $topics.status) -}}
 {{- fail (printf "connect-cluster: the internal topics must be three different topics; internalTopics gives offsets=%s configs=%s status=%s" $topics.offsets $topics.configs $topics.status) -}}

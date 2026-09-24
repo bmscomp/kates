@@ -35,8 +35,17 @@ spec:
     value.converter: {{ .Values.config.valueConverter | default "org.apache.kafka.connect.json.JsonConverter" }}
     key.converter.schemas.enable: {{ eq (include "kafka-common.enabled" (list .Values.config.keyConverterSchemasEnable true)) "true" }}
     value.converter.schemas.enable: {{ eq (include "kafka-common.enabled" (list .Values.config.valueConverterSchemasEnable true)) "true" }}
+    {{- /* Connect configures a converter with the worker properties under its
+           own prefix only, and Apicurio's converters read
+           apicurio.registry.url, so each Apicurio converter gets its own. */}}
     {{- if .Values.schemaRegistry.enabled }}
-    schema.registry.url: {{ printf "http://%s.%s.svc.%s:%d%s" .Values.schemaRegistry.serviceName (include "connect-cluster.schemaRegistryNamespace" .) (include "connect-cluster.clusterDomain" .) (.Values.schemaRegistry.port | int) .Values.schemaRegistry.path }}
+    {{- $registry := printf "http://%s.%s.svc.%s:%d%s" .Values.schemaRegistry.serviceName (include "connect-cluster.schemaRegistryNamespace" .) (include "connect-cluster.clusterDomain" .) (.Values.schemaRegistry.port | int) .Values.schemaRegistry.path }}
+    {{- range $side := list "key" "value" }}
+    {{- $prop := printf "%s.converter.apicurio.registry.url" $side }}
+    {{- if and (hasPrefix "io.apicurio." (index $.Values.config (printf "%sConverter" $side) | default "")) (not (hasKey ($.Values.extraConfig | default dict) $prop)) }}
+    {{ $prop }}: {{ $registry }}
+    {{- end }}
+    {{- end }}
     {{- end }}
     {{- /* Every worker of a group must agree on this, so it is a chart switch;
            the managed KafkaUser grants the transactional IDs it needs. */}}
