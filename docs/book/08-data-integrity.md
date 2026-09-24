@@ -96,6 +96,7 @@ The consumer reads all messages and builds a bitmap of received sequence numbers
 ```mermaid
 graph LR
     subgraph Received
+        direction LR
         S1["seq 1 ✅"]
         S2["seq 2 ✅"]
         S3["seq 3 ✅"]

@@ -39,9 +39,9 @@ graph TB
     W1 <-->|"group protocol"| OFF
     W2 <-->|"group protocol"| OFF
 
-    style AZ_Alpha fill:#1a4a1a
-    style AZ_Sigma fill:#1a3a4a
-    style AZ_Gamma fill:#4a1a3a
+    style AZ_Alpha fill:#16a34a24,stroke:#16a34a
+    style AZ_Sigma fill:#0284c724,stroke:#0284c7
+    style AZ_Gamma fill:#c026d324,stroke:#c026d3
 ```
 
 ### How It Works

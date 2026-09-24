@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Kates">
+  <!-- The cover's broker ring and recovery arc (assets/cover.svg), on a navy tile
+       so the one file reads on light and dark backgrounds and as a favicon. -->
+  <defs>
+    <marker id="kates-mark-ah" viewBox="0 0 8 8" refX="5" refY="4" markerWidth="2.6" markerHeight="2.6" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#5FA9EE"/>
+    </marker>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#1D2B62"/>
+  <g transform="translate(32 33.5) scale(0.175)" fill="none" stroke-linecap="round">
+    <circle r="80" stroke="#3B51A0" stroke-width="16"/>
+    <circle cx="0" cy="-80" r="22" fill="#3B51A0"/>
+    <circle cx="69.3" cy="40" r="22" fill="#3B51A0"/>
+    <circle cx="-69.3" cy="40" r="22" fill="#3B51A0"/>
+    <g transform="rotate(-28)">
+      <circle cx="-124.4" cy="29.5" r="17" fill="#5FA9EE"/>
+      <path d="M -124.4 29.5 A 132 86 0 0 1 124.4 -29.5" stroke="#5FA9EE" stroke-width="15" marker-end="url(#kates-mark-ah)"/>
+    </g>
+  </g>
+</svg>

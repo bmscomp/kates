@@ -548,24 +548,28 @@ The CLI displays each event as it arrives:
 The `kates resilience run` command combines a performance test with chaos injection, providing a **before/after impact analysis**:
 
 ```mermaid
-graph LR
+graph TB
     subgraph Phase1["Phase 1: Baseline"]
+        direction TB
         B1[Run LOAD test<br/>30s steady state]
         B2[Capture baseline<br/>throughput + latency]
     end
     
     subgraph Phase2["Phase 2: Chaos"]
+        direction TB
         C1[Inject fault<br/>while load continues]
         C2[Observe impact<br/>on throughput + latency]
     end
     
     subgraph Phase3["Phase 3: Recovery"]
+        direction TB
         R1[Remove fault]
         R2[Wait for recovery]
         R3[Measure recovery time]
     end
     
     subgraph Analysis
+        direction TB
         A1[Compare pre vs. post]
         A2[Calculate % change per metric]
         A3[Grade against SLA]

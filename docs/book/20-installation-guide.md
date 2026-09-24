@@ -185,6 +185,12 @@ graph TD
     KC --> KE
     EO --> T1
     EO --> U1
+
+    CP ~~~ EO
+    BP1 ~~~ CC
+    BP2 ~~~ KE
+    T1 ~~~ T2 ~~~ T3 ~~~ T4 ~~~ T5
+    U1 ~~~ U2 ~~~ U3
 ```
 
 ### 2.2 How Strimzi Works
@@ -1247,7 +1253,7 @@ The chart deploys a comprehensive monitoring pipeline that integrates with the P
 ### 12.1 Architecture
 
 ```mermaid
-graph LR
+graph TB
     subgraph "Kafka Cluster"
         B["Brokers and controllers"]
         CC["Cruise Control"]

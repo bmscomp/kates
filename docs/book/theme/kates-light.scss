@@ -1,0 +1,78 @@
+/*-- scss:defaults --*/
+
+// Light palette: the navy and sky of the book cover (assets/cover.svg) on
+// white. Every text colour here clears WCAG AA (4.5:1) against the surface it
+// sits on; code blocks keep the navy slab in both colour schemes.
+
+// Brand and text
+$kates-heading: #131d42;
+$kates-link: #1d63c7;
+$kates-accent: #5fa9ee;
+$kates-number: #5775a8;
+$kates-strong: #111827;
+$kates-muted: #5b6683;
+$kates-sidebar-fg: #374260;
+
+// Surfaces and lines
+$kates-border: #e3e8f0;
+$kates-border-strong: #cbd4e2;
+$kates-surface: #f6f8fc;
+$kates-active-bg: rgba(29, 99, 199, 0.08);
+$kates-row-hover: #f8fafd;
+
+// Bootstrap
+$body-bg: #ffffff;
+$body-color: #1f2937;
+$primary: $kates-link;
+$secondary: #5b6683;
+$link-color: $kates-link;
+$headings-color: $kates-heading;
+$text-muted: $kates-muted;
+$border-color: $kates-border;
+
+// Inline code
+$code-bg: #eef2f9;
+$code-color: #1b2b58;
+$kates-code-border: #dce3ef;
+
+// Code blocks
+$code-block-bg: #111a33;
+$kates-code-block-border: #111a33;
+$kates-code-block-fg: #e3e9f5;
+$kates-code-file-bg: #1c2649;
+$kates-code-file-fg: #c3cde2;
+$btn-code-copy-color: #9fb0cf;
+$btn-code-copy-color-active: $kates-accent;
+
+// Command output (`text` fences)
+$kates-output-bg: #f6f8fc;
+$kates-output-fg: #26324d;
+$kates-output-rule: #9fb3d6;
+
+// Callouts
+$callout-color-note: #1d63c7;
+$callout-color-tip: #15803d;
+$callout-color-important: #c62828;
+$callout-color-warning: #b45309;
+$callout-color-caution: #c2410c;
+$kates-callout-tint: 0.035;
+$kates-callout-header-tint: 0.09;
+
+// Diagrams
+$kates-diagram-bg: #fbfcfe;
+$kates-scroll-shadow: rgba(19, 29, 66, 0.2);
+$kates-diagram-note-bg: #fff8db;
+$kates-diagram-note-border: #e3cb72;
+
+$mermaid-bg-color: $kates-diagram-bg;
+$mermaid-node-bg-color: #eaf2fd;
+$mermaid-node-fg-color: #5877ad;
+$mermaid-fg-color: $body-color;
+$mermaid-fg-color--lighter: #b9c6dc;
+$mermaid-fg-color--lightest: #f1f5fb;
+$mermaid-label-bg-color: $kates-diagram-bg;
+$mermaid-label-fg-color: #16213f;
+$mermaid-edge-color: #52607d;
+
+// Cover
+$kates-cover-shadow: rgba(19, 29, 66, 0.45);

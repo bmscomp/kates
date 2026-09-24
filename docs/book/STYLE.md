@@ -27,6 +27,7 @@ Exactly one blank line after the closing `:::`. Genuine quotations may use plain
 - Every fence carries a language tag: `bash`, `yaml`, `json`, `properties`, `promql`, `sql`, `protobuf`, `xml`, `mermaid`, or `text` for terminal output and ASCII UI. Never `sh`, `console`, or `shell`.
 - Commands carry no `$` prompt. Captured output goes in a separate `text` block introduced by "Output:"; short inline annotations are ordinary `#` comments (no `# →` arrows).
 - Mermaid uses plain ```` ```mermaid ```` fences (GitHub-renderable); the CI build converts them for Quarto.
+- Keep diagrams narrow enough for the text column: lay long chains out `TB` and wide fan-outs `LR`, and give a subgraph with no edges crossing its border an explicit `direction` (Mermaid otherwise flips it to the opposite of its parent's). The site never shrinks labels below 70%; a wider diagram scrolls sideways and opens full screen.
 
 ## Cross-references
 

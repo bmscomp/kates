@@ -1,0 +1,89 @@
+/*-- scss:defaults --*/
+
+// Dark palette: the cover's navy deepened into a reading background, with the
+// sky accent carrying links. Every text colour here clears WCAG AA (4.5:1)
+// against the surface it sits on.
+
+// Brand and text
+$kates-heading: #f1f4fa;
+$kates-link: #7ab6f5;
+$kates-accent: #5fa9ee;
+$kates-number: #8ea6d0;
+$kates-strong: #f1f4fa;
+$kates-muted: #95a2bd;
+$kates-sidebar-fg: #c3cce0;
+
+// Surfaces and lines
+$kates-border: #243150;
+$kates-border-strong: #33426a;
+$kates-surface: #131c33;
+$kates-active-bg: rgba(122, 182, 245, 0.1);
+$kates-row-hover: #121b31;
+
+// Bootstrap
+$body-bg: #0e1425;
+$body-color: #d3dbea;
+$primary: $kates-link;
+$secondary: #95a2bd;
+$link-color: $kates-link;
+$headings-color: $kates-heading;
+$text-muted: $kates-muted;
+$border-color: $kates-border;
+$input-bg: #131c33;
+$input-color: $body-color;
+$input-border-color: $kates-border;
+$input-placeholder-color: $kates-muted;
+$dropdown-bg: #131c33;
+$dropdown-color: $body-color;
+$dropdown-border-color: $kates-border;
+$dropdown-link-color: $body-color;
+$dropdown-link-hover-bg: #1b2542;
+$table-color: $body-color;
+$table-border-color: $kates-border;
+
+// Inline code
+$code-bg: #1b2542;
+$code-color: #dbe4f6;
+$kates-code-border: #2a375a;
+
+// Code blocks
+$code-block-bg: #0a1020;
+$kates-code-block-border: #243150;
+$kates-code-block-fg: #e3e9f5;
+$kates-code-file-bg: #141d38;
+$kates-code-file-fg: #c3cde2;
+$btn-code-copy-color: #9fb0cf;
+$btn-code-copy-color-active: $kates-accent;
+
+// Command output (`text` fences)
+$kates-output-bg: #121a30;
+$kates-output-fg: #cfd8ea;
+$kates-output-rule: #4a6699;
+
+// Callouts
+$callout-color-note: #5fa9ee;
+$callout-color-tip: #4ade80;
+$callout-color-important: #f87171;
+$callout-color-warning: #fbbf24;
+$callout-color-caution: #fb923c;
+$kates-callout-tint: 0.06;
+$kates-callout-header-tint: 0.13;
+
+// Diagrams
+$kates-diagram-bg: #10182c;
+$kates-scroll-shadow: rgba(0, 0, 0, 0.55);
+$kates-diagram-note-bg: #2e2a1a;
+$kates-diagram-note-border: #7a6a2e;
+
+$mermaid-bg-color: $kates-diagram-bg;
+$mermaid-node-bg-color: #17223f;
+$mermaid-node-fg-color: #6f8fc4;
+$mermaid-fg-color: $body-color;
+$mermaid-fg-color--lighter: #3b4a70;
+$mermaid-fg-color--lightest: #141e38;
+$mermaid-label-bg-color: $kates-diagram-bg;
+$mermaid-label-fg-color: #e6ecf7;
+$mermaid-edge-color: #a3b2cf;
+
+// Cover
+$kates-cover-shadow: rgba(0, 0, 0, 0.7);
