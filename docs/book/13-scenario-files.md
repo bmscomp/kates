@@ -81,7 +81,7 @@ The `spec` object controls all test parameters. Every field is optional; the bac
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `records` | Integer | 1,000,000 | Number of records to produce |
-| `parallelProducers` | Integer | 1 | Number of concurrent producer threads |
+| `parallelProducers` | Integer | 1 | Number of producers for STRESS and CAPACITY; other types run one |
 | `recordSizeBytes` | Integer | 1024 | Payload size per record in bytes |
 | `acks` | String | `all` | Producer acknowledgment mode: `0`, `1`, or `all` |
 | `batchSize` | Integer | 65536 | Producer batch size in bytes |
@@ -279,12 +279,14 @@ scenarios:
 ### Basic Execution
 
 ```bash
-# Submit all scenarios in the file (fire-and-forget — no SLA evaluation)
+# Submit all scenarios in the file (fire-and-forget — they run concurrently, with no SLA evaluation)
 kates test apply -f scenarios.yaml
 
 # Run and wait for each to complete; SLA gates are evaluated at the end
 kates test apply -f scenarios.yaml --wait
 ```
+
+Use `--wait` whenever the scenarios are meant to be compared, as in the [Tuning Comparison](#tuning-comparison) file. Without it, the scenarios run at the same time: scenarios of one type that set no `topic` share that type's default topic (`load-test` for LOAD), so each measures the load of the others, and the backend runs at most three tests at once (`kates.engine.max-concurrent-tests`), refusing any further scenario with `429 Too Many Requests`.
 
 ### How Execution Works
 

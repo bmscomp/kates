@@ -496,7 +496,7 @@ Individual test results are snapshots. Trend analysis turns those snapshots into
 kates trend --type LOAD --metric p99LatencyMs --days 30
 
 # View throughput trend
-kates trend --type LOAD --metric throughputRecordsPerSec --days 30
+kates trend --type LOAD --metric avgThroughputRecPerSec --days 30
 ```
 
 The CLI renders sparkline charts for quick visual assessment:
@@ -756,8 +756,10 @@ Since chart 1.5.0 that ConfigMap is the single delivery route: the workload char
 
 | Service | URL |
 |---|---|
-| Grafana | `http://localhost:30080` (NodePort on Kind) |
-| Prometheus | `http://localhost:9090` (port-forward) |
+| Grafana | `http://localhost:30080` with `make ports`; `http://localhost:3000` with `kates ports` |
+| Prometheus | `http://localhost:30090` with `make ports`; `http://localhost:9090` with `kates ports` |
+
+Both addresses are port-forwards: the Kind overlay makes Grafana a NodePort on 30080, but the Kind cluster does not publish NodePorts on the host. `make ports` looks for the two services in the `kafka` namespace, where `make monitoring` installs them; `kates deploy` installs them into `monitoring`, so on that install run `MONITORING_NS=monitoring make ports`. `kates ports` looks in the namespace that `--monitoring-ns` names (`monitoring` by default); when a service is not there, it forwards a service of the same name from any other namespace, so it finds either install without the flag. Pass `--monitoring-ns` only to choose when two namespaces both have one.
 
 Default Grafana credentials: `admin` / `admin`.
 
@@ -781,6 +783,9 @@ helm search repo prometheus-community/kube-prometheus-stack --versions | head -1
 Run a test end-to-end and read the results the way this chapter teaches — cluster first, then the run itself:
 
 ```bash
+# Forward the API and Grafana; a kates deploy install keeps Grafana in the monitoring namespace
+MONITORING_NS=monitoring make ports
+
 # Quick pre-check: engine and Kafka both reachable
 kates status
 

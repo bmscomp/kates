@@ -41,7 +41,8 @@ Throughout this book:
 
 - Shell commands are shown without a prompt character — copy them as-is
 - Commands using `kubectl` assume a kubeconfig pointing at your cluster
-- `kates` commands assume the CLI is installed and configured with a context
+- `kates` commands assume the CLI is installed and configured with a context that carries the API key, set up by the Quick Start in [Introduction](01-introduction.md#quick-start)
+- `curl` and `grpcurl` examples assume the API is forwarded to `localhost:30083` and read the key from `$KATES_API_KEY`, exported as shown in [REST API Reference](11-api-reference.md#authentication)
 - Code blocks with a filename header are files you create or edit
 - Mermaid diagrams illustrate architecture and workflows inline
 

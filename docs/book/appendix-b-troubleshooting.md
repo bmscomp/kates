@@ -64,6 +64,7 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 |---------|-------------|---------|
 | `kates health` killed immediately (exit 137) on macOS | macOS blocks unsigned binary — `com.apple.provenance` xattr | [Deployment Guide](12-deployment.md#cli-binary-killed-on-macos) |
 | CLI connection timeout / connection refused | Backend not running or port-forward died | [Deployment Guide](12-deployment.md#kates-cant-connect-to-kafka) |
+| `[401] Missing API key` or `[403] Invalid API key`, while `kates health` works | The CLI context carries no API key or a stale one, or a stale `KATES_API_KEY` is exported, which the CLI prefers to the context's key — only `/api/health` is public | [Deployment Guide](12-deployment.md#cli-configuration) |
 
 ## Chaos Engineering
 
