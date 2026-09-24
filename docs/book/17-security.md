@@ -6,7 +6,8 @@ Use this chapter as a reference when auditing your deployment, onboarding new se
 
 - Explain which listener each client authenticates on, and why the performance listener deliberately skips TLS
 - Onboard a new service with a least-privilege `KafkaUser` — scoped ACLs, prefix patterns, and quotas
-- Verify that default-deny NetworkPolicies and Kyverno admission policies actually block what they claim to block
+- Test what the shipped NetworkPolicies block and what they leave open, and close the listener ports to pods you have not granted
+- Rotate the Kates backend's SCRAM password without leaving Kates on the old one
 - Grade your cluster's posture with `kates security audit` and act on the findings
 
 ## Threat Model
@@ -25,7 +26,7 @@ graph TD
     subgraph Mitigations["Kates Mitigations"]
         M1["TLS listener (port 9093)<br/>encrypts all traffic"]
         M2["Per-user ACLs with<br/>minimum required permissions"]
-        M3["Kyverno secret sync +<br/>RBAC limiting Secret access"]
+        M3["RBAC limiting<br/>Secret access"]
         M4["NetworkPolicies isolating<br/>operator namespace"]
     end
 
@@ -86,7 +87,9 @@ Each listener enforces a specific authentication mechanism. The choice of listen
 |----------|------|------|----------|---------|-------------|
 | `plain` | 9092 | SCRAM-SHA-512 | SASL_PLAINTEXT | Kates, Kafka UI, Apicurio | Performance testing baselines (no TLS overhead) |
 | `tls` | 9093 | mTLS (certificate) | SSL | Encrypted internal | When you need wire encryption between services |
-| `external` | 9094 | SCRAM-SHA-512 | SASL_SSL | External tools, CI | Access from outside the Kubernetes cluster |
+| `external` | 9094 | SCRAM-SHA-512 | SASL_SSL | External tools, CI | Access from outside the Kubernetes cluster, where the values chain declares it |
+
+The chart's base values declare only `plain` and `tls`. `values-prod.yaml` and, outside kind, `kates deploy` add `external`, as [What the Shipped Policies Block](#what-the-shipped-policies-block) explains.
 
 ### SCRAM-SHA-512
 
@@ -100,65 +103,57 @@ kubectl get secret kafka-ui -n kafka -o jsonpath='{.data.password}' | base64 -d
 ```
 
 ::: {.callout-warning}
-Kubernetes Secrets are base64-encoded, **not encrypted**. Anyone with RBAC permission to read Secrets in the `kafka` namespace can extract every SCRAM password. This is why namespace-level RBAC and NetworkPolicies are not optional — they're the outer wall protecting your credentials.
-:::
-
-### Password Rotation
-
-Strimzi does not automatically rotate SCRAM passwords, but you can trigger a rotation without downtime:
-
-```bash
-# Step 1: Delete the existing Secret (Strimzi will regenerate it)
-kubectl delete secret kates-backend -n kafka
-
-# Step 2: Wait for the Entity Operator to reconcile (typically < 30 seconds)
-kubectl wait --for=condition=Ready kafkauser/kates-backend -n kafka --timeout=60s
-
-# Step 3: Verify the new password was generated
-kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d
-```
-
-If your application runs in a different namespace and uses a Kyverno-synced copy of the secret, the sync policy propagates the new password automatically, and the application picks up the new credentials on its next reconnection cycle.
-
-::: {.callout-caution}
-During the brief window between deleting the old Secret and the Entity Operator creating the new one, any application that restarts will fail to authenticate. Time your rotations during low-traffic periods, and ensure your application has retry logic for authentication failures.
+Kubernetes Secrets are base64-encoded, **not encrypted**. Anyone with RBAC permission to read Secrets in the `kafka` namespace can extract every SCRAM password, and the copy of the `kates-backend` password in the `kates` namespace is just as exposed. RBAC on Secrets in both namespaces is the wall around these credentials. A NetworkPolicy does not help here: Secrets are read from the Kubernetes API, not from the brokers.
 :::
 
 ### Cross-Namespace Credential Synchronization
 
-When a `KafkaUser` is created, Strimzi generates the credential Secret only in the namespace where the Strimzi operator and Kafka cluster reside (usually `kafka`).
+Strimzi writes a `KafkaUser`'s Secret only into the Kafka cluster's namespace (`kafka`). Kates runs in `kates`, so it needs a copy of the `kates-backend` Secret there. `kates deploy` makes that copy each time it installs or reconciles the backend, and so do `make kates-secret` and `scripts/deploy-kates.sh`. Nothing keeps the copy in step between those runs: no controller or policy that ships with Kates watches the source Secret.
 
-If your application runs in a different namespace (e.g., `kates`), you must securely synchronize this Secret. **Do not copy it manually**, as Strimzi may rotate the password. Instead, use a Kyverno `ClusterPolicy` to automatically clone and synchronize the Secret:
+A synchronized copy would not be enough on its own anyway. The Kates pod reads the password once, at startup, into the `KATES_KAFKA_SASL_PASSWORD` environment variable, and never reads the Secret again. Whatever keeps the copy current — the steps below, or a Kyverno clone rule or External Secrets that you add yourself — Kates uses a new password only after a restart.
 
-```yaml
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: sync-kates-backend-secret
-  annotations:
-    policies.kyverno.io/title: Sync Kafka Credentials
-    policies.kyverno.io/category: Secrets Management
-spec:
-  generateExisting: true
-  rules:
-  - name: clone-kafka-secret
-    match:
-      any:
-      - resources:
-          kinds:
-          - Namespace
-          names:
-          - kates
-    generate:
-      apiVersion: v1
-      kind: Secret
-      name: kates-backend
-      namespace: "{{request.object.metadata.name}}"
-      synchronize: true # Keeps the cloned secret updated if Strimzi rotates the original
-      clone:
-        namespace: kafka
-        name: kates-backend
+With `kates deploy --topology single`, Kates and Kafka share one namespace, `kates-stack` unless you passed `--namespace`, and Kates reads the Strimzi Secret itself. There is no copy to refresh, but the restart is still needed: in the procedure below, skip step 3, run the `kubectl` commands of the other steps against that namespace, and pass it to `kates ports` with `--app-ns`.
+
+### Password Rotation
+
+Strimzi does not rotate SCRAM passwords on its own. You rotate one by deleting the user's Secret: the User Operator generates a new password, sets it on the brokers and writes a new Secret. From then on the old password no longer authenticates.
+
+For `kates-backend`, that is a short outage of Kates, which lasts until Kates restarts with the new password. Run the steps back to back:
+
+```bash
+# 1. Delete the Secret; the User Operator generates a new password
+kubectl delete secret kates-backend -n kafka
+
+# 2. Wait for the new Secret. The KafkaUser is already Ready, so waiting on
+#    its Ready condition returns at once and proves nothing.
+for _ in $(seq 60); do
+  kubectl get secret kates-backend -n kafka >/dev/null 2>&1 && break
+  sleep 5
+done
+
+# 3. Copy the new password into the Kates namespace
+PASSWORD=$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.password}' | base64 -d)
+test -n "$PASSWORD" && kubectl create secret generic kates-backend -n kates \
+  --from-literal=password="$PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
+
+# 4. Restart Kates so it reads the new password
+kubectl rollout restart deployment/kates -n kates
+kubectl rollout status deployment/kates -n kates --timeout=300s
+
+# 5. The restart ended any port-forward to the old pod: start the forwards again
+kates ports
+
+# 6. Check that Kates can authenticate to Kafka again
+kates health
 ```
+
+A port-forward to a Service is bound to the one pod it picked when it started, and neither `kates ports` nor `make ports` reconnects it when that pod goes away, so step 5 is what makes the API reachable again. `kates ports` also points your current CLI context at the forward it starts. Skip it if you reach the API through an Ingress or a NodePort.
+
+A finished rollout does not prove the rotation worked. The readiness probe does not depend on Kafka (`kates.health.readiness.require-kafka` is `false`), so the new pod turns Ready even with a wrong password. `kates health` has the backend describe the cluster over its own SASL connection, and its **Kafka Cluster** block must show `UP` and "Kafka cluster is reachable". The command needs only the API URL of your CLI context, because `/api/health` is served without the API key.
+
+::: {.callout-caution}
+From step 1 until the restarted pod is Ready, Kates cannot open a new connection to Kafka. Connections it already holds keep working, because Kafka does not re-authenticate them, but every new one fails SASL authentication: the producers and consumers of a new test, or a reconnect after a broker restarts. Rotate when no test or chaos experiment is running.
+:::
 
 ### mTLS (Mutual TLS)
 
@@ -235,7 +230,7 @@ spec:
 
 The `patternType: prefix` is key — it means the service can access any topic or group starting with `my-service` (e.g., `my-service-events`, `my-service-results`). This is more maintainable than listing individual topics, especially as your service evolves.
 
-An ACL is only half the grant. With `networkPolicy.defaultDeny` on, the new service still cannot open a socket to the brokers until it appears in `networkPolicy.clients`, which is what turns a pod selector into an ingress rule on the listener ports:
+An ACL is only half the grant. The other half is `networkPolicy.clients`, which turns a pod selector into an ingress rule on the listener ports of the chart's `krafter-kafka` policy:
 
 ```yaml
 networkPolicy:
@@ -248,6 +243,8 @@ networkPolicy:
 
 `listeners` holds listener *names* from `kafka.listeners`, not ports — the chart derives the ports. An empty `namespace` means the release namespace.
 
+That rule is what lets the service in once the listeners are closed to everyone else. As the charts ship, they are not: Strimzi's own policy admits every pod to them, so the grant starts to matter only after you give the listeners `networkPolicyPeers`, as [Network Policies](#network-policies) shows.
+
 ::: {.callout-note}
 There is no namespace-level shortcut. `networkPolicies.allowedClientNamespaces` was the 0.4 spelling, it never generated a rule, and `kafka-cluster` 1.0 emits a deprecation notice for it instead of honouring it. Grant per client.
 :::
@@ -256,7 +253,7 @@ A user the chart should own goes in `users.items` alongside the grant, so one `h
 
 ### Granting Full Cluster Rights (Super-User)
 
-If you need to create a service account (like an administrator or automated testing tool) that has **full rights** across the entire Kafka cluster, you must explicitly grant it `All` operations on the `cluster`, `topic`, and `group` resources.
+A person administering the cluster sometimes needs **full rights** across it. You grant them explicitly, with `All` operations on the `cluster`, `topic`, and `group` resources. Do not use this for an automated tool: give a tool its own `KafkaUser` with scoped ACLs, as in [Adding a New Service](#adding-a-new-service).
 
 Create a file named `kafka-admin-user.yaml` with the following content:
 
@@ -299,6 +296,10 @@ Once the Strimzi Operator processes the resource, it generates a Kubernetes Secr
 kubectl get secret admin-user -n kafka -o jsonpath="{.data.password}" | base64 -d
 ```
 
+::: {.callout-warning}
+`All` on the `cluster` resource includes `Alter`, which manages ACLs, so this user can grant itself or anyone else any permission, and `All` on every topic lets it delete them. Its password sits in a Secret in the `kafka` namespace like any other. Create the user for the task at hand and delete it afterwards: `kubectl delete kafkauser admin-user -n kafka` removes its credentials and ACLs from the cluster.
+:::
+
 ## Certificate Management
 
 Strimzi manages two independent CA hierarchies — one for cluster-internal communication and one for client authentication:
@@ -324,30 +325,30 @@ The `replace-key` renewal policy means that on each renewal, Strimzi generates a
 
 ### Rotation Monitoring
 
-Strimzi sets the `NotAfter` date on each certificate. Monitor with:
+Strimzi sets the `NotAfter` date on each certificate. Read it directly with:
 
 ```bash
 kubectl get secret krafter-cluster-ca-cert -n kafka \
   -o jsonpath='{.data.ca\.crt}' | base64 -d | openssl x509 -noout -dates
 ```
 
-Set up a Prometheus alert for certificates expiring within 30 days:
+For alerting, use the rules the `strimzi-operator` chart ships instead of writing your own. The Cluster Operator publishes `strimzi_certificate_expiration_timestamp_ms` for the cluster and clients CA certificates of every Kafka cluster it manages, and the chart's PrometheusRule, `strimzi-operator-operator-alerts` in the `strimzi-operator` namespace, alerts on it:
 
-```yaml
-- alert: KafkaCertificateExpiringSoon
-  expr: |
-    (kube_secret_created{namespace="kafka", secret=~".*-ca-cert"} + 157680000)
-    - time() < 2592000
-  for: 1h
-  labels:
-    severity: warning
-  annotations:
-    summary: "Kafka CA certificate expires within 30 days"
-    description: "Secret {{ $labels.secret }} in namespace {{ $labels.namespace }} will expire soon. Trigger a certificate renewal."
+| Alert | Fires When the Certificate Expires In | Severity |
+|-------|---------------------------------------|----------|
+| `KafkaCertificateExpiringSoon` | Under 30 days, for 1h | warning |
+| `KafkaCertificateExpiryCritical` | Under 7 days, for 30m | critical |
+
+The thresholds are the chart's `alerts.thresholds.certificateWarningDays` and `alerts.thresholds.certificateCriticalDays`. Strimzi renews a CA 180 days before it expires, so either alert means a renewal did not happen: look at the operator's logs and at the cluster's `maintenanceTimeWindows`, outside which Strimzi does not renew.
+
+::: {.callout-important}
+The chart renders the rule, and the PodMonitor that scrapes the operator, only if the `monitoring.coreos.com` API exists when the release is installed or upgraded. `kates deploy` installs the operator before the monitoring stack, so after the first deploy on a fresh cluster neither object exists. Check:
+
+```bash
+kubectl get prometheusrule,podmonitor -n strimzi-operator
 ```
 
-::: {.callout-caution}
-This alert is an approximation, not a measurement of the certificate itself. `kube_secret_created` reports when the Secret was **first created** — not the certificate's `NotAfter` date — and the hardcoded `157680000` seconds mirrors the chart's 1825-day CA validity (`clusterCa.validityDays`). Strimzi renews certificates by updating the Secret in place, so the metric never resets: after the first in-place renewal the alert fires permanently, and it drifts silently if you change the validity period. Treat the `openssl x509 -noout -dates` check above as the source of truth.
+If nothing is listed, run `kates deploy` again with the flags you first used. It upgrades the operator release on every run, and this time the API is there. Each of those upgrades passes `--reset-values` and the kind or generic overlay, so on an operator you manage with Helm yourself it drops `values-prod.yaml` and every value you set. For that operator, upgrade the release yourself with its own values, as [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-crashloopbackoff) shows, which renders both objects now that the API exists, and pass `--with-strimzi=false` whenever you run `kates deploy`.
 :::
 
 ## Audit Logging
@@ -368,13 +369,152 @@ spec:
 
 At the default `INFO` level the authorizer logs denied operations only. At `DEBUG`, every produce, consume, and admin operation generates an audit entry that includes the principal, the resource, the operation, and the decision (ALLOWED or DENIED). These logs are invaluable during security incident investigations.
 
+::: {.callout-warning}
+Turn `DEBUG` on for an investigation, then set the logger back to `INFO`. The authorizer checks every request, so at `DEBUG` each broker writes a line for every authorized produce and fetch request, including those of `kates-backend`: super-user status skips the ACLs but not the log. Under a Kates load test that can be thousands of lines a second per broker, which costs broker CPU and log storage and skews the baseline you are measuring.
+:::
+
 ::: {.callout-tip}
 For lighter-weight auditing, Kates records every mutating operation issued through the backend — test creates and deletes, topic changes, disruption runs — in its audit log. Inspect the trail with `kates audit`, filtering with `--type` and `--since`.
 :::
 
 ## Network Policies
 
-Network policies are your last line of defense. Even if an attacker compromises a pod in your cluster, network policies prevent that pod from reaching the Kafka brokers unless it's explicitly allowed. The `kafka` namespace enforces **default-deny** ingress and egress on all Strimzi cluster pods (the policy selects the `app.kubernetes.io/part-of: strimzi-krafter` label rather than using an empty pod selector):
+Network policies decide which pods can open a socket to the brokers at all, so that a compromised pod elsewhere in the cluster cannot even try a stolen password. Know what the shipped ones do before you rely on them: as the charts ship, the client listeners are open to every pod in the cluster.
+
+### What the Shipped Policies Block
+
+Whether `kafka-cluster` renders any policy depends on the values chain. `kates deploy` starts its chain with `.build/values-detected.yaml`, which it writes from what it detects on the cluster, layers `values-platform.yaml` over it, and adds `values-kind.yaml` on a kind cluster:
+
+| Values Chain | kafka-cluster NetworkPolicies |
+|--------------|-------------------------------|
+| `values-kind.yaml`, `values-dev.yaml` | None: both set `networkPolicy.enabled: false` |
+| `kates deploy` on a cluster whose CNI it cannot identify, EKS, GKE and AKS excepted | None: `values-detected.yaml` turns them off |
+| `kates deploy` on any other cluster, the base values, `values-staging.yaml`, `values-prod.yaml` | The six in [Policy Summary](#policy-summary), plus `krafter-test-egress` |
+
+Where the chart's policies render, they add two things:
+
+- **Egress** from the brokers, controllers, Cruise Control, the Entity Operator and the Kafka Exporter is limited to the cluster's own pods, DNS, and TCP 443 and 6443 to any address. Set `networkPolicy.apiServer.ipBlock` to pin those two ports to the Kubernetes API server.
+- **A deny-all**, `krafter-default-deny`, for every pod of the cluster, so that Cruise Control, the Entity Operator and the Kafka Exporter accept only what a policy allows them.
+
+The internal ports are closed to other workloads in every profile, and not by the chart. The Strimzi Cluster Operator generates a policy of its own for every Kafka cluster, `krafter-network-policy-kafka`, unless its `STRIMZI_NETWORK_POLICY_GENERATION` is off (it is on by default). That policy admits only the cluster's brokers and controllers and the Cluster Operator to 9090 (controller quorum and control plane), those and the cluster's other operands to 9091 (replication), and only the operator to 8443 (the Kafka agent). It recognizes the operator by the label `strimzi.io/kind: cluster-operator` in any namespace, unless the operator knows the labels of its own namespace: set `strimzi-kafka-operator.image.operatorNamespaceLabels` on the `strimzi-operator` release, for example to `kubernetes.io/metadata.name=strimzi-operator`, to hold those rules to that namespace.
+
+Neither policy restricts the client listeners. NetworkPolicies are additive: a connection is allowed when **any** policy that selects the pod allows it. In Strimzi's policy, a listener without `networkPolicyPeers` admits every pod in every namespace, and no listener in the chart's values or in `values-detected.yaml` has them. Whatever the values chain, this is who can connect:
+
+| Port | Who Can Connect |
+|------|-----------------|
+| 9092 (`plain`), 9093 (`tls`) | Every pod in the cluster |
+| 9404 (metrics) | Every pod in the cluster: Strimzi opens the metrics port to all while `metrics.enabled` is on, as it is by default |
+| 9094 (`external`), wherever the chain declares it | Every source. `kafka.externalAccess.allowedCidrs` narrows only the chart's rule |
+
+Two things declare 9094: `kafka.externalAccess`, which `values-prod.yaml` sets to a NodePort, and `values-detected.yaml`, which adds an `external` listener on every cluster but kind, a NodePort or, on EKS, GKE and AKS, a LoadBalancer. `kates deploy` therefore exposes 9094 outside kind although the base values leave `kafka.externalAccess` off. On EKS, GKE and AKS the detected listener annotates the bootstrap Service only, so every broker's load balancer gets the provider's default, usually a public address, and on EKS and GKE the bootstrap's is public too; only the AKS bootstrap is internal. A default `kates deploy` on those clouds can therefore put 9094 on the internet, with TLS and SCRAM-SHA-512 as its only guard. [Deployment Guide](12-deployment.md#cloud-deployment) replaces that listener with internal load balancers that admit only the ranges you list.
+
+So neither `krafter-default-deny` nor the client list in `networkPolicy.clients` keeps anyone off the listeners on its own. Until you close them, SCRAM authentication and ACLs are what stand between an arbitrary pod and your data.
+
+### Closing the Listeners
+
+Give every listener in `kafka.listeners` a `networkPolicyPeers` list. Strimzi's policy then admits only those peers, and because the two policies add up, the pods that can connect are the ones the chart already admits (every `networkPolicy.clients` entry, the `kates.io/test-pod` pods, the cluster's own pods and the operator) plus the peers you name. One narrow peer is therefore enough, and `networkPolicy.clients` stays the one place where you grant access.
+
+Helm replaces lists instead of merging them, so restate every listener the release has, not only the base values' two. List them first:
+
+```bash
+kubectl get kafka krafter -n kafka -o jsonpath='{.spec.kafka.listeners[*].name}'
+```
+
+On kind that prints `plain tls`, which the file below restates. If it also prints `external`, keep that listener too, in the form shown for port 9094 further down.
+
+The file also grants Kafka UI, which the platform profile misses on the default install: `kates deploy` puts Kafka UI in the `kafka` namespace (`--ui-ns` defaults to `kafka`), and the profile grants `app: kafka-ui` only in `kates` and `kafka-ui`. Kafka UI reaches the brokers today through Strimzi's open rule and loses them once the peers land, unless the file grants it:
+
+```yaml
+# closed-listeners.yaml
+kafka:
+  listeners:
+    - name: plain
+      port: 9092
+      type: internal
+      tls: false
+      authentication:
+        type: scram-sha-512
+      networkPolicyPeers:
+        - podSelector:
+            matchLabels:
+              kates.io/test-pod: "true"
+    - name: tls
+      port: 9093
+      type: internal
+      tls: true
+      authentication:
+        type: tls
+      networkPolicyPeers:
+        - podSelector:
+            matchLabels:
+              kates.io/test-pod: "true"
+networkPolicy:
+  # The allow list the peers rely on; values-kind.yaml and values-dev.yaml turn it off
+  enabled: true
+  clients:
+    # kates deploy sets this entry: keep it, with the namespace you gave --connect-ns
+    - name: connect
+      namespace: connect
+    # Kafka UI where kates deploy installs it
+    - name: kafka-ui-in-kafka
+      namespace: kafka
+      podSelector: { app: kafka-ui }
+      listeners: [plain, tls]
+```
+
+A peer with only a `podSelector` selects pods in the Kafka namespace, which here are the Helm test pods the chart admits anyway. The chart passes the list to the `Kafka` resource unchanged, and Strimzi rewrites its policy on the next reconciliation.
+
+The peers rely on the chart's policies: without them, Strimzi's policy is the only one, and the peers you name are the only pods that can connect. That is why the file sets `networkPolicy.enabled: true`. Where `kates deploy` could not identify the CNI, that is not enough: `values-detected.yaml` turned the policies off with the older key `networkPolicies.enabled: false`, which the chart applies over a `networkPolicy.enabled` left at its default of `true`, so add `networkPolicies: {enabled: true}` to the file as well.
+
+Apply the file over the values the release already has:
+
+```bash
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+helm dependency build charts/kafka-cluster
+
+helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values -f closed-listeners.yaml
+kubectl get networkpolicy krafter-kafka -n kafka
+```
+
+The chart does not render until `helm dependency build` has filled its gitignored `charts/` directory, and once `Chart.lock` exists the build fetches the SeaweedFS subchart only from a repository Helm has configured, hence the `helm repo add`, once per machine. `--reuse-values` keeps everything the release was installed with — for a `kates deploy` release, `values-detected.yaml`, the platform profile, the kind overlay, its `--set` flags and the version pins — and lays the file over it. Do not upgrade with the file alone: the release would lose the platform profile, and with it every `networkPolicy.clients` grant and the `kates-backend` super user, while the peers admit only test pods, so Kates, Kafka UI and Connect would lose the brokers. `kates deploy` has no flag for a values file of yours, and a later run leaves the release alone, because it skips a Kafka cluster that is already installed. The `kubectl get` must find `krafter-kafka`. If it does not, the chart's policies are off and only the peers can connect: add the key from the previous paragraph and upgrade again.
+
+::: {.callout-warning}
+Anything that reaches the brokers today without a `networkPolicy.clients` entry loses access when the peers land: an ad-hoc debug pod, a client nobody declared. Compare the client list with what actually connects before you roll this out, and run the probe in [Testing Network Policies](#testing-network-policies) afterwards.
+:::
+
+::: {.callout-important}
+`kafka.externalAccess.allowedCidrs` does not close port 9094. It narrows the chart's rule for the listener, but Strimzi's policy still admits every source to a listener without `networkPolicyPeers`, and the `externalAccess` preset cannot carry them.
+:::
+
+To restrict 9094, declare the listener yourself in `kafka.listeners`, named `external`, with `ipBlock` peers, and set `kafka.externalAccess.type` to `none` so that the preset does not replace it. `allowedCidrs` still narrows the chart's rule for a listener of that name. Add the listener to `closed-listeners.yaml` as a third entry of `kafka.listeners`, after `plain` and `tls`, with the type and `configuration` it has in `kubectl get kafka krafter -n kafka -o yaml` (on EKS, GKE and AKS, `kates deploy` declares a LoadBalancer with provider annotations):
+
+```yaml
+kafka:
+  externalAccess:
+    type: none
+    allowedCidrs: ["203.0.113.0/24"]
+  listeners:
+    # plain and tls come first, as above
+    - name: external
+      port: 9094
+      type: nodeport
+      tls: true
+      authentication:
+        type: scram-sha-512
+      configuration:
+        externalTrafficPolicy: Local
+      networkPolicyPeers:
+        - ipBlock:
+            cidr: 203.0.113.0/24
+```
+
+`externalTrafficPolicy: Local` keeps the client's address, where the infrastructure supports it, so the brokers see it. With the default, `Cluster`, a connection can arrive from a node's address instead, which your `ipBlock` does not cover.
+
+Port 9404 serves read-only metrics, and no listener setting closes it. Two settings do, each at a price. `metrics.enabled: false`, with `alerts.enabled: false`, which the chart requires with it, stops Strimzi opening the port, and the brokers stop exporting the metrics Prometheus scrapes there. The operator's `strimzi-kafka-operator.generateNetworkPolicy: false` stops Strimzi generating policies at all, for every cluster that operator manages; the chart's policies are then the only ones on the brokers, which also makes `networkPolicy.clients` the allow list for the listeners. Turn generation off only where the chart's policies render: under `values-kind.yaml` or `values-dev.yaml`, the brokers would have no policy at all, internal ports included.
+
+### Policy Summary
+
+Every policy is named for its cluster, so two clusters can share a namespace. These are what `kafka-cluster` renders with the platform profile and the base listeners, beside the one Strimzi generates:
 
 ```mermaid
 graph TD
@@ -385,13 +525,17 @@ graph TD
     subgraph Kafka["krafter-kafka (brokers + controllers)"]
         B0["krafter pods ↔ 9090, 9091, 9092, 9093"]
         B1["operator → 9090, 9091, 8443, 9092, 9093"]
-        B2["kates namespace → 9092, 9093"]
-        B3["litmus namespace → 9092, 9093"]
+        B2["Kates backend pods → 9092, 9093"]
+        B3["Litmus pods → 9092, 9093"]
         B4["kafka-ui pod → 9092, 9093"]
         B5["apicurio pod → 9092, 9093"]
         B6["connect + MirrorMaker 2 → 9092, 9093"]
         B7["kates.io/test-pod → 9092, 9093"]
         B8["monitoring namespace → 9404"]
+    end
+
+    subgraph Generated["krafter-network-policy-kafka (generated by Strimzi)"]
+        G1["any pod, any namespace → 9092, 9093, 9404<br/>until the listeners carry networkPolicyPeers"]
     end
 
     subgraph Operands
@@ -401,13 +545,9 @@ graph TD
     end
 
     subgraph Egress
-        E1["every policy: krafter pods + K8s API (443, 6443)"]
+        E1["every policy: krafter pods + TCP 443, 6443"]
     end
 ```
-
-### Policy Summary
-
-Every policy is named for its cluster, so two clusters can share a namespace. These are what `kafka-cluster` renders with the platform profile and the base listeners:
 
 | Policy | Target | Ingress From | Ports |
 |--------|--------|-------------|-------|
@@ -418,13 +558,16 @@ Every policy is named for its cluster, so two clusters can share a namespace. Th
 | `krafter-entity-operator` | Entity Operator pod | monitoring | 8080, 8081 |
 | `krafter-kafka-exporter` | Kafka Exporter pod | monitoring | 9404 |
 
+`krafter-default-deny` allows nothing, so for the pods it selects, whatever no other policy allows is dropped. It does not outvote an allow: the ingress rules of `krafter-kafka` and of Strimzi's `krafter-network-policy-kafka` add up.
+
 A seventh, `krafter-test-egress`, gives pods labelled `kates.io/test-pod=true` egress to the listeners, the Kafka agent, DNS and the API server. It carries `helm.sh/resource-policy: keep` so a `helm test` against a reinstalled release still works.
 
-Client ports come from `kafka.listeners`, so turning on `kafka.externalAccess` adds its port (9094 by default, restricted by `externalAccess.allowedCidrs`) to the rules that need it. The chart no longer renders policies that select another release's pods — the operator's own policy belongs to the `strimzi-operator` release (`operatorPolicy`, on by default), and Kafka UI, Connect and MirrorMaker 2 each carry their own.
+Client ports come from the listeners, so an external listener, from the `kafka.externalAccess` preset or from `kafka.listeners`, adds its port (9094 by default) to the rules that need it, and `externalAccess.allowedCidrs` restricts the chart's rule for the one named `external`. The chart renders no policy that selects another release's pods — the operator's own policy belongs to the `strimzi-operator` release (`operatorPolicy`, on by default), and Kafka UI, Connect and MirrorMaker 2 each carry their own.
 
 Re-derive the list rather than trusting this table, since it follows the values chain you deploy with:
 
 ```bash
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm dependency build charts/kafka-cluster
 
 helm template krafter charts/kafka-cluster -n kafka \
@@ -432,21 +575,33 @@ helm template krafter charts/kafka-cluster -n kafka \
   | grep -A2 'kind: NetworkPolicy' | grep 'name:'
 ```
 
+On a running cluster, `kubectl get networkpolicy -n kafka` lists Strimzi's generated policies beside these.
+
 ### Testing Network Policies
 
-Don't trust that your network policies work — verify them. These two commands test both the positive and negative cases:
+Don't trust that your network policies work — test them, with a test that can fail. A probe such as `nc -z` from a throwaway pod fails for many reasons that have nothing to do with policy: the image does not pull, admission rejects the pod, the name does not resolve, the broker is down. Reading every failure as "blocked" proves nothing. A failed probe is evidence of a policy drop only when:
+
+- the same probe, run from a pod the policies admit, connects, so the brokers, DNS and the probe itself work;
+- the probing pod resolved the bootstrap name and its connection **timed out**. A policy drops packets, whereas a refusal means something answered;
+- the probing pod's own namespace has no NetworkPolicy that could have dropped its egress.
+
+`make kafka-verify-policies` runs that test (see [Validating Policy Compliance](#validating-policy-compliance)). To run it by hand from the repository root, use the `kates-tester` image that the chart's Helm tests run:
 
 ```bash
-# Verify a pod CAN reach brokers (should succeed from kates namespace)
-kubectl exec deployment/kates -n kates -- \
-  nc -zv krafter-kafka-bootstrap.kafka 9092
+IMAGE=$(awk '$1 == "kubectl:" {gsub(/"/, "", $2); print $2; exit}' charts/kafka-cluster/values.yaml)
+PROBE='getent hosts krafter-kafka-bootstrap.kafka.svc >/dev/null || { echo "no DNS"; exit; }
+timeout 5 bash -c "exec 3<>/dev/tcp/krafter-kafka-bootstrap.kafka.svc/9092"; echo "exit $?"'
 
-# Verify a pod CANNOT reach brokers (should fail from default namespace)
-kubectl run test --rm -it --image=busybox -- \
-  nc -zv krafter-kafka-bootstrap.kafka 9092
+# Control: a pod the chart always admits. It must print "exit 0".
+kubectl run np-control -n kafka --rm -i --restart=Never --image="$IMAGE" \
+  --labels=kates.io/test-pod=true -- bash -c "$PROBE"
+
+# The probe: a namespace with no grant, and no NetworkPolicy of its own
+kubectl get networkpolicy -n default
+kubectl run np-probe -n default --rm -i --restart=Never --image="$IMAGE" -- bash -c "$PROBE"
 ```
 
-The first command should succeed (the Kates backend is explicitly allowed). The second should time out (the default namespace has no ingress rule to the brokers). If both succeed, your network policies are not enforcing correctly.
+`exit 0` from the probe means it reached the broker. `exit 124` is a timeout, and counts as blocked only if the control printed `exit 0` and `default` has no NetworkPolicy. Any other result proves nothing either way. On the charts as shipped, expect `exit 0` from both pods until you [close the listeners](#closing-the-listeners). If admission rejects the pods, use `make kafka-verify-policies`, whose probe pods carry a restricted security context and resource limits.
 
 ## Container Security
 
@@ -508,14 +663,14 @@ graph LR
 
 ### Cluster Policies
 
-The kates chart ships four `ClusterPolicy` resources, deployed conditionally when `kyvernoPolicy.enabled=true` in the Helm values (the kafka-cluster and kates-chaos charts ship additional policies of their own):
+The kates chart ships four `ClusterPolicy` resources. It renders them only when `kyvernoPolicy.enabled=true` in the Helm values and the Kyverno API exists, and the last two need a switch of their own besides (the kafka-cluster and kates-chaos charts ship additional policies of their own):
 
 | Policy | Category | Severity | Description |
 |--------|----------|----------|-------------|
 | `kates-pod-security-standards` | Pod Security | High | Mutates and validates restricted PSS: non-root, drop ALL capabilities, seccomp, read-only rootfs, no privilege escalation |
 | `kates-workload-standards` | Best Practices | Medium | Requires standard labels, health probes, and pinned image tags on workloads |
-| `kates-image-verification` | Supply Chain | Critical | Verifies Cosign image signatures from trusted registries |
-| `kates-generate-network-policies` | Network Security | Medium | Auto-generates default-deny NetworkPolicies in new namespaces |
+| `kates-image-verification` | Supply Chain | Critical | Verifies Cosign image signatures from trusted registries. Off by default: needs `kyvernoPolicy.cosign.enabled` and a `publicKey` |
+| `kates-generate-network-policies` | Network Security | Medium | Generates default-deny NetworkPolicies in namespaces created after it. Off by default: needs `kyvernoPolicy.networkPolicyGeneration.enabled`, which `kates kyverno apply --with-netpol` sets |
 
 ### Pod Security Standards (Mutate + Validate)
 
@@ -566,7 +721,7 @@ When enabled, unsigned or tampered images from the specified registries are reje
 
 ### Automatic NetworkPolicy Generation
 
-The `kates-generate-network-policies` policy implements **zero-trust networking** by automatically generating three NetworkPolicies in every newly created namespace:
+The `kates-generate-network-policies` policy is off by default: it renders only when both `kyvernoPolicy.enabled` and `kyvernoPolicy.networkPolicyGeneration.enabled` are true, which `kates kyverno apply --with-netpol` sets. Once it is on, Kyverno generates three NetworkPolicies in every namespace created afterwards:
 
 1. **`default-deny-ingress`** — blocks all inbound traffic
 2. **`default-deny-egress`** — blocks all outbound traffic
@@ -671,27 +826,30 @@ Use this checklist when auditing your deployment. Each item links to the section
 - [ ] All listeners require authentication (no anonymous access) — see [Authentication](#authentication)
 - [ ] `superUsers` list contains only the Kates backend principal — see [User Permissions Matrix](#user-permissions-matrix)
 - [ ] Each service has its own `KafkaUser` with minimum required ACLs — see [Adding a New Service](#adding-a-new-service)
-- [ ] Network policies enforce default-deny in the `kafka` namespace — see [Network Policies](#network-policies)
+- [ ] Every listener carries `networkPolicyPeers` (an external one declared in `kafka.listeners`, since the `externalAccess` preset cannot carry them), and a pod with no grant times out on the listener ports — see [Closing the Listeners](#closing-the-listeners)
 - [ ] Containers run as non-root with read-only root filesystem — see [Container Security](#container-security)
-- [ ] Certificate renewal alerts are configured — see [Rotation Monitoring](#rotation-monitoring)
+- [ ] The operator's certificate-expiry alerts are loaded (`kubectl get prometheusrule -n strimzi-operator`) — see [Rotation Monitoring](#rotation-monitoring)
 - [ ] Per-user quotas limit blast radius from runaway clients — see [Quotas as Security](#quotas-as-security)
 - [ ] `deleteClaim: false` on all PVCs (data survives pod deletion) — see [Kafka Deployment Engineering](15-kafka-deployment.md)
 - [ ] Secrets are not committed to source control (Strimzi auto-generates) — see [SCRAM-SHA-512](#scram-sha-512)
-- [ ] Audit logging is enabled for authorization decisions — see [Audit Logging](#audit-logging)
+- [ ] Denied operations reach your log pipeline (the authorizer logs them at `INFO`), and `DEBUG` stays off outside investigations — see [Audit Logging](#audit-logging)
 
 ### Validating Policy Compliance
 
-To automate the verification of Kyverno policies, Strimzi operator health, and NetworkPolicy connectivity, you can use the built-in `make` target. The target verifies that your generic cluster is not blocking the Kafka deployment:
+To automate the verification of Kyverno policies, Strimzi operator health, and NetworkPolicy connectivity, use the built-in `make` target:
 
 ```bash
 make kafka-verify-policies
 ```
 
-The target performs these checks:
+The target runs `scripts/verify-kafka-policies.sh`, which exits 0 when every check passes, 1 when one fails, and 2 when none failed but the network probe reached no verdict. `make` prints the script's status as `Error 1` or `Error 2`, and itself exits 2 for either. The script takes these steps, of which the first reports Kyverno rejections without counting them as a failure:
+
 1. Scan the `kafka` namespace events for any Kyverno rejections.
-2. Verify the Strimzi Operator is `Running`.
+2. Find the Strimzi Cluster Operator in whichever namespaces it runs, and verify that each of them has an operator pod that is `Running` and Ready. An Evicted pod not yet garbage-collected, or a new pod still `Pending` during a rollout, does not fail the check.
 3. Check the Kafka cluster CR status to ensure it successfully reached the `Ready` state.
-4. Spawn temporary pods in both the `default` and `kates` namespaces to verify NetworkPolicies (default-deny enforcement and explicitly allowed traffic).
+4. Run the probe from [Testing Network Policies](#testing-network-policies) against the `plain` listener: first a control pod labelled `kates.io/test-pod=true` in the `kafka` namespace, then a pod with no grant in `default`. It reports **blocked** only for a timeout after a successful lookup, with the control connected and no NetworkPolicy in `default`. A connection is a failure; any other result is inconclusive.
+
+Set `PROBE_NAMESPACE` to probe from another namespace, for example `make kafka-verify-policies PROBE_NAMESPACE=apps`; `KAFKA_NAMESPACE` and `KAFKA_CLUSTER` select another cluster. On the charts as shipped, step 4 fails, because the listeners are open to every pod until you [close them](#closing-the-listeners).
 
 For deployment-level security details (Drain Cleaner, backup encryption), see [Kafka Deployment Engineering](15-kafka-deployment.md).
 
@@ -718,8 +876,9 @@ Expect a graded report organized by category — authentication, transport secur
 
 - Every listener authenticates, but only some encrypt: `plain` (9092) uses SCRAM-SHA-512 without TLS so performance baselines isolate Kafka throughput from encryption cost — production traffic belongs on `tls` (9093) or `external` (9094).
 - Authorization is deny-by-default: each service gets its own `KafkaUser` with `patternType: prefix` ACLs and quotas, and only the Kates backend holds superUser status.
-- SCRAM passwords live in base64-encoded — not encrypted — Kubernetes Secrets, so namespace RBAC, Kyverno secret synchronization, and default-deny NetworkPolicies form the outer wall around your credentials.
+- SCRAM passwords live in base64-encoded — not encrypted — Kubernetes Secrets, so RBAC on Secrets in the `kafka` and `kates` namespaces is the wall around your credentials. Kates reads its copy of the `kates-backend` password once, at startup, and nothing keeps that copy in step, so a rotation is rotate, re-copy, restart.
 - Kyverno enforces restricted Pod Security Standards in two phases — mutation silently patches missing settings, validation rejects what mutation can't fix — and starts in `Audit` mode so you can review violations before switching to `Enforce`.
-- `kates security audit` grades the whole posture A–F against CIS-mapped checks, while `make kafka-verify-policies` verifies that Kyverno, the Strimzi operator, and the NetworkPolicies enforce as intended.
+- As shipped, Strimzi's generated policy confines the brokers' internal ports and, where they render, the chart's policies confine their egress, but every pod can reach the client listeners, and every source can reach 9094 wherever a listener declares it: Strimzi's policy admits all sources to a listener without `networkPolicyPeers`. Set them, over the values the release already has, to make `networkPolicy.clients` the real allow list.
+- `kates security audit` grades the whole posture A–F against CIS-mapped checks, while `make kafka-verify-policies` checks Kyverno, the Strimzi operator and the Kafka CR, and probes whether a pod with no grant can reach the brokers.
 
 With the security layers in place for a single team, [Multi-Tenancy](19-multi-tenancy.md) shows how to share the same cluster across many services and teams without interference.
