@@ -12,13 +12,27 @@ book:
   date: today
   date-format: "MMMM YYYY"
   cover-image: assets/cover.svg
+  cover-image-alt: "Kates — The Definitive Guide"
+  favicon: assets/kates-mark.svg
   repo-url: https://github.com/bmscomp/kates
   repo-subdir: docs/book
   repo-actions: [edit, issue]
   search: true
   sidebar:
-    logo: assets/kates-wordmark.svg
+    logo: assets/kates-mark.svg
+    logo-alt: "Kates"
+  page-footer:
+    left: "Kates — The Definitive Guide"
+    right:
+      - icon: github
+        href: https://github.com/bmscomp/kates
+        aria-label: "Kates on GitHub"
+  back-to-top-navigation: true
   downloads: [pdf]
+  # The PDF's file name, which the sidebar's download link points at. Set on
+  # the book, not on format.pdf: a book ignores format.pdf.output-file and
+  # names the PDF after its title, so the link and book.yml's mv both missed.
+  output-file: kates-definitive-guide
 
   # Filenames are stable identifiers, not ordering — reading order lives
   # here and only here. Never renumber files; new chapters get slug names.
@@ -76,17 +90,21 @@ book:
 
 format:
   html:
+    # Structure is shared; each scheme only swaps the palette. Diagrams take
+    # their colours from the palette too (no mermaid theme), so they follow
+    # the reader's light/dark choice.
     theme:
-      - cosmo
-      - custom.scss
+      light: [theme/kates.scss, theme/kates-light.scss]
+      dark: [theme/kates.scss, theme/kates-dark.scss]
+    respect-user-color-scheme: true
+    highlight-style: theme/kates-code.theme
+    include-in-header: theme/head.html
+    include-after-body: theme/diagrams.html
     toc: true
     toc-depth: 3
     code-copy: true
     code-overflow: wrap
-    mermaid:
-      theme: neutral
   pdf:
-    output-file: kates-definitive-guide
     documentclass: scrbook
     papersize: a4
     fontsize: 11pt

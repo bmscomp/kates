@@ -1,0 +1,827 @@
+/*-- scss:defaults --*/
+
+// Kates book theme: type, spacing, and components shared by both colour
+// schemes. Every colour lives in kates-light.scss / kates-dark.scss, so this
+// file only reads the $kates-* palette and never defines a colour itself.
+
+// Typography — the web fonts are requested in theme/head.html.
+$font-family-sans-serif: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+$font-family-monospace: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+$line-height-base: 1.7;
+$headings-font-weight: 700;
+$headings-line-height: 1.25;
+$link-decoration: none;
+
+// Shape
+$border-radius: 0.5rem;
+$border-radius-sm: 0.375rem;
+$border-radius-lg: 0.75rem;
+
+// Code. Inline code is sized relative to its surroundings (em) so it scales
+// inside headings and tables.
+$code-font-size: 0.86em;
+$code-block-font-size: 0.84rem;
+$code-block-bg-padding: 0.95rem 1.15rem;
+
+// Callouts and the chapter table of contents
+$callout-border-width: 4px;
+$callout-margin-top: 1.5rem;
+$callout-margin-bottom: 1.5rem;
+$toc-font-size: 0.82rem;
+
+/*-- scss:rules --*/
+
+// ── Base ────────────────────────────────────────────────────────────────────
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  // Inter alternates that tell l, I and 1 apart in resource names and flags
+  font-feature-settings: "cv05", "cv08";
+}
+
+::selection {
+  background-color: rgba($kates-link, 0.2);
+}
+
+// ── Headings ────────────────────────────────────────────────────────────────
+
+h1, h2, h3, h4, h5, h6 {
+  letter-spacing: -0.012em;
+}
+
+.quarto-title-block .quarto-title h1.title {
+  font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.6rem);
+  font-weight: 800;
+  letter-spacing: -0.028em;
+  line-height: 1.12;
+  margin-bottom: 0.35rem;
+
+  .chapter-number {
+    color: $kates-link;
+  }
+}
+
+// The title breadcrumb repeats the H1 below it, so show only the part name,
+// as an eyebrow above the chapter title.
+#quarto-document-content .quarto-title-breadcrumbs {
+  margin-bottom: 0.6rem;
+
+  .breadcrumb {
+    margin-bottom: 0;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .breadcrumb-item a {
+    color: $kates-link;
+    text-decoration: none;
+  }
+
+  .breadcrumb-item:not(:first-child):last-child {
+    display: none;
+  }
+}
+
+#quarto-document-content {
+  > section > h2,
+  h2.anchored {
+    font-size: 1.6rem;
+    margin-top: 3rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid $kates-border;
+  }
+
+  h3.anchored {
+    font-size: 1.27rem;
+    margin-top: 2.25rem;
+    margin-bottom: 0.75rem;
+  }
+
+  h4.anchored {
+    font-size: 1.08rem;
+    margin-top: 1.75rem;
+  }
+
+  .header-section-number {
+    color: $kates-number;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    margin-right: 0.3em;
+  }
+}
+
+.anchorjs-link {
+  color: $kates-muted !important;
+}
+
+// ── Prose ───────────────────────────────────────────────────────────────────
+
+#quarto-document-content {
+  :is(p, li, td, dd, blockquote) a:not(.footnote-ref):not(.nav-link) {
+    text-decoration: underline;
+    text-decoration-thickness: 0.07em;
+    text-underline-offset: 0.2em;
+    text-decoration-color: rgba($kates-link, 0.35);
+    transition: text-decoration-color 0.15s ease;
+
+    &:hover {
+      text-decoration-color: currentColor;
+    }
+  }
+
+  strong {
+    color: $kates-strong;
+  }
+
+  hr {
+    border-color: $kates-border;
+    opacity: 1;
+  }
+}
+
+blockquote,
+.blockquote {
+  border-left: 3px solid $kates-accent;
+  color: $kates-muted;
+  padding: 0.25rem 0 0.25rem 1.1rem;
+  margin: 1.5rem 0;
+}
+
+kbd {
+  font-family: $font-family-monospace;
+  font-size: 0.8em;
+  color: $body-color;
+  background-color: $kates-surface;
+  border: 1px solid $kates-border;
+  border-bottom-width: 2px;
+  border-radius: 0.3em;
+  padding: 0.1em 0.4em;
+}
+
+// ── Inline code ─────────────────────────────────────────────────────────────
+// A light chip that reads as part of the sentence. (Quarto used to reuse the
+// dark code-block background here, which left purple text on navy.)
+
+#quarto-document-content
+  :is(p, li, td, th, dd, dt, h1, h2, h3, h4, h5, h6, figcaption, blockquote, .callout-body, .callout-title-container)
+  code:not(.sourceCode):not(pre code) {
+  color: $code-color;
+  background-color: $code-bg;
+  border: 1px solid $kates-code-border;
+  border-radius: 0.32em;
+  padding: 0.08em 0.36em;
+  font-size: $code-font-size;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+#quarto-document-content a code:not(.sourceCode):not(pre code) {
+  color: inherit;
+  background-color: rgba($kates-link, 0.07);
+  border-color: rgba($kates-link, 0.28);
+}
+
+// Headings already carry weight; keep their code at heading size
+#quarto-document-content :is(h1, h2, h3, h4) code:not(.sourceCode) {
+  font-size: 0.9em;
+  font-weight: inherit;
+}
+
+// ── Code blocks ─────────────────────────────────────────────────────────────
+
+div.sourceCode {
+  border: 1px solid $kates-code-block-border;
+  border-radius: $border-radius-lg;
+  margin: 1rem 0 1.5rem;
+}
+
+div.sourceCode,
+div.sourceCode pre.sourceCode {
+  color: $kates-code-block-fg;
+}
+
+pre.sourceCode > code.sourceCode {
+  line-height: 1.65;
+}
+
+// Copy button: visible on the dark block, brand accent on hover
+.code-copy-button {
+  margin-top: 8px !important;
+  margin-right: 8px !important;
+  border-radius: $border-radius-sm;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    opacity: 1;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+  }
+}
+
+.code-with-filename {
+  margin: 1rem 0 1.5rem;
+
+  .code-with-filename-file {
+    background-color: $kates-code-file-bg;
+    border: 1px solid $kates-code-block-border;
+    border-bottom: 0;
+    border-radius: $border-radius-lg $border-radius-lg 0 0;
+    padding: 0.45rem 1.15rem;
+
+    pre,
+    strong {
+      color: $kates-code-file-fg;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin: 0;
+    }
+  }
+
+  div.sourceCode {
+    margin-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+}
+
+// Terminal output and ASCII UIs are `text` fences, which Pandoc emits as a
+// bare <pre>. Give them their own lighter "output" treatment so what you
+// type (dark blocks) and what you see (these) never blur together.
+#quarto-document-content pre:not(.sourceCode) {
+  font-size: $code-block-font-size;
+  line-height: 1.55;
+  color: $kates-output-fg;
+  background-color: $kates-output-bg;
+  border: 1px solid $kates-border;
+  border-left: 3px solid $kates-output-rule;
+  border-radius: $border-radius-sm;
+  padding: 0.85rem 1.1rem;
+  margin: 1rem 0 1.5rem;
+  overflow-x: auto;
+
+  code {
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: inherit;
+  }
+}
+
+// ── Callouts ────────────────────────────────────────────────────────────────
+
+div.callout {
+  border-radius: $border-radius-lg;
+  border-color: $kates-border;
+  box-shadow: none;
+  overflow: hidden;
+
+  .callout-header {
+    font-weight: 600;
+  }
+
+  .callout-body-container > :last-child {
+    margin-bottom: 0;
+  }
+}
+
+@each $name, $color in ("note": $callout-color-note, "tip": $callout-color-tip, "warning": $callout-color-warning, "caution": $callout-color-caution, "important": $callout-color-important) {
+  div.callout-#{$name}.callout {
+    background-color: rgba($color, $kates-callout-tint);
+  }
+
+  div.callout-#{$name}.callout-style-default > .callout-header {
+    background-color: rgba($color, $kates-callout-header-tint);
+    color: $kates-heading;
+  }
+}
+
+// ── Tables ──────────────────────────────────────────────────────────────────
+
+#quarto-document-content table.table {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  margin: 1.25rem 0 1.75rem;
+  border: 1px solid $kates-border;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: $border-radius-lg;
+  overflow: hidden;
+
+  > :not(caption) > * > * {
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid $kates-border;
+    background-color: transparent;
+  }
+
+  > tbody > tr:last-child > * {
+    border-bottom: 0;
+  }
+
+  > thead > tr > th {
+    background-color: $kates-surface;
+    color: $kates-heading;
+    font-weight: 600;
+    border-bottom: 1px solid $kates-border-strong;
+    vertical-align: bottom;
+  }
+
+  > tbody > tr:hover > * {
+    background-color: $kates-row-hover;
+  }
+
+  > :not(:first-child) {
+    border-top: 0;
+  }
+}
+
+// Wide tables scroll inside their own box on narrow screens instead of
+// widening the page.
+@include media-breakpoint-down(md) {
+  #quarto-document-content table.table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+// ── Diagrams ────────────────────────────────────────────────────────────────
+// theme/diagrams.html sizes each rendered Mermaid SVG and adds the expand
+// button; these rules give every diagram a plate to sit on.
+
+figure.kates-diagram {
+  position: relative;
+  margin: 1.5rem 0 2rem;
+  padding: 1.25rem 1rem;
+  background-color: $kates-diagram-bg;
+  border: 1px solid $kates-border;
+  border-radius: $border-radius-lg;
+
+  > .kates-diagram-frame {
+    overflow-x: auto;
+    overflow-y: hidden;
+    cursor: zoom-in;
+    // Scroll shadows: only visible while there is more diagram to either side
+    background:
+      linear-gradient(to right, $kates-diagram-bg 30%, rgba($kates-diagram-bg, 0)) left center / 2.5rem 100% no-repeat local,
+      linear-gradient(to left, $kates-diagram-bg 30%, rgba($kates-diagram-bg, 0)) right center / 2.5rem 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, $kates-scroll-shadow, transparent) left center / 0.9rem 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, $kates-scroll-shadow, transparent) right center / 0.9rem 100% no-repeat scroll;
+  }
+
+  svg.mermaid-js {
+    display: block;
+    margin: 0 auto;
+    height: auto;
+  }
+
+  > p:empty {
+    display: none;
+  }
+
+  figcaption {
+    margin-top: 0.75rem;
+  }
+}
+
+.kates-diagram-expand {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: $kates-muted;
+  background-color: $body-bg;
+  border: 1px solid $kates-border;
+  border-radius: $border-radius-sm;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    color: $kates-link;
+    border-color: $kates-link;
+  }
+}
+
+figure.kates-diagram:hover .kates-diagram-expand,
+figure.kates-diagram:focus-within .kates-diagram-expand,
+figure.kates-diagram:is(.is-scrollable, .is-oversized) .kates-diagram-expand {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .kates-diagram-expand {
+    opacity: 1;
+  }
+}
+
+.kates-diagram-hint {
+  display: none;
+  margin-top: 0.6rem;
+  font-size: 0.75rem;
+  color: $kates-muted;
+  text-align: center;
+}
+
+figure.kates-diagram:is(.is-scrollable, .is-oversized) .kates-diagram-hint {
+  display: block;
+}
+
+@media print {
+  figure.kates-diagram svg.mermaid-js {
+    width: 100% !important;
+  }
+
+  .kates-diagram-expand,
+  .kates-diagram-hint {
+    display: none !important;
+  }
+}
+
+// Mermaid colours come from the --mermaid-* variables Quarto derives from the
+// $mermaid-* palette. These rules cover what Mermaid's own base theme paints
+// with fixed colours, so both colour schemes stay legible.
+svg.mermaid-js {
+  .edgeLabel,
+  .edgeLabel p,
+  .edgeLabel span,
+  .labelBkg {
+    background-color: var(--mermaid-label-bg-color) !important;
+    color: var(--mermaid-edge-color) !important;
+  }
+
+  .cluster-label span,
+  .cluster-label p {
+    color: var(--mermaid-label-fg-color) !important;
+  }
+
+  .node .label,
+  .nodeLabel,
+  .nodeLabel p {
+    color: var(--mermaid-label-fg-color) !important;
+  }
+
+  .note,
+  rect.note {
+    fill: $kates-diagram-note-bg !important;
+    stroke: $kates-diagram-note-border !important;
+  }
+
+  .noteText,
+  .noteText > tspan {
+    fill: var(--mermaid-label-fg-color) !important;
+  }
+
+  .actor-line {
+    stroke: var(--mermaid-fg-color--lighter) !important;
+  }
+
+  .labelBox {
+    fill: var(--mermaid-node-bg-color) !important;
+    stroke: var(--mermaid-node-fg-color) !important;
+  }
+
+  .loopLine {
+    stroke: var(--mermaid-node-fg-color) !important;
+  }
+
+  .labelText,
+  .loopText,
+  .loopText > tspan {
+    fill: var(--mermaid-label-fg-color) !important;
+  }
+
+  .messageText {
+    fill: var(--mermaid-label-fg-color) !important;
+  }
+
+  // autonumber digits sit on an edge-coloured disc, so take the background
+  .sequenceNumber {
+    fill: var(--mermaid-bg-color) !important;
+  }
+}
+
+// Full-screen diagram viewer (theme/diagrams.html)
+dialog.kates-diagram-viewer {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: $body-color;
+  background-color: $kates-diagram-bg;
+
+  &[open] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  &::backdrop {
+    background: rgba(8, 12, 26, 0.6);
+  }
+
+  .kdv-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    border-bottom: 1px solid $kates-border;
+    background-color: $body-bg;
+  }
+
+  .kdv-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kdv-help {
+    font-size: 0.75rem;
+    color: $kates-muted;
+  }
+
+  .kdv-actions {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  button {
+    min-width: 2.1rem;
+    height: 2.1rem;
+    padding: 0 0.55rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: $body-color;
+    background-color: $kates-surface;
+    border: 1px solid $kates-border;
+    border-radius: $border-radius-sm;
+
+    &:hover,
+    &:focus-visible {
+      color: $kates-link;
+      border-color: $kates-link;
+    }
+  }
+
+  .kdv-stage {
+    flex: 1;
+    overflow: auto;
+    cursor: grab;
+    overscroll-behavior: contain;
+    outline: none;
+
+    &.is-panning {
+      cursor: grabbing;
+      user-select: none;
+    }
+  }
+
+  .kdv-canvas {
+    display: flex;
+    min-width: 100%;
+    min-height: 100%;
+    width: max-content;
+    padding: 2rem;
+  }
+
+  svg {
+    display: block;
+    margin: auto;
+    max-width: none !important;
+  }
+}
+
+@include media-breakpoint-down(md) {
+  dialog.kates-diagram-viewer .kdv-help {
+    display: none;
+  }
+}
+
+// ── Cover ───────────────────────────────────────────────────────────────────
+
+.quarto-cover-image {
+  border-radius: $border-radius;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 14px 32px -12px $kates-cover-shadow;
+}
+
+// ── Sidebar ─────────────────────────────────────────────────────────────────
+
+.sidebar-header {
+  .sidebar-logo {
+    max-width: 44px;
+    max-height: 44px;
+    margin-bottom: 0.6rem;
+  }
+
+  .sidebar-title a {
+    color: $kates-heading;
+    font-size: 1.12rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    line-height: 1.3;
+  }
+}
+
+.sidebar-navigation {
+  // Part headings only — chapters keep their normal case
+  .sidebar-item-section > .sidebar-item-container > .sidebar-item-text {
+    color: $kates-muted;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .sidebar-item-section {
+    margin-top: 0.9rem;
+  }
+
+  .sidebar-section.depth1 .sidebar-link {
+    font-size: 0.87rem;
+    line-height: 1.4;
+  }
+
+  .sidebar-item-container {
+    border-radius: $border-radius-sm;
+  }
+
+  .sidebar-item-container:has(> .sidebar-link.active) {
+    background-color: $kates-active-bg;
+  }
+
+  // Numbered chapters: a fixed number column, so wrapped titles hang
+  // under the title instead of under the number
+  .menu-text:has(> .chapter-number) {
+    display: flex;
+    align-items: baseline;
+    font-size: 0; // drops the &nbsp; Quarto puts between number and title
+
+    > .chapter-number,
+    > .chapter-title {
+      font-size: 0.87rem;
+    }
+
+    > .chapter-number {
+      flex: 0 0 1.9em;
+    }
+  }
+
+  .sidebar-link {
+    color: $kates-sidebar-fg;
+
+    &:hover {
+      color: $kates-link;
+    }
+
+    &.active {
+      color: $kates-link;
+      font-weight: 600;
+    }
+
+    .chapter-number {
+      color: $kates-muted;
+      font-variant-numeric: tabular-nums;
+    }
+
+    &.active .chapter-number {
+      color: inherit;
+    }
+  }
+}
+
+// ── Table of contents ───────────────────────────────────────────────────────
+
+#TOC,
+nav[role="doc-toc"] {
+  #toc-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: $kates-muted;
+  }
+
+  .nav-link {
+    color: $kates-sidebar-fg;
+    line-height: 1.4;
+
+    &:hover {
+      color: $kates-link;
+    }
+
+    &.active {
+      color: $kates-link;
+      font-weight: 600;
+    }
+  }
+
+  .header-section-number {
+    color: $kates-muted;
+  }
+}
+
+.toc-actions a {
+  color: $kates-muted;
+
+  &:hover {
+    color: $kates-link;
+  }
+}
+
+// ── Page navigation ─────────────────────────────────────────────────────────
+
+.page-navigation {
+  gap: 1rem;
+  margin-top: 3.5rem;
+  padding-top: 0;
+  border-top: 0;
+
+  .nav-page {
+    flex: 1 1 0;
+    max-width: 50%;
+  }
+
+  .nav-page-next {
+    text-align: right;
+  }
+
+  .pagination-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    height: 100%;
+    padding: 0.85rem 1rem;
+    color: $kates-heading;
+    font-weight: 600;
+    border: 1px solid $kates-border;
+    border-radius: $border-radius-lg;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+
+    &:hover {
+      border-color: $kates-link;
+      background-color: $kates-active-bg;
+    }
+  }
+
+  .nav-page-next .pagination-link {
+    justify-content: flex-end;
+  }
+
+  .nav-page-text::before {
+    display: block;
+    margin-bottom: 0.15rem;
+    color: $kates-muted;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .nav-page-previous .nav-page-text::before {
+    content: "Previous";
+  }
+
+  .nav-page-next .nav-page-text::before {
+    content: "Next";
+  }
+
+  .bi {
+    color: $kates-link;
+    font-size: 1.2rem;
+  }
+}
+
+// ── Footer ──────────────────────────────────────────────────────────────────
+
+.nav-footer {
+  border-top: 1px solid $kates-border;
+  font-size: 0.8rem;
+  color: $kates-muted;
+
+  a {
+    color: $kates-muted;
+
+    &:hover {
+      color: $kates-link;
+    }
+  }
+}

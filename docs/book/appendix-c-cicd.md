@@ -7,7 +7,7 @@ Two things to keep in mind while reading. First, **any job that renders a chart 
 ## Pipeline Overview
 
 ```mermaid
-graph TB
+graph LR
     subgraph Triggers
         Push[Push to main]
         PR[Pull Request]

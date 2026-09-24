@@ -1,0 +1,246 @@
+<script>
+// Mermaid diagrams for the Kates book: legible sizing and a full-screen viewer.
+//
+// Quarto renders each diagram in the browser on `load` and lets it shrink to
+// the text column, so a wide flowchart ends up with 3px labels. This keeps
+// every diagram at a legible minimum scale (scrolling sideways past that) and
+// adds an Expand button that opens it full screen with zoom and pan.
+(() => {
+  "use strict";
+
+  const MIN_SCALE = 0.7; // Mermaid draws 16px labels; below ~11px they blur
+  const MAX_SCROLL = 2.5; // past this many column widths, fit and point to Expand
+  const FIT_MAX = 1.5;    // how far "fit to width" may enlarge a small diagram
+  const ZOOM_MIN = 0.1;
+  const ZOOM_MAX = 4;
+  const ZOOM_STEP = 1.25;
+
+  // Measure labels in the font they are drawn in. Quarto's mermaid-init.js has
+  // already called initialize(); calling it again before `load` keeps Quarto's
+  // options and swaps Mermaid's default Trebuchet for the book's font, so boxes
+  // are sized for the text they hold.
+  if (window.mermaid && typeof mermaidOpts !== "undefined") {
+    const font = getComputedStyle(document.documentElement)
+      .getPropertyValue("--mermaid-font-family").trim();
+    if (font) mermaid.initialize({ ...mermaidOpts, fontFamily: font });
+  }
+
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  function naturalSize(svg) {
+    const vb = svg.viewBox && svg.viewBox.baseVal;
+    return vb && vb.width > 0 && vb.height > 0 ? { w: vb.width, h: vb.height } : null;
+  }
+
+  function titleFor(figure) {
+    const caption = figure.querySelector("figcaption");
+    if (caption && caption.textContent.trim()) return caption.textContent.trim();
+    const heading = figure.closest("section")?.querySelector(":scope > h2, :scope > h3, :scope > h4");
+    return heading ? heading.textContent.trim() : document.title;
+  }
+
+  // ── Inline sizing ──────────────────────────────────────────────────────────
+
+  function layout(figure) {
+    const frame = figure.querySelector(".kates-diagram-frame");
+    const svg = frame && frame.querySelector("svg");
+    const size = svg && naturalSize(svg);
+    const room = frame ? frame.clientWidth : 0;
+    if (!size || !room) return; // not laid out yet: the ResizeObserver retries
+    // Fit when that keeps labels legible, give or take a few percent so a
+    // diagram that only just misses does not get a scrollbar for 3px.
+    const legible = size.w * MIN_SCALE;
+    let width = size.w <= room ? size.w : legible <= room * 1.04 ? room : legible;
+    // Scrolling through several screens of one diagram (a phone, mostly) is
+    // worse than seeing its shape and opening it full screen.
+    const oversized = width > room * MAX_SCROLL;
+    if (oversized) width = room;
+    svg.style.maxWidth = "none";
+    svg.style.width = `${Math.floor(width)}px`;
+    figure.classList.toggle("is-scrollable", !oversized && width > room + 1);
+    figure.classList.toggle("is-oversized", oversized);
+    figure.querySelector(".kates-diagram-hint").textContent = oversized
+      ? "Too wide to read here: expand it full screen."
+      : "Scroll sideways to see the rest, or expand it full screen.";
+  }
+
+  const resizes = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const frame = entry.target;
+      if (frame._katesWidth === entry.contentRect.width) continue;
+      frame._katesWidth = entry.contentRect.width;
+      const figure = frame.closest("figure.kates-diagram");
+      if (figure) layout(figure);
+    }
+  });
+
+  function enhance(svg) {
+    const frame = svg.parentElement;
+    const figure = svg.closest("figure");
+    if (!frame || !figure || figure.classList.contains("kates-diagram")) return;
+
+    figure.classList.add("kates-diagram");
+    frame.classList.add("kates-diagram-frame");
+
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "kates-diagram-expand";
+    expand.title = "Open the diagram full screen";
+    expand.innerHTML = '<i class="bi bi-arrows-angle-expand" aria-hidden="true"></i><span>Expand</span>';
+    expand.addEventListener("click", () => openViewer(figure, expand));
+    frame.addEventListener("click", () => openViewer(figure, expand));
+    figure.prepend(expand);
+
+    const hint = document.createElement("div");
+    hint.className = "kates-diagram-hint";
+    frame.after(hint);
+
+    layout(figure);
+    resizes.observe(frame);
+  }
+
+  // Quarto swaps each <pre class="mermaid-js"> for its rendered SVG one at a
+  // time; pick every diagram up as soon as it lands, and stop watching once
+  // the last one has.
+  const rendered = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.matches("svg.mermaid-js")) enhance(node);
+        else node.querySelectorAll?.("svg.mermaid-js").forEach(enhance);
+      }
+    }
+    if (!document.querySelector("pre.mermaid-js")) rendered.disconnect();
+  });
+  if (document.querySelector("pre.mermaid-js")) {
+    rendered.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ── Full-screen viewer ─────────────────────────────────────────────────────
+
+  let viewer = null;
+
+  function buildViewer() {
+    const dialog = document.createElement("dialog");
+    if (typeof dialog.showModal !== "function") return null;
+    dialog.className = "kates-diagram-viewer";
+    dialog.setAttribute("aria-label", "Diagram viewer");
+    dialog.innerHTML = `
+      <div class="kdv-bar">
+        <div class="kdv-title"></div>
+        <div class="kdv-help">Drag to pan · Ctrl/⌘ + scroll or pinch to zoom · Esc to close</div>
+        <div class="kdv-actions">
+          <button type="button" data-zoom="out" title="Zoom out (−)" aria-label="Zoom out"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
+          <button type="button" data-zoom="fit" title="Fit to width (0)" aria-label="Fit to width" class="kdv-level">100%</button>
+          <button type="button" data-zoom="in" title="Zoom in (+)" aria-label="Zoom in"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
+          <button type="button" data-close title="Close (Esc)" aria-label="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      <div class="kdv-stage" tabindex="0"><div class="kdv-canvas"></div></div>`;
+    document.body.appendChild(dialog);
+
+    const v = {
+      dialog,
+      title: dialog.querySelector(".kdv-title"),
+      level: dialog.querySelector(".kdv-level"),
+      stage: dialog.querySelector(".kdv-stage"),
+      canvas: dialog.querySelector(".kdv-canvas"),
+      svg: null, size: null, zoom: 1, opener: null, pan: null,
+    };
+
+    // Fit the width, not the whole diagram: fitting a tall diagram's height
+    // would open it smaller than it reads inline. Height scrolls instead.
+    const fitZoom = () => clamp(Math.min((v.stage.clientWidth - 64) / v.size.w, FIT_MAX), ZOOM_MIN, ZOOM_MAX);
+
+    // Zoom about a point of the stage (its centre by default), keeping the
+    // part of the diagram under that point in place.
+    v.setZoom = (zoom, ax, ay) => {
+      zoom = clamp(zoom, ZOOM_MIN, ZOOM_MAX);
+      const s = v.stage;
+      ax = ax ?? s.clientWidth / 2;
+      ay = ay ?? s.clientHeight / 2;
+      const fx = (s.scrollLeft + ax) / s.scrollWidth;
+      const fy = (s.scrollTop + ay) / s.scrollHeight;
+      v.zoom = zoom;
+      v.svg.style.width = `${v.size.w * zoom}px`;
+      v.svg.style.height = `${v.size.h * zoom}px`;
+      v.level.textContent = `${Math.round(zoom * 100)}%`;
+      s.scrollLeft = fx * s.scrollWidth - ax;
+      s.scrollTop = fy * s.scrollHeight - ay;
+    };
+    v.fit = () => v.setZoom(fitZoom());
+
+    dialog.querySelector('[data-zoom="in"]').addEventListener("click", () => v.setZoom(v.zoom * ZOOM_STEP));
+    dialog.querySelector('[data-zoom="out"]').addEventListener("click", () => v.setZoom(v.zoom / ZOOM_STEP));
+    dialog.querySelector('[data-zoom="fit"]').addEventListener("click", v.fit);
+    dialog.querySelector("[data-close]").addEventListener("click", () => dialog.close());
+
+    dialog.addEventListener("keydown", (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "+" || e.key === "=") v.setZoom(v.zoom * ZOOM_STEP);
+      else if (e.key === "-" || e.key === "_") v.setZoom(v.zoom / ZOOM_STEP);
+      else if (e.key === "0") v.fit();
+      else return;
+      e.preventDefault();
+    });
+
+    // Ctrl/⌘ + wheel, and trackpad pinch (which arrives as ctrl + wheel)
+    v.stage.addEventListener("wheel", (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const r = v.stage.getBoundingClientRect();
+      v.setZoom(v.zoom * Math.exp(-e.deltaY * 0.002), e.clientX - r.left, e.clientY - r.top);
+    }, { passive: false });
+
+    // Drag to pan with a mouse; touch keeps its native scrolling
+    v.stage.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      v.pan = { x: e.clientX, y: e.clientY, left: v.stage.scrollLeft, top: v.stage.scrollTop };
+      v.stage.setPointerCapture(e.pointerId);
+      v.stage.classList.add("is-panning");
+    });
+    v.stage.addEventListener("pointermove", (e) => {
+      if (!v.pan) return;
+      v.stage.scrollLeft = v.pan.left - (e.clientX - v.pan.x);
+      v.stage.scrollTop = v.pan.top - (e.clientY - v.pan.y);
+    });
+    const endPan = () => { v.pan = null; v.stage.classList.remove("is-panning"); };
+    v.stage.addEventListener("pointerup", endPan);
+    v.stage.addEventListener("pointercancel", endPan);
+
+    dialog.addEventListener("close", () => {
+      v.svg?.remove();
+      v.svg = null;
+      v.opener?.focus();
+    });
+
+    return v;
+  }
+
+  function openViewer(figure, opener) {
+    const svg = figure.querySelector(".kates-diagram-frame svg");
+    const size = svg && naturalSize(svg);
+    if (!size) return;
+    viewer = viewer || buildViewer();
+    if (!viewer) return;
+
+    // A copy keeps the page layout untouched underneath. It shares the
+    // original's ids, so its scoped <style> and arrowhead markers still apply.
+    const copy = svg.cloneNode(true);
+    copy.removeAttribute("style");
+    copy.removeAttribute("width");
+    copy.removeAttribute("height");
+    copy.setAttribute("aria-label", titleFor(figure));
+    viewer.canvas.replaceChildren(copy);
+    viewer.svg = copy;
+    viewer.size = size;
+    viewer.opener = opener;
+    viewer.title.textContent = titleFor(figure);
+
+    viewer.dialog.showModal();
+    viewer.fit();
+    viewer.stage.scrollTo(0, 0); // start at the top, not wherever the zoom anchor landed
+    viewer.stage.focus();
+  }
+})();
+</script>
