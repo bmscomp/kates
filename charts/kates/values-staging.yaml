@@ -3,13 +3,18 @@ replicaCount: 2
 image:
   pullPolicy: IfNotPresent
 
+# The heap is sized against the memory LIMIT (half of it here, as in
+# values-dev.yaml). The default -Xmx2560m would not fit in this limit at all.
 resources:
   requests:
-    memory: "256Mi"
+    memory: "512Mi"
     cpu: "250m"
   limits:
-    memory: "512Mi"
+    memory: "1Gi"
     cpu: "500m"
+
+jvm:
+  options: "-Xms256m -Xmx512m -XX:+UseZGC -XX:+ZGenerational"
 
 autoscaling:
   enabled: false

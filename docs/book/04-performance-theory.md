@@ -130,7 +130,7 @@ In Kafka, tail latency is caused by:
 - **Controller elections** — KRaft metadata operations can cause brief pauses
 
 ::: {.callout-tip}
-GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size. Kates deploys with generational ZGC by default (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default) — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
+GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size. Kates's JVM image runs generational ZGC (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default), both under the chart's defaults and under the overlay `kates deploy` applies on a cloud cluster. On Kind, `kates deploy` runs the native image instead, which runs the Serial GC, so the tail latencies of a local run include its pauses — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
 :::
 
 ## Coordinated Omission

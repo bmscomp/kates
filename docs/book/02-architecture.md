@@ -56,7 +56,7 @@ graph TB
 
 ## Backend Engine
 
-The backend is a **Quarkus application** running in JVM mode (with native image support via GraalVM). It exposes both a REST API and a **gRPC API** (see [gRPC API Reference](16-grpc-api.md)), and manages the full test lifecycle. Both APIs delegate to the same service layer — identical behavior, different wire formats.
+The backend is a **Quarkus application**, built as a JVM image and as a GraalVM native image: `kates deploy` runs the native one on Kind and the JVM one on other clusters (see [Deployment Guide](12-deployment.md#native-image-build)). It exposes both a REST API and a **gRPC API** (see [gRPC API Reference](16-grpc-api.md)), and manages the full test lifecycle. Both APIs delegate to the same service layer, so a test run behaves the same whichever API starts it; the gRPC API covers fewer operations, and some of its responses carry less than their REST counterparts, as its chapter lists.
 
 ### Component Map
 
