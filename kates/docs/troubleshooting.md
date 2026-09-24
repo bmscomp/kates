@@ -113,7 +113,7 @@ kubectl exec -it krafter-kafka-0 -n kafka -- kafka-topics.sh \
 
 **Root cause:** The `maxAffectedBrokers` in your disruption plan is too low for the number of pods that match your label selector. This is a safety feature — the guard is preventing you from accidentally taking down more brokers than intended.
 
-This often happens when using a broad label selector like `strimzi.io/component-type=kafka` (which matches all Kafka brokers) with `maxAffectedBrokers: 1`. The label selector matches all brokers, triggering the safety check.
+This often happens when using a broad label selector like `strimzi.io/component-type=kafka` with `targetAll: true` and `maxAffectedBrokers: 1`. The selector matches every Kafka pod, and each broker among them (each pod labelled `strimzi.io/broker-role=true`) counts, triggering the safety check. The KRaft controllers it also matches do not count.
 
 **Fix:** Either increase `maxAffectedBrokers` to the number of brokers you actually intend to disrupt, or narrow your label selector to target a specific broker:
 
