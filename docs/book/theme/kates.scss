@@ -122,7 +122,9 @@ h1, h2, h3, h4, h5, h6 {
 // ── Prose ───────────────────────────────────────────────────────────────────
 
 #quarto-document-content {
-  :is(p, li, td, dd, blockquote) a:not(.footnote-ref):not(.nav-link) {
+  // Links in running text only: not footnote markers, and nothing inside a
+  // <nav> such as the part eyebrow above each chapter title.
+  :is(p, li, td, dd, blockquote) a:not(.footnote-ref, .nav-link, nav a) {
     text-decoration: underline;
     text-decoration-thickness: 0.07em;
     text-underline-offset: 0.2em;
