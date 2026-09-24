@@ -15,6 +15,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultSpec;
+import com.bmscomp.kates.chaos.VertxPerMockClient;
 
 /**
  * The dry-run RBAC check has to ask about the verb the provider sends and the
@@ -22,7 +23,7 @@ import com.bmscomp.kates.chaos.FaultSpec;
  * group, which a networking.k8s.io or apps rule never matches — so the dry run
  * reported "Insufficient RBAC permissions" even where the chart granted them.
  */
-@EnableKubernetesMockClient
+@EnableKubernetesMockClient(kubernetesClientBuilderCustomizer = VertxPerMockClient.class)
 class DisruptionSafetyGuardRbacTest {
 
     private static final String SSAR_PATH = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
