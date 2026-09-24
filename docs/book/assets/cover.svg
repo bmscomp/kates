@@ -1,22 +1,78 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 840" width="600" height="840" role="img" aria-label="Kates — The Definitive Guide">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 840" width="600" height="840" role="img" aria-label="Kates — The Definitive Guide: performance testing, chaos engineering, and resilience for Apache Kafka">
+  <!-- Shown as an <img>, so no web fonts reach it: the type uses the system
+       stack, and the art is the broker ring and recovery arc of kates-mark.svg. -->
   <defs>
-    <marker id="ah" viewBox="0 0 8 8" refX="5" refY="4" markerWidth="3.4" markerHeight="3.4" orient="auto">
-      <path d="M0 0 L8 4 L0 8 Z" fill="#5FA9EE"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2e7ae5"/>
+      <stop offset="0.55" stop-color="#1a55c2"/>
+      <stop offset="1" stop-color="#0c2c7a"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="360" cy="300" r="270" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7cc0ff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#7cc0ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shade" x1="0" y1="420" x2="0" y2="840" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#081a4a" stop-opacity="0"/>
+      <stop offset="1" stop-color="#081a4a" stop-opacity="0.45"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="-150" y1="80" x2="150" y2="-60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9dd0ff" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#c4e3ff" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+    <marker id="head" viewBox="0 0 10 10" refX="3" refY="5" markerWidth="30" markerHeight="30" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#ffffff"/>
     </marker>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
-  <rect width="600" height="840" fill="#1D2B62"/>
-  <g transform="translate(300 250)" fill="none" stroke-linecap="round">
-    <circle r="80" stroke="#2E4080" stroke-width="10"/>
-    <circle cx="0" cy="-80" r="14" fill="#2E4080"/>
-    <circle cx="69.3" cy="40" r="14" fill="#2E4080"/>
-    <circle cx="-69.3" cy="40" r="14" fill="#2E4080"/>
-    <g transform="rotate(-28)">
-      <circle cx="-124.4" cy="29.5" r="11" fill="#5FA9EE"/>
-      <path d="M -124.4 29.5 A 132 86 0 0 1 124.4 -29.5" stroke="#5FA9EE" stroke-width="9" marker-end="url(#ah)"/>
+
+  <rect width="600" height="840" fill="url(#bg)"/>
+  <rect width="600" height="840" fill="url(#halo)"/>
+  <rect width="600" height="840" fill="url(#shade)"/>
+
+  <!-- spine -->
+  <rect width="12" height="840" fill="#ffffff" fill-opacity="0.08"/>
+  <rect x="12" width="2" height="840" fill="#081a4a" fill-opacity="0.25"/>
+
+  <g transform="translate(360 300)" fill="none">
+    <!-- orbits -->
+    <circle r="182" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1.5"/>
+    <circle r="240" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1.5"/>
+    <circle r="304" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1.5"/>
+
+    <!-- three brokers on the ring; the one under test carries a halo -->
+    <circle r="112" stroke="#ffffff" stroke-opacity="0.5" stroke-width="4"/>
+    <circle cy="-112" r="27" stroke="#9dd0ff" stroke-opacity="0.9" stroke-width="3"/>
+    <g fill="#ffffff" filter="url(#glow)">
+      <circle cy="-112" r="18"/>
+      <circle cx="97" cy="56" r="18"/>
+      <circle cx="-97" cy="56" r="18"/>
     </g>
+
+    <!-- recovery arc -->
+    <circle cx="-136.8" cy="79.0" r="9" fill="#9dd0ff" fill-opacity="0.6"/>
+    <path d="M -136.8 79.0 A 158 158 0 1 1 148.5 -54.0" stroke="url(#arc)" stroke-width="10" stroke-linecap="round" marker-end="url(#head)"/>
   </g>
-  <text x="300" y="520" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"><tspan font-size="88" font-weight="800" fill="#5FA9EE">K</tspan><tspan font-size="88" font-weight="500" fill="#E8EDF5">ates</tspan></text>
-  <rect x="240" y="560" width="120" height="3" fill="#5FA9EE"/>
-  <text x="300" y="620" text-anchor="middle" font-family="Charter, 'Bitstream Charter', Cambria, Georgia, serif" font-size="30" fill="#E8EDF5">The Definitive Guide</text>
-  <text x="300" y="662" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" fill="#93A0B4">Performance testing, chaos engineering, and resilience for Apache Kafka</text>
+
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" fill="#ffffff">
+    <text x="56" y="94" font-size="24" font-weight="700" letter-spacing="5" fill="#eaf3ff">THE DEFINITIVE GUIDE</text>
+
+    <text x="50" y="560" font-size="150" font-weight="800" letter-spacing="-5">Kates</text>
+    <rect x="58" y="588" width="84" height="6" rx="3" fill="#7fc0ff"/>
+
+    <text font-size="27" font-weight="600" fill="#e3eeff">
+      <tspan x="58" y="640">Performance testing, chaos</tspan>
+      <tspan x="58" y="674">engineering, and resilience</tspan>
+      <tspan x="58" y="708">for Apache Kafka</tspan>
+    </text>
+
+    <line x1="58" y1="758" x2="542" y2="758" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
+    <text x="58" y="798" font-size="23" font-weight="600" fill="#d6e6ff">The Kates Team</text>
+  </g>
 </svg>
