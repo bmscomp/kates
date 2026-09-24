@@ -7,7 +7,9 @@
 # script on its checkout right before `quarto render` — the conversion is
 # never committed. It:
 #   1. converts ```mermaid fences to ```{mermaid} executable cells
-#   2. rewrites relative intra-book links from .md to .qmd (URLs untouched)
+#   2. points .md links that leave docs/book (../x.md) at the file on GitHub —
+#      the site holds only the book, so they would resolve to nothing — then
+#      rewrites the remaining relative links from .md to .qmd (URLs untouched)
 #   3. renames chapter .md files to .qmd (README.md stays — not a chapter)
 #   4. updates the chapter list in _quarto.yml accordingly
 set -euo pipefail
@@ -15,10 +17,17 @@ set -euo pipefail
 cd "$(dirname "$0")/../docs/book"
 
 python3 - <<'PY'
-import glob, os, re
+import glob, os, posixpath, re
+
+GITHUB = 'https://github.com/bmscomp/kates/blob/main/'
+
+def github_link(m):
+    path = posixpath.normpath(posixpath.join('docs/book', m.group(1)))
+    return f']({GITHUB}{path}{m.group(2) or ""})'
 
 def convert_body(text):
     text = re.sub(r'^```mermaid[ \t]*$', '```{mermaid}', text, flags=re.M)
+    text = re.sub(r'\]\((\.\./[^)#\s]+\.md)(#[^)]*)?\)', github_link, text)
     text = re.sub(r'\]\((?!https?://)([^)#\s]+)\.md(#[^)]*)?\)', r'](\1.qmd\2)', text)
     return text
 
