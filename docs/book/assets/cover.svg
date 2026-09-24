@@ -1,78 +1,75 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 840" width="600" height="840" role="img" aria-label="Kates — The Definitive Guide: performance testing, chaos engineering, and resilience for Apache Kafka">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 840" width="600" height="840" role="img" aria-label="Kates — The Definitive Guide: performance testing, chaos engineering, and resilience for Apache Kafka, by Said BOUDJELDA and Contributors">
   <!-- Shown as an <img>, so no web fonts reach it: the type uses the system
-       stack, and the art is the broker ring and recovery arc of kates-mark.svg. -->
+       stack, and the art is the broker ring and recovery arc of kates-mark.svg.
+       White above, the book's blue below. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2e7ae5"/>
-      <stop offset="0.55" stop-color="#1a55c2"/>
-      <stop offset="1" stop-color="#0c2c7a"/>
-    </linearGradient>
-    <radialGradient id="halo" cx="360" cy="300" r="270" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7cc0ff" stop-opacity="0.5"/>
-      <stop offset="1" stop-color="#7cc0ff" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="shade" x1="0" y1="420" x2="0" y2="840" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#081a4a" stop-opacity="0"/>
-      <stop offset="1" stop-color="#081a4a" stop-opacity="0.45"/>
-    </linearGradient>
-    <linearGradient id="arc" x1="-150" y1="80" x2="150" y2="-60" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#9dd0ff" stop-opacity="0.45"/>
-      <stop offset="0.5" stop-color="#c4e3ff" stop-opacity="0.85"/>
+    <radialGradient id="wash" cx="300" cy="285" r="270" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e3efff"/>
       <stop offset="1" stop-color="#ffffff"/>
+    </radialGradient>
+    <linearGradient id="band" x1="0" y1="430" x2="600" y2="840" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2e7ae5"/>
+      <stop offset="1" stop-color="#1a5bcc"/>
     </linearGradient>
-    <marker id="head" viewBox="0 0 10 10" refX="3" refY="5" markerWidth="30" markerHeight="30" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M0 0 L10 5 L0 10 Z" fill="#ffffff"/>
+    <linearGradient id="arc" x1="-120" y1="70" x2="125" y2="-45" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9dd0ff" stop-opacity="0.7"/>
+      <stop offset="0.5" stop-color="#4f94ea"/>
+      <stop offset="1" stop-color="#1d63c7"/>
+    </linearGradient>
+    <marker id="head" viewBox="0 0 10 10" refX="3" refY="5" markerWidth="25" markerHeight="25" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#1d63c7"/>
     </marker>
-    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
-      <feGaussianBlur stdDeviation="7" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
   </defs>
 
-  <rect width="600" height="840" fill="url(#bg)"/>
-  <rect width="600" height="840" fill="url(#halo)"/>
-  <rect width="600" height="840" fill="url(#shade)"/>
+  <rect width="600" height="840" fill="url(#wash)"/>
 
-  <!-- spine -->
-  <rect width="12" height="840" fill="#ffffff" fill-opacity="0.08"/>
-  <rect x="12" width="2" height="840" fill="#081a4a" fill-opacity="0.25"/>
-
-  <g transform="translate(360 300)" fill="none">
+  <g transform="translate(300 285)" fill="none">
     <!-- orbits -->
-    <circle r="182" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1.5"/>
-    <circle r="240" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1.5"/>
-    <circle r="304" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1.5"/>
+    <circle r="150" stroke="#1d63c7" stroke-opacity="0.1" stroke-width="1.5"/>
+    <circle r="198" stroke="#1d63c7" stroke-opacity="0.07" stroke-width="1.5"/>
+    <circle r="250" stroke="#1d63c7" stroke-opacity="0.045" stroke-width="1.5"/>
 
     <!-- three brokers on the ring; the one under test carries a halo -->
-    <circle r="112" stroke="#ffffff" stroke-opacity="0.5" stroke-width="4"/>
-    <circle cy="-112" r="27" stroke="#9dd0ff" stroke-opacity="0.9" stroke-width="3"/>
-    <g fill="#ffffff" filter="url(#glow)">
-      <circle cy="-112" r="18"/>
-      <circle cx="97" cy="56" r="18"/>
-      <circle cx="-97" cy="56" r="18"/>
+    <circle r="92" stroke="#2e7ae5" stroke-opacity="0.45" stroke-width="3.5"/>
+    <g fill="#cfe4ff">
+      <circle cy="-92" r="23"/>
+      <circle cx="79.7" cy="46" r="23"/>
+      <circle cx="-79.7" cy="46" r="23"/>
+    </g>
+    <circle cy="-92" r="22" stroke="#7cc0ff" stroke-width="3"/>
+    <g fill="#1d63c7">
+      <circle cy="-92" r="15"/>
+      <circle cx="79.7" cy="46" r="15"/>
+      <circle cx="-79.7" cy="46" r="15"/>
     </g>
 
     <!-- recovery arc -->
-    <circle cx="-136.8" cy="79.0" r="9" fill="#9dd0ff" fill-opacity="0.6"/>
-    <path d="M -136.8 79.0 A 158 158 0 1 1 148.5 -54.0" stroke="url(#arc)" stroke-width="10" stroke-linecap="round" marker-end="url(#head)"/>
+    <circle cx="-112.6" cy="65" r="7.5" fill="#9dd0ff"/>
+    <path d="M -112.6 65 A 130 130 0 1 1 122.2 -44.5" stroke="url(#arc)" stroke-width="8" stroke-linecap="round" marker-end="url(#head)"/>
   </g>
 
+  <!-- blue band, with a sky stripe along its top edge -->
+  <rect y="430" width="600" height="410" fill="url(#band)"/>
+  <rect y="430" width="600" height="6" fill="#7cc0ff"/>
+
+  <!-- spine and edge -->
+  <rect width="12" height="840" fill="#1d63c7" fill-opacity="0.07"/>
+  <rect x="12" width="1.5" height="840" fill="#1d63c7" fill-opacity="0.12"/>
+  <rect x="0.75" y="0.75" width="598.5" height="838.5" fill="none" stroke="#d3e1f5" stroke-width="1.5"/>
+
   <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" fill="#ffffff">
-    <text x="56" y="94" font-size="24" font-weight="700" letter-spacing="5" fill="#eaf3ff">THE DEFINITIVE GUIDE</text>
+    <text x="56" y="94" font-size="24" font-weight="700" letter-spacing="5" fill="#1d63c7">THE DEFINITIVE GUIDE</text>
 
-    <text x="50" y="560" font-size="150" font-weight="800" letter-spacing="-5">Kates</text>
-    <rect x="58" y="588" width="84" height="6" rx="3" fill="#7fc0ff"/>
+    <text x="50" y="582" font-size="150" font-weight="800" letter-spacing="-5">Kates</text>
+    <rect x="58" y="606" width="84" height="6" rx="3" fill="#bfe0ff"/>
 
-    <text font-size="27" font-weight="600" fill="#e3eeff">
-      <tspan x="58" y="640">Performance testing, chaos</tspan>
-      <tspan x="58" y="674">engineering, and resilience</tspan>
-      <tspan x="58" y="708">for Apache Kafka</tspan>
+    <text font-size="27" font-weight="600" fill="#eef5ff">
+      <tspan x="58" y="656">Performance testing, chaos</tspan>
+      <tspan x="58" y="690">engineering, and resilience</tspan>
+      <tspan x="58" y="724">for Apache Kafka</tspan>
     </text>
 
-    <line x1="58" y1="758" x2="542" y2="758" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
-    <text x="58" y="798" font-size="23" font-weight="600" fill="#d6e6ff">Said BOUDJELDA and Contributors</text>
+    <line x1="58" y1="762" x2="542" y2="762" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5"/>
+    <text x="58" y="800" font-size="23" font-weight="600" fill="#e2eeff">Said BOUDJELDA and Contributors</text>
   </g>
 </svg>
