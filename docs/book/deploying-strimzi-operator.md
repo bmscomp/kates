@@ -131,7 +131,7 @@ Five overlays ship with the chart. All of them are overrides only — they layer
 |---------|-----------------|----------------|
 | `values-kind.yaml` | Lowers operator memory to 384Mi to fit a laptop; PDB off | Local `panda` Kind cluster |
 | `values-dev.yaml` | `logLevel: DEBUG`, lower memory request | Debugging operand reconciliation |
-| `values-prod.yaml` | Hardening, PDB, upstream's operator NetworkPolicy, tighter reconciliation loop, `productionMode`, and the drain cleaner on two replicas with a cert-manager certificate | Production — **read the header first** |
+| `values-prod.yaml` | Hardening, PDB, tighter reconciliation loop, `productionMode`, and the drain cleaner on two replicas with a cert-manager certificate. It also turns on upstream's operator NetworkPolicy, which is not hardening: its `egress: [{}]` admits every destination, and since policies add up, it lifts the egress limits of the chart's own `strimzi-operator` policy. Add `--set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false` after the overlay to keep them | Production — **read the header first** |
 | `values-generic.yaml` | Nothing. It sets no keys — it carries the two facts a generic cluster gets wrong, both of which the caller must act on | Clusters whose topology is not known ahead of time (EKS/GKE/AKS/on-prem) |
 | `values-namespace-scope.yaml` | The shape of an *additional* operator: `watchAnyNamespace: false` with an empty `watchNamespaces`, `createGlobalResources: false`, `globalBindings.enabled: true`, `crdUpgrade.enabled: false`, dashboards and drain cleaner off, kind-sized resources | A second operator co-located with the Kafka namespace it watches — never the primary |
 
