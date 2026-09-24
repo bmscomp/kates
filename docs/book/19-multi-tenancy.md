@@ -363,7 +363,7 @@ The `kafka-cluster` chart renders the cluster's alerts as a `PrometheusRule` nam
     runbook_url: "https://github.com/bmscomp/kates/blob/main/docs/kafka-cluster-runbook.md#kafkarequesthandlersaturated"
 ```
 
-`KafkaConsumerGroupLagCritical` fires on the same series at ten times the threshold after five minutes. `kates cluster alerts --group kafka-cluster.krafter.consumers` lists what the live cluster actually carries.
+`KafkaConsumerGroupLagCritical` fires on the same series at ten times the threshold after five minutes. `kubectl get prometheusrule krafter-alerts -n kafka -o yaml` shows what the live cluster actually carries; `kates cluster alerts --group kafka-cluster.krafter.consumers` lists only the critical rule, because the command shows a fixed set of alert names and `KafkaConsumerGroupLag` is not among them.
 
 ## Decommissioning a Tenant
 
