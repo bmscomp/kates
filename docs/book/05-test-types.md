@@ -57,8 +57,8 @@ graph LR
 |-----------|---------|-------------|
 | `records` | 1,000,000 | Total messages to produce |
 | `recordSizeBytes` | 1024 | Message payload size |
-| `parallelProducers` | 1 | Number of concurrent producers |
-| `numConsumers` | 1 | Number of concurrent consumers |
+| `parallelProducers` | 1 | Ignored: LOAD runs one producer |
+| `numConsumers` | 1 | Ignored: LOAD runs one consumer |
 | `acks` | `all` | Producer acknowledgment mode |
 | `topic` | `load-test` | Target topic name (unless overridden) |
 | `partitions` | 3 | Topic partition count |
@@ -74,8 +74,6 @@ kates test create --type LOAD --records 100000 --wait
 kates test create --type LOAD \
   --records 500000 \
   --record-size 2048 \
-  --producers 4 \
-  --consumers 4 \
   --topic perf-load-test \
   --acks all \
   --wait
@@ -90,8 +88,6 @@ scenarios:
     spec:
       records: 500000
       recordSizeBytes: 2048
-      parallelProducers: 4
-      numConsumers: 4
       topic: perf-load-test
       acks: all
     validate:
@@ -220,13 +216,13 @@ graph LR
 
 ### Methodology
 
-An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended period** — hours or days — to detect slow resource leaks and gradual degradation.
+An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended period** — up to 30 minutes on a default install, hours once you raise the backend's run limit — to detect slow resource leaks and gradual degradation.
 
 ```mermaid
 graph LR
     subgraph Endurance["Load Profile"]
         direction LR
-        E1["Sustained rate-limited load<br/>5,000 msg/s default<br/>1h default — extend to 4-24h for leak hunting"]
+        E1["Sustained rate-limited load<br/>5,000 msg/s default<br/>30 min run limit by default — raise it for leak hunting"]
     end
 ```
 
@@ -244,10 +240,16 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `durationSeconds` | 3600 (1h) | Override with longer values to expose slow leaks |
-| `parallelProducers` | 1 | Moderate, sustainable load |
-| `targetThroughput` | 5,000 msg/s | Rate limit that keeps the load sustainable |
+| `durationSeconds` | 3600 (1h) | Upper bound on the run; a longer soak also needs more `records` and a raised backend run limit (see the callout below) |
+| `parallelProducers` | 1 | Ignored: ENDURANCE runs one producer and one consumer |
+| `targetThroughput` | 5,000 msg/s | Rate limit that keeps the load sustainable. The 5,000 is the ENDURANCE default, which this key cannot change (see the callout under Scenario Files) |
 | `records` | 10,000,000 | Enough for the full duration |
+
+::: {.callout-important}
+**No run lasts longer than 30 minutes by default**
+
+The backend fails any run that is still `RUNNING` 30 minutes after it was created: it stops the run's producer and consumer and marks the run `FAILED`. The limit is the backend setting `kates.engine.max-duration-ms`, 1,800,000 ms by default, and the `kates` chart has no value for it. The default ENDURANCE run sends 10,000,000 records at 5,000 records/s, which takes about 33 minutes, so on a default install it fails unless `records` is 8,500,000 or fewer or `durationSeconds` is 1,700 or less. To allow longer runs, save the release's values with `helm get values kates -n kates -o yaml`, add the environment variable `KATES_ENGINE_MAX_DURATION_MS`, in milliseconds, to their `extraEnv`, and `helm upgrade` the release with that file. `kates deploy` upgrades the release from its own values files, which drops the entry, so repeat the upgrade after it.
+:::
 
 ---
 
@@ -290,7 +292,6 @@ scenarios:
     spec:
       records: 10000
       recordSizeBytes: 102400
-      parallelProducers: 2
       acks: all
     validate:
       maxP99LatencyMs: 500
@@ -366,10 +367,10 @@ sequenceDiagram
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `parallelProducers` | 1 | Single producer for clean measurement |
-| `numConsumers` | 1 | Single consumer to capture delivery |
+| `parallelProducers` | 1 | Ignored: ROUND_TRIP runs one producer |
+| `numConsumers` | 1 | Ignored: ROUND_TRIP runs one consumer |
 | `records` | 500,000 | Records to measure |
-| `targetThroughput` | 10,000 msg/s | Rate-limited to keep latency measurements clean |
+| `targetThroughput` | 10,000 msg/s | Rate-limited to keep latency measurements clean. The 10,000 is the ROUND_TRIP default, which this key cannot change (see the callout under Scenario Files) |
 
 **Scenario file equivalent:**
 
@@ -379,8 +380,6 @@ scenarios:
     type: ROUND_TRIP
     spec:
       records: 10000
-      parallelProducers: 1
-      numConsumers: 1
     validate:
       maxP99LatencyMs: 25
       maxAvgLatencyMs: 10
@@ -439,12 +438,16 @@ graph TB
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `records` | 1,000,000 | Messages to verify |
-| `acks` | `all` | Forced to `all` for integrity guarantees |
-| `enableIdempotence` | `false` | Kafka producer idempotency — enable it for duplicate detection |
-| `enableTransactions` | `false` | Optional exactly-once |
-| `enableCrc` | `true` | Per-record CRC payload verification |
-| `numConsumers` | 1 | Consumer for verification |
-| `consumerGroup` | `integrity-cg` | Consumer group name (unless overridden) |
+| `acks` | `all` | Default for integrity guarantees; a request can override it, and `1` or `0` also turn producer idempotence off |
+| `enableIdempotence` | `false` | Accepted but dropped (see the callout below); the Kafka producer is idempotent by default with `acks=all` |
+| `enableTransactions` | `false` | Accepted but dropped, so no run is transactional |
+| `enableCrc` | `true` | Per-record CRC payload verification, always on |
+| `numConsumers` | 1 | Ignored: INTEGRITY runs one producer and one consumer |
+| `consumerGroup` | `integrity-cg` | Base of the consumer group name: the verifying consumer joins `integrity-cg-integrity`, and a request cannot override it |
+
+::: {.callout-important}
+`enableIdempotence`, `enableTransactions` and `enableCrc` do not reach the producer: the backend drops them when it merges a request with the INTEGRITY defaults. Every INTEGRITY run is CRC-checked, never transactional, and idempotent whenever `acks` is `all`, whatever these fields say. The merge drops `consumerGroup` too, so overriding it has no effect. [Data Integrity Verification](08-data-integrity.md) covers what that means for each integrity mode.
+:::
 
 **Scenario file equivalent:**
 
@@ -454,10 +457,7 @@ scenarios:
     type: INTEGRITY
     spec:
       records: 100000
-      acks: all
-      enableIdempotence: true
-      enableCrc: true
-      numConsumers: 1
+      acks: all              # also makes the producer idempotent
     validate:
       maxDataLossPercent: 0
       maxOutOfOrder: 0
@@ -473,12 +473,14 @@ The real power of INTEGRITY tests emerges when combined with chaos engineering. 
 testRequest:
   type: INTEGRITY
   spec:
-    numRecords: 100000
-    enableIdempotence: true
+    numRecords: 180000     # at 500 records/s: 360 s of producing
+    throughput: 500
+    durationMs: 600000
 
 chaosSpec:
-  experimentName: kafka-broker-pod-kill
+  experimentName: broker-pod-kill
   targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
   disruptionType: POD_KILL
   chaosDurationSec: 30
 
@@ -486,11 +488,11 @@ steadyStateSec: 30
 ```
 
 ```bash
-# Run it — produces messages while killing a broker
+# Run it — produces for 360 s and kills one broker from 30 s to 60 s
 kates resilience run -f resilience-integrity.yaml
 ```
 
-This produces messages, kills a broker mid-test, waits for recovery, and then verifies that **every single message** was persisted correctly. It is the ultimate validation of Kafka's durability guarantees. For a standalone transactional integrity scenario, export the built-in template instead: `kates test scaffold export integrity-tx`.
+This produces sequenced records at 500 per second, deletes one broker's pod 30 s in and again every 10 s until 60 s, keeps producing through the broker's restart and return to the ISR, then consumes everything back and verifies that **every acknowledged record** was persisted. The rate limit is what makes the result mean something: an unthrottled run can finish before the fault is triggered, and its verdict then says nothing about the failure. A resilience file's `spec` uses the API's field names, so the rate is `throughput`, not the scenario file's `targetThroughput`. [Data Integrity Verification](08-data-integrity.md) walks through the sizing and how to read the verdict, which the INTEGRITY run reports rather than `kates resilience run`. For a standalone integrity scenario, export the built-in template instead: `kates test scaffold export integrity-tx`.
 
 ## Scenario Files
 
@@ -516,14 +518,18 @@ CLI flags and scenario-file spec keys use different names for the same setting. 
 | CLI flag (`kates test create`) | Scenario YAML key (`spec:`) | Meaning |
 |---|---|---|
 | `--records` | `records` | Total records |
-| `--producers` | `parallelProducers` | Concurrent producers |
-| `--consumers` | `numConsumers` | Concurrent consumers |
+| `--producers` | `parallelProducers` | Producers, for STRESS and CAPACITY only; other types run one |
+| `--consumers` | `numConsumers` | Read by no test type; each type runs at most one consumer |
 | `--record-size` | `recordSizeBytes` | Record size in bytes |
 | `--duration` | `durationSeconds` | Test duration in seconds |
 | `--acks` | `acks` | Producer acknowledgment mode |
 | `--topic` | `topic` | Topic name |
-| `--throughput` | `targetThroughput` | Rate limit in msg/s (-1 = unlimited) |
-| — | `enableIdempotence`, `enableTransactions`, `enableCrc` | Integrity options (scenario files only) |
+| `--throughput` | `targetThroughput` | Does not limit the rate: the backend drops it (see the callout below) |
+| — | `enableIdempotence`, `enableTransactions`, `enableCrc` | Integrity options (scenario files only), which the backend drops (see the callout below) |
+
+::: {.callout-important}
+`--throughput` and `targetThroughput` do not limit the rate: both send the API field `targetThroughput`, which the backend drops when it merges the request with the type defaults. The producer's rate comes from the API field `throughput`, which neither sets; a `kates resilience run` file can set it, because its `spec` goes to the API as written. The integrity options are dropped by the same merge — see the callout under INTEGRITY Test.
+:::
 
 ::: {.callout-tip}
 **Try it**
@@ -534,7 +540,7 @@ Run a correctness test end to end from a built-in template:
 # List every test type the API supports
 kates test types
 
-# Export the transactional INTEGRITY template and inspect it
+# Export the integrity-tx INTEGRITY template and inspect it
 kates test scaffold export integrity-tx
 cat integrity-tx.yaml
 
@@ -542,7 +548,7 @@ cat integrity-tx.yaml
 kates test apply -f integrity-tx.yaml --wait
 ```
 
-The apply blocks until the verification pass completes — on a healthy cluster, expect a PASS with zero data loss, zero duplicates, and zero CRC failures.
+The apply blocks until the verification pass completes — on a healthy cluster, expect `✓ SLA Pass`. The SLA gates do not check duplicates, so confirm `Duplicates 0` and `Verdict ● PASS` with `kates test get <id>`.
 :::
 
 ## Summary

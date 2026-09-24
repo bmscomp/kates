@@ -66,7 +66,6 @@ scenarios:
     type: LOAD
     spec:
       records: 200000
-      parallelProducers: 4
       acks: all
     validate:
       maxP99LatencyMs: 50
@@ -76,8 +75,7 @@ scenarios:
     type: INTEGRITY
     spec:
       records: 100000
-      enableIdempotence: true
-      enableCrc: true
+      acks: all
     validate:
       maxDataLossPercent: 0
       maxCrcFailures: 0
@@ -86,10 +84,11 @@ scenarios:
     type: ROUND_TRIP
     spec:
       records: 10000
-      numConsumers: 1
     validate:
       maxP99LatencyMs: 30
 ```
+
+The integrity scenario relies on `acks: all`, which also makes the producer idempotent. A scenario file cannot turn idempotence, transactions or CRC checks on or off: the backend drops `enableIdempotence`, `enableTransactions` and `enableCrc`, so every INTEGRITY run is CRC-checked and never transactional whatever they say (see [Scenario Files & SLA Gates](13-scenario-files.md)).
 
 ---
 
@@ -107,7 +106,6 @@ cat > nightly-load.json << 'EOF'
   "type": "LOAD",
   "spec": {
     "numRecords": 100000,
-    "numProducers": 4,
     "recordSize": 1024,
     "acks": "all"
   }
@@ -174,7 +172,7 @@ graph TD
 **Step 1 — Performance baseline:**
 
 ```bash
-kates test create --type LOAD --records 200000 --producers 4 --acks all --wait
+kates test create --type LOAD --records 200000 --acks all --wait
 ```
 
 **Step 2 — Data integrity:**
@@ -199,12 +197,12 @@ cat > resilience.json << 'EOF'
 {
   "testRequest": {
     "type": "LOAD",
-    "spec": { "numRecords": 100000, "numProducers": 4 }
+    "spec": { "numRecords": 180000, "throughput": 500 }
   },
   "chaosSpec": {
     "experimentName": "kafka-broker-pod-kill",
     "targetNamespace": "kafka",
-    "targetLabel": "strimzi.io/component-type=kafka",
+    "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
     "chaosDurationSec": 30,
     "disruptionType": "POD_KILL"
   },
@@ -214,27 +212,47 @@ EOF
 kates resilience run -f resilience.json
 ```
 
-Expected output:
+The rate limit keeps the load running across the fault: 180,000 records at 500 records/s take 360 s, while the fault is triggered after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s). An unthrottled run can finish before the fault is triggered, and then both summaries describe a run the fault never touched. The `spec` goes to the API as written, so it takes the API's field names: `throughput` sets the rate, and LOAD runs one producer and one consumer whatever `numProducers` says. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and a random pick could then kill a controller instead of a broker. [Chaos Engineering in Practice](07-chaos-practice.md) covers the fields.
+
+Expected output, with illustrative numbers:
 
 ```text
+◉ Running resilience test...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Resilience Test Results
-  Status: COMPLETED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Status                   ● COMPLETED
 
-  Chaos Outcome
-  Experiment: kafka-broker-pod-kill
-  Verdict:    Pass
-  Duration:   30s
+ ▸ Chaos Outcome
+  Experiment               kafka-broker-pod-kill
+  Verdict                  ● PASS
+  Duration                 47.318204000s
+  Phase                    Completed
+  Fail Step                N/A
+  Probe Success            ████████████████████ 100%
 
-  Pre-Chaos Baseline
-  Throughput (rec/s): 18500.0
-  P99 Latency (ms):   11.20
-  Error Rate:         0.0000%
+ ▸ Impact Analysis (% change)
+  Metric               Change
+  ───────────────────  ────────  ─
+  throughputRecPerSec  -2.1%
+  avgLatencyMs         +184.6%   ▲
+  p99LatencyMs         +3572.3%  ▲
+  maxLatencyMs         +2410.8%  ▲
+  errorRate            +0.0%
 
-  Post-Chaos Impact
-  Throughput (rec/s): 18200.0
-  P99 Latency (ms):   12.80
-  Error Rate:         0.0000%
+ ▸ Pre-Chaos Baseline
+  Throughput (rec/s)       499.6
+  P99 Latency (ms)         11.20
+  Error Rate               0.0000%
+
+ ▸ Post-Chaos Impact
+  Throughput (rec/s)       489.1
+  P99 Latency (ms)         411.30
+  Error Rate               0.0000%
 ```
+
+`Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. The Impact Analysis rows come in a different order from run to run. The command returns as soon as its recovery probes pass, usually while the LOAD run is still producing, so the post-chaos summary covers the run up to that moment. With the rate held at 500 records/s, throughput barely moves, and the fault shows in the latency rows.
 
 ::: {.callout-tip}
 Each playbook run prints an SLA grade at the end. If you need a hard pass/fail gate for CI — exit code 1 on SLA violation — run a custom disruption plan instead: `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.
@@ -385,13 +403,11 @@ scenarios:
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 4
 
   - name: "High Batch + Linger"
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 4
       batchSize: 65536
       lingerMs: 50
 
@@ -399,14 +415,12 @@ scenarios:
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 4
       compressionType: lz4
 
   - name: "Full Optimization"
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 4
       batchSize: 65536
       lingerMs: 50
       compressionType: lz4
