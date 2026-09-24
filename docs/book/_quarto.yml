@@ -8,7 +8,7 @@ book:
   description: |
     A comprehensive guide to performance testing, chaos engineering,
     and operational resilience for Apache Kafka — from theory to practice.
-  author: "The Kates Team"
+  author: "Said BOUDJELDA and Contributors"
   date: today
   date-format: "MMMM YYYY"
   cover-image: assets/cover.svg
