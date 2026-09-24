@@ -126,7 +126,7 @@ The `spec` object controls all test parameters. Every field is optional; the bac
 The `validate` section defines pass/fail criteria that the CLI checks after each test completes. If any threshold is breached, the violation is listed in the summary table and the CLI exits with a non-zero status code — making it ideal for CI/CD gate enforcement.
 
 ::: {.callout-warning}
-SLA gates are only evaluated when you run `kates test apply` with `--wait`. Without it, scenarios are fire-and-forget: each one is submitted (status `SUBMITTED`), no gate is ever checked, and the CLI exits 0 regardless of how the tests turn out.
+SLA gates are only evaluated when you run `kates test apply` with `--wait`. Without it, scenarios are fire-and-forget: each one is submitted (status `SUBMITTED`), no gate is ever checked, and how the tests turn out never affects the exit status. A scenario that fails to submit still makes the CLI exit 1.
 :::
 
 ```mermaid
@@ -330,11 +330,11 @@ Scenario files are designed for CI/CD pipelines. Combine with `--wait` to block 
 kates test apply -f regression-suite.yaml --wait
 
 # The exit code tells you the result:
-# 0 = no SLA gate violations detected
-# 1 = one or more SLA gates violated
+# 0 = every scenario finished and no SLA gate was violated
+# 1 = a scenario failed to submit, finished FAILED, was lost track of (ERROR), or violated an SLA gate
 ```
 
-Note that only SLA violations set the exit code: a scenario that fails to submit or errors out shows as `FAILED`/`ERROR` in the summary but does not change the exit code. Give every scenario you gate on a `validate` block so a regression actually fails the pipeline.
+A failed run fails the pipeline whether or not its scenario has gates. A scenario that fails to submit or finishes `FAILED` shows as `FAILED` in the summary, one the CLI loses track of while waiting shows as `ERROR`, and any of them makes the command exit 1, just as a violated gate does. A scenario that finishes `DONE` passes unless one of its gates is violated, so a regression fails the pipeline only in a scenario that carries a `validate` block; without one, a run that completes but regresses exits 0.
 
 For JUnit-compatible output, export each test report individually after the suite completes — see [Observability & Monitoring](09-observability.md) for export formats.
 
@@ -509,8 +509,8 @@ No real cluster delivers a 1 ms P99, so the summary table marks the scenario `DO
 ## Summary
 
 - A scenario file is a `scenarios:` list in YAML or JSON; `type` is the only field a scenario must carry, and the backend fills in per-type defaults for everything else
-- SLA gates in the `validate` block are evaluated only with `--wait` — without it, `kates test apply` is fire-and-forget and exits 0 no matter what
-- Only SLA violations set exit code 1; a scenario that fails at submission shows `FAILED` in the summary but does not change the exit code, so give every gated scenario a `validate` block
+- SLA gates in the `validate` block are evaluated only with `--wait` — without it, `kates test apply` is fire-and-forget, and how the runs turn out never affects its exit status
+- `kates test apply` exits 1 when any scenario fails to submit, with or without `--wait`; with `--wait` it also exits 1 when a scenario finishes `FAILED`, is lost track of (`ERROR`), or violates a gate, and a run that completes without a `validate` block passes whatever its numbers
 - The CLI never validates a file against a schema: malformed YAML aborts the run with the raw parse error, while an invalid `type` travels to the backend and is rejected there
 - Start from a `kates test scaffold export` template instead of a blank file — edit a known-good scenario, then run it with `kates test apply -f`
 
