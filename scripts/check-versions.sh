@@ -657,6 +657,35 @@ else
   echo "OK: every Strimzi chart runs kates-tester:${kates_app_version}."
 fi
 
+# The Kafka CLI inside the tester is the Kafka the charts deploy. Left on 3.7
+# while the brokers moved to 4.x, the image kept shipping the 3.7 line's CVEs
+# (kafka-clients, ZooKeeper, Jetty 9.4) long after every other image had moved
+# on. tester/kafka-lib-overrides.txt swaps jars inside ONE Kafka release's
+# tarball, and the image build refuses any other; holding its `kafka` line here
+# catches a Kafka bump that forgot the list before the release build does. The
+# tarball checksum and each listed jar are only checked when the image is
+# built, which no PR workflow does yet.
+tester_kafka=$(grep -E '^ARG KAFKA_VERSION=' tester/Dockerfile | head -1 | cut -d= -f2 || true)
+tester_overrides_kafka=$(sed -n 's/^kafka //p' tester/kafka-lib-overrides.txt 2>/dev/null | head -1 || true)
+printf '  %-46s %s\n' "tester/Dockerfile KAFKA_VERSION:" "${tester_kafka:-<unset>}"
+printf '  %-46s %s\n' "tester/kafka-lib-overrides.txt kafka:" "${tester_overrides_kafka:-<unset>}"
+if [[ -z "$tester_kafka" ]]; then
+  echo "ERROR: could not read ARG KAFKA_VERSION from tester/Dockerfile" >&2
+  fail=1
+elif [[ "$tester_kafka" != "$env_kafka_version" ]]; then
+  echo "DRIFT: tester/Dockerfile installs the Kafka ${tester_kafka} CLI, the Kafka pin is ${env_kafka_version}." >&2
+  echo "  Move ARG KAFKA_VERSION (and KAFKA_SHA512, from the .sha512 file next to the tarball)" >&2
+  echo "  to ${env_kafka_version}, then review tester/kafka-lib-overrides.txt against the new tarball." >&2
+  fail=1
+elif [[ "$tester_overrides_kafka" != "$tester_kafka" ]]; then
+  echo "DRIFT: tester/kafka-lib-overrides.txt is written for Kafka ${tester_overrides_kafka:-<unset>}," >&2
+  echo "  tester/Dockerfile installs ${tester_kafka}; the image build refuses the mismatch. Check each" >&2
+  echo "  line against the ${tester_kafka} tarball's libs/, drop what it already fixes, move the kafka line." >&2
+  fail=1
+else
+  echo "OK: kates-tester ships the Kafka ${tester_kafka} CLI, and its jar overrides are written for it."
+fi
+
 check_workflows || fail=1
 
 exit "$fail"

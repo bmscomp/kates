@@ -122,7 +122,7 @@ spec:
           # round trip that timed out on the consume side.
           echo "Producing test record..."
           if ! echo "${MSG}" | kafka-console-producer.sh \
-            --broker-list ${BOOTSTRAP} \
+            --bootstrap-server ${BOOTSTRAP} \
             --topic ${TOPIC} \
             --producer.config /tmp/client.properties > /tmp/produce.log 2>&1; then
             echo "✗ Producer exited non-zero:"; sed 's/^/    /' /tmp/produce.log | tail -10; exit 1

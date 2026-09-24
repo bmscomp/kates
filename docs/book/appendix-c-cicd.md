@@ -347,7 +347,7 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 | Property | Value |
 |----------|-------|
 | **Images** | `ghcr.io/bmscomp/kates-tester:<version>`, `docker.io/bmscomp/kates-tester:<version>` |
-| **Base** | `debian:bookworm-slim` |
+| **Base** | `debian:trixie-slim` |
 | **Contents** | `kcat`, the Apache Kafka CLI scripts, `kubectl`, `curl`, `jq`, DNS and netcat utilities |
 | **Platforms** | `linux/amd64`, `linux/arm64` (cross-built with QEMU) |
 

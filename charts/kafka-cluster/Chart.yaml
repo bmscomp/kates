@@ -2,10 +2,10 @@ apiVersion: v2
 name: kafka-cluster
 description: A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability
 type: application
-# Patch: the Helm-test images move to kates-tester 1.23.0, the tag the
-# v1.23.0 release publishes; every Strimzi chart pins the same one.
-# Templates and defaults are otherwise unchanged.
-version: 1.0.2
+# Patch: Helm tests 02 and 11 run on the Kafka 4.x CLI that kates-tester now
+# ships — the console producer takes --bootstrap-server, and the tiered-storage
+# read-back counts records instead of stdout bytes. Values are unchanged.
+version: 1.0.3
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -39,6 +39,10 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Helm test 02 (produce/consume) passed --broker-list to kafka-console-producer.sh, which Kafka 4.0 removed, so on a 4.x CLI — kates-tester from the next release, or the Strimzi image the tests fall back to when testImages.kafka is empty — the producer exited 1 and the test always failed. It passes --bootstrap-server, which the 3.x CLI accepts too"
+    - kind: fixed
+      description: "Helm test 11 (tiered storage) proved it had read offset 0 back from object storage by counting stdout bytes. The Kafka 4.x console consumer prints an option-deprecation notice on stdout, so the count was never 0 and the check could not fail. It now reads the consumer's own 'Processed a total of N messages' line from stderr, on the 3.x and 4.x CLI alike"
     - kind: changed
       description: "testImages.kafka and testImages.kubectl move to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: fixed
