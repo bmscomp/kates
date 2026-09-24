@@ -14,164 +14,176 @@ First, verify integrity under normal conditions:
 ```bash
 kates test create --type INTEGRITY \
   --records 100000 \
-  --consumers 1 \
   --acks all \
   --wait
 ```
 
-Expected result:
-
-```
-  Data Integrity
-  ──────────────
-  Sent       100,000
-  Acked      100,000
-  Received   100,000
-  Lost            0
-  Duplicates      0
-  Mode       idempotent
-  Verdict    PASS ✅
-```
-
-If this fails, stop here — you have a configuration problem that must be fixed before chaos testing.
-
-## Part 2: Integrity Under Broker Kill
-
-Now the real test — produce 100K messages while killing a broker in the middle:
-
-### Step 1: Write the Chaos Integrity Config
-
-No scenario template carries chaos — a scaffold describes a test, and pairing
-one with a fault is what `kates resilience run` is for. Its config puts the
-`testRequest` and the `chaosSpec` side by side:
-
-```bash
-cat > integrity-chaos.json <<'EOF'
-{
-  "testRequest": {
-    "testType": "INTEGRITY",
-    "spec": {
-      "records": 100000,
-      "acks": "all",
-      "consumers": 1
-    }
-  },
-  "chaosSpec": {
-    "experimentName": "kafka-pod-kill",
-    "disruptionType": "POD_KILL",
-    "targetNamespace": "kafka"
-  },
-  "steadyStateSec": 30
-}
-EOF
-```
-
-### Step 2: Review It
-
-```bash
-cat integrity-chaos.json
-```
-
-The run has a shape the results are read against:
-
-```mermaid
-graph LR
-    P1["Phase 1<br/>Produce 50K messages<br/>Steady state"] --> P2["Phase 2<br/>Kill broker<br/>Continue producing"] --> P3["Phase 3<br/>Wait for recovery<br/>Produce remaining"] --> P4["Phase 4<br/>Consume all<br/>Verify integrity"]
-```
-
-### Step 3: Run It
-
-```bash
-kates resilience run -f integrity-chaos.json
-```
-
-Add `--dry-run` first to have the config parsed and echoed without executing.
-
-### Step 4: Analyze the Results
+`--wait` follows the run until it finishes. The verdict is on the run itself, under the ID that `create` printed:
 
 ```bash
 kates test get <id>
 ```
 
-Expected output:
+The report ends with a Data Integrity section and an Integrity Timeline:
 
-```
-  Data Integrity
-  ──────────────
-  Sent       100,000
-  Acked      100,000
-  Received   100,000
-  Lost            0
-  Duplicates      0
-  Mode       idempotent
-  Verdict    PASS ✅
+```text
+ ▸ Data Integrity
+  Sent                     100.0K
+  Acked                    100.0K
+  Consumed                 100.0K
+  Lost                     0
+  Duplicates               0
+  Data Loss                0.0000%
+  RPO                      not measured
+  CRC Failures             0
+  Out of Order             0
+  Verdict                  ● PASS
 
-  Timeline Events
-  ┌─────────────────┬────────────────┬──────────────────────────────┐
-  │ Timestamp       │ Type           │ Detail                       │
-  ├─────────────────┼────────────────┼──────────────────────────────┤
-  │ 1708012345000   │ PRODUCE_START  │ Started producing 100K       │
-  │ 1708012375000   │ FAULT_INJECTED │ Killed broker-0              │
-  │ 1708012376000   │ ISR_SHRINK     │ P0 ISR: [0,1,2] → [1,2]     │
-  │ 1708012378000   │ LEADER_CHANGE  │ P0 leader: 0 → 1            │
-  │ 1708012380000   │ PRODUCE_ERROR  │ 3 send timeouts (retrying)   │
-  │ 1708012395000   │ BROKER_RECOVER │ Broker 0 rejoined            │
-  │ 1708012410000   │ ISR_EXPAND     │ P0 ISR: [1,2] → [0,1,2]     │
-  │ 1708012420000   │ PRODUCE_END    │ All 100K produced            │
-  │ 1708012425000   │ CONSUME_END    │ All 100K consumed            │
-  │ 1708012425001   │ VERDICT        │ PASS — zero data loss        │
-  └─────────────────┴────────────────┴──────────────────────────────┘
+ ▸ Integrity Timeline
+  Timestamp      Type     Detail
+  ─────────────  ───────  ────────────────────────────────
+  1790240112345  SUMMARY  verdict=PASS lost=0 duplicates=0
 ```
+
+`RPO` reads `not measured` because no fault was marked on this run. There is no idempotence or transactions switch to set: with `acks=all` the Kafka producer is idempotent by default, and the backend drops a request's `enableIdempotence`, `enableTransactions` and `enableCrc` fields, so every INTEGRITY run is CRC-checked and never transactional.
+
+If this fails, stop here — you have a configuration problem that must be fixed before chaos testing.
+
+## Part 2: Integrity Under Broker Kill
+
+Now the real test: produce sequenced records while a broker is killed, and keep producing until the cluster has recovered.
+
+### Step 1: Write the Chaos Integrity Config
+
+No scenario template carries chaos — a scaffold describes a test, and pairing
+one with a fault is what `kates resilience run` is for. Its config puts the
+`testRequest` and the `chaosSpec` side by side. The `testRequest` goes to the
+API as written, so it takes the API's field names — `type`, `numRecords`,
+`throughput`, `durationMs` — not a scenario file's `records`:
+
+```bash
+cat > integrity-chaos.yaml <<'EOF'
+testRequest:
+  type: INTEGRITY
+  spec:
+    numRecords: 180000     # 180,000 records at 500 records/s: 360 s of producing
+    throughput: 500        # records per second
+    durationMs: 600000     # hard stop for the produce phase: 600 s
+    acks: all
+    replicationFactor: 3
+    minInsyncReplicas: 2
+
+chaosSpec:
+  experimentName: broker-pod-kill
+  disruptionType: POD_KILL
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
+  chaosDurationSec: 30
+
+steadyStateSec: 30
+EOF
+```
+
+### Step 2: Check It
+
+```bash
+kates resilience run -f integrity-chaos.yaml --dry-run
+```
+
+`--dry-run` parses the file and prints the request it would send, without sending it. A config that names the test type anything but `type` stops here with `testRequest.type is required`.
+
+The run has a shape the results are read against, counted from its start:
+
+```mermaid
+graph LR
+    P1["0–30 s<br/>Produce at 500 records/s<br/>Steady state"] --> P2["30–60 s<br/>Kill one broker<br/>Keep producing"] --> P3["60–360 s<br/>Broker rejoins the ISR<br/>Keep producing"] --> P4["After 360 s<br/>Consume all<br/>Verify integrity"]
+```
+
+The rate limit is what makes the result mean something: an unthrottled run can finish before the fault is triggered, and its verdict then says nothing about the failure. INTEGRITY runs one producer, so `throughput` is the whole rate. The selector adds `strimzi.io/broker-role=true` because the default, `strimzi.io/component-type=kafka`, also matches the KRaft controllers, and a random pick could then kill a controller instead of a broker. [Data Integrity Verification](../book/08-data-integrity.md) walks through the sizing.
+
+### Step 3: Run It
+
+```bash
+kates resilience run -f integrity-chaos.yaml
+```
+
+The command prints the chaos outcome and a before/after impact analysis, not the integrity result, and it can return while the INTEGRITY run is still producing. Its `Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. Anything else — `CHAOS_FAILED`, or a `Skipped` verdict when no chaos provider is available — means the fault may not have landed, and the integrity verdict then proves nothing about the failure.
+
+### Step 4: Analyze the Results
+
+Read the verdict from the INTEGRITY run itself:
+
+```bash
+kates test list --type INTEGRITY   # newest first: the top row is this run
+kates test watch <id>              # wait for produce, consume and verification
+kates test get <id>
+```
+
+Expected output, at the end of the report:
+
+```text
+ ▸ Data Integrity
+  Sent                     180.0K
+  Acked                    180.0K
+  Consumed                 180.0K
+  Lost                     0
+  Duplicates               0
+  Data Loss                0.0000%
+  RPO                      0 ms
+  CRC Failures             0
+  Out of Order             0
+  Verdict                  ● PASS
+
+ ▸ Integrity Timeline
+  Timestamp      Type     Detail
+  ─────────────  ───────  ────────────────────────────────
+  1790244361011  SUMMARY  verdict=PASS lost=0 duplicates=0
+```
+
+- `Lost 0` — every acknowledged record was consumed back.
+- `Duplicates 0` — with `acks=all` the producer is idempotent, so its retries through the leader election write nothing twice.
+- `RPO 0 ms` — a chaos start was marked on the run, and nothing written before it was lost. The mark is set just before the fault is triggered, so only `Status COMPLETED` from Step 3 shows that the fault landed. `RPO not measured` means no chaos start reached the run: either the run finished before the fault, and needs resizing, or the chaos provider is `noop` and injected nothing.
+- The timeline records only violations — CRC failures, records out of order, lost ranges — and a final summary, so a clean run shows just the `SUMMARY` row.
 
 ## Part 3: Testing Different Failure Modes
 
+Each variant keeps the `testRequest` from `integrity-chaos.yaml`, so the run still outlasts the fault, and replaces its `chaosSpec`.
+
 ### Network Partition
 
-Does the cluster lose messages when a broker is network-isolated?
+Does the cluster lose messages when a broker is network-isolated? Copy `integrity-chaos.yaml` to `integrity-partition.yaml` and replace its `chaosSpec`:
 
-Create `integrity-partition.json`:
-
-```json
-{
-  "testRequest": {
-    "testType": "INTEGRITY",
-    "spec": {
-      "records": 100000,
-      "acks": "all",
-      "consumers": 1
-    }
-  },
-  "chaosSpec": {
-    "experimentName": "network-partition",
-    "disruptionType": "NETWORK_PARTITION",
-    "targetNamespace": "kafka"
-  },
-  "steadyStateSec": 30
-}
+```yaml
+chaosSpec:
+  experimentName: network-partition
+  disruptionType: NETWORK_PARTITION
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
+  chaosDurationSec: 30
 ```
 
 ```bash
-kates resilience run -f integrity-partition.json
+kates resilience run -f integrity-partition.yaml
 ```
 
 ### CPU Stress
 
-Does CPU saturation cause replication failures?
+Does CPU saturation cause replication failures? Copy `integrity-chaos.yaml` to `integrity-cpu.yaml` and replace its `chaosSpec`:
 
-```json
-{
-  "testRequest": {
-    "testType": "INTEGRITY",
-    "spec": { "records": 50000, "acks": "all", "consumers": 1 }
-  },
-  "chaosSpec": {
-    "experimentName": "cpu-stress",
-    "disruptionType": "CPU_STRESS",
-    "targetNamespace": "kafka"
-  },
-  "steadyStateSec": 20
-}
+```yaml
+chaosSpec:
+  experimentName: cpu-stress
+  disruptionType: CPU_STRESS
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
+  chaosDurationSec: 30
 ```
+
+```bash
+kates resilience run -f integrity-cpu.yaml
+```
+
+Read each verdict with `kates test get <id>`, as in Part 2.
 
 ### Multiple Failures
 
@@ -191,16 +203,32 @@ If an integrity test fails, here's how to diagnose:
 
 ### Scenario: DATA_LOSS Detected
 
+```text
+ ▸ Data Integrity
+  Sent                     180.0K
+  Acked                    180.0K
+  Consumed                 180.0K
+  Lost                     2
+  Duplicates               0
+  Data Loss                0.0011%
+  RPO                      0 ms
+  CRC Failures             0
+  Out of Order             0
+  Verdict                  ○ DATA_LOSS
+
+ ▸ Lost Ranges
+  From Seq  To Seq  Count
+  ────────  ──────  ─────
+  21407     21408   2
+
+ ▸ Integrity Timeline
+  Timestamp      Type        Detail
+  ─────────────  ──────────  ─────────────────────────────────────
+  1790244361010  LOST_RANGE  from=21407 to=21408 count=2
+  1790244361011  SUMMARY     verdict=DATA_LOSS lost=2 duplicates=0
 ```
-  Data Integrity
-  ──────────────
-  Sent       100,000
-  Acked       99,998
-  Received    99,996
-  Lost            2
-  Lost Ranges [45231-45231], [78442-78442]
-  Verdict    DATA_LOSS ❌
-```
+
+The counts are abbreviated in the display: `Consumed` reads `180.0K` for 179,998, and `Lost`, `Data Loss` and the `Lost Ranges` table carry the exact numbers. `RPO` stays at `0 ms` because it counts only acknowledged records sent before the chaos start, and these two were sent after it, while the broker was going down. They still count in `Lost` and `Data Loss`.
 
 **Diagnosis checklist:**
 
@@ -220,13 +248,14 @@ graph TD
 Schedule nightly integrity tests to catch regressions:
 
 A schedule is a cron expression plus a test request read from a JSON file —
-`--name`, `--cron` and `--request` are all required:
+`--name`, `--cron` and `--request` are all required. The request goes to the
+API as written, so it takes the API's field names, `type` and `numRecords`:
 
 ```bash
 cat > nightly-integrity.json <<'EOF'
 {
-  "testType": "INTEGRITY",
-  "spec": { "records": 100000, "acks": "all", "consumers": 1 }
+  "type": "INTEGRITY",
+  "spec": { "numRecords": 100000, "acks": "all" }
 }
 EOF
 

@@ -4,7 +4,7 @@ Data integrity is the highest-stakes property of any messaging system. This chap
 
 It's written for engineers who run Kafka where losing a message costs more than delivering it slowly. After this chapter, you can:
 
-- Run an INTEGRITY test and choose between standard, idempotent, and transactional modes
+- Run an INTEGRITY test and know which producer guarantees it exercises: `acks=all` durability and idempotence, but not transactions
 - Read a Data Integrity report and distinguish real data loss from harmless unacked sends
 - Prove durability under failure by pairing an integrity run with live fault injection
 - Trace a DATA_LOSS verdict to its cause using the Lost Ranges table and the Integrity Timeline
@@ -30,7 +30,7 @@ graph TB
         P3[Record unacked messages]
     end
     
-    subgraph Inject["Phase 2: Inject (Optional)"]
+    subgraph Inject["Phase 2: Inject while producing (Optional)"]
         I1[Kill broker]
         I2[Network partition]
         I3[CPU stress]
@@ -116,6 +116,12 @@ graph LR
 
 ## Integrity Modes
 
+::: {.callout-important}
+**`enableIdempotence`, `enableTransactions` and `enableCrc` do not reach the producer**
+
+The backend merges every request with the INTEGRITY defaults before it builds the run, and the merge drops these three fields. Whatever a scenario file, a resilience file or an API call sets, every INTEGRITY run is CRC-checked, never transactional, and idempotent whenever `acks` is `all`, because the Kafka producer enables idempotence by default then. The `integrity-tx` template runs without transactions. The standard and idempotent modes below are therefore the same run, and the transactional mode is not tested.
+:::
+
 ### Standard Integrity
 
 Uses `acks=all` and verifies that all ACKed messages are consumable:
@@ -128,7 +134,7 @@ Expected result: **zero data loss**. If messages are ACKed with `acks=all`, Kafk
 
 ### Idempotent Integrity
 
-Enables Kafka's producer idempotency to verify exactly-once delivery to the log. Idempotence is off by default; enable it with the `enableIdempotence` field in a scenario file:
+Kafka's producer idempotency lets the broker discard a retried send it has already written, which gives exactly-once delivery to the log. The Kafka producer enables it by default whenever `acks` is `all`, the INTEGRITY default, and leaves it off when `acks` is `1` or `0`, so the standard run above is already idempotent. A scenario file accepts an `enableIdempotence` field, but the backend drops it (see the callout above): the file below is idempotent because of `acks: "all"`, and would not be with `acks: "1"`, whatever the field says:
 
 ```yaml
 scenarios:
@@ -148,10 +154,10 @@ With idempotency, even if the producer retries a send (due to transient network 
 
 ### Transactional Integrity
 
-Enables Kafka transactions for the strongest guarantee — exactly-once processing. The built-in `integrity-tx` template ships with transactions, idempotence, and CRC verification already enabled:
+Kafka transactions add atomic, exactly-once writes on top of idempotence. The built-in `integrity-tx` template declares transactions, idempotence, and CRC verification, but the backend drops those fields (see the callout under Integrity Modes). The template runs an INTEGRITY test with `acks=all`, idempotent by the client default and CRC-checked, without transactions, and with one producer and one consumer whatever `parallelProducers` and `numConsumers` say:
 
 ```bash
-# Export the built-in transactional integrity template, then run it
+# Export the built-in integrity-tx template, then run it
 kates test scaffold export integrity-tx
 kates test apply -f integrity-tx.yaml --wait
 ```
@@ -182,47 +188,97 @@ scenarios:
       maxP99LatencyMs: 150
 ```
 
+::: {.callout-important}
+`kates test apply` gates on `maxDataLossPercent`, `maxOutOfOrder`, `maxCrcFailures` and `maxP99LatencyMs`, but not on `maxDuplicatePercent`: its validator has no duplicate gate and ignores the key. A run whose verdict is `DUPLICATES_DETECTED` can still show `✓ SLA Pass`, so read `Duplicates` and `Verdict` in `kates test get <id>`.
+:::
+
 ## Integrity Under Chaos
 
-The real power of integrity testing emerges when combined with fault injection. There is no dedicated scaffold for this — you run an INTEGRITY test and inject a disruption (see [Chaos Engineering in Practice](07-chaos-practice.md)) while it is producing:
+The real power of integrity testing emerges when combined with fault injection — but only when the fault lands while the producer is writing, and the producer keeps writing until the cluster has recovered. A run that finishes before the fault is injected passes, and its verdict says nothing about the failure. `kates resilience run` handles the timing: it starts the INTEGRITY run, waits `steadyStateSec`, marks the moment on the run so the verifier can measure RPO against it, and triggers the fault (the chaos fields are covered in [Chaos Engineering in Practice](07-chaos-practice.md)). What is left to you is sizing the run so it outlasts the fault and the recovery:
 
-```bash
-# Terminal 1 — start the integrity test
-kates test apply -f integrity-tx.yaml --wait
+```yaml
+# integrity-chaos.yaml
+testRequest:
+  type: INTEGRITY
+  spec:
+    numRecords: 180000     # 180,000 records at 500 records/s: 360 s of producing
+    throughput: 500        # records per second
+    durationMs: 600000     # hard stop for the produce phase: 600 s
+    acks: all
+    replicationFactor: 3
+    minInsyncReplicas: 2
 
-# Terminal 2 — inject a broker failure while the test produces
-kates disruption run --config disruption-plan.json
+chaosSpec:
+  experimentName: broker-pod-kill
+  disruptionType: POD_KILL
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
+  chaosDurationSec: 30
+
+steadyStateSec: 30
 ```
+
+The arithmetic, counted from the start of the run:
+
+| Event | Setting | Time |
+|-------|---------|-----:|
+| Fault triggered | `steadyStateSec` | 30 s |
+| Fault over | + `chaosDurationSec` | 60 s |
+| Produce phase over | `numRecords` ÷ `throughput` = 180,000 ÷ 500 | 360 s |
+
+For a `POD_KILL`, LitmusChaos (the default chaos provider) deletes the chosen broker's pod, then deletes it again every 10 s until `chaosDurationSec` has passed, so the same broker goes down repeatedly between 30 s and 60 s. Litmus takes a few seconds to start its runner pod and to report its result, which moves the fault a little later than the table. The producer keeps writing for about five minutes after the fault is over, which gives the broker time to restart and rejoin the ISR, so records are written before, during, and after the failure.
+
+The run's recovery wait does not change this sizing. After the fault, `kates resilience run` polls its probes every 5 s and returns as soon as they pass, or after `maxRecoveryWaitSec` ÷ 5 polls (24 with the default 120). The default `POD_KILL` probes pass while the ISR is still catching up, since the ISR probe tolerates up to 50 under-replicated partitions. The command therefore usually returns soon after the fault is over, before the broker is back in the ISR and while the producer is still writing. The produce phase stops at `numRecords` or at `durationMs`, whichever comes first, and the rate limiter never makes up time lost in a stall — a stall lengthens the run instead — so keep `durationMs` well above `numRecords` ÷ `throughput`.
+
+The `spec` of a resilience file goes to the API as written, so it takes the API's field names — `numRecords`, `throughput`, `durationMs` — not a scenario file's. `throughput` is the rate the INTEGRITY producer honours. `kates test create --throughput` and a scenario file's `targetThroughput` both send `targetThroughput`, which the backend drops, so neither can slow an INTEGRITY run down. INTEGRITY runs one producer and one consumer whatever `numProducers` and `numConsumers` say, so `throughput` is the whole rate. The selector `strimzi.io/component-type=kafka` alone also matches the KRaft controllers; adding `strimzi.io/broker-role=true` makes the fault pick one broker at random.
 
 The combined flow looks like this:
 
 ```mermaid
 sequenceDiagram
-    participant Engine as Kates Engine
-    participant Producer as Producer
-    participant Kafka as Kafka Cluster
-    participant Consumer as Consumer
-    
-    Engine->>Producer: Start producing (seq 1..N)
-    Producer->>Kafka: Send messages
-    
-    Note over Engine: After 30s of steady production
-    Engine->>Kafka: KILL broker-0
-    
-    Note over Producer: Producer retries for failed partitions
-    Producer->>Kafka: Continue producing
-    
-    Note over Kafka: Leader election for affected partitions
-    Note over Kafka: ISR shrinks to 2
-    
-    Note over Engine: Wait 60s for recovery
-    Note over Kafka: Broker-0 recovers, ISR expands
-    
-    Engine->>Producer: Stop producing
-    Engine->>Consumer: Consume all messages
-    Consumer->>Consumer: Verify sequences
-    Consumer->>Engine: Verdict: PASS/FAIL
+    participant Res as kates resilience run
+    participant Producer as INTEGRITY producer
+    participant Kafka as Kafka cluster
+    participant Consumer as INTEGRITY consumer
+
+    Res->>Producer: Start the run at 500 records/s
+    Producer->>Kafka: Send sequenced records, acks=all
+    Note over Res: steadyStateSec: 30 s
+    Res->>Kafka: Mark the chaos start, then delete one broker pod
+    Note over Kafka: Same broker deleted again every 10 s until 60 s
+    Note over Producer: Sends to the lost leaders are retried
+    Note over Kafka: Leader election, ISR shrinks to 2
+    Note over Res: Returns once its probes pass, often before the ISR is whole
+    Note over Kafka: Broker restarts and rejoins the ISR
+    Producer->>Kafka: Keep producing until 180,000 records are sent
+    Consumer->>Kafka: Read the topic from the start
+    Consumer->>Consumer: Reconcile acked against consumed sequences
+    Note over Consumer: Verdict and RPO, read with kates test get
 ```
+
+Run it, checking the request first:
+
+```bash
+kates resilience run -f integrity-chaos.yaml --dry-run   # print the request, send nothing
+kates resilience run -f integrity-chaos.yaml
+```
+
+`kates resilience run` prints the chaos outcome and the before/after impact analysis but not the integrity result, and it can return while the INTEGRITY run is still producing. Its `Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. Anything else — `CHAOS_FAILED`, or a `Skipped` verdict when no chaos provider is available — means the fault may not have landed, and the integrity verdict then proves nothing about the failure. Read the verdict from the INTEGRITY run itself:
+
+```bash
+kates test list --type INTEGRITY   # newest first: the top row is this run
+kates test watch <id>              # wait for produce, consume and verification
+kates test get <id>
+```
+
+With three brokers, `replicationFactor: 3` and `minInsyncReplicas: 2`, expect `Lost 0`, `Duplicates 0`, `RPO 0 ms` and `Verdict ● PASS` in the Data Integrity section:
+
+- `Lost 0` — every acknowledged record was consumed back.
+- `Duplicates 0` — with `acks=all` the producer is idempotent, so its retries through the leader election write nothing twice.
+- `RPO 0 ms` — a chaos start was marked on the run, and nothing written before it was lost. The mark is set just before the fault is triggered, so a Litmus experiment that then fails still gives `RPO 0 ms`: only `Status COMPLETED` from `kates resilience run` shows that the fault landed. `RPO not measured` means no chaos start reached the run, for one of two reasons. If the INTEGRITY run finished before the fault, resize it. If the chaos outcome's verdict is `Skipped`, the chaos provider is `noop` and injected nothing; resizing changes nothing, so set up a chaos provider first.
+- `Producer RTO` appears only when a send failed outright. Retries the producer absorbs within its delivery timeout leave it out.
+
+The verdict is `DATA_LOSS` if an acknowledged record is missing, otherwise `CORRUPTION` on a CRC failure, `ORDERING_VIOLATION` on a record out of order within its partition, `DUPLICATES_DETECTED` on a record consumed twice, and `PASS` when none of these occurred.
 
 ### What Gets Verified
 
@@ -265,13 +321,13 @@ A clean run contains only the final `SUMMARY` event.
   Lost                     0
   Duplicates               0
   Data Loss                0.0000%
+  RPO                      not measured
   CRC Failures             0
   Out of Order             0
-  Mode                     idempotent
   Verdict                  ● PASS
 ```
 
-This is the expected result for a properly configured cluster with `acks=all` and `min.insync.replicas=2`, even during single-broker failures.
+This is the expected result for a properly configured cluster with `acks=all` and `min.insync.replicas=2`, even during single-broker failures. `RPO` reads `not measured` on a standalone run: it gets a value only when a resilience run marks a fault on the run, as in Integrity Under Chaos above.
 
 ### DATA_LOSS — Messages Missing
 
@@ -283,6 +339,7 @@ This is the expected result for a properly configured cluster with `acks=all` an
   Lost                     2
   Duplicates               0
   Data Loss                0.0020%
+  RPO                      not measured
   CRC Failures             0
   Out of Order             0
   Verdict                  ○ DATA_LOSS
@@ -315,9 +372,11 @@ Data loss indicates a serious issue. Common causes:
   Lost                     0
   Duplicates               0
   Data Loss                0.0000%
+  Producer RTO             2340 ms
+  Max RTO                  2340 ms
+  RPO                      0 ms
   CRC Failures             0
   Out of Order             0
-  Producer RTO             2340 ms
   Verdict                  ● PASS
 ```
 
@@ -360,18 +419,18 @@ This section walks through a full data integrity verification from start to fini
 ### Step 1 — Run the INTEGRITY Test
 
 ```bash
-# Export the built-in transactional integrity template, then run it
+# Export the built-in integrity-tx template, then run it
 kates test scaffold export integrity-tx
 kates test apply -f integrity-tx.yaml --wait
 ```
 
-This runs a 200,000-record INTEGRITY test with `acks=all`, idempotence, transactions, and CRC verification enabled (the template contents are shown in the Transactional Integrity section above). For a quick ad-hoc run without a scenario file:
+This runs a 200,000-record INTEGRITY test with `acks=all` and CRC verification, idempotent by the client default and not transactional, although the template asks for transactions (its contents and the reason are in the Transactional Integrity section above). For a quick ad-hoc run without a scenario file:
 
 ```bash
 kates test create --type INTEGRITY --records 100000 --acks all --wait
 ```
 
-Ad-hoc `create` runs use the backend defaults: CRC verification is on, but idempotence and transactions stay off — those are scenario-file fields (`enableIdempotence`, `enableTransactions`).
+Ad-hoc `create` runs use the backend defaults: `acks=all`, which makes the producer idempotent, and CRC verification on. Transactions stay off: `kates test create` has no flag for them, and the scenario-file field `enableTransactions` does not reach the producer either (see the callout under Integrity Modes).
 
 ### Step 2 — Observe Output During the Test
 
@@ -381,13 +440,13 @@ With `--wait`, `kates test apply` shows a spinner per scenario and a summary tab
   Applying 1 scenario(s) from integrity-tx.yaml
 
   ▸ Transactional Integrity Verification (INTEGRITY)...
-  ✓   Created: a1b2c3d4e5f6…
+  ✓   Created: a1b2c3d4
   ✓ Transactional Integrity Verification → ● DONE
 
   ▸ Summary
-  Scenario                               ID             Status  Note
-  ─────────────────────────────────────  ─────────────  ──────  ──────────
-  Transactional Integrity Verification   a1b2c3d4e5f6…  DONE    ✓ SLA Pass
+  Scenario                               ID        Status  Note
+  ─────────────────────────────────────  ────────  ──────  ──────────
+  Transactional Integrity Verification   a1b2c3d4  DONE    ✓ SLA Pass
 ```
 
 Internally the test runs its produce phase to completion, then consumes everything back from the beginning, then reconciles ACKed against consumed sequence numbers. The topic is named after the test type (`integrity-test`) unless overridden with the `topic` spec field.
@@ -408,9 +467,9 @@ The report starts with the test details, configuration, and per-phase results; f
   Lost                     0
   Duplicates               0
   Data Loss                0.0000%
+  RPO                      not measured
   CRC Failures             0
   Out of Order             0
-  Mode                     idempotent transactional
   Verdict                  ● PASS
 ```
 
@@ -428,6 +487,8 @@ The report starts with the test details, configuration, and per-phase results; f
 | **Out of Order** | Messages received with a lower sequence than a prior message in the same partition | `0` | Non-zero: possible log truncation or unclean election |
 | **Producer RTO** | Longest window between a failed send and the next successful ACK (shown only after producer stalls) | Absent | Large values: slow leader failover |
 | **Consumer RTO** | Duration of the first gap observed in the consumed sequence stream (shown only after consumer stalls) | Absent | Large values: slow recovery on the read path |
+| **Max RTO** | The larger of Producer RTO and Consumer RTO (shown only when one of them is) | Absent | Large values: slow recovery |
+| **RPO** | How long before the fault the oldest lost acknowledged record was sent | `not measured` standalone, `0 ms` under chaos | Non-zero: acknowledged writes from before the fault were lost |
 
 ### Step 5 — What a Failure Looks Like
 
@@ -441,9 +502,9 @@ If the test detects data loss, the Data Integrity section changes to:
   Lost                     3
   Duplicates               0
   Data Loss                0.0015%
+  RPO                      not measured
   CRC Failures             1
   Out of Order             0
-  Mode                     idempotent transactional
   Verdict                  ○ DATA_LOSS
 
   ▸ Lost Ranges
@@ -478,29 +539,28 @@ Reading this report:
 ::: {.callout-tip}
 **Try it**
 
-Prove zero data loss under a broker failure with two terminals (the disruption plan format is covered in [Chaos Engineering in Practice](07-chaos-practice.md)):
+Prove zero data loss under a broker failure with one resilience run, using the `integrity-chaos.yaml` from Integrity Under Chaos above — 360 s of production at 500 records/s, with a broker killed 30 s in:
 
 ```bash
-# Terminal 1 — export and run the transactional integrity template
-kates test scaffold export integrity-tx
-kates test apply -f integrity-tx.yaml --wait
+# Check the request, then run it
+kates resilience run -f integrity-chaos.yaml --dry-run
+kates resilience run -f integrity-chaos.yaml
 
-# Terminal 2 — inject a broker failure while the test produces
-kates disruption run --config disruption-plan.json
-
-# Terminal 1, after the run — read the verdict and timeline
+# Find the INTEGRITY run (newest first), wait for it, then read the verdict and timeline
+kates test list --type INTEGRITY
+kates test watch <id>
 kates test get <id>
 ```
 
-Expect `Verdict ● PASS` with `Lost 0`: the producer stalls during leader election (visible as a non-zero Producer RTO), but every ACKed message is consumed.
+Expect `Status COMPLETED` from `kates resilience run`, then `Lost 0`, `RPO 0 ms` and `Verdict ● PASS` from `kates test get`: the producer retries through the leader election, and every acknowledged record is consumed back. Any other `Status`, or `RPO not measured`, means the run did not overlap a fault that landed, and the PASS proves nothing about the failure.
 :::
 
 ## Summary
 
 - Every INTEGRITY message carries a binary header — sequence number, timestamp, run ID hash, CRC32 checksum — so the verifier detects loss, duplication, reordering, and corruption independently of Kafka's own bookkeeping.
 - Only ACKed messages carry a durability promise: unacked sends during a broker crash are excluded from the loss calculation, so a PASS with a non-zero Producer RTO is expected behavior.
-- Standard mode verifies `acks=all` durability; `enableIdempotence` adds exactly-once delivery to the log; the `integrity-tx` template layers transactions and CRC verification on top.
-- Integrity tests earn their keep under chaos: run `kates test apply` in one terminal and `kates disruption run` in another to verify guarantees during real failures.
+- Standard mode verifies `acks=all` durability, and with `acks=all` the producer is idempotent by default, which adds exactly-once delivery to the log. The `enableIdempotence`, `enableTransactions` and `enableCrc` fields do not reach the producer, so the `integrity-tx` template does not test transactions.
+- Integrity tests earn their keep under chaos: one `kates resilience run`, rate-limited with `throughput` so the produce phase outlasts the fault and the recovery, verifies the guarantees during a real failure. A run that finishes before the fault proves nothing.
 - A DATA_LOSS verdict usually traces back to `acks=1`, `min.insync.replicas=1`, or unclean leader election — the Lost Ranges table and Integrity Timeline show exactly which sequences vanished.
 
 With integrity verified, the next question is what the cluster was doing while the test ran — [Observability & Monitoring](09-observability.md) covers the metrics, dashboards, and alerts that answer it.
