@@ -2,10 +2,11 @@ apiVersion: v2
 name: connect-cluster
 description: A Helm chart for deploying Strimzi Kafka Connect clusters
 type: application
-# Patch: the Helm-test and secret-sync image moves to kates-tester 1.23.0,
-# the tag the v1.23.0 release publishes; every Strimzi chart pins the same
-# one. Templates and defaults are otherwise unchanged.
-version: 2.1.2
+# Patch: schemaRegistry reaches the Apicurio converters — the registry URL is
+# rendered as each Apicurio converter's apicurio.registry.url on the core v3
+# API, a ccompat path beside an Apicurio converter is refused, and the egress
+# rule admits the registry pods' port.
+version: 2.1.3
 # Tracks the Kafka line the workers run, as mirror-maker2's does. The plugin
 # set is in the image; its pin is the kates.io/connect-image annotation.
 appVersion: "4.3.1"
@@ -32,6 +33,12 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "schemaRegistry.enabled rendered a worker-level schema.registry.url on Apicurio's Confluent-compatible path. Connect hands a converter only the worker properties under its own key.converter. or value.converter. prefix, and Apicurio's converters read apicurio.registry.url, so no converter ever received it and an Apicurio converter failed to configure ('Missing registry base url'). With schemaRegistry.enabled, each Apicurio converter in config.keyConverter / config.valueConverter now gets <key|value>.converter.apicurio.registry.url; an extraConfig entry of the same name wins. The worker-level schema.registry.url is no longer rendered"
+    - kind: changed
+      description: "schemaRegistry.path defaults to /apis/registry/v3, Apicurio Registry 3's core API, which the Apicurio converters call; /apis/ccompat/v7 is the Confluent-compatible API they do not speak. A release that set path explicitly keeps its value; if that value is a /apis/ccompat/ path and config names an Apicurio converter, the render is refused with the fix named — set path to /apis/registry/v3 or remove it"
+    - kind: fixed
+      description: "The Schema Registry egress rule admitted only schemaRegistry.port, the Service's port (80). NetworkPolicy matches the destination pod's port after the Service translates it, so Connect could not reach Apicurio's pods on 8080 wherever policies are enforced. The rule admits the new schemaRegistry.targetPort (default 8080) as well as port"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: fixed

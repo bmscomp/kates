@@ -149,7 +149,7 @@ A deny-all policy for the workers (`networkPolicy.defaultDeny`) and one policy o
 | ingress: REST (8083) | `networkPolicy.restApi.clients`, the Cluster Operator in `strimziOperatorNamespace` (`strimzi-operator`), the other workers; `allowAll` opens it |
 | egress: DNS, API server | `networkPolicy.dns`, `networkPolicy.apiServer` |
 | egress: Kafka | the Kafka namespace's `strimzi.io/cluster` pods, on the ports the bootstrap dials; an explicit bootstrap outside the cluster may be anywhere. `networkPolicy.kafka.ports` fixes the ports, and a bootstrap port outside them is refused |
-| egress: Schema Registry, OTLP | `schemaRegistry.enabled`, `tracing.endpoint` |
+| egress: Schema Registry, OTLP | `schemaRegistry.enabled` (the registry pods' `targetPort`, 8080, and the Service `port`), `tracing.endpoint` |
 | egress: databases | `networkPolicy.egress.databases`, each with a matching ingress policy in the database namespace unless `createIngressPolicy: false` |
 | anything else | `extraIngress`, `extraEgress` |
 
@@ -189,6 +189,7 @@ The Strimzi operator's `strimzi-kafka-connect` dashboard (shipped by strimzi-ope
 | `kafka.authentication` | `tls` without TLS; SCRAM or PLAIN on kafka-cluster's mutual-TLS port; `custom` without its configuration; a type the v1 API does not have |
 | `kafkaUser` | a type a KafkaUser cannot have; `mode: custom` without `acls` |
 | `extraConfig` | `exactly.once.source.support` (use `exactlyOnce`) |
+| `schemaRegistry.path` | a `/apis/ccompat/` path while `config` names an Apicurio converter, which calls the core API |
 | `internalTopics` | two of the three topics share a name |
 | `kafka.brokerCount` | below `config.replicationFactor` or a dead letter queue's |
 | connectors | see [Connectors](#connectors); a name declared twice |
@@ -229,7 +230,7 @@ The test connectors expect the platform's demo PostgreSQL; `values-prod.yaml` tu
 | `internalTopics.*` | `<groupId>-offsets/configs/status` | |
 | `config.*` | RF 3, JSON converters with schemas | worker config |
 | `extraConfig` | producer `acks=all`, idempotence, `earliest` | further worker properties |
-| `schemaRegistry.*` | off | Apicurio's Confluent-compatible API |
+| `schemaRegistry.*` | off | Apicurio Registry's core v3 API, rendered as `<key\|value>.converter.apicurio.registry.url` for each Apicurio converter in `config` |
 | `plugins`, `imageVolumes.acknowledged`, `build` | off | see [Plugins](#plugins) |
 | `logging` | `external`, `rootLevel: INFO`, `loggers` | or `inline` |
 | `tracing.*` | OpenTelemetry, no endpoint | |

@@ -132,14 +132,28 @@ extraConfig:
   consumer.auto.offset.reset: "earliest"
   group.initial.rebalance.delay.ms: "3000"
 
-# ── Schema Registry (Apicurio, Confluent-compatible API) ────────────────────
+# ── Schema Registry (Apicurio Registry) ─────────────────────────────────────
+# Enabled, the chart points every Apicurio converter in `config` (a
+# keyConverter/valueConverter class under io.apicurio.) at the registry with
+# <key|value>.converter.apicurio.registry.url, and opens egress to the registry
+# pods. Connect hands a converter only the worker properties under its own
+# prefix, so a bare schema.registry.url reaches none. Other converters, and
+# connectors that override the converter, take their registry settings
+# through extraConfig or their own config.
 schemaRegistry:
   enabled: false
   serviceName: apicurio-apicurio-registry
   # -- Namespace of the registry (empty = the Kafka namespace)
   namespace: ""
+  # -- Port of the registry's Service
   port: 80
-  path: /apis/ccompat/v7
+  # -- API base the converters call: Apicurio Registry 3's core API (they also
+  # speak /apis/registry/v2; the Confluent-compatible ccompat path is not
+  # theirs, and the chart refuses it beside an Apicurio converter)
+  path: /apis/registry/v3
+  # -- Port the registry pods listen on. NetworkPolicy matches the pod's port,
+  # not the Service's, so the egress rule admits this one (and `port`).
+  targetPort: 8080
   # -- Registry pod labels, for the NetworkPolicy egress rule
   podSelector:
     app.kubernetes.io/name: apicurio-registry
