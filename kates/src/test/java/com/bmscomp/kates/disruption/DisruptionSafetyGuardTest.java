@@ -25,6 +25,7 @@ import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.KubernetesChaosProvider;
 import com.bmscomp.kates.chaos.StrimziTestCluster;
+import com.bmscomp.kates.chaos.VertxPerMockClient;
 import com.bmscomp.kates.domain.SlaDefinition;
 
 /**
@@ -35,7 +36,7 @@ import com.bmscomp.kates.domain.SlaDefinition;
  * from the {@code kates.io/original-replicas} snapshot the provider stamps at
  * scale-down time, then clears it.
  */
-@EnableKubernetesMockClient(crud = true)
+@EnableKubernetesMockClient(crud = true, kubernetesClientBuilderCustomizer = VertxPerMockClient.class)
 class DisruptionSafetyGuardTest {
 
     KubernetesMockServer server;
