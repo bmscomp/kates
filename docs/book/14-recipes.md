@@ -25,7 +25,11 @@ kates test apply -f upgrade-suite.yaml --wait
 # Note the test IDs from the output
 ```
 
-**Step 2 — Perform the upgrade** — change `kafkaVersion` in the environment's `kafka-cluster` values and re-run `helm upgrade` over the platform profile, or `kates deploy --kafka-version <new-version>`. The full procedure, including the `metadataVersion` point of no return, is in [Upgrade Playbook](18-upgrade-playbook.md).
+**Step 2 — Perform the upgrade** with the procedure in [Upgrade Playbook](18-upgrade-playbook.md#kafka-version-upgrade): a `helm upgrade` of the Kafka release that starts from its current values (`helm get values`), sets the new `kafkaVersion`, and pins `kafka.metadataVersion` where it is so the upgrade stays reversible. Do not rebuild the values from the repository's files, which can rename the node pools, and do not use `kates deploy --kafka-version`, which leaves a running cluster alone. Confirm the cluster runs the new version before you re-test, or Step 4 compares two runs of the old one:
+
+```bash
+kubectl get kafka krafter -n kafka -o jsonpath='{.status.kafkaVersion}{"\n"}'
+```
 
 **Step 3 — Re-run the same suite:**
 
