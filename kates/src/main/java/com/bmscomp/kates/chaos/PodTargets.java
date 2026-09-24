@@ -1,6 +1,7 @@
 package com.bmscomp.kates.chaos;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import io.fabric8.kubernetes.api.model.Pod;
@@ -20,6 +21,10 @@ import io.fabric8.kubernetes.client.KubernetesClient;
  * matching pod, as if {@code targetAll} were set: it restarts them one at a
  * time, so the safety guard counts only one of them against
  * {@code maxAffectedBrokers}.
+ *
+ * <p>{@code targetBrokerId} picks among the brokers the selector matches
+ * ({@link #isBroker}). {@code strimzi.io/component-type=kafka} matches KRaft
+ * controllers too, and a dedicated controller's node ID used to pick it.
  */
 public final class PodTargets {
 
@@ -62,32 +67,55 @@ public final class PodTargets {
                 .getItems();
         List<String> targets = select(spec, pods);
         if (targets.isEmpty()) {
-            throw new IllegalStateException("No pods found matching label selector '" + selector + "' in namespace '"
-                    + spec.targetNamespace() + "'");
+            throw new IllegalStateException((pods.isEmpty()
+                            ? "No pods found"
+                            : "targetBrokerId picks brokers only, and no broker pod was found")
+                    + " matching label selector '" + selector + "' in namespace '" + spec.targetNamespace()
+                    + "'");
         }
         return targets;
     }
 
-    /** The pods among {@code matching} that the fault hits; empty only when {@code matching} is. */
+    /**
+     * The pods among {@code matching} that the fault hits; empty only when
+     * {@code matching} is, or holds no broker for {@code targetBrokerId}.
+     */
     public static List<String> select(FaultSpec spec, List<Pod> matching) {
         return switch (mode(spec)) {
             case NAMED_POD -> List.of(spec.targetPod());
             case ALL -> matching.stream().map(PodTargets::name).toList();
-            // Falls back to the first match when no pod the selector matches
-            // has a name ending in -<id>.
-            case BROKER_ID ->
-                matching.isEmpty()
+            // Falls back to the first broker when no broker the selector
+            // matches has a name ending in -<id>.
+            case BROKER_ID -> {
+                List<String> brokers = matching.stream()
+                        .filter(PodTargets::isBroker)
+                        .map(PodTargets::name)
+                        .toList();
+                yield brokers.isEmpty()
                         ? List.of()
-                        : List.of(matching.stream()
-                                .map(PodTargets::name)
+                        : List.of(brokers.stream()
                                 .filter(n -> n.endsWith("-" + spec.targetBrokerId()))
                                 .findFirst()
-                                .orElse(name(matching.getFirst())));
+                                .orElse(brokers.getFirst()));
+            }
             case ONE_RANDOM ->
                 matching.isEmpty()
                         ? List.of()
                         : List.of(name(matching.get(ThreadLocalRandom.current().nextInt(matching.size()))));
         };
+    }
+
+    /**
+     * Whether a Kafka pod runs a broker. Strimzi labels every pod of a node
+     * pool with its roles: a dedicated KRaft controller has
+     * {@code strimzi.io/broker-role=false}, and a node with both roles counts
+     * as a broker. A pod without the label, such as Kafka not run by Strimzi,
+     * is taken for a broker, since nothing says it is not one.
+     */
+    public static boolean isBroker(Pod pod) {
+        Map<String, String> labels = pod.getMetadata().getLabels();
+        String brokerRole = labels != null ? labels.get(ScaleDownTargets.BROKER_ROLE_LABEL) : null;
+        return brokerRole == null || "true".equals(brokerRole);
     }
 
     private static String name(Pod pod) {

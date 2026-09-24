@@ -36,6 +36,11 @@ public class DisruptionSafetyGuard {
     @ConfigProperty(name = "kates.chaos.kafka.namespace", defaultValue = "kafka")
     String kafkaNamespace;
 
+    /**
+     * Selects the cluster's Kafka pods. The default matches the KRaft
+     * controllers as well, so only the brokers among them are counted
+     * ({@link PodTargets#isBroker}).
+     */
     @ConfigProperty(name = "kates.chaos.kafka.label", defaultValue = "strimzi.io/component-type=kafka")
     String kafkaLabel;
 
@@ -76,6 +81,14 @@ public class DisruptionSafetyGuard {
     private record TargetedStep(
             DisruptionPlan.DisruptionStep step, FaultSpec spec, Integer leader, boolean lookupFailed) {}
 
+    /**
+     * What a step's fault hits: every pod, for the dry run to list, and the
+     * brokers among them, which are what the blast radius counts.
+     */
+    record Impact(List<String> pods, List<String> brokers) {
+        static final Impact NONE = new Impact(List.of(), List.of());
+    }
+
     private List<TargetedStep> targeted(DisruptionPlan plan) {
         List<TargetedStep> targeted = new ArrayList<>();
         for (DisruptionPlan.DisruptionStep step : plan.getSteps()) {
@@ -113,8 +126,8 @@ public class DisruptionSafetyGuard {
         SlaGrader.unevaluableConstraints(plan.getSla())
                 .forEach(c -> warnings.add("SLA " + c + ". It will be reported as not evaluated, not as passed."));
 
-        List<Pod> brokerPods = listBrokerPods();
-        int totalBrokers = brokerPods.size();
+        List<Pod> kafkaPods = listKafkaPods();
+        int totalBrokers = brokerCount(kafkaPods);
 
         if (totalBrokers == 0) {
             errors.add(
@@ -129,7 +142,7 @@ public class DisruptionSafetyGuard {
             FaultSpec spec = t.spec();
 
             try {
-                List<String> hit = affectedBrokers(spec, brokerPods);
+                List<String> hit = impact(spec, kafkaPods).brokers();
                 // A rolling restart takes its brokers down one at a time.
                 affectedBrokers.addAll(
                         spec.disruptionType() == DisruptionType.ROLLING_RESTART && !hit.isEmpty()
@@ -178,8 +191,8 @@ public class DisruptionSafetyGuard {
         List<String> errors = new ArrayList<>();
         List<StepPreview> stepPreviews = new ArrayList<>();
 
-        List<Pod> brokerPods = listBrokerPods();
-        int totalBrokers = brokerPods.size();
+        List<Pod> kafkaPods = listKafkaPods();
+        int totalBrokers = brokerCount(kafkaPods);
 
         if (totalBrokers == 0) {
             errors.add("No broker pods found");
@@ -204,7 +217,7 @@ public class DisruptionSafetyGuard {
 
             String targetPod = null;
             try {
-                List<String> hit = affectedBrokers(spec, brokerPods);
+                List<String> hit = impact(spec, kafkaPods).pods();
                 if (hit.isEmpty() && spec.disruptionType() == DisruptionType.SCALE_DOWN) {
                     stepWarnings.add("SCALE_DOWN removes no broker in namespace '" + kafkaNamespace + "'");
                 } else if (hit.isEmpty()) {
@@ -214,12 +227,20 @@ public class DisruptionSafetyGuard {
                     targetPod = String.join(",", hit);
                     affected.addAll(hit);
                 }
+                if (spec.disruptionType() != DisruptionType.SCALE_DOWN
+                        && PodTargets.mode(spec) == PodTargets.Mode.BROKER_ID
+                        && !hit.isEmpty()
+                        && !hit.getFirst().endsWith("-" + spec.targetBrokerId())) {
+                    stepWarnings.add("targetBrokerId " + spec.targetBrokerId() + " matches no broker pod, so the step"
+                            + " falls back to " + hit.getFirst() + ", the first broker targetLabel matches. KRaft"
+                            + " controllers are never picked by ID");
+                }
             } catch (IllegalArgumentException e) {
                 stepWarnings.add(e.getMessage());
             }
 
             if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
-                stepWarnings.addAll(scaleDownWarnings(spec, brokerPods, affected));
+                stepWarnings.addAll(scaleDownWarnings(spec, kafkaPods, affected));
             }
 
             if (spec.disruptionType() == DisruptionType.ROLLING_RESTART && spec.chaosDurationSec() <= 0) {
@@ -245,28 +266,29 @@ public class DisruptionSafetyGuard {
     }
 
     /**
-     * Verifies the cluster state by checking if all broker pods are running and ready.
+     * Verifies the cluster state by checking if all Kafka pods, KRaft
+     * controllers included, are running and ready.
      * Use before/after chaos injection to ensure a stable baseline.
      */
     @Retry(maxRetries = 3, delay = 2000)
     @Timeout(10000)
     public boolean verifyClusterState() {
-        List<Pod> brokers = listBrokerPods();
-        if (brokers.isEmpty()) {
-            LOG.warn("Cluster state verification failed: no brokers found");
+        List<Pod> pods = listKafkaPods();
+        if (pods.isEmpty()) {
+            LOG.warn("Cluster state verification failed: no Kafka pods found");
             return false;
         }
 
-        for (Pod pod : brokers) {
+        for (Pod pod : pods) {
             if (pod.getStatus() == null || !"Running".equals(pod.getStatus().getPhase())) {
-                LOG.warn("Cluster state verification failed: broker "
+                LOG.warn("Cluster state verification failed: Kafka pod "
                         + pod.getMetadata().getName() + " is not Running");
                 return false;
             }
             boolean ready = pod.getStatus().getConditions().stream()
                     .anyMatch(c -> "Ready".equals(c.getType()) && "True".equals(c.getStatus()));
             if (!ready) {
-                LOG.warn("Cluster state verification failed: broker "
+                LOG.warn("Cluster state verification failed: Kafka pod "
                         + pod.getMetadata().getName() + " is not Ready");
                 return false;
             }
@@ -318,8 +340,12 @@ public class DisruptionSafetyGuard {
         ScaleDownSnapshots.restore(kubeClient, spec.targetNamespace(), meta -> true);
     }
 
+    /**
+     * Every pod {@code kates.chaos.kafka.label} matches: the brokers, and with
+     * the default label the KRaft controllers too.
+     */
     @Retry(maxRetries = 3, delay = 2000)
-    List<Pod> listBrokerPods() {
+    List<Pod> listKafkaPods() {
         try {
             return kubeClient
                     .pods()
@@ -328,57 +354,80 @@ public class DisruptionSafetyGuard {
                     .list()
                     .getItems();
         } catch (Exception e) {
-            LOG.warn("Failed to list broker pods", e);
+            LOG.warn("Failed to list Kafka pods", e);
             return List.of();
         }
     }
 
+    private static int brokerCount(List<Pod> kafkaPods) {
+        return (int) kafkaPods.stream().filter(PodTargets::isBroker).count();
+    }
+
     /**
-     * The broker pods a step's fault would hit, chosen by the same rules the
-     * chaos backends use ({@link PodTargets}) among the brokers its selector
-     * matches, so a {@code targetAll} step counts every one of them. A random
-     * pick is counted as one broker, marked since the actual pod is not known yet.
-     * A {@code SCALE_DOWN} step counts the broker each KafkaNodePool or
+     * What a step's fault would hit, chosen by the same rules the chaos
+     * backends use ({@link PodTargets}) among the Kafka pods its selector
+     * matches, so a {@code targetAll} step hits every one of them. Only the
+     * brokers among them count: a KRaft controller the step hits is listed,
+     * not counted. A random pick is one pod, marked since the actual pod is
+     * not known yet, and counts as a broker if the selector matches one. A
+     * {@code SCALE_DOWN} step hits the broker each KafkaNodePool or
      * StatefulSet it selects will lose ({@link ScaleDownTargets}).
      *
      * @throws IllegalArgumentException when {@code targetLabel} is not a valid selector
      */
-    List<String> affectedBrokers(FaultSpec spec, List<Pod> brokerPods) {
+    Impact impact(FaultSpec spec, List<Pod> kafkaPods) {
+        boolean inKafkaNamespace =
+                spec.targetNamespace() == null || spec.targetNamespace().equals(kafkaNamespace);
         if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
-            if (spec.targetNamespace() != null && !spec.targetNamespace().equals(kafkaNamespace)) {
-                return List.of();
+            if (!inKafkaNamespace) {
+                return Impact.NONE;
             }
-            return ScaleDownTargets.preview(spec, brokerPods).removedPods();
+            List<String> removed = ScaleDownTargets.preview(spec, kafkaPods).removedPods();
+            return new Impact(removed, removed);
         }
         PodTargets.Mode mode = PodTargets.mode(spec);
         if (mode == PodTargets.Mode.NAMED_POD) {
-            return List.of(spec.targetPod());
+            boolean controller = inKafkaNamespace
+                    && kafkaPods.stream()
+                            .anyMatch(
+                                    p -> p.getMetadata().getName().equals(spec.targetPod()) && !PodTargets.isBroker(p));
+            return new Impact(List.of(spec.targetPod()), controller ? List.of() : List.of(spec.targetPod()));
         }
-        if (spec.targetNamespace() != null && !spec.targetNamespace().equals(kafkaNamespace)) {
-            return List.of();
+        if (!inKafkaNamespace) {
+            return Impact.NONE;
         }
-        List<Pod> matching = brokerPods;
+        List<Pod> matching = kafkaPods;
         if (spec.targetLabel() != null && !spec.targetLabel().isBlank()) {
             ParsedLabelSelector selector = ParsedLabelSelector.parse(spec.targetLabel());
-            matching = brokerPods.stream()
+            matching = kafkaPods.stream()
                     .filter(p -> selector.matches(p.getMetadata().getLabels()))
                     .toList();
         }
         if (mode == PodTargets.Mode.ONE_RANDOM) {
-            return matching.isEmpty()
-                    ? List.of()
-                    : List.of(matching.getFirst().getMetadata().getName() + " (random selection)");
+            if (matching.isEmpty()) {
+                return Impact.NONE;
+            }
+            Optional<Pod> broker =
+                    matching.stream().filter(PodTargets::isBroker).findFirst();
+            List<String> pick =
+                    List.of(broker.orElse(matching.getFirst()).getMetadata().getName() + " (random selection)");
+            return new Impact(pick, broker.isPresent() ? pick : List.of());
         }
-        return PodTargets.select(spec, matching);
+        List<String> pods = PodTargets.select(spec, matching);
+        Set<String> brokers = new HashSet<>(matching.stream()
+                .filter(PodTargets::isBroker)
+                .map(p -> p.getMetadata().getName())
+                .toList());
+        return new Impact(pods, pods.stream().filter(brokers::contains).toList());
     }
 
     /** What the dry run says about a SCALE_DOWN step, beyond the brokers it removes. */
-    private List<String> scaleDownWarnings(FaultSpec spec, List<Pod> brokerPods, List<String> removed) {
+    private List<String> scaleDownWarnings(FaultSpec spec, List<Pod> kafkaPods, List<String> removed) {
         List<String> warnings = new ArrayList<>();
         boolean nodePools = false;
         if (spec.targetNamespace() == null || spec.targetNamespace().equals(kafkaNamespace)) {
             try {
-                ScaleDownTargets.Preview preview = ScaleDownTargets.preview(spec, brokerPods);
+                ScaleDownTargets.Preview preview = ScaleDownTargets.preview(spec, kafkaPods);
                 warnings.addAll(preview.notes());
                 nodePools = !preview.targets().pools().isEmpty();
             } catch (IllegalArgumentException e) {

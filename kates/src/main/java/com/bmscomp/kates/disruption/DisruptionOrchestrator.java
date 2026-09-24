@@ -62,6 +62,11 @@ public class DisruptionOrchestrator {
     @ConfigProperty(name = "kates.chaos.kafka.cluster", defaultValue = "krafter")
     String kafkaCluster;
 
+    /**
+     * The pods watched for recovery, KRaft controllers included: a fault that
+     * takes a controller down has to be seen coming back. The blast radius and
+     * {@code targetBrokerId} count and pick brokers only ({@link PodTargets#isBroker}).
+     */
     @ConfigProperty(name = "kates.chaos.kafka.label", defaultValue = "strimzi.io/component-type=kafka")
     String kafkaLabel;
 

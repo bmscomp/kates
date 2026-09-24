@@ -106,7 +106,7 @@ A pod-level fault hits one pod unless told otherwise. The first of these that ap
 
 1. `targetPod`, when set.
 2. Every pod the selector matches, when `targetAll: true`.
-3. The pod named `<anything>-<targetBrokerId>`, when `targetBrokerId` is set (falling back to the first match if no pod has that ordinal).
+3. The broker pod named `<anything>-<targetBrokerId>`, when `targetBrokerId` is set (falling back to the first matching broker if no broker has that ordinal). A dedicated KRaft controller is never picked this way: see [Safety Guardrails](#safety-guardrails) for which pods are brokers.
 4. Otherwise, one matching pod at random.
 
 `ROLLING_RESTART` always takes every pod the selector matches, as if `targetAll` were set, unless `targetPod` names one: a rolling restart restarts all of them, one at a time.
@@ -191,7 +191,7 @@ steps:
 
 ### split-brain
 
-Isolates node 0 via network partition to test cluster consensus under split-brain conditions. For 60 seconds, all traffic between it and the other cluster members is blocked — by a deny-all NetworkPolicy on the pod with the direct Kubernetes backend, or by the Litmus `pod-network-partition` experiment. The playbook does not look up the active controller: `targetBrokerId: 0` picks the pod whose name ends in `-0`, which is the active controller only if node 0 leads the metadata quorum at the time.
+Isolates node 0 via network partition to test cluster consensus under split-brain conditions. For 60 seconds, all traffic between it and the other cluster members is blocked — by a deny-all NetworkPolicy on the pod with the direct Kubernetes backend, or by the Litmus `pod-network-partition` experiment. The playbook does not look up the active controller: `targetBrokerId: 0` picks the broker whose pod name ends in `-0`, which is the active controller only if node 0 also has the controller role and leads the metadata quorum at the time. `targetBrokerId` never picks a dedicated controller; to isolate one, name its pod in `targetPod`.
 
 ```mermaid
 graph LR
@@ -231,7 +231,7 @@ steps:
 
 Simulates an availability zone failure by killing every Kafka pod in zone `alpha` at once. This is the most aggressive built-in playbook — it sets `maxAffectedBrokers: 3` because an entire AZ may host multiple brokers. Use this to validate your rack-aware replication strategy.
 
-Pods do not carry their node's `topology.kubernetes.io/zone` label, so the playbook selects on the pod label `zone: alpha`. The `kafka-cluster` chart puts that label on every pod of a node pool pinned with `zone:`, and `kates detect --generate-values` pins one broker pool to each of the lab's `alpha`, `sigma` and `gamma` zones. `targetAll: true` makes the step kill every pod the selector matches, not just one of them, and the safety guard counts each of those pods against `maxAffectedBrokers`.
+Pods do not carry their node's `topology.kubernetes.io/zone` label, so the playbook selects on the pod label `zone: alpha`. The `kafka-cluster` chart puts that label on every pod of a node pool pinned with `zone:`, and `kates detect --generate-values` pins one broker pool to each of the lab's `alpha`, `sigma` and `gamma` zones. `targetAll: true` makes the step kill every pod the selector matches, not just one of them, and the safety guard counts each broker among those pods against `maxAffectedBrokers`. A KRaft controller in the zone is killed too, but it is not a broker, so it is not counted.
 
 A cluster whose pools spread across zones without a `zone:` pin has no pod with that label. On such a cluster the dry run warns that the selector matches no broker pod, and the step fails instead of silently killing nothing. To fail a different zone, submit the step as your own plan with the selector changed — built-in playbooks take no parameters.
 
@@ -387,7 +387,9 @@ graph TD
     V3 -->|Yes| EXECUTE["✅ Execute"]
 ```
 
-A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step aimed at a namespace other than the brokers' counts none. The dry run lists these pods per step and warns when a step's selector matches no broker pod.
+The guard lists the pods in `kates.chaos.kafka.namespace` that match `kates.chaos.kafka.label`, `strimzi.io/component-type=kafka` by default. That label matches the KRaft controllers as well, so the guard counts as brokers only the pods Strimzi labels `strimzi.io/broker-role=true`: a node with both roles is a broker, and a dedicated controller is not. On the default cluster, with brokers 0–2 and controllers 3–5, a plan that takes down all three brokers is rejected. A pod without the role label, such as Kafka not run by Strimzi, counts as a broker.
+
+A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step aimed at a namespace other than the brokers' counts none. The dry run lists every pod a step hits, controllers included, and warns when a step's selector matches no broker pod or when `targetBrokerId` names no broker.
 
 The guard also emits per-step warnings — for example, `SCALE_DOWN` without `autoRollback`, or a `NETWORK_PARTITION` with no duration (the NetworkPolicy would persist until cleanup).
 

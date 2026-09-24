@@ -145,7 +145,7 @@ The `FaultSpec` is deliberately backend-agnostic. Whether you are using Litmus C
 | `targetLabel` | `String` | `"strimzi.io/component-type=kafka"` | Kubernetes label selector (`kubectl -l` syntax) for the target pods |
 | `targetPod` | `String` | `""` | Specific pod name (overrides label selector) |
 | `targetAll` | `boolean` | `false` | Hit every pod `targetLabel` matches instead of one (overrides `targetBrokerId`) |
-| `targetBrokerId` | `int` | `-1` | Kafka broker ID to target |
+| `targetBrokerId` | `int` | `-1` | Kafka broker ID to target; never picks a dedicated KRaft controller |
 | `targetTopic` | `String` | `""` | Topic for leader-aware targeting |
 | `targetPartition` | `int` | `0` | Partition for leader-aware targeting |
 | `chaosDurationSec` | `int` | `30` | How long the fault persists |
@@ -156,13 +156,13 @@ The `FaultSpec` is deliberately backend-agnostic. Whether you are using Litmus C
 | `cpuCores` | `int` | `1` | CPU cores to stress (CPU_STRESS only) |
 | `envOverrides` | `Map<String,String>` | `{}` | Additional env vars for the chaos engine |
 
-The defaults apply to a `faultSpec` posted as JSON as well as to a playbook step: a field the JSON leaves out gets the value in this table, and a field it sets, `0` included, keeps that value. So an omitted `targetBrokerId` means one random matching pod, and `"targetBrokerId": 0` means the pod whose name ends in `-0`. The same holds for each entry of `probes`.
+The defaults apply to a `faultSpec` posted as JSON as well as to a playbook step: a field the JSON leaves out gets the value in this table, and a field it sets, `0` included, keeps that value. So an omitted `targetBrokerId` means one random matching pod, and `"targetBrokerId": 0` means the broker pod whose name ends in `-0`. The same holds for each entry of `probes`.
 
 ### Leader-Aware Targeting: The Killer Feature
 
 Most chaos engineering tools operate at the infrastructure level — they kill pods, partition networks, or stress CPUs. But they do not understand *what* is running inside those pods. You tell them "kill pod X" and they kill pod X. If you want to kill the leader of a specific Kafka partition, you first need to figure out which pod hosts that leader, which means querying the Kafka AdminClient, parsing the response, and building the right pod name. This is tedious, error-prone, and defeats the purpose of automation.
 
-Kates solves this with leader-aware targeting. When you set `targetTopic` and `targetPartition` in your `FaultSpec`, the `KafkaIntelligenceService` automatically resolves the current leader broker ID by calling `AdminClient.describeTopics()`. The orchestrator copies your `FaultSpec` with `targetBrokerId` set to that ID, and the chaos backend picks the pod whose name ends in `-{brokerId}` among the pods `targetLabel` matches in `targetNamespace`. So the namespace and label still decide where Kates looks.
+Kates solves this with leader-aware targeting. When you set `targetTopic` and `targetPartition` in your `FaultSpec`, the `KafkaIntelligenceService` automatically resolves the current leader broker ID by calling `AdminClient.describeTopics()`. The orchestrator copies your `FaultSpec` with `targetBrokerId` set to that ID, and the chaos backend picks the pod whose name ends in `-{brokerId}` among the broker pods `targetLabel` matches in `targetNamespace`. So the namespace and label still decide where Kates looks.
 
 This means you can write experiments like "kill the leader of the `orders` topic, partition 0" without knowing — or caring — which broker that is:
 
@@ -349,9 +349,11 @@ The most important feature of any chaos engineering tool is not what it can brea
 
 ### Blast Radius Validation
 
-Every disruption plan declares a `maxAffectedBrokers` value. Before executing the plan, the `DisruptionSafetyGuard` counts how many pods match the label selector across all steps and rejects the plan if the total exceeds the limit.
+Every disruption plan declares a `maxAffectedBrokers` value. Before executing the plan, the `DisruptionSafetyGuard` works out which pods each step's fault will hit, by the rules the chaos backend uses, and counts the brokers among them across all steps. It rejects the plan if that count exceeds `maxAffectedBrokers` (when it is above zero) or includes every broker, and warns when only one broker would be left.
 
-This prevents a common mistake: using a broad label selector like `strimzi.io/component-type=kafka` (which matches all brokers) when you only intended to affect one. Without blast radius validation, a typo in a label selector could take down your entire cluster.
+Only brokers count. The guard lists the pods in `kates.chaos.kafka.namespace` that match `kates.chaos.kafka.label`, `strimzi.io/component-type=kafka` by default, which matches the KRaft controllers as well as the brokers. A pod is a broker if Strimzi labels it `strimzi.io/broker-role=true`, so a node with both roles counts and a dedicated controller does not. On the default cluster, with brokers 0–2 and controllers 3–5, that makes three brokers, not six: a plan that kills all three is rejected. A controller a step hits, such as the one in a failed zone, is listed in the dry run but not counted. `targetBrokerId` picks among the brokers only, so `targetBrokerId: 3` does not hit controller 3: it falls back to the first broker, and the dry run warns about it. A pod without the role label, such as Kafka not run by Strimzi, counts as a broker.
+
+This prevents a common mistake: using a broad label selector like `strimzi.io/component-type=kafka` (which matches every Kafka pod) when you only intended to affect one. Without blast radius validation, a typo in a label selector could take down your entire cluster.
 
 ### RBAC Permission Verification
 
