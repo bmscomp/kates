@@ -662,9 +662,9 @@ fi
 # (kafka-clients, ZooKeeper, Jetty 9.4) long after every other image had moved
 # on. tester/kafka-lib-overrides.txt swaps jars inside ONE Kafka release's
 # tarball, and the image build refuses any other; holding its `kafka` line here
-# catches a Kafka bump that forgot the list before the release build does. The
+# catches a Kafka bump that forgot the list without building anything. The
 # tarball checksum and each listed jar are only checked when the image is
-# built, which no PR workflow does yet.
+# built, which ci-tester.yml does on every pull request touching tester/.
 tester_kafka=$(grep -E '^ARG KAFKA_VERSION=' tester/Dockerfile | head -1 | cut -d= -f2 || true)
 tester_overrides_kafka=$(sed -n 's/^kafka //p' tester/kafka-lib-overrides.txt 2>/dev/null | head -1 || true)
 printf '  %-46s %s\n' "tester/Dockerfile KAFKA_VERSION:" "${tester_kafka:-<unset>}"

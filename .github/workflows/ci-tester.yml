@@ -1,0 +1,135 @@
+name: CI · Tester
+
+# publish-tester.yml builds this image only from release.yml on a `v*` tag, and
+# most of what can go wrong with it is checked only by building it: the Kafka
+# tarball's SHA-512, the `kafka` line of tester/kafka-lib-overrides.txt against
+# KAFKA_VERSION, every listed jar being in the tarball, every replacement's
+# SHA-256. scripts/check-versions.sh holds only the `kafka` line. A Kafka bump
+# with a stale checksum or override line could merge green and then fail the
+# tag — and release.yml's GitHub Release job needs the tester image. This
+# builds it on the pull request instead.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            image:
+              - 'tester/**'
+              - '.github/workflows/ci-tester.yml'
+
+  build:
+    name: Build tester (amd64)
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read the Kafka version the Dockerfile installs
+        id: version
+        run: |
+          kafka=$(grep '^ARG KAFKA_VERSION=' tester/Dockerfile | head -n 1 | cut -d= -f2)
+          if [ -z "${kafka}" ]; then
+            echo "::error file=tester/Dockerfile::could not read ARG KAFKA_VERSION"
+            exit 1
+          fi
+          echo "kafka=${kafka}" >> "$GITHUB_OUTPUT"
+
+      # No push and no layer cache, so every download and every checksum and
+      # override check in the Dockerfile runs on each build. The tarball and the
+      # jars are the same for every architecture; arm64 would repeat the same
+      # checks under QEMU.
+      - name: Build image (no push)
+        run: |
+          docker buildx build --platform linux/amd64 --load \
+            -t kates-tester:ci \
+            -f tester/Dockerfile tester
+
+      # The build proves the downloads matched their pins; this proves the
+      # image came out as intended. `--version` starts the JVM on the patched
+      # classpath through the PATH the charts' hooks use, and each overridden
+      # library must be in libs/ exactly once, at the patched version — a
+      # second copy of the same library is a classpath that picks either.
+      - name: Smoke test (Kafka CLI and jar overrides)
+        env:
+          KAFKA_VERSION: ${{ steps.version.outputs.kafka }}
+        run: |
+          set -euo pipefail
+          got=$(docker run --rm kates-tester:ci kafka-topics.sh --version)
+          if [ "${got}" != "${KAFKA_VERSION}" ]; then
+            echo "::error::kafka-topics.sh --version reports '${got}', tester/Dockerfile installs ${KAFKA_VERSION}"
+            exit 1
+          fi
+          echo "OK: kafka-topics.sh --version reports ${got}"
+
+          libs=$(docker run --rm kates-tester:ci ls /opt/kafka/libs)
+          fail=0
+          while read -r old path _; do
+            jar="${path##*/}"
+            dir="${path%/*}"
+            version="${dir##*/}"
+            dir="${dir%/*}"
+            artifact="${dir##*/}"
+            # Every jar of this artifact, whatever its version: the name, a dash,
+            # then a digit. Compared as a string, since artifact names hold dots.
+            found=$(printf '%s\n' "${libs}" | awk -v a="${artifact}-" \
+              'index($0, a) == 1 && substr($0, length(a) + 1) ~ /^[0-9].*\.jar$/')
+            if [ "${found}" != "${jar}" ]; then
+              echo "::error file=tester/kafka-lib-overrides.txt::${artifact} in /opt/kafka/libs is '$(printf '%s' "${found}" | tr '\n' ' ')', expected ${jar} (${version}) exactly once"
+              fail=1
+            elif printf '%s\n' "${libs}" | grep -qxF "${old}"; then
+              echo "::error file=tester/kafka-lib-overrides.txt::${old} is still in /opt/kafka/libs next to ${jar}"
+              fail=1
+            else
+              echo "OK: ${old} -> ${jar}"
+            fi
+          done < <(grep -v -e '^#' -e '^kafka ' -e '^$' tester/kafka-lib-overrides.txt)
+          exit "${fail}"
+
+      # The same gate publish-tester.yml applies to the published image, so a
+      # fixable CRITICAL that would fail the release fails the pull request.
+      - name: Scan the image (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: kates-tester:ci
+          scanners: vuln
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+
+  gate:
+    name: Gate · Tester
+    if: always()
+    needs: [changes, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

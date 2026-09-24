@@ -1,6 +1,6 @@
 # CI/CD Pipeline
 
-This appendix documents the GitHub Actions workflows that automate building, testing, and releasing the Kates platform — from pull-request validation to production image publishing and CLI binary releases. The repository carries further workflows for the Apicurio Registry chart (`ci-apicurio.yml`), the Connect image build check (`ci-connect.yml`), native-image builds (`native.yml`), the linters (`lint.yml`), dependency review and the weekly rescan of released images (`security.yml`), CodeQL (`codeql.yml`), chart publishing (`publish-charts.yml`), registry descriptions (`sync-registry-descriptions.yml`), and documentation builds (`docs.yml`, `book.yml`); they follow the same patterns and are not covered here.
+This appendix documents the GitHub Actions workflows that automate building, testing, and releasing the Kates platform — from pull-request validation to production image publishing and CLI binary releases. The repository carries further workflows for the Apicurio Registry chart (`ci-apicurio.yml`), the Connect and tester image build checks (`ci-connect.yml`, `ci-tester.yml`), native-image builds (`native.yml`), the linters (`lint.yml`), dependency review and the weekly rescan of released images (`security.yml`), CodeQL (`codeql.yml`), chart publishing (`publish-charts.yml`), registry descriptions (`sync-registry-descriptions.yml`), and documentation builds (`docs.yml`, `book.yml`); they follow the same patterns and are not covered here.
 
 Two things to keep in mind while reading. First, **any job that renders a chart runs `helm dependency build` first** — `strimzi-operator` pulls the operator subchart from `quay.io`, and `kafka-cluster`, `connect-cluster` and `mirror-maker2` all resolve the `kafka-common` library through a `file://` dependency. `helm lint` only warns about a missing dependency and still exits 0, so a job that skips the build can be green while the chart cannot be deployed. Second, the expensive jobs — the ones that stand up a Kind cluster and scrape a real broker — are gated behind a schedule, a manual dispatch, or a pull-request label, and never run on an ordinary push.
 
@@ -352,6 +352,8 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 | **Platforms** | `linux/amd64`, `linux/arm64` (cross-built with QEMU) |
 
 The tester image is referenced by the Kafka charts' test hooks — `kafka-cluster`, `connect-cluster`, `mirror-maker2` and `strimzi-operator` all pin it under `testImages`, and the operator chart's CRD-upgrade hook runs on it too. It validates Kafka connectivity, SCRAM authentication, and ACL enforcement from inside the cluster.
+
+A tag is too late to find out that the Dockerfile no longer builds: the build checks the Kafka tarball against `KAFKA_SHA512` and each jar in `tester/kafka-lib-overrides.txt` against its SHA-256, and `release.yml` creates the GitHub Release only once this image is published. So `ci-tester.yml` builds the image for `linux/amd64` on every pull request that touches `tester/**`, without pushing, then checks that `kafka-topics.sh --version` reports the Dockerfile's `KAFKA_VERSION`, that each overridden library is in `/opt/kafka/libs` exactly once and at its patched version, and that Trivy passes it with the same settings as the release scan.
 
 ---
 
