@@ -234,8 +234,14 @@ For deep operational details on each component, see [Kafka Deployment Engineerin
 |---------|-----|-------------|
 | Grafana | http://localhost:30080 | admin / admin |
 | Kafka UI | http://localhost:30081 | — |
-| Kates API | http://localhost:30083 | — |
+| Kates API | http://localhost:30083 | API key from the `kates-api-key` Secret |
 | Chaos state | `make chaos-status` | — |
+
+The `localhost` addresses are the local ends of the port-forwards that `make ports` starts in the background; the Kind cluster does not publish its NodePorts on the host, so nothing answers on them until it runs. The Quick Start in [Introduction](01-introduction.md#quick-start) sets up the port-forward and a CLI context carrying the API key.
+
+::: {.callout-important}
+`make ports` looks for Grafana, and for Prometheus, which it forwards to `localhost:30090`, only in the `kafka` namespace, where `make monitoring` installs them. `kates deploy`, and so `make all`, installs the monitoring stack into the `monitoring` namespace, and `make ports` skips both with a "not deployed in namespace 'kafka'" line, so nothing answers on `localhost:30080`. On that install, run `MONITORING_NS=monitoring make ports` instead, or `kates ports`, which forwards Grafana to `localhost:3000` and Prometheus to `localhost:9090`.
+:::
 
 The `kates-chaos` chart deploys the LitmusChaos execution plane only — there is no bundled web portal. `make chaos-ui` says so and points you at `make chaos-status`; drive experiments through `ChaosEngine` resources instead.
 

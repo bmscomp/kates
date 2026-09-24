@@ -219,17 +219,21 @@ Always discard the first few seconds of data. Multi-phase Kates scenarios suppor
 For critical decisions, run the same test 3–5 times and compare. Kates provides:
 
 ```bash
-# Run the same test multiple times
-kates test create --type LOAD --records 100000
-kates test create --type LOAD --records 100000
-kates test create --type LOAD --records 100000
+# Run the same test three times, one after another, collecting the run IDs
+IDS=""
+for i in 1 2 3; do
+  ID=$(kates test create --type LOAD --records 100000 --wait -o json | jq -r .id)
+  IDS="${IDS:+$IDS,}$ID"
+done
 
 # Compare results
-kates report compare id1,id2,id3
+kates report compare "$IDS"
 
 # View trends over time
 kates trend --type LOAD --metric p99LatencyMs --days 7
 ```
+
+With `-o json`, `--wait` prints the finished run as JSON, and `jq` picks out its `id`. Run the repetitions sequentially like this: without `--wait`, `kates test create` returns as soon as the backend accepts the run, so back-to-back creates run at the same time — on the same `load-test` topic, since a LOAD test without `--topic` uses it — and each run measures the load of the others. The backend also runs at most three tests at once (`kates.engine.max-concurrent-tests`) and refuses a fourth with `429 Too Many Requests`.
 
 ### What "Good" Looks Like
 

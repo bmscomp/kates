@@ -6,7 +6,7 @@ The Kates backend exposes a RESTful API that the CLI and other clients use to ma
 
 **When should you choose the REST API over the CLI or gRPC?** Use the REST API when you need to integrate Kates into shell scripts, automation pipelines, or monitoring systems that work best with JSON over HTTP. It is ideal for `curl`-based workflows, webhook integrations, and any tool that speaks HTTP natively. The API is human-readable and easy to debug — every request and response is plain JSON, so you can inspect traffic with standard tools like `curl`, `httpie`, or browser dev-tools.
 
-If you need strongly typed clients, streaming results, or high-throughput programmatic access from Go, Java, or Python services, consider the [gRPC API](16-grpc-api.md) instead. If you prefer an interactive experience with formatted output, the [CLI](10-cli-reference.md) is the best choice. All three interfaces share the same backend service layer, so results are identical regardless of which you choose.
+If you need strongly typed clients or high-throughput programmatic access from Go, Java, or Python services, consider the [gRPC API](16-grpc-api.md) instead; it covers test runs, cluster inspection, and health. If you prefer an interactive experience with formatted output, the [CLI](10-cli-reference.md) is the best choice. All three interfaces share the same backend service layer, so a test run is the same run whichever one started it; [gRPC API Reference](16-grpc-api.md) lists the places where gRPC responses carry less than REST.
 
 After this chapter, you can:
 
@@ -19,7 +19,15 @@ After this chapter, you can:
 
 ## Authentication
 
-Kates enforces API-key authentication **by default**: `kates.api.security-enabled=true` in `application.properties` (the `%dev` and `%test` profiles disable it). The expected key comes from the `kates.api.key` property, which reads the `KATES_API_KEY` environment variable; the Helm chart provisions it as a Kubernetes Secret via the `apiKey` values (see [Security & Compliance](17-security.md)).
+Kates enforces API-key authentication **by default**: `kates.api.security-enabled=true` in `application.properties` (the `%dev` and `%test` profiles disable it). The expected key comes from the `kates.api.key` property, which reads the `KATES_API_KEY` environment variable; the Helm chart provisions it as a Kubernetes Secret via the `apiKey` values in `charts/kates/values.yaml`: `enabled`, `value` (a random 32-character key when empty, kept across upgrades), and `existingSecret` with `secretKey` to use a Secret you manage.
+
+On a default install the chart generates a random key into the `kates-api-key` Secret in the `kates` namespace. Read it into a shell variable once; every example in this chapter uses it:
+
+```bash
+export KATES_API_KEY="$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)"
+```
+
+The CLI reads the same variable, ahead of the key stored in its context.
 
 Include the key in every request, using either header form:
 
@@ -51,7 +59,7 @@ In Quarkus dev mode and in tests, security is switched off (`%dev.kates.api.secu
 http://localhost:30083
 ```
 
-Port `30083` is the NodePort defined by the kind overlay (`charts/kates/values-kind.yaml`) — it is not a universal default. On other clusters, port-forward the service (`kubectl port-forward svc/kates 8080:8080`) and target `http://localhost:8080`. When running in-cluster, use the Kubernetes service DNS name: `http://kates.kates.svc.cluster.local:8080`
+`localhost:30083` is the local end of the port-forward that `make ports` (`scripts/port-forward.sh`) starts to port 8080 of the `kates` Service; nothing answers there until it runs. The number matches the NodePort the Kind overlay assigns (`charts/kates/values-kind.yaml`), but the Kind cluster does not publish NodePorts on the host, so the forward is what makes the API reachable. Without the repository's scripts, forward the Service yourself with `kubectl port-forward svc/kates -n kates 30083:8080`, or run `kates ports`, which forwards it to `localhost:8080` instead. When running in-cluster, use the Kubernetes service DNS name: `http://kates.kates.svc.cluster.local:8080`
 
 ---
 
@@ -73,7 +81,7 @@ System health check including Kafka connectivity and engine status. This endpoin
   "engine": { "activeBackend": "native", "availableBackends": ["native", "trogdor"] },
   "kafka": {
     "status": "UP",
-    "bootstrapServers": "krafter-kafka-bootstrap.kafka.svc:9092",
+    "bootstrapServers": "krafter-kafka-bootstrap.kafka.svc.cluster.local:9092",
     "message": "Kafka cluster is reachable"
   }
 }
@@ -98,18 +106,13 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
   "spec": {
     "numRecords": 100000,
     "recordSize": 1024,
-    "numProducers": 4,
-    "numConsumers": 2,
     "acks": "all",
     "topic": "perf-test",
     "partitions": 3,
     "replicationFactor": 3,
     "minInsyncReplicas": 2,
     "durationMs": 120000,
-    "throughput": -1,
-    "consumerGroup": "perf-cg",
-    "fetchMinBytes": 1,
-    "fetchMaxWaitMs": 500
+    "throughput": -1
   }
 }
 ```
@@ -120,6 +123,10 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
 | `backend` | String | | Backend engine (default: "native") |
 | `spec` | Object | | Test specification overrides |
 
+::: {.callout-important}
+The backend merges `spec` with the defaults of the test type, and the merge keeps only `topic`, `numRecords`, `recordSize`, `throughput`, `durationMs`, `acks`, `batchSize`, `lingerMs`, `compressionType`, `partitions`, `replicationFactor`, `minInsyncReplicas`, `numProducers` and `numConsumers`. It drops the other fields the request accepts — `targetThroughput`, `consumerGroup`, `fetchMinBytes`, `fetchMaxWaitMs`, `enableIdempotence`, `enableTransactions` and `enableCrc` — so they have no effect: the response's `spec` leaves `consumerGroup` out and shows the others at their defaults. The echoed `enableIdempotence: false` does not make the producer non-idempotent: the Kafka client turns idempotence on whenever `acks` is `all`. `throughput` is the only rate limit: `kates test create --throughput` sends `targetThroughput` and does not slow a run down. Of the fields kept, `numProducers` sets the number of producers for STRESS and CAPACITY only, and no test type reads `numConsumers`, so a LOAD run has one producer and one consumer whatever the spec says.
+:::
+
 **Response:** `202 Accepted`
 
 ```json
@@ -129,13 +136,18 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
   "status": "PENDING",
   "backend": "native",
   "spec": {
-    "numRecords": 100000, "recordSize": 1024, "numProducers": 4, "numConsumers": 2,
-    "acks": "all", "topic": "perf-test", "partitions": 3, "replicationFactor": 3,
-    "minInsyncReplicas": 2, "durationMs": 120000, "throughput": -1
+    "topic": "perf-test", "numRecords": 100000, "recordSize": 1024, "throughput": -1,
+    "acks": "all", "batchSize": 65536, "lingerMs": 5, "compressionType": "lz4",
+    "numProducers": 1, "numConsumers": 1, "durationMs": 120000,
+    "replicationFactor": 3, "partitions": 3, "minInsyncReplicas": 2,
+    "targetThroughput": -1, "fetchMinBytes": 1, "fetchMaxWaitMs": 500,
+    "enableIdempotence": false, "enableTransactions": false, "enableCrc": true
   },
   "createdAt": "2026-02-15T20:00:00Z"
 }
 ```
+
+The `spec` in the response is the merged one: the request's values, and the LOAD defaults for everything it leaves out.
 
 Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`.
 
@@ -180,7 +192,7 @@ List test runs with pagination and filtering.
 
 Get full details of a test run, refreshing its status. The run carries one result entry per task/phase; for INTEGRITY tests each result also includes an `integrity` object (lost/duplicate records, RTO/RPO).
 
-**Response:** `200 OK`
+**Response:** `200 OK` (`spec` cut down to four fields; it is the merged spec shown under [POST /api/tests](#post-apitests))
 
 ```json
 {
@@ -188,24 +200,26 @@ Get full details of a test run, refreshing its status. The run carries one resul
   "testType": "LOAD",
   "status": "DONE",
   "backend": "native",
-  "spec": { "numRecords": 100000, "recordSize": 1024, "numProducers": 4, "numConsumers": 2, "acks": "all", "topic": "perf-test" },
+  "spec": { "topic": "perf-test", "numRecords": 100000, "recordSize": 1024, "acks": "all" },
   "results": [
     {
-      "taskId": "producer-1", "phaseName": "ramp-up", "status": "DONE", "recordsSent": 10000,
-      "throughputRecordsPerSec": 5234.1, "throughputMBPerSec": 5.1,
-      "avgLatencyMs": 4.8, "p50LatencyMs": 3.2, "p95LatencyMs": 9.6, "p99LatencyMs": 18.4, "maxLatencyMs": 45.2,
-      "startTime": "2026-02-15T20:00:01Z", "endTime": "2026-02-15T20:00:16Z"
+      "taskId": "a1b2c3d4-produce-0", "testType": "LOAD", "phaseName": "produce", "status": "DONE", "recordsSent": 100000,
+      "throughputRecordsPerSec": 8412.7, "throughputMBPerSec": 8.2,
+      "avgLatencyMs": 2.4, "p50LatencyMs": 1.9, "p95LatencyMs": 6.8, "p99LatencyMs": 12.3, "maxLatencyMs": 41.6,
+      "startTime": "2026-02-15T20:00:01.108342Z", "endTime": "2026-02-15T20:00:13.527115Z"
     },
     {
-      "taskId": "producer-2", "phaseName": "steady-state", "status": "DONE", "recordsSent": 90000,
-      "throughputRecordsPerSec": 8412.7, "throughputMBPerSec": 8.2,
-      "avgLatencyMs": 2.4, "p50LatencyMs": 1.8, "p95LatencyMs": 5.6, "p99LatencyMs": 12.3, "maxLatencyMs": 34.1,
-      "startTime": "2026-02-15T20:00:16Z", "endTime": "2026-02-15T20:02:05Z"
+      "taskId": "a1b2c3d4-consume-0", "testType": "LOAD", "phaseName": "consume", "status": "DONE", "recordsSent": 100000,
+      "throughputRecordsPerSec": 8391.2, "throughputMBPerSec": 8.2,
+      "avgLatencyMs": 0.0, "p50LatencyMs": 0.0, "p95LatencyMs": 0.0, "p99LatencyMs": 0.0, "maxLatencyMs": 0.0,
+      "startTime": "2026-02-15T20:00:01.109020Z", "endTime": "2026-02-15T20:00:13.640388Z"
     }
   ],
-  "createdAt": "2026-02-15T20:00:00Z"
+  "createdAt": "2026-02-15T20:00:00.412587Z"
 }
 ```
+
+A LOAD run has exactly two tasks, `<id>-produce-0` in phase `produce` and `<id>-consume-0` in phase `consume`, however many producers and consumers the spec asks for. On the consumer, `recordsSent` counts the records it consumed; it measures no latency, so its latency fields are always `0.0`, and the run's latency lives on the producer.
 
 #### DELETE /api/tests/{id}
 
@@ -235,14 +249,14 @@ Get the full test report with cluster snapshot, broker metrics, and SLA verdict.
     { "phaseName": "steady-state", "metrics": { "avgThroughputRecPerSec": 8412.7, "p99LatencyMs": 12.3 } }
   ],
   "clusterSnapshot": {
-    "clusterId": "abc123",
+    "clusterId": "4L6g3nShT-eMCtK--X86sw",
     "brokerCount": 3,
     "controllerId": 0,
-    "brokers": [ { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092, "rack": "zone-a" } ]
+    "brokers": [ { "id": 0, "host": "krafter-brokers-alpha-0.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "alpha" } ]
   },
   "brokerMetrics": [
     {
-      "brokerId": 0, "host": "krafter-kafka-0.kafka.svc", "isController": true,
+      "brokerId": 0, "host": "krafter-brokers-alpha-0.krafter-kafka-brokers.kafka.svc", "isController": true,
       "leaderPartitions": 12, "replicaPartitions": 36, "underReplicatedPartitions": 0,
       "leaderSharePercent": 33.3, "skewed": false
     }
@@ -315,16 +329,18 @@ Kafka cluster metadata: cluster ID, controller, and brokers.
 
 ```json
 {
-  "clusterId": "abc123",
-  "controller": { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092 },
+  "clusterId": "4L6g3nShT-eMCtK--X86sw",
+  "controller": { "id": 1, "host": "krafter-brokers-gamma-1.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "gamma" },
   "brokerCount": 3,
   "brokers": [
-    { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092, "rack": "zone-a" },
-    { "id": 1, "host": "krafter-kafka-1.kafka.svc", "port": 9092, "rack": "zone-b" },
-    { "id": 2, "host": "krafter-kafka-2.kafka.svc", "port": 9092, "rack": "zone-c" }
+    { "id": 0, "host": "krafter-brokers-alpha-0.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "alpha" },
+    { "id": 1, "host": "krafter-brokers-gamma-1.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "gamma" },
+    { "id": 2, "host": "krafter-brokers-sigma-2.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "sigma" }
   ]
 }
 ```
+
+Hosts and racks are what the brokers advertise: here the `krafter` cluster that `kates deploy` creates on the Kind cluster, with one broker pool per zone. `controller` is whatever Kafka's `DescribeCluster` answer names, and a KRaft broker answers with an arbitrary live broker rather than the active controller, so it can change between calls. The KRaft quorum leader is `kraftQuorum.leaderId` in the `GET /api/cluster/check` response.
 
 #### GET /api/cluster/topics
 
@@ -407,13 +423,16 @@ Execute a disruption plan. Execution is **asynchronous** — the plan is validat
     "name": "kill-broker-0",
     "faultSpec": {
       "experimentName": "broker-kill", "disruptionType": "POD_KILL",
-      "targetNamespace": "kafka", "targetLabel": "strimzi.io/cluster=krafter",
-      "chaosDurationSec": 30, "gracePeriodSec": 0
+      "targetNamespace": "kafka",
+      "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
+      "targetBrokerId": 0, "chaosDurationSec": 30, "gracePeriodSec": 0
     },
     "steadyStateSec": 15, "observationWindowSec": 60, "requireRecovery": true
   }]
 }
 ```
+
+The selector matches broker pods only, and `targetBrokerId` picks the broker whose pod name ends in `-0`. A broader selector such as `strimzi.io/cluster=krafter` also matches the KRaft controllers, the Entity Operator and the Kafka exporter, and without `targetBrokerId` the step kills one matching pod at random.
 
 **Response:** `202 Accepted`
 
@@ -434,13 +453,13 @@ Then poll `GET /api/disruptions/{id}` until the status is terminal:
   "stepReports": [{
     "stepName": "kill-broker-0",
     "disruptionType": "POD_KILL",
-    "timeToFirstReady": "PT27S",
-    "timeToAllReady": "PT41S",
+    "timeToFirstReady": 27.000000000,
+    "timeToAllReady": 41.000000000,
     "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
     "rolledBack": false
   }],
   "summary": {
-    "totalSteps": 1, "passedSteps": 1, "worstRecovery": "PT41S",
+    "totalSteps": 1, "passedSteps": 1, "worstRecovery": 41.000000000,
     "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
   }
 }
@@ -459,9 +478,9 @@ Disruption IDs are 8-character UUID prefixes. `status` is `RUNNING` while the pl
   "steps": [{
     "name": "kill-broker-0",
     "disruptionType": "POD_KILL",
-    "targetPod": "krafter-kafka-0",
+    "targetPod": "krafter-brokers-alpha-0",
     "resolvedLeaderId": null,
-    "affectedPods": ["krafter-kafka-0"],
+    "affectedPods": ["krafter-brokers-alpha-0"],
     "warnings": []
   }],
   "warnings": [],
@@ -500,15 +519,15 @@ Get the full disruption report: per-step recovery timings, pod event timeline, p
     "stepName": "kill-broker-0",
     "disruptionType": "POD_KILL",
     "podTimeline": [
-      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-kafka-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
+      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-brokers-alpha-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
     ],
-    "timeToFirstReady": "PT27S",
-    "timeToAllReady": "PT41S",
+    "timeToFirstReady": 27.000000000,
+    "timeToAllReady": 41.000000000,
     "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
     "rolledBack": false
   }],
   "summary": {
-    "totalSteps": 1, "passedSteps": 1, "worstRecovery": "PT41S",
+    "totalSteps": 1, "passedSteps": 1, "worstRecovery": 41.000000000,
     "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
   },
   "slaVerdict": { "grade": "A", "violated": false, "violations": [], "totalChecks": 3, "passedChecks": 3 }
@@ -525,7 +544,7 @@ Get pod-level events and recovery times per step.
     "step": "kill-broker-0",
     "type": "POD_KILL",
     "events": [
-      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-kafka-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
+      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-brokers-alpha-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
     ],
     "timeToFirstReady": "27000ms",
     "timeToAllReady": "41000ms"
@@ -558,34 +577,47 @@ Get Kafka intelligence data captured during the disruption — ISR recovery and 
 
 #### POST /api/resilience
 
-Run a combined performance + chaos test. The call is long-running: whitespace is streamed as a keep-alive while the test executes, and the JSON report is written when it completes.
+Run a combined performance + chaos test. The call is long-running: whitespace is streamed as a keep-alive while the fault runs and recovery is measured, and the JSON report is written after that, usually before the test run itself has finished.
 
 **Request Body:**
 
 ```json
 {
-  "testRequest": { "type": "LOAD", "spec": { "numRecords": 100000, "numProducers": 4 } },
-  "chaosSpec": { "experimentName": "kafka-pod-kill", "targetNamespace": "kafka" },
+  "testRequest": {
+    "type": "LOAD",
+    "spec": { "numRecords": 180000, "throughput": 500, "recordSize": 1024, "acks": "all" }
+  },
+  "chaosSpec": {
+    "experimentName": "kafka-pod-kill",
+    "disruptionType": "POD_KILL",
+    "targetNamespace": "kafka",
+    "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
+    "chaosDurationSec": 30
+  },
   "steadyStateSec": 30
 }
 ```
 
 Optional fields: `probes` (steady-state probe definitions) and `maxRecoveryWaitSec` (default 120).
 
-**Response:**
+The workload has to be running when the fault lands. At 500 records/s the 180,000 records take 360 s, while the fault is triggered after `steadyStateSec` (30 s), lasts `chaosDurationSec` (30 s), and the run then waits up to `maxRecoveryWaitSec` for recovery. Without `throughput` the producer runs unthrottled and can finish before the fault is triggered, and both summaries then describe a run the fault never touched. `testRequest` is the body of [POST /api/tests](#post-apitests), so the same fields apply: `throughput` is the rate limit, and LOAD runs one producer and one consumer, so the spec sets no producer count. `disruptionType` picks the fault: on the default LitmusChaos backend `POD_KILL` runs the `pod-delete` experiment, and the outcome reports that name, while `experimentName` only names the ChaosEngine. Without `disruptionType`, Litmus runs the experiment that `experimentName` names, and the `kates-chaos` chart installs none called `kafka-pod-kill`. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and the random pick could then kill a controller instead of a broker.
+
+The call returns once the probes pass after the fault, or once `maxRecoveryWaitSec` runs out, so with this example the response usually arrives while the LOAD run is still producing. `postChaosSummary` and `impactDeltas` cover the run up to that moment. The run keeps producing, and keeps its place among the `kates.engine.max-concurrent-tests` running tests, until it reaches `DONE`; its final numbers are then at [GET /api/tests/{id}](#get-apitestsid), with the id from `performanceReport.run.id`.
+
+**Response** (cut down, with illustrative numbers):
 
 ```json
 {
   "status": "COMPLETED",
-  "chaosOutcome": { "experimentName": "kafka-pod-kill", "verdict": "Pass", "chaosDuration": "PT30S" },
-  "impactDeltas": { "throughputRecPerSec": -15.6, "avgLatencyMs": 42.1, "p99LatencyMs": 596.7, "maxLatencyMs": 310.4, "errorRate": 0.3 },
-  "preChaosSummary": { "avgThroughputRecPerSec": 8412.7, "p99LatencyMs": 12.3, "errorRate": 0.0 },
-  "postChaosSummary": { "avgThroughputRecPerSec": 7097.1, "p99LatencyMs": 609.0, "errorRate": 0.3 },
-  "recoveryTime": "PT41S"
+  "chaosOutcome": { "experimentName": "pod-delete", "verdict": "Pass", "chaosDuration": 68.214530000 },
+  "impactDeltas": { "throughputRecPerSec": -2.7, "avgLatencyMs": 216.1, "p99LatencyMs": 4891.9, "maxLatencyMs": 8909.6, "errorRate": 0.0 },
+  "preChaosSummary": { "avgThroughputRecPerSec": 499.6, "avgLatencyMs": 3.1, "p99LatencyMs": 6.2, "maxLatencyMs": 20.8, "errorRate": 0.0 },
+  "postChaosSummary": { "avgThroughputRecPerSec": 486.3, "avgLatencyMs": 9.8, "p99LatencyMs": 309.5, "maxLatencyMs": 1874.0, "errorRate": 0.0 },
+  "recoveryTime": 41.027310000
 }
 ```
 
-`status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`. Impact deltas are percentage changes between the pre- and post-chaos summaries.
+`status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`. Impact deltas are percentage changes between the pre- and post-chaos summaries. Durations are in seconds: `chaosDuration` runs from the moment Kates creates the fault to its verdict, so on Litmus it includes the experiment's start-up, and `recoveryTime` runs from the verdict until every probe passes, or until `maxRecoveryWaitSec` runs out.
 
 ---
 
@@ -631,7 +663,7 @@ Create a recurring test schedule. Cron expressions use the 5-field Unix format (
   "name": "Nightly Load Regression",
   "cronExpression": "0 2 * * *",
   "enabled": true,
-  "testRequest": { "type": "LOAD", "spec": { "numRecords": 100000, "numProducers": 4, "acks": "all" } }
+  "testRequest": { "type": "LOAD", "spec": { "numRecords": 100000, "acks": "all" } }
 }
 ```
 
@@ -727,7 +759,7 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 
 ## API Workflows
 
-The following `curl`-based workflows demonstrate common multi-step operations. All examples assume the API is available at `localhost:30083` (the kind NodePort). When API security is enabled — the production default — add `-H "X-API-Key: $KATES_API_KEY"` to every `curl` call.
+The following `curl`-based workflows demonstrate common multi-step operations. All examples assume the API is forwarded to `localhost:30083` (see [Base URL](#base-url)) and `KATES_API_KEY` holds the key (see [Authentication](#authentication)); with `set -u`, a script stops at its `AUTH=` line if the variable is unset.
 
 ### Workflow 1: Create a Test, Poll for Completion, Get the Report
 
@@ -735,25 +767,26 @@ The following `curl`-based workflows demonstrate common multi-step operations. A
 #!/usr/bin/env bash
 set -euo pipefail
 BASE="http://localhost:30083"
+AUTH="X-API-Key: $KATES_API_KEY"
 
 # Create a load test
-TEST_ID=$(curl -s -X POST "$BASE/api/tests" \
+TEST_ID=$(curl -s -X POST "$BASE/api/tests" -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{"type":"LOAD","spec":{"numRecords":100000,"numProducers":4,"numConsumers":2,"acks":"all","topic":"perf-test","partitions":3,"replicationFactor":3}}' \
+  -d '{"type":"LOAD","spec":{"numRecords":100000,"acks":"all","topic":"perf-test","partitions":3,"replicationFactor":3}}' \
   | jq -r '.id')
 echo "Created test: $TEST_ID"
 
 # Poll until complete
 while true; do
-  STATUS=$(curl -s "$BASE/api/tests/$TEST_ID" | jq -r '.status')
+  STATUS=$(curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID" | jq -r '.status')
   echo "Status: $STATUS"
   [[ "$STATUS" == "DONE" || "$STATUS" == "FAILED" ]] && break
   sleep 5
 done
 
 # Fetch report and export as JUnit XML
-curl -s "$BASE/api/tests/$TEST_ID/report" | jq .
-curl -s "$BASE/api/tests/$TEST_ID/report/junit" -o report.xml
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report" | jq .
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/junit" -o report.xml
 ```
 
 ### Workflow 2: Validate and Execute a Disruption
@@ -764,26 +797,27 @@ Disruption execution is asynchronous. The `POST` validates the plan, returns `20
 #!/usr/bin/env bash
 set -euo pipefail
 BASE="http://localhost:30083"
-PLAN='{"name":"broker-kill-test","maxAffectedBrokers":1,"autoRollback":true,"steps":[{"name":"kill-broker-0","faultSpec":{"experimentName":"broker-kill","disruptionType":"POD_KILL","targetNamespace":"kafka","targetLabel":"strimzi.io/cluster=krafter","chaosDurationSec":30},"steadyStateSec":15,"observationWindowSec":60,"requireRecovery":true}]}'
+AUTH="X-API-Key: $KATES_API_KEY"
+PLAN='{"name":"broker-kill-test","maxAffectedBrokers":1,"autoRollback":true,"steps":[{"name":"kill-broker-0","faultSpec":{"experimentName":"broker-kill","disruptionType":"POD_KILL","targetNamespace":"kafka","targetLabel":"strimzi.io/component-type=kafka,strimzi.io/broker-role=true","targetBrokerId":0,"chaosDurationSec":30},"steadyStateSec":15,"observationWindowSec":60,"requireRecovery":true}]}'
 
 # Dry-run to validate (no faults injected)
-curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "Content-Type: application/json" -d "$PLAN" | jq .
+curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "$AUTH" -H "Content-Type: application/json" -d "$PLAN" | jq .
 
 # Execute — returns 202 immediately with the report id
-DISRUPT_ID=$(curl -s -X POST "$BASE/api/disruptions" -H "Content-Type: application/json" -d "$PLAN" | jq -r '.id')
+DISRUPT_ID=$(curl -s -X POST "$BASE/api/disruptions" -H "$AUTH" -H "Content-Type: application/json" -d "$PLAN" | jq -r '.id')
 echo "Disruption started: $DISRUPT_ID"
 
 # Poll until the report reaches a terminal status
 while true; do
-  STATUS=$(curl -s "$BASE/api/disruptions/$DISRUPT_ID" | jq -r '.status')
+  STATUS=$(curl -s -H "$AUTH" "$BASE/api/disruptions/$DISRUPT_ID" | jq -r '.status')
   echo "Status: $STATUS"
   case "$STATUS" in COMPLETED|PARTIAL|FAILED|REJECTED|INTERRUPTED) break ;; esac
   sleep 10
 done
 
 # Inspect recovery timings and Kafka impact
-curl -s "$BASE/api/disruptions/$DISRUPT_ID/timeline" | jq '.[] | {step, timeToFirstReady, timeToAllReady}'
-curl -s "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.[] | {step, isr, lag}'
+curl -s -H "$AUTH" "$BASE/api/disruptions/$DISRUPT_ID/timeline" | jq '.[] | {step, timeToFirstReady, timeToAllReady}'
+curl -s -H "$AUTH" "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.[] | {step, isr, lag}'
 ```
 
 ### Workflow 3: Export Results in Different Formats
@@ -792,13 +826,14 @@ curl -s "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.[] | {step, isr
 #!/usr/bin/env bash
 set -euo pipefail
 BASE="http://localhost:30083"
-TEST_ID="a1b2c3d4"
+AUTH="X-API-Key: $KATES_API_KEY"
+TEST_ID="${1:?usage: $0 <test-id>}"   # an ID from kates test list or GET /api/tests
 
-curl -s "$BASE/api/tests/$TEST_ID/report"                   -o report.json
-curl -s "$BASE/api/tests/$TEST_ID/report/csv"                -o report.csv
-curl -s "$BASE/api/tests/$TEST_ID/report/junit"              -o report.xml
-curl -s "$BASE/api/tests/$TEST_ID/report/heatmap?format=json" -o heatmap.json
-curl -s "$BASE/api/tests/$TEST_ID/report/heatmap?format=csv"  -o heatmap.csv
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report"                   -o report.json
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/csv"                -o report.csv
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/junit"              -o report.xml
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/heatmap?format=json" -o heatmap.json
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/heatmap?format=csv"  -o heatmap.csv
 
 echo "Exported: report.json, report.csv, report.xml, heatmap.json, heatmap.csv"
 jq '{type:.run.testType, throughput:.summary.avgThroughputRecPerSec, p99:.summary.p99LatencyMs, sla:.overallSlaVerdict.passed}' report.json
@@ -807,10 +842,11 @@ jq '{type:.run.testType, throughput:.summary.avgThroughputRecPerSec, p99:.summar
 ::: {.callout-tip}
 **Try it**
 
-Walk the core loop against a running backend — no CLI involved:
+Walk the core loop against a running backend — no CLI involved. With `make ports` running:
 
 ```bash
 BASE="http://localhost:30083"
+export KATES_API_KEY="$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)"
 
 # Public endpoint — answers without any key
 curl -s "$BASE/api/health" | jq '{status, kafka: .kafka.status}'
@@ -844,4 +880,4 @@ The health check works with no key, the create call returns `202 Accepted` with 
 - One report feeds many consumers: JSON for dashboards, CSV for spreadsheets, JUnit XML for CI gates, and heatmap data for latency visualization
 - This chapter covers the core endpoint families only; the complete, always-current spec lives at `/q/openapi`
 
-When shell scripts hit their limits — typed clients, streaming results, service-to-service calls — the same operations are available over protocol buffers in [gRPC API Reference](16-grpc-api.md).
+When shell scripts hit their limits — typed clients, service-to-service calls — the same operations are available over protocol buffers in [gRPC API Reference](16-grpc-api.md).
