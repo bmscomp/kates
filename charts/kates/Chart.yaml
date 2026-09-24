@@ -2,10 +2,11 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: the default ClusterRole may patch KafkaNodePools. SCALE_DOWN lowers a
-# node pool's replicas on either chaos backend, so the permission cannot wait
-# for rbac.directChaos. Other defaults are unchanged.
-version: 0.10.3
+# Patch: values-prod.yaml and values-staging.yaml size the heap inside their
+# memory limit, values-generic.yaml runs generational ZGC, and the JVM
+# overlays (prod, generic, corporate) no longer pin a release tag of their own;
+# values-native.yaml keeps its matching -native pin. values.yaml is unchanged.
+version: 0.10.4
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -29,6 +30,12 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "values-prod.yaml set a 1Gi memory limit and inherited -Xmx2560m from values.yaml, and values-staging.yaml a 512Mi limit under the same heap, so either pod is OOMKilled once its heap grows past the limit. values-prod.yaml now runs 2Gi/4Gi, the chart defaults, with the heap set beside it (62.5% of the limit); values-staging.yaml runs 512Mi/1Gi with -Xmx512m, as values-dev.yaml does"
+    - kind: changed
+      description: "values-generic.yaml, the overlay `kates deploy` applies on every cluster that is not kind, adds -XX:+ZGenerational, so ZGC runs its generational mode on the JDK 21 image there as it does under values.yaml and values-prod.yaml; -XX:+UseZGC alone selects the single-generation mode on JDK 21"
+    - kind: fixed
+      description: "values-prod.yaml, values-generic.yaml and values-corporate.yaml pinned image.tag 1.17.0, older than the 1.22.0 the probe defaults need, and `kates deploy` applies values-generic.yaml on every cluster that is not kind. They set no tag now, so the one in values.yaml applies"
     - kind: changed
       description: "The default ClusterRole grants patch on kafkanodepools. SCALE_DOWN now removes a broker by lowering spec.replicas of its KafkaNodePool, and rollback and orphan recovery put the count back; it used to scale StatefulSets, which Strimzi does not create, so it removed nothing and its rollback restored nothing. It runs on the Kubernetes API with the Kates service account on both chaos backends (Litmus pod-delete only kills a pod its StrimziPodSet recreates), so the rule is not behind rbac.directChaos"
     - kind: fixed

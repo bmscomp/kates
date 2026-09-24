@@ -1,15 +1,27 @@
+# No image.tag here: values.yaml carries the release pin, and it has to name a
+# release with the health endpoints the probes use (>= 1.22.0). A second pin
+# in an overlay does not move with it. values-native.yaml carries the matching
+# <appVersion>-native pin, which has to move by hand.
 image:
   repository: ghcr.io/bmscomp/kates
-  tag: "1.17.0"
   pullPolicy: Always
 
+# The heap is sized against the memory LIMIT: -Xmx2560m is 62.5% of 4Gi. The
+# rest is what the JVM holds outside the heap — metaspace, thread stacks,
+# direct buffers, the code cache, ZGC's own structures. A heap at or above the
+# limit gets the container OOMKilled under load, with nothing in the Java log
+# to say why. Change the two together and keep the heap at no more than ~70%
+# of the limit.
 resources:
   requests:
-    memory: "512Mi"
+    memory: "2Gi"
     cpu: "500m"
   limits:
-    memory: "1Gi"
+    memory: "4Gi"
     cpu: "1000m"
+
+jvm:
+  options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 
 autoscaling:
   enabled: true

@@ -23,9 +23,11 @@ containerSecurityContext:
     drop: ["ALL"]
 
 # ── Image ─────────────────────────────────────────────────────────────────────
+# The tag comes from values.yaml, whose release carries the health endpoints
+# the probes use (>= 1.22.0). Pin one here only if your mirror lags, and keep
+# it at or above that release.
 image:
   repository: ghcr.io/bmscomp/kates
-  tag: "1.17.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
