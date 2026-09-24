@@ -23,7 +23,7 @@ Unlike generic load testing tools, Kates understands Kafka semantics — produce
 Running Kafka in production requires confidence in three dimensions:
 
 ```mermaid
-graph TD
+graph LR
     A[Production Readiness] --> B[Performance]
     A --> C[Resilience]
     A --> D[Data Integrity]
@@ -84,7 +84,7 @@ Disruption tests include safety guardrails: maximum affected broker limits, auto
 ## How Kates Fits Into Your Workflow
 
 ```mermaid
-graph LR
+graph TB
     subgraph Development
         A[Code Change] --> B[Build Pipeline]
     end

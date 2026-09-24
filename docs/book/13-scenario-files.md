@@ -130,20 +130,20 @@ SLA gates are only evaluated when you run `kates test apply` with `--wait`. With
 :::
 
 ```mermaid
-graph TD
+graph LR
     subgraph Test Completes
         R[Test Results]
     end
     
     subgraph SLA Gates
-        R --> G1{"P99 ≤ threshold?"}
-        R --> G2{"Avg ≤ threshold?"}
-        R --> G3{"Throughput ≥ min?"}
-        R --> G5{"Data loss ≤ max?"}
-        R --> G6{"RTO ≤ max?"}
-        R --> G7{"RPO ≤ max?"}
-        R --> G8{"Out-of-order ≤ max?"}
-        R --> G9{"CRC failures ≤ max?"}
+        R --> G1(["P99 ≤ threshold?"])
+        R --> G2(["Avg ≤ threshold?"])
+        R --> G3(["Throughput ≥ min?"])
+        R --> G5(["Data loss ≤ max?"])
+        R --> G6(["RTO ≤ max?"])
+        R --> G7(["RPO ≤ max?"])
+        R --> G8(["Out-of-order ≤ max?"])
+        R --> G9(["CRC failures ≤ max?"])
     end
     
     subgraph Outcome

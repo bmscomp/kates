@@ -85,7 +85,7 @@ The following diagram shows three representative topologies. Most teams start wi
 ```mermaid
 graph TB
     subgraph Minimal["Minimal (1 Kind node)"]
-        direction TB
+        direction LR
         MN1["Single Node"]
         MN1 --- MB["3 Brokers + 3 Controllers"]
         MN1 --- MK["Kates + PostgreSQL"]
@@ -93,7 +93,7 @@ graph TB
     end
 
     subgraph Standard["Standard (3 nodes)"]
-        direction TB
+        direction LR
         SN1["Node 1 (alpha)"]
         SN2["Node 2 (sigma)"]
         SN3["Node 3 (gamma)"]
@@ -106,7 +106,7 @@ graph TB
     end
 
     subgraph Production["Production (6+ nodes)"]
-        direction TB
+        direction LR
         PN1["Nodes 1-3: Kafka"]
         PN4["Node 4: Kates + DB"]
         PN5["Node 5: Monitoring"]
@@ -116,6 +116,8 @@ graph TB
         PN5 --- PM["Prometheus + Grafana<br/>persistent storage"]
         PN6 --- PL["LitmusChaos + spare capacity"]
     end
+
+    Minimal ~~~ Standard ~~~ Production
 ```
 
 ---

@@ -129,10 +129,12 @@ The histogram is the heart of latency measurement. It is backed by **HdrHistogra
 ```mermaid
 graph LR
     subgraph Internal["HdrHistogram (1µs–60s)"]
+        direction TB
         B1["0.001ms"] --> B2["0.01ms"] --> B3["0.1ms"] --> B4["1ms"] --> B5["10ms"] --> B6["100ms"] --> B7["1000ms"]
     end
     
     subgraph Export["25 Heatmap Buckets"]
+        direction LR
         H1["0–0.1ms"]
         H2["0.1–0.5ms"]
         H3["0.5–1ms"]
@@ -159,7 +161,7 @@ Key methods:
 The disruption subsystem provides **Kubernetes-native chaos injection** with Kafka awareness.
 
 ```mermaid
-graph TB
+graph LR
     subgraph Control
         DO[DisruptionOrchestrator]
         DSG[DisruptionSafetyGuard]

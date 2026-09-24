@@ -16,33 +16,34 @@ After this chapter, you can:
 ```mermaid
 graph TB
     subgraph Kind["Kind Cluster: panda"]
-        subgraph Alpha["Node: alpha (control-plane)"]
-            B0["brokers-alpha-0<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass: local-storage-alpha"]
+        direction TB
+        REP(["replication<br/>between the three brokers"])
+
+        subgraph Alpha["alpha (control-plane)"]
+            B0["brokers-alpha-0<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass:<br/>local-storage-alpha"]
             C3["controllers-3<br/>Controller<br/>1Gi Memory | 5Gi PVC"]
         end
 
-        subgraph Sigma["Node: sigma (worker)"]
-            B2["brokers-sigma-2<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass: local-storage-sigma"]
+        subgraph Sigma["sigma (worker)"]
+            B2["brokers-sigma-2<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass:<br/>local-storage-sigma"]
             C4["controllers-4<br/>Controller<br/>1Gi Memory | 5Gi PVC"]
         end
 
-        subgraph Gamma["Node: gamma (worker)"]
-            B1["brokers-gamma-1<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass: local-storage-gamma"]
+        subgraph Gamma["gamma (worker)"]
+            B1["brokers-gamma-1<br/>Broker<br/>4Gi Memory | 50Gi PVC<br/>StorageClass:<br/>local-storage-gamma"]
             C5["controllers-5<br/>Controller<br/>1Gi Memory | 5Gi PVC"]
         end
+
+        RAFT(["Raft metadata<br/>between the three controllers"])
     end
 
-    C3 <-->|"Raft<br/>metadata"| C4
-    C4 <-->|"Raft<br/>metadata"| C5
-    C5 <-->|"Raft<br/>metadata"| C3
-
-    B0 <-.->|"replication"| B2
-    B2 <-.->|"replication"| B1
-    B1 <-.->|"replication"| B0
+    REP <-.-> B0 & B2 & B1
 
     B0 -->|"fetch metadata"| C3
     B2 -->|"fetch metadata"| C4
     B1 -->|"fetch metadata"| C5
+
+    C3 & C4 & C5 <--> RAFT
 ```
 
 The cluster uses **dedicated roles** — controllers and brokers run in separate pods. There is no ZooKeeper. The three controllers form the KRaft metadata quorum via Raft consensus, while the three brokers handle the data plane (produce, consume, replicate).

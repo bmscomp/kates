@@ -23,6 +23,7 @@ Chaos engineering replaces **hope** with **evidence**.
 ```mermaid
 graph TD
     subgraph Without Chaos
+        direction TB
         A[Deploy to production] --> B[Wait for incident]
         B --> C[Scramble to fix]
         C --> D[Post-mortem]
@@ -30,6 +31,7 @@ graph TD
     end
     
     subgraph With Chaos
+        direction TB
         F[Deploy to staging] --> G[Inject controlled failure]
         G --> H[Observe behavior]
         H --> I[Fix weaknesses]
@@ -259,7 +261,7 @@ These metrics form the foundation of SLA grading in Kates disruption tests.
 A fully automated Game Day follows a 7-phase pipeline. Each phase has a clear entry gate and exit criteria:
 
 ```mermaid
-flowchart LR
+flowchart TB
     P["1. Pre-flight\n• Cluster healthy\n• Backups verified\n• Team notified"] --> B["2. Baseline\n• Run LOAD test\n• Record metrics\n• Confirm steady state"]
     B --> C["3. Chaos\n• Inject fault\n• Monitor impact\n• Record timeline"]
     C --> O["4. Observe\n• Track recovery\n• Measure RTO/RPO\n• Check data integrity"]
