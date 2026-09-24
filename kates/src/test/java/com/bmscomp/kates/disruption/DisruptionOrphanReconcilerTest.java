@@ -10,12 +10,13 @@ import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.chaos.ScaleDownSnapshots;
 import com.bmscomp.kates.chaos.StrimziTestCluster;
+import com.bmscomp.kates.chaos.VertxPerMockClient;
 
 /**
  * Startup recovery of a SCALE_DOWN whose plan died with the Kates pod. It
  * used to look only at StatefulSets, which Strimzi does not create.
  */
-@EnableKubernetesMockClient(crud = true)
+@EnableKubernetesMockClient(crud = true, kubernetesClientBuilderCustomizer = VertxPerMockClient.class)
 class DisruptionOrphanReconcilerTest {
 
     KubernetesMockServer server;

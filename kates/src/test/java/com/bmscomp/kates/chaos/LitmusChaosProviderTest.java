@@ -19,7 +19,7 @@ import com.bmscomp.kates.chaos.litmus.ChaosEngine;
  * TARGET_PODS used to be one random pod whatever the spec asked for:
  * targetBrokerId was ignored and a zone-wide fault hit a single broker.
  */
-@EnableKubernetesMockClient(crud = true)
+@EnableKubernetesMockClient(crud = true, kubernetesClientBuilderCustomizer = VertxPerMockClient.class)
 class LitmusChaosProviderTest {
 
     KubernetesMockServer server;

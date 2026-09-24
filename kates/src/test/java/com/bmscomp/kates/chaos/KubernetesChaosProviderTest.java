@@ -19,7 +19,7 @@ import io.fabric8.mockwebserver.http.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-@EnableKubernetesMockClient(crud = true)
+@EnableKubernetesMockClient(crud = true, kubernetesClientBuilderCustomizer = VertxPerMockClient.class)
 public class KubernetesChaosProviderTest {
 
     KubernetesMockServer server;
@@ -638,6 +638,34 @@ public class KubernetesChaosProviderTest {
         List<String> remaining = remainingPods();
         assertEquals(2, remaining.size());
         assertTrue(remaining.contains("krafter-brokers-2"));
+    }
+
+    @Test
+    void podKillByBrokerIdNeverKillsAKraftController() throws Exception {
+        // The default Kind cluster: brokers are nodes 0–2, dedicated controllers 3–5.
+        StrimziTestCluster cluster = new StrimziTestCluster(server, client)
+                .pool("brokers-alpha", "broker", 0)
+                .pool("brokers-gamma", "broker", 1)
+                .pool("brokers-sigma", "broker", 2)
+                .pool("controllers-alpha", "controller", 3)
+                .pool("controllers-gamma", "controller", 4)
+                .pool("controllers-sigma", "controller", 5);
+
+        FaultSpec spec = FaultSpec.builder("kill-3")
+                .targetBrokerId(3)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        List<String> pods = cluster.pods();
+        assertEquals(
+                3,
+                pods.stream().filter(p -> p.startsWith("krafter-controllers-")).count(),
+                "controller 3 used to go");
+        assertEquals(
+                2, pods.stream().filter(p -> p.startsWith("krafter-brokers-")).count(), pods.toString());
     }
 
     @Test

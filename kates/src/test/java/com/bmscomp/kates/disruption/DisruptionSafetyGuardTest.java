@@ -25,6 +25,7 @@ import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.KubernetesChaosProvider;
 import com.bmscomp.kates.chaos.StrimziTestCluster;
+import com.bmscomp.kates.chaos.VertxPerMockClient;
 import com.bmscomp.kates.domain.SlaDefinition;
 
 /**
@@ -35,7 +36,7 @@ import com.bmscomp.kates.domain.SlaDefinition;
  * from the {@code kates.io/original-replicas} snapshot the provider stamps at
  * scale-down time, then clears it.
  */
-@EnableKubernetesMockClient(crud = true)
+@EnableKubernetesMockClient(crud = true, kubernetesClientBuilderCustomizer = VertxPerMockClient.class)
 class DisruptionSafetyGuardTest {
 
     KubernetesMockServer server;
@@ -447,6 +448,116 @@ class DisruptionSafetyGuardTest {
         assertEquals(
                 List.of("patch apps/statefulsets", "update apps/statefulsets/scale"),
                 asked.stream().map(DisruptionSafetyGuardTest::review).toList());
+    }
+
+    // ── KRaft controllers are not brokers ───────────────────────────────────
+
+    /**
+     * The default Kind cluster: brokers are nodes 0–2 and dedicated KRaft
+     * controllers 3–5. strimzi.io/component-type=kafka matches all six.
+     */
+    private StrimziTestCluster threeBrokersThreeControllers() {
+        return new StrimziTestCluster(server, client)
+                .pool("brokers-alpha", "broker", 0)
+                .pool("brokers-gamma", "broker", 1)
+                .pool("brokers-sigma", "broker", 2)
+                .pool("controllers-alpha", "controller", 3)
+                .pool("controllers-gamma", "controller", 4)
+                .pool("controllers-sigma", "controller", 5);
+    }
+
+    private static final List<String> THREE_BROKERS =
+            List.of("krafter-brokers-alpha-0", "krafter-brokers-gamma-1", "krafter-brokers-sigma-2");
+
+    private static FaultSpec killAll(String selector) {
+        return FaultSpec.builder("kill-all")
+                .targetLabel(selector)
+                .targetAll(true)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+    }
+
+    private static FaultSpec kill(int brokerId) {
+        return FaultSpec.builder("kill-" + brokerId)
+                .targetBrokerId(brokerId)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+    }
+
+    @Test
+    void aPlanThatTargetsAllThreeBrokersIsRejected() {
+        threeBrokersThreeControllers();
+
+        // Both passed: the controllers made it 3 brokers down of 6.
+        var byLabel = guard.validatePlan(plan(-1, killAll("strimzi.io/broker-role=true")));
+        var byId = guard.validatePlan(plan(-1, kill(0), kill(1), kill(2)));
+
+        for (var result : List.of(byLabel, byId)) {
+            assertFalse(result.safe());
+            assertEquals(List.of("Plan would affect ALL 3 brokers — cluster would lose availability"), result.errors());
+        }
+    }
+
+    @Test
+    void blastRadiusCountsThreeBrokersNotSix() {
+        threeBrokersThreeControllers();
+
+        assertEquals(3, guard.dryRun(plan(1, kill(1))).totalBrokers());
+        assertTrue(guard.validatePlan(plan(1, kill(1))).safe());
+        // Never fired: two of six left four.
+        assertEquals(
+                List.of("Only 1 broker would remain after disruption — high risk of data loss"),
+                guard.validatePlan(plan(-1, kill(0), kill(1))).warnings());
+    }
+
+    @Test
+    void targetBrokerIdResolvesToABrokerNeverAController() {
+        threeBrokersThreeControllers();
+
+        var broker = guard.dryRun(plan(1, kill(1))).steps().getFirst();
+        assertEquals("krafter-brokers-gamma-1", broker.targetPod());
+        assertTrue(broker.warnings().isEmpty(), broker.warnings().toString());
+
+        // Node 3 is a controller, and used to be the target.
+        var controller = guard.dryRun(plan(1, kill(3))).steps().getFirst();
+        assertTrue(THREE_BROKERS.contains(controller.targetPod()), controller.targetPod());
+        assertTrue(
+                controller.warnings().stream().anyMatch(w -> w.startsWith("targetBrokerId 3 matches no broker pod")),
+                controller.warnings().toString());
+    }
+
+    @Test
+    void controllersAStepHitsAreListedButNotCounted() {
+        threeBrokersThreeControllers();
+        // What az-failure kills in zone alpha: a broker and a controller.
+        FaultSpec zoneAlpha = killAll("strimzi.io/pool-name in (brokers-alpha,controllers-alpha)");
+
+        assertTrue(guard.validatePlan(plan(1, zoneAlpha)).safe());
+        assertEquals(
+                List.of("krafter-brokers-alpha-0", "krafter-controllers-alpha-3"),
+                guard.dryRun(plan(1, zoneAlpha)).steps().getFirst().affectedPods().stream()
+                        .sorted()
+                        .toList());
+    }
+
+    @Test
+    void aNodeWithBothRolesCountsAsABroker() {
+        new StrimziTestCluster(server, client).pool("dual-role", "broker,controller", 0, 1, 2);
+
+        var result = guard.validatePlan(plan(-1, killAll("strimzi.io/controller-role=true")));
+
+        assertFalse(result.safe());
+        assertEquals(List.of("Plan would affect ALL 3 brokers — cluster would lose availability"), result.errors());
+    }
+
+    @Test
+    void anOverriddenKafkaLabelCountsOnlyItsBrokers() {
+        threeBrokersThreeControllers();
+        guard.kafkaLabel = "strimzi.io/cluster=krafter";
+
+        assertEquals(3, guard.dryRun(plan(-1, kill(1))).totalBrokers());
+        assertFalse(guard.validatePlan(plan(-1, killAll("strimzi.io/broker-role=true")))
+                .safe());
     }
 
     // ── Leader-aware steps ──────────────────────────────────────────────────
