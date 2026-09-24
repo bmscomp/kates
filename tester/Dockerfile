@@ -45,6 +45,13 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # explains which CVEs each swap clears and why it is tied to one Kafka release;
 # MAVEN_REPO points the downloads at a mirror where Maven Central is not
 # reachable.
+#
+# The tarball comes from Apache's CDN, which carries only current releases, and
+# falls back to archive.apache.org, which carries every release but serves it
+# at a trickle: 84 KB/s when measured, so a CI build sat on the 130 MB tarball
+# until the job timed out. The pinned SHA-512 makes the source irrelevant to
+# what gets installed. Every download retries, and one that stalls (under
+# 10 KB/s for a minute) is dropped and retried.
 ARG KAFKA_VERSION=4.3.1
 ARG KAFKA_SCALA_VERSION=2.13
 ARG KAFKA_SHA512=c7d7b2318cb51aa0c61d3246a51c349210073c5c9b754947ef965a439f2f939e8600f204e134a75ac31faf3829c9370960ef7c6a9886c8a1dbf0339a21f4c54c
@@ -52,8 +59,10 @@ ARG MAVEN_REPO=https://repo1.maven.org/maven2
 WORKDIR /tmp
 COPY kafka-lib-overrides.txt ./
 RUN set -eu; \
+    fetch() { curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --speed-limit 10240 --speed-time 60 "$@"; }; \
     tgz="kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"; \
-    curl -fsSLO "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${tgz}"; \
+    fetch -O "https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${tgz}" \
+      || fetch -O "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${tgz}"; \
     printf '%s  %s\n' "${KAFKA_SHA512}" "${tgz}" > "${tgz}.sha512"; \
     sha512sum -c "${tgz}.sha512"; \
     tar -xzf "${tgz}"; \
@@ -72,7 +81,7 @@ RUN set -eu; \
       fi; \
       rm "/opt/kafka/libs/${old}"; \
       new="/opt/kafka/libs/${path##*/}"; \
-      curl -fsSL -o "${new}" "${MAVEN_REPO}/${path}"; \
+      fetch -o "${new}" "${MAVEN_REPO}/${path}"; \
       printf '%s  %s\n' "${sum}" "${new}" > jar.sha256; \
       sha256sum -c jar.sha256; \
     done < overrides; \
