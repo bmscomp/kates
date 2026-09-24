@@ -148,19 +148,69 @@ The default 3-broker, 3-controller topology covers the most common testing scena
 
 ### Testing with More Brokers
 
-To add brokers (e.g., testing partition rebalancing after scale-up):
+To add brokers (e.g., testing partition rebalancing after scale-up), upgrade the release from the values it runs with — not with `--reuse-values`, which applies the release's values over the *old* chart's defaults and so ignores every default the chart has changed since the install.
 
 ```bash
-# Add a broker to the default pool
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm dependency build charts/kafka-cluster
-helm upgrade krafter charts/kafka-cluster -n kafka \
-  --set nodePools.roleDefaults.broker.replicas=4 \
-  --reuse-values
+
+# The Helm release: krafter from kates deploy, kafka-cluster from make kafka
+RELEASE=krafter
+
+# Every value the release was installed with — its files and its --set flags
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
 ```
 
-`charts/kafka-cluster/charts/` is generated and gitignored, so the `helm dependency build` that resolves the `kafka-common` library chart is not optional on a fresh checkout — without it Helm refuses to render. The same applies to every `helm` command against `connect-cluster` and `mirror-maker2`, which share that library.
+`charts/kafka-cluster/charts/` is generated and gitignored, so the `helm dependency build` that resolves the `kafka-common` library chart is not optional on a fresh checkout — without it Helm refuses to render. The same applies to every `helm` command against `connect-cluster` and `mirror-maker2`, which share that library. For kafka-cluster the build also downloads the SeaweedFS subchart, and once `Chart.lock` exists it accepts only a repository Helm has configured — hence the `helm repo add`, once per machine.
 
-When the new broker joins, Cruise Control's auto-rebalance moves partitions onto it: the chart references its `krafter-add-brokers-template` KafkaRebalance template from `cruiseControl.autoRebalance`. A full rebalance is opt-in (`rebalance.full.enabled`).
+`kates deploy` and `make kafka` (`scripts/deploy-kafka-generic.sh`) install the same `krafter` Kafka cluster under different Helm releases, `krafter` and `kafka-cluster` respectively; `helm list -n kafka` shows which one you have. The `helm` commands here take the release from `RELEASE`.
+
+A pool's own `replicas` wins over `nodePools.roleDefaults`, so where the broker count lives depends on how the release was installed. `kates deploy` and `make kafka` (with its default `ENV=kind`) generate the pools, each with a `replicas` of its own. On the `panda` Kind cluster, `krafter-current.yaml` lists one broker pool per zone under `brokerPools` — `brokers-alpha`, `brokers-sigma` and `brokers-gamma`, at `replicas: 1` each.
+
+The generated values also size each broker for one per zone: `brokerDefaults.resources` gives every broker close to half of a node's CPU and memory, up to 8000m and 16Gi, with requests equal to limits. A second broker in a zone shares that zone's node with the first one and the zone's controller, and unless the caps apply, the three ask for more than the node has. A fourth broker therefore takes two edits in `krafter-current.yaml`: raise one pool's `replicas` (`brokers-alpha` to `2` adds the broker in `alpha`), and halve `brokerDefaults.resources`, requests and limits alike. Keep the memory at 3Gi or more, which leaves the JVM 1Gi beyond the broker's 2048m heap (`nodePools.roleDefaults.broker.jvmOptions`). With a file that holds 8000m and 16Gi, the edited entries read:
+
+```yaml
+brokerDefaults:
+  # podAntiAffinity and topologySpreadConstraints unchanged
+  resources:
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+    requests:
+      cpu: 4000m
+      memory: 8Gi
+brokerPools:
+  # brokers-gamma and brokers-sigma unchanged
+  - name: brokers-alpha
+    replicas: 2
+    # Only replicas changes: keep the storageClass and storageSize your
+    # file has, so the upgrade neither resizes the existing volume nor
+    # gives the new broker a different one
+    storageClass: local-storage-alpha
+    storageSize: 200Gi
+    zone: alpha
+```
+
+Upgrade from the edited file, then check that the new broker runs:
+
+```bash
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka -f krafter-current.yaml
+
+# Two pods, both Running once the roll finishes
+kubectl get pods -n kafka -l strimzi.io/pool-name=brokers-alpha
+```
+
+The new resources apply to every broker pool, so Strimzi also rolls the three existing brokers, one at a time. A pod that stays `Pending` does not fit its node: `kubectl describe pod` on it names the resource that ran out (`Insufficient cpu` or `Insufficient memory`). Lower that one further; where that would take the memory under 3Gi, the node has no room for a second broker.
+
+A broker pool that sets no `replicas` of its own, such as the chart's default `brokers` pool, takes the count from the role default instead:
+
+```bash
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  --set nodePools.roleDefaults.broker.replicas=4
+```
+
+Where Cruise Control runs, its auto-rebalance moves partitions onto the new broker: the chart references its `krafter-add-brokers-template` KafkaRebalance template from `cruiseControl.autoRebalance`. A full rebalance is opt-in (`rebalance.full.enabled`). The generated values that `kates deploy` and `make kafka` install from turn Cruise Control off, and so does the Kind overlay, so on `panda` the new broker takes replicas only of partitions created after it joins; the existing partitions stay where they are.
 
 ### Testing Single-Zone Failures
 

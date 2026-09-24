@@ -69,7 +69,7 @@ Each tenant gets:
 
 ## Onboarding a New Service
 
-Topics, users and network access are all `kafka-cluster` chart values, so one tenant is one block in the environment's values file and one `helm upgrade`. The examples below go in a `tenants.yaml` layered after the platform profile and the environment overlay.
+Topics, users and network access are all `kafka-cluster` chart values, so one tenant is one block of values and one `helm upgrade`. The examples below go in a `tenants.yaml` that holds every tenant, layered after the values the release already runs with.
 
 ### Step 1 — Define Topics
 
@@ -124,11 +124,14 @@ users:
 
 ### Step 3 — Allow Network Access
 
-`networkPolicy.clients` is the allow list in front of the default-deny. Name the listeners the tenant may reach and the chart derives their ports from `kafka.listeners`:
+`networkPolicy.clients` grants the tenant's pods ingress to the brokers in the chart's `krafter-kafka` policy, which `values-kind.yaml` and `values-dev.yaml` do not render. On its own it keeps no other pod out: NetworkPolicies add up, and the policy the Strimzi operator generates admits every pod in the cluster to a listener without `networkPolicyPeers`, which no listener in the chart's values has. The list becomes the allow list once the listeners carry peers, as [Security & Compliance](17-security.md#network-policies) shows. Name the listeners the tenant may reach and the chart derives their ports from `kafka.listeners`.
+
+`clients` is a list, and a list in a later values file replaces the earlier one rather than merging with it. `tenants.yaml` therefore carries every entry the release already has — `helm get values krafter -n kafka` lists them (`kafka-cluster` in place of `krafter` for a release `make kafka` installed); a `kates deploy` install has at least the `connect` entry — with the tenant's added. An entry left out is dropped at the next upgrade:
 
 ```yaml
 networkPolicy:
   clients:
+    # ...every entry the release already lists, unchanged
     - name: my-service
       namespace: my-service-namespace
       podSelector: { app.kubernetes.io/name: my-service }
@@ -160,21 +163,31 @@ env:
 
 ### Step 5 — Apply and Verify
 
-Render first to see exactly what the tenant block adds, then upgrade the release:
+Start from the values the release runs with — every file and `--set` flag it was installed with — then render to see exactly what the tenant block adds, and upgrade. The release is `krafter` when `kates deploy` installed it and `kafka-cluster` when `make kafka` did — `helm list -n kafka` shows which — while the Kafka cluster is `krafter` either way:
 
 ```bash
+# Once per machine: the build downloads the SeaweedFS subchart, and once
+# Chart.lock exists it accepts only a repository Helm has configured
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm dependency build charts/kafka-cluster
 
-helm template krafter charts/kafka-cluster -n kafka \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-<env>.yaml \
+# The Helm release: krafter from kates deploy, kafka-cluster from make kafka
+RELEASE=krafter
+
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
+
+helm template "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
   -f tenants.yaml | grep -E 'kind: (KafkaTopic|KafkaUser|NetworkPolicy)' -A2 | grep 'name:'
 
-helm upgrade krafter charts/kafka-cluster -n kafka \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-<env>.yaml \
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
   -f tenants.yaml
 ```
+
+::: {.callout-caution}
+Do not rebuild the chain from the repository's files (`values-platform.yaml`, then an environment overlay). A release that `kates deploy` or `scripts/deploy-kafka-generic.sh` installed takes its node pools from `.build/values-detected.yaml`, which such a chain leaves out, so the pools it renders carry other names. A pool's name is its identity: each renamed pool is a new pool with new, empty volumes, and the old pools drop out of the release but keep running with the data.
+:::
 
 ```bash
 # Check user was created
@@ -283,14 +296,19 @@ flowchart TD
 
 ### Quick-Start Script
 
-There is no dedicated CLI command for tenant onboarding — the workflow is declarative, and all three pieces are chart values. Add the tenant's `topics.items`, `users.items` and `networkPolicy.clients` entries to `tenants.yaml`, then upgrade the release and verify:
+There is no dedicated CLI command for tenant onboarding — the workflow is declarative, and all three pieces are chart values. Add the tenant's `topics.items`, `users.items` and `networkPolicy.clients` entries to `tenants.yaml`, then upgrade the release from its current values and verify:
 
 ```bash
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm dependency build charts/kafka-cluster
 
-helm upgrade krafter charts/kafka-cluster -n kafka \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-<env>.yaml \
+# The Helm release: krafter from kates deploy, kafka-cluster from make kafka
+RELEASE=krafter
+
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
+
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
   -f tenants.yaml
 
 # Wait for the User Operator to reconcile the credentials
@@ -367,14 +385,33 @@ The `kafka-cluster` chart renders the cluster's alerts as a `PrometheusRule` nam
 
 ## Decommissioning a Tenant
 
-Decommissioning is two moves, not one. Removing the tenant's block from `tenants.yaml` and upgrading stops the chart managing those objects, but `keepOnDelete` is on by default and the chart annotates every `KafkaTopic` and `KafkaUser` with `helm.sh/resource-policy: keep` — so Helm leaves them behind on purpose, and the credentials stay valid until you delete them yourself.
+Decommissioning is two moves, not one. Turning the tenant's entries off and upgrading stops the chart managing those objects, but `keepOnDelete` is on by default and the chart annotates every `KafkaTopic` and `KafkaUser` with `helm.sh/resource-policy: keep` — so Helm leaves them behind on purpose, and the credentials stay valid until you delete them yourself.
+
+Deleting the tenant's block from `tenants.yaml` is not enough: `krafter-current.yaml` still carries it from the upgrade that added it, and Helm merges the two. Set `enabled: false` on each entry instead:
+
+```yaml
+topics:
+  items:
+    my-service-events: { enabled: false }
+    my-service-dlq: { enabled: false }
+users:
+  items:
+    my-service: { enabled: false }
+networkPolicy:
+  clients:
+    # ...every other client, unchanged
+    - name: my-service
+      enabled: false
+```
 
 ```bash
-# 1. Drop the tenant's topics.items, users.items and networkPolicy.clients
-#    entries from tenants.yaml, then upgrade
-helm upgrade krafter charts/kafka-cluster -n kafka \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-<env>.yaml \
+# 1. Upgrade from the current values with the tenant turned off
+# (the Helm release: krafter from kates deploy, kafka-cluster from make kafka)
+RELEASE=krafter
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
+
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
   -f tenants.yaml
 
 # 2. Delete the user (revokes credentials + ACLs)
@@ -429,6 +466,6 @@ Within the wait window the User Operator flips the user Ready and generates the 
 - Onboarding is declarative and lives in the `kafka-cluster` chart's values — `topics.items`, `users.items` and `networkPolicy.clients` — so one `helm upgrade` carries the whole tenant and the User Operator reconciles credentials and ACLs.
 - Quotas throttle at the broker: an over-quota client sees delayed responses, not errors, so watch tenant latency rather than error rates.
 - Per-user quota metrics aren't exported by the JMX rules, so tenant usage is tracked indirectly — by topic prefix and consumer group in PromQL.
-- Decommissioning takes two moves: drop the tenant from the values and upgrade, then delete the `KafkaUser` and its topics by hand — `keepOnDelete` and `helm.sh/resource-policy: keep` mean Helm will not remove them for you.
+- Decommissioning takes two moves: turn the tenant's entries off (`enabled: false`) and upgrade from the current values, then delete the `KafkaUser` and its topics by hand — `keepOnDelete` and `helm.sh/resource-policy: keep` mean Helm will not remove them for you.
 
 With tenants isolated from each other, the remaining risk is change itself — [Upgrade Playbook](18-upgrade-playbook.md) gives you step-by-step procedures for upgrading every component of the stack without breaking them.

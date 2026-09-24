@@ -470,16 +470,16 @@ When a new Debezium or Kafka version is released:
 #    then build and push — the image tag is derived from that ARG
 make connect-build connect-push
 
-# 2. Deploy with updated image via Kates CLI
-kates deploy --with-kafka-connect
-
-# Or update directly via Helm. charts/connect-cluster/charts/ is generated and
-# gitignored, so build the kafka-common library before rendering the chart.
+# 2. Upgrade the release from the values it runs with. charts/connect-cluster/charts/
+#    is generated and gitignored, so build the kafka-common library first.
 helm dependency build charts/connect-cluster
+helm get values connect-cluster -n connect -o yaml > connect-current.yaml
 helm upgrade connect-cluster charts/connect-cluster \
-  --namespace connect --reuse-values \
+  --namespace connect -f connect-current.yaml \
   --set image=ghcr.io/bmscomp/connect:3.7.0
 ```
+
+`connect-current.yaml` holds everything the release was installed with — for a `kates deploy` install, the bootstrap address, the Kafka namespace, the schema registry URL, the database egress and the replica count all arrive as `--set` flags that no file records. `--reuse-values` keeps them too, but over the *old* chart's defaults, so a default the new chart changes never applies. `kates deploy --with-kafka-connect` is not an upgrade path: it skips a Connect release that is already deployed and has worker pods.
 
 `make connect-push` publishes the Debezium-only tag (`connect:3.7.0`). The chart's own pin is the fully qualified `<debezium>-kafka-<kafka>` tag, and it lives in two places: `image` in `values.yaml` and the `kates.io/connect-image` annotation in `Chart.yaml`. `kates deploy` runs whatever `values.yaml` pins. A `v*` release tag runs `.github/workflows/publish-connect.yml`, which publishes the qualified tag and moves both pins together, and `scripts/check-versions.sh` fails when the pins disagree with each other, with `Dockerfile.connect`, or with the Kafka pin. `Chart.yaml` `appVersion` is the Kafka version the workers run (the `version` value), not the Debezium version. The chart refuses `:latest` and untagged images.
 
@@ -487,13 +487,14 @@ Strimzi performs a **rolling restart** — one worker at a time. Connectors are 
 
 ### Upgrading the Chart from 1.x
 
-Chart 2.0 reads 1.x values: each moved key is translated, and `helm upgrade` prints a `DEPRECATED` line in the release notes for each one still in use. Check the render and the list before you upgrade:
+Chart 2.0 reads 1.x values: each moved key is translated, and `helm upgrade` prints a `DEPRECATED` line in the release notes for each one still in use. Start from the values the 1.x release runs with, then check the render and the list before you upgrade:
 
 ```bash
 helm dependency build charts/connect-cluster
-helm template connect-cluster charts/connect-cluster -n connect -f my-values.yaml > /dev/null
-helm upgrade connect-cluster charts/connect-cluster -n connect -f my-values.yaml --dry-run | sed -n '/^NOTES/,$p'
-helm upgrade connect-cluster charts/connect-cluster -n connect -f my-values.yaml
+helm get values connect-cluster -n connect -o yaml > connect-current.yaml
+helm template connect-cluster charts/connect-cluster -n connect -f connect-current.yaml > /dev/null
+helm upgrade connect-cluster charts/connect-cluster -n connect -f connect-current.yaml --dry-run | sed -n '/^NOTES/,$p'
+helm upgrade connect-cluster charts/connect-cluster -n connect -f connect-current.yaml
 ```
 
 The upgrade rolls the workers once (the metrics ConfigMap key is now `metrics-config.yml`). Afterwards, check that every connector still runs: one that fails with `Forbidden` reading a Secret needs that Secret in `rbac.secretNames`. The Kafka egress ports, the operator namespace and three alert names changed too — see [Network Policies](#network-policies), [Prometheus Alerts](#prometheus-alerts), and [the 2.0 upgrade guide](../connect-cluster-2.0-upgrade.md) for the key-by-key table.
@@ -504,10 +505,10 @@ The upgrade rolls the workers once (the metrics ConfigMap key is now `metrics-co
 |:----:|--------|--------|
 | 1 | Read Debezium migration guide | Breaking changes documented |
 | 2 | Build new image on CI | `make connect-build` passes |
-| 3 | Deploy to dev/staging | `kates deploy --with-kafka-connect` on dev cluster |
+| 3 | Deploy to dev/staging | The `helm upgrade` above, from the release's current values; every worker rolls onto the new image |
 | 4 | Run integration test | `kates kafka connect test` passes |
 | 5 | Verify connector status | `kates kafka connect connectors` — all RUNNING, no DLQ growth |
-| 6 | Deploy to production | `kates deploy --with-kafka-connect --ha` on prod cluster |
+| 6 | Deploy to production | The same `helm upgrade` on the production cluster, from its own current values |
 | 7 | Monitor for 24h | No alerts, no lag increase |
 
 ### Rolling Back
@@ -518,8 +519,9 @@ helm rollback connect-cluster -n connect
 
 # Or pin to previous image
 helm dependency build charts/connect-cluster
+helm get values connect-cluster -n connect -o yaml > connect-current.yaml
 helm upgrade connect-cluster charts/connect-cluster \
-  --namespace connect --reuse-values \
+  --namespace connect -f connect-current.yaml \
   --set image=ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1
 ```
 
