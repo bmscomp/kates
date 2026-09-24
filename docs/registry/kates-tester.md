@@ -28,25 +28,29 @@ If you are looking for the thing that produces load and grades the result, that 
 | Tool | Version | Notes |
 |---|---|---|
 | `kubectl` | latest stable at build time | From `dl.k8s.io/release/stable.txt` — **not pinned** |
-| Apache Kafka CLI | **3.7.0** (Scala 2.13) | `/opt/kafka/bin` on `PATH` — `kafka-topics.sh`, `kafka-console-producer.sh`, `kafka-consumer-groups.sh`, `kafka-producer-perf-test.sh`, … |
-| `kcat` | Debian bookworm | The Kafka swiss-army knife |
-| `jq` | Debian bookworm | JSON parsing for `kubectl -o json` |
-| `netcat-openbsd` | Debian bookworm | `nc -zv` port probes |
-| `dnsutils` | Debian bookworm | `dig`, `nslookup` — service discovery debugging |
-| `curl`, `ca-certificates`, `bash` | Debian bookworm | |
-| `default-jre-headless` | Debian bookworm | Required by the Kafka shell scripts |
+| Apache Kafka CLI | **4.3.1** (Scala 2.13) | `/opt/kafka/bin` on `PATH` — `kafka-topics.sh`, `kafka-console-producer.sh`, `kafka-consumer-groups.sh`, `kafka-producer-perf-test.sh`, … Tarball checked against Apache's SHA-512; the jars 4.3.1 ships with known CVEs (Jetty, jline, lz4-java, Jackson, log4j) swapped for patched releases, listed in [`tester/kafka-lib-overrides.txt`](https://github.com/bmscomp/kates/blob/main/tester/kafka-lib-overrides.txt) |
+| `kcat` | Debian trixie | The Kafka swiss-army knife |
+| `jq` | Debian trixie | JSON parsing for `kubectl -o json` |
+| `netcat-openbsd` | Debian trixie | `nc -zv` port probes |
+| `dnsutils` | Debian trixie | `dig`, `nslookup` — service discovery debugging |
+| `curl`, `ca-certificates`, `bash` | Debian trixie | |
+| `default-jre-headless` | Debian trixie (OpenJDK 21) | Required by the Kafka shell scripts; the Kafka 4.x tools need 17 or newer |
 
-**Base:** `debian:bookworm-slim` · **User:** UID 1000 (`kates`) · **Workdir:** `/app` ·
+**Base:** `debian:trixie-slim` · **User:** UID 1000 (`kates`) · **Workdir:** `/app` ·
 **Entrypoint:** none; `CMD ["bash"]`
 
 Only the Kafka CLI version is pinned (via the `KAFKA_VERSION` build arg, which also feeds
-the image's own OCI label so the two cannot drift). `kubectl` tracks upstream stable and
-the Debian packages are whatever bookworm ships — this is a diagnostics image, and
+the image's own OCI label so the two cannot drift). It follows the Kafka the charts deploy;
+`scripts/check-versions.sh` holds the two together. `kubectl` tracks upstream stable and
+the Debian packages are whatever trixie ships — this is a diagnostics image, and
 freshness matters more than reproducibility.
 
-> The Kafka **CLI** being 3.7.0 does not limit which brokers you can talk to. The 3.7 tools
-> speak to modern brokers fine; they are here to drive tests, not to define a support
-> matrix.
+> From the first release after 1.23.0. The `1.23.0` tag and older ship the Kafka 3.7.0 CLI
+> on `debian:bookworm-slim`, with that line's CVEs (kafka-clients, ZooKeeper, Jetty 9.4).
+>
+> The Kafka **CLI** is 4.3.1, the Kafka the charts deploy. A 4.x client talks to brokers
+> 2.1 and newer (KIP-896): for an older legacy source cluster, run that cluster's own image,
+> as the `legacy-kafka` chart's tests do.
 
 ---
 

@@ -48,6 +48,8 @@ jobs:
               # check-versions.sh now also asserts the kind node image tags in
               # this file against versions.env, so editing it has to run it.
               - 'config/cluster.yaml'
+              # ...and the tester's Kafka CLI and jar overrides against it.
+              - 'tester/**'
             yaml:
               - 'config/**'
 

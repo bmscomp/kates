@@ -1,0 +1,50 @@
+# Jars in the Apache Kafka tarball that tester/Dockerfile swaps for patched
+# releases from Maven Central. Kafka 4.3.1 ships these with known CVEs that
+# the next 4.3 patch release already fixes upstream (the 4.3 branch moved
+# Jetty, jline, lz4-java, Jackson and log4j after 4.3.1):
+#
+#   Jetty 12.0.34   CVE-2026-10050 (jetty-security, HIGH), CVE-2026-10051,
+#                   CVE-2026-6790, CVE-2026-8384 -> 12.0.39
+#   jline 3.30.4    CVE-2026-56740, CVE-2026-56741 (bundled jline-remote-telnet,
+#                   HIGH), CVE-2026-77420/77421/77422 -> 3.30.17
+#   lz4-java 1.10.2 CVE-2026-59949 (at.yawk.lz4 fork; no fixed 1.10.x) -> 1.11.3,
+#                   the version kates/pom.xml pins
+#   Jackson 2.21.2  CVE-2026-54512, CVE-2026-54513, GHSA-r7wm-3cxj-wff9 (HIGH)
+#                   -> 2.21.7; jackson-annotations stays at 2.21
+#   log4j 2.25.4    CVE-2026-49844 -> 2.25.5
+#
+# The list is written for ONE Kafka release, named on the `kafka` line. The
+# build refuses any other KAFKA_VERSION, and refuses a line whose jar the
+# tarball does not contain, so a Kafka bump cannot leave two versions of a
+# library on the classpath: review every line against the new tarball, drop
+# the ones it already fixes, and move the `kafka` line.
+# scripts/check-versions.sh holds the `kafka` line to the Dockerfile's
+# KAFKA_VERSION.
+#
+# Format: <jar in /opt/kafka/libs> <Maven Central path of the replacement> <sha256>
+kafka 4.3.1
+jackson-core-2.21.2.jar com/fasterxml/jackson/core/jackson-core/2.21.7/jackson-core-2.21.7.jar 8c5623b98f32d5f7e1287ff61ed50e08ab7b11381e991fff89327faabba42261
+jackson-databind-2.21.2.jar com/fasterxml/jackson/core/jackson-databind/2.21.7/jackson-databind-2.21.7.jar 1290c2795e93e8a6861a6c4d9ff0d844d32f5ea178362cb2721edf5561e828b1
+jackson-dataformat-csv-2.21.2.jar com/fasterxml/jackson/dataformat/jackson-dataformat-csv/2.21.7/jackson-dataformat-csv-2.21.7.jar 588050148497158cabdc05c0ae3a7e123194a486b8c62745778fc6239f9b085e
+jackson-dataformat-yaml-2.21.2.jar com/fasterxml/jackson/dataformat/jackson-dataformat-yaml/2.21.7/jackson-dataformat-yaml-2.21.7.jar df2b3e6a194181dc067b7211d750926b4ae9e4f3c892a0005b8219a9b59be681
+jackson-datatype-jdk8-2.21.2.jar com/fasterxml/jackson/datatype/jackson-datatype-jdk8/2.21.7/jackson-datatype-jdk8-2.21.7.jar b8f62f98363ed9aa259b3a479a64fcbe7e081158a8bec6733972e900d12f4e47
+jackson-jakarta-rs-base-2.21.2.jar com/fasterxml/jackson/jakarta/rs/jackson-jakarta-rs-base/2.21.7/jackson-jakarta-rs-base-2.21.7.jar 202b61a95e735d01ae03e411b8f6ae1245bbf19c87d4746c0204579f5c2e456b
+jackson-jakarta-rs-json-provider-2.21.2.jar com/fasterxml/jackson/jakarta/rs/jackson-jakarta-rs-json-provider/2.21.7/jackson-jakarta-rs-json-provider-2.21.7.jar 32473ee172e0c181ba63688ee4a94349de77de05bd4279d0846a9515a56bb0fe
+jackson-module-blackbird-2.21.2.jar com/fasterxml/jackson/module/jackson-module-blackbird/2.21.7/jackson-module-blackbird-2.21.7.jar b41fb816cbaa5f2393136cf1c525e0d9a9f9bcea14207a09e8e703df53351596
+jackson-module-jakarta-xmlbind-annotations-2.21.2.jar com/fasterxml/jackson/module/jackson-module-jakarta-xmlbind-annotations/2.21.7/jackson-module-jakarta-xmlbind-annotations-2.21.7.jar 76054ca6e252e7142fec9c0e9a146bd8c43cde13dddf2d1cdaecd9db981c2ddc
+jetty-alpn-client-12.0.34.jar org/eclipse/jetty/jetty-alpn-client/12.0.39/jetty-alpn-client-12.0.39.jar 131fd1b0d62872f44f92332c061397cebf0480898b7b302740d08c1a853e3d08
+jetty-client-12.0.34.jar org/eclipse/jetty/jetty-client/12.0.39/jetty-client-12.0.39.jar bc2bf4cc3942a34f0ac0ba30ca343bc54d4698d6a5f4b0eba8b84425208923ca
+jetty-ee10-servlet-12.0.34.jar org/eclipse/jetty/ee10/jetty-ee10-servlet/12.0.39/jetty-ee10-servlet-12.0.39.jar 310d0f0f803575fac4d1550ac0dc7c4f7e60f86f1867c747391dc936031e7797
+jetty-ee10-servlets-12.0.34.jar org/eclipse/jetty/ee10/jetty-ee10-servlets/12.0.39/jetty-ee10-servlets-12.0.39.jar 9231f22549934b0d10588154f86459b2eec8ccb50c3ec493c1dde4d2d12d9543
+jetty-http-12.0.34.jar org/eclipse/jetty/jetty-http/12.0.39/jetty-http-12.0.39.jar 1bbccba6e05bb1e738018d224e00455a81260a89faa97b6b56f1998149b2ce01
+jetty-io-12.0.34.jar org/eclipse/jetty/jetty-io/12.0.39/jetty-io-12.0.39.jar b021ebb8eb8d9074b98184ff83f8e57dc224b86c4414e72cf77f9d314149a77d
+jetty-security-12.0.34.jar org/eclipse/jetty/jetty-security/12.0.39/jetty-security-12.0.39.jar 88d9c86676f49d64fa19a7c43be368b1b8726b910f70185ce8df723ea2224b35
+jetty-server-12.0.34.jar org/eclipse/jetty/jetty-server/12.0.39/jetty-server-12.0.39.jar 3a2f2c445016ce2371d1a0577a9e69c225f9b82d431bac6bb4e530bf30b010bf
+jetty-session-12.0.34.jar org/eclipse/jetty/jetty-session/12.0.39/jetty-session-12.0.39.jar 62de5256e331f68c7191533dbd928197b99221293054cb339be7c790636f3007
+jetty-util-12.0.34.jar org/eclipse/jetty/jetty-util/12.0.39/jetty-util-12.0.39.jar 5034589c368cce15eb80171f41c399391b60d3649bde2bafe48f4b6a1c7e84df
+jline-3.30.4.jar org/jline/jline/3.30.17/jline-3.30.17.jar 32ca18a3b5c742bc8a7b42af61ad9b3320dab525361b793ea9e3cb361e292c1d
+log4j-1.2-api-2.25.4.jar org/apache/logging/log4j/log4j-1.2-api/2.25.5/log4j-1.2-api-2.25.5.jar 4dd812dc5a6343f542a9e0046b1ec78ecf10bdd5a8c15745101cdd8b9aa24974
+log4j-api-2.25.4.jar org/apache/logging/log4j/log4j-api/2.25.5/log4j-api-2.25.5.jar 64777f73ea0b3104c04eb82befbdccc30a425a19e83ad06cb2f93aa303511863
+log4j-core-2.25.4.jar org/apache/logging/log4j/log4j-core/2.25.5/log4j-core-2.25.5.jar 050c4f85deb48b055e9c041ac39043fbb79ce477841a11a1eb2969c86c6a0072
+log4j-slf4j-impl-2.25.4.jar org/apache/logging/log4j/log4j-slf4j-impl/2.25.5/log4j-slf4j-impl-2.25.5.jar 3d25b926bc6025c47ec010459749c12aa66b9d5537ba1922d67d89a098a66607
+lz4-java-1.10.2.jar at/yawk/lz4/lz4-java/1.11.3/lz4-java-1.11.3.jar ffdfceacabf20fef15547ab2113374cb2c2b42634f5ac14be72c296a77fd49f8

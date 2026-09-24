@@ -90,10 +90,13 @@ spec:
           echo "  ✓ earliest local offset is ${EARLIEST_LOCAL}: older segments live in object storage"
 
           echo "Reading offset 0 back..."
+          # The consumer's own count, from stderr, not a byte count of stdout:
+          # Kafka 4.x prints option-deprecation notices on stdout, so bytes on
+          # stdout no longer prove a record was read.
           GOT=$(timeout 60 kafka-console-consumer.sh --bootstrap-server "$BOOTSTRAP" \
             --consumer.config /tmp/client.properties --topic "$TOPIC" --partition 0 --offset 0 \
-            --max-messages 1 2>/dev/null | wc -c)
-          if [ "$GOT" -gt 0 ]; then
+            --max-messages 1 2>&1 >/dev/null | sed -n 's/^Processed a total of \([0-9][0-9]*\) messages.*/\1/p')
+          if [ "${GOT:-0}" -gt 0 ]; then
             echo "  ✓ offset 0 was served from object storage"
           else
             echo "  ✗ offset 0 could not be read" && exit 1
