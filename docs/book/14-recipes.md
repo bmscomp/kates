@@ -189,9 +189,11 @@ kates test apply -f integrity-tx.yaml --wait
 **Step 3 — Disruption playbooks:**
 
 ```bash
-kates disruption playbook run leader-cascade
-kates disruption playbook run split-brain
-kates disruption playbook run az-failure
+# Each dry run previews the cluster as it is just before its playbook, starts
+# nothing, and exits 1 when the safety guard would refuse the playbook
+kates disruption playbook run leader-cascade --dry-run && kates disruption playbook run leader-cascade
+kates disruption playbook run split-brain --dry-run && kates disruption playbook run split-brain
+kates disruption playbook run az-failure --dry-run && kates disruption playbook run az-failure
 ```
 
 **Step 4 — Resilience test (performance + chaos combined):**
@@ -259,7 +261,7 @@ Expected output, with illustrative numbers:
 `Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. The Impact Analysis rows come in a different order from run to run. The command returns as soon as its recovery probes pass, usually while the LOAD run is still producing, so the post-chaos summary covers the run up to that moment. With the rate held at 500 records/s, throughput barely moves, and the fault shows in the latency rows.
 
 ::: {.callout-tip}
-Each playbook run prints an SLA grade at the end. If you need a hard pass/fail gate for CI — exit code 1 on SLA violation — run a custom disruption plan instead: `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.
+A playbook run prints the disruption ID and the final status, and gets no SLA grade: playbook YAML cannot carry an `sla` block. For a hard pass/fail gate in CI — exit code 1 on an SLA violation — save a playbook's plan with `kates disruption playbook show <name> -o json > plan.json`, add an `sla` block, and run it with `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.
 :::
 
 ---

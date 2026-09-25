@@ -159,6 +159,8 @@ func TestPathSegmentsAreEscaped(t *testing.T) {
 			func(ctx context.Context, c *Client) error { return ignore(c.ReportBrokers(ctx, hostileID)) }},
 		{"ReportSnapshot", http.MethodGet, "/api/tests/" + id + "/report/snapshot",
 			func(ctx context.Context, c *Client) error { return ignore(c.ReportSnapshot(ctx, hostileID)) }},
+		{"PlaybookPlan", http.MethodGet, "/api/disruptions/playbooks/" + id,
+			func(ctx context.Context, c *Client) error { return ignore(c.PlaybookPlan(ctx, hostileID)) }},
 		{"DisruptionStatus", http.MethodGet, "/api/disruptions/" + id,
 			func(ctx context.Context, c *Client) error { return ignore(c.DisruptionStatus(ctx, hostileID)) }},
 		{"DisruptionTimelineData", http.MethodGet, "/api/disruptions/" + id + "/timeline",
