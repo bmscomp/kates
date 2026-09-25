@@ -1,0 +1,453 @@
+{
+  "name": "cluster_topology",
+  "title": "Cluster topology",
+  "description": "Where the pinned Kafka cluster runs: the Strimzi Kafka resource, its node pools (roles, replicas, storage), the KRaft controllers, and the brokers, each with its pod's readiness and Kubernetes node and whether the Kafka admin API lists it, and the pods of pools with neither role. With topic, also that topic's partitions: leader, replicas and in-sync replicas of each, a page at a time (from_partition), with counts of under-replicated and leaderless partitions and how many partitions each broker leads over the whole topic, and min.insync.replicas when the topic sets it or nothing does; set at broker level, it is not reported. It does not name the KRaft quorum leader: cluster_overview does. Node pools and controllers are read through the Kubernetes API, so a backend running outside Kubernetes cannot report them; with topic, the partitions are still returned. Only reads.",
+  "annotations": {
+    "idempotentHint": false,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "Cluster topology"
+  },
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "from_partition": {
+        "description": "with topic: the first partition to list (default 0); pass nextFromPartition from the previous result for the next page",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "topic": {
+        "description": "a topic name; with it the result adds the topic's partitions",
+        "pattern": "^[a-zA-Z0-9._-]{1,249}$",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "outputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "caveats": {
+        "description": "what this data cannot show; read these before drawing conclusions",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "caveat id; kates://caveats lists every caveat with its sources",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "text"
+          ],
+          "type": "object"
+        },
+        "type": [
+          "null",
+          "array"
+        ]
+      },
+      "cluster": {
+        "additionalProperties": false,
+        "description": "the Kafka cluster this result describes",
+        "properties": {
+          "id": {
+            "description": "the Kafka clusterId this server is pinned to",
+            "type": "string"
+          },
+          "label": {
+            "description": "the label given with --cluster-label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "data": {
+        "additionalProperties": false,
+        "description": "the tool's result",
+        "properties": {
+          "brokers": {
+            "description": "pods of the node pools with the broker role, and every broker the Kafka admin API lists, by id; a node of a pool with both roles is also a controller",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "description": "the host the broker advertises, when registered",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "node id; -1 for a pod whose name does not end in one",
+                  "type": "integer"
+                },
+                "k8sNode": {
+                  "description": "the Kubernetes node the pod runs on",
+                  "type": "string"
+                },
+                "podReady": {
+                  "description": "the pod's Ready condition; absent when no pod was found",
+                  "type": [
+                    "null",
+                    "boolean"
+                  ]
+                },
+                "pool": {
+                  "description": "the node pool; absent when no pod of a broker pool has this id",
+                  "type": "string"
+                },
+                "rack": {
+                  "description": "the broker's rack, when registered",
+                  "type": "string"
+                },
+                "registered": {
+                  "description": "whether the Kafka admin API lists this broker; it leaves out brokers that are down or fenced",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "registered"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "controllers": {
+            "description": "KRaft controllers: pods of the node pools with the controller role, by id",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "node id, the number at the end of the pod name; -1 when the name does not end in one",
+                  "type": "integer"
+                },
+                "k8sNode": {
+                  "description": "the Kubernetes node the pod runs on",
+                  "type": "string"
+                },
+                "podReady": {
+                  "description": "the pod's Ready condition",
+                  "type": "boolean"
+                },
+                "pool": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "pool",
+                "podReady"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "kafka": {
+            "additionalProperties": false,
+            "description": "the Strimzi Kafka resource the backend is configured to read",
+            "properties": {
+              "kafkaVersion": {
+                "description": "from the resource's status, else its spec; absent when neither names one. With ready also absent, the resource may not exist or could not be read",
+                "type": "string"
+              },
+              "name": {
+                "description": "the name the backend is configured to read (kates.topology.kafka-cluster), reported whether or not such a resource exists",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "the namespace the backend is configured to read (kates.topology.kafka-namespace)",
+                "type": "string"
+              },
+              "ready": {
+                "description": "the resource's Ready condition; absent when it has none, does not exist or could not be read",
+                "type": [
+                  "null",
+                  "boolean"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "namespace"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "nodePools": {
+            "description": "the cluster's KafkaNodePools, by name",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "pods": {
+                  "description": "pods of this pool the backend found. Fewer than replicas can mean pods not yet created or being replaced, or a pod read that failed partway, which the caveats then name",
+                  "type": "integer"
+                },
+                "replicas": {
+                  "description": "spec.replicas: the pods the pool asks for, not the pods that are running",
+                  "type": "integer"
+                },
+                "roles": {
+                  "description": "controller, broker, or both",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "storageClass": {
+                  "description": "storage class of the first volume of jbod storage; absent for other storage types and when the volume names none",
+                  "type": "string"
+                },
+                "storageSize": {
+                  "description": "size of the first volume of jbod storage. The backend reads no other size, so this is absent for persistent-claim and ephemeral storage even when they set one",
+                  "type": "string"
+                },
+                "storageType": {
+                  "description": "the Strimzi storage type, such as jbod, persistent-claim or ephemeral",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "roles",
+                "replicas",
+                "pods"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "otherPods": {
+            "description": "pods of node pools with neither the controller nor the broker role, such as a pool whose roles are not set, by id",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "node id, the number at the end of the pod name; -1 when the name does not end in one",
+                  "type": "integer"
+                },
+                "k8sNode": {
+                  "description": "the Kubernetes node the pod runs on",
+                  "type": "string"
+                },
+                "podReady": {
+                  "description": "the pod's Ready condition",
+                  "type": "boolean"
+                },
+                "pool": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "pool",
+                "podReady"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "topic": {
+            "additionalProperties": false,
+            "description": "the topic asked for",
+            "properties": {
+              "fromPartition": {
+                "description": "the first partition this page lists",
+                "type": "integer"
+              },
+              "internal": {
+                "type": "boolean"
+              },
+              "leaderless": {
+                "description": "partitions, over the whole topic, with no leader",
+                "type": "integer"
+              },
+              "leaders": {
+                "description": "how many partitions each broker leads, over the whole topic, by broker id; broker -1 counts partitions with no leader",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "broker": {
+                      "type": "integer"
+                    },
+                    "leaders": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "broker",
+                    "leaders"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "minInsyncReplicas": {
+                "description": "the topic's min.insync.replicas when the topic sets it, or Kafka's default of 1 when nothing does; absent when it is set at broker level, which topic detail does not report",
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "nextFromPartition": {
+                "description": "pass as from_partition for the next page; absent on the last page",
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "partitionCount": {
+                "type": "integer"
+              },
+              "partitions": {
+                "description": "this page of partitions, by partition id",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "isr": {
+                      "description": "in-sync replicas",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "leader": {
+                      "description": "broker id of the leader; -1 when the partition has none",
+                      "type": "integer"
+                    },
+                    "partition": {
+                      "type": "integer"
+                    },
+                    "replicas": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "underReplicated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "partition",
+                    "leader",
+                    "replicas",
+                    "isr",
+                    "underReplicated"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "replicationFactor": {
+                "description": "replicas of the first partition",
+                "type": "integer"
+              },
+              "underReplicated": {
+                "description": "partitions, over the whole topic, with fewer in-sync replicas than replicas",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "internal",
+              "partitionCount",
+              "replicationFactor",
+              "underReplicated",
+              "leaderless",
+              "leaders",
+              "fromPartition",
+              "partitions"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "topology": {
+            "additionalProperties": false,
+            "description": "whether the Strimzi resources could be read",
+            "properties": {
+              "available": {
+                "description": "false when the backend could not read the Strimzi resources; kafka, nodePools and controllers are then empty and brokers come from the Kafka admin API alone. Only a call with topic answers when this read fails.",
+                "type": "boolean"
+              },
+              "errorCode": {
+                "description": "why the Strimzi resources are not available",
+                "type": "string"
+              }
+            },
+            "required": [
+              "available"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "topology",
+          "nodePools",
+          "controllers",
+          "brokers"
+        ],
+        "type": "object"
+      },
+      "tier": {
+        "description": "what the tool may do; observe tools only read",
+        "type": "string"
+      },
+      "truncated": {
+        "description": "true when something was left out to fit one result (a list cut short, or long text dropped); narrow the request or page for the rest",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "cluster",
+      "tier",
+      "caveats",
+      "truncated",
+      "data"
+    ],
+    "type": "object"
+  }
+}
