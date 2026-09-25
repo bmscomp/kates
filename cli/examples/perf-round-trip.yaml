@@ -16,14 +16,11 @@ scenarios:
       throughput: 1000
       numProducers: 1
       numConsumers: 1
-      consumerGroup: round-trip-cg
       acks: "all"
       enableIdempotence: true
       batchSize: 16384          # small batch — reduce buffering latency
       lingerMs: 0               # no artificial delay
       compressionType: none
-      fetchMinBytes: 1          # return immediately
-      fetchMaxWaitMs: 0
     validate:
       maxP99LatencyMs: 50
       maxAvgLatencyMs: 10

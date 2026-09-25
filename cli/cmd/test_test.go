@@ -3,6 +3,8 @@ package cmd
 import (
 	"strings"
 	"testing"
+
+	"github.com/bmscomp/kates/cli/output"
 )
 
 func TestTestGet_ShowsIntegrityRtoRpoAndVerdict(t *testing.T) {
@@ -41,5 +43,31 @@ func TestTestGet_ShowsIntegrityRtoRpoAndVerdict(t *testing.T) {
 	}
 	if strings.Contains(out, "-1 ms") {
 		t.Errorf("the -1 sentinel must not be printed as a value:\n%s", out)
+	}
+}
+
+// The throughput bar is drawn against the rate the run used, spec.throughput:
+// throughput wins over targetThroughput when a request sets both, and a
+// request that sets only throughput has no targetThroughput at all.
+func TestTestGet_ThroughputBarUsesTheRateTheRunUsed(t *testing.T) {
+	ts, buf := setupTest(t, "GET", "/api/tests/run-2", 200, `{
+		"id": "run-2", "testType": "LOAD", "status": "DONE",
+		"spec": {"throughput": 300, "targetThroughput": 2000},
+		"results": [{"phaseName": "produce", "status": "DONE", "throughputRecordsPerSec": 290}]
+	}`)
+	defer ts.Close()
+
+	if err := testGetCmd.RunE(testGetCmd, []string{"run-2"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 290 of 300 fills 19 of the bar's 20 cells; against 2000 it filled 2.
+	var bar string
+	for _, line := range strings.Split(stripAnsi(buf.String()), "\n") {
+		if strings.Contains(line, "Throughput") && strings.Contains(line, output.Glyphs().BarEmpty) {
+			bar = line
+		}
+	}
+	if got := strings.Count(bar, output.Glyphs().BarFull); got != 19 {
+		t.Errorf("bar %q fills %d cells, want 19: it is not drawn against the rate the run used", bar, got)
 	}
 }

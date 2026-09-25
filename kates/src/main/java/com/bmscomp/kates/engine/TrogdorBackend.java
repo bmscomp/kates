@@ -1,5 +1,7 @@
 package com.bmscomp.kates.engine;
 
+import java.util.HashMap;
+import java.util.Map;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -69,10 +71,12 @@ public class TrogdorBackend implements BenchmarkBackend {
         }
     }
 
-    private TrogdorSpec toTrogdorSpec(BenchmarkTask task) {
+    // Package-private: what a task becomes on Trogdor is the whole of this
+    // backend's work, and checking it through submit would need a coordinator.
+    TrogdorSpec toTrogdorSpec(BenchmarkTask task) {
         return switch (task.getWorkloadType()) {
-            case PRODUCE ->
-                com.bmscomp.kates.trogdor.spec.ProduceBenchSpec.create(
+            case PRODUCE -> {
+                var produce = com.bmscomp.kates.trogdor.spec.ProduceBenchSpec.create(
                         resolveBootstrapServers(task),
                         task.getTopic(),
                         task.getPartitions(),
@@ -80,16 +84,22 @@ public class TrogdorBackend implements BenchmarkBackend {
                         task.getMaxMessages(),
                         task.getDurationMs(),
                         task.getRecordSize());
-            case CONSUME ->
-                com.bmscomp.kates.trogdor.spec.ConsumeBenchSpec.create(
+                produce.getProducerConf().putAll(clientConfig(task.getProducerConfig()));
+                yield produce;
+            }
+            case CONSUME -> {
+                var consume = com.bmscomp.kates.trogdor.spec.ConsumeBenchSpec.create(
                         resolveBootstrapServers(task),
                         task.getTopic(),
                         task.getPartitions(),
                         task.getMaxMessages(),
                         task.getDurationMs(),
                         task.getConsumerGroup());
-            case ROUND_TRIP ->
-                com.bmscomp.kates.trogdor.spec.RoundTripWorkloadSpec.create(
+                consume.getConsumerConf().putAll(clientConfig(task.getConsumerConfig()));
+                yield consume;
+            }
+            case ROUND_TRIP -> {
+                var roundTrip = com.bmscomp.kates.trogdor.spec.RoundTripWorkloadSpec.create(
                         resolveBootstrapServers(task),
                         task.getTopic(),
                         task.getPartitions(),
@@ -97,9 +107,26 @@ public class TrogdorBackend implements BenchmarkBackend {
                         task.getMaxMessages(),
                         task.getDurationMs(),
                         task.getRecordSize());
+                roundTrip.getProducerConf().putAll(clientConfig(task.getProducerConfig()));
+                roundTrip.getConsumerConf().putAll(clientConfig(task.getConsumerConfig()));
+                yield roundTrip;
+            }
             case INTEGRITY, INTEGRITY_CDC ->
                 throw new BenchmarkException("INTEGRITY/CDC tests require the native backend", null);
         };
+    }
+
+    /**
+     * A task's client settings, for a Trogdor spec's producerConf or
+     * consumerConf. They were left out entirely, so a run on this backend used
+     * the Kafka client's defaults whatever the request's acks, batching,
+     * compression, idempotence or fetch settings said. The bootstrap servers
+     * have a field of their own in the spec.
+     */
+    private static Map<String, String> clientConfig(Map<String, String> config) {
+        Map<String, String> conf = new HashMap<>(config);
+        conf.remove("bootstrap.servers");
+        return conf;
     }
 
     private String resolveBootstrapServers(BenchmarkTask task) {

@@ -124,8 +124,43 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
 | `spec` | Object | | Test specification overrides |
 
 ::: {.callout-important}
-The backend merges `spec` with the defaults of the test type, and the merge keeps only `topic`, `numRecords`, `recordSize`, `throughput`, `durationMs`, `acks`, `batchSize`, `lingerMs`, `compressionType`, `partitions`, `replicationFactor`, `minInsyncReplicas`, `numProducers` and `numConsumers`. It drops the other fields the request accepts — `targetThroughput`, `consumerGroup`, `fetchMinBytes`, `fetchMaxWaitMs`, `enableIdempotence`, `enableTransactions` and `enableCrc` — so they have no effect: the response's `spec` leaves `consumerGroup` out and shows the others at their defaults. The echoed `enableIdempotence: false` does not make the producer non-idempotent: the Kafka client turns idempotence on whenever `acks` is `all`. `throughput` is the only rate limit: `kates test create --throughput` sends `targetThroughput` and does not slow a run down. Of the fields kept, `numProducers` sets the number of producers for STRESS and CAPACITY only, and no test type reads `numConsumers`, so a LOAD run has one producer and one consumer whatever the spec says.
+The backend merges `spec` with the defaults of the test type: a field the request sets wins, and the type's default fills each one it leaves out. What the fields do:
+
+- `throughput` is the rate each producer honours, in records per second, and -1 is unlimited. `targetThroughput` is another name for it, the one `kates test create --throughput` and scenario files send. When both are set, `throughput` wins; when only `targetThroughput` is, it sets the rate in place of the type's default. In the merged `spec`, `throughput` is the rate the run used.
+- `consumerGroup` names the consumer's group, and must not be empty or blank. A group that already has committed offsets on the topic resumes from them, and a LOAD or ENDURANCE consumer commits offsets as it reads, so a group an application uses would rebalance and lose its place: give a test a group of its own. An INTEGRITY run's consumer joins the name with `-integrity` appended; without one it is `integrity-cg-integrity`, and a LOAD or ENDURANCE consumer gets a group named after its task.
+- `fetchMinBytes` and `fetchMaxWaitMs` become the consumer's `fetch.min.bytes` and `fetch.max.wait.ms`.
+- `enableIdempotence` sets the producer's `enable.idempotence`, `false` included. Left out, the Kafka client decides, and it turns idempotence on whenever `acks` is `all`.
+- `enableTransactions` makes every producer of the run transactional, committing every 100 records or every 10 seconds, whichever comes first, so a slow producer stays inside the client's 60-second transaction timeout; a LOAD or ENDURANCE consumer then reads with `read_committed`, as the INTEGRITY consumer does.
+- `enableCrc` turns an INTEGRITY run's CRC check of each record on or off.
+- `numProducers` sets the number of producers for STRESS and CAPACITY only, and no test type reads `numConsumers`, so a LOAD run has one producer and one consumer whatever the spec says.
+
+The merged `spec` holds every field the type has a default for. `targetThroughput`, `consumerGroup`, the fetch settings and the three `enable` options have none, and appear in it only when the request set them, so an `enableIdempotence: false` there is always the request's.
+
+On the `trogdor` backend, the producer settings (`acks`, `batchSize`, `lingerMs`, `compressionType`, `enableIdempotence`) and the fetch settings go into the Trogdor spec's `producerConf` and `consumerConf`. A Trogdor run stored before the backend kept the request, one without `requestedSpec`, ran with the Kafka client's defaults whatever those settings said, so its results do not compare with a later Trogdor run of the same spec.
 :::
+
+A field the run could not honour is refused rather than ignored: the answer is `400` with `error` `Validation Failed`, a `message` that names each field, and `fieldErrors`, one entry per field with the reason. A value that asks for nothing passes, because the run honours it anyway, such as `throughput: -1` for SPIKE, `enableCrc: false` for LOAD or `enableIdempotence: false` for INTEGRATION_CDC. So the `spec` of a run that has a `requestedSpec` is valid input again, and can be sent back as a request; an older run's `spec` holds fields its backend ignored (see `GET /api/tests/{id}` above), which is why `kates replay` leaves them out.
+
+| Field | Refused when |
+|-------|--------------|
+| `throughput`, `targetThroughput` | Any value but -1 for SPIKE and CAPACITY, which run their producers unthrottled, and for INTEGRATION_CDC, which runs no Kates producer |
+| `consumerGroup`, `fetchMinBytes`, `fetchMaxWaitMs` | The type starts no consumer: every type but LOAD, ENDURANCE and INTEGRITY |
+| `enableCrc` | `true` for any type but INTEGRITY, the only one that checks CRCs |
+| `enableIdempotence` | `true` when the run's `acks`, the request's or the type's default (SPIKE's is `1`), is not `all`, or for INTEGRATION_CDC |
+| `enableTransactions` | `true` when `acks` is not `all`, when the request sets `enableIdempotence: false`, on the `trogdor` backend, or for INTEGRATION_CDC |
+
+A request with a `scenario` and its `phases` is checked the same way. Each phase starts producers only, so `consumerGroup`, the fetch settings and `enableCrc: true` are refused in its `baseSpec` or in a phase's `spec`, with `fieldErrors` keyed by their path in the scenario, such as `baseSpec.consumerGroup` or `phases[0].spec.fetchMinBytes`. The producer options reach every phase, checked against the `acks` each phase runs with, and a phase's rate follows the rule above: its `throughput`, or its `targetThroughput` without one.
+
+```json
+{
+  "status": 400,
+  "error": "Validation Failed",
+  "message": "spec.consumerGroup: STRESS starts no consumer; only LOAD, ENDURANCE and INTEGRITY do",
+  "fieldErrors": {
+    "consumerGroup": "STRESS starts no consumer; only LOAD, ENDURANCE and INTEGRITY do"
+  }
+}
+```
 
 **Response:** `202 Accepted`
 
@@ -139,15 +174,17 @@ The backend merges `spec` with the defaults of the test type, and the merge keep
     "topic": "perf-test", "numRecords": 100000, "recordSize": 1024, "throughput": -1,
     "acks": "all", "batchSize": 65536, "lingerMs": 5, "compressionType": "lz4",
     "numProducers": 1, "numConsumers": 1, "durationMs": 120000,
-    "replicationFactor": 3, "partitions": 3, "minInsyncReplicas": 2,
-    "targetThroughput": -1, "fetchMinBytes": 1, "fetchMaxWaitMs": 500,
-    "enableIdempotence": false, "enableTransactions": false, "enableCrc": true
+    "replicationFactor": 3, "partitions": 3, "minInsyncReplicas": 2
+  },
+  "requestedSpec": {
+    "numRecords": 100000, "recordSize": 1024, "acks": "all", "topic": "perf-test", "partitions": 3,
+    "replicationFactor": 3, "minInsyncReplicas": 2, "durationMs": 120000, "throughput": -1
   },
   "createdAt": "2026-02-15T20:00:00Z"
 }
 ```
 
-The `spec` in the response is the merged one: the request's values, and the LOAD defaults for everything it leaves out.
+The `spec` in the response is the merged one: the request's values, and the LOAD defaults for everything it leaves out that LOAD has a default for. `requestedSpec` is the request's own `spec`, only the fields it set, so the two tell a requested value from a default; a request without a `spec` gets an empty one. The backend stores both, and `kates replay` sends `requestedSpec` back to start the run again.
 
 Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
 
@@ -192,7 +229,7 @@ List test runs with pagination and filtering.
 
 Get full details of a test run, refreshing its status. The run carries one result entry per task/phase; for INTEGRITY tests each result also includes an `integrity` object (lost/duplicate records, RTO/RPO).
 
-**Response:** `200 OK` (`spec` cut down to four fields; it is the merged spec shown under [POST /api/tests](#post-apitests))
+**Response:** `200 OK` (`spec` and `requestedSpec` cut down to four fields; they are the merged spec and the request's own fields shown under [POST /api/tests](#post-apitests)). A run stored before the backend kept the request has no `requestedSpec`, and its `spec` shows `targetThroughput`, `consumerGroup`, the fetch settings and the three `enable` options at their Java defaults whatever the request said: that backend dropped them, and the run went without them.
 
 ```json
 {
@@ -201,6 +238,7 @@ Get full details of a test run, refreshing its status. The run carries one resul
   "status": "DONE",
   "backend": "native",
   "spec": { "topic": "perf-test", "numRecords": 100000, "recordSize": 1024, "acks": "all" },
+  "requestedSpec": { "topic": "perf-test", "numRecords": 100000, "recordSize": 1024, "acks": "all" },
   "results": [
     {
       "taskId": "a1b2c3d4-produce-0", "testType": "LOAD", "phaseName": "produce", "status": "DONE", "recordsSent": 100000,
@@ -668,7 +706,9 @@ The call returns once the probes pass after the fault, or once `maxRecoveryWaitS
 }
 ```
 
-`status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`. Impact deltas are percentage changes between the pre- and post-chaos summaries. Durations are in seconds: `chaosDuration` runs from the moment Kates creates the fault to its verdict, so on Litmus it includes the experiment's start-up, and `recoveryTime` runs from the verdict until every probe passes, or until `maxRecoveryWaitSec` runs out.
+A `testRequest` that `POST /api/tests` would refuse for a field its type or backend cannot apply is refused here too, with the same `400` and `fieldErrors`, before the stream starts and before any fault is injected.
+
+`status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`; with `ERROR`, `error` says why, for example that the benchmark did not start. Impact deltas are percentage changes between the pre- and post-chaos summaries. Durations are in seconds: `chaosDuration` runs from the moment Kates creates the fault to its verdict, so on Litmus it includes the experiment's start-up, and `recoveryTime` runs from the verdict until every probe passes, or until `maxRecoveryWaitSec` runs out.
 
 ---
 
@@ -732,6 +772,10 @@ Create a recurring test schedule. Cron expressions use the 5-field Unix format (
 ```
 
 Schedule IDs, like run IDs, are 8-character UUID prefixes.
+
+A schedule stores `testRequest` with only the fields it sets. Each firing is a `POST /api/tests` of it, merged with the test type's defaults of that day, and the run's `requestedSpec` holds the same fields. A firing the backend refuses, for a field the type cannot apply, starts no run, and the reason is in the server log only.
+
+A schedule created before the backend kept the request stored every spec field, those it did not set at their Java defaults. When the backend upgrades, its database migration removes the defaults stored for `targetThroughput`, the fetch settings and the three `enable` options, which runs then ignored, so such a schedule runs as it did. A value the schedule did set for one of them now reaches the run, or is refused at each firing if the type cannot apply it. Its other fields keep the stored values, the Java defaults rather than the type's; `PUT` the schedule's `testRequest` again to have the type's defaults fill them in.
 
 #### GET /api/schedules
 

@@ -1,7 +1,7 @@
 {
   "name": "draft_scenario",
   "title": "Draft a test scenario",
-  "description": "Checks a load-test scenario before anyone runs it. Takes a scenario file as kates test apply -f reads it (YAML, or JSON, which must read the same as a .json and as a YAML file), or a built-in template (kates://scenarios/{name}) with optional overrides. It parses the file as kates test apply does, converts each scenario with the CLI's scenarioToRequest, fills what a scenario leaves out with the per-type defaults Kates ships, and checks the result against the agent envelope the Kates MCP plan proposes: one scenario per file (one test at a time), an allowed test type, a set producer rate under a cap, a byte budget, at most 20 minutes, at most 50 partitions, a topic named kates-mcp-.... Returns the YAML, the request each scenario would send, its effective spec, a verdict, and findings, worst first: invalid (the CLI or backend would refuse it, it would run other than checked, or the run would fail at once), outside_envelope, and warning (it runs, but not as written: fields the backend drops, keys nothing reads, thresholds that are never graded). Warnings, then the echo of an unchanged yaml argument, are left out when the result would not fit. A scenario file has no key for the producer rate, so most types run unlimited. Saves nothing, starts nothing and sends the scenario nowhere; nothing enforces the envelope today, so the YAML is a draft for a human to review before running it.",
+  "description": "Checks a load-test scenario before anyone runs it. Takes a scenario file as kates test apply -f reads it (YAML, or JSON, which must read the same as a .json and as a YAML file), or a built-in template (kates://scenarios/{name}) with optional overrides. It parses the file as kates test apply does, converts each scenario with the CLI's scenarioToRequest, fills what a scenario leaves out with the per-type defaults Kates ships, and checks the result against the agent envelope the Kates MCP plan proposes: one scenario per file (one test at a time), an allowed test type, a set producer rate under a cap, a byte budget, at most 20 minutes, at most 50 partitions, a topic named kates-mcp-.... Returns the YAML, the request each scenario would send, its effective spec, a verdict, and findings, worst first: invalid (the CLI or backend would refuse it, as the backend refuses a field the test type or backend cannot apply; it would run other than checked; or the run would fail at once), outside_envelope, and warning (it runs, but not as written: keys nothing reads, counts no run uses, thresholds that are never graded). Warnings, then the echo of an unchanged yaml argument, are left out when the result would not fit. A scenario sets the producer rate with targetThroughput; without it most types run unlimited. Saves nothing, starts nothing and sends the scenario nowhere; nothing enforces the envelope today, so the YAML is a draft for a human to review before running it.",
   "annotations": {
     "idempotentHint": false,
     "openWorldHint": false,
@@ -293,13 +293,22 @@
                           "type": "integer"
                         },
                         "enableCrc": {
-                          "type": "boolean"
+                          "type": [
+                            "null",
+                            "boolean"
+                          ]
                         },
                         "enableIdempotence": {
-                          "type": "boolean"
+                          "type": [
+                            "null",
+                            "boolean"
+                          ]
                         },
                         "enableTransactions": {
-                          "type": "boolean"
+                          "type": [
+                            "null",
+                            "boolean"
+                          ]
                         },
                         "fetchMaxWaitMs": {
                           "type": "integer"
@@ -332,6 +341,9 @@
                           "type": "integer"
                         },
                         "targetThroughput": {
+                          "type": "integer"
+                        },
+                        "throughput": {
                           "type": "integer"
                         },
                         "topic": {

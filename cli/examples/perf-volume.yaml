@@ -16,14 +16,11 @@ scenarios:
       throughput: 500           # 500 × 64 KB ≈ 32 MB/s
       numProducers: 2
       numConsumers: 1
-      consumerGroup: volume-cg
       acks: "all"
       enableIdempotence: true
       batchSize: 1048576        # 1 MB — must be ≥ recordSize
       lingerMs: 20
       compressionType: snappy
-      fetchMinBytes: 1048576
-      fetchMaxWaitMs: 500
     validate:
       maxP99LatencyMs: 2000
       maxAvgLatencyMs: 500

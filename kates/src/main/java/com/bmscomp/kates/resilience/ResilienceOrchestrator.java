@@ -62,9 +62,10 @@ public class ResilienceOrchestrator {
             LOG.info("Resilience test: starting benchmark");
             var result = testOrchestrator.executeTest(request.getTestRequest());
             if (result.isFailure()) {
+                String why = result.asFailure().orElseThrow().getMessage();
                 report.setStatus("ERROR");
-                LOG.error("Failed to start resilience benchmark: "
-                        + result.asFailure().orElseThrow().getMessage());
+                report.setError("The benchmark did not start: " + why);
+                LOG.error("Failed to start resilience benchmark: " + why);
                 return report;
             }
             TestRun run = result.asSuccess().orElseThrow();
@@ -173,6 +174,8 @@ public class ResilienceOrchestrator {
             LOG.warn("Resilience test interrupted", e);
         } catch (Exception e) {
             report.setStatus("ERROR");
+            report.setError(
+                    e.getMessage() != null ? e.getMessage() : e.getClass().getName());
             LOG.error("Resilience test failed", e);
         }
 

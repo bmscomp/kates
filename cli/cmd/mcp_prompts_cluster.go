@@ -88,12 +88,12 @@ func mcpDidKatesCauseThis(_ context.Context, req *mcp.GetPromptRequest) (*mcp.Ge
 
 // mcpDidKatesCauseThisText is the prompt itself. Every fact it states about
 // Kates was checked against the code: runs and disruptions record no owner
-// and audit rows no actor (domain/TestRun.java:15-26,
+// and audit rows no actor (domain/TestRun.java:15-33,
 // disruption/DisruptionReportEntity.java:15-34,
 // persistence/AuditEventEntity.java:17-32); only test create, delete and
-// cancel through the REST API write audit rows (api/TestResource.java:93,125,
-// 152,238,274), while scheduled and gRPC runs go straight to the orchestrator
-// (schedule/TestScheduler.java:65, grpc/GrpcTestService.java:57).
+// cancel through the REST API write audit rows (api/TestResource.java:102,134,
+// 161,253,289), while scheduled and gRPC runs go straight to the orchestrator
+// (schedule/TestScheduler.java:66, grpc/GrpcTestService.java:57).
 //
 // The window it asks for reaches well before the problem, and the answer it
 // asks for weighs activity that ended before the problem began: a fault can

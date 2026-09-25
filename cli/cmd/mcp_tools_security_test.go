@@ -23,7 +23,6 @@ var mcpCaveatIDsSecurity = []mcpCaveatID{
 	mcpCaveatSecurityComplianceByCategory,
 	mcpCaveatAgentEnvelopeProposed,
 	mcpCaveatScenarioShippedDefaults,
-	mcpCaveatScenarioThroughputUnsettable,
 	mcpCaveatScenarioValidateGrading,
 }
 

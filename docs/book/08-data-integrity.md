@@ -117,9 +117,9 @@ graph LR
 ## Integrity Modes
 
 ::: {.callout-important}
-**`enableIdempotence`, `enableTransactions` and `enableCrc` do not reach the producer**
+**`enableIdempotence`, `enableTransactions` and `enableCrc` reach the run**
 
-The backend merges every request with the INTEGRITY defaults before it builds the run, and the merge drops these three fields. Whatever a scenario file, a resilience file or an API call sets, every INTEGRITY run is CRC-checked, never transactional, and idempotent whenever `acks` is `all`, because the Kafka producer enables idempotence by default then. The `integrity-tx` template runs without transactions. The standard and idempotent modes below are therefore the same run, and the transactional mode is not tested.
+A scenario file, a resilience file and an API call can each set them. `enableIdempotence` becomes the producer's `enable.idempotence`; left out, the Kafka producer decides, and it enables idempotence whenever `acks` is `all`, so the standard and idempotent modes below differ only in that the second asks for it. `enableTransactions: true` makes the producer transactional and the verifying consumer read with `read_committed`. `enableCrc: false` turns off the per-record CRC check. The Kafka producer can be idempotent or transactional only with `acks=all`, and a transactional producer is always idempotent, so the backend refuses a request that asks otherwise before the run starts: `POST /api/tests` answers `400` naming the field, and so does `POST /api/resilience`, before any fault is injected, which `kates resilience run` reports as its error. `enableTransactions` commits every 100 records or every 10 seconds, whichever comes first, so a slow rate stays inside the producer's 60-second transaction timeout.
 :::
 
 ### Standard Integrity
@@ -134,7 +134,7 @@ Expected result: **zero data loss**. If messages are ACKed with `acks=all`, Kafk
 
 ### Idempotent Integrity
 
-Kafka's producer idempotency lets the broker discard a retried send it has already written, which gives exactly-once delivery to the log. The Kafka producer enables it by default whenever `acks` is `all`, the INTEGRITY default, and leaves it off when `acks` is `1` or `0`, so the standard run above is already idempotent. A scenario file accepts an `enableIdempotence` field, but the backend drops it (see the callout above): the file below is idempotent because of `acks: "all"`, and would not be with `acks: "1"`, whatever the field says:
+Kafka's producer idempotency lets the broker discard a retried send it has already written, which gives exactly-once delivery to the log. The Kafka producer enables it by default whenever `acks` is `all`, the INTEGRITY default, and leaves it off when `acks` is `1` or `0`, so the standard run above is already idempotent. The file below asks for it with `enableIdempotence: true`, which sets the producer's `enable.idempotence`; with `acks: "1"` the backend would refuse the file, because the producer cannot be idempotent without `acks=all`:
 
 ```yaml
 scenarios:
@@ -154,7 +154,7 @@ With idempotency, even if the producer retries a send (due to transient network 
 
 ### Transactional Integrity
 
-Kafka transactions add atomic, exactly-once writes on top of idempotence. The built-in `integrity-tx` template declares transactions, idempotence, and CRC verification, but the backend drops those fields (see the callout under Integrity Modes). The template runs an INTEGRITY test with `acks=all`, idempotent by the client default and CRC-checked, without transactions, and with one producer and one consumer whatever `parallelProducers` and `numConsumers` say:
+Kafka transactions add atomic, exactly-once writes on top of idempotence. The built-in `integrity-tx` template asks for transactions, idempotence and CRC verification, and the run has all three: its producer commits a transaction every 100 records, or sooner when 10 seconds pass first, and the verifying consumer reads with `read_committed`, so it counts only committed records. The run has one producer and one consumer whatever `parallelProducers` and `numConsumers` say:
 
 ```bash
 # Export the built-in integrity-tx template, then run it
@@ -230,7 +230,7 @@ For a `POD_KILL`, LitmusChaos (the default chaos provider) deletes the chosen br
 
 The run's recovery wait does not change this sizing. After the fault, `kates resilience run` polls its probes every 5 s and returns as soon as they pass, or after `maxRecoveryWaitSec` ÷ 5 polls (24 with the default 120). The default `POD_KILL` probes pass while the ISR is still catching up, since the ISR probe tolerates up to 50 under-replicated partitions. The command therefore usually returns soon after the fault is over, before the broker is back in the ISR and while the producer is still writing. The produce phase stops at `numRecords` or at `durationMs`, whichever comes first, and the rate limiter never makes up time lost in a stall — a stall lengthens the run instead — so keep `durationMs` well above `numRecords` ÷ `throughput`.
 
-The `spec` of a resilience file goes to the API as written, so it takes the API's field names — `numRecords`, `throughput`, `durationMs` — not a scenario file's. `throughput` is the rate the INTEGRITY producer honours. `kates test create --throughput` and a scenario file's `targetThroughput` both send `targetThroughput`, which the backend drops, so neither can slow an INTEGRITY run down. INTEGRITY runs one producer and one consumer whatever `numProducers` and `numConsumers` say, so `throughput` is the whole rate. The selector `strimzi.io/component-type=kafka` alone also matches the KRaft controllers; adding `strimzi.io/broker-role=true` makes the fault pick one broker at random.
+The `spec` of a resilience file goes to the API as written, so it takes the API's field names — `numRecords`, `throughput`, `durationMs` — not a scenario file's. `throughput` is the rate the INTEGRITY producer honours. `kates test create --throughput` and a scenario file's `targetThroughput` send the same rate as `targetThroughput`, which sets `throughput` when the request leaves it out. INTEGRITY runs one producer and one consumer whatever `numProducers` and `numConsumers` say, so `throughput` is the whole rate. The selector `strimzi.io/component-type=kafka` alone also matches the KRaft controllers; adding `strimzi.io/broker-role=true` makes the fault pick one broker at random.
 
 The combined flow looks like this:
 
@@ -424,13 +424,13 @@ kates test scaffold export integrity-tx
 kates test apply -f integrity-tx.yaml --wait
 ```
 
-This runs a 200,000-record INTEGRITY test with `acks=all` and CRC verification, idempotent by the client default and not transactional, although the template asks for transactions (its contents and the reason are in the Transactional Integrity section above). For a quick ad-hoc run without a scenario file:
+This runs a 200,000-record INTEGRITY test with `acks=all`, CRC verification and an idempotent, transactional producer (its contents are in the Transactional Integrity section above). For a quick ad-hoc run without a scenario file:
 
 ```bash
 kates test create --type INTEGRITY --records 100000 --acks all --wait
 ```
 
-Ad-hoc `create` runs use the backend defaults: `acks=all`, which makes the producer idempotent, and CRC verification on. Transactions stay off: `kates test create` has no flag for them, and the scenario-file field `enableTransactions` does not reach the producer either (see the callout under Integrity Modes).
+Ad-hoc `create` runs use the backend defaults: `acks=all`, which makes the producer idempotent, and CRC verification on. Transactions stay off: `kates test create` has no flag for them, so a transactional run needs a scenario file with `enableTransactions: true`, a resilience file, or the API (see the callout under Integrity Modes).
 
 ### Step 2 — Observe Output During the Test
 
@@ -559,7 +559,7 @@ Expect `Status COMPLETED` from `kates resilience run`, then `Lost 0`, `RPO 0 ms`
 
 - Every INTEGRITY message carries a binary header — sequence number, timestamp, run ID hash, CRC32 checksum — so the verifier detects loss, duplication, reordering, and corruption independently of Kafka's own bookkeeping.
 - Only ACKed messages carry a durability promise: unacked sends during a broker crash are excluded from the loss calculation, so a PASS with a non-zero Producer RTO is expected behavior.
-- Standard mode verifies `acks=all` durability, and with `acks=all` the producer is idempotent by default, which adds exactly-once delivery to the log. The `enableIdempotence`, `enableTransactions` and `enableCrc` fields do not reach the producer, so the `integrity-tx` template does not test transactions.
+- Standard mode verifies `acks=all` durability, and with `acks=all` the producer is idempotent by default, which adds exactly-once delivery to the log. `enableIdempotence`, `enableTransactions` and `enableCrc` reach the producer and the verifier, so the `integrity-tx` template tests a transactional producer read with `read_committed`.
 - Integrity tests earn their keep under chaos: one `kates resilience run`, rate-limited with `throughput` so the produce phase outlasts the fault and the recovery, verifies the guarantees during a real failure. A run that finishes before the fault proves nothing.
 - A DATA_LOSS verdict usually traces back to `acks=1`, `min.insync.replicas=1`, or unclean leader election — the Lost Ranges table and Integrity Timeline show exactly which sequences vanished.
 

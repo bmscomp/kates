@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/bmscomp/kates/cli/client"
@@ -18,19 +20,24 @@ var replayCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		original, err := apiClient.GetTest(ctx, args[0])
+		// MCPRun keeps both specs as the backend sent them.
+		original, err := apiClient.MCPRun(ctx, args[0])
 		if err != nil {
 			return cmdErr("Test not found: " + err.Error())
 		}
+		spec, err := replaySpec(original)
+		if err != nil {
+			return cmdErr("Cannot read the spec of test " + truncID(original.ID) + ": " + err.Error())
+		}
 
-		req := &client.CreateTestRequest{
+		req := &client.RerunTestRequest{
 			TestType: original.TestType,
 			Backend:  original.Backend,
-			Spec:     original.Spec,
+			Spec:     spec,
 		}
 
 		output.Hint(fmt.Sprintf("Replaying %s test %s...", original.TestType, truncID(original.ID)))
-		result, err := apiClient.CreateTest(ctx, req)
+		result, err := apiClient.RerunTest(ctx, req)
 		if err != nil {
 			return cmdErr("Failed to create test: " + err.Error())
 		}
@@ -57,6 +64,39 @@ var replayCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// replayNeverUsed are the spec fields a backend that did not keep the request
+// accepted and dropped when it merged the spec; it stored them at their Java
+// defaults whatever the request said.
+var replayNeverUsed = []string{
+	"consumerGroup", "targetThroughput", "fetchMinBytes", "fetchMaxWaitMs",
+	"enableIdempotence", "enableTransactions", "enableCrc",
+}
+
+// replaySpec is the spec a replay sends: the request the run was started
+// with, which the backend merges with the type's defaults as it did the first
+// time. The merged spec is not a request, and used to be sent as one: it asked
+// for what the defaults had filled in, including fields the type cannot use,
+// which the backend refuses. A run stored before the backend kept the request
+// has only the merged spec; it is sent without the fields that backend never
+// used, and so asks for what the run did.
+func replaySpec(run *client.MCPRun) (json.RawMessage, error) {
+	if requested := bytes.TrimSpace(run.RequestedSpec); len(requested) > 0 && !bytes.Equal(requested, []byte("null")) {
+		return requested, nil
+	}
+	merged := bytes.TrimSpace(run.Spec)
+	if len(merged) == 0 || bytes.Equal(merged, []byte("null")) {
+		return nil, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(merged, &fields); err != nil {
+		return nil, err
+	}
+	for _, name := range replayNeverUsed {
+		delete(fields, name)
+	}
+	return json.Marshal(fields)
 }
 
 func init() {

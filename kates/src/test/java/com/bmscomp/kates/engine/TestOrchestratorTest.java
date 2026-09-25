@@ -5,6 +5,8 @@ import static org.mockito.Mockito.*;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
 
@@ -15,6 +17,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
+import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.TestRunRepository;
@@ -675,6 +678,641 @@ class TestOrchestratorTest {
             long uniqueIds =
                     tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
             assertEquals(16, uniqueIds, "All 16 task IDs must be unique");
+        }
+    }
+
+    /**
+     * Every field a request may set reaches the merged spec and the tasks built
+     * from it. applyTypeDefaults used to copy fourteen fields and drop the other
+     * seven, so a requested rate, consumer group, fetch setting or integrity
+     * option was accepted, echoed at its default and never used.
+     */
+    @Nested
+    class RequestedFieldsReachTheRun {
+
+        private TestSpec requested() {
+            return new TestSpec();
+        }
+
+        @Test
+        void targetThroughputFillsTheRateWhenThroughputIsUnset() {
+            TestSpec req = requested();
+            req.setTargetThroughput(2000);
+
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.LOAD, req);
+
+            assertEquals(2000, merged.getThroughput(), "the producer honours throughput, so the alias must fill it");
+            assertEquals(2000, merged.getTargetThroughput(), "the requested alias is kept as it was sent");
+            assertEquals(
+                    2000,
+                    orchestrator
+                            .buildTasks(TestType.LOAD, merged, "run-1")
+                            .get(0)
+                            .getTargetMessagesPerSec());
+        }
+
+        @Test
+        void targetThroughputReplacesTheTypeDefaultRate() {
+            TestSpec req = requested();
+            req.setTargetThroughput(1000);
+
+            assertEquals(
+                    1000,
+                    orchestrator.applyTypeDefaults(TestType.ENDURANCE, req).getThroughput());
+        }
+
+        @Test
+        void throughputWinsWhenBothAreSet() {
+            TestSpec req = requested();
+            req.setThroughput(300);
+            req.setTargetThroughput(2000);
+
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.LOAD, req);
+
+            assertEquals(300, merged.getThroughput());
+            assertEquals(2000, merged.getTargetThroughput());
+        }
+
+        @Test
+        void consumerGroupAndFetchSettingsAreCarried() {
+            TestSpec req = requested();
+            req.setConsumerGroup("perf-cg");
+            req.setFetchMinBytes(1_048_576);
+            req.setFetchMaxWaitMs(250);
+
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.LOAD, req);
+
+            assertEquals("perf-cg", merged.getConsumerGroup());
+            assertEquals(1_048_576, merged.getFetchMinBytes());
+            assertEquals(250, merged.getFetchMaxWaitMs());
+        }
+
+        @Test
+        void integrityOptionsAreCarried() {
+            TestSpec req = requested();
+            req.setEnableIdempotence(true);
+            req.setEnableTransactions(true);
+            req.setEnableCrc(false);
+
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.INTEGRITY, req);
+
+            assertTrue(merged.isEnableIdempotence());
+            assertTrue(merged.isEnableTransactions());
+            assertFalse(merged.isEnableCrc());
+            BenchmarkTask task =
+                    orchestrator.buildTasks(TestType.INTEGRITY, merged, "run-1").get(0);
+            assertTrue(task.isEnableIdempotence());
+            assertTrue(task.isEnableTransactions());
+            assertFalse(task.isEnableCrc());
+        }
+
+        @Test
+        void loadConsumerUsesTheRequestedGroupAndFetchSettings() {
+            TestSpec req = requested();
+            req.setConsumerGroup("perf-cg");
+            req.setFetchMinBytes(65_536);
+            req.setFetchMaxWaitMs(100);
+
+            BenchmarkTask consumer = orchestrator
+                    .buildTasks(TestType.LOAD, orchestrator.applyTypeDefaults(TestType.LOAD, req), "run-1")
+                    .get(1);
+
+            assertEquals("perf-cg", consumer.getConsumerGroup());
+            assertEquals("65536", consumer.getConsumerConfig().get("fetch.min.bytes"));
+            assertEquals("100", consumer.getConsumerConfig().get("fetch.max.wait.ms"));
+        }
+
+        @Test
+        void integrityConsumerGetsTheFetchSettings() {
+            TestSpec req = requested();
+            req.setFetchMinBytes(2048);
+
+            BenchmarkTask task = orchestrator
+                    .buildTasks(TestType.INTEGRITY, orchestrator.applyTypeDefaults(TestType.INTEGRITY, req), "run-1")
+                    .get(0);
+
+            assertEquals("2048", task.getConsumerConfig().get("fetch.min.bytes"));
+        }
+
+        @Test
+        void loadProducerUsesTheRequestedIdempotence() {
+            TestSpec req = requested();
+            req.setEnableIdempotence(true);
+
+            BenchmarkTask producer = orchestrator
+                    .buildTasks(TestType.LOAD, orchestrator.applyTypeDefaults(TestType.LOAD, req), "run-1")
+                    .get(0);
+
+            assertTrue(producer.isEnableIdempotence());
+            assertEquals("true", producer.getProducerConfig().get("enable.idempotence"));
+        }
+
+        @Test
+        void anExplicitFalseTurnsTheClientsIdempotenceOff() {
+            TestSpec req = requested();
+            req.setEnableIdempotence(false);
+
+            BenchmarkTask producer = orchestrator
+                    .buildTasks(TestType.LOAD, orchestrator.applyTypeDefaults(TestType.LOAD, req), "run-1")
+                    .get(0);
+
+            assertFalse(producer.isEnableIdempotence());
+            assertEquals(
+                    "false",
+                    producer.getProducerConfig().get("enable.idempotence"),
+                    "left out, the client would turn idempotence on by itself with acks=all");
+        }
+
+        @Test
+        void unrequestedSettingsLeaveTheClientDefaults() {
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.LOAD, requested());
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.LOAD, merged, "run-1");
+
+            assertFalse(tasks.get(0).getProducerConfig().containsKey("enable.idempotence"));
+            assertTrue(tasks.get(1).getConsumerConfig().isEmpty());
+            assertEquals("run-1-consume-0-group", tasks.get(1).getConsumerGroup());
+            assertFalse(merged.hasConsumerGroup());
+            assertFalse(merged.hasEnableIdempotence());
+            assertFalse(merged.hasEnableTransactions());
+            assertFalse(merged.hasEnableCrc());
+        }
+
+        @Test
+        void transactionsReachTheProducerAndTheConsumerReadsCommitted() {
+            TestSpec req = requested();
+            req.setEnableTransactions(true);
+
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(
+                    TestType.ENDURANCE, orchestrator.applyTypeDefaults(TestType.ENDURANCE, req), "run-1");
+
+            assertTrue(tasks.get(0).isEnableTransactions());
+            assertEquals("read_committed", tasks.get(1).getConsumerConfig().get("isolation.level"));
+        }
+
+        @ParameterizedTest
+        @EnumSource(
+                value = TestType.class,
+                names = {
+                    "STRESS",
+                    "SPIKE",
+                    "VOLUME",
+                    "CAPACITY",
+                    "ROUND_TRIP",
+                    "TUNE_REPLICATION",
+                    "TUNE_ACKS",
+                    "TUNE_BATCHING",
+                    "TUNE_COMPRESSION",
+                    "TUNE_PARTITIONS"
+                })
+        void everyProducerCarriesTheProducerOptions(TestType type) {
+            TestSpec req = requested();
+            req.setAcks("all");
+            req.setEnableIdempotence(true);
+            req.setEnableTransactions(true);
+
+            List<BenchmarkTask> tasks =
+                    orchestrator.buildTasks(type, orchestrator.applyTypeDefaults(type, req), "run-1");
+
+            assertFalse(tasks.isEmpty());
+            for (BenchmarkTask task : tasks) {
+                assertTrue(task.isEnableIdempotence(), type + " " + task.getTaskId());
+                assertTrue(task.isEnableTransactions(), type + " " + task.getTaskId());
+                assertEquals("true", task.getProducerConfig().get("enable.idempotence"));
+            }
+        }
+
+        @Test
+        void integrityConsumerGroupKeepsItsDefaultWhenUnset() {
+            BenchmarkTask task = orchestrator
+                    .buildTasks(
+                            TestType.INTEGRITY,
+                            orchestrator.applyTypeDefaults(TestType.INTEGRITY, requested()),
+                            "run-1")
+                    .get(0);
+
+            assertEquals("integrity-cg", task.getConsumerGroup(), "the backend appends -integrity to it");
+            assertTrue(task.isEnableCrc(), "CRC checks stay on unless a request turns them off");
+        }
+    }
+
+    /**
+     * A field a run could not honour is refused, by name, instead of being
+     * accepted and ignored.
+     */
+    @Nested
+    class InapplicableFields {
+
+        private Map<String, String> check(TestType type, String backend, TestSpec requested) {
+            return orchestrator.inapplicableFields(
+                    type, backend, requested, orchestrator.applyTypeDefaults(type, requested));
+        }
+
+        private TestSpec everyField() {
+            TestSpec req = new TestSpec();
+            req.setAcks("all");
+            req.setTargetThroughput(1000);
+            req.setConsumerGroup("perf-cg");
+            req.setFetchMinBytes(1024);
+            req.setFetchMaxWaitMs(100);
+            req.setEnableIdempotence(true);
+            req.setEnableTransactions(true);
+            return req;
+        }
+
+        @ParameterizedTest
+        @EnumSource(
+                value = TestType.class,
+                names = {"LOAD", "ENDURANCE"})
+        void aTypeWithAProducerAndAConsumerTakesThemAll(TestType type) {
+            assertEquals(Map.of(), check(type, "native", everyField()));
+        }
+
+        @Test
+        void integrityTakesThemAllAndTheCrcOption() {
+            TestSpec req = everyField();
+            req.setEnableCrc(false);
+
+            assertEquals(Map.of(), check(TestType.INTEGRITY, "native", req));
+        }
+
+        @Test
+        void noSpecAndAnEmptySpecAreFine() {
+            assertEquals(Map.of(), check(TestType.SPIKE, "native", null));
+            assertEquals(Map.of(), check(TestType.INTEGRATION_CDC, "native", new TestSpec()));
+        }
+
+        @ParameterizedTest
+        @EnumSource(
+                value = TestType.class,
+                names = {"STRESS", "SPIKE", "VOLUME", "CAPACITY", "ROUND_TRIP", "TUNE_ACKS", "INTEGRATION_CDC"})
+        void consumerSettingsNeedAConsumer(TestType type) {
+            TestSpec req = new TestSpec();
+            req.setConsumerGroup("perf-cg");
+            req.setFetchMinBytes(1024);
+            req.setFetchMaxWaitMs(100);
+
+            Map<String, String> errors = check(type, "native", req);
+
+            assertEquals(Set.of("consumerGroup", "fetchMinBytes", "fetchMaxWaitMs"), errors.keySet());
+            assertTrue(errors.get("consumerGroup").contains("starts no consumer"), errors.toString());
+        }
+
+        @ParameterizedTest
+        @EnumSource(
+                value = TestType.class,
+                names = {"SPIKE", "CAPACITY"})
+        void anUnthrottledTypeRefusesARate(TestType type) {
+            TestSpec req = new TestSpec();
+            req.setThroughput(500);
+            req.setTargetThroughput(500);
+
+            Map<String, String> errors = check(type, "native", req);
+
+            assertEquals(Set.of("throughput", "targetThroughput"), errors.keySet());
+            assertTrue(errors.get("targetThroughput").contains("unthrottled"));
+        }
+
+        @Test
+        void anUnthrottledTypeTakesTheUnlimitedRateItRunsAt() {
+            TestSpec req = new TestSpec();
+            req.setTargetThroughput(-1);
+
+            assertEquals(Map.of(), check(TestType.CAPACITY, "native", req));
+        }
+
+        @Test
+        void cdcRefusesEveryProducerOptionThatAsksForSomething() {
+            TestSpec req = new TestSpec();
+            req.setThroughput(500);
+            req.setTargetThroughput(500);
+            req.setEnableIdempotence(true);
+            req.setEnableTransactions(true);
+
+            assertEquals(
+                    Set.of("throughput", "targetThroughput", "enableIdempotence", "enableTransactions"),
+                    check(TestType.INTEGRATION_CDC, "native", req).keySet());
+        }
+
+        /**
+         * The cases kates mcp's draft_scenario runs through its own copy of
+         * these rules (TestMCPDraftScenarioRulesMatchTheBackend reads the same
+         * file), so that a rule changed here and not there fails a test.
+         */
+        @org.junit.jupiter.api.TestFactory
+        java.util.stream.Stream<org.junit.jupiter.api.DynamicTest> theCasesDraftScenarioSharesHoldHere()
+                throws Exception {
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            var root = json.readTree(getClass().getResourceAsStream("/spec-applicability.json"));
+            return java.util.stream.StreamSupport.stream(root.get("cases").spliterator(), false)
+                    .map(c -> org.junit.jupiter.api.DynamicTest.dynamicTest(
+                            c.get("name").asText(), () -> {
+                                TestType type = TestType.valueOf(c.get("type").asText());
+                                String backend =
+                                        c.has("backend") ? c.get("backend").asText() : "native";
+                                TestSpec spec = json.treeToValue(c.get("spec"), TestSpec.class);
+                                Set<String> refused = new java.util.HashSet<>();
+                                c.get("refused").forEach(n -> refused.add(n.asText()));
+
+                                assertEquals(refused, check(type, backend, spec).keySet());
+                            }));
+        }
+
+        @Test
+        void cdcTakesTheValuesThatAskForNothing() {
+            // No producer runs, so an unlimited rate and an option turned off
+            // are what the run does anyway; the merged spec a CDC run shows
+            // holds its type's rate, -1, and must be valid input again.
+            TestSpec req = new TestSpec();
+            req.setThroughput(-1);
+            req.setTargetThroughput(-1);
+            req.setEnableIdempotence(false);
+            req.setEnableTransactions(false);
+            req.setEnableCrc(false);
+
+            assertEquals(Map.of(), check(TestType.INTEGRATION_CDC, "native", req));
+        }
+
+        @Test
+        void crcChecksNeedAnIntegrityRun() {
+            TestSpec on = new TestSpec();
+            on.setEnableCrc(true);
+            TestSpec off = new TestSpec();
+            off.setEnableCrc(false);
+
+            assertEquals(
+                    Set.of("enableCrc"),
+                    check(TestType.ROUND_TRIP, "native", on).keySet());
+            assertEquals(Map.of(), check(TestType.ROUND_TRIP, "native", off), "no CRC check is what a LOAD run does");
+        }
+
+        @Test
+        void idempotenceNeedsAcksAllAndSaysWhenTheAcksIsTheTypeDefault() {
+            TestSpec req = new TestSpec();
+            req.setEnableIdempotence(true);
+
+            Map<String, String> errors = check(TestType.SPIKE, "native", req);
+
+            assertEquals(Set.of("enableIdempotence"), errors.keySet());
+            assertTrue(errors.get("enableIdempotence").contains("acks is 1 (the type's default)"), errors.toString());
+
+            req.setAcks("all");
+            assertEquals(Map.of(), check(TestType.SPIKE, "native", req));
+        }
+
+        @Test
+        void transactionsNeedAcksAllAndIdempotence() {
+            TestSpec acksOne = new TestSpec();
+            acksOne.setAcks("1");
+            acksOne.setEnableTransactions(true);
+            TestSpec notIdempotent = new TestSpec();
+            notIdempotent.setEnableTransactions(true);
+            notIdempotent.setEnableIdempotence(false);
+
+            assertTrue(check(TestType.LOAD, "native", acksOne)
+                    .get("enableTransactions")
+                    .contains("acks=all"));
+            assertTrue(check(TestType.LOAD, "native", notIdempotent)
+                    .get("enableTransactions")
+                    .contains("always idempotent"));
+        }
+
+        @Test
+        void trogdorCannotRunTransactionsButTakesTheRest() {
+            TestSpec req = everyField();
+
+            assertEquals(
+                    Set.of("enableTransactions"),
+                    check(TestType.LOAD, "trogdor", req).keySet());
+            req.setEnableTransactions(false);
+            assertEquals(Map.of(), check(TestType.LOAD, "trogdor", req));
+        }
+
+        @Test
+        void executeTestRefusesBeforeTakingAPermit() {
+            CreateTestRequest request = new CreateTestRequest();
+            request.setType(TestType.STRESS);
+            TestSpec req = new TestSpec();
+            req.setConsumerGroup("perf-cg");
+            request.setSpec(req);
+
+            // More refusals than there are permits: none of them may take one.
+            for (int i = 0; i < 5; i++) {
+                Exception failure =
+                        orchestrator.executeTest(request).asFailure().orElseThrow();
+                InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+                assertEquals(Set.of("consumerGroup"), invalid.getFieldErrors().keySet());
+                assertTrue(invalid.getMessage().startsWith("spec.consumerGroup: "), invalid.getMessage());
+            }
+        }
+    }
+
+    /**
+     * A spec the API serves or stores is valid input again. TestSpec used to
+     * serialize through its getters, which answer a default for every field
+     * nobody set, so a GET's spec and a schedule's stored request carried all
+     * of them: enableCrc true, the fetch settings, enableIdempotence false.
+     * Sent back (a replay, a schedule firing), those read as requested, and
+     * the checks refused every type but INTEGRITY, whose producer they turned
+     * non-idempotent.
+     */
+    @Nested
+    class ServedAndStoredSpecsAreValidInput {
+
+        private final com.fasterxml.jackson.databind.ObjectMapper json =
+                new com.fasterxml.jackson.databind.ObjectMapper();
+
+        @ParameterizedTest
+        @EnumSource(TestType.class)
+        void aScheduleRunsTheRequestItStored(TestType type) throws Exception {
+            // As ScheduleResource stores the request and TestScheduler reads it.
+            CreateTestRequest posted = json.readValue(
+                    "{\"type\":\"" + type + "\",\"spec\":{\"numRecords\":1000}}", CreateTestRequest.class);
+            CreateTestRequest fired = json.readValue(json.writeValueAsString(posted), CreateTestRequest.class);
+
+            TestSpec spec = fired.getSpec();
+            assertEquals(
+                    Map.of(),
+                    orchestrator.inapplicableFields(type, "native", spec, orchestrator.applyTypeDefaults(type, spec)));
+            assertEquals(Map.of("numRecords", 1000), spec.explicitFields(), "only what the request set");
+        }
+
+        @ParameterizedTest
+        @EnumSource(TestType.class)
+        void theSpecARunShowsCanBeSentAgain(TestType type) throws Exception {
+            TestSpec requested = new TestSpec();
+            requested.setNumRecords(1000);
+            String served = json.writeValueAsString(orchestrator.applyTypeDefaults(type, requested));
+
+            TestSpec again = json.readValue(served, TestSpec.class);
+
+            assertEquals(
+                    Map.of(),
+                    orchestrator.inapplicableFields(type, "native", again, orchestrator.applyTypeDefaults(type, again)),
+                    served);
+        }
+
+        @Test
+        void replayingAnIntegrityRunLeavesIdempotenceToTheClient() throws Exception {
+            TestSpec requested = new TestSpec();
+            requested.setNumRecords(1000);
+            String served = json.writeValueAsString(orchestrator.applyTypeDefaults(TestType.INTEGRITY, requested));
+
+            TestSpec again = json.readValue(served, TestSpec.class);
+            BenchmarkTask task = orchestrator
+                    .buildTasks(TestType.INTEGRITY, orchestrator.applyTypeDefaults(TestType.INTEGRITY, again), "r")
+                    .get(0);
+
+            assertFalse(task.getProducerConfig().containsKey("enable.idempotence"), served);
+        }
+    }
+
+    /**
+     * A scenario's base and phase specs are checked like a plain request's, and
+     * what they set reaches the phases. The phases start only producers, so the
+     * consumer settings and CRC checks were stored as the run's spec and never
+     * used; the rate a scenario set with targetThroughput was stored as the
+     * run's throughput while every phase ran at the base spec's throughput.
+     */
+    @Nested
+    class ScenarioRequests {
+
+        private final List<BenchmarkTask> submitted = new java.util.ArrayList<>();
+
+        @SuppressWarnings("unchecked")
+        private TestOrchestrator withBackend(String name) {
+            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            when(backend.name()).thenReturn(name);
+            when(backend.submit(any())).thenAnswer(invocation -> {
+                BenchmarkTask task = invocation.getArgument(0);
+                submitted.add(task);
+                return new BenchmarkHandle(name, task.getTaskId());
+            });
+            Instance<BenchmarkBackend> backends = mock(Instance.class);
+            when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
+            return new TestOrchestrator(
+                    mock(TopicService.class),
+                    mock(TestRunRepository.class),
+                    backends,
+                    typeDefaults,
+                    mock(BenchmarkMetrics.class),
+                    mock(KatesMetrics.class),
+                    new SlaEvaluator(),
+                    mock(Event.class),
+                    name,
+                    "localhost:9092",
+                    3);
+        }
+
+        private CreateTestRequest scenario(TestSpec base, com.bmscomp.kates.domain.ScenarioPhase... phases) {
+            com.bmscomp.kates.domain.TestScenario scenario = new com.bmscomp.kates.domain.TestScenario();
+            scenario.setName("s");
+            scenario.setType(TestType.LOAD);
+            scenario.setBaseSpec(base);
+            scenario.setPhases(List.of(phases));
+            CreateTestRequest request = new CreateTestRequest();
+            request.setType(TestType.LOAD);
+            request.setScenario(scenario);
+            return request;
+        }
+
+        private com.bmscomp.kates.domain.ScenarioPhase phase(
+                String name, com.bmscomp.kates.domain.ScenarioPhase.PhaseType type) {
+            return new com.bmscomp.kates.domain.ScenarioPhase(name, type, 0, -1);
+        }
+
+        @Test
+        void consumerSettingsAndCrcChecksAreRefusedByName() {
+            TestSpec base = new TestSpec();
+            base.setConsumerGroup("perf-cg");
+            base.setFetchMinBytes(1024);
+            base.setEnableCrc(true);
+            com.bmscomp.kates.domain.ScenarioPhase steady =
+                    phase("steady", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY);
+            TestSpec phaseSpec = new TestSpec();
+            phaseSpec.setFetchMaxWaitMs(100);
+            steady.setSpec(phaseSpec);
+
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(base, steady))
+                    .asFailure()
+                    .orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(
+                    Set.of(
+                            "baseSpec.consumerGroup",
+                            "baseSpec.fetchMinBytes",
+                            "baseSpec.enableCrc",
+                            "phases[0].spec.fetchMaxWaitMs"),
+                    invalid.getFieldErrors().keySet());
+            assertTrue(invalid.getMessage().contains("scenario.baseSpec.consumerGroup: "), invalid.getMessage());
+            assertTrue(invalid.getFieldErrors().get("baseSpec.consumerGroup").contains("start no consumer"));
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void targetThroughputSetsThePhaseRate() {
+            TestSpec base = new TestSpec();
+            base.setTargetThroughput(5000);
+            com.bmscomp.kates.domain.ScenarioPhase slow =
+                    phase("slow", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY);
+            TestSpec slowSpec = new TestSpec();
+            slowSpec.setTargetThroughput(700);
+            slow.setSpec(slowSpec);
+
+            assertTrue(withBackend("native")
+                    .executeTest(scenario(
+                            base, phase("steady", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY), slow))
+                    .isSuccess());
+
+            assertEquals(2, submitted.size());
+            assertEquals(5000, submitted.get(0).getTargetMessagesPerSec());
+            assertEquals(700, submitted.get(1).getTargetMessagesPerSec());
+        }
+
+        @Test
+        void theProducerOptionsReachEveryPhase() {
+            TestSpec base = new TestSpec();
+            base.setAcks("all");
+            base.setThroughput(1000);
+            base.setEnableIdempotence(true);
+            base.setEnableTransactions(true);
+            com.bmscomp.kates.domain.ScenarioPhase ramp =
+                    phase("ramp", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.RAMP);
+            ramp.setRampSteps(2);
+
+            assertTrue(withBackend("native")
+                    .executeTest(scenario(
+                            base,
+                            phase("steady", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY),
+                            ramp,
+                            phase("burst", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.SPIKE)))
+                    .isSuccess());
+
+            assertEquals(4, submitted.size());
+            for (BenchmarkTask task : submitted) {
+                assertTrue(task.isEnableIdempotence(), task.getTaskId());
+                assertTrue(task.isEnableTransactions(), task.getTaskId());
+                assertEquals("true", task.getProducerConfig().get("enable.idempotence"), task.getTaskId());
+            }
+        }
+
+        @Test
+        void transactionsOnTrogdorAreRefused() {
+            TestSpec base = new TestSpec();
+            base.setEnableTransactions(true);
+
+            Exception failure = withBackend("trogdor")
+                    .executeTest(
+                            scenario(base, phase("steady", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY)))
+                    .asFailure()
+                    .orElseThrow();
+
+            assertEquals(
+                    Set.of("baseSpec.enableTransactions"),
+                    assertInstanceOf(InvalidTestSpecException.class, failure)
+                            .getFieldErrors()
+                            .keySet());
         }
     }
 }

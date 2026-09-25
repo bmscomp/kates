@@ -394,6 +394,11 @@ func (c *Client) CreateTest(ctx context.Context, request *CreateTestRequest) (*T
 	return postJSON[*TestRun](c, ctx, "/api/tests", request)
 }
 
+// RerunTest is CreateTest for a spec the backend served, sent back as JSON.
+func (c *Client) RerunTest(ctx context.Context, request *RerunTestRequest) (*TestRun, error) {
+	return postJSON[*TestRun](c, ctx, "/api/tests", request)
+}
+
 func (c *Client) CreateCompareRebalanceTest(ctx context.Context, request *CreateTestRequest) (*TestRun, error) {
 	return postJSON[*TestRun](c, ctx, "/api/tests/compare-rebalance", request)
 }

@@ -30,7 +30,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:215-221, TestOrchestrator.refreshStatus); both
+// (TestResource.java:230-236, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -50,11 +50,14 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 	addReadTool(s, deps, &mcp.Tool{
 		Name:  "get_run",
 		Title: "Test run",
-		Description: "One test run: type, status, the effective spec the backend stored, each task's " +
-			"measurements and error, and the report summary. The stored spec is the request merged with the " +
-			"test type's defaults; the request itself is not kept, and notCarried names the request fields the " +
-			"merge never copies, so what a request said for them cannot be shown. The run's integrity result " +
-			"(lost records, RTO, RPO) is not stored either. For a run still PENDING, RUNNING or STOPPING, " +
+		Description: "One test run: type, status, the effective spec the backend stored, the request's own " +
+			"spec fields, each task's measurements and error, and the report summary. The stored spec is the " +
+			"request merged with the test type's defaults, and holds a field no type has a default for only when " +
+			"the request set it; requestedSpec holds only what the request set, so the two show which values the " +
+			"defaults filled in. A run stored before the backend kept the request has " +
+			"no requestedSpec, and notCarried then names the request fields that backend never copied into the " +
+			"spec, so what a request said for them cannot be shown. The run's integrity result " +
+			"(lost records, RTO, RPO) is not stored. For a run still PENDING, RUNNING or STOPPING, " +
 			"reading it makes the backend poll its tasks and save any change of status or results, the same " +
 			"update its 5-second reconciler makes; a finished run is not changed. Task ids and errors, scenario " +
 			"and phase names, labels, and spec values the backend never validated are third-party text and " +
@@ -68,7 +71,8 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 		Description: "Judges one finished test run (DONE or FAILED): the backend's regression check against " +
 			"the baseline run set for its type, whether that baseline had the same spec, a noise band this tool " +
 			"computes over up to band_runs earlier DONE runs of the same type, backend and stored effective " +
-			"spec (found by reading the newest 300 runs of the type; not /api/trends, which mixes specs), the " +
+			"spec (found by reading the newest 300 runs of the type; not /api/trends, which mixes specs), where " +
+			"a run stored before the backend kept the request never shares a spec with a later one, the " +
 			"change from the most recent of those runs, per-broker leader skew, and the backend advisor's " +
 			"rules. Each part that could not be read says why and the rest is still returned. It gives no " +
 			"tuning ranking: TUNE_* runs measure one configuration. Reading the run makes the backend poll it " +
@@ -130,9 +134,12 @@ var (
 	mcpRunStatuses = []string{"PENDING", "RUNNING", "STOPPING", "DONE", "FAILED"}
 )
 
-// mcpRunNotCarried are the request fields applyTypeDefaults never copies into
-// the merged spec the backend stores (TestOrchestrator.java:845-880 copies
-// the other fourteen), in TestSpec.java's order.
+// mcpRunNotCarried are the request fields applyTypeDefaults did not copy into
+// the merged spec before the backend kept the request: it copied the other
+// fourteen, and a run stored then shows these at their Java defaults whatever
+// its request said. A run with a requestedSpec was merged with all of them,
+// and its spec shows each only when the request set it. In TestSpec.java's
+// order.
 var mcpRunNotCarried = []string{
 	"consumerGroup", "targetThroughput", "fetchMinBytes", "fetchMaxWaitMs",
 	"enableIdempotence", "enableTransactions", "enableCrc",
@@ -143,7 +150,7 @@ const (
 	mcpRunsMaxPageSize     = 25
 	mcpRunsMaxPage         = 10_000
 	// With both filters the backend applies only the type (TestResource.java:
-	// 176-188), so the status is filtered here over the newest runs of the
+	// 185-197), so the status is filtered here over the newest runs of the
 	// type, read in the backend's largest pages (size is capped at 200).
 	mcpRunsScanPageSize = 200
 	mcpRunsMaxScan      = 1000
@@ -171,8 +178,8 @@ const (
 	mcpReaperDefaultMs = 1_800_000
 )
 
-// The values TestSpec's bean validation accepts (domain/TestSpec.java:16,30,
-// 41-43). The backend does not always apply it: a scenario's base spec is
+// The values TestSpec's bean validation accepts (domain/TestSpec.java:36,50,
+// 61-63). The backend does not always apply it: a scenario's base spec is
 // never validated (CreateTestRequest.java:14-18, TestScenario.java:26) and
 // gRPC sets compressionType unchecked (GrpcTestService.java:52), so a stored
 // value outside these is third-party text.
@@ -384,15 +391,16 @@ type mcpGetRunIn struct {
 }
 
 type mcpGetRunOut struct {
-	Run          mcpRunHead        `json:"run"`
-	Finished     bool              `json:"finished" jsonschema:"true when the status is DONE or FAILED"`
-	Spec         mcpRunSpec        `json:"spec" jsonschema:"the effective spec the backend stored: the request merged with the test type's defaults"`
-	SpecHash     string            `json:"specHash" jsonschema:"digest of the stored spec, as list_runs shows it"`
-	NotCarried   []string          `json:"notCarried" jsonschema:"request fields the merge never copies into the stored spec; the run did not use what a request said for them"`
-	TaskCount    int               `json:"taskCount"`
-	Tasks        []mcpRunTaskOut   `json:"tasks" jsonschema:"the run's tasks as stored, in order; at most 20"`
-	Summary      *mcpRunSummaryOut `json:"summary,omitempty" jsonschema:"the report summary; absent when it could not be read"`
-	SummaryError mcpErrorCode      `json:"summaryError,omitempty" jsonschema:"why the summary could not be read"`
+	Run           mcpRunHead           `json:"run"`
+	Finished      bool                 `json:"finished" jsonschema:"true when the status is DONE or FAILED"`
+	Spec          mcpRunSpec           `json:"spec" jsonschema:"the effective spec the backend stored: the request merged with the test type's defaults"`
+	SpecHash      string               `json:"specHash" jsonschema:"digest of the stored spec, as list_runs shows it"`
+	RequestedSpec *mcpRunRequestedSpec `json:"requestedSpec,omitempty" jsonschema:"the request's own spec fields, as the backend kept them beside the merged spec; absent for a run stored before it kept them"`
+	NotCarried    []string             `json:"notCarried,omitempty" jsonschema:"only for a run with no requestedSpec: request fields the backend that stored it never copied into the spec, so the run did not use what a request said for them"`
+	TaskCount     int                  `json:"taskCount"`
+	Tasks         []mcpRunTaskOut      `json:"tasks" jsonschema:"the run's tasks as stored, in order; at most 20"`
+	Summary       *mcpRunSummaryOut    `json:"summary,omitempty" jsonschema:"the report summary; absent when it could not be read"`
+	SummaryError  mcpErrorCode         `json:"summaryError,omitempty" jsonschema:"why the summary could not be read"`
 }
 
 type mcpRunHead struct {
@@ -409,22 +417,61 @@ type mcpRunHead struct {
 // pointer, so a spec stored by another backend version that lacks one shows
 // it absent rather than as 0.
 type mcpRunSpec struct {
-	Topic             string         `json:"topic,omitempty" jsonschema:"the topic the run used; absent when the stored name is not a legal Kafka topic name (see invalid)"`
-	TopicDefaulted    bool           `json:"topicDefaulted" jsonschema:"true when the spec names no topic and the run used <type>-test, lowercased"`
-	NumRecords        *int64         `json:"numRecords,omitempty"`
-	RecordSize        *int64         `json:"recordSize,omitempty" jsonschema:"bytes"`
-	Throughput        *int64         `json:"throughput,omitempty" jsonschema:"target records per second for each producer task; -1 means no limit. SPIKE and CAPACITY ignore it and run unthrottled, and INTEGRATION_CDC does not read it"`
-	Acks              *string        `json:"acks,omitempty" jsonschema:"absent when the stored value is not one Kafka accepts (see invalid)"`
-	BatchSize         *int64         `json:"batchSize,omitempty" jsonschema:"bytes"`
-	LingerMs          *int64         `json:"lingerMs,omitempty"`
-	CompressionType   *string        `json:"compressionType,omitempty" jsonschema:"absent when the stored value is not one Kafka accepts (see invalid)"`
-	NumProducers      *int64         `json:"numProducers,omitempty" jsonschema:"read only by STRESS and CAPACITY, which start this many producer tasks; every other type starts at most one, whatever this says"`
-	NumConsumers      *int64         `json:"numConsumers,omitempty" jsonschema:"not read by any run type: LOAD and ENDURANCE start one consumer task and the other types no separate one, whatever this says"`
-	DurationMs        *int64         `json:"durationMs,omitempty"`
-	ReplicationFactor *int64         `json:"replicationFactor,omitempty"`
-	Partitions        *int64         `json:"partitions,omitempty"`
-	MinInsyncReplicas *int64         `json:"minInsyncReplicas,omitempty"`
-	Invalid           []mcpUntrusted `json:"invalid,omitempty" jsonschema:"stored topic, acks or compressionType values that are not legal Kafka values, as field=value; the backend does not validate a scenario's base spec, nor compressionType sent over gRPC"`
+	Topic             string  `json:"topic,omitempty" jsonschema:"the topic the run used; absent when the stored name is not a legal Kafka topic name (see invalid)"`
+	TopicDefaulted    bool    `json:"topicDefaulted" jsonschema:"true when the spec names no topic and the run used <type>-test, lowercased"`
+	NumRecords        *int64  `json:"numRecords,omitempty"`
+	RecordSize        *int64  `json:"recordSize,omitempty" jsonschema:"bytes"`
+	Throughput        *int64  `json:"throughput,omitempty" jsonschema:"target records per second for each producer task; -1 means no limit. SPIKE and CAPACITY ignore it and run unthrottled, and INTEGRATION_CDC does not read it"`
+	Acks              *string `json:"acks,omitempty" jsonschema:"absent when the stored value is not one Kafka accepts (see invalid)"`
+	BatchSize         *int64  `json:"batchSize,omitempty" jsonschema:"bytes"`
+	LingerMs          *int64  `json:"lingerMs,omitempty"`
+	CompressionType   *string `json:"compressionType,omitempty" jsonschema:"absent when the stored value is not one Kafka accepts (see invalid)"`
+	NumProducers      *int64  `json:"numProducers,omitempty" jsonschema:"read only by STRESS and CAPACITY, which start this many producer tasks; every other type starts at most one, whatever this says"`
+	NumConsumers      *int64  `json:"numConsumers,omitempty" jsonschema:"not read by any run type: LOAD and ENDURANCE start one consumer task and the other types no separate one, whatever this says"`
+	DurationMs        *int64  `json:"durationMs,omitempty"`
+	ReplicationFactor *int64  `json:"replicationFactor,omitempty"`
+	Partitions        *int64  `json:"partitions,omitempty"`
+	MinInsyncReplicas *int64  `json:"minInsyncReplicas,omitempty"`
+	// The fields below appear only for a run with a requestedSpec, and only
+	// when its request set them: the backend has no default for them. A
+	// backend that stored no requestedSpec dropped them and stored their Java
+	// defaults (mcpRunNotCarried), which would read as values the run used.
+	TargetThroughput   *int64         `json:"targetThroughput,omitempty" jsonschema:"the rate as requested under its other name, the one the CLI and scenario files send; throughput is the rate the run used, taken from this when the request set no throughput. Absent when the request did not set it"`
+	ConsumerGroup      mcpUntrusted   `json:"consumerGroup,omitempty" jsonschema:"the consumer group the request named; absent when it named none, and then each consumer used a group of its own: the task id with -group appended for LOAD and ENDURANCE, integrity-cg-integrity for INTEGRITY. An INTEGRITY run's consumer joins a named group with -integrity appended"`
+	FetchMinBytes      *int64         `json:"fetchMinBytes,omitempty" jsonschema:"the consumers' fetch.min.bytes; absent when the request set none, and then the Kafka client's default, 1"`
+	FetchMaxWaitMs     *int64         `json:"fetchMaxWaitMs,omitempty" jsonschema:"the consumers' fetch.max.wait.ms; absent when the request set none, and then the Kafka client's default, 500"`
+	EnableIdempotence  *bool          `json:"enableIdempotence,omitempty" jsonschema:"what the request set: false turned the producers' idempotence off. Absent when it set none, and then the Kafka client decided: it turns idempotence on whenever acks is all"`
+	EnableTransactions *bool          `json:"enableTransactions,omitempty" jsonschema:"true when the run's producers were transactional, and then a LOAD or ENDURANCE consumer read with read_committed; absent when the request did not set it"`
+	EnableCrc          *bool          `json:"enableCrc,omitempty" jsonschema:"whether an INTEGRITY run checked each record's CRC; absent when the request did not set it, and then an INTEGRITY run did. No other type checks one"`
+	Invalid            []mcpUntrusted `json:"invalid,omitempty" jsonschema:"stored topic, acks or compressionType values that are not legal Kafka values, as field=value; the backend does not validate a scenario's base spec, nor compressionType sent over gRPC"`
+}
+
+// mcpRunRequestedSpec is the request's own spec fields, as the backend kept
+// them beside the merged spec (TestSpec.explicitFields): a field is present
+// only when the request set it. Text is checked as in the stored spec.
+type mcpRunRequestedSpec struct {
+	Topic              string         `json:"topic,omitempty" jsonschema:"absent when the request named none, or named one that is not a legal Kafka topic name (see invalid)"`
+	NumRecords         *int64         `json:"numRecords,omitempty"`
+	RecordSize         *int64         `json:"recordSize,omitempty"`
+	Throughput         *int64         `json:"throughput,omitempty"`
+	Acks               *string        `json:"acks,omitempty"`
+	BatchSize          *int64         `json:"batchSize,omitempty"`
+	LingerMs           *int64         `json:"lingerMs,omitempty"`
+	CompressionType    *string        `json:"compressionType,omitempty"`
+	NumProducers       *int64         `json:"numProducers,omitempty"`
+	NumConsumers       *int64         `json:"numConsumers,omitempty"`
+	DurationMs         *int64         `json:"durationMs,omitempty"`
+	ReplicationFactor  *int64         `json:"replicationFactor,omitempty"`
+	Partitions         *int64         `json:"partitions,omitempty"`
+	MinInsyncReplicas  *int64         `json:"minInsyncReplicas,omitempty"`
+	ConsumerGroup      mcpUntrusted   `json:"consumerGroup,omitempty"`
+	TargetThroughput   *int64         `json:"targetThroughput,omitempty"`
+	FetchMinBytes      *int64         `json:"fetchMinBytes,omitempty"`
+	FetchMaxWaitMs     *int64         `json:"fetchMaxWaitMs,omitempty"`
+	EnableIdempotence  *bool          `json:"enableIdempotence,omitempty"`
+	EnableTransactions *bool          `json:"enableTransactions,omitempty"`
+	EnableCrc          *bool          `json:"enableCrc,omitempty"`
+	Invalid            []mcpUntrusted `json:"invalid,omitempty" jsonschema:"requested topic, acks or compressionType values that are not legal Kafka values, as field=value"`
 }
 
 type mcpRunTaskOut struct {
@@ -475,13 +522,20 @@ func mcpGetRun(ctx context.Context, call *mcpCall, in mcpGetRunIn) (mcpGetRunOut
 	if err != nil {
 		return out, err
 	}
+	requested, err := mcpRunRequestedFrom(call, run)
+	if err != nil {
+		return out, err
+	}
 	out = mcpGetRunOut{
-		Run:        mcpRunHeadFrom(call, run),
-		Finished:   mcpRunFinished(run.Status),
-		Spec:       spec,
-		SpecHash:   mcpRunSpecHash(key),
-		NotCarried: append([]string(nil), mcpRunNotCarried...),
-		TaskCount:  len(run.Results),
+		Run:           mcpRunHeadFrom(call, run),
+		Finished:      mcpRunFinished(run.Status),
+		Spec:          spec,
+		SpecHash:      mcpRunSpecHash(key),
+		RequestedSpec: requested,
+		TaskCount:     len(run.Results),
+	}
+	if requested == nil {
+		out.NotCarried = append([]string(nil), mcpRunNotCarried...)
 	}
 	tasks := make([]mcpRunTaskOut, 0, len(run.Results))
 	for _, t := range run.Results {
@@ -541,38 +595,61 @@ func mcpRunHeadFrom(call *mcpCall, run *client.MCPRun) mcpRunHead {
 	return h
 }
 
-// mcpRunSpecWire is the stored spec as the backend serialises it
-// (domain/TestSpec.java getters).
+// mcpRunSpecWire is a spec as the backend serialises it: the stored spec
+// from domain/TestSpec.java's fields that are set (through its getters, and
+// so with every field, for a run stored before the backend kept the
+// request), or the requested one through TestSpec.explicitFields, which uses
+// the same names.
 type mcpRunSpecWire struct {
-	Topic             *string `json:"topic"`
-	NumRecords        *int64  `json:"numRecords"`
-	RecordSize        *int64  `json:"recordSize"`
-	Throughput        *int64  `json:"throughput"`
-	Acks              *string `json:"acks"`
-	BatchSize         *int64  `json:"batchSize"`
-	LingerMs          *int64  `json:"lingerMs"`
-	CompressionType   *string `json:"compressionType"`
-	NumProducers      *int64  `json:"numProducers"`
-	NumConsumers      *int64  `json:"numConsumers"`
-	DurationMs        *int64  `json:"durationMs"`
-	ReplicationFactor *int64  `json:"replicationFactor"`
-	Partitions        *int64  `json:"partitions"`
-	MinInsyncReplicas *int64  `json:"minInsyncReplicas"`
+	Topic              *string `json:"topic"`
+	NumRecords         *int64  `json:"numRecords"`
+	RecordSize         *int64  `json:"recordSize"`
+	Throughput         *int64  `json:"throughput"`
+	Acks               *string `json:"acks"`
+	BatchSize          *int64  `json:"batchSize"`
+	LingerMs           *int64  `json:"lingerMs"`
+	CompressionType    *string `json:"compressionType"`
+	NumProducers       *int64  `json:"numProducers"`
+	NumConsumers       *int64  `json:"numConsumers"`
+	DurationMs         *int64  `json:"durationMs"`
+	ReplicationFactor  *int64  `json:"replicationFactor"`
+	Partitions         *int64  `json:"partitions"`
+	MinInsyncReplicas  *int64  `json:"minInsyncReplicas"`
+	ConsumerGroup      *string `json:"consumerGroup"`
+	TargetThroughput   *int64  `json:"targetThroughput"`
+	FetchMinBytes      *int64  `json:"fetchMinBytes"`
+	FetchMaxWaitMs     *int64  `json:"fetchMaxWaitMs"`
+	EnableIdempotence  *bool   `json:"enableIdempotence"`
+	EnableTransactions *bool   `json:"enableTransactions"`
+	EnableCrc          *bool   `json:"enableCrc"`
+}
+
+// mcpRunDecodeSpec reads raw into w; nothing, or JSON null, leaves w empty and
+// reports false.
+func mcpRunDecodeSpec(raw json.RawMessage, w *mcpRunSpecWire) (bool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return false, nil
+	}
+	return true, json.Unmarshal(trimmed, w)
 }
 
 // mcpRunSpecFrom reads the stored spec. A run without a topic used one named
-// after its type (TestOrchestrator.java:894,1144-1145). The topic, acks and
+// after its type (TestOrchestrator.java:1117,1412-1413). The topic, acks and
 // compressionType are shown as identifiers only when they hold values Kafka
 // accepts: a scenario's base spec reaches the store unvalidated
-// (TestOrchestrator.java:306-318), so another value is third-party text and
-// goes, fenced, into invalid. call may be nil when only the topic's kind is
-// needed.
+// (TestOrchestrator.java:319-331), so another value is third-party text and
+// goes, fenced, into invalid. The seven fields a backend without
+// requestedSpec never carried are shown only for a run that has one. call may
+// be nil when only the topic's kind is needed.
 func mcpRunSpecFrom(call *mcpCall, run *client.MCPRun) (mcpRunSpec, error) {
 	var w mcpRunSpecWire
-	if len(bytes.TrimSpace(run.Spec)) > 0 && !bytes.Equal(bytes.TrimSpace(run.Spec), []byte("null")) {
-		if err := json.Unmarshal(run.Spec, &w); err != nil {
-			return mcpRunSpec{}, err
-		}
+	if _, err := mcpRunDecodeSpec(run.Spec, &w); err != nil {
+		return mcpRunSpec{}, err
+	}
+	carried, err := mcpRunDecodeSpec(run.RequestedSpec, &mcpRunSpecWire{})
+	if err != nil {
+		return mcpRunSpec{}, err
 	}
 	spec := mcpRunSpec{
 		NumRecords:        w.NumRecords,
@@ -615,13 +692,75 @@ func mcpRunSpecFrom(call *mcpCall, run *client.MCPRun) (mcpRunSpec, error) {
 			invalid("compressionType", *w.CompressionType)
 		}
 	}
+	if carried {
+		spec.TargetThroughput = w.TargetThroughput
+		spec.FetchMinBytes = w.FetchMinBytes
+		spec.FetchMaxWaitMs = w.FetchMaxWaitMs
+		spec.EnableIdempotence = w.EnableIdempotence
+		spec.EnableTransactions = w.EnableTransactions
+		spec.EnableCrc = w.EnableCrc
+		if w.ConsumerGroup != nil && call != nil {
+			spec.ConsumerGroup = call.FenceN(*w.ConsumerGroup, 300)
+		}
+	}
 	return spec, nil
+}
+
+// mcpRunRequestedFrom reads the request's own spec fields, nil when the run
+// has none: a run stored before the backend kept them, or a backend that
+// predates them. The request passed the same validation as the stored spec
+// (a scenario's base spec, none), so text is checked the same way, and the
+// consumer group, which the backend checks only for length, is fenced.
+func mcpRunRequestedFrom(call *mcpCall, run *client.MCPRun) (*mcpRunRequestedSpec, error) {
+	var w mcpRunSpecWire
+	ok, err := mcpRunDecodeSpec(run.RequestedSpec, &w)
+	if err != nil || !ok {
+		return nil, err
+	}
+	r := &mcpRunRequestedSpec{
+		NumRecords:         w.NumRecords,
+		RecordSize:         w.RecordSize,
+		Throughput:         w.Throughput,
+		BatchSize:          w.BatchSize,
+		LingerMs:           w.LingerMs,
+		NumProducers:       w.NumProducers,
+		NumConsumers:       w.NumConsumers,
+		DurationMs:         w.DurationMs,
+		ReplicationFactor:  w.ReplicationFactor,
+		Partitions:         w.Partitions,
+		MinInsyncReplicas:  w.MinInsyncReplicas,
+		TargetThroughput:   w.TargetThroughput,
+		FetchMinBytes:      w.FetchMinBytes,
+		FetchMaxWaitMs:     w.FetchMaxWaitMs,
+		EnableIdempotence:  w.EnableIdempotence,
+		EnableTransactions: w.EnableTransactions,
+		EnableCrc:          w.EnableCrc,
+	}
+	check := func(field string, v *string, re *regexp.Regexp) *string {
+		switch {
+		case v == nil:
+			return nil
+		case re.MatchString(*v):
+			return v
+		}
+		r.Invalid = append(r.Invalid, call.FenceN(field+"="+*v, 300))
+		return nil
+	}
+	if t := check("topic", w.Topic, mcpRunTopicRE); t != nil {
+		r.Topic = *t
+	}
+	r.Acks = check("acks", w.Acks, mcpRunAcksRE)
+	r.CompressionType = check("compressionType", w.CompressionType, mcpRunCompressionRE)
+	if w.ConsumerGroup != nil {
+		r.ConsumerGroup = call.FenceN(*w.ConsumerGroup, 300)
+	}
+	return r, nil
 }
 
 func mcpRunTaskFrom(call *mcpCall, t client.MCPRunTask) mcpRunTaskOut {
 	return mcpRunTaskOut{
 		// A scenario run's task ids are the run id and the phase name
-		// (TestOrchestrator.java:993), which nothing validates.
+		// (TestOrchestrator.java:1251), which nothing validates.
 		TaskID:              call.FenceN(t.TaskID, 128),
 		Phase:               call.FenceN(t.PhaseName, 64),
 		Status:              mcpSanitizeLine(t.Status, 16),
@@ -988,16 +1127,33 @@ func mcpAssessPartsContext(ctx context.Context) (context.Context, context.Cancel
 type mcpRunIdentity struct {
 	testType, backend, key string
 	scenario               bool
+	// requested: the backend kept the run's request. A run stored before it
+	// did ran without seven fields its spec shows, on a Trogdor backend that
+	// also left the client settings out, so it never matches a later run,
+	// whatever its spec.
+	requested bool
 }
 
 func mcpRunIdentityOf(r *client.MCPRun) (mcpRunIdentity, bool) {
 	key, ok := mcpRunSpecKey(r.Spec)
-	return mcpRunIdentity{testType: r.TestType, backend: r.Backend, key: key, scenario: r.ScenarioName != ""}, ok
+	return mcpRunIdentity{
+		testType:  r.TestType,
+		backend:   r.Backend,
+		key:       key,
+		scenario:  r.ScenarioName != "",
+		requested: mcpRunHasRequested(r),
+	}, ok
+}
+
+// mcpRunHasRequested reports whether the backend kept the run's request.
+func mcpRunHasRequested(r *client.MCPRun) bool {
+	raw := bytes.TrimSpace(r.RequestedSpec)
+	return len(raw) > 0 && !bytes.Equal(raw, []byte("null"))
 }
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:337-365 checks only that it exists),
+// any type or status (TestResource.java:352-380 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -1109,7 +1265,8 @@ func mcpScanBand(ctx context.Context, call *mcpCall, run *client.MCPRun, key str
 				continue
 			}
 			scan.earlier++
-			if ok && r.Status == "DONE" && r.ScenarioName == "" && r.Backend == run.Backend && ident.key == key && mcpIDRE.MatchString(r.ID) {
+			if ok && r.Status == "DONE" && r.ScenarioName == "" && r.Backend == run.Backend && ident.key == key &&
+				ident.requested == mcpRunHasRequested(run) && mcpIDRE.MatchString(r.ID) {
 				scan.matches = append(scan.matches, r.ID)
 			}
 		}
@@ -1286,7 +1443,8 @@ func mcpAssessRegressionFrom(call *mcpCall, reads *mcpAssessReads, run *client.M
 		out.BaselineMatch = "yes"
 	case b == nil:
 		out.BaselineMatch = "unknown"
-	case b.testType != run.TestType || b.backend != run.Backend || b.key != key || b.scenario != (run.ScenarioName != ""):
+	case b.testType != run.TestType || b.backend != run.Backend || b.key != key || b.scenario != (run.ScenarioName != "") ||
+		b.requested != mcpRunHasRequested(run):
 		out.BaselineMatch = "no"
 	case b.scenario:
 		out.BaselineMatch = "unknown"
@@ -1935,8 +2093,8 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"data-loss, RTO or RPO limit as met, because a missing value is skipped rather than failed.",
 		Refs: []string{
 			mcpJava + "persistence/TestResultEntity.java:20-75",
-			mcpJava + "persistence/EntityMapper.java:162-197",
-			mcpJava + "engine/TestOrchestrator.java:1216-1217",
+			mcpJava + "persistence/EntityMapper.java:171-206",
+			mcpJava + "engine/TestOrchestrator.java:1484-1485",
 			mcpJava + "report/ReportGenerator.java:62-86,390-395",
 			mcpJava + "engine/SlaEvaluator.java:91-102",
 		},
@@ -1949,17 +2107,23 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
 			"audit row.",
 		Refs: []string{
-			mcpJava + "engine/TestOrchestrator.java:1230-1303",
-			mcpJava + "api/TestResource.java:246-291",
+			mcpJava + "engine/TestOrchestrator.java:1498-1571",
+			mcpJava + "api/TestResource.java:261-306",
 			mcpJava + "domain/TestResult.java:25-31",
 		},
 	},
 	{
 		ID: mcpCaveatScenarioBaseSpecOnly,
-		Text: "A scenario run stores only its base spec merged with the type's defaults. Each phase resolves its " +
-			"own spec from the scenario, and those are not stored, so the spec shown is not what every phase ran.",
+		Text: "A scenario run stores its base spec merged with the type's defaults, and as requestedSpec the base " +
+			"spec as the scenario sent it. Each phase resolves its own spec from the scenario, and those are not " +
+			"stored, so the spec shown is not what every phase ran. Phases start only producers: the backend " +
+			"refuses a scenario that sets consumerGroup, a fetch setting or enableCrc: true, and the producer " +
+			"options and the rate (throughput, or targetThroughput without it) reach every phase.",
 		Refs: []string{
-			mcpJava + "engine/TestOrchestrator.java:306-311,336-339",
+			mcpJava + "engine/TestOrchestrator.java:319-326,349-352",
+			mcpJava + "engine/TestOrchestrator.java:1048-1104",
+			mcpJava + "engine/TestOrchestrator.java:1237-1254",
+			mcpJava + "domain/TestScenario.java:107-182",
 			mcpJava + "domain/ScenarioPhase.java:21-26",
 		},
 	},
@@ -2002,7 +2166,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"newest matching rows.",
 		Refs: []string{
 			mcpJava + "persistence/AuditEventEntity.java:15-32",
-			mcpJava + "api/TestResource.java:93,125,152,238,274",
+			mcpJava + "api/TestResource.java:102,134,161,253,289",
 			mcpJava + "service/AuditService.java:52-78",
 			mcpJava + "api/AuditResource.java:43-47",
 		},
@@ -2027,7 +2191,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionScheduler.java:92-104",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
 			mcpJava + "disruption/DisruptionAnalysisResource.java:104-130",
-			mcpJava + "resilience/ResilienceResource.java:38-64",
+			mcpJava + "resilience/ResilienceResource.java:41-67",
 		},
 	},
 }

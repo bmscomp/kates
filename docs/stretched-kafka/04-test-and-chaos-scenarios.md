@@ -516,7 +516,7 @@ kates ctx set site-b --url http://localhost:30084 --api-key "$KEY_B"
 
 ### Sustained Workloads
 
-Tests that keep a domain down, cut the link or shape it run an INTEGRITY workload while the fault is applied outside Kates. Start it through the REST API: `throughput`, the rate an INTEGRITY run reads, is set only there and in a resilience file's raw `testRequest.spec`. `kates test create --throughput` and a scenario file's `targetThroughput` set `targetThroughput`, which INTEGRITY ignores, so a run started with `kates test apply` produces as fast as it can. Leave out `enableIdempotence`, `enableTransactions`, `enableCrc` and `consumerGroup`: [`TestOrchestrator.applyTypeDefaults`](../../kates/src/main/java/com/bmscomp/kates/engine/TestOrchestrator.java) does not carry them through today. CRC checks stay on by default, and the producer is idempotent by the client's default for acks=all.
+Tests that keep a domain down, cut the link or shape it run an INTEGRITY workload while the fault is applied outside Kates. Start it through the REST API, as below; `kates test create --throughput` and a scenario file's `targetThroughput` set the same rate, which the API takes as `throughput` or `targetThroughput` ([`TestOrchestrator.applyTypeDefaults`](../../kates/src/main/java/com/bmscomp/kates/engine/TestOrchestrator.java)). CRC checks stay on by default, and the producer is idempotent by the client's default for acks=all; `enableIdempotence`, `enableTransactions`, `enableCrc` and `consumerGroup` change that when set.
 
 ```json
 {

@@ -545,23 +545,23 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 | `--record-size` | Record payload size in bytes |
 | `--producers` | Number of producers. STRESS and CAPACITY start this many; every other type runs one producer whatever the flag says |
 | `--consumers` | Accepted, but no test type reads it: LOAD, ENDURANCE and INTEGRITY run one consumer, the other types none |
-| `--consumer-group` | Dropped by the backend, which names each consumer group itself |
+| `--consumer-group` | Consumer group, for LOAD, ENDURANCE and INTEGRITY (whose consumer joins it with `-integrity` appended); without it the backend names the group. A LOAD or ENDURANCE consumer commits offsets in it, so do not name a group an application uses. Refused for other types (see the callout below) |
 | `--acks` | Producer acks mode: `0`, `1`, `all` |
 | `--topic` | Target topic name |
 | `--partitions` | Topic partition count |
 | `--replication-factor` | Topic replication factor |
 | `--min-isr` | Minimum in-sync replicas |
 | `--duration` | Test duration in seconds; the backend fails any run still going after 30 minutes (see below) |
-| `--throughput` | Does not limit the rate: it sends `targetThroughput`, which the backend drops (see the callout below) |
-| `--fetch-min-bytes` | Dropped by the backend |
-| `--fetch-max-wait-ms` | Dropped by the backend |
+| `--throughput` | Producer rate in records/s, for each producer; sent as `targetThroughput` (see the callout below) |
+| `--fetch-min-bytes` | Consumer `fetch.min.bytes`, for LOAD, ENDURANCE and INTEGRITY |
+| `--fetch-max-wait-ms` | Consumer `fetch.max.wait.ms`, for LOAD, ENDURANCE and INTEGRITY |
 | `--backend` | Backend engine to use |
 | `--wait` | Wait for test completion |
 
 ::: {.callout-important}
-**`--throughput` does not rate-limit a run**
+**`--throughput` sets the rate, and some flags do not apply to every type**
 
-The backend merges every request with its test type's defaults before it builds the run, and the merge drops `targetThroughput` — the field `--throughput` sends — along with `consumerGroup` and the two fetch settings. A run therefore produces at its type's default rate whatever `--throughput` says: unthrottled for most types, 5,000 records/s for ENDURANCE and 10,000 records/s for ROUND_TRIP on a default install. The rate comes from the API field `throughput` instead — SPIKE and CAPACITY ignore even that — and no `kates test create` flag sets it. A `kates resilience run` file can set it, because its `spec` goes to the API as written (see Resilience, below).
+`--throughput` sends `targetThroughput`, which the backend uses as the rate of each producer in place of the type's default: unthrottled for most types, 5,000 records/s for ENDURANCE and 10,000 records/s for ROUND_TRIP on a default install. The API also takes the rate as `throughput`, the name a `kates resilience run` file uses, and that one wins when a request sets both. SPIKE and CAPACITY always run unthrottled, and only LOAD, ENDURANCE and INTEGRITY start a consumer, so the backend refuses a `--throughput` rate for the first two, and `--consumer-group` and the fetch flags for types without a consumer: the command fails with `[400] Validation Failed:` and a message naming the field, and no run starts.
 :::
 
 ::: {.callout-important}
@@ -601,7 +601,7 @@ kates test show <id>
 kates test inspect <id>
 ```
 
-Shows detailed test results including phases, metrics, integrity data, and timeline events.
+Shows detailed test results including phases, metrics, integrity data, and timeline events. When the run had a rate, `spec.throughput` above 0, a bar shows the peak throughput against it; otherwise the peak throughput is printed as a number.
 
 #### test delete
 
@@ -627,7 +627,7 @@ kates test apply -f scenario.yaml
 kates test apply -f scenario.yaml --wait
 ```
 
-Apply a YAML scenario file. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes.
+Apply a YAML scenario file. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
 
 #### test scaffold
 
@@ -648,12 +648,12 @@ kates test scaffold export --all           # export every template
 | `production-load` | LOAD | Up to 1M records of 2 KiB with `acks=all`, lz4 and 12 partitions for at most 300 s, through one producer and one consumer; gates on P99 ≤ 50 ms, average ≤ 10 ms and at least 50,000 records/s |
 | `stress-test` | STRESS | 16 producers, each sending up to 5M records of 512 B with `acks=1` and snappy to 24 partitions; gates each producer on P99 ≤ 200 ms and at least 100,000 records/s |
 | `endurance-soak` | ENDURANCE | 10M records of 1 KiB at 5,000 records/s through one producer and one consumer; gates on P99 ≤ 100 ms and average ≤ 20 ms. The records take about 33 minutes, past the 30-minute limit on any run (see the callout under `test create`), so on a default install the run fails and `kates test apply --wait` exits 1. Set `records` to 8,500,000 or fewer in the exported file to run it |
-| `exactly-once` | ROUND_TRIP | 100k records of 256 B with `acks=all` through one producer at 10,000 records/s; gates on P99 ≤ 200 ms. No transactions and no integrity check run, so its loss, ordering and CRC gates have nothing to check |
-| `integrity-tx` | INTEGRITY | 200k records of 512 B with `acks=all` and zstd through one producer and one consumer — CRC-checked, idempotent by the Kafka producer's default, not transactional; gates on zero loss, zero out-of-order, zero CRC failures and P99 ≤ 150 ms |
+| `exactly-once` | ROUND_TRIP | 100k records of 256 B with `acks=all` through one idempotent, transactional producer at 10,000 records/s; gates on P99 ≤ 200 ms. A ROUND_TRIP run makes no integrity check, so its loss, ordering and CRC gates have nothing to check |
+| `integrity-tx` | INTEGRITY | 200k records of 512 B with `acks=all` and zstd through one producer and one consumer — CRC-checked, idempotent and transactional, read with `read_committed`; gates on zero loss, zero out-of-order, zero CRC failures and P99 ≤ 150 ms |
 | `spike-test` | SPIKE | One unthrottled producer sending up to 500k records of 1 KiB with `acks=1` for at most 60 s; gates on P99 ≤ 500 ms |
 | `ci-gate` | LOAD | 10k records of 512 B with `acks=all` through one producer and one consumer; gates on P99 ≤ 100 ms and at least 1,000 records/s |
 
-`kates test scaffold` prints the CLI's own one-line descriptions, which promise more than the runs deliver: multiple producers for `quick-load`, `production-load`, `integrity-tx` and `spike-test`, a one-hour soak that the 30-minute run limit rules out, transactions and an integrity check for `exactly-once`, transactions for `integrity-tx`, and a zero-error gate for `ci-gate`. The table above says what the backend runs. The backend keeps a file's producer count only for STRESS and CAPACITY, reads `numConsumers` for no type, and drops `targetThroughput` (see the callout under `test create`) and the integrity options `enableIdempotence`, `enableTransactions` and `enableCrc`, so every INTEGRITY run is CRC-checked and none is transactional. The files also declare gates that `kates test apply` does not check: `maxErrorRate` in `production-load`, `endurance-soak`, `spike-test` and `ci-gate`, `maxDuplicatePercent` in `integrity-tx`, and `maxDataLossPercent` in `ci-gate`, whose LOAD run reports no integrity result — see [Scenario Files & SLA Gates](13-scenario-files.md).
+`kates test scaffold` prints the CLI's own one-line descriptions, which promise more than the runs deliver: multiple producers for `quick-load`, `production-load`, `integrity-tx` and `spike-test`, a one-hour soak that the 30-minute run limit rules out, and a zero-error gate for `ci-gate`. The table above says what the backend runs. The backend keeps a file's producer count only for STRESS and CAPACITY and reads `numConsumers` for no type; `targetThroughput` and the integrity options `enableIdempotence`, `enableTransactions` and `enableCrc` reach the run. The files also declare gates that `kates test apply` does not check: `maxErrorRate` in `production-load`, `endurance-soak`, `spike-test` and `ci-gate`, `maxDuplicatePercent` in `integrity-tx`, and `maxDataLossPercent` in `ci-gate`, whose LOAD run reports no integrity result — see [Scenario Files & SLA Gates](13-scenario-files.md).
 
 **See also:** [Test Types Deep Dive](05-test-types.md) for the theory behind each test type, [Scenario Files & SLA Gates](13-scenario-files.md) for YAML scenario syntax.
 
@@ -978,6 +978,8 @@ steadyStateSec: 30
 
 The rate limit keeps the load running across the fault: 180,000 records at 500 records/s take 360 s, while the fault is triggered after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s). An unthrottled run can finish before the fault is triggered, and its results then describe a run the fault never touched. `throughput` is the rate the run honours, and LOAD runs one producer and one consumer whatever `numProducers` says, so it is the whole rate. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and the fault could then hit a controller instead of a broker. The example in `kates resilience run --help` has neither the rate limit nor the broker selector; start from this one.
 
+A `testRequest` spec field the backend cannot apply to the test type fails the command with `[400] Validation Failed:` and the field's name, as `kates test create` does, before any fault is injected. A report with status `ERROR` prints its reason on an `Error` line.
+
 **See also:** [Chaos Engineering in Practice](07-chaos-practice.md) for resilience test configuration.
 
 ---
@@ -1019,7 +1021,7 @@ kates schedule create --name "Nightly Endurance" --cron "0 2 * * *" --request en
 | `--cron` | ✅ | Cron expression (e.g., `0 * * * *`) |
 | `--request` | ✅ | Path to JSON file containing the test request body |
 
-The request file should contain the same JSON body you would send to `POST /api/tests`.
+The request file should contain the same JSON body you would send to `POST /api/tests`. The schedule keeps the fields it sets, and each firing merges them with the test type's defaults, as a `POST /api/tests` would; a firing the backend refuses starts no run, and says why only in the server log.
 
 #### schedule delete
 
@@ -1799,6 +1801,8 @@ kates replay <id>
 kates replay abc123
 ```
 
+The replay sends the run's `requestedSpec`, the fields its request set, and the backend merges them with the type's defaults as it did the first time. A run stored before the backend kept the request has none; it is replayed from its merged spec without `targetThroughput`, `consumerGroup`, the fetch settings and the `enable` options, which that backend never applied, so the new run does what the old one did. A scenario run is replayed as a plain run of its base spec, without its phases.
+
 #### gate
 
 Aliases: `ci`, `quality-gate`
@@ -2147,7 +2151,7 @@ Twelve tools, all read-only:
 |------|-------|
 | Cluster | `cluster_overview` (start here: clusterId, brokers, partition health, the KRaft quorum, alert rules), `cluster_topology` (node pools, controllers, brokers; with a topic, its partitions), `consumer_group_lag` (one group's lag by topic, partition and leader) |
 | Kates activity | `kates_activity` (tests not yet finished, runs, disruption reports and audit rows since a time) |
-| Test runs | `list_runs`, `get_run` (effective spec, tasks and summary), `assess_run` (regression, a noise band over earlier runs with the same spec, broker skew, advisor rules) |
+| Test runs | `list_runs`, `get_run` (effective spec, the request's own spec fields, tasks and summary), `assess_run` (regression, a noise band over earlier runs with the same spec, broker skew, advisor rules) |
 | Chaos | `list_chaos_catalog` (fault types, playbooks, templates, providers), `preview_disruption` (the backend's dry run of a playbook or an ad-hoc plan), `disruption_report` (one disruption, with an optional baseline) |
 | Security and scenarios | `security_evidence` (the security checks, as a lab posture and drift check), `draft_scenario` (checks a `kates test apply` scenario file and saves nothing) |
 

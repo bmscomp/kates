@@ -1,7 +1,17 @@
 package cmd
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
+	"gopkg.in/yaml.v3"
 )
 
 func TestScenarioToRequest_BasicFields(t *testing.T) {
@@ -143,6 +153,38 @@ func TestScenarioToRequest_TargetThroughput(t *testing.T) {
 	}
 }
 
+// An integrity option the file sets to false is sent as false. omitempty on a
+// plain bool dropped it, so enableCrc: false reached the backend as nothing,
+// and the run checked CRCs anyway.
+func TestScenarioToRequest_ExplicitFalseIsSent(t *testing.T) {
+	s := TestScenario{
+		Type: "INTEGRITY",
+		Spec: map[string]interface{}{
+			"enableCrc":          false,
+			"enableIdempotence":  false,
+			"enableTransactions": true,
+		},
+	}
+
+	body, err := json.Marshal(scenarioToRequest(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"enableCrc":false`, `"enableIdempotence":false`, `"enableTransactions":true`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("request %s lacks %s", body, want)
+		}
+	}
+
+	body, err = json.Marshal(scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]interface{}{"records": 5.0}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "enable") {
+		t.Errorf("a file that sets no option sends none: %s", body)
+	}
+}
+
 func TestScenarioToRequest_NilSpec(t *testing.T) {
 	s := TestScenario{
 		Type: "LOAD",
@@ -194,5 +236,56 @@ func TestToInt_Int(t *testing.T) {
 func TestToInt_Unknown(t *testing.T) {
 	if toInt("not-a-number") != 0 {
 		t.Error("toInt(string) should be 0")
+	}
+}
+
+// A flag that is not a YAML boolean is not sent as false. yes, on and a bare
+// key all used to become an explicit false, which turns CRC checks or the
+// producer's idempotence off where the backend would otherwise keep them on.
+func TestScenarioToRequest_AFlagThatIsNotABooleanIsNotSent(t *testing.T) {
+	var sf ScenarioFile
+	if err := yaml.Unmarshal([]byte("scenarios:\n  - name: x\n    type: INTEGRITY\n    spec:\n      enableCrc: yes\n      enableIdempotence: on\n      enableTransactions:\n"), &sf); err != nil {
+		t.Fatal(err)
+	}
+	req := scenarioToRequest(sf.Scenarios[0])
+	if req.Spec.EnableCrc != nil || req.Spec.EnableIdempotence != nil || req.Spec.EnableTransactions != nil {
+		body, _ := json.Marshal(req)
+		t.Errorf("sent %s", body)
+	}
+
+	problems := scenarioSpecProblems(sf.Scenarios[0])
+	if len(problems) != 3 || !strings.Contains(strings.Join(problems, "; "), "spec.enableCrc is yes; write true or false") {
+		t.Errorf("problems = %q", problems)
+	}
+	sf.Scenarios[0].Spec = map[string]any{"enableCrc": false, "enableIdempotence": "true"}
+	if problems := scenarioSpecProblems(sf.Scenarios[0]); len(problems) != 0 {
+		t.Errorf("true and false, quoted or not, are fine: %q", problems)
+	}
+}
+
+// kates test apply refuses a file with such a flag before it starts any of
+// its tests.
+func TestApply_RefusesAFlagThatIsNotABoolean(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.yaml")
+	data := "scenarios:\n  - name: first\n    type: LOAD\n  - name: second\n    type: INTEGRITY\n    spec:\n      enableCrc: yes\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var requests int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++ }))
+	defer ts.Close()
+	apiClient = client.New(ts.URL)
+	output.ResetForTesting()
+	applyFile, applyWait = path, false
+	defer func() { applyFile = "" }()
+
+	err := testApplyCmd.RunE(testApplyCmd, nil)
+
+	if err == nil || !strings.Contains(err.Error(), "scenario 2 (second): spec.enableCrc is yes") {
+		t.Errorf("err = %v", err)
+	}
+	if requests != 0 {
+		t.Errorf("%d requests reached the backend", requests)
 	}
 }

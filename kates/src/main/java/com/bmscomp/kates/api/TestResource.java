@@ -71,6 +71,10 @@ public class TestResource {
             summary = "Create and execute a test",
             description = "Submits a new performance test run for asynchronous execution")
     @APIResponse(responseCode = "202", description = "Test accepted for execution")
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid request, including a spec field the test type or backend cannot apply;"
+                    + " fieldErrors names each field")
     @APIResponse(responseCode = "429", description = "Concurrency limit reached — retry later")
     public Response createTest(@Valid CreateTestRequest request) {
         var result = orchestrator.executeTest(request);
@@ -83,6 +87,11 @@ public class TestResource {
                 return Response.status(429)
                         .header("Retry-After", RETRY_AFTER_SECONDS)
                         .entity(ApiError.of(429, "Too Many Requests", failure.getMessage()))
+                        .build();
+            }
+            if (failure instanceof com.bmscomp.kates.engine.InvalidTestSpecException invalid) {
+                return Response.status(400)
+                        .entity(ApiError.validationFailed(invalid.getMessage(), invalid.getFieldErrors()))
                         .build();
             }
             return Response.status(400)
@@ -209,7 +218,13 @@ public class TestResource {
 
     @GET
     @Path("/{id}")
-    @Operation(summary = "Get a test run", description = "Returns a single test run by ID, refreshing its status")
+    @Operation(
+            summary = "Get a test run",
+            description = "Returns a single test run by ID, refreshing its status. spec is what the run used, the"
+                    + " request merged with its test type's defaults; a field no type has a default for"
+                    + " (consumerGroup, targetThroughput, the fetch settings, the enable options) appears only"
+                    + " when the request set it. requestedSpec is the request's own spec fields, absent on runs"
+                    + " stored before it was kept")
     @APIResponse(responseCode = "200", description = "Test run details")
     @APIResponse(responseCode = "404", description = "Test run not found")
     public Response getTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {

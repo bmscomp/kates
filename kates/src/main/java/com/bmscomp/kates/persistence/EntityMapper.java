@@ -39,6 +39,7 @@ public final class EntityMapper {
         entity.setBackend(run.getBackend());
         entity.setScenarioName(run.getScenarioName());
         entity.setSpecJson(toJson(run.getSpec()));
+        entity.setRequestedSpecJson(toJson(run.getRequestedSpec()));
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
@@ -64,8 +65,9 @@ public final class EntityMapper {
                 .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
                 .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
                 .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
-                .withCdcPhases(
-                        fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
+                .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
+                .withRequestedSpec(
+                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}));
 
         if (entity.getResults() != null) {
             run = run.withResults(entity.getResults().stream()
@@ -92,8 +94,9 @@ public final class EntityMapper {
                 .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
                 .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
                 .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
-                .withCdcPhases(
-                        fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
+                .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
+                .withRequestedSpec(
+                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}));
     }
 
     /**
@@ -113,6 +116,12 @@ public final class EntityMapper {
         entity.setBackend(run.getBackend());
         entity.setScenarioName(run.getScenarioName());
         entity.setSpecJson(toJson(run.getSpec()));
+        // A request does not change after the run is created, so an update from
+        // a copy that never carried it (one built by hand rather than read back)
+        // must not erase the stored one.
+        if (run.getRequestedSpec() != null) {
+            entity.setRequestedSpecJson(toJson(run.getRequestedSpec()));
+        }
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));

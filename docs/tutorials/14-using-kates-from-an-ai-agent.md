@@ -166,10 +166,12 @@ the machine that runs `kates mcp`, which is yours; an RFC 3339 time such as
 ### "How did my last LOAD run go, and is it within the usual noise?"
 
 The agent calls `list_runs` for the newest LOAD run, `get_run` for its
-effective spec, tasks and summary, and `assess_run`, which puts the run
-against a noise band computed over the earlier runs with the same stored
-spec: for each metric, their mean, standard deviation, minimum and maximum,
-and whether this run falls below, within or above them. It adds the backend's
+effective spec, the spec fields its request set, its tasks and summary, and
+`assess_run`, which puts the run against a noise band computed over the
+earlier runs with the same stored spec, never mixing a run stored before the
+backend kept the request with a later one: for each metric, their mean,
+standard deviation, minimum and maximum, and whether this run falls below,
+within or above them. It adds the backend's
 regression check against the baseline for the type, per-broker leader skew,
 and the advisor's rules. The `diagnose_run` prompt asks for the same
 reading, given a run id:
@@ -180,9 +182,10 @@ reading, given a run id:
 
 What it cannot show: the summary averages the run's tasks rather than
 measuring the run as a whole; a LOAD run is one producer and one consumer;
-the backend stores only the spec merged with the type's defaults, so fields
-the merge drops are named in `notCarried` instead of shown; and the
-per-broker figures are projected from leader share, not measured per broker.
+a run stored before the backend kept the request has no `requestedSpec`
+beside its merged spec, so the fields that backend dropped are named in
+`notCarried` instead of shown; and the per-broker figures are projected from
+leader share, not measured per broker.
 Attach the full report with `@kates:kates://runs/<run-id>/report.md` when
 you want the agent to quote it.
 

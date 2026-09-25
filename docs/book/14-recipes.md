@@ -92,7 +92,7 @@ scenarios:
       maxP99LatencyMs: 30
 ```
 
-The integrity scenario relies on `acks: all`, which also makes the producer idempotent. A scenario file cannot turn idempotence, transactions or CRC checks on or off: the backend drops `enableIdempotence`, `enableTransactions` and `enableCrc`, so every INTEGRITY run is CRC-checked and never transactional whatever they say (see [Scenario Files & SLA Gates](13-scenario-files.md)).
+The integrity scenario relies on `acks: all`, which also makes the producer idempotent. `enableIdempotence`, `enableTransactions` and `enableCrc` in a scenario file turn idempotence, transactions and CRC checks on or off explicitly, and the backend refuses a combination the producer cannot run, such as transactions with `acks: 1` (see [Scenario Files & SLA Gates](13-scenario-files.md)).
 
 ---
 

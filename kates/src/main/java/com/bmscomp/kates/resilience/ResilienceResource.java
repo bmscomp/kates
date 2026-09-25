@@ -30,6 +30,9 @@ public class ResilienceResource {
     ResilienceOrchestrator orchestrator;
 
     @Inject
+    com.bmscomp.kates.engine.TestOrchestrator testOrchestrator;
+
+    @Inject
     ObjectMapper objectMapper;
 
     @Inject
@@ -68,6 +71,10 @@ public class ResilienceResource {
             summary = "Execute a resilience test",
             description = "Runs a combined performance + chaos test with probe evaluation and returns impact analysis")
     @APIResponse(responseCode = "200", description = "Resilience test report with probe results and RTO")
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid request, including a testRequest spec field the test type or backend cannot"
+                    + " apply; fieldErrors names each field")
     public Response executeResilienceTest(ResilienceTestRequest request) {
         if (request.getTestRequest() == null) {
             return Response.status(400)
@@ -77,6 +84,17 @@ public class ResilienceResource {
         if (request.getChaosSpec() == null) {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "Field 'chaosSpec' is required"))
+                    .build();
+        }
+
+        // Checked here because the answer is a stream: once the keep-alive
+        // bytes have gone out the status is 200, and a test request the
+        // orchestrator refuses could only end the report as ERROR.
+        var refused = testOrchestrator.refusal(request.getTestRequest());
+        if (refused.isPresent()) {
+            return Response.status(400)
+                    .entity(ApiError.validationFailed(
+                            refused.get().getMessage(), refused.get().getFieldErrors()))
                     .build();
         }
 

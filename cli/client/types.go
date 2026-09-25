@@ -154,18 +154,22 @@ type TopoUsers struct {
 	Items []map[string]interface{} `json:"items,omitempty"`
 }
 
-// TestRun from GET /api/tests/:id and POST /api/tests
+// TestRun from GET /api/tests/:id and POST /api/tests. RequestedSpec is the
+// request's own spec fields, under their API names, kept raw so that it can be
+// sent again as it was; Spec is what the run used. A run stored before the
+// backend kept the request has no RequestedSpec.
 type TestRun struct {
-	ID           string           `json:"id"`
-	TestType     string           `json:"testType"`
-	Status       string           `json:"status"`
-	Backend      string           `json:"backend"`
-	ScenarioName string           `json:"scenarioName"`
-	CreatedAt    string           `json:"createdAt"`
-	Spec         *TestSpec        `json:"spec,omitempty"`
-	Results      []PhaseResult    `json:"results,omitempty"`
-	CdcPhases    map[string]int64 `json:"cdcPhases,omitempty"`
-	CdcPhase     string           `json:"currentPhase,omitempty"`
+	ID            string           `json:"id"`
+	TestType      string           `json:"testType"`
+	Status        string           `json:"status"`
+	Backend       string           `json:"backend"`
+	ScenarioName  string           `json:"scenarioName"`
+	CreatedAt     string           `json:"createdAt"`
+	Spec          *TestSpec        `json:"spec,omitempty"`
+	RequestedSpec json.RawMessage  `json:"requestedSpec,omitempty"`
+	Results       []PhaseResult    `json:"results,omitempty"`
+	CdcPhases     map[string]int64 `json:"cdcPhases,omitempty"`
+	CdcPhase      string           `json:"currentPhase,omitempty"`
 }
 
 type PhaseResult struct {
@@ -414,9 +418,11 @@ type CreateScheduleRequest struct {
 	TestRequest    interface{} `json:"testRequest"`
 }
 
-// ResilienceResult from POST /api/resilience
+// ResilienceResult from POST /api/resilience. Error says why, when Status is
+// ERROR.
 type ResilienceResult struct {
 	Status           string             `json:"status"`
+	Error            string             `json:"error,omitempty"`
 	ChaosOutcome     *ChaosOutcome      `json:"chaosOutcome,omitempty"`
 	ImpactDeltas     map[string]float64 `json:"impactDeltas,omitempty"`
 	PreChaosSummary  *ReportSummary     `json:"preChaosSummary,omitempty"`
@@ -441,6 +447,24 @@ type CreateTestRequest struct {
 	Spec     *TestSpec `json:"spec,omitempty"`
 }
 
+// RerunTestRequest is a POST /api/tests whose spec is JSON the backend served,
+// sent back as it came. Through TestSpec, whose fields are omitempty, a spec
+// lost every 0 it held (lingerMs 0 became the type's default) and every field
+// TestSpec does not name.
+type RerunTestRequest struct {
+	TestType string          `json:"type"`
+	Backend  string          `json:"backend,omitempty"`
+	Spec     json.RawMessage `json:"spec,omitempty"`
+}
+
+// TestSpec is a request's spec, or the spec a run used. The three Enable
+// fields are pointers so that an explicit false is sent: as plain bools under
+// omitempty they dropped it, and a scenario's enableCrc: false or
+// enableIdempotence: false reached the backend as nothing, which runs with CRC
+// checks on and leaves idempotence to the Kafka client. Throughput is the rate
+// the run used; TargetThroughput is the other name a request may give it, the
+// one scenario files and --throughput send, and the backend takes it as the
+// rate when a request sets no throughput.
 type TestSpec struct {
 	Records            int    `json:"numRecords,omitempty"`
 	ParallelProducers  int    `json:"numProducers,omitempty"`
@@ -456,12 +480,13 @@ type TestSpec struct {
 	Partitions         int    `json:"partitions,omitempty"`
 	MinInsyncReplicas  int    `json:"minInsyncReplicas,omitempty"`
 	ConsumerGroup      string `json:"consumerGroup,omitempty"`
+	Throughput         int    `json:"throughput,omitempty"`
 	TargetThroughput   int    `json:"targetThroughput,omitempty"`
 	FetchMinBytes      int    `json:"fetchMinBytes,omitempty"`
 	FetchMaxWaitMs     int    `json:"fetchMaxWaitMs,omitempty"`
-	EnableIdempotence  bool   `json:"enableIdempotence,omitempty"`
-	EnableTransactions bool   `json:"enableTransactions,omitempty"`
-	EnableCrc          bool   `json:"enableCrc,omitempty"`
+	EnableIdempotence  *bool  `json:"enableIdempotence,omitempty"`
+	EnableTransactions *bool  `json:"enableTransactions,omitempty"`
+	EnableCrc          *bool  `json:"enableCrc,omitempty"`
 }
 
 // TopicDetail from GET /api/cluster/topics/{name}

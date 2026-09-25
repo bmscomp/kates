@@ -346,6 +346,8 @@ Proto3 fields carry no wire-level defaults — when a field is unset, the backen
 | `partitions` | int32 | 3 | Topic partition count |
 | `min_insync_replicas` | int32 | 2 | Topic ISR constraint |
 
+A `TestRun` returned over gRPC carries this merged spec only. The request's own fields, which `GET /api/tests/{id}` returns as `requestedSpec`, have no proto field.
+
 ### TestResult
 
 | Field | Type | Description |

@@ -59,7 +59,8 @@ public class TestScheduler {
         }
     }
 
-    private void executeSchedule(ScheduledTestRun schedule) {
+    // Package-private: a test fires a schedule without waiting for its minute.
+    void executeSchedule(ScheduledTestRun schedule) {
         try {
             CreateTestRequest request = JSON.readValue(schedule.getRequestJson(), CreateTestRequest.class);
             var result = orchestrator.executeTest(request);
