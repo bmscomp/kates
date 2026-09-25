@@ -65,7 +65,7 @@ http://localhost:30083
 
 ## Endpoints
 
-This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The backend exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates/schedules/playbooks, resilience scenarios, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi` (Swagger UI is available at `/q/swagger-ui` in dev mode).
+This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The backend exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates and schedules, resilience scenarios, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi` (Swagger UI is available at `/q/swagger-ui` in dev mode).
 
 ### Health & System
 
@@ -570,6 +570,56 @@ Get Kafka intelligence data captured during the disruption — ISR recovery and 
   }
 ]
 ```
+
+#### GET /api/disruptions/playbooks
+
+List the built-in playbooks. Each entry carries the playbook's `name`, `description`, `category`, and `steps`, the number of steps it has.
+
+```json
+[
+  { "name": "rolling-restart", "description": "Restart every Kafka pod one at a time through the Strimzi Cluster Operator", "category": "operations", "steps": 1 }
+]
+```
+
+#### GET /api/disruptions/playbooks/{name}
+
+Get the disruption plan a playbook runs, resolved from its YAML the same way `POST /api/disruptions/playbooks/{name}` resolves it. The plan is named `playbook:<name>`, and each fault carries every field, with the default the playbook runs with wherever the YAML sets none. An unknown name returns `404 Not Found`.
+
+```json
+{
+  "name": "playbook:rolling-restart",
+  "description": "Restart every Kafka pod one at a time through the Strimzi Cluster Operator",
+  "steps": [{
+    "name": "rolling-restart-brokers",
+    "faultSpec": {
+      "experimentName": "rolling-restart-sts", "disruptionType": "ROLLING_RESTART",
+      "targetNamespace": "kafka", "targetLabel": "strimzi.io/component-type=kafka",
+      "targetPod": "", "targetAll": false, "targetBrokerId": -1, "targetTopic": "", "targetPartition": 0,
+      "chaosDurationSec": 600, "delayBeforeSec": 0, "gracePeriodSec": 30,
+      "networkLatencyMs": 100, "fillPercentage": 80, "cpuCores": 1, "memoryMb": 500, "ioWorkers": 2,
+      "envOverrides": {}, "probes": []
+    },
+    "steadyStateSec": 30, "observationWindowSec": 180, "requireRecovery": true
+  }],
+  "maxAffectedBrokers": 1, "autoRollback": false,
+  "isrTrackingTopic": null, "lagTrackingGroupId": null, "sla": null, "testType": null,
+  "baselineDurationSec": 60, "isrPollIntervalMs": 2000, "lagPollIntervalMs": 2000
+}
+```
+
+The response is a complete disruption plan, the body `POST /api/disruptions` takes. Posted unchanged to `POST /api/disruptions?dryRun=true`, it previews the playbook without injecting a fault:
+
+```bash
+BASE="http://localhost:30083"
+AUTH="X-API-Key: $KATES_API_KEY"
+curl -s -H "$AUTH" "$BASE/api/disruptions/playbooks/leader-cascade" \
+  | curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "$AUTH" -H "Content-Type: application/json" -d @- \
+  | jq .
+```
+
+#### POST /api/disruptions/playbooks/{name}
+
+Run a playbook. It takes no body and goes through the launcher `POST /api/disruptions` uses: `202 Accepted` with the report id, status `RUNNING`, and the plan name `playbook:<name>`; `422 Unprocessable Entity` with status `REJECTED` when the safety guard refuses the plan; `409 Conflict` while another plan runs against the cluster; `404 Not Found` for an unknown name. This endpoint has no dry run. Preview a playbook through `GET /api/disruptions/playbooks/{name}` and the plan dry run instead.
 
 ---
 
