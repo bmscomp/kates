@@ -159,7 +159,7 @@ func TestSaveConfig_FailureKeepsOldFile(t *testing.T) {
 	if err := os.Chmod(home, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(home, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(home, 0o700) })
 
 	if err := saveConfig(Config{CurrentContext: "other", Contexts: map[string]Context{}}); err == nil {
 		t.Fatal("saveConfig into a read-only directory succeeded, want an error")

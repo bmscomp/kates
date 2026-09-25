@@ -903,10 +903,10 @@ func TestResilience_ConcurrentCallsShareClient(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/resilience" {
-			json.NewEncoder(w).Encode(ResilienceResult{Status: "COMPLETED"})
+			_ = json.NewEncoder(w).Encode(ResilienceResult{Status: "COMPLETED"})
 			return
 		}
-		w.Write([]byte(`{"status":"UP"}`))
+		_, _ = w.Write([]byte(`{"status":"UP"}`))
 	})
 	const defaultTimeout = 60 * time.Second
 	ctx := context.Background()
@@ -945,7 +945,7 @@ func TestPostJSONWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"COMPLETED"}`))
+		_, _ = w.Write([]byte(`{"status":"COMPLETED"}`))
 	})
 	const clientTimeout = 50 * time.Millisecond
 	c.HTTPClient.Timeout = clientTimeout
