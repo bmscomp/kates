@@ -147,7 +147,7 @@ kates ports
 kates health
 ```
 
-A port-forward to a Service is bound to the one pod it picked when it started, and neither `kates ports` nor `make ports` reconnects it when that pod goes away, so step 5 is what makes the API reachable again. `kates ports` also points your current CLI context at the forward it starts. Skip it if you reach the API through an Ingress or a NodePort.
+A port-forward to a Service is bound to the one pod it picked when it started, and neither `kates ports` nor `make ports` reconnects it when that pod goes away, so step 5 is what makes the API reachable again. `kates ports` also points the `ports` CLI context at the forward it starts and makes it the current context. Skip it if you reach the API through an Ingress or a NodePort.
 
 A finished rollout does not prove the rotation worked. The readiness probe does not depend on Kafka (`kates.health.readiness.require-kafka` is `false`), so the new pod turns Ready even with a wrong password. `kates health` has the backend describe the cluster over its own SASL connection, and its **Kafka Cluster** block must show `UP` and "Kafka cluster is reachable". The command needs only the API URL of your CLI context, because `/api/health` is served without the API key.
 

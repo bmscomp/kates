@@ -3,8 +3,8 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -1188,33 +1188,96 @@ data:
 	return nil
 }
 
-// updateActiveContextAPIKey syncs the API key from the deployed cluster
-// secret into the active CLI context configuration.
+// updateActiveContextAPIKey stores the key from Secret kates-api-key in the
+// active CLI context after a deploy, so the commands that follow work without
+// a kates ctx set, and reports what it did.
 func updateActiveContextAPIKey(ctx context.Context, appNS string) {
-	out, err := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-api-key", "-n", appNS, "-o", "jsonpath={.data.api-key}")
+	printDeployKeySync(os.Stdout, syncActiveContextKey(ctx, appNS), appNS)
+}
+
+// deployKeyOutcome is what kates deploy did with the key of the active context.
+type deployKeyOutcome int
+
+const (
+	deployKeyStored       deployKeyOutcome = iota // the Secret's key was stored
+	deployKeyPresent                              // the context already held the Secret's key
+	deployKeyKept                                 // the context holds a key kates did not store, which stays
+	deployKeyNoContext                            // --context or KATES_CONTEXT names a context that does not exist
+	deployKeySecretUnread                         // the Secret could not be read
+)
+
+// deployKeySync is what syncActiveContextKey did, for printDeployKeySync.
+type deployKeySync struct {
+	Context   string
+	Key       deployKeyOutcome
+	SecretErr error // why the Secret could not be read (deployKeySecretUnread)
+	SaveErr   error
+}
+
+// syncActiveContextKey puts the key from Secret kates-api-key into the active
+// context (the current one, or the one --context or KATES_CONTEXT names) by
+// the rule kates ports goes by, keyReplaceable: only into a context without a
+// key, or in place of the key kates stored there itself.
+//
+// It used to overwrite whatever key the context held, so a context holding a
+// narrower key for another tool (an MCP server, a CI job) was handed the
+// shared admin key whenever a deploy finished while it was current. It also
+// printed the key's first four characters.
+func syncActiveContextKey(ctx context.Context, appNS string) deployKeySync {
+	secretKey, err := fetchKatesAPIKey(ctx, appNS)
 	if err != nil {
-		return
+		return deployKeySync{Key: deployKeySecretUnread, SecretErr: err}
 	}
-	encoded := strings.TrimSpace(string(out))
-	if encoded == "" {
-		return
-	}
-	if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
-		apiKey := strings.TrimSpace(string(decoded))
-		if apiKey != "" {
-			cfg := loadConfig()
-			ctxName := cfg.CurrentContext
-			if contextFlag != "" {
-				ctxName = contextFlag
-			}
-			if active, ok := cfg.Contexts[ctxName]; ok {
-				active.APIKey = apiKey
-				cfg.Contexts[ctxName] = active
-				_ = saveConfig(cfg)
-				dl.Printf("    ✓ Automatically synced API Key to context %q: %s****\n\n", ctxName, apiKey[:4])
-			}
+
+	var result deployKeySync
+	result.SaveErr = updateConfig(func(cfg *Config) error {
+		result.Context = cfg.CurrentContext
+		if contextFlag != "" {
+			result.Context = contextFlag
 		}
+		c, ok := cfg.Contexts[result.Context]
+		switch {
+		case !ok:
+			result.Key = deployKeyNoContext
+			return errConfigUnchanged
+		case c.APIKey == secretKey:
+			result.Key = deployKeyPresent
+			return errConfigUnchanged
+		case !keyReplaceable(c):
+			result.Key = deployKeyKept
+			return errConfigUnchanged
+		}
+		storeSecretKey(&c, secretKey)
+		cfg.Contexts[result.Context] = c
+		result.Key = deployKeyStored
+		return nil
+	})
+	return result
+}
+
+// printDeployKeySync reports what syncActiveContextKey did.
+func printDeployKeySync(w io.Writer, s deployKeySync, appNS string) {
+	okMark := output.SuccessStyle.Render("✓")
+	warnMark := output.WarningStyle.Render("⚠")
+	secret := fmt.Sprintf("Secret %s (namespace %s)", apiKeySecretName, appNS)
+
+	switch {
+	case s.Key == deployKeySecretUnread:
+		fmt.Fprintf(w, "    %s No API key from %s: %v\n", warnMark, secret, s.SecretErr)
+	case s.SaveErr != nil:
+		fmt.Fprintf(w, "    %s Could not store the API key from %s: %v\n", warnMark, secret, s.SaveErr)
+	case s.Key == deployKeyStored:
+		fmt.Fprintf(w, "    %s API key from %s stored in context %q\n", okMark, secret, s.Context)
+	case s.Key == deployKeyPresent:
+		fmt.Fprintf(w, "    %s Context %q already holds the API key from %s\n", okMark, s.Context, secret)
+	case s.Key == deployKeyKept:
+		fmt.Fprintf(w, "    %s Context %q keeps the API key it holds: kates replaces only a key it copied from the Secret itself\n", warnMark, s.Context)
+		fmt.Fprintf(w, "      %s\n", output.DimStyle.Render(fmt.Sprintf(
+			"To use the Secret's key there: kates ctx set %s --url <url> --api-key <key>. kates ports keeps it in context %q instead.", s.Context, portsContextName)))
+	case s.Key == deployKeyNoContext:
+		fmt.Fprintf(w, "    %s Context %q does not exist, so the API key from %s was not stored\n", warnMark, s.Context, secret)
 	}
+	fmt.Fprintln(w)
 }
 
 func (dc *deployContext) resolveClusterDomain() string {

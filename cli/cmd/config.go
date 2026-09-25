@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -103,25 +104,28 @@ var ctxSetCmd = &cobra.Command{
 			return cmdErr("--api-key was given but is empty")
 		}
 
-		cfg := loadConfig()
 		out := ctxSetOutput
 		if out == "" {
 			out = "table"
 		}
-		cfg.Contexts[name] = Context{
-			URL:      ctxSetURL,
-			Output:   out,
-			APIKey:   ctxSetAPIKey,
-			ProxyURL: ctxSetProxy,
-			Insecure: ctxSetInsecure,
-		}
+		var cfg Config
+		err := updateConfig(func(c *Config) error {
+			c.Contexts[name] = Context{
+				URL:      ctxSetURL,
+				Output:   out,
+				APIKey:   ctxSetAPIKey,
+				ProxyURL: ctxSetProxy,
+				Insecure: ctxSetInsecure,
+			}
 
-		// Auto-select if first context
-		if len(cfg.Contexts) == 1 {
-			cfg.CurrentContext = name
-		}
-
-		if err := saveConfig(cfg); err != nil {
+			// Auto-select if first context
+			if len(c.Contexts) == 1 {
+				c.CurrentContext = name
+			}
+			cfg = *c
+			return nil
+		})
+		if err != nil {
 			return cmdErr("Failed to save: " + err.Error())
 		}
 		output.Success(fmt.Sprintf("Context '%s' → %s", name, ctxSetURL))
@@ -145,17 +149,24 @@ var ctxUseCmd = &cobra.Command{
   kates ctx use prod`,
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
-		cfg := loadConfig()
-		if _, ok := cfg.Contexts[name]; !ok {
+		var ctx Context
+		err := updateConfig(func(cfg *Config) error {
+			c, ok := cfg.Contexts[name]
+			if !ok {
+				return errContextNotFound
+			}
+			cfg.CurrentContext = name
+			ctx = c
+			return nil
+		})
+		switch {
+		case errors.Is(err, errContextNotFound):
 			output.Error(fmt.Sprintf("Context '%s' not found. Run: kates ctx show", name))
 			return
-		}
-		cfg.CurrentContext = name
-		if err := saveConfig(cfg); err != nil {
+		case err != nil:
 			output.Error("Failed to save: " + err.Error())
 			return
 		}
-		ctx := cfg.Contexts[name]
 		output.Success(fmt.Sprintf("Switched to '%s' → %s", name, ctx.URL))
 	},
 }
@@ -166,26 +177,33 @@ var ctxDeleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		name := args[0]
-		cfg := loadConfig()
-		if _, ok := cfg.Contexts[name]; !ok {
+		var current string
+		err := updateConfig(func(cfg *Config) error {
+			if _, ok := cfg.Contexts[name]; !ok {
+				return errContextNotFound
+			}
+			delete(cfg.Contexts, name)
+			if cfg.CurrentContext == name {
+				cfg.CurrentContext = ""
+				for n := range cfg.Contexts {
+					cfg.CurrentContext = n
+					break
+				}
+			}
+			current = cfg.CurrentContext
+			return nil
+		})
+		switch {
+		case errors.Is(err, errContextNotFound):
 			output.Error(fmt.Sprintf("Context '%s' not found", name))
 			return
-		}
-		delete(cfg.Contexts, name)
-		if cfg.CurrentContext == name {
-			cfg.CurrentContext = ""
-			for n := range cfg.Contexts {
-				cfg.CurrentContext = n
-				break
-			}
-		}
-		if err := saveConfig(cfg); err != nil {
+		case err != nil:
 			output.Error("Failed to save: " + err.Error())
 			return
 		}
 		output.Success(fmt.Sprintf("Context '%s' deleted", name))
-		if cfg.CurrentContext != "" {
-			output.Hint(fmt.Sprintf("  Active context: %s", cfg.CurrentContext))
+		if current != "" {
+			output.Hint(fmt.Sprintf("  Active context: %s", current))
 		}
 	},
 }
@@ -203,6 +221,10 @@ var ctxCurrentCmd = &cobra.Command{
 		output.Success(fmt.Sprintf("%s → %s", cfg.CurrentContext, ctx.URL))
 	},
 }
+
+// errContextNotFound ends a context update that names a context the config
+// does not have.
+var errContextNotFound = errors.New("context not found")
 
 var ctxExportFlag string
 
@@ -261,14 +283,19 @@ var ctxImportCmd = &cobra.Command{
 			return
 		}
 
-		cfg := loadConfig()
 		imported := 0
-		for name, ctx := range incoming.Contexts {
-			cfg.Contexts[name] = ctx
-			imported++
-		}
-
-		if err := saveConfig(cfg); err != nil {
+		err = updateConfig(func(cfg *Config) error {
+			for name, ctx := range incoming.Contexts {
+				// An imported key was not stored by kates on this machine,
+				// whatever the file says, so kates ports and kates deploy
+				// must not replace it.
+				ctx.KeySource = ""
+				cfg.Contexts[name] = ctx
+				imported++
+			}
+			return nil
+		})
+		if err != nil {
 			output.Error("Failed to save: " + err.Error())
 			return
 		}

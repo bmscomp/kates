@@ -32,7 +32,10 @@ var disruptionWatchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		disruptionID := args[0]
-		url := fmt.Sprintf("%s/api/disruptions/%s/stream", apiClient.BaseURL, disruptionID)
+		url, err := apiClient.DisruptionStreamURL(disruptionID)
+		if err != nil {
+			return err
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()

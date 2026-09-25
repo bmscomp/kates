@@ -3,11 +3,14 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func testServer(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
@@ -454,8 +457,9 @@ func TestReportSummary(t *testing.T) {
 
 func TestCompare(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.RawQuery, "ids=a,b") {
-			t.Errorf("query = %s", r.URL.RawQuery)
+		// The comma arrives escaped (%2C); what the backend decodes is what counts.
+		if got := r.URL.Query().Get("ids"); got != "a,b" {
+			t.Errorf("ids = %q, want %q (raw query %s)", got, "a,b", r.URL.RawQuery)
 		}
 		w.Write([]byte(`{"comparison": "data"}`))
 	})
@@ -886,6 +890,98 @@ func TestResilience(t *testing.T) {
 	}
 	if resp.ChaosOutcome.Verdict != "Pass" {
 		t.Errorf("Verdict = %q", resp.ChaosOutcome.Verdict)
+	}
+}
+
+// TestResilience_ConcurrentCallsShareClient runs Resilience beside ordinary
+// calls on one Client, as a caller serving several requests at once does.
+// Resilience used to widen the shared HTTPClient.Timeout for the length of the
+// call and restore it afterwards; under -race that is a data race with every
+// concurrent request, and without -race the other calls ran on the 20-minute
+// timeout meanwhile.
+func TestResilience_ConcurrentCallsShareClient(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/resilience" {
+			json.NewEncoder(w).Encode(ResilienceResult{Status: "COMPLETED"})
+			return
+		}
+		w.Write([]byte(`{"status":"UP"}`))
+	})
+	const defaultTimeout = 60 * time.Second
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if _, err := c.Resilience(ctx, map[string]string{"experiment": "pod-kill"}); err != nil {
+				t.Errorf("Resilience: %v", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if _, err := c.Health(ctx); err != nil {
+				t.Errorf("Health: %v", err)
+			}
+			if got := c.HTTPClient.Timeout; got != defaultTimeout {
+				t.Errorf("HTTPClient.Timeout during a Resilience call = %v, want %v", got, defaultTimeout)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestPostJSONWithTimeout_DeadlineReplacesClientTimeout checks that a long
+// call is bounded by its own deadline, not by the client's Timeout, and that
+// ordinary calls keep the client's Timeout.
+func TestPostJSONWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
+	const serverDelay = 300 * time.Millisecond
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(serverDelay):
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"COMPLETED"}`))
+	})
+	const clientTimeout = 50 * time.Millisecond
+	c.HTTPClient.Timeout = clientTimeout
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		deadline time.Duration
+		wantErr  bool
+	}{
+		{"a deadline longer than the client timeout lets the call finish", 10 * time.Second, false},
+		{"a deadline shorter than the reply cuts the call off", 20 * time.Millisecond, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := postJSONWithTimeout[*ResilienceResult](c, ctx, "/api/resilience", nil, tt.deadline)
+			if tt.wantErr {
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("postJSONWithTimeout: %v", err)
+			}
+			if got == nil || got.Status != "COMPLETED" {
+				t.Errorf("result = %+v, want status COMPLETED", got)
+			}
+		})
+	}
+
+	if _, err := c.Health(ctx); err == nil {
+		t.Errorf("Health answered after %v with a %v client timeout; want a timeout error", serverDelay, clientTimeout)
+	}
+	if c.HTTPClient.Timeout != clientTimeout {
+		t.Errorf("HTTPClient.Timeout = %v after the calls, want %v", c.HTTPClient.Timeout, clientTimeout)
 	}
 }
 
