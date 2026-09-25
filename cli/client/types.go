@@ -445,7 +445,7 @@ type TestSpec struct {
 	Records            int    `json:"numRecords,omitempty"`
 	ParallelProducers  int    `json:"numProducers,omitempty"`
 	RecordSizeBytes    int    `json:"recordSize,omitempty"`
-	DurationMs    int    `json:"durationMs,omitempty"`
+	DurationMs         int    `json:"durationMs,omitempty"`
 	Topic              string `json:"topic,omitempty"`
 	Acks               string `json:"acks,omitempty"`
 	BatchSize          int    `json:"batchSize,omitempty"`
@@ -523,7 +523,20 @@ type ClusterHealthReport struct {
 	Partitions      int                   `json:"partitions"`
 	ConsumerGroups  int                   `json:"consumerGroups"`
 	PartitionHealth PartitionHealthReport `json:"partitionHealth"`
-	Status          string                `json:"status"`
+	// KraftQuorum is absent when the admin API cannot describe the metadata
+	// quorum (a ZooKeeper cluster, or an old broker).
+	KraftQuorum *KraftQuorumHealth `json:"kraftQuorum,omitempty"`
+	Status      string             `json:"status"`
+}
+
+// KraftQuorumHealth is the KRaft metadata quorum as /api/cluster/check reports
+// it; no leader turns the check's status CRITICAL.
+type KraftQuorumHealth struct {
+	LeaderID  int    `json:"leaderId"`
+	Voters    int    `json:"voters"`
+	Observers int    `json:"observers"`
+	HasLeader bool   `json:"hasLeader"`
+	Issue     string `json:"issue,omitempty"`
 }
 
 type PartitionHealthReport struct {

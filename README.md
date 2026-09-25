@@ -182,6 +182,7 @@ kates test apply -f scenarios/ci-gate.yaml --wait           # Scenarios with SLA
 kates gate --min-grade B                                    # CI gate: run a LOAD test, exit 1 below grade B
 kates security audit                                        # Security configuration audit, graded A–F
 kates dashboard                                             # Live full-screen dashboard
+kates mcp --context ports --allow-cluster <clusterId>       # Read-only MCP server for AI agents (experimental)
 ```
 
 `kates gate` grades average throughput and p99 latency against fixed bands, the same for every test type. The SLA verdict in `kates report show` checks only thresholds stored with the run, and runs from `kates test create` carry none; to check thresholds, put them in a scenario's `validate:` block and run it with `kates test apply`.
