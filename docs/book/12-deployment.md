@@ -708,14 +708,20 @@ For the full list of access points and URLs, see [The Cluster Under Test](03-clu
 
 ## CLI Configuration
 
+The backend requires an API key on every `/api` endpoint except `/api/health`. The chart generates one into the `kates-api-key` Secret. `kates deploy` writes it into whichever CLI context is active when it finishes — on a fresh machine, the built-in `default` context at `http://localhost:8080` — and never into a context you create afterwards, so pass the key when you create one:
+
 ```bash
-# Connect the CLI to Kates
-kates ctx set local --url http://localhost:30083
+# Connect the CLI to Kates, with the key from the Secret
+kates ctx set local --url http://localhost:30083 \
+  --api-key "$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)"
 kates ctx use local
 
-# Verify connectivity
+# Verify connectivity (health is public), then the key (test list is not)
 kates health
+kates test list
 ```
+
+`kates ports` is the one-step alternative: it forwards the API to `localhost:8080` instead and writes that address and the key into the active context. The Quick Start in [Introduction](01-introduction.md#quick-start) describes it, along with the commands for the single-namespace topology.
 
 ## Makefile Reference
 
@@ -1050,13 +1056,17 @@ make all
 # Verify every pod came up
 make status
 
-# Point the CLI at the stack and check end-to-end health
-kates ctx set local --url http://localhost:30083
+# Point the CLI at the stack (make all already started the port-forwards)
+kates ctx set local --url http://localhost:30083 \
+  --api-key "$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)"
 kates ctx use local
+
+# Check end-to-end health, then prove the key
 kates health
+kates test list
 ```
 
-`make status` prints pod counts per namespace and reports "All pods are running!" once the stack is healthy; `kates health` answers with the Kates Health Dashboard showing the system status, the Kafka cluster state, and its bootstrap address.
+`make status` prints pod counts per namespace and reports "All pods are running!" once the stack is healthy; `kates health` answers with the Kates Health Dashboard showing the system status, the Kafka cluster state, and its bootstrap address; and `kates test list`, the first call that needs the key, reports "No test runs found." on a fresh stack.
 :::
 
 ## Summary

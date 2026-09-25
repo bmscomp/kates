@@ -18,7 +18,7 @@ After this chapter, you can:
 | Use Case | Tool |
 |----------|------|
 | Quick one-off test | `kates test create --type LOAD --wait` |
-| CI/CD regression gate | `kates test apply -f scenario.yaml` |
+| CI/CD regression gate | `kates test apply -f scenario.yaml --wait` |
 | Iterative parameter tuning | **`kates lab`** |
 | Exploring throughput/latency tradeoffs | **`kates lab`** |
 | Sweeping a parameter across all values | **`kates lab`** |

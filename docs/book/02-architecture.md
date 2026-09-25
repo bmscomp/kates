@@ -227,7 +227,7 @@ The `DisruptionSafetyGuard` validates every disruption plan before execution:
 
 ## CLI Architecture
 
-The CLI is a **standalone Go binary** built with Cobra. It splits its work between two channels: it calls the backend's REST API for test, report, and disruption operations, and it shells out to `kubectl`, `helm`, and `kind` (via `os/exec`) for cluster provisioning and lifecycle tasks such as `kates deploy`, `kates cluster`, and `kates portforward`.
+The CLI is a **standalone Go binary** built with Cobra. It splits its work between two channels: it calls the backend's REST API for test, report, and disruption operations, and it shells out to `kubectl`, `helm`, and `kind` (via `os/exec`) for cluster provisioning and lifecycle tasks such as `kates deploy`, `kates clean`, and `kates ports`.
 
 ```mermaid
 graph TD

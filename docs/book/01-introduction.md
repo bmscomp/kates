@@ -16,7 +16,7 @@ This chapter is for anyone who runs, tests, or is about to inherit an Apache Kaf
 - *Does my cluster recover from a network partition within my SLA?*
 - *Is there any data loss under cascading failures?*
 
-Unlike generic load testing tools, Kates understands Kafka semantics — producer acknowledgments, consumer group rebalancing, ISR tracking, and partition leadership. Unlike basic `kafka-perf-test`, Kates provides structured reports, SLA enforcement, historical trend analysis, and automated disruption testing with safety guardrails.
+Unlike generic load testing tools, Kates understands Kafka semantics — producer acknowledgments, consumer group rebalancing, ISR tracking, and partition leadership. Unlike basic `kafka-producer-perf-test`, Kates provides structured reports, SLA enforcement, historical trend analysis, and automated disruption testing with safety guardrails.
 
 ## The Problem Space
 
@@ -109,12 +109,18 @@ Kates can serve as both a **development-time validation tool** (run a quick load
 
 ## Quick Start
 
+The Quick Start assumes a checkout of the repository, for the `make` targets, and a stack deployed with `make all` or `kates deploy` in isolated namespaces, which puts the Kates backend in the `kates` namespace.
+
 ```bash
 # Install the CLI
 make cli-install
 
-# Connect to a running Kates instance
-kates ctx set local --url http://localhost:30083
+# Forward the Kates API to localhost:30083 (the forwards run in the background)
+make ports
+
+# Connect to the running Kates instance, with the API key the chart generated
+kates ctx set local --url http://localhost:30083 \
+  --api-key "$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)"
 kates ctx use local
 
 # Check system health
@@ -123,10 +129,18 @@ kates health
 # Run your first test
 kates test create --type LOAD --records 100000 --wait
 
-# View the report
+# View the report: <id> is the ID that test create printed, and test list shows it again
 kates test list
 kates report show <id>
 ```
+
+Every `/api` endpoint except `/api/health` requires the API key, which the `kates` chart generates into the `kates-api-key` Secret. `kates deploy` writes the key into whichever CLI context is active when it finishes — on a fresh machine, the built-in `default` context at `http://localhost:8080` — and never into a context you create afterwards, so `kates ctx set` needs `--api-key`, as above. Because the health endpoint is public, `kates health` succeeds even without a key; every other command in the block needs one, starting with `kates test create`, which fails with `[401] Missing API key` when the context has none.
+
+::: {.callout-note}
+`kates ports` does both steps at once: it forwards the API to `localhost:8080` rather than 30083, and rewrites the active context (on a fresh machine, the built-in `default` one) to point at that address with the key from the `kates-api-key` Secret. It stops every `kubectl port-forward` already running, including those `make ports` started. With the single-namespace topology (option 1 in `make all`), the backend and its Secret live in `kates-stack`: use `-n kates-stack` in the `kubectl` command, and `KATES_NS=kates-stack make ports` for the API forward.
+:::
+
+The REST and gRPC examples in this book read the same key from the `KATES_API_KEY` variable; [REST API Reference](11-api-reference.md#authentication) shows how to export it.
 
 For a complete setup guide, see [Deployment Guide](12-deployment.md). For hands-on tutorials, see the [Tutorials](https://github.com/bmscomp/kates/tree/main/docs/tutorials) directory.
 
@@ -139,10 +153,11 @@ Once the Quick Start connection works, take the report pipeline for a spin:
 kates test types
 kates test create --type LOAD --records 100000 --acks 1 --wait
 kates test list --type LOAD
-kates report show <id>
+kates report show <id>        # the ID the create above printed
 
-# Compare against your Quick Start run (which used the acks=all default)
-kates report compare <id1,id2>
+# Compare against your Quick Start run (which used the acks=all default);
+# test list shows both IDs, joined here with a comma
+kates report compare <quick-start-id>,<id>
 ```
 
 Expect a throughput summary, a latency distribution from average through P99, an error rate, and — when thresholds are set — an SLA verdict; the comparison shows what relaxing producer acknowledgments buys you in latency.

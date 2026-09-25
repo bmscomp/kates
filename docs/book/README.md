@@ -94,7 +94,7 @@ Hands-on step-by-step guides for specific workflows:
 
 - **Platform engineers** who need to validate Kafka cluster resilience before production
 - **SREs** who want automated chaos testing with SLA enforcement
-- **Performance engineers** who need rigorous benchmarking beyond `kafka-perf-test`
+- **Performance engineers** who need rigorous benchmarking beyond `kafka-producer-perf-test`
 - **Developers** building event-driven systems who want confidence in their Kafka infrastructure
 
 ## How to Read This Book
