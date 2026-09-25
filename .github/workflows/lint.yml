@@ -6,8 +6,9 @@ name: CI · Lint
 # codebases. Everything here is seconds, so it runs on every PR and gates.
 #
 # golangci-lint is the one check with a backlog (several hundred errcheck and
-# staticcheck findings). It runs with only-new-issues so a PR is held to the
-# code it touches, and the backlog is paid down file by file.
+# staticcheck findings). It reports only issues new since the PR's base commit,
+# so a PR is held to the code it touches, and the backlog is paid down file by
+# file.
 
 on:
   push:
@@ -159,6 +160,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # --new-from-rev below diffs against an earlier commit, which a
+          # shallow clone does not have.
+          fetch-depth: 0
       - uses: ./.github/actions/load-versions
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -169,12 +174,24 @@ jobs:
         working-directory: cli
         run: go vet ./...
 
+      # "New" is computed by git, not by the action's only-new-issues: that
+      # asks the GitHub API for the pull request's diff, which GitHub refuses
+      # past 20,000 lines (HTTP 406), and the action then lints every file, so
+      # the backlog fails a large PR on code it never touched. The base is the
+      # PR's base commit, or on a push to main the commit main was at before.
+      - name: Revision new issues are counted from
+        id: base
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: echo "rev=${PR_BASE:-$PUSH_BEFORE}" >> "$GITHUB_OUTPUT"
+
       - name: golangci-lint (new issues only)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: cli
-          only-new-issues: true
+          args: --new-from-rev=${{ steps.base.outputs.rev }}
 
   java:
     name: spotless

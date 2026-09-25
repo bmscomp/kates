@@ -1,0 +1,407 @@
+{
+  "name": "draft_scenario",
+  "title": "Draft a test scenario",
+  "description": "Checks a load-test scenario before anyone runs it. Takes a scenario file as kates test apply -f reads it (YAML, or JSON, which must read the same as a .json and as a YAML file), or a built-in template (kates://scenarios/{name}) with optional overrides. It parses the file as kates test apply does, converts each scenario with the CLI's scenarioToRequest, fills what a scenario leaves out with the per-type defaults Kates ships, and checks the result against the agent envelope the Kates MCP plan proposes: one scenario per file (one test at a time), an allowed test type, a set producer rate under a cap, a byte budget, at most 20 minutes, at most 50 partitions, a topic named kates-mcp-.... Returns the YAML, the request each scenario would send, its effective spec, a verdict, and findings, worst first: invalid (the CLI or backend would refuse it, it would run other than checked, or the run would fail at once), outside_envelope, and warning (it runs, but not as written: fields the backend drops, keys nothing reads, thresholds that are never graded). Warnings, then the echo of an unchanged yaml argument, are left out when the result would not fit. A scenario file has no key for the producer rate, so most types run unlimited. Saves nothing, starts nothing and sends the scenario nowhere; nothing enforces the envelope today, so the YAML is a draft for a human to review before running it.",
+  "annotations": {
+    "idempotentHint": false,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "Draft a test scenario"
+  },
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "description": "a new name for every scenario in the file",
+        "maxLength": 200,
+        "type": "string"
+      },
+      "spec_overrides": {
+        "additionalProperties": true,
+        "description": "spec keys to set in every scenario, named as scenario files name them (records, parallelProducers, recordSizeBytes, durationSeconds, topic, partitions, ...); each a number, text or true/false",
+        "maxProperties": 30,
+        "type": "object"
+      },
+      "template": {
+        "description": "a built-in scenario template to start from, as listed under kates://scenarios/. Give this or yaml",
+        "enum": [
+          "quick-load",
+          "production-load",
+          "stress-test",
+          "endurance-soak",
+          "exactly-once",
+          "integrity-tx",
+          "spike-test",
+          "ci-gate"
+        ],
+        "type": "string"
+      },
+      "validate_overrides": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "description": "validate thresholds to set in every scenario (maxP99LatencyMs, maxAvgLatencyMs, minThroughputRecPerSec, maxDataLossPercent, ...)",
+        "maxProperties": 20,
+        "type": "object"
+      },
+      "yaml": {
+        "description": "a scenario file as kates test apply -f reads it: a scenarios list of name, type, spec and validate. JSON is checked both as kates test apply reads a .json file and as YAML, and must read the same both ways. Give this or template",
+        "maxLength": 8000,
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "outputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "caveats": {
+        "description": "what this data cannot show; read these before drawing conclusions",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "caveat id; kates://caveats lists every caveat with its sources",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "text"
+          ],
+          "type": "object"
+        },
+        "type": [
+          "null",
+          "array"
+        ]
+      },
+      "cluster": {
+        "additionalProperties": false,
+        "description": "the Kafka cluster this result describes",
+        "properties": {
+          "id": {
+            "description": "the Kafka clusterId this server is pinned to",
+            "type": "string"
+          },
+          "label": {
+            "description": "the label given with --cluster-label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "data": {
+        "additionalProperties": false,
+        "description": "the tool's result",
+        "properties": {
+          "envelope": {
+            "additionalProperties": false,
+            "properties": {
+              "maxBytes": {
+                "type": "integer"
+              },
+              "maxDurationMs": {
+                "type": "integer"
+              },
+              "maxPartitions": {
+                "type": "integer"
+              },
+              "maxRecordsPerSecond": {
+                "description": "cap on numProducers × throughput; the plan names none, so this is this server's",
+                "type": "integer"
+              },
+              "maxStressProducers": {
+                "type": "integer"
+              },
+              "source": {
+                "type": "string"
+              },
+              "topicPrefix": {
+                "type": "string"
+              },
+              "types": {
+                "description": "test types allowed",
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "types",
+              "maxStressProducers",
+              "maxRecordsPerSecond",
+              "maxBytes",
+              "maxDurationMs",
+              "maxPartitions",
+              "topicPrefix",
+              "source"
+            ],
+            "type": "object"
+          },
+          "findings": {
+            "description": "invalid first, then outside_envelope, then warning, each in file order; file-level findings have scenario -1; warnings are the first left out when the result would not fit",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "description": "the key, as spec.records or validate.maxErrorRate",
+                  "type": "string"
+                },
+                "level": {
+                  "description": "invalid, outside_envelope or warning",
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "scenario": {
+                  "description": "index of the scenario, or -1 for the file",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "scenario",
+                "level",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "scenarios": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "effective": {
+                  "additionalProperties": false,
+                  "description": "the request merged with the shipped defaults of its type, as the backend would merge it; absent when the type is unknown",
+                  "properties": {
+                    "bytes": {
+                      "description": "numProducers × numRecords × recordSize, the envelope's volume",
+                      "type": "number"
+                    },
+                    "defaulted": {
+                      "description": "fields the request leaves out, taken from the shipped defaults; a deployment can set other defaults",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "durationMs": {
+                      "description": "the most the run lasts: its producer stops at numRecords or at this deadline, whichever comes first",
+                      "type": "integer"
+                    },
+                    "numProducers": {
+                      "type": "integer"
+                    },
+                    "numRecords": {
+                      "type": "integer"
+                    },
+                    "partitions": {
+                      "type": "integer"
+                    },
+                    "producerTasks": {
+                      "description": "producers the backend starts: numProducers for STRESS and CAPACITY, one for every other type",
+                      "type": "integer"
+                    },
+                    "recordSize": {
+                      "type": "integer"
+                    },
+                    "recordsPerSecond": {
+                      "description": "numProducers × throughput, the envelope's rate; -1 when unlimited",
+                      "type": "number"
+                    },
+                    "throughput": {
+                      "description": "records per second per producer; -1 is unlimited",
+                      "type": "integer"
+                    },
+                    "topic": {
+                      "description": "the topic the run writes to: the one given, or <type>-test, which every run of the type shares",
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "topic",
+                    "numRecords",
+                    "recordSize",
+                    "numProducers",
+                    "producerTasks",
+                    "throughput",
+                    "durationMs",
+                    "partitions",
+                    "recordsPerSecond",
+                    "bytes",
+                    "defaulted"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
+                "index": {
+                  "description": "position in the file, from 0",
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "request": {
+                  "additionalProperties": false,
+                  "description": "the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; zero values are left out",
+                  "properties": {
+                    "backend": {
+                      "type": "string"
+                    },
+                    "spec": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "acks": {
+                          "type": "string"
+                        },
+                        "batchSize": {
+                          "type": "integer"
+                        },
+                        "compressionType": {
+                          "type": "string"
+                        },
+                        "consumerGroup": {
+                          "type": "string"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        },
+                        "enableCrc": {
+                          "type": "boolean"
+                        },
+                        "enableIdempotence": {
+                          "type": "boolean"
+                        },
+                        "enableTransactions": {
+                          "type": "boolean"
+                        },
+                        "fetchMaxWaitMs": {
+                          "type": "integer"
+                        },
+                        "fetchMinBytes": {
+                          "type": "integer"
+                        },
+                        "lingerMs": {
+                          "type": "integer"
+                        },
+                        "minInsyncReplicas": {
+                          "type": "integer"
+                        },
+                        "numConsumers": {
+                          "type": "integer"
+                        },
+                        "numProducers": {
+                          "type": "integer"
+                        },
+                        "numRecords": {
+                          "type": "integer"
+                        },
+                        "partitions": {
+                          "type": "integer"
+                        },
+                        "recordSize": {
+                          "type": "integer"
+                        },
+                        "replicationFactor": {
+                          "type": "integer"
+                        },
+                        "targetThroughput": {
+                          "type": "integer"
+                        },
+                        "topic": {
+                          "type": "string"
+                        }
+                      },
+                      "type": [
+                        "null",
+                        "object"
+                      ]
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "index",
+                "name",
+                "request"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "verdict": {
+            "description": "invalid when a finding is invalid; outside_envelope when one is outside the envelope; inside_envelope otherwise, warnings included; it counts findings left out to fit",
+            "type": "string"
+          },
+          "yaml": {
+            "description": "the scenario file that was checked, ready for kates test apply -f; it was neither saved nor run",
+            "type": "string"
+          },
+          "yamlOmitted": {
+            "description": "true when yaml is left out to fit the result: the file checked is the yaml argument, unchanged",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "verdict",
+          "scenarios",
+          "findings",
+          "envelope"
+        ],
+        "type": "object"
+      },
+      "tier": {
+        "description": "what the tool may do; observe tools only read",
+        "type": "string"
+      },
+      "truncated": {
+        "description": "true when something was left out to fit one result (a list cut short, or long text dropped); narrow the request or page for the rest",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "cluster",
+      "tier",
+      "caveats",
+      "truncated",
+      "data"
+    ],
+    "type": "object"
+  }
+}
