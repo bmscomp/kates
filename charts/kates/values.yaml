@@ -365,6 +365,18 @@ trogdor:
   # -- Trogdor coordinator URL
   coordinatorUrl: "http://trogdor-coordinator.kafka.svc:8889"
 
+# -- Prometheus the backend queries for a disruption's Kafka metrics
+prometheus:
+  # -- Prometheus base URL (KATES_PROMETHEUS_URL). The default is the Service
+  # kube-prometheus-stack creates for charts/monitoring installed as release
+  # `monitoring` in namespace `monitoring`, which is what `kates deploy` does
+  # (it sets this for the namespace it uses). `make monitoring` installs that
+  # release in namespace `kafka`: set
+  # http://monitoring-kube-prometheus-prometheus.kafka.svc:9090 there, and
+  # networkPolicy.prometheus.namespace to kafka. Unreachable, a disruption's
+  # Prometheus metrics are missing and its SLA verdict lists them unevaluated.
+  url: "http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"
+
 # -- Benchmark engine configuration
 engine:
   # -- Default benchmark backend (native or trogdor)
@@ -406,9 +418,10 @@ networkPolicy:
   kafka:
     namespace: kafka
     port: 9092
-  # -- Prometheus egress configuration
+  # -- Prometheus egress configuration: the namespace prometheus.url points
+  # into. The policy used to allow `monitoring` whatever this said.
   prometheus:
-    namespace: kafka
+    namespace: monitoring
     port: 9090
   # -- Extra egress rules
   egressRules: []

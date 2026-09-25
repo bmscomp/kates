@@ -2,11 +2,11 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: values-prod.yaml and values-staging.yaml size the heap inside their
-# memory limit, values-generic.yaml runs generational ZGC, and the JVM
-# overlays (prod, generic, corporate) no longer pin a release tag of their own;
-# values-native.yaml keeps its matching -native pin. values.yaml is unchanged.
-version: 0.10.4
+# Patch: prometheus.url sets the backend's Prometheus, defaulting to the
+# Service charts/monitoring creates, and the NetworkPolicy's Prometheus egress
+# reads networkPolicy.prometheus.namespace (default monitoring, as rendered
+# before). Nothing else moves.
+version: 0.10.5
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -30,6 +30,10 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The backend read Prometheus at http://prometheus.monitoring.svc:9090, its built-in default, and no chart creates that Service: charts/monitoring installs kube-prometheus-stack, whose Service is monitoring-kube-prometheus-prometheus. Every disruption on a default install captured no Kafka metrics, and its SLA verdict left latency and throughput unevaluated. prometheus.url (KATES_PROMETHEUS_URL) now defaults to http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090, the Service `kates deploy` installs, and `kates deploy` sets it for the namespace it installs monitoring into"
+    - kind: fixed
+      description: "The NetworkPolicy's egress to Prometheus always named namespace monitoring, whatever networkPolicy.prometheus.namespace said (and values.yaml said kafka). It now reads the value, which defaults to monitoring, so the rendered policy is unchanged when a values file leaves it out; set it with prometheus.url when Prometheus runs elsewhere, as after `make monitoring` (namespace kafka). Upgrading: a values file copied from 0.10.4 or earlier (helm show values) carries the old, ignored networkPolicy.prometheus.namespace: kafka, which now takes effect and moves the egress to namespace kafka while prometheus.url points into monitoring, so Prometheus becomes unreachable with the NetworkPolicy on. Remove that line, or set it to the namespace your Prometheus runs in"
     - kind: fixed
       description: "values-prod.yaml set a 1Gi memory limit and inherited -Xmx2560m from values.yaml, and values-staging.yaml a 512Mi limit under the same heap, so either pod is OOMKilled once its heap grows past the limit. values-prod.yaml now runs 2Gi/4Gi, the chart defaults, with the heap set beside it (62.5% of the limit); values-staging.yaml runs 512Mi/1Gi with -Xmx512m, as values-dev.yaml does"
     - kind: changed

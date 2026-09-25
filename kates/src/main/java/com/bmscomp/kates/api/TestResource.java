@@ -254,45 +254,35 @@ public class TestResource {
     @Consumes(MediaType.WILDCARD)
     @Operation(
             summary = "Cancel a running test",
-            description = "Safely stops all tasks and marks the test as CANCELLED")
-    @APIResponse(responseCode = "200", description = "Test cancelled")
+            description = "Stops the run's tasks and stores the run as FAILED, each unfinished task with the error"
+                    + " \"Cancelled by user\". There is no CANCELLED status: the answer says FAILED, as every later"
+                    + " read does, with reason \"cancelled\".")
+    @APIResponse(responseCode = "200", description = "Test cancelled and stored as FAILED")
     @APIResponse(responseCode = "404", description = "Test run not found")
     @APIResponse(responseCode = "409", description = "Test is not running")
     public Response cancelTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        return repository
-                .findById(id)
+        java.util.Optional<TestRun> cancelled;
+        try {
+            cancelled = orchestrator.cancelTest(id);
+        } catch (com.bmscomp.kates.engine.RunNotCancellableException e) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(new ApiError(409, "Conflict", e.getMessage()))
+                    .build();
+        }
+        return cancelled
                 .map(run -> {
-                    var status = run.getStatus();
-                    if (status != com.bmscomp.kates.domain.TestResult.TaskStatus.RUNNING
-                            && status != com.bmscomp.kates.domain.TestResult.TaskStatus.PENDING) {
-                        return Response.status(Response.Status.CONFLICT)
-                                .entity(new ApiError(409, "Conflict", "Test is not running (status: " + status + ")"))
-                                .build();
-                    }
-                    orchestrator.stopTest(id);
-                    run = run.withStatus(com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED);
-
-                    if (run.getResults() != null) {
-                        java.util.List<com.bmscomp.kates.domain.TestResult> updatedResults =
-                                new java.util.ArrayList<>();
-                        for (var result : run.getResults()) {
-                            if (result.getStatus() == com.bmscomp.kates.domain.TestResult.TaskStatus.RUNNING
-                                    || result.getStatus() == com.bmscomp.kates.domain.TestResult.TaskStatus.PENDING) {
-                                result = result.withStatus(com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED)
-                                        .withError("Cancelled by user")
-                                        .withEndTime(java.time.Instant.now().toString());
-                            }
-                            updatedResults.add(result);
-                        }
-                        run = run.withResults(updatedResults);
-                    }
-
-                    repository.save(run);
                     auditService.record("CANCEL", "test", id, "Test cancelled by user");
+                    // status is what the run is stored as, FAILED; reason
+                    // says why, which the stored status cannot.
                     return Response.ok(java.util.Map.of(
-                                    "id", run.getId(),
-                                    "status", "CANCELLED",
-                                    "message", "Test cancelled successfully"))
+                                    "id",
+                                    run.getId(),
+                                    "status",
+                                    run.getStatus().name(),
+                                    "reason",
+                                    "cancelled",
+                                    "message",
+                                    "Test cancelled; it is stored as FAILED"))
                             .build();
                 })
                 .orElse(Response.status(Response.Status.NOT_FOUND)

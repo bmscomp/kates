@@ -3,12 +3,13 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/client"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/client"
 )
 
 type topicsView int
@@ -318,8 +319,21 @@ func (m topicsModel) viewDetail() string {
 
 	if configs, ok := m.detail["configs"].(map[string]interface{}); ok && len(configs) > 0 {
 		b.WriteString("\n" + dimStyle.Render("Configuration") + "\n")
-		for k, v := range configs {
-			b.WriteString(detailKeyStyle.Render("  "+k) + detailValueStyle.Render(fmt.Sprintf("%v", v)) + "\n")
+		// The values are the ones in force, a broker-level one included, so
+		// each carries where it comes from when the backend says, as in the
+		// CLI's topic tables; an older backend reports no sources.
+		sources, _ := m.detail["configSources"].(map[string]interface{})
+		keys := make([]string, 0, len(configs))
+		for k := range configs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			line := detailKeyStyle.Render("  "+k) + detailValueStyle.Render(fmt.Sprintf("%v", configs[k]))
+			if src, _ := sources[k].(string); src != "" {
+				line += "  " + dimStyle.Render(src)
+			}
+			b.WriteString(line + "\n")
 		}
 	}
 

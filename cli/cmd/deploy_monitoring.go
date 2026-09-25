@@ -58,6 +58,28 @@ func (dc *deployContext) scrapeArgs(chart string) []string {
 	return args
 }
 
+// monitoringPrometheusService is the Service kube-prometheus-stack creates for
+// Prometheus when charts/monitoring is installed as release "monitoring", as
+// this deploy and `make monitoring` both do. There is no Service named
+// prometheus, which the backend's default used to name.
+const monitoringPrometheusService = "monitoring-kube-prometheus-prometheus"
+
+// prometheusArgs points the backend at the Prometheus this deploy installs,
+// in the namespace it installs it into (--topology single moves it), and
+// lets the chart's NetworkPolicy reach it there. Nothing without
+// --with-monitoring: the chart's default, namespace monitoring, stands.
+func (dc *deployContext) prometheusArgs() []string {
+	if !deployWithMonitoring {
+		return nil
+	}
+	ns := dc.ns.jaeger
+	url := fmt.Sprintf("http://%s.%s.svc.%s:9090", monitoringPrometheusService, ns, dc.resolveClusterDomain())
+	return []string{
+		"--set", "prometheus.url=" + url,
+		"--set", "networkPolicy.prometheus.namespace=" + ns,
+	}
+}
+
 // wireKyvernoScrape switches on the ServiceMonitors of the two Kyverno
 // controllers the kyverno-security board reads (admission requests, review
 // latency, policy results). Kyverno is installed in Group A, before the

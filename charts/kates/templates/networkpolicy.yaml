@@ -58,7 +58,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: monitoring
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.prometheus.namespace | default "monitoring" }}
       ports:
         - port: {{ .Values.networkPolicy.prometheus.port | default 9090 }}
           protocol: TCP

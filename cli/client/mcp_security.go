@@ -115,7 +115,8 @@ type SecurityComplianceReport struct {
 }
 
 // SecurityComplianceReport maps the audit's checks to frameworks. The backend
-// runs a full audit for it, which appends to its grade history.
+// runs a full audit for it, which a current backend does not add to its grade
+// history (an older one did).
 func (c *Client) SecurityComplianceReport(ctx context.Context) (*SecurityComplianceReport, error) {
 	return get[*SecurityComplianceReport](c, ctx, "/api/security/compliance")
 }
@@ -226,8 +227,8 @@ type SecurityDriftReport struct {
 }
 
 // SecurityDriftReport compares a fresh audit with the saved baseline. When a
-// baseline is saved the backend runs a full audit for it, which appends to
-// its grade history.
+// baseline is saved the backend runs a full audit for it, which a current
+// backend does not add to its grade history (an older one did).
 func (c *Client) SecurityDriftReport(ctx context.Context) (*SecurityDriftReport, error) {
 	return get[*SecurityDriftReport](c, ctx, "/api/security/drift")
 }

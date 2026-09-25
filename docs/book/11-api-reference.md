@@ -149,7 +149,7 @@ The backend merges `spec` with the defaults of the test type, and the merge keep
 
 The `spec` in the response is the merged one: the request's values, and the LOAD defaults for everything it leaves out.
 
-Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`.
+Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
 
 #### GET /api/tests
 
@@ -352,7 +352,7 @@ List topic names, paginated (`page`, `size` query parameters; `size` defaults to
 
 #### GET /api/cluster/topics/{name}
 
-Topic detail with partition assignments, ISR, and key configuration entries.
+Topic detail with partition assignments, ISR, and eight configuration keys: `cleanup.policy`, `retention.ms`, `retention.bytes`, `min.insync.replicas`, `compression.type`, `segment.bytes`, `max.message.bytes` and `message.timestamp.type`. `configs` holds the value in force of each, wherever it is set, and `configSources` says what set it, as Kafka names the source: `DYNAMIC_TOPIC_CONFIG` for the topic, `STATIC_BROKER_CONFIG` or `DYNAMIC_BROKER_CONFIG` for a broker, `DYNAMIC_DEFAULT_BROKER_CONFIG` for the cluster-wide default, `DEFAULT_CONFIG` for Kafka's default. On the `krafter` cluster, `min.insync.replicas` comes from the brokers. `GET /api/kafka/topics/{name}` answers the same.
 
 ```json
 {
@@ -364,7 +364,8 @@ Topic detail with partition assignments, ISR, and key configuration entries.
     { "partition": 0, "leader": 0, "replicas": [0, 1, 2], "isr": [0, 1, 2], "underReplicated": false },
     { "partition": 1, "leader": 1, "replicas": [1, 2, 0], "isr": [1, 2, 0], "underReplicated": false }
   ],
-  "configs": { "retention.ms": "604800000", "min.insync.replicas": "2", "cleanup.policy": "delete" }
+  "configs": { "retention.ms": "604800000", "min.insync.replicas": "2", "cleanup.policy": "delete" },
+  "configSources": { "retention.ms": "DYNAMIC_TOPIC_CONFIG", "min.insync.replicas": "STATIC_BROKER_CONFIG", "cleanup.policy": "STATIC_BROKER_CONFIG" }
 }
 ```
 

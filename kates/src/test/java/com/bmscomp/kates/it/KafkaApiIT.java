@@ -104,6 +104,13 @@ class KafkaApiIT {
                     return "60000".equals(value);
                 }),
                 "an altered config must survive a re-describe");
+        // What set each value is reported beside it: this one is the topic's
+        // own, where a value the brokers set would say so.
+        given().when()
+                .get("/api/kafka/topics/" + topic)
+                .then()
+                .statusCode(200)
+                .body("configSources.'retention.ms'", equalTo("DYNAMIC_TOPIC_CONFIG"));
 
         given().when().delete("/api/kafka/topics/" + topic).then().statusCode(204);
 

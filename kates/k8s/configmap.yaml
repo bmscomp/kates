@@ -24,6 +24,12 @@ data:
   # Benchmark engine (native | trogdor)
   KATES_ENGINE_DEFAULT_BACKEND: "native"
 
+  # Prometheus, for a disruption's Kafka metrics: the Service kube-prometheus-stack
+  # creates for `make monitoring`, which installs release `monitoring` into
+  # namespace kafka. The backend's own default names namespace monitoring,
+  # where `kates deploy` installs it.
+  KATES_PROMETHEUS_URL: "http://monitoring-kube-prometheus-prometheus.kafka.svc:9090"
+
   # PostgreSQL datasource
   QUARKUS_DATASOURCE_DB_KIND: "postgresql"
   QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres.kates.svc:5432/kates"

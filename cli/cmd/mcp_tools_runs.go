@@ -166,7 +166,7 @@ const (
 	mcpActivityDefaultSince = "1h"
 
 	// The reaper's default limit (kates.engine.max-duration-ms,
-	// application.properties:278; TestTimeoutReaper.java:32-56) and the
+	// application.properties:282; TestTimeoutReaper.java:32-56) and the
 	// ENDURANCE default duration, which exceeds it (application.properties:56).
 	mcpReaperDefaultMs = 1_800_000
 )
@@ -997,7 +997,7 @@ func mcpRunIdentityOf(r *client.MCPRun) (mcpRunIdentity, bool) {
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:347-375 checks only that it exists),
+// any type or status (TestResource.java:337-365 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -1943,11 +1943,14 @@ var mcpCaveatsRuns = []mcpCaveat{
 	},
 	{
 		ID: mcpCaveatCancelStoredAsFailed,
-		Text: "A cancelled run is stored as FAILED: cancel answers CANCELLED but saves FAILED, and gives each " +
-			"unfinished task the error \"Cancelled by user\". There is no CANCELLED status, so a FAILED run may " +
-			"have been cancelled rather than have failed.",
+		Text: "A cancelled run is stored as FAILED: there is no CANCELLED status, so cancel saves FAILED, answers " +
+			"FAILED with reason cancelled, and gives each task that had not finished the error \"Cancelled by user\". " +
+			"A FAILED run may therefore have been cancelled rather than have failed. That task error says which, " +
+			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
+			"audit row.",
 		Refs: []string{
-			mcpJava + "api/TestResource.java:261-296",
+			mcpJava + "engine/TestOrchestrator.java:1230-1303",
+			mcpJava + "api/TestResource.java:246-291",
 			mcpJava + "domain/TestResult.java:25-31",
 		},
 	},
@@ -1999,7 +2002,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"newest matching rows.",
 		Refs: []string{
 			mcpJava + "persistence/AuditEventEntity.java:15-32",
-			mcpJava + "api/TestResource.java:93,125,152,238,291",
+			mcpJava + "api/TestResource.java:93,125,152,238,274",
 			mcpJava + "service/AuditService.java:52-78",
 			mcpJava + "api/AuditResource.java:43-47",
 		},

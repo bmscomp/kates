@@ -28,7 +28,9 @@ public class PrometheusMetricsCapture {
 
     private static final Logger LOG = Logger.getLogger(PrometheusMetricsCapture.class);
 
-    @ConfigProperty(name = "kates.prometheus.url", defaultValue = "http://prometheus.monitoring.svc:9090")
+    @ConfigProperty(
+            name = "kates.prometheus.url",
+            defaultValue = "http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090")
     String prometheusUrl;
 
     @ConfigProperty(name = "kates.chaos.kafka.namespace", defaultValue = "kafka")

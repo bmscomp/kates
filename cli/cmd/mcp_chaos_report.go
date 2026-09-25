@@ -455,7 +455,7 @@ func mcpDisruptionReportStepFrom(call *mcpCall, s client.DisruptionStepDetail) m
 		}
 	}
 	// The backend captures nine metrics (PrometheusMetricsCapture.java:
-	// 67-85); the cap only bounds a backend that sends far more.
+	// 69-87); the cap only bounds a backend that sends far more.
 	keys := make([]string, 0, len(s.ImpactDeltas))
 	for k := range s.ImpactDeltas {
 		keys = append(keys, k)

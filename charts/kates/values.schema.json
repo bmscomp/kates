@@ -393,6 +393,15 @@
                 "coordinatorUrl": { "type": "string" }
             }
         },
+        "prometheus": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Prometheus base URL the backend queries for disruption metrics (KATES_PROMETHEUS_URL); empty leaves the backend's own default"
+                }
+            }
+        },
         "engine": {
             "type": "object",
             "properties": {

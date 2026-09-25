@@ -58,7 +58,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"that checks every 60 seconds. The limit is kates.engine.max-duration-ms (default 1800000) and counts " +
 			"time spent waiting to start.",
 		Refs: []string{
-			"kates/src/main/resources/application.properties:277-278",
+			"kates/src/main/resources/application.properties:281-282",
 			mcpJava + "engine/TestTimeoutReaper.java:32-56",
 		},
 	},
@@ -88,20 +88,21 @@ var mcpCaveatsCore = []mcpCaveat{
 			"learns the Kafka version: it reads kafkaVersion from the cluster description, which does not carry one, " +
 			"so the version is \"unknown\", the comparison fails, and every CVE is reported PATCHED with grade PASS.",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:1373-1464",
-			mcpJava + "service/SecurityService.java:1562-1576",
+			mcpJava + "service/SecurityService.java:1383-1474",
+			mcpJava + "service/SecurityService.java:1572-1586",
 			mcpJava + "service/ClusterHealthService.java:72-93",
 		},
 	},
 	{
 		ID: mcpCaveatSecurityTrendInMemory,
 		Text: "The security grade trend is an in-memory list of the last 100 audits in the backend pod, lost on " +
-			"restart. Every audit call appends to it, including the audits that compliance, baseline, drift and gate " +
-			"run internally and the calls agents make, so it mostly reflects API traffic.",
+			"restart. Each read of GET /api/security/audit appends one entry, an agent's posture read included; the " +
+			"audits that compliance, baseline, drift and gate run internally do not (an older backend appended those " +
+			"too, so there it mostly reflects API traffic).",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:42,766-773",
-			mcpJava + "service/SecurityService.java:779,842,904,969",
-			mcpJava + "service/SecurityService.java:1639-1660",
+			mcpJava + "service/SecurityService.java:42,58-69",
+			mcpJava + "service/SecurityService.java:789,852,914,979",
+			mcpJava + "service/SecurityService.java:1649-1689",
 		},
 	},
 	{
@@ -125,25 +126,31 @@ var mcpCaveatsCore = []mcpCaveat{
 	},
 	{
 		ID: mcpCaveatMinISRBrokerLevel,
-		Text: "Topic detail keeps only topic-level and default config entries, so min.insync.replicas set at broker " +
-			"level, which is where the kafka-cluster chart sets it (2), is missing from a topic's configs. Its absence " +
-			"does not mean 1.",
+		Text: "This Kates backend's topic detail left min.insync.replicas out: an older backend keeps only topic-level " +
+			"and default config entries, so a value set at broker level, which is where the kafka-cluster chart sets " +
+			"it (2), is missing from a topic's configs. Its absence does not mean 1. A current backend reports the " +
+			"value in force wherever it is set, and what set it.",
 		Refs: []string{
-			mcpJava + "service/TopicService.java:170-184",
+			mcpJava + "service/TopicService.java:170-198",
 			"charts/kafka-cluster/values.yaml:137",
 		},
 	},
 	{
 		ID: mcpCaveatPrometheusUnreachable,
-		Text: "Kafka metrics in disruption reports come from Prometheus at kates.prometheus.url, which defaults to " +
-			"http://prometheus.monitoring.svc:9090. The monitoring chart installs kube-prometheus-stack, which does " +
-			"not create that Service, and no chart sets the URL, so on a default install the metrics can be missing: " +
-			"missing means not measured, not zero. An SLA verdict leaves a check it could not measure out of its grade " +
-			"and lists it, with the reason, under unevaluated (with nothing measured the grade is \"-\"), so read a grade " +
-			"that has unevaluated checks as partial.",
+		Text: "Kafka metrics in disruption reports come from Prometheus at kates.prometheus.url. The kates chart sets it " +
+			"to the Service of the monitoring stack kates deploy installs (monitoring-kube-prometheus-prometheus in " +
+			"namespace monitoring), and kates deploy to the namespace it uses. The metrics are missing when Prometheus " +
+			"runs elsewhere (make monitoring installs it in namespace kafka, where the manifests make kates applies " +
+			"point, but a chart install is not told) or is down, and on a chart older than 0.10.5, which set no URL: " +
+			"missing means not measured, not zero. An SLA verdict leaves a check it could not " +
+			"measure out of its grade and lists it, with the reason, under unevaluated (with nothing measured the grade " +
+			"is \"-\"), so read a grade that has unevaluated checks as partial.",
 		Refs: []string{
-			"kates/src/main/resources/application.properties:274-275",
-			mcpJava + "disruption/PrometheusMetricsCapture.java:31-32",
+			"kates/src/main/resources/application.properties:274-279",
+			"charts/kates/values.yaml:368-378",
+			"charts/kates/templates/configmap.yaml:36-38",
+			"kates/k8s/configmap.yaml:27-31",
+			mcpJava + "disruption/PrometheusMetricsCapture.java:31-34",
 			mcpJava + "disruption/SlaGrader.java:26,140,153,170-178,183,191-192",
 			"charts/monitoring/Chart.yaml:18",
 		},

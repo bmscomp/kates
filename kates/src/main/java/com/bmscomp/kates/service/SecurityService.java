@@ -55,9 +55,28 @@ public class SecurityService {
         this.clusterHealthService = clusterHealthService;
     }
 
+    /**
+     * GET /api/security/audit: runs the checks and adds the grade to the score
+     * history /trend reads. Only this explicit audit records one. Compliance,
+     * baseline, drift and gate used to call it too, so each of those requests,
+     * and every page an agent read, added a snapshot, and /trend mostly
+     * counted API traffic.
+     */
+    public Map<String, Object> securityAudit() {
+        Map<String, Object> report = runAudit();
+        recordSnapshot(report);
+        return report;
+    }
+
+    /**
+     * The graded checks, without a history entry: what compliance, baseline,
+     * drift and gate build on. Not private, so the retry and timeout still
+     * apply when this bean calls it on itself, and a retried audit records
+     * once.
+     */
     @Retry(maxRetries = 2, delay = 1000)
     @Timeout(60_000)
-    public Map<String, Object> securityAudit() {
+    Map<String, Object> runAudit() {
         AdminClient client = adminService.getClient();
         Map<String, Object> report = new LinkedHashMap<>();
         List<Map<String, Object>> checks = new ArrayList<>();
@@ -763,20 +782,11 @@ public class SecurityService {
             report.put("grade", "F");
         }
 
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("timestamp", report.getOrDefault("timestamp", Instant.now().toString()));
-        snapshot.put("grade", report.getOrDefault("grade", "F"));
-        snapshot.put("summary", report.get("summary"));
-        scoreHistory.add(snapshot);
-        if (scoreHistory.size() > 100) {
-            scoreHistory.remove(0);
-        }
-
         return report;
     }
 
     public Map<String, Object> securityCompliance() {
-        Map<String, Object> audit = securityAudit();
+        Map<String, Object> audit = runAudit();
         Map<String, Object> report = new LinkedHashMap<>();
 
         @SuppressWarnings("unchecked")
@@ -839,7 +849,7 @@ public class SecurityService {
     }
 
     public Map<String, Object> saveBaseline() {
-        Map<String, Object> audit = securityAudit();
+        Map<String, Object> audit = runAudit();
         savedBaseline = audit;
         baselineTimestamp = Instant.now().toString();
         persistBaseline(audit, baselineTimestamp);
@@ -901,7 +911,7 @@ public class SecurityService {
                     "error", "No baseline saved. Run 'kates security baseline --save' first.", "hasBaseline", false);
         }
 
-        Map<String, Object> current = securityAudit();
+        Map<String, Object> current = runAudit();
         Map<String, Object> report = new LinkedHashMap<>();
 
         @SuppressWarnings("unchecked")
@@ -966,7 +976,7 @@ public class SecurityService {
     }
 
     public Map<String, Object> securityGate(String minGrade) {
-        Map<String, Object> audit = securityAudit();
+        Map<String, Object> audit = runAudit();
         String currentGrade = (String) audit.getOrDefault("grade", "F");
 
         boolean passed = gradeRank(currentGrade) >= gradeRank(minGrade);
@@ -1636,6 +1646,18 @@ public class SecurityService {
         return report;
     }
 
+    /** Appends an audit's grade to the history scoreTrend reads: the last 100, in this pod's memory. */
+    private void recordSnapshot(Map<String, Object> report) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("timestamp", report.getOrDefault("timestamp", Instant.now().toString()));
+        snapshot.put("grade", report.getOrDefault("grade", "F"));
+        snapshot.put("summary", report.get("summary"));
+        scoreHistory.add(snapshot);
+        if (scoreHistory.size() > 100) {
+            scoreHistory.remove(0);
+        }
+    }
+
     public Map<String, Object> scoreTrend() {
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("history", new ArrayList<>(scoreHistory));
@@ -1649,7 +1671,9 @@ public class SecurityService {
                 Map<String, Object> previous = scoreHistory.get(scoreHistory.size() - 2);
                 String currGrade = String.valueOf(latest.get("grade"));
                 String prevGrade = String.valueOf(previous.get("grade"));
-                int trend = gradeRank(prevGrade) - gradeRank(currGrade);
+                // gradeRank is higher for a better grade (A 5, F 1), so a rise
+                // from the previous audit is an improvement.
+                int trend = gradeRank(currGrade) - gradeRank(prevGrade);
                 report.put("trend", trend > 0 ? "IMPROVING" : trend < 0 ? "DEGRADING" : "STABLE");
                 report.put("previousGrade", prevGrade);
             } else {

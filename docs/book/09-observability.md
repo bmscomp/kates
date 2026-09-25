@@ -751,6 +751,8 @@ helm upgrade --install monitoring charts/monitoring \
   --timeout 10m --wait
 ```
 
+The Kates backend reads a disruption's Kafka metrics from this Prometheus, through the Service kube-prometheus-stack creates for the release, `monitoring-kube-prometheus-prometheus`. The kates chart's `prometheus.url` points at it in the `monitoring` namespace, where `kates deploy` installs it, and `kates deploy` sets it for the namespace it uses. After `make monitoring`, the Service is in `kafka`. `make kates` applies the raw manifests in `kates/k8s/`, whose ConfigMap points there already; install the kates chart with `--set prometheus.url=http://monitoring-kube-prometheus-prometheus.kafka.svc:9090 --set networkPolicy.prometheus.namespace=kafka`. Without that, the backend cannot reach Prometheus: a disruption report has no Kafka metrics, and its SLA verdict lists latency and throughput as unevaluated.
+
 Since chart 1.5.0 that ConfigMap is the single delivery route: the workload charts (kates 0.9.0, kates-chaos 2.2.0, connect-cluster 2.1.0, mirror-maker2 0.11.0) no longer render their own board copies, and their old dashboard values are refused with the new location named. All twelve boards are picked up by the same Grafana sidecar.
 
 ### Access

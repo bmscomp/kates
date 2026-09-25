@@ -167,23 +167,35 @@ public class TopicService {
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
                     .get(resource);
 
+            // Each entry of a topic's config is the value in force, whatever
+            // set it: the topic, a broker (static or dynamic), the cluster-wide
+            // dynamic default, or Kafka's own default. Only topic and Kafka
+            // default entries used to be kept, so a key set at broker level,
+            // where the kafka-cluster chart sets min.insync.replicas, retention
+            // and cleanup, was missing, and a missing min.insync.replicas read
+            // as 1. The list of keys keeps the broker's other settings out.
             Map<String, String> topicConfigs = new LinkedHashMap<>();
+            Map<String, String> configSources = new LinkedHashMap<>();
             for (ConfigEntry entry : config.entries()) {
-                if (entry.source() == ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG
-                        || entry.source() == ConfigEntry.ConfigSource.DEFAULT_CONFIG) {
-                    switch (entry.name()) {
-                        case "cleanup.policy",
-                                "retention.ms",
-                                "retention.bytes",
-                                "min.insync.replicas",
-                                "compression.type",
-                                "segment.bytes",
-                                "max.message.bytes",
-                                "message.timestamp.type" -> topicConfigs.put(entry.name(), entry.value());
+                if (entry.value() == null) {
+                    continue;
+                }
+                switch (entry.name()) {
+                    case "cleanup.policy",
+                            "retention.ms",
+                            "retention.bytes",
+                            "min.insync.replicas",
+                            "compression.type",
+                            "segment.bytes",
+                            "max.message.bytes",
+                            "message.timestamp.type" -> {
+                        topicConfigs.put(entry.name(), entry.value());
+                        configSources.put(entry.name(), String.valueOf(entry.source()));
                     }
                 }
             }
             result.put("configs", topicConfigs);
+            result.put("configSources", configSources);
             return result;
 
         } catch (Exception e) {
