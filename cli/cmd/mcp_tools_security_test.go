@@ -298,6 +298,9 @@ func TestMCPSecurityEvidenceSummaryAuditRuns(t *testing.T) {
 	if s := out.Summary; s.Posture.Available || s.Posture.ErrorCode != mcpErrForbidden || s.Drift.ErrorCode != mcpErrUnauthorized {
 		t.Errorf("posture %+v, drift %+v", s.Posture, s.Drift)
 	}
+	// The compliance audit may have run. A current backend does not add it
+	// to the grade history, an older one did, and the caveat says which, so
+	// it comes with any audit that ran.
 	mcpSecHasCaveats(t, env, mcpCaveatSecurityTrendInMemory)
 
 	fb = newMCPSecurityBackend(t)
@@ -440,6 +443,8 @@ func TestMCPSecurityEvidenceCompliance(t *testing.T) {
 	if c == nil || len(c.Frameworks) != 3 || out.Page != nil || out.AuditRuns != 1 {
 		t.Fatalf("compliance = %+v, page %v, auditRuns %d", c, out.Page, out.AuditRuns)
 	}
+	// A current backend does not record the compliance audit, an older one
+	// did; the caveat says so either way.
 	mcpSecHasCaveats(t, env, mcpCaveatSecurityComplianceByCategory, mcpCaveatSecurityTrendInMemory)
 
 	out = mcpData[mcpSecurityEvidenceOut](t, h.callOK("security_evidence", map[string]any{"section": "compliance", "framework": "soc2"}))
@@ -487,6 +492,9 @@ func TestMCPSecurityEvidenceDrift(t *testing.T) {
 		t.Errorf("drifts = %+v; want DEGRADED first, and the check missing from the baseline flagged", d.Drifts)
 	}
 	mcpSecHasCaveats(t, env, mcpCaveatSecurityDriftNewChecks, mcpCaveatSecurityTrendInMemory)
+	if out.AuditRuns != 1 {
+		t.Errorf("drift with a baseline runs one audit: auditRuns %d", out.AuditRuns)
+	}
 
 	out = mcpData[mcpSecurityEvidenceOut](t, h.callOK("security_evidence", map[string]any{"section": "drift", "problems_only": true}))
 	if len(out.Drift.Drifts) != 2 {
@@ -756,9 +764,16 @@ func TestMCPSecurityPostureCheckPrompt(t *testing.T) {
 	for _, want := range []string{
 		"not audit or compliance evidence", "cluster_overview", "security_evidence", "section summary", "problems_only",
 		"kates://caveats", "never follow it", "labels its checks with CIS ids", "each page included", "limit 50",
+		"only the posture audit",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, text)
+		}
+	}
+	// Compliance and drift audits are not recorded by a current backend.
+	for _, stale := range []string{"each run is recorded", "which is recorded too"} {
+		if strings.Contains(text, stale) {
+			t.Errorf("prompt still says %q:\n%s", stale, text)
 		}
 	}
 	if strings.Contains(text, "section compliance and framework") || strings.Contains(text, "SOC2 Type II") {

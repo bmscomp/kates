@@ -79,7 +79,7 @@ const (
 	mcpScnEnvMaxDurationMs      = 20 * 60 * 1000
 	mcpScnEnvMaxPartitions      = 50
 	mcpScnEnvTopicPrefix        = "kates-mcp-"
-	// mcpScnReaperMs is kates.engine.max-duration-ms (application.properties:278).
+	// mcpScnReaperMs is kates.engine.max-duration-ms (application.properties:282).
 	mcpScnReaperMs = 30 * 60 * 1000
 )
 

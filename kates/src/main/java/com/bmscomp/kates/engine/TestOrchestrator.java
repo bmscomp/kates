@@ -708,10 +708,10 @@ public class TestOrchestrator {
 
     /**
      * Stops any live backend workers for a run and drops its handles WITHOUT
-     * changing the persisted status. Used by the timeout reaper, which owns the
-     * FAILED transition — the previous reaper updated the DB row but left the
-     * producer/consumer virtual threads running, so a "failed" run kept
-     * hammering Kafka and skewing concurrent runs.
+     * changing the persisted status. Used by the timeout reaper and by cancel,
+     * which own the FAILED transition — the previous reaper updated the DB row
+     * but left the producer/consumer virtual threads running, so a "failed" run
+     * kept hammering Kafka and skewing concurrent runs.
      */
     public void abortWorkers(TestRun run) {
         List<BenchmarkHandle> handles = activeHandles.remove(run.getId());
@@ -732,7 +732,7 @@ public class TestOrchestrator {
             try {
                 backend.stop(handle);
             } catch (Exception e) {
-                LOG.warnf("Reaper: failed to stop task %s: %s", handle.taskId(), e.getMessage());
+                LOG.warnf("Failed to stop task %s of ended run: %s", handle.taskId(), e.getMessage());
             }
         }
     }
@@ -1225,5 +1225,80 @@ public class TestOrchestrator {
     private void fireEvent(TestRun run, TestLifecycleEvent.EventKind kind) {
         String type = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
         lifecycleEvents.fireAsync(new TestLifecycleEvent(run.getId(), type, kind));
+    }
+
+    /** The error a cancel gives each task of the run that had not finished. */
+    private static final String CANCELLED_TASK_ERROR = "Cancelled by user";
+
+    /**
+     * Cancels a PENDING or RUNNING run: stops its tasks, then stores the run
+     * as FAILED, with each task that had not finished marked FAILED and given
+     * {@link #CANCELLED_TASK_ERROR}. {@code TaskStatus} has no CANCELLED, so
+     * FAILED is what a cancelled run reads back as; REST and gRPC both answer
+     * with the run as stored here, so the answer and every later read agree.
+     *
+     * <p>It ends the run the way the timeout reaper does, because nothing
+     * settles a FAILED run afterwards: {@link #refreshStatus} returns early for
+     * it and the reaper only scans RUNNING. So {@link #abortWorkers} hands back
+     * the concurrency slot and the per-run meters here, before FAILED is
+     * written, since once the row reads FAILED the reconciler drops the run's
+     * handles and nothing could stop its workers. The write is a compare-and-set
+     * on the status read, so a run that ends on its own in between keeps its
+     * ending; one that only moved from PENDING to RUNNING is cancelled on the
+     * second pass.
+     *
+     * @return the run as stored, or empty when no run has that id
+     * @throws RunNotCancellableException when the run is neither PENDING nor
+     *     RUNNING, or ended while being cancelled
+     */
+    public java.util.Optional<TestRun> cancelTest(String runId) {
+        TestResult.TaskStatus status = null;
+        // Two passes cover the one move that keeps a run cancellable, PENDING
+        // to RUNNING; a run that moved again has ended.
+        for (int pass = 0; pass < 2; pass++) {
+            java.util.Optional<TestRun> found = repository.findById(runId);
+            if (found.isEmpty()) {
+                return found;
+            }
+            TestRun run = found.get();
+            status = run.getStatus();
+            if (status != TestResult.TaskStatus.RUNNING && status != TestResult.TaskStatus.PENDING) {
+                throw new RunNotCancellableException(status);
+            }
+            TestRun cancelled = withCancelledTasks(run.withStatus(TestResult.TaskStatus.FAILED));
+            abortWorkers(cancelled);
+            if (repository.saveIfStatus(cancelled, status)) {
+                String typeName = cancelled.getTestType() != null
+                        ? cancelled.getTestType().name()
+                        : "UNKNOWN";
+                // The terminal event the run would otherwise never get: an SSE
+                // subscriber used to see STOPPING and then nothing.
+                lifecycleEvents.fireAsync(
+                        new TestLifecycleEvent(runId, typeName, TestLifecycleEvent.EventKind.FAILED, "cancelled"));
+                katesMetrics.recordTestCompleted(typeName, "failed");
+                return java.util.Optional.of(cancelled);
+            }
+        }
+        TestResult.TaskStatus stored =
+                repository.findById(runId).map(TestRun::getStatus).orElse(status);
+        throw new RunNotCancellableException(stored);
+    }
+
+    /** The run with each task that had not finished marked as cancelled. */
+    private static TestRun withCancelledTasks(TestRun run) {
+        if (run.getResults() == null) {
+            return run;
+        }
+        List<TestResult> updatedResults = new java.util.ArrayList<>();
+        for (TestResult result : run.getResults()) {
+            if (result.getStatus() == TestResult.TaskStatus.RUNNING
+                    || result.getStatus() == TestResult.TaskStatus.PENDING) {
+                result = result.withStatus(TestResult.TaskStatus.FAILED)
+                        .withError(CANCELLED_TASK_ERROR)
+                        .withEndTime(Instant.now().toString());
+            }
+            updatedResults.add(result);
+        }
+        return run.withResults(updatedResults);
     }
 }

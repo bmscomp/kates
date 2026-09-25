@@ -1,7 +1,7 @@
 {
   "name": "cluster_topology",
   "title": "Cluster topology",
-  "description": "Where the pinned Kafka cluster runs: the Strimzi Kafka resource, its node pools (roles, replicas, storage), the KRaft controllers, and the brokers, each with its pod's readiness and Kubernetes node and whether the Kafka admin API lists it, and the pods of pools with neither role. With topic, also that topic's partitions: leader, replicas and in-sync replicas of each, a page at a time (from_partition), with counts of under-replicated and leaderless partitions and how many partitions each broker leads over the whole topic, and min.insync.replicas when the topic sets it or nothing does; set at broker level, it is not reported. It does not name the KRaft quorum leader: cluster_overview does. Node pools and controllers are read through the Kubernetes API, so a backend running outside Kubernetes cannot report them; with topic, the partitions are still returned. Only reads.",
+  "description": "Where the pinned Kafka cluster runs: the Strimzi Kafka resource, its node pools (roles, replicas, storage), the KRaft controllers, and the brokers, each with its pod's readiness and Kubernetes node and whether the Kafka admin API lists it, and the pods of pools with neither role. With topic, also that topic's partitions: leader, replicas and in-sync replicas of each, a page at a time (from_partition), with counts of under-replicated and leaderless partitions and how many partitions each broker leads over the whole topic, and the topic's min.insync.replicas in force with what set it (the topic, a broker, or Kafka's default). It does not name the KRaft quorum leader: cluster_overview does. Node pools and controllers are read through the Kubernetes API, so a backend running outside Kubernetes cannot report them; with topic, the partitions are still returned. Only reads.",
   "annotations": {
     "idempotentHint": false,
     "openWorldHint": false,
@@ -312,11 +312,15 @@
                 ]
               },
               "minInsyncReplicas": {
-                "description": "the topic's min.insync.replicas when the topic sets it, or Kafka's default of 1 when nothing does; absent when it is set at broker level, which topic detail does not report",
+                "description": "the topic's min.insync.replicas in force, wherever it is set; absent only from an older Kates backend, which leaves out a value set at broker level",
                 "type": [
                   "null",
                   "integer"
                 ]
+              },
+              "minInsyncReplicasSource": {
+                "description": "what set minInsyncReplicas, as Kafka names it: DYNAMIC_TOPIC_CONFIG (the topic), STATIC_BROKER_CONFIG or DYNAMIC_BROKER_CONFIG (a broker), DYNAMIC_DEFAULT_BROKER_CONFIG (the cluster-wide default), DEFAULT_CONFIG (Kafka's default); absent from an older backend",
+                "type": "string"
               },
               "name": {
                 "type": "string"

@@ -1491,6 +1491,8 @@ kates security trend
 kates sec trend
 ```
 
+The trend is the grade of each audit read (`kates security audit`, or `GET /api/security/audit`), the last 100, held in the backend pod's memory and lost when it restarts. `compliance`, `baseline`, `drift` and `gate` run the same checks without adding to it, so a `kates security gate` in every CI build does not move the trend.
+
 **See also:** [Security & Compliance](17-security.md) for in-depth security auditing and hardening.
 
 ---
@@ -1636,6 +1638,8 @@ Describe a topic — partitions, ISR, offsets, and configuration.
 kates kafka topic <name>
 kates kafka topic my-events
 ```
+
+The configuration table shows the value in force of each key, wherever it is set, and a Source column names where that is, as Kafka does: `DYNAMIC_TOPIC_CONFIG` for the topic itself, `STATIC_BROKER_CONFIG` for the brokers' configuration (where the `krafter` cluster sets `min.insync.replicas`), `DEFAULT_CONFIG` for Kafka's default. `kates cluster topics describe` shows the same table, and the topic detail in `kates kafka tui` gives the same source beside each value.
 
 #### kafka groups
 

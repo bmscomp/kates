@@ -11,7 +11,7 @@ Use the REST API instead when you need quick automation with `curl`, are integra
 After this chapter, you can:
 
 - Connect `grpcurl` to the unified Quarkus server on port 8080 with the API key, and discover the `TestService`, `ClusterService`, and `HealthService` RPCs from `kates.proto` — or through server reflection in the dev profile
-- Drive a full test lifecycle over gRPC — `CreateTest`, poll `GetTest` until a terminal status, then `CancelTest` or `DeleteTest`
+- Drive a full test lifecycle over gRPC — `CreateTest`, poll `GetTest` until a terminal status, `CancelTest` while the run is still pending or running, and `DeleteTest`
 - Read proto3 JSON output correctly, knowing that zero-valued fields are omitted and unset request fields fall back to per-test-type defaults
 - Generate typed Go, Java, or Python clients from `kates.proto`
 
@@ -106,7 +106,7 @@ The protobuf contract is defined in [`kates.proto`](https://github.com/bmscomp/k
 | `CreateTest` | `CreateTestRequest` | `TestRun` | Start a new test execution |
 | `GetTest` | `GetTestRequest` | `TestRun` | Retrieve a test by ID |
 | `ListTests` | `ListTestsRequest` | `ListTestsResponse` | Paginated test listing |
-| `CancelTest` | `CancelTestRequest` | `TestRun` | Cancel a running test |
+| `CancelTest` | `CancelTestRequest` | `TestRun` | Cancel a pending or running test; it is stored and returned as `FAILED` |
 | `DeleteTest` | `DeleteTestRequest` | `Empty` | Delete a test and its results |
 
 #### CreateTest
@@ -198,12 +198,14 @@ grpcurl "${GRPC[@]}" -d '{"type": "LOAD", "page": 0, "size": 10}' \
 ```bash
 # Cancel
 grpcurl "${GRPC[@]}" -d '{"id": "a1b2c3d4"}' localhost:30083 kates.TestService/CancelTest
-# Response: TestRun with status "CANCELLED"
+# Response: TestRun with status "FAILED", as the run is stored; each task it stopped has error "Cancelled by user"
 
 # Delete
 grpcurl "${GRPC[@]}" -d '{"id": "a1b2c3d4"}' localhost:30083 kates.TestService/DeleteTest
 # Response: {} (empty)
 ```
+
+`TestStatus` declares `CANCELLED`, but no run is ever reported in it: there is no cancelled status to store, so a cancelled run reads as `FAILED` from then on. `STOPPING`, which a run passes through while a REST delete stops its tasks, reads as `RUNNING`. A client polling `GetTest` for the end of a run stops at `COMPLETED` or `FAILED`. `CancelTest` accepts only a run that is `PENDING` or `RUNNING` in the store, and answers any other, a stopping run included, with `FAILED_PRECONDITION`.
 
 ---
 
@@ -270,15 +272,17 @@ grpcurl "${GRPC[@]}" -d '{"name": "kates-results"}' localhost:30083 kates.Cluste
   "configs": {
     "cleanup.policy": "delete",
     "compression.type": "lz4",
+    "max.message.bytes": "10485760",
     "message.timestamp.type": "CreateTime",
     "min.insync.replicas": "2",
+    "retention.bytes": "10737418240",
     "retention.ms": "604800000",
     "segment.bytes": "1073741824"
   }
 }
 ```
 
-`partitions` is a count, not a per-partition breakdown — the proto `TopicDetail` message has no leader/replica/ISR detail. `configs` holds at most eight keys — `cleanup.policy`, `retention.ms`, `retention.bytes`, `min.insync.replicas`, `compression.type`, `segment.bytes`, `max.message.bytes`, and `message.timestamp.type` — and only when the value is set on the topic or left at Kafka's default; a value the topic inherits from broker configuration is left out, which is why `retention.bytes` and `max.message.bytes` are absent above: the `krafter` cluster sets both at broker level (`log.retention.bytes`, `message.max.bytes`).
+`partitions` is a count, not a per-partition breakdown — the proto `TopicDetail` message has no leader/replica/ISR detail. `configs` holds eight keys — `cleanup.policy`, `retention.ms`, `retention.bytes`, `min.insync.replicas`, `compression.type`, `segment.bytes`, `max.message.bytes`, and `message.timestamp.type` — each with the value in force, wherever it is set: on the topic, at broker level, or left at Kafka's default. `retention.bytes` and `max.message.bytes` above come from the `krafter` brokers (`log.retention.bytes`, `message.max.bytes`). The proto message has no field for where a value comes from; `GET /api/cluster/topics/{name}` reports it in `configSources`.
 
 ---
 
@@ -368,6 +372,7 @@ All list RPCs use `page` (zero-based) and `size` (default 50, max 200) request f
 | `UNAUTHENTICATED` | 401/403 | Missing or wrong API key | `Missing or invalid API key. Provide it via 'authorization: Bearer <key>' or 'x-api-key: <key>' metadata.` |
 | `INVALID_ARGUMENT` | 400 | Missing/invalid fields | `Test type is required`, `Invalid test type: BENCHMARK` |
 | `NOT_FOUND` | 404 | Resource doesn't exist | `Test not found: 0badc0de` |
+| `FAILED_PRECONDITION` | 409 | `CancelTest` on a run that is neither pending nor running | `Test is not running (status: DONE)` |
 | `INTERNAL` | 500 or 429 | `CreateTest` could not start the run | Surfaces the underlying exception message verbatim — including `Concurrency limit reached: 3 tests already running`, which REST reports as `429` |
 
 Any other exception inside an RPC — Kafka unreachable during `GetClusterInfo`, no Kubernetes API for `GetClusterTopology` — reaches the client as `UNKNOWN`, with the Java exception class and message as the description. Transport-level codes such as `UNAVAILABLE` come from the gRPC runtime itself (e.g. when the server cannot be reached), not from Kates.
@@ -440,7 +445,7 @@ Generated clients carry no credentials of their own: attach the API key as `x-ap
 - Server reflection is enabled only in the dev profile; against a deployed backend, pass `-import-path kates/src/main/proto -proto kates.proto` to `grpcurl`
 - `CreateTestRequest` exposes only a subset of `TestSpec`; unset fields fall back to per-test-type defaults, and the request's `labels` map is ignored by the current server
 - proto3 JSON output omits zero-valued fields — a missing `id` or `page` in a response means zero, not an error — and some declared fields (`controller_id`, most of `ClusterTopology`, the counts on `ListTopics` items) are never populated at all
-- Kates raises four application status codes — `UNAUTHENTICATED`, `INVALID_ARGUMENT`, `NOT_FOUND`, and `INTERNAL`; any other exception surfaces as `UNKNOWN`, and transport-level codes like `UNAVAILABLE` come from the gRPC runtime itself
+- Kates raises five application status codes — `UNAUTHENTICATED`, `INVALID_ARGUMENT`, `NOT_FOUND`, `FAILED_PRECONDITION` and `INTERNAL`; any other exception surfaces as `UNKNOWN`, and transport-level codes like `UNAVAILABLE` come from the gRPC runtime itself
 - Typed clients for Go, Java, and Python are generated with `protoc` from the bundled `kates/src/main/proto/kates.proto`; Go needs an `M` mapping because the file declares no `go_package`
 
 This closes the book's reference part — for ready-made workflows that put these APIs to work, return to [Recipes & Patterns](14-recipes.md), and turn to the appendices for the glossary, troubleshooting guide, CI/CD templates, and version matrix.

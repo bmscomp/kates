@@ -69,11 +69,13 @@ Prometheus is valuable but not required. Before using Prometheus metrics, the di
 
 This is a deliberate design decision: Prometheus enhances observability, but its absence should never prevent you from running a disruption test. The test results will still include Kafka intelligence data (ISR tracking, lag monitoring) and SLA grading — just without the Prometheus-specific infrastructure metrics.
 
-To configure the Prometheus URL:
+The Prometheus URL defaults to the Service kube-prometheus-stack creates for `charts/monitoring` installed as release `monitoring` in namespace `monitoring`, which is what `kates deploy` does:
 
 ```properties
-kates.prometheus.url=http://prometheus.monitoring.svc:9090
+kates.prometheus.url=http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
 ```
+
+On Kubernetes, set it with the kates chart's `prometheus.url` (`kates deploy` sets it for the namespace it installs monitoring into). `make monitoring` installs the release in namespace `kafka`; there, set `prometheus.url=http://monitoring-kube-prometheus-prometheus.kafka.svc:9090` and `networkPolicy.prometheus.namespace=kafka` on a chart install. `make kates` applies the raw manifests in `kates/k8s/`, whose ConfigMap sets `KATES_PROMETHEUS_URL` to that Service already.
 
 ## Kafka-Native Observability: Application-Level Visibility
 

@@ -471,7 +471,12 @@ type TopicDetail struct {
 	ReplicationFactor int               `json:"replicationFactor"`
 	Internal          bool              `json:"internal"`
 	Configs           map[string]string `json:"configs,omitempty"`
-	PartitionInfo     []PartitionInfo   `json:"partitionInfo,omitempty"`
+	// ConfigSources names, for each key in Configs, what set the value in
+	// force: Kafka's ConfigSource (DYNAMIC_TOPIC_CONFIG, STATIC_BROKER_CONFIG,
+	// DEFAULT_CONFIG, ...). Absent from a backend that kept only topic-level
+	// and default entries, which left out any key set at broker level.
+	ConfigSources map[string]string `json:"configSources,omitempty"`
+	PartitionInfo []PartitionInfo   `json:"partitionInfo,omitempty"`
 }
 
 type PartitionInfo struct {
