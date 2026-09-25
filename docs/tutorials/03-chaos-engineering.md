@@ -408,9 +408,11 @@ kates disruption run --config full-suite.json --dry-run
 # Execute
 kates disruption run --config full-suite.json
 
-# Watch progress in real-time
-kates disruption watch <id>
+# Follow its progress
+kates disruption status <id>
 ```
+
+`kates disruption watch <id>` is meant to stream the run's progress, but the backend emits its events under the plan's name rather than the disruption ID, so for now it receives nothing; `kates disruption status <id>` shows where the run stands.
 
 ## What's Next?
 

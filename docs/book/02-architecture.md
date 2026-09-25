@@ -265,7 +265,7 @@ Key design decisions:
 - **Multi-context support** — like `kubectl`, the CLI supports named contexts for targeting different Kates instances
 - **Rich terminal output** — tables, colored badges, metric bars, sparkline charts, and ASCII banners
 - **Scaffold templates** — `kates test scaffold export <name>` writes a ready-to-use YAML scenario file to the current directory (browse the library with `kates test scaffold list`, optionally filtered by `--type LOAD`)
-- **Streaming watch** — `kates test watch` and `kates disruption watch` provide real-time progress updates
+- **Streaming watch** — `kates test watch` and `kates disruption watch` provide real-time progress updates (`disruption watch` receives no events for a disruption ID yet; see its entry in the CLI reference)
 
 ## Data Flow
 
