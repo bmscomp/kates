@@ -2,18 +2,25 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +44,7 @@ var wellKnownPorts = []struct {
 	Local  int
 	URL    string
 }{
-	{"kates/kates", "Kates REST API", 8080, 8080, "http://localhost:8080/api/health"},
+	{"kates/kates", katesAPILabel, 8080, 8080, "http://localhost:8080/api/health"},
 	{"kates/kates", "Kates gRPC", 9000, 9000, ""},
 	{"kafka/" + kafkaBootstrapPlaceholder, "Kafka Bootstrap (plain)", 9092, 9092, ""},
 	{"kafka/" + kafkaBootstrapPlaceholder, "Kafka Bootstrap (TLS)", 9093, 9093, ""},
@@ -49,6 +56,10 @@ var wellKnownPorts = []struct {
 	{"jaeger/jaeger-query", "Jaeger UI", 16686, 16686, "http://localhost:16686"},
 	{"kates/kates-postgresql", "PostgreSQL", 5432, 5432, ""},
 }
+
+// katesAPILabel names the forward of the Kates REST API, the one whose local
+// port the "ports" context points at.
+const katesAPILabel = "Kates REST API"
 
 // kafkaBootstrapPlaceholder stands for "<primary name>-kafka-bootstrap" in
 // wellKnownPorts and is substituted at match time from --kafka-name.
@@ -67,7 +78,13 @@ var portsCmd = &cobra.Command{
 	Long: `Discover deployed Kates services and start port-forwards to localhost.
 
 Auto-detects which services are running and forwards only the available ones.
-Keeps running until you press Ctrl+C.
+The forwards keep running in the background after the command returns.
+
+Points the CLI context "ports" at the forwarded API and makes it the current
+context, creating it if needed. Stores the API key from Secret kates-api-key
+in that context, unless it holds a key you set yourself, and checks the key
+against the API. No other context is changed. A local port that another
+program already listens on is not forwarded, and no key is sent to it.
 
 Examples:
   kates ports                    # auto-discover and forward all services
@@ -101,8 +118,7 @@ func runPorts(ctx context.Context) {
 			var pid int
 			if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil && pid != myPid {
 				if cmdOut, err := exec.Command("ps", "-p", pidStr, "-o", "command=").Output(); err == nil {
-					cmdLine := string(cmdOut)
-					if strings.Contains(cmdLine, "kates") {
+					if isKatesPortsCommand(string(cmdOut)) {
 						_ = syscall.Kill(pid, syscall.SIGTERM)
 					}
 				}
@@ -150,10 +166,19 @@ func runPorts(ctx context.Context) {
 	}
 
 	fmt.Printf("    %s\n", output.DimStyle.Render("────────────────────────────────────────────────────────────────"))
+
+	// A port another program listens on cannot be forwarded, yet connecting
+	// to it succeeds, so the check below would call it active and the API
+	// key would go to that program. Such ports are left out.
+	taken := takenLocalPorts(specs, 2*time.Second)
+
 	// ── 3. Start all forwards in the background ──────────────────────────────
 	fmt.Printf("\n    %s Establishing port-forwards in the background...\n", boldStyle.Render("⚡"))
 
 	for _, spec := range specs {
+		if taken[spec.Local] {
+			continue
+		}
 		pfArg := fmt.Sprintf("%d:%d", spec.Local, spec.Remote)
 		cmd := exec.Command("kubectl", "port-forward",
 			spec.Resource,
@@ -185,7 +210,21 @@ func runPorts(ctx context.Context) {
 	katesAPIForwardActive := false
 	katesAPINS := ""
 	katesAPILocalPort := 0
+	katesAPIPortTaken := 0
 	for _, spec := range specs {
+		if taken[spec.Local] {
+			allOk = false
+			if spec.Label == katesAPILabel {
+				katesAPIPortTaken = spec.Local
+			}
+			fmt.Printf("    %s  %-26s  localhost:%-5d  %s\n",
+				errStyle.Render("✖"),
+				spec.Label,
+				spec.Local,
+				output.ErrorStyle.Render("[IN USE]"),
+			)
+			continue
+		}
 		addr := fmt.Sprintf("127.0.0.1:%d", spec.Local)
 		success := false
 		for i := 0; i < 15; i++ {
@@ -197,7 +236,7 @@ func runPorts(ctx context.Context) {
 		}
 
 		if success {
-			if spec.Label == "Kates REST API" {
+			if spec.Label == katesAPILabel {
 				katesAPIForwardActive = true
 				katesAPINS = spec.Namespace
 				katesAPILocalPort = spec.Local
@@ -219,10 +258,14 @@ func runPorts(ctx context.Context) {
 		}
 	}
 
-	// Keep local CLI context in sync with the forwarded API endpoint so follow-up
-	// commands (health/resilience/tests) work without manual ctx/api-key edits.
+	// Point the "ports" context at the forwarded API and make it current, so
+	// follow-up commands (health, resilience, tests) work without manual
+	// ctx/api-key edits.
 	if katesAPIForwardActive {
-		syncContextToPortForward(ctx, katesAPINS, katesAPILocalPort)
+		endpoint := fmt.Sprintf("http://localhost:%d", katesAPILocalPort)
+		printPortsSync(os.Stdout, syncPortsContext(ctx, katesAPINS, endpoint))
+	} else if katesAPIPortTaken != 0 {
+		printAPIPortTaken(os.Stdout, katesAPIPortTaken)
 	}
 
 	fmt.Println()
@@ -235,203 +278,404 @@ func runPorts(ctx context.Context) {
 	}
 }
 
-func syncContextToPortForward(ctx context.Context, appNS string, localPort int) {
-	endpoint := fmt.Sprintf("http://localhost:%d", localPort)
-	cfg := loadConfig()
-	ctxName := resolveContextName(cfg)
-	existingKey := ""
-	if existing, ok := cfg.Contexts[ctxName]; ok {
-		existingKey = strings.TrimSpace(existing.APIKey)
+// isKatesPortsCommand reports whether cmdLine, as ps prints it, runs kates
+// ports: a kates binary whose subcommand, after any global flags, is ports.
+//
+// runPorts stops such a process before it starts forwards of its own. It used
+// to stop every process whose command line merely held "kates" and "ports",
+// which took in `kates test create --context ports`, run against the very
+// context kates ports writes, and any command with a path such as reports/.
+func isKatesPortsCommand(cmdLine string) bool {
+	fields := strings.Fields(cmdLine)
+	if len(fields) < 2 || !strings.HasPrefix(filepath.Base(fields[0]), "kates") {
+		return false
 	}
-
-	apiKey, source, keyErr := resolveWorkingAPIKey(ctx, endpoint, appNS, existingKey)
-	cfg = applyPortForwardContext(cfg, ctxName, endpoint, apiKey)
-	if err := saveConfig(cfg); err != nil {
-		fmt.Printf("    %s Failed to persist context sync: %v\n", output.WarningStyle.Render("⚠"), err)
-		return
-	}
-
-	if apiKey != "" {
-		if source == "" {
-			source = "resolved"
+	for i := 1; i < len(fields); i++ {
+		arg := fields[i]
+		if !strings.HasPrefix(arg, "-") {
+			return arg == "ports"
 		}
-		fmt.Printf("    %s Synced context %q → %s (API key source: %s)\n", output.SuccessStyle.Render("✓"), ctxName, endpoint, source)
-		return
+		if globalFlagTakesValue(arg) {
+			i++ // its value is the next field
+		}
 	}
+	return false
+}
 
-	fmt.Printf("    %s Synced context %q → %s\n", output.SuccessStyle.Render("✓"), ctxName, endpoint)
-	if keyErr != nil {
-		fmt.Printf("      %s\n", output.DimStyle.Render("API key was not refreshed automatically (secret not found or not readable)."))
+// globalFlagTakesValue reports whether arg is a global flag, --context or -o
+// for instance, whose value follows as a separate argument.
+func globalFlagTakesValue(arg string) bool {
+	if strings.Contains(arg, "=") {
+		return false
+	}
+	if name, ok := strings.CutPrefix(arg, "--"); ok {
+		f := rootCmd.PersistentFlags().Lookup(name)
+		return f != nil && f.NoOptDefVal == ""
+	}
+	if len(arg) == 2 {
+		f := rootCmd.PersistentFlags().ShorthandLookup(arg[1:])
+		return f != nil && f.NoOptDefVal == ""
+	}
+	return false
+}
+
+// takenLocalPorts returns the local ports of specs that another program
+// listens on. It waits up to wait for them to come free, since the forwards
+// runPorts stopped a moment ago may still be closing.
+func takenLocalPorts(specs []portForwardSpec, wait time.Duration) map[int]bool {
+	deadline := time.Now().Add(wait)
+	for {
+		taken := map[int]bool{}
+		for _, s := range specs {
+			if localPortTaken(s.Local) {
+				taken[s.Local] = true
+			}
+		}
+		if len(taken) == 0 || time.Now().After(deadline) {
+			return taken
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-func resolveContextName(cfg Config) string {
-	name := cfg.CurrentContext
-	if contextFlag != "" {
-		name = contextFlag
+// localPortTaken reports whether a program listens on port at localhost, on
+// IPv4 or IPv6. kubectl port-forward cannot bind such a port, but a
+// connection to it succeeds all the same, and before this check the key
+// check sent the API key from Secret kates-api-key to whatever program held
+// the port. An error other than "address in use" (no IPv6, for one) says
+// nothing about the port.
+func localPortTaken(port int) bool {
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+		if err == nil {
+			ln.Close()
+			continue
+		}
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return true
+		}
 	}
-	if strings.TrimSpace(name) == "" {
-		return "local"
-	}
-	return name
+	return false
 }
 
-func resolveWorkingAPIKey(ctx context.Context, endpoint, namespace, existingKey string) (string, string, error) {
-	secretKey, secretErr := fetchKatesAPIKey(ctx, namespace)
-	if secretKey != "" && isAPIKeyAccepted(endpoint, secretKey) {
-		return secretKey, "secret", nil
-	}
-
-	podKey, podErr := fetchKatesAPIKeyFromRunningPod(ctx, namespace)
-	if podKey != "" && isAPIKeyAccepted(endpoint, podKey) {
-		return podKey, "running-pod", nil
-	}
-
-	if strings.TrimSpace(existingKey) != "" && isAPIKeyAccepted(endpoint, existingKey) {
-		return existingKey, "existing-context", nil
-	}
-
-	// Best-effort fallback when validation cannot succeed (e.g., API temporarily down).
-	if secretKey != "" {
-		if secretErr != nil {
-			return secretKey, "secret-unverified", secretErr
-		}
-		return secretKey, "secret-unverified", nil
-	}
-	if podKey != "" {
-		if podErr != nil {
-			return podKey, "running-pod-unverified", podErr
-		}
-		return podKey, "running-pod-unverified", nil
-	}
-	if strings.TrimSpace(existingKey) != "" {
-		return existingKey, "existing-context-unverified", nil
-	}
-
-	if secretErr != nil {
-		return "", "", secretErr
-	}
-	if podErr != nil {
-		return "", "", podErr
-	}
-	return "", "", fmt.Errorf("no usable API key source")
+// printAPIPortTaken reports that the API was not forwarded because another
+// program holds its local port, and that nothing was sent to that program.
+func printAPIPortTaken(w io.Writer, port int) {
+	fmt.Fprintf(w, "    %s localhost:%d is in use by another program, so the API is not forwarded there\n",
+		output.ErrorStyle.Render("✖"), port)
+	fmt.Fprintf(w, "      %s\n", output.DimStyle.Render(fmt.Sprintf(
+		"Context %q is unchanged and no API key was sent. Find the program with: lsof -nP -iTCP:%d -sTCP:LISTEN", portsContextName, port)))
 }
 
+// portsContextName is the one CLI context `kates ports` writes.
+//
+// kates ports used to rewrite whichever context was current, or named by
+// --context: its URL, and its key with the one in Secret kates-api-key
+// whenever the API answered. A remote context became a localhost one, and a
+// context holding a narrower key for another tool (an MCP server, a CI job)
+// was handed the shared admin key without a word. The forward's settings now
+// live in a context of their own, and every other context is left as it is.
+const portsContextName = "ports"
+
+// apiKeySecretName is the Secret the kates chart generates the API key into.
+// kates ports reads the key from it and nowhere else. It used to fall back to
+// `kubectl exec … printenv KATES_API_KEY` in a running backend pod, which
+// needs exec rights on that pod and copies out whatever key it was started
+// with.
+const apiKeySecretName = "kates-api-key"
+
+// secretKeySource is the key-source kates records next to a key it copied
+// from Secret kates-api-key: the Secret's name and the first 12 hex digits of
+// the key's SHA-256. The digest ties the record to that one key. A mark on the
+// context alone would still claim a key typed over the copied one, in the
+// file or by a command that leaves the mark in place, and kates would replace
+// it; with the digest, such a key no longer matches and counts as the user's.
+func secretKeySource(apiKey string) string {
+	sum := sha256.Sum256([]byte(apiKey))
+	return apiKeySecretName + "@sha256:" + hex.EncodeToString(sum[:6])
+}
+
+// keyReplaceable reports whether kates may put the Secret's key into c: c has
+// no key, or holds the very key kates copied there. kates ports and kates
+// deploy, the two commands that copy the Secret's key, both go by it.
+func keyReplaceable(c Context) bool {
+	return strings.TrimSpace(c.APIKey) == "" || c.KeySource == secretKeySource(c.APIKey)
+}
+
+// storeSecretKey puts a key read from Secret kates-api-key into c and records
+// that kates put it there.
+func storeSecretKey(c *Context, apiKey string) {
+	c.APIKey = apiKey
+	c.KeySource = secretKeySource(apiKey)
+}
+
+// sameKey reports whether a and b hold the same key with the same key-source.
+func sameKey(a, b Context) bool {
+	return a.APIKey == b.APIKey && a.KeySource == b.KeySource
+}
+
+// keyProbePath is where kates ports checks a key: a protected, read-only
+// endpoint that answers from memory. The check used to call /api/health,
+// which is public, so every key passed it and a wrong key was stored as a
+// working one.
+const keyProbePath = "/api/tests/types"
+
+// keyVerdict is what the API said about a key.
+type keyVerdict int
+
+const (
+	keyUnverified keyVerdict = iota // the API could not be asked, or answered neither way
+	keyAccepted
+	keyRejected
+)
+
+type keyCheck struct {
+	Verdict keyVerdict
+	Detail  string // the HTTP status or the error behind the verdict
+}
+
+// keyOutcome is what syncPortsContext did with the key of the "ports" context.
+type keyOutcome int
+
+const (
+	keyFromSecret       keyOutcome = iota // the Secret's key was stored
+	keySecretRejected                     // the API rejected the Secret's key, so it was not stored
+	keySecretUnread                       // the Secret could not be read
+	keyUserOwned                          // a key kates did not store was there, and was left alone
+	keyChangedMeanwhile                   // someone set the key while kates ports ran, and theirs was kept
+)
+
+// portsSync is what syncPortsContext did, for printPortsSync to report.
+type portsSync struct {
+	Endpoint  string
+	Namespace string
+	Created   bool   // the "ports" context did not exist before
+	Previous  string // the context that was current before, when it was not "ports"
+	Override  string // a --context or KATES_CONTEXT value, which outranks the current context
+
+	Key         keyOutcome
+	SecretCheck keyCheck // the verdict on the Secret's key (keyFromSecret, keySecretRejected)
+	SecretErr   error    // why the Secret could not be read (keySecretUnread)
+	// KeptKey is set when the context ends up holding a key other than the
+	// Secret's: the user's, or one kates ports stored on an earlier run.
+	// KeptCheck is the API's verdict on it.
+	KeptKey   bool
+	KeptCheck keyCheck
+	SaveErr   error
+}
+
+// syncPortsContext points the "ports" context at the forwarded API, stores the
+// key from Secret kates-api-key in it when it may, and makes it current. It
+// changes no other context.
+//
+// "When it may" is keyReplaceable: the context holds no key yet, or holds the
+// one kates stored there. A key the user put there stays, whatever the Secret
+// says; the API's verdict on it is reported instead.
+func syncPortsContext(ctx context.Context, appNS, endpoint string) portsSync {
+	result := portsSync{Endpoint: endpoint, Namespace: appNS}
+	if contextFlag != "" && contextFlag != portsContextName {
+		result.Override = contextFlag
+	}
+
+	// Decide on a snapshot of "ports" and do the slow part, reading the Secret
+	// and checking keys against the API (up to about 20 seconds), before
+	// anything is written. The write below re-reads the file and changes only
+	// "ports" and the current context, so whatever another command saved in
+	// the meantime stays. This used to save the whole file as it was read
+	// before those calls, and put back the old value of any context changed
+	// during them.
+	before := loadConfig().Contexts[portsContextName]
+	want := before // the key "ports" should end up holding, with its key-source
+	if !keyReplaceable(before) {
+		result.Key = keyUserOwned
+	} else if secretKey, err := fetchKatesAPIKey(ctx, appNS); err != nil {
+		result.Key = keySecretUnread
+		result.SecretErr = err
+	} else {
+		result.SecretCheck = checkAPIKey(ctx, endpoint, secretKey)
+		if result.SecretCheck.Verdict == keyRejected {
+			// Storing a key the API refuses would replace one that may still
+			// work: a backend not restarted since the Secret changed still
+			// accepts the key kates ports stored before.
+			result.Key = keySecretRejected
+		} else {
+			result.Key = keyFromSecret
+			storeSecretKey(&want, secretKey)
+		}
+	}
+	if result.Key != keyFromSecret && strings.TrimSpace(want.APIKey) != "" {
+		result.KeptKey = true
+		result.KeptCheck = checkAPIKey(ctx, endpoint, want.APIKey)
+	}
+
+	result.SaveErr = updateConfig(func(cfg *Config) error {
+		pc, exists := cfg.Contexts[portsContextName]
+		result.Created = !exists
+		result.Previous = ""
+		if cfg.CurrentContext != portsContextName {
+			result.Previous = cfg.CurrentContext
+		}
+		switch {
+		case sameKey(pc, before), sameKey(pc, want):
+			pc.APIKey, pc.KeySource = want.APIKey, want.KeySource
+		case result.Key == keyFromSecret && keyReplaceable(pc):
+			// Another kates stored a key meanwhile, or the key was removed:
+			// still one this run may replace.
+			pc.APIKey, pc.KeySource = want.APIKey, want.KeySource
+		default:
+			// The key changed during the run to one kates did not store, so
+			// someone set it, and it is newer than anything decided above.
+			result.Key = keyChangedMeanwhile
+			result.KeptKey = false
+		}
+		pc.URL = endpoint
+		if pc.Output == "" {
+			pc.Output = "table"
+		}
+		cfg.Contexts[portsContextName] = pc
+		cfg.CurrentContext = portsContextName
+		return nil
+	})
+	return result
+}
+
+// checkAPIKey asks the API whether it accepts apiKey. Only 401 and 403 count
+// as a rejection, because the auth filter answers before any resource runs;
+// anything else short of a 2xx leaves the key unverified.
+func checkAPIKey(ctx context.Context, endpoint, apiKey string) keyCheck {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, strings.TrimRight(endpoint, "/")+keyProbePath, nil)
+	if err != nil {
+		return keyCheck{Verdict: keyUnverified, Detail: err.Error()}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return keyCheck{Verdict: keyUnverified, Detail: err.Error()}
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+
+	detail := "HTTP " + resp.Status
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		return keyCheck{Verdict: keyAccepted, Detail: detail}
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return keyCheck{Verdict: keyRejected, Detail: detail}
+	default:
+		return keyCheck{Verdict: keyUnverified, Detail: detail}
+	}
+}
+
+// fetchKatesAPIKey reads the API key from Secret kates-api-key.
 func fetchKatesAPIKey(ctx context.Context, namespace string) (string, error) {
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(
-		checkCtx,
+	out, err := runExecOutputFn(checkCtx,
 		"kubectl",
-		"get", "secret", "kates-api-key",
+		"get", "secret", apiKeySecretName,
 		"-n", namespace,
 		"-o", "go-template={{index .data \"api-key\"}}",
-	).Output()
+	)
 	if err != nil {
+		// kubectl explains itself on stderr ("secrets … not found",
+		// "forbidden"); "exit status 1" alone does not say which.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if msg := strings.TrimSpace(strings.SplitN(string(exitErr.Stderr), "\n", 2)[0]); msg != "" {
+				return "", errors.New(msg)
+			}
+		}
 		return "", err
 	}
 
+	// The go-template prints "<no value>" for a key the Secret lacks.
 	encoded := strings.TrimSpace(string(out))
-	if encoded == "" {
-		return "", fmt.Errorf("secret kates-api-key has empty api-key")
+	if encoded == "" || encoded == "<no value>" {
+		return "", fmt.Errorf("secret %s has no api-key entry", apiKeySecretName)
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("secret %s: api-key is not base64: %w", apiKeySecretName, err)
 	}
 	apiKey := strings.TrimSpace(string(decoded))
 	if apiKey == "" {
-		return "", fmt.Errorf("decoded api-key is empty")
+		return "", fmt.Errorf("secret %s has an empty api-key", apiKeySecretName)
 	}
 	return apiKey, nil
 }
 
-func fetchKatesAPIKeyFromRunningPod(ctx context.Context, namespace string) (string, error) {
-	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	podOut, err := exec.CommandContext(
-		checkCtx,
-		"kubectl",
-		"get", "pods",
-		"-n", namespace,
-		"-l", "app.kubernetes.io/instance=kates",
-		"-o", "jsonpath={.items[0].metadata.name}",
-	).Output()
-	if err != nil {
-		return "", err
+// printPortsSync reports what syncPortsContext did. A key the API rejects,
+// the Secret's or the one left in the context, gets a red line of its own that
+// names the key and the status: the old report said "synced" in every case,
+// and the rejection only surfaced as a 403 on the next command.
+func printPortsSync(w io.Writer, s portsSync) {
+	okMark := output.SuccessStyle.Render("✓")
+	warnMark := output.WarningStyle.Render("⚠")
+	errMark := output.ErrorStyle.Render("✖")
+	note := func(format string, args ...any) {
+		fmt.Fprintf(w, "      %s\n", output.DimStyle.Render(fmt.Sprintf(format, args...)))
 	}
 
-	podName := strings.TrimSpace(string(podOut))
-	if podName == "" {
-		return "", fmt.Errorf("no running kates pod found in namespace %q", namespace)
+	if s.SaveErr != nil {
+		fmt.Fprintf(w, "    %s Could not save context %q: %v\n", warnMark, portsContextName, s.SaveErr)
+		return
 	}
 
-	out, err := exec.CommandContext(
-		checkCtx,
-		"kubectl", "exec",
-		"-n", namespace,
-		podName,
-		"--",
-		"printenv", "KATES_API_KEY",
-	).Output()
-	if err != nil {
-		return "", err
+	verb := "Updated"
+	if s.Created {
+		verb = "Created"
+	}
+	fmt.Fprintf(w, "    %s %s context %q → %s, now the current context\n", okMark, verb, portsContextName, s.Endpoint)
+	if s.Previous != "" {
+		note("Context %q was current and is unchanged; switch back with: kates ctx use %s", s.Previous, s.Previous)
 	}
 
-	key := strings.TrimSpace(string(out))
-	if key == "" {
-		return "", fmt.Errorf("running pod %q has empty KATES_API_KEY", podName)
-	}
-	return key, nil
-}
-
-func isAPIKeyAccepted(endpoint, apiKey string) bool {
-	if strings.TrimSpace(endpoint) == "" || strings.TrimSpace(apiKey) == "" {
-		return false
-	}
-
-	checkURL := strings.TrimRight(endpoint, "/") + "/api/health"
-	req, err := http.NewRequest(http.MethodGet, checkURL, nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
-}
-
-func applyPortForwardContext(cfg Config, ctxName, endpoint, apiKey string) Config {
-	if cfg.Contexts == nil {
-		cfg.Contexts = map[string]Context{}
-	}
-	if strings.TrimSpace(ctxName) == "" {
-		ctxName = "local"
+	secret := fmt.Sprintf("Secret %s (namespace %s)", apiKeySecretName, s.Namespace)
+	switch s.Key {
+	case keyFromSecret:
+		if s.SecretCheck.Verdict == keyAccepted {
+			fmt.Fprintf(w, "    %s API key from %s, accepted by the API\n", okMark, secret)
+		} else {
+			fmt.Fprintf(w, "    %s API key from %s stored, but not checked: %s\n", warnMark, secret, s.SecretCheck.Detail)
+		}
+	case keySecretRejected:
+		fmt.Fprintf(w, "    %s The API rejected the key in %s with %s; it was not stored\n", errMark, secret, s.SecretCheck.Detail)
+		note("If the Secret changed after the backend started, the backend still expects the old key; restart it: kubectl rollout restart deployment/kates -n %s", s.Namespace)
+	case keySecretUnread:
+		fmt.Fprintf(w, "    %s No API key from %s: %v\n", warnMark, secret, s.SecretErr)
+	case keyUserOwned:
+		fmt.Fprintf(w, "    %s Kept the API key already in context %q: kates replaces only a key it copied from the Secret itself\n", okMark, portsContextName)
+	case keyChangedMeanwhile:
+		fmt.Fprintf(w, "    %s The API key in context %q changed while kates ports ran; kept the new key without checking it\n", warnMark, portsContextName)
+		note("Run kates ports again to check it.")
 	}
 
-	active := cfg.Contexts[ctxName]
-	if active.Output == "" {
-		active.Output = "table"
-	}
-	if endpoint != "" {
-		active.URL = endpoint
-	}
-	if apiKey != "" {
-		active.APIKey = apiKey
+	switch {
+	case s.Key == keyFromSecret, s.Key == keyChangedMeanwhile:
+	case !s.KeptKey:
+		note("Context %q has no API key. If the API requires one, every command but kates health fails until it has one.", portsContextName)
+	case s.KeptCheck.Verdict == keyAccepted:
+		note("The key in context %q is accepted by the API.", portsContextName)
+	case s.KeptCheck.Verdict == keyRejected:
+		fmt.Fprintf(w, "    %s The API rejects the key in context %q (%s)\n", errMark, portsContextName, s.KeptCheck.Detail)
+		note("Set a working key with: kates ctx set %s --url %s --api-key <key>", portsContextName, s.Endpoint)
+		if s.Key == keyUserOwned {
+			note("or let kates ports store the Secret's key: kates ctx delete %s, then kates ports", portsContextName)
+		}
+	default:
+		note("Could not check the key in context %q: %s", portsContextName, s.KeptCheck.Detail)
 	}
 
-	cfg.Contexts[ctxName] = active
-	cfg.CurrentContext = ctxName
-	return cfg
+	if s.Override != "" {
+		fmt.Fprintf(w, "    %s --context or KATES_CONTEXT selects %q, which outranks the current context:\n", warnMark, s.Override)
+		note("commands use %q, not %q, until you pass --context %s or unset KATES_CONTEXT", s.Override, portsContextName, portsContextName)
+	}
 }
 
 // discoverServices returns a set of "namespace/service-name" strings for all

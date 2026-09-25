@@ -176,7 +176,9 @@ kates --context staging test list
 
 The `kates` chart turns API-key authentication on by default and generates the key into the `kates-api-key` Secret; the command above reads it from the `kates` namespace of the default install. The URL answers only while something forwards the API to it: `make ports` forwards it to `localhost:30083`, `kates ports` to `localhost:8080`, and when only one of those two ports answers, the CLI uses that one. `kates health` reads a public endpoint and succeeds without a key, so check a new context with `kates test list` instead. `kates ctx set` stores a context without switching to it — the configuration always carries a built-in `default` context pointing at `http://localhost:8080` — so follow it with `kates ctx use`.
 
-The context stores the key in plain text in `~/.kates.yaml`, and the CLI creates that file readable by other users on the machine (mode `0644` under the usual umask). Run `chmod 600 ~/.kates.yaml` once — later saves keep the mode — or leave `--api-key` out of the context and export the key as `KATES_API_KEY` for the session instead.
+The context stores the key in plain text in `~/.kates.yaml`. The CLI writes that file readable by you alone (mode `0600`); a file that an earlier release left readable by others is tightened to `0600` the next time the CLI saves it, on `kates ctx use` for instance. That keeps other users of the machine out, not other programs you run; to keep the key out of the file, leave `--api-key` out of the context and export the key as `KATES_API_KEY` for the session instead.
+
+A command that changes the file first takes a lock on `~/.kates.yaml.lock`, which stays beside it, and then writes a complete new file in place of the old one. Two commands that change contexts at once therefore do not undo each other's changes, and a save that fails leaves the old file as it was.
 
 ### Config File Format
 
@@ -193,7 +195,14 @@ contexts:
   staging:
     url: https://kates-staging.example.com
     output: table
+  ports:
+    url: http://localhost:8080
+    output: table
+    api-key: <api-key>
+    key-source: kates-api-key@sha256:<digest>
 ```
+
+`kates ports` writes the `ports` context. `key-source` marks a key that `kates ports` or `kates deploy` copied from the `kates-api-key` Secret, with the first 12 hex digits of that key's SHA-256. Those two commands replace a key only while its `key-source` matches it. A key you set with `kates ctx set`, bring in with `kates ctx import`, or change in the file has no matching `key-source`, and both commands leave it in place.
 
 ## Global Flags
 
@@ -1053,7 +1062,7 @@ kates deploy --yes
 | `--topology` | `isolated` (a namespace per component) or `single` (default: `isolated`) |
 | `--namespace` | Target namespace when `--topology single` (default: `kates-stack`) |
 | `--ha` | Multi-AZ high availability: replicas 3, `min.insync.replicas` 2, zone spread (default: `true`) |
-| `--port-forward`, `-P` | After deploying, hold the terminal forwarding every service until Ctrl+C |
+| `--port-forward`, `-P` | After deploying, run [`kates ports`](#ports): forward every service in the background and make the `ports` context current |
 | `--with-schema-registry` | `none`, `apicurio`, or `confluent` (default: `apicurio`) |
 | `--with-*` | Per-component toggles — `kates deploy --help` lists them, along with the per-component `*-ns` flags |
 | `--operator-scope` | `cluster` (default): one Strimzi operator watching every namespace. `namespace`: one operator per Kafka namespace, so older Kafka lines can run beside the primary under an operator of their own |
@@ -1063,6 +1072,8 @@ kates deploy --yes
 | `--kafka-name` | Name of the primary Kafka cluster (default: `krafter`) |
 | `--with-mirror-maker2` | Deploy MirrorMaker 2 as a loopback mirror of the primary — the chart's shipped shape, enough to exercise connectors, offset syncs, checkpoints and the `kates-mm2` ACLs without a second cluster (default: `false`). Real sources are `kates migrate up --from …` |
 | `--mm2-ns` | Namespace for MirrorMaker 2 in the isolated topology (default: `kafka`, where the `kates-mm2` credential lives; elsewhere the credential is copied) |
+
+**The API key.** When the deploy succeeds, `kates deploy` stores the key from the `kates-api-key` Secret in the active CLI context, the current one or the one `--context` names, if that context has no key or holds one that kates copied from the Secret before. A key you set there yourself stays, and `kates deploy` says so; the [Config File Format](#config-file-format) shows how it tells the two apart.
 
 **The wizard.** `kates deploy -i` (or a bare `kates deploy` on a terminal) walks four screens, and nothing is installed until the last one is confirmed:
 
@@ -1169,7 +1180,13 @@ Port-forward all Kates services to localhost.
 kates ports
 ```
 
-It first stops every `kubectl port-forward` you are running, including ones it did not start, such as those from `make ports`. It then forwards the API to `localhost:8080` and rewrites the active context to point there, with the first API key the API accepts — from the `kates-api-key` Secret, then the running pod, then the context itself — so switch to your local context before you run it. The forwards keep running in the background after the command returns.
+It first stops every `kubectl port-forward` you are running, including ones it did not start, such as those from `make ports`. It then forwards the API to `localhost:8080`, points the CLI context `ports` at that address, creating it the first time, and makes it the current context. No other context changes. The forwards keep running in the background after the command returns.
+
+A local port that another program already listens on is not forwarded, and the table marks it `[IN USE]`. When that port is the API's, `kates ports` leaves the `ports` context as it is and sends no key, since the program on the port, not the API, would receive it.
+
+It reads the API key from the `kates-api-key` Secret in the namespace where it found the API's Service, and nowhere else, and checks it with a request to `/api/tests/types`, which needs the key; `/api/health` would accept any key. A key the API accepts goes into `ports`, and so does one it cannot check because the API does not answer or fails with a status other than 401 or 403. A key the API rejects does not: `kates ports` says so and leaves the key that `ports` already had. A key you put in `ports` yourself, with `kates ctx set`, `kates ctx import` or an editor, stays whatever the Secret holds; `kates ports` reports whether the API accepts it.
+
+`--context` and `KATES_CONTEXT` do not change where `kates ports` writes, but they still outrank the current context for later commands, so `kates ports` warns when either names another context.
 
 #### auto
 
@@ -2127,7 +2144,7 @@ Some commands report a failure on screen and still exit `0`, so a script cannot 
 - `kates clean` when you decline its confirmation: it prints `Cancelled.` Unattended runs pass `--force`.
 - `kates ctx use`, `kates ctx delete` and `kates ctx export --name` with a context that does not exist, `kates ctx import` with a file it cannot read or parse, and a mistyped subcommand under a command group — `kates ctx list`, for instance — which prints the group's help.
 - `kates status` when the API does not answer or rejects the API key: it prints `unreachable`.
-- `kates ports` when it finds no Kates services or some forwards fail.
+- `kates ports` when it finds no Kates services, some forwards fail, or the API rejects a key it checks.
 - `kates snapshot create` when the API fails: it saves a snapshot of zeros.
 - `kates doctor`, whatever its checks find, and `kates cluster check` on `WARNING` and `CRITICAL` alike.
 - `kates security audit` and `kates security tls-inspect` when the backend reports that the check itself failed.

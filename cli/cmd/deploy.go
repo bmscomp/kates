@@ -105,7 +105,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
-	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
+	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, run kates ports: forward every service in the background and make the ports context current")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
 	deployCmd.Flags().BoolVarP(&deployYes, "yes", "y", false, "Assume yes and never prompt (fails instead of asking)")
 	deployCmd.Flags().StringVar(&deployOperatorScope, "operator-scope", "cluster", "Strimzi operator scope: 'cluster' (one operator watching every namespace) or 'namespace' (one per Kafka namespace)")
@@ -360,7 +360,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if deployErr == nil && len(finalEntries) > 0 {
 		RenderDeployDashboard(ctx, finalEntries, deployElapsed)
 
-		// Automatically sync API key from deployed cluster to active context
+		// Store the key from Secret kates-api-key in the active context,
+		// unless that context holds a key kates did not put there.
 		updateActiveContextAPIKey(ctx, ns.app)
 
 		if deployPortForward {

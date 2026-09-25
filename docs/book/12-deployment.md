@@ -708,7 +708,7 @@ For the full list of access points and URLs, see [The Cluster Under Test](03-clu
 
 ## CLI Configuration
 
-The backend requires an API key on every `/api` endpoint except `/api/health`. The chart generates one into the `kates-api-key` Secret. `kates deploy` writes it into whichever CLI context is active when it finishes — on a fresh machine, the built-in `default` context at `http://localhost:8080` — and never into a context you create afterwards, so pass the key when you create one:
+The backend requires an API key on every `/api` endpoint except `/api/health`. The chart generates one into the `kates-api-key` Secret. `kates deploy` writes it into whichever CLI context is active when it finishes — on a fresh machine, the built-in `default` context at `http://localhost:8080` — unless that context already holds a key that kates did not put there, and never into a context you create afterwards, so pass the key when you create one:
 
 ```bash
 # Connect the CLI to Kates, with the key from the Secret
@@ -721,7 +721,7 @@ kates health
 kates test list
 ```
 
-`kates ports` is the one-step alternative: it forwards the API to `localhost:8080` instead and writes that address and the key into the active context. The Quick Start in [Introduction](01-introduction.md#quick-start) describes it, along with the commands for the single-namespace topology.
+`kates ports` is the one-step alternative: it forwards the API to `localhost:8080` instead, writes that address and the key into a context of its own, `ports`, and makes it the current context, leaving every other context as it was. The Quick Start in [Introduction](01-introduction.md#quick-start) describes it, along with the commands for the single-namespace topology.
 
 ## Makefile Reference
 
