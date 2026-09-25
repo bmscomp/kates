@@ -5,7 +5,7 @@ This chapter covers how Kates implements chaos engineering: disruption types, pl
 It picks up where [Chaos Engineering Theory](06-chaos-theory.md) leaves off — you have a hypothesis; now you run the experiment. After this chapter, you can:
 
 - Choose the right disruption type and know which backend — the direct Kubernetes API or LitmusChaos — implements it
-- Run a built-in playbook and read the resulting report, timeline, and Kafka intelligence metrics
+- Preview a built-in playbook, run it, and read the resulting report, timeline, and Kafka intelligence metrics
 - Bound the blast radius of any plan with `maxAffectedBrokers`, `autoRollback`, and recovery gates
 - Gate a CI/CD pipeline on an SLA grade with `--fail-on-sla-breach` and JUnit output
 
@@ -371,6 +371,64 @@ Each step contains:
 
 These are the only keys the loader accepts, along with the `faultSpec` fields the playbooks above use; any other key, such as an `sla` block, makes the file fail to load, and Kates leaves it out of the catalog. SLA thresholds and consumer-lag tracking (`lagTrackingGroupId`) need a plan posted to `POST /api/disruptions`. The catalog also loads only the playbooks named in the `PLAYBOOK_NAMES` array of `DisruptionPlaybookCatalog`, so a new playbook file needs its name added there and a rebuild of Kates.
 
+### Previewing a Playbook
+
+The YAML ships inside the Kates backend, and a playbook starts injecting faults as soon as you run it, so read it and preview it first. `kates disruption playbook show` prints the plan the backend builds from the YAML, with the defaults the YAML leaves out filled in. The `leader-cascade` steps name no namespace or selector, so they get `kafka` and `strimzi.io/component-type=kafka`:
+
+```bash
+kates disruption playbook show leader-cascade
+```
+
+Output:
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Playbook Plan: playbook:leader-cascade
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Description              Kill partition leaders sequentially to test cascading election recovery
+  Max Affected Brokers     2
+  Auto Rollback            yes
+  ISR Tracking Topic       __consumer_offsets
+
+ ▸ Step 1: kill-leader-partition-0 (POD_KILL)
+  Namespace                kafka
+  Label Selector           strimzi.io/component-type=kafka
+  Leader Of                __consumer_offsets-0
+  Chaos Duration           10s
+  Steady State             30s
+  Observation Window       60s
+  Require Recovery         yes
+
+ ▸ Step 2: kill-leader-partition-1 (POD_KILL)
+  Namespace                kafka
+  Label Selector           strimzi.io/component-type=kafka
+  Leader Of                __consumer_offsets-1
+  Chaos Duration           10s
+  Steady State             15s
+  Observation Window       60s
+  Require Recovery         yes
+
+  See which pods each step hits: kates disruption playbook run leader-cascade --dry-run
+```
+
+With `--dry-run`, `playbook run` sends that plan to the same dry run as `kates disruption run --dry-run` and starts nothing. The safety guard resolves each partition's current leader, lists the pods each step would hit, and checks `maxAffectedBrokers` and that a broker survives:
+
+```bash
+kates disruption playbook run leader-cascade --dry-run
+```
+
+The verdict is UNSAFE when the guard would refuse to run the playbook, and the command then exits 1, so a script can run the preview first and stop on its exit status:
+
+```bash
+kates disruption playbook run leader-cascade --dry-run && kates disruption playbook run leader-cascade
+```
+
+For `POD_KILL`, `POD_DELETE`, `LEADER_ELECTION`, `NETWORK_PARTITION`, `NETWORK_LATENCY`, `ROLLING_RESTART` and `SCALE_DOWN` steps, the dry run also asks the Kubernetes API whether the Kates service account holds the permission the step uses on the direct Kubernetes backend, and reports a missing one as a step warning, which does not change the verdict. Other fault types get no RBAC check, and a check that cannot run counts as permitted.
+
+The preview describes the cluster at that moment. A leader can move before its step starts, and the step kills whichever broker leads the partition when it starts.
+
+With `-o json`, `playbook show` prints the plan as JSON, which `kates disruption run --config` accepts. Save it, change what the playbook hardcodes, such as its topic and partitions, or add the `sla` block that playbook YAML cannot carry, and run the result as a plan of your own. Over the API, `GET /api/disruptions/playbooks/{name}` returns the same plan, and `POST /api/disruptions?dryRun=true` previews it ([REST API Reference](11-api-reference.md)).
+
 ## Safety Guardrails
 
 The `DisruptionSafetyGuard` validates every plan before execution:
@@ -622,6 +680,9 @@ Run the most common chaos test — sequential leader kills — and watch the clu
 # See what ships out of the box
 kates disruption playbook list
 
+# Preview which brokers it would kill, without killing any
+kates disruption playbook run leader-cascade --dry-run
+
 # Kill the leaders of __consumer_offsets partitions 0 and 1, back to back
 kates disruption playbook run leader-cascade
 
@@ -630,13 +691,13 @@ kates disruption kafka-metrics <id>
 kates disruption timeline <id>
 ```
 
-The safety guard checks that enough brokers survive before anything is killed; the run prints a disruption ID, final status, and SLA grade, and the metrics show each step's time to full ISR recovery.
+The safety guard checks that enough brokers survive before anything is killed; the run prints a disruption ID and the final status, and the metrics show each step's time to full ISR recovery.
 :::
 
 ## Summary
 
 - The hybrid provider picks its chaos backend once, at startup: LitmusChaos when the Litmus CRDs exist in the cluster, the direct Kubernetes API provider otherwise — there is no per-type routing.
-- Built-in playbooks (`leader-cascade`, `split-brain`, `az-failure`, `rolling-restart`, `consumer-isolation`, `storage-pressure`) package the common Kafka failure scenarios as ready-to-run YAML.
+- Built-in playbooks (`leader-cascade`, `split-brain`, `az-failure`, `rolling-restart`, `consumer-isolation`, `storage-pressure`) package the common Kafka failure scenarios as ready-to-run YAML; `kates disruption playbook show` prints the plan one runs, and `playbook run --dry-run` previews it without injecting a fault.
 - Every plan passes through the `DisruptionSafetyGuard` first: target pods must exist, affected brokers stay within `maxAffectedBrokers`, and at least one broker always survives.
 - Kafka intelligence makes chaos Kafka-aware — leader-targeted kills, ISR recovery snapshots, and consumer lag tracking, surfaced by `kates disruption kafka-metrics`.
 - SLA grading turns post-disruption metrics into a letter grade against your plan's `sla` block; `--fail-on-sla-breach` and `--output-junit` turn that grade into a CI/CD gate.

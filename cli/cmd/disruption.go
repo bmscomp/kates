@@ -48,7 +48,11 @@ var disruptionRunCmd = &cobra.Command{
 			return runDryRun(plan)
 		}
 
-		fmt.Println(output.AccentStyle.Render("◉ Running disruption plan..."))
+		// Above a table only, as in runDryRun: ahead of -o json it would
+		// leave stdout unreadable as JSON.
+		if outputMode != "json" {
+			fmt.Println(output.AccentStyle.Render("◉ Running disruption plan..."))
+		}
 
 		result, err := apiClient.RunDisruption(context.Background(), plan)
 		if err != nil {
@@ -110,8 +114,16 @@ var disruptionRunCmd = &cobra.Command{
 	},
 }
 
+// runDryRun previews a plan, read from a file or fetched for a playbook. It
+// writes through output.Out, and prints the progress line only above a
+// table: printed ahead of -o json, it left stdout unreadable as JSON.
+//
+// The step names it prints come from the plan and the pods and messages from
+// the backend, so each string goes through output.Printable.
 func runDryRun(plan interface{}) error {
-	fmt.Println(output.AccentStyle.Render("◉ Dry-run — validating plan without execution..."))
+	if outputMode != "json" {
+		fmt.Fprintln(output.Out, output.AccentStyle.Render("◉ Dry-run — validating plan without execution..."))
+	}
 
 	result, err := apiClient.RunDryRun(context.Background(), plan)
 	if err != nil {
@@ -120,7 +132,7 @@ func runDryRun(plan interface{}) error {
 
 	if outputMode == "json" {
 		output.JSON(result)
-		return nil
+		return dryRunVerdict(result)
 	}
 
 	output.Header("Dry-Run Results")
@@ -135,21 +147,21 @@ func runDryRun(plan interface{}) error {
 	if len(result.Errors) > 0 {
 		output.SubHeader("Errors")
 		for _, e := range result.Errors {
-			fmt.Println("  ✗ " + e)
+			fmt.Fprintln(output.Out, "  ✗ "+output.Printable(e))
 		}
 	}
 
 	if len(result.Warnings) > 0 {
 		output.SubHeader("Warnings")
 		for _, w := range result.Warnings {
-			fmt.Println("  ⚠ " + w)
+			fmt.Fprintln(output.Out, "  ⚠ "+output.Printable(w))
 		}
 	}
 
 	for _, step := range result.Steps {
-		output.SubHeader("Step: " + step.Name + " (" + step.DisruptionType + ")")
+		output.SubHeader("Step: " + output.Printable(step.Name) + " (" + output.Printable(step.DisruptionType) + ")")
 		if step.TargetPod != "" {
-			output.KeyValue("Target Pod", step.TargetPod)
+			output.KeyValue("Target Pod", output.Printable(step.TargetPod))
 		}
 		if step.ResolvedLeaderId != nil {
 			output.KeyValue("Resolved Leader", fmt.Sprintf("broker-%d", *step.ResolvedLeaderId))
@@ -157,15 +169,27 @@ func runDryRun(plan interface{}) error {
 		if len(step.AffectedPods) > 0 {
 			output.KeyValue("Affected Pods", fmt.Sprintf("%d pods", len(step.AffectedPods)))
 			for _, pod := range step.AffectedPods {
-				fmt.Println("    • " + pod)
+				fmt.Fprintln(output.Out, "    • "+output.Printable(pod))
 			}
 		}
 		for _, w := range step.Warnings {
-			fmt.Println("    ⚠ " + w)
+			fmt.Fprintln(output.Out, "    ⚠ "+output.Printable(w))
 		}
 	}
 
-	return nil
+	return dryRunVerdict(result)
+}
+
+// dryRunVerdict fails the command, after the result is printed, when the
+// verdict is UNSAFE. The dry run reports the errors the launcher refuses a
+// plan for, so an UNSAFE plan is one that would not start, and a script that
+// previews a plan before running it can stop on the exit status instead of
+// reading the verdict out of the output.
+func dryRunVerdict(result *client.DryRunResult) error {
+	if result.WouldSucceed {
+		return nil
+	}
+	return cmdErr("Dry-run verdict is UNSAFE: the safety guard would refuse this plan")
 }
 
 func renderSlaVerdict(verdict *client.SlaVerdict) {
@@ -493,7 +517,7 @@ func renderStepReport(step client.StepReport) {
 
 func init() {
 	disruptionRunCmd.Flags().StringVar(&disruptionFile, "config", "", "Path to disruption plan JSON config (required)")
-	disruptionRunCmd.Flags().BoolVar(&dryRunMode, "dry-run", false, "Validate plan without executing (checks targets, RBAC, blast radius)")
+	disruptionRunCmd.Flags().BoolVar(&dryRunMode, "dry-run", false, "Validate plan without executing (lists the pods each step hits, checks the blast radius; exits 1 if UNSAFE)")
 	disruptionRunCmd.Flags().BoolVar(&failOnSlaBreach, "fail-on-sla-breach", false, "Exit with code 1 if SLA is violated (for CI/CD pipelines)")
 	disruptionRunCmd.Flags().StringVar(&outputJUnit, "output-junit", "", "Write JUnit XML report to file (for CI/CD integration)")
 

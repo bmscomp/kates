@@ -43,6 +43,27 @@ public class DisruptionPlaybookResource {
         return Response.ok(entries).build();
     }
 
+    @GET
+    @Path("/{name}")
+    @Operation(
+            summary = "Get a playbook's plan",
+            description = "Returns the disruption plan a playbook runs, resolved from its YAML the way"
+                    + " POST /api/disruptions/playbooks/{name} resolves it. The body is accepted as is by"
+                    + " POST /api/disruptions?dryRun=true, which previews the playbook without injecting faults.")
+    @APIResponse(responseCode = "200", description = "The playbook's disruption plan")
+    @APIResponse(responseCode = "404", description = "Playbook not found")
+    public Response getPlaybookPlan(@Parameter(description = "Playbook name") @PathParam("name") String name) {
+        // The list returns only a step count, and the YAML sits inside the
+        // backend jar, so this is the only way for a client to read what a
+        // playbook would do, or to preview it, before running it.
+        return playbookCatalog
+                .findByName(name)
+                .map(entry -> Response.ok(playbookCatalog.toPlan(entry)).build())
+                .orElseGet(() -> Response.status(404)
+                        .entity(ApiError.of(404, "Not Found", "Playbook not found: " + name))
+                        .build());
+    }
+
     @POST
     @Path("/{name}")
     @Operation(

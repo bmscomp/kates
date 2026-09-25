@@ -990,7 +990,7 @@
       desc: "Path to disruption plan JSON config (required)"
     - name: "--dry-run"
       type: bool
-      desc: "Validate plan without executing"
+      desc: "Validate plan without executing; exits 1 when the verdict is UNSAFE"
     - name: "--fail-on-sla-breach"
       type: bool
       desc: "Exit code 1 if SLA is violated"
@@ -1070,15 +1070,45 @@
   examples:
     - "kates disruption playbook list"
   see_also:
+    - disruption playbook show
     - disruption playbook run
+
+- name: disruption playbook show
+  category: Disruption
+  synopsis: "kates disruption playbook show <name>"
+  short: "Show the disruption plan a playbook runs"
+  description: |
+    Prints the plan the backend resolves from the playbook's YAML:
+    each step's fault, targets, the fields that size a fault of its
+    type, and timings, with the defaults the YAML leaves out filled
+    in. With -o json it prints the plan as the backend returns it,
+    which 'kates disruption run --config' accepts.
+  examples:
+    - "kates disruption playbook show leader-cascade"
+    - "kates disruption playbook show leader-cascade -o json > plan.json"
+  see_also:
+    - disruption playbook run
+    - disruption playbook list
 
 - name: disruption playbook run
   category: Disruption
-  synopsis: "kates disruption playbook run <name>"
+  synopsis: "kates disruption playbook run <name> [flags]"
   short: "Execute a pre-built disruption playbook"
+  description: |
+    Runs the playbook and waits for its report. With --dry-run it
+    sends the playbook's plan to the disruption dry run instead,
+    which lists the pods each step would hit and checks the blast
+    radius without injecting any fault, and exits 1 when the
+    verdict is UNSAFE. With -o json it prints the result as JSON.
+  flags:
+    - name: "--dry-run"
+      type: bool
+      desc: "Preview the blast radius without injecting any fault; exits 1 when the verdict is UNSAFE"
   examples:
-    - "kates disruption playbook run broker-kill"
+    - "kates disruption playbook run leader-cascade --dry-run"
+    - "kates disruption playbook run leader-cascade"
   see_also:
+    - disruption playbook show
     - disruption playbook list
     - disruption run
 

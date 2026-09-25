@@ -828,7 +828,7 @@ kates disruption run --config plan.json --fail-on-sla-breach --output-junit resu
 | Flag | Description |
 |------|-------------|
 | `--config` | Path to disruption plan JSON file (required) |
-| `--dry-run` | Validate plan without executing |
+| `--dry-run` | Validate plan without executing; exits 1 when the verdict is UNSAFE |
 | `--fail-on-sla-breach` | Exit with non-zero if SLA is breached |
 | `--output-junit` | Write JUnit XML to file |
 
@@ -879,6 +879,38 @@ kates disruption watch <id>
 ```
 
 Real-time SSE progress stream for disruption tests.
+
+#### disruption playbook list
+
+```bash
+kates disruption playbook list
+```
+
+List the built-in playbooks with their category, step count, and description.
+
+#### disruption playbook show
+
+```bash
+kates disruption playbook show leader-cascade
+kates disruption playbook show leader-cascade -o json > plan.json
+```
+
+Show the plan a playbook runs, as the backend resolves it from the playbook's YAML, with the defaults the YAML leaves out filled in. For each step it prints the fault type, the namespace and label selector, the target the YAML names (every matching pod, a broker ID, or the leader of a partition), the fields that size a fault of that type (the grace period of a `POD_DELETE`, the fill percentage of a `DISK_FILL` or `IO_STRESS`, and so on), the chaos duration, the steady-state and observation windows, and whether the step waits for recovery. A step whose `faultSpec` has no `disruptionType` shows as `no disruptionType`, with its `experimentName` as the Litmus experiment it runs on the LitmusChaos backend. Which pods a step hits depends on the cluster at the time; `disruption playbook run --dry-run` shows that.
+
+With `-o json` the command prints the plan as the backend returns it. That is a complete disruption plan, which `kates disruption run --config` accepts, so a saved copy is a starting point for a plan of your own.
+
+#### disruption playbook run
+
+```bash
+kates disruption playbook run leader-cascade --dry-run
+kates disruption playbook run leader-cascade
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview the playbook without injecting any fault; exits 1 when the verdict is UNSAFE |
+
+Run a playbook and wait for its report; the command prints the disruption ID and the final status, or with `-o json` the ID and the report as JSON. With `--dry-run` it fetches the playbook's plan and sends it to the same dry run as `disruption run --dry-run`, which resolves partition leaders, lists the pods each step would hit, and checks the blast radius. It starts nothing. It prints the dry-run result, as JSON with `-o json`, and exits 1 when the verdict is UNSAFE, which is when running the playbook would be refused. The dry run checks RBAC for some fault types only, and reports a missing permission as a step warning, not in the verdict; [Chaos Engineering in Practice](07-chaos-practice.md) lists which.
 
 **See also:** [Chaos Engineering Theory](06-chaos-theory.md) for the principles behind chaos engineering, [Chaos Engineering in Practice](07-chaos-practice.md) for step-by-step chaos test walkthroughs.
 

@@ -150,6 +150,8 @@ The dry run checks:
 - Plan is syntactically valid
 - Target namespace and labels are correct
 
+When the safety guard would refuse the plan, the verdict is UNSAFE and the command exits 1, so a script can stop here.
+
 ### Step 4: Execute
 
 ```bash
@@ -255,6 +257,21 @@ Network-isolates the consumer to test rebalancing behavior.
 ### storage-pressure
 
 Fills broker disk to trigger log retention.
+
+### Preview, Then Run
+
+Read a playbook's plan and preview it before you run it. The dry run lists the pods each step would hit and checks the blast radius; it kills nothing:
+
+```bash
+# The steps the playbook runs, with the defaults its YAML leaves out
+kates disruption playbook show leader-cascade
+
+# Which brokers it would kill right now
+kates disruption playbook run leader-cascade --dry-run
+
+# Run it and wait for the report
+kates disruption playbook run leader-cascade
+```
 
 ## Part 4: Resilience Testing (Performance + Chaos)
 

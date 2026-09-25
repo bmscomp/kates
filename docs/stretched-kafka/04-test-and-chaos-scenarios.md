@@ -726,7 +726,7 @@ The pods come back within seconds: this is not an outage test.
 
 **Gate.** `lostRecords` = 0 and `dataLossPercent` = 0 for every injection. An unclean election that does not match the RECOVERING-plus-restart pattern blocks further testing until it is explained.
 
-**Run it.** From the site-A Kates, with the plan above saved as `t0-plan.json` and the resilience file as `t0-integrity.yaml`. The dry run goes to the REST API, because `kates disruption run --dry-run` prints a status line before its JSON:
+**Run it.** From the site-A Kates, with the plan above saved as `t0-plan.json` and the resilience file as `t0-integrity.yaml`. The dry run goes straight to the REST API, and `jq -e '.wouldSucceed'` stops the loop at a plan the guard would refuse:
 
 ```bash
 source integrity.sh

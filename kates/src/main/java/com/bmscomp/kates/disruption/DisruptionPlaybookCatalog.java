@@ -66,6 +66,9 @@ public class DisruptionPlaybookCatalog {
     public DisruptionPlan toPlan(PlaybookEntry entry) {
         DisruptionPlan plan = new DisruptionPlan();
         plan.setName("playbook:" + entry.name);
+        // Nothing that runs a plan reads it; GET /api/disruptions/playbooks/{name}
+        // returns it, so a reader of the plan sees what the playbook is for.
+        plan.setDescription(entry.description);
         plan.setMaxAffectedBrokers(entry.maxAffectedBrokers);
         plan.setAutoRollback(entry.autoRollback);
 
