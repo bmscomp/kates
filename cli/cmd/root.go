@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
@@ -29,6 +32,13 @@ type Context struct {
 	APIKey   string `yaml:"api-key,omitempty"`
 	ProxyURL string `yaml:"proxy-url,omitempty"`
 	Insecure bool   `yaml:"insecure,omitempty"`
+	// KeySource records that kates copied APIKey from Secret kates-api-key,
+	// and which key it copied (see secretKeySource). kates ports and kates
+	// deploy replace a key only while this still matches it. Every other key
+	// counts as the user's and stays: one set with kates ctx set or brought in
+	// with kates ctx import, one changed in the file by hand, and every key in
+	// a config written before this field existed.
+	KeySource string `yaml:"key-source,omitempty"`
 }
 
 type Config struct {
@@ -46,28 +56,214 @@ func configPath() string {
 }
 
 func loadConfig() Config {
+	cfg, err := readConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not load config %s: %v\n", configPath(), err)
+	}
+	return cfg
+}
+
+// readConfig returns the config on disk, or the built-in default context when
+// there is no file. It reports a file it cannot read or parse, which
+// loadConfig only warns about but updateConfig refuses to write over: saving
+// the defaults in its place would lose every context in it for good.
+func readConfig() (Config, error) {
 	cfg := Config{
 		CurrentContext: "default",
 		Contexts:       map[string]Context{"default": {URL: "http://localhost:8080", Output: "table"}},
 	}
 	data, err := os.ReadFile(configPath())
-	if err == nil {
-		if yamlErr := yaml.Unmarshal(data, &cfg); yamlErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to parse config %s: %v\n", configPath(), yamlErr)
-		}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		err = nil
+	case err == nil:
+		err = yaml.Unmarshal(data, &cfg)
 	}
 	if cfg.Contexts == nil {
 		cfg.Contexts = map[string]Context{}
 	}
-	return cfg
+	return cfg, err
 }
 
+// configFileMode keeps ~/.kates.yaml, which holds API keys, readable by its
+// owner only. It used to be written 0644, so every local account could read
+// the keys. 0600 keeps out other users, not other processes of the same one.
+const configFileMode os.FileMode = 0o600
+
+// saveConfig replaces the whole config with cfg. A command that changes part
+// of the config calls updateConfig instead, which reads it under the same lock.
 func saveConfig(cfg Config) error {
+	unlock, err := lockConfig()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return writeConfigFile(cfg)
+}
+
+// updateConfig applies change to the config as it is on disk and saves the
+// result, holding the config lock from the read to the write.
+//
+// Commands used to load the config, do their work and then save all of it, so
+// a change another kates process saved in the meantime was put back. kates
+// ports made that window long: it reads a Secret and checks keys against the
+// API before it saves, and a key set with kates ctx set in another terminal
+// during those seconds was quietly restored. change runs on a copy read just
+// before the write; slow work belongs before the call.
+func updateConfig(change func(cfg *Config) error) error {
+	unlock, err := lockConfig()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg, err := readConfig()
+	if err != nil {
+		return fmt.Errorf("not saving over %s, which cannot be loaded: %w", configPath(), err)
+	}
+	if err := change(&cfg); err != nil {
+		if errors.Is(err, errConfigUnchanged) {
+			return nil
+		}
+		return err
+	}
+	return writeConfigFile(cfg)
+}
+
+// errConfigUnchanged, returned by an updateConfig change, ends the update
+// without writing the file.
+var errConfigUnchanged = errors.New("config unchanged")
+
+// configLockWait bounds how long a save waits for another kates process to
+// finish its own. Holders keep the lock for one read and one write.
+var configLockWait = 5 * time.Second
+
+// lockConfig takes an exclusive advisory lock on ~/.kates.yaml.lock and
+// returns the function that releases it. The lock lives in a file of its own
+// because writeConfigFile replaces the config file, and a lock on the old file
+// would not bind the new one. The kernel releases it when the process exits,
+// so a kates that crashed never leaves it held.
+//
+// Only another kates holding the lock past configLockWait is an error. A lock
+// file that cannot be opened (one root created) or locked (a filesystem
+// without flock) leaves the save unlocked, as every save was before.
+func lockConfig() (unlock func(), err error) {
+	path := configPath() + ".lock"
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, configFileMode)
+	if err != nil {
+		return func() {}, nil
+	}
+	fd := int(f.Fd())
+	deadline := time.Now().Add(configLockWait)
+	for {
+		err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case err == nil:
+			return func() {
+				_ = syscall.Flock(fd, syscall.LOCK_UN)
+				f.Close()
+			}, nil
+		case !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR):
+			f.Close()
+			return func() {}, nil
+		case time.Now().After(deadline):
+			f.Close()
+			return nil, fmt.Errorf("another kates process has held %s for %s; try again once it finishes", path, configLockWait)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// writeConfigFile replaces the config file with cfg in one step.
+//
+// It writes a new file beside the config and renames it over the old one, so
+// a reader sees the old contents or the new, never a half-written file, and a
+// write that fails leaves the old file whole. kates used to rewrite the file
+// in place, emptying it first: a failure after that left an empty config,
+// which loads as no contexts, and the next save made the loss permanent. A
+// symlinked config (a dotfiles checkout) is followed first, so the rename
+// replaces the file it points to and the link stays a link.
+func writeConfigFile(cfg Config) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configPath(), data, 0644)
+	target, err := followSymlinks(configPath())
+	if err != nil {
+		return err
+	}
+	// The rename needs write access to the directory, not the file, so check
+	// the file as the in-place write did: a config made read-only to keep
+	// kates from changing it stays unchanged. Opening without O_TRUNC leaves
+	// it intact.
+	if f, err := os.OpenFile(target, os.O_WRONLY, 0); err == nil {
+		f.Close()
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+
+	name := filepath.Base(target)
+	if !strings.HasPrefix(name, ".") {
+		name = "." + name
+	}
+	f, err := os.CreateTemp(filepath.Dir(target), name+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer func() {
+		if tmp != "" {
+			os.Remove(tmp)
+		}
+	}()
+	// CreateTemp already uses 0600, less whatever the umask removes; set it
+	// exactly, so an unusual umask cannot leave the owner without write access.
+	if err := f.Chmod(configFileMode); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		return err
+	}
+	tmp = ""
+	return nil
+}
+
+// followSymlinks returns the file path names once every symlink on it is
+// followed, including a link whose target does not exist yet, which the
+// first save then creates. filepath.EvalSymlinks fails on such a link.
+func followSymlinks(path string) (string, error) {
+	for range 40 {
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(path), link)
+		}
+		path = link
+	}
+	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
 }
 
 func activeContext(cfg Config) Context {

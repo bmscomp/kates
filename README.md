@@ -54,7 +54,7 @@ make kates-native
 # 3. The stack: a wizard on a terminal; --dry-run prints the plan and installs nothing
 kates deploy
 
-# 4. Port-forwards in the background; writes the API URL and key into the active CLI context
+# 4. Port-forwards in the background; a CLI context named ports, with the API URL and key, becomes current
 kates ports
 
 # 5. A first load test
@@ -65,7 +65,7 @@ kates test create --type LOAD --records 100000 --wait
 - **Release or `main`.** Homebrew, the release tarballs and `make kates-native` all give the latest release, so step 1 checks out that release's charts to match. Without Homebrew, download `kates-<os>-<arch>.tar.gz` from the [latest release](https://github.com/bmscomp/kates/releases/latest); it holds a single `kates` binary. To run `main` instead, skip the `git checkout` and build both halves from the checkout: `make cli-install` for the CLI and `make kates-image-native-local` for the backend (see [Building from source](#building-from-source)).
 - **Which cluster.** `kates deploy` installs into kubectl's current context. `make cluster` switches that to `kind-panda` only when it creates the cluster, so check `kubectl config current-context` and run `kubectl config use-context kind-panda` if needed. Before deploying, `kates deploy` probes every context in your kubeconfig: with none reachable it offers to create the Kind cluster, and with several it asks which one, but it does not switch to the one you pick. `-y` never prompts, so it fails where it would have asked.
 - **The backend image.** On Kind, `kates deploy` runs a local native image, `kates:native-local` if present and otherwise `kates:native`, and never pulls one. Without either, the deploy stops at the backend step, after Kafka and monitoring are installed. `make kates-native` pulls the published image of the release that `charts/kates/Chart.yaml` names, and compiles one only if the pull fails; it keeps a `kates:native` already on the machine, so run `docker rmi kates:native` first when you change releases. `make kates-image-native-local` compiles your working tree instead (several minutes, about 8 GB of Docker memory). Both load the image into `panda`, so create the cluster first.
-- **The API key.** Every `/api` call except `/api/health` needs the key from Secret `kates-api-key` in namespace `kates` (`kates-stack` with `--topology single`). `kates deploy` and `kates ports` write it into the active CLI context; a context you create yourself needs `--api-key`. Because `/api/health` is public, a green `kates health` does not prove the key works; `kates test list` does.
+- **The API key.** Every `/api` call except `/api/health` needs the key from Secret `kates-api-key` in namespace `kates` (`kates-stack` with `--topology single`). `kates deploy` writes it into the active CLI context unless that context already holds a key kates did not put there, and `kates ports` into a context of its own, `ports`; a context you create yourself needs `--api-key`. Because `/api/health` is public, a green `kates health` does not prove the key works; `kates test list` does.
 - **`make all`** is an interactive wrapper: it creates the Kind cluster if no cluster is reachable, asks for a topology, runs `kates deploy` and then the `make ports` script, which uses the second port map below. With the single-namespace topology that script finds nothing to forward, so run `kates ports` afterwards. It uses the `kates` on your `PATH` and does not fetch the backend image, so do step 1 and `make cluster && make kates-native` first.
 
 ### What `kates deploy` installs
@@ -98,7 +98,7 @@ Kind publishes no NodePorts on the host, so every `localhost` address is a port-
 
 ¹ `make ports` looks for Grafana and Prometheus in namespace `kafka`. With the default isolated topology they are in `monitoring`, so run `MONITORING_NS=monitoring make ports`. With `--topology single` everything is in `kates-stack`: set `KAFKA_NS`, `KATES_NS` and `MONITORING_NS` to `kates-stack`, or use `kates ports`, which finds the services in any namespace.
 
-`kates ports` first stops every `kubectl port-forward` on the machine, then forwards in the background and points the active CLI context at `http://localhost:8080` with the key. `make ports` leaves contexts alone; the CLI switches between `localhost:8080` and `localhost:30083` when only one of them answers. Stop either set with `pkill -f kubectl.port-forward`. To read the credentials yourself:
+`kates ports` first stops every `kubectl port-forward` on the machine, then forwards in the background, points the CLI context `ports` at `http://localhost:8080` with the key from the Secret, and makes `ports` the current context. It changes no other context, keeps a key you set in `ports` yourself, and says when the API rejects the key. `make ports` leaves contexts alone; the CLI switches between `localhost:8080` and `localhost:30083` when only one of them answers. Stop either set with `pkill -f kubectl.port-forward`. To read the credentials yourself:
 
 ```bash
 kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d           # Kates API key
@@ -115,7 +115,7 @@ Kafka UI can only read: its Kafka user has Describe and Read ACLs, so the broker
 | `kates deploy` fails with "(run from the repo root)" | Run it from the root of the checkout. |
 | `kates deploy` fails anywhere else | The error is also in `deploy-error.log`. `kates deploy status` checks each component; `kates deploy --verbose` prints every `helm` and `kubectl` command. |
 | `kates health` reports connection refused | No port-forward is running: run `kates ports`. |
-| `[401] Missing API key` or `[403] Invalid API key` while `kates health` works | If the active context has no key or a stale one, run `kates ports`. An exported `KATES_API_KEY` wins over the context, so if it is stale, `unset KATES_API_KEY` (or export the current key, read as shown above). |
+| `[401] Missing API key` or `[403] Invalid API key` while `kates health` works | If the active context has no key or a stale one, run `kates ports`: it makes the `ports` context current with the key from the Secret, and says when the API rejects that key. An exported `KATES_API_KEY` wins over the context, so if it is stale, `unset KATES_API_KEY` (or export the current key, read as shown above). |
 | A chaos run changes nothing | If `kubectl logs -n kates deploy/kates \| grep noop` shows `falling back to noop`, the backend found no usable chaos provider when it started; it picks the provider once. Check Litmus (`kubectl get pods -n litmus`), then `kubectl rollout restart deploy/kates -n kates`. |
 | A disruption plan leaves p99 latency and throughput unevaluated, or reads them as 0 | `kates.prometheus.url` defaults to `http://prometheus.monitoring.svc:9090`, but the monitoring chart's Service is `monitoring-kube-prometheus-prometheus`. Set `KATES_PROMETHEUS_URL=http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090` in the kates chart's `extraEnv`. Backends from release 1.23.0 and earlier also read p99 as 0, and pass it, whatever the URL. |
 | A test ends `FAILED` after 30 minutes | `kates.engine.max-duration-ms` caps every run, and the default `ENDURANCE` lasts an hour. Pass a shorter `--duration`, or raise the cap with `KATES_ENGINE_MAX_DURATION_MS` in `extraEnv`. |
@@ -170,7 +170,7 @@ The CLI and its full-screen views talk to the backend over REST. The backend als
 
 ```bash
 kates deploy -i                                             # Deployment wizard
-kates ports                                                 # Port-forward services; point the CLI context at the API
+kates ports                                                 # Port-forward services; point the ports context at the API
 kates health                                                # Backend health and Kafka connectivity
 kates kafka tui                                             # Full-screen Kafka explorer
 kates test create --type LOAD --records 100000 --wait       # Run a load test and print the results
