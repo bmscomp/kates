@@ -7,7 +7,7 @@ This chapter serves two readers: the operator scanning for a flag mid-incident, 
 - Chain individual commands into complete workflows — regression checks, lag investigations, chaos validation, and CI gates
 - Manage contexts with `kates ctx` so one binary drives local, staging, and production
 - Locate the right command family for any task, from test lifecycle to security auditing
-- Switch any command to JSON output and wire it into scripts and pipelines
+- Switch the commands that have a JSON form to JSON output and wire them into scripts and pipelines
 
 ## Installation
 
@@ -105,8 +105,8 @@ kates doctor
 # 3. Verify the broker/controller layout and zone distribution
 kates cluster topology
 
-# 4. Run a 30-minute endurance test to stress-test under sustained load
-kates test create --type ENDURANCE --duration 1800 --wait
+# 4. Run a 25-minute endurance test, inside the 30-minute limit on any run (see test create)
+kates test create --type ENDURANCE --duration 1500 --wait
 
 # 5. Check the endurance results against historical baselines
 kates trend --type ENDURANCE --metric p99LatencyMs --days 30
@@ -159,28 +159,37 @@ export NO_PROXY="localhost,127.0.0.1"
 ### Context Management
 
 ```bash
-# Set a context
-kates ctx set local --url http://localhost:30083
+# Set a context, with the API key the kates chart generated
+kates ctx set local --url http://localhost:30083 \
+  --api-key "$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)"
 
 # Use a context
 kates ctx use local
 
-# List contexts
-kates ctx list
+# List contexts (the active one is marked →)
+kates ctx show
 
 # Override context for a single call
 kates --url http://other-server:8080 health
 kates --context staging test list
 ```
 
+The `kates` chart turns API-key authentication on by default and generates the key into the `kates-api-key` Secret; the command above reads it from the `kates` namespace of the default install. The URL answers only while something forwards the API to it: `make ports` forwards it to `localhost:30083`, `kates ports` to `localhost:8080`, and when only one of those two ports answers, the CLI uses that one. `kates health` reads a public endpoint and succeeds without a key, so check a new context with `kates test list` instead. `kates ctx set` stores a context without switching to it — the configuration always carries a built-in `default` context pointing at `http://localhost:8080` — so follow it with `kates ctx use`.
+
+The context stores the key in plain text in `~/.kates.yaml`, and the CLI creates that file readable by other users on the machine (mode `0644` under the usual umask). Run `chmod 600 ~/.kates.yaml` once — later saves keep the mode — or leave `--api-key` out of the context and export the key as `KATES_API_KEY` for the session instead.
+
 ### Config File Format
 
 ```yaml
 current-context: local
 contexts:
+  default:
+    url: http://localhost:8080
+    output: table
   local:
     url: http://localhost:30083
     output: table
+    api-key: <api-key>
   staging:
     url: https://kates-staging.example.com
     output: table
@@ -193,6 +202,8 @@ contexts:
 | `--url` | | Override API URL for this call |
 | `--output` | `-o` | Output format: `table` or `json` |
 | `--context` | | Use a specific context |
+| `--api-key` | | API key for this call, in place of the context's |
+| `--plain` | | Disable interactive prompts and fancy UI formatting |
 | `--help` | `-h` | Show help |
 
 ## Commands
@@ -244,7 +255,7 @@ Expected output:
   ✓ local │ UP │ Kafka ✓ │ 12 configs │ 0 running │ 8 done │ 0 failed
 ```
 
-If the API is unreachable, the line shows the context name, its URL, and `unreachable` instead.
+If the API is unreachable — or rejects the API key — the line shows the context name, its URL, and `unreachable` instead, and the command still exits `0`.
 
 #### version
 
@@ -321,7 +332,7 @@ kates cluster broker configs <broker-id>
 # Full cluster topology
 kates cluster topology
 
-# Critical Kafka health alerts
+# Kafka alert rules defined in the Kafka namespace
 kates cluster alerts
 ```
 
@@ -436,12 +447,10 @@ Expected output (abbreviated — full output includes all sections listed below)
 
 #### cluster alerts
 
-Show critical Kafka health alerts from PrometheusRule CRDs — the alert rules the `kafka-cluster` chart installs, organized into the groups listed below. Alerts are sorted by severity (critical first) with styled indicators.
-
-Returns **exit code 2** when critical alerts are configured — useful for CI/CD health gates.
+List the Kafka alert rules defined in PrometheusRule resources — the rule definitions, not whether they are firing. The backend reads every PrometheusRule in its Kafka namespace (`kates.topology.kafka-namespace`, `kafka` by default) and keeps the `critical` and `warning` rules whose names are on a fixed list of Kafka health alerts. Each is printed with its expression, `for` duration and description, critical first.
 
 ```bash
-# Show all alerts
+# Show every listed rule
 kates cluster alerts
 
 # Filter by severity
@@ -449,22 +458,29 @@ kates cluster alerts --severity critical
 kates cluster alerts --severity warning
 
 # Filter by alert group
-kates cluster alerts --group kafka-cluster.krafter.kraft
 kates cluster alerts --group kafka-cluster.krafter.availability
+kates cluster alerts --group kafka-cluster.krafter.storage
 
 # JSON output for scripting
 kates cluster alerts -o json
-
-# CI/CD health gate
-kates cluster alerts --severity critical && echo "safe"
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--severity` | Filter by severity: `critical` or `warning` |
-| `--group` | Filter by alert group (e.g. `kafka-cluster.krafter.availability`, `kafka-cluster.krafter.kraft`) |
+| `--group` | Filter by alert group (e.g. `kafka-cluster.krafter.availability`, `kafka-cluster.krafter.storage`) |
 
-Group names are scoped to the cluster they cover, so two clusters in one namespace never collide. The `kafka-cluster` chart renders `kafka-cluster.<cluster>.` followed by `availability`, `consumers`, `cruise-control`, `kraft`, `performance`, `records`, `replication` and `storage`. The operator's own alerts — including `StrimziOperatorDown` and the certificate-expiry rules — live in the `strimzi-operator` release's `strimzi-operator.<release>` group, not in the Kafka cluster's rules.
+Group names are scoped to the cluster they cover, so two clusters in one namespace never collide. The `kafka-cluster` chart renders `kafka-cluster.<cluster>.` followed by `availability`, `consumers`, `cruise-control`, `kraft`, `performance`, `records`, `replication` and `storage`, plus `slo` when `alerts.slo.enabled` is set. The `records` group holds recording rules only. The fixed list covers only part of the alerts in the others: nothing from `kraft` or `slo`, and neither `KafkaConsumerGroupLag`, `KafkaUnderMinIsrPartitions` nor `KafkaNodesMissing`, among others. `kubectl get prometheusrule <cluster>-alerts -n kafka -o yaml` shows every rule the chart installed.
+
+The operator's own alerts — including `StrimziOperatorDown` and the certificate-expiry rules — live in the `strimzi-operator.<namespace>` group, in the operator's own namespace (`strimzi-operator` on a default install), which the command does not read.
+
+The exit status counts rules, not alerts. The command exits `1` whenever a `critical` rule on its list is defined, and `0` when none is — including when no PrometheusRule exists at all. `--severity` and `--group` narrow what is printed but not that count, with one exception: in table output, a filter that matches nothing exits `0`. A failed API call exits `1`. The command's own `--help` text says it exits `2` and gives `kafka.cluster` and `kafka.kraft` as group names; it exits `1`, and no group carries those names.
+
+::: {.callout-important}
+**Not a health gate**
+
+`kates cluster alerts` never asks Prometheus which alerts are firing. A default install defines four critical rules on its list — `KafkaOfflinePartitions`, `KafkaActiveControllerCount`, `KafkaBrokerDiskUsageCritical` and `KafkaConsumerGroupLagCritical` — so the command exits `1` on a healthy cluster, and a cluster without PrometheusRules exits `0` however unhealthy it is. To gate a pipeline on alerts that are firing, query Prometheus for `ALERTS{alertstate="firing", severity="critical"}` instead.
+:::
 
 #### cluster watch
 
@@ -488,7 +504,7 @@ kates cluster watch --interval 10
 
 ### Test Commands
 
-Test commands are the core of Kates. They let you create, monitor, and manage performance test runs against your Kafka cluster. Whether you're running a quick load test to sanity-check throughput or a multi-hour endurance test to catch memory leaks and log-roll spikes, the workflow is always the same: create a test, optionally watch it in real time, then inspect the results. For repeatable, version-controlled test definitions, use `test apply` with YAML scenario files instead of inline flags.
+Test commands are the core of Kates. They let you create, monitor, and manage performance test runs against your Kafka cluster. Whether you're running a quick load test to sanity-check throughput or a 25-minute endurance test to catch memory leaks and log-roll spikes, the workflow is always the same: create a test, optionally watch it in real time, then inspect the results. For repeatable, version-controlled test definitions, use `test apply` with YAML scenario files instead of inline flags.
 
 #### test list
 
@@ -515,23 +531,56 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 
 | Flag | Description |
 |------|-------------|
-| `--type` | Test type (required) |
+| `--type` | Test type (default `LOAD`) |
 | `--records` | Number of records |
 | `--record-size` | Record payload size in bytes |
-| `--producers` | Number of producer threads |
-| `--consumers` | Number of consumer threads |
-| `--consumer-group` | Consumer group name |
+| `--producers` | Number of producers. STRESS and CAPACITY start this many; every other type runs one producer whatever the flag says |
+| `--consumers` | Accepted, but no test type reads it: LOAD, ENDURANCE and INTEGRITY run one consumer, the other types none |
+| `--consumer-group` | Dropped by the backend, which names each consumer group itself |
 | `--acks` | Producer acks mode: `0`, `1`, `all` |
 | `--topic` | Target topic name |
 | `--partitions` | Topic partition count |
 | `--replication-factor` | Topic replication factor |
 | `--min-isr` | Minimum in-sync replicas |
-| `--duration` | Test duration in seconds |
-| `--throughput` | Target throughput (rec/s), -1 for unlimited |
-| `--fetch-min-bytes` | Consumer fetch minimum bytes |
-| `--fetch-max-wait-ms` | Consumer fetch maximum wait |
+| `--duration` | Test duration in seconds; the backend fails any run still going after 30 minutes (see below) |
+| `--throughput` | Does not limit the rate: it sends `targetThroughput`, which the backend drops (see the callout below) |
+| `--fetch-min-bytes` | Dropped by the backend |
+| `--fetch-max-wait-ms` | Dropped by the backend |
 | `--backend` | Backend engine to use |
 | `--wait` | Wait for test completion |
+
+::: {.callout-important}
+**`--throughput` does not rate-limit a run**
+
+The backend merges every request with its test type's defaults before it builds the run, and the merge drops `targetThroughput` — the field `--throughput` sends — along with `consumerGroup` and the two fetch settings. A run therefore produces at its type's default rate whatever `--throughput` says: unthrottled for most types, 5,000 records/s for ENDURANCE and 10,000 records/s for ROUND_TRIP on a default install. The rate comes from the API field `throughput` instead — SPIKE and CAPACITY ignore even that — and no `kates test create` flag sets it. A `kates resilience run` file can set it, because its `spec` goes to the API as written (see Resilience, below).
+:::
+
+::: {.callout-important}
+**No run lasts longer than 30 minutes**
+
+The backend fails any run that is still `RUNNING` 30 minutes after it was created: it stops the run's producers and consumers and marks the run `FAILED` with the error `Timeout: exceeded max duration of 1800000ms`, and `--wait` then exits 1. It checks once a minute, so the run fails between 30 and 31 minutes after creation. The clock starts before the backend creates the topic and starts the run's tasks, while `--duration` counts from the task start, so a run with a `--duration` of 1,800 s is still going when the limit passes and can fail just before it ends; keep `--duration` to 1,700 s or less. A run that ends on its record count is cut off the same way. The default ENDURANCE run sends 10M records at 5,000 records/s, which takes about 33 minutes, so on a default install it fails unless `--records 8500000` or fewer, or `--duration 1700` or less, brings it under the limit.
+
+The limit is the backend setting `kates.engine.max-duration-ms`, 1,800,000 ms by default, and the `kates` chart has no value for it. To allow longer runs, set the environment variable `KATES_ENGINE_MAX_DURATION_MS` through the chart's `extraEnv`. Start from the values the release runs with, and upgrade from a checkout of the version it runs, so the upgrade changes nothing else:
+
+```bash
+# Every value the release was installed with — its files and its --set flags
+helm get values kates -n kates -o yaml > kates-current.yaml
+```
+
+Add the variable to `extraEnv` in `kates-current.yaml`, next to any entries already there:
+
+```yaml
+extraEnv:
+  - name: KATES_ENGINE_MAX_DURATION_MS
+    value: "7200000"   # two hours, in milliseconds
+```
+
+```bash
+helm upgrade kates charts/kates -n kates -f kates-current.yaml --timeout 8m --wait
+```
+
+`kates deploy` upgrades the release from its own values files each time it runs, which drops the entry, so repeat the upgrade after it.
+:::
 
 #### test get
 
@@ -569,7 +618,7 @@ kates test apply -f scenario.yaml
 kates test apply -f scenario.yaml --wait
 ```
 
-Apply a YAML scenario file. Supports multi-phase tests with SLA definitions.
+Apply a YAML scenario file. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes.
 
 #### test scaffold
 
@@ -584,16 +633,18 @@ kates test scaffold export ci-gate -o my-gate.yaml
 kates test scaffold export --all           # export every template
 ```
 
-| Template | Type | Description |
-|----------|------|-------------|
-| `quick-load` | LOAD | Quick smoke test — 50k records, 2 producers, P99 < 100ms gate |
-| `production-load` | LOAD | Production-grade — 1M records, 8 producers, acks=all, lz4, strict SLA |
-| `stress-test` | STRESS | High-throughput stress — 5M records, 16 producers, find breaking points |
-| `endurance-soak` | ENDURANCE | 1-hour soak at 5k msg/s — detect GC pauses and log compaction issues |
-| `exactly-once` | ROUND_TRIP | E2E integrity — idempotent + transactional, zero-loss, CRC verification |
-| `integrity-tx` | INTEGRITY | Transactional integrity — 4 producers, zstd, CRC, zero-loss verification |
-| `spike-test` | SPIKE | Burst traffic — 32 producers for 60s, test backpressure handling |
-| `ci-gate` | LOAD | CI pipeline gate — fast 10k-record validation with strict zero-error SLA |
+| Template | Type | What it runs |
+|----------|------|--------------|
+| `quick-load` | LOAD | 50k records of 1 KiB through one producer and one consumer; gates on P99 ≤ 100 ms and at least 5,000 records/s |
+| `production-load` | LOAD | Up to 1M records of 2 KiB with `acks=all`, lz4 and 12 partitions for at most 300 s, through one producer and one consumer; gates on P99 ≤ 50 ms, average ≤ 10 ms and at least 50,000 records/s |
+| `stress-test` | STRESS | 16 producers, each sending up to 5M records of 512 B with `acks=1` and snappy to 24 partitions; gates each producer on P99 ≤ 200 ms and at least 100,000 records/s |
+| `endurance-soak` | ENDURANCE | 10M records of 1 KiB at 5,000 records/s through one producer and one consumer; gates on P99 ≤ 100 ms and average ≤ 20 ms. The records take about 33 minutes, past the 30-minute limit on any run (see the callout under `test create`), so on a default install the run fails and `kates test apply --wait` exits 1. Set `records` to 8,500,000 or fewer in the exported file to run it |
+| `exactly-once` | ROUND_TRIP | 100k records of 256 B with `acks=all` through one producer at 10,000 records/s; gates on P99 ≤ 200 ms. No transactions and no integrity check run, so its loss, ordering and CRC gates have nothing to check |
+| `integrity-tx` | INTEGRITY | 200k records of 512 B with `acks=all` and zstd through one producer and one consumer — CRC-checked, idempotent by the Kafka producer's default, not transactional; gates on zero loss, zero out-of-order, zero CRC failures and P99 ≤ 150 ms |
+| `spike-test` | SPIKE | One unthrottled producer sending up to 500k records of 1 KiB with `acks=1` for at most 60 s; gates on P99 ≤ 500 ms |
+| `ci-gate` | LOAD | 10k records of 512 B with `acks=all` through one producer and one consumer; gates on P99 ≤ 100 ms and at least 1,000 records/s |
+
+`kates test scaffold` prints the CLI's own one-line descriptions, which promise more than the runs deliver: multiple producers for `quick-load`, `production-load`, `integrity-tx` and `spike-test`, a one-hour soak that the 30-minute run limit rules out, transactions and an integrity check for `exactly-once`, transactions for `integrity-tx`, and a zero-error gate for `ci-gate`. The table above says what the backend runs. The backend keeps a file's producer count only for STRESS and CAPACITY, reads `numConsumers` for no type, and drops `targetThroughput` (see the callout under `test create`) and the integrity options `enableIdempotence`, `enableTransactions` and `enableCrc`, so every INTEGRITY run is CRC-checked and none is transactional. The files also declare gates that `kates test apply` does not check: `maxErrorRate` in `production-load`, `endurance-soak`, `spike-test` and `ci-gate`, `maxDuplicatePercent` in `integrity-tx`, and `maxDataLossPercent` in `ci-gate`, whose LOAD run reports no integrity result — see [Scenario Files & SLA Gates](13-scenario-files.md).
 
 **See also:** [Test Types Deep Dive](05-test-types.md) for the theory behind each test type, [Scenario Files & SLA Gates](13-scenario-files.md) for YAML scenario syntax.
 
@@ -863,25 +914,28 @@ kates resilience run -f resilience-test.json    # JSON also supported
 kates resilience run -f resilience-test.yaml --dry-run
 ```
 
-The config file has three parts: a `testRequest` (the same shape as a test creation request), a `chaosSpec` (experiment name, target namespace/label, duration, disruption type), and an optional `steadyStateSec` baseline period:
+The config file has three parts: a `testRequest`, which is the API's test creation request, so its `spec` takes the API's field names (`numRecords`, `throughput`, `recordSize`) rather than a scenario file's; a `chaosSpec` (experiment name, target namespace and label selector, duration, disruption type); and `steadyStateSec`, the seconds of load before the fault. Leave `steadyStateSec` out and the CLI sends `0`, so the fault is triggered as the load starts.
 
 ```yaml
 testRequest:
   type: LOAD
   spec:
-    numRecords: 100000
-    numProducers: 2
-    recordSize: 512
+    numRecords: 180000     # at 500 records/s: 360 s of load
+    throughput: 500
+    recordSize: 1024
+    acks: all
 
 chaosSpec:
   experimentName: kafka-broker-pod-kill
-  targetNamespace: kafka
-  targetLabel: "strimzi.io/component-type=kafka"
-  chaosDurationSec: 30
   disruptionType: POD_KILL
+  targetNamespace: kafka
+  targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
+  chaosDurationSec: 30
 
 steadyStateSec: 30
 ```
+
+The rate limit keeps the load running across the fault: 180,000 records at 500 records/s take 360 s, while the fault is triggered after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s). An unthrottled run can finish before the fault is triggered, and its results then describe a run the fault never touched. `throughput` is the rate the run honours, and LOAD runs one producer and one consumer whatever `numProducers` says, so it is the whole rate. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and the fault could then hit a controller instead of a broker. The example in `kates resilience run --help` has neither the rate limit nor the broker selector; start from this one.
 
 **See also:** [Chaos Engineering in Practice](07-chaos-practice.md) for resilience test configuration.
 
@@ -1105,6 +1159,8 @@ kates preflight-cluster
 kates cluster-check
 ```
 
+It exits `0` whatever it finds unless you ask otherwise: `--fail-on-error` exits `2` when compatibility checks fail or the cluster cannot be inspected, and `--fail-on-warning` exits `1` on warnings.
+
 #### ports
 
 Port-forward all Kates services to localhost.
@@ -1112,6 +1168,8 @@ Port-forward all Kates services to localhost.
 ```bash
 kates ports
 ```
+
+It first stops every `kubectl port-forward` you are running, including ones it did not start, such as those from `make ports`. It then forwards the API to `localhost:8080` and rewrites the active context to point there, with the first API key the API accepts — from the `kates-api-key` Secret, then the running pod, then the context itself — so switch to your local context before you run it. The forwards keep running in the background after the command returns.
 
 #### auto
 
@@ -1260,11 +1318,11 @@ kates sec tls
 
 Aliases: `auth`
 
-Probe ACL rules for a specific user to verify least-privilege access.
+Probe ACL rules for a specific user to verify least-privilege access. `--user` names the Kafka user and is required; without it the command prints an example and exits `1`.
 
 ```bash
-kates security auth-test
-kates sec auth
+kates security auth-test --user kafka-ui
+kates sec auth --user kates-backend
 ```
 
 #### security pentest
@@ -1293,11 +1351,11 @@ kates sec comply
 
 Aliases: `base`
 
-Save current security posture as baseline for drift detection.
+Save current security posture as baseline for drift detection. The save needs `--save`: without it the command saves nothing, prints how to use the flag, and exits `1`. The backend keeps one baseline in its database, and each save replaces it.
 
 ```bash
-kates security baseline
-kates sec base
+kates security baseline --save
+kates sec base --save
 ```
 
 #### security drift
@@ -1482,7 +1540,7 @@ Kafka commands give you direct visibility into the cluster without leaving the K
 
 #### kafka
 
-Interactive Kafka client.
+The parent of the Kafka client commands below; on its own it lists them. The interactive explorer is `kates kafka tui`.
 
 ```bash
 kates kafka
@@ -1590,12 +1648,12 @@ kates kafka create-topic my-new-topic --partitions 6 --replication-factor 3
 Alter topic configuration entries.
 
 ```bash
-kates kafka alter-topic <name>
+kates kafka alter-topic <name> --config <key>=<value>
 kates kafka alter-topic my-events --config retention.ms=604800000
 kates kafka alter-topic my-events --config retention.ms=604800000 --config cleanup.policy=compact
 ```
 
-`--config` takes a `key=value` entry and repeats for each config you set. `--dry-run` prints the request JSON instead of sending it.
+`--config` takes a `key=value` entry and repeats for each config you set; at least one is required. `--dry-run` prints the request JSON instead of sending it.
 
 #### kafka delete-topic
 
@@ -1858,7 +1916,11 @@ kates cost estimate --records 1000000 --record-size 1024 --duration 3600
 
 ### Snapshot Commands
 
-Snapshot commands capture the full state of your Kafka cluster — topics, partitions, consumer groups, broker configs, ACLs — at a point in time. The primary use case is before/after comparison: take a snapshot before a change, make the change, take another snapshot, then diff them. The diff shows exactly what changed: new topics, altered configs, shifted partition leaders. Snapshots are stored server-side, so they persist across CLI sessions.
+Snapshot commands record a small picture of your Kafka cluster at a point in time: the broker count, the names of its topics and consumer groups, and the name of the current context. The use case is before/after comparison: take a snapshot before a change, make the change, take another snapshot, then diff them. The diff shows the three counts side by side and lists the topics and groups added or removed; configuration, partition layout and ACLs are not recorded. Snapshots are JSON files under `~/.kates/snapshots/` on the machine that ran the CLI, one per name — a second `create` with the same name replaces the first.
+
+::: {.callout-warning}
+`kates snapshot create` does not fail when the API does. It skips each API call that fails and records zero for what that call would have returned, so with the API unreachable or the API key missing it saves a snapshot of zero brokers, topics and groups and exits `0`. Check the counts it prints before you rely on it.
+:::
 
 #### snapshot
 
@@ -1894,7 +1956,7 @@ kates snapshot diff <name1> <name2>
 kates snapshot diff pre-upgrade post-upgrade
 ```
 
-**See also:** [Upgrade Playbook](18-upgrade-playbook.md) for using snapshots during Kafka version upgrades.
+**See also:** [Upgrade Playbook](18-upgrade-playbook.md), whose pre-upgrade snapshot is a Velero backup — a `kates snapshot` is not a backup.
 
 ---
 
@@ -2026,7 +2088,7 @@ kates changelog --since 2025-01-01 --until 2025-01-31
 
 ## Output Modes
 
-All commands support two output modes:
+`-o` is a global flag with two values, `table` and `json`, and JSON support varies by command. The commands whose sections in this chapter show `-o json` — `test list`, `report show`, `cluster check`, `cluster topology`, `cluster alerts`, `security audit`, `operators list` and `migrate run` — print JSON, and so do some others, such as `test get` and `cluster info`:
 
 ```bash
 # Table output (default) — human-readable with colors
@@ -2036,22 +2098,43 @@ kates test list -o table
 kates test list -o json
 ```
 
+Many commands have no JSON form and print the same output whatever `-o` says, among them `status`, `ctx show`, `snapshot`, `profile`, `kyverno`, `gate`, `advisor`, `explain`, `benchmark`, `tune`, `test compare`, `test summary`, `webhook list`, `changelog` and the full-screen views (`dashboard`, `top`, `lab`). Check a command's output before you pipe it into `jq`.
+
 Output degrades automatically. When stdout is not a terminal — a pipe, a redirect, a CI log — color codes are stripped, refreshing displays become append-only lines, and full-screen TUIs refuse with a plain-text explanation instead of launching. `NO_COLOR` and `TERM=dumb` are honored; `--plain` (or `KATES_PLAIN=1`) forces the fully plain, pure-ASCII form; `KATES_ASCII=1` keeps colors but swaps glyphs for ASCII.
 
 ## Exit Codes
 
-The exit code is a contract: `0` means the thing you asked for happened.
+For most commands the exit code is a contract: `0` means the thing you asked for happened.
 
 | Code | Meaning |
 |------|---------|
 | `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
-| `1` | Anything else: the operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), a confirmation was declined or could not be asked |
+| `1` | The operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), or a confirmation was declined or could not be asked |
+| `2` | `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`) |
 
-Three consequences worth knowing in scripts:
+Consequences worth knowing in scripts:
 
 - `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
-- A declined confirmation exits `1`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
-- Confirmations are never answered implicitly. With no terminal attached, a command that needs consent fails and tells you to pass `--yes`, rather than assuming either answer.
+- `kates cluster alerts` exits `1` wherever a critical alert rule is defined, firing or not, which on a default install means always — see its section above.
+- A declined confirmation exits `1` in `deploy`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
+- Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.
+
+::: {.callout-warning}
+**Commands that exit 0 on failure**
+
+Some commands report a failure on screen and still exit `0`, so a script cannot rely on their status. Among them:
+
+- `kates clean` when you decline its confirmation: it prints `Cancelled.` Unattended runs pass `--force`.
+- `kates ctx use`, `kates ctx delete` and `kates ctx export --name` with a context that does not exist, `kates ctx import` with a file it cannot read or parse, and a mistyped subcommand under a command group — `kates ctx list`, for instance — which prints the group's help.
+- `kates status` when the API does not answer or rejects the API key: it prints `unreachable`.
+- `kates ports` when it finds no Kates services or some forwards fail.
+- `kates snapshot create` when the API fails: it saves a snapshot of zeros.
+- `kates doctor`, whatever its checks find, and `kates cluster check` on `WARNING` and `CRITICAL` alike.
+- `kates security audit` and `kates security tls-inspect` when the backend reports that the check itself failed.
+- `kates detect` on failing checks or a cluster it cannot inspect, unless you pass `--fail-on-error` (`--fail-on-warning` reacts to warnings only); with it, still when it cannot read its `--values` file.
+- `kates kyverno status`, `violations`, `enforce` and `audit` when Kyverno is missing or the change fails.
+- `kates advisor` when the run or its report is not found.
+:::
 
 ## Shell Completion
 
@@ -2086,7 +2169,7 @@ Expect a version banner (with "API: not reachable" when no server is up), a chea
 - The Common Workflows section is the map: regression checking, lag investigation, chaos validation, pre-production checkout, and CI gating each chain a handful of commands into a repeatable task.
 - Contexts (`kates ctx set`, `kates ctx use`) let one binary target every environment; `--url` and `--context` override the active context for a single call.
 - `kates health`, `kates status`, and `kates doctor` form an escalating diagnostic ladder — start cheap, go deep only when something looks wrong.
-- Every command supports `-o table` for humans and `-o json` for scripts — JSON mode is what makes the CI/CD workflows possible.
+- `-o table` is for humans and `-o json` for scripts, on the commands that have a JSON form, such as `test list`, `report show` and `cluster check`; many commands have none, and not every command's exit code can gate a pipeline.
 - When you can't remember a command, the CLI documents itself: `kates tldr` for a cheatsheet, `kates docs` for man-style detail, and shell completion for everything in between.
 
-Every one of these commands talks to the same HTTP API, and [REST API Reference](11-api-reference.md) documents those endpoints for when a script or integration needs to skip the CLI.
+Most of these commands talk to the Kates HTTP API, and [REST API Reference](11-api-reference.md) documents those endpoints for when a script or integration needs to skip the CLI. Others work without it, among them: `deploy`, `clean`, `detect`, `auto`, `ports`, `kyverno`, `migrate`, `versions`, `operators`, `kafka connect`, `doctor dns` and `doctor network` drive `kubectl` and `helm` against your current Kubernetes context; `ctx`, `snapshot list`, `snapshot diff`, `profile list` and `profile compare` read files in your home directory; and `cost estimate`, `tldr`, `docs` and `completion` need neither.
