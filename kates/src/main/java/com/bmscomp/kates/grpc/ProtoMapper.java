@@ -123,7 +123,10 @@ public final class ProtoMapper {
             case RUNNING -> com.bmscomp.kates.grpc.proto.TestStatus.RUNNING;
             case DONE -> com.bmscomp.kates.grpc.proto.TestStatus.COMPLETED;
             case FAILED -> com.bmscomp.kates.grpc.proto.TestStatus.FAILED;
-            case STOPPING -> com.bmscomp.kates.grpc.proto.TestStatus.CANCELLED;
+            // STOPPING is a run whose tasks are being stopped, by a cancel or a
+            // delete, and a cancel ends FAILED (TestOrchestrator.cancelTest):
+            // CANCELLED would name an end state no run is ever stored in.
+            case STOPPING -> com.bmscomp.kates.grpc.proto.TestStatus.RUNNING;
         };
     }
 

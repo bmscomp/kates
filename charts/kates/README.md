@@ -39,6 +39,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address |
 | `kafka.topicNamespace` | `""` | Namespace for CDC test `KafkaTopic` CRs (`""` = auto-detect) |
 | `engine.defaultBackend` | `native` | Benchmark engine (`native` or `trogdor`) |
+| `prometheus.url` | `http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090` | Prometheus the backend queries for a disruption's Kafka metrics: kube-prometheus-stack's Service for `charts/monitoring` installed as release `monitoring` in namespace `monitoring`, as `kates deploy` does. After `make monitoring`, which uses namespace `kafka`, set `http://monitoring-kube-prometheus-prometheus.kafka.svc:9090` and `networkPolicy.prometheus.namespace=kafka` |
 
 ### Networking
 
@@ -55,8 +56,16 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `networkPolicy.enabled` | `true` | Enable NetworkPolicy |
 | `networkPolicy.kafka.namespace` | `kafka` | Kafka egress target namespace |
 | `networkPolicy.kafka.port` | `9092` | Kafka egress target port |
-| `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace |
+| `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace: the one `prometheus.url` points into |
 | `networkPolicy.prometheus.port` | `9090` | Prometheus egress target port |
+
+Upgrading from chart 0.10.4 or earlier: those charts ignored
+`networkPolicy.prometheus.namespace` and always allowed egress to
+`monitoring`, while their `values.yaml` said `kafka`. A values file copied
+from one of them (`helm show values`) still says `kafka`, which now takes
+effect and moves the egress there while `prometheus.url` points into
+`monitoring`, so the backend loses Prometheus. Remove that line, or set it to
+the namespace your Prometheus runs in.
 
 ### Security
 

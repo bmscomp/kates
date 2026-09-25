@@ -149,7 +149,7 @@ class RunApiIT {
     }
 
     @Test
-    void cancelReportsCancelledButPersistsFailed() {
+    void cancelAnswersFailedAndPersistsFailed() {
         // Seeded PENDING rather than submitted, on purpose. Cancelling a run
         // that was just POSTed races the submission itself: executeTest saves
         // PENDING, then a virtual thread creates the topic and saves RUNNING.
@@ -159,15 +159,16 @@ class RunApiIT {
         // and it is not what this test is about.
         String id = seedRun(TestResult.TaskStatus.PENDING);
 
-        // The response body says CANCELLED but TaskStatus has no such constant
-        // — the run is persisted as FAILED. Pinned deliberately: clients read
-        // the body, dashboards read the row, and the two disagree.
+        // TaskStatus has no CANCELLED, so the run is persisted as FAILED, and
+        // the body says so too: clients read the body, dashboards read the
+        // row, and the two must agree. reason carries what the status cannot.
         given().when()
                 .post("/api/tests/" + id + "/cancel")
                 .then()
                 .statusCode(200)
                 .body("id", equalTo(id))
-                .body("status", equalTo("CANCELLED"));
+                .body("status", equalTo("FAILED"))
+                .body("reason", equalTo("cancelled"));
 
         given().when().get("/api/tests/" + id).then().statusCode(200).body("status", equalTo("FAILED"));
 

@@ -199,6 +199,7 @@ func TestMCPClusterTopologyTopic(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
 	fb.JSON("GET", "/api/cluster/topology", http.StatusOK, mcpClusterLabTopology("cluster-a"))
 	body := mcpClusterTopicBody("payments", 6, 3, map[string]string{"min.insync.replicas": "3", "retention.ms": "-1"})
+	body["configSources"] = map[string]string{"min.insync.replicas": "DYNAMIC_TOPIC_CONFIG", "retention.ms": "DYNAMIC_TOPIC_CONFIG"}
 	infos := body["partitionInfo"].([]map[string]any)
 	// Partition 4 (listed second) has lost a replica; partition 1 has no leader.
 	infos[1]["isr"], infos[1]["underReplicated"] = []int{1, 2}, true
@@ -216,8 +217,8 @@ func TestMCPClusterTopologyTopic(t *testing.T) {
 	if tp.Name != "payments" || tp.PartitionCount != 6 || tp.ReplicationFactor != 3 || tp.Internal {
 		t.Errorf("topic = %+v", tp)
 	}
-	if tp.MinInsyncReplicas == nil || *tp.MinInsyncReplicas != 3 {
-		t.Errorf("minInsyncReplicas = %v, want the topic's 3", tp.MinInsyncReplicas)
+	if tp.MinInsyncReplicas == nil || *tp.MinInsyncReplicas != 3 || tp.MinISRSource != "DYNAMIC_TOPIC_CONFIG" {
+		t.Errorf("minInsyncReplicas = %v from %q, want the topic's 3", tp.MinInsyncReplicas, tp.MinISRSource)
 	}
 	if tp.UnderReplicated != 2 || tp.Leaderless != 1 {
 		t.Errorf("underReplicated=%d leaderless=%d, want 2 and 1", tp.UnderReplicated, tp.Leaderless)
@@ -253,12 +254,16 @@ func TestMCPClusterTopologyTopic(t *testing.T) {
 }
 
 // TestMCPClusterTopologyMinISRBrokerLevel: the kafka-cluster chart sets
-// min.insync.replicas at broker level, where topic detail drops it. The
-// result must not guess, and says why it is missing.
+// min.insync.replicas at broker level. The backend reports it with what set
+// it; an older backend drops it, and then the result must not guess, and
+// says why it is missing.
 func TestMCPClusterTopologyMinISRBrokerLevel(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
 	fb.JSON("GET", "/api/cluster/topology", http.StatusOK, mcpClusterLabTopology("cluster-a"))
-	fb.JSON("GET", "/api/kafka/topics/orders", http.StatusOK, mcpClusterTopicBody("orders", 3, 3, nil))
+	broker := mcpClusterTopicBody("orders", 3, 3, map[string]string{"min.insync.replicas": "2", "cleanup.policy": "delete"})
+	broker["configSources"] = map[string]string{"min.insync.replicas": "STATIC_BROKER_CONFIG", "cleanup.policy": "STATIC_BROKER_CONFIG"}
+	fb.JSON("GET", "/api/kafka/topics/orders", http.StatusOK, broker)
+	fb.JSON("GET", "/api/kafka/topics/legacy", http.StatusOK, mcpClusterTopicBody("legacy", 3, 3, nil))
 	fb.JSON("GET", "/api/kafka/topics/defaults", http.StatusOK,
 		mcpClusterTopicBody("defaults", 1, 1, map[string]string{"min.insync.replicas": "1"}))
 	h := newMCPHarness(t, fb)
@@ -266,17 +271,28 @@ func TestMCPClusterTopologyMinISRBrokerLevel(t *testing.T) {
 
 	env := h.callOK("cluster_topology", map[string]any{"topic": "orders"})
 	got := mcpData[mcpClusterTopologyOut](t, env)
-	if got.Topic.MinInsyncReplicas != nil {
-		t.Errorf("minInsyncReplicas = %d, want absent", *got.Topic.MinInsyncReplicas)
+	if m := got.Topic.MinInsyncReplicas; m == nil || *m != 2 || got.Topic.MinISRSource != "STATIC_BROKER_CONFIG" {
+		t.Errorf("minInsyncReplicas = %v from %q, want the broker's 2", m, got.Topic.MinISRSource)
+	}
+	if ids := mcpClusterCaveatIDs(env); ids != "cluster-data-cached" {
+		t.Errorf("caveats = %s, want no min-isr caveat when the backend reports it", ids)
+	}
+
+	// An older backend: no configSources, and the broker-level key left out.
+	env = h.callOK("cluster_topology", map[string]any{"topic": "legacy"})
+	got = mcpData[mcpClusterTopologyOut](t, env)
+	if got.Topic.MinInsyncReplicas != nil || got.Topic.MinISRSource != "" {
+		t.Errorf("minInsyncReplicas = %v from %q, want absent", got.Topic.MinInsyncReplicas, got.Topic.MinISRSource)
 	}
 	if ids := mcpClusterCaveatIDs(env); ids != "cluster-data-cached,min-isr-broker-level" {
 		t.Errorf("caveats = %s", ids)
 	}
 
-	// Kafka's default, reported when neither the topic nor a broker sets it.
+	// Kafka's default on an older backend: the value, with no source.
 	env = h.callOK("cluster_topology", map[string]any{"topic": "defaults"})
-	if m := mcpData[mcpClusterTopologyOut](t, env).Topic.MinInsyncReplicas; m == nil || *m != 1 {
-		t.Errorf("minInsyncReplicas = %v, want 1", m)
+	got = mcpData[mcpClusterTopologyOut](t, env)
+	if m := got.Topic.MinInsyncReplicas; m == nil || *m != 1 || got.Topic.MinISRSource != "" {
+		t.Errorf("minInsyncReplicas = %v from %q, want 1 and no source", m, got.Topic.MinISRSource)
 	}
 	if ids := mcpClusterCaveatIDs(env); ids != "cluster-data-cached" {
 		t.Errorf("caveats = %s", ids)

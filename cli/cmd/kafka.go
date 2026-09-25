@@ -161,11 +161,23 @@ var kafkaTopicCmd = &cobra.Command{
 
 		if configs, ok := detail["configs"].(map[string]interface{}); ok && len(configs) > 0 {
 			output.SubHeader("Configuration")
+			// As in `kates cluster topics describe`: values in force, with
+			// where each comes from when the backend says.
+			sources, _ := detail["configSources"].(map[string]interface{})
+			headers := []string{"Config", "Value"}
+			if len(sources) > 0 {
+				headers = append(headers, "Source")
+			}
 			configRows := make([][]string, 0, len(configs))
 			for k, v := range configs {
-				configRows = append(configRows, []string{k, fmt.Sprintf("%v", v)})
+				row := []string{k, fmt.Sprintf("%v", v)}
+				if len(sources) > 0 {
+					src, _ := sources[k].(string)
+					row = append(row, src)
+				}
+				configRows = append(configRows, row)
 			}
-			output.Table([]string{"Config", "Value"}, configRows)
+			output.Table(headers, configRows)
 		}
 
 		if piRaw, ok := detail["partitionInfo"].([]interface{}); ok && len(piRaw) > 0 {

@@ -1007,6 +1007,7 @@ data:
 			"--set", "kafka.topicNamespace="+kafkaNS,
 			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring))
 		katesArgs = append(katesArgs, dc.scrapeArgs("charts/kates")...)
+		katesArgs = append(katesArgs, dc.prometheusArgs()...)
 		katesArgs = append(katesArgs, "--timeout", "8m")
 
 		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")

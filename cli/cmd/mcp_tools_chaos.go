@@ -193,7 +193,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"and the steps' impactDeltas instead.",
 		Refs: []string{
 			mcpJava + "disruption/DisruptionOrchestrator.java:182-187,198-199",
-			mcpJava + "disruption/PrometheusMetricsCapture.java:150-169",
+			mcpJava + "disruption/PrometheusMetricsCapture.java:152-171",
 			mcpJava + "disruption/DisruptionImpactScorer.java:92-130",
 		},
 	},

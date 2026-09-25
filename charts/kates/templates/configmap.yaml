@@ -33,6 +33,9 @@ data:
   {{- end }}
   {{- end }}
   KATES_TROGDOR_COORDINATOR_URL: {{ .Values.trogdor.coordinatorUrl | quote }}
+  {{- with .Values.prometheus.url }}
+  KATES_PROMETHEUS_URL: {{ . | quote }}
+  {{- end }}
   KATES_ENGINE_DEFAULT_BACKEND: {{ .Values.engine.defaultBackend | quote }}
   KATES_API_SECURITY_ENABLED: {{ .Values.apiKey.enabled | default false | quote }}
 

@@ -23,8 +23,8 @@ const mcpClusterTopologyDescription = "Where the pinned Kafka cluster runs: the 
 	"(roles, replicas, storage), the KRaft controllers, and the brokers, each with its pod's readiness and Kubernetes " +
 	"node and whether the Kafka admin API lists it, and the pods of pools with neither role. With topic, also that topic's partitions: leader, replicas and " +
 	"in-sync replicas of each, a page at a time (from_partition), with counts of under-replicated and leaderless " +
-	"partitions and how many partitions each broker leads over the whole topic, and min.insync.replicas when the " +
-	"topic sets it or nothing does; set at broker level, it is not reported. It does not name the KRaft quorum " +
+	"partitions and how many partitions each broker leads over the whole topic, and the topic's min.insync.replicas " +
+	"in force with what set it (the topic, a broker, or Kafka's default). It does not name the KRaft quorum " +
 	"leader: cluster_overview does. Node pools and controllers are read through the Kubernetes API, so a backend " +
 	"running outside Kubernetes cannot report them; with topic, the partitions are still returned. Only reads."
 
@@ -144,7 +144,8 @@ type mcpTopicLayout struct {
 	Internal          bool                `json:"internal"`
 	PartitionCount    int                 `json:"partitionCount"`
 	ReplicationFactor int                 `json:"replicationFactor" jsonschema:"replicas of the first partition"`
-	MinInsyncReplicas *int                `json:"minInsyncReplicas,omitempty" jsonschema:"the topic's min.insync.replicas when the topic sets it, or Kafka's default of 1 when nothing does; absent when it is set at broker level, which topic detail does not report"`
+	MinInsyncReplicas *int                `json:"minInsyncReplicas,omitempty" jsonschema:"the topic's min.insync.replicas in force, wherever it is set; absent only from an older Kates backend, which leaves out a value set at broker level"`
+	MinISRSource      string              `json:"minInsyncReplicasSource,omitempty" jsonschema:"what set minInsyncReplicas, as Kafka names it: DYNAMIC_TOPIC_CONFIG (the topic), STATIC_BROKER_CONFIG or DYNAMIC_BROKER_CONFIG (a broker), DYNAMIC_DEFAULT_BROKER_CONFIG (the cluster-wide default), DEFAULT_CONFIG (Kafka's default); absent from an older backend"`
 	UnderReplicated   int                 `json:"underReplicated" jsonschema:"partitions, over the whole topic, with fewer in-sync replicas than replicas"`
 	Leaderless        int                 `json:"leaderless" jsonschema:"partitions, over the whole topic, with no leader"`
 	Leaders           []mcpBrokerLeads    `json:"leaders" jsonschema:"how many partitions each broker leads, over the whole topic, by broker id; broker -1 counts partitions with no leader"`
@@ -510,14 +511,15 @@ func mcpTopicLayoutFrom(call *mcpCall, d *client.TopicDetail, from int) (*mcpTop
 	sort.Slice(leaders, func(i, j int) bool { return leaders[i].Broker < leaders[j].Broker })
 	t.Leaders = mcpCap(call, leaders, mcpTopologyLeaderSummaries)
 
-	// TopicService keeps a config entry only when its source is the topic or
-	// Kafka's built-in default (TopicService.java:170-184). Present, the value
-	// is therefore the one in force: the topic's own, or 1 when neither the
-	// topic nor any broker setting sets it. Absent, it is set at broker level,
-	// and its value is not in the response.
+	// Topic detail reports the value in force of each key it lists, and in
+	// configSources what set it (TopicService.java:170-198). A backend from
+	// before configSources kept only entries set on the topic or left at
+	// Kafka's default: there a present value is also the one in force, but an
+	// absent one is set at broker level and is not in the response.
 	if v, ok := d.Configs["min.insync.replicas"]; ok {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
 			t.MinInsyncReplicas = &n
+			t.MinISRSource = mcpSanitizeLine(d.ConfigSources["min.insync.replicas"], 40)
 		}
 	}
 	if t.MinInsyncReplicas == nil {
@@ -603,7 +605,7 @@ const (
 // topic it cannot describe with HTTP 500 whether the topic is missing or Kafka
 // failed: TopicService wraps every failure as "Failed to describe topic", and
 // the resource answers 404 only for a message containing "not found", which
-// that one never does (TopicService.java:138-140,189-191;
+// that one never does (TopicService.java:138-140,201-203;
 // KafkaClientResource.java:111-119). So on a 5xx the topic list decides: a
 // topic missing from it is reported as not found, anything else is passed on.
 func mcpTopicDetailError(ctx context.Context, call *mcpCall, topic string, err error) error {

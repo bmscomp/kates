@@ -109,15 +109,21 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
     @Override
     public Uni<com.bmscomp.kates.grpc.proto.TestRun> cancelTest(CancelTestRequest request) {
         return Uni.createFrom().item(() -> {
-            TestRun run = repository
-                    .findById(request.getId())
-                    .orElseThrow(() -> Status.NOT_FOUND
-                            .withDescription("Test not found: " + request.getId())
-                            .asRuntimeException());
-
-            orchestrator.stopTest(request.getId());
-            TestRun updated = repository.findById(request.getId()).orElse(run);
-            return ProtoMapper.toProto(updated);
+            // The same cancel as POST /api/tests/{id}/cancel: the run is
+            // stored as FAILED and this answers with it as stored. It used to
+            // only stop the tasks, which left the run STOPPING (answered as
+            // CANCELLED) until a poll settled it, and marked a run that had
+            // already finished as STOPPING too.
+            try {
+                return orchestrator
+                        .cancelTest(request.getId())
+                        .map(ProtoMapper::toProto)
+                        .orElseThrow(() -> Status.NOT_FOUND
+                                .withDescription("Test not found: " + request.getId())
+                                .asRuntimeException());
+            } catch (com.bmscomp.kates.engine.RunNotCancellableException e) {
+                throw Status.FAILED_PRECONDITION.withDescription(e.getMessage()).asRuntimeException();
+            }
         });
     }
 

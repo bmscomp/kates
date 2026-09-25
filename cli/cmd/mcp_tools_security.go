@@ -17,8 +17,9 @@ import (
 // caveats of mcp_tools_scenario.go.
 //
 // Every /api/security/audit call appends to the backend's in-memory grade
-// history, and compliance, drift and gate each run an audit, so the tool
-// leaves out /trend and names that side effect in its description (P-16).
+// history (on a current backend, compliance, drift and gate run the audit
+// without appending; an older one appended for them too), so the tool leaves
+// out /trend and names that side effect in its description (P-16).
 // /api/security/secrets, /acl-map and /auth-test are never exposed (plan
 // §4.4); the read-only transport refuses them (mcpNeverRead).
 func registerMCPSecurityTools(s *mcp.Server, deps *mcpDeps) {
@@ -41,10 +42,11 @@ const mcpSecurityEvidenceDescription = "Security posture of the pinned Kafka clu
 	"configuration and ACLs through the Kafka admin API: the pentest attacks nothing, the certificate check opens no " +
 	"certificate, and the checks read broker-wide settings, never per-listener ones. The CVE check compares a fixed " +
 	"list of seven CVEs, and the backend does not learn the Kafka version today, so entries come back NOT_COMPARED. " +
-	"Side effect: the backend keeps an in-memory history of audit grades, and every posture, compliance and drift " +
-	"read, each page included, runs a fresh audit that appends to it (summary up to three; auditRuns says how many), " +
-	"so page with problems_only true and limit 50, which usually holds a whole audit, and this tool leaves that " +
-	"history out. Detail, fix and error text is fenced; fix text is the backend's suggestion, for a human to weigh. " +
+	"Side effect: the backend keeps an in-memory history of audit grades, and every posture read, each page and " +
+	"summary included, runs a fresh audit that appends one entry to it; compliance and drift run the audit too, and " +
+	"a current backend does not append for them, an older one does (auditRuns counts every audit run). So page with " +
+	"problems_only true and limit 50, which usually holds a whole audit; this tool leaves that history out. Detail, " +
+	"fix and error text is fenced; fix text is the backend's suggestion, for a human to weigh. " +
 	"Never reads the secret scan, the ACL map or authorization probes, and cannot save a baseline."
 
 // Sections of security_evidence.
@@ -66,7 +68,7 @@ var mcpSecuritySections = []string{
 }
 
 // mcpComplianceFramework names a framework as the tool takes it and as the
-// backend keys it (SecurityService.java:786-788).
+// backend keys it (SecurityService.java:796-798).
 type mcpComplianceFrameworkName struct{ key, name string }
 
 var mcpComplianceFrameworks = []mcpComplianceFrameworkName{
@@ -128,7 +130,7 @@ func mcpSecurityEvidenceInputSchema() any {
 
 type mcpSecurityEvidenceOut struct {
 	Section    string                 `json:"section"`
-	AuditRuns  int                    `json:"auditRuns" jsonschema:"security audits this call made the backend run, each appending an entry to its in-memory grade history: one each for posture and compliance, one for drift when a baseline is saved, none for a read the API refused (4xx); a failed read that may have reached the audit is counted, and a backend retry after a timeout can add more"`
+	AuditRuns  int                    `json:"auditRuns" jsonschema:"security audits this call made the backend run: one each for posture and compliance, one for drift when a baseline is saved, none for a read the API refused (4xx); a failed read that may have reached the audit is counted, and a backend retry after a timeout runs more. On a current backend only the posture audit adds an entry to its in-memory grade history; an older backend adds one for every audit"`
 	Summary    *mcpSecuritySummary    `json:"summary,omitempty"`
 	Posture    *mcpSecurityPosture    `json:"posture,omitempty"`
 	Pentest    *mcpSecurityPentest    `json:"pentest,omitempty"`
@@ -328,8 +330,11 @@ func mcpSecurityEvidence(ctx context.Context, call *mcpCall, in mcpSecurityEvide
 }
 
 // mcpAuditRan records that a call made the backend run its audit, and the
-// caveat that says what that does. It is noted before any page is cut, so
-// that the caveat counts toward the size the page is fitted to.
+// caveat that says which audits the backend adds to its grade history. That
+// depends on the backend's version, which this server cannot tell, so the
+// caveat comes with every audit and its text names both. It is noted before
+// any page is cut, so that the caveat counts toward the size the page is
+// fitted to.
 func mcpAuditRan(call *mcpCall, out *mcpSecurityEvidenceOut, n int) {
 	out.AuditRuns += n
 	call.Caveat(mcpCaveatSecurityTrendInMemory)
@@ -705,7 +710,7 @@ const (
 // version. It reads kafkaVersion from a cluster description that never holds
 // one (ClusterHealthService.describeCluster), so it gets "unknown", and its
 // compareVersions, failing to parse that, calls every entry PATCHED
-// (SecurityService.java:1380,1438,1562-1576). A version counts as known when
+// (SecurityService.java:1390,1448,1572-1586). A version counts as known when
 // every dot-separated part holds a digit, as compareVersions needs.
 func mcpCVEVersionKnown(v string) bool {
 	if v == "" {
@@ -882,12 +887,13 @@ func mcpSecurityPromptText(framework mcpComplianceFrameworkName) string {
 		"listener's, labels its checks with CIS ids, and assigns SOC2 and PCI-DSS controls by check category.\n\n")
 	b.WriteString("1. Call cluster_overview. Note the cluster id and label: every finding is about that cluster only.\n")
 	b.WriteString("2. Call security_evidence with section summary, once. It makes the backend run its audit up to three " +
-		"times, and each run is recorded in the backend's grade history, so do not call it in a loop.\n")
+		"times, which is load on the brokers, so do not call it in a loop. A current backend adds only the posture " +
+		"audit to its in-memory grade history; an older one adds all three.\n")
 	b.WriteString("3. For each part of the summary that has problems or is not available, call security_evidence with " +
 		"that section (configDiff is section config_diff), problems_only true and limit 50. Each call, each page " +
-		"included, of posture, compliance or drift runs a fresh audit, which is recorded too and can differ from the " +
-		"last, so page with offset only when page.nextOffset is present, which limit 50 makes rare (the audit has 45 " +
-		"checks).\n")
+		"included, of posture, compliance or drift runs a fresh audit, which can differ from the last; a posture " +
+		"page adds an entry to the grade history, and on an older backend compliance and drift pages do too. So page " +
+		"with offset only when page.nextOffset is present, which limit 50 makes rare (the audit has 45 checks).\n")
 	step := 4
 	if framework.key != "" {
 		fmt.Fprintf(&b, "%d. Call security_evidence with section compliance and framework %s, with limit 50, for the "+
@@ -931,7 +937,7 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"result does not say so: each check then reports the value it assumes for a missing setting.",
 		Refs: []string{
 			mcpJava + "service/SecurityKafkaHelpers.java:31-60",
-			mcpJava + "service/SecurityService.java:69-78,1045-1051,1283-1287,1501-1509",
+			mcpJava + "service/SecurityService.java:88-97,1055-1061,1293-1297,1511-1519",
 			mcpJava + "service/SecurityPentestService.java:46-51",
 		},
 	},
@@ -944,8 +950,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"pass, and no certificate is opened: expiry, issuer and chain are never read, only whether a keystore and " +
 			"a truststore location are set.",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:1039-1148",
-			mcpJava + "service/SecurityService.java:1276-1370",
+			mcpJava + "service/SecurityService.java:1049-1158",
+			mcpJava + "service/SecurityService.java:1286-1380",
 		},
 	},
 	{
@@ -963,8 +969,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"protocol unless the map holds PLAINTEXT without SASL_PLAINTEXT; it passes whenever the map holds " +
 			"SASL_PLAINTEXT, which is authenticated but unencrypted, even beside a PLAINTEXT listener.",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:80-107,338-374,666-680",
-			mcpJava + "service/SecurityService.java:1039-1148,1276-1300",
+			mcpJava + "service/SecurityService.java:99-126,357-393,685-699",
+			mcpJava + "service/SecurityService.java:1049-1158,1286-1310",
 			mcpJava + "service/SecurityPentestService.java:127-137,155-166",
 			"charts/kafka-cluster/values.yaml:90-105",
 			"charts/kafka-cluster/README.md:370-379",
@@ -977,7 +983,7 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"has but the fresh audit lacks is not listed. Without a saved baseline there is no drift to report, and " +
 			"this server cannot save one: the baseline is a POST, which its transport refuses.",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:898-965,1000-1007",
+			mcpJava + "service/SecurityService.java:908-975,1010-1017",
 			mcpJava + "api/SecurityResource.java:126-140",
 			"cli/cmd/mcp_guard.go:1110-1145",
 		},
@@ -988,6 +994,6 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"CIS ids are the ones the checks carry, SOC2 and PCI-DSS controls are assigned by check category alone " +
 			"(auth, authz and transport for SOC2; transport, auth and limits for PCI-DSS), and the percentage is the " +
 			"share of mapped checks that pass.",
-		Refs: []string{mcpJava + "service/SecurityService.java:778-839,1020-1037"},
+		Refs: []string{mcpJava + "service/SecurityService.java:788-849,1030-1047"},
 	},
 }, mcpCaveatsScenario)
