@@ -88,6 +88,52 @@ class EntityMapperTest {
         assertEquals("task-3", entity.getResults().get(1).getTaskId());
     }
 
+    @Test
+    void theRequestedSpecIsStoredBesideTheMergedOne() {
+        TestSpec requested = new TestSpec();
+        requested.setTargetThroughput(2000);
+        requested.setEnableCrc(false);
+        TestRun run = buildFullRun().withRequestedSpec(requested.explicitFields());
+
+        TestRunEntity entity = EntityMapper.toEntity(run);
+        TestRun restored = EntityMapper.toDomain(entity);
+
+        assertEquals("{\"targetThroughput\":2000,\"enableCrc\":false}", entity.getRequestedSpecJson());
+        assertEquals(Map.of("targetThroughput", 2000, "enableCrc", false), restored.getRequestedSpec());
+        assertEquals(
+                restored.getRequestedSpec(),
+                EntityMapper.toDomainSummary(entity).getRequestedSpec());
+        assertEquals("my-topic", restored.getSpec().getTopic(), "the merged spec is kept as before");
+    }
+
+    @Test
+    void aRowFromBeforeTheColumnHasNoRequestedSpec() {
+        TestRunEntity entity = EntityMapper.toEntity(buildFullRun());
+        assertNull(entity.getRequestedSpecJson());
+
+        assertNull(EntityMapper.toDomain(entity).getRequestedSpec());
+        assertNull(EntityMapper.toDomainSummary(entity).getRequestedSpec());
+    }
+
+    @Test
+    void anEmptyRequestIsStoredAsEmptyNotAsMissing() {
+        TestRunEntity entity = EntityMapper.toEntity(buildFullRun().withRequestedSpec(Map.of()));
+
+        assertEquals("{}", entity.getRequestedSpecJson());
+        assertEquals(Map.of(), EntityMapper.toDomain(entity).getRequestedSpec());
+    }
+
+    @Test
+    void updateEntityKeepsTheStoredRequest() {
+        TestRunEntity entity =
+                EntityMapper.toEntity(buildFullRun().withRequestedSpec(Map.of("consumerGroup", "perf-cg")));
+
+        EntityMapper.updateEntity(entity, buildFullRun().withStatus(TestResult.TaskStatus.DONE));
+
+        assertEquals("{\"consumerGroup\":\"perf-cg\"}", entity.getRequestedSpecJson());
+        assertEquals(TestResult.TaskStatus.DONE, entity.getStatus());
+    }
+
     private TestRun buildFullRun() {
         TestSpec spec = new TestSpec();
         spec.setTopic("my-topic");

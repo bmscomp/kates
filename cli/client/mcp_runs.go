@@ -18,18 +18,21 @@ import (
 // MCPRun is a test run as GET /api/tests/{id} and the /api/tests list return
 // it (domain/TestRun.java). Spec is kept raw: it is the request merged with
 // the test type's defaults, and a tool compares whole specs, so no field may
-// be dropped by a struct that does not name it. The list returns runs
-// without results (EntityMapper.toDomainSummary).
+// be dropped by a struct that does not name it. RequestedSpec, raw for the
+// same reason, is the request's own spec fields; a backend that predates it,
+// or a run stored before it, sends none. The list returns runs without
+// results (EntityMapper.toDomainSummary).
 type MCPRun struct {
-	ID           string            `json:"id"`
-	TestType     string            `json:"testType"`
-	Status       string            `json:"status"`
-	Backend      string            `json:"backend"`
-	ScenarioName string            `json:"scenarioName"`
-	CreatedAt    string            `json:"createdAt"`
-	Labels       map[string]string `json:"labels,omitempty"`
-	Spec         json.RawMessage   `json:"spec,omitempty"`
-	Results      []MCPRunTask      `json:"results,omitempty"`
+	ID            string            `json:"id"`
+	TestType      string            `json:"testType"`
+	Status        string            `json:"status"`
+	Backend       string            `json:"backend"`
+	ScenarioName  string            `json:"scenarioName"`
+	CreatedAt     string            `json:"createdAt"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	Spec          json.RawMessage   `json:"spec,omitempty"`
+	RequestedSpec json.RawMessage   `json:"requestedSpec,omitempty"`
+	Results       []MCPRunTask      `json:"results,omitempty"`
 }
 
 // MCPRunTask is one task of a run (domain/TestResult.java), as stored: the

@@ -60,6 +60,10 @@ public class TestRunEntity {
     @Column(name = "spec_json", columnDefinition = "TEXT")
     private String specJson;
 
+    /** The request's own fields, beside the merged spec_json; null on rows older than V23. */
+    @Column(name = "requested_spec_json", columnDefinition = "TEXT")
+    private String requestedSpecJson;
+
     @Column(name = "sla_json", columnDefinition = "TEXT")
     private String slaJson;
 
@@ -136,6 +140,14 @@ public class TestRunEntity {
 
     public void setSpecJson(String specJson) {
         this.specJson = specJson;
+    }
+
+    public String getRequestedSpecJson() {
+        return requestedSpecJson;
+    }
+
+    public void setRequestedSpecJson(String requestedSpecJson) {
+        this.requestedSpecJson = requestedSpecJson;
     }
 
     public String getSlaJson() {

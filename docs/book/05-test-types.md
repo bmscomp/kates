@@ -59,6 +59,7 @@ graph LR
 | `recordSizeBytes` | 1024 | Message payload size |
 | `parallelProducers` | 1 | Ignored: LOAD runs one producer |
 | `numConsumers` | 1 | Ignored: LOAD runs one consumer |
+| `targetThroughput` | -1 (unlimited) | Producer rate in records/s |
 | `acks` | `all` | Producer acknowledgment mode |
 | `topic` | `load-test` | Target topic name (unless overridden) |
 | `partitions` | 3 | Topic partition count |
@@ -242,7 +243,7 @@ graph LR
 |-----------|---------|-------------|
 | `durationSeconds` | 3600 (1h) | Upper bound on the run; a longer soak also needs more `records` and a raised backend run limit (see the callout below) |
 | `parallelProducers` | 1 | Ignored: ENDURANCE runs one producer and one consumer |
-| `targetThroughput` | 5,000 msg/s | Rate limit that keeps the load sustainable. The 5,000 is the ENDURANCE default, which this key cannot change (see the callout under Scenario Files) |
+| `targetThroughput` | 5,000 msg/s | Rate limit that keeps the load sustainable; the 5,000 is the ENDURANCE default, and this key replaces it |
 | `records` | 10,000,000 | Enough for the full duration |
 
 ::: {.callout-important}
@@ -370,7 +371,7 @@ sequenceDiagram
 | `parallelProducers` | 1 | Ignored: ROUND_TRIP runs one producer |
 | `numConsumers` | 1 | Ignored: ROUND_TRIP runs one consumer |
 | `records` | 500,000 | Records to measure |
-| `targetThroughput` | 10,000 msg/s | Rate-limited to keep latency measurements clean. The 10,000 is the ROUND_TRIP default, which this key cannot change (see the callout under Scenario Files) |
+| `targetThroughput` | 10,000 msg/s | Rate-limited to keep latency measurements clean; the 10,000 is the ROUND_TRIP default, and this key replaces it |
 
 **Scenario file equivalent:**
 
@@ -439,14 +440,14 @@ graph TB
 |-----------|---------|-------------|
 | `records` | 1,000,000 | Messages to verify |
 | `acks` | `all` | Default for integrity guarantees; a request can override it, and `1` or `0` also turn producer idempotence off |
-| `enableIdempotence` | `false` | Accepted but dropped (see the callout below); the Kafka producer is idempotent by default with `acks=all` |
-| `enableTransactions` | `false` | Accepted but dropped, so no run is transactional |
-| `enableCrc` | `true` | Per-record CRC payload verification, always on |
+| `enableIdempotence` | not set | Sets the producer's `enable.idempotence`; left out, the Kafka producer is idempotent by default with `acks=all` (see the callout below) |
+| `enableTransactions` | `false` | Transactional producer, committing every 100 records or every 10 seconds, whichever comes first; the verifying consumer then reads with `read_committed` |
+| `enableCrc` | `true` | Per-record CRC payload verification; `false` turns it off |
 | `numConsumers` | 1 | Ignored: INTEGRITY runs one producer and one consumer |
-| `consumerGroup` | `integrity-cg` | Base of the consumer group name: the verifying consumer joins `integrity-cg-integrity`, and a request cannot override it |
+| `consumerGroup` | `integrity-cg` | Base of the consumer group name: the verifying consumer joins it with `-integrity` appended, `integrity-cg-integrity` by default |
 
 ::: {.callout-important}
-`enableIdempotence`, `enableTransactions` and `enableCrc` do not reach the producer: the backend drops them when it merges a request with the INTEGRITY defaults. Every INTEGRITY run is CRC-checked, never transactional, and idempotent whenever `acks` is `all`, whatever these fields say. The merge drops `consumerGroup` too, so overriding it has no effect. [Data Integrity Verification](08-data-integrity.md) covers what that means for each integrity mode.
+`enableIdempotence` and `enableTransactions` need `acks` to be `all`, which the Kafka producer requires for both, and a transactional producer is always idempotent: the backend refuses a request that asks for either with other `acks`, or for transactions with `enableIdempotence: false`, with a `400` that names the field. A request that leaves `enableIdempotence` out gets the client's choice, idempotent whenever `acks` is `all`. [Data Integrity Verification](08-data-integrity.md) covers what each integrity mode checks.
 :::
 
 **Scenario file equivalent:**
@@ -492,7 +493,7 @@ steadyStateSec: 30
 kates resilience run -f resilience-integrity.yaml
 ```
 
-This produces sequenced records at 500 per second, deletes one broker's pod 30 s in and again every 10 s until 60 s, keeps producing through the broker's restart and return to the ISR, then consumes everything back and verifies that **every acknowledged record** was persisted. The rate limit is what makes the result mean something: an unthrottled run can finish before the fault is triggered, and its verdict then says nothing about the failure. A resilience file's `spec` uses the API's field names, so the rate is `throughput`, not the scenario file's `targetThroughput`. [Data Integrity Verification](08-data-integrity.md) walks through the sizing and how to read the verdict, which the INTEGRITY run reports rather than `kates resilience run`. For a standalone integrity scenario, export the built-in template instead: `kates test scaffold export integrity-tx`.
+This produces sequenced records at 500 per second, deletes one broker's pod 30 s in and again every 10 s until 60 s, keeps producing through the broker's restart and return to the ISR, then consumes everything back and verifies that **every acknowledged record** was persisted. The rate limit is what makes the result mean something: an unthrottled run can finish before the fault is triggered, and its verdict then says nothing about the failure. A resilience file's `spec` uses the API's field names, so the rate is `throughput`; the API also takes it as `targetThroughput`, the scenario file's name. [Data Integrity Verification](08-data-integrity.md) walks through the sizing and how to read the verdict, which the INTEGRITY run reports rather than `kates resilience run`. For a standalone integrity scenario, export the built-in template instead: `kates test scaffold export integrity-tx`.
 
 ## Scenario Files
 
@@ -524,11 +525,13 @@ CLI flags and scenario-file spec keys use different names for the same setting. 
 | `--duration` | `durationSeconds` | Test duration in seconds |
 | `--acks` | `acks` | Producer acknowledgment mode |
 | `--topic` | `topic` | Topic name |
-| `--throughput` | `targetThroughput` | Does not limit the rate: the backend drops it (see the callout below) |
-| — | `enableIdempotence`, `enableTransactions`, `enableCrc` | Integrity options (scenario files only), which the backend drops (see the callout below) |
+| `--throughput` | `targetThroughput` | Producer rate in records/s, for each producer (see the callout below) |
+| `--consumer-group` | `consumerGroup` | Consumer group, for LOAD, ENDURANCE and INTEGRITY; a group of the test's own, since a LOAD or ENDURANCE consumer commits offsets in it |
+| `--fetch-min-bytes`, `--fetch-max-wait-ms` | `fetchMinBytes`, `fetchMaxWaitMs` | Consumer fetch settings, for LOAD, ENDURANCE and INTEGRITY |
+| — | `enableIdempotence`, `enableTransactions`, `enableCrc` | Integrity options, `true` or `false` (scenario files only; see the callout under INTEGRITY Test) |
 
 ::: {.callout-important}
-`--throughput` and `targetThroughput` do not limit the rate: both send the API field `targetThroughput`, which the backend drops when it merges the request with the type defaults. The producer's rate comes from the API field `throughput`, which neither sets; a `kates resilience run` file can set it, because its `spec` goes to the API as written. The integrity options are dropped by the same merge — see the callout under INTEGRITY Test.
+`--throughput` and `targetThroughput` both send the API field `targetThroughput`, which sets the producer's rate in place of the type's default. The API also takes the same rate as `throughput`, the name a `kates resilience run` file uses; when a request sets both, `throughput` wins. SPIKE and CAPACITY run their producers unthrottled, so the backend refuses a rate other than -1 for them, and it refuses a consumer setting for a type that starts no consumer: the answer is a `400` naming the field, where these settings used to be accepted and ignored.
 :::
 
 ::: {.callout-tip}

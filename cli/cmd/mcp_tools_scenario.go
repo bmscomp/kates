@@ -21,7 +21,7 @@ import (
 // §4.2). The tool is local compute: it parses a scenario file the way
 // kates test apply does (apply.go:74-91), a JSON one both as a .json and as a
 // YAML file, converts each scenario with
-// scenarioToRequest (apply.go:194), and checks the result against the agent
+// scenarioToRequest (apply.go:205), and checks the result against the agent
 // envelope of plan §5.4-§5.5. It saves nothing and sends the scenario
 // nowhere; like every tool it runs behind the guard, whose pin check is the
 // only request it causes.
@@ -33,8 +33,7 @@ func registerMCPScenarioTools(s *mcp.Server, deps *mcpDeps) {
 		Description: mcpDraftScenarioDescription,
 		InputSchema: mcpDraftScenarioInputSchema(),
 	}, mcpDraftScenario,
-		mcpCaveatAgentEnvelopeProposed, mcpCaveatScenarioShippedDefaults,
-		mcpCaveatScenarioThroughputUnsettable, mcpCaveatScenarioValidateGrading)
+		mcpCaveatAgentEnvelopeProposed, mcpCaveatScenarioShippedDefaults, mcpCaveatScenarioValidateGrading)
 
 	for _, meta := range builtinScenarios {
 		data, err := scenarioFS.ReadFile("scenarios/" + meta.filename)
@@ -62,10 +61,11 @@ const mcpDraftScenarioDescription = "Checks a load-test scenario before anyone r
 	"one scenario per file (one test at a time), an allowed test type, a set producer rate under a cap, a byte " +
 	"budget, at most 20 minutes, at most 50 partitions, a topic named kates-mcp-.... Returns the YAML, the request " +
 	"each scenario would send, its effective spec, a verdict, and findings, worst first: invalid (the CLI or backend " +
-	"would refuse it, it would run other than checked, or the run would fail at once), outside_envelope, and " +
-	"warning (it runs, but not as written: fields the backend drops, keys nothing reads, thresholds that are never " +
-	"graded). Warnings, then the echo of an unchanged yaml argument, are left out when the result would not fit. " +
-	"A scenario file has no key for the producer rate, so most types run unlimited. Saves nothing, starts nothing " +
+	"would refuse it, as the backend refuses a field the test type or backend cannot apply; it would run other than " +
+	"checked; or the run would fail at once), outside_envelope, and warning (it runs, but not as written: keys " +
+	"nothing reads, counts no run uses, thresholds that are never graded). Warnings, then the echo of an unchanged " +
+	"yaml argument, are left out when the result would not fit. A scenario sets the producer rate with " +
+	"targetThroughput; without it most types run unlimited. Saves nothing, starts nothing " +
 	"and sends the scenario nowhere; nothing enforces the envelope today, so the YAML is a draft for a human to " +
 	"review before running it."
 
@@ -104,23 +104,25 @@ var mcpScnTestTypes = []string{
 }
 
 // mcpScnTypeDefaults are the defaults applyTypeDefaults fills in for the fields
-// the envelope reads. They are the ones Kates ships: the @ConfigProperty
+// the envelope reads, and the acks the producer options are checked against.
+// They are the ones Kates ships: the @ConfigProperty
 // fallbacks of TestTypeDefaults.java, the kates.tests.* lines of
 // application.properties and the tests section of the kates chart, which
 // agree (TestMCPScenarioShippedDefaultsMatchTheBackend checks all three).
 type mcpScnTypeDefaults struct {
 	partitions, recordSize, numProducers, throughput int
 	numRecords, durationMs                           int64
+	acks                                             string
 }
 
 var mcpScnShippedDefaults = map[string]mcpScnTypeDefaults{
-	"LOAD":       {partitions: 3, recordSize: 1024, numProducers: 1, throughput: -1, numRecords: 1_000_000, durationMs: 600_000},
-	"STRESS":     {partitions: 6, recordSize: 1024, numProducers: 3, throughput: -1, numRecords: 5_000_000, durationMs: 900_000},
-	"SPIKE":      {partitions: 3, recordSize: 1024, numProducers: 1, throughput: -1, numRecords: 2_000_000, durationMs: 300_000},
-	"ENDURANCE":  {partitions: 3, recordSize: 1024, numProducers: 1, throughput: 5000, numRecords: 10_000_000, durationMs: 3_600_000},
-	"VOLUME":     {partitions: 6, recordSize: 10240, numProducers: 1, throughput: -1, numRecords: 2_000_000, durationMs: 600_000},
-	"CAPACITY":   {partitions: 12, recordSize: 1024, numProducers: 5, throughput: -1, numRecords: 10_000_000, durationMs: 1_200_000},
-	"ROUND_TRIP": {partitions: 3, recordSize: 1024, numProducers: 1, throughput: 10000, numRecords: 500_000, durationMs: 600_000},
+	"LOAD":       {partitions: 3, recordSize: 1024, numProducers: 1, throughput: -1, numRecords: 1_000_000, durationMs: 600_000, acks: "all"},
+	"STRESS":     {partitions: 6, recordSize: 1024, numProducers: 3, throughput: -1, numRecords: 5_000_000, durationMs: 900_000, acks: "all"},
+	"SPIKE":      {partitions: 3, recordSize: 1024, numProducers: 1, throughput: -1, numRecords: 2_000_000, durationMs: 300_000, acks: "1"},
+	"ENDURANCE":  {partitions: 3, recordSize: 1024, numProducers: 1, throughput: 5000, numRecords: 10_000_000, durationMs: 3_600_000, acks: "all"},
+	"VOLUME":     {partitions: 6, recordSize: 10240, numProducers: 1, throughput: -1, numRecords: 2_000_000, durationMs: 600_000, acks: "all"},
+	"CAPACITY":   {partitions: 12, recordSize: 1024, numProducers: 5, throughput: -1, numRecords: 10_000_000, durationMs: 1_200_000, acks: "all"},
+	"ROUND_TRIP": {partitions: 3, recordSize: 1024, numProducers: 1, throughput: 10000, numRecords: 500_000, durationMs: 600_000, acks: "all"},
 }
 
 // mcpScnTypeDefaultsFor returns a type's shipped defaults. INTEGRITY, TUNE_* and
@@ -768,6 +770,7 @@ func mcpScnCheckScenario(call *mcpCall, i int, sc TestScenario, raw map[string]a
 		mcpScnCheckValidate(i, req, raw, fs)
 		return out
 	}
+	mcpScnCheckApplies(i, req, fs)
 	out.Effective = mcpScnEffectiveOf(req)
 	mcpScnCheckEnvelope(call, i, out.Effective, fs)
 	mcpScnCheckValidate(i, req, raw, fs)
@@ -816,16 +819,16 @@ func mcpScnCheckTypeAndBackend(i int, req *client.CreateTestRequest, fs *mcpScnF
 	return known
 }
 
-// mcpScnSpecKey describes one spec key scenarioToRequest reads (apply.go:199-263)
+// mcpScnSpecKey describes one spec key scenarioToRequest reads (apply.go:210-274)
 // and the range the backend accepts for the field it becomes
-// (domain/TestSpec.java:16-85).
+// (domain/TestSpec.java:34-113).
 type mcpScnSpecKey struct {
 	wire     string
 	kind     byte // 'i' number, 's' text, 'b' true/false
 	scale    int64
 	min, max int64
 	pattern  *regexp.Regexp
-	dropped  string // why applyTypeDefaults drops it, when it does
+	notBlank bool // the backend refuses a value with nothing but whitespace
 }
 
 var (
@@ -833,12 +836,7 @@ var (
 	mcpScnAcksRE        = regexp.MustCompile(`^(all|-1|0|1)$`)
 	mcpScnCompressionRE = regexp.MustCompile(`^(none|gzip|snappy|lz4|zstd)$`)
 	mcpScnGroupRE       = regexp.MustCompile(`^(?s).{0,255}$`)
-)
-
-const (
-	mcpScnDroppedFlags = "the backend drops it when it merges the spec, so every run uses enableIdempotence false, " +
-		"enableTransactions false and enableCrc true whatever the scenario says"
-	mcpScnDroppedFetch = "the backend drops it when it merges the spec, so the consumers use their defaults"
+	mcpScnNotBlankRE    = regexp.MustCompile(`\S`)
 )
 
 var mcpScnSpecKeys = map[string]mcpScnSpecKey{
@@ -855,19 +853,19 @@ var mcpScnSpecKeys = map[string]mcpScnSpecKey{
 	"replicationFactor":  {wire: "replicationFactor", kind: 'i', min: 1, max: 10},
 	"partitions":         {wire: "partitions", kind: 'i', min: 1, max: 10_000},
 	"minInsyncReplicas":  {wire: "minInsyncReplicas", kind: 'i', min: 1, max: 10},
-	"consumerGroup":      {wire: "consumerGroup", kind: 's', pattern: mcpScnGroupRE, dropped: "the backend drops it when it merges the spec: an INTEGRITY run uses the group integrity-cg, and other runs name their own groups"},
-	"targetThroughput":   {wire: "targetThroughput", kind: 'i', min: -1, max: math.MaxInt32, dropped: "the backend drops it when it merges the spec, so it never sets the rate"},
-	"fetchMinBytes":      {wire: "fetchMinBytes", kind: 'i', min: 1, max: math.MaxInt32, dropped: mcpScnDroppedFetch},
-	"fetchMaxWaitMs":     {wire: "fetchMaxWaitMs", kind: 'i', min: 0, max: 300_000, dropped: mcpScnDroppedFetch},
-	"enableIdempotence":  {wire: "enableIdempotence", kind: 'b', dropped: mcpScnDroppedFlags},
-	"enableTransactions": {wire: "enableTransactions", kind: 'b', dropped: mcpScnDroppedFlags},
-	"enableCrc":          {wire: "enableCrc", kind: 'b', dropped: mcpScnDroppedFlags},
+	"consumerGroup":      {wire: "consumerGroup", kind: 's', pattern: mcpScnGroupRE, notBlank: true},
+	"targetThroughput":   {wire: "targetThroughput", kind: 'i', min: -1, max: math.MaxInt32},
+	"fetchMinBytes":      {wire: "fetchMinBytes", kind: 'i', min: 1, max: math.MaxInt32},
+	"fetchMaxWaitMs":     {wire: "fetchMaxWaitMs", kind: 'i', min: 0, max: 300_000},
+	"enableIdempotence":  {wire: "enableIdempotence", kind: 'b'},
+	"enableTransactions": {wire: "enableTransactions", kind: 'b'},
+	"enableCrc":          {wire: "enableCrc", kind: 'b'},
 }
 
 // mcpScnSpecKeyHints names the scenario key for the backend names an agent may
 // reach for, which scenarioToRequest does not read.
 var mcpScnSpecKeyHints = map[string]string{
-	"throughput":   "no scenario key sets the producer rate",
+	"throughput":   "the scenario key for the producer rate is targetThroughput",
 	"numRecords":   "the scenario key is records",
 	"numProducers": "the scenario key is parallelProducers",
 	"recordSize":   "the scenario key is recordSizeBytes",
@@ -886,10 +884,6 @@ func mcpScnCheckSpecKey(i int, key string, v any, testType string, fs *mcpScnFin
 		fs.add(i, mcpScnWarning, field, msg)
 		return
 	}
-	if k.dropped != "" {
-		fs.add(i, mcpScnWarning, field, k.dropped)
-		fs.caveats = append(fs.caveats, mcpCaveatMergedSpecOnly)
-	}
 	switch k.kind {
 	case 'i':
 		mcpScnCheckSpecNumber(i, field, k, v, fs)
@@ -899,18 +893,12 @@ func mcpScnCheckSpecKey(i int, key string, v any, testType string, fs *mcpScnFin
 		switch {
 		case sent == "":
 			fs.add(i, mcpScnWarning, field, "it is empty, so it is left out of the request and the type default applies")
-		case !k.pattern.MatchString(sent):
+		case !k.pattern.MatchString(sent), k.notBlank && !mcpScnNotBlankRE.MatchString(sent):
 			fs.add(i, mcpScnInvalid, field, "it is sent as "+mcpScnShow(sent)+", which the backend refuses for "+k.wire)
 		}
 	case 'b':
-		switch x := v.(type) {
-		case bool:
-		case string:
-			if x != "true" && x != "false" {
-				fs.add(i, mcpScnWarning, field, "it is "+mcpScnShow(v)+", which scenarioToRequest reads as false")
-			}
-		default:
-			fs.add(i, mcpScnWarning, field, "it is "+mcpScnShow(v)+", which scenarioToRequest reads as false")
+		if toBoolPtr(v) == nil {
+			fs.add(i, mcpScnInvalid, field, "it is "+mcpScnShow(v)+"; kates test apply refuses it: write true or false")
 		}
 	}
 }
@@ -962,6 +950,90 @@ func mcpScnCheckSpecEffect(i int, key string, v any, testType string, fs *mcpScn
 	}
 }
 
+// mcpScnCheckApplies flags the spec fields the backend refuses, with a 400
+// naming each, because a run of the scenario's type or backend could not
+// honour them (TestOrchestrator.inapplicableFields); it reads the request as
+// scenarioToRequest builds it, which is what the backend receives. A value
+// that asks for nothing passes, as it does there. The two copies of the rules
+// run the same cases (kates/src/test/resources/spec-applicability.json), so a
+// change to one that the other lacks fails a test.
+func mcpScnCheckApplies(i int, req *client.CreateTestRequest, fs *mcpScnFindings) {
+	if req.Spec == nil {
+		return
+	}
+	s, t := req.Spec, req.TestType
+	refuse := func(key, why string) {
+		fs.add(i, mcpScnInvalid, "spec."+key, "the backend refuses it: "+why)
+	}
+	producer := t != "INTEGRATION_CDC"
+	consumer := t == "LOAD" || t == "ENDURANCE" || t == "INTEGRITY"
+	rateWhy := ""
+	switch {
+	case !producer:
+		rateWhy = "INTEGRATION_CDC runs no Kates producer, so no rate applies; only -1 (unlimited) does"
+	case t == "SPIKE" || t == "CAPACITY":
+		rateWhy = t + " runs its producers unthrottled whatever the rate says; only -1 (unlimited) applies"
+	}
+	// 0 is no value here: the request's omitempty fields leave it out.
+	if rateWhy != "" && s.Throughput != 0 && s.Throughput != -1 {
+		refuse("throughput", rateWhy)
+	}
+	if rateWhy != "" && s.TargetThroughput != 0 && s.TargetThroughput != -1 {
+		refuse("targetThroughput", rateWhy)
+	}
+	if !consumer {
+		why := t + " starts no consumer; only LOAD, ENDURANCE and INTEGRITY do"
+		if s.ConsumerGroup != "" {
+			refuse("consumerGroup", why)
+		}
+		if s.FetchMinBytes != 0 {
+			refuse("fetchMinBytes", why)
+		}
+		if s.FetchMaxWaitMs != 0 {
+			refuse("fetchMaxWaitMs", why)
+		}
+	}
+	if s.EnableCrc != nil && *s.EnableCrc && t != "INTEGRITY" {
+		refuse("enableCrc", "only an INTEGRITY run checks record CRCs; a "+t+" run checks none")
+	}
+	mcpScnCheckProducerOptions(req, refuse)
+}
+
+// mcpScnCheckProducerOptions is the part of mcpScnCheckApplies for
+// enableIdempotence and enableTransactions.
+func mcpScnCheckProducerOptions(req *client.CreateTestRequest, refuse func(key, why string)) {
+	s, t := req.Spec, req.TestType
+	if t == "INTEGRATION_CDC" {
+		if s.EnableIdempotence != nil && *s.EnableIdempotence {
+			refuse("enableIdempotence", "INTEGRATION_CDC runs no Kates producer to configure")
+		}
+		if s.EnableTransactions != nil && *s.EnableTransactions {
+			refuse("enableTransactions", "INTEGRATION_CDC runs no Kates producer to configure")
+		}
+		return
+	}
+	// The Kafka client refuses both options with any acks but all; the acks
+	// may be the type's default rather than the scenario's (SPIKE's is 1).
+	acks, source := s.Acks, ""
+	if acks == "" {
+		acks, source = mcpScnTypeDefaultsFor(t).acks, " (the type's default as Kates ships it); set acks: all"
+	}
+	acksAll := acks == "all" || acks == "-1"
+	if s.EnableIdempotence != nil && *s.EnableIdempotence && !acksAll {
+		refuse("enableIdempotence", "an idempotent producer needs acks=all, and this run's acks is "+acks+source)
+	}
+	if s.EnableTransactions != nil && *s.EnableTransactions {
+		switch {
+		case !acksAll:
+			refuse("enableTransactions", "a transactional producer needs acks=all, and this run's acks is "+acks+source)
+		case s.EnableIdempotence != nil && !*s.EnableIdempotence:
+			refuse("enableTransactions", "a transactional producer is always idempotent, and the scenario sets enableIdempotence to false")
+		case req.Backend == "trogdor":
+			refuse("enableTransactions", "the trogdor backend cannot run a transactional producer")
+		}
+	}
+}
+
 // mcpScnEffectiveOf merges the request with the shipped defaults of its type,
 // for the fields the envelope reads, as applyTypeDefaults would.
 func mcpScnEffectiveOf(req *client.CreateTestRequest) *mcpDraftEffective {
@@ -983,8 +1055,9 @@ func mcpScnEffectiveOf(req *client.CreateTestRequest) *mcpDraftEffective {
 	e.NumProducers = int(pick("numProducers", int64(spec.ParallelProducers), int64(d.numProducers)))
 	e.DurationMs = pick("durationMs", int64(spec.DurationMs), d.durationMs)
 	e.Partitions = int(pick("partitions", int64(spec.Partitions), int64(d.partitions)))
-	e.Throughput = d.throughput
-	e.Defaulted = append(e.Defaulted, "throughput")
+	// A scenario has no key for throughput; targetThroughput, its other
+	// name, sets the rate in its place.
+	e.Throughput = int(pick("throughput", int64(spec.TargetThroughput), int64(d.throughput)))
 	e.Topic = spec.Topic
 	if e.Topic == "" {
 		e.Topic = strings.ToLower(req.TestType) + "-test"
@@ -1018,8 +1091,8 @@ func mcpScnCheckEnvelope(call *mcpCall, i int, e *mcpDraftEffective, fs *mcpScnF
 	}
 	switch {
 	case e.Throughput <= 0 && allowed:
-		fs.add(i, mcpScnOutside, "spec", "the rate is unlimited: a "+t+" run uses its type's default throughput, -1 "+
-			"(unlimited) as Kates ships, and a scenario file has no key that sets throughput")
+		fs.add(i, mcpScnOutside, "spec.targetThroughput", "the rate is unlimited: set targetThroughput to a rate "+
+			"above 0; without it a "+t+" run uses its type's default throughput, -1 (unlimited) as Kates ships")
 	case e.RecordsPerSec > mcpScnEnvMaxRecordsPerSec:
 		fs.add(i, mcpScnOutside, "spec", fmt.Sprintf("numProducers × throughput is %.0f records/s; the envelope allows %d",
 			e.RecordsPerSec, mcpScnEnvMaxRecordsPerSec))
@@ -1128,10 +1201,9 @@ func mcpScnCheckValidate(i int, req *client.CreateTestRequest, raw map[string]an
 
 // Caveats only draft_scenario uses, part of mcpCaveatsSecurity.
 const (
-	mcpCaveatAgentEnvelopeProposed        mcpCaveatID = "agent-envelope-proposed"
-	mcpCaveatScenarioShippedDefaults      mcpCaveatID = "scenario-shipped-defaults"
-	mcpCaveatScenarioThroughputUnsettable mcpCaveatID = "scenario-throughput-unsettable"
-	mcpCaveatScenarioValidateGrading      mcpCaveatID = "scenario-validate-grading"
+	mcpCaveatAgentEnvelopeProposed   mcpCaveatID = "agent-envelope-proposed"
+	mcpCaveatScenarioShippedDefaults mcpCaveatID = "scenario-shipped-defaults"
+	mcpCaveatScenarioValidateGrading mcpCaveatID = "scenario-validate-grading"
 )
 
 var mcpCaveatsScenario = []mcpCaveat{
@@ -1139,13 +1211,15 @@ var mcpCaveatsScenario = []mcpCaveat{
 		ID: mcpCaveatAgentEnvelopeProposed,
 		Text: "The agent envelope draft_scenario checks is the one the Kates MCP plan proposes for runs an agent " +
 			"starts (§5.4-§5.5), with a rate cap of 20,000 records/s chosen by this server because the plan names " +
-			"none. Nothing enforces it today: POST /api/tests checks only the type and the ranges and formats of " +
-			"fields, and kates test apply sends a scenario with whatever key it holds.",
+			"none. Nothing enforces it today: POST /api/tests checks the type, the ranges and formats of fields, and " +
+			"whether the type and backend can apply each field set, but no limit on rate, volume, duration or topic, " +
+			"and kates test apply sends a scenario with whatever key it holds.",
 		Refs: []string{
 			"plans/mcp-server.md:387-405",
-			mcpJava + "api/TestResource.java:69-95",
-			mcpJava + "domain/TestSpec.java:16-85",
-			"cli/cmd/apply.go:98-130",
+			mcpJava + "api/TestResource.java:69-104",
+			mcpJava + "domain/TestSpec.java:34-113",
+			mcpJava + "engine/TestOrchestrator.java:973-1035",
+			"cli/cmd/apply.go:109-141",
 		},
 	},
 	{
@@ -1157,23 +1231,10 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"listed as defaulted may differ on the cluster that runs the scenario.",
 		Refs: []string{
 			mcpJava + "config/TestTypeDefaults.java:22-64,323-464",
-			mcpJava + "engine/TestOrchestrator.java:845-880",
+			mcpJava + "engine/TestOrchestrator.java:871-916",
 			"kates/src/main/resources/application.properties:37-78",
 			"charts/kates/values.yaml:551-618",
 			"charts/kates/templates/configmap.yaml:75-170",
-		},
-	},
-	{
-		ID: mcpCaveatScenarioThroughputUnsettable,
-		Text: "A scenario file cannot set the producer rate: scenarioToRequest has no key for throughput and sends " +
-			"targetThroughput, which the backend drops when it merges the spec. A run from a scenario file therefore " +
-			"uses its type's default throughput, which Kates ships as unlimited (-1) for every type but ENDURANCE " +
-			"(5,000 records/s) and ROUND_TRIP (10,000 records/s).",
-		Refs: []string{
-			"cli/cmd/apply.go:194-267",
-			mcpJava + "engine/TestOrchestrator.java:845-880,1118-1130",
-			mcpJava + "config/TestTypeDefaults.java:50-51,179-180,308-309",
-			"kates/src/main/resources/application.properties:55,78",
 		},
 	},
 	{
@@ -1184,10 +1245,10 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"produce, and RPO is measured only when a resilience run marks a fault, so a scenario run never has one. " +
 			"Keys ValidationSpec does not name, such as maxDuplicatePercent, are dropped when the file is read.",
 		Refs: []string{
-			"cli/cmd/apply.go:27-37,120-126,142-156,294-358",
-			mcpJava + "engine/NativeKafkaBackend.java:142-147,287-306",
-			mcpJava + "engine/TrogdorBackend.java:100-101",
-			mcpJava + "resilience/ResilienceOrchestrator.java:109",
+			"cli/cmd/apply.go:27-37,131-137,153-167,338-402",
+			mcpJava + "engine/NativeKafkaBackend.java:154-159,299-318",
+			mcpJava + "engine/TrogdorBackend.java:114-115",
+			mcpJava + "resilience/ResilienceOrchestrator.java:110",
 		},
 	},
 }

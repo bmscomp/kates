@@ -137,13 +137,20 @@ public class TestOrchestrator {
             return executeScenario(request);
         }
 
-        if (!concurrencyGuard.tryAcquire()) {
-            return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
-        }
-
         TestType type = request.getType();
         TestSpec spec = applyTypeDefaults(type, request.getSpec());
         String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
+
+        // Before the permit: a request that cannot run as written is the
+        // caller's to fix, and must not cost a slot another run could use.
+        java.util.Optional<InvalidTestSpecException> refused = refusal(request);
+        if (refused.isPresent()) {
+            return com.bmscomp.kates.util.Result.failure(refused.get());
+        }
+
+        if (!concurrencyGuard.tryAcquire()) {
+            return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
+        }
 
         com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
         if (backendResult.isFailure()) {
@@ -153,7 +160,8 @@ public class TestOrchestrator {
         }
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
-        TestRun run = new TestRun(type, spec).withBackend(backendName);
+        TestRun run =
+                new TestRun(type, spec).withBackend(backendName).withRequestedSpec(explicitFieldsOf(request.getSpec()));
         // Register BEFORE the first thing that can throw. A transient failure in
         // save/fireEvent used to strand the permit forever (the semaphore drained
         // one permit per failure until restart), because nothing had recorded
@@ -284,9 +292,13 @@ public class TestOrchestrator {
     com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request) {
         TestScenario scenario = request.getScenario();
         TestType type = scenario.getType() != null ? scenario.getType() : request.getType();
-        String backendName = scenario.getBackend() != null
-                ? scenario.getBackend()
-                : (request.getBackend() != null ? request.getBackend() : defaultBackend);
+        String backendName = scenarioBackend(request);
+
+        // Refused before the permit, as in executeTest.
+        java.util.Optional<InvalidTestSpecException> refused = refusal(request);
+        if (refused.isPresent()) {
+            return com.bmscomp.kates.util.Result.failure(refused.get());
+        }
 
         // Scenarios previously bypassed the concurrency cap entirely — executeTest
         // delegates here BEFORE its tryAcquire, so any number of multi-phase runs
@@ -306,6 +318,7 @@ public class TestOrchestrator {
 
         TestSpec baseSpec = applyTypeDefaults(type, scenario.getBaseSpec());
         TestRun run = new TestRun(type, baseSpec)
+                .withRequestedSpec(explicitFieldsOf(scenario.getBaseSpec()))
                 .withBackend(backendName)
                 .withScenarioName(scenario.getName())
                 .withLabels(scenario.getLabels())
@@ -841,6 +854,19 @@ public class TestOrchestrator {
     /**
      * Merges per-type defaults with the user-supplied spec.
      * User-provided values in the request take priority over type defaults.
+     *
+     * <p>Every field the request can set is carried. The merge used to copy
+     * fourteen and drop the other seven (targetThroughput, consumerGroup, the
+     * two fetch settings and the three integrity options), so they were
+     * accepted, echoed at their defaults and never used.
+     *
+     * <p>{@code throughput} is the rate the producers honour, and
+     * {@code targetThroughput} is another name for it: the name the CLI and
+     * scenario files send. When both are set, {@code throughput} wins; when only
+     * {@code targetThroughput} is, it sets the rate, in place of the type's
+     * default. So the merged {@code throughput} is always the rate the run
+     * used, and {@code targetThroughput} stays as requested: absent, like the
+     * other fields a type has no default for, when the request left it out.
      */
     TestSpec applyTypeDefaults(TestType type, TestSpec userSpec) {
         TestTypeDefaults.TypeConfig defaults = typeDefaults.forType(type);
@@ -871,13 +897,210 @@ public class TestOrchestrator {
             if (userSpec.hasCompressionType()) merged.setCompressionType(userSpec.getCompressionType());
             if (userSpec.hasRecordSize()) merged.setRecordSize(userSpec.getRecordSize());
             if (userSpec.hasNumRecords()) merged.setNumRecords(userSpec.getNumRecords());
+            if (userSpec.hasTargetThroughput()) {
+                merged.setTargetThroughput(userSpec.getTargetThroughput());
+                merged.setThroughput(userSpec.getTargetThroughput());
+            }
             if (userSpec.hasThroughput()) merged.setThroughput(userSpec.getThroughput());
             if (userSpec.hasDurationMs()) merged.setDurationMs(userSpec.getDurationMs());
             if (userSpec.hasNumProducers()) merged.setNumProducers(userSpec.getNumProducers());
             if (userSpec.hasNumConsumers()) merged.setNumConsumers(userSpec.getNumConsumers());
+            if (userSpec.hasConsumerGroup()) merged.setConsumerGroup(userSpec.getConsumerGroup());
+            if (userSpec.hasFetchMinBytes()) merged.setFetchMinBytes(userSpec.getFetchMinBytes());
+            if (userSpec.hasFetchMaxWaitMs()) merged.setFetchMaxWaitMs(userSpec.getFetchMaxWaitMs());
+            if (userSpec.hasEnableIdempotence()) merged.setEnableIdempotence(userSpec.isEnableIdempotence());
+            if (userSpec.hasEnableTransactions()) merged.setEnableTransactions(userSpec.isEnableTransactions());
+            if (userSpec.hasEnableCrc()) merged.setEnableCrc(userSpec.isEnableCrc());
         }
 
         return merged;
+    }
+
+    /** The request's own fields, or none when it sent no spec. */
+    private static Map<String, Object> explicitFieldsOf(TestSpec requested) {
+        return requested != null ? requested.explicitFields() : Map.of();
+    }
+
+    /** The backend a scenario runs on: the scenario's, the request's, or the default. */
+    private String scenarioBackend(CreateTestRequest request) {
+        TestScenario scenario = request.getScenario();
+        if (scenario.getBackend() != null) {
+            return scenario.getBackend();
+        }
+        return request.getBackend() != null ? request.getBackend() : defaultBackend;
+    }
+
+    /**
+     * Why a run could not honour this request as written, or empty when it
+     * could: the spec fields its type and backend cannot apply, for a plain
+     * request or a scenario. executeTest fails with this exception before it
+     * takes a concurrency permit. A caller that starts the run later, as a
+     * resilience run does after it has begun streaming its answer, asks first
+     * so that it can still answer the client with a 400.
+     */
+    public java.util.Optional<InvalidTestSpecException> refusal(CreateTestRequest request) {
+        if (request.isScenario()) {
+            Map<String, String> errors = scenarioInapplicableFields(request.getScenario(), scenarioBackend(request));
+            return errors.isEmpty()
+                    ? java.util.Optional.empty()
+                    : java.util.Optional.of(new InvalidTestSpecException("scenario.", errors));
+        }
+        TestType type = request.getType();
+        if (type == null) {
+            return java.util.Optional.empty();
+        }
+        String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
+        Map<String, String> errors =
+                inapplicableFields(type, backendName, request.getSpec(), applyTypeDefaults(type, request.getSpec()));
+        return errors.isEmpty()
+                ? java.util.Optional.empty()
+                : java.util.Optional.of(new InvalidTestSpecException(errors));
+    }
+
+    /**
+     * The requested fields a run of this type on this backend could not
+     * honour, each with the reason, keyed by field name; empty when there are
+     * none.
+     *
+     * <p>Only what the request set is checked, against the merged spec the run
+     * would use. A value that asks for nothing passes, because the run honours
+     * it trivially: an unlimited rate (-1) for a type that always runs
+     * unthrottled or runs no producer, {@code enableCrc: false} for a type that
+     * checks no CRC, {@code false} for a producer option where there is no
+     * producer. A value the run would contradict fails, and the request with
+     * it, rather than the run going ahead on other terms.
+     */
+    Map<String, String> inapplicableFields(TestType type, String backendName, TestSpec requested, TestSpec merged) {
+        Map<String, String> errors = new java.util.LinkedHashMap<>();
+        if (requested == null || type == null) {
+            return errors;
+        }
+
+        boolean producer = type != TestType.INTEGRATION_CDC;
+        boolean consumer = type == TestType.LOAD || type == TestType.ENDURANCE || type == TestType.INTEGRITY;
+        boolean unthrottled = type == TestType.SPIKE || type == TestType.CAPACITY;
+
+        if (!producer || unthrottled) {
+            String why = producer
+                    ? type + " runs its producers unthrottled whatever the rate says; only -1 (unlimited) applies"
+                    : "INTEGRATION_CDC runs no Kates producer, so no rate applies; only -1 (unlimited) does";
+            if (requested.hasThroughput() && requested.getThroughput() != -1) {
+                errors.put("throughput", why);
+            }
+            if (requested.hasTargetThroughput() && requested.getTargetThroughput() != -1) {
+                errors.put("targetThroughput", why);
+            }
+        }
+
+        if (!consumer) {
+            String why = type + " starts no consumer; only LOAD, ENDURANCE and INTEGRITY do";
+            if (requested.hasConsumerGroup()) errors.put("consumerGroup", why);
+            if (requested.hasFetchMinBytes()) errors.put("fetchMinBytes", why);
+            if (requested.hasFetchMaxWaitMs()) errors.put("fetchMaxWaitMs", why);
+        }
+
+        if (requested.hasEnableCrc() && requested.isEnableCrc() && type != TestType.INTEGRITY) {
+            errors.put("enableCrc", "only an INTEGRITY run checks record CRCs; a " + type + " run checks none");
+        }
+
+        if (!producer) {
+            String why = "INTEGRATION_CDC runs no Kates producer to configure";
+            if (requested.isEnableIdempotence()) errors.put("enableIdempotence", why);
+            if (requested.isEnableTransactions()) errors.put("enableTransactions", why);
+            return errors;
+        }
+
+        // The Kafka client refuses both options with any acks but all, so the
+        // run would fail as its producer starts. The acks may be the type's
+        // default rather than the request's (SPIKE's is 1), so name it.
+        String acks = merged.getAcks();
+        boolean acksAll = "all".equals(acks) || "-1".equals(acks);
+        String acksWhy = " needs acks=all, and this " + type + " run's acks is " + acks
+                + (requested.hasAcks() ? "" : " (the type's default); set acks to all");
+        if (requested.isEnableIdempotence() && !acksAll) {
+            errors.put("enableIdempotence", "an idempotent producer" + acksWhy);
+        }
+        if (requested.isEnableTransactions()) {
+            if (!acksAll) {
+                errors.put("enableTransactions", "a transactional producer" + acksWhy);
+            } else if (requested.hasEnableIdempotence() && !requested.isEnableIdempotence()) {
+                errors.put(
+                        "enableTransactions",
+                        "a transactional producer is always idempotent, and the request sets enableIdempotence to false");
+            } else if ("trogdor".equals(backendName)) {
+                errors.put("enableTransactions", "the trogdor backend cannot run a transactional producer");
+            }
+        }
+        return errors;
+    }
+
+    /**
+     * The scenario's spec fields its phases could not honour, keyed by their
+     * path in the scenario ({@code baseSpec.x}, {@code phases[i].spec.x});
+     * empty when there are none.
+     *
+     * <p>Every phase is a set of producers (buildPhaseTask), whatever the
+     * scenario's type, so the consumer settings and CRC checks have nothing to
+     * apply to; they were stored as the run's spec and never used. The two
+     * producer options reach every phase, and are checked against the acks
+     * each phase resolves, since the Kafka client refuses them with any other.
+     */
+    Map<String, String> scenarioInapplicableFields(TestScenario scenario, String backendName) {
+        Map<String, String> errors = new java.util.LinkedHashMap<>();
+        List<ScenarioPhase> phases = scenario.getPhases();
+        refuseConsumerAndCrc("baseSpec.", scenario.getBaseSpec(), errors);
+        for (int i = 0; i < phases.size(); i++) {
+            refuseConsumerAndCrc("phases[" + i + "].spec.", phases.get(i).getSpec(), errors);
+        }
+
+        for (int i = 0; i < phases.size(); i++) {
+            ScenarioPhase phase = phases.get(i);
+            TestSpec own = phase.getSpec();
+            TestSpec resolved = scenario.resolveSpecForPhase(phase);
+            String name = phase.getName() != null ? phase.getName() : "phase-" + i;
+            // Named where it was set: the phase's own spec, or the base one.
+            String idempotence = own != null && own.hasEnableIdempotence()
+                    ? "phases[" + i + "].spec.enableIdempotence"
+                    : "baseSpec.enableIdempotence";
+            String transactions = own != null && own.hasEnableTransactions()
+                    ? "phases[" + i + "].spec.enableTransactions"
+                    : "baseSpec.enableTransactions";
+            String acks = resolved.getAcks();
+            boolean acksAll = "all".equals(acks) || "-1".equals(acks);
+            String acksWhy = " needs acks=all, and phase " + name + " runs with acks " + acks;
+            if (resolved.isEnableIdempotence() && !acksAll) {
+                errors.putIfAbsent(idempotence, "an idempotent producer" + acksWhy);
+            }
+            if (resolved.isEnableTransactions()) {
+                if (!acksAll) {
+                    errors.putIfAbsent(transactions, "a transactional producer" + acksWhy);
+                } else if (resolved.hasEnableIdempotence() && !resolved.isEnableIdempotence()) {
+                    errors.putIfAbsent(
+                            transactions,
+                            "a transactional producer is always idempotent, and phase " + name
+                                    + " sets enableIdempotence to false");
+                } else if ("trogdor".equals(backendName)) {
+                    errors.putIfAbsent(transactions, "the trogdor backend cannot run a transactional producer");
+                }
+            }
+        }
+        return errors;
+    }
+
+    private static void refuseConsumerAndCrc(String path, TestSpec spec, Map<String, String> errors) {
+        if (spec == null) {
+            return;
+        }
+        String why = "a scenario's phases start no consumer; only a LOAD, ENDURANCE or INTEGRITY request"
+                + " without phases does";
+        if (spec.hasConsumerGroup()) errors.put(path + "consumerGroup", why);
+        if (spec.hasFetchMinBytes()) errors.put(path + "fetchMinBytes", why);
+        if (spec.hasFetchMaxWaitMs()) errors.put(path + "fetchMaxWaitMs", why);
+        if (spec.hasEnableCrc() && spec.isEnableCrc()) {
+            errors.put(
+                    path + "enableCrc",
+                    "a scenario's phases check no record CRCs; only an INTEGRITY request without phases does");
+        }
     }
 
     private com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> resolveBackend(String name) {
@@ -893,18 +1116,38 @@ public class TestOrchestrator {
     List<BenchmarkTask> buildTasks(TestType type, TestSpec spec, String runId) {
         String topic = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
 
-        Map<String, String> producerConfig = Map.of(
-                "bootstrap.servers", bootstrapServers,
-                "acks", spec.getAcks(),
-                "batch.size", String.valueOf(spec.getBatchSize()),
-                "linger.ms", String.valueOf(spec.getLingerMs()),
-                "compression.type", spec.getCompressionType());
+        Map<String, String> producerConfig = new HashMap<>();
+        producerConfig.put("bootstrap.servers", bootstrapServers);
+        producerConfig.put("acks", spec.getAcks());
+        producerConfig.put("batch.size", String.valueOf(spec.getBatchSize()));
+        producerConfig.put("linger.ms", String.valueOf(spec.getLingerMs()));
+        producerConfig.put("compression.type", spec.getCompressionType());
+        // Only when asked. Left unset, the client decides, and with acks=all it
+        // turns idempotence on by itself; an explicit false has to reach the
+        // client to turn it off, which the task's flag alone cannot do.
+        if (spec.hasEnableIdempotence()) {
+            producerConfig.put("enable.idempotence", String.valueOf(spec.isEnableIdempotence()));
+        }
+
+        Map<String, String> consumerConfig = new HashMap<>();
+        if (spec.hasFetchMinBytes()) {
+            consumerConfig.put("fetch.min.bytes", String.valueOf(spec.getFetchMinBytes()));
+        }
+        if (spec.hasFetchMaxWaitMs()) {
+            consumerConfig.put("fetch.max.wait.ms", String.valueOf(spec.getFetchMaxWaitMs()));
+        }
+        // A transactional producer's records are for read_committed readers;
+        // the integrity consumer already reads that way, and so does a LOAD or
+        // ENDURANCE consumer of a transactional run.
+        if (spec.isEnableTransactions()) {
+            consumerConfig.put("isolation.level", "read_committed");
+        }
 
         return switch (type) {
             case LOAD ->
                 List.of(
                         produceTask(runId + "-produce-0", runId, topic, spec, producerConfig),
-                        consumeTask(runId + "-consume-0", runId, topic, spec));
+                        consumeTask(runId + "-consume-0", runId, topic, spec, consumerConfig));
             case STRESS -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 for (int i = 0; i < spec.getNumProducers(); i++) {
@@ -922,11 +1165,13 @@ public class TestOrchestrator {
                         .durationMs(spec.getDurationMs())
                         .recordSize(spec.getRecordSize())
                         .producerConfig(producerConfig)
+                        .enableIdempotence(spec.isEnableIdempotence())
+                        .enableTransactions(spec.isEnableTransactions())
                         .build());
             case ENDURANCE ->
                 List.of(
                         produceTask(runId + "-endurance-produce", runId, topic, spec, producerConfig),
-                        consumeTask(runId + "-endurance-consume", runId, topic, spec));
+                        consumeTask(runId + "-endurance-consume", runId, topic, spec, consumerConfig));
             case VOLUME -> List.of(produceTask(runId + "-volume-0", runId, topic, spec, producerConfig));
             case CAPACITY -> {
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
@@ -940,6 +1185,8 @@ public class TestOrchestrator {
                             .durationMs(spec.getDurationMs())
                             .recordSize(spec.getRecordSize())
                             .producerConfig(producerConfig)
+                            .enableIdempotence(spec.isEnableIdempotence())
+                            .enableTransactions(spec.isEnableTransactions())
                             .build());
                 }
                 yield tasks;
@@ -954,6 +1201,8 @@ public class TestOrchestrator {
                         .durationMs(spec.getDurationMs())
                         .recordSize(spec.getRecordSize())
                         .producerConfig(producerConfig)
+                        .enableIdempotence(spec.isEnableIdempotence())
+                        .enableTransactions(spec.isEnableTransactions())
                         .build());
             case INTEGRITY ->
                 List.of(BenchmarkTask.builder(runId + "-integrity-0", BenchmarkTask.WorkloadType.INTEGRITY)
@@ -964,8 +1213,12 @@ public class TestOrchestrator {
                         .maxMessages(spec.getNumRecords())
                         .durationMs(spec.getDurationMs())
                         .recordSize(spec.getRecordSize())
+                        // The backend's integrity consumer joins this name with
+                        // "-integrity" appended (NativeKafkaBackend), so the
+                        // default group is integrity-cg-integrity.
                         .consumerGroup(spec.getConsumerGroup() != null ? spec.getConsumerGroup() : "integrity-cg")
                         .producerConfig(producerConfig)
+                        .consumerConfig(consumerConfig)
                         .enableIdempotence(spec.isEnableIdempotence())
                         .enableTransactions(spec.isEnableTransactions())
                         .enableCrc(spec.isEnableCrc())
@@ -989,6 +1242,11 @@ public class TestOrchestrator {
         producerConfig.put("batch.size", String.valueOf(spec.getBatchSize()));
         producerConfig.put("linger.ms", String.valueOf(spec.getLingerMs()));
         producerConfig.put("compression.type", spec.getCompressionType());
+        // As in buildTasks: only when asked, so that an explicit false reaches
+        // the client and an absent one leaves it to decide.
+        if (spec.hasEnableIdempotence()) {
+            producerConfig.put("enable.idempotence", String.valueOf(spec.isEnableIdempotence()));
+        }
 
         String taskId = runId + "-" + phaseName;
 
@@ -1008,6 +1266,8 @@ public class TestOrchestrator {
                     stepSpec.setNumRecords(spec.getNumRecords() / steps);
                     stepSpec.setDurationMs(spec.getDurationMs() / steps);
                     stepSpec.setRecordSize(spec.getRecordSize());
+                    stepSpec.setEnableIdempotence(spec.isEnableIdempotence());
+                    stepSpec.setEnableTransactions(spec.isEnableTransactions());
                     tasks.add(produceTask(taskId + "-ramp-" + s, runId, topic, stepSpec, producerConfig));
                 }
                 yield tasks;
@@ -1022,6 +1282,8 @@ public class TestOrchestrator {
                         .durationMs(spec.getDurationMs())
                         .recordSize(spec.getRecordSize())
                         .producerConfig(producerConfig)
+                        .enableIdempotence(spec.isEnableIdempotence())
+                        .enableTransactions(spec.isEnableTransactions())
                         .build());
         };
     }
@@ -1126,17 +1388,23 @@ public class TestOrchestrator {
                 .durationMs(spec.getDurationMs())
                 .recordSize(spec.getRecordSize())
                 .producerConfig(producerConfig)
+                .enableIdempotence(spec.isEnableIdempotence())
+                .enableTransactions(spec.isEnableTransactions())
                 .build();
     }
 
-    private BenchmarkTask consumeTask(String taskId, String runId, String topic, TestSpec spec) {
+    private BenchmarkTask consumeTask(
+            String taskId, String runId, String topic, TestSpec spec, Map<String, String> consumerConfig) {
         return BenchmarkTask.builder(taskId, BenchmarkTask.WorkloadType.CONSUME)
                 .runId(runId)
                 .topic(topic)
                 .partitions(spec.getPartitions())
                 .maxMessages(spec.getNumRecords())
                 .durationMs(spec.getDurationMs())
-                .consumerGroup(taskId + "-group")
+                // A named group that has committed offsets on the topic resumes
+                // from them; the per-task default never has any.
+                .consumerGroup(spec.getConsumerGroup() != null ? spec.getConsumerGroup() : taskId + "-group")
+                .consumerConfig(consumerConfig)
                 .build();
     }
 

@@ -76,6 +76,9 @@ public class ScheduleResource {
             schedule.setName(request.name);
             schedule.setCronExpression(request.cronExpression);
             schedule.setEnabled(request.enabled);
+            // A TestSpec writes only the fields the request set (TestSpec's
+            // class comment), so the schedule fires the request it was given
+            // and the type defaults of the day fill in the rest.
             schedule.setRequestJson(JSON.writeValueAsString(request.testRequest));
             repository.save(schedule);
 

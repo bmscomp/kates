@@ -50,7 +50,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		ID: mcpCaveatLoadSingleProducer,
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
-		Refs: []string{mcpJava + "engine/TestOrchestrator.java:904-913"},
+		Refs: []string{mcpJava + "engine/TestOrchestrator.java:1147-1156"},
 	},
 	{
 		ID: mcpCaveatReaper30Minutes,
@@ -64,16 +64,24 @@ var mcpCaveatsCore = []mcpCaveat{
 	},
 	{
 		ID: mcpCaveatMergedSpecOnly,
-		Text: "The backend stores only the spec merged with the test type's defaults. applyTypeDefaults copies 14 fields " +
-			"and drops targetThroughput, consumerGroup, fetchMinBytes, fetchMaxWaitMs, enableIdempotence, " +
-			"enableTransactions and enableCrc, so a run shows those unset or at their Java defaults whatever the " +
-			"request said, and the run executes that way: an INTEGRITY run always uses consumer group integrity-cg " +
-			"and runs without idempotence or transactions.",
+		Text: "A run's spec is the request merged with its test type's defaults. A field the type has a default " +
+			"for shows the value the run used; targetThroughput, consumerGroup, fetchMinBytes, fetchMaxWaitMs and " +
+			"the enable options appear only when the request set them, so enableIdempotence false there means the " +
+			"request turned the producer's idempotence off, and an absent one that the Kafka client decided, which " +
+			"turns it on whenever acks is all. Absent, an INTEGRITY run checked CRCs and its consumer joined " +
+			"integrity-cg-integrity. requestedSpec holds the request's own fields. A run stored before the backend " +
+			"kept the request has no requestedSpec, and its spec shows all seven of those fields at the Java " +
+			"defaults whatever the request said: that backend dropped them when it merged the spec and ran without " +
+			"them, so its enableIdempotence false means the client decided, and such an INTEGRITY run used " +
+			"integrity-cg-integrity, without transactions.",
 		Refs: []string{
-			mcpJava + "engine/TestOrchestrator.java:145,156,197",
-			mcpJava + "engine/TestOrchestrator.java:845-880",
-			mcpJava + "engine/TestOrchestrator.java:958-972",
-			mcpJava + "domain/TestSpec.java:71-85",
+			mcpJava + "domain/TestSpec.java:14-32,111-113",
+			mcpJava + "engine/TestOrchestrator.java:141,163-164,205",
+			mcpJava + "engine/TestOrchestrator.java:871-916",
+			mcpJava + "engine/TestOrchestrator.java:1125-1130,1216-1219",
+			mcpJava + "engine/NativeKafkaBackend.java:494",
+			mcpJava + "persistence/EntityMapper.java:42,69-70,122-124",
+			"kates/src/main/resources/db/migration/V23__requested_spec_fields.sql:1-6",
 		},
 	},
 	{
@@ -110,7 +118,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration. The tuning report copies " +
 			"that one summary into every step, so all steps show the same numbers and the best step is always step 0.",
 		Refs: []string{
-			mcpJava + "engine/TestOrchestrator.java:973-974",
+			mcpJava + "engine/TestOrchestrator.java:1226-1227",
 			mcpJava + "trogdor/SpecFactory.java:38-39",
 			mcpJava + "engine/TuningTestRunner.java:101-139",
 		},

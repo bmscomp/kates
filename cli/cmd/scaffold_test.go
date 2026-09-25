@@ -70,10 +70,15 @@ func TestBuiltinScenarios_ExactlyOnceHasIntegrityFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(data)
-	for _, field := range []string{"enableIdempotence", "enableTransactions", "enableCrc", "maxDataLossPercent"} {
+	for _, field := range []string{"enableIdempotence", "enableTransactions", "maxDataLossPercent"} {
 		if !strings.Contains(content, field) {
 			t.Errorf("exactly-once scenario missing field: %s", field)
 		}
+	}
+	// A ROUND_TRIP run checks no CRC, and the backend refuses a request that
+	// asks it to, so the template must not.
+	if strings.Contains(content, "enableCrc") {
+		t.Error("exactly-once is a ROUND_TRIP scenario; the backend refuses enableCrc for it")
 	}
 }
 

@@ -55,6 +55,18 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
     private static final int MAX_RETAINED_COMPLETED = 500;
 
+    /**
+     * A transactional producer commits after this many records, or once its
+     * transaction has been open {@link #TX_MAX_OPEN_NANOS}, whichever comes
+     * first. By count alone a producer slower than about 1.7 records/s kept a
+     * transaction open past the client's transaction.timeout.ms, 60 s by
+     * default; the coordinator aborted it and the next commit failed the task.
+     */
+    static final int TX_BATCH_RECORDS = 100;
+
+    /** A sixth of the client's default transaction.timeout.ms, which Kates does not change. */
+    static final long TX_MAX_OPEN_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+
     @Inject
     public NativeKafkaBackend(
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
@@ -337,7 +349,9 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
             long sent = 0;
             long nextSendNanos = System.nanoTime();
-            int txBatchSize = 100;
+            boolean txOpen = false;
+            long txSent = 0;
+            long txOpenedNanos = 0;
 
             while (!state.stopRequested.get()
                     && sent < task.getMaxMessages()
@@ -359,9 +373,18 @@ public class NativeKafkaBackend implements BenchmarkBackend {
                     nextSendNanos = now + targetNanosPerMsg;
                 }
 
-                if (task.isEnableTransactions() && sent % txBatchSize == 0) {
-                    if (sent > 0) producer.commitTransaction();
-                    producer.beginTransaction();
+                if (task.isEnableTransactions()) {
+                    long now = System.nanoTime();
+                    if (txOpen && transactionDue(txSent, txOpenedNanos, now)) {
+                        producer.commitTransaction();
+                        txOpen = false;
+                    }
+                    if (!txOpen) {
+                        producer.beginTransaction();
+                        txOpen = true;
+                        txSent = 0;
+                        txOpenedNanos = now;
+                    }
                 }
 
                 long seq = sent;
@@ -394,9 +417,12 @@ public class NativeKafkaBackend implements BenchmarkBackend {
 
                 state.recordsProcessed.incrementAndGet();
                 sent++;
+                txSent++;
             }
 
-            if (task.isEnableTransactions()) {
+            // Only a transaction that was begun: a producer that sent nothing
+            // has none, and committing then throws.
+            if (txOpen) {
                 producer.commitTransaction();
             }
 
@@ -404,6 +430,11 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         } catch (Exception e) {
             throw new BenchmarkException("Producer failed: " + e.getMessage(), e);
         }
+    }
+
+    /** Whether an open transaction is due for its commit before the next record. */
+    static boolean transactionDue(long sentInTransaction, long openedNanos, long nowNanos) {
+        return sentInTransaction >= TX_BATCH_RECORDS || nowNanos - openedNanos >= TX_MAX_OPEN_NANOS;
     }
 
     private void runConsumer(BenchmarkTask task, WorkerState state) {

@@ -379,6 +379,7 @@ erDiagram
         varchar backend
         varchar scenario_name
         text spec_json
+        text requested_spec_json
         text sla_json
         text labels_json
     }

@@ -25,6 +25,9 @@ public class ResilienceReport {
     private ReportSummary postChaosSummary;
     private Map<String, Double> impactDeltas;
     private String status;
+    /** Why the status is ERROR, when it is; the log used to be the only place that said. */
+    private String error;
+
     private IntegrityResult integrityResult;
 
     private List<ProbeResult> baselineProbes;
@@ -78,6 +81,14 @@ public class ResilienceReport {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getError() {
+        return error;
+    }
+
+    public void setError(String error) {
+        this.error = error;
     }
 
     public IntegrityResult getIntegrityResult() {

@@ -24,6 +24,13 @@ public class TestRun {
     private final SlaDefinition sla;
     private final Map<String, Long> cdcPhases;
     private final String cdcPhase;
+    /**
+     * The spec as the request sent it: only the fields it set (see
+     * {@link TestSpec#explicitFields()}). {@link #spec} is what the run used,
+     * after the type defaults filled the rest. Null for runs stored before the
+     * request was kept.
+     */
+    private final Map<String, Object> requestedSpec;
 
     public TestRun() {
         this(
@@ -36,6 +43,7 @@ public class TestRun {
                 null,
                 null,
                 new LinkedHashMap<>(),
+                null,
                 null,
                 null,
                 null);
@@ -54,6 +62,7 @@ public class TestRun {
                 new LinkedHashMap<>(),
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -69,7 +78,8 @@ public class TestRun {
             Map<String, String> labels,
             SlaDefinition sla,
             Map<String, Long> cdcPhases,
-            String cdcPhase) {
+            String cdcPhase,
+            Map<String, Object> requestedSpec) {
         this.id = id;
         this.testType = testType;
         this.spec = spec;
@@ -82,6 +92,7 @@ public class TestRun {
         this.sla = sla;
         this.cdcPhases = cdcPhases != null ? new LinkedHashMap<>(cdcPhases) : null;
         this.cdcPhase = cdcPhase;
+        this.requestedSpec = requestedSpec != null ? new LinkedHashMap<>(requestedSpec) : null;
     }
 
     public TestRun withResult(TestResult result) {
@@ -99,7 +110,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withId(String id) {
@@ -115,7 +127,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withTestType(TestType testType) {
@@ -131,7 +144,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withSpec(TestSpec spec) {
@@ -147,7 +161,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withStatus(TestResult.TaskStatus status) {
@@ -163,7 +178,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withResults(List<TestResult> results) {
@@ -179,7 +195,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withCreatedAt(String createdAt) {
@@ -195,7 +212,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withBackend(String backend) {
@@ -211,7 +229,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withScenarioName(String scenarioName) {
@@ -227,7 +246,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withLabels(Map<String, String> labels) {
@@ -243,7 +263,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withSla(SlaDefinition sla) {
@@ -259,7 +280,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withCdcPhases(Map<String, Long> cdcPhases) {
@@ -275,7 +297,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withCdcPhase(String cdcPhase) {
@@ -291,7 +314,25 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
+    }
+
+    public TestRun withRequestedSpec(Map<String, Object> requestedSpec) {
+        return new TestRun(
+                id,
+                testType,
+                spec,
+                status,
+                results,
+                createdAt,
+                backend,
+                scenarioName,
+                labels,
+                sla,
+                cdcPhases,
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withAddedResult(TestResult result) {
@@ -310,7 +351,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public TestRun withUpdatedResult(TestResult updatedResult) {
@@ -330,7 +372,8 @@ public class TestRun {
                 labels,
                 sla,
                 cdcPhases,
-                cdcPhase);
+                cdcPhase,
+                requestedSpec);
     }
 
     public String getId() {
@@ -379,5 +422,9 @@ public class TestRun {
 
     public String getCdcPhase() {
         return cdcPhase;
+    }
+
+    public Map<String, Object> getRequestedSpec() {
+        return requestedSpec;
     }
 }

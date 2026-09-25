@@ -160,12 +160,14 @@ var testGetCmd = &cobra.Command{
 			}
 			if maxThroughput > 0 {
 				fmt.Println()
-				// Only draw a bar when the test declared a target: a bar needs
+				// Only draw a bar when the run had a target rate: a bar needs
 				// a meaningful ceiling, and the old hardcoded 100k made high
 				// throughput render RED (the consumption palette read "good"
 				// as "dangerous") while any slow test looked healthily green.
-				if result.Spec != nil && result.Spec.TargetThroughput > 0 {
-					output.MetricBarDir("Throughput", maxThroughput, float64(result.Spec.TargetThroughput), true)
+				// The rate is spec.throughput, what the producers honoured;
+				// targetThroughput is only the name a request may give it.
+				if result.Spec != nil && result.Spec.Throughput > 0 {
+					output.MetricBarDir("Throughput", maxThroughput, float64(result.Spec.Throughput), true)
 				} else {
 					output.KeyValue("Peak Throughput", fmtNum(maxThroughput)+" rec/s")
 				}
