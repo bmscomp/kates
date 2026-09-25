@@ -5,20 +5,42 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
+// advisorRule is one recommendation. Severity is HIGH, MED or OK.
 type advisorRule struct {
-	Severity string
-	Title    string
-	Detail   string
-	Fix      string
-	Evidence string
+	Severity string `json:"severity"`
+	Title    string `json:"title"`
+	Detail   string `json:"detail,omitempty"`
+	Fix      string `json:"fix,omitempty"`
+	Evidence string `json:"evidence,omitempty"`
 }
+
+// advisorResult is the advisor's answer for one run, which the table prints
+// and -o json prints as is.
+//
+// A run or report that cannot be found is an answer, not an error: the
+// command has always exited 0 for it, and scripts may rely on that. Status
+// tells the cases apart, so a JSON reader does not take a missing report for
+// a clean bill.
+type advisorResult struct {
+	RunID string `json:"runId"`
+	// Status is ANALYZED, RUN_NOT_FOUND or REPORT_NOT_READY.
+	Status          string        `json:"status"`
+	Message         string        `json:"message,omitempty"`
+	Recommendations []advisorRule `json:"recommendations"`
+}
+
+const (
+	advisorAnalyzed       = "ANALYZED"
+	advisorRunNotFound    = "RUN_NOT_FOUND"
+	advisorReportNotReady = "REPORT_NOT_READY"
+)
 
 var (
 	advisorApply bool
@@ -52,80 +74,107 @@ var advisorCmd = &cobra.Command{
 cluster topology to generate actionable tuning recommendations.
 
 Rules cover batching, compression, acks, partitions, replication,
-linger timing, record sizing, and consumer/producer balance.`,
+linger timing, record sizing, and consumer/producer balance.
+
+With -o json it prints the recommendations as JSON, with a status of
+ANALYZED, RUN_NOT_FOUND or REPORT_NOT_READY. A run or report that is not
+found exits 0, as it does with the table.`,
 	Example: `  kates advisor abc123
   kates advisor abc123 --apply
   kates advisor abc123 -o json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
-
-		run, err := apiClient.GetTest(context.Background(), id)
+		res, err := adviseRun(context.Background(), args[0])
 		if err != nil {
-			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "Not Found") {
-				fmt.Println()
-				fmt.Println(advHighStyle.Render("  ✖ Test run not found: " + id))
-				fmt.Println()
-				fmt.Println(advDimStyle.Render("  Suggestions:"))
-				fmt.Println(advDimStyle.Render("    • Verify the run ID — use 'kates test list' to see available runs"))
-				fmt.Println(advDimStyle.Render("    • Run IDs are UUID format, e.g. 3fa85f64-5717-4562-b3fc-2c963f66afa6"))
-				fmt.Println()
-				return nil
-			}
-			return fmt.Errorf("failed to fetch test run: %w", err)
+			return err
 		}
-
-		report, err := apiClient.Report(context.Background(), id)
-		if err != nil {
-			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-				fmt.Println()
-				fmt.Println(advMedStyle.Render("  ⏳ Report not available yet for run: " + truncAdvisorID(id)))
-				fmt.Println(advDimStyle.Render("    The test may still be running. Wait for completion and try again."))
-				fmt.Println()
-				return nil
-			}
-			return fmt.Errorf("failed to fetch report: %w", err)
-		}
-
-		rules := analyzeRun(run, report)
-
-		fmt.Println(advTitleStyle.Width(60).Render(
-			fmt.Sprintf("  Configuration Advisor  ·  Run %s", truncAdvisorID(id)),
-		))
-		fmt.Println()
-
-		if len(rules) == 0 {
-			fmt.Println(advOkStyle.Render("  ✓ No recommendations — configuration looks optimal"))
-			return nil
-		}
-
-		for _, r := range rules {
-			var badge string
-			switch r.Severity {
-			case "HIGH":
-				badge = advHighStyle.Render("⚡ HIGH")
-			case "MED":
-				badge = advMedStyle.Render("📊 MED ")
-			case "OK":
-				badge = advOkStyle.Render("✓  OK  ")
-			}
-
-			fmt.Printf("  %s  %s\n", badge, r.Title)
-			if r.Fix != "" {
-				fmt.Printf("           → %s\n", advOkStyle.Render(r.Fix))
-			}
-			if r.Evidence != "" {
-				fmt.Printf("           %s\n", advDimStyle.Render("Evidence: "+r.Evidence))
-			}
-			fmt.Println()
-		}
-
-		if advisorApply {
-			output.Hint("Use the recommendations above to update your scenario YAML")
-		}
-
+		output.Render(outputMode == "json", res, func() { renderAdvisor(res) })
 		return nil
 	},
+}
+
+// adviseRun fetches a run and its report and runs the rules over them.
+func adviseRun(ctx context.Context, id string) (advisorResult, error) {
+	res := advisorResult{RunID: id, Recommendations: []advisorRule{}}
+
+	run, err := apiClient.GetTest(ctx, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "Not Found") {
+			res.Status = advisorRunNotFound
+			res.Message = "Test run not found: " + id
+			return res, nil
+		}
+		return res, fmt.Errorf("failed to fetch test run: %w", err)
+	}
+
+	report, err := apiClient.Report(ctx, id)
+	if err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			res.Status = advisorReportNotReady
+			res.Message = "Report not available yet for run: " + truncAdvisorID(id)
+			return res, nil
+		}
+		return res, fmt.Errorf("failed to fetch report: %w", err)
+	}
+
+	res.Status = advisorAnalyzed
+	res.Recommendations = append(res.Recommendations, analyzeRun(run, report)...)
+	return res, nil
+}
+
+func renderAdvisor(res advisorResult) {
+	switch res.Status {
+	case advisorRunNotFound:
+		fmt.Println()
+		fmt.Println(advHighStyle.Render("  ✖ " + res.Message))
+		fmt.Println()
+		fmt.Println(advDimStyle.Render("  Suggestions:"))
+		fmt.Println(advDimStyle.Render("    • Verify the run ID — use 'kates test list' to see available runs"))
+		fmt.Println(advDimStyle.Render("    • Run IDs are UUID format, e.g. 3fa85f64-5717-4562-b3fc-2c963f66afa6"))
+		fmt.Println()
+		return
+	case advisorReportNotReady:
+		fmt.Println()
+		fmt.Println(advMedStyle.Render("  ⏳ " + res.Message))
+		fmt.Println(advDimStyle.Render("    The test may still be running. Wait for completion and try again."))
+		fmt.Println()
+		return
+	}
+
+	fmt.Println(advTitleStyle.Width(60).Render(
+		fmt.Sprintf("  Configuration Advisor  ·  Run %s", truncAdvisorID(res.RunID)),
+	))
+	fmt.Println()
+
+	if len(res.Recommendations) == 0 {
+		fmt.Println(advOkStyle.Render("  ✓ No recommendations — configuration looks optimal"))
+		return
+	}
+
+	for _, r := range res.Recommendations {
+		var badge string
+		switch r.Severity {
+		case "HIGH":
+			badge = advHighStyle.Render("⚡ HIGH")
+		case "MED":
+			badge = advMedStyle.Render("📊 MED ")
+		case "OK":
+			badge = advOkStyle.Render("✓  OK  ")
+		}
+
+		fmt.Printf("  %s  %s\n", badge, r.Title)
+		if r.Fix != "" {
+			fmt.Printf("           → %s\n", advOkStyle.Render(r.Fix))
+		}
+		if r.Evidence != "" {
+			fmt.Printf("           %s\n", advDimStyle.Render("Evidence: "+r.Evidence))
+		}
+		fmt.Println()
+	}
+
+	if advisorApply {
+		output.Hint("Use the recommendations above to update your scenario YAML")
+	}
 }
 
 func analyzeRun(run *client.TestRun, report *client.Report) []advisorRule {

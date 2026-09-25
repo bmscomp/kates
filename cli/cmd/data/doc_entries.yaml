@@ -1058,6 +1058,10 @@
   category: Disruption
   synopsis: "kates disruption watch <id>"
   short: "Stream real-time progress events from a running disruption"
+  description: |
+    The backend emits the events under the plan's name, not under
+    the disruption ID, so for that ID no events arrive yet. Follow
+    a run with 'kates disruption status <id>' until it does.
   examples:
     - "kates disruption watch abc123"
   see_also:
@@ -1508,7 +1512,9 @@
   short: "Export context(s) as YAML for team sharing"
   description: |
     Marshals the specified context (or all contexts if no name given)
-    to YAML on stdout. Compatible with 'kates ctx import'.
+    to YAML on stdout. Compatible with 'kates ctx import'. API keys and
+    proxy passwords are masked and key-source is left out, unless
+    --reveal is given.
   examples:
     - "kates ctx export staging > kates-staging.yaml"
     - "kates ctx export > all-contexts.yaml"
@@ -1523,7 +1529,9 @@
   description: |
     Reads context definitions from a YAML file (or stdin) and
     merges them into ~/.kates.yaml. Existing contexts with the
-    same name are overwritten.
+    same name are overwritten. A masked API key is never stored:
+    an existing context keeps its key only while the file leaves
+    its URL, proxy and insecure setting unchanged.
   flags:
     - name: "--file"
       short: "-f"

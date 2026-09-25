@@ -147,7 +147,7 @@ echo "Running integrity gate..."
 
 # Export the built-in INTEGRITY template and run it
 kates test scaffold export integrity-tx -o /tmp/integrity.yaml
-ID=$(kates test apply -f /tmp/integrity.yaml --wait -o json | jq -r '.id')
+ID=$(kates test apply -f /tmp/integrity.yaml --wait -o json | jq -r '.scenarios[0].runId')
 
 # Check verdict
 VERDICT=$(kates test get "$ID" -o json | jq -r '.results[0].integrity.verdict')

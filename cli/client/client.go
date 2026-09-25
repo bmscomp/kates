@@ -193,9 +193,7 @@ func (c *Client) doRequestWith(ctx context.Context, hc *http.Client, req *http.R
 			}
 		}
 
-		if c.APIKey != "" {
-			req.Header.Set("Authorization", "Bearer "+c.APIKey)
-		}
+		c.setAuth(req)
 		resp, err := hc.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("connection failed: %w", err)
@@ -215,21 +213,34 @@ func (c *Client) doRequestWith(ctx context.Context, hc *http.Client, req *http.R
 		}
 
 		if resp.StatusCode >= 400 {
-			if strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
-				var apiErr APIError
-				if json.Unmarshal(body, &apiErr) == nil && apiErr.Message != "" {
-					return nil, &HTTPError{StatusCode: resp.StatusCode, message: apiErr.String()}
-				}
-			}
-			return nil, &HTTPError{
-				StatusCode: resp.StatusCode,
-				message:    fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)),
-			}
+			return nil, httpError(resp, body)
 		}
 
 		return body, nil
 	}
 	return nil, lastErr
+}
+
+// setAuth puts the API key on req, the one way every request carries it.
+func (c *Client) setAuth(req *http.Request) {
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+}
+
+// httpError describes a failed response from its status and body, using the
+// backend's JSON error message when it sent one.
+func httpError(resp *http.Response, body []byte) *HTTPError {
+	if strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
+		var apiErr APIError
+		if json.Unmarshal(body, &apiErr) == nil && apiErr.Message != "" {
+			return &HTTPError{StatusCode: resp.StatusCode, message: apiErr.String()}
+		}
+	}
+	return &HTTPError{
+		StatusCode: resp.StatusCode,
+		message:    fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)),
+	}
 }
 
 func (c *Client) getBytes(ctx context.Context, path string) ([]byte, error) {
@@ -739,14 +750,55 @@ func (c *Client) DisruptionStatus(ctx context.Context, id string) (*DisruptionRe
 }
 
 // DisruptionStreamURL is the address of a disruption's server-sent event
-// stream. `kates disruption watch` reads the stream itself rather than through
-// a Client method, so it takes the escaped URL from here.
+// stream, with the id escaped.
 func (c *Client) DisruptionStreamURL(id string) (string, error) {
 	path, err := pathf("/api/disruptions/%s/stream", id)
 	if err != nil {
 		return "", err
 	}
 	return c.BaseURL + path, nil
+}
+
+// maxStreamErrorBody caps how much of a refused stream's body goes into the
+// error: a server that answers with a stream anyway would never end it.
+const maxStreamErrorBody = 4096
+
+// DisruptionStream opens a disruption's server-sent event stream and returns
+// its body, which the caller reads to the end and closes.
+//
+// `kates disruption watch` used to open the stream itself with
+// http.DefaultClient, which sent no API key, so the backend answered 401
+// wherever API keys are on, as they are by default. The request now carries
+// the key as every other request does, and goes through the client's
+// transport, so a context's proxy and insecure settings apply too. It does
+// not take the client's 60-second timeout, which would cut a stream that
+// runs for minutes: ctx bounds it instead.
+func (c *Client) DisruptionStream(ctx context.Context, id string) (io.ReadCloser, error) {
+	u, err := c.DisruptionStreamURL(id)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	c.setAuth(req)
+
+	hc := &http.Client{}
+	if c.HTTPClient != nil {
+		hc.Transport = c.HTTPClient.Transport
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connection failed: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxStreamErrorBody))
+		resp.Body.Close()
+		return nil, httpError(resp, body)
+	}
+	return resp.Body, nil
 }
 
 func (c *Client) DisruptionTimelineData(ctx context.Context, id string) ([]DisruptionTimeline, error) {
