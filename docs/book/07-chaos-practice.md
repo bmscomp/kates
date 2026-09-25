@@ -586,20 +586,24 @@ stateDiagram-v2
 
 ## Real-Time Monitoring
 
-During execution, Kates provides real-time progress via Server-Sent Events (SSE):
+During execution, Kates publishes progress as Server-Sent Events (SSE), and `kates disruption watch` prints each event as it arrives:
 
 ```bash
-# Watch disruption progress in real-time
+# Watch disruption progress
 kates disruption watch <id>
 ```
-
-The CLI displays each event as it arrives:
 
 - Step start and completion
 - Baseline and post-fault metrics capture
 - Fault injection and recovery waiting
 - Rollback events
 - Final SLA grade and completion status
+
+::: {.callout-warning}
+**Poll the status for now**
+
+The backend emits these events under the plan's name, not under the disruption ID that `kates disruption run` returns, so `kates disruption watch <id>` connects and then receives nothing. Until the backend emits them under the disruption ID, follow a run with `kates disruption status <id>`, which shows its status and each finished step.
+:::
 
 ## Resilience Testing: Performance + Chaos Combined
 

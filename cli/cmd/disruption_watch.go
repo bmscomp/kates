@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -33,37 +32,29 @@ func init() {
 var disruptionWatchCmd = &cobra.Command{
 	Use:   "watch <disruption-id>",
 	Short: "Stream real-time progress events from a running disruption",
-	Args:  cobra.ExactArgs(1),
+	Long: `Stream a disruption's progress events until it completes or fails, for at
+most 30 minutes.
+
+The backend emits the events under the plan's name, not under the ID that
+'kates disruption run' returns, so for that ID no events arrive yet. Until it
+does, follow a run with 'kates disruption status <id>'.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		disruptionID := args[0]
-		url, err := apiClient.DisruptionStreamURL(disruptionID)
-		if err != nil {
-			return err
-		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		stream, err := apiClient.DisruptionStream(ctx, disruptionID)
 		if err != nil {
-			return fmt.Errorf("failed to create SSE request: %w", err)
+			return fmt.Errorf("failed to open the event stream: %w", err)
 		}
-		req.Header.Set("Accept", "text/event-stream")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to connect to SSE stream: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status: %d", resp.StatusCode)
-		}
+		defer stream.Close()
 
 		fmt.Printf("📡 Watching disruption: %s\n", disruptionID)
 		fmt.Println(strings.Repeat("─", 60))
 
-		scanner := bufio.NewScanner(resp.Body)
+		scanner := bufio.NewScanner(stream)
 		var eventName string
 
 		for scanner.Scan() {

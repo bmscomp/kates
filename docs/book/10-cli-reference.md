@@ -178,6 +178,14 @@ The `kates` chart turns API-key authentication on by default and generates the k
 
 The context stores the key in plain text in `~/.kates.yaml`. The CLI writes that file readable by you alone (mode `0600`); a file that an earlier release left readable by others is tightened to `0600` the next time the CLI saves it, on `kates ctx use` for instance. That keeps other users of the machine out, not other programs you run; to keep the key out of the file, leave `--api-key` out of the context and export the key as `KATES_API_KEY` for the session instead.
 
+`kates ctx show` and `kates ctx export` mask each API key: they print its first four characters and `****`, or only `****` for a key shorter than 16 characters. `kates ctx export` prints the contexts as YAML that can go to a teammate: besides the keys it masks the password in a `proxy-url` (as `xxxxx`) and leaves out `key-source`, a digest of the key. `kates ctx export --reveal` prints all of them in clear, to move your own contexts to another machine. `kates ctx import --file <file>` merges such a file into your configuration and never stores a masked value. A context you already have keeps its own key only while the file leaves its `url`, `proxy-url` and `insecure` as they are and masks that same key; otherwise it arrives without a key, and the import says why. A new context arrives without a key, and a masked proxy password is dropped unless the context already has that proxy.
+
+```bash
+kates ctx export > team-contexts.yaml            # keys masked
+kates ctx export --reveal > my-contexts.yaml     # keys in clear; keep the file private
+kates ctx import --file my-contexts.yaml
+```
+
 A command that changes the file first takes a lock on `~/.kates.yaml.lock`, which stays beside it, and then writes a complete new file in place of the old one. Two commands that change contexts at once therefore do not undo each other's changes, and a save that fails leaves the old file as it was.
 
 ### Config File Format
@@ -625,9 +633,12 @@ Live-stream test progress to the terminal.
 ```bash
 kates test apply -f scenario.yaml
 kates test apply -f scenario.yaml --wait
+kates test apply -f scenario.yaml --wait -o json
 ```
 
 Apply a YAML scenario file. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
+
+In a terminal, `--wait` shows a spinner while each run goes. Without one (a pipe, a CI job, an agent's shell) or with `--plain`, it prints a plain line to stderr each time a run's status changes, such as `quick (3f8a2c1e): RUNNING`. With `-o json` stdout carries only the summary as JSON: each scenario's `name`, `type`, `runId`, `status` and `error`, and with `--wait`, for a scenario with a `validate` block, an `sla` object with its `violations` and the gates that were `notEvaluable`. A scenario that failed to submit has no `runId`. The exit code is the same in every mode.
 
 #### test scaffold
 
@@ -878,7 +889,13 @@ Show Kafka intelligence data: ISR tracking, consumer lag, leader targeting.
 kates disruption watch <id>
 ```
 
-Real-time SSE progress stream for disruption tests.
+Opens the disruption's server-sent event stream, with the context's API key, and prints each progress event until the run completes or fails, for at most 30 minutes.
+
+::: {.callout-warning}
+**No events arrive for a disruption ID yet**
+
+The backend emits a run's events under its plan's name, not under the ID that `kates disruption run` returns, so `watch <id>` connects and then waits without printing any progress. Until the backend emits them under the disruption ID, follow a run by polling `kates disruption status <id>`, with `-o json` in a script.
+:::
 
 #### disruption playbook list
 
@@ -1769,7 +1786,10 @@ Run a full test battery (LOAD → STRESS → SPIKE) with a letter-grade scorecar
 ```bash
 kates benchmark
 kates bench
+kates benchmark -o json
 ```
+
+With `-o json` it prints only the scorecard, once the battery ends: per test its `runId`, `status`, peak throughput, highest P99, `score` and `grade`, and the `overallGrade`. A metric no phase reported is `null`, as the table's `—` is. The scorecard takes each test's status from its run, so a run that finished `FAILED` shows as `FAILED` whether or not one of its phases carried an error message. A test that could not be created shows as `FAILED`. A run with no final status after 120 polls shows as `ERROR`, because it may still be going; the battery stops there, and the tests after it show as `SKIPPED`. The command exits `0` in every one of these cases.
 
 #### advisor
 
@@ -1778,7 +1798,10 @@ Analyze test results and recommend configuration improvements.
 ```bash
 kates advisor <run-id>
 kates advisor abc123
+kates advisor abc123 -o json
 ```
+
+With `-o json` it prints the recommendations, each with its `severity`, `title`, `fix` and `evidence`, and a `status`: `ANALYZED`, or `RUN_NOT_FOUND` and `REPORT_NOT_READY` with an empty list. Those two exit `0` in both modes. The rules are the CLI's own, not the backend advisor that `GET /api/tests/{id}/advisor` serves.
 
 #### explain
 
@@ -1790,7 +1813,10 @@ Plain-English summary and verdict for a test run.
 kates explain <id>
 kates why <id>
 kates interpret <id>
+kates explain <id> -o json
 ```
+
+With `-o json` it prints the `runId`, the narrative lines, the phase and failed-phase counts, the record total, peak throughput, the best and worst P99 (`null` when no phase reported them), each failed phase's error with its hints, and the `verdict` (`HEALTHY`, `DEGRADED` or `POOR`) with its `verdictReason`. The verdict does not wait for the run to finish: a run still going is graded on the phases it has reported, which usually reads as `DEGRADED`, so check `status` first.
 
 #### replay
 
@@ -1816,7 +1842,10 @@ kates quality-gate
 kates gate --min-grade B
 kates gate --min-grade C --type STRESS --records 100000
 kates gate --min-grade A --timeout 300
+kates gate --min-grade B -o json
 ```
+
+With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. A gate that ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — prints the same object with an `error`, and with `null` for the throughput and P99 it never read. The exit code is the same as with the table.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -1876,6 +1905,8 @@ kates tune run TUNE_PARTITIONS
 | `TUNE_COMPRESSION` | Test different compression codecs |
 | `TUNE_PARTITIONS` | Test different partition counts |
 
+With `-o json` it prints the run the backend created, as `kates test create -o json` does.
+
 #### tune report
 
 Show tuning comparison report.
@@ -1883,7 +1914,10 @@ Show tuning comparison report.
 ```bash
 kates tune report <run-id>
 kates tune report abc123
+kates tune report abc123 -o json
 ```
+
+With `-o json` it prints the same rows: each step's `stepIndex`, `label`, average throughput, P99 and error rate (`null` where the step has no value), and a `verdict` of `BEST` or `WORST`, with the `bestStepIndex` and the `recommendation`.
 
 #### tune types
 
@@ -1891,6 +1925,7 @@ List available tuning tests.
 
 ```bash
 kates tune types
+kates tune types -o json
 ```
 
 **See also:** [Lab — Interactive Performance Tuning](10b-lab.md) for the interactive tuning workbench, [Test Types Deep Dive](05-test-types.md) for understanding how tuning tests differ from standard tests.
@@ -2282,7 +2317,7 @@ kates changelog --since 2025-01-01 --until 2025-01-31
 
 ## Output Modes
 
-`-o` is a global flag with two values, `table` and `json`, and JSON support varies by command. The commands whose sections in this chapter show `-o json` — `test list`, `report show`, `cluster check`, `cluster topology`, `cluster alerts`, `security audit`, `operators list` and `migrate run` — print JSON, and so do some others, such as `test get` and `cluster info`:
+`-o` is a global flag with two values, `table` and `json`, and JSON support varies by command. The commands whose sections in this chapter show `-o json` — `test list`, `test apply`, `report show`, `cluster check`, `cluster topology`, `cluster alerts`, `security audit`, `operators list`, `migrate run`, `benchmark`, `advisor`, `explain`, `gate` and `tune` — print JSON, and so do some others, such as `test get` and `cluster info`. `test apply`, `benchmark`, `advisor`, `explain`, `gate` and `tune` print nothing else on stdout under `-o json`: no banner and no progress lines.
 
 ```bash
 # Table output (default) — human-readable with colors
@@ -2292,7 +2327,9 @@ kates test list -o table
 kates test list -o json
 ```
 
-Many commands have no JSON form and print the same output whatever `-o` says, among them `status`, `ctx show`, `snapshot`, `profile`, `kyverno`, `gate`, `advisor`, `explain`, `benchmark`, `tune`, `test compare`, `test summary`, `webhook list`, `changelog` and the full-screen views (`dashboard`, `top`, `lab`). Check a command's output before you pipe it into `jq`.
+Many commands have no JSON form and print the same output whatever `-o` says, among them `status`, `ctx show`, `snapshot`, `profile`, `kyverno`, `test compare`, `test summary`, `webhook list`, `changelog` and the full-screen views (`dashboard`, `top`, `lab`). Check a command's output before you pipe it into `jq`.
+
+An AI agent that has a shell can drive Kates through this CLI rather than through [`kates mcp`](#mcp-server-for-ai-agents). The skill file `skills/kates-cli/SKILL.md` at the root of the repository tells it how: set up a context with the API key, pass `-o json`, and follow one recipe for each task, from security posture and drift to planning a Game Day with `disruption playbook show` and `--dry-run`.
 
 Output degrades automatically. When stdout is not a terminal — a pipe, a redirect, a CI log — color codes are stripped, refreshing displays become append-only lines, and full-screen TUIs refuse with a plain-text explanation instead of launching. `NO_COLOR` and `TERM=dumb` are honored; `--plain` (or `KATES_PLAIN=1`) forces the fully plain, pure-ASCII form; `KATES_ASCII=1` keeps colors but swaps glyphs for ASCII.
 
@@ -2328,6 +2365,7 @@ Some commands report a failure on screen and still exit `0`, so a script cannot 
 - `kates detect` on failing checks or a cluster it cannot inspect, unless you pass `--fail-on-error` (`--fail-on-warning` reacts to warnings only); with it, still when it cannot read its `--values` file.
 - `kates kyverno status`, `violations`, `enforce` and `audit` when Kyverno is missing or the change fails.
 - `kates advisor` when the run or its report is not found.
+- `kates benchmark`, whatever its runs do: a test it could not create, a run that finished `FAILED` and one it lost track of all exit `0`.
 :::
 
 ## Shell Completion

@@ -19,9 +19,9 @@ import (
 
 // draft_scenario and the kates://scenarios/{name} resources (plan §4.1,
 // §4.2). The tool is local compute: it parses a scenario file the way
-// kates test apply does (apply.go:74-91), a JSON one both as a .json and as a
+// kates test apply does (apply.go:84-101), a JSON one both as a .json and as a
 // YAML file, converts each scenario with
-// scenarioToRequest (apply.go:205), and checks the result against the agent
+// scenarioToRequest (apply.go:292), and checks the result against the agent
 // envelope of plan §5.4-§5.5. It saves nothing and sends the scenario
 // nowhere; like every tool it runs behind the guard, whose pin check is the
 // only request it causes.
@@ -539,7 +539,7 @@ func mcpScnNotAScenarioFile(err error) error {
 }
 
 // mcpScnParseFile reads a scenario file as kates test apply reads a YAML
-// one (apply.go:74-91): a scenarios list, or failing that one scenario with a
+// one (apply.go:84-101): a scenarios list, or failing that one scenario with a
 // type. yaml.v3 ignores keys the structs do not name.
 func mcpScnParseFile(data []byte) ([]TestScenario, error) {
 	var sf ScenarioFile
@@ -561,7 +561,7 @@ func mcpScnLooksJSON(text string) bool {
 }
 
 // mcpScnParseJSONFile reads a scenario file as kates test apply reads a .json
-// one (apply.go:74-91): with encoding/json, which matches a key to a field in
+// one (apply.go:84-101): with encoding/json, which matches a key to a field in
 // any case and lets a later key replace an earlier one, and failing that as
 // one scenario in YAML.
 func mcpScnParseJSONFile(data []byte) ([]TestScenario, error) {
@@ -699,7 +699,7 @@ func (f *mcpScnFindings) file(raw map[string]any) {
 }
 
 // The field names kates test apply reads, as its structs name them
-// (apply.go:19-41).
+// (apply.go:20-42).
 var (
 	mcpScnFileFields     = []string{"scenarios"}
 	mcpScnScenarioFields = []string{"name", "type", "backend", "spec", "validate"}
@@ -819,7 +819,7 @@ func mcpScnCheckTypeAndBackend(i int, req *client.CreateTestRequest, fs *mcpScnF
 	return known
 }
 
-// mcpScnSpecKey describes one spec key scenarioToRequest reads (apply.go:210-274)
+// mcpScnSpecKey describes one spec key scenarioToRequest reads (apply.go:297-361)
 // and the range the backend accepts for the field it becomes
 // (domain/TestSpec.java:34-113).
 type mcpScnSpecKey struct {
@@ -1126,7 +1126,7 @@ func mcpScnCheckTopic(i int, e *mcpDraftEffective, fs *mcpScnFindings) {
 	}
 }
 
-// Validate keys ValidationSpec reads (apply.go:27-37).
+// Validate keys ValidationSpec reads (apply.go:28-38).
 var (
 	mcpScnValidateFields = []string{
 		"maxP99LatencyMs", "maxAvgLatencyMs", "minThroughputRecPerSec", "maxErrorRate",
@@ -1219,7 +1219,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			mcpJava + "api/TestResource.java:69-104",
 			mcpJava + "domain/TestSpec.java:34-113",
 			mcpJava + "engine/TestOrchestrator.java:973-1035",
-			"cli/cmd/apply.go:109-141",
+			"cli/cmd/apply.go:129-186",
 		},
 	},
 	{
@@ -1245,7 +1245,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"produce, and RPO is measured only when a resilience run marks a fault, so a scenario run never has one. " +
 			"Keys ValidationSpec does not name, such as maxDuplicatePercent, are dropped when the file is read.",
 		Refs: []string{
-			"cli/cmd/apply.go:27-37,131-137,153-167,338-402",
+			"cli/cmd/apply.go:28-38,160-183,259-271,425-489",
 			mcpJava + "engine/NativeKafkaBackend.java:154-159,299-318",
 			mcpJava + "engine/TrogdorBackend.java:114-115",
 			mcpJava + "resilience/ResilienceOrchestrator.java:110",
