@@ -476,7 +476,7 @@ graph TD
 
 The grader runs each threshold once per step, after the last step has finished, so a two-step plan with two thresholds makes four checks. Each miss is a violation classified `WARNING` or `CRITICAL`. P99 latency or recovery time above twice the limit, or throughput below half the minimum, is `CRITICAL`, and any other miss is a `WARNING`. The grade is `A` when every check passes, `F` if any violation is critical, and otherwise `B`, `C`, or `D` depending on the fraction of checks that failed (more than 25% → `C`, more than 50% → `D`).
 
-A plan runs no workload of its own, its Prometheus capture has no P99.9 latency or error rate, and Kafka's exporter publishes latency percentiles but no mean. So `maxAvgLatencyMs`, `maxP999LatencyMs`, `maxErrorRate`, `minRecordsProcessed`, `maxDataLossPercent` and `maxRpoMs` cannot be evaluated here. A plan that declares any of them still runs, with a validation warning naming each one, and the verdict lists them under `unevaluated` instead of counting them as passed. A constraint that has nothing to compare against on this run — latency with Prometheus unreachable, `maxRtoMs` when no step waited for recovery — is listed there too. When no constraint could be evaluated, the grade is `-`, not `A`. Data loss and RPO come from an INTEGRITY workload, not from a plan: a resilience test (`kates resilience run`) whose workload is an INTEGRITY test reports both in its integrity result.
+A plan runs no workload of its own, its Prometheus capture has no P99.9 latency or error rate, and Kafka's exporter publishes latency percentiles but no mean. So `maxAvgLatencyMs`, `maxP999LatencyMs`, `maxErrorRate`, `minRecordsProcessed`, `maxDataLossPercent` and `maxRpoMs` cannot be evaluated here. A plan that declares any of them still runs, with a validation warning naming each one, and the verdict lists them under `unevaluated` instead of counting them as passed. A constraint that has nothing to compare against on this run — latency with Prometheus unreachable, `maxRtoMs` when no step waited for recovery — is listed there too. When no constraint could be evaluated, the grade is `-`, not `A`. Data loss and RPO come from an INTEGRITY workload, not from a plan: a resilience test (`kates resilience run`) whose workload is an INTEGRITY test measures both, and the INTEGRITY run reports them in its integrity result, which `kates test get <id>` prints ([Data Integrity Verification](08-data-integrity.md) shows how to size that run so it overlaps the fault).
 
 The checks that do run have limits of their own:
 
@@ -584,8 +584,8 @@ cat > resilience-test.yaml << 'EOF'
 testRequest:
   type: LOAD
   spec:
-    numRecords: 100000
-    numProducers: 4
+    numRecords: 180000     # at 500 records/s: 360 s of load
+    throughput: 500
     recordSize: 1024
     acks: all
 
@@ -593,7 +593,7 @@ chaosSpec:
   experimentName: kafka-pod-kill
   disruptionType: POD_KILL
   targetNamespace: kafka
-  targetLabel: "strimzi.io/component-type=kafka"
+  targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
   chaosDurationSec: 30
 
 steadyStateSec: 30
@@ -602,6 +602,8 @@ EOF
 # Run it
 kates resilience run -f resilience-test.yaml
 ```
+
+The rate limit keeps the load running across the fault: 180,000 records at 500 records/s take 360 s, while the fault is triggered after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s), and the run then polls its probes every 5 s until they pass or it has made `maxRecoveryWaitSec` ÷ 5 polls (24 with the default 120). An unthrottled run can finish before the fault is triggered, and then both summaries describe a run the fault never touched. The `spec` goes to the API as written, so it takes the API's field names: `throughput` sets the rate, and LOAD runs one producer and one consumer whatever `numProducers` says. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and a random pick could then kill a controller instead of a broker.
 
 The CLI prints the chaos outcome, a pre-chaos baseline and post-chaos summary (throughput, P99 latency, error rate), and an **Impact Analysis** table with the percentage change of each metric — `throughputRecPerSec`, `avgLatencyMs`, `p99LatencyMs`, `maxLatencyMs`, and `errorRate`. With illustrative numbers:
 

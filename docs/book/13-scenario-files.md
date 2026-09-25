@@ -50,7 +50,6 @@ scenarios:
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 4
     validate:
       maxP99LatencyMs: 50
       minThroughputRecPerSec: 10000
@@ -76,6 +75,10 @@ scenarios:
 
 The `spec` object controls all test parameters. Every field is optional; the backend fills in defaults per test type (configurable via its `kates.tests.<type>.*` properties), so a STRESS test defaults to larger batches and more producers than a ROUND_TRIP test. The defaults shown below are the stock values for a LOAD test — other types differ.
 
+::: {.callout-important}
+The backend merges `spec` with the test type's defaults and drops `targetThroughput`, `enableIdempotence`, `enableTransactions`, `enableCrc`, `consumerGroup`, `fetchMinBytes` and `fetchMaxWaitMs` in the merge, so setting them changes nothing. A scenario file cannot set the produce rate: no scenario key maps to the API field `throughput`, the rate limit the producer honours, so a scenario runs at its type's default rate, unlimited for LOAD. Every INTEGRITY run is CRC-checked and never transactional, and its producer is idempotent whenever `acks` is `all`, whatever `enableIdempotence`, `enableTransactions` and `enableCrc` say. Of the keys that survive the merge, `parallelProducers` counts only for STRESS and CAPACITY, and no test type reads `numConsumers`, so a LOAD scenario runs one producer and one consumer whatever they say. A `kates resilience run` file can set the rate, because its `spec` goes to the API as written and takes `throughput` — see [Test Types Deep Dive](05-test-types.md) and [Data Integrity Verification](08-data-integrity.md).
+:::
+
 ### Producer Configuration
 
 | Field | Type | Default | Description |
@@ -87,18 +90,18 @@ The `spec` object controls all test parameters. Every field is optional; the bac
 | `batchSize` | Integer | 65536 | Producer batch size in bytes |
 | `lingerMs` | Integer | 5 | Milliseconds to wait before sending a batch |
 | `compressionType` | String | `lz4` | Compression: `none`, `gzip`, `snappy`, `lz4`, `zstd` |
-| `targetThroughput` | Integer | -1 | Target records/sec (-1 = unlimited) |
-| `enableIdempotence` | Boolean | false | Enable Kafka producer idempotency |
-| `enableTransactions` | Boolean | false | Enable Kafka transactions |
+| `targetThroughput` | Integer | -1 | Accepted but dropped, so it does not limit the rate |
+| `enableIdempotence` | Boolean | false | Accepted but dropped; the producer is idempotent whenever `acks` is `all` |
+| `enableTransactions` | Boolean | false | Accepted but dropped, so no run is transactional |
 
 ### Consumer Configuration
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `numConsumers` | Integer | 1 | Number of consumer threads |
-| `consumerGroup` | String | auto | Consumer group name |
-| `fetchMinBytes` | Integer | 1 | Minimum bytes per fetch request |
-| `fetchMaxWaitMs` | Integer | 500 | Maximum wait time for fetch in milliseconds |
+| `numConsumers` | Integer | 1 | Read by no test type |
+| `consumerGroup` | String | auto | Accepted but dropped; the backend names the group |
+| `fetchMinBytes` | Integer | 1 | Accepted but dropped |
+| `fetchMaxWaitMs` | Integer | 500 | Accepted but dropped |
 
 ### Topic Configuration
 
@@ -119,7 +122,7 @@ The `spec` object controls all test parameters. Every field is optional; the bac
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enableCrc` | Boolean | true | Enable CRC32 checksum verification on messages |
+| `enableCrc` | Boolean | true | Accepted but dropped; every INTEGRITY run verifies a CRC32 checksum on each record |
 
 ## Validation Reference (SLA Gates)
 
@@ -186,7 +189,6 @@ scenarios:
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 4
       recordSizeBytes: 1024
       acks: all
     validate:
@@ -204,7 +206,6 @@ scenarios:
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 2
     validate:
       maxP99LatencyMs: 50
       minThroughputRecPerSec: 10000
@@ -223,8 +224,6 @@ scenarios:
     spec:
       records: 50000
       acks: all
-      enableIdempotence: true
-      enableCrc: true
     validate:
       maxDataLossPercent: 0.0
       maxOutOfOrder: 0
@@ -239,9 +238,6 @@ scenarios:
     type: ROUND_TRIP
     spec:
       records: 10000
-      parallelProducers: 1
-      numConsumers: 1
-      consumerGroup: "latency-cg"
     validate:
       maxP99LatencyMs: 25
       maxAvgLatencyMs: 10
@@ -257,7 +253,6 @@ scenarios:
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 4
     validate:
       maxP99LatencyMs: 50
 
@@ -265,7 +260,6 @@ scenarios:
     type: LOAD
     spec:
       records: 100000
-      parallelProducers: 4
       batchSize: 262144
       lingerMs: 50
       compressionType: zstd
@@ -351,8 +345,7 @@ Scenario files also work in JSON:
       "name": "Load Test",
       "type": "LOAD",
       "spec": {
-        "records": 100000,
-        "parallelProducers": 4
+        "records": 100000
       },
       "validate": {
         "maxP99LatencyMs": 50,
