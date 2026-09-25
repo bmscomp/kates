@@ -229,27 +229,59 @@ helm template strimzi-operator charts/strimzi-operator -n strimzi-operator \
 
 Every version on the left must appear on the right. If one does not, stop and upgrade that cluster's Kafka version first.
 
-**The roll-survivability gate.** Adoption rolls every broker (the next section explains why), so the cluster must survive losing one at a time. Read the replication settings from inside the cluster, not from `KafkaTopic` resources — a cluster with no `KafkaTopic` resources still has topics, and it is the real topics that must survive:
+**The roll-survivability gate.** Adoption rolls every broker (the next section explains why), so the cluster must survive losing one at a time. Read the replication settings from inside the cluster, not from `KafkaTopic` resources — a cluster with no `KafkaTopic` resources still has topics, and it is the real topics that must survive.
+
+Both internal listeners authenticate (SCRAM-SHA-512 on 9092, mutual TLS on 9093) and the brokers enforce ACLs, so the Kafka tools need credentials. Without them `kafka-topics.sh` retries until it times out, prints an `Error while executing topic command` line to standard output and exits 1 — and a `grep` for bad topics after it prints nothing, which reads as a pass. Run the tools inside a broker pod, where the listener is local, with a client configuration built from the `kates-backend` KafkaUser's Secret. The platform profile makes `kates-backend` a super user, so it can describe every topic and its configuration; on a cluster without the profile, use a KafkaUser allowed `Describe` and `DescribeConfigs` on every topic:
 
 ```bash
-BROKER=$(kubectl get pods -n kafka -l strimzi.io/broker-role=true -o name | head -1)
+BROKER=$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter,strimzi.io/broker-role=true -o name | head -1)
+JAAS=$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.sasl\.jaas\.config}' | base64 -d)
 
-kubectl exec -n kafka "${BROKER}" -- \
-  /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe \
-  | grep -E 'ReplicationFactor:\s*1\b'
+# Written to the pod's memory-backed /tmp, so it is gone when the pod restarts
+kubectl exec -i -n kafka "${BROKER}" -- sh -c 'cat > /tmp/client.properties' <<EOF
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=${JAAS}
+EOF
 ```
 
-Expect no output. Any topic with a replication factor of 1 goes offline the moment its broker restarts. Confirm `min.insync.replicas` is strictly below `default.replication.factor`, that no partition is under-replicated, and that every broker pool has more than one replica or a replication factor that spans pools.
-
-**The condition gate.** Check conditions by name rather than eyeballing for green:
+Describe every topic, and check that the command succeeded before you read the result — an empty result is a failure, not a pass:
 
 ```bash
-kubectl get kafka krafter -n kafka -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+if kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+     --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+     --describe > /tmp/topics.txt && grep -q '^Topic:' /tmp/topics.txt; then
+  echo "OK: described $(grep -c '^Topic:' /tmp/topics.txt) topics"
+else
+  echo "GATE FAILED: could not describe the topics" >&2
+  cat /tmp/topics.txt
+fi
+
+# Topics with a replication factor of 1 — expect no output
+grep -E '^Topic:.*[[:space:]]ReplicationFactor: 1[[:space:]]' /tmp/topics.txt
+
+# Partitions already short of a replica, then partitions at min.insync.replicas — expect no output
+kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+  --describe --under-replicated-partitions
+kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+  --describe --at-min-isr-partitions
 ```
 
-`Ready=True` is the bar. A `Warning=True` with reason `KafkaMetadataVersion` may also be present — it means the `metadataVersion` in the CR trails the running Kafka version and an earlier upgrade never finished. That is pre-existing debt: this migration neither causes it nor fixes it, and waiting for it to clear on its own will not work. Record it, decide separately whether to complete that metadata upgrade, and do not treat it as a blocker for the operator work.
+The first check must print `OK`; only then does silence from the other three mean something. Any topic with a replication factor of 1 goes offline the moment its broker restarts, an under-replicated partition has already lost a replica, and a partition at `min.insync.replicas` rejects `acks=all` writes as soon as one more replica leaves — so the roller refuses to restart its broker. Confirm too that every broker pool has more than one replica or a replication factor that spans pools. `kates cluster check` counts under-replicated and offline partitions, but it reports no replication factors and exits 0 whatever it finds, so it does not replace this gate.
 
-Finally, record the baseline watch scope (expect `*`) and take a maintenance window.
+Run the gate against every Kafka cluster the operator watches — `kubectl get kafka -A` lists them — not only `krafter`: all of them roll. For each other cluster, substitute its namespace, its name in the `strimzi.io/cluster` label, and a KafkaUser of that cluster allowed `Describe` and `DescribeConfigs` on every topic, with the security settings its listener expects — `kates-backend` exists only where the platform profile created it.
+
+**The condition gate.** Check conditions by name rather than eyeballing for green, on every Kafka cluster:
+
+```bash
+kubectl get kafka -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{range .status.conditions[*]}  {.type}={.status} {.reason}{"\n"}{end}{end}'
+```
+
+`Ready=True` under every cluster is the bar. A `Warning=True` with reason `KafkaMetadataVersion` may also be present — it means the `metadataVersion` in the CR trails the running Kafka version and an earlier upgrade never finished. That is pre-existing debt: this migration neither causes it nor fixes it, and waiting for it to clear on its own will not work. Record it, decide separately whether to complete that metadata upgrade, and do not treat it as a blocker for the operator work.
+
+Finally, record the baseline watch scope (`*` for an operator that watches every namespace; Step 2 shows how to read it) and take a maintenance window.
 
 ### Step 1 — Verify Adoptability Without Mutating
 
@@ -257,10 +289,14 @@ Finally, record the baseline watch scope (expect `*`) and take a maintenance win
 Pass `--reset-values`. Bare `helm upgrade` **is** `--reuse-values`: when you supply no values, Helm copies the previous release's stored config forward. That stored config is the stale flat keys from the retired call sites, and this chart's schema rejects them. This is a one-time cost — after the first adoption the stored config is clean and later bare upgrades pass.
 :::
 
+`--reset-values` drops every other value the release carries as well, so the command passes back what the operator must keep. `<domain>` is the cluster's DNS domain: the `kubernetesServiceDnsDomain` value in the Step 0 record, `/tmp/pre-migration-values.yaml`, or `cluster.local` when the record has none. On a later upgrade of an operator that runs with more — an overlay such as `values-prod.yaml`, or a namespace scope — add those flags too; [Upgrading the Operator](#upgrading-the-operator) lists them.
+
 ```bash
 helm upgrade strimzi-operator charts/strimzi-operator \
   --namespace strimzi-operator \
-  --reset-values --dry-run=server
+  --reset-values \
+  --set strimzi-kafka-operator.kubernetesServiceDnsDomain=<domain> \
+  --dry-run=server
 ```
 
 Expect a clean render with no ownership error and no schema error. Confirm `helm list -n strimzi-operator` still shows the old revision — a server dry-run does not mutate the release.
@@ -310,22 +346,31 @@ Every Kafka version on the live side must still be present on the rendered side 
 ### Step 3 — Adopt, in Three Movements
 
 ::: {.callout-caution}
-Adoption rolls the entire Kafka data plane. The operand image tag embeds the operator version — the operator's image map reads `<kafka-version>=quay.io/strimzi/kafka:<operator-version>-kafka-<kafka-version>` — so the same Kafka version resolves to a different image after the bump. No node pool pins an image, so every broker and every controller restarts. This is not optional and it is not avoidable — pinning `.spec.kafka.image` to dodge it is not supported by Strimzi. It can only be **deferred**, which is what the three movements below do — the roll itself is sequenced by the operator, not by you. Take a maintenance window.
+Adoption rolls the entire Kafka data plane. The operand image tag embeds the operator version — the operator's image map reads `<kafka-version>=quay.io/strimzi/kafka:<operator-version>-kafka-<kafka-version>` — so the same Kafka version resolves to a different image after the bump. No node pool pins an image, so every broker and every controller restarts. Kafka Connect and MirrorMaker 2 workers on the operator's default image roll for the same reason, and any other operand rolls wherever the new operator renders its pods differently. This is not optional and it is not avoidable — pinning `.spec.kafka.image` to dodge it is not supported by Strimzi. It can only be **deferred**, which is what the three movements below do — the roll itself is sequenced by the operator, not by you. Take a maintenance window.
 :::
 
-**Step 3a — Pause reconciliation:** annotate the Kafka resource so the new operator adopts the cluster without touching it.
+**Step 3a — Pause reconciliation:** annotate every resource the new operator would roll, so it adopts them without touching them.
 
-Pause the `Kafka` resource, and only the `Kafka` resource:
+By default the operator watches every namespace (`watchAnyNamespace: true`, so `STRIMZI_NAMESPACE` is `*`), and the new one reconciles everything it finds the moment it starts. For an operator installed with `kates deploy --operator-scope namespace`, which watches only some namespaces, the pause below is wider than it needs to be, and Step 3c releases the same list. Pausing `krafter` alone leaves every other Kafka cluster, Kafka Connect cluster, MirrorMaker 2 and Kafka Bridge free to roll during Step 3b — the one step meant to be cheap to roll back. The kinds that run pods and honor the pause annotation are `Kafka`, `KafkaConnect`, `KafkaMirrorMaker2` and `KafkaBridge`. Pause all of them, in every namespace, but leave out any that someone paused before you, and keep the list, so Step 3c releases exactly what this step paused:
 
 ```bash
-kubectl annotate kafka krafter -n kafka strimzi.io/pause-reconciliation=true --overwrite
+KINDS=kafka,kafkaconnect,kafkamirrormaker2,kafkabridge
+
+# Everything the operator will reconcile, minus what is already paused
+kubectl get "${KINDS}" -A -o jsonpath='{range .items[*]}{.kind} {.metadata.namespace} {.metadata.name} {.metadata.annotations.strimzi\.io/pause-reconciliation}{"\n"}{end}' \
+  | awk '$4 != "true" {print tolower($1), $2, $3}' > /tmp/paused-by-upgrade.txt
+cat /tmp/paused-by-upgrade.txt
+
+while read -r kind ns name; do
+  kubectl annotate "${kind}" "${name}" -n "${ns}" strimzi.io/pause-reconciliation=true --overwrite
+done < /tmp/paused-by-upgrade.txt
 
 # Confirm the pause took effect BEFORE upgrading anything
-kubectl get kafka krafter -n kafka \
-  -o jsonpath='{.status.conditions[?(@.type=="ReconciliationPaused")].status}'
+kubectl get "${KINDS}" -A \
+  -o custom-columns='KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,PAUSED:.status.conditions[?(@.type=="ReconciliationPaused")].status'
 ```
 
-This must report `True`. Do not proceed otherwise.
+Every row must report `True` in `PAUSED`. Do not proceed otherwise.
 
 ::: {.callout-important}
 Do not try to pause node pools. Strimzi runs no assembly operator for `KafkaNodePool` — the pause annotation is honored on the `Kafka` resource and on the other top-level resources that have their own operator, and nowhere else. Annotating a pool writes an annotation nothing reads: the pool reports no `ReconciliationPaused` condition, so a gate that waits for one never passes.
@@ -336,15 +381,19 @@ Pausing the parent is sufficient precisely because pools have no independent rec
 Listing the pools is still worthwhile — it sizes the roll you are deferring, and names the pods that restart in Step 3c:
 
 ```bash
-kubectl get kafkanodepool -n kafka
+kubectl get kafkanodepool -A
 ```
 
 **Step 3b — Upgrade the control plane only:** this is the real checkpoint, and the only place where rollback is cheap.
 
+Pass back the same values as in Step 1 — the DNS domain, and on a later upgrade the overlay and scope the operator runs with:
+
 ```bash
 helm upgrade strimzi-operator charts/strimzi-operator \
   --namespace strimzi-operator \
-  --reset-values --timeout 10m --wait
+  --reset-values \
+  --set strimzi-kafka-operator.kubernetesServiceDnsDomain=<domain> \
+  --timeout 10m --wait
 ```
 
 The `pre-upgrade` hook applies the target CRDs before the Deployment is patched. Verify in isolation — the data plane has not moved yet:
@@ -354,7 +403,8 @@ The `pre-upgrade` hook applies the target CRDs before the Deployment is patched.
 kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
   -o jsonpath='{.spec.template.spec.containers[0].image}'
 
-# The canary: if this is not "*", STOP and roll back
+# The canary: it must match the scope Step 0 recorded ("*" for an operator that
+# watches every namespace); if it does not, STOP and roll back
 kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
   -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_NAMESPACE")].value}'
 
@@ -367,12 +417,14 @@ kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=50 |
 
 **Step 3c — Unpause and let the operator sequence the roll:** pausing deferred the roll; this is where it happens.
 
-Unpausing the `Kafka` resource releases the whole data plane at once. There is no per-pool staging — the pause lives on the parent, so lifting it resumes reconciliation for every pool together:
+Unpausing a `Kafka` resource releases its whole data plane at once. There is no per-pool staging — the pause lives on the parent, so lifting it resumes reconciliation for every pool together. Release the Kafka clusters first, and their clients only once the brokers have converged:
 
 ```bash
-kubectl annotate kafka krafter -n kafka strimzi.io/pause-reconciliation-
+# 1. The Kafka clusters this procedure paused — their roll starts immediately
+awk '$1 == "kafka"' /tmp/paused-by-upgrade.txt | while read -r kind ns name; do
+  kubectl annotate "${kind}" "${name}" -n "${ns}" strimzi.io/pause-reconciliation-
+done
 
-# The roll starts immediately; watch it proceed
 kubectl get pods -n kafka -w
 ```
 
@@ -384,10 +436,24 @@ You do not sequence this roll — the operator does, and its guarantees are stro
 
 This is why Step 0's replication gate is the real safety mechanism: the roller can only honor what your replication factors permit. On a topic with `min.insync.replicas` equal to its replication factor, there is no safe moment to roll and the operator stalls rather than breaking the topic.
 
-Watch the cluster converge:
+Watch every Kafka cluster converge — each must report `Ready` `True` before you go on:
 
 ```bash
-kubectl get kafka krafter -n kafka -o jsonpath='{range .status.conditions[*]}{.type}={.status}{"\n"}{end}'
+kubectl get kafka -A \
+  -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status'
+```
+
+Then release everything else this procedure paused — the Connect, MirrorMaker 2 and Bridge resources roll now, against brokers that are already done — and confirm nothing is left paused but what was paused before Step 3a:
+
+```bash
+# 2. The rest of the list
+awk '$1 != "kafka"' /tmp/paused-by-upgrade.txt | while read -r kind ns name; do
+  kubectl annotate "${kind}" "${name}" -n "${ns}" strimzi.io/pause-reconciliation-
+done
+
+KINDS=kafka,kafkaconnect,kafkamirrormaker2,kafkabridge
+kubectl get "${KINDS}" -A \
+  -o custom-columns='KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,PAUSED:.status.conditions[?(@.type=="ReconciliationPaused")].status,READY:.status.conditions[?(@.type=="Ready")].status'
 ```
 
 Then run the chart's tests:
@@ -403,6 +469,10 @@ Retarget every remaining ad-hoc install in the same change: the deploy scripts, 
 ## Upgrading the Operator
 
 The CLI is the front door: `kates deploy --strimzi-version <v>` fetches that version's chart, reads its Kafka window and CRD API, compares it with the installed operator (same → converge; older → upgrade after a confirmation listing the clusters that will roll; newer → refused), and installs through this wrapper — from the repository directory for the pin, from a generated per-version copy of it otherwise — so the CRD hook always applies the matching bundle. `--operator-scope namespace` installs the operator watching only the primary's namespaces instead of every namespace; `values-namespace-scope.yaml` is the shape of an *additional*, co-located operator that a future `kates clusters add` will install beside it (see [the multi-version plan](../kafka-multi-version-deploy-plan.md)).
+
+::: {.callout-warning}
+The CLI path checks the version window — Step 0's version gate — but runs none of the other gates and pauses nothing: once you confirm, the new operator reconciles everything it watches as soon as it starts, and every operand the upgrade changes rolls at that moment. And every `kates deploy` run re-applies the operator release, not only one with `--strimzi-version` (`--with-strimzi` is on by default): it upgrades the release with `--reset-values` and the Kind or generic overlay, so an operator installed with `values-prod.yaml` loses what that overlay added — the drain cleaner and its webhook, upstream's operator NetworkPolicy, both PodDisruptionBudgets — the next time anyone runs `kates deploy` against the cluster. `scripts/deploy-kafka.sh` and `scripts/deploy-kafka-generic.sh` re-apply it the same way, with no overlay at all. Upgrade a production operator by hand, with the procedure above, and run `kates deploy --with-strimzi=false` on that cluster, which leaves the operator release alone.
+:::
 
 For the repository's own pin, a version bump is a values change plus an upgrade. The pin lives in six places that must agree, which `scripts/check-versions.sh` enforces — it runs in CI on every chart change, and locally via `make check-versions`:
 
@@ -426,7 +496,15 @@ helm dependency build charts/strimzi-operator
 
 If `strimziVersion` drifts from the dependency version, the hook applies CRDs for a different operator than the one being installed — the worst failure this design can produce, and a silent one. Run the check before the upgrade, not after.
 
-From there the procedure is Step 0 through Step 3 above, unchanged. Every operator upgrade rolls the data plane for the same reason adoption does, so every operator upgrade needs the pause-and-sequence treatment and a window. The [Upgrade Playbook](18-upgrade-playbook.md)'s golden rule still holds: upgrade the operator before Kafka, and run `make gameday` afterwards.
+From there the procedure is Step 0 through Step 3 above. Every operator upgrade rolls the data plane for the same reason adoption does, so every operator upgrade needs the pause-and-sequence treatment and a window.
+
+`--reset-values` in Step 1 and Step 3b is deliberate: it takes `strimziVersion`, and with it the CRD bundle, from the chart you install rather than from the release. It also drops everything the release was installed with, so both commands pass back what the operator runs with. `helm get values strimzi-operator -n strimzi-operator` shows what the release carries now; compare it with the flags before you run either command:
+
+- The DNS domain, which both commands already carry: `--set strimzi-kafka-operator.kubernetesServiceDnsDomain=<domain>`.
+- The overlay the operator runs with: `-f charts/strimzi-operator/values-prod.yaml` in production; `kates deploy` installs with `values-kind.yaml` or `values-generic.yaml`.
+- The scope of an operator installed with `kates deploy --operator-scope namespace`: `--set strimzi-kafka-operator.watchAnyNamespace=false --set 'strimzi-kafka-operator.watchNamespaces={<namespace>,<namespace>}'`. Without them the operator comes back watching every namespace.
+
+The [Upgrade Playbook](18-upgrade-playbook.md)'s golden rule still holds: upgrade the operator before Kafka, and run `make gameday` afterwards.
 
 ## Rollback
 
@@ -450,7 +528,7 @@ Two caveats decide whether rollback is cheap or expensive:
   ```
 
   Restoring an older schema over resources that already use newer fields drops those fields. Roll the operator back first, so nothing is writing the fields you are about to remove.
-- **Rollback re-rolls the data plane.** Rolling back at Step 3b, while the `Kafka` resource is still paused, is free. Rolling back after Step 3c means every broker restarts a second time.
+- **Rollback re-rolls the data plane.** Rolling back at Step 3b, while everything Step 3a paused is still paused, is free. Rolling back after Step 3c means every broker restarts a second time.
 
 ::: {.callout-caution}
 Never migrate or roll back by uninstalling. `helm uninstall strimzi-operator` leaves the CRDs behind — and those orphaned CRDs are the only thing keeping every `Kafka`, `KafkaNodePool`, `KafkaTopic`, and `KafkaUser` resource alive while no operator is running. Deleting them by hand to "clean up" cascades through `CRD → Kafka / KafkaNodePool → StrimziPodSet → Pods` and destroys every cluster the operator manages, in every namespace. The two operations to never perform on a live cluster are `kubectl delete crd` on anything matching `*.strimzi.io`, and an uninstall-then-reinstall cycle. Use `helm upgrade` and `helm rollback` — both are in-place patches.
@@ -581,7 +659,8 @@ The Strimzi operator version, the chart version, and the Kafka versions each ope
 - The operator is a separate Helm release because CRDs must exist and be `Established` before any `Kafka` resource can validate — and because a cluster-wide singleton has no business inside a chart you might install twice.
 - Helm applies `crds/` on install and never again; the chart's `pre-install`/`pre-upgrade` hook is what keeps the schema current, and without it the API server silently prunes fields the frozen CRDs do not know about.
 - The CRDs deliberately stay untemplated: Helm does not know they exist, which is the only reason `helm uninstall` cannot cascade through `CRD → Kafka → StrimziPodSet → Pods` and destroy every cluster.
-- Adoption is a pure in-place patch — identical names, nothing recreated — but it rolls every broker and controller, because the operand image tag embeds the operator version. Pause the `Kafka` resource, upgrade the control plane, verify, then unpause and let the operator sequence the roll.
+- Adoption is a pure in-place patch — identical names, nothing recreated — but it rolls every broker and controller, because the operand image tag embeds the operator version. Pause every `Kafka`, `KafkaConnect`, `KafkaMirrorMaker2` and `KafkaBridge` the operator watches, upgrade the control plane, verify, then unpause — the Kafka clusters first — and let the operator sequence the roll.
+- The roll-survivability gate runs the Kafka tools with SCRAM credentials from the `kates-backend` Secret and checks their exit status: without credentials they fail, and a failed describe piped into `grep` looks exactly like a pass.
 - Bare `helm upgrade` is `--reuse-values`: pass `--reset-values` once during adoption, or the schema rejects the stale flat keys the ad-hoc install left in the release record.
 - Every operator setting nests under `strimzi-kafka-operator:`; a top-level key is silently ignored by Helm, and the schema rejects it so the mistake is loud rather than invisible.
 

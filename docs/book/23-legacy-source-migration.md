@@ -312,7 +312,10 @@ an old source is where the version questions land in the order:
 
 1. **Establish the source's version, from the source.** Not from the runbook,
    not from the ticket. `kafka-broker-api-versions.sh --bootstrap-server "$SRC"`
-   answers it from the wire.
+   lists, from the wire, the version range of each API the brokers serve; the
+   newest versions narrow it to a release line, not an exact release. The
+   broker's startup log (`Kafka version: …`) and the `Version` attribute of
+   the `kafka.server:type=app-info` MBean name the release itself.
 2. **Decide one hop or two.** At or above 2.1, one mirror. Below it, the
    intermediate cluster from Two Hops above.
 3. **Inventory the clients**, using `DeprecatedRequestsPerSec` if the source is

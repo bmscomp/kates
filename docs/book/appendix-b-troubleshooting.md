@@ -154,11 +154,8 @@ kubectl logs <broker-pod> -n kafka --previous --tail=30
 # Kafka status conditions
 kubectl get kafka krafter -n kafka -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}'
 
-# Under-replicated partitions
-kubectl exec <broker-pod> -n kafka -- bin/kafka-topics.sh --describe --under-replicated-partitions --bootstrap-server localhost:9092
-
-# Consumer lag
-kubectl exec <broker-pod> -n kafka -- bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --all-groups --describe
+# Under-replicated and offline partitions, through the Kates backend
+kates cluster check
 
 # Kyverno policy status
 kates kyverno status
@@ -169,4 +166,40 @@ kates kyverno violations
 # Kyverno violations (specific namespace)
 kates kyverno violations --namespace kafka
 ```
+
+### Kafka Tools Inside a Broker Pod
+
+The tools under `/opt/kafka/bin` need credentials. Both internal listeners authenticate — SCRAM-SHA-512 on 9092, mutual TLS on 9093 — and the brokers enforce ACLs. Without credentials `kafka-topics.sh` retries until it times out, prints an `Error while executing topic command` line to standard output and exits 1, so a filter after it shows nothing and a broken command reads like a healthy cluster. Build one client configuration from the `kates-backend` KafkaUser's Secret — the platform profile makes that user a super user, so it can describe every topic, its configuration and every consumer group — and pass it to each tool with `--command-config`:
+
+```bash
+BROKER=$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter,strimzi.io/broker-role=true -o name | head -1)
+JAAS=$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.sasl\.jaas\.config}' | base64 -d)
+
+# Written to the pod's memory-backed /tmp, so it is gone when the pod restarts
+kubectl exec -i -n kafka "${BROKER}" -- sh -c 'cat > /tmp/client.properties' <<EOF
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=${JAAS}
+EOF
+
+# Prove the credentials work: this lists the topics, __consumer_offsets included
+kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --command-config /tmp/client.properties --list
+```
+
+Then every tool takes the same two flags:
+
+```bash
+# Under-replicated partitions — no output means none, once --list above succeeded
+kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+  --describe --under-replicated-partitions
+
+# Consumer lag
+kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+  --all-groups --describe
+```
+
+`kates kafka groups` and `kates kafka group <group-name>` answer the lag question through the Kates backend without a broker pod. The client configuration carries a super user's password: it stays in the broker pod, and `kubectl exec -n kafka "${BROKER}" -- rm /tmp/client.properties` removes it when you are done.
 
