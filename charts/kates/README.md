@@ -32,8 +32,8 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `image.repository` | `kates` | Container image name |
-| `image.tag` | `latest` | Container image tag |
+| `image.repository` | `ghcr.io/bmscomp/kates` | Container image name |
+| `image.tag` | `1.23.0` | Container image tag, pinned in `values.yaml` to match the chart's `appVersion`. Keep it at 1.22.0 or newer: the probes use health endpoints older images lack |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy |
 | `replicaCount` | `1` | Number of Kates pods |
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address |
@@ -52,7 +52,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `ingress.certManager.enabled` | `false` | Auto-create TLS via cert-manager |
 | `ingress.certManager.issuerName` | `""` | cert-manager issuer name |
 | `ingress.certManager.issuerKind` | `ClusterIssuer` | Issuer kind |
-| `networkPolicy.enabled` | `false` | Enable NetworkPolicy |
+| `networkPolicy.enabled` | `true` | Enable NetworkPolicy |
 | `networkPolicy.kafka.namespace` | `kafka` | Kafka egress target namespace |
 | `networkPolicy.kafka.port` | `9092` | Kafka egress target port |
 | `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace |
@@ -200,8 +200,6 @@ helm install kates ./charts/kates \
 ```bash
 helm install kates ./charts/kates \
   --namespace kates --create-namespace \
-  --set image.repository=ghcr.io/bmscomp/kates \
-  --set image.tag=1.0.0 \
   --set kafka.bootstrapServers=my-kafka:9092 \
   --set postgresql.enabled=false \
   --set externalDatabase.enabled=true \
@@ -223,15 +221,16 @@ helm install kates ./charts/kates \
 
 ## Example: EKS with ALB Ingress
 
+The repository is an ECR mirror of `ghcr.io/bmscomp/kates` holding the tag `values.yaml` names. The ALB is internal: reachable from the VPC only.
+
 ```bash
 helm install kates ./charts/kates \
   --namespace kates --create-namespace \
   --set image.repository=123456789.dkr.ecr.us-east-1.amazonaws.com/kates \
-  --set image.tag=1.0.0 \
   --set kafka.bootstrapServers=b-1.msk-cluster.kafka.us-east-1.amazonaws.com:9092 \
   --set ingress.enabled=true \
   --set ingress.className=alb \
-  --set ingress.annotations."alb\.ingress\.kubernetes\.io/scheme"=internet-facing \
+  --set ingress.annotations."alb\.ingress\.kubernetes\.io/scheme"=internal \
   --set ingress.annotations."alb\.ingress\.kubernetes\.io/target-type"=ip \
   --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::role/kates
 ```

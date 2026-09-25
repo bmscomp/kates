@@ -41,7 +41,7 @@ The simplest deployment puts everything — Kafka, Kates, monitoring, chaos tool
 Why? Each namespace can have independent:
 - **RBAC policies** — the team running chaos experiments shouldn't need write access to the Kafka namespace
 - **Resource quotas** — prevent the monitoring stack from starving Kafka of memory during a spike
-- **Network policies** — default-deny per namespace means a compromised monitoring pod can't reach broker ports
+- **Network policies** — rules on which pods may reach which ports. They add up rather than override, and as the charts ship they leave the Kafka client listeners open to every pod in the cluster: the policy Strimzi generates admits any pod to a listener without `networkPolicyPeers`. A compromised monitoring pod can reach the brokers until you close the listeners — see [Security & Compliance](17-security.md#network-policies)
 
 The isolated topology uses these namespaces by default:
 
@@ -65,9 +65,9 @@ How you expose services outside the cluster depends on where the cluster runs:
 |----------|------------|------------|
 | **NodePort** | Local Kind clusters, CI runners | Simple — no external dependencies. Limited to ports 30000–32767. No TLS termination. |
 | **Ingress** | Shared development clusters, staging | Path-based routing, TLS termination, single entry point. Requires an Ingress controller. |
-| **LoadBalancer** | Production cloud deployments | Cloud-native L4 load balancing, static IPs, health checks. Costs money per service. |
+| **LoadBalancer** | Production cloud deployments | Cloud-native L4 load balancing, static IPs, health checks. Usually public unless annotated internal. Costs money per service. |
 
-The default deployment uses **NodePort** for all services (Grafana on 30080, Kafka UI on 30081, etc.). Cloud deployments should switch to LoadBalancer or Ingress — see the [Cloud Deployment](#cloud-deployment) section for provider-specific annotations.
+The default deployment uses **NodePort** for all services (Grafana on 30080, Kafka UI on 30081, etc.). The Kind cluster does not publish those ports on the host, so `make ports` forwards each service it finds to the same port number on `localhost`. It looks for Grafana and Prometheus only in the `kafka` namespace, not in `monitoring`, where `kates deploy` installs them; [The Cluster Under Test](03-cluster.md#access-points) gives the command that reaches them. Cloud deployments should switch to internal LoadBalancers or Ingress — see the [Cloud Deployment](#cloud-deployment) section for provider-specific annotations.
 
 ### Ephemeral vs Persistent Storage for Test Data
 
@@ -145,7 +145,7 @@ The following table shows resource requirements per component. Use this to right
 | Strimzi Operator | 1 | 200m / 500m | 384Mi / 384Mi | — | Watches CRs, low steady-state usage |
 | Cruise Control | 1 | 500m / 1000m | 512Mi / 1Gi | — | Spikes during rebalance calculations |
 | Kafka Exporter | 1 | 100m / 200m | 128Mi / 256Mi | — | Consumer lag metrics |
-| Kates Backend | 1 | 500m / 1000m | 512Mi / 2560Mi | — | JVM: `-Xms512m -Xmx2560m` with ZGC |
+| Kates Backend | 1 | 500m / 2000m | 2Gi / 4Gi | — | JVM: `-Xms512m -Xmx2560m` with ZGC — 62.5% of the limit, see [JVM Tuning](#jvm-tuning) |
 | PostgreSQL | 1 | 250m / 500m | 256Mi / 512Mi | 10Gi | Test results and metadata |
 | Prometheus | 1 | 500m / 1000m | 1Gi / 2Gi | 50Gi | 30d retention in the generic overlay |
 | Grafana | 1 | 100m / 200m | 128Mi / 256Mi | — | 13 pre-provisioned dashboards |
@@ -161,11 +161,19 @@ The **Minimal** profile (16 GB) runs everything but leaves almost no headroom. I
 
 The default deployment targets Kind. Moving to a cloud provider requires adjustments to storage classes, service exposure, and identity federation. This section provides the key overrides for each major provider.
 
+Every overlay below keeps its load balancers **internal**: reachable only from inside the cluster's VPC or VNet. The Kafka load balancers, and Grafana's on EKS and AKS, also admit only the ranges in `loadBalancerSourceRanges`; on GKE the Kates API and Grafana sit behind an internal Ingress, which takes no source ranges (see [Google GKE](#google-gke)). A LoadBalancer Service with no provider annotations usually gets a public address instead. The external Kafka listener still demands TLS and SCRAM-SHA-512, but a broker endpoint on the internet is attack surface all the same: anyone who can reach the port can probe its TLS stack, try passwords against SCRAM, and load the brokers with connections that authentication has yet to refuse. `10.0.0.0/16` stands for your VPC or VNet range in every overlay; add the peered or on-premises ranges your clients run in.
+
+For Kafka, the chart passes `kafka.externalAccess.configuration` to the Strimzi listener's `configuration` unchanged. Strimzi creates one load balancer for the bootstrap and one per broker, and each needs the provider's annotations: `bootstrap.annotations` covers the first, `perBrokerAnnotationsTemplate` every broker whatever its node ID, and `loadBalancerSourceRanges` applies to all of them. `perBrokerAnnotationsTemplate` needs Strimzi 1.1.0 or newer (the version the repository pins is in the [Version & Compatibility Matrix](appendix-d-versions.md)). Strimzi 1.0.x does not have the field: the API server rejects the Kafka resource or drops the field, and a dropped field leaves every broker's Service on the provider's default. On 1.0.x, annotate the brokers one by one instead, under `configuration.brokers`, with a `broker` node ID and its `annotations` per entry. Grafana sits behind an internal load balancer too (an internal Ingress on GKE); it serves plain HTTP, so put TLS in front of it before you open it to more clients.
+
+::: {.callout-important}
+Open a load balancer to the internet only on purpose: switch the scheme (`internet-facing` on EKS; drop the internal annotation on GKE and AKS) and set `loadBalancerSourceRanges` to the public ranges of the clients that need it. On a public load balancer, empty ranges mean `0.0.0.0/0`. `kafka.externalAccess.allowedCidrs` does not replace them. It narrows the chart's own NetworkPolicy rule for the listener, but NetworkPolicies add up, and the policy the Strimzi operator generates for the cluster admits the listener's port from anywhere, because the `externalAccess` preset sets no `networkPolicyPeers` on the listener. Behind a load balancer the address a NetworkPolicy sees is also often a node or the load balancer rather than the client. So the overlays leave `allowedCidrs` empty and filter at the load balancer.
+:::
+
 ### Amazon EKS
 
 **Storage:** Use the `gp3` StorageClass instead of the default `gp2`. GP3 provides 3,000 baseline IOPS and 125 MB/s throughput regardless of volume size — GP2 scales IOPS with size, which means small test volumes get poor I/O performance.
 
-**Load Balancer:** Use AWS Network Load Balancer (NLB) annotations for Kafka external access. NLB operates at L4 (TCP), which is what Kafka's binary protocol requires.
+**Load Balancer:** Use an internal AWS Network Load Balancer (NLB) for Kafka external access. NLB operates at L4 (TCP), which is what Kafka's binary protocol requires. The annotations below are read by the AWS Load Balancer Controller, which has to be installed in the cluster: `aws-load-balancer-type: external` hands the Service to it, `aws-load-balancer-nlb-target-type: ip` sends traffic straight to the pod, and `aws-load-balancer-scheme: internal` keeps the NLB inside the VPC. Without the controller the Services stay pending, since the in-tree provider leaves `external` to it.
 
 **IAM:** Use IAM Roles for Service Accounts (IRSA) so the Kates pod can access AWS services (S3 for report storage, CloudWatch for metrics export) without embedding credentials.
 
@@ -183,10 +191,19 @@ kafka:
   externalAccess:
     type: loadbalancer
     configuration:
+      # Who may connect, on the bootstrap and every broker
+      loadBalancerSourceRanges:
+        - 10.0.0.0/16
       bootstrap:
         annotations:
-          service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-          service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+          service.beta.kubernetes.io/aws-load-balancer-type: "external"
+          service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+          service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+      # Every per-broker Service, whatever its node ID
+      perBrokerAnnotationsTemplate:
+        service.beta.kubernetes.io/aws-load-balancer-type: "external"
+        service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+        service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
 ```
 
 ```yaml
@@ -208,7 +225,11 @@ kube-prometheus-stack:
     service:
       type: LoadBalancer
       annotations:
-        service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+        service.beta.kubernetes.io/aws-load-balancer-type: "external"
+        service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+        service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+      loadBalancerSourceRanges:
+        - 10.0.0.0/16
   prometheus:
     prometheusSpec:
       storageSpec:
@@ -224,7 +245,19 @@ kube-prometheus-stack:
 
 **Storage:** Use `premium-rwo` for SSD-backed PersistentVolumeClaims. This StorageClass provisions pd-ssd disks with much higher IOPS than the default `standard-rwo` (pd-balanced).
 
-**Ingress:** GKE's built-in Ingress controller integrates with Google Cloud Load Balancing. Use `BackendConfig` resources to configure health checks that match Kafka's and Kates's actual health endpoints.
+**Load Balancer:** `networking.gke.io/load-balancer-type: "Internal"` makes each Kafka Service an internal passthrough Network Load Balancer. GKE enforces `loadBalancerSourceRanges` twice: as VPC firewall rules, and in each node's own packet filtering (kube-proxy, or GKE Dataplane V2).
+
+**Ingress:** GKE's built-in Ingress controller integrates with Google Cloud Load Balancing. The annotation `kubernetes.io/ingress.class: "gce-internal"` gives the Kates API and Grafana an internal Application Load Balancer; it has to be the annotation, because GKE's controller does not read `ingressClassName`. An internal Ingress needs a proxy-only subnet in the cluster's region and container-native load balancing, which the `cloud.google.com/neg` Service annotation turns on. A `BackendConfig`, named from the Service with `cloud.google.com/backend-config`, points the load balancer's health check at Kates's readiness endpoint.
+
+With container-native load balancing, the load balancer's proxies connect straight to the pods from addresses in the proxy-only subnet, and its health checks come from `35.191.0.0/16` and `130.211.0.0/22`. GKE's Ingress controller opens the VPC firewall for the health checks but not for the proxies, so create that rule yourself, for Kates's port 8080 and Grafana's 3000; without it the backends never turn healthy and the Ingress answers 502. The Kates chart's own NetworkPolicy, on by default, admits port 8080 from pods only, so on a cluster that enforces NetworkPolicy (GKE Dataplane V2, which Autopilot always runs, or Calico) it drops both the proxies and the health checks. `kates-gke.yaml` adds a rule for them. `10.129.0.0/23` stands for your proxy-only subnet there and in the firewall rule:
+
+```bash
+gcloud compute firewall-rules create kates-allow-proxy-only-subnet \
+  --network=my-vpc --direction=INGRESS --action=ALLOW \
+  --source-ranges=10.129.0.0/23 --rules=tcp:8080,tcp:3000
+```
+
+The Ingress takes no source ranges: any client that reaches the VPC in that region can connect to it, and the firewall rule above admits the proxies, not the clients. Kates still asks for its API key and Grafana for its login. To restrict who gets that far, turn on Identity-Aware Proxy in the `BackendConfig`; Cloud Armor, the source-range filter of an external Ingress, is not available on an internal one.
 
 **Identity:** Use Workload Identity to bind Kubernetes service accounts to Google Cloud IAM service accounts — no key files to manage.
 
@@ -241,6 +274,29 @@ nodePools:
 kafka:
   externalAccess:
     type: loadbalancer
+    configuration:
+      # Who may connect, on the bootstrap and every broker
+      loadBalancerSourceRanges:
+        - 10.0.0.0/16
+      bootstrap:
+        annotations:
+          networking.gke.io/load-balancer-type: "Internal"
+      # Every per-broker Service, whatever its node ID
+      perBrokerAnnotationsTemplate:
+        networking.gke.io/load-balancer-type: "Internal"
+```
+
+```yaml
+# kates-backend-config.yaml — apply in the kates namespace before the chart
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: kates-backend-config
+spec:
+  healthCheck:
+    type: HTTP
+    requestPath: /q/health/ready
+    port: 8080
 ```
 
 ```yaml
@@ -249,16 +305,35 @@ serviceAccount:
   annotations:
     iam.gke.io/gcp-service-account: "kates@my-project.iam.gserviceaccount.com"
 
+service:
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "kates-backend-config"}'
+
 ingress:
   enabled: true
-  className: gce
   annotations:
-    cloud.google.com/backend-config: '{"default": "kates-backend-config"}'
+    kubernetes.io/ingress.class: "gce-internal"
   hosts:
     - host: kates.example.com
       paths:
         - path: /
           pathType: Prefix
+
+# The load balancer's proxies and health checks reach the pod directly.
+# The chart keeps its own rule for pods on 8080 and 9000 beside this one.
+networkPolicy:
+  ingressRules:
+    - from:
+        - ipBlock:
+            cidr: 10.129.0.0/23    # your proxy-only subnet
+        - ipBlock:
+            cidr: 35.191.0.0/16
+        - ipBlock:
+            cidr: 130.211.0.0/22
+      ports:
+        - port: 8080
+          protocol: TCP
 
 postgresql:
   storage:
@@ -270,9 +345,13 @@ postgresql:
 # monitoring-gke.yaml — overlay for charts/monitoring
 kube-prometheus-stack:
   grafana:
+    service:
+      annotations:
+        cloud.google.com/neg: '{"ingress": true}'
     ingress:
       enabled: true
-      ingressClassName: gce
+      annotations:
+        kubernetes.io/ingress.class: "gce-internal"
       hosts:
         - grafana.example.com
   prometheus:
@@ -290,7 +369,7 @@ kube-prometheus-stack:
 
 **Storage:** Use `managed-premium` for Premium SSD-backed volumes. Premium SSDs offer consistent low-latency I/O, which is critical for Kafka broker performance.
 
-**Load Balancer:** Use internal LoadBalancer annotations for private access within a VNet. For public access, use Azure Application Gateway Ingress Controller (AGIC).
+**Load Balancer:** `service.beta.kubernetes.io/azure-load-balancer-internal: "true"` puts each Kafka Service on an internal Azure Load Balancer in the cluster's VNet. AKS enforces `loadBalancerSourceRanges` in the Network Security Group and on each node, but the NSG's default rule still admits the whole VNet, so the overlays also set `service.beta.kubernetes.io/azure-deny-all-except-load-balancer-source-ranges: "true"`, which adds a deny rule so that the NSG drops every other VNet address before it reaches a node. Azure Application Gateway (AGIC) is an HTTP proxy: it can front Grafana or the Kates API, never Kafka's binary protocol.
 
 **Identity:** Use Azure AD Pod Identity (or the newer Workload Identity Federation) to grant pods access to Azure resources without storing credentials.
 
@@ -308,9 +387,17 @@ kafka:
   externalAccess:
     type: loadbalancer
     configuration:
+      # Who may connect, on the bootstrap and every broker
+      loadBalancerSourceRanges:
+        - 10.0.0.0/16
       bootstrap:
         annotations:
           service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+          service.beta.kubernetes.io/azure-deny-all-except-load-balancer-source-ranges: "true"
+      # Every per-broker Service, whatever its node ID
+      perBrokerAnnotationsTemplate:
+        service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+        service.beta.kubernetes.io/azure-deny-all-except-load-balancer-source-ranges: "true"
 ```
 
 ```yaml
@@ -336,6 +423,9 @@ kube-prometheus-stack:
       type: LoadBalancer
       annotations:
         service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+        service.beta.kubernetes.io/azure-deny-all-except-load-balancer-source-ranges: "true"
+      loadBalancerSourceRanges:
+        - 10.0.0.0/16
   prometheus:
     prometheusSpec:
       storageSpec:
@@ -348,18 +438,71 @@ kube-prometheus-stack:
 ```
 
 ::: {.callout-note}
-Each chart is its own Helm release, so each takes its own overlay — there is no single file that spans them. Layer the Kafka one after the platform profile, and remember the dependency build:
+Each chart is its own Helm release, so each takes its own overlay — there is no single file that spans them. Layer the Kafka one after the platform profile, and the Kates and monitoring ones after the chart's `values-generic.yaml`, the file `kates deploy` applies on a cloud cluster. Without `charts/monitoring/values-generic.yaml` Grafana keeps the chart's default admin password, `admin`, on a load balancer; with it the Grafana chart generates one and stores it in the `monitoring-grafana` Secret.
+:::
+
+`kafka-cluster` and `monitoring` take subcharts from chart repositories — SeaweedFS and kube-prometheus-stack — and `helm dependency build` refuses to fetch them until those repositories are added. Add them once:
+
+```bash
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+```
+
+::: {.callout-caution}
+Do not run the install chain below against a `krafter` that `kates deploy` installed: `helm upgrade --install` upgrades a release that already exists. `kates deploy` installs the release with `.build/values-detected.yaml` first — the node pools, their zones and storage classes come from it — and a chain without it renders other pool names. A pool's name is its identity, so each renamed pool is a new pool with new, empty volumes, while the old pools drop out of the release but keep running with the data (the chart marks them `helm.sh/resource-policy: keep`). Upgrade such a release from its own values instead, as shown after the chain.
+:::
+
+Install a release that does not exist yet from the chart's files, with the overlay last:
 
 ```bash
 helm dependency build charts/kafka-cluster
 
-helm upgrade --install krafter charts/kafka-cluster -n kafka \
+helm upgrade --install krafter charts/kafka-cluster -n kafka --create-namespace \
   -f charts/kafka-cluster/values-platform.yaml \
   -f kafka-eks.yaml
+
+helm dependency build charts/monitoring
+
+helm upgrade --install monitoring charts/monitoring -n monitoring --create-namespace \
+  -f charts/monitoring/values-generic.yaml \
+  -f monitoring-eks.yaml
 ```
 
-An overlay changes only the keys it names; every other default stands.
-:::
+An overlay changes only the keys it names; every other value stands. A release that `kates deploy` installed also carries values the CLI supplied at install time, from `.build/values-detected.yaml` and its `--set` flags — the node pools, broker sizing, versions and replica counts on `krafter`, the bootstrap address on `kates`, the cluster domain and chaos alerts on `monitoring` — and an upgrade that leaves them out resets them to the chart defaults. Upgrade such a release from its own values, with the overlay last.
+
+On `krafter`, first take away the listener the overlay replaces. On EKS, GKE and AKS the detected values declare an `external` LoadBalancer listener with an annotation on the bootstrap Service only, so every broker's load balancer gets the provider's default, usually a public address; on EKS and GKE the bootstrap's is public too. The overlay's `kafka.externalAccess` replaces that listener, but not its load balancers: Strimzi changes the annotations of the Services that exist. On EKS the in-tree provider then leaves those Services to the AWS Load Balancer Controller and keeps the public load balancers it created in place, still forwarding to the brokers, while the controller creates internal ones beside them; AWS warns against changing `aws-load-balancer-type` on an existing Service for that reason. On GKE and AKS the same upgrade would switch live load balancers from public to internal in place. So remove the listener, let its Services and load balancers go, and only then add the overlay's.
+
+Save the release's values:
+
+```bash
+helm dependency build charts/kafka-cluster
+
+# Every value the release was installed with — its files and its --set flags
+helm get values krafter -n kafka -o yaml > krafter-current.yaml
+```
+
+In `krafter-current.yaml`, delete the entry of `kafka.listeners` whose `name` is `external`. The detected values append it after `plain` and `tls`, and Helm keeps a list in order, so it is the last entry. Helm sorts the keys inside it, so it runs from its `- authentication:` line to its `type: loadbalancer` line; leave `plain` and `tls` as they are. If the file has no such entry, go straight to the upgrade with the overlay. Otherwise upgrade from the edited file alone, then list the cluster's Services:
+
+```bash
+helm upgrade krafter charts/kafka-cluster -n kafka -f krafter-current.yaml
+
+kubectl get svc -n kafka -l strimzi.io/cluster=krafter
+```
+
+The brokers roll to drop the listener, and Strimzi deletes its bootstrap and per-broker Services. Wait until the list shows no Service of type `LoadBalancer`, then check in the provider's console or CLI that their load balancers are gone too. Then upgrade with the overlay, from the edited file:
+
+```bash
+helm upgrade krafter charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  -f kafka-eks.yaml
+
+kubectl get kafka krafter -n kafka \
+  -o jsonpath='{.status.listeners[?(@.name=="external")].bootstrapServers}'
+```
+
+The brokers roll again, and Strimzi creates the listener's Services afresh, with the overlay's annotations from the start. External clients get a new bootstrap address, which the `kubectl get kafka` prints once the brokers are ready. The overlay's `nodePools.defaults.storage` changes nothing on such a release: the detected pools set their own storage class and size.
+
+Upgrade `monitoring` in `monitoring` and `kates` in `kates` in one step, from `helm get values` with the overlay last (build the `monitoring` chart's dependencies first). Their overlays' storage settings do not reach the volumes that exist, because a StatefulSet's `volumeClaimTemplates` cannot change once it is created. The Kates overlay's `postgresql.storage` changes those of the bundled PostgreSQL, which `kates deploy` created at the chart's 1Gi on the default class, so Kubernetes refuses the upgrade and Helm marks the release failed: leave the `postgresql` block out of the overlay for such a release. The monitoring overlay's Prometheus `storageSpec` meets the same restriction, but the Prometheus operator replaces the StatefulSet itself, and Prometheus restarts on the volume it had, with that volume's class and size.
 
 ---
 
@@ -473,7 +616,7 @@ make kates
 make kates-build     # Build JVM image + load into Kind
 make kates-deploy    # Apply K8s manifests
 
-# Native image (GraalVM)
+# Load a native (GraalVM) image into Kind — deploys nothing
 make kates-native
 ```
 
@@ -500,26 +643,40 @@ The 13 annotated methods across `TopicService`, `ClusterHealthService`, and `Con
 
 #### JVM Tuning
 
-Kates is a latency-sensitive application — it's measuring Kafka's performance, so its own GC pauses can't be allowed to pollute the measurements. A 200ms GC pause during a throughput test would show up as a producer timeout, making it indistinguishable from actual Kafka latency. This is why the deployment uses **ZGC** (Z Garbage Collector) rather than the default G1GC.
+Kates is a latency-sensitive application — it's measuring Kafka's performance, so its own GC pauses can't be allowed to pollute the measurements. A 200ms GC pause during a throughput test would show up as a producer timeout, making it indistinguishable from actual Kafka latency. This is why the JVM image runs **ZGC** (Z Garbage Collector) rather than the default G1GC. The native image cannot — see [Native Image Build](#native-image-build).
 
 ZGC achieves sub-millisecond pause times by performing garbage collection concurrently with the application. The trade-off is roughly 10–15% lower peak throughput compared to G1GC — but for a benchmarking tool, consistent latency matters far more than raw throughput.
 
+The chart sets the collector and the heap in `jvm.options`, which reaches the JVM as `JAVA_TOOL_OPTIONS`. Read it together with the memory limit the heap has to fit in (`kates/k8s/deployment.yaml` carries the same numbers):
+
 ```yaml
-# kates/k8s/deployment.yaml
-- name: JAVA_TOOL_OPTIONS
-  value: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
+# charts/kates/values.yaml
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "500m"
+  limits:
+    memory: "4Gi"
+    cpu: "2"
+
+jvm:
+  options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 ```
+
+These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` sizes Kates differently: on a cloud cluster it applies `charts/kates/values-generic.yaml`, a 512Mi limit with `-Xms128m -Xmx256m`, and on Kind it runs the native image, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)).
 
 | GC | Max Pause | Throughput Overhead | Best For |
 |----|:-:|:-:|----------|
 | G1 (default) | ~10–200ms | Baseline | General workloads where occasional pauses are acceptable |
 | ZGC | < 1ms | ~10–15% | Latency-sensitive benchmarking where pause consistency matters |
-| Shenandoah | < 1ms | ~10–15% | Alternative low-pause GC (Red Hat JDKs) |
+| Shenandoah | < 1ms | ~10–15% | Alternative low-pause GC (most OpenJDK builds, Temurin included; not Oracle JDK) |
 
 The `-Xms512m -Xmx2560m` settings give ZGC a 512 MB starting heap that can grow to 2.5 GB. The `+ZGenerational` flag (Java 21+) enables the generational mode of ZGC, which reduces the amount of work the collector does by separately collecting short-lived objects — this further lowers allocation stall rates during burst workloads like spike tests.
 
+`-Xmx` caps the Java heap, not the process. Outside the heap the JVM holds metaspace, a stack per thread, direct buffers for socket I/O, the JIT's code cache and ZGC's own bookkeeping, and the kernel kills the container as soon as the total crosses `resources.limits.memory`: the pod reports `OOMKilled` and the JVM logs nothing. Keep the heap at no more than about 70% of the memory limit, and lower on small limits, where the off-heap share is larger. The chart's `-Xmx2560m` is 62.5% of its 4Gi limit. To size the heap from the limit instead, replace `-Xmx` with `-XX:MaxRAMPercentage=70`, which the JVM applies to the container's memory limit, so the ratio holds when the limit changes.
+
 ::: {.callout-tip}
-If you observe `Allocation Stall` warnings in the Kates logs during stress tests, increase `-Xmx` to 3072m or 4096m. This gives ZGC more headroom to collect without stalling application threads.
+If you observe `Allocation Stall` warnings in the Kates logs during stress tests, ZGC needs more heap to collect into. Raise the memory limit and the heap together — `-Xmx4096m` needs a limit of at least 6Gi — never the heap alone.
 :::
 
 ### Kates CLI
@@ -637,7 +794,7 @@ graph TB
 | `make connect-deploy` | Deploy Kafka Connect cluster |
 | `make kates` | Build + deploy Kates application |
 | `make kates-build` | Build Kates JVM image |
-| `make kates-native` | Build Kates native image (see below) |
+| `make kates-native` | Load a Kates native image into Kind (see below) |
 | `make kates-deploy` | Apply Kates K8s manifests |
 | `make kates-helm` | Deploy Kates via its Helm chart |
 | `make kates-redeploy` | Restart Kates deployment |
@@ -648,12 +805,10 @@ graph TB
 
 ### Native Image Build
 
-`make kates-native` builds a GraalVM native image of the Kates backend using Quarkus's native compilation pipeline. This produces a standalone binary with dramatically faster startup.
+`make kates-native` puts a GraalVM native image of the Kates backend on the Kind node as `kates:native`. It reuses a `kates:native` already in your local Docker, pulls the published `ghcr.io/bmscomp/kates:<appVersion>-native` tag when there is none, and compiles `kates/Dockerfile.native` only when the pull fails; a local image from an older release therefore wins until you remove it with `docker rmi kates:native`. The compile runs Quarkus's native pipeline inside the Mandrel builder image, so it needs no local GraalVM. The target loads the image and deploys nothing. The result is a standalone binary with dramatically faster startup.
 
-**Prerequisites:**
-- GraalVM 21+ with `native-image` component installed
-- Docker (used by Quarkus for in-container native builds)
-- ~6GB free memory during compilation
+**Prerequisites** (for the compile):
+- Docker, with more than 8 GB of memory available to it (10 GB or more is safe) — the Dockerfile gives the compiler alone an 8 GB heap (`quarkus.native.native-image-xmx=8g`), and Maven and the compiler's memory outside that heap come on top
 
 **Build time:** Expect 3–8 minutes depending on hardware (native compilation is significantly slower than JVM builds).
 
@@ -661,18 +816,22 @@ graph TB
 
 | Mode | Startup Time | Memory at Idle | Use Case |
 |------|:---:|:---:|----------|
-| JVM (`make kates`) | ~2s | ~200MB | Development, debugging |
-| Native (`make kates-native`) | ~0.05s | ~50MB | Production, CI/CD |
+| JVM (`make kates`) | ~2s | ~200MB | Benchmarking, production, debugging |
+| Native (`make kates-native`) | ~0.05s | ~50MB | CI/CD, smoke tests, laptops |
 
-The native image is the recommended deployment mode for production and CI/CD environments where fast startup and low memory footprint matter.
+The native image does not run ZGC. It is built with Mandrel, whose only collector apart from Epsilon (which never collects) is the Serial GC, and the build selects no other. Every collection stops the application, and those pauses land in the latencies Kates records. `jvm.options` cannot change that: a native binary does not read `JAVA_TOOL_OPTIONS`. Its maximum heap is `-XX:MaximumHeapSizePercent=75` of the memory limit, passed as container args (`containerArgs` in `charts/kates/values-native.yaml`). That is above the 70% rule for the JVM image, and safely so: a native binary has no metaspace, JIT or code cache to hold beside its heap.
+
+So the two images do different jobs. Run the JVM image wherever Kates's own numbers are the product — continuous benchmarking, SLO gates, capacity planning. Run the native image where startup and footprint matter more than pause consistency: CI jobs, smoke tests, laptops. `kates deploy` on a Kind cluster runs a local native image (`kates:native-local`, else `kates:native`), so a local run measures with Serial GC. On other clusters, `charts/kates/values-native.yaml` switches the chart to the published `-native` tag.
+
+`make kates-native-local` is the target that deploys: it compiles the working tree into `kates:native-local`, loads it into Kind, installs the chart pinned to it and waits for the rollout, so the check below reads the pod it started.
 
 ```bash
-# Build native image (in-container build, no local GraalVM needed)
-make kates-native
+# Compile the working tree and deploy it to Kind
+make kates-native-local
 
-# Verify
-kubectl logs deployment/kates -n kates | head -1
-# Expect a startup line like: started in 0.047s
+# Verify: the startup line names the native build
+kubectl logs deployment/kates -n kates | grep 'started in'
+# Expect a line like: ... native (powered by Quarkus ...) started in 0.047s
 ```
 
 | Target | Description |
@@ -714,12 +873,14 @@ Certificates are auto-managed by Strimzi:
 
 ### Network Policies
 
-The `kafka-cluster` chart renders them from `networkPolicy`, default-deny first and then one allow per client:
+The `kafka-cluster` chart renders them from `networkPolicy`, unless the values chain turns them off, as `values-kind.yaml` and `values-dev.yaml` do, and as `.build/values-detected.yaml` does where `kates deploy` cannot identify the CNI (EKS, GKE and AKS excepted):
 
-- `networkPolicy.defaultDeny` denies everything else for this cluster's pods
-- `networkPolicy.clients` is the allow list — each entry names a namespace, a pod selector and the listener *names* it may reach, and the ports are derived from `kafka.listeners`. The `platform` profile grants `kates`, `litmus`, `kafka-ui`, `apicurio-registry`, Connect and MirrorMaker 2
+- `networkPolicy.defaultDeny` is a deny-all for this cluster's pods, so Cruise Control, the Entity Operator and the Kafka Exporter accept only what another policy allows them
+- `networkPolicy.clients` grants access to the listeners — each entry names a namespace, a pod selector and the listener *names* it may reach, and the ports are derived from `kafka.listeners`. The `platform` profile grants `kates`, `litmus`, `kafka-ui`, `apicurio-registry`, Connect and MirrorMaker 2
 - `networkPolicy.monitoring.namespace` admits the Prometheus scrape, `networkPolicy.apiServer` the rack-awareness init container and the entity operator, and `networkPolicy.operatorNamespace` (default `strimzi-operator`) the operator itself
 - Pods labelled `kates.io/test-pod=true` in the release namespace are always allowed, so Helm tests and CLI clients work without their own entry
+
+None of this narrows the client listeners on its own. NetworkPolicies are additive, so a connection that any policy selecting the pod allows gets through, and the policy the Strimzi Cluster Operator generates for the cluster admits every pod in every namespace to a listener without `networkPolicyPeers`. No listener in the chart's values or in `.build/values-detected.yaml` has them, so ports 9092 and 9093 are open to the whole cluster whatever `networkPolicy.clients` says. So is the metrics port, 9404, which Strimzi opens to every pod while `metrics.enabled` is on, as it is by default. [Security & Compliance](17-security.md#network-policies) shows how to close them and how to test the result.
 
 The `strimzi-operator` chart carries the operator's own policy (`operatorPolicy`, on by default); `kafka-cluster` no longer renders policies that select another release's pods.
 
@@ -728,6 +889,7 @@ The `strimzi-operator` chart carries the operator's own policy (`operatorPolicy`
 ACLs are declared via `KafkaUser` CRs that the chart renders from `users.items` (GitOps). With the `platform` profile selected the release carries `kates-backend` (the one super user), `kafka-ui`, `apicurio-registry`, `litmus-chaos`, `kates-connect`, `kates-mm2` and the Helm-test principal. Confirm what a given values chain produces rather than trusting a list:
 
 ```bash
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
 helm dependency build charts/kafka-cluster
 
 helm template krafter charts/kafka-cluster -n kafka \
@@ -901,8 +1063,8 @@ kates health
 
 - Three decisions shape your topology before you deploy anything: namespace isolation (`strimzi-operator`, `kafka`, `kates`, `monitoring`, `litmus` by default), service exposure (NodePort locally, LoadBalancer or Ingress in the cloud), and storage durability — Kafka broker volumes are always persistent.
 - Size for what you measure: under-provisioned brokers benchmark resource contention, not Kafka, and the Minimal profile's 16 GB leaves almost no headroom.
-- Cloud moves are values overlays, not rewrites: `gp3` on EKS, `premium-rwo` on GKE, `managed-premium` on AKS, plus workload-identity annotations instead of embedded credentials.
+- Cloud moves are values overlays, not rewrites: `gp3` on EKS, `premium-rwo` on GKE, `managed-premium` on AKS, internal load balancers with source ranges on the bootstrap and every broker, plus workload-identity annotations instead of embedded credentials.
 - `make all` drives the whole deployment through `kates deploy`; per-component targets (`make cluster`, `make monitoring`, `make kafka`, `make litmus`, `make kates`) build the same stack piece by piece.
-- Kates itself runs on ZGC because a benchmarking tool's own GC pauses must not pollute its measurements; the native image cuts startup to ~0.05s for production and CI/CD.
+- The JVM image runs ZGC because a benchmarking tool's own GC pauses must not pollute its measurements, with the heap at no more than about 70% of the memory limit. The native image starts in ~0.05s but runs Serial GC, so it suits CI and laptops rather than measurement.
 
 Your stack is running — now lock it down: [Security & Compliance](17-security.md) covers authentication, authorization, network policies, and certificate management in depth.
