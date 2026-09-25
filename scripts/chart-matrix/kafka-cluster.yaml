@@ -192,6 +192,21 @@ renders:
         name: krafter-kafka
         path: spec/ingress/*/from/0/podSelector/matchLabels/strimzi.io~1kind
         equals: KafkaMirrorMaker2
+      - why: "Debezium writes its schema history without keys: a compacted topic refuses them"
+        kind: KafkaTopic
+        name: cdc-schema-history
+        path: spec/config/cleanup.policy
+        equals: delete
+      - why: "no size retention on the schema history either (the broker default is 10 GiB)"
+        kind: KafkaTopic
+        name: cdc-schema-history
+        path: spec/config/retention.bytes
+        equals: "-1"
+      - why: "a dead letter queue keeps every failure, not the latest per key"
+        kind: KafkaTopic
+        name: kates-dlq
+        path: spec/config/cleanup.policy
+        equals: delete
   - name: additional
     values: [values-ci.yaml, values-additional.yaml]
     assert:

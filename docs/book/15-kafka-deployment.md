@@ -331,12 +331,14 @@ Topics are declared as `KafkaTopic` CRDs, managed by the Topic Operator:
 | `kates-results` | 12 | 3 | 7d | lz4 | Test results and metrics |
 | `kates-metrics` | 6 | 3 | 24h | lz4 | Real-time broker metrics |
 | `kates-audit` | 3 | 3 | 30d | — | Audit trail |
-| `kates-dlq` | 3 | 3 | ∞ | — | Dead letter queue (compacted) |
-| `cdc-schema-history` | 1 | 3 | ∞ | — | Debezium schema history (compacted) |
+| `kates-dlq` | 3 | 3 | ∞ | — | Dead letter queue |
+| `cdc-schema-history` | 1 | 3 | ∞, no size limit | — | Debezium schema history |
 | `cdc-heartbeat` | 1 | 3 | 24h | — | Debezium heartbeat |
 | `test-sink-topic` | 3 | 3 | 24h | — | Connect sink-connector validation |
 
 **Partition rationale:** `kates-results` has 12 partitions (4× the broker count) for maximum consumer parallelism during high-throughput test runs. `kates-audit` has 3 (one per broker) since writes are infrequent.
+
+**Cleanup policy:** every topic here is `cleanup.policy: delete` — none is compacted, and two of them would break if they were. Debezium writes its schema history without record keys, which a compacted topic refuses, and replays the whole history on restart, so `cdc-schema-history` keeps `retention.ms: -1` and `retention.bytes: -1` (the second overrides the brokers' 10 GiB `log.retention.bytes`). `kates-dlq` is a delete topic because compaction keeps only the latest failure per key and refuses records without one. It has no time limit because it keeps the retention it had as a compacted topic, so an upgrade from that topic deletes nothing by age; only the brokers' `log.retention.bytes` bounds it until you set a `retention.ms` to age failures out.
 
 ## Certificate Management
 

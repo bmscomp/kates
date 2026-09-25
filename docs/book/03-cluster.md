@@ -211,7 +211,7 @@ Kates provisions its core application topics via `KafkaTopic` CRDs:
 | `kates-results` | 12 | 7d | lz4 | Test results (high-throughput) |
 | `kates-metrics` | 6 | 24h | lz4 | Real-time broker metrics |
 | `kates-audit` | 3 | 30d | — | Audit trail |
-| `kates-dlq` | 3 | ∞ | — | Dead letter queue (compacted) |
+| `kates-dlq` | 3 | ∞ | — | Dead letter queue |
 
 `kates-results` has 12 partitions (4× the broker count) for maximum consumer parallelism during high-throughput test runs. The lz4 compression on results and metrics topics reduces network bandwidth and storage at minimal CPU cost — lz4 is specifically designed for speed over compression ratio.
 

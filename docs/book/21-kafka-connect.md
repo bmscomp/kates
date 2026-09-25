@@ -68,12 +68,12 @@ The `connect-cluster` chart lives at `charts/connect-cluster/` and produces the 
 
 ```text
 charts/connect-cluster/
-├── Chart.yaml                     # 2.0.0; appVersion is the Kafka version, the image pin is the kates.io/connect-image annotation
+├── Chart.yaml                     # appVersion is the Kafka version, the image pin is the kates.io/connect-image annotation
 ├── Chart.lock                     # kafka-common dependency (file://../kafka-common)
 ├── charts/                        # kafka-common, filled by `helm dependency build`
 ├── values.yaml                    # Defaults
 ├── values-generic.yaml            # kates deploy on clusters other than kind
-├── values-kind.yaml               # kates deploy on kind (no monitoring, platform database egress, Schema Registry)
+├── values-kind.yaml               # kates deploy on kind (platform database egress, Schema Registry egress)
 ├── values-dev.yaml                # One small worker, replication factor 1
 ├── values-prod.yaml               # productionMode: TLS listener, chart-managed certificate user, SLO alert
 ├── values.schema.json             # Input validation
@@ -539,7 +539,7 @@ This catches misconfigurations at `helm upgrade` time rather than at runtime, pr
 
 ## Environment Overlays
 
-The Kates CLI applies `values-kind.yaml` on Kind clusters and `values-generic.yaml` on other clusters. Both turn tracing off and list the Secrets the CLI's own connectors read in `rbac.secretNames`; the Kind overlay also turns monitoring off, adds database egress to the local `kates` namespace, and enables the Schema Registry integration. On the generic overlay, the PodMonitor and alerts render only where the `monitoring.coreos.com/v1` API exists (the CLI also turns them off when the Prometheus CRDs are missing). `values-dev.yaml` and `values-prod.yaml` are for direct Helm use. Cells marked *(base)* are inherited from `values.yaml` rather than set by the overlay:
+The Kates CLI applies `values-kind.yaml` on Kind clusters and `values-generic.yaml` on other clusters. Both turn tracing off and list the Secrets the CLI's own connectors read in `rbac.secretNames`; the Kind overlay also adds database egress to the local `kates` namespace and sets `schemaRegistry.enabled`. With the JSON converters both overlays keep, that opens egress to the registry and renders no converter URL — only an Apicurio converter gets one (see Schema Registry Integration below). On both overlays, the PodMonitor and alerts render only where the `monitoring.coreos.com/v1` API exists (the CLI also turns them off when the Prometheus CRDs are missing). `values-dev.yaml` and `values-prod.yaml` are for direct Helm use. Cells marked *(base)* are inherited from `values.yaml` rather than set by the overlay:
 
 | Setting | Kind | Generic | Dev | Prod |
 |---------|:----:|:----:|:---:|:----:|
@@ -551,11 +551,11 @@ The Kates CLI applies `values-kind.yaml` on Kind clusters and `values-generic.ya
 | Pod anti-affinity | Per-hostname *(base)* | Per-hostname *(base)* | Disabled | Per-hostname |
 | Kafka connection | SCRAM, 9092 *(base)* | SCRAM, 9092 *(base)* | SCRAM, 9092 *(base)* | Mutual TLS, 9093, chart-managed `KafkaUser` |
 | `productionMode` | Off *(base)* | Off *(base)* | Off *(base)* | On |
-| Alerts | Off | On *(base)* | Off | On, plus the task-availability SLO |
-| PodMonitor | Off | On *(base)* | On *(base)* | On *(base)* |
-| Dashboard | Off | On *(base)* | On *(base)* | On *(base)* |
+| Alerts | On *(base)* | On *(base)* | Off | On, plus the task-availability SLO |
+| PodMonitor | On *(base)* | On *(base)* | On *(base)* | On *(base)* |
+| Dashboard | From `charts/monitoring` | From `charts/monitoring` | From `charts/monitoring` | From `charts/monitoring` |
 | Tracing | Off | Off | OpenTelemetry, no endpoint *(base)* | OpenTelemetry, no endpoint *(base)* |
-| Schema Registry | On | Off *(base)* | Off *(base)* | Off *(base)* |
+| Schema Registry | Egress only (JSON converters) | Off *(base)* — the CLI sets it on | Off *(base)* | Off *(base)* |
 | Database egress | `kates` (PostgreSQL) | — | — | `database` (PostgreSQL, MySQL, MongoDB) |
 | Test connectors | Demo pipeline *(base)* | Demo pipeline *(base)* | Demo pipeline *(base)* | None |
 | Priority class | None *(base)* | None *(base)* | None *(base)* | `kates-streaming`, created by the release |
@@ -756,21 +756,36 @@ To enable Apicurio Avro serialization:
 schemaRegistry:
   enabled: true
   serviceName: apicurio-apicurio-registry
-  port: 80
-  path: /apis/ccompat/v7
+  namespace: ""                  # empty = the Kafka namespace
+  port: 80                       # the registry's Service port
+  path: /apis/registry/v3        # Apicurio Registry 3's core API
+  targetPort: 8080               # the port the registry pods listen on
 
 config:
   keyConverter: io.apicurio.registry.utils.converter.AvroConverter
   valueConverter: io.apicurio.registry.utils.converter.AvroConverter
-  keyConverterSchemasEnable: true
-  valueConverterSchemasEnable: true
+
+extraConfig:
+  key.converter.apicurio.registry.auto-register: "true"
+  value.converter.apicurio.registry.auto-register: "true"
 ```
 
-The chart automatically computes the full Schema Registry URL from the service name, port, path, and cluster domain:
+Connect configures a converter only with the worker properties under its own `key.converter.` or `value.converter.` prefix, and Apicurio's converters read `apicurio.registry.url`. So the chart builds the registry URL from the service name, namespace, port, path and cluster domain, and renders it once for each Apicurio converter in `config`:
 
 ```text
-http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/ccompat/v7
+key.converter.apicurio.registry.url: http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/registry/v3
+value.converter.apicurio.registry.url: http://apicurio-apicurio-registry.<namespace>.svc.<clusterDomain>:80/apis/registry/v3
 ```
+
+Three details make the difference between a converter that reaches the registry and one that does not:
+
+- **The path is the core API.** The Apicurio converters call `/apis/registry/v3` (or `/apis/registry/v2`). `/apis/ccompat/v7` is the Confluent-compatible API, which they do not speak.
+- **Registration is off by default.** Apicurio's serializer registers a schema only with `apicurio.registry.auto-register: true`. For a CDC pipeline, whose schemas come from the database, turn it on as in the `extraConfig` above, or register every schema before the connector produces.
+- **The egress rule needs the pod's port.** NetworkPolicy matches the destination pod's port after the Service has translated it, so the workers' egress rule admits `targetPort` — 8080 for Apicurio Registry — as well as `port`.
+
+A connector that sets its own `value.converter` (or `key.converter`) is configured from its own `config` only, so it needs its own `value.converter.apicurio.registry.url` there. An `extraConfig` entry named like one the chart renders wins over it.
+
+A values file that sets `schemaRegistry.path: /apis/ccompat/v7` beside an Apicurio converter is refused at render time, with the fix named: remove the key, or set it to `/apis/registry/v3`. The Confluent-compatible path belongs to clients that speak the Confluent API, such as Kafka UI.
 
 ### Schema Evolution
 

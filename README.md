@@ -186,9 +186,9 @@ Kates ships its platform as independently versioned Helm charts, composable via 
 | Chart | Version | App Version | Description |
 |:------|:--------|:------------|:------------|
 | [`apicurio-registry`](charts/apicurio-registry/) | 0.4.0 | 3.3.0 | A Helm chart for Kubernetes of Apicurio Registry, backed by the |
-| [`connect-cluster`](charts/connect-cluster/) | 2.1.2 | 4.3.1 | A Helm chart for deploying Strimzi Kafka Connect clusters |
+| [`connect-cluster`](charts/connect-cluster/) | 2.1.3 | 4.3.1 | A Helm chart for deploying Strimzi Kafka Connect clusters |
 | [`headlamp`](charts/headlamp/) | 0.2.0 | 0.40.1 | Headlamp — Kubernetes Dashboard for cluster visualization and management |
-| [`kafka-cluster`](charts/kafka-cluster/) | 1.0.3 | 4.3.1 | A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability |
+| [`kafka-cluster`](charts/kafka-cluster/) | 1.0.4 | 4.3.1 | A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability |
 | [`kafka-common`](charts/kafka-common/) | 0.1.0 |  | Library chart — the templates the Strimzi charts share (names and labels, rails, Kafka client authentication, the Connect worker spec, KafkaUser, secret sync, NetworkPolicy and monitoring fragments, the Grafana grid, the preflight probe) |
 | [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication |
 | [`kates-chaos`](charts/kates-chaos/) | 2.2.1 | 3.28.0 | Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring |
