@@ -199,10 +199,10 @@ contexts:
     url: http://localhost:8080
     output: table
     api-key: <api-key>
-    key-source: kates-api-key@sha256:<digest>
+    key-source: kates-api-key@pbkdf2-sha256:<iterations>:<salt>:<digest>
 ```
 
-`kates ports` writes the `ports` context. `key-source` marks a key that `kates ports` or `kates deploy` copied from the `kates-api-key` Secret, with the first 12 hex digits of that key's SHA-256. Those two commands replace a key only while its `key-source` matches it. A key you set with `kates ctx set`, bring in with `kates ctx import`, or change in the file has no matching `key-source`, and both commands leave it in place.
+`kates ports` writes the `ports` context. `key-source` marks a key that `kates ports` or `kates deploy` copied from the `kates-api-key` Secret, with a salted PBKDF2-SHA256 digest of that key. Those two commands replace a key only while its `key-source` matches it. A key you set with `kates ctx set`, bring in with `kates ctx import`, or change in the file has no matching `key-source`, and both commands leave it in place.
 
 ## Global Flags
 

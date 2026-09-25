@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"crypto/pbkdf2"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -384,22 +386,94 @@ const portsContextName = "ports"
 // with.
 const apiKeySecretName = "kates-api-key"
 
+// keySourceScheme follows the Secret's name in every key-source kates writes.
+const keySourceScheme = "@pbkdf2-sha256:"
+
+// defaultKeySourceIterations is the PBKDF2 work factor of a key-source digest,
+// the OWASP figure for PBKDF2-HMAC-SHA256. keySourceIterations is the value in
+// use; the tests lower it. A digest is computed once when kates stores a key
+// and once each time it asks whether it may replace one, a few times per run
+// of kates ports or kates deploy.
+const defaultKeySourceIterations = 600_000
+
+var keySourceIterations = defaultKeySourceIterations
+
+// The work factors keySourceMatches accepts. The upper bound keeps a
+// key-source kates never wrote, typed into the file by hand, from making a
+// command stall; the lower one refuses a digest too cheap to have come from
+// kates.
+const (
+	minKeySourceIterations = 1_000
+	maxKeySourceIterations = 2_000_000
+)
+
 // secretKeySource is the key-source kates records next to a key it copied
-// from Secret kates-api-key: the Secret's name and the first 12 hex digits of
-// the key's SHA-256. The digest ties the record to that one key. A mark on the
-// context alone would still claim a key typed over the copied one, in the
-// file or by a command that leaves the mark in place, and kates would replace
-// it; with the digest, such a key no longer matches and counts as the user's.
+// from Secret kates-api-key: the Secret's name, then a salted PBKDF2-SHA256
+// digest of the key with its work factor and salt. The digest ties the record
+// to that one key. A mark on the context alone would still claim a key typed
+// over the copied one, in the file or by a command that leaves the mark in
+// place, and kates would replace it; with the digest, such a key no longer
+// matches and counts as the user's.
+//
+// The key sits beside its digest in the same file, so the digest guards
+// nothing the file does not already hold. It is salted and slow anyway, so
+// that kates never writes a fast digest of a credential: a config shared with
+// its api-key lines removed must not let anyone test guesses against it. The
+// digest used to be the first 12 hex digits of a plain SHA-256, which did,
+// and code scanning flagged it. A key-source in that older form no longer
+// matches, so its key counts as the user's, the safe reading.
+//
+// An empty result, which the next run reads as a key kates did not store,
+// means the salt could not be drawn.
 func secretKeySource(apiKey string) string {
-	sum := sha256.Sum256([]byte(apiKey))
-	return apiKeySecretName + "@sha256:" + hex.EncodeToString(sum[:6])
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return ""
+	}
+	sum, err := pbkdf2.Key(sha256.New, apiKey, salt, keySourceIterations, sha256.Size)
+	if err != nil {
+		return ""
+	}
+	return apiKeySecretName + keySourceScheme + strconv.Itoa(keySourceIterations) + ":" +
+		base64.RawStdEncoding.EncodeToString(salt) + ":" + base64.RawStdEncoding.EncodeToString(sum)
+}
+
+// keySourceMatches reports whether source is a key-source kates wrote for
+// apiKey, by deriving the digest again with the salt and work factor source
+// records and comparing the two in constant time.
+func keySourceMatches(source, apiKey string) bool {
+	rest, ok := strings.CutPrefix(source, apiKeySecretName+keySourceScheme)
+	if !ok {
+		return false
+	}
+	parts := strings.Split(rest, ":")
+	if len(parts) != 3 {
+		return false
+	}
+	iterations, err := strconv.Atoi(parts[0])
+	if err != nil || iterations < minKeySourceIterations || iterations > maxKeySourceIterations {
+		return false
+	}
+	salt, err := base64.RawStdEncoding.DecodeString(parts[1])
+	if err != nil || len(salt) < 16 {
+		return false
+	}
+	want, err := base64.RawStdEncoding.DecodeString(parts[2])
+	if err != nil || len(want) != sha256.Size {
+		return false
+	}
+	got, err := pbkdf2.Key(sha256.New, apiKey, salt, iterations, sha256.Size)
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
 // keyReplaceable reports whether kates may put the Secret's key into c: c has
 // no key, or holds the very key kates copied there. kates ports and kates
 // deploy, the two commands that copy the Secret's key, both go by it.
 func keyReplaceable(c Context) bool {
-	return strings.TrimSpace(c.APIKey) == "" || c.KeySource == secretKeySource(c.APIKey)
+	return strings.TrimSpace(c.APIKey) == "" || keySourceMatches(c.KeySource, c.APIKey)
 }
 
 // storeSecretKey puts a key read from Secret kates-api-key into c and records
