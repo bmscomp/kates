@@ -64,7 +64,7 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
 |---------|---------|
 | `values-kind.yaml` | Local kind — lowers the operator to 384Mi |
 | `values-dev.yaml` | Dev — `logLevel: DEBUG` |
-| `values-prod.yaml` | Prod **uplift** — hardening, PDB, upstream NetworkPolicy, `productionMode`, and the drain cleaner (two replicas, cert-manager certificate). Read the header. |
+| `values-prod.yaml` | Prod **uplift** — hardening, PDB, `productionMode`, and the drain cleaner (two replicas, cert-manager certificate). It also enables upstream's operator NetworkPolicy, whose `egress: [{}]` admits every destination and so lifts the egress limits of `operatorPolicy` (policies add up); add `--set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false` after the overlay to keep them. Read the header. |
 | `values-generic.yaml` | Unknown clusters — documents DNS-domain injection and registry redirection |
 | `values-namespace-scope.yaml` | An **additional** operator, co-located with the Kafka namespace it watches: `watchAnyNamespace: false`, `createGlobalResources: false`, `crdUpgrade.enabled: false`, `globalBindings.enabled: true`, dashboards and drain cleaner off (once per Kubernetes cluster), kind-sized. Never for the primary. |
 

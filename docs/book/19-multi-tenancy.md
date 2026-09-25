@@ -124,11 +124,14 @@ users:
 
 ### Step 3 — Allow Network Access
 
-`networkPolicy.clients` is the allow list in front of the default-deny. Name the listeners the tenant may reach and the chart derives their ports from `kafka.listeners`:
+`networkPolicy.clients` grants the tenant's pods ingress to the brokers in the chart's `krafter-kafka` policy, which `values-kind.yaml` and `values-dev.yaml` do not render. On its own it keeps no other pod out: NetworkPolicies add up, and the policy the Strimzi operator generates admits every pod in the cluster to a listener without `networkPolicyPeers`, which no listener in the chart's values has. The list becomes the allow list once the listeners carry peers, as [Security & Compliance](17-security.md#network-policies) shows. Name the listeners the tenant may reach and the chart derives their ports from `kafka.listeners`.
+
+`clients` is a list, and a list in a later values file replaces the earlier one rather than merging with it. `tenants.yaml` therefore carries every entry the release already has — `helm get values krafter -n kafka` lists them (`kafka-cluster` in place of `krafter` for a release `make kafka` installed); a `kates deploy` install has at least the `connect` entry — with the tenant's added. An entry left out is dropped at the next upgrade:
 
 ```yaml
 networkPolicy:
   clients:
+    # ...every entry the release already lists, unchanged
     - name: my-service
       namespace: my-service-namespace
       podSelector: { app.kubernetes.io/name: my-service }
@@ -245,7 +248,7 @@ When a client exceeds its quota, the broker delays its response by a calculated 
 | **Data** | Prefix-scoped ACLs | Kafka ACL evaluator |
 | **Bandwidth** | Per-user produce/consume quotas | Broker throttling |
 | **CPU** | `requestPercentage` quota | Broker request handler pool |
-| **Network** | Kubernetes NetworkPolicies | CNI plugin |
+| **Network** | Kubernetes NetworkPolicies, once the listeners carry `networkPolicyPeers` | CNI plugin |
 | **Storage** | Topic-level retention policies | Log cleaner |
 | **Credentials** | Per-user SCRAM secrets | Strimzi User Operator |
 
