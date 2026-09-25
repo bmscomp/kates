@@ -38,8 +38,10 @@ var mcpCaveatIDsRuns = []mcpCaveatID{
 type mcpFakeRun struct {
 	ID, Type, Status, CreatedAt, Backend, Scenario string
 	Spec                                           map[string]any
-	Labels                                         map[string]string
-	Results                                        []map[string]any
+	// RequestedSpec is nil for a run stored before the backend kept it.
+	RequestedSpec map[string]any
+	Labels        map[string]string
+	Results       []map[string]any
 }
 
 // json renders the run as the backend does: the list leaves results out
@@ -51,6 +53,9 @@ func (r mcpFakeRun) json(withResults bool) map[string]any {
 	}
 	if r.Spec != nil {
 		m["spec"] = r.Spec
+	}
+	if r.RequestedSpec != nil {
+		m["requestedSpec"] = r.RequestedSpec
 	}
 	if r.Labels != nil {
 		m["labels"] = r.Labels
@@ -69,6 +74,20 @@ func mcpLoadSpec(overrides map[string]any) map[string]any {
 		"lingerMs": 5, "compressionType": "lz4", "numProducers": 1, "numConsumers": 1, "durationMs": 600000,
 		"replicationFactor": 3, "partitions": 3, "minInsyncReplicas": 2, "targetThroughput": -1,
 		"fetchMinBytes": 1, "fetchMaxWaitMs": 500, "enableIdempotence": false, "enableTransactions": false, "enableCrc": true,
+	}
+	for k, v := range overrides {
+		s[k] = v
+	}
+	return s
+}
+
+// mcpMergedSpec is a LOAD spec as the backend serves it for a run it kept the
+// request of: the fields every type has a default for, and the seven others
+// only as the request set them (TestSpec is written from its fields).
+func mcpMergedSpec(overrides map[string]any) map[string]any {
+	s := mcpLoadSpec(nil)
+	for _, k := range mcpRunNotCarried {
+		delete(s, k)
 	}
 	for k, v := range overrides {
 		s[k] = v
@@ -432,8 +451,13 @@ func TestMCPGetRun(t *testing.T) {
 		t.Errorf("run = %+v finished=%v", got.Run, got.Finished)
 	}
 	mcpCheckDefaultLoadSpec(t, got.Spec)
+	// A run stored before the backend kept the request: the seven fields it
+	// dropped are named rather than shown at the Java defaults it stored.
 	if fmt.Sprint(got.NotCarried) != "[consumerGroup targetThroughput fetchMinBytes fetchMaxWaitMs enableIdempotence enableTransactions enableCrc]" {
 		t.Errorf("notCarried = %v", got.NotCarried)
+	}
+	if got.RequestedSpec != nil || got.Spec.TargetThroughput != nil || got.Spec.EnableCrc != nil || got.Spec.FetchMinBytes != nil {
+		t.Errorf("requestedSpec = %+v, spec = %+v", got.RequestedSpec, got.Spec)
 	}
 	if got.SpecHash == "" {
 		t.Error("specHash missing")
@@ -478,6 +502,47 @@ func mcpCheckDefaultLoadSpec(t *testing.T, s mcpRunSpec) {
 	if s.Acks == nil || *s.Acks != "all" || s.CompressionType == nil || *s.CompressionType != "lz4" {
 		t.Errorf("acks = %v, compression = %v", s.Acks, s.CompressionType)
 	}
+}
+
+// A run the backend stored with its request: requestedSpec holds what was
+// asked, the spec shows the seven fields the merge now carries, and there is
+// no notCarried.
+func TestMCPGetRunRequestedSpec(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	run := mcpLoadRun()
+	run.RequestedSpec = map[string]any{
+		"targetThroughput": 2000, "consumerGroup": "perf-cg " + mcpInjection, "enableIdempotence": false, "acks": "2",
+	}
+	run.Spec = mcpMergedSpec(map[string]any{
+		"throughput": 2000, "targetThroughput": 2000, "consumerGroup": "perf-cg " + mcpInjection, "enableIdempotence": false,
+	})
+	mcpServeRuns(fb, []mcpFakeRun{run})
+	fb.JSON("GET", "/api/tests/0a1b2c3d/report/summary", http.StatusOK, mcpSummary(1, 1))
+	h := newMCPHarness(t, fb)
+
+	env := h.callOK("get_run", map[string]any{"run_id": "0a1b2c3d"})
+	got := mcpData[mcpGetRunOut](t, env)
+
+	if got.NotCarried != nil {
+		t.Errorf("notCarried = %v; the merge carried every field", got.NotCarried)
+	}
+	r := got.RequestedSpec
+	if r == nil || r.TargetThroughput == nil || *r.TargetThroughput != 2000 || r.EnableIdempotence == nil ||
+		*r.EnableIdempotence || r.Throughput != nil || r.NumRecords != nil || r.EnableCrc != nil || r.Acks != nil {
+		t.Fatalf("requestedSpec = %+v", r)
+	}
+	if !mcpFenced(h, r.ConsumerGroup) || len(r.Invalid) != 1 || !strings.Contains(string(r.Invalid[0]), "acks=2") {
+		t.Errorf("requested text not fenced or checked: group %q invalid %v", r.ConsumerGroup, r.Invalid)
+	}
+	// What the request left out of the seven is absent, not its default.
+	s := got.Spec
+	if s.Throughput == nil || *s.Throughput != 2000 || s.TargetThroughput == nil || *s.TargetThroughput != 2000 ||
+		s.EnableIdempotence == nil || *s.EnableIdempotence || s.EnableCrc != nil || s.EnableTransactions != nil ||
+		s.FetchMinBytes != nil || s.FetchMaxWaitMs != nil || !mcpFenced(h, s.ConsumerGroup) {
+		t.Errorf("spec = %+v", s)
+	}
+	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly)
+	assertReadOnly(t, fb.Requests())
 }
 
 func TestMCPGetRunFailedScenarioRun(t *testing.T) {
@@ -642,8 +707,8 @@ func mcpOutsideFences(h *mcpHarness, raw []byte) string {
 }
 
 // A scenario run's text reaches the store unvalidated: its phase names
-// become task ids (TestOrchestrator.java:993), and its base spec's topic,
-// acks and compression are stored as sent (TestOrchestrator.java:306-318).
+// become task ids (TestOrchestrator.java:1106), and its base spec's topic,
+// acks and compression are stored as sent (TestOrchestrator.java:310-322).
 // None of it may reach the model outside a fence.
 func TestMCPGetRunUnvalidatedScenarioText(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
@@ -1193,6 +1258,35 @@ func TestMCPAssessRunFewMatches(t *testing.T) {
 	}
 	assertReadOnly(t, fb.Requests())
 	assertReadOnly(t, fb2.Requests())
+}
+
+// A run stored before the backend kept the request ran without seven fields
+// its spec shows, and a Trogdor one without the client settings, so it is
+// not in the band of a later run, even with a spec that reads the same.
+func TestMCPAssessRunBandKeepsEarlierBackendsApart(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	current, all := mcpAssessFixture()
+	for i := range all {
+		if all[i].ID == current.ID || all[i].ID == "00000006" {
+			all[i].RequestedSpec = map[string]any{}
+		}
+	}
+	current.RequestedSpec = map[string]any{}
+	mcpServeRuns(fb, all)
+	mcpServeAssessReports(fb, current.ID)
+	var asked []string
+	mcpServeCompare(fb, map[string]map[string]any{"0a1b2c3d": mcpSummary(40000, 20), "00000006": mcpSummary(50000, 10)}, &asked)
+	h := newMCPHarness(t, fb)
+
+	got := mcpData[mcpAssessRunOut](t, h.callOK("assess_run", map[string]any{"run_id": "0a1b2c3d"}))
+
+	if b := got.NoiseBand; fmt.Sprint(b.RunIDs) != "[00000006]" {
+		t.Errorf("band = %+v; only the earlier run whose request was kept matches", b)
+	}
+	if c := got.Comparison; !c.Available || c.PreviousRunID != "00000006" {
+		t.Errorf("comparison = %+v", c)
+	}
+	assertReadOnly(t, fb.Requests())
 }
 
 func TestMCPAssessRunBandSize(t *testing.T) {
@@ -1851,9 +1945,11 @@ func TestMCPRunEnumsMatchTheBackend(t *testing.T) {
 	}
 }
 
-// mcpRunNotCarried must be every TestSpec field applyTypeDefaults does not
-// copy.
-func TestMCPRunNotCarriedMatchesTheMerge(t *testing.T) {
+// applyTypeDefaults copies every TestSpec field. get_run shows notCarried only
+// for runs stored before it did; a field the merge dropped again would go
+// missing from every newer run with nothing to say so. mcpRunNotCarried, the
+// fields the old merge dropped, must still name TestSpec fields.
+func TestMCPRunMergeCarriesEveryField(t *testing.T) {
 	root := filepath.Join("..", "..", filepath.FromSlash(mcpJava))
 	spec, err := os.ReadFile(filepath.Join(root, "domain", "TestSpec.java"))
 	if err != nil {
@@ -1881,8 +1977,13 @@ func TestMCPRunNotCarriedMatchesTheMerge(t *testing.T) {
 			dropped = append(dropped, f)
 		}
 	}
-	if fmt.Sprint(dropped) != fmt.Sprint(mcpRunNotCarried) {
-		t.Errorf("applyTypeDefaults leaves out %v; mcpRunNotCarried is %v", dropped, mcpRunNotCarried)
+	if len(dropped) != 0 {
+		t.Errorf("applyTypeDefaults leaves out %v", dropped)
+	}
+	for _, f := range mcpRunNotCarried {
+		if !slices.Contains(fields, f) {
+			t.Errorf("mcpRunNotCarried names %s, which TestSpec does not have", f)
+		}
 	}
 }
 

@@ -45,7 +45,7 @@ The report ends with a Data Integrity section and an Integrity Timeline:
   1790240112345  SUMMARY  verdict=PASS lost=0 duplicates=0
 ```
 
-`RPO` reads `not measured` because no fault was marked on this run. There is no idempotence or transactions switch to set: with `acks=all` the Kafka producer is idempotent by default, and the backend drops a request's `enableIdempotence`, `enableTransactions` and `enableCrc` fields, so every INTEGRITY run is CRC-checked and never transactional.
+`RPO` reads `not measured` because no fault was marked on this run. It needs no idempotence switch: with `acks=all` the Kafka producer is idempotent by default. A scenario file or the API can still set `enableIdempotence`, `enableTransactions` and `enableCrc`, and the run uses them; `kates test create` has no flag for them.
 
 If this fails, stop here — you have a configuration problem that must be fixed before chaos testing.
 

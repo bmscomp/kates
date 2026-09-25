@@ -1,14 +1,34 @@
 package com.bmscomp.kates.domain;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
+/**
+ * A test's parameters. A field is null until something sets it; the getters
+ * answer a default for an unset one.
+ *
+ * <p>The JSON form holds the fields that are set, and no others: Jackson reads
+ * the fields, not the getters. Through the getters every unset field was
+ * written at its default, so the spec a run showed, or a request a schedule
+ * stored, read back as a request that had set them all: enableCrc true, the
+ * fetch settings, enableIdempotence false. Sent again, by a replay or a
+ * schedule firing, those were refused for types that cannot use them, and an
+ * explicit enableIdempotence false turned off the idempotence the Kafka client
+ * would otherwise have turned on.
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonAutoDetect(
+        fieldVisibility = JsonAutoDetect.Visibility.ANY,
+        getterVisibility = JsonAutoDetect.Visibility.NONE,
+        isGetterVisibility = JsonAutoDetect.Visibility.NONE)
 public class TestSpec {
 
     // Nullable on purpose: null means "use the configured default for the test
@@ -67,7 +87,10 @@ public class TestSpec {
     @Max(10)
     private Integer minInsyncReplicas;
 
+    // Kafka refuses an empty or blank group id when the consumer subscribes,
+    // so such a name would fail the run's consumer rather than the request.
     @Size(max = 255)
+    @Pattern(regexp = ".*\\S.*", message = "consumerGroup must name a group; Kafka refuses an empty or blank one")
     private String consumerGroup;
 
     @Min(value = -1, message = "targetThroughput must be -1 (unlimited) or positive")
@@ -80,9 +103,14 @@ public class TestSpec {
     @Max(300_000)
     private Integer fetchMaxWaitMs;
 
-    private boolean enableIdempotence = false;
-    private boolean enableTransactions = false;
-    private boolean enableCrc = true;
+    // Nullable like the fields above, so a request that leaves them out can be
+    // told from one that sets them to their defaults: an explicit false is an
+    // instruction (it turns the producer's idempotence off), an absent one is
+    // not. The setters take Boolean for the same reason: a JSON null leaves the
+    // field unset, where a primitive setter would have read it as false.
+    private Boolean enableIdempotence;
+    private Boolean enableTransactions;
+    private Boolean enableCrc;
 
     public TestSpec() {}
 
@@ -271,6 +299,11 @@ public class TestSpec {
         this.consumerGroup = consumerGroup;
     }
 
+    @JsonIgnore
+    public boolean hasConsumerGroup() {
+        return consumerGroup != null;
+    }
+
     public int getTargetThroughput() {
         return targetThroughput != null ? targetThroughput : -1;
     }
@@ -311,26 +344,79 @@ public class TestSpec {
     }
 
     public boolean isEnableIdempotence() {
-        return enableIdempotence;
+        return enableIdempotence != null && enableIdempotence;
     }
 
-    public void setEnableIdempotence(boolean enableIdempotence) {
+    public void setEnableIdempotence(Boolean enableIdempotence) {
         this.enableIdempotence = enableIdempotence;
     }
 
-    public boolean isEnableTransactions() {
-        return enableTransactions;
+    @JsonIgnore
+    public boolean hasEnableIdempotence() {
+        return enableIdempotence != null;
     }
 
-    public void setEnableTransactions(boolean enableTransactions) {
+    public boolean isEnableTransactions() {
+        return enableTransactions != null && enableTransactions;
+    }
+
+    public void setEnableTransactions(Boolean enableTransactions) {
         this.enableTransactions = enableTransactions;
     }
 
-    public boolean isEnableCrc() {
-        return enableCrc;
+    @JsonIgnore
+    public boolean hasEnableTransactions() {
+        return enableTransactions != null;
     }
 
-    public void setEnableCrc(boolean enableCrc) {
+    public boolean isEnableCrc() {
+        return enableCrc == null || enableCrc;
+    }
+
+    public void setEnableCrc(Boolean enableCrc) {
         this.enableCrc = enableCrc;
+    }
+
+    @JsonIgnore
+    public boolean hasEnableCrc() {
+        return enableCrc != null;
+    }
+
+    /**
+     * The fields this spec was given, under their JSON names, and no others:
+     * what its JSON form holds, as a map. A run keeps its request in this form
+     * beside the merged spec, so that what was asked for can be told apart from
+     * what the type defaults filled in.
+     */
+    public Map<String, Object> explicitFields() {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        putIfSet(fields, "topic", topic);
+        putIfSet(fields, "numRecords", numRecords);
+        putIfSet(fields, "recordSize", recordSize);
+        putIfSet(fields, "throughput", throughput);
+        putIfSet(fields, "acks", acks);
+        putIfSet(fields, "batchSize", batchSize);
+        putIfSet(fields, "lingerMs", lingerMs);
+        putIfSet(fields, "compressionType", compressionType);
+        putIfSet(fields, "numProducers", numProducers);
+        putIfSet(fields, "numConsumers", numConsumers);
+        putIfSet(fields, "durationMs", durationMs);
+        putIfSet(fields, "replicationFactor", replicationFactor);
+        putIfSet(fields, "partitions", partitions);
+        putIfSet(fields, "minInsyncReplicas", minInsyncReplicas);
+        putIfSet(fields, "consumerGroup", consumerGroup);
+        putIfSet(fields, "targetThroughput", targetThroughput);
+        putIfSet(fields, "fetchMinBytes", fetchMinBytes);
+        putIfSet(fields, "fetchMaxWaitMs", fetchMaxWaitMs);
+        putIfSet(fields, "enableIdempotence", enableIdempotence);
+        putIfSet(fields, "enableTransactions", enableTransactions);
+        putIfSet(fields, "enableCrc", enableCrc);
+        return fields;
+    }
+
+    private static void putIfSet(Map<String, Object> fields, String name, Object value) {
+        if (value != null) {
+            fields.put(name, value);
+        }
     }
 }

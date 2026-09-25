@@ -141,6 +141,9 @@ var resilienceRunCmd = &cobra.Command{
 
 		output.Header("Resilience Test Results")
 		output.KeyValue("Status", output.StatusBadge(result.Status))
+		if result.Error != "" {
+			output.KeyValue("Error", result.Error)
+		}
 
 		if chaos := result.ChaosOutcome; chaos != nil {
 			output.SubHeader("Chaos Outcome")

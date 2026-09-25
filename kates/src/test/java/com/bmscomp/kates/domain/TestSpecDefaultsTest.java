@@ -2,6 +2,12 @@ package com.bmscomp.kates.domain;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 class TestSpecDefaultsTest {
@@ -110,5 +116,77 @@ class TestSpecDefaultsTest {
 
         spec.setCompressionType("lz4");
         assertTrue(spec.hasCompressionType());
+    }
+
+    @Test
+    void integrityOptionsDefaultWithoutCountingAsSet() {
+        TestSpec spec = new TestSpec();
+
+        assertFalse(spec.isEnableIdempotence());
+        assertFalse(spec.isEnableTransactions());
+        assertTrue(spec.isEnableCrc());
+        assertFalse(spec.hasEnableIdempotence());
+        assertFalse(spec.hasEnableTransactions());
+        assertFalse(spec.hasEnableCrc());
+        assertFalse(spec.hasConsumerGroup());
+    }
+
+    @Test
+    void anExplicitFalseCountsAsSet() {
+        TestSpec spec = new TestSpec();
+        spec.setEnableIdempotence(false);
+
+        assertTrue(spec.hasEnableIdempotence(), "false is an instruction, not the absence of one");
+        assertFalse(spec.isEnableIdempotence());
+    }
+
+    @Test
+    void explicitFieldsHoldOnlyWhatWasSet() {
+        TestSpec spec = new TestSpec();
+        spec.setTargetThroughput(2000);
+        spec.setEnableIdempotence(false);
+
+        assertEquals(Map.of("targetThroughput", 2000, "enableIdempotence", false), spec.explicitFields());
+        assertEquals(Map.of(), new TestSpec().explicitFields());
+    }
+
+    @Test
+    void explicitFieldsCoverEveryField() throws Exception {
+        // Deserialized the way a request is, with every field in it: each must
+        // come back out, or explicitFields has fallen behind the class.
+        Map<String, Object> all = new LinkedHashMap<>();
+        for (Field f : TestSpec.class.getDeclaredFields()) {
+            if (Modifier.isStatic(f.getModifiers())) {
+                continue;
+            }
+            Class<?> t = f.getType();
+            all.put(
+                    f.getName(),
+                    t == String.class
+                            ? (f.getName().equals("acks") ? "1" : f.getName().equals("compressionType") ? "zstd" : "x")
+                            : t == Boolean.class ? Boolean.FALSE : t == Long.class ? 5_000L : 7);
+        }
+        TestSpec spec = new ObjectMapper().convertValue(all, TestSpec.class);
+
+        assertEquals(all.keySet(), spec.explicitFields().keySet());
+    }
+
+    @Test
+    void aJsonNullLeavesAFieldUnset() throws Exception {
+        TestSpec spec = new ObjectMapper()
+                .readValue(
+                        "{\"enableCrc\":null,\"enableIdempotence\":null,\"enableTransactions\":null}", TestSpec.class);
+
+        assertEquals(Map.of(), spec.explicitFields(), "null is no instruction; false would turn CRC checks off");
+        assertTrue(spec.isEnableCrc());
+    }
+
+    @Test
+    void theJsonHoldsOnlyTheFieldsThatWereSet() throws Exception {
+        TestSpec spec = new TestSpec();
+        spec.setNumRecords(1000);
+        spec.setEnableIdempotence(false);
+
+        assertEquals("{\"numRecords\":1000,\"enableIdempotence\":false}", new ObjectMapper().writeValueAsString(spec));
     }
 }

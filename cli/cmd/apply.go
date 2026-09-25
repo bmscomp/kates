@@ -89,6 +89,17 @@ var testApplyCmd = &cobra.Command{
 		if len(sf.Scenarios) == 0 {
 			return cmdErr("No scenarios found in file")
 		}
+		// Checked before the first test starts, so a file with a mistake
+		// runs none of its tests rather than the ones above it.
+		var problems []string
+		for i, scenario := range sf.Scenarios {
+			for _, p := range scenarioSpecProblems(scenario) {
+				problems = append(problems, fmt.Sprintf("scenario %d (%s): %s", i+1, scenario.Name, p))
+			}
+		}
+		if len(problems) > 0 {
+			return cmdErr("Invalid scenario file: " + strings.Join(problems, "; "))
+		}
 
 		output.Header(fmt.Sprintf("Applying %d scenario(s) from %s", len(sf.Scenarios), applyFile))
 		fmt.Println()
@@ -253,13 +264,13 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.FetchMaxWaitMs = toInt(v)
 		}
 		if v, ok := s.Spec["enableIdempotence"]; ok {
-			spec.EnableIdempotence = toBool(v)
+			spec.EnableIdempotence = toBoolPtr(v)
 		}
 		if v, ok := s.Spec["enableTransactions"]; ok {
-			spec.EnableTransactions = toBool(v)
+			spec.EnableTransactions = toBoolPtr(v)
 		}
 		if v, ok := s.Spec["enableCrc"]; ok {
-			spec.EnableCrc = toBool(v)
+			spec.EnableCrc = toBoolPtr(v)
 		}
 		req.Spec = spec
 	}
@@ -289,6 +300,39 @@ func toBool(v interface{}) bool {
 	default:
 		return false
 	}
+}
+
+// toBoolPtr reads a key the file sets as true or false, so that false is sent
+// too. Anything else is nil and sends nothing: yes, on, or a bare key used to
+// become an explicit false, which turned CRC checks or the producer's
+// idempotence off. scenarioSpecProblems refuses such a file before anything
+// is sent.
+func toBoolPtr(v interface{}) *bool {
+	switch b := v.(type) {
+	case bool:
+		return &b
+	case string:
+		if b == "true" || b == "false" {
+			t := b == "true"
+			return &t
+		}
+	}
+	return nil
+}
+
+// scenarioBoolKeys are the spec keys scenarioToRequest sends as true or false.
+var scenarioBoolKeys = []string{"enableIdempotence", "enableTransactions", "enableCrc"}
+
+// scenarioSpecProblems names the spec keys of a scenario that
+// scenarioToRequest cannot send as written.
+func scenarioSpecProblems(s TestScenario) []string {
+	var problems []string
+	for _, key := range scenarioBoolKeys {
+		if v, ok := s.Spec[key]; ok && toBoolPtr(v) == nil {
+			problems = append(problems, fmt.Sprintf("spec.%s is %v; write true or false", key, v))
+		}
+	}
+	return problems
 }
 
 func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {

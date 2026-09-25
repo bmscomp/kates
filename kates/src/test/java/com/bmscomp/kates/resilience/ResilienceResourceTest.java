@@ -31,6 +31,25 @@ class ResilienceResourceTest {
                 .body("message", containsString("chaosSpec"));
     }
 
+    /**
+     * A test request the backend would refuse is refused before the stream
+     * starts, naming the field. It used to go into the resilience run, which
+     * ended ERROR with the reason only in the server log.
+     */
+    @Test
+    void aFieldTheRunCannotApplyIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"SPIKE\",\"spec\":{\"throughput\":500}},"
+                        + "\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors.throughput", containsString("unthrottled"))
+                .body("message", containsString("spec.throughput"));
+    }
+
     @Test
     void listScenariosReturnsSevenEntries() {
         given().when().get("/api/resilience/scenarios").then().statusCode(200).body("$.size()", is(7));

@@ -76,7 +76,11 @@ scenarios:
 The `spec` object controls all test parameters. Every field is optional; the backend fills in defaults per test type (configurable via its `kates.tests.<type>.*` properties), so a STRESS test defaults to larger batches and more producers than a ROUND_TRIP test. The defaults shown below are the stock values for a LOAD test — other types differ.
 
 ::: {.callout-important}
-The backend merges `spec` with the test type's defaults and drops `targetThroughput`, `enableIdempotence`, `enableTransactions`, `enableCrc`, `consumerGroup`, `fetchMinBytes` and `fetchMaxWaitMs` in the merge, so setting them changes nothing. A scenario file cannot set the produce rate: no scenario key maps to the API field `throughput`, the rate limit the producer honours, so a scenario runs at its type's default rate, unlimited for LOAD. Every INTEGRITY run is CRC-checked and never transactional, and its producer is idempotent whenever `acks` is `all`, whatever `enableIdempotence`, `enableTransactions` and `enableCrc` say. Of the keys that survive the merge, `parallelProducers` counts only for STRESS and CAPACITY, and no test type reads `numConsumers`, so a LOAD scenario runs one producer and one consumer whatever they say. A `kates resilience run` file can set the rate, because its `spec` goes to the API as written and takes `throughput` — see [Test Types Deep Dive](05-test-types.md) and [Data Integrity Verification](08-data-integrity.md).
+The backend merges `spec` with the test type's defaults, and every key below reaches the run. `targetThroughput` sets the producer rate in place of the type's default. `parallelProducers` counts only for STRESS and CAPACITY, and no test type reads `numConsumers`, so a LOAD scenario runs one producer and one consumer whatever they say.
+
+The three `enable` keys take `true` or `false`. `kates test apply` refuses a file where one holds anything else, such as `yes`, `on` or nothing, naming the scenario and the key, before it starts any of the file's tests; such a value used to be sent as `false`.
+
+A key the scenario's type or backend cannot apply is refused: `kates test apply` gets a `400` naming it, and the scenario does not start. That is a rate other than -1 for SPIKE or CAPACITY, which run unthrottled; `consumerGroup` or a fetch setting for a type without a consumer (every type but LOAD, ENDURANCE and INTEGRITY); `enableCrc: true` for any type but INTEGRITY; `enableIdempotence: true` or `enableTransactions: true` when `acks` is not `all` (SPIKE's default is `1`); `enableTransactions: true` with `enableIdempotence: false`, or on the `trogdor` backend. The [API Reference](11-api-reference.md#post-apitests) lists the rules; [Test Types Deep Dive](05-test-types.md) and [Data Integrity Verification](08-data-integrity.md) cover what the options do.
 :::
 
 ### Producer Configuration
@@ -90,18 +94,18 @@ The backend merges `spec` with the test type's defaults and drops `targetThrough
 | `batchSize` | Integer | 65536 | Producer batch size in bytes |
 | `lingerMs` | Integer | 5 | Milliseconds to wait before sending a batch |
 | `compressionType` | String | `lz4` | Compression: `none`, `gzip`, `snappy`, `lz4`, `zstd` |
-| `targetThroughput` | Integer | -1 | Accepted but dropped, so it does not limit the rate |
-| `enableIdempotence` | Boolean | false | Accepted but dropped; the producer is idempotent whenever `acks` is `all` |
-| `enableTransactions` | Boolean | false | Accepted but dropped, so no run is transactional |
+| `targetThroughput` | Integer | -1 | Producer rate in records/s, for each producer; -1 is unlimited. Replaces the type's default rate (5,000 for ENDURANCE, 10,000 for ROUND_TRIP) |
+| `enableIdempotence` | Boolean | not set | The producer's `enable.idempotence`; not set, the producer is idempotent whenever `acks` is `all` |
+| `enableTransactions` | Boolean | false | Transactional producers, committing every 100 records or every 10 seconds, whichever comes first; a LOAD, ENDURANCE or INTEGRITY consumer then reads with `read_committed` |
 
 ### Consumer Configuration
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `numConsumers` | Integer | 1 | Read by no test type |
-| `consumerGroup` | String | auto | Accepted but dropped; the backend names the group |
-| `fetchMinBytes` | Integer | 1 | Accepted but dropped |
-| `fetchMaxWaitMs` | Integer | 500 | Accepted but dropped |
+| `consumerGroup` | String | auto | The consumer's group, for LOAD, ENDURANCE and INTEGRITY; not empty or blank. A group with committed offsets on the topic resumes from them, and a LOAD or ENDURANCE consumer commits as it reads, so use a group of the test's own, not one an application reads with. An INTEGRITY consumer joins it with `-integrity` appended (`integrity-cg-integrity` when not set) |
+| `fetchMinBytes` | Integer | 1 | The consumer's `fetch.min.bytes`, for LOAD, ENDURANCE and INTEGRITY |
+| `fetchMaxWaitMs` | Integer | 500 | The consumer's `fetch.max.wait.ms`, for LOAD, ENDURANCE and INTEGRITY |
 
 ### Topic Configuration
 
@@ -122,7 +126,7 @@ The backend merges `spec` with the test type's defaults and drops `targetThrough
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enableCrc` | Boolean | true | Accepted but dropped; every INTEGRITY run verifies a CRC32 checksum on each record |
+| `enableCrc` | Boolean | true | Whether an INTEGRITY run verifies a CRC32 checksum on each record; `false` turns the check off. `true` is refused for any other type |
 
 ## Validation Reference (SLA Gates)
 

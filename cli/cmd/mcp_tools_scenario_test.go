@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bmscomp/kates/cli/client"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gopkg.in/yaml.v3"
@@ -136,10 +137,10 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 			t.Errorf("defaulted %v lacks %s", e.Defaulted, f)
 		}
 	}
-	mcpScnHasFinding(t, out, 0, "spec", mcpScnOutside, "the rate is unlimited")
+	mcpScnHasFinding(t, out, 0, "spec.targetThroughput", mcpScnOutside, "the rate is unlimited: set targetThroughput")
 	mcpScnHasFinding(t, out, 0, "spec.topic", mcpScnOutside, "load-test, the topic every LOAD run shares")
 	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnWarning, "starts one producer")
-	mcpSecHasCaveats(t, env, mcpCaveatAgentEnvelopeProposed, mcpCaveatScenarioShippedDefaults, mcpCaveatScenarioThroughputUnsettable,
+	mcpSecHasCaveats(t, env, mcpCaveatAgentEnvelopeProposed, mcpCaveatScenarioShippedDefaults,
 		mcpCaveatScenarioValidateGrading, mcpCaveatLoadSingleProducer)
 	if out.Envelope.MaxRecordsPerSecond != mcpScnEnvMaxRecordsPerSec || out.Envelope.MaxBytes != 10<<30 || out.Envelope.TopicPrefix != "kates-mcp-" {
 		t.Errorf("envelope = %+v", out.Envelope)
@@ -148,8 +149,8 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 }
 
 // TestMCPDraftScenarioEveryTemplate: every built-in template is a valid
-// scenario file, and none is inside the envelope as shipped, because a
-// scenario file cannot set the rate or a kates-mcp- topic by default.
+// scenario file, and none is inside the envelope as shipped, because none
+// writes to a kates-mcp- topic, and most leave the rate unlimited.
 func TestMCPDraftScenarioEveryTemplate(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
 	h := newMCPHarness(t, fb)
@@ -169,7 +170,13 @@ func TestMCPDraftScenarioEveryTemplate(t *testing.T) {
 	mcpScnHasFinding(t, out, 0, "spec", mcpScnOutside, "GiB")
 	_, out = mcpDraft(t, h, map[string]any{"template": "integrity-tx"})
 	mcpScnHasFinding(t, out, 0, "validate.maxDuplicatePercent", mcpScnWarning, "drops validate.maxDuplicatePercent")
-	mcpScnHasFinding(t, out, 0, "spec.enableTransactions", mcpScnWarning, "enableTransactions false")
+	// The backend carries the integrity options now, and an INTEGRITY run with
+	// acks=all can apply all three.
+	for _, key := range []string{"spec.enableIdempotence", "spec.enableTransactions", "spec.enableCrc"} {
+		if f := mcpScnFindingsOn(out, 0, key); len(f) != 0 {
+			t.Errorf("integrity-tx: %s has findings %+v", key, f)
+		}
+	}
 	_, out = mcpDraft(t, h, map[string]any{"template": "ci-gate"})
 	mcpScnHasFinding(t, out, 0, "validate.maxErrorRate", mcpScnWarning, "never checks maxErrorRate")
 	mcpScnHasFinding(t, out, 0, "validate.maxDataLossPercent", mcpScnWarning, "only INTEGRITY runs")
@@ -197,7 +204,7 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	if e := sc.Effective; e.Throughput != 10000 || e.RecordsPerSec != 20000 || e.DurationMs != 600_000 {
 		t.Errorf("effective = %+v", e)
 	}
-	for _, want := range []string{"name: RT smoke", "topic: kates-mcp-rt", "records: 20000", "maxP99LatencyMs: 150", "enableCrc: true"} {
+	for _, want := range []string{"name: RT smoke", "topic: kates-mcp-rt", "records: 20000", "maxP99LatencyMs: 150", "enableTransactions: true"} {
 		if !strings.Contains(out.YAML, want) {
 			t.Errorf("YAML lacks %q:\n%s", want, out.YAML)
 		}
@@ -207,12 +214,137 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	if err != nil || len(again) != 1 || scenarioToRequest(again[0]).Spec.Topic != "kates-mcp-rt" {
 		t.Errorf("the YAML does not read back: %v %+v", err, again)
 	}
-	// Warnings remain: ROUND_TRIP reports no integrity data, and the backend
-	// drops the enable* flags.
+	// Warnings remain: ROUND_TRIP reports no integrity data. Its producer
+	// takes the idempotence and transactions the template asks for.
 	mcpScnHasFinding(t, out, 0, "validate.maxOutOfOrder", mcpScnWarning, "never checked")
-	mcpScnHasFinding(t, out, 0, "spec.enableIdempotence", mcpScnWarning, "drops it")
 	mcpScnHasFinding(t, out, 0, "spec.numConsumers", mcpScnWarning, "no effect")
-	mcpSecHasCaveats(t, env, mcpCaveatMergedSpecOnly)
+	if f := mcpScnFindingsOn(out, 0, "spec.enableIdempotence"); len(f) != 0 {
+		t.Errorf("spec.enableIdempotence has findings %+v", f)
+	}
+	mcpSecHasCaveats(t, env, mcpCaveatAgentEnvelopeProposed)
+	mcpScnOnlyPinCheck(t, fb)
+}
+
+// TestMCPDraftScenarioFieldsTheBackendRefuses: what the backend answers 400
+// for, draft_scenario calls invalid, naming the key.
+func TestMCPDraftScenarioFieldsTheBackendRefuses(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	yamlText := `scenarios:
+  - name: stress with consumer settings
+    type: STRESS
+    spec: {topic: kates-mcp-a, consumerGroup: perf-cg, fetchMinBytes: 1024, fetchMaxWaitMs: 100, enableCrc: true}
+  - name: spike with a rate and idempotence
+    type: SPIKE
+    spec: {topic: kates-mcp-b, targetThroughput: 500, enableIdempotence: true}
+  - name: transactions on trogdor
+    type: LOAD
+    backend: trogdor
+    spec: {topic: kates-mcp-c, enableTransactions: true}
+  - name: transactions without idempotence
+    type: LOAD
+    spec: {topic: kates-mcp-d, enableTransactions: true, enableIdempotence: false, enableCrc: false}
+`
+	_, out := mcpDraft(t, h, map[string]any{"yaml": yamlText})
+	if out.Verdict != mcpScnInvalid {
+		t.Fatalf("verdict %s; findings %+v", out.Verdict, out.Findings)
+	}
+	for _, key := range []string{"spec.consumerGroup", "spec.fetchMinBytes", "spec.fetchMaxWaitMs"} {
+		mcpScnHasFinding(t, out, 0, key, mcpScnInvalid, "STRESS starts no consumer")
+	}
+	mcpScnHasFinding(t, out, 0, "spec.enableCrc", mcpScnInvalid, "only an INTEGRITY run checks record CRCs")
+	mcpScnHasFinding(t, out, 1, "spec.targetThroughput", mcpScnInvalid, "SPIKE runs its producers unthrottled")
+	mcpScnHasFinding(t, out, 1, "spec.enableIdempotence", mcpScnInvalid, "acks is 1 (the type's default")
+	mcpScnHasFinding(t, out, 2, "spec.enableTransactions", mcpScnInvalid, "the trogdor backend cannot")
+	mcpScnHasFinding(t, out, 3, "spec.enableTransactions", mcpScnInvalid, "always idempotent")
+	if f := mcpScnFindingsOn(out, 3, "spec.enableCrc"); len(f) != 0 {
+		t.Errorf("enableCrc: false asks for no CRC check, which a LOAD run honours; findings %+v", f)
+	}
+	mcpScnOnlyPinCheck(t, fb)
+}
+
+// TestMCPDraftScenarioRefusesWhatApplyAndTheBackendRefuse: a flag that is
+// not true or false stops kates test apply, and a blank consumer group fails
+// the backend's validation, so both are invalid rather than warnings.
+func TestMCPDraftScenarioRefusesWhatApplyAndTheBackendRefuse(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	yamlText := `scenarios:
+  - name: integrity with a yes
+    type: INTEGRITY
+    spec: {topic: kates-mcp-a, enableCrc: yes, consumerGroup: "  "}
+`
+	_, out := mcpDraft(t, h, map[string]any{"yaml": yamlText})
+	mcpScnHasFinding(t, out, 0, "spec.enableCrc", mcpScnInvalid, "write true or false")
+	mcpScnHasFinding(t, out, 0, "spec.consumerGroup", mcpScnInvalid, "which the backend refuses for consumerGroup")
+	if req := out.Scenarios[0].Request; req.Spec.EnableCrc != nil {
+		t.Errorf("enableCrc: yes is sent as %v", *req.Spec.EnableCrc)
+	}
+	mcpScnOnlyPinCheck(t, fb)
+}
+
+// TestMCPDraftScenarioRulesMatchTheBackend runs the cases the backend's
+// TestOrchestratorTest runs through TestOrchestrator.inapplicableFields
+// through draft_scenario's copy of those rules: the two must refuse the same
+// fields, or an agent is told a scenario runs that the backend refuses.
+func TestMCPDraftScenarioRulesMatchTheBackend(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "kates", "src", "test", "resources", "spec-applicability.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Cases []struct {
+			Name    string          `json:"name"`
+			Type    string          `json:"type"`
+			Backend string          `json:"backend"`
+			Spec    json.RawMessage `json:"spec"`
+			Refused []string        `json:"refused"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Cases) < 10 {
+		t.Fatalf("only %d cases", len(fixture.Cases))
+	}
+	for _, c := range fixture.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			spec := &client.TestSpec{}
+			if err := json.Unmarshal(c.Spec, spec); err != nil {
+				t.Fatal(err)
+			}
+			var fs mcpScnFindings
+			mcpScnCheckApplies(0, &client.CreateTestRequest{TestType: c.Type, Backend: c.Backend, Spec: spec}, &fs)
+			var got []string
+			for _, f := range fs.list {
+				got = append(got, strings.TrimPrefix(f.Field, "spec."))
+			}
+			want := append([]string(nil), c.Refused...)
+			slices.Sort(got)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Errorf("refused %v, the backend refuses %v", got, want)
+			}
+		})
+	}
+}
+
+// TestMCPDraftScenarioTargetThroughputSetsTheRate: targetThroughput is the
+// scenario key for the rate, and the effective spec uses it.
+func TestMCPDraftScenarioTargetThroughputSetsTheRate(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	_, out := mcpDraft(t, h, map[string]any{
+		"template":       "quick-load",
+		"spec_overrides": map[string]any{"topic": "kates-mcp-rate", "targetThroughput": 2000},
+	})
+	e := out.Scenarios[0].Effective
+	if e.Throughput != 2000 || slices.Contains(e.Defaulted, "throughput") {
+		t.Errorf("effective = %+v", e)
+	}
+	if f := mcpScnFindingsOn(out, 0, "spec.targetThroughput"); len(f) != 0 {
+		t.Errorf("a set rate is inside the envelope; findings %+v", f)
+	}
 	mcpScnOnlyPinCheck(t, fb)
 }
 
@@ -251,7 +383,7 @@ validate:
 		t.Errorf("request = %+v", sc.Request.Spec)
 	}
 	mcpScnHasFinding(t, out, 0, "spec.records", mcpScnWarning, "reads as 0")
-	mcpScnHasFinding(t, out, 0, "spec.throughput", mcpScnWarning, "no scenario key sets the producer rate")
+	mcpScnHasFinding(t, out, 0, "spec.throughput", mcpScnWarning, "the scenario key for the producer rate is targetThroughput")
 	mcpScnHasFinding(t, out, 0, "spec.numRecords", mcpScnWarning, "the scenario key is records")
 	mcpScnHasFinding(t, out, 0, "spec.lingerMs", mcpScnWarning, "0 is left out")
 	mcpScnHasFinding(t, out, 0, "spec.acks", mcpScnInvalid, "the backend refuses for acks")
@@ -482,6 +614,14 @@ func TestMCPScenarioShippedDefaultsMatchTheBackend(t *testing.T) {
 			if b != want || c != want {
 				t.Errorf("%s %s: draft_scenario assumes %s, the backend ships %s, the chart %s", typ, key, want, b, c)
 			}
+		}
+		// acks is text, and decides whether the producer options apply.
+		b, c := backend[prefix+".acks"], chart.Tests[prefix]["acks"]
+		if c == "" {
+			c = chart.Defaults["acks"]
+		}
+		if b != d.acks || c != d.acks {
+			t.Errorf("%s acks: draft_scenario assumes %s, the backend ships %s, the chart %s", typ, d.acks, b, c)
 		}
 	}
 	if len(mcpScnShippedDefaults) != len(types) {
