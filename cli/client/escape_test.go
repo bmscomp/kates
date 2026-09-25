@@ -52,7 +52,7 @@ func recordingServer(t *testing.T) (*Client, func() []recordedRequest) {
 		})
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"abcd1234","status":"COMPLETED"}`))
+		_, _ = w.Write([]byte(`{"id":"abcd1234","status":"COMPLETED"}`))
 	})
 	return c, func() []recordedRequest {
 		mu.Lock()

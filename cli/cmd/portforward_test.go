@@ -66,17 +66,17 @@ func newPortsTestEnv(t *testing.T, secretKey string, secretErr error, validKey s
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/health"):
-			w.Write([]byte(`{"status":"UP"}`))
+			_, _ = w.Write([]byte(`{"status":"UP"}`))
 		case code != 0:
 			w.WriteHeader(code)
 		case key == "":
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"status":401,"error":"Missing API key","message":"Provide a token"}`))
+			_, _ = w.Write([]byte(`{"status":401,"error":"Missing API key","message":"Provide a token"}`))
 		case key != validKey:
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(`{"status":403,"error":"Invalid API key","message":"The provided API key is not valid"}`))
+			_, _ = w.Write([]byte(`{"status":403,"error":"Invalid API key","message":"The provided API key is not valid"}`))
 		default:
-			w.Write([]byte(`["LOAD","STRESS"]`))
+			_, _ = w.Write([]byte(`["LOAD","STRESS"]`))
 		}
 	}))
 	t.Cleanup(ts.Close)
