@@ -14,7 +14,13 @@ import (
 // current context of the developer's own ~/.kates.yaml, and deleted
 // ~/.kube/cache/discovery and ~/.cache/helm. A test that needs a home of its
 // own still sets HOME itself.
+//
+// It also lowers the PBKDF2 work factor of key-source digests to the least
+// keySourceMatches accepts: the tests store and check many keys, and at the
+// production figure each digest takes a noticeable fraction of a second.
+// TestSecretKeySource checks the production figure itself.
 func TestMain(m *testing.M) {
+	keySourceIterations = minKeySourceIterations
 	home, err := os.MkdirTemp("", "kates-cmd-test-home-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "TestMain:", err)

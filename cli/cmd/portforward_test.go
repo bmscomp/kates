@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -136,6 +137,12 @@ func TestSyncPortsContext(t *testing.T) {
 	// current in most cases below, which is where kates ports used to write.
 	mcp := Context{URL: "https://kates.example.com", Output: "json", APIKey: agentKey}
 
+	// Each key-source is salted, so two calls for one key differ: a context
+	// whose key-source must stay as it was shares one string with its want.
+	staleSource := secretKeySource("stale")
+	stillValidSource := secretKeySource("still-valid")
+	adminSource := secretKeySource(adminKey)
+
 	tests := []struct {
 		name      string
 		ports     *Context // the "ports" context before the run, if any
@@ -145,7 +152,8 @@ func TestSyncPortsContext(t *testing.T) {
 		probeCode int    // a status the backend answers protected paths with, if set
 
 		wantKey          string
-		wantKeySource    string
+		wantKeySource    string // exactly this key-source, when wantFreshSource is false
+		wantFreshSource  bool   // a key-source kates just wrote for wantKey
 		wantOutcome      keyOutcome
 		wantSecretCheck  keyVerdict
 		wantKeptKey      bool
@@ -155,21 +163,21 @@ func TestSyncPortsContext(t *testing.T) {
 		{
 			name:      "creates the context and stores the Secret's key the API accepts",
 			secretKey: adminKey, validKey: adminKey,
-			wantKey: adminKey, wantKeySource: secretKeySource(adminKey),
+			wantKey: adminKey, wantFreshSource: true,
 			wantOutcome: keyFromSecret, wantSecretCheck: keyAccepted, wantSecretLookup: true,
 		},
 		{
 			name:      "replaces a key it stored on an earlier run",
-			ports:     &Context{URL: "http://localhost:30083", Output: "table", APIKey: "stale", KeySource: secretKeySource("stale")},
+			ports:     &Context{URL: "http://localhost:30083", Output: "table", APIKey: "stale", KeySource: staleSource},
 			secretKey: adminKey, validKey: adminKey,
-			wantKey: adminKey, wantKeySource: secretKeySource(adminKey),
+			wantKey: adminKey, wantFreshSource: true,
 			wantOutcome: keyFromSecret, wantSecretCheck: keyAccepted, wantSecretLookup: true,
 		},
 		{
 			name:      "stores the Secret's key when the context has an empty one",
 			ports:     &Context{URL: "http://localhost:8080", Output: "table"},
 			secretKey: adminKey, validKey: adminKey,
-			wantKey: adminKey, wantKeySource: secretKeySource(adminKey),
+			wantKey: adminKey, wantFreshSource: true,
 			wantOutcome: keyFromSecret, wantSecretCheck: keyAccepted, wantSecretLookup: true,
 		},
 		{
@@ -183,9 +191,9 @@ func TestSyncPortsContext(t *testing.T) {
 			// The key was edited in the file under the key-source of the one
 			// kates stored; the digest no longer matches, so it is the user's.
 			name:      "keeps a key typed over one it stored",
-			ports:     &Context{URL: "http://localhost:8080", Output: "table", APIKey: agentKey, KeySource: secretKeySource("stale")},
+			ports:     &Context{URL: "http://localhost:8080", Output: "table", APIKey: agentKey, KeySource: staleSource},
 			secretKey: adminKey, validKey: agentKey,
-			wantKey: agentKey, wantKeySource: secretKeySource("stale"),
+			wantKey: agentKey, wantKeySource: staleSource,
 			wantOutcome: keyUserOwned, wantKeptKey: true, wantKeptCheck: keyAccepted,
 		},
 		{
@@ -205,9 +213,9 @@ func TestSyncPortsContext(t *testing.T) {
 		},
 		{
 			name:      "does not store a Secret key the API rejects",
-			ports:     &Context{URL: "http://localhost:8080", Output: "table", APIKey: "still-valid", KeySource: secretKeySource("still-valid")},
+			ports:     &Context{URL: "http://localhost:8080", Output: "table", APIKey: "still-valid", KeySource: stillValidSource},
 			secretKey: "rotated-key", validKey: "still-valid",
-			wantKey: "still-valid", wantKeySource: secretKeySource("still-valid"),
+			wantKey: "still-valid", wantKeySource: stillValidSource,
 			wantOutcome: keySecretRejected, wantSecretCheck: keyRejected,
 			wantKeptKey: true, wantKeptCheck: keyAccepted, wantSecretLookup: true,
 		},
@@ -219,7 +227,7 @@ func TestSyncPortsContext(t *testing.T) {
 		{
 			name:      "stores the Secret's key unverified when the API gives no verdict",
 			secretKey: adminKey, validKey: adminKey, probeCode: http.StatusServiceUnavailable,
-			wantKey: adminKey, wantKeySource: secretKeySource(adminKey),
+			wantKey: adminKey, wantFreshSource: true,
 			wantOutcome: keyFromSecret, wantSecretCheck: keyUnverified, wantSecretLookup: true,
 		},
 		{
@@ -229,9 +237,9 @@ func TestSyncPortsContext(t *testing.T) {
 		},
 		{
 			name:      "an unreadable Secret keeps a key stored earlier",
-			ports:     &Context{URL: "http://localhost:8080", Output: "table", APIKey: adminKey, KeySource: secretKeySource(adminKey)},
+			ports:     &Context{URL: "http://localhost:8080", Output: "table", APIKey: adminKey, KeySource: adminSource},
 			secretErr: errors.New("forbidden"), validKey: adminKey,
-			wantKey: adminKey, wantKeySource: secretKeySource(adminKey),
+			wantKey: adminKey, wantKeySource: adminSource,
 			wantOutcome: keySecretUnread, wantKeptKey: true, wantKeptCheck: keyAccepted, wantSecretLookup: true,
 		},
 	}
@@ -270,7 +278,12 @@ func TestSyncPortsContext(t *testing.T) {
 			if got.APIKey != tt.wantKey {
 				t.Errorf("APIKey = %q, want %q", got.APIKey, tt.wantKey)
 			}
-			if got.KeySource != tt.wantKeySource {
+			switch {
+			case tt.wantFreshSource:
+				if !keySourceMatches(got.KeySource, got.APIKey) {
+					t.Errorf("KeySource = %q, want one kates wrote for the stored key", got.KeySource)
+				}
+			case got.KeySource != tt.wantKeySource:
 				t.Errorf("KeySource = %q, want %q", got.KeySource, tt.wantKeySource)
 			}
 
@@ -653,6 +666,8 @@ func TestKeyReplaceable(t *testing.T) {
 		{"a key with no key-source", Context{APIKey: "k-1"}, false},
 		{"a key typed over one kates stored", Context{APIKey: "k-2", KeySource: secretKeySource("k-1")}, false},
 		{"a key-source without a digest", Context{APIKey: "k-1", KeySource: "kates-ports"}, false},
+		// The unsalted SHA-256 form an earlier build of this branch wrote.
+		{"a key-source in the old sha256 form", Context{APIKey: "k-1", KeySource: apiKeySecretName + "@sha256:0123456789ab"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -661,12 +676,62 @@ func TestKeyReplaceable(t *testing.T) {
 			}
 		})
 	}
+}
 
-	if got := secretKeySource("k-1"); !strings.HasPrefix(got, apiKeySecretName+"@sha256:") || len(got) != len(apiKeySecretName)+len("@sha256:")+12 {
-		t.Errorf("secretKeySource = %q, want %s@sha256: and 12 hex digits", got, apiKeySecretName)
+// TestSecretKeySource checks the digest kates records next to a key it
+// copied: salted, slow, bound to that key, and read back only in the form
+// kates writes.
+func TestSecretKeySource(t *testing.T) {
+	if defaultKeySourceIterations < 600_000 {
+		t.Errorf("defaultKeySourceIterations = %d, want at least 600000 (OWASP, PBKDF2-HMAC-SHA256)", defaultKeySourceIterations)
 	}
-	if strings.Contains(secretKeySource("k-1"), "k-1") {
+	if defaultKeySourceIterations > maxKeySourceIterations {
+		t.Errorf("defaultKeySourceIterations = %d is above maxKeySourceIterations = %d, so kates could not read its own digests",
+			defaultKeySourceIterations, maxKeySourceIterations)
+	}
+
+	src := secretKeySource("k-1")
+	if !strings.HasPrefix(src, apiKeySecretName+keySourceScheme) {
+		t.Fatalf("secretKeySource = %q, want the prefix %q", src, apiKeySecretName+keySourceScheme)
+	}
+	if strings.Contains(src, "k-1") {
 		t.Error("secretKeySource carries the key itself")
+	}
+	if !keySourceMatches(src, "k-1") {
+		t.Error("the digest does not match the key it was made for")
+	}
+	if keySourceMatches(src, "k-2") {
+		t.Error("the digest matches another key")
+	}
+	if again := secretKeySource("k-1"); again == src {
+		t.Error("two digests of one key are equal: the salt is missing")
+	}
+
+	rest := strings.TrimPrefix(src, apiKeySecretName+keySourceScheme)
+	parts := strings.Split(rest, ":")
+	if len(parts) != 3 {
+		t.Fatalf("key-source %q, want work factor, salt and digest", src)
+	}
+	iterations, salt, digest := parts[0], parts[1], parts[2]
+	tampered := []struct{ name, source string }{
+		{"empty", ""},
+		{"another Secret", "other-secret" + keySourceScheme + rest},
+		{"another scheme", apiKeySecretName + "@sha256:" + rest},
+		{"a part missing", apiKeySecretName + keySourceScheme + iterations + ":" + salt},
+		{"a part too many", apiKeySecretName + keySourceScheme + rest + ":x"},
+		{"a work factor that is not a number", apiKeySecretName + keySourceScheme + "many:" + salt + ":" + digest},
+		{"a work factor below the least accepted", apiKeySecretName + keySourceScheme + strconv.Itoa(minKeySourceIterations-1) + ":" + salt + ":" + digest},
+		{"a work factor above the most accepted", apiKeySecretName + keySourceScheme + strconv.Itoa(maxKeySourceIterations+1) + ":" + salt + ":" + digest},
+		{"another work factor", apiKeySecretName + keySourceScheme + strconv.Itoa(minKeySourceIterations+1) + ":" + salt + ":" + digest},
+		{"a salt that is not base64", apiKeySecretName + keySourceScheme + iterations + ":!!:" + digest},
+		{"a short salt", apiKeySecretName + keySourceScheme + iterations + ":AAAA:" + digest},
+		{"a digest that is not base64", apiKeySecretName + keySourceScheme + iterations + ":" + salt + ":!!"},
+		{"a short digest", apiKeySecretName + keySourceScheme + iterations + ":" + salt + ":" + digest[:10]},
+	}
+	for _, tt := range tampered {
+		if keySourceMatches(tt.source, "k-1") {
+			t.Errorf("%s: keySourceMatches(%q) = true, want false", tt.name, tt.source)
+		}
 	}
 }
 

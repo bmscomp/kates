@@ -353,7 +353,8 @@ contexts:
 		t.Fatalf("legacy context = %+v, want its key with no key-source", got)
 	}
 
-	cfg.Contexts[portsContextName] = Context{URL: "http://localhost:8080", APIKey: "k", KeySource: secretKeySource("k")}
+	source := secretKeySource("k")
+	cfg.Contexts[portsContextName] = Context{URL: "http://localhost:8080", APIKey: "k", KeySource: source}
 	if err := saveConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -364,8 +365,8 @@ contexts:
 	if n := strings.Count(string(data), "key-source:"); n != 1 {
 		t.Errorf("key-source written %d times, want once (only for ports):\n%s", n, data)
 	}
-	if got := loadConfig().Contexts[portsContextName].KeySource; got != secretKeySource("k") {
-		t.Errorf("ports key-source after reload = %q, want %q", got, secretKeySource("k"))
+	if got := loadConfig().Contexts[portsContextName].KeySource; got != source {
+		t.Errorf("ports key-source after reload = %q, want %q", got, source)
 	}
 }
 

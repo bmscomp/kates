@@ -19,6 +19,9 @@ func TestSyncActiveContextKey(t *testing.T) {
 		adminKey = "admin-key-from-secret"
 		agentKey = "agent-scoped-key"
 	)
+	// Key-sources are salted: a context whose key-source must stay as it was
+	// shares this one string with its want.
+	oldSource := secretKeySource("old")
 	tests := []struct {
 		name        string
 		contexts    map[string]Context
@@ -28,6 +31,7 @@ func TestSyncActiveContextKey(t *testing.T) {
 		wantOutcome deployKeyOutcome
 		wantTarget  string   // the context the outcome is about
 		wantCtx     *Context // that context afterwards, when it exists
+		freshSource bool     // wantCtx's key-source is one kates just wrote for its key
 		wantReport  string
 	}{
 		{
@@ -35,15 +39,15 @@ func TestSyncActiveContextKey(t *testing.T) {
 			contexts:    map[string]Context{"local": {URL: "http://localhost:8080", Output: "table"}},
 			current:     "local",
 			wantOutcome: deployKeyStored, wantTarget: "local",
-			wantCtx:    &Context{URL: "http://localhost:8080", Output: "table", APIKey: adminKey, KeySource: secretKeySource(adminKey)},
+			wantCtx: &Context{URL: "http://localhost:8080", Output: "table", APIKey: adminKey}, freshSource: true,
 			wantReport: `API key from Secret kates-api-key (namespace kates) stored in context "local"`,
 		},
 		{
 			name:        "replaces a key it stored before",
-			contexts:    map[string]Context{"local": {URL: "u", APIKey: "old", KeySource: secretKeySource("old")}},
+			contexts:    map[string]Context{"local": {URL: "u", APIKey: "old", KeySource: oldSource}},
 			current:     "local",
 			wantOutcome: deployKeyStored, wantTarget: "local",
-			wantCtx:    &Context{URL: "u", APIKey: adminKey, KeySource: secretKeySource(adminKey)},
+			wantCtx: &Context{URL: "u", APIKey: adminKey}, freshSource: true,
 			wantReport: `stored in context "local"`,
 		},
 		{
@@ -58,10 +62,10 @@ func TestSyncActiveContextKey(t *testing.T) {
 		},
 		{
 			name:        "keeps a key typed over one it stored",
-			contexts:    map[string]Context{"local": {URL: "u", APIKey: agentKey, KeySource: secretKeySource("old")}},
+			contexts:    map[string]Context{"local": {URL: "u", APIKey: agentKey, KeySource: oldSource}},
 			current:     "local",
 			wantOutcome: deployKeyKept, wantTarget: "local",
-			wantCtx:    &Context{URL: "u", APIKey: agentKey, KeySource: secretKeySource("old")},
+			wantCtx:    &Context{URL: "u", APIKey: agentKey, KeySource: oldSource},
 			wantReport: `Context "local" keeps the API key it holds`,
 		},
 		{
@@ -80,7 +84,7 @@ func TestSyncActiveContextKey(t *testing.T) {
 			},
 			current: "mcp", flag: "lab",
 			wantOutcome: deployKeyStored, wantTarget: "lab",
-			wantCtx:    &Context{URL: "http://lab", APIKey: adminKey, KeySource: secretKeySource(adminKey)},
+			wantCtx: &Context{URL: "http://lab", APIKey: adminKey}, freshSource: true,
 			wantReport: `stored in context "lab"`,
 		},
 		{
@@ -132,6 +136,13 @@ func TestSyncActiveContextKey(t *testing.T) {
 			for name, want := range before.Contexts {
 				if name == tt.wantTarget && tt.wantCtx != nil {
 					want = *tt.wantCtx
+					if tt.freshSource {
+						got := after.Contexts[name]
+						if !keySourceMatches(got.KeySource, got.APIKey) {
+							t.Errorf("context %q key-source = %q, want one kates wrote for its key", name, got.KeySource)
+						}
+						want.KeySource = got.KeySource
+					}
 				}
 				if got := after.Contexts[name]; !reflect.DeepEqual(got, want) {
 					t.Errorf("context %q = %+v, want %+v", name, got, want)
