@@ -150,7 +150,7 @@ A pod selector is required — there is no namespace-wide grant. `networkPolicie
 
 ### Step 4 — Configure the Service
 
-Strimzi writes the tenant's Secret, `my-service`, only into the Kafka cluster's namespace, `kafka` (see [Cross-Namespace Credential Synchronization](17-security.md#cross-namespace-credential-synchronization)). A pod can read a Secret only from its own namespace, so a service that runs in `my-service-namespace` needs a copy there. The Secret holds the password under `password`, and a ready-made `sasl.jaas.config` line beside it. It exists once the upgrade in Step 5 has created the user, so make the copy after that step:
+Strimzi writes the tenant's Secret, `my-service`, only into the Kafka cluster's namespace, `kafka` (see [Security & Compliance](17-security.md#cross-namespace-credential-synchronization)). A pod can read a Secret only from its own namespace, so a service that runs in `my-service-namespace` needs a copy there. The Secret holds the password under `password`, and a ready-made `sasl.jaas.config` line beside it. It exists once the upgrade in Step 5 has created the user, so make the copy after that step:
 
 ```bash
 # Copy the tenant's password into the namespace its pods run in
@@ -161,7 +161,7 @@ test -n "$PASSWORD" && kubectl create secret generic my-service \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Nothing keeps the copy in step. When the tenant's password changes, copy it again and restart the service's pods, which read it only when they start; [Password Rotation](17-security.md#password-rotation) walks through the same sequence for Kates.
+Nothing keeps the copy in step. When the tenant's password changes, copy it again and restart the service's pods, which read it only when they start; the Password Rotation section of [Security & Compliance](17-security.md#password-rotation) walks through the same sequence for Kates.
 
 The service's deployment then reads the copy. Step 3 granted the `plain` listener, which takes SCRAM over a connection without TLS, so the client needs `security.protocol` set to `SASL_PLAINTEXT` as well as the SCRAM mechanism. The variable names below are an example; your application has to read them and hand them to its Kafka client:
 
@@ -223,6 +223,8 @@ kubectl get secret my-service -n kafka
 # tenant, so select by the cluster and read the name prefix
 kubectl get kafkatopic -n kafka -l strimzi.io/cluster=krafter
 ```
+
+Once `kubectl get secret` finds `my-service`, go back to Step 4 and copy it into `my-service-namespace`. The service's pods can't start until the copy is there.
 
 ## Quota Strategy
 
