@@ -1,0 +1,417 @@
+{
+  "checks": [
+    {
+      "name": "SASL Authentication",
+      "category": "auth",
+      "status": "PASS",
+      "detail": "SASL mechanisms: GSSAPI",
+      "severity": "HIGH",
+      "compliance": "CIS-4.1",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.1"
+    },
+    {
+      "name": "No Plaintext Listeners",
+      "category": "transport",
+      "status": "PASS",
+      "detail": "All listeners use TLS or SASL",
+      "severity": "HIGH",
+      "compliance": "CIS-4.2",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.2"
+    },
+    {
+      "name": "ACL Authorization",
+      "category": "authz",
+      "status": "PASS",
+      "detail": "Authorizer: org.apache.kafka.metadata.authorizer.StandardAuthorizer",
+      "severity": "HIGH",
+      "compliance": "CIS-5.1",
+      "fix": "See the CIS Kafka Benchmark control CIS-5.1"
+    },
+    {
+      "name": "ACL Rules Defined",
+      "category": "authz",
+      "status": "PASS",
+      "detail": "14 ACL rules defined",
+      "severity": "MEDIUM",
+      "compliance": "CIS-5.2",
+      "fix": "See the CIS Kafka Benchmark control CIS-5.2"
+    },
+    {
+      "name": "No Wildcard Topic ACLs",
+      "category": "authz",
+      "status": "PASS",
+      "detail": "No wildcard ALLOW rules on topics",
+      "severity": "MEDIUM",
+      "compliance": "CIS-5.3",
+      "fix": "See the CIS Kafka Benchmark control CIS-5.3"
+    },
+    {
+      "name": "Unclean Election Disabled",
+      "category": "config",
+      "status": "PASS",
+      "detail": "unclean.leader.election.enable = false",
+      "severity": "CRITICAL",
+      "compliance": "CIS-3.1",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.1"
+    },
+    {
+      "name": "Auto-Create Topics Disabled",
+      "category": "config",
+      "status": "PASS",
+      "detail": "auto.create.topics.enable = false",
+      "severity": "MEDIUM",
+      "compliance": "CIS-3.2",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.2"
+    },
+    {
+      "name": "Message Size Bounded",
+      "category": "config",
+      "status": "PASS",
+      "detail": "message.max.bytes = 10.0 MB",
+      "severity": "LOW",
+      "compliance": "CIS-3.3",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.3"
+    },
+    {
+      "name": "Min ISR ≥ 2",
+      "category": "durability",
+      "status": "PASS",
+      "detail": "min.insync.replicas = 2",
+      "severity": "HIGH",
+      "compliance": "CIS-3.4",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.4"
+    },
+    {
+      "name": "Replication Factor ≥ 3",
+      "category": "durability",
+      "status": "PASS",
+      "detail": "default.replication.factor = 3",
+      "severity": "HIGH",
+      "compliance": "CIS-3.5",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.5"
+    },
+    {
+      "name": "Inter-Broker Encryption",
+      "category": "transport",
+      "status": "WARN",
+      "detail": "security.inter.broker.protocol = PLAINTEXT",
+      "severity": "HIGH",
+      "compliance": "CIS-4.3",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.3"
+    },
+    {
+      "name": "Default Cleanup Policy",
+      "category": "config",
+      "status": "PASS",
+      "detail": "log.cleanup.policy = delete",
+      "severity": "LOW",
+      "compliance": "CIS-3.6",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.6"
+    },
+    {
+      "name": "Connection Rate Limiting",
+      "category": "dos",
+      "status": "WARN",
+      "detail": "No connection creation rate limit",
+      "severity": "MEDIUM",
+      "compliance": "CIS-6.1",
+      "fix": "See the CIS Kafka Benchmark control CIS-6.1"
+    },
+    {
+      "name": "Default Quotas Set",
+      "category": "limits",
+      "status": "PASS",
+      "detail": "Producer and consumer quotas configured",
+      "severity": "MEDIUM",
+      "compliance": "CIS-6.2",
+      "fix": "See the CIS Kafka Benchmark control CIS-6.2"
+    },
+    {
+      "name": "TLS Protocol Version",
+      "category": "transport",
+      "status": "PASS",
+      "detail": "ssl.protocol = TLSv1.3",
+      "severity": "HIGH",
+      "compliance": "CIS-4.4",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.4"
+    },
+    {
+      "name": "Super Users Audited",
+      "category": "auth",
+      "status": "PASS",
+      "detail": "2 super users",
+      "severity": "HIGH",
+      "compliance": "CIS-5.6",
+      "fix": "See the CIS Kafka Benchmark control CIS-5.6"
+    },
+    {
+      "name": "SASL Mechanism Strength",
+      "category": "auth",
+      "status": "PASS",
+      "detail": "Mechanisms: GSSAPI",
+      "severity": "HIGH",
+      "compliance": "CIS-4.10",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.10"
+    },
+    {
+      "name": "DENY Rules Defined",
+      "category": "authz",
+      "status": "WARN",
+      "detail": "No DENY rules defined",
+      "severity": "LOW",
+      "compliance": "CIS-5.7",
+      "fix": "See the CIS Kafka Benchmark control CIS-5.7"
+    },
+    {
+      "name": "SSL Keystore Configured",
+      "category": "transport",
+      "status": "WARN",
+      "detail": "No keystore configured",
+      "severity": "HIGH",
+      "compliance": "CIS-4.11",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.11"
+    },
+    {
+      "name": "SSL Truststore Configured",
+      "category": "transport",
+      "status": "WARN",
+      "detail": "No truststore configured",
+      "severity": "MEDIUM",
+      "compliance": "CIS-4.12",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.12"
+    },
+    {
+      "name": "mTLS Enforcement",
+      "category": "transport",
+      "status": "WARN",
+      "detail": "ssl.client.auth = none",
+      "severity": "HIGH",
+      "compliance": "CIS-4.13",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.13"
+    },
+    {
+      "name": "Log Retention Configured",
+      "category": "config",
+      "status": "PASS",
+      "detail": "log.retention.hours = 24",
+      "severity": "MEDIUM",
+      "compliance": "CIS-3.7",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.7"
+    },
+    {
+      "name": "Controlled Shutdown",
+      "category": "config",
+      "status": "PASS",
+      "detail": "controlled.shutdown.enable = true",
+      "severity": "MEDIUM",
+      "compliance": "CIS-3.8",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.8"
+    },
+    {
+      "name": "Delete Topic Enabled",
+      "category": "config",
+      "status": "WARN",
+      "detail": "delete.topic.enable = true",
+      "severity": "MEDIUM",
+      "compliance": "CIS-3.9",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.9"
+    },
+    {
+      "name": "Transaction Log Replication",
+      "category": "durability",
+      "status": "PASS",
+      "detail": "transaction.state.log.replication.factor = 3",
+      "severity": "HIGH",
+      "compliance": "CIS-3.10",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.10"
+    },
+    {
+      "name": "Request Size Limits",
+      "category": "dos",
+      "status": "PASS",
+      "detail": "socket.request.max.bytes = 100.0 MB",
+      "severity": "LOW",
+      "compliance": "CIS-6.3",
+      "fix": "See the CIS Kafka Benchmark control CIS-6.3"
+    },
+    {
+      "name": "Background Threads",
+      "category": "config",
+      "status": "PASS",
+      "detail": "background.threads = 10",
+      "severity": "LOW",
+      "compliance": "CIS-3.11",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.11"
+    },
+    {
+      "name": "Offset Retention",
+      "category": "config",
+      "status": "PASS",
+      "detail": "offsets.retention.minutes = 10080",
+      "severity": "MEDIUM",
+      "compliance": "CIS-3.12",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.12"
+    },
+    {
+      "name": "Log Segment Size",
+      "category": "config",
+      "status": "PASS",
+      "detail": "log.segment.bytes = 1.0 GB",
+      "severity": "LOW",
+      "compliance": "CIS-3.13",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.13"
+    },
+    {
+      "name": "Compression Policy",
+      "category": "config",
+      "status": "PASS",
+      "detail": "compression.type = producer",
+      "severity": "LOW",
+      "compliance": "CIS-3.14",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.14"
+    },
+    {
+      "name": "SSL Cipher Suites",
+      "category": "transport",
+      "status": "PASS",
+      "detail": "Using JVM defaults",
+      "severity": "HIGH",
+      "compliance": "CIS-4.5",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.5"
+    },
+    {
+      "name": "SSL Hostname Verification",
+      "category": "transport",
+      "status": "PASS",
+      "detail": "ssl.endpoint.identification.algorithm = https",
+      "severity": "HIGH",
+      "compliance": "CIS-4.6",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.6"
+    },
+    {
+      "name": "SSL Enabled Protocols",
+      "category": "transport",
+      "status": "PASS",
+      "detail": "Using JVM defaults (TLSv1.2+)",
+      "severity": "HIGH",
+      "compliance": "CIS-4.7",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.7"
+    },
+    {
+      "name": "Topics with RF=1",
+      "category": "topics",
+      "status": "PASS",
+      "detail": "All user topics have replication factor ≥ 2",
+      "severity": "HIGH",
+      "compliance": "CIS-3.15",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.15"
+    },
+    {
+      "name": "Under-Replicated Partitions",
+      "category": "topics",
+      "status": "PASS",
+      "detail": "All partitions fully replicated",
+      "severity": "CRITICAL",
+      "compliance": "CIS-3.16",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.16"
+    },
+    {
+      "name": "Internal Topic Protection",
+      "category": "topics",
+      "status": "PASS",
+      "detail": "__consumer_offsets RF=3 — properly replicated",
+      "severity": "HIGH",
+      "compliance": "CIS-3.17",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.17"
+    },
+    {
+      "name": "Topic Count",
+      "category": "topics",
+      "status": "PASS",
+      "detail": "17 user topics",
+      "severity": "LOW",
+      "compliance": "CIS-3.18",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.18"
+    },
+    {
+      "name": "Max Connections Per IP",
+      "category": "network",
+      "status": "WARN",
+      "detail": "No per-IP connection limit — single host can exhaust all connections",
+      "severity": "MEDIUM",
+      "compliance": "CIS-6.4",
+      "fix": "See the CIS Kafka Benchmark control CIS-6.4"
+    },
+    {
+      "name": "Network Threads",
+      "category": "network",
+      "status": "PASS",
+      "detail": "num.network.threads = 5",
+      "severity": "MEDIUM",
+      "compliance": "CIS-6.5",
+      "fix": "See the CIS Kafka Benchmark control CIS-6.5"
+    },
+    {
+      "name": "IO Threads",
+      "category": "network",
+      "status": "PASS",
+      "detail": "num.io.threads = 8",
+      "severity": "MEDIUM",
+      "compliance": "CIS-6.6",
+      "fix": "See the CIS Kafka Benchmark control CIS-6.6"
+    },
+    {
+      "name": "Listener Protocol Map",
+      "category": "network",
+      "status": "PASS",
+      "detail": "Protocol map: CONTROLPLANE-9090:SSL,REPLICATION-9091:SSL,PLAIN-9092:SASL_PLAINTEXT,TLS-9093:SSL",
+      "severity": "HIGH",
+      "compliance": "CIS-4.8",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.8"
+    },
+    {
+      "name": "Log Flush Interval",
+      "category": "durability",
+      "status": "WARN",
+      "detail": "Using OS-level fsync only — may lose data on power failure",
+      "severity": "MEDIUM",
+      "compliance": "CIS-3.19",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.19"
+    },
+    {
+      "name": "Group Coordinator Replication",
+      "category": "durability",
+      "status": "PASS",
+      "detail": "offsets.topic.replication.factor = 3",
+      "severity": "HIGH",
+      "compliance": "CIS-3.20",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.20"
+    },
+    {
+      "name": "Leader Imbalance Threshold",
+      "category": "durability",
+      "status": "PASS",
+      "detail": "leader.imbalance.per.broker.percentage = 10%",
+      "severity": "LOW",
+      "compliance": "CIS-3.21",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.21"
+    },
+    {
+      "name": "Delegation Token Config",
+      "category": "auth",
+      "status": "WARN",
+      "detail": "No delegation token master key — tokens unavailable for short-lived clients",
+      "severity": "LOW",
+      "compliance": "CIS-4.9",
+      "fix": "See the CIS Kafka Benchmark control CIS-4.9"
+    }
+  ],
+  "summary": {
+    "total": 45,
+    "passed": 35,
+    "warnings": 10,
+    "failures": 0
+  },
+  "grade": "D",
+  "timestamp": "2026-09-26T09:12:03.418233Z"
+}

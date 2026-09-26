@@ -1,0 +1,69 @@
+{
+  "name": "leader-cascade",
+  "description": "Kill partition leaders sequentially to test cascading election recovery",
+  "steps": [
+    {
+      "name": "kill-leader-partition-0",
+      "faultSpec": {
+        "experimentName": "leader-cascade-p0",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/component-type=kafka",
+        "targetPod": "",
+        "targetAll": false,
+        "chaosDurationSec": 10,
+        "delayBeforeSec": 0,
+        "envOverrides": {},
+        "disruptionType": "POD_KILL",
+        "targetBrokerId": -1,
+        "networkLatencyMs": 100,
+        "fillPercentage": 80,
+        "cpuCores": 1,
+        "memoryMb": 500,
+        "ioWorkers": 2,
+        "gracePeriodSec": 0,
+        "targetTopic": "__consumer_offsets",
+        "targetPartition": 0,
+        "probes": []
+      },
+      "steadyStateSec": 30,
+      "observationWindowSec": 60,
+      "requireRecovery": true
+    },
+    {
+      "name": "kill-leader-partition-1",
+      "faultSpec": {
+        "experimentName": "leader-cascade-p1",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/component-type=kafka",
+        "targetPod": "",
+        "targetAll": false,
+        "chaosDurationSec": 10,
+        "delayBeforeSec": 0,
+        "envOverrides": {},
+        "disruptionType": "POD_KILL",
+        "targetBrokerId": -1,
+        "networkLatencyMs": 100,
+        "fillPercentage": 80,
+        "cpuCores": 1,
+        "memoryMb": 500,
+        "ioWorkers": 2,
+        "gracePeriodSec": 0,
+        "targetTopic": "__consumer_offsets",
+        "targetPartition": 1,
+        "probes": []
+      },
+      "steadyStateSec": 15,
+      "observationWindowSec": 60,
+      "requireRecovery": true
+    }
+  ],
+  "sla": null,
+  "testType": null,
+  "baselineDurationSec": 60,
+  "isrTrackingTopic": "__consumer_offsets",
+  "lagTrackingGroupId": null,
+  "isrPollIntervalMs": 2000,
+  "lagPollIntervalMs": 2000,
+  "maxAffectedBrokers": 2,
+  "autoRollback": true
+}

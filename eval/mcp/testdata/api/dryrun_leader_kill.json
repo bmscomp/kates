@@ -1,0 +1,18 @@
+{
+  "wouldSucceed": true,
+  "totalBrokers": 3,
+  "steps": [
+    {
+      "name": "kill-leader",
+      "disruptionType": "POD_KILL",
+      "targetPod": "krafter-brokers-4",
+      "resolvedLeaderId": 4,
+      "affectedPods": [
+        "krafter-brokers-4"
+      ],
+      "warnings": []
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

@@ -1,0 +1,101 @@
+{
+  "id": "d1d1d1d1",
+  "template": "broker-kill-recovery",
+  "report": {
+    "planName": "Broker Kill & Recovery",
+    "status": "COMPLETED",
+    "stepReports": [
+      {
+        "stepName": "kill-broker-3",
+        "disruptionType": "POD_KILL",
+        "chaosOutcome": {
+          "engineName": "broker-kill-3-k7x2p",
+          "experimentName": "broker-kill-3",
+          "chaosStartTime": "2026-09-26T09:45:41.102233Z",
+          "chaosEndTime": "2026-09-26T09:46:14.870004Z",
+          "chaosStartNanos": 91827364500012,
+          "chaosDuration": 33.767771,
+          "verdict": "Pass",
+          "failureReason": null,
+          "probeSuccessPercentage": "100",
+          "failStep": null,
+          "phase": "Completed"
+        },
+        "podTimeline": [
+          {
+            "timestamp": "2026-09-26T09:45:41.311201Z",
+            "podName": "krafter-brokers-3",
+            "eventType": "MODIFIED",
+            "phase": "Running",
+            "reason": "",
+            "message": ""
+          },
+          {
+            "timestamp": "2026-09-26T09:45:41.902415Z",
+            "podName": "krafter-brokers-3",
+            "eventType": "DELETED",
+            "phase": "Running",
+            "reason": "",
+            "message": ""
+          },
+          {
+            "timestamp": "2026-09-26T09:45:42.380770Z",
+            "podName": "krafter-brokers-3",
+            "eventType": "ADDED",
+            "phase": "Pending",
+            "reason": "",
+            "message": ""
+          },
+          {
+            "timestamp": "2026-09-26T09:45:44.120903Z",
+            "podName": "krafter-brokers-3",
+            "eventType": "MODIFIED",
+            "phase": "Pending",
+            "reason": "",
+            "message": ""
+          },
+          {
+            "timestamp": "2026-09-26T09:45:58.004112Z",
+            "podName": "krafter-brokers-3",
+            "eventType": "MODIFIED",
+            "phase": "Running",
+            "reason": "",
+            "message": ""
+          },
+          {
+            "timestamp": "2026-09-26T09:45:59.771260Z",
+            "podName": "krafter-controllers-1",
+            "eventType": "MODIFIED",
+            "phase": "Running",
+            "reason": "",
+            "message": ""
+          }
+        ],
+        "timeToFirstReady": 21.534,
+        "timeToAllReady": 27.912,
+        "strimziRecoveryTime": 35.012,
+        "preDisruptionMetrics": null,
+        "postDisruptionMetrics": null,
+        "impactDeltas": {},
+        "targetedLeaderBrokerId": null,
+        "isrMetrics": null,
+        "lagMetrics": null,
+        "rolledBack": false,
+        "rollbackReason": null,
+        "unmeasuredMetrics": null,
+        "unrecoveredAfter": null
+      }
+    ],
+    "summary": {
+      "totalSteps": 1,
+      "passedSteps": 1,
+      "worstRecovery": 27.912,
+      "avgThroughputDegradation": 0.0,
+      "maxP99LatencySpike": 0.0,
+      "slaViolated": false,
+      "worstIsrRecovery": 0.0,
+      "peakConsumerLag": 0
+    },
+    "validationWarnings": []
+  }
+}
