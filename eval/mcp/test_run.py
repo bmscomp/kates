@@ -543,6 +543,47 @@ class EndToEndTest(unittest.TestCase):
         self.assertFalse((self.runs / "e2e" / "state.json").exists())
         self.assertEqual(self.api.requests, [])
 
+    def test_a_run_that_could_not_start_freezes_nothing(self):
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
+            self.assertEqual(call(["preflight", *self.common, *self.agent])[0], 3)
+        self.assertFalse((self.runs / "e2e" / "tasks.json").exists())
+
+    def changed_list(self) -> Path:
+        """A copy of the fixture task list with one note changed: another
+        list, as tasks.json is after an edit."""
+        doc = json.loads(TASKS.read_text())
+        doc["tasks"][0]["notes"] += " Changed after the run froze its list."
+        path = Path(self.tmp.name) / "tasks-changed.json"
+        path.write_text(json.dumps(doc))
+        return path
+
+    def test_an_unused_run_takes_a_changed_task_list(self):
+        without_tasks = [a for a in self.common if a not in ("--tasks", str(TASKS))]
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS):
+            self.assertEqual(call(["preflight", *without_tasks, *self.agent])[0], 0)
+        frozen = self.runs / "e2e" / "tasks.json"
+        self.assertEqual(frozen.read_text(), TASKS.read_text())
+        # Only frozen and preflighted: the run takes the list as it is now.
+        changed = self.changed_list()
+        with mock.patch.object(run, "DEFAULT_TASKS", changed):
+            code, out, err = call(["preflight", *without_tasks, *self.agent])
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("nothing in the run has used it", out)
+        self.assertEqual(frozen.read_text(), changed.read_text())
+        manifest = json.loads((self.runs / "e2e" / "manifest.json").read_text())
+        self.assertEqual(manifest["tasks"]["sha256"], tasks.file_sha256(changed))
+
+    def test_a_run_that_used_its_task_list_keeps_it(self):
+        without_tasks = [a for a in self.common if a not in ("--tasks", str(TASKS))]
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS):
+            self.assertEqual(call(["setup", *without_tasks])[0], 0)
+        changed = self.changed_list()
+        with mock.patch.object(run, "DEFAULT_TASKS", changed):
+            code, out, err = call(["preflight", *without_tasks, *self.agent])
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("keeps the task list it froze", err)
+        self.assertEqual((self.runs / "e2e" / "tasks.json").read_text(), TASKS.read_text())
+
     def test_trials_before_setup_refuse_before_recording_settings(self):
         code, _, err = call(["trials", *self.common, *self.agent, "--max-trials", "1"])
         self.assertEqual(code, 2)
