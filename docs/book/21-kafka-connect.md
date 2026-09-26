@@ -56,11 +56,11 @@ graph TB
 
 | Aspect | Embedded in kafka-cluster | Standalone connect-cluster |
 |--------|:---:|:---:|
-| Upgrade independence | ❌ Broker upgrade = Connect restart | ✅ Upgrade Connect without touching brokers |
-| Scaling | ❌ Tied to broker chart values | ✅ Independent replica count |
-| Failure blast radius | ❌ Bad connector config blocks broker chart | ✅ Connect failures isolated |
-| CI/CD pipeline | ❌ Single chart = single pipeline | ✅ Separate lint/test/package/push |
-| Environment overlays | ❌ Shared values file | ✅ Dedicated `values-generic.yaml`, `values-prod.yaml` |
+| Upgrade independence | Poor: broker upgrade = Connect restart | Good: upgrade Connect without touching brokers |
+| Scaling | Poor: tied to broker chart values | Good: independent replica count |
+| Failure blast radius | Poor: bad connector config blocks broker chart | Good: Connect failures isolated |
+| CI/CD pipeline | Poor: single chart = single pipeline | Good: separate lint/test/package/push |
+| Environment overlays | Poor: shared values file | Good: dedicated `values-generic.yaml`, `values-prod.yaml` |
 
 ## Helm Chart Structure
 
@@ -290,10 +290,10 @@ stateDiagram-v2
 
 | State | Offset Tracking | Tasks Active | Use Case |
 |-------|:-:|:-:|----------|
-| `running` | ✅ Advancing | ✅ Yes | Normal operation |
-| `paused` | ✅ Preserved | ❌ No | Maintenance window, schema migration |
-| `stopped` | ✅ Preserved | ❌ No | Long-term pause, cost savings |
-| `failed` | ✅ Preserved | ❌ No | Error — awaiting auto-restart or manual fix |
+| `running` | Advancing | Yes | Normal operation |
+| `paused` | Preserved | No | Maintenance window, schema migration |
+| `stopped` | Preserved | No | Long-term pause, cost savings |
+| `failed` | Preserved | No | Error — awaiting auto-restart or manual fix |
 
 ### Auto-Restart
 

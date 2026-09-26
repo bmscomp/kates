@@ -75,7 +75,7 @@ sequenceDiagram
 | Worker pod dies | Framework rebalances tasks to surviving workers (seconds) |
 | Entire AZ offline | Framework reassigns all tasks from dead workers |
 | AZ recovers | Workers rejoin, framework rebalances to restore even distribution |
-| Offset continuity | ✅ Preserved — offsets stored in shared Kafka topic |
+| Offset continuity | Preserved — offsets stored in shared Kafka topic |
 
 ::: {.callout-note}
 Cross-AZ data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. This is an acceptable tradeoff for seamless failover — CDC downtime during a rebalance is typically under 30 seconds.

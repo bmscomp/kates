@@ -1034,9 +1034,9 @@ kates schedule create --name "Nightly Endurance" --cron "0 2 * * *" --request en
 
 | Flag | Required | Description |
 |------|:---:|-------------|
-| `--name` | ✅ | Human-readable schedule name |
-| `--cron` | ✅ | Cron expression (e.g., `0 * * * *`) |
-| `--request` | ✅ | Path to JSON file containing the test request body |
+| `--name` | Yes | Human-readable schedule name |
+| `--cron` | Yes | Cron expression (e.g., `0 * * * *`) |
+| `--request` | Yes | Path to JSON file containing the test request body |
 
 The request file should contain the same JSON body you would send to `POST /api/tests`. The schedule keeps the fields it sets, and each firing merges them with the test type's defaults, as a `POST /api/tests` would; a firing the backend refuses starts no run, and says why only in the server log.
 

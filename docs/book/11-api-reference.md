@@ -42,7 +42,7 @@ Requests without a key receive `401 Unauthorized`; requests with a wrong key rec
 
 | Header | Value | Required | Description |
 |--------|-------|:---:|-------------|
-| `Content-Type` | `application/json` | ✅ (POST/PUT) | Request body format |
+| `Content-Type` | `application/json` | Yes (POST/PUT) | Request body format |
 | `Accept` | `application/json` | | Response format (default) |
 | `Authorization` | `Bearer <api-key>` | When security enabled | API key (alternative: `X-API-Key`) |
 | `X-API-Key` | `<api-key>` | When security enabled | API key (alternative to `Authorization`) |
@@ -119,7 +119,7 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
-| `type` | String | ✅ | Test type — any value returned by `GET /api/tests/types` (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY, the TUNE_* family, INTEGRATION_CDC) |
+| `type` | String | Yes | Test type — any value returned by `GET /api/tests/types` (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY, the TUNE_* family, INTEGRATION_CDC) |
 | `backend` | String | | Backend engine (default: "native") |
 | `spec` | Object | | Test specification overrides |
 

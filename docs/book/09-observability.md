@@ -529,9 +529,9 @@ The diff command highlights meaningful differences with directional indicators:
 
 | Metric | Run 1 | Run 2 | Change |
 |--------|:---:|:---:|:---:|
-| Throughput | 45,230 rec/s | 42,100 rec/s | -6.9% ▼ |
-| P99 Latency | 12.3ms | 18.7ms | +52.0% ▲ |
-| Avg Latency | 4.1ms | 5.8ms | +41.5% ▲ |
+| Throughput | 45,230 rec/s | 42,100 rec/s | -6.9%, regressed |
+| P99 Latency | 12.3ms | 18.7ms | +52.0%, regressed |
+| Avg Latency | 4.1ms | 5.8ms | +41.5%, regressed |
 | Error Rate | 0.00% | 0.00% | — |
 
 A 52% increase in P99 latency with only a 7% drop in throughput suggests the cluster is near its saturation point — small increases in load cause disproportionate latency increases. See [Performance Theory](04-performance-theory.md#the-two-pillars-throughput-and-latency) for why this non-linear relationship exists.

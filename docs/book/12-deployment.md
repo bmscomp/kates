@@ -938,8 +938,8 @@ volumes:
 | Path | Purpose | Without emptyDir |
 |------|---------|------------------|
 | `/var/lib/postgresql/data` | Persistent database storage | PVC — always writable |
-| `/var/run/postgresql` | Unix domain socket and `.s.PGSQL.5432.lock` | ❌ `FATAL: could not create lock file` |
-| `/tmp` | Temporary sort files, pg_stat_tmp | ❌ `could not write to file "pg_stat_tmp/global.tmp"` |
+| `/var/run/postgresql` | Unix domain socket and `.s.PGSQL.5432.lock` | Fails with `FATAL: could not create lock file` |
+| `/tmp` | Temporary sort files, pg_stat_tmp | Fails with `could not write to file "pg_stat_tmp/global.tmp"` |
 
 ::: {.callout-note}
 These `emptyDir` volumes are ephemeral — they do not survive pod restarts. This is safe because `/var/run/postgresql` and `/tmp` contain only runtime artifacts (sockets, lock files, temp data). Persistent data is stored on the PVC-backed `/var/lib/postgresql/data` volume.

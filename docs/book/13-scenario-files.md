@@ -59,14 +59,14 @@ scenarios:
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
-| `scenarios` | List | ✅ | One or more test scenario definitions |
+| `scenarios` | List | Yes | One or more test scenario definitions |
 
 ### Scenario Fields
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
 | `name` | String | | Human-readable scenario name (displayed in output) |
-| `type` | String | ✅ | Test type: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`, `TUNE_REPLICATION`, `TUNE_ACKS`, `TUNE_BATCHING`, `TUNE_COMPRESSION`, `TUNE_PARTITIONS`, or `INTEGRATION_CDC`. Case-insensitive — the CLI upper-cases the value before submitting |
+| `type` | String | Yes | Test type: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`, `TUNE_REPLICATION`, `TUNE_ACKS`, `TUNE_BATCHING`, `TUNE_COMPRESSION`, `TUNE_PARTITIONS`, or `INTEGRATION_CDC`. Case-insensitive — the CLI upper-cases the value before submitting |
 | `backend` | String | | Backend engine (default: `native`) |
 | `spec` | Object | | Test specification — see Spec Reference below |
 | `validate` | Object | | SLA validation gates — see Validation Reference below |

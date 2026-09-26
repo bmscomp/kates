@@ -21,13 +21,13 @@ After this chapter, you can:
 
 | Criterion | gRPC | REST |
 |-----------|------|------|
-| CI/CD pipelines | ✅ Strongly typed, fast | ⚠️ Requires JSON parsing |
-| Browser access | ❌ Requires proxy | ✅ Native |
-| Service mesh | ✅ HTTP/2 multiplexing | ✅ Standard |
-| Code generation | ✅ Automatic from `.proto` | ❌ Manual |
-| Debugging | ⚠️ Binary format | ✅ Human-readable |
-| Type safety | ✅ Compile-time via protobuf | ❌ Runtime JSON validation |
-| Payload size | ✅ ~30% smaller (binary) | Larger (JSON text) |
+| CI/CD pipelines | Good: strongly typed, fast | Fair: requires JSON parsing |
+| Browser access | Poor: requires proxy | Good: native |
+| Service mesh | Good: HTTP/2 multiplexing | Good: standard |
+| Code generation | Good: automatic from `.proto` | Poor: manual |
+| Debugging | Fair: binary format | Good: human-readable |
+| Type safety | Good: compile-time via protobuf | Poor: runtime JSON validation |
+| Payload size | Good: ~30% smaller (binary) | Larger (JSON text) |
 | Tooling | `grpcurl`, generated stubs | `curl`, Postman, browsers |
 
 ---
