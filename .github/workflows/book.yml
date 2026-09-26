@@ -13,9 +13,10 @@ on:
       - "docs/book/**"
       - "scripts/prepare-book-render.sh"
       - ".github/workflows/book.yml"
-  # The PDF half of this job runs on everything except a pull request, so a
-  # manual run is how it gets exercised without pushing to main. It renders
-  # the PDF but publishes nothing: the upload and deploy stay on push.
+  # The PDF half of the build job runs on everything except a pull request
+  # (a pull request gets the pdf job instead), so a manual run is how the
+  # publish path gets exercised without pushing to main. It renders the PDF
+  # but publishes nothing: the upload and deploy stay on push.
   workflow_dispatch:
 
 permissions:
@@ -49,7 +50,11 @@ jobs:
       # run on main for 4035f59, in the setup step, before the HTML render that
       # needs none of this. The token moves the call onto this repository's own
       # rate limit; the retry covers the rest.
-      - name: Install the PDF toolchain — TinyTeX and Chromium (best-effort)
+      #
+      # The fonts and rsvg-convert are the ones the pdf job installs, so the
+      # published PDF is set the way that job checked it; see there for what
+      # each is for.
+      - name: Install the PDF toolchain — fonts, TinyTeX and Chromium (best-effort)
         id: pdf-toolchain
         if: github.event_name != 'pull_request'
         continue-on-error: true
@@ -57,9 +62,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          scripts/retry.sh 3 sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            fonts-inter fonts-jetbrains-mono fonts-noto-core fonts-symbola librsvg2-bin
           scripts/retry.sh 3 quarto install tool tinytex --no-prompt --log-level warning
           # What the setup action does after installing TinyTeX on Linux, and
-          # the reason this step cannot just call quarto: without it xelatex
+          # the reason this step cannot just call quarto: without it lualatex
           # and tlmgr are installed but not on PATH for the render below.
           echo "$HOME/bin" >> "$GITHUB_PATH"
           scripts/retry.sh 3 quarto install chromium --no-prompt
@@ -76,7 +84,7 @@ jobs:
       - name: Prepare sources for Quarto
         run: ./scripts/prepare-book-render.sh
 
-      # The PDF (102 chromium-rendered diagrams + xelatex) is best-effort:
+      # The PDF (102 chromium-rendered diagrams + lualatex) is best-effort:
       # a slow or wedged PDF build must never block publishing the site.
       # On failure the site's PDF download link 404s until the next
       # successful run — acceptable degradation. The PDF is stashed
@@ -110,6 +118,104 @@ jobs:
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: docs/book/_book
+
+  # The build job skips the PDF on a pull request, so until this job a PDF
+  # problem surfaced only after merge, if at all: LaTeX drops a character no
+  # font has and says so only in its log (that is how the Scenario Files
+  # "Required" column once printed empty), and a diagram wider than the page
+  # is cut off at its edge. This job renders the PDF with the publish step's
+  # toolchain and fails on either. The publish step stays best-effort until
+  # this job has proved reliable.
+  pdf:
+    name: Render PDF
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b # v2.2.0
+
+      # docs/book/theme/pdf-header.tex sets Inter for text and JetBrains Mono
+      # for code, as on the web, and takes the characters they lack (check
+      # marks, triangles, warning signs, emoji) from Noto Sans Symbols 2,
+      # Noto Sans Symbols, Noto Sans Math and Symbola. rsvg-convert draws the
+      # cover page (docs/book/theme/pdf-cover.lua).
+      - name: Install fonts and rsvg-convert
+        run: |
+          set -euo pipefail
+          scripts/retry.sh 3 sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            fonts-inter fonts-jetbrains-mono fonts-noto-core fonts-symbola librsvg2-bin
+
+      # See the build job for why GH_TOKEN, the retries and the PATH line.
+      - name: Install TinyTeX and Chromium
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          scripts/retry.sh 3 quarto install tool tinytex --no-prompt --log-level warning
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          scripts/retry.sh 3 quarto install chromium --no-prompt
+
+      - name: Prepare sources for Quarto
+        run: ./scripts/prepare-book-render.sh
+
+      # keep-tex and latex-clean:false leave the .tex and the LaTeX log in
+      # docs/book for the check below. The retry covers a diagram that
+      # headless Chromium fails to draw now and then.
+      - name: Render PDF
+        timeout-minutes: 30
+        run: scripts/retry.sh 2 quarto render docs/book --to pdf -M keep-tex:true -M latex-clean:false
+
+      - name: Check for dropped characters and overfull diagrams
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          book = pathlib.Path("docs/book")
+          log = (book / "index.log").read_text(encoding="utf-8", errors="replace").splitlines()
+          tex = (book / "kates-definitive-guide.tex").read_text(encoding="utf-8").splitlines()
+          bad = False
+
+          # LaTeX leaves out a character none of the fonts has, and says so
+          # only in the log.
+          missing = {}
+          for line in log:
+              m = re.search(r"Missing character: There is no (.+?) \((U\+[0-9A-F]+)\)", line)
+              if m:
+                  missing[m.group(2)] = m.group(1)
+          for code, char in sorted(missing.items()):
+              print(f"::error::The PDF leaves out {char} ({code}): none of its fonts has it")
+              bad = True
+
+          # A diagram wider than the text overflows its line. The log gives the
+          # paragraph's line numbers in the .tex, which show whether it was an
+          # image; a point or less over is rounding, not a cut-off diagram.
+          for line in log:
+              m = re.match(r"Overfull \\hbox \(([\d.]+)pt too wide\) in paragraph at lines (\d+)--(\d+)", line)
+              if not m or float(m.group(1)) <= 1:
+                  continue
+              for src in tex[int(m.group(2)) - 1:int(m.group(3))]:
+                  g = re.search(r"\\includegraphics(?:\[[^]]*\])?\{([^}]+)\}", src)
+                  if g:
+                      print(f"::error::{g.group(1)} runs {m.group(1)}pt past the right margin")
+                      bad = True
+
+          print("PDF check: " + ("failed" if bad else "no missing characters, no overfull diagrams"))
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Upload the PDF and its LaTeX log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kates-definitive-guide-pdf
+          path: |
+            docs/book/_book/kates-definitive-guide.pdf
+            docs/book/index.log
+          if-no-files-found: ignore
+          retention-days: 14
 
   deploy:
     name: Publish to GitHub Pages
