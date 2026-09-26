@@ -119,21 +119,27 @@ func init() {
 
 func runDeploy(cmd *cobra.Command, args []string) error {
 	deployStartTime := time.Now()
-	PrintDeployBanner()
 	resetDeployPhases()
 
 	dl = &DashboardController{}
 
 	// ── Target cluster ───────────────────────────────────────────────────
-	// This runs FIRST, before the wizard. There is no point asking eight
-	// questions about a deployment and only then discovering there is nowhere
-	// to deploy it. When nothing is reachable this offers to build the local
-	// 3-zone kind cluster; when several are reachable it asks rather than
-	// guessing.
-	PrintPhaseHeader(nextDeployPhase(), "Selecting Target Cluster")
-	if _, err := resolveClusterFn(); err != nil {
+	// This runs FIRST, before the banner and the wizard. There is no point
+	// asking eight questions about a deployment and only then discovering
+	// there is nowhere to deploy it. When nothing is reachable this offers to
+	// build the local 3-zone kind cluster; when several are reachable it asks
+	// rather than guessing.
+	target, err := resolveClusterFn()
+	if err != nil {
 		return err
 	}
+	// Every later step reads kubectl's current context, so the chosen cluster
+	// becomes it. Without this, picking another cluster changed nothing: the
+	// deploy still went wherever kubectl already pointed.
+	if err := useTargetContext(target); err != nil {
+		return err
+	}
+	PrintDeployBanner(target)
 
 	// ── Interactive Forms ────────────────────────────────────────────────
 	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
