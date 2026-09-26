@@ -70,7 +70,7 @@ kubectl create namespace kafka --dry-run=client -o yaml | kubectl apply -f -
 
 Why `--dry-run=client | apply`? This is an idempotent pattern — it creates the namespace if it doesn't exist and does nothing if it already does. Safe to run multiple times.
 
-### Monitoring Stack (Optional but Recommended) {#monitoring-stack-optional-but-recommended}
+### Monitoring Stack (Optional but Recommended)
 
 If you want metrics, dashboards, and alerts, install the local monitoring wrapper chart first. It is `kates-monitoring` (versions in the [Version & Compatibility Matrix](appendix-d-versions.md)), and it wraps kube-prometheus-stack with the Kates dashboards and scrape configuration:
 
@@ -92,7 +92,7 @@ The kafka-cluster chart then creates the `PodMonitor` and `PrometheusRule` resou
 
 What `charts/monitoring` ships instead is two Kafka boards — **Kafka — KRaft Operations** and **Kafka — Performance & Load Testing** — plus four Kates boards, all generated from `dashboards/` and all checked against the exporter rules on every build. Broker health, quorum identity, Cruise Control and consumer lag come from the Strimzi operator's own dashboards (`charts/strimzi-operator`, see [Step 2 — Install the Strimzi Operator](#step-2--install-the-strimzi-operator)), and connect-cluster, mirror-maker2 and kates each ship the board for the workload they own. [Observability & Monitoring](09-observability.md) is the tour.
 
-### Kyverno (Optional) {#kyverno-optional}
+### Kyverno (Optional)
 
 If you want admission-control policy enforcement — Pod Security Standards (PSS), automatic NetworkPolicy generation, and optional container image signature verification — install [Kyverno](https://kyverno.io/) before deploying the kafka-cluster chart:
 
@@ -1810,7 +1810,7 @@ kafka:
 The `KafkaCertificateExpiringSoon` alert (see [PrometheusRule Alerts](#prometheusrule-alerts)) fires 30 days before expiry. With a 180-day renewal window, you should never see this alert under normal operations — if you do, Strimzi's automatic renewal may be stuck.
 :::
 
-### Helm Test Suite (Profiler Plus 11 Tiers) {#helm-test-suite-profiler-plus-11-tiers}
+### Helm Test Suite (Profiler Plus 11 Tiers)
 
 The chart's test suite runs via `kates test helm` (or `helm test kafka-cluster -n kafka`). It is a profiler at hook weight 0 followed by eleven tiers at weights 1 through 11, executed in that order — from basic connectivity to tiered storage. Tiers 5, 8 and 11 render only when the feature they cover is configured, so a given release runs between nine and twelve test pods:
 
@@ -1950,7 +1950,7 @@ helm uninstall kafka-cluster -n kafka
 By default, the chart sets `helm.sh/resource-policy: keep` on the `Kafka` CR, `KafkaNodePool` CRs, `KafkaTopic` CRs, and `KafkaUser` CRs. This means `helm uninstall` **will not delete your data** or Kafka resources. This is intentional — it prevents accidental data loss.
 :::
 
-### Full Removal (Including Data) {#full-removal-including-data}
+### Full Removal (Including Data)
 
 To completely remove everything including PVCs:
 
@@ -1975,7 +1975,7 @@ kubectl delete namespace kafka
 
 ## Troubleshooting
 
-### Pods stuck in `Pending` {#pods-stuck-in-pending}
+### Pods stuck in `Pending`
 
 **Cause:** No nodes match the `nodeAffinity` rules, or no StorageClass can provision PVCs.
 
@@ -1987,7 +1987,7 @@ Look for `FailedScheduling` — it will tell you exactly which constraint failed
 
 **Fix:** Ensure your nodes have the label `topology.kubernetes.io/zone` set to `alpha`, `sigma`, or `gamma` (or change `nodePools.pools[].zone` to match your actual zone labels).
 
-### Kafka CR stuck on `NotReady` {#kafka-cr-stuck-on-notready}
+### Kafka CR stuck on `NotReady`
 
 ```bash
 kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions}' | python3 -m json.tool
@@ -1998,7 +1998,7 @@ Common causes:
 - Strimzi CRDs not installed — run `kubectl get crd kafkas.kafka.strimzi.io`
 - Insufficient resources — check pod events with `kubectl describe pod`
 
-### Helm upgrade fails with "another operation in progress" {#helm-upgrade-fails-with-another-operation-in-progress}
+### Helm upgrade fails with "another operation in progress"
 
 A previous upgrade or install was interrupted. Roll back first:
 
