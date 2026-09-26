@@ -4,7 +4,7 @@ This tutorial walks through all 8 Kates test types with real commands and expect
 
 ## Prerequisites
 
-- Kates stack deployed and CLI configured (see [Tutorial 1](01-getting-started.md))
+- Kates stack deployed, and the CLI configured with a context that carries the API key, as the Quick Start in [Introduction](../book/01-introduction.md#quick-start) sets it up
 - System health verified: `kates health`
 
 ## 1. LOAD Test — Baseline Performance
@@ -224,19 +224,27 @@ kates test create --type INTEGRITY \
 For the ultimate validation — verify integrity while killing a broker. No
 scenario template carries chaos: a scaffold describes a test, and pairing one
 with a fault is what `kates resilience run` is for. It takes a config with a
-`testRequest` and a `chaosSpec` side by side:
+`testRequest` and a `chaosSpec` side by side. The `testRequest` goes to the API
+as written, so it takes the API's field names (`type`, `numRecords`,
+`numConsumers`), not the flags above or a scenario file's `records`:
 
 ```bash
 cat > integrity-chaos.json <<'EOF'
 {
   "testRequest": {
-    "testType": "INTEGRITY",
-    "spec": { "records": 100000, "acks": "all", "consumers": 1 }
+    "type": "INTEGRITY",
+    "spec": {
+      "numRecords": 100000,
+      "throughput": 500,
+      "acks": "all",
+      "numConsumers": 1
+    }
   },
   "chaosSpec": {
     "experimentName": "kafka-pod-kill",
     "disruptionType": "POD_KILL",
-    "targetNamespace": "kafka"
+    "targetNamespace": "kafka",
+    "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
   },
   "steadyStateSec": 30
 }
@@ -245,6 +253,11 @@ EOF
 kates resilience run -f integrity-chaos.json
 ```
 
+The fault comes after the 30 seconds of `steadyStateSec`, so the run must still
+be producing then. An INTEGRITY run is unthrottled unless you set `throughput`,
+and at 500 records per second these 100,000 records take about 200 seconds. The
+selector adds `strimzi.io/broker-role=true` because the default,
+`strimzi.io/component-type=kafka`, also matches the KRaft controllers.
 [Tutorial 4](04-integrity-under-fire.md) works through this in full.
 
 ## Quick Reference: Choosing the Right Test

@@ -125,7 +125,7 @@ Create a file called `broker-kill-plan.json`:
         "experimentName": "broker-kill",
         "disruptionType": "POD_KILL",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 30,
         "gracePeriodSec": 0
       },
@@ -136,6 +136,10 @@ Create a file called `broker-kill-plan.json`:
   ]
 }
 ```
+
+The step hits one pod at random among those the selector matches.
+`strimzi.io/cluster=krafter` would match every pod Strimzi runs for the cluster,
+the KRaft controllers included, so the selector names the brokers.
 
 ### Step 3: Dry Run
 
@@ -279,26 +283,39 @@ The most powerful mode — run a performance test while simultaneously injecting
 
 ### Step 1: Create a Resilience Config
 
+The `testRequest` goes to the API as written, so it takes the API's field names
+(`type`, `numRecords`, `recordSize`), not a scenario file's `records` or
+`recordSizeBytes`:
+
 ```json
 {
   "testRequest": {
-    "testType": "LOAD",
+    "type": "LOAD",
     "spec": {
-      "records": 200000,
-      "producers": 4,
-      "recordSizeBytes": 1024,
+      "numRecords": 200000,
+      "throughput": 1000,
+      "recordSize": 1024,
       "acks": "all"
     }
   },
   "chaosSpec": {
     "experimentName": "kafka-pod-kill",
-    "targetNamespace": "kafka"
+    "disruptionType": "POD_KILL",
+    "targetNamespace": "kafka",
+    "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
   },
   "steadyStateSec": 30
 }
 ```
 
 Save as `resilience-test.json`.
+
+The fault comes after the 30 seconds of `steadyStateSec`, so the run must still
+be producing then. A LOAD run is unthrottled unless you set `throughput`, and at
+1,000 records per second these 200,000 records take about 200 seconds. Keep
+`disruptionType`: without it the direct Kubernetes provider refuses the fault,
+and LitmusChaos looks for a ChaosExperiment named after `experimentName`, which
+the chart does not install. The selector names the brokers, as in Part 2.
 
 ### Step 2: Execute
 
@@ -308,44 +325,23 @@ kates resilience run -f resilience-test.json
 
 ### Step 3: Interpret the Impact Analysis
 
-```
-  Resilience Test Results
-  ───────────────────────
-  Status     COMPLETED ✅
+The command returns once the fault has ended, which can be before the LOAD run
+finishes, and prints four blocks:
 
-  Chaos Outcome
-  ─────────────
-  Experiment   kafka-pod-kill
-  Verdict      PASS ✅
-  Duration     30s
+| Block | What it shows |
+|-------|---------------|
+| Status | `COMPLETED` when the chaos outcome passed, `CHAOS_FAILED` when it did not, `ERROR` with the reason when the run failed |
+| Chaos Outcome | The experiment, its verdict, and how long the fault lasted |
+| Impact Analysis (% change) | How `throughputRecPerSec`, `avgLatencyMs`, `p99LatencyMs`, `maxLatencyMs` and `errorRate` changed, with ▲ or ▼ beside a change beyond 10% |
+| Pre-Chaos Baseline, Post-Chaos Impact | Throughput, P99 latency and error rate when the fault started, and again just after it ended |
 
-  Impact Analysis (% change)
-  ┌─────────────────────────────┬──────────┬───┐
-  │ Metric                      │ Change   │   │
-  ├─────────────────────────────┼──────────┼───┤
-  │ throughputRecordsPerSec     │ -15.6%   │ ▼ │
-  │ p99LatencyMs                │ +596.7%  │ ▲ │
-  │ errorRate                   │ +0.3%    │   │
-  └─────────────────────────────┴──────────┴───┘
-
-  Pre-Chaos Baseline
-  ──────────────────
-  Throughput    45,000 rec/s
-  P99 Latency   12.3ms
-  Error Rate    0.0000%
-
-  Post-Chaos Impact
-  ─────────────────
-  Throughput    38,000 rec/s
-  P99 Latency   85.7ms
-  Error Rate    0.3000%
-```
-
-**Interpretation:**
-- Throughput dropped 15.6% — the cluster absorbed the impact
-- P99 latency spiked nearly 6x — during leader election
-- Error rate was 0.3% — a few messages timed out and were retried
-- Overall verdict: PASS — the cluster recovered and no data was lost
+Read the Impact Analysis first: it is the cost of the fault. With three replicas
+and `min.insync.replicas=2`, losing one broker should cost latency while
+partition leaders move, and no records. A LOAD run does not check for lost
+records, though. To prove that nothing was lost, run an INTEGRITY test through
+the fault, as [Tutorial 4](04-integrity-under-fire.md) does. `kates test list`
+shows the LOAD run, and `kates report show <id>` its full report once it has
+finished.
 
 ## Part 5: Multi-Step Disruption Plans
 
@@ -363,7 +359,7 @@ For comprehensive testing, create multi-step plans:
         "experimentName": "graceful",
         "disruptionType": "POD_DELETE",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 10
       },
       "steadyStateSec": 15,
@@ -376,7 +372,7 @@ For comprehensive testing, create multi-step plans:
         "experimentName": "hard-kill",
         "disruptionType": "POD_KILL",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 10,
         "gracePeriodSec": 0
       },
@@ -390,7 +386,7 @@ For comprehensive testing, create multi-step plans:
         "experimentName": "cpu-stress",
         "disruptionType": "CPU_STRESS",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 60
       },
       "steadyStateSec": 15,
