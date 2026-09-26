@@ -71,8 +71,6 @@ class FakeLab:
             return 0, json.dumps(canned("topic_eval_diag.json")), ""
         if line.startswith("security baseline --save"):
             return 0, json.dumps(canned("security_baseline_save.json")), ""
-        if line.startswith("disruption status"):
-            return 0, json.dumps(canned("disruption_status_running.json")), ""
         if line.startswith("cluster topology"):
             return 0, json.dumps(canned("cluster_topology.json")), ""
         if line.startswith("cluster info"):
@@ -84,8 +82,6 @@ class FakeLab:
         self.posts.append((path, body))
         if path.startswith("/api/disruptions/templates/"):
             return canned("template_run.json")
-        if path == "/api/disruptions":
-            return canned("disruption_accepted.json")
         raise AssertionError(path)
 
     def get(self, path, params=None):
@@ -175,9 +171,6 @@ class EveryTask(unittest.TestCase):
             got = set(((fixture_state["tasks"].get(tid) or {}).get("captures") or {}))
             self.assertEqual(got, want, tid)
 
-    def test_the_stale_row_premise_is_checked(self) -> None:
-        self.assertIn(["disruption", "status", "9f8e7d6c", "-o", "json", "--context", "human"], self.lab.commands)
-
 
 class Steps(unittest.TestCase):
     def setUp(self) -> None:
@@ -243,7 +236,8 @@ class Steps(unittest.TestCase):
     def test_api_step_needs_the_api(self) -> None:
         self.h.api = None
         with self.assertRaises(setup.StepFailed) as ctx:
-            self.run_task([{"kind": "api", "method": "POST", "path": "/api/disruptions", "body": {}, "why": "x"}])
+            self.run_task([{"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery",
+                            "body": {}, "why": "x"}])
         self.assertIn(oracle.API_KEY_ENV, str(ctx.exception))
 
     def test_a_task_used_twice_runs_once(self) -> None:
@@ -268,7 +262,8 @@ class Steps(unittest.TestCase):
 class HarnessApi(unittest.TestCase):
     def test_posts_outside_the_allowlist_are_refused(self) -> None:
         api = setup.HarnessAPI("http://localhost:8080", "k")
-        for path in ("/api/tests", "/api/disruptions/compound", "/api/kafka/produce/x", "/api/security/baseline"):
+        for path in ("/api/tests", "/api/disruptions", "/api/disruptions/compound", "/api/disruptions/templates",
+                     "/api/kafka/produce/x", "/api/security/baseline"):
             with self.subTest(path=path), self.assertRaises(setup.StepFailed):
                 api.post(path, {}, 10)
 
@@ -282,9 +277,9 @@ class HarnessApi(unittest.TestCase):
 
         api._send = send
         api.post("/api/disruptions/templates/broker-kill-recovery", {"brokerId": 3}, 900)
-        api.post("/api/disruptions", {}, 60)
+        api.post("/api/disruptions/templates/leader-election-storm", {}, 60)
         self.assertEqual(seen, [("POST", "/api/disruptions/templates/broker-kill-recovery", 900),
-                                ("POST", "/api/disruptions", 60)])
+                                ("POST", "/api/disruptions/templates/leader-election-storm", 60)])
         self.assertEqual(api.timeout, 90)
 
 

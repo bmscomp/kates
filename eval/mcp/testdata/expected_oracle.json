@@ -137,12 +137,5 @@
       "3"
     ],
     "total_lag": 25
-  },
-  "sre-stale-running-disruption": {
-    "disruption_records_marked_running": [
-      "9f8e7d6c"
-    ],
-    "fault_in_progress": false,
-    "test_running": false
   }
 }

@@ -580,7 +580,7 @@ Each is a test that must fail if the property breaks.
 - Claude Code runs with `MCP_PROTOCOL_NEGOTIATION` set explicitly, and the report names the era it measured; left unset, stdio stays on the legacy handshake ([Claude Code MCP](https://code.claude.com/docs/en/mcp)).
 - **Scenario ground truth** from the existing layer: run a playbook, give an agent the read-only tools and a symptom, and grade its diagnosis against the `DisruptionReport` targets and timeline. This is the spec's benchmark idea used as an internal harness. Allow for timing noise on `litmus-crd` (D1), and hide the report from the agent under test (no `disruption_report` or `kates_activity` in that arm), otherwise the answer leaks.
 - Add a context-switch case (the kube context and `kates ports` change mid-session) and a tampered-plan approval case.
-- The harness is in [`eval/mcp/`](../eval/mcp/README.md): 21 tasks frozen on 2026-09-26, with setup and oracles, and the runner, grading and report that apply §2.5. The context-switch and tampered-plan cases wait for Phase 5, and scenario drafting is not in the first list.
+- The harness is in [`eval/mcp/`](../eval/mcp/README.md): 20 tasks frozen on 2026-09-26, with setup and oracles, and the runner, grading and report that apply §2.5. The context-switch and tampered-plan cases wait for Phase 5, and scenario drafting is not in the first list.
 
 ---
 

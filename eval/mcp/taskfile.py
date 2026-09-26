@@ -45,12 +45,11 @@ MCP_TOOLS = (
     "draft_scenario",
 )
 
-# The only paths setup may POST to. A template run is the one way today to
-# get a disruption whose final report is stored (DisruptionLauncher persists
-# a second row under the same id, which fails), and POST /api/disruptions is
-# how the stale-row task leaves a RUNNING record; neither has a kates command
-# that returns. Setup never deletes or alters anything through the API.
-SETUP_API_POSTS = ("/api/disruptions/templates/", "/api/disruptions")
+# The only paths setup may POST to: a template run, which no kates command
+# starts. It runs synchronously and returns the report it stored, which is
+# the debrief tasks' ground truth. Setup never deletes or alters anything
+# through the API.
+SETUP_API_POSTS = ("/api/disruptions/templates/",)
 
 # Captures every task can use without a setup step: run_tag keeps topic names
 # and specs of one evaluation run apart from every earlier one.
