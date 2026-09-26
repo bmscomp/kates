@@ -513,6 +513,61 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("froze a different task list", err)
 
+    def test_preflight_before_setup_pins_the_cluster_itself(self):
+        code, out, err = call(["preflight", *self.common, *self.agent])
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("FAIL", out)
+        state = json.loads((self.runs / "e2e" / "state.json").read_text())
+        self.assertEqual(state["cluster_id"], CLUSTER_ID)
+        self.assertEqual(state["tasks"], {})
+        # Setup afterwards keeps the pin and the run_tag.
+        code, _, err = call(["setup", *self.common])
+        self.assertEqual(code, 0, err)
+        after = json.loads((self.runs / "e2e" / "state.json").read_text())
+        self.assertEqual((after["cluster_id"], after["run_tag"]), (CLUSTER_ID, state["run_tag"]))
+
+    def test_preflight_refuses_a_cluster_other_than_allow_cluster(self):
+        code, _, err = call(["preflight", *self.common, *self.agent, "--allow-cluster", "another-cluster"])
+        self.assertEqual(code, 3)
+        self.assertIn("--allow-cluster another-cluster but", err)
+        # Once pinned, too.
+        self.assertEqual(call(["preflight", *self.common, *self.agent])[0], 0)
+        code, _, err = call(["preflight", *self.common, *self.agent, "--allow-cluster", "another-cluster"])
+        self.assertEqual(code, 3)
+        self.assertIn("but this run pinned Kafka cluster fixture-cluster-1", err)
+
+    def test_an_environment_that_cannot_run_a_trial_writes_no_state(self):
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
+            code, _, err = call(["preflight", *self.common, *self.agent])
+        self.assertEqual(code, 3, err)
+        self.assertFalse((self.runs / "e2e" / "state.json").exists())
+        self.assertEqual(self.api.requests, [])
+
+    def test_trials_before_setup_refuse_before_recording_settings(self):
+        code, _, err = call(["trials", *self.common, *self.agent, "--max-trials", "1"])
+        self.assertEqual(code, 2)
+        self.assertIn("not set up yet: sec-posture, run-noise", err)
+        # Nothing was recorded: a later run with other settings is not refused.
+        self.assertFalse((self.runs / "e2e" / "manifest.json").exists())
+        self.assertEqual(self.api.requests, [])
+
+    def test_the_oracle_refuses_a_cluster_other_than_the_pinned_one(self):
+        self.assertEqual(call(["setup", *self.common])[0], 0)
+        state_path = self.runs / "e2e" / "state.json"
+        state = json.loads(state_path.read_text())
+        state["cluster_id"] = "the-cluster-setup-saw"
+        state_path.write_text(json.dumps(state))
+        code, _, err = call(["oracle", *self.common])
+        self.assertEqual(code, 3)
+        self.assertIn("this run pinned Kafka cluster the-cluster-setup-saw", err)
+        self.assertFalse((self.runs / "e2e" / "oracle.json").exists())
+
+    def test_a_dry_run_of_an_unpinned_preflight_names_the_pin(self):
+        code, out, _ = call(["preflight", *self.common, *self.agent, "--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertIn("# pin: read contexts 'human' (human) and 'agent' (agent)", out)
+        self.assertFalse((self.runs / "e2e").exists())
+
     def test_preflight(self):
         code, out, err = call(["setup", *self.common])
         self.assertEqual(code, 0, err)
@@ -533,7 +588,10 @@ class EndToEndTest(unittest.TestCase):
         doc = json.loads(TASKS.read_text())
         doc["tasks"][0]["prompt"] += " FAKE:crash"
         doc["tasks"][1]["prompt"] += " FAKE:sleep=30"
-        doc["tasks"][1]["timeout_s"] = 1
+        # Long enough for the fake to start and report its session even on a
+        # loaded machine (a timeout before the init event is the harness's,
+        # not the agent's, and would make the trial invalid).
+        doc["tasks"][1]["timeout_s"] = 4
         path = Path(self.tmp.name) / "tasks-bad.json"
         path.write_text(json.dumps(doc))
         common = [*self.common]
