@@ -1,3 +1,7 @@
+---
+toc-depth: 4
+---
+
 # CLI Reference
 
 Reference for the Kates CLI — the commands, flags, and output formats you'll use day to day.
@@ -128,7 +132,7 @@ kates gate --min-grade B --type LOAD --records 100000
 ```
 
 ::: {.callout-tip}
-See [CI/CD Pipeline](appendix-c-cicd.md) for complete GitHub Actions, GitLab CI, and Jenkins pipeline examples.
+[Scenario Files & SLA Gates](13-scenario-files.md#cicd-integration) explains the exit code `kates test apply --wait` gives a pipeline, and [Chaos Engineering in Practice](07-chaos-practice.md#cicd-integration) shows how `kates disruption run --fail-on-sla-breach` fails one on a disruption plan's SLA.
 :::
 
 ## Configuration
@@ -225,7 +229,42 @@ contexts:
 
 ## Commands
 
-### Health, Status & Diagnostics
+Find your question in the table below, then follow its link to the family's commands and flags. The last column says what the family works through: the Kates API, at the URL and with the API key of the context you use; Kubernetes, through the `kubectl` and `helm` the CLI runs against a cluster from your kubeconfig; or files on your machine.
+
+| Family | Commands | The question it answers | What it talks to |
+|:-----|:---------|:---------|:-------|
+| [Context Management](#context-management) | `ctx set`, `use`, `show`, `export`, `import` | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
+| [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the backend up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno |
+| [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs` | What does the Kafka cluster look like, and is it healthy? | Kates API |
+| [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test scaffold` uses only templates built into the CLI |
+| [Report Commands](#report-commands) | `report show`, `summary`, `export`, `diff`, `compare`, `brokers` | What did a run measure, and how does it compare with another run? | Kates API |
+| [Trend Analysis](#trend-analysis) | `trend` | How has one metric moved across a test type's runs over recent days? | Kates API |
+| [Disruption Commands](#disruption-commands) | `disruption run`, `list`, `status`, `timeline`, `types`, `kafka-metrics`, `watch`, `playbook list`, `playbook show`, `playbook run` | What happens to the cluster when a fault hits it, and how fast does it recover? | Kates API |
+| [Chaos Experiment History](#chaos-experiment-history) | `chaos list`, `show` | Which disruption plans ran recently, and what grade did each get? | Kates API |
+| [Resilience](#resilience) | `resilience run` | How much does one fault hurt a test while it runs? | Kates API |
+| [Schedule Commands](#schedule-commands) | `schedule list`, `get`, `create`, `delete` | How do you run the same test on a cron schedule? | Kates API |
+| [Observability & Monitoring](#observability--monitoring) | `dashboard`, `top` | What is running right now, and how is it doing? | Kates API |
+| [Interactive Lab](#interactive-lab) | `lab` | Which settings work best, when you try them one run at a time? | Kates API |
+| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `clean`, `detect`, `ports`, `auto`, `operator`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
+| [Versions and Operators](#versions-and-operators) | `versions`, `operators list` | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
+| [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes, through `kubectl` and `helm` |
+| [Security Commands](#security-commands) | `security audit`, `tls-inspect`, `auth-test`, `pentest`, `compliance`, `baseline`, `drift`, `gate`, `certs`, `cve`, `secrets`, `netpol`, `acl-map`, `config-diff`, `trend` | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl`, and `security audit` also asks it about Kyverno |
+| [Kyverno Policy Commands](#kyverno-policy-commands) | `kyverno status`, `violations`, `enforce`, `audit`, `detect`, `apply` | Which admission policies guard the cluster, and what do they catch? | Kubernetes, through `kubectl`; `kyverno apply` also runs `helm` |
+| [Kafka Client Commands](#kafka-client-commands) | `kafka brokers`, `topics`, `topic`, `groups`, `group`, `consume`, `produce`, `create-topic`, `alter-topic`, `delete-topic`, `tui`, `connect` | What is in a topic or consumer group, and how do you read, write or change it? | Kates API; `kafka connect` uses `kubectl` |
+| [Analysis & Optimization Commands](#analysis--optimization-commands) | `benchmark`, `advisor`, `explain`, `replay`, `gate`, `test baseline`, `report regression` | What do a run's results mean, and do they clear the grade or baseline you require? | Kates API |
+| [Tuning Commands](#tuning-commands) | `tune run`, `report`, `types` | Which setting of `acks`, batching, compression, partition count or replication factor performs best? | Kates API |
+| [Profile Commands](#profile-commands) | `profile save`, `list`, `compare`, `assert` | Does a new run still perform like one you saved earlier? | Kates API for `save` and `assert`; profiles are files in `~/.kates/profiles` |
+| [Cost Estimation](#cost-estimation) | `cost estimate` | Roughly what would a workload cost to run with a cloud provider? | Nothing: the CLI computes the estimate itself |
+| [Snapshot Commands](#snapshot-commands) | `snapshot create`, `list`, `diff` | What changed in the cluster's brokers, topics and groups between two moments? | Kates API for `create`; snapshots are files in `~/.kates/snapshots` |
+| [Flow Pipelines](#flow-pipelines) | `flow run` | How do you run several tests in a row, with grade gates, from one YAML file? | Kates API, for a pipeline read from a local file |
+| [Badge Generation](#badge-generation) | `badge` | What badge shows the latest run's grade, P99 or throughput? | Kates API |
+| [Webhook Notifications](#webhook-notifications) | `webhook list`, `add`, `remove` | Which URLs hear about it when a test finishes? | Kates API |
+| [MCP Server for AI Agents](#mcp-server-for-ai-agents) | `mcp` | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
+| [Developer & Help Commands](#developer--help-commands) | `docs`, `tldr`, `changelog` | How does a command work, and what does the backend's audit log record? | Nothing for `docs` and `tldr`; `changelog` reads audit events from the Kates API |
+
+Contexts, profiles and snapshots are files in your home directory, so they stay on the machine that made them; `kates ctx export` moves your contexts to another one.
+
+### Health, Status & Diagnostics {#health-status--diagnostics}
 
 These are the commands you reach for first. Whether you're starting your day, triaging an incident, or validating a deployment, health and status commands give you a quick read on whether the system is behaving. Run `kates health` before and after any significant change — it's cheap and tells you immediately if something broke.
 
@@ -1052,7 +1091,7 @@ kates schedule delete <id>
 
 ---
 
-### Observability & Monitoring
+### Observability & Monitoring {#observability--monitoring}
 
 Observability commands give you real-time and historical visibility into what Kates and Kafka are doing. The `dashboard` command opens a full-screen TUI with live metrics, `top` shows running tests like `kubectl top` shows pods, and `watch` streams a single test's progress. These are the commands you keep running in a side terminal during performance tests and chaos experiments.
 
@@ -1091,7 +1130,7 @@ See [Lab — Interactive Performance Tuning](10b-lab.md) for the full guide.
 
 ---
 
-### Deployment & Lifecycle
+### Deployment & Lifecycle {#deployment--lifecycle}
 
 Deployment commands manage the full lifecycle of the Kates stack — from initial deployment to teardown. The `deploy` command can set up the entire stack (Kafka, Kates backend, monitoring, chaos engine) with a single interactive wizard, while `clean` tears everything down cleanly, including finalizer stripping for Strimzi CRDs that can otherwise block namespace deletion.
 
@@ -1773,7 +1812,7 @@ kates kafka connect scale <replicas>        # Scale Connect workers
 
 ---
 
-### Analysis & Optimization Commands
+### Analysis & Optimization Commands {#analysis--optimization-commands}
 
 Analysis commands take raw test results and turn them into actionable recommendations. The `benchmark` command runs a full battery of tests and grades your cluster with a letter score. The `advisor` analyzes a specific run and suggests configuration improvements. The `explain` command produces a plain-English summary — useful when you need to share results with people who don't want to read latency tables.
 
@@ -1868,7 +1907,7 @@ kates test baseline unset <type>
 kates report regression <run-id>
 ```
 
-**See also:** [Performance Theory](04-performance-theory.md) for statistical significance and why multiple runs matter, [CI/CD Pipeline](appendix-c-cicd.md) for quality gate examples.
+**See also:** [Performance Theory](04-performance-theory.md) for statistical significance and why multiple runs matter, [Scenario Files & SLA Gates](13-scenario-files.md#cicd-integration) for gating a pipeline on a scenario file's SLA.
 
 ---
 
@@ -2277,7 +2316,7 @@ The server speaks every MCP protocol revision from 2024-11-05 to 2026-07-28, so 
 
 ---
 
-### Developer & Help Commands
+### Developer & Help Commands {#developer--help-commands}
 
 #### docs
 
