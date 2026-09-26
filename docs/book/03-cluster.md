@@ -119,12 +119,12 @@ This matrix is the most important table in this chapter. It tells you exactly wh
 
 | Failure Scenario | Write Available? | Data Loss? | Why |
 |------------------|:---:|:---:|-----|
-| 1 broker down | ✅ | ❌ | ISR still ≥ 2, `min.insync.replicas` satisfied |
-| 2 brokers down | ❌ | ❌ | ISR = 1 < `min.insync.replicas`, writes rejected |
-| 3 brokers down | ❌ | ❌ | No leader, cluster unavailable |
-| 1 controller down | ✅ | ❌ | Quorum of 2 still holds, metadata operations continue |
-| 2 controllers down | ❌ | ❌ | No quorum — metadata operations halt, brokers freeze |
-| 1 broker + 1 controller | ✅ | ❌ | Quorum intact, ISR ≥ 2 |
+| 1 broker down | Yes | No | ISR still ≥ 2, `min.insync.replicas` satisfied |
+| 2 brokers down | No | No | ISR = 1 < `min.insync.replicas`, writes rejected |
+| 3 brokers down | No | No | No leader, cluster unavailable |
+| 1 controller down | Yes | No | Quorum of 2 still holds, metadata operations continue |
+| 2 controllers down | No | No | No quorum — metadata operations halt, brokers freeze |
+| 1 broker + 1 controller | Yes | No | Quorum intact, ISR ≥ 2 |
 
 ::: {.callout-important}
 Notice that **2 brokers down** means writes are rejected, but **no data is lost**. This is the difference between *availability* and *durability*. With `min.insync.replicas=2`, Kafka trades availability for durability — it would rather refuse writes than risk losing data. Understanding this trade-off is fundamental to designing meaningful chaos experiments.

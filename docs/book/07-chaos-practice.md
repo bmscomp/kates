@@ -671,8 +671,8 @@ The CLI prints the chaos outcome, a pre-chaos baseline and post-chaos summary (t
 
 | Metric | Change | |
 |--------|-------:|:-:|
-| `throughputRecPerSec` | -15.6% | ▼ |
-| `p99LatencyMs` | +596.7% | ▲ |
+| `throughputRecPerSec` | -15.6% | Down |
+| `p99LatencyMs` | +596.7% | Up |
 | `errorRate` | +0.3% | |
 
 ::: {.callout-tip}

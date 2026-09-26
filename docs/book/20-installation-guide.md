@@ -1016,9 +1016,9 @@ The base values configure two internal listeners. A third, `external`, comes fro
 
 | Listener | Port | Protocol | Authentication | TLS | Use Case |
 |----------|:----:|----------|---------------|:---:|----------|
-| `plain` | 9092 | Plaintext | SCRAM-SHA-512 | ✗ | Internal services within the cluster (fast, no TLS overhead) |
-| `tls` | 9093 | TLS | mTLS (certificate) | ✓ | Secure internal communication (mutual TLS — both client and server present certificates) |
-| `external` | 9094 | TLS + NodePort or LoadBalancer | SCRAM-SHA-512 | ✓ | External clients outside the Kubernetes cluster — where the preset or the generated values declare it |
+| `plain` | 9092 | Plaintext | SCRAM-SHA-512 | No | Internal services within the cluster (fast, no TLS overhead) |
+| `tls` | 9093 | TLS | mTLS (certificate) | Yes | Secure internal communication (mutual TLS — both client and server present certificates) |
+| `external` | 9094 | TLS + NodePort or LoadBalancer | SCRAM-SHA-512 | Yes | External clients outside the Kubernetes cluster — where the preset or the generated values declare it |
 
 **Why three listeners?** Different clients have different security requirements:
 - **Internal microservices** use `plain:9092` — SCRAM authentication without TLS encryption. Keep it to a network you trust: as the charts ship, every pod in the cluster can reach this port, because Strimzi's generated NetworkPolicy admits all sources to a listener without `networkPolicyPeers` (section 11.1).
