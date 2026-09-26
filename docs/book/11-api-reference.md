@@ -459,7 +459,7 @@ Non-default configuration entries for a specific broker.
 
 ### Disruption Testing
 
-A disruption plan injects faults into the Kafka cluster step by step, measures how the cluster recovers and grades the result; a playbook is a ready-made plan. `kates disruption` wraps these endpoints, and [Chaos Engineering in Practice](07-chaos-practice.md) explains plans, the safety guard and the grades.
+A disruption plan injects faults into the Kafka cluster step by step, measures how the cluster recovers and, when the plan's `sla` block sets a threshold, grades the result against it; a playbook is a ready-made plan with no `sla` block, so it gets no grade. `kates disruption` wraps these endpoints, and [Chaos Engineering in Practice](07-chaos-practice.md) explains plans, the safety guard and the grades.
 
 #### POST /api/disruptions
 
@@ -678,7 +678,7 @@ Run a playbook. It takes no body and goes through the launcher `POST /api/disrup
 
 ### Resilience Testing
 
-A resilience test starts a test run, injects one fault while it runs, and compares the run's numbers from before and after the fault; `kates resilience run` sends this request.
+A resilience test starts a test run, injects one fault while it runs, and compares a snapshot of the run taken before the fault with a summary of the whole run taken after the recovery wait; `kates resilience run` sends this request. A disruption plan starts no test run and measures the cluster itself; [Chaos Engineering in Practice](07-chaos-practice.md) explains both.
 
 #### POST /api/resilience
 
