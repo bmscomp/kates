@@ -78,6 +78,18 @@ then
   note "normalize to exactly one blank line after ':::'"
 fi
 
+# 6. Structure ratchet (scripts/book_metrics.py, tested first): per-page counts
+#    of bare headings, tables without a lead-in, hand-numbered headings, broken
+#    handoffs, long fenced lines and the rest may fall but never rise above
+#    scripts/book-metrics-baseline.json; a new page starts at zero, and '[TODO'
+#    is zero everywhere.
+if ! tests=$(python3 -m unittest discover -s scripts -p 'test_book_metrics.py' -q 2>&1); then
+  echo "$tests" >&2
+  note "scripts/test_book_metrics.py fails -> fix scripts/book_metrics.py first"
+elif ! python3 scripts/book_metrics.py --check scripts/book-metrics-baseline.json; then
+  note "book structure ratchet (see above)"
+fi
+
 if [[ $fail -ne 0 ]]; then
   echo "" >&2
   echo "Book style violations found — see docs/book/STYLE.md." >&2
