@@ -38,6 +38,7 @@ jobs:
               - 'scripts/book_metrics.py'
               - 'scripts/test_book_metrics.py'
               - 'scripts/book-metrics-baseline.json'
+              - 'scripts/check-book-contrast.py'
               - 'scripts/check-mermaid.sh'
               - '.github/workflows/docs.yml'
 
