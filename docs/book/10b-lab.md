@@ -39,22 +39,24 @@ Lab splits the terminal into two panes:
 │    Compression   [lz4]   │  2   52.1K rec/s  8ms  ▲15%  │
 │    Batch Size    [16384] │  3   48.7K rec/s 11ms  ▼7%   │
 │    Linger ms     [0]     │                              │
-│    Partitions    [6]     │  Throughput: ▃▇▅             │
-│    Replication   [3]     │  P99 ms:     ▅▂▄             │
-│                          │                              │
-│                          │  Latency Distribution        │
-│                          │  <1ms  ██████████████  50%   │
-│                          │  1-5ms ████████        30%   │
-│                          │  5-10  ████            15%   │
-│                          │  10-50 █                4%   │
-│                          │  50+ms ▏                1%   │
+│    Partitions    [6]     │  Throughput: ▁█▄             │
+│    Replication   [3]     │  P99 ms:     █▁▆             │
 ├──────────────────────────┴──────────────────────────────┤
 │  ✓ #3 — 48.7K rec/s, p99=11.00ms                        │
 │  ↑↓ navigate  ←→ change  Enter run  p preset  d diff    │
 └─────────────────────────────────────────────────────────┘
 ```
 
-The left pane shows configurable parameters. The right pane shows iteration history with sparklines and a latency histogram that adapts to the last result's P99 value.
+Read the screen from the top:
+
+1. The header names the Kates API that Lab sends its runs to, the address your CLI is using. It shows only on a terminal at least 100 columns wide.
+2. The left pane holds the settings for the next run. `▸` marks the one that `↑` and `↓` select and `←` and `→` change; on the live screen, that row also opens out to list the values it can take.
+3. Iteration History lists the recent iterations, one row each: its number, throughput, P99, and Δ, the change in throughput from the iteration before it (▲ up, ▼ down). On a very wide terminal, an `Err %` column appears as well.
+4. The two sparklines trace throughput and P99 across every iteration, oldest first, each scaled from its own lowest value (▁) to its highest (█). They appear once there are two iterations.
+5. The status line says what Lab just did: here, the result of iteration 3. While a test runs, it shows the elapsed seconds and, once Kates reports progress, the live record count, throughput and P99.
+6. The help line lists the keys that work right now. While a test runs it offers only `x` and `ctrl+c`, `c compare` joins it once there are two iterations, and `r retry` after a run fails.
+
+Below 80 columns, the two panes stack one above the other instead of sitting side by side.
 
 ## Keyboard Reference
 
