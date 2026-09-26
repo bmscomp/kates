@@ -110,6 +110,8 @@ Kates reports the mean plus P50, P95, P99, P99.9, and Max for every test run.
 
 ### The Long Tail Problem
 
+A run's percentiles can sit far apart. In the illustrative distribution below, P50 is 5 ms while the slowest request takes 2 s, and the list after it names what causes that tail in Kafka.
+
 ```mermaid
 graph LR
     subgraph Distribution
@@ -138,6 +140,8 @@ GC pauses are the most common source of tail latency in Kates benchmarks. Switch
 One of the most insidious measurement errors in load testing is **coordinated omission**. It occurs when your measurement tool slows down along with the system, causing it to miss the worst-case latencies.
 
 ### How It Happens
+
+Follow a tool that sends one request every 10 ms but waits for each response before it sends the next. Watch what happens to the requests it should have sent while Kafka stalls for 200 ms.
 
 ```mermaid
 sequenceDiagram

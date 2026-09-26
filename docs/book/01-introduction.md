@@ -69,6 +69,8 @@ Disruption tests include safety guardrails: maximum affected broker limits, auto
 
 ## Feature Overview
 
+Each row is one area of Kates and the features it offers there. The first three rows answer the three dimensions above; the rest cover how you watch a run, export and grade its results, drive Kates from the CLI, schedule runs, and combine a performance test with chaos.
+
 | Category | Features |
 |----------|----------|
 | **Performance Testing** | Load, Stress, Spike, Endurance, Volume, Capacity, Round-Trip, and Integrity test types |
@@ -82,6 +84,8 @@ Disruption tests include safety guardrails: maximum affected broker limits, auto
 | **Resilience Testing** | Combined performance + chaos tests with before/after impact analysis |
 
 ## How Kates Fits Into Your Workflow
+
+The diagram places Kates in a delivery pipeline as two gates. Read it from the top: a change passes a performance gate before staging and a chaos gate before production, and after release, scheduled tests feed a trend that sends any regression to the same block-and-alert step.
 
 ```mermaid
 graph TB

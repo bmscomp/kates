@@ -441,6 +441,8 @@ The 25 heatmap buckets (defined by `HEATMAP_BOUNDARIES` in `LatencyHistogram.jav
 
 ### Exporting Heatmaps
 
+`kates report export` writes a run's heatmap as JSON or as CSV, and the `--format` flag picks which:
+
 ```bash
 # JSON (for Grafana) — run in a terminal, this writes kates-heatmap-<id>.json
 kates report export <id> --format heatmap
@@ -455,6 +457,8 @@ kates report export <id> --format heatmap > heatmap.json
 There is no output-file flag: when stdout is a terminal, the export is written to an auto-named file; when piped or redirected, it goes to stdout.
 
 ### REST API
+
+The CLI's export reads this endpoint, so a script can fetch the same data over HTTP. The `format` parameter picks JSON, the default, or CSV:
 
 ```text
 GET /api/tests/{id}/report/heatmap?format=json

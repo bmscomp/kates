@@ -13,6 +13,8 @@ After this chapter, you can:
 
 ## Physical Topology
 
+The `panda` Kind cluster has three nodes, `alpha`, `sigma` and `gamma`, and each one stands in for an availability zone. Every node runs one broker and one controller of the `krafter` Kafka cluster. Notice that they are separate pods: the brokers replicate data among themselves, while the controllers keep the cluster's metadata in their own Raft quorum.
+
 ```mermaid
 graph TB
     subgraph Kind["Kind Cluster: panda"]
@@ -71,6 +73,8 @@ You can verify the zone distribution at any time with `kates cluster topology`. 
 :::
 
 ## Resource Budget
+
+The table gives the memory, CPU, storage and heap of each pod in the `krafter` lab cluster. The figure to notice is the broker's: 4Gi of memory around a 2Gi heap, which the paragraphs below turn into a page-cache budget.
 
 | Component | Memory (req=limit) | CPU (req / limit) | Storage | JVM Heap |
 |-----------|:------------------:|:-----------------:|:-------:|:--------:|
@@ -240,6 +244,8 @@ Remember to re-apply zone labels after testing. Without rack awareness, a single
 :::
 
 ## Listeners
+
+Every `krafter` install has the two internal listeners, and the third, `external`, exists only where something declares it. The one to notice is `plain` on port 9092, the listener the performance tests use.
 
 | Name | Port | Type | Auth | TLS | Use Case |
 |------|------|------|------|-----|----------|

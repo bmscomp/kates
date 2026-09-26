@@ -67,6 +67,8 @@ graph LR
 
 ### Example
 
+The first command runs a quick baseline. The second runs closer to production, with 2048-byte records, a topic of its own and `acks=all` spelled out.
+
 ```bash
 # Quick baseline
 kates test create --type LOAD --records 100000 --wait
@@ -203,6 +205,8 @@ graph LR
 
 ### Key Metrics
 
+Each row is a phase of the Trogdor profile above, with the question to ask of it. On the native backend, which runs the burst alone, the run has no baseline or recovery phase, so you observe recovery in your monitoring, as Methodology says.
+
 | Phase | Watch For |
 |-------|-----------|
 | Pre-spike baseline | Record your normal P99 |
@@ -228,6 +232,8 @@ graph LR
 ```
 
 ### What It Detects
+
+Each row is a slow failure and the symptom it leaves over a long run: drift that a short test ends before it can show.
 
 | Problem | How It Manifests |
 |---------|------------------|

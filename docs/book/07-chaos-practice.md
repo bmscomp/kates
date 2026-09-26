@@ -85,6 +85,8 @@ When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption t
 
 ### The Hybrid Provider
 
+The diagram shows the one decision the hybrid provider makes, and when it makes it. Notice that the check runs once, at startup, not once per disruption.
+
 ```mermaid
 graph TD
     DO[DisruptionOrchestrator] --> HCP[HybridChaosProvider<br/>startup: are Litmus CRDs installed?]

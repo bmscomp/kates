@@ -311,7 +311,11 @@ A clean run contains only the final `SUMMARY` event.
 
 ## Interpreting Integrity Results
 
+Every INTEGRITY run ends its report with the same Data Integrity section. The examples below show how it reads for a clean run, for a run that lost records, and for a clean run whose producer hit errors during a broker failure.
+
 ### PASS — Zero Data Loss
+
+Every count that could signal trouble reads zero, and `RPO` reads `not measured` because nothing marked a fault on this run:
 
 ```text
   ▸ Data Integrity
@@ -330,6 +334,8 @@ A clean run contains only the final `SUMMARY` event.
 This is the expected result for a properly configured cluster with `acks=all` and `min.insync.replicas=2`, even during single-broker failures. `RPO` reads `not measured` on a standalone run: it gets a value only when a resilience run marks a fault on the run, as in Integrity Under Chaos above.
 
 ### DATA_LOSS — Messages Missing
+
+Look at `Lost` and at the Lost Ranges table under it: two acknowledged records never came back, and the table gives their sequence numbers:
 
 ```text
   ▸ Data Integrity
@@ -363,6 +369,8 @@ Data loss indicates a serious issue. Common causes:
 | Log truncation | Follower promoted with less data than old leader |
 
 ### PASS with Unacked Messages
+
+This run overlapped a broker failure. `Producer RTO` is there because some sends failed, and `RPO` has a value because a chaos start was marked on the run; the verdict is still PASS:
 
 ```text
   ▸ Data Integrity
@@ -452,6 +460,8 @@ With `--wait`, `kates test apply` shows a spinner per scenario and a summary tab
 Internally the test runs its produce phase to completion, then consumes everything back from the beginning, then reconciles ACKed against consumed sequence numbers. The topic is named after the test type (`integrity-test`) unless overridden with the `topic` spec field.
 
 ### Step 3 — Read the Verification Report
+
+Once the run is `DONE`, read its report with the ID the summary printed:
 
 ```bash
 kates test get <id>

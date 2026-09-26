@@ -91,6 +91,8 @@ Note that each preset also switches the **Test Type** (`SPIKE`, `STRESS`, or `LO
 
 ## Iteration Workflow
 
+Lab moves between a few states as you work: you set parameters, a test runs, and you compare the results. The diagram shows the main keys that move you from one state to the next.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Config: kates lab
@@ -118,6 +120,8 @@ While a test runs, the status bar shows the iteration number and elapsed time, u
 Throughput and latency metrics appear once the test completes.
 
 ## Comparing Iterations
+
+Two views put iterations side by side: `d` compares the last two, or the pair you pinned, and `c` lets you pick any two.
 
 ### Quick Diff (`d`)
 
@@ -164,6 +168,8 @@ Auto-sweep systematically tests every value of a parameter while holding all oth
 2. Press `s`
 3. Lab runs a test for each value: 16384 → 32768 → 65536 → 131072 → 262144
 
+From the second step on, the status line names the value each step tries as it starts:
+
 ```text
 ⟳ Sweep Batch Size = 65536 (3/5)
 ```
@@ -204,6 +210,8 @@ Median mode ignores the warmup setting: pressing `m` always runs exactly 3 back-
 
 ## Export & Sessions
 
+Results leave Lab in two ways: `e` writes every iteration to a CSV file, and `w` saves the session to a file that `L` loads again later.
+
 ### CSV Export (`e`)
 
 Exports all iterations with full parameters to a timestamped CSV file:
@@ -223,6 +231,8 @@ Sessions persist iteration history and current parameter positions to `~/.kates-
 - Keep a baseline session for regression comparison
 
 ## Cancel & Retry
+
+Two keys handle a run that doesn't finish cleanly: `x` stops a test that is running, and `r` repeats one that failed.
 
 ### Cancel (`x`)
 

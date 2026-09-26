@@ -42,6 +42,8 @@ graph TD
 
 ## Core Principles
 
+The five principles below come from the [Principles of Chaos Engineering](https://principlesofchaos.org). Each section restates one of them for a Kafka cluster.
+
 ### 1. Build a Hypothesis Around Steady State
 
 Before injecting chaos, you must define what "normal" looks like. For Kafka, steady state includes:
@@ -243,6 +245,8 @@ sequenceDiagram
 The diagram shows the classic **eager** protocol, where all consumers in the group stop processing during a rebalance — a "stop-the-world" pause that can last seconds to minutes depending on group size and partition count. Cooperative incremental rebalancing (KIP-429) shrinks the pause to only the partitions that actually move, and the next-generation consumer group protocol (KIP-848, `group.protocol=consumer`) removes the global synchronization barrier entirely. Kates test workloads can exercise either protocol via the per-test-type `group-protocol` setting (default: `classic`).
 
 ## Key Metrics During Chaos
+
+Watch these signals while a fault is active. For each one, the table says what a cluster that copes with the fault should show; for recovery time, it says what you measure.
 
 | Metric | What to Watch |
 |--------|---------------|
