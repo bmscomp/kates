@@ -142,7 +142,7 @@ def run_started(run_dir: Path) -> bool:
     answer computed, or a trial scheduled. A preflight or a pin alone uses
     no task."""
     state = read_json(run_dir / "state.json", {}) or {}
-    return bool(state.get("tasks")) or (run_dir / "oracle.json").exists() or \
+    return bool(state.get("tasks")) or bool(state.get("setup_started_at")) or (run_dir / "oracle.json").exists() or \
         (run_dir / "schedule.json").exists() or any(run_dir.glob("*/*/trial-*/metrics.json"))
 
 
@@ -154,8 +154,10 @@ class Run:
         source = args.tasks or DEFAULT_TASKS
         self.oracle = load_oracle(args.oracle)
         self.refreeze = False
+        # --tasks naming the default list is the same as leaving it out.
+        explicit = bool(args.tasks) and Path(args.tasks).resolve() != Path(DEFAULT_TASKS).resolve()
         try:
-            if frozen.exists() and not args.tasks and Path(source).exists() and \
+            if frozen.exists() and not explicit and Path(source).exists() and \
                     tasklib.file_sha256(source) != tasklib.file_sha256(frozen):
                 # tasks.json changed since this run froze it. A run that has
                 # used its list keeps it (its answers belong to it); one that
@@ -168,7 +170,7 @@ class Run:
                         f"using {source} as it is now")
                     self.refreeze = True
             if frozen.exists() and not self.refreeze:
-                if args.tasks and tasklib.file_sha256(args.tasks) != tasklib.file_sha256(frozen):
+                if explicit and tasklib.file_sha256(args.tasks) != tasklib.file_sha256(frozen):
                     raise Fail(2, f"{self.dir} froze a different task list than {args.tasks}; "
                                   "start a new --run-id to use the new list")
                 self.doc = tasklib.load_tasks(frozen, self.oracle.ORACLES)
@@ -319,8 +321,12 @@ def phase_setup(run: Run) -> int:
         human = pin_cluster(run, kates_bin)
         api = api_for(human, setuplib.HarnessAPI)
         # Frozen once the cluster is pinned: a setup that could not start
-        # leaves the run free to take a changed task list.
+        # leaves the run free to take a changed task list. From here on it
+        # changes the lab, so the run counts as started even if the first
+        # step is interrupted.
         run.freeze()
+        run.state.setdefault("setup_started_at", now())
+        run.save_state()
     harness = setuplib.Harness(kates=kates_bin, context=args.human_context,
                                run_dir=None if run.dry else str(run.dir), api=api, dry_run=run.dry, out=say)
     for task in run.selected():
@@ -941,7 +947,6 @@ def preflight_checks(arm: str, record: dict[str, Any], t: metrics.Transcript, cl
 
 def phase_expert_template(run: Run) -> int:
     from grade import EXPERT_COLUMNS
-    run.freeze()
     lines = []
     rows = []
     for task in run.selected():
@@ -955,6 +960,7 @@ def phase_expert_template(run: Run) -> int:
     if run.dry:
         say("\n".join(lines))
         return 0
+    run.freeze()
     template = run.dir / "expert-template.csv"
     with open(template, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=EXPERT_COLUMNS)
