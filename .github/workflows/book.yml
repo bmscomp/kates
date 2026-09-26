@@ -162,11 +162,15 @@ jobs:
         run: ./scripts/prepare-book-render.sh
 
       # keep-tex and latex-clean:false leave the .tex and the LaTeX log in
-      # docs/book for the check below. The retry covers a diagram that
-      # headless Chromium fails to draw now and then.
+      # docs/book for the check below. A render can wedge rather than fail:
+      # the first run of this workflow on main did (#62). So each attempt has
+      # its own 12-minute limit, and a wedged first attempt still leaves the
+      # second one time to run inside the step's 30. The retry is for a
+      # transient failure, such as a download that fails while Quarto installs
+      # a LaTeX package TinyTeX lacks.
       - name: Render PDF
         timeout-minutes: 30
-        run: scripts/retry.sh 2 quarto render docs/book --to pdf -M keep-tex:true -M latex-clean:false
+        run: scripts/retry.sh 2 timeout -k 1m 12m quarto render docs/book --to pdf -M keep-tex:true -M latex-clean:false
 
       - name: Check for dropped characters and overfull diagrams
         run: |
