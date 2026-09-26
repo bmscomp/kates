@@ -39,6 +39,7 @@ Before deploying anything, there are three architectural decisions that will sha
 The simplest deployment puts everything — Kafka, Kates, monitoring, chaos tools — into a single namespace. This is fine for local development on Kind where you want `kubectl get pods` to show everything in one place. But for shared or production environments, multi-namespace isolation is strongly recommended.
 
 Why? Each namespace can have independent:
+
 - **RBAC policies** — the team running chaos experiments shouldn't need write access to the Kafka namespace
 - **Resource quotas** — prevent the monitoring stack from starving Kafka of memory during a spike
 - **Network policies** — rules on which pods may reach which ports. They add up rather than override, and as the charts ship they leave the Kafka client listeners open to every pod in the cluster: the policy Strimzi generates admits any pod to a listener without `networkPolicyPeers`. A compromised monitoring pod can reach the brokers until you close the listeners — see [Security & Compliance](17-security.md#network-policies)
@@ -537,6 +538,7 @@ make cluster
 ```
 
 Creates a Kind cluster named `panda` with:
+
 - 1 control-plane node (alpha)
 - 2 worker nodes (sigma, gamma)
 - Zone labels for rack awareness, and a `node.kubernetes.io/local-storage` label per node
@@ -567,6 +569,7 @@ make monitoring
 ```
 
 Deploys:
+
 - Prometheus with Kafka JMX scrape targets
 - Grafana with 13 custom pre-provisioned JSON dashboards
 - NodePort service at port 30080
@@ -814,6 +817,7 @@ graph TB
 `make kates-native` puts a GraalVM native image of the Kates backend on the Kind node as `kates:native`. It reuses a `kates:native` already in your local Docker, pulls the published `ghcr.io/bmscomp/kates:<appVersion>-native` tag when there is none, and compiles `kates/Dockerfile.native` only when the pull fails; a local image from an older release therefore wins until you remove it with `docker rmi kates:native`. The compile runs Quarkus's native pipeline inside the Mandrel builder image, so it needs no local GraalVM. The target loads the image and deploys nothing. The result is a standalone binary with dramatically faster startup.
 
 **Prerequisites** (for the compile):
+
 - Docker, with more than 8 GB of memory available to it (10 GB or more is safe) — the Dockerfile gives the compiler alone an 8 GB heap (`quarkus.native.native-image-xmx=8g`), and Maven and the compiler's memory outside that heap come on top
 
 **Build time:** Expect 3–8 minutes depending on hardware (native compilation is significantly slower than JVM builds).
@@ -873,6 +877,7 @@ The Kafka cluster uses multiple layers of security:
 ### Certificate Rotation
 
 Certificates are auto-managed by Strimzi:
+
 - **Cluster CA**: 5-year validity, auto-renewed 180 days before expiry
 - **Clients CA**: 5-year validity, auto-renewed 180 days before expiry
 - Policy: `replace-key` (new key pair on renewal)

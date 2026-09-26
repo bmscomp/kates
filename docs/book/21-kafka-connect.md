@@ -182,6 +182,8 @@ sequenceDiagram
 
 ### Key Configuration
 
+The Default column is the chart's own value. A `kates deploy` install sets `replicas`, `kafka.bootstrapServers` and `kafka.namespace` on the command line, so `helm get values connect-cluster -n connect` shows what a running release overrides:
+
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `groupId` | `kates-connect-cluster` | All workers sharing this ID form a single cluster |
@@ -253,6 +255,8 @@ The `krafter` cluster's platform profile also provisions `kates-connect`. To let
 
 ## Connector Lifecycle
 
+A connector either reads from an external system into Kafka, as a source, or from Kafka into an external system, as a sink. Both kinds move through the same states.
+
 ### Source Connectors
 
 Source connectors read from an external system and produce to Kafka:
@@ -277,7 +281,12 @@ graph LR
 
 ### Connector States
 
+You choose three of these states through a connector's `state` value: `running`, `paused` and `stopped`. The framework sets the fourth, FAILED, when the connector hits an error it can't recover from:
+
 ```mermaid
+%%| label: fig-kc-connector-states
+%%| fig-cap: "A connector's states: you move it between running, paused and stopped, and an unrecoverable error moves it to failed."
+%%| fig-alt: "State diagram. A deployed connector starts in RUNNING. Pause and Resume move it between RUNNING and PAUSED, Stop and Start between RUNNING and STOPPED. An unrecoverable error moves it from RUNNING to FAILED, and auto-restart, if enabled, returns it to RUNNING."
 stateDiagram-v2
     [*] --> RUNNING : Deploy connector
     RUNNING --> PAUSED : Pause
@@ -287,6 +296,8 @@ stateDiagram-v2
     RUNNING --> STOPPED : Stop
     STOPPED --> RUNNING : Start
 ```
+
+The table adds what each state does to the connector's offsets and tasks, and when you'd choose it:
 
 | State | Offset Tracking | Tasks Active | Use Case |
 |-------|:-:|:-:|----------|
@@ -391,6 +402,9 @@ The script is written to run as an init container that populates a shared volume
 The default Kates CDC pipeline captures changes from a PostgreSQL database:
 
 ```mermaid
+%%| label: fig-kc-postgres-cdc
+%%| fig-cap: "Debezium streams PostgreSQL's changes through a replication slot into one topic per table, and schema changes into a history topic."
+%%| fig-alt: "PostgreSQL's write-ahead log, decoded by the pgoutput plugin, feeds the replication slot debezium_kates through logical replication. The slot streams changes to the Debezium PostgresConnector in Connect, which writes each table to its own topic, cdc.public.orders and cdc.public.customers, and DDL changes to cdc-schema-history."
 graph LR
     subgraph PostgreSQL
         WAL["Write-Ahead Log<br/>(pgoutput plugin)"]
@@ -488,6 +502,9 @@ Chart 1.x let the workers read every Secret in the Connect namespace and in the 
 The chart validates connector configurations while Helm renders it (`_resolve.tpl` and `_validate.tpl`), before anything reaches the Kubernetes API or the Strimzi operator. A mistake fails `helm template`, `helm install` or `helm upgrade` itself, naming the connector and the setting — there is no hook Pod to wait for or read logs from.
 
 ```mermaid
+%%| label: fig-kc-predeploy-validation
+%%| fig-cap: "The chart checks connector configs while Helm renders it, so a bad config fails the upgrade before anything is applied."
+%%| fig-alt: "helm upgrade renders the chart through _resolve.tpl and _validate.tpl. If every check passes, the KafkaConnect and KafkaConnector resources are applied; if a check fails, the upgrade is refused and nothing is applied."
 graph LR
     A["helm upgrade"] --> B{"Render:<br/>_resolve.tpl + _validate.tpl"}
     B -->|"All checks pass"| C["Apply KafkaConnect + KafkaConnectors"]
@@ -611,7 +628,12 @@ Kafka Connect supports **exactly-once source** (EOS) delivery — guaranteeing t
 
 ### How EOS Works
 
+The diagram follows one batch through a worker with EOS on. Watch where the offsets go: into the same transaction as the records.
+
 ```mermaid
+%%| label: fig-kc-eos
+%%| fig-cap: "With exactly-once source support, a batch's records and its offsets commit in one transaction."
+%%| fig-alt: "Sequence diagram. The source connector's poll returns a batch to the Connect worker, which begins a transaction on Kafka, produces the records to the data topic and the offsets to the offsets topic, then commits the transaction. A note says data and offsets are committed together, atomically."
 sequenceDiagram
     participant SC as Source Connector
     participant W as Connect Worker
@@ -640,6 +662,8 @@ extraConfig:
   producer.acks: "all"
   producer.enable.idempotence: "true"
 ```
+
+The block renders three worker settings. Only the first comes from the `exactlyOnce` switch; the other two are the chart's default `extraConfig`:
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
@@ -682,6 +706,8 @@ Transforms are chained in order — each receives the output of the previous one
 
 ### Common Transforms
 
+The Class column says where each transform comes from: `org.apache.kafka.connect.transforms` ships with Kafka Connect, and `io.debezium.transforms` with Debezium. For a Debezium source, `ExtractNewRecordState` is the one to start with, as the example below shows:
+
 | Transform | Class | Use Case |
 |-----------|-------|---------|
 | Route records by field | `io.debezium.transforms.ByLogicalTableRouter` | Route to per-tenant topics |
@@ -693,6 +719,8 @@ Transforms are chained in order — each receives the output of the previous one
 | Set topic name | `org.apache.kafka.connect.transforms.RegexRouter` | Rewrite topic names with regex |
 
 ### Example: Unwrap Debezium Envelope + Route by Tenant
+
+This connector chains two transforms, which run in the order `transforms` lists them: `unwrap` first, then `route`:
 
 ```yaml
 connectors:
@@ -713,6 +741,7 @@ connectors:
 ```
 
 This chain:
+
 1. Unwraps the Debezium envelope (`{before, after, source, op}`) into a flat record
 2. Adds `op` and `source.ts_ms` as header fields for consumers
 3. Renames `cdc.public.orders` → `events.orders`
@@ -857,6 +886,8 @@ Setting `errors.tolerance: all` without a DLQ silently drops bad records. Always
 
 ## CDC Patterns
 
+The three patterns below are what CDC is for in practice: publishing events without a dual write to the database and to Kafka, keeping several views of the same data in step, and copying data between databases.
+
 ### Pattern 1: Transactional Outbox
 
 The Outbox pattern avoids dual-write problems by writing events to an `outbox` table in the same database transaction as the business data. Debezium captures the outbox table and routes events to Kafka.
@@ -895,6 +926,9 @@ config:
 Capture all state changes as an immutable event log:
 
 ```mermaid
+%%| label: fig-kc-event-sourcing
+%%| fig-cap: "One CDC topic feeds several materialized views, each through its own sink connector."
+%%| fig-alt: "Debezium captures the orders table in PostgreSQL, the source of truth, into the topic cdc.public.orders. Three sink connectors read that topic into Elasticsearch as a search index, Redis as a cache and a warehouse for analytics."
 graph LR
     subgraph "Source of Truth"
         PG["PostgreSQL<br/>(orders table)"]
@@ -923,11 +957,15 @@ Each materialized view is independently rebuildable by replaying the CDC topic f
 Replicate data between databases using a source-to-sink chain:
 
 ```mermaid
+%%| label: fig-kc-cross-db-sync
+%%| fig-cap: "A Debezium source and a JDBC sink, chained through one topic, copy a table from one database to another."
+%%| fig-alt: "PostgreSQL, the source, feeds the topic cdc.public.users through a Debezium source connector, and a JDBC sink connector writes that topic into MySQL, the replica."
 graph LR
     PG["PostgreSQL<br/>(source)"] -->|"Debezium Source"| TOPIC["cdc.public.users"] -->|"JDBC Sink"| MYSQL["MySQL<br/>(replica)"]
 ```
 
 This is useful for:
+
 - Migrating between database engines
 - Feeding analytics databases
 - Maintaining read replicas across cloud regions
