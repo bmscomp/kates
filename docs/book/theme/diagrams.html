@@ -13,7 +13,7 @@
   "use strict";
 
   const FIT_LIMIT = 1.3;  // wider than this many times the room: a thumbnail
-  const FIT_SLACK = 1.04; // a diagram only just wider than the column shrinks to it
+  const FIT_SLACK = 1.1;  // up to this many times the column: shrink to it rather than reach into the margin
   const FIT_MAX = 1.5;    // how far "fit to width" may enlarge a small diagram
   const ZOOM_MIN = 0.1;
   const ZOOM_MAX = 4;
@@ -93,7 +93,8 @@
   }
 
   // The table of contents steps aside while a diagram that reaches into the
-  // margin passes under it.
+  // margin passes under it: one that overlaps the contents both across and
+  // down the page, not one that only takes the gutter beside the column.
   let yieldQueued = false;
   function yieldMargin() {
     if (!margin || yieldQueued) return;
@@ -101,14 +102,15 @@
     requestAnimationFrame(() => {
       yieldQueued = false;
       // The margin column is as tall as the window; its contents are not
-      const first = margin.firstElementChild;
-      const last = margin.lastElementChild;
-      if (!first || !last) return;
-      const top = first.getBoundingClientRect().top;
-      const bottom = last.getBoundingClientRect().bottom;
+      const boxes = [...margin.children].map((child) => child.getBoundingClientRect())
+        .filter((box) => box.width > 0 && box.height > 0);
+      if (!boxes.length) return;
+      const left = Math.min(...boxes.map((box) => box.left));
+      const top = Math.min(...boxes.map((box) => box.top));
+      const bottom = Math.max(...boxes.map((box) => box.bottom));
       const hit = [...document.querySelectorAll("figure.kates-diagram.is-wide")].some((figure) => {
         const r = figure.getBoundingClientRect();
-        return r.bottom > top && r.top < bottom;
+        return r.right > left && r.bottom > top && r.top < bottom;
       });
       margin.classList.toggle("kates-yield", hit);
     });

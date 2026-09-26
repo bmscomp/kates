@@ -24,12 +24,12 @@ book:
     keyboard-shortcut: ["/", "k"]
     limit: 50
     collapse-after: 2
-  # Reader mode hides both sidebars on long pages.
+  # Reader mode adds a toggle that hides the sidebar and the table of contents.
   reader-mode: true
   sidebar:
     logo: assets/kates-mark.svg
     logo-alt: "Kates"
-    # Only the current part starts open, so every part fits on one screen.
+    # Only the current part starts open.
     collapse-level: 1
   page-footer:
     left: "Kates — The Definitive Guide"
