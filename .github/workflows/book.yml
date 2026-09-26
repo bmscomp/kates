@@ -99,7 +99,8 @@ jobs:
       # the way GitHub does, and Quarto computes them differently, so a
       # #fragment can pass that check and still miss on the site. This one
       # reads the rendered pages and fails on any link whose fragment is not
-      # an id on its target page.
+      # an id on its target page, and on any link Quarto could not resolve
+      # and left pointing at a .md or .qmd file, which the render lets through.
       - name: Check fragment links
         run: python3 scripts/check-book-fragments.py docs/book/_book
 

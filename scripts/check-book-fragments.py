@@ -17,6 +17,13 @@ a single "-". A fragment can pass lychee and still miss on the site, and only
 the rendered HTML says which. Give such a heading an explicit {#id} equal to
 its GitHub slug, and both checks agree.
 
+It also fails on any link, fragment or not, that still points at a .md or .qmd
+file. Quarto turns a link to a chapter into a link to its .html page; a link
+it can't resolve (a file the book leaves out, such as STYLE.md, or a misspelt
+name) it leaves as written, and the render still succeeds. It warns about a
+missing file, but not about STYLE.md, which the prepare step converts to .qmd
+like a chapter although _quarto.yml doesn't list it.
+
 Links that leave the book (http:, https:, mailto:, the GitHub copies the
 render points ../ links at) are not checked here.
 """
@@ -63,12 +70,21 @@ def main(argv):
                 with open(path, encoding="utf-8") as fh:
                     parser.feed(fh.read())
                 pages[os.path.relpath(path, root)] = parser
+    if not pages:
+        print(f"fragments: no .html pages under {root}: render the book to HTML first", file=sys.stderr)
+        return 2
 
-    checked, misses = 0, []
+    checked, misses, unresolved = 0, [], []
     for page, parsed in sorted(pages.items()):
         for href, line in parsed.hrefs:
             parts = urlsplit(href)
-            if parts.scheme or parts.netloc or not parts.fragment:
+            if parts.scheme or parts.netloc:
+                continue
+            if unquote(parts.path).endswith((".md", ".qmd")):
+                # Quarto left it as written: it could not resolve the target.
+                unresolved.append((page, line, href))
+                continue
+            if not parts.fragment:
                 continue
             if parts.path:
                 target = os.path.normpath(os.path.join(os.path.dirname(page), unquote(parts.path)))
@@ -84,12 +100,21 @@ def main(argv):
             elif fragment not in pages[target].ids and parts.fragment not in pages[target].ids:
                 misses.append((page, line, href, target, fragment))
 
+    for page, line, href in unresolved:
+        print(f"{page}:{line}: {href} -> unresolved link: Quarto found no page for it", file=sys.stderr)
+    for page, line, href, target, fragment in misses:
+        if fragment is None:
+            print(f"{page}:{line}: {href} -> no page {target}", file=sys.stderr)
+        else:
+            print(f"{page}:{line}: {href} -> no id \"{fragment}\" in {target}", file=sys.stderr)
+    if unresolved:
+        print(
+            f"\n{len(unresolved)} links point at a .md or .qmd file Quarto could not resolve. "
+            "Link to a page listed in docs/book/_quarto.yml; a .md file outside docs/book "
+            "goes by its ../ path, which the render points at the copy on GitHub.",
+            file=sys.stderr,
+        )
     if misses:
-        for page, line, href, target, fragment in misses:
-            if fragment is None:
-                print(f"{page}:{line}: {href} -> no page {target}", file=sys.stderr)
-            else:
-                print(f"{page}:{line}: {href} -> no id \"{fragment}\" in {target}", file=sys.stderr)
         print(
             f"\n{len(misses)} of {checked} fragment links miss their target. The source "
             "of <page>.html is docs/book/<page>.md (index.html: index.qmd). Point the link "
@@ -97,6 +122,7 @@ def main(argv):
             "to its GitHub slug so lychee and Quarto agree.",
             file=sys.stderr,
         )
+    if unresolved or misses:
         return 1
     print(f"OK: all {checked} fragment links in {len(pages)} pages land on an id")
     return 0
