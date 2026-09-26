@@ -39,13 +39,38 @@
   \directlua{luaotfload.add_fallback("katesfallback", {\kates@fallbacks})}
   \def\kates@features{RawFeature={fallback=katesfallback}}
 \fi
+% Inter's alternates that tell l, I and 1 apart in resource names and flags,
+% as the web sets them (kates.scss). Only Inter has them under these names.
+\def\kates@inter{Inter}
+\ifx\kates@text\kates@inter
+  \def\kates@textfeatures{,RawFeature={+cv05;+cv08}}
+\else
+  \def\kates@textfeatures{}
+\fi
 \ifx\kates@text\relax\else
-  \expandafter\setmainfont\expandafter{\kates@text}[\kates@features]
-  \expandafter\setsansfont\expandafter{\kates@text}[\kates@features]
+  \expandafter\setmainfont\expandafter{\kates@text}[\kates@features\kates@textfeatures]
+  \expandafter\setsansfont\expandafter{\kates@text}[\kates@features\kates@textfeatures]
 \fi
 \ifx\kates@code\relax\else
   \expandafter\setmonofont\expandafter{\kates@code}[\kates@features]
 \fi
+% Callout icons: under lualatex, Font Awesome's glyphs carry their names
+% ("LIGHTBULB", "INFO") as the text a PDF reader copies, searches and reads
+% aloud, so a Tip read "LIGHTBULB Tip". Drop that text from its icons, which
+% are private use characters, as the earlier xelatex build did; the callout's
+% title says the rest.
+\directlua{
+  luatexbase.add_to_callback("luaotfload.patch_font", function(tfmdata)
+    local name = tfmdata.psname or tfmdata.fullname or tfmdata.name or ""
+    if name:find("FontAwesome", 1, true) then
+      for code, char in pairs(tfmdata.characters) do
+        if code >= 0xE000 and code <= 0xF8FF then
+          char.tounicode = nil
+        end
+      end
+    end
+  end, "kates.icon-text")
+}
 \makeatother
 \fi
 
@@ -84,6 +109,12 @@
 \renewcommand*{\partformat}{}
 \renewcommand*{\addparttocentry}[2]{\addtocentrydefault{part}{}{#2}}
 
+% Part and chapter entries in the table of contents take the headings' font,
+% blue included; the link colour turns their titles navy, but not their page
+% numbers. Make the whole entry navy.
+\addtokomafont{partentry}{\color{katesnavy}}
+\addtokomafont{chapterentry}{\color{katesnavy}}
+
 % Room in the table of contents for three-digit page numbers and for section
 % numbers such as 26.10: Inter's digits are wider than the defaults allow for.
 \makeatletter
@@ -95,15 +126,16 @@
 % Mermaid diagrams arrive at their natural size, often wider than the page.
 % Shrink any graphic to the line width and to 80% of the text height, keeping
 % its proportions; smaller ones stay as they are. adjustbox applies its max
-% keys after the width and height Pandoc writes, whatever their order.
+% keys after the width and height Pandoc writes, whatever their order. Then
+% centre it on the line, as the web centres its diagrams.
 % \kates@includegraphics is the unclamped original, for the cover.
 \usepackage[export]{adjustbox}
 \makeatletter
 \NewCommandCopy\kates@includegraphics\includegraphics
 \RenewDocumentCommand\includegraphics{s O{} m}{%
   \IfBooleanTF{#1}%
-    {\kates@includegraphics*[#2,max width=\linewidth,max totalheight=0.8\textheight]{#3}}%
-    {\kates@includegraphics[#2,max width=\linewidth,max totalheight=0.8\textheight]{#3}}}
+    {\kates@includegraphics*[#2,max width=\linewidth,max totalheight=0.8\textheight,center]{#3}}%
+    {\kates@includegraphics[#2,max width=\linewidth,max totalheight=0.8\textheight,center]{#3}}}
 \makeatother
 
 % ── Tables ──────────────────────────────────────────────────────────────────
@@ -132,6 +164,12 @@
 \@ifundefined{Highlighting}{}{%
   \RecustomVerbatimEnvironment{Highlighting}{Verbatim}%
     {commandchars=\\\{\},fontsize=\footnotesize}}
+% Inline code at 0.86 of the text around it, as on the web ($code-font-size in
+% kates.scss): at the same size, JetBrains Mono's lowercase is about an eighth
+% wider than Inter's, and its x-height no smaller. Pandoc writes inline code
+% as \texttt; code blocks and output panels set their own size.
+\DeclareTextFontCommand{\texttt}{%
+  \ttfamily\fontsize{\fpeval{0.86*\f@size}}{\f@baselineskip}\selectfont}
 \makeatother
 
 % `text` fences (terminal output and ASCII screens), as theme/pdf-output.lua
@@ -153,6 +191,24 @@
   fontupper=\footnotesize,
   before upper={\lineskiplimit=-\maxdimen},
   #1}
+
+% ── Callouts ────────────────────────────────────────────────────────────────
+% One colour per callout type, for its frame and its icon: note in the brand
+% blue, tip green, warning amber, important indigo, and caution red, the only
+% red. Each clears 4.5:1 on white and on the title's tint. Quarto defines its
+% own colours after this header, so these replace them when the document
+% begins.
+\AtBeginDocument{%
+  \definecolor{quarto-callout-note-color}{HTML}{1D63C7}%
+  \definecolor{quarto-callout-tip-color}{HTML}{15803D}%
+  \definecolor{quarto-callout-important-color}{HTML}{4F46E5}%
+  \definecolor{quarto-callout-warning-color}{HTML}{B45309}%
+  \definecolor{quarto-callout-caution-color}{HTML}{C62828}%
+  \colorlet{quarto-callout-note-color-frame}{quarto-callout-note-color}%
+  \colorlet{quarto-callout-tip-color-frame}{quarto-callout-tip-color}%
+  \colorlet{quarto-callout-important-color-frame}{quarto-callout-important-color}%
+  \colorlet{quarto-callout-warning-color-frame}{quarto-callout-warning-color}%
+  \colorlet{quarto-callout-caution-color-frame}{quarto-callout-caution-color}}
 
 % ── Title page ──────────────────────────────────────────────────────────────
 % When theme/pdf-cover.lua has drawn assets/cover.svg into a PDF, the book
