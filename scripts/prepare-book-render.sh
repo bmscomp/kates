@@ -95,11 +95,27 @@ with open('_quarto.yml', encoding='utf-8') as fh:
     if problems:
         sys.exit(1)
 
+def pandoc_id(title):
+    """The id Pandoc gives a heading, which is what a link to the page becomes
+    in the PDF: "Part III — Chaos & Integrity" -> part-iii-chaos-integrity."""
+    kept = ''.join(c for c in title.lower() if c.isalnum() or c in '_-. \t')
+    return re.sub(r'^[^a-z]+', '', '-'.join(kept.split()))
+
+def label_part(body):
+    """Quarto prints a Part page's H1 as \\part{...} with no \\label, so a link
+    to the Part lands nowhere in the PDF. Put the label back, for the PDF only."""
+    return re.sub(r'^# (.+)\n', lambda m: m.group(0) + '\n```{=latex}\n\\label{'
+                  + pandoc_id(re.sub(r'\s*\{[^}]*\}\s*$', '', m.group(1))) + '}\n```\n',
+                  body, count=1, flags=re.M)
+
+part_files = {page for page, _ in parts}
 for f in sorted(glob.glob('*.md')):
     if f == 'README.md':
         continue
     with open(f, encoding='utf-8') as fh:
         body = fh.read()
+    if f in part_files:
+        body = label_part(body)
     with open(f[:-3] + '.qmd', 'w', encoding='utf-8') as fh:
         fh.write(convert_body(body))
     os.remove(f)
