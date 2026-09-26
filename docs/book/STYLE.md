@@ -1,8 +1,8 @@
 # Book Style Sheet
 
-One page. Every chapter follows it; `scripts/check-book-style.sh` enforces the machine-checkable rules in CI. When editing, match the file you're in; when in doubt, this sheet wins.
+Every chapter follows this sheet; `scripts/check-book-style.sh` enforces the machine-checkable rules in CI. When editing, match the file you're in; when in doubt, this sheet wins.
 
-The rendered site is the canonical reader; GitHub's file view comes second. A chapter written before a rule existed comes into line in its own rewrite PR, not as separate churn, and the ratchet described under What CI Checks keeps it from getting worse in the meantime.
+The rendered site is the canonical reader; GitHub's file view comes second. Removing an older chapter's `---` rules and reflowing its text happen in that chapter's rewrite PR, not as separate churn. Other fixes to older chapters may land on their own, and the ratchet described under What CI Checks keeps the counts from growing in the meantime.
 
 ## Chapter Types
 
@@ -78,7 +78,7 @@ Every callout has a descriptive title (`::: {.callout-note title="…"}`) and us
 - A product bug appears only as `::: {.callout-warning title="Known limitation: <what>"}`, with the issue link and the workaround; delete it when the fix ships. Never describe in prose a mismatch between help text and actual behavior.
 - Scope goes in the opening prose or in a `callout-note` titled "Scope", never in a bold blockquote.
 
-Exactly one blank line after the closing `:::`. Genuine quotations may use plain blockquotes. Fenced divs other than callouts show as literal `:::` lines on GitHub, so don't use them.
+Exactly one blank line after the closing `:::`. Genuine quotations may use plain blockquotes. Callouts are the only fenced divs for now; every fenced div, callouts included, shows as literal `:::` lines on GitHub.
 
 ## Code Fences and Figures
 
@@ -122,7 +122,7 @@ Use the left column in prose; commands, fields and resource names in code stay a
 | LOAD, ROUND_TRIP, INTEGRITY | Load, Round-Trip | Enum form whenever naming a Kates test type; lowercase "round-trip" only for the generic latency concept |
 | records per second (prose), rec/s (tables) | records/s, msg/s, messages/s | One unit for throughput |
 | warm-up | warmup in prose | `WARMUP` stays as the scenario phase's name |
-| zone | rack, AZ, availability zone | The same failure domain here: the `kafka-cluster` chart sets Strimzi's rack from `topology.kubernetes.io/zone`; `rack` only for the Strimzi field |
+| zone | rack, AZ, availability zone | The same failure domain here: the `kafka-cluster` chart sets Strimzi's rack from `topology.kubernetes.io/zone` by default; `rack` only for the Strimzi field |
 | `min.insync.replicas` | ISR=2 | The ISR is the set of replicas in sync, not a setting |
 
 ## Punctuation
@@ -139,12 +139,13 @@ Use the left column in prose; commands, fields and resource names in code stay a
 
 `scripts/check-book-style.sh` runs in the docs workflow. It fails on an unlabeled code fence, a bold-blockquote admonition, "Chapter N" in link text, a banned term in prose, or a double blank line after `:::`. It then tests and runs the ratchet, `scripts/book_metrics.py`, against `scripts/book-metrics-baseline.json`, which holds each page's count of:
 
-- bare headings, tables without a lead-in, bold-label bullets and hand-numbered headings;
+- bare headings at any level, not only H2 and H3: a heading followed directly by another heading, a table or a code block (reference entries are exempt);
+- tables without a lead-in, bold-label bullets and hand-numbered headings;
 - formula openings and changelog phrases;
 - fenced lines over 90 characters, and Mermaid blocks without `fig-cap` and `fig-alt`;
 - `---` rules, bold Scope blockquotes, and a broken handoff.
 
-A page's counts may fall but never rise, a new page starts at zero, and `[TODO` fails anywhere. The metrics skip STYLE.md and README.md, which are about the book rather than in it. To see what a page is counted for, and to record a lower count:
+A page's counts may fall but never rise, a new page starts at zero, and `[TODO` fails anywhere. The style check and the metrics skip STYLE.md and README.md, which are about the book rather than in it. To see what a page is counted for, and to record a lower count:
 
 ```bash
 # Every finding for one page, with line numbers
