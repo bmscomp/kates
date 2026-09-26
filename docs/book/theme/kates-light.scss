@@ -3,7 +3,7 @@
 // Light palette: the blues of the book cover (assets/cover.svg) on white,
 // with deep navy for headings. Every text colour here clears WCAG AA (4.5:1)
 // against the surface it sits on; code blocks keep the navy slab in both
-// colour schemes.
+// colour schemes. scripts/check-book-contrast.py checks every pair in CI.
 
 // Brand and text
 $kates-heading: #131d42;
@@ -31,10 +31,9 @@ $headings-color: $kates-heading;
 $text-muted: $kates-muted;
 $border-color: $kates-border;
 
-// Inline code
-$code-bg: #eef2f9;
+// Inline code: a faint tint with no border, so it sits inside the sentence
+$code-bg: #f1f4fa;
 $code-color: #1b2b58;
-$kates-code-border: #dce3ef;
 
 // Code blocks
 $code-block-bg: #111a33;
@@ -44,18 +43,19 @@ $kates-code-file-bg: #1c2649;
 $kates-code-file-fg: #c3cde2;
 $btn-code-copy-color: #9fb0cf;
 $btn-code-copy-color-active: $kates-accent;
+$kates-code-scroll-shadow: rgba(159, 176, 207, 0.35);
 
 // Command output (`text` fences)
 $kates-output-bg: #f6f8fc;
 $kates-output-fg: #26324d;
 $kates-output-rule: #9fb3d6;
 
-// Callouts
+// Callouts: caution is the only red; important is indigo, warning amber
 $callout-color-note: #1d63c7;
 $callout-color-tip: #15803d;
-$callout-color-important: #c62828;
+$callout-color-important: #4f46e5;
 $callout-color-warning: #b45309;
-$callout-color-caution: #c2410c;
+$callout-color-caution: #c62828;
 $kates-callout-tint: 0.035;
 $kates-callout-header-tint: 0.09;
 
@@ -77,3 +77,8 @@ $mermaid-edge-color: #52607d;
 
 // Cover
 $kates-cover-shadow: rgba(19, 29, 66, 0.45);
+
+// Keyboard focus: a ring that clears 3:1 against the page, and a lighter
+// one for controls that sit on the navy code blocks
+$kates-focus-ring: $kates-link;
+$kates-focus-ring-on-code: $kates-accent;

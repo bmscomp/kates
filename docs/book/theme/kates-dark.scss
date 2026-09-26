@@ -2,7 +2,8 @@
 
 // Dark palette: the cover's darkest blue, taken darker still for a reading
 // background, with the sky accent carrying links. Every text colour here
-// clears WCAG AA (4.5:1) against the surface it sits on.
+// clears WCAG AA (4.5:1) against the surface it sits on;
+// scripts/check-book-contrast.py checks every pair in CI.
 
 // Brand and text
 $kates-heading: #f1f4fa;
@@ -41,31 +42,32 @@ $dropdown-link-hover-bg: #1b2542;
 $table-color: $body-color;
 $table-border-color: $kates-border;
 
-// Inline code
-$code-bg: #1b2542;
+// Inline code: a faint tint with no border, so it sits inside the sentence
+$code-bg: #182038;
 $code-color: #dbe4f6;
-$kates-code-border: #2a375a;
 
-// Code blocks
-$code-block-bg: #0a1020;
-$kates-code-block-border: #243150;
+// Code blocks: a step lighter than the page, so they separate from it
+$code-block-bg: #121b36;
+$kates-code-block-border: #2c3a60;
 $kates-code-block-fg: #e3e9f5;
-$kates-code-file-bg: #141d38;
+$kates-code-file-bg: #1a2547;
 $kates-code-file-fg: #c3cde2;
 $btn-code-copy-color: #9fb0cf;
 $btn-code-copy-color-active: $kates-accent;
+$kates-code-scroll-shadow: rgba(159, 176, 207, 0.3);
 
-// Command output (`text` fences)
-$kates-output-bg: #121a30;
+// Command output (`text` fences): set into the page, below it, now that
+// the code blocks sit a step above it
+$kates-output-bg: #0b1120;
 $kates-output-fg: #cfd8ea;
 $kates-output-rule: #4a6699;
 
-// Callouts
+// Callouts: caution is the only red; important is indigo, warning amber
 $callout-color-note: #5fa9ee;
 $callout-color-tip: #4ade80;
-$callout-color-important: #f87171;
+$callout-color-important: #818cf8;
 $callout-color-warning: #fbbf24;
-$callout-color-caution: #fb923c;
+$callout-color-caution: #f87171;
 $kates-callout-tint: 0.06;
 $kates-callout-header-tint: 0.13;
 
@@ -87,3 +89,7 @@ $mermaid-edge-color: #a3b2cf;
 
 // Cover
 $kates-cover-shadow: rgba(0, 0, 0, 0.7);
+
+// Keyboard focus: a ring that clears 3:1 against the page and the code blocks
+$kates-focus-ring: $kates-link;
+$kates-focus-ring-on-code: $kates-link;

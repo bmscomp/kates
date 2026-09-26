@@ -1,19 +1,25 @@
 <script>
 // Mermaid diagrams for the Kates book: legible sizing and a full-screen viewer.
+// Also keyboard access to what scrolls sideways and to the sidebar's parts.
 //
 // Quarto renders each diagram in the browser on `load` and lets it shrink to
-// the text column, so a wide flowchart ends up with 3px labels. This keeps
-// every diagram at a legible minimum scale (scrolling sideways past that) and
-// adds an Expand button that opens it full screen with zoom and pan.
+// the text column, so a wide flowchart ends up with 3px labels. This shows a
+// diagram at full size when it fits (from 1200px up, reaching into the right
+// margin to do so), shrinks it a little when that keeps its labels legible,
+// and otherwise shows the whole diagram as a fitted thumbnail that points to
+// Expand, which opens it full screen with zoom and pan. No diagram opens
+// scrolled to its left edge.
 (() => {
   "use strict";
 
-  const MIN_SCALE = 0.7; // Mermaid draws 16px labels; below ~11px they blur
-  const MAX_SCROLL = 2.5; // past this many column widths, fit and point to Expand
+  const FIT_LIMIT = 1.3;  // wider than this many times the room: a thumbnail
+  const FIT_SLACK = 1.04; // a diagram only just wider than the column shrinks to it
   const FIT_MAX = 1.5;    // how far "fit to width" may enlarge a small diagram
   const ZOOM_MIN = 0.1;
   const ZOOM_MAX = 4;
   const ZOOM_STEP = 1.25;
+  const wideScreen = window.matchMedia("(min-width: 1200px)");
+  const margin = document.getElementById("quarto-margin-sidebar");
 
   // Measure labels in the font they are drawn in. Quarto's mermaid-init.js has
   // already called initialize(); calling it again before `load` keeps Quarto's
@@ -41,28 +47,75 @@
 
   // ── Inline sizing ──────────────────────────────────────────────────────────
 
+  // How far the plate may reach past the text column into the right margin:
+  // up to the margin column's far edge, and only on wide screens.
+  function marginRoom(figure) {
+    if (!wideScreen.matches || !margin) return 0;
+    const column = figure.parentElement.getBoundingClientRect().right;
+    return Math.max(0, Math.floor(margin.getBoundingClientRect().right - column));
+  }
+
   function layout(figure) {
     const frame = figure.querySelector(".kates-diagram-frame");
     const svg = frame && frame.querySelector("svg");
     const size = svg && naturalSize(svg);
-    const room = frame ? frame.clientWidth : 0;
-    if (!size || !room) return; // not laid out yet: the ResizeObserver retries
-    // Fit when that keeps labels legible, give or take a few percent so a
-    // diagram that only just misses does not get a scrollbar for 3px.
-    const legible = size.w * MIN_SCALE;
-    let width = size.w <= room ? size.w : legible <= room * 1.04 ? room : legible;
-    // Scrolling through several screens of one diagram (a phone, mostly) is
-    // worse than seeing its shape and opening it full screen.
-    const oversized = width > room * MAX_SCROLL;
-    if (oversized) width = room;
+    if (!size || !figure.parentElement.clientWidth) return; // not laid out yet: the ResizeObserver retries
+    // The frame's width with the plate inside the column; measured from the
+    // column, not the frame, so widening the plate never feeds back.
+    const style = getComputedStyle(figure);
+    const plate = ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"]
+      .reduce((sum, side) => sum + parseFloat(style[side]), 0);
+    const column = figure.parentElement.clientWidth - plate;
+    const room = column + marginRoom(figure);
+
+    let width = size.w;
+    let oversized = false;
+    if (size.w > room) {
+      // Shrink to fit; past FIT_LIMIT the labels are too small to read, so
+      // the fitted diagram becomes a thumbnail that points to Expand.
+      width = size.w <= column * FIT_SLACK ? column : room;
+      oversized = size.w > room * FIT_LIMIT;
+    } else if (size.w > column * FIT_SLACK) {
+      width = size.w; // fits at full size once it takes some of the margin
+    } else {
+      width = Math.min(size.w, column);
+    }
+    const bleed = Math.max(0, Math.ceil(width - column));
+    figure.style.setProperty("--kates-diagram-bleed", `${bleed}px`);
+    figure.classList.toggle("is-wide", bleed > 0);
+    figure.classList.toggle("is-oversized", oversized);
     svg.style.maxWidth = "none";
     svg.style.width = `${Math.floor(width)}px`;
-    figure.classList.toggle("is-scrollable", !oversized && width > room + 1);
-    figure.classList.toggle("is-oversized", oversized);
     figure.querySelector(".kates-diagram-hint").textContent = oversized
       ? "Too wide to read here: expand it full screen."
-      : "Scroll sideways to see the rest, or expand it full screen.";
+      : "";
+    yieldMargin();
   }
+
+  // The table of contents steps aside while a diagram that reaches into the
+  // margin passes under it.
+  let yieldQueued = false;
+  function yieldMargin() {
+    if (!margin || yieldQueued) return;
+    yieldQueued = true;
+    requestAnimationFrame(() => {
+      yieldQueued = false;
+      // The margin column is as tall as the window; its contents are not
+      const first = margin.firstElementChild;
+      const last = margin.lastElementChild;
+      if (!first || !last) return;
+      const top = first.getBoundingClientRect().top;
+      const bottom = last.getBoundingClientRect().bottom;
+      const hit = [...document.querySelectorAll("figure.kates-diagram.is-wide")].some((figure) => {
+        const r = figure.getBoundingClientRect();
+        return r.bottom > top && r.top < bottom;
+      });
+      margin.classList.toggle("kates-yield", hit);
+    });
+  }
+  window.addEventListener("scroll", () => {
+    if (document.querySelector("figure.kates-diagram.is-wide")) yieldMargin();
+  }, { passive: true });
 
   const resizes = new ResizeObserver((entries) => {
     for (const entry of entries) {
@@ -81,6 +134,9 @@
 
     figure.classList.add("kates-diagram");
     frame.classList.add("kates-diagram-frame");
+    // Quarto's cell wrapper scrolls its overflow, which would clip a plate
+    // that reaches into the margin; the frame inside does the scrolling.
+    figure.closest(".cell-output-display")?.classList.add("kates-diagram-cell");
 
     const expand = document.createElement("button");
     expand.type = "button";
@@ -115,6 +171,11 @@
   if (document.querySelector("pre.mermaid-js")) {
     rendered.observe(document.body, { childList: true, subtree: true });
   }
+
+  // Crossing 1200px changes how much margin a diagram may take
+  wideScreen.addEventListener("change", () => {
+    document.querySelectorAll("figure.kates-diagram").forEach(layout);
+  });
 
   // ── Full-screen viewer ─────────────────────────────────────────────────────
 
@@ -241,6 +302,64 @@
     viewer.fit();
     viewer.stage.scrollTo(0, 0); // start at the top, not wherever the zoom anchor landed
     viewer.stage.focus();
+  }
+
+  // ── Keyboard access to sideways scrolling ──────────────────────────────────
+  // Code blocks, command output and (on narrow screens) tables scroll
+  // sideways inside their own box. A box that overflows gets tabindex="0", so
+  // a keyboard can reach it and scroll it with the arrow keys; the theme
+  // draws the focus ring. A box that fits is left out of the tab order.
+
+  const SCROLLERS = [
+    "div.sourceCode > pre.sourceCode",
+    "#quarto-document-content pre:not(.sourceCode)",
+    "#quarto-document-content table.table",
+  ].join(", ");
+
+  function markScrollers() {
+    for (const box of document.querySelectorAll(SCROLLERS)) {
+      const overflows = box.scrollWidth > box.clientWidth + 1;
+      if (overflows && !box.hasAttribute("tabindex")) {
+        box.tabIndex = 0;
+        box.dataset.katesScroller = "";
+      } else if (!overflows && "katesScroller" in box.dataset) {
+        box.removeAttribute("tabindex");
+        delete box.dataset.katesScroller;
+      }
+    }
+  }
+
+  let scrollersQueued = false;
+  const queueScrollers = () => {
+    if (scrollersQueued) return;
+    scrollersQueued = true;
+    requestAnimationFrame(() => {
+      scrollersQueued = false;
+      markScrollers();
+    });
+  };
+  markScrollers();
+  window.addEventListener("load", queueScrollers);
+  window.addEventListener("resize", queueScrollers);
+  document.fonts?.ready.then(queueScrollers); // web fonts change line widths
+
+  // ── Keyboard access to the sidebar's parts ─────────────────────────────────
+  // Only the current part starts open (collapse-level: 1 in _quarto.yml), and
+  // Quarto draws each part's label as an <a> with no href, which a keyboard
+  // cannot reach. Make each label a button that Enter and Space toggle;
+  // Bootstrap keeps its aria-expanded up to date.
+  const partLabels = document.querySelectorAll(
+    '.sidebar-item-section > .sidebar-item-container > a.sidebar-item-text[data-bs-toggle="collapse"]:not([href])');
+  for (const label of partLabels) {
+    label.tabIndex = 0;
+    label.setAttribute("role", "button");
+    const target = label.getAttribute("data-bs-target");
+    if (target && target.startsWith("#")) label.setAttribute("aria-controls", target.slice(1));
+    label.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      label.click();
+    });
   }
 })();
 </script>
