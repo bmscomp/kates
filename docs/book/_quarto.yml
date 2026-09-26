@@ -17,10 +17,20 @@ book:
   repo-url: https://github.com/bmscomp/kates
   repo-subdir: docs/book
   repo-actions: [edit, issue]
-  search: true
+  # An overlay: a wide modal with each match in context, opened with / or k.
+  # collapse-after keeps one chapter's matches from burying the others.
+  search:
+    type: overlay
+    keyboard-shortcut: ["/", "k"]
+    limit: 50
+    collapse-after: 2
+  # Reader mode hides both sidebars on long pages.
+  reader-mode: true
   sidebar:
     logo: assets/kates-mark.svg
     logo-alt: "Kates"
+    # Only the current part starts open, so every part fits on one screen.
+    collapse-level: 1
   page-footer:
     left: "Kates — The Definitive Guide"
     right:
@@ -100,10 +110,16 @@ format:
     highlight-style: theme/kates-code.theme
     include-in-header: theme/head.html
     include-after-body: theme/diagrams.html
+    language:
+      search-text-placeholder: "Search the book (/)"
     toc: true
     toc-depth: 3
+    # Number chapters and sections (5.2), not every heading below them.
+    number-depth: 2
     code-copy: true
-    code-overflow: wrap
+    # Long lines scroll sideways (with edge shadows, theme/kates.scss) instead
+    # of wrapping, which broke flags at hyphens and YAML indentation.
+    code-overflow: scroll
   pdf:
     documentclass: scrbook
     papersize: a4
