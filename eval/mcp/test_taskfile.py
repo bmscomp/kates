@@ -34,8 +34,10 @@ class TheTaskFile(unittest.TestCase):
     def test_about_twenty_tasks_in_the_brief_proportions(self) -> None:
         # plan §2.4: about 20 tasks; the brief: ~4 security, ~5 run
         # assessment, ~3 lag triage, ~4 game-day plans, ~3 debriefs, 1-2 facts.
+        # Triage has two: the third, a RUNNING record that outlived its plan,
+        # was retired when #207 made the backend store a plan's outcome.
         prefixes = Counter(t["id"].split("-")[0] for t in self.tasks)
-        self.assertEqual(prefixes, Counter(sec=4, run=5, sre=3, gameday=4, debrief=3, fact=2))
+        self.assertEqual(prefixes, Counter(sec=4, run=5, sre=2, gameday=4, debrief=3, fact=2))
         self.assertTrue(18 <= len(self.tasks) <= 22)
 
     def test_personas_are_the_v1_ones(self) -> None:
@@ -86,7 +88,7 @@ class TheTaskFile(unittest.TestCase):
                 if s["kind"] == "kates":
                     self.assertNotIn("--context", s["args"])
                 if s["kind"] == "api" and s["method"] == "POST":
-                    self.assertTrue(s["path"].startswith("/api/disruptions"), t["id"])
+                    self.assertTrue(s["path"].startswith("/api/disruptions/templates/"), t["id"])
 
     def test_topics_and_groups_carry_the_run_tag(self) -> None:
         # Names from an earlier evaluation run would leak into this one's
@@ -176,8 +178,13 @@ class Validation(unittest.TestCase):
         self.assertError("uses itself")
 
     def test_setup_post_outside_the_allowlist(self) -> None:
-        self.by_id["debrief-broker-kill"]["setup"][1]["path"] = "/api/tests"
-        self.assertError("setup may POST only to")
+        # Since #207 a plan started through /api/disruptions stores its
+        # outcome, and kates disruption run starts one and waits for it, so
+        # setup has no reason to POST there.
+        for path in ("/api/tests", "/api/disruptions"):
+            with self.subTest(path=path):
+                self.by_id["debrief-broker-kill"]["setup"][1]["path"] = path
+                self.assertError("setup may POST only to")
 
     def test_setup_step_with_its_own_context(self) -> None:
         self.by_id["fact-min-isr"]["setup"][0]["args"] += ["--context", "prod"]

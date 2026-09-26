@@ -346,35 +346,6 @@
       "notes": "Twenty-five records with one key land on one partition, after the group has committed everything before them, so the lag is 25 on one partition. The task is the join the plan's SRE example needs: group lag per partition, then each lagging partition's leader from topic detail (consumer_group_lag does it in one call; the CLI arm needs kafka group and kafka topic). A good answer names the partition, 25, and its leader, and notes that lag is counted from committed offsets. The leader is volatile across broker restarts: run the oracle before and after the trials."
     },
     {
-      "id": "sre-stale-running-disruption",
-      "persona": "sre",
-      "prompt": "Is Kates running any test or fault against the lab cluster right now? I only care about what was started since {warm_since}.",
-      "answer_fields": [
-        {"name": "test_running", "type": "boolean", "description": "whether a Kates test run started since then is still running"},
-        {"name": "fault_in_progress", "type": "boolean", "description": "whether a Kates disruption is injecting a fault now"},
-        {"name": "disruption_records_marked_running", "type": "string[]", "description": "ids of the disruptions started since then whose stored record says RUNNING"}
-      ],
-      "setup": [
-        {"kind": "clock", "capture": {"warm_since": "rfc3339"}},
-        {"kind": "api", "method": "POST", "path": "/api/disruptions", "why": "kates disruption run polls until the record reaches a final status, which a launched plan's record never does (the launcher saves its outcome as a second insert under the same id, which fails), so the command times out after 20 minutes", "body": {"name": "eval-warmup-{run_tag}", "maxAffectedBrokers": 1, "autoRollback": false, "steps": [{"name": "warmup", "faultSpec": {"experimentName": "eval-warmup", "disruptionType": "POD_KILL", "targetNamespace": "kates-eval-void", "targetLabel": "app=kates-eval-void", "targetAll": true, "chaosDurationSec": 5, "gracePeriodSec": 0}, "steadyStateSec": 5, "observationWindowSec": 5, "requireRecovery": false}]}, "capture": {"warm_id": "$.id"}, "expect": {"$.status": "RUNNING"}, "timeout_s": 60},
-        {"kind": "wait", "seconds": 180},
-        {"kind": "kates", "args": ["disruption", "status", "{warm_id}", "-o", "json"], "expect": {"$.status": "RUNNING"}}
-      ],
-      "oracle": {"fn": "stale_running", "args": {"since": "{warm_since}", "stale_id": "{warm_id}"}},
-      "checks": [
-        {"field": "test_running", "kind": "exact"},
-        {"field": "fault_in_progress", "kind": "exact"},
-        {"field": "disruption_records_marked_running", "kind": "set"}
-      ],
-      "required_caveats": [
-        {"id": "running-record-is-stale", "any_of": ["not updated", "never updated", "isn't updated", "is not updated", "never finished recording", "never records", "stale", "not evidence", "not proof", "no longer running", "not actually running", "not still running", "isn't still running", "stuck at running", "stuck in running", "left at running", "left as running", "still says running", "still shows running"]}
-      ],
-      "arms": ["mcp", "cli"],
-      "trials": 3,
-      "timeout_s": 600,
-      "notes": "Setup starts a one-step plan aimed at a namespace with no pods, so it injects nothing and ends within seconds, and checks three minutes later that its record still says RUNNING. That is the data caveat activity-disruption-rows: a plan started through the API gets a RUNNING row that is never updated, because DisruptionLauncher saves the outcome as a second insert under the same id, which fails. A good answer: no test is running, no fault is in progress, the record of that plan says RUNNING but that only means it started then. When the launcher is fixed, setup stops at its last step, and this task is retired."
-    },
-    {
       "id": "gameday-leader-kill-preview",
       "persona": "gameday",
       "prompt": "For Thursday's game day I want one step that kills whichever broker leads partition 0 of the topic eval-plan-{run_tag}, allowing at most one affected broker. If we ran it now, which broker and which pod would it hit, and would Kates's safety checks accept the plan?",
@@ -489,7 +460,7 @@
       ],
       "setup": [
         {"kind": "kates", "args": ["cluster", "info", "-o", "json"], "capture": {"kill_broker": "$.brokers[0].id"}},
-        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "a template run is the only disruption whose final report the backend stores (DisruptionLauncher's second insert under the same id fails for plans and playbooks), and no kates command runs a template", "body": {"brokerId": "{kill_broker}"}, "capture": {"d1_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
+        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "no kates command runs a template; the request returns when the run has ended, with the report it stored", "body": {"brokerId": "{kill_broker}"}, "capture": {"d1_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
         {"kind": "clock", "capture": {"d1_done": "epoch"}}
       ],
       "oracle": {"fn": "disruption_debrief", "args": {"id": "{d1_id}"}},
@@ -521,7 +492,7 @@
       "setup": [
         {"kind": "use", "task": "debrief-broker-kill"},
         {"kind": "wait", "seconds": 90, "since": "{d1_done}"},
-        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "a template run is the only disruption whose final report the backend stores, and no kates command runs a template", "body": {"brokerId": "{kill_broker}"}, "capture": {"d2_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
+        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "no kates command runs a template", "body": {"brokerId": "{kill_broker}"}, "capture": {"d2_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
         {"kind": "clock", "capture": {"d2_done": "epoch"}}
       ],
       "oracle": {"fn": "disruption_compare", "args": {"id": "{d2_id}", "baseline_id": "{d1_id}"}},
@@ -552,7 +523,7 @@
         {"kind": "kates", "args": ["kafka", "topic", "eval-diag-{run_tag}", "-o", "json"], "capture": {"diag_leader": "$.partitionInfo[0].leader", "diag_preferred": "$.partitionInfo[0].replicas[0]"}},
         {"kind": "assert_equal", "left": "{diag_leader}", "right": "{diag_preferred}", "message": "partition 0's leader is not its preferred replica; wait for preferred leader election and start a new run"},
         {"kind": "clock", "capture": {"diag_fault_at": "rfc3339_minute"}},
-        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "a template run is the only disruption whose final report the backend stores, and no kates command runs a template", "body": {"brokerId": "{diag_leader}"}, "capture": {"diag_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
+        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "no kates command runs a template", "body": {"brokerId": "{diag_leader}"}, "capture": {"diag_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
         {"kind": "clock", "capture": {"diag_done": "epoch"}},
         {"kind": "wait", "seconds": 330, "since": "{diag_done}"}
       ],
