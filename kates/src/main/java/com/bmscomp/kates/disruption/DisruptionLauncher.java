@@ -107,6 +107,7 @@ public class DisruptionLauncher {
         return new LaunchResult(Status.ACCEPTED, id, validation.warnings());
     }
 
+    // The outcome is saved under the placeholder's id, and replaces it.
     private void runPlan(String id, DisruptionPlan plan) {
         try {
             DisruptionReport report = orchestrator.execute(plan);
