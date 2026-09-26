@@ -182,7 +182,7 @@ sequenceDiagram
 
 ### Key Configuration
 
-The Default column is the chart's own value. A `kates deploy` install sets `replicas`, `kafka.bootstrapServers` and `kafka.namespace` on the command line, so `helm get values connect-cluster -n connect` shows what a running release overrides:
+The Default column is the chart's own value. A `kates deploy` install sets `replicas`, `version`, `kafka.bootstrapServers` and `kafka.namespace` on the command line, so `helm get values connect-cluster -n connect` shows what a running release overrides:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
@@ -402,9 +402,6 @@ The script is written to run as an init container that populates a shared volume
 The default Kates CDC pipeline captures changes from a PostgreSQL database:
 
 ```mermaid
-%%| label: fig-kc-postgres-cdc
-%%| fig-cap: "Debezium streams PostgreSQL's changes through a replication slot into one topic per table, and schema changes into a history topic."
-%%| fig-alt: "PostgreSQL's write-ahead log, decoded by the pgoutput plugin, feeds the replication slot debezium_kates through logical replication. The slot streams changes to the Debezium PostgresConnector in Connect, which writes each table to its own topic, cdc.public.orders and cdc.public.customers, and DDL changes to cdc-schema-history."
 graph LR
     subgraph PostgreSQL
         WAL["Write-Ahead Log<br/>(pgoutput plugin)"]
@@ -679,6 +676,8 @@ EOS requires `min.insync.replicas >= 2` on the data topics and `acks=all` on the
 
 ### When to Disable EOS
 
+`exactlyOnce.enabled` is on by default and applies to the whole group, so turning it off takes exactly-once away from every source connector on the workers. Weigh that against the cases below:
+
 | Scenario | Recommendation |
 |----------|---------------|
 | Sink-only connectors | Not applicable — EOS is for source connectors only |
@@ -817,6 +816,8 @@ A connector that sets its own `value.converter` (or `key.converter`) is configur
 A values file that sets `schemaRegistry.path: /apis/ccompat/v7` beside an Apicurio converter is refused at render time, with the fix named: remove the key, or set it to `/apis/registry/v3`. The Confluent-compatible path belongs to clients that speak the Confluent API, such as Kafka UI.
 
 ### Schema Evolution
+
+When a compatibility rule is set, the registry checks each new version of a schema against it and refuses a version that breaks it. The table lists the four basic modes:
 
 | Compatibility Mode | What's Allowed | Use Case |
 |-------------------|---------------|----------|

@@ -243,6 +243,8 @@ Default quotas prevent a single runaway producer or consumer from starving other
 
 ### Kafka 4.x Features
 
+The key below turns on share groups. The chart renders it, like every `group.share.*` and `share.*` key, only when `kafkaVersion` is 4.2.0 or newer:
+
 ```yaml
 group.share.enable: true  # KIP-932 Share Groups
 ```

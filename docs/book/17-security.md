@@ -820,6 +820,8 @@ kates kyverno enforce kates-pod-security-standards
 kates kyverno audit kates-pod-security-standards
 ```
 
+The table adds the commands' short aliases, where they have any, and what each one reads or changes:
+
 | Command | Aliases | Description |
 |---------|---------|-------------|
 | `kates kyverno status` | `st`, `list` | Lists all ClusterPolicies with mode, ready state, validate/mutate rule counts, and violation summary |
