@@ -1,7 +1,7 @@
 {
   "name": "kates_activity",
   "title": "Kates activity",
-  "description": "What Kates is running and what it recorded since a time: test runs not yet finished (PENDING, RUNNING or STOPPING, whatever their age), test runs created since then, disruption reports written since then, the newest reports stored as RUNNING, and audit rows since then. A disruption report stored as RUNNING says only that a plan started then, not that its fault is still running: the backend does not update the row when the plan ends, so it cannot show whether Kates is injecting a fault now. Audit rows name no actor, so this cannot say who did something, and only the REST test endpoints write them. Disruptions appear only when Kates wrote a report row. since is an RFC 3339 time, a duration back from now such as 30m or 2h, or a clock time such as 13:30 (its latest occurrence, in the server's time zone); the default is 1h. Each list holds at most limit items; count and complete say when a list is cut. Plan names and audit details are fenced. Only reads.",
+  "description": "What Kates is running and what it recorded since a time: test runs not yet finished (PENDING, RUNNING or STOPPING, whatever their age), test runs created since then, disruption reports written since then, the newest reports stored as RUNNING, and audit rows since then. A disruption report stored as RUNNING is a plan still in progress, or one whose backend process stopped mid-plan and has not started again (the backend marks such a report INTERRUPTED when it starts). A plan in progress injects its faults for only part of its run, so this cannot show whether Kates is injecting a fault now. Audit rows name no actor, so this cannot say who did something, and only the REST test endpoints write them. Disruptions appear only when Kates wrote a report row. since is an RFC 3339 time, a duration back from now such as 30m or 2h, or a clock time such as 13:30 (its latest occurrence, in the server's time zone); the default is 1h. Each list holds at most limit items; count and complete say when a list is cut. Plan names and audit details are fenced. Only reads.",
   "annotations": {
     "idempotentHint": false,
     "openWorldHint": false,
@@ -195,7 +195,7 @@
                 ]
               },
               "storedAsRunning": {
-                "description": "reports stored as RUNNING among those read, whatever their age. This does not mean the fault is running: the backend does not update the row when a plan ends (caveat activity-disruption-rows)",
+                "description": "reports stored as RUNNING among those read, whatever their age: plans still in progress, or stopped with the backend process and not yet marked INTERRUPTED. This does not mean a fault is injected now (caveat activity-disruption-rows)",
                 "items": {
                   "additionalProperties": false,
                   "properties": {

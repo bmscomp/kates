@@ -89,9 +89,10 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 		Description: "What Kates is running and what it recorded since a time: test runs not yet finished " +
 			"(PENDING, RUNNING or STOPPING, whatever their age), test runs created since then, disruption " +
 			"reports written since then, the newest reports stored as RUNNING, and audit rows since then. A " +
-			"disruption report stored as RUNNING says only that a plan started then, not that its fault is " +
-			"still running: the backend does not update the row when the plan ends, so it cannot show whether " +
-			"Kates is injecting a fault now. Audit rows name no actor, so this cannot say who did something, " +
+			"disruption report stored as RUNNING is a plan still in progress, or one whose backend process " +
+			"stopped mid-plan and has not started again (the backend marks such a report INTERRUPTED when it " +
+			"starts). A plan in progress injects its faults for only part of its run, so this cannot show " +
+			"whether Kates is injecting a fault now. Audit rows name no actor, so this cannot say who did something, " +
 			"and only the REST test endpoints write them. Disruptions appear only when Kates wrote a report " +
 			"row. since is an RFC 3339 time, a duration back from now such as 30m or 2h, or a clock time such " +
 			"as 13:30 (its latest occurrence, in the server's time zone); the default is 1h. Each list holds " +
@@ -1558,7 +1559,7 @@ type mcpActivityDisruptions struct {
 	ErrorCode       mcpErrorCode               `json:"errorCode,omitempty"`
 	Count           int                        `json:"count" jsonschema:"reports written since then that were found; can exceed the reports listed"`
 	Complete        bool                       `json:"complete" jsonschema:"false when reading stopped before the start of the window"`
-	StoredAsRunning []mcpActivityDisruptionRow `json:"storedAsRunning" jsonschema:"reports stored as RUNNING among those read, whatever their age. This does not mean the fault is running: the backend does not update the row when a plan ends (caveat activity-disruption-rows)"`
+	StoredAsRunning []mcpActivityDisruptionRow `json:"storedAsRunning" jsonschema:"reports stored as RUNNING among those read, whatever their age: plans still in progress, or stopped with the backend process and not yet marked INTERRUPTED. This does not mean a fault is injected now (caveat activity-disruption-rows)"`
 	Since           []mcpActivityDisruptionRow `json:"since" jsonschema:"reports written since then, newest first"`
 }
 
@@ -1790,11 +1791,11 @@ func mcpActivityTestsSince(ctx context.Context, call *mcpCall, since time.Time, 
 
 // mcpActivityDisruptionsSince reads disruption reports newest first until one
 // was written before since, and keeps any stored as RUNNING on the way. A
-// RUNNING row is not a running fault: the launcher saves a plan's final
-// report as a second insert under the same id, which fails, and the startup
-// reconciler's INTERRUPTED update saves the same way (DisruptionLauncher.java:
-// 95-121, DisruptionReportRepository.java:18-21,
-// DisruptionOrphanReconciler.java:146-158).
+// RUNNING row is not a running fault: it is a plan in progress, whose faults
+// are injected for part of its run, or one whose backend process stopped
+// before it ended and has not started again to mark it INTERRUPTED
+// (DisruptionLauncher.java:95-123, DisruptionReportRepository.java:35-43,
+// DisruptionOrphanReconciler.java:152-203).
 func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.Time, limit int) (mcpActivityDisruptions, error) {
 	out := mcpActivityDisruptions{StoredAsRunning: []mcpActivityDisruptionRow{}, Since: []mcpActivityDisruptionRow{}}
 	for p := 0; p < mcpActivityMaxPages; p++ {
@@ -2174,19 +2175,18 @@ var mcpCaveatsRuns = []mcpCaveat{
 	{
 		ID: mcpCaveatActivityDisruptionRows,
 		Text: "Disruptions are known only from the report rows Kates writes. A plan or playbook started through " +
-			"the API gets a RUNNING row when it starts, and that row is not updated when the plan ends: the " +
-			"launcher saves the final report as a second insert under the same id (a JPA persist, never a merge), " +
-			"which fails, and the startup reconciler that should mark a stale RUNNING row INTERRUPTED saves the " +
-			"same way and swallows the failure. A row stored as RUNNING therefore says only that a plan started " +
-			"then, not that its fault is still running, and a plan's outcome may never be stored. A template run " +
-			"or a scheduled disruption gets its row only when it has finished, stamped with that time; resilience " +
-			"runs and compound chaos write no row. A fault in progress can therefore be missing, and some faults " +
-			"never appear.",
+			"the API gets a RUNNING row when it starts, and the row takes the plan's outcome when the plan ends, " +
+			"keeping the time it started. A row stored as RUNNING is therefore a plan still in progress, whose " +
+			"faults are injected for only part of its run, or one whose backend process stopped mid-plan and has " +
+			"not started again; when it starts, it marks each such row INTERRUPTED. A template run or a scheduled " +
+			"disruption gets its row only when it has finished, stamped with that time; resilience runs and " +
+			"compound chaos write no row. A fault in progress can therefore be missing, and some faults never " +
+			"appear.",
 		Refs: []string{
-			mcpJava + "disruption/DisruptionLauncher.java:95-121",
-			mcpJava + "disruption/DisruptionPersistence.java:16-32",
-			mcpJava + "disruption/DisruptionReportRepository.java:18-21",
-			mcpJava + "disruption/DisruptionOrphanReconciler.java:142-158",
+			mcpJava + "disruption/DisruptionLauncher.java:95-123",
+			mcpJava + "disruption/DisruptionPersistence.java:16-37",
+			mcpJava + "disruption/DisruptionReportRepository.java:20-43",
+			mcpJava + "disruption/DisruptionOrphanReconciler.java:152-203",
 			mcpJava + "disruption/DisruptionTemplateResource.java:57-59",
 			mcpJava + "disruption/DisruptionScheduler.java:92-104",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",

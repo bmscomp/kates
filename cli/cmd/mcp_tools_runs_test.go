@@ -1524,8 +1524,8 @@ func TestMCPKatesActivity(t *testing.T) {
 }
 
 // mcpCheckActivityDisruptions: two reports in the window, and the two stored
-// as RUNNING whatever their age (the older one ended long ago as far as
-// anyone knows: the backend never updates the row).
+// as RUNNING whatever their age (the older one may be a long plan, or one
+// whose backend stopped mid-plan and has not started again to mark it).
 func mcpCheckActivityDisruptions(t *testing.T, h *mcpHarness, d mcpActivityDisruptions) {
 	t.Helper()
 	if !d.Available || !d.Complete || d.Count != 2 || len(d.Since) != 2 || len(d.StoredAsRunning) != 2 {
