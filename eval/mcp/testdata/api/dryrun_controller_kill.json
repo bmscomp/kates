@@ -1,0 +1,18 @@
+{
+  "wouldSucceed": true,
+  "totalBrokers": 3,
+  "steps": [
+    {
+      "name": "kill-controller",
+      "disruptionType": "POD_KILL",
+      "targetPod": "krafter-controllers-0",
+      "resolvedLeaderId": null,
+      "affectedPods": [
+        "krafter-controllers-0"
+      ],
+      "warnings": []
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

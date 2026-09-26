@@ -1,0 +1,210 @@
+{
+  "brokerCount": 3,
+  "keysChecked": 20,
+  "mismatches": [],
+  "consistent": [
+    {
+      "key": "ssl.protocol",
+      "values": {
+        "3": "TLSv1.3",
+        "4": "TLSv1.3",
+        "5": "TLSv1.3"
+      },
+      "consistent": true,
+      "value": "TLSv1.3"
+    },
+    {
+      "key": "ssl.client.auth",
+      "values": {
+        "3": "none",
+        "4": "none",
+        "5": "none"
+      },
+      "consistent": true,
+      "value": "none"
+    },
+    {
+      "key": "ssl.keystore.location",
+      "values": {
+        "3": "(not set)",
+        "4": "(not set)",
+        "5": "(not set)"
+      },
+      "consistent": true,
+      "value": "(not set)"
+    },
+    {
+      "key": "ssl.truststore.location",
+      "values": {
+        "3": "(not set)",
+        "4": "(not set)",
+        "5": "(not set)"
+      },
+      "consistent": true,
+      "value": "(not set)"
+    },
+    {
+      "key": "ssl.endpoint.identification.algorithm",
+      "values": {
+        "3": "https",
+        "4": "https",
+        "5": "https"
+      },
+      "consistent": true,
+      "value": "https"
+    },
+    {
+      "key": "ssl.enabled.protocols",
+      "values": {
+        "3": "TLSv1.2,TLSv1.3",
+        "4": "TLSv1.2,TLSv1.3",
+        "5": "TLSv1.2,TLSv1.3"
+      },
+      "consistent": true,
+      "value": "TLSv1.2,TLSv1.3"
+    },
+    {
+      "key": "sasl.enabled.mechanisms",
+      "values": {
+        "3": "GSSAPI",
+        "4": "GSSAPI",
+        "5": "GSSAPI"
+      },
+      "consistent": true,
+      "value": "GSSAPI"
+    },
+    {
+      "key": "sasl.mechanism.inter.broker.protocol",
+      "values": {
+        "3": "GSSAPI",
+        "4": "GSSAPI",
+        "5": "GSSAPI"
+      },
+      "consistent": true,
+      "value": "GSSAPI"
+    },
+    {
+      "key": "authorizer.class.name",
+      "values": {
+        "3": "org.apache.kafka.metadata.authorizer.StandardAuthorizer",
+        "4": "org.apache.kafka.metadata.authorizer.StandardAuthorizer",
+        "5": "org.apache.kafka.metadata.authorizer.StandardAuthorizer"
+      },
+      "consistent": true,
+      "value": "org.apache.kafka.metadata.authorizer.StandardAuthorizer"
+    },
+    {
+      "key": "super.users",
+      "values": {
+        "3": "User:CN=krafter-kafka;User:kates-backend",
+        "4": "User:CN=krafter-kafka;User:kates-backend",
+        "5": "User:CN=krafter-kafka;User:kates-backend"
+      },
+      "consistent": true,
+      "value": "User:CN=krafter-kafka;User:kates-backend"
+    },
+    {
+      "key": "security.inter.broker.protocol",
+      "values": {
+        "3": "PLAINTEXT",
+        "4": "PLAINTEXT",
+        "5": "PLAINTEXT"
+      },
+      "consistent": true,
+      "value": "PLAINTEXT"
+    },
+    {
+      "key": "listener.security.protocol.map",
+      "values": {
+        "3": "CONTROLPLANE-9090:SSL,REPLICATION-9091:SSL,PLAIN-9092:SASL_PLAINTEXT,TLS-9093:SSL",
+        "4": "CONTROLPLANE-9090:SSL,REPLICATION-9091:SSL,PLAIN-9092:SASL_PLAINTEXT,TLS-9093:SSL",
+        "5": "CONTROLPLANE-9090:SSL,REPLICATION-9091:SSL,PLAIN-9092:SASL_PLAINTEXT,TLS-9093:SSL"
+      },
+      "consistent": true,
+      "value": "CONTROLPLANE-9090:SSL,REPLICATION-9091:SSL,PLAIN-9092:SASL_PLAINTEXT,TLS-9093:SSL"
+    },
+    {
+      "key": "auto.create.topics.enable",
+      "values": {
+        "3": "false",
+        "4": "false",
+        "5": "false"
+      },
+      "consistent": true,
+      "value": "false"
+    },
+    {
+      "key": "unclean.leader.election.enable",
+      "values": {
+        "3": "false",
+        "4": "false",
+        "5": "false"
+      },
+      "consistent": true,
+      "value": "false"
+    },
+    {
+      "key": "min.insync.replicas",
+      "values": {
+        "3": "2",
+        "4": "2",
+        "5": "2"
+      },
+      "consistent": true,
+      "value": "2"
+    },
+    {
+      "key": "default.replication.factor",
+      "values": {
+        "3": "3",
+        "4": "3",
+        "5": "3"
+      },
+      "consistent": true,
+      "value": "3"
+    },
+    {
+      "key": "log.cleanup.policy",
+      "values": {
+        "3": "delete",
+        "4": "delete",
+        "5": "delete"
+      },
+      "consistent": true,
+      "value": "delete"
+    },
+    {
+      "key": "delete.topic.enable",
+      "values": {
+        "3": "true",
+        "4": "true",
+        "5": "true"
+      },
+      "consistent": true,
+      "value": "true"
+    },
+    {
+      "key": "max.connections.per.ip",
+      "values": {
+        "3": "(not set)",
+        "4": "(not set)",
+        "5": "(not set)"
+      },
+      "consistent": true,
+      "value": "(not set)"
+    },
+    {
+      "key": "max.connections",
+      "values": {
+        "3": "(not set)",
+        "4": "(not set)",
+        "5": "(not set)"
+      },
+      "consistent": true,
+      "value": "(not set)"
+    }
+  ],
+  "mismatchCount": 0,
+  "grade": "PASS",
+  "timestamp": "2026-09-26T09:13:10.004511Z"
+}

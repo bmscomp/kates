@@ -1,0 +1,5 @@
+# Run output: state, expected answers, transcripts, grades and reports of real
+# runs. They hold lab data and cost money to produce; archive the ones worth
+# keeping elsewhere.
+runs/
+__pycache__/

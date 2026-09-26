@@ -1,0 +1,148 @@
+{
+  "debrief-broker-kill": {
+    "kafka_metrics_measured": false,
+    "recovered": true,
+    "sla_graded": false,
+    "status": "COMPLETED",
+    "targeted_pod": "krafter-brokers-3",
+    "time_to_all_ready_seconds": 27.912
+  },
+  "debrief-compare-game-days": {
+    "earlier_worst_recovery_seconds": 27.912,
+    "later_worst_recovery_seconds": 31.407,
+    "recovery_change_seconds": 3.495
+  },
+  "debrief-diagnose-without-report": {
+    "leads_partition_again": true,
+    "lost_broker_id": 4
+  },
+  "fact-min-isr": {
+    "min_insync_replicas": 2,
+    "set_at": "broker"
+  },
+  "fact-partition-leader": {
+    "isr_broker_ids": [
+      "3",
+      "4",
+      "5"
+    ],
+    "leader_broker_id": 5
+  },
+  "gameday-controller-kill-uncounted": {
+    "acceptance_means_quorum_safe": false,
+    "brokers_counted": 0,
+    "would_be_accepted": true
+  },
+  "gameday-leader-cascade-fit": {
+    "brokers_it_would_hit_now": [
+      "3",
+      "5"
+    ],
+    "playbook_fits": false,
+    "playbook_target_partitions": [
+      "0",
+      "1"
+    ],
+    "playbook_target_topic": "__consumer_offsets"
+  },
+  "gameday-leader-kill-preview": {
+    "leader_broker_id": 4,
+    "target_pod": "krafter-brokers-4",
+    "would_be_accepted": true
+  },
+  "gameday-rolling-restart-preview": {
+    "restarted_pods": [
+      "krafter-brokers-3",
+      "krafter-brokers-4",
+      "krafter-brokers-5",
+      "krafter-controllers-0",
+      "krafter-controllers-1",
+      "krafter-controllers-2"
+    ],
+    "touches_controllers": true,
+    "would_be_accepted": true
+  },
+  "run-baseline-spec-mismatch": {
+    "comparable_to_baseline": false,
+    "differing_settings": [
+      "recordSize"
+    ],
+    "regression_flagged": false
+  },
+  "run-load-parallel-producers": {
+    "producer_throughput_rec_per_sec": 998.1,
+    "producers_that_ran": 1,
+    "run_supports_sizing": false
+  },
+  "run-noise-band": {
+    "band_p99_max_ms": 13.3,
+    "band_p99_min_ms": 10.2,
+    "band_run_count": 4,
+    "p99_position": "within",
+    "run_p99_ms": 12.6
+  },
+  "run-trend-mixed-specs": {
+    "distinct_settings": 3,
+    "runs_on_topic": 7,
+    "trend_across_all_meaningful": false
+  },
+  "run-vs-baseline": {
+    "baseline_run_id": "1a2b3c4d",
+    "p99_change_percent": 23.5,
+    "regression_flagged": true,
+    "throughput_change_percent": -0.1
+  },
+  "sec-drift-trend": {
+    "baseline_grade": "D",
+    "current_grade": "D",
+    "degraded_checks": [],
+    "grade_history_shows_trend": false,
+    "improved_checks": [
+      "Topics with RF=1"
+    ]
+  },
+  "sec-listener-encryption": {
+    "all_listeners_encrypted": false,
+    "unencrypted_listeners": [
+      "PLAIN-9092"
+    ]
+  },
+  "sec-pentest-cve": {
+    "cve_check_compared_version": false,
+    "pentest_attacked_cluster": false,
+    "pentest_vulnerable_checks": [
+      "Connection Flood"
+    ]
+  },
+  "sec-posture": {
+    "failing_high_or_critical": [
+      "Inter-Broker Encryption",
+      "SSL Keystore Configured",
+      "mTLS Enforcement"
+    ],
+    "grade": "D"
+  },
+  "sre-kates-caused-lag": {
+    "group_active_members": 0,
+    "group_total_lag": 5000,
+    "kafka_unhealthy": false,
+    "kates_caused": true,
+    "kates_run_id": "92b3c4d5"
+  },
+  "sre-lag-partition-leader": {
+    "lagging_partitions": [
+      "1"
+    ],
+    "leader_broker_ids": [
+      "3"
+    ],
+    "total_lag": 25
+  },
+  "sre-stale-running-disruption": {
+    "disruption_records_marked_running": [
+      "9f8e7d6c"
+    ],
+    "fault_in_progress": false,
+    "test_running": false
+  }
+}

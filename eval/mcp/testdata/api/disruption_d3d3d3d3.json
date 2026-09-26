@@ -1,0 +1,97 @@
+{
+  "planName": "Broker Kill & Recovery",
+  "status": "COMPLETED",
+  "stepReports": [
+    {
+      "stepName": "kill-broker-4",
+      "disruptionType": "POD_KILL",
+      "chaosOutcome": {
+        "engineName": "broker-kill-4-k7x2p",
+        "experimentName": "broker-kill-4",
+        "chaosStartTime": "2026-09-26T09:59:41.102233Z",
+        "chaosEndTime": "2026-09-26T09:60:14.870004Z",
+        "chaosStartNanos": 91827364500012,
+        "chaosDuration": 33.767771,
+        "verdict": "Pass",
+        "failureReason": null,
+        "probeSuccessPercentage": "100",
+        "failStep": null,
+        "phase": "Completed"
+      },
+      "podTimeline": [
+        {
+          "timestamp": "2026-09-26T09:59:41.311201Z",
+          "podName": "krafter-brokers-4",
+          "eventType": "MODIFIED",
+          "phase": "Running",
+          "reason": "",
+          "message": ""
+        },
+        {
+          "timestamp": "2026-09-26T09:59:41.902415Z",
+          "podName": "krafter-brokers-4",
+          "eventType": "DELETED",
+          "phase": "Running",
+          "reason": "",
+          "message": ""
+        },
+        {
+          "timestamp": "2026-09-26T09:59:42.380770Z",
+          "podName": "krafter-brokers-4",
+          "eventType": "ADDED",
+          "phase": "Pending",
+          "reason": "",
+          "message": ""
+        },
+        {
+          "timestamp": "2026-09-26T09:59:44.120903Z",
+          "podName": "krafter-brokers-4",
+          "eventType": "MODIFIED",
+          "phase": "Pending",
+          "reason": "",
+          "message": ""
+        },
+        {
+          "timestamp": "2026-09-26T09:59:58.004112Z",
+          "podName": "krafter-brokers-4",
+          "eventType": "MODIFIED",
+          "phase": "Running",
+          "reason": "",
+          "message": ""
+        },
+        {
+          "timestamp": "2026-09-26T09:59:59.771260Z",
+          "podName": "krafter-controllers-1",
+          "eventType": "MODIFIED",
+          "phase": "Running",
+          "reason": "",
+          "message": ""
+        }
+      ],
+      "timeToFirstReady": 22.87,
+      "timeToAllReady": 29.118,
+      "strimziRecoveryTime": 36.218,
+      "preDisruptionMetrics": null,
+      "postDisruptionMetrics": null,
+      "impactDeltas": {},
+      "targetedLeaderBrokerId": null,
+      "isrMetrics": null,
+      "lagMetrics": null,
+      "rolledBack": false,
+      "rollbackReason": null,
+      "unmeasuredMetrics": null,
+      "unrecoveredAfter": null
+    }
+  ],
+  "summary": {
+    "totalSteps": 1,
+    "passedSteps": 1,
+    "worstRecovery": 29.118,
+    "avgThroughputDegradation": 0.0,
+    "maxP99LatencySpike": 0.0,
+    "slaViolated": false,
+    "worstIsrRecovery": 0.0,
+    "peakConsumerLag": 0
+  },
+  "validationWarnings": []
+}

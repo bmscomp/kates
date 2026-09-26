@@ -1,0 +1,19 @@
+{
+  "currentId": "d2d2d2d2",
+  "baselineId": "d1d1d1d1",
+  "deltas": {
+    "recoveryDeltaMs": 3495,
+    "throughputDeltaPercent": -12.4,
+    "p99DeltaPercent": 41.0
+  },
+  "current": {
+    "status": "COMPLETED",
+    "slaGrade": "-",
+    "passedSteps": "1/1"
+  },
+  "baseline": {
+    "status": "COMPLETED",
+    "slaGrade": "-",
+    "passedSteps": "1/1"
+  }
+}

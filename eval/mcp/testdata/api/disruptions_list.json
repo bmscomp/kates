@@ -1,0 +1,42 @@
+{
+  "page": 0,
+  "size": 200,
+  "count": 5,
+  "items": [
+    {
+      "id": "d3d3d3d3",
+      "planName": "Broker Kill & Recovery",
+      "status": "COMPLETED",
+      "slaGrade": "-",
+      "createdAt": "2026-09-26T10:01:12.504399Z"
+    },
+    {
+      "id": "d2d2d2d2",
+      "planName": "Broker Kill & Recovery",
+      "status": "COMPLETED",
+      "slaGrade": "-",
+      "createdAt": "2026-09-26T09:52:40.117028Z"
+    },
+    {
+      "id": "d1d1d1d1",
+      "planName": "Broker Kill & Recovery",
+      "status": "COMPLETED",
+      "slaGrade": "-",
+      "createdAt": "2026-09-26T09:47:02.990214Z"
+    },
+    {
+      "id": "9f8e7d6c",
+      "planName": "eval-warmup-abc123",
+      "status": "RUNNING",
+      "slaGrade": "-",
+      "createdAt": "2026-09-26T09:40:04.221067Z"
+    },
+    {
+      "id": "0a1b2c3d",
+      "planName": "rolling-restart",
+      "status": "RUNNING",
+      "slaGrade": "-",
+      "createdAt": "2026-09-20T14:02:11.004120Z"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "name": "eval-diag-abc123",
+  "internal": false,
+  "partitions": 3,
+  "replicationFactor": 3,
+  "partitionInfo": [
+    {
+      "partition": 0,
+      "leader": 4,
+      "replicas": [
+        4,
+        3,
+        5
+      ],
+      "isr": [
+        4,
+        3,
+        5
+      ],
+      "underReplicated": false
+    },
+    {
+      "partition": 1,
+      "leader": 5,
+      "replicas": [
+        5,
+        4,
+        3
+      ],
+      "isr": [
+        5,
+        4,
+        3
+      ],
+      "underReplicated": false
+    },
+    {
+      "partition": 2,
+      "leader": 3,
+      "replicas": [
+        3,
+        5,
+        4
+      ],
+      "isr": [
+        3,
+        5,
+        4
+      ],
+      "underReplicated": false
+    }
+  ],
+  "configs": {
+    "cleanup.policy": "delete",
+    "retention.ms": "86400000",
+    "min.insync.replicas": "2",
+    "compression.type": "producer",
+    "segment.bytes": "1073741824",
+    "max.message.bytes": "10485760",
+    "message.timestamp.type": "CreateTime"
+  },
+  "configSources": {
+    "cleanup.policy": "STATIC_BROKER_CONFIG",
+    "retention.ms": "STATIC_BROKER_CONFIG",
+    "min.insync.replicas": "STATIC_BROKER_CONFIG",
+    "compression.type": "DEFAULT_CONFIG",
+    "segment.bytes": "STATIC_BROKER_CONFIG",
+    "max.message.bytes": "STATIC_BROKER_CONFIG",
+    "message.timestamp.type": "DEFAULT_CONFIG"
+  }
+}
