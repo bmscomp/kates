@@ -314,6 +314,20 @@ class DryRunTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("persona", err)
 
+    def test_a_frozen_list_the_harness_no_longer_accepts(self):
+        # A run that froze a task since retired, whose oracle is gone.
+        doc = json.loads(TASKS.read_text())
+        doc["tasks"][0]["oracle"]["fn"] = "stale_running"
+        rd = self.runs / "old"
+        rd.mkdir(parents=True)
+        (rd / "tasks.json").write_text(json.dumps(doc))
+        code, _, err = call(["preflight", "--run-id", "old", "--runs-dir", str(self.runs), "--oracle", str(ORACLE),
+                             "--model", "claude-opus-5-5", "--dry-run"])
+        self.assertEqual(code, 2)
+        self.assertIn(f"this run froze a task list ({rd / 'tasks.json'})", err)
+        self.assertIn("start a new --run-id", err)
+        self.assertIn("oracle fn 'stale_running' is not in oracle.py", err)
+
     def test_all_prints_everything_and_writes_nothing(self):
         code, out, err = call(["all", "--dry-run", *self.common, "--model", "claude-opus-5-5", "--seed", "3"])
         self.assertEqual(code, 0, err)

@@ -153,7 +153,11 @@ class Run:
                 self.doc = tasklib.load_tasks(source, self.oracle.ORACLES)
                 self.tasks_path = Path(source)
         except tasklib.TaskError as e:
-            raise Fail(2, "the task list is invalid:\n  " + "\n  ".join(e.problems)) from e
+            # A frozen list the harness no longer accepts (a task retired
+            # since, its oracle removed) cannot be fixed in place.
+            what = (f"this run froze a task list ({frozen}) that this harness no longer accepts; start a new "
+                    "--run-id" if frozen.exists() else "the task list is invalid")
+            raise Fail(2, what + ":\n  " + "\n  ".join(e.problems)) from e
         self.by_id = tasklib.task_by_id(self.doc)
         self.manifest: dict[str, Any] = read_json(self.dir / "manifest.json", {})
         # setup.py's state: the run's run_tag, the human context, and each

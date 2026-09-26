@@ -1,6 +1,6 @@
 # MCP evaluation: the tasks
 
-The fixed task list for the evaluation in [`plans/mcp-server.md`](../../plans/mcp-server.md) §2.4 and §8.4: 21 tasks with known answers, asked identically of the curated MCP arm (`kates mcp`), the shell arm (`kates` CLI plus [`skills/kates-cli/SKILL.md`](../../skills/kates-cli/SKILL.md)) and, by hand, an expert with the CLI and no AI. The list was fixed on 2026-09-26 (`fixed_at` in [`tasks.json`](tasks.json)), before either agent arm was measured but after both were built, by the people who built them; plan §2.4 asks for it to be fixed before the arms are built, so have someone who built neither review the selection before the run.
+The fixed task list for the evaluation in [`plans/mcp-server.md`](../../plans/mcp-server.md) §2.4 and §8.4: 20 tasks with known answers, asked identically of the curated MCP arm (`kates mcp`), the shell arm (`kates` CLI plus [`skills/kates-cli/SKILL.md`](../../skills/kates-cli/SKILL.md)) and, by hand, an expert with the CLI and no AI. The list was fixed on 2026-09-26 (`fixed_at` in [`tasks.json`](tasks.json)), before either agent arm was measured but after both were built, by the people who built them; plan §2.4 asks for it to be fixed before the arms are built, so have someone who built neither review the selection before the run.
 
 | File | What it is |
 | --- | --- |
@@ -30,7 +30,6 @@ Each task names a persona from plan §2.2. The application developer has no task
 | `run-trend-mixed-specs` | platform | Refusing one trend across runs with three different specs (plan §2.4) | `topic_trend` | `trend-mixes-specs` |
 | `sre-kates-caused-lag` | sre | "Did Kates cause this": a Kates run wrote into the topic a stopped group reads; Kafka is healthy | `kates_caused_lag` | `audit-no-actor` |
 | `sre-lag-partition-leader` | sre | Lag per partition joined with each partition's leader | `lag_partitions` | none |
-| `sre-stale-running-disruption` | sre | "Is Kates doing anything now?" when a finished plan's record still says RUNNING | `stale_running` | `running-record-is-stale` |
 | `gameday-leader-kill-preview` | gameday | An ad-hoc step on a partition's leader, previewed by the dry run, handed to the human | `leader_kill_preview` | `leader-may-move` |
 | `gameday-rolling-restart-preview` | gameday | A playbook's plan and blast radius before anyone runs it (P-17) | `playbook_preview` | none |
 | `gameday-leader-cascade-fit` | gameday | Checking what a playbook targets instead of trusting its name | `playbook_fit` | none |
@@ -39,7 +38,7 @@ Each task names a persona from plan §2.2. The application developer has no task
 | `debrief-compare-game-days` | gameday | Recovery compared with the previous game day, within the timing noise of the chaos provider | `disruption_compare` | `chaos-times-approximate` |
 | `debrief-diagnose-without-report` | gameday | Plan §8.4 ground truth with the report hidden: which broker was lost, inferred from the cluster | `hidden_fault_target` | `inferred-not-recorded` |
 
-The mix follows the brief: four security, five run assessment, three lag triage, four game-day plans, three debriefs, two cluster facts. Every task runs in both agent arms, three trials each. Each task's `notes` field says what a good answer contains and why its caveats matter.
+The mix follows the brief: four security, five run assessment, two lag triage (the brief asks for about three; the third was retired, under "Left out"), four game-day plans, three debriefs, two cluster facts. Every task runs in both agent arms, three trials each. Each task's `notes` field says what a good answer contains and why its caveats matter.
 
 ## What the harness does to the lab
 
@@ -49,7 +48,6 @@ Setup runs as the human, with the named context; agents only read. On the kafka-
 - starts ten LOAD runs, one at a time, each 3,000 to 10,000 records at 1,000 records per second, and produces 25 records with `kates kafka produce`;
 - sets the LOAD test baseline and saves the security baseline, replacing both of the lab's;
 - creates and deletes one topic with replication factor 1, to make a drift;
-- starts one plan through the API that targets a namespace with no pods: it injects nothing and leaves a disruption record stuck at RUNNING;
 - runs the `broker-kill-recovery` template three times, one broker pod each time, one at a time (the backend's lease also refuses a second concurrent fault), with at least 90 s between them, and waits 330 s after the last.
 
 Setup takes about 30 minutes, most of it the three pod kills and the waits. A setup that fails leaves the lab partly prepared; start a new run directory, which gets a new `run_tag`.
@@ -108,7 +106,7 @@ Tools and commands the agent may not use in that task, because they would leak t
 | Kind | Fields | What it does |
 | --- | --- | --- |
 | `kates` | `args`, optional `capture`, `expect`, `repeat`, `allow_fail`, `timeout_s` | Runs `kates <args> --context <context>` with `KATES_URL`, `KATES_API_KEY`, `KATES_CONTEXT` and `KATES_OUTPUT` removed from the environment. A step that captures or expects must pass `-o json`. A step may not pass `--context`, `--url` or `--api-key` |
-| `api` | `method`, `path`, `why`, optional `body`, `capture`, `expect`, `timeout_s` | A GET, or a POST to `/api/disruptions/templates/…` or `/api/disruptions` only (`taskfile.SETUP_API_POSTS`), with the human key (`run.py` reads it from the human context; `setup.py` on its own from `KATES_EVAL_API_KEY`). `why` says what no kates command does |
+| `api` | `method`, `path`, `why`, optional `body`, `capture`, `expect`, `timeout_s` | A GET, or a POST to `/api/disruptions/templates/…` only (`taskfile.SETUP_API_POSTS`), with the human key (`run.py` reads it from the human context; `setup.py` on its own from `KATES_EVAL_API_KEY`). `why` says what no kates command does |
 | `wait` | `seconds`, optional `since` | Sleeps; with `since` (an epoch capture), only what is left of `seconds` after it |
 | `clock` | `capture` | Captures the time as `rfc3339`, `rfc3339_minute` (floored), `epoch` or `hhmm_utc` |
 | `use` | `task` | Runs that task's setup first, once per run, and makes its captures visible |
@@ -116,7 +114,7 @@ Tools and commands the agent may not use in that task, because they would leak t
 
 `capture` maps a name to a JSON path into the command's stdout (or the response): `$.key`, `[n]` (negative from the end), and `[key=value]`, which keeps the objects of a list whose key equals value (`$.nodes[role=controller][0].id`). `expect` maps a JSON path to the value it must have.
 
-The `api` kind exists because of the backend, not by choice. `DisruptionLauncher` saves a RUNNING placeholder for a plan and later saves the outcome as a second insert under the same id, which fails, so a plan or playbook started through the API never gets its final report, and `kates disruption run` polls for 20 minutes and times out. A template run (`POST /api/disruptions/templates/{id}`) runs synchronously and stores its report once, and no kates command runs a template. When the launcher is fixed, the debrief setups can use `kates disruption playbook run`, and `sre-stale-running-disruption` should be retired: its setup checks the premise and fails when it no longer holds.
+The `api` kind exists for the debrief tasks, whose ground truth is the report of a `broker-kill-recovery` template run: `POST /api/disruptions/templates/{id}` runs the template synchronously, stores its report once, when the run has ended, and returns it, and no kates command runs a template. Until #207 it was also the only disruption whose report the backend stored: `DisruptionLauncher` saved a plan's outcome as a second insert under the id of its RUNNING placeholder, which failed, so a plan or playbook started through the API stayed RUNNING and `kates disruption run` timed out after 20 minutes. #207 made that save replace the placeholder, and left template runs, which insert a new id once, as they were. The debrief setups could now use `kates disruption run` or `kates disruption playbook run`; they keep the template runs the list was fixed with.
 
 ### Captures and placeholders
 
@@ -149,7 +147,7 @@ A task's `status` is `done` or `failed` (with `error`). Setup skips a task alrea
 
 ## Fixtures
 
-`testdata/api/` holds one imaginary evaluation run (`run_tag` abc123) on the chart's lab: cluster `krafter`, controllers 0 to 2 in pool `controllers`, brokers 3 to 5 in pool `brokers`. Every file has the shape the backend serialises, read from its code: `TestRun`, `TestResult` and `TestSpec` (`domain/`); `ReportSummary`, `ComparisonReport` and `BaselineService.compareRegression` (`report/`, `service/`); the maps of `SecurityService` and `SecurityPentestService`; `TopicService.describeTopicDetail`, `ConsumerGroupService.describeConsumerGroup`, `ClusterHealthService.clusterHealthCheck` and `ClusterTopologyService.describeNodes`; `DisruptionReport` (durations in seconds, as Jackson writes `java.time.Duration`), the disruption list, compare and playbook plan, and `DisruptionSafetyGuard.DryRunResult`. `manifest.json` maps each request (`GET <path>?<sorted query>`, or `DRYRUN <plan name>`) to its file. `expected_oracle.json` holds the answers they give, checked by hand. `testdata/setup/` holds kates output and API responses for the setup tests.
+`testdata/api/` holds one imaginary evaluation run (`run_tag` abc123) on the chart's lab: cluster `krafter`, controllers 0 to 2 in pool `controllers`, brokers 3 to 5 in pool `brokers`. Every file has the shape the backend serialises, read from its code: `TestRun`, `TestResult` and `TestSpec` (`domain/`); `ReportSummary`, `ComparisonReport` and `BaselineService.compareRegression` (`report/`, `service/`); the maps of `SecurityService` and `SecurityPentestService`; `TopicService.describeTopicDetail`, `ConsumerGroupService.describeConsumerGroup`, `ClusterHealthService.clusterHealthCheck` and `ClusterTopologyService.describeNodes`; `DisruptionReport` (durations in seconds, as Jackson writes `java.time.Duration`), the disruption compare and playbook plan, and `DisruptionSafetyGuard.DryRunResult`. `manifest.json` maps each request (`GET <path>?<sorted query>`, or `DRYRUN <plan name>`) to its file. `expected_oracle.json` holds the answers they give, checked by hand. `testdata/setup/` holds kates output and API responses for the setup tests.
 
 ## Left out
 
@@ -157,4 +155,5 @@ A task's `status` is `done` or `failed` (with `error`). Setup skips a task alrea
 - **Scenario drafting** (`draft_scenario`). Not in this mix; its SLA thresholds can be graded only after a run, which agents may not start.
 - **A context switch mid-session, and a tampered plan at approval.** Phase 5 material (plan §8.4): they test the server's pinning and an approval flow that does not exist yet.
 - **Fields `applyTypeDefaults` dropped.** Fixed in the backend (#204), which now keeps the request; the caveat applies only to older runs.
+- **A disruption record left at RUNNING** (`sre-stale-running-disruption`, retired). It asked whether Kates was running anything while the record of a plan that had ended still said RUNNING (mcp caveat activity-disruption-rows, as it read then). #207 made the backend store a plan's outcome, and mark a report that a stopped backend left RUNNING as INTERRUPTED when it starts again, so on a backend with #207 the task's setup cannot produce its premise: its last step, which checks it, fails and stops `run.py setup` partway through the list. It was retired on 2026-09-26, the day the list was fixed and before any run used it, so `fixed_at` did not change. A run directory that froze the 21-task list is refused (exit 2); start a new `--run-id`.
 - **CI pass or fail.** Not an MCP case (plan §2.2).

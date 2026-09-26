@@ -10,7 +10,7 @@ A task's setup is a list of steps (tasks.json, documented in TASKS.md):
 
   kates         run the kates binary with --context <human context>
   api           a GET, or a POST to one of taskfile.SETUP_API_POSTS, for
-                what no kates command does and returns from (template runs)
+                what no kates command does (template runs)
   wait          sleep, optionally measured from a captured epoch
   clock         capture the current time
   use           run another task's setup first (once) and see its captures
