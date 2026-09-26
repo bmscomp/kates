@@ -14,7 +14,9 @@ is built to be predictable and resumable (plans/mcp-server.md §2.4, §8.4):
                     trials ran is void, and the report leaves it out
   preflight         one short real session per arm, checking that Claude Code
                     started it the way the arm needs (tools, MCP server,
-                    permission mode) before paying for the full run
+                    permission mode, the answer turn) before paying for the
+                    full run; it needs nothing from setup, and pins the
+                    clusterId itself when setup has not run yet
   trials            every task x arm x trial as `claude -p`, in a random
                     order per round (seeded), skipping trials whose
                     metrics.json exists (--redo-invalid moves invalid ones
@@ -166,7 +168,7 @@ class Run:
         self.state: dict[str, Any] = read_json(self.dir / "state.json", None) or setuplib.new_state(
             args.human_context, None, args.kates_bin)
         if self.state.get("context") != args.human_context:
-            raise Fail(2, f"{self.dir} was set up with the human context {self.state.get('context')!r}, "
+            raise Fail(2, f"{self.dir} was started with the human context {self.state.get('context')!r}, "
                           f"not {args.human_context!r}")
         unknown = [t for t in args.only_task or [] if t not in self.by_id]
         if unknown:
@@ -244,6 +246,46 @@ def resolve_bin(name: str, what: str, dry: bool) -> str:
 # Setup
 
 
+def pin_cluster(run: Run, kates_bin: str) -> kates_api.KatesContext:
+    """Read the human and agent contexts and pin the Kafka clusterId the
+    human context reaches into state.json, once per run. Setup and the
+    oracle then check that the human context still reaches it, and preflight
+    and every trial that the agent context does. Setup pins first; preflight
+    and trials pin when setup has not run yet, so the arms can be checked
+    before setup spends half an hour on the lab. Returns the human context."""
+    args = run.args
+    try:
+        human = kates_api.read_context(kates_bin, args.human_context)
+        agent = kates_api.read_context(kates_bin, args.agent_context)
+    except kates_api.ContextError as e:
+        raise Fail(3, str(e)) from e
+    try:
+        live = api_for(human).cluster_id()
+    except oraclelib.OracleError as e:
+        raise Fail(3, f"cannot reach the Kates API as {human.masked()}: {e}") from e
+    if args.allow_cluster and args.allow_cluster != live:
+        raise Fail(3, f"--allow-cluster {args.allow_cluster} but {human.url} reaches Kafka cluster {live}")
+    pinned = run.state.get("cluster_id")
+    if pinned and pinned != live:
+        raise Fail(3, f"this run pinned Kafka cluster {pinned}, but {human.url} now reaches {live}; "
+                      "its setup and expected answers belong to the first; start a new --run-id")
+    run.state["cluster_id"] = live
+    run.state["api_url"] = human.url
+    run.state["kates"] = kates_bin
+    run.state["human_context"] = {"name": human.name, "url": human.url}
+    run.state["agent_context"] = {"name": agent.name, "url": agent.url}
+    run.manifest["agent_key_is_human_key"] = bool(agent.api_key) and agent.api_key == human.api_key
+    if agent.url.rstrip("/") != human.url.rstrip("/"):
+        warn(f"the agent context points at {agent.url}, the human context at {human.url}")
+    if run.manifest["agent_key_is_human_key"]:
+        warn("the agent context holds the human's key: until scoped keys exist (plan Phase 2) nothing "
+             "but the arm setup keeps the agents from anything the human can do. Run this on a lab.")
+    run.save_state()
+    run.save_manifest()
+    say(f"cluster {live} via {human.masked()}; agent context {agent.masked()}; run_tag {run.state['run_tag']}")
+    return human
+
+
 def phase_setup(run: Run) -> int:
     """Pin the cluster, then run each selected task's setup with setup.py as
     the human (TASKS.md, "What the harness does to the lab")."""
@@ -256,35 +298,7 @@ def phase_setup(run: Run) -> int:
             f"`kates ctx export --name <ctx> --reveal`, then GET /api/cluster/info as the human")
         say(f"# dry run: run_tag {run.state['run_tag']}; nothing is executed")
     else:
-        try:
-            human = kates_api.read_context(kates_bin, args.human_context)
-            agent = kates_api.read_context(kates_bin, args.agent_context)
-        except kates_api.ContextError as e:
-            raise Fail(3, str(e)) from e
-        try:
-            live = api_for(human).cluster_id()
-        except oraclelib.OracleError as e:
-            raise Fail(3, f"cannot reach the Kates API as {human.masked()}: {e}") from e
-        if args.allow_cluster and args.allow_cluster != live:
-            raise Fail(3, f"--allow-cluster {args.allow_cluster} but {human.url} reaches Kafka cluster {live}")
-        pinned = run.state.get("cluster_id")
-        if pinned and pinned != live:
-            raise Fail(3, f"this run pinned Kafka cluster {pinned}, but {human.url} now reaches {live}; "
-                          "its setup and expected answers belong to the first; start a new --run-id")
-        run.state["cluster_id"] = live
-        run.state["api_url"] = human.url
-        run.state["kates"] = kates_bin
-        run.state["human_context"] = {"name": human.name, "url": human.url}
-        run.state["agent_context"] = {"name": agent.name, "url": agent.url}
-        run.manifest["agent_key_is_human_key"] = bool(agent.api_key) and agent.api_key == human.api_key
-        if agent.url.rstrip("/") != human.url.rstrip("/"):
-            warn(f"the agent context points at {agent.url}, the human context at {human.url}")
-        if run.manifest["agent_key_is_human_key"]:
-            warn("the agent context holds the human's key: until scoped keys exist (plan Phase 2) nothing "
-                 "but the arm setup keeps the agents from anything the human can do. Run this on a lab.")
-        run.save_state()
-        run.save_manifest()
-        say(f"cluster {live} via {human.masked()}; agent context {agent.masked()}; run_tag {run.state['run_tag']}")
+        human = pin_cluster(run, kates_bin)
         api = api_for(human, setuplib.HarnessAPI)
     harness = setuplib.Harness(kates=kates_bin, context=args.human_context,
                                run_dir=None if run.dry else str(run.dir), api=api, dry_run=run.dry, out=say)
@@ -343,6 +357,16 @@ def phase_oracle(run: Run, recheck: bool = False) -> int:
     except kates_api.ContextError as e:
         raise Fail(3, str(e)) from e
     api = api_for(human)
+    # The expected answers must come from the cluster the run pinned.
+    pinned = run.state.get("cluster_id")
+    if pinned:
+        try:
+            live = api.cluster_id()
+        except oraclelib.OracleError as e:
+            raise Fail(3, f"cannot reach the Kates API as {human.masked()}: {e}") from e
+        if live != pinned:
+            raise Fail(3, f"this run pinned Kafka cluster {pinned}, but {human.url} now reaches {live}; "
+                          "its expected answers belong to the first; start a new --run-id")
     out = read_json(run.dir / target, {"tasks": {}}) if not recheck else {"tasks": {}}
     failed = []
     for task in run.selected():
@@ -720,16 +744,25 @@ def require_auth(env: dict[str, str]) -> None:
 def prepare_trials(run: Run) -> tuple[armlib.ArmSettings, str, kates_api.KatesContext | None, int | str]:
     args = run.args
     run.freeze()
-    cluster_id = run.state.get("cluster_id") or args.allow_cluster
-    if not cluster_id:
-        if not run.dry:
-            raise Fail(2, f"no clusterId pinned; run: run.py setup --run-id {args.run_id}")
-        cluster_id = "<clusterId>"
-    settings, skill_sha = arm_settings(run, cluster_id, run.dry)
+    # The local checks come first (skill, jq, claude, kates, credentials), so
+    # a run that cannot start has read no context and written no state.
+    settings, skill_sha = arm_settings(run, "<clusterId>", run.dry)
+    if not run.dry:
+        require_auth(dict(os.environ))
+    pinned = run.state.get("cluster_id")
+    if run.dry:
+        if not pinned:
+            say(f"# pin: read contexts {args.human_context!r} (human) and {args.agent_context!r} (agent) with "
+                f"`kates ctx export --name <ctx> --reveal`, GET /api/cluster/info as the human, write state.json")
+    elif not pinned:
+        pin_cluster(run, settings.kates_bin)
+    elif args.allow_cluster and args.allow_cluster != pinned:
+        raise Fail(3, f"--allow-cluster {args.allow_cluster} but this run pinned Kafka cluster {pinned}")
+    cluster_id = run.state.get("cluster_id") or args.allow_cluster or "<clusterId>"
+    settings = dataclasses.replace(settings, cluster_id=cluster_id)
     seed = args.seed if args.seed is not None else run.manifest.get("seed", random.randrange(2 ** 31))
     agent = None
     if not run.dry:
-        require_auth(dict(os.environ))
         try:
             agent = kates_api.read_context(settings.kates_bin, args.agent_context)
         except kates_api.ContextError as e:
@@ -756,11 +789,18 @@ def prepare_trials(run: Run) -> tuple[armlib.ArmSettings, str, kates_api.KatesCo
 
 def phase_trials(run: Run) -> int:
     args = run.args
-    settings, skill_sha, agent, seed = prepare_trials(run)
     # A task whose oracle failed is void: its trials would cost money and
     # count for nothing.
     oracle = read_json(run.dir / "oracle.json", {"tasks": {}}).get("tasks", {})
     void = sorted(tid for tid, e in oracle.items() if isinstance(e, dict) and "expected" not in e)
+    # Refuse before recording any setting: a trial of a task that is not set
+    # up has no prompt to ask.
+    if not run.dry:
+        not_ready = [t["id"] for t in run.selected() if t["id"] not in void
+                     and (run.state.get("tasks", {}).get(t["id"]) or {}).get("status") != "done"]
+        if not_ready:
+            raise Fail(2, f"not set up yet: {', '.join(not_ready)}; run: run.py setup --run-id {args.run_id}")
+    settings, skill_sha, agent, seed = prepare_trials(run)
     if void:
         warn(f"no trials for void tasks (their oracle failed; see oracle.json): {', '.join(void)}")
     only = [t["id"] for t in run.selected() if t["id"] not in void]
@@ -927,7 +967,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--kates-bin", default="kates", help="the kates CLI under test")
     common.add_argument("--human-context", default="human", help="kates context for setup and the oracle")
     common.add_argument("--agent-context", default="agent", help="kates context the agents get")
-    common.add_argument("--allow-cluster", help="Kafka clusterId to pin (default: read it through the human context)")
+    common.add_argument("--allow-cluster", help="refuse to run unless the human context reaches this Kafka clusterId "
+                                                "(and, once pinned, unless it is the run's)")
     common.add_argument("--dry-run", action="store_true", help="print what would run; touch nothing")
 
     agent = argparse.ArgumentParser(add_help=False)
