@@ -38,30 +38,33 @@ book:
   # here and only here. Never renumber files; new chapters get slug names.
   chapters:
     - index.qmd
-    - part: "Part I — Foundations"
+    # Each Part is a page, part-<slug>.md: its H1 is the Part's label in the
+    # sidebar and the PDF, and its bullets list the chapters below, in this
+    # order, by their H1 titles (scripts/prepare-book-render.sh checks both).
+    - part: part-foundations.md
       chapters:
         - 01-introduction.md
         - 02-architecture.md
         - 03-cluster.md
 
-    - part: "Part II — Performance Testing"
+    - part: part-performance-testing.md
       chapters:
         - 04-performance-theory.md
         - 05-test-types.md
         - 13-scenario-files.md
         - 10b-lab.md
 
-    - part: "Part III — Chaos & Integrity"
+    - part: part-chaos-integrity.md
       chapters:
         - 06-chaos-theory.md
         - 07-chaos-practice.md
         - 08-data-integrity.md
 
-    - part: "Part IV — Observability"
+    - part: part-observability.md
       chapters:
         - 09-observability.md
 
-    - part: "Part V — Deployment & Operations"
+    - part: part-deployment-operations.md
       chapters:
         - deploying-strimzi-operator.md
         - 20-installation-guide.md
@@ -76,12 +79,16 @@ book:
         - 23-legacy-source-migration.md
         - 14-recipes.md
 
-    - part: "Part VI — Reference"
+    - part: part-reference.md
       chapters:
         - 10-cli-reference.md
         - 11-api-reference.md
         - 16-grpc-api.md
 
+  # No Part page here: Quarto accepts a `part:` entry in this list, but nests
+  # it under its own unlinked "Appendices" label, so the sidebar shows a second,
+  # collapsed "Appendices" holding the appendices. Their introduction is the
+  # last section of part-reference.md instead.
   appendices:
     - appendix-a-glossary.md
     - appendix-b-troubleshooting.md
