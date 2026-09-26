@@ -10,7 +10,7 @@ You'll have an order to look in after any run: cluster health, then performance,
 
 ## The Chapters
 
-This Part has one chapter, which opens with the diagnostic walkthrough and then covers each tool in turn:
+This Part has one chapter, which gives the diagnostic walkthrough right after its architecture overview and then covers each tool in turn:
 
 - [Observability & Monitoring](09-observability.md): why did a run produce the numbers it did, and where do you look to find out? About 40 minutes.
 

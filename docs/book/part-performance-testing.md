@@ -1,6 +1,6 @@
 # Part II — Performance Testing
 
-How much can `krafter` take, and how fast does it answer? This Part teaches you to measure both in a way you can defend: which numbers to trust, which test answers which question, and how to keep a test so that it runs the same way every time.
+How much can the `krafter` Kafka cluster take, and how fast does it answer? This Part teaches you to measure both in a way you can defend: which numbers to trust, which test answers which question, and how to keep a test so that it runs the same way every time.
 
 Read it before you run a performance test or judge someone else's results. It assumes the lab and the configured CLI from [Part I — Foundations](part-foundations.md).
 

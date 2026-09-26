@@ -1,6 +1,6 @@
 # Part III — Chaos & Integrity
 
-What happens to `krafter` when a broker dies, the network splits or a whole zone goes dark, and did any acknowledged record go missing? This Part answers both questions. It turns "the cluster is resilient" into a hypothesis you can test, runs the experiment, and then checks every record.
+What happens to the `krafter` Kafka cluster when a broker dies, the network splits or a whole zone goes dark, and did any acknowledged record go missing? This Part answers both questions. It turns "the cluster is resilient" into a hypothesis you can test, runs the experiment, and then checks every record.
 
 Every experiment here breaks something on purpose, so two rules come first: write the hypothesis before you inject anything, and keep the blast radius small with the guardrails that Chaos Engineering in Practice describes. Have a LOAD baseline from [Part II — Performance Testing](part-performance-testing.md) at hand, so that you can tell the fault's effect from the cluster's normal behavior. Some disruption types run only on LitmusChaos, which `make all` deploys with the rest of the stack; Chaos Engineering in Practice says which.
 
@@ -18,7 +18,7 @@ The chapters go from the idea, to the tooling, to the proof that nothing was los
 
 ## Choosing How to Inject a Fault
 
-The chapters use three commands to inject faults, and the one you reach for depends on what you want to learn:
+The chapters inject faults with three `kates` commands, and the one you reach for depends on what you want to learn:
 
 | Command | What it runs | Reach for it when |
 |----------------------------------------|--------------------------------|----------------------------|

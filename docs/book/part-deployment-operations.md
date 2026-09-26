@@ -18,7 +18,7 @@ Read these when you stand up a cluster, in the order you install things: the ope
 
 - [Deploying the Strimzi Operator](deploying-strimzi-operator.md): how do you install, migrate and upgrade the operator that every Kafka cluster here depends on? About 30 minutes.
 - [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md): how do you deploy and verify a Kafka cluster with the chart, step by step? About 70 minutes.
-- [Kafka Deployment Engineering](15-kafka-deployment.md): why is `krafter` built the way it is, from node pools to listeners and certificates? About 25 minutes.
+- [Kafka Deployment Engineering](15-kafka-deployment.md): why is the `krafter` Kafka cluster built the way it is, from node pools to listeners and certificates? About 25 minutes.
 - [Deployment Guide](12-deployment.md): how do you size and deploy the Kates stack, on Kind or on EKS, GKE or AKS? About 30 minutes.
 
 ### Share and Change It
