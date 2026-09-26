@@ -4,9 +4,7 @@ title-block-banner: false
 
 # Preface {.unnumbered}
 
-::: {.callout-note appearance="simple"}
-**You are reading the Kates Definitive Guide** — from performance theory and chaos engineering to security, deployment, and operations, with three reference chapters and four appendices.
-:::
+Kates answers three questions about an Apache Kafka cluster: how much load it takes before latency degrades, what happens when parts of it fail, and whether it loses data along the way. This book teaches you to ask those questions and to read the answers.
 
 ## What This Book Covers
 
@@ -31,24 +29,51 @@ This guide takes you from first principles to production operations:
 | **Security Engineer** | Security & Compliance → Troubleshooting Index | Security, compliance, and troubleshooting |
 | **Developer** using the API | REST API Reference → gRPC API Reference → Scenario Files & SLA Gates | REST API, gRPC API, and scenario files |
 
+## How to Read This Book
+
+The first four Parts build on one another, so read them in order. [Part I — Foundations](part-foundations.md) is the shared base: [Architecture & Design](02-architecture.md) builds the model that later chapters assume, and [The Cluster Under Test](03-cluster.md) describes the cluster behind every number you measure. [Part II — Performance Testing](part-performance-testing.md), [Part III — Chaos & Integrity](part-chaos-integrity.md) and [Part IV — Observability](part-observability.md) build on that base and on each other. Part III reuses the test types of Part II to measure what a fault costs, and Part IV explains why a run produced the numbers it did.
+
+[Part V — Deployment & Operations](part-deployment-operations.md) is for the day you deploy, secure, upgrade or extend a cluster, and [Part VI — Reference](part-reference.md) and the appendices are for looking things up. Each Part opens with a page that says what the Part is for, lists its chapters with the question each one answers, and links the tutorials that go with them.
+
+## Before You Start
+
+The book's exercises run against a lab on your own machine, so set it up before you reach the Quick Start in [Introduction](01-introduction.md#quick-start).
+
+You don't need to know Kafka's internals first. [The Cluster Under Test](03-cluster.md) explains the replication settings, `acks`, the in-sync replicas and the controller quorum behind every test, in its [Replication Configuration](03-cluster.md#replication-configuration) section, and the [Glossary](appendix-a-glossary.md) defines the terms the book uses. You do need to be at home at a shell prompt and with `kubectl`.
+
+The Deployment Guide's [Prerequisites](12-deployment.md#prerequisites) table lists the tools the lab needs, with their versions. For the machine, [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) asks for a Kubernetes cluster with at least 16 GB of memory and 6 CPU cores, and recommends 24 GB and 12 cores. On Kind, the memory and cores come from Docker.
+
+From a checkout of the repository, `make all` builds the lab. When `kubectl` can't reach a cluster, it creates the `panda` Kind cluster; when it can, it deploys into the cluster your current context points at, so check the context first. It then asks you to choose a topology: 1 puts the whole stack in the `kates-stack` namespace, and 2 gives Kafka, Kates and the chaos tooling namespaces of their own. Choose 2, which the Quick Start assumes.
+
+Two names recur throughout the book. `panda` is the Kind cluster: its three nodes are named after the zones they stand for, `alpha`, `sigma` and `gamma`, and Kafka spreads its brokers across them. `krafter` is the Kafka cluster under test, which [The Cluster Under Test](03-cluster.md) describes.
+
+The [Kates Tutorials](../tutorials/README.md) are for practice, and the book is for explanation. Each tutorial walks through one workflow on the lab, step by step, while the chapters explain why it works; each Part page links the tutorials that go with its chapters.
+
 ## Versions This Book Targets
 
 The book tracks the versions pinned in the repository — Kafka, Strimzi, and the Kates charts themselves. The consolidated matrix lives in the [Version & Compatibility Matrix](appendix-d-versions.md) appendix, generated from `versions.env`; when a claim in a chapter and the matrix disagree, the matrix wins.
 
 ## Conventions
 
-Throughout this book:
+The same conventions hold in every chapter. The table says what each one means:
 
-- Shell commands are shown without a prompt character — copy them as-is
-- Commands using `kubectl` assume a kubeconfig pointing at your cluster
-- `kates` commands assume the CLI is installed and configured with a context that carries the API key, set up by the Quick Start in [Introduction](01-introduction.md#quick-start)
-- `curl` and `grpcurl` examples assume the API is forwarded to `localhost:30083` and read the key from `$KATES_API_KEY`, exported as shown in [REST API Reference](11-api-reference.md#authentication)
-- Code blocks with a filename header are files you create or edit
-- Mermaid diagrams illustrate architecture and workflows inline
-
-::: {.callout-tip}
-Each chapter is self-contained. You can read them in order or jump to the topic you need.
-:::
+| Convention | What it means |
+|----------------------------------|--------------------------------------------------|
+| A shell command | It carries no prompt character, so copy it as it is. |
+| A `kubectl` command | It assumes a kubeconfig pointing at your cluster. |
+| A `kates` command | It assumes the CLI is installed and configured with a context that carries the API key, as the Quick Start in [Introduction](01-introduction.md#quick-start) sets up. |
+| A `curl` or `grpcurl` example | It assumes the API is forwarded to `localhost:30083`, and reads the key from `$KATES_API_KEY`, exported as shown in [REST API Reference](11-api-reference.md#authentication). |
+| A code block whose first line is a comment naming a file, such as `# kafka-eks.yaml` | A file you create or edit. |
+| A `text` block after a line that reads **Output:** | What the command before it printed. IDs, times and figures differ from run to run. |
+| `<id>` in a command | A placeholder for an ID that an earlier command printed, such as a test run's. |
+| LOAD, ROUND_TRIP and the other test types in capitals | Kates test types, spelled as the API spells them. Lowercase "round-trip" is the general idea of round-trip latency. |
+| A Note callout | Context worth knowing. |
+| A Tip callout | A shortcut or a good practice. |
+| An Important callout | A constraint you must not miss. |
+| A Warning callout | A risk of breaking something. |
+| A Caution callout | A risk of losing data or causing downtime. |
+| A Tip callout that opens with **Try it** | An exercise to run on your lab. |
+| "About N minutes" on a Part page | The chapter's prose read at 200 words a minute and rounded to 5 minutes, code blocks left out, so time at the keyboard comes on top. |
 
 ## Source Code
 
@@ -56,3 +81,19 @@ The complete source code for Kates is available on GitHub:
 
 - **Repository**: [github.com/bmscomp/kates](https://github.com/bmscomp/kates)
 - **License**: Apache 2.0
+
+```{=html}
+<style>
+/* Quarto floats the cover right at 35% of the text width. Below Bootstrap's md
+   breakpoint that leaves the Preface a column of two-word lines beside it, so
+   there the cover sits above the text instead. */
+@media (max-width: 767.98px) {
+  main .quarto-cover-image {
+    float: none;
+    display: block;
+    max-width: min(60%, 16rem);
+    margin: 0 auto 1.5rem;
+  }
+}
+</style>
+```
