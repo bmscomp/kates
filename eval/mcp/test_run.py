@@ -314,6 +314,20 @@ class DryRunTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("persona", err)
 
+    def test_an_unused_run_with_a_retired_task_takes_the_current_list(self):
+        # The two lab directories: a 21-task list frozen by a preflight that
+        # failed, then a task retired. Nothing ran, so the run takes the list.
+        doc = json.loads(TASKS.read_text())
+        doc["tasks"][0]["oracle"]["fn"] = "stale_running"
+        rd = self.runs / "old"
+        rd.mkdir(parents=True)
+        (rd / "tasks.json").write_text(json.dumps(doc))
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS):
+            code, out, err = call(["preflight", "--run-id", "old", "--runs-dir", str(self.runs), "--oracle", str(ORACLE),
+                                   "--model", "claude-opus-5-5", "--dry-run"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("nothing in the run has used it", out)
+
     def test_a_frozen_list_the_harness_no_longer_accepts(self):
         # A run that froze a task since retired, whose oracle is gone.
         doc = json.loads(TASKS.read_text())
@@ -321,6 +335,10 @@ class DryRunTest(unittest.TestCase):
         rd = self.runs / "old"
         rd.mkdir(parents=True)
         (rd / "tasks.json").write_text(json.dumps(doc))
+        # This run set up a task on the old list, so it keeps it, and the
+        # harness no longer accepts it.
+        (rd / "state.json").write_text(json.dumps({"context": "human", "run_tag": "abc123",
+                                                   "tasks": {"sec-posture": {"status": "done"}}}))
         code, _, err = call(["preflight", "--run-id", "old", "--runs-dir", str(self.runs), "--oracle", str(ORACLE),
                              "--model", "claude-opus-5-5", "--dry-run"])
         self.assertEqual(code, 2)
@@ -556,6 +574,74 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(code, 3, err)
         self.assertFalse((self.runs / "e2e" / "state.json").exists())
         self.assertEqual(self.api.requests, [])
+
+    def test_a_run_that_could_not_start_freezes_nothing(self):
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
+            self.assertEqual(call(["preflight", *self.common, *self.agent])[0], 3)
+        self.assertFalse((self.runs / "e2e" / "tasks.json").exists())
+
+    def changed_list(self) -> Path:
+        """A copy of the fixture task list with one note changed: another
+        list, as tasks.json is after an edit."""
+        doc = json.loads(TASKS.read_text())
+        doc["tasks"][0]["notes"] += " Changed after the run froze its list."
+        path = Path(self.tmp.name) / "tasks-changed.json"
+        path.write_text(json.dumps(doc))
+        return path
+
+    def test_an_unused_run_takes_a_changed_task_list(self):
+        without_tasks = [a for a in self.common if a not in ("--tasks", str(TASKS))]
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS):
+            self.assertEqual(call(["preflight", *without_tasks, *self.agent])[0], 0)
+        frozen = self.runs / "e2e" / "tasks.json"
+        self.assertEqual(frozen.read_text(), TASKS.read_text())
+        # Only frozen and preflighted: the run takes the list as it is now.
+        changed = self.changed_list()
+        with mock.patch.object(run, "DEFAULT_TASKS", changed):
+            code, out, err = call(["preflight", *without_tasks, *self.agent])
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("nothing in the run has used it", out)
+        self.assertEqual(frozen.read_text(), changed.read_text())
+        manifest = json.loads((self.runs / "e2e" / "manifest.json").read_text())
+        self.assertEqual(manifest["tasks"]["sha256"], tasks.file_sha256(changed))
+
+    def test_a_run_that_used_its_task_list_keeps_it(self):
+        without_tasks = [a for a in self.common if a not in ("--tasks", str(TASKS))]
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS):
+            self.assertEqual(call(["setup", *without_tasks])[0], 0)
+        changed = self.changed_list()
+        with mock.patch.object(run, "DEFAULT_TASKS", changed):
+            code, out, err = call(["preflight", *without_tasks, *self.agent])
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("keeps the task list it froze", err)
+        self.assertEqual((self.runs / "e2e" / "tasks.json").read_text(), TASKS.read_text())
+
+    def test_a_setup_interrupted_in_its_first_task_counts_as_started(self):
+        without_tasks = [a for a in self.common if a not in ("--tasks", str(TASKS))]
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS), \
+                mock.patch.object(run.setuplib, "ensure_task", side_effect=KeyboardInterrupt):
+            self.assertEqual(call(["setup", *without_tasks])[0], 130)
+        self.assertTrue(run.run_started(self.runs / "e2e"))
+        with mock.patch.object(run, "DEFAULT_TASKS", self.changed_list()):
+            code, _, err = call(["preflight", *without_tasks, *self.agent])
+        self.assertEqual(code, 0, err)
+        self.assertIn("keeps the task list it froze", err)
+
+    def test_tasks_naming_the_default_list_is_the_same_as_no_flag(self):
+        changed = self.changed_list()
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS):
+            self.assertEqual(call(["preflight", *self.common, *self.agent])[0], 0)
+        common = [str(changed) if a == str(TASKS) else a for a in self.common]
+        with mock.patch.object(run, "DEFAULT_TASKS", changed):
+            code, out, err = call(["preflight", *common, *self.agent])
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("nothing in the run has used it", out)
+
+    def test_expert_template_freezes_nothing_when_it_cannot_run(self):
+        code, _, err = call(["expert-template", *self.common])
+        self.assertEqual(code, 2)
+        self.assertIn("not set up yet", err)
+        self.assertFalse((self.runs / "e2e").exists())
 
     def test_trials_before_setup_refuse_before_recording_settings(self):
         code, _, err = call(["trials", *self.common, *self.agent, "--max-trials", "1"])

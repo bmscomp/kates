@@ -137,6 +137,15 @@ def warn(msg: str) -> None:
 # The run directory
 
 
+def run_started(run_dir: Path) -> bool:
+    """Whether a run has used its task list: a task set up, an expected
+    answer computed, or a trial scheduled. A preflight or a pin alone uses
+    no task."""
+    state = read_json(run_dir / "state.json", {}) or {}
+    return bool(state.get("tasks")) or bool(state.get("setup_started_at")) or (run_dir / "oracle.json").exists() or \
+        (run_dir / "schedule.json").exists() or any(run_dir.glob("*/*/trial-*/metrics.json"))
+
+
 class Run:
     def __init__(self, args: argparse.Namespace):
         self.args = args
@@ -144,9 +153,24 @@ class Run:
         frozen = self.dir / "tasks.json"
         source = args.tasks or DEFAULT_TASKS
         self.oracle = load_oracle(args.oracle)
+        self.refreeze = False
+        # --tasks naming the default list is the same as leaving it out.
+        explicit = bool(args.tasks) and Path(args.tasks).resolve() != Path(DEFAULT_TASKS).resolve()
         try:
-            if frozen.exists():
-                if args.tasks and tasklib.file_sha256(args.tasks) != tasklib.file_sha256(frozen):
+            if frozen.exists() and not explicit and Path(source).exists() and \
+                    tasklib.file_sha256(source) != tasklib.file_sha256(frozen):
+                # tasks.json changed since this run froze it. A run that has
+                # used its list keeps it (its answers belong to it); one that
+                # has only frozen it takes the current list.
+                if run_started(self.dir):
+                    warn(f"{self.dir} keeps the task list it froze, not {source} as it is now; "
+                         "start a new --run-id to use the current list")
+                else:
+                    say(f"the task list changed since {self.dir} froze it, and nothing in the run has used it: "
+                        f"using {source} as it is now")
+                    self.refreeze = True
+            if frozen.exists() and not self.refreeze:
+                if explicit and tasklib.file_sha256(args.tasks) != tasklib.file_sha256(frozen):
                     raise Fail(2, f"{self.dir} froze a different task list than {args.tasks}; "
                                   "start a new --run-id to use the new list")
                 self.doc = tasklib.load_tasks(frozen, self.oracle.ORACLES)
@@ -184,9 +208,10 @@ class Run:
             return
         self.dir.mkdir(parents=True, exist_ok=True)
         frozen = self.dir / "tasks.json"
-        if not frozen.exists():
+        if not frozen.exists() or self.refreeze:
             shutil.copyfile(self.tasks_path, frozen)
             self.tasks_path = frozen
+            self.refreeze = False
         self.manifest.setdefault("run_id", self.args.run_id)
         self.manifest.setdefault("created_at", now())
         self.manifest["tasks"] = {
@@ -291,7 +316,6 @@ def phase_setup(run: Run) -> int:
     the human (TASKS.md, "What the harness does to the lab")."""
     args = run.args
     kates_bin = resolve_bin(args.kates_bin, "the kates CLI", run.dry)
-    run.freeze()
     api = None
     if run.dry:
         say(f"# setup: read contexts {args.human_context!r} (human) and {args.agent_context!r} (agent) with "
@@ -300,6 +324,13 @@ def phase_setup(run: Run) -> int:
     else:
         human = pin_cluster(run, kates_bin)
         api = api_for(human, setuplib.HarnessAPI)
+        # Frozen once the cluster is pinned: a setup that could not start
+        # leaves the run free to take a changed task list. From here on it
+        # changes the lab, so the run counts as started even if the first
+        # step is interrupted.
+        run.freeze()
+        run.state.setdefault("setup_started_at", now())
+        run.save_state()
     harness = setuplib.Harness(kates=kates_bin, context=args.human_context,
                                run_dir=None if run.dry else str(run.dir), api=api, dry_run=run.dry, out=say)
     for task in run.selected():
@@ -743,7 +774,6 @@ def require_auth(env: dict[str, str]) -> None:
 
 def prepare_trials(run: Run) -> tuple[armlib.ArmSettings, str, kates_api.KatesContext | None, int | str]:
     args = run.args
-    run.freeze()
     # The local checks come first (skill, jq, claude, kates, credentials), so
     # a run that cannot start has read no context and written no state.
     settings, skill_sha = arm_settings(run, "<clusterId>", run.dry)
@@ -758,6 +788,9 @@ def prepare_trials(run: Run) -> tuple[armlib.ArmSettings, str, kates_api.KatesCo
         pin_cluster(run, settings.kates_bin)
     elif args.allow_cluster and args.allow_cluster != pinned:
         raise Fail(3, f"--allow-cluster {args.allow_cluster} but this run pinned Kafka cluster {pinned}")
+    # Frozen only once the checks pass, so a run that could not start is
+    # free to take a changed task list.
+    run.freeze()
     cluster_id = run.state.get("cluster_id") or args.allow_cluster or "<clusterId>"
     settings = dataclasses.replace(settings, cluster_id=cluster_id)
     seed = args.seed if args.seed is not None else run.manifest.get("seed", random.randrange(2 ** 31))
@@ -918,7 +951,6 @@ def preflight_checks(arm: str, record: dict[str, Any], t: metrics.Transcript, cl
 
 def phase_expert_template(run: Run) -> int:
     from grade import EXPERT_COLUMNS
-    run.freeze()
     lines = []
     rows = []
     for task in run.selected():
@@ -932,6 +964,7 @@ def phase_expert_template(run: Run) -> int:
     if run.dry:
         say("\n".join(lines))
         return 0
+    run.freeze()
     template = run.dir / "expert-template.csv"
     with open(template, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=EXPERT_COLUMNS)
@@ -959,7 +992,7 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--run-id", help="name of the run directory under --runs-dir")
     common.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS)
-    common.add_argument("--tasks", type=Path, help=f"task list (default {DEFAULT_TASKS.relative_to(REPO)}; "
+    common.add_argument("--tasks", type=Path, help="task list (default eval/mcp/tasks.json; "
                                                    "a run keeps the copy it froze)")
     common.add_argument("--oracle", type=Path, default=DEFAULT_ORACLE, help="module with the oracle functions")
     common.add_argument("--only-task", action="append", metavar="ID", help="limit to a task (repeatable)")
