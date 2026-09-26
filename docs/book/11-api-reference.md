@@ -1,3 +1,7 @@
+---
+toc-depth: 4
+---
+
 # REST API Reference
 
 ## Introduction
@@ -69,6 +73,8 @@ This chapter documents the most commonly used endpoints in the core resource fam
 
 ### Health & System
 
+Call this endpoint first to learn whether the backend is up and can reach Kafka; `kates health` shows the same answer.
+
 #### GET /api/health
 
 System health check including Kafka connectivity and engine status. This endpoint is public — no API key required.
@@ -92,6 +98,8 @@ The response also contains a `tests` object with the resolved default configurat
 ---
 
 ### Test Management
+
+These endpoints start performance test runs, then find, follow and delete them. A run executes in the background, so you create it and then poll it; `kates test` wraps these calls, and [Test Types Deep Dive](05-test-types.md) explains what each type measures.
 
 #### POST /api/tests
 
@@ -269,6 +277,8 @@ Stop and delete a test run. If the test is currently running, it is cancelled be
 
 ### Reports
 
+These endpoints return a run's results as one JSON report, or export them as CSV, JUnit XML or latency heatmap data; `kates report show` and `kates report export` read them.
+
 #### GET /api/tests/{id}/report
 
 Get the full test report with cluster snapshot, broker metrics, and SLA verdict.
@@ -361,6 +371,8 @@ Export latency heatmap data. Returns `404` with a plain-text message when no hea
 
 ### Cluster Inspection
 
+These endpoints describe the Kafka cluster the backend is connected to — its brokers, topics, consumer groups and broker configuration — and change nothing; `kates cluster` shows the same data.
+
 #### GET /api/cluster/info
 
 Kafka cluster metadata: cluster ID, controller, and brokers.
@@ -446,6 +458,8 @@ Non-default configuration entries for a specific broker.
 ---
 
 ### Disruption Testing
+
+A disruption plan injects faults into the Kafka cluster step by step, measures how the cluster recovers and grades the result; a playbook is a ready-made plan. `kates disruption` wraps these endpoints, and [Chaos Engineering in Practice](07-chaos-practice.md) explains plans, the safety guard and the grades.
 
 #### POST /api/disruptions
 
@@ -664,6 +678,8 @@ Run a playbook. It takes no body and goes through the launcher `POST /api/disrup
 
 ### Resilience Testing
 
+A resilience test starts a test run, injects one fault while it runs, and compares the run's numbers from before and after the fault; `kates resilience run` sends this request.
+
 #### POST /api/resilience
 
 Run a combined performance + chaos test. The call is long-running: whitespace is streamed as a keep-alive while the fault runs and recovery is measured, and the JSON report is written after that, usually before the test run itself has finished.
@@ -714,6 +730,8 @@ A `testRequest` that `POST /api/tests` would refuse for a field its type or back
 
 ### Trend Analysis
 
+A trend follows one metric across a test type's stored runs over a number of days, compares each run with a baseline averaged over the most recent runs, and flags regressions; `kates trend` charts the same data.
+
 #### GET /api/trends
 
 Historical test trends with baseline comparison and regression detection.
@@ -742,6 +760,8 @@ Historical test trends with baseline comparison and regression detection.
 ---
 
 ### Scheduling
+
+A schedule stores a test request with a cron expression, and while the schedule is enabled the backend submits that request as a new run each time the expression fires; `kates schedule` calls every one of these endpoints except `PUT`.
 
 #### POST /api/schedules
 
