@@ -144,6 +144,9 @@ One of the most insidious measurement errors in load testing is **coordinated om
 Follow a tool that sends one request every 10 ms but waits for each response before it sends the next. Watch what happens to the requests it should have sent while Kafka stalls for 200 ms.
 
 ```mermaid
+%%| label: fig-perf-coordinated-omission
+%%| fig-cap: "Coordinated omission: a tool that waits for each response stops sending during a stall, so it records one slow request and never measures the ones it should have sent."
+%%| fig-alt: "Sequence diagram between a load test tool and Kafka. Requests 1 and 2 go out 10 ms apart and return in 5 ms. Request 3 goes out at 20 ms, Kafka pauses 200 ms for garbage collection, and the response arrives at 220 ms. Request 4 is sent only at 220 ms instead of 30 ms and returns at 225 ms, so the tool records 5 ms for it, while a user who expected a response at 35 ms waited 195 ms."
 sequenceDiagram
     participant Tool as Load Test Tool
     participant System as Kafka

@@ -175,6 +175,9 @@ Kafka has unique failure characteristics that general-purpose chaos tools don't 
 When a partition's leader broker dies, Kafka must elect a new leader from the ISR:
 
 ```mermaid
+%%| label: fig-chaos-leader-election
+%%| fig-cap: "When a partition's leader dies, the producer buffers and retries while the controller promotes a follower; the gap it sees is detection time plus election time."
+%%| fig-alt: "Sequence diagram with a producer, the leader that dies, two followers and the controller. The leader broker crashes and the producer's write to it fails, so the producer buffers and retries. The controller detects the leader loss and tells follower 1 it is the new leader, and follower 1 accepts. The producer's retried write to follower 1 succeeds. A note marks the gap as detection time plus election time."
 sequenceDiagram
     participant P as Producer
     participant L as Leader (dies)
@@ -222,6 +225,9 @@ stateDiagram-v2
 When a consumer dies or a new one joins, Kafka rebalances partition assignments:
 
 ```mermaid
+%%| label: fig-chaos-eager-rebalance
+%%| fig-cap: "An eager rebalance: one new member makes every consumer in the group stop, rejoin and take a new assignment before processing resumes."
+%%| fig-alt: "Sequence diagram with consumers 1 and 2, the group coordinator and a new consumer 3. In steady state consumer 1 owns partitions 0 and 1 and consumer 2 owns partition 2. Consumer 3 sends JoinGroup, the coordinator triggers a rebalance on consumers 1 and 2, and all consumers stop processing. All three send JoinGroup, and the coordinator assigns partition 0 to consumer 1, partition 1 to consumer 2 and partition 2 to consumer 3. Processing resumes."
 sequenceDiagram
     participant C1 as Consumer 1
     participant C2 as Consumer 2

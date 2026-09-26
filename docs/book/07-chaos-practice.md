@@ -88,6 +88,9 @@ When LitmusChaos is installed, the `LitmusChaosProvider` maps every disruption t
 The diagram shows the one decision the hybrid provider makes, and when it makes it. Notice that the check runs once, at startup, not once per disruption.
 
 ```mermaid
+%%| label: fig-practice-hybrid-provider
+%%| fig-cap: "With `kates.chaos.provider=hybrid`, Kates looks for the LitmusChaos CRDs once, at startup, and sends every disruption to the backend it picked."
+%%| fig-alt: "Flowchart. The DisruptionOrchestrator calls the HybridChaosProvider, which asks at startup whether the Litmus CRDs are installed. If Litmus is detected, it uses the LitmusChaosProvider, which drives the LitmusChaos CRDs. If Litmus is not found, it uses the KubernetesChaosProvider, which calls the Kubernetes API directly for its subset of types."
 graph TD
     DO[DisruptionOrchestrator] --> HCP[HybridChaosProvider<br/>startup: are Litmus CRDs installed?]
     
@@ -142,6 +145,9 @@ Kates ships with a set of built-in playbooks located in `kates/src/main/resource
 Kills partition leaders sequentially to test cascading election recovery. This is the most common chaos test — it validates that your cluster can handle back-to-back leader elections without data loss. Each step looks up the current leader of a `__consumer_offsets` partition when it starts and kills that broker's pod.
 
 ```mermaid
+%%| label: fig-practice-leader-cascade
+%%| fig-cap: "leader-cascade kills the leader of one `__consumer_offsets` partition, watches recovery for 60 s, then kills the leader of the next."
+%%| fig-alt: "Sequence diagram between Kates, the broker leading partition 0, the broker leading partition 1, and the cluster. Kates waits 30 seconds of steady state, kills the partition 0 leader's pod, and the cluster elects a new leader for partition 0 while Kates observes a 60-second recovery window. Kates then waits 15 seconds of steady state and kills the partition 1 leader's pod; the cluster elects a new leader for partition 1, possibly while the first broker is still catching up, and Kates observes another 60-second window."
 sequenceDiagram
     participant Kates
     participant Broker0 as Broker 0 (Leader P0)
@@ -238,6 +244,9 @@ Pods do not carry their node's `topology.kubernetes.io/zone` label, so the playb
 A cluster whose pools spread across zones without a `zone:` pin has no pod with that label. On such a cluster the dry run warns that the selector matches no broker pod, and the step fails instead of silently killing nothing. To fail a different zone, submit the step as your own plan with the selector changed — built-in playbooks take no parameters.
 
 ```mermaid
+%%| label: fig-practice-az-failure
+%%| fig-cap: "az-failure kills every Kafka pod labelled `zone=alpha` at once; the brokers in `sigma` and `gamma` keep running."
+%%| fig-alt: "Two panels. Before the AZ failure, zones alpha, sigma and gamma each run one broker and all are healthy. A POD_KILL on zone=alpha with targetAll leads to the second panel: every pod in alpha is killed, while the brokers in sigma and gamma are still healthy."
 graph TB
     subgraph Before["Before AZ Failure"]
         N1[Zone: alpha ✅<br/>Broker 0]
@@ -436,6 +445,9 @@ With `-o json`, `playbook show` prints the plan as JSON, which `kates disruption
 The `DisruptionSafetyGuard` validates every plan before execution:
 
 ```mermaid
+%%| label: fig-practice-safety-guard
+%%| fig-cap: "Before any fault, the guard rejects a plan when it finds no broker pods, when the plan hits more brokers than `maxAffectedBrokers` allows, or when no broker would be left untouched; a plan that leaves exactly one broker runs with a warning."
+%%| fig-alt: "Decision flow for a disruption plan. If no broker pods are found, the plan is rejected. If more brokers are affected than maxAffectedBrokers, it is rejected. If no broker is left untouched, it is rejected as affecting all brokers. If exactly one broker is left, it executes with a warning. Otherwise it executes."
 graph TD
     PLAN[Disruption Plan] --> V1{Broker pods found<br/>for target label?}
     V1 -->|No| REJECT1["❌ Rejected:<br/>No broker pods found"]
@@ -511,6 +523,9 @@ For consumer-facing tests, Kates tracks consumer group lag:
 A disruption report includes an **SLA grade** — a structured verdict on whether the cluster met its resilience targets — when its plan defines those targets. The thresholds are not built in: you define them in the plan's `sla` block (an `SlaDefinition`), and the `SlaGrader` checks each step's post-disruption metrics against them. A plan with no SLA constraints gets no grade, and neither does a built-in playbook, which cannot carry an `sla` block.
 
 ```mermaid
+%%| label: fig-practice-sla-grade
+%%| fig-cap: "A plan's `sla` block turns each step's P99 latency, throughput and recovery time into a letter grade: A when every check passes, F on any critical miss, and B, C or D by the share of failed checks."
+%%| fig-alt: "Three groups connected left to right. Post-disruption metrics per step: P99 latency, throughput and recovery time. They are compared with the SLA thresholds in the plan's sla block: maxP99LatencyMs, minThroughputRecPerSec and maxRtoMs. The result is a letter grade: A when all checks pass, B, C or D by the fraction of failed checks, and F on any critical violation."
 graph TD
     subgraph Metrics["Post-Disruption Metrics (per step)"]
         M1[P99 Latency]

@@ -94,6 +94,9 @@ The producer maintains:
 The consumer reads all messages and builds a bitmap of received sequence numbers:
 
 ```mermaid
+%%| label: fig-integrity-lost-ranges
+%%| fig-cap: "The consumer marks each sequence number it reads back. An acknowledged sequence it never reads is lost, and consecutive lost sequences are reported as one range."
+%%| fig-alt: "A row of received sequence numbers 1 to 8: 1, 2, 3, 5, 6 and 8 are present, 4 and 7 are missing. The result lists the lost ranges 4 to 4 and 7 to 7, two messages lost."
 graph LR
     subgraph Received
         direction LR
@@ -235,6 +238,9 @@ The `spec` of a resilience file goes to the API as written, so it takes the API'
 The combined flow looks like this:
 
 ```mermaid
+%%| label: fig-integrity-under-chaos
+%%| fig-cap: "`kates resilience run` starts the INTEGRITY run, marks the chaos start and deletes a broker pod, and can return before the ISR is whole; the verdict and RPO come later, from the INTEGRITY run itself."
+%%| fig-alt: "Sequence diagram with kates resilience run, the INTEGRITY producer, the Kafka cluster and the INTEGRITY consumer. The resilience run starts the producer at 500 records per second, and the producer sends sequenced records with acks=all. After 30 seconds of steady state, the resilience run marks the chaos start and deletes one broker pod, and the same broker is deleted again every 10 seconds until 60 seconds. Sends to the lost leaders are retried, a leader election runs and the ISR shrinks to 2. The resilience run returns once its probes pass, often before the ISR is whole. The broker restarts and rejoins the ISR, and the producer keeps going until 180,000 records are sent. The consumer then reads the topic from the start and reconciles acknowledged against consumed sequences, and the verdict and RPO are read with kates test get."
 sequenceDiagram
     participant Res as kates resilience run
     participant Producer as INTEGRITY producer

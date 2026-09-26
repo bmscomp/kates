@@ -150,6 +150,9 @@ graph LR
 The key metrics to watch across phases:
 
 ```mermaid
+%%| label: fig-types-stress-phases
+%%| fig-cap: "Illustrative: how a STRESS run on the Trogdor backend reads step by step, from linear growth through saturation to overload."
+%%| fig-alt: "Three groups of expectations. Phases 1 to 3, healthy: throughput rises linearly, latency is stable, errors are zero. Phase 4, saturation: throughput plateaus, latency rises, GC pressure increases. Phase 5, overload: throughput drops, latency spikes, errors appear."
 graph TD
     subgraph Healthy["Phase 1-3: Healthy"]
         A[Throughput ↑ linearly]
@@ -403,6 +406,9 @@ scenarios:
 The INTEGRITY test is the most critical test type. It produces messages with **monotonic sequence numbers**, tracks acknowledgments, and then consumes all messages to verify completeness.
 
 ```mermaid
+%%| label: fig-types-integrity-flow
+%%| fig-cap: "An INTEGRITY run numbers every record it sends, reads the topic back, and compares what was acknowledged with what came back."
+%%| fig-alt: "Flowchart. The producer sends messages with sequence numbers 1 to N and tracks acknowledgments. The messages pass through Kafka replication and storage to a consumer that reads them all and verifies the sequences for gaps. The tracked acknowledgments and the verified sequences meet at a decision, all sequences accounted for: yes gives PASS with zero data loss, no gives DATA_LOSS with the lost ranges identified."
 graph TB
     subgraph Producer
         P[Produce messages<br/>seq: 1, 2, 3, ..., N]
