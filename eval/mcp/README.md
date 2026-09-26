@@ -168,9 +168,9 @@ AGENT="--model claude-opus-5-5"               # plus any other agent flag, the s
 
 python3 run.py validate
 python3 run.py all $RUN $AGENT --dry-run | less    # every kates call, oracle call, config file and claude command
-python3 run.py setup $RUN                          # pins the clusterId, prepares the lab as the human (~30 min)
+python3 run.py preflight $RUN $AGENT               # pins the clusterId; one short session per arm: is each set up right?
+python3 run.py setup $RUN                          # prepares the lab as the human (~30 min)
 python3 run.py oracle $RUN                         # expected answers -> oracle.json
-python3 run.py preflight $RUN $AGENT               # two short sessions: does each arm get what it should?
 python3 run.py trials $RUN $AGENT --only-task sec-posture --max-trials 1    # a smoke run: read its transcripts
 python3 run.py trials $RUN $AGENT                  # the rest; resumable
 python3 run.py oracle $RUN --recheck               # did the run change any expected answer?
@@ -180,7 +180,12 @@ python3 grade.py --run-id 2026-10-lab          # again: keeps row ids and the gr
 python3 report.py --run-id 2026-10-lab         # report.md and the verdict
 ```
 
-`run.py all $RUN $AGENT` does setup, oracle, trials and the recheck in one go. Flags for every
+The first of `preflight`, `setup` and `trials` to run pins the Kafka clusterId the human context
+reaches. Setup and the oracle then check that the human context still reaches it, and preflight
+and every trial that the agent context does. Preflight needs nothing from
+setup, so run it first: it costs cents and tells you whether both arms start right before setup
+spends half an hour on the lab. `run.py all $RUN $AGENT` does setup, oracle, trials and the
+recheck in one go. Flags for every
 phase: `--arms mcp` or `--arms cli`, `--only-task ID` (repeatable), `--human-context`,
 `--agent-context`, `--kates-bin`, `--tasks`, `--oracle`. Agent flags (preflight, trials, all):
 `--model` (required), `--max-turns` (default 30), `--max-budget-usd` (a per-trial cap passed to
