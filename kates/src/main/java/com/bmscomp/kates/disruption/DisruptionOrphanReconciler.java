@@ -1,10 +1,14 @@
 package com.bmscomp.kates.disruption;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -43,6 +47,9 @@ public class DisruptionOrphanReconciler {
     @Inject
     DisruptionReportRepository repository;
 
+    @Inject
+    ObjectMapper objectMapper;
+
     @ConfigProperty(name = "kates.chaos.orphan-recovery.enabled", defaultValue = "true")
     boolean enabled;
 
@@ -53,6 +60,9 @@ public class DisruptionOrphanReconciler {
     String kafkaNamespace;
 
     void onStart(@Observes StartupEvent event) {
+        // Taken before the HTTP server accepts a request, so no plan this
+        // process launches can have started earlier.
+        Instant startedAt = Instant.now();
         if (!enabled) {
             LOG.debug("Disruption orphan recovery disabled");
             return;
@@ -72,14 +82,14 @@ public class DisruptionOrphanReconciler {
         //
         // Recovery is cleanup of faults at least `min-age-sec` old. Nothing
         // about it needs to happen before the first request is served.
-        Thread.ofVirtual().name("disruption-orphan-recovery").start(this::reconcile);
+        Thread.ofVirtual().name("disruption-orphan-recovery").start(() -> reconcile(startedAt));
     }
 
-    private void reconcile() {
+    private void reconcile(Instant startedAt) {
         try {
             int policies = reconcileNetworkPolicies();
             ScaleDownSnapshots.Restored scaled = reconcileScaleDowns();
-            int reports = markInterruptedReports();
+            int reports = markInterruptedReports(startedAt);
             if (policies + scaled.total() + reports > 0) {
                 LOG.warnf(
                         "Orphan recovery: removed %d NetworkPolicy(ies), restored %d KafkaNodePool(s) and %d"
@@ -142,19 +152,54 @@ public class DisruptionOrphanReconciler {
     /**
      * A RUNNING report row whose process is gone can never complete — leaving it
      * RUNNING forever misreports an in-flight disruption that no longer exists.
+     *
+     * <p>Only reports created before this process started are marked: the API
+     * is already serving while this runs, and a plan launched since then is
+     * alive. Like the disruption lease, this assumes one replica. A plan
+     * another replica started earlier and is still running is marked too, and
+     * gets its real outcome when it ends, because the launcher's final save
+     * replaces the row whatever its status.
+     *
+     * <p>The status changes in the row, which the list reads, and in the stored
+     * report, which a GET returns, and only while the row still says RUNNING.
+     * This never worked before: the query ran on this thread with neither a
+     * transaction nor a request context and threw, and the save it never
+     * reached was an insert that would have failed on the primary key.
      */
-    private int markInterruptedReports() {
-        int marked = 0;
+    int markInterruptedReports(Instant startedBefore) {
+        List<DisruptionReportEntity> running;
         try {
-            for (DisruptionReportEntity entity : repository.findByStatus("RUNNING")) {
-                entity.setStatus("INTERRUPTED");
-                repository.save(entity);
-                marked++;
-            }
+            running = repository.findByStatusCreatedBefore("RUNNING", startedBefore);
         } catch (Exception e) {
-            LOG.warn("Could not mark interrupted disruption reports", e);
+            LOG.warn("Could not read the disruption reports left RUNNING", e);
+            return 0;
+        }
+        int marked = 0;
+        for (DisruptionReportEntity entity : running) {
+            try {
+                if (repository.saveIfStatus(interrupted(entity), "RUNNING")) {
+                    marked++;
+                }
+            } catch (Exception e) {
+                LOG.warnf(e, "Could not mark disruption report %s INTERRUPTED", entity.getId());
+            }
         }
         return marked;
+    }
+
+    private DisruptionReportEntity interrupted(DisruptionReportEntity entity) throws JsonProcessingException {
+        DisruptionReport report = DisruptionPersistence.readReport(entity, objectMapper);
+        if (report == null) {
+            report = new DisruptionReport();
+            report.setPlanName(entity.getPlanName());
+        }
+        report.setStatus("INTERRUPTED");
+        List<String> warnings =
+                new ArrayList<>(report.getValidationWarnings() != null ? report.getValidationWarnings() : List.of());
+        warnings.add("Interrupted: the Kates process running this plan stopped before the plan finished,"
+                + " so its outcome was not recorded");
+        report.setValidationWarnings(warnings);
+        return DisruptionPersistence.toEntity(entity.getId(), report, objectMapper);
     }
 
     private boolean isScaleDownOlderThan(ObjectMeta meta, long cutoff) {

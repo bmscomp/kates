@@ -8,8 +8,12 @@ import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -131,6 +135,66 @@ class DisruptionApiIT {
 
         given().when().get("/api/disruptions/unknown-id/timeline").then().statusCode(404);
         given().when().get("/api/disruptions/unknown-id/kafka-metrics").then().statusCode(404);
+    }
+
+    // ---------------------------------------------------------------- saving
+
+    @Test
+    void savingAReportAgainUnderItsIdReplacesTheRow() throws Exception {
+        // The launcher's two saves of one plan: the RUNNING placeholder when it
+        // starts, then its outcome. The second was an insert that failed on the
+        // primary key, so the row said RUNNING for good.
+        String id = UUID.randomUUID().toString().substring(0, 8);
+        store(id, placeholder("az-failure"));
+        String startedAt =
+                given().when().get("/api/disruptions").then().extract().path("items[0].createdAt");
+
+        store(id, report("az-failure", "COMPLETED", "A", 2, 2, false));
+
+        given().when()
+                .get("/api/disruptions/" + id)
+                .then()
+                .statusCode(200)
+                .body("status", equalTo("COMPLETED"))
+                .body("summary.passedSteps", is(2))
+                .body("slaVerdict.grade", equalTo("A"));
+        given().when()
+                .get("/api/disruptions")
+                .then()
+                .statusCode(200)
+                .body("count", is(1))
+                .body("items[0].id", equalTo(id))
+                .body("items[0].status", equalTo("COMPLETED"))
+                .body("items[0].slaGrade", equalTo("A"))
+                .body("items[0].createdAt", equalTo(startedAt));
+    }
+
+    @Test
+    void aReportLeftRunningIsReplacedOnlyWhileItStillSaysRunning() throws Exception {
+        String orphan = UUID.randomUUID().toString().substring(0, 8);
+        String finished = UUID.randomUUID().toString().substring(0, 8);
+        store(orphan, placeholder("az-failure"));
+        store(finished, placeholder("split-brain"));
+        Instant processStart = Instant.now();
+        String later = UUID.randomUUID().toString().substring(0, 8);
+        store(later, placeholder("az-failure"));
+
+        List<String> running = reports.findByStatusCreatedBefore("RUNNING", processStart).stream()
+                .map(DisruptionReportEntity::getId)
+                .toList();
+        assertEquals(List.of(finished, orphan), running);
+
+        // One plan finishes between the reconciler's read and its write.
+        store(finished, report("split-brain", "COMPLETED", "B", 1, 1, false));
+        DisruptionReport interrupted = placeholder("az-failure");
+        interrupted.setStatus("INTERRUPTED");
+        assertTrue(reports.saveIfStatus(entity(orphan, interrupted), "RUNNING"));
+        interrupted.setPlanName("split-brain");
+        assertFalse(reports.saveIfStatus(entity(finished, interrupted), "RUNNING"));
+
+        given().when().get("/api/disruptions/" + orphan).then().body("status", equalTo("INTERRUPTED"));
+        given().when().get("/api/disruptions/" + finished).then().body("status", equalTo("COMPLETED"));
+        given().when().get("/api/disruptions/" + later).then().body("status", equalTo("RUNNING"));
     }
 
     // --------------------------------------------------------------- analysis
@@ -312,6 +376,13 @@ class DisruptionApiIT {
 
     private String seedReport(String planName, String status, String grade, int steps, int passed, boolean slaViolated)
             throws Exception {
+        String id = UUID.randomUUID().toString();
+        store(id, report(planName, status, grade, steps, passed, slaViolated));
+        return id;
+    }
+
+    private static DisruptionReport report(
+            String planName, String status, String grade, int steps, int passed, boolean slaViolated) {
         DisruptionReport report = new DisruptionReport();
         report.setPlanName(planName);
         report.setStatus(status);
@@ -321,15 +392,29 @@ class DisruptionApiIT {
         // entity column: the list endpoint reads the column, but /{id}/compare
         // reads the deserialised report's SLA verdict and falls back to "-".
         report.setSlaVerdict(new SlaGrader.SlaVerdict(grade, slaViolated, List.of(), steps, passed, List.of()));
+        return report;
+    }
 
-        String id = UUID.randomUUID().toString();
-        reports.save(new DisruptionReportEntity(
+    /** The report the launcher stores when a plan starts. */
+    private static DisruptionReport placeholder(String planName) {
+        DisruptionReport report = new DisruptionReport();
+        report.setPlanName(planName);
+        report.setStatus("RUNNING");
+        report.setValidationWarnings(List.of());
+        return report;
+    }
+
+    private void store(String id, DisruptionReport report) throws Exception {
+        reports.save(entity(id, report));
+    }
+
+    private DisruptionReportEntity entity(String id, DisruptionReport report) throws Exception {
+        return new DisruptionReportEntity(
                 id,
-                planName,
-                status,
-                grade,
+                report.getPlanName(),
+                report.getStatus(),
+                report.getSlaVerdict() != null ? report.getSlaVerdict().grade() : null,
                 objectMapper.writeValueAsString(report),
-                objectMapper.writeValueAsString(report.getSummary())));
-        return id;
+                report.getSummary() != null ? objectMapper.writeValueAsString(report.getSummary()) : null);
     }
 }
