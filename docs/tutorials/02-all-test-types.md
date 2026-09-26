@@ -225,8 +225,8 @@ For the ultimate validation — verify integrity while killing a broker. No
 scenario template carries chaos: a scaffold describes a test, and pairing one
 with a fault is what `kates resilience run` is for. It takes a config with a
 `testRequest` and a `chaosSpec` side by side. The `testRequest` goes to the API
-as written, so it takes the API's field names (`type`, `numRecords`,
-`numConsumers`), not the flags above or a scenario file's `records`:
+as written, so it takes the API's field names (`type`, `numRecords`), not the
+flags above or a scenario file's `records`:
 
 ```bash
 cat > integrity-chaos.json <<'EOF'
@@ -236,8 +236,7 @@ cat > integrity-chaos.json <<'EOF'
     "spec": {
       "numRecords": 100000,
       "throughput": 500,
-      "acks": "all",
-      "numConsumers": 1
+      "acks": "all"
     }
   },
   "chaosSpec": {

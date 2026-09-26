@@ -120,7 +120,7 @@ Create a file called `broker-kill-plan.json`:
   "autoRollback": true,
   "steps": [
     {
-      "name": "kill-broker-0",
+      "name": "kill-one-broker",
       "faultSpec": {
         "experimentName": "broker-kill",
         "disruptionType": "POD_KILL",
@@ -167,8 +167,8 @@ Expected output:
 ```
   ◉ Executing disruption plan: single-broker-kill
 
-  Step 1/1: kill-broker-0
-  ────────────────────────
+  Step 1/1: kill-one-broker
+  ──────────────────────────
   Type         POD_KILL
   Target       kafka/krafter-pool-alpha-0
   Duration     30s
@@ -325,15 +325,16 @@ kates resilience run -f resilience-test.json
 
 ### Step 3: Interpret the Impact Analysis
 
-The command returns once the fault has ended, which can be before the LOAD run
-finishes, and prints four blocks:
+The command returns once the fault has ended and the backend has waited for the
+cluster to recover, which can be before the LOAD run finishes, and prints four
+blocks:
 
 | Block | What it shows |
 |-------|---------------|
-| Status | `COMPLETED` when the chaos outcome passed, `CHAOS_FAILED` when it did not, `ERROR` with the reason when the run failed |
+| Status | `COMPLETED` when the chaos outcome passed, `CHAOS_FAILED` when it did not, `ERROR` with the reason when the run failed, `INTERRUPTED` when the backend was interrupted before the run ended |
 | Chaos Outcome | The experiment, its verdict, and how long the fault lasted |
 | Impact Analysis (% change) | How `throughputRecPerSec`, `avgLatencyMs`, `p99LatencyMs`, `maxLatencyMs` and `errorRate` changed, with ▲ or ▼ beside a change beyond 10% |
-| Pre-Chaos Baseline, Post-Chaos Impact | Throughput, P99 latency and error rate when the fault started, and again just after it ended |
+| Pre-Chaos Baseline, Post-Chaos Impact | The run's throughput, P99 latency and error rate so far: just before the fault, and again once the cluster has recovered or the recovery wait, 120 seconds by default, has run out |
 
 Read the Impact Analysis first: it is the cost of the fault. With three replicas
 and `min.insync.replicas=2`, losing one broker should cost latency while

@@ -173,9 +173,9 @@ Set up nightly performance tests to catch slow regressions:
 
 A schedule is a name, a cron expression and a test request read from a JSON
 file — `--name`, `--cron` and `--request` are all required. The request goes to
-the API as written, so it takes the API's field names (`type`, `numRecords`,
-`numConsumers`), not a scenario file's `records`. The backend reads the cron
-expression as five fields, in UTC:
+the API as written, so it takes the API's field names (`type`, `numRecords`),
+not a scenario file's `records`. The backend reads the cron expression as five
+fields, in UTC:
 
 ```bash
 cat > nightly-load.json <<'EOF'
@@ -185,7 +185,7 @@ EOF
 cat > weekly-integrity.json <<'EOF'
 {
   "type": "INTEGRITY",
-  "spec": { "numRecords": 100000, "acks": "all", "numConsumers": 1 }
+  "spec": { "numRecords": 100000, "acks": "all" }
 }
 EOF
 
