@@ -6,12 +6,14 @@ on:
     paths:
       - "docs/book/**"
       - "scripts/prepare-book-render.sh"
+      - "scripts/check-book-fragments.py"
       - ".github/workflows/book.yml"
   push:
     branches: [main]
     paths:
       - "docs/book/**"
       - "scripts/prepare-book-render.sh"
+      - "scripts/check-book-fragments.py"
       - ".github/workflows/book.yml"
   # The PDF half of this job runs on everything except a pull request, so a
   # manual run is how it gets exercised without pushing to main. It renders
