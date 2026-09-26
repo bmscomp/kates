@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -71,6 +72,15 @@ func resolveCluster() (string, error) {
 	switch decision.Outcome {
 	case cluster.UseContext:
 		c := decision.Candidates[0]
+		// The only cluster that answered is not the one kubectl points at.
+		// Deploying there means switching kubectl to it, and nobody chose it:
+		// it is merely what was left. Ask. A dry run skips the question
+		// because useTargetContext refuses to switch whatever the answer.
+		if !c.Current && !deployDryRun {
+			if err := confirmOnlyReachable(c, contexts); err != nil {
+				return "", err
+			}
+		}
 		fmt.Println("  " + gateOK.Render("✓") + " Cluster: " + gateAccent.Render(c.Name) + gateDim.Render(describeContext(c)))
 		return c.Name, nil
 
@@ -107,6 +117,88 @@ func resolveCluster() (string, error) {
 			"    • Docker, so a local 3-zone kind cluster can be created for you\n" +
 			"  Install Docker: https://docs.docker.com/get-docker/")
 	}
+}
+
+// confirmOnlyReachable asks before deploying to the one reachable cluster when
+// kubectl points somewhere else: a VPN that is down can leave a production
+// context as the only one answering.
+func confirmOnlyReachable(c cluster.Context, all []cluster.Context) error {
+	pointsAt := "kubectl has no current context"
+	if cur := currentOf(all); cur != "" {
+		pointsAt = fmt.Sprintf("kubectl points at %s, which did not answer", cur)
+	}
+
+	if !interactiveFn() {
+		return fmt.Errorf("the only reachable cluster is %s, but %s — not switching clusters without asking.\n"+
+			"  To deploy there:  kubectl config use-context %s",
+			c.Name, pointsAt, c.Name)
+	}
+
+	fmt.Println("  " + gateWarn.Render("!") + " " + pointsAt + ".")
+	fmt.Println("    " + gateDim.Render("The only reachable cluster is ") + gateAccent.Render(c.Name) + gateDim.Render(describeContext(c)))
+	ok, err := confirmFn(fmt.Sprintf("Deploy to %s, and point kubectl at it?", c.Name))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("not deploying to %s: switching to it was declined", c.Name)
+	}
+	return nil
+}
+
+// useTargetContext makes the cluster the gate chose kubectl's current context.
+//
+// Everything deploy runs after the gate — helm, kubectl, the introspection, the
+// port-forwards — reads the current context, and so does whatever the user
+// types next (make all runs scripts/port-forward.sh straight after). Passing
+// --kube-context/--context down every one of those calls would leave the
+// deploy on one cluster and the user's shell on another; switching once, and
+// saying so, keeps them on the same cluster.
+func useTargetContext(target string) error {
+	current := currentContextName()
+	if target == current {
+		return nil
+	}
+
+	// A dry run changes nothing, and this change outlives the run.
+	if deployDryRun {
+		return fmt.Errorf("--dry-run does not switch kubectl's current context, so it cannot plan against %s.\n"+
+			"  Switch first:  kubectl config use-context %s\n"+
+			"  Then re-run:   kates deploy --dry-run",
+			target, target)
+	}
+
+	if err := runExecFn(context.Background(), "kubectl", "config", "use-context", target); err != nil {
+		return fmt.Errorf("pointing kubectl at %s: %w", target, err)
+	}
+
+	if current == "" {
+		fmt.Println("  " + gateOK.Render("✓") + " kubectl now points at " + gateAccent.Render(target))
+		return nil
+	}
+	fmt.Println("  " + gateOK.Render("✓") + " kubectl now points at " + gateAccent.Render(target) + gateDim.Render(" (it pointed at "+current+")"))
+	fmt.Println("    " + gateDim.Render("To switch back after the deploy:  kubectl config use-context "+current))
+	return nil
+}
+
+// currentContextName returns kubectl's current context, or "" when there is
+// none or it cannot be read.
+func currentContextName() string {
+	out, err := runExecOutputFn(context.Background(), "kubectl", "config", "current-context")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// currentOf returns the name of the context marked current, or "".
+func currentOf(cs []cluster.Context) string {
+	for _, c := range cs {
+		if c.Current {
+			return c.Name
+		}
+	}
+	return ""
 }
 
 // offerKind asks whether to build the local 3-AZ cluster, then builds it.

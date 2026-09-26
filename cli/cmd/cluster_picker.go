@@ -57,7 +57,10 @@ func (m pickerModel) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString("\n  " + gateTitle.Render("Select a cluster to deploy to") + "\n\n")
+	b.WriteString("\n  " + gateTitle.Render("Select a cluster to deploy to") + "\n")
+	// Said before the choice, not after: picking another cluster switches
+	// kubectl to it, and that outlives the deploy.
+	b.WriteString("  " + gateDim.Render("kubectl will point at the one you pick") + "\n\n")
 
 	for i, c := range m.contexts {
 		cursor := "  "

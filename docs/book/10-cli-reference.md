@@ -1152,19 +1152,21 @@ kates deploy --dry-run --strimzi-version latest          # shows the resolution,
 
 | What it finds | What it does |
 |---|---|
-| One reachable cluster | Uses it, without asking |
-| Several reachable clusters | Asks you to pick one |
+| One reachable cluster | Uses it, without asking when it is your current context |
+| Several reachable clusters | Asks you to pick one, starting on your current context |
 | No reachable cluster, Docker and kind available | Offers to create a local three-zone kind cluster |
 | No reachable cluster, kind missing | Explains how to install kind |
 | No reachable cluster, Docker stopped | Asks you to start Docker |
 | No Docker at all | Explains both ways forward |
+
+The cluster it settles on becomes `kubectl`'s current context, because every step after this one, the port-forwards included, and every command you type next goes wherever that context points. When that is a change, `deploy` says so and prints the `kubectl config use-context` command that switches back. When the one reachable cluster is not your current context, `deploy` asks before switching, since the only cluster that answers is not necessarily one you meant. `--dry-run` never switches: it stops and asks you to switch first.
 
 When nothing is reachable, any contexts you do have configured are listed by name rather than treated as absent — a kubeconfig that has gone stale looks nothing like a machine with no cluster, and the difference decides what you do about it.
 
 The kind offer has three further conditions. It is skipped under `--dry-run`, and it stops rather than proceeding when a kind cluster of that name already exists but does not answer (recreating would destroy it) or when the topology config cannot be read from the current directory. Each case prints the command that resolves it.
 
 ::: {.callout-note}
-`--yes` never guesses. When several clusters are reachable and nothing can be asked, `deploy` fails and tells you to choose with `kubectl config use-context` rather than picking one for you. Selecting a cluster silently is how a deployment lands somewhere it was never meant to go.
+`--yes` never guesses. When several clusters are reachable, or the only reachable one is not your current context, and nothing can be asked, `deploy` fails and tells you to choose with `kubectl config use-context` rather than picking one for you. Selecting a cluster silently is how a deployment lands somewhere it was never meant to go.
 :::
 
 The same applies without a terminal. Piped or scripted runs take the flag defaults instead of opening the wizard, and any state that needs an answer becomes an error carrying the command that resolves it.

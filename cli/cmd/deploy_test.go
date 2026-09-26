@@ -16,6 +16,8 @@ func init() {
 	// exists. The cluster gate is a real precondition of runDeploy, but its own
 	// behavior (picking, the kind offer, the blocked states) is covered directly
 	// in cluster_gate_test.go — stubbing it here keeps that concern in one place.
+	// stubClusterRead reports the same context as kubectl's current one, so
+	// these runs never switch it.
 	resolveClusterFn = func() (string, error) { return "test-context", nil }
 
 	// Cluster READS are stubbed for the whole package. Without this they run
@@ -74,6 +76,9 @@ func stubClusterRead(_ context.Context, name string, args ...string) ([]byte, er
 	joined := name + " " + strings.Join(args, " ")
 
 	switch {
+	// The context the stubbed cluster gate returns: already current.
+	case joined == "kubectl config current-context":
+		return []byte("test-context\n"), nil
 	// Secrets are read for their base64 data field; a non-empty value ends the
 	// wait loops immediately.
 	case strings.Contains(joined, "get secret"):

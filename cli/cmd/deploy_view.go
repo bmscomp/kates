@@ -294,10 +294,11 @@ func resetDeployPhases() { deployPhase = 0 }
 func nextDeployPhase() int { deployPhase++; return deployPhase }
 
 // deployPhaseCount is how many phases runDeploy prints. It is a constant
-// because the sequence is: cluster, pre-flight, versions, topology,
-// components, pipeline — the same six every run, whatever is selected. Saying
-// "3 of 6" instead of "3" is the difference between a list and progress.
-const deployPhaseCount = 6
+// because the sequence is: pre-flight, versions, topology, components,
+// pipeline — the same five every run, whatever is selected. Choosing the
+// cluster comes before the banner, so it is not one of them. Saying "3 of 5"
+// instead of "3" is the difference between a list and progress.
+const deployPhaseCount = 5
 
 // PrintPhaseHeader prints a phase header with its place in the run, and a
 // rule that runs out to the layout width so every phase begins at the same
@@ -332,11 +333,13 @@ func PrintPhaseWarn(text string) {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ " + text))
 }
 
-// PrintDeployBanner prints the initial deploy banner: what is about to run,
-// which build of the CLI is running it, and where. The version and context
-// are there because "it did something different this time" is nearly always
-// one of those two having changed.
-func PrintDeployBanner() {
+// PrintDeployBanner prints the deploy banner: what is about to run, which
+// build of the CLI is running it, and where. The version and context are there
+// because "it did something different this time" is nearly always one of
+// those two having changed. target is the context the cluster gate chose; the
+// banner prints after the gate so that it names the cluster actually deployed
+// to, not whatever kubectl pointed at before the picker.
+func PrintDeployBanner(target string) {
 	g := output.Glyphs()
 	fmt.Println()
 	mark := "kates deploy"
@@ -344,7 +347,7 @@ func PrintDeployBanner() {
 		mark = "⎈ kates deploy"
 	}
 	line := lipgloss.NewStyle().Bold(true).Foreground(clrAccent).Render(mark)
-	if sub := bannerSubtitle(); sub != "" {
+	if sub := bannerSubtitle(target); sub != "" {
 		line += lipgloss.NewStyle().Foreground(clrDim).Render("   " + sub)
 	}
 	fmt.Println(line)
@@ -354,25 +357,15 @@ func PrintDeployBanner() {
 
 // bannerSubtitle is the one-line context: CLI version and target cluster,
 // each omitted when unknown rather than printed as "unknown".
-func bannerSubtitle() string {
+func bannerSubtitle(target string) string {
 	parts := []string{}
 	if Version != "" && Version != "dev" {
 		parts = append(parts, Version)
 	}
-	if ctxName := currentContextName(); ctxName != "" {
-		parts = append(parts, ctxName)
+	if target != "" {
+		parts = append(parts, target)
 	}
 	return strings.Join(parts, "  ·  ")
-}
-
-// currentContextName returns the kubeconfig context this deploy will target,
-// best-effort: a banner is not worth an error path.
-func currentContextName() string {
-	out, err := runExecOutputFn(context.Background(), "kubectl", "config", "current-context")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // ThemeKates returns a custom huh theme using the Kates blue palette,

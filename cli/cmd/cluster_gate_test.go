@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/bmscomp/kates/cli/pkg/cluster"
@@ -79,6 +80,13 @@ func (s *stubGate) install(t *testing.T) {
 func reachable(name string) cluster.Context {
 	return cluster.Context{Name: name, Reachable: true, Probed: true}
 }
+
+// reachableCurrent is a reachable context that kubectl already points at.
+func reachableCurrent(name string) cluster.Context {
+	c := reachable(name)
+	c.Current = true
+	return c
+}
 func unreachable(name string) cluster.Context {
 	return cluster.Context{Name: name, Reachable: false, Probed: true}
 }
@@ -114,10 +122,230 @@ func TestRunDeploy_AbortsWhenClusterGateFails(t *testing.T) {
 	}
 }
 
+// fakeKubeconfig stands in for kubectl's current context. `kubectl config
+// use-context` moves it, and every command records where it pointed when the
+// command ran — which is where a real helm or kubectl call would have gone.
+type fakeKubeconfig struct {
+	mu      sync.Mutex
+	current string
+	ran     []targetedCmd
+}
+
+type targetedCmd struct{ cmd, context string }
+
+func (k *fakeKubeconfig) run(name string, args ...string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.ran = append(k.ran, targetedCmd{name + " " + strings.Join(args, " "), k.current})
+	if name == "kubectl" && len(args) == 3 && args[0] == "config" && args[1] == "use-context" {
+		k.current = args[2]
+	}
+}
+
+// install routes cluster writes and the current-context read through k; every
+// other read gets the package's canned answers.
+func (k *fakeKubeconfig) install(t *testing.T) {
+	t.Helper()
+	origOut, origExec := runExecOutputFn, runExecFn
+	t.Cleanup(func() { runExecOutputFn, runExecFn = origOut, origExec })
+
+	runExecOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "kubectl" && strings.Join(args, " ") == "config current-context" {
+			k.mu.Lock()
+			defer k.mu.Unlock()
+			if k.current == "" {
+				return nil, errors.New("error: current-context is not set")
+			}
+			return []byte(k.current + "\n"), nil
+		}
+		return stubClusterRead(ctx, name, args...)
+	}
+	runExecFn = func(_ context.Context, name string, args ...string) error {
+		k.run(name, args...)
+		return nil
+	}
+}
+
+func (k *fakeKubeconfig) commands() []targetedCmd {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return append([]targetedCmd(nil), k.ran...)
+}
+
+// The picker's answer must decide where the deploy goes. It used to be thrown
+// away: runDeploy discarded the gate's context name, and every helm and kubectl
+// call went to kubectl's current context — so picking another cluster in the
+// picker still deployed into the one kubectl pointed at.
+func TestRunDeploy_DeploysToThePickedCluster(t *testing.T) {
+	s := &stubGate{
+		contexts: []cluster.Context{reachableCurrent("kind-panda"), reachable("prod-eu")},
+		env:      dockerReady, tty: true, picked: "prod-eu",
+	}
+	s.install(t)
+	k := &fakeKubeconfig{current: "kind-panda"}
+	k.install(t)
+
+	origGate, origStdin, origHelm := resolveClusterFn, runExecStdinFn, runHelmFn
+	origDeployed, origExecutor := isHelmReleaseDeployedFn, defaultExecutor
+	t.Cleanup(func() {
+		resolveClusterFn, runExecStdinFn, runHelmFn = origGate, origStdin, origHelm
+		isHelmReleaseDeployedFn, defaultExecutor = origDeployed, origExecutor
+	})
+	resolveClusterFn = resolveCluster // the real gate, with the stubbed picker
+	runExecStdinFn = func(_ context.Context, name string, args []string, _ string) error {
+		k.run(name, args...)
+		return nil
+	}
+	runHelmFn = func(_ context.Context, args ...string) error {
+		k.run("helm", args...)
+		return nil
+	}
+	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+	defaultExecutor = &MockExecutor{}
+
+	setDeployFlags(t, func() {
+		deployTopology, deployNamespace = "single", "kates-test"
+		deployWithSchemaRegistry = "none"
+		deployWithChaos, deployWithMonitoring, deployWithCertManager = false, false, false
+		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = false, false, false
+		deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun = false, false, false
+	})
+
+	var err error
+	out := captureStdout(t, func() { err = runDeploy(deployCmd, []string{}) })
+	if err != nil {
+		t.Fatalf("runDeploy: %v", err)
+	}
+	if !s.pickCalled {
+		t.Fatal("two reachable clusters must present the picker")
+	}
+
+	var helm int
+	for _, c := range k.commands() {
+		if !strings.HasPrefix(c.cmd, "helm ") {
+			continue
+		}
+		helm++
+		if c.context != "prod-eu" {
+			t.Errorf("%q ran against %q, want the picked prod-eu", c.cmd, c.context)
+		}
+	}
+	if helm == 0 {
+		t.Fatal("the deploy ran no helm commands; nothing was checked")
+	}
+	if k.current != "prod-eu" {
+		t.Errorf("kubectl is left pointing at %q, want prod-eu, the cluster just deployed to", k.current)
+	}
+
+	// The banner names the cluster deployed to, not the one kubectl pointed
+	// at before the picker.
+	var banner string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "kates deploy") {
+			banner = line
+			break
+		}
+	}
+	if !strings.Contains(banner, "prod-eu") || strings.Contains(banner, "kind-panda") {
+		t.Errorf("banner should name prod-eu, got %q", banner)
+	}
+	// Switching kubectl outlives the deploy, so it has to be said, with the
+	// way back.
+	if !strings.Contains(out, "kubectl config use-context kind-panda") {
+		t.Errorf("the switch should be announced with the command to undo it; output:\n%s", out)
+	}
+}
+
+// setDeployFlags sets deploy's flag variables for one test and restores them
+// after, so this file's runDeploy cannot change what deploy_test.go runs.
+func setDeployFlags(t *testing.T, set func()) {
+	t.Helper()
+	topology, namespace, registry := deployTopology, deployNamespace, deployWithSchemaRegistry
+	chaos, monitoring, certManager := deployWithChaos, deployWithMonitoring, deployWithCertManager
+	kyverno, strimzi, connect := deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect
+	ui, mm2, dry := deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun
+	t.Cleanup(func() {
+		deployTopology, deployNamespace, deployWithSchemaRegistry = topology, namespace, registry
+		deployWithChaos, deployWithMonitoring, deployWithCertManager = chaos, monitoring, certManager
+		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = kyverno, strimzi, connect
+		deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun = ui, mm2, dry
+	})
+	set()
+}
+
+// ── Pointing kubectl at the target ─────────────────────────────────────────
+
+func TestUseTargetContext_SwitchesAndSaysHowToGoBack(t *testing.T) {
+	k := &fakeKubeconfig{current: "kind-panda"}
+	k.install(t)
+
+	var err error
+	out := captureStdout(t, func() { err = useTargetContext("prod-eu") })
+	if err != nil {
+		t.Fatalf("useTargetContext: %v", err)
+	}
+	if k.current != "prod-eu" {
+		t.Errorf("kubectl points at %q, want prod-eu", k.current)
+	}
+	if !strings.Contains(out, "kubectl config use-context kind-panda") {
+		t.Errorf("should say how to switch back, got:\n%s", out)
+	}
+}
+
+// The common case — the cluster chosen is the one kubectl points at — must
+// not touch the kubeconfig.
+func TestUseTargetContext_LeavesTheCurrentContextAlone(t *testing.T) {
+	k := &fakeKubeconfig{current: "kind-panda"}
+	k.install(t)
+
+	if err := useTargetContext("kind-panda"); err != nil {
+		t.Fatalf("useTargetContext: %v", err)
+	}
+	if ran := k.commands(); len(ran) != 0 {
+		t.Errorf("nothing to switch, but ran %v", ran)
+	}
+}
+
+func TestUseTargetContext_NoCurrentContextStillSwitches(t *testing.T) {
+	k := &fakeKubeconfig{}
+	k.install(t)
+
+	var err error
+	captureStdout(t, func() { err = useTargetContext("prod-eu") })
+	if err != nil {
+		t.Fatalf("useTargetContext: %v", err)
+	}
+	if k.current != "prod-eu" {
+		t.Errorf("kubectl points at %q, want prod-eu", k.current)
+	}
+}
+
+// A switch outlives the run, and a dry run changes nothing. Planning against
+// the current context instead would preview the wrong cluster, so it refuses.
+func TestUseTargetContext_DryRunRefusesToSwitch(t *testing.T) {
+	origDry := deployDryRun
+	deployDryRun = true
+	t.Cleanup(func() { deployDryRun = origDry })
+
+	k := &fakeKubeconfig{current: "kind-panda"}
+	k.install(t)
+
+	err := useTargetContext("prod-eu")
+	if err == nil {
+		t.Fatal("a dry run must not switch kubectl to another cluster")
+	}
+	if !strings.Contains(err.Error(), "kubectl config use-context prod-eu") {
+		t.Errorf("error should give the command, got: %v", err)
+	}
+	if ran := k.commands(); len(ran) != 0 {
+		t.Errorf("a dry run ran %v", ran)
+	}
+}
+
 // ── The happy path ─────────────────────────────────────────────────────────
 
 func TestResolveCluster_SingleContextNeverPrompts(t *testing.T) {
-	s := &stubGate{contexts: []cluster.Context{reachable("kind-panda")}, env: dockerReady, tty: true}
+	s := &stubGate{contexts: []cluster.Context{reachableCurrent("kind-panda")}, env: dockerReady, tty: true}
 	s.install(t)
 
 	got, err := resolveCluster()
@@ -149,6 +377,61 @@ func TestResolveCluster_MultipleContextsPrompt(t *testing.T) {
 	}
 	if got != "prod-eu" {
 		t.Errorf("got %q, want the picked context", got)
+	}
+}
+
+// ── The only reachable cluster is not the current one ──────────────────────
+
+// kubectl points at a cluster that did not answer, and one other cluster did.
+// That one is what is left, not what anyone chose: with a VPN down it can be
+// production. Deploying there switches kubectl to it, so the gate asks.
+func onlyReachableElsewhere() []cluster.Context {
+	return []cluster.Context{
+		{Name: "kind-panda", Current: true, Probed: true},
+		reachable("prod-eu"),
+	}
+}
+
+func TestResolveCluster_OnlyReachableButNotCurrentAsks(t *testing.T) {
+	s := &stubGate{contexts: onlyReachableElsewhere(), env: dockerReady, tty: true, confirm: true}
+	s.install(t)
+
+	got, err := resolveCluster()
+	if err != nil {
+		t.Fatalf("resolveCluster: %v", err)
+	}
+	if !s.confirmCalled {
+		t.Error("must ask before deploying to a cluster kubectl does not point at")
+	}
+	if got != "prod-eu" {
+		t.Errorf("got %q, want prod-eu", got)
+	}
+}
+
+func TestResolveCluster_OnlyReachableButNotCurrentDeclined(t *testing.T) {
+	s := &stubGate{contexts: onlyReachableElsewhere(), env: dockerReady, tty: true, confirm: false}
+	s.install(t)
+
+	if _, err := resolveCluster(); err == nil {
+		t.Fatal("declining must stop the deploy")
+	}
+}
+
+func TestResolveCluster_OnlyReachableButNotCurrentNonTTYFails(t *testing.T) {
+	s := &stubGate{contexts: onlyReachableElsewhere(), env: dockerReady, tty: false}
+	s.install(t)
+
+	_, err := resolveCluster()
+	if err == nil {
+		t.Fatal("must fail rather than switch clusters without asking")
+	}
+	if s.confirmCalled {
+		t.Error("must not prompt without a terminal — it would hang")
+	}
+	for _, want := range []string{"kind-panda", "kubectl config use-context prod-eu"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
 	}
 }
 
