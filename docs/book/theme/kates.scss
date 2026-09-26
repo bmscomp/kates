@@ -223,6 +223,10 @@ kbd {
   font-size: $code-font-size;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
+  // A long path or command wraps with the sentence instead of pushing the
+  // page wider than a phone's screen.
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 #quarto-document-content a code:not(.sourceCode):not(pre code) {
@@ -478,6 +482,13 @@ figure.kates-diagram {
 figure.kates-diagram.is-wide {
   z-index: 3;
   margin-right: calc(-1 * var(--kates-diagram-bleed, 0px));
+}
+
+// Quarto pins a captioned figure to width: 100%, which cancels the negative
+// margin above; widen it by the bleed instead, so the plate still holds its
+// diagram and the table of contents sees how far it reaches.
+.quarto-figure > figure.kates-diagram.is-wide {
+  width: calc(100% + var(--kates-diagram-bleed, 0px));
 }
 
 .cell-output-display.kates-diagram-cell {

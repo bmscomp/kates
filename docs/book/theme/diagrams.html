@@ -346,21 +346,34 @@
   document.fonts?.ready.then(queueScrollers); // web fonts change line widths
 
   // ── Keyboard access to the sidebar's parts ─────────────────────────────────
-  // Only the current part starts open (collapse-level: 1 in _quarto.yml), and
-  // Quarto draws each part's label as an <a> with no href, which a keyboard
-  // cannot reach. Make each label a button that Enter and Space toggle;
+  // Only the current part starts open (collapse-level: 1 in _quarto.yml). A
+  // part with its own page has a link for its label and a separate chevron
+  // that toggles it; a part without one (the appendices) toggles from its
+  // label. Quarto draws both toggles as an <a> with no href, which a keyboard
+  // cannot reach, so make each one a button that Enter and Space press;
   // Bootstrap keeps its aria-expanded up to date.
-  const partLabels = document.querySelectorAll(
-    '.sidebar-item-section > .sidebar-item-container > a.sidebar-item-text[data-bs-toggle="collapse"]:not([href])');
-  for (const label of partLabels) {
-    label.tabIndex = 0;
-    label.setAttribute("role", "button");
-    const target = label.getAttribute("data-bs-target");
-    if (target && target.startsWith("#")) label.setAttribute("aria-controls", target.slice(1));
-    label.addEventListener("keydown", (e) => {
+  const partToggles = document.querySelectorAll(
+    '.sidebar-item-section > .sidebar-item-container > a[data-bs-toggle="collapse"]:not([href])');
+  for (const toggle of partToggles) {
+    if (toggle.classList.contains("sidebar-item-toggle")) {
+      const label = toggle.parentElement.querySelector("a.sidebar-item-text");
+      // A label that toggles already takes the keyboard; one stop is enough.
+      if (label && !label.hasAttribute("href")) {
+        toggle.tabIndex = -1;
+        toggle.setAttribute("aria-hidden", "true");
+        continue;
+      }
+      const title = label?.textContent.trim();
+      if (title) toggle.setAttribute("aria-label", `Show or hide ${title}`);
+    }
+    toggle.tabIndex = 0;
+    toggle.setAttribute("role", "button");
+    const target = toggle.getAttribute("data-bs-target");
+    if (target && target.startsWith("#")) toggle.setAttribute("aria-controls", target.slice(1));
+    toggle.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
       e.preventDefault();
-      label.click();
+      toggle.click();
     });
   }
 })();
