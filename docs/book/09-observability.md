@@ -353,6 +353,7 @@ kates dash
 ```
 
 It shows:
+
 - System health status
 - Active tests count
 - Recent test results table
@@ -391,6 +392,7 @@ kates cluster watch --interval 10
 ```
 
 The display shows:
+
 - **Broker status** — count, controller identity
 - **Partition health** — under-replicated ▁▂▃ sparkline, offline ▁▁▁ sparkline
 - **Partition count** — total and per-topic breakdown with trend
@@ -824,4 +826,4 @@ Expect a healthy run: dashboards flat where they should be flat (zero under-repl
 - `kates trend` and `kates report diff` turn snapshots into regression detection — compare runs instead of trusting absolute numbers.
 - PrometheusRule alerts ship with the charts and fire on offline partitions, sustained under-replication, and runaway consumer lag — each chart carries its own enable toggle.
 
-With the observability stack in place, the next step is standing up the cluster it watches: [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) walks through that deployment from an empty namespace to a running Kafka.
+You can now read what a run did to the cluster. The next chapters turn from reading the platform to building and operating it, and they start where every Kafka cluster in this repository starts: [Deploying the Strimzi Operator](deploying-strimzi-operator.md) installs the operator that turns a `Kafka` resource into a running cluster.

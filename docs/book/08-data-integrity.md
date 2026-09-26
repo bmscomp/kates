@@ -421,6 +421,7 @@ Each disruption type can expose different integrity issues:
 ### 4. Test with Production-Like Configuration
 
 Integrity tests are only meaningful if the topic configuration matches production:
+
 - Same replication factor
 - Same `min.insync.replicas`
 - Same `acks` mode

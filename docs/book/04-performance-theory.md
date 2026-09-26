@@ -89,6 +89,7 @@ Under normal conditions, end-to-end latency on a local Kind cluster typically la
 **Never use average latency as your primary metric.** Here's why:
 
 Consider two systems over 100 requests:
+
 - **System A**: 99 requests at 5ms, 1 request at 500ms → Average = 9.95ms
 - **System B**: 100 requests at 10ms → Average = 10ms
 
