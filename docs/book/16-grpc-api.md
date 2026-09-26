@@ -101,6 +101,8 @@ The protobuf contract is defined in [`kates.proto`](https://github.com/bmscomp/k
 
 ### TestService
 
+Use `TestService` to start performance test runs from your own code and follow them to the end; they are the same runs that `kates test list` and `GET /api/tests` show.
+
 | RPC | Request | Response | Description |
 |-----|---------|----------|-------------|
 | `CreateTest` | `CreateTestRequest` | `TestRun` | Start a new test execution |
@@ -211,6 +213,8 @@ grpcurl "${GRPC[@]}" -d '{"id": "a1b2c3d4"}' localhost:30083 kates.TestService/D
 
 ### ClusterService
 
+Use `ClusterService` to read the Kafka cluster the backend is connected to — its brokers, node pools, topics and consumer groups — without changing anything.
+
 | RPC | Request | Response | Description |
 |-----|---------|----------|-------------|
 | `GetClusterInfo` | `Empty` | `ClusterInfo` | Cluster ID and broker list |
@@ -287,6 +291,8 @@ grpcurl "${GRPC[@]}" -d '{"name": "kates-results"}' localhost:30083 kates.Cluste
 ---
 
 ### HealthService
+
+Use `HealthService` to check that the backend is up, which benchmark backend it uses by default, and whether it can reach Kafka.
 
 | RPC | Request | Response | Description |
 |-----|---------|----------|-------------|
@@ -450,4 +456,4 @@ Generated clients carry no credentials of their own: attach the API key as `x-ap
 - Kates raises five application status codes — `UNAUTHENTICATED`, `INVALID_ARGUMENT`, `NOT_FOUND`, `FAILED_PRECONDITION` and `INTERNAL`; any other exception surfaces as `UNKNOWN`, and transport-level codes like `UNAVAILABLE` come from the gRPC runtime itself
 - Typed clients for Go, Java, and Python are generated with `protoc` from the bundled `kates/src/main/proto/kates.proto`; Go needs an `M` mapping because the file declares no `go_package`
 
-This closes the book's reference part — for ready-made workflows that put these APIs to work, return to [Recipes & Patterns](14-recipes.md), and turn to the appendices for the glossary, troubleshooting guide, CI/CD templates, and version matrix.
+That ends the reference part. The appendices come next, starting with the [Glossary](appendix-a-glossary.md): look up ISR, KRaft or consumer lag there when one of these references uses a term without explaining it.
