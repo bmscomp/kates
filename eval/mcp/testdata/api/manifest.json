@@ -13,7 +13,6 @@
   "GET /api/disruptions/d3d3d3d3": "disruption_d3d3d3d3.json",
   "GET /api/disruptions/playbooks/leader-cascade": "playbook_leader_cascade.json",
   "GET /api/disruptions/playbooks/rolling-restart": "playbook_rolling_restart.json",
-  "GET /api/disruptions?size=200": "disruptions_list.json",
   "GET /api/kafka/topics/eval-diag-abc123": "topic_eval_diag.json",
   "GET /api/kafka/topics/eval-facts-abc123": "topic_eval_facts.json",
   "GET /api/kafka/topics/eval-pay-abc123": "topic_eval_pay.json",
@@ -34,8 +33,5 @@
   "GET /api/tests/708192a3": "test_run_708192a3.json",
   "GET /api/tests/708192a3/report/regression": "report_regression_708192a3.json",
   "GET /api/tests?page=0&size=200": "tests_all.json",
-  "GET /api/tests?page=0&size=200&status=PENDING": "tests_empty.json",
-  "GET /api/tests?page=0&size=200&status=RUNNING": "tests_empty.json",
-  "GET /api/tests?page=0&size=200&status=STOPPING": "tests_empty.json",
   "GET /api/tests?page=0&size=200&type=LOAD": "tests_load.json"
 }
