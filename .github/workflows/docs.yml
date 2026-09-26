@@ -55,6 +55,9 @@ jobs:
       - name: Verify book style rules
         run: ./scripts/check-book-style.sh
 
+      - name: Verify book theme colours meet WCAG AA
+        run: ./scripts/check-book-contrast.py
+
   mermaid:
     name: Mermaid Diagrams Parse
     needs: changes
