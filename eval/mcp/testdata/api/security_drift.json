@@ -1,0 +1,287 @@
+{
+  "hasBaseline": true,
+  "baselineTimestamp": "2026-09-26T08:02:11.482Z",
+  "baselineGrade": "D",
+  "currentGrade": "D",
+  "drifts": [
+    {
+      "check": "SASL Authentication",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "No Plaintext Listeners",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "ACL Authorization",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "ACL Rules Defined",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "No Wildcard Topic ACLs",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Unclean Election Disabled",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Auto-Create Topics Disabled",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Message Size Bounded",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Min ISR ≥ 2",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Replication Factor ≥ 3",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Inter-Broker Encryption",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Default Cleanup Policy",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Connection Rate Limiting",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Default Quotas Set",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "TLS Protocol Version",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Super Users Audited",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "SASL Mechanism Strength",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "DENY Rules Defined",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "SSL Keystore Configured",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "SSL Truststore Configured",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "mTLS Enforcement",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Log Retention Configured",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Controlled Shutdown",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Delete Topic Enabled",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Transaction Log Replication",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Request Size Limits",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Background Threads",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Offset Retention",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Log Segment Size",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Compression Policy",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "SSL Cipher Suites",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "SSL Hostname Verification",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "SSL Enabled Protocols",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Topics with RF=1",
+      "baseline": "WARN",
+      "current": "PASS",
+      "change": "IMPROVED",
+      "detail": "All user topics have replication factor ≥ 2",
+      "fix": "See the CIS Kafka Benchmark control CIS-3.15"
+    },
+    {
+      "check": "Under-Replicated Partitions",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Internal Topic Protection",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Topic Count",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Max Connections Per IP",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Network Threads",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "IO Threads",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Listener Protocol Map",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Log Flush Interval",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Group Coordinator Replication",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Leader Imbalance Threshold",
+      "baseline": "PASS",
+      "current": "PASS",
+      "change": "UNCHANGED"
+    },
+    {
+      "check": "Delegation Token Config",
+      "baseline": "WARN",
+      "current": "WARN",
+      "change": "UNCHANGED"
+    }
+  ],
+  "summary": {
+    "improved": 1,
+    "degraded": 0,
+    "unchanged": 44,
+    "total": 45
+  },
+  "timestamp": "2026-09-26T09:14:40.120771Z"
+}

@@ -1,0 +1,26 @@
+{
+  "clusterId": "Xy3kQ9vTR2uD4mP1aBcDeF",
+  "brokerCount": 3,
+  "controller": {
+    "id": 1,
+    "host": "krafter-controllers-1.krafter-kafka-brokers.kafka.svc",
+    "port": 9090
+  },
+  "brokers": [
+    {
+      "id": 3,
+      "host": "krafter-brokers-3.krafter-kafka-brokers.kafka.svc",
+      "port": 9092
+    },
+    {
+      "id": 4,
+      "host": "krafter-brokers-4.krafter-kafka-brokers.kafka.svc",
+      "port": 9092
+    },
+    {
+      "id": 5,
+      "host": "krafter-brokers-5.krafter-kafka-brokers.kafka.svc",
+      "port": 9092
+    }
+  ]
+}

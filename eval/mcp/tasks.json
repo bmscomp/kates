@@ -1,0 +1,577 @@
+{
+  "version": 1,
+  "fixed_at": "2026-09-26",
+  "tasks": [
+    {
+      "id": "fact-min-isr",
+      "persona": "platform",
+      "prompt": "What min.insync.replicas is actually in force for the Kafka topic eval-facts-{run_tag}, and at what level is that value set?",
+      "answer_fields": [
+        {"name": "min_insync_replicas", "type": "number", "description": "the min.insync.replicas value in force for the topic"},
+        {"name": "set_at", "type": "string", "description": "where that value is set: topic, broker, cluster-default (the cluster-wide dynamic broker default) or kafka-default (Kafka's built-in default)"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["kafka", "create-topic", "eval-facts-{run_tag}", "--partitions", "3", "--replication-factor", "3", "-o", "json"]},
+        {"kind": "wait", "seconds": 5}
+      ],
+      "oracle": {"fn": "topic_min_isr", "args": {"topic": "eval-facts-{run_tag}"}},
+      "checks": [
+        {"field": "min_insync_replicas", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "set_at", "kind": "exact"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 600,
+      "notes": "The topic is created without a topic-level override, so the value in force is the broker's: the kafka-cluster chart sets min.insync.replicas 2 in the Kafka resource, which Kafka reports as STATIC_BROKER_CONFIG. A good answer says 2, set on the brokers, not on the topic. The silent misread this guards against (plan §2.4, min ISR set at broker level) is reading a missing topic-level entry as Kafka's default of 1. The backend reports the value with its source (TopicService configSources), and both the MCP tools and the CLI skill say so."
+    },
+    {
+      "id": "fact-partition-leader",
+      "persona": "platform",
+      "prompt": "Which broker currently leads partition 1 of the topic eval-facts-{run_tag}, and which brokers are in that partition's in-sync replica set?",
+      "answer_fields": [
+        {"name": "leader_broker_id", "type": "number", "description": "the node id of the broker leading partition 1"},
+        {"name": "isr_broker_ids", "type": "string[]", "description": "node ids of the brokers in partition 1's in-sync replica set, as strings"}
+      ],
+      "setup": [
+        {"kind": "use", "task": "fact-min-isr"}
+      ],
+      "oracle": {"fn": "partition_leader", "args": {"topic": "eval-facts-{run_tag}", "partition": 1}},
+      "checks": [
+        {"field": "leader_broker_id", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "isr_broker_ids", "kind": "set"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 600,
+      "notes": "A plain cluster fact, the baseline for grounded claims: the leader and ISR of one partition, read from topic detail. Volatile: a broker restart moves leadership until preferred leader election restores it (up to five minutes), so compute the oracle right before the trials and again after them, and void the task if it moved. The MCP arm reads it from cluster_topology with the topic; the CLI arm from topic detail (`kates cluster topology` lists controllers and node pools, not partition leaders, so an answer built from that command alone is wrong)."
+    },
+    {
+      "id": "sec-posture",
+      "persona": "security",
+      "prompt": "Where does the lab Kafka cluster stand on security right now? I want its overall grade and every high- or critical-severity check that is not passing.",
+      "answer_fields": [
+        {"name": "grade", "type": "string", "description": "the A to F grade Kates gives the Kafka cluster's own configuration checks, leaving out any Kubernetes admission-policy (Kyverno) checks"},
+        {"name": "failing_high_or_critical", "type": "string[]", "description": "the names, exactly as Kates gives them, of the Kafka checks with severity HIGH or CRITICAL whose status is WARN or FAIL"}
+      ],
+      "setup": [],
+      "oracle": {"fn": "security_posture", "args": {}},
+      "checks": [
+        {"field": "grade", "kind": "exact"},
+        {"field": "failing_high_or_critical", "kind": "set"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 600,
+      "notes": "The reference is the backend's audit (GET /api/security/audit). The CLI's security audit adds checks of category policy that it reads with the local kubectl from whatever kubeconfig context is current, adds a HIGH FAIL when Kyverno is not visible, and can lower the grade one letter; a correct CLI-arm answer leaves them out, as the skill says, or its grade does not match. A good answer also says this is a lab posture check, not audit evidence, but that is not graded as a caveat because missing it misreads no data. Under-Replicated Partitions reads live state: run the oracle before and after the trials."
+    },
+    {
+      "id": "sec-listener-encryption",
+      "persona": "security",
+      "prompt": "Is traffic to the lab Kafka cluster's brokers encrypted on every listener? If it is not, which listeners carry it in the clear?",
+      "answer_fields": [
+        {"name": "all_listeners_encrypted", "type": "boolean", "description": "true only if every listener uses SSL or SASL_SSL"},
+        {"name": "unencrypted_listeners", "type": "string[]", "description": "the listener names as Kafka's listener.security.protocol.map spells them (NAME-PORT) whose protocol is PLAINTEXT or SASL_PLAINTEXT"}
+      ],
+      "setup": [],
+      "oracle": {"fn": "listener_encryption", "args": {}},
+      "checks": [
+        {"field": "all_listeners_encrypted", "kind": "exact"},
+        {"field": "unencrypted_listeners", "kind": "set"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 600,
+      "notes": "The kafka-cluster chart's plain listener is SCRAM without TLS, which Strimzi maps as PLAIN-9092:SASL_PLAINTEXT. The audit's No Plaintext Listeners check looks for the text PLAINTEXT:// and passes, and so does Listener Protocol Map whenever the map holds SASL_PLAINTEXT, so an answer that reads the check names says everything is encrypted. The truth is in the protocol map, which the config consistency check lists for every broker and the Listener Protocol Map check shows in its detail. A good answer: not encrypted everywhere; PLAIN-9092 (SASL_PLAINTEXT) carries credentials-checked but unencrypted traffic; the audit's plaintext check does not see named listeners (mcp caveat security-broker-wide-keys). The misread is caught by the boolean, so no phrase is required."
+    },
+    {
+      "id": "sec-pentest-cve",
+      "persona": "security",
+      "prompt": "Did the security penetration test find anything exploitable in the lab Kafka cluster, and is the cluster exposed to any known Kafka CVEs?",
+      "answer_fields": [
+        {"name": "pentest_vulnerable_checks", "type": "string[]", "description": "names of the penetration-test checks reported VULNERABLE, exactly as Kates names them"},
+        {"name": "pentest_attacked_cluster", "type": "boolean", "description": "whether the penetration test actually sent attacks to the cluster"},
+        {"name": "cve_check_compared_version", "type": "boolean", "description": "whether the CVE check compared the cluster's actual Kafka version with its list of CVEs"}
+      ],
+      "setup": [],
+      "oracle": {"fn": "pentest_and_cve", "args": {}},
+      "checks": [
+        {"field": "pentest_vulnerable_checks", "kind": "set"},
+        {"field": "pentest_attacked_cluster", "kind": "exact"},
+        {"field": "cve_check_compared_version", "kind": "exact"}
+      ],
+      "required_caveats": [
+        {"id": "pentest-config-only", "any_of": ["attacks nothing", "attack nothing", "does not attack", "doesn't attack", "did not attack", "didn't attack", "no actual attack", "not an actual attack", "not a real attack", "no real attack", "config-only", "configuration-only", "configuration only", "config only", "only reads", "only inspects", "only checks the config", "reads the broker config", "reads broker config", "reads the configuration", "inspects configuration", "inspects the configuration", "configuration inspection", "not a real penetration test", "not a penetration test", "isn't a penetration test"]},
+        {"id": "cve-fixed-list", "any_of": ["fixed list", "static list", "hard-coded", "hardcoded", "seven", "7 cves", "7 known", "list of 7", "newest from 2024", "from 2024", "version is unknown", "version unknown", "unknown version", "never learns", "does not know the kafka version", "doesn't know the kafka version", "did not compare", "didn't compare", "not compared", "could not compare", "couldn't compare", "cannot compare"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 600,
+      "notes": "Two silent misreads from plan §2.4 in one question. The pentest's six checks read the first broker's configuration and the ACL list and send nothing to the cluster (SecurityPentestService.java:40-67). The CVE check compares against a fixed list of seven CVEs, the newest from 2024, and never learns the Kafka version: kafkaVersion is \"unknown\", every entry is reported PATCHED with grade PASS, so \"no known CVEs\" is not supported by the data. A good answer lists the checks reported VULNERABLE, says they come from configuration, and says the CVE result says nothing about this cluster's version."
+    },
+    {
+      "id": "sec-drift-trend",
+      "persona": "security",
+      "prompt": "What has changed in the lab Kafka cluster's security posture since the security baseline saved at {baseline_saved_at}, and is its security grade trending up or down over time?",
+      "answer_fields": [
+        {"name": "baseline_grade", "type": "string", "description": "the grade recorded in that baseline"},
+        {"name": "current_grade", "type": "string", "description": "the grade now"},
+        {"name": "improved_checks", "type": "string[]", "description": "names of the checks whose status improved since the baseline, exactly as Kates names them"},
+        {"name": "degraded_checks", "type": "string[]", "description": "names of the checks whose status got worse since the baseline, exactly as Kates names them"},
+        {"name": "grade_history_shows_trend", "type": "boolean", "description": "whether Kates keeps a durable history of grades that can show a trend over time"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["kafka", "create-topic", "eval-rf1-{run_tag}", "--partitions", "1", "--replication-factor", "1", "-o", "json"]},
+        {"kind": "wait", "seconds": 5},
+        {"kind": "kates", "args": ["security", "baseline", "--save", "-o", "json"], "capture": {"baseline_saved_at": "$.timestamp", "baseline_saved_grade": "$.grade"}},
+        {"kind": "kates", "args": ["kafka", "delete-topic", "eval-rf1-{run_tag}", "--yes"]},
+        {"kind": "wait", "seconds": 15}
+      ],
+      "oracle": {"fn": "security_drift", "args": {}},
+      "checks": [
+        {"field": "baseline_grade", "kind": "exact"},
+        {"field": "current_grade", "kind": "exact"},
+        {"field": "improved_checks", "kind": "set"},
+        {"field": "degraded_checks", "kind": "set"},
+        {"field": "grade_history_shows_trend", "kind": "exact"}
+      ],
+      "required_caveats": [
+        {"id": "security-trend-in-memory", "any_of": ["in memory", "in-memory", "lost on restart", "lost when", "each audit", "every audit", "audit call", "own audit", "my audit", "per pod", "per-pod", "last 100", "not durable", "not persisted", "isn't persisted", "is not persisted"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 600,
+      "notes": "Setup saves the baseline while a replication-factor-1 topic exists, then deletes the topic, so Topics with RF=1 goes from WARN to PASS: drift shows one improved check and nothing degraded (unless the lab has another RF=1 topic, in which case the oracle reports what is there). Saving replaces the lab's reference security baseline. The trend half is a silent misread from plan §2.4: the grade history is an in-memory list of the last 100 explicit audits in the backend pod, lost on restart and fed by every explicit audit, the agent's own included, so it cannot show a trend over time; kates mcp leaves it out, the CLI has security trend. A good answer names the one change and both grades, and refuses the trend with that reason."
+    },
+    {
+      "id": "run-vs-baseline",
+      "persona": "platform",
+      "prompt": "How does LOAD run {cand_id} compare with the LOAD baseline? Give me the change in p99 latency and in average throughput, and tell me whether Kates flags it as a regression.",
+      "answer_fields": [
+        {"name": "baseline_run_id", "type": "string", "description": "id of the baseline run it was compared with"},
+        {"name": "p99_change_percent", "type": "number", "description": "change in p99 latency from the baseline to this run, in percent (positive means slower)"},
+        {"name": "throughput_change_percent", "type": "number", "description": "change in average throughput in records per second from the baseline to this run, in percent"},
+        {"name": "regression_flagged", "type": "boolean", "description": "whether Kates's own regression check flags the run"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-load-{run_tag}", "--records", "10000", "--record-size", "1024", "--throughput", "1000", "--wait", "-o", "json"], "capture": {"base_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "kates", "args": ["test", "baseline", "set", "{base_id}"]},
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-load-{run_tag}", "--records", "10000", "--record-size", "1024", "--throughput", "1000", "--wait", "-o", "json"], "capture": {"band1_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-load-{run_tag}", "--records", "10000", "--record-size", "1024", "--throughput", "1000", "--wait", "-o", "json"], "capture": {"band2_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-load-{run_tag}", "--records", "10000", "--record-size", "1024", "--throughput", "1000", "--wait", "-o", "json"], "capture": {"band3_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-load-{run_tag}", "--records", "10000", "--record-size", "1024", "--throughput", "1000", "--wait", "-o", "json"], "capture": {"cand_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-load-{run_tag}", "--records", "10000", "--record-size", "1024", "--throughput", "1000", "--producers", "8", "--wait", "-o", "json"], "capture": {"par_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-load-{run_tag}", "--records", "10000", "--record-size", "512", "--throughput", "1000", "--wait", "-o", "json"], "capture": {"small_id": "$.id"}, "expect": {"$.status": "DONE"}}
+      ],
+      "oracle": {"fn": "run_vs_baseline", "args": {"run_id": "{cand_id}"}},
+      "checks": [
+        {"field": "baseline_run_id", "kind": "exact"},
+        {"field": "p99_change_percent", "kind": "number", "tolerance": 0.5, "tolerance_kind": "abs"},
+        {"field": "throughput_change_percent", "kind": "number", "tolerance": 0.5, "tolerance_kind": "abs"},
+        {"field": "regression_flagged", "kind": "exact"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "Builds the run world every run-* task uses: seven LOAD runs on one topic of this evaluation run, 10,000 records each at 1,000 records per second (about ten seconds apiece): the baseline, three runs like it, the candidate, one asking for 8 producers and one with 512-byte records. It sets the LOAD baseline, replacing the lab's. This task grades grounded numbers: the baseline id, the two percentage changes as the regression report computes them (one decimal), and the backend's flag on its fixed thresholds (throughput down 10 %, p99 up 20 %). A good answer also notes that a run's throughput is the mean of its producer and consumer task rates, but that is not graded."
+    },
+    {
+      "id": "run-noise-band",
+      "persona": "platform",
+      "prompt": "Is the p99 latency of LOAD run {cand_id} out of line with the earlier finished LOAD runs that used exactly the same settings, or inside their normal spread?",
+      "answer_fields": [
+        {"name": "band_run_count", "type": "number", "description": "how many earlier finished runs of the same type, backend and identical stored spec you compared with"},
+        {"name": "band_p99_min_ms", "type": "number", "description": "the lowest p99 latency among those runs, in milliseconds, as each run's report summary gives it"},
+        {"name": "band_p99_max_ms", "type": "number", "description": "the highest p99 latency among those runs, in milliseconds"},
+        {"name": "run_p99_ms", "type": "number", "description": "this run's p99 latency as its report summary gives it, in milliseconds"},
+        {"name": "p99_position", "type": "string", "description": "below, within or above the range of those runs"}
+      ],
+      "setup": [
+        {"kind": "use", "task": "run-vs-baseline"}
+      ],
+      "oracle": {"fn": "noise_band", "args": {"run_id": "{cand_id}"}},
+      "checks": [
+        {"field": "band_run_count", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "band_p99_min_ms", "kind": "number", "tolerance": 1, "tolerance_kind": "pct"},
+        {"field": "band_p99_max_ms", "kind": "number", "tolerance": 1, "tolerance_kind": "pct"},
+        {"field": "run_p99_ms", "kind": "number", "tolerance": 1, "tolerance_kind": "pct"},
+        {"field": "p99_position", "kind": "exact"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "The band is assess_run's rule, which the CLI skill spells out with jq: earlier DONE runs of the same type and backend, not from a scenario, with an identical stored spec. The topic carries run_tag, so exactly four runs match (the baseline and three like it); the 8-producer and 512-byte runs have other specs and must be left out. The p99 of a run is its report summary's, the mean of its producer's and consumer's p99. An answer that builds the band from the type's trend mixes specs and gets other numbers. A good answer gives the four runs' range, the candidate's p99, where it falls, and says a difference inside the range is noise."
+    },
+    {
+      "id": "run-load-parallel-producers",
+      "persona": "platform",
+      "prompt": "LOAD run {par_id} was set up with 8 producers to mimic our application's 8 parallel producers. What throughput did those 8 producers reach together, and can we size the cluster for 8 parallel producers from this run?",
+      "answer_fields": [
+        {"name": "producers_that_ran", "type": "number", "description": "how many producer tasks the run actually ran"},
+        {"name": "producer_throughput_rec_per_sec", "type": "number", "description": "the records per second the run's producing actually reached"},
+        {"name": "run_supports_sizing", "type": "boolean", "description": "whether this run can show how the cluster handles 8 parallel producers"}
+      ],
+      "setup": [
+        {"kind": "use", "task": "run-vs-baseline"}
+      ],
+      "oracle": {"fn": "load_parallel", "args": {"run_id": "{par_id}"}},
+      "checks": [
+        {"field": "producers_that_ran", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "producer_throughput_rec_per_sec", "kind": "number", "tolerance": 2, "tolerance_kind": "pct"},
+        {"field": "run_supports_sizing", "kind": "exact"}
+      ],
+      "required_caveats": [
+        {"id": "load-single-producer", "any_of": ["one producer", "single producer", "1 producer", "only one producer", "a single producer", "one produce task", "one producer task", "single produce task", "ignores numproducers", "ignores the producer count", "ignores the 8"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "The \"this test cannot answer that\" task. The run's spec says numProducers 8, but a LOAD run is one producer and one consumer whatever the spec says (TestOrchestrator, case LOAD), and the run's tasks show it: one produce task, one consume task. The throughput is that one producer's, capped by the requested 1,000 records per second. A good answer gives the one producer's rate, says the run cannot size 8 parallel producers, and proposes a STRESS run (one producer per numProducers) for the human to start, rate-limited and under 30 minutes. This is the plan §2.4 silent misread of LOAD's single producer."
+    },
+    {
+      "id": "run-baseline-spec-mismatch",
+      "persona": "platform",
+      "prompt": "Did LOAD run {small_id} regress against the LOAD baseline?",
+      "answer_fields": [
+        {"name": "regression_flagged", "type": "boolean", "description": "whether Kates's own regression check flags the run"},
+        {"name": "comparable_to_baseline", "type": "boolean", "description": "whether the run and the baseline used the same settings, so that the comparison is like for like"},
+        {"name": "differing_settings", "type": "string[]", "description": "the spec fields whose values differ between the run and the baseline, named in camelCase as Kates names spec fields"}
+      ],
+      "setup": [
+        {"kind": "use", "task": "run-vs-baseline"}
+      ],
+      "oracle": {"fn": "baseline_spec_mismatch", "args": {"run_id": "{small_id}"}},
+      "checks": [
+        {"field": "regression_flagged", "kind": "exact"},
+        {"field": "comparable_to_baseline", "kind": "exact"},
+        {"field": "differing_settings", "kind": "set"}
+      ],
+      "required_caveats": [
+        {"id": "spec-mismatch", "any_of": ["record size", "recordsize", "record-size", "different settings", "different spec", "spec differ", "specs differ", "settings differ", "not like-for-like", "not like for like", "not comparable", "isn't comparable", "not directly comparable", "apples"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "The regression check compares a run with the one baseline of its type whatever that run's spec (mcp caveat regression-one-baseline). Here the run wrote 512-byte records and the baseline 1,024-byte ones, so whatever the backend flags, the comparison is not like for like. A good answer reports the backend's verdict, says the specs differ in recordSize, and does not call it a regression or an improvement; it may propose rerunning the baseline's spec. kates mcp reports baselineMatch no; the CLI arm has to compare the two specs itself."
+    },
+    {
+      "id": "run-trend-mixed-specs",
+      "persona": "platform",
+      "prompt": "Across all the LOAD runs on topic eval-load-{run_tag}, is p99 latency creeping up from run to run?",
+      "answer_fields": [
+        {"name": "runs_on_topic", "type": "number", "description": "how many LOAD runs used that topic"},
+        {"name": "distinct_settings", "type": "number", "description": "how many different stored specs those runs have"},
+        {"name": "trend_across_all_meaningful", "type": "boolean", "description": "whether reading one trend across all of those runs is meaningful"}
+      ],
+      "setup": [
+        {"kind": "use", "task": "run-vs-baseline"}
+      ],
+      "oracle": {"fn": "topic_trend", "args": {"topic": "eval-load-{run_tag}", "test_type": "LOAD"}},
+      "checks": [
+        {"field": "runs_on_topic", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "distinct_settings", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "trend_across_all_meaningful", "kind": "exact"}
+      ],
+      "required_caveats": [
+        {"id": "trend-mixes-specs", "any_of": ["different settings", "different spec", "differing spec", "specs differ", "settings differ", "not comparable", "not like-for-like", "not like for like", "apples", "record size", "mixes", "mixed spec", "mixed settings", "mix of spec", "mix of settings", "mix of record size"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "The seven runs on the topic have three stored specs (five alike, one asking for 8 producers, one with 512-byte records). GET /api/trends and kates trend select runs by type and date only, so a trend over them mixes specs (plan §2.4 silent misread; mcp caveat trends-mix-specs). A good answer says one trend across all seven is not meaningful, and reads the five like runs as a spread rather than a trend. list_runs has no topic filter, so the MCP arm has to read each run's spec; that cost is part of what this task measures."
+    },
+    {
+      "id": "sre-kates-caused-lag",
+      "persona": "sre",
+      "prompt": "Our consumer group eval-orders-{run_tag}-app has been lagging on topic eval-orders-{run_tag} since about {alert_since}. Is Kafka itself unhealthy, or did something Kates did cause the lag?",
+      "answer_fields": [
+        {"name": "kafka_unhealthy", "type": "boolean", "description": "whether the Kafka cluster itself is unhealthy: offline or under-replicated partitions, or no KRaft quorum leader"},
+        {"name": "kates_caused", "type": "boolean", "description": "whether something Kates did explains the lag"},
+        {"name": "kates_run_id", "type": "string", "description": "id of the Kates test run responsible, or an empty string if none"},
+        {"name": "group_total_lag", "type": "number", "description": "the group's total lag on that topic now, in messages"},
+        {"name": "group_active_members", "type": "number", "description": "how many consumers are in the group now"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-orders-{run_tag}", "--records", "3000", "--throughput", "1000", "--consumer-group", "eval-orders-{run_tag}-app", "--wait", "-o", "json"], "capture": {"orders_prime_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "wait", "seconds": 70},
+        {"kind": "clock", "capture": {"alert_since": "rfc3339_minute"}},
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-orders-{run_tag}", "--records", "5000", "--throughput", "1000", "--wait", "-o", "json"], "capture": {"orders_culprit_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "wait", "seconds": 5}
+      ],
+      "oracle": {"fn": "kates_caused_lag", "args": {"group": "eval-orders-{run_tag}-app", "topic": "eval-orders-{run_tag}", "since": "{alert_since}"}},
+      "checks": [
+        {"field": "kafka_unhealthy", "kind": "exact"},
+        {"field": "kates_caused", "kind": "exact"},
+        {"field": "kates_run_id", "kind": "exact"},
+        {"field": "group_total_lag", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "group_active_members", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"}
+      ],
+      "required_caveats": [
+        {"id": "audit-no-actor", "any_of": ["who started", "who ran", "who launched", "who kicked", "no actor", "without an actor", "records no user", "cannot tell who", "can't tell who", "cannot say who", "can't say who", "doesn't record who", "does not record who", "doesn't say who", "does not say who", "not who", "unknown who", "which user", "whoever"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "Setup first lets the application's group consume the topic (a LOAD run whose consumer uses that group, so it commits), then, after the alert time, a second LOAD run writes 5,000 records into the same topic with its own consumer group. The app group has no members, so its lag is exactly those records. A good answer: Kafka is healthy; the Kates LOAD run created just after the alert time wrote into the topic the group reads, and the group has no active consumer, so the lag stays; the run is finished (nothing to cancel). It must say Kates cannot tell who started the run: audit rows record no actor (plan §2.2 SRE example; mcp caveat audit-no-actor). If other tasks' faults run after this setup, disruptions also appear after the alert time; they did not cause the lag and a careful answer says so."
+    },
+    {
+      "id": "sre-lag-partition-leader",
+      "persona": "sre",
+      "prompt": "Consumer group eval-pay-{run_tag}-app is falling behind on topic eval-pay-{run_tag}. Which partitions are lagging and by how much in total, and which brokers lead those partitions?",
+      "answer_fields": [
+        {"name": "lagging_partitions", "type": "string[]", "description": "numbers of the partitions of that topic where the group's lag is above 0, as strings"},
+        {"name": "total_lag", "type": "number", "description": "the group's total lag on the topic, in messages"},
+        {"name": "leader_broker_ids", "type": "string[]", "description": "node ids of the brokers leading the lagging partitions, as strings"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["test", "create", "--type", "LOAD", "--topic", "eval-pay-{run_tag}", "--records", "3000", "--throughput", "1000", "--consumer-group", "eval-pay-{run_tag}-app", "--wait", "-o", "json"], "capture": {"pay_prime_id": "$.id"}, "expect": {"$.status": "DONE"}},
+        {"kind": "kates", "args": ["kafka", "produce", "eval-pay-{run_tag}", "--key", "order-42", "--value", "eval-lag", "-o", "json"], "repeat": 25, "capture": {"pay_lag_partition": "$.partition"}},
+        {"kind": "wait", "seconds": 5}
+      ],
+      "oracle": {"fn": "lag_partitions", "args": {"group": "eval-pay-{run_tag}-app", "topic": "eval-pay-{run_tag}"}},
+      "checks": [
+        {"field": "lagging_partitions", "kind": "set"},
+        {"field": "total_lag", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "leader_broker_ids", "kind": "set"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "Twenty-five records with one key land on one partition, after the group has committed everything before them, so the lag is 25 on one partition. The task is the join the plan's SRE example needs: group lag per partition, then each lagging partition's leader from topic detail (consumer_group_lag does it in one call; the CLI arm needs kafka group and kafka topic). A good answer names the partition, 25, and its leader, and notes that lag is counted from committed offsets. The leader is volatile across broker restarts: run the oracle before and after the trials."
+    },
+    {
+      "id": "sre-stale-running-disruption",
+      "persona": "sre",
+      "prompt": "Is Kates running any test or fault against the lab cluster right now? I only care about what was started since {warm_since}.",
+      "answer_fields": [
+        {"name": "test_running", "type": "boolean", "description": "whether a Kates test run started since then is still running"},
+        {"name": "fault_in_progress", "type": "boolean", "description": "whether a Kates disruption is injecting a fault now"},
+        {"name": "disruption_records_marked_running", "type": "string[]", "description": "ids of the disruptions started since then whose stored record says RUNNING"}
+      ],
+      "setup": [
+        {"kind": "clock", "capture": {"warm_since": "rfc3339"}},
+        {"kind": "api", "method": "POST", "path": "/api/disruptions", "why": "kates disruption run polls until the record reaches a final status, which a launched plan's record never does (the launcher saves its outcome as a second insert under the same id, which fails), so the command times out after 20 minutes", "body": {"name": "eval-warmup-{run_tag}", "maxAffectedBrokers": 1, "autoRollback": false, "steps": [{"name": "warmup", "faultSpec": {"experimentName": "eval-warmup", "disruptionType": "POD_KILL", "targetNamespace": "kates-eval-void", "targetLabel": "app=kates-eval-void", "targetAll": true, "chaosDurationSec": 5, "gracePeriodSec": 0}, "steadyStateSec": 5, "observationWindowSec": 5, "requireRecovery": false}]}, "capture": {"warm_id": "$.id"}, "expect": {"$.status": "RUNNING"}, "timeout_s": 60},
+        {"kind": "wait", "seconds": 180},
+        {"kind": "kates", "args": ["disruption", "status", "{warm_id}", "-o", "json"], "expect": {"$.status": "RUNNING"}}
+      ],
+      "oracle": {"fn": "stale_running", "args": {"since": "{warm_since}", "stale_id": "{warm_id}"}},
+      "checks": [
+        {"field": "test_running", "kind": "exact"},
+        {"field": "fault_in_progress", "kind": "exact"},
+        {"field": "disruption_records_marked_running", "kind": "set"}
+      ],
+      "required_caveats": [
+        {"id": "running-record-is-stale", "any_of": ["not updated", "never updated", "isn't updated", "is not updated", "never finished recording", "never records", "stale", "not evidence", "not proof", "no longer running", "not actually running", "not still running", "isn't still running", "stuck at running", "stuck in running", "left at running", "left as running", "still says running", "still shows running"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 600,
+      "notes": "Setup starts a one-step plan aimed at a namespace with no pods, so it injects nothing and ends within seconds, and checks three minutes later that its record still says RUNNING. That is the data caveat activity-disruption-rows: a plan started through the API gets a RUNNING row that is never updated, because DisruptionLauncher saves the outcome as a second insert under the same id, which fails. A good answer: no test is running, no fault is in progress, the record of that plan says RUNNING but that only means it started then. When the launcher is fixed, setup stops at its last step, and this task is retired."
+    },
+    {
+      "id": "gameday-leader-kill-preview",
+      "persona": "gameday",
+      "prompt": "For Thursday's game day I want one step that kills whichever broker leads partition 0 of the topic eval-plan-{run_tag}, allowing at most one affected broker. If we ran it now, which broker and which pod would it hit, and would Kates's safety checks accept the plan?",
+      "answer_fields": [
+        {"name": "leader_broker_id", "type": "number", "description": "node id of the broker the step would kill"},
+        {"name": "target_pod", "type": "string", "description": "the Kubernetes pod name the step would kill"},
+        {"name": "would_be_accepted", "type": "boolean", "description": "whether Kates's safety checks would accept the plan now"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["kafka", "create-topic", "eval-plan-{run_tag}", "--partitions", "3", "--replication-factor", "3", "-o", "json"]},
+        {"kind": "wait", "seconds": 5}
+      ],
+      "oracle": {"fn": "leader_kill_preview", "args": {"topic": "eval-plan-{run_tag}", "partition": 0}},
+      "checks": [
+        {"field": "leader_broker_id", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "target_pod", "kind": "exact"},
+        {"field": "would_be_accepted", "kind": "exact"}
+      ],
+      "required_caveats": [
+        {"id": "leader-may-move", "any_of": ["may move", "can move", "might move", "could move", "may change", "can change", "might change", "could change", "may have moved", "looked up again", "looks it up again", "looks up the leader", "resolved again", "leader moves", "re-resolved", "leadership moves", "leadership can move", "leader can move", "leader may move"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "The plan §2.2 game-day example: one POD_KILL step with targetTopic and targetPartition 0, maxAffectedBrokers 1, previewed with the backend's dry run, which injects nothing. A good answer names the leader and its pod, gives the dry run's verdict, hands the human the plan and the --dry-run command to run first, and says the step looks the leader up again when it starts, so it may hit another broker if leadership moves before then. Agents must not run the plan. Volatile: run the oracle before and after the trials."
+    },
+    {
+      "id": "gameday-rolling-restart-preview",
+      "persona": "gameday",
+      "prompt": "We are thinking of running the rolling-restart playbook at the next game day. Before anyone runs it: which pods would it restart, does it touch the KRaft controllers, and would Kates's safety checks accept it right now?",
+      "answer_fields": [
+        {"name": "restarted_pods", "type": "string[]", "description": "the Kubernetes pod names the playbook would restart"},
+        {"name": "touches_controllers", "type": "boolean", "description": "whether it restarts KRaft controller pods"},
+        {"name": "would_be_accepted", "type": "boolean", "description": "whether Kates's safety checks would accept it now"}
+      ],
+      "setup": [],
+      "oracle": {"fn": "playbook_preview", "args": {"playbook": "rolling-restart"}},
+      "checks": [
+        {"field": "restarted_pods", "kind": "set"},
+        {"field": "touches_controllers", "kind": "exact"},
+        {"field": "would_be_accepted", "kind": "exact"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "Playbook preview, which P-17 made possible: the playbook's plan (GET /api/disruptions/playbooks/rolling-restart) through the dry run. Its targetLabel strimzi.io/component-type=kafka matches controllers as well as brokers, so the roll restarts every Kafka pod, through the Strimzi Cluster Operator one at a time; the guard counts one broker for a roll and passes it under maxAffectedBrokers 1. A good answer lists all the pods, says the controllers are rolled too (safely, by the operator, one at a time), gives the verdict, and gives the human the --dry-run command before the real one. The playbook list alone shows only a step count."
+    },
+    {
+      "id": "gameday-leader-cascade-fit",
+      "persona": "gameday",
+      "prompt": "Can we use the leader-cascade playbook to take out the leader of partition 0 of the topic eval-plan-{run_tag}? If not, what would it hit instead if we ran it now?",
+      "answer_fields": [
+        {"name": "playbook_fits", "type": "boolean", "description": "whether the playbook targets the leader of partition 0 of that topic"},
+        {"name": "playbook_target_topic", "type": "string", "description": "the topic whose partition leaders the playbook targets"},
+        {"name": "playbook_target_partitions", "type": "string[]", "description": "the partitions of that topic whose leaders it kills, as strings"},
+        {"name": "brokers_it_would_hit_now", "type": "string[]", "description": "node ids of the brokers it would kill if run now, as strings"}
+      ],
+      "setup": [
+        {"kind": "use", "task": "gameday-leader-kill-preview"}
+      ],
+      "oracle": {"fn": "playbook_fit", "args": {"playbook": "leader-cascade", "topic": "eval-plan-{run_tag}", "partition": 0}},
+      "checks": [
+        {"field": "playbook_fits", "kind": "exact"},
+        {"field": "playbook_target_topic", "kind": "exact"},
+        {"field": "playbook_target_partitions", "kind": "set"},
+        {"field": "brokers_it_would_hit_now", "kind": "set"}
+      ],
+      "required_caveats": [],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "Plan §2.2: the shipped leader-cascade playbook kills the leaders of __consumer_offsets partitions 0 and 1 and takes no parameters, so it does not fit a request about another topic, whatever its name suggests. A good answer says no, names what it targets and the brokers that lead those partitions now (from the dry run), and proposes an ad-hoc step on the requested partition instead, for the human to dry-run and run. Volatile leaders: run the oracle before and after the trials."
+    },
+    {
+      "id": "gameday-controller-kill-uncounted",
+      "persona": "gameday",
+      "prompt": "Someone proposed a game-day step that kills the KRaft controller pod {cluster_name}-{ctrl_pool}-{ctrl_id}, in a plan allowed to affect at most one broker. Would Kates's safety checks accept it, how many brokers would they count as affected, and does their acceptance mean the controller quorum is safe?",
+      "answer_fields": [
+        {"name": "would_be_accepted", "type": "boolean", "description": "whether Kates's safety checks would accept the plan"},
+        {"name": "brokers_counted", "type": "number", "description": "how many brokers the safety checks count as affected by the step"},
+        {"name": "acceptance_means_quorum_safe", "type": "boolean", "description": "whether the checks accepting it shows the controller quorum is safe"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["cluster", "topology", "-o", "json"], "capture": {"cluster_name": "$.cluster.name", "ctrl_pool": "$.nodes[role=controller][0].pool", "ctrl_id": "$.nodes[role=controller][0].id"}}
+      ],
+      "oracle": {"fn": "controller_kill_preview", "args": {"pod": "{cluster_name}-{ctrl_pool}-{ctrl_id}"}},
+      "checks": [
+        {"field": "would_be_accepted", "kind": "exact"},
+        {"field": "brokers_counted", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "acceptance_means_quorum_safe", "kind": "exact"}
+      ],
+      "required_caveats": [
+        {"id": "controllers-uncounted", "any_of": ["only brokers", "only counts brokers", "counts only brokers", "only broker", "brokers only", "controllers are not counted", "controllers aren't counted", "controller is not counted", "controller isn't counted", "doesn't count controllers", "does not count controllers", "doesn't count the controller", "does not count the controller", "not counted", "ignores controllers", "ignores the controller", "blind to controllers", "blind to the controller"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "P-18: the dry run lists the controller pod but the blast-radius check counts brokers only, so a controller kill counts 0 brokers and passes under maxAffectedBrokers 1. Its acceptance says nothing about the quorum (one of three controllers down leaves a majority, two would not, and the check would pass both). A good answer: accepted, 0 brokers counted, and the acceptance is no evidence of quorum safety; kates mcp flags KRaft controllers per step, the CLI arm has the skill's caveat. Targeting the controller by targetBrokerId instead of targetPod makes the backend fall back to the first broker, which a careful answer notices in the dry run's warning. Premise: the controllers are a dedicated node pool, as the kafka-cluster chart deploys them."
+    },
+    {
+      "id": "debrief-broker-kill",
+      "persona": "gameday",
+      "prompt": "Write up disruption {d1_id} for the game-day notes: what did it hit, did everything recover and how long did that take, how did it grade against an SLA, and were Kafka throughput and latency measured while it ran?",
+      "answer_fields": [
+        {"name": "status", "type": "string", "description": "the disruption's final status as Kates records it"},
+        {"name": "targeted_pod", "type": "string", "description": "the Kubernetes pod the fault took down"},
+        {"name": "recovered", "type": "boolean", "description": "whether every Kafka pod was ready again before Kates stopped watching"},
+        {"name": "time_to_all_ready_seconds", "type": "number", "description": "the time until every Kafka pod was ready again, in seconds"},
+        {"name": "sla_graded", "type": "boolean", "description": "whether the disruption was graded against an SLA"},
+        {"name": "kafka_metrics_measured", "type": "boolean", "description": "whether Kafka throughput and latency were measured during the disruption"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["cluster", "info", "-o", "json"], "capture": {"kill_broker": "$.brokers[0].id"}},
+        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "a template run is the only disruption whose final report the backend stores (DisruptionLauncher's second insert under the same id fails for plans and playbooks), and no kates command runs a template", "body": {"brokerId": "{kill_broker}"}, "capture": {"d1_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
+        {"kind": "clock", "capture": {"d1_done": "epoch"}}
+      ],
+      "oracle": {"fn": "disruption_debrief", "args": {"id": "{d1_id}"}},
+      "checks": [
+        {"field": "status", "kind": "exact"},
+        {"field": "targeted_pod", "kind": "exact"},
+        {"field": "recovered", "kind": "exact"},
+        {"field": "time_to_all_ready_seconds", "kind": "number", "tolerance": 1.5, "tolerance_kind": "abs"},
+        {"field": "sla_graded", "kind": "exact"},
+        {"field": "kafka_metrics_measured", "kind": "exact"}
+      ],
+      "required_caveats": [
+        {"id": "chaos-times-approximate", "any_of": ["approximate", "several seconds", "a few seconds", "polled", "polling", "polls", "not precise", "imprecise", "not exact", "from when kates asked", "from the fault request", "from when the fault was requested", "from the request"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "Ground truth is the DisruptionReport of a broker-kill-recovery template run (one POD_KILL of one broker, 30 s steady state, 60 s observation, recovery required), which the agent is meant to read here: a debrief is the report explained. The targeted pod is the one the pod watch saw DELETED (the timeline). Templates declare no SLA, so there is no grade to report; an answer that invents one is wrong. Metrics are measured only when Prometheus answers at kates.prometheus.url; missing means not measured, not zero. Recovery counts from when Kates asked for the fault, and on the default litmus-crd provider start and end are approximate by several seconds (plan §2.2 game-day limits); a good answer says so. Setup fails if the provider injected nothing (status not COMPLETED)."
+    },
+    {
+      "id": "debrief-compare-game-days",
+      "persona": "gameday",
+      "prompt": "Compare game-day disruption {d2_id} with the earlier one, {d1_id}. Did recovery get faster or slower, and by how much?",
+      "answer_fields": [
+        {"name": "earlier_worst_recovery_seconds", "type": "number", "description": "the earlier disruption's worst time until every Kafka pod was ready again, in seconds"},
+        {"name": "later_worst_recovery_seconds", "type": "number", "description": "the later disruption's worst time until every Kafka pod was ready again, in seconds"},
+        {"name": "recovery_change_seconds", "type": "number", "description": "later minus earlier, in seconds (negative means faster)"}
+      ],
+      "setup": [
+        {"kind": "use", "task": "debrief-broker-kill"},
+        {"kind": "wait", "seconds": 90, "since": "{d1_done}"},
+        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "a template run is the only disruption whose final report the backend stores, and no kates command runs a template", "body": {"brokerId": "{kill_broker}"}, "capture": {"d2_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
+        {"kind": "clock", "capture": {"d2_done": "epoch"}}
+      ],
+      "oracle": {"fn": "disruption_compare", "args": {"id": "{d2_id}", "baseline_id": "{d1_id}"}},
+      "checks": [
+        {"field": "earlier_worst_recovery_seconds", "kind": "number", "tolerance": 1, "tolerance_kind": "abs"},
+        {"field": "later_worst_recovery_seconds", "kind": "number", "tolerance": 1, "tolerance_kind": "abs"},
+        {"field": "recovery_change_seconds", "kind": "number", "tolerance": 1, "tolerance_kind": "abs"}
+      ],
+      "required_caveats": [
+        {"id": "chaos-times-approximate", "any_of": ["approximate", "several seconds", "a few seconds", "polled", "polling", "polls", "not precise", "imprecise", "not exact", "within noise", "within the noise", "noise", "within the margin"]}
+      ],
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "Two runs of the same template on the same broker, the plan §2.2 debrief against the last game day. The expected change is the backend's comparison (recoveryDeltaMs, later minus earlier), which the CLI arm computes from the two summaries' worstRecovery. A good answer gives both times and the change, and says that recovery times on the default litmus-crd provider are approximate by several seconds, so a difference of that size is not a trend. The broker is the same in both runs, so the comparison is like for like."
+    },
+    {
+      "id": "debrief-diagnose-without-report",
+      "persona": "gameday",
+      "prompt": "Shortly after {diag_fault_at}, producers writing to the topic eval-diag-{run_tag} logged NOT_LEADER_OR_FOLLOWER errors for partition 0 for under a minute, then recovered. Which broker was most likely lost or restarted, and does that broker lead partition 0 again now?",
+      "answer_fields": [
+        {"name": "lost_broker_id", "type": "number", "description": "node id of the broker most likely lost or restarted"},
+        {"name": "leads_partition_again", "type": "boolean", "description": "whether that broker leads partition 0 again now"}
+      ],
+      "setup": [
+        {"kind": "kates", "args": ["kafka", "create-topic", "eval-diag-{run_tag}", "--partitions", "3", "--replication-factor", "3", "-o", "json"]},
+        {"kind": "wait", "seconds": 90},
+        {"kind": "kates", "args": ["kafka", "topic", "eval-diag-{run_tag}", "-o", "json"], "capture": {"diag_leader": "$.partitionInfo[0].leader", "diag_preferred": "$.partitionInfo[0].replicas[0]"}},
+        {"kind": "assert_equal", "left": "{diag_leader}", "right": "{diag_preferred}", "message": "partition 0's leader is not its preferred replica; wait for preferred leader election and start a new run"},
+        {"kind": "clock", "capture": {"diag_fault_at": "rfc3339_minute"}},
+        {"kind": "api", "method": "POST", "path": "/api/disruptions/templates/broker-kill-recovery", "why": "a template run is the only disruption whose final report the backend stores, and no kates command runs a template", "body": {"brokerId": "{diag_leader}"}, "capture": {"diag_id": "$.id"}, "expect": {"$.report.status": "COMPLETED"}, "timeout_s": 900},
+        {"kind": "clock", "capture": {"diag_done": "epoch"}},
+        {"kind": "wait", "seconds": 330, "since": "{diag_done}"}
+      ],
+      "oracle": {"fn": "hidden_fault_target", "args": {"id": "{diag_id}", "topic": "eval-diag-{run_tag}", "partition": 0}},
+      "checks": [
+        {"field": "lost_broker_id", "kind": "number", "tolerance": 0, "tolerance_kind": "abs"},
+        {"field": "leads_partition_again", "kind": "exact"}
+      ],
+      "required_caveats": [
+        {"id": "inferred-not-recorded", "any_of": ["infer", "cannot confirm", "can't confirm", "cannot be certain", "can't be certain", "not certain", "no record", "without a record", "circumstantial", "indirect", "consistent with", "suggests"]}
+      ],
+      "forbid": {
+        "mcp": ["disruption_report", "kates_activity"],
+        "cli": ["kates disruption", "kates chaos", "kates audit", "kates watch", "kates changelog", "kates dashboard", "kates top", "kates resilience", "kubectl", "curl", "wget"]
+      },
+      "arms": ["mcp", "cli"],
+      "trials": 3,
+      "timeout_s": 900,
+      "notes": "Plan §8.4 scenario ground truth with the report hidden: setup kills the broker leading partition 0 (asserting first that it is the partition's preferred replica), the oracle reads the target from the DisruptionReport's pod timeline, and the runner denies the tools and commands in forbid, which would leak the answer (the report, the activity list, the audit, kubectl). Setup then waits 330 s after the run, past the controller's 300 s leader-imbalance check, so preferred leader election has returned leadership. What the agent can see: partition 0's replica list, whose first entry is its preferred leader and so the broker that led it before the errors, and the current leader. A good answer: that broker, most likely restarted, leads the partition again; it says the conclusion is inferred, not recorded. The runner must also scan transcripts (taskfile.forbidden_hits), because a Bash prefix rule does not see kates --context lab disruption, and the MCP timeline resource kates://disruptions/{id}/timeline needs an id the agent cannot list without the forbidden tools. Keep this task last: a later fault would move leaders."
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "run_tag": "abc123",
+  "context": "lab",
+  "api_url": "http://localhost:8080",
+  "kates": "/usr/local/bin/kates",
+  "created_at": "2026-09-26T08:00:00Z",
+  "updated_at": "2026-09-26T10:08:40Z",
+  "tasks": {
+    "fact-min-isr": {"status": "done", "captures": {}},
+    "fact-partition-leader": {"status": "done", "captures": {}},
+    "sec-drift-trend": {"status": "done", "captures": {"baseline_saved_at": "2026-09-26T08:02:11.482Z", "baseline_saved_grade": "D"}},
+    "run-vs-baseline": {"status": "done", "captures": {
+      "base_id": "1a2b3c4d", "band1_id": "2b3c4d5e", "band2_id": "3c4d5e6f", "band3_id": "4d5e6f70",
+      "cand_id": "5e6f7081", "par_id": "6f708192", "small_id": "708192a3"}},
+    "run-noise-band": {"status": "done", "captures": {}},
+    "run-load-parallel-producers": {"status": "done", "captures": {}},
+    "run-baseline-spec-mismatch": {"status": "done", "captures": {}},
+    "run-trend-mixed-specs": {"status": "done", "captures": {}},
+    "sre-kates-caused-lag": {"status": "done", "captures": {
+      "orders_prime_id": "81a2b3c4", "alert_since": "2026-09-26T09:35:00Z", "orders_culprit_id": "92b3c4d5"}},
+    "sre-lag-partition-leader": {"status": "done", "captures": {"pay_prime_id": "a3c4d5e6", "pay_lag_partition": 1}},
+    "sre-stale-running-disruption": {"status": "done", "captures": {"warm_since": "2026-09-26T09:40:03Z", "warm_id": "9f8e7d6c"}},
+    "gameday-leader-kill-preview": {"status": "done", "captures": {}},
+    "gameday-leader-cascade-fit": {"status": "done", "captures": {}},
+    "gameday-controller-kill-uncounted": {"status": "done", "captures": {"cluster_name": "krafter", "ctrl_pool": "controllers", "ctrl_id": 0}},
+    "debrief-broker-kill": {"status": "done", "captures": {"kill_broker": 3, "d1_id": "d1d1d1d1", "d1_done": 1790416150}},
+    "debrief-compare-game-days": {"status": "done", "captures": {"d2_id": "d2d2d2d2", "d2_done": 1790416470}},
+    "debrief-diagnose-without-report": {"status": "done", "captures": {
+      "diag_leader": 4, "diag_preferred": 4, "diag_fault_at": "2026-09-26T09:58:00Z", "diag_id": "d3d3d3d3", "diag_done": 1790416990}}
+  }
+}

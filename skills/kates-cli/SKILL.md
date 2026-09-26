@@ -64,11 +64,13 @@ kates security config-diff --context lab -o json    # config consistency across 
 Say what the answer is not: a lab posture check, not audit evidence.
 
 - The CLI's `security audit` is not the backend's alone. It adds checks of category `policy` (Kyverno) that it reads with your local `kubectl`, from whatever kubeconfig context is current, which need not be the cluster behind `--context`. Where kubectl cannot see Kyverno it adds a HIGH FAIL, "Kyverno is not installed", and where it finds policy violations it lowers the grade one letter. Leave those checks out (`jq '.checks |= map(select(.category != "policy"))'`) or name them as read from the local kubeconfig, and say the grade may carry that step.
-- Audit, compliance, drift and gate each run a fresh audit and add it to the grade history, which is in memory in the backend pod and lost on restart. `security trend` therefore mostly reflects calls like yours: do not report it as a trend.
-- `security pentest` attacks nothing: its checks read the first broker's configuration and the ACL list.
+- Each `security audit` adds its grade to the grade history: the last 100, in the backend pod's memory, lost on restart. Compliance, drift and gate run an audit without adding one (an older backend added those too). `security trend` therefore mostly reflects calls like yours: do not report it as a trend.
+- The audit, pentest, TLS and certificate checks read the configuration of the first broker the backend lists. When Kafka does not answer that read, or the ACL read, the backend runs the checks on an empty configuration or ACL list and does not say so: each check reports the value it assumes for a missing setting.
+- `security pentest` attacks nothing: its checks read that configuration and the ACL list, and an ACL list it could not read passes as PROTECTED.
 - `security cve` compares against a fixed list of seven Kafka CVEs, the newest from 2024, and never learns the Kafka version, so it reports every CVE PATCHED.
-- The TLS and certificate checks read broker-wide `ssl.*` settings, never per-listener ones, and open no certificate: expiry and issuer are never read. The plaintext checks look for the text `PLAINTEXT://`, so a listener with a name of its own (such as `plain`) is never flagged, whatever its protocol.
-- Drift compares by check name. A check the baseline lacks counts as IMPROVED, whatever its status. Without a saved baseline there is no drift; do not save one (`security baseline --save`) unless asked, because it replaces the reference.
+- The TLS and certificate checks read broker-wide `ssl.*` settings, never per-listener ones, and open no certificate: expiry and issuer are never read. A missing setting counts as the secure default the check assumes (`ssl.protocol` TLSv1.3), and Keystore Type and Truststore Type always pass.
+- The plaintext checks look for the text `PLAINTEXT://`, so a listener with a name of its own (such as `plain`) is never flagged, whatever its protocol, and Listener Protocol Map passes whenever the map holds SASL_PLAINTEXT, which is unencrypted. On a cluster that sets security per listener, as the kafka-cluster chart does (`plain` on 9092 with SCRAM and no TLS, `tls` on 9093 with TLS), the audit can report no SASL, no keystore and no plaintext listener at once: read none of them as the truth about the listeners.
+- Drift compares by check name. A check the baseline lacks counts as IMPROVED, whatever its status, and one the baseline has but the fresh audit lacks is not listed. Without a saved baseline there is no drift; do not save one (`security baseline --save`) unless asked, because it replaces the reference.
 - The compliance mapping relabels the audit's checks by category; it is not an assessment against the frameworks.
 
 ### A run against its baseline
@@ -94,9 +96,10 @@ Compare the difference with the spread of runs with the same spec before calling
 - A run's `spec` is the request merged with the type's defaults, and `requestedSpec` holds what the request itself set. `targetThroughput`, `consumerGroup`, the fetch settings and the `enable*` options appear in `spec` only when the request set them. A run stored before the backend kept the request has no `requestedSpec`, and its `spec` shows those fields at their defaults whatever was asked, because that backend ignored them: leave such runs out of a band with newer ones.
 - `kates trend` mixes every run of a type whatever its spec; build the band from `test list` as above. A run from a scenario file stores only its base spec, not what each phase ran, so leave those out of a band.
 - The regression check compares with the one baseline of the type, whatever its spec, on fixed thresholds (throughput down 10 %, P99 up 20 %).
-- A run's summary averages its tasks. Per-broker figures split throughput by each broker's share of partition leaders when the report was built; they are not measured per broker.
-- `explain` grades a run that has not finished on the phases it has; check `status` first. The advisor's rules are rules of thumb, and the gains they name were never measured.
-- A run still RUNNING 30 minutes after it was created is failed by the backend. A cancelled run is stored as FAILED.
+- A run's summary averages its tasks: throughput is the mean of the tasks' rates (not the sum over STRESS producers), the percentiles are means of each task's own, `errorRate` is the number of tasks that ended with an error divided by the records sent, and `p999LatencyMs` and `durationMs` are always 0. Per-broker figures split throughput by each broker's share of partition leaders when the report was built; they are not measured per broker.
+- `explain` grades a run that has not finished on the phases it has; check `status` first. The advisor's rules are rules of thumb, the gains they name were never measured, and two of them use the cluster's broker count now, not at the run.
+- A run still RUNNING 30 minutes after it was created, time spent waiting to start included, is failed by the backend. A cancelled run is stored as FAILED; a task error `Cancelled by user` tells it apart once the run had tasks.
+- An INTEGRITY run's integrity result (records lost and duplicated, RTO, RPO) is not stored: a run read back has none, and its SLA verdict treats those limits as met.
 - `TUNE_*` runs execute one configuration and the tuning report copies that result into every step, so its best step is always step 0: do not rank settings with `tune report`.
 
 ### Did Kates cause this?
@@ -118,10 +121,12 @@ kates cluster check --context lab -o json
 
 Match the lagging partitions to their leaders (run `kafka topic` for each topic the group reads), and the leaders to what Kates was doing to those brokers at the time. `cluster topology` lists controllers and node pools, not partition leaders.
 
-- A topic's `configs` shows `min.insync.replicas` only where the topic sets it, or Kafka's default of 1 where nothing does. The kafka-cluster chart sets it at broker level (2), which topic detail leaves out, so its absence does not mean 1. A partition without a leader shows `leader` -1.
+- A topic's `configs` gives the value in force of a few keys (`min.insync.replicas`, retention, cleanup and the like) wherever it is set, and `configSources` says what set each: DYNAMIC_TOPIC_CONFIG the topic, STATIC_BROKER_CONFIG or DYNAMIC_BROKER_CONFIG a broker, DYNAMIC_DEFAULT_BROKER_CONFIG the cluster-wide default, DEFAULT_CONFIG Kafka's default. Without `configSources` the backend is older and leaves out a value set at broker level, which is where the kafka-cluster chart sets `min.insync.replicas` (2), so there its absence does not mean 1. A partition without a leader shows `leader` -1.
+- A group's lag is each partition's latest offset minus the group's committed offset, both read now. A partition the group reads but has never committed is missing, and progress not yet committed counts as lag. The `leader` that `kafka topic` shows is the leader now, which may not be the broker that led while the lag built up.
+- `disruption list` knows a fault only from its report row. A plan started through the API (`disruption run`, `disruption playbook run`) gets a RUNNING row when it starts, and the backend never updates that row when the plan ends, so RUNNING says a plan started then, not that its fault is still running. A template run or a scheduled disruption gets its row only when it has finished, with that time as `createdAt`, and `resilience run` writes none, so a fault in progress can be missing.
 - Audit rows record no actor, and only the test endpoints write them: disruptions, topics and schedules leave none. Runs have no owner. You can say a Kates run was active, not who started it.
 - A run has a creation time and a status, not an end time.
-- Cluster info and the partition health check are cached for 30 seconds. `cluster alerts` lists alert rules that are defined, not alerts that are firing.
+- Cluster info and the partition health check are cached for 30 seconds, and cluster info lists the brokers the Kafka admin API returns, which leaves out one that is down. `cluster alerts` lists alert rules that are defined, not alerts that are firing; an empty list can also mean the rules could not be read.
 - `kates test delete <id>` stops a run and deletes it with its results; it is for the human only. No CLI command cancels a run and keeps it: the human who wants that calls `POST /api/tests/{id}/cancel`.
 
 ### Planning a Game Day
@@ -142,10 +147,12 @@ kates disruption run --config plan.json --dry-run --context lab -o json
 
 The dry run resolves partition leaders, lists the pods each step hits, and checks the blast radius; `wouldSucceed` false (exit 1) means the run would be refused. Write the run sheet with each step's time, fault, target and abort condition, and give the human the two commands per step: the `--dry-run` form, then the same without it.
 
+- A step's `resolvedLeaderId` is the partition's leader now. A leader-aware step (`targetTopic`) looks the leader up again when it starts and hits that broker, which may have changed by then, not least after an earlier step's fault; a stored report's `targetedLeaderBrokerId` says which broker the step aimed at. When that lookup fails the step runs as written, on a random pod if it names no broker or pod.
 - The blast-radius check counts only brokers: a step that hits KRaft controllers adds nothing, so a plan that loses the controller quorum can still pass.
-- The RBAC check covers a few fault types and counts every other one, and any check that errors, as permitted.
+- The RBAC check covers a few fault types and counts every other one, and any check that errors, as permitted; a denied check is only a step warning and never makes `wouldSucceed` false. On the default litmus-crd provider Litmus injects every fault except ROLLING_RESTART and SCALE_DOWN under its own `litmus-admin` service account, so for those the check does not show whether the fault can run.
 - A step with no pod, broker, `targetAll` or partition leader to aim at hits one matching pod picked at random when it runs; the default label matches controllers too.
-- A step outside the `kafka` namespace is previewed as hitting nothing.
+- A step outside the `kafka` namespace is previewed as hitting nothing, yet acts on pods in its own namespace when it runs. A named pod is taken as given: the dry run does not check that it exists or runs Kafka.
+- `cluster topology` reads the Strimzi KafkaNodePools, and their pods, of the cluster name the backend is configured with (`kates.topology.kafka-cluster`, default `krafter`), and keeps what it had when a pod read fails, so an empty list, or a pool with fewer pods than replicas, is not evidence that controllers or brokers are missing.
 - Playbook YAML cannot carry an `sla` block; for a graded run, save the plan with `playbook show -o json`, add one, and run it with `disruption run --config`.
 - Check a playbook's plan before proposing it: `leader-cascade`, for one, targets the leaders of `__consumer_offsets` partitions 0 and 1, not a topic you name.
 
@@ -163,8 +170,10 @@ kates disruption status <previous-id> --context lab -o json
 
 Compare `summary` and each entry of `stepReports` (its recovery times and `impactDeltas`) between the two. The CLI's JSON carries the fields it decodes (`status`, `stepReports`, `summary`, `slaVerdict` and `validationWarnings`), not the backend's impact score.
 
-- Kafka metrics come from Prometheus at a default URL the monitoring chart does not create, so they are often missing. The SLA verdict leaves a check it could not measure out of its grade, and the CLI's JSON does not list which, so treat a grade over missing metrics as partial.
-- A step whose chaos verdict is Skipped injected nothing: the backend ran the noop provider.
-- Recovery times count from when Kates asked for the fault, and on the default LitmusChaos provider start and end are approximate by several seconds.
+- A plan started with `disruption run` or `disruption playbook run` keeps the RUNNING report it got when it started: the backend's save of the finished report under the same id fails, and so does the startup reconciler's attempt to mark it INTERRUPTED. Its status, timeline and kafka-metrics show no steps and never will. Say that its outcome was not stored, and do not read RUNNING as a fault in progress.
+- Kafka metrics come from Prometheus at `kates.prometheus.url`, by default the monitoring stack `kates deploy` installs in namespace `monitoring`. They are missing when Prometheus runs elsewhere (`make monitoring` installs it in namespace `kafka`, which a chart install is not told) or is down. The SLA verdict leaves a check it could not measure out of its grade, and the CLI's JSON does not list which, so treat a grade over missing metrics as partial.
+- A metric Prometheus returned nothing for holds 0 in `postDisruptionMetrics`, and `impactDeltas` leaves it out; a delta whose metric was 0 before the fault is its value after, not a percentage. An ISR entry with `totalPartitions` 0 sampled nothing (the topic is missing, or every poll failed): its `minIsrDepth` 0 is not a measurement.
+- A step whose chaos verdict is Skipped injected nothing, and counts as a failed step (PARTIAL): the backend ran the noop provider. It uses noop when `kates.chaos.provider` (litmus-crd by default) names it, and also, saying so only in its log, when that provider is unknown or was unavailable at startup.
+- Recovery times count from when Kates asked for the fault, and on the default litmus-crd provider start and end are approximate by several seconds. `timeToFirstReady` is the first Ready event from any watched Kafka pod after that, which need not be a pod the fault hit.
+- `summary.worstRecovery` leaves out every step without `timeToAllReady`: one that never recovered while Kates watched, did not wait for recovery, or failed first. It can therefore understate the worst recovery, and the CLI's JSON does not say which steps never recovered.
 - `summary.maxP99LatencySpike` and `summary.avgThroughputDegradation` are per-step changes in percent; judge latency and throughput from the steps' `impactDeltas`.
-- A report that says RUNNING after a backend restart never finishes; `disruption list` shows it as INTERRUPTED.

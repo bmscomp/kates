@@ -1,0 +1,121 @@
+{
+  "kubernetes": {
+    "version": "1.34",
+    "platform": "linux/arm64",
+    "gitVersion": "v1.34.0",
+    "nodes": [],
+    "nodeCount": 4
+  },
+  "strimzi": {
+    "operatorImage": "quay.io/strimzi/operator:1.2.0",
+    "version": "1.2.0",
+    "operatorReady": true,
+    "entityOperatorReady": true
+  },
+  "cluster": {
+    "name": "krafter",
+    "namespace": "kafka",
+    "kraftMode": true,
+    "kafkaVersion": "4.3.1",
+    "listeners": [
+      {
+        "name": "plain",
+        "type": "internal",
+        "port": 9092,
+        "tls": false,
+        "authType": "scram-sha-512"
+      },
+      {
+        "name": "tls",
+        "type": "internal",
+        "port": 9093,
+        "tls": true,
+        "authType": "tls"
+      }
+    ]
+  },
+  "nodePools": [
+    {
+      "name": "controllers",
+      "role": "controller",
+      "replicas": 3,
+      "storageType": "persistent-claim",
+      "storageSize": "10Gi"
+    },
+    {
+      "name": "brokers",
+      "role": "broker",
+      "replicas": 3,
+      "storageType": "persistent-claim",
+      "storageSize": "50Gi"
+    }
+  ],
+  "nodes": [
+    {
+      "id": 0,
+      "host": "krafter-controllers-0.krafter-kafka-brokers.kafka.svc",
+      "port": 9092,
+      "rack": "",
+      "role": "controller",
+      "pool": "controllers",
+      "status": "Ready",
+      "isQuorumLeader": false,
+      "k8sNode": "kates-worker1"
+    },
+    {
+      "id": 1,
+      "host": "krafter-controllers-1.krafter-kafka-brokers.kafka.svc",
+      "port": 9092,
+      "rack": "",
+      "role": "controller",
+      "pool": "controllers",
+      "status": "Ready",
+      "isQuorumLeader": true,
+      "k8sNode": "kates-worker2"
+    },
+    {
+      "id": 2,
+      "host": "krafter-controllers-2.krafter-kafka-brokers.kafka.svc",
+      "port": 9092,
+      "rack": "",
+      "role": "controller",
+      "pool": "controllers",
+      "status": "Ready",
+      "isQuorumLeader": false,
+      "k8sNode": "kates-worker3"
+    },
+    {
+      "id": 3,
+      "host": "krafter-brokers-3.krafter-kafka-brokers.kafka.svc",
+      "port": 9092,
+      "rack": "",
+      "role": "broker",
+      "pool": "brokers",
+      "status": "Ready",
+      "isQuorumLeader": false,
+      "k8sNode": "kates-worker1"
+    },
+    {
+      "id": 4,
+      "host": "krafter-brokers-4.krafter-kafka-brokers.kafka.svc",
+      "port": 9092,
+      "rack": "",
+      "role": "broker",
+      "pool": "brokers",
+      "status": "Ready",
+      "isQuorumLeader": false,
+      "k8sNode": "kates-worker2"
+    },
+    {
+      "id": 5,
+      "host": "krafter-brokers-5.krafter-kafka-brokers.kafka.svc",
+      "port": 9092,
+      "rack": "",
+      "role": "broker",
+      "pool": "brokers",
+      "status": "Ready",
+      "isQuorumLeader": false,
+      "k8sNode": "kates-worker3"
+    }
+  ]
+}

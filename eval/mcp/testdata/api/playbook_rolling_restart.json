@@ -1,0 +1,42 @@
+{
+  "name": "rolling-restart",
+  "description": "Restart every Kafka pod one at a time through the Strimzi Cluster Operator",
+  "steps": [
+    {
+      "name": "rolling-restart-brokers",
+      "faultSpec": {
+        "experimentName": "rolling-restart-sts",
+        "targetNamespace": "kafka",
+        "targetLabel": "strimzi.io/component-type=kafka",
+        "targetPod": "",
+        "targetAll": false,
+        "chaosDurationSec": 600,
+        "delayBeforeSec": 0,
+        "envOverrides": {},
+        "disruptionType": "ROLLING_RESTART",
+        "targetBrokerId": -1,
+        "networkLatencyMs": 100,
+        "fillPercentage": 80,
+        "cpuCores": 1,
+        "memoryMb": 500,
+        "ioWorkers": 2,
+        "gracePeriodSec": 30,
+        "targetTopic": "",
+        "targetPartition": 0,
+        "probes": []
+      },
+      "steadyStateSec": 30,
+      "observationWindowSec": 180,
+      "requireRecovery": true
+    }
+  ],
+  "sla": null,
+  "testType": null,
+  "baselineDurationSec": 60,
+  "isrTrackingTopic": null,
+  "lagTrackingGroupId": null,
+  "isrPollIntervalMs": 2000,
+  "lagPollIntervalMs": 2000,
+  "maxAffectedBrokers": 1,
+  "autoRollback": false
+}
