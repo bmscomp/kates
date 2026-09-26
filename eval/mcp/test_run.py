@@ -584,6 +584,33 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("keeps the task list it froze", err)
         self.assertEqual((self.runs / "e2e" / "tasks.json").read_text(), TASKS.read_text())
 
+    def test_a_setup_interrupted_in_its_first_task_counts_as_started(self):
+        without_tasks = [a for a in self.common if a not in ("--tasks", str(TASKS))]
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS), \
+                mock.patch.object(run.setuplib, "ensure_task", side_effect=KeyboardInterrupt):
+            self.assertEqual(call(["setup", *without_tasks])[0], 130)
+        self.assertTrue(run.run_started(self.runs / "e2e"))
+        with mock.patch.object(run, "DEFAULT_TASKS", self.changed_list()):
+            code, _, err = call(["preflight", *without_tasks, *self.agent])
+        self.assertEqual(code, 0, err)
+        self.assertIn("keeps the task list it froze", err)
+
+    def test_tasks_naming_the_default_list_is_the_same_as_no_flag(self):
+        changed = self.changed_list()
+        with mock.patch.object(run, "DEFAULT_TASKS", TASKS):
+            self.assertEqual(call(["preflight", *self.common, *self.agent])[0], 0)
+        common = [str(changed) if a == str(TASKS) else a for a in self.common]
+        with mock.patch.object(run, "DEFAULT_TASKS", changed):
+            code, out, err = call(["preflight", *common, *self.agent])
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("nothing in the run has used it", out)
+
+    def test_expert_template_freezes_nothing_when_it_cannot_run(self):
+        code, _, err = call(["expert-template", *self.common])
+        self.assertEqual(code, 2)
+        self.assertIn("not set up yet", err)
+        self.assertFalse((self.runs / "e2e").exists())
+
     def test_trials_before_setup_refuse_before_recording_settings(self):
         code, _, err = call(["trials", *self.common, *self.agent, "--max-trials", "1"])
         self.assertEqual(code, 2)
