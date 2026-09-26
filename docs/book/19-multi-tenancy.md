@@ -42,6 +42,7 @@ graph TB
 ```
 
 Each tenant gets:
+
 - **Prefix-scoped topics** — all topics start with the service name
 - **Dedicated KafkaUser** — own credentials, own ACLs
 - **Resource quotas** — produce/consume rate limits + CPU share
@@ -49,9 +50,13 @@ Each tenant gets:
 
 ## Topic Naming Convention
 
+The service name at the front of every topic is what the rest of this chapter keys on: Step 2's ACLs grant topics and consumer groups by that prefix, and the monitoring queries select a tenant's topics and groups by it. A service's topic names follow this shape:
+
 ```text
 <service-name>-<domain>[-<qualifier>]
 ```
+
+The patterns below cover the usual kinds of topic:
 
 | Pattern | Example | Purpose |
 |---------|---------|---------|
@@ -62,6 +67,7 @@ Each tenant gets:
 | `__<svc>-<x>` | `__apicurio-global-id` | Framework-internal topics |
 
 **Rules:**
+
 - Lowercase, hyphen-separated
 - Always prefix with the service name
 - Use `__` prefix for framework/infrastructure topics
@@ -144,22 +150,39 @@ A pod selector is required — there is no namespace-wide grant. `networkPolicie
 
 ### Step 4 — Configure the Service
 
-Mount the auto-generated secret in the service's deployment:
+Strimzi writes the tenant's Secret, `my-service`, only into the Kafka cluster's namespace, `kafka` (see [Cross-Namespace Credential Synchronization](17-security.md#cross-namespace-credential-synchronization)). A pod can read a Secret only from its own namespace, so a service that runs in `my-service-namespace` needs a copy there. The Secret holds the password under `password`, and a ready-made `sasl.jaas.config` line beside it. It exists once the upgrade in Step 5 has created the user, so make the copy after that step:
+
+```bash
+# Copy the tenant's password into the namespace its pods run in
+PASSWORD=$(kubectl get secret my-service -n kafka \
+  -o jsonpath='{.data.password}' | base64 -d)
+test -n "$PASSWORD" && kubectl create secret generic my-service \
+  -n my-service-namespace --from-literal=password="$PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Nothing keeps the copy in step. When the tenant's password changes, copy it again and restart the service's pods, which read it only when they start; [Password Rotation](17-security.md#password-rotation) walks through the same sequence for Kates.
+
+The service's deployment then reads the copy. Step 3 granted the `plain` listener, which takes SCRAM over a connection without TLS, so the client needs `security.protocol` set to `SASL_PLAINTEXT` as well as the SCRAM mechanism. The variable names below are an example; your application has to read them and hand them to its Kafka client:
 
 ```yaml
 env:
   - name: KAFKA_BOOTSTRAP_SERVERS
     value: krafter-kafka-bootstrap.kafka:9092
+  - name: KAFKA_SECURITY_PROTOCOL
+    value: SASL_PLAINTEXT
   - name: KAFKA_SASL_USERNAME
     value: my-service
   - name: KAFKA_SASL_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: my-service       # Strimzi-generated secret
+        name: my-service       # the copy in my-service-namespace
         key: password
   - name: KAFKA_SASL_MECHANISM
     value: SCRAM-SHA-512
 ```
+
+Step 2 grants consumer groups by prefix too, so every consumer's `group.id` must start with `my-service`, as in `my-service-billing`. The brokers refuse a consumer whose group falls outside the prefix.
 
 ### Step 5 — Apply and Verify
 
@@ -217,6 +240,9 @@ kubectl get kafkatopic -n kafka -l strimzi.io/cluster=krafter
 Quotas are enforced by Kafka at the broker level:
 
 ```mermaid
+%%| label: fig-mt-quota-throttle
+%%| fig-cap: "A producer over its quota is slowed down, not refused."
+%%| fig-alt: "Sequence diagram. A producer sends 15 MB/s to a broker whose quota for it is 10 MB/s. The broker answers with a throttle response, the client pauses, then resumes at 10 MB/s and the broker answers OK."
 sequenceDiagram
     participant Producer
     participant Broker
