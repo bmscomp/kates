@@ -48,7 +48,7 @@ A chapter written before the types keeps its objectives and Summary until its re
 - H2/H3 in Title Case, unnumbered, no terminal punctuation except `?`. No heading starts with a hand-typed number (the check is `^#+ \d`), in any chapter. A procedure is an ordered list, or H3s titled "Step N — Verb the Thing".
 - Rename repeated headings so they say something.
 - Troubleshooting symptom headings: Title Case with literal error strings in backticks.
-- Explicit ids: give a heading a `{#id}` only when it is a link target and contains punctuation or starts with a number, and always make the id the GitHub slug of the heading text: lowercase, spaces become `-`, punctuation other than `-` and `_` is dropped, leading digits stay, so " — " and " + " become `--`. For example, `### Step 1 — Deploy the Chart {#step-1--deploy-the-chart}`. The link check (lychee, which computes GitHub slugs) and Quarto (which uses the explicit id) then agree; GitHub shows the `{#…}` literally.
+- Explicit ids: give a heading a `{#id}` only when it is a link target and its GitHub slug differs from Quarto's automatic id, which happens with " — ", " + ", " & " or a leading number (both drop parentheses, backticks and quotes the same way). Always make the id the GitHub slug of the heading text: lowercase, spaces become `-`, punctuation other than `-` and `_` is dropped, leading digits stay, so " — " and " + " become `--`. For example, `### Step 1 — Deploy the Chart {#step-1--deploy-the-chart}`. The link check (lychee, which computes GitHub slugs) and Quarto (which uses the explicit id) then agree; GitHub shows the `{#…}` literally.
 
 ## Cross-References
 
@@ -89,7 +89,7 @@ Exactly one blank line after the closing `:::`. Genuine quotations may use plain
 - Mermaid uses plain ```` ```mermaid ```` fences (GitHub-renderable); the CI build converts them for Quarto.
 - Every Mermaid block starts with `%%| label: fig-<slug>`, `%%| fig-cap:` (the figure's point, as a sentence) and `%%| fig-alt:` (what it shows, in words), which GitHub reads as Mermaid comments, and has a lead-in sentence above it.
 - One idea per figure, about 8 nodes; a list belongs in a table, not a diagram. Never fake a chart or heatmap with a flowchart. Plots are generated from data committed alongside them, never drawn by hand.
-- Keep diagrams narrow enough for the text column: lay long chains out `TB` and wide fan-outs `LR`, and give a subgraph with no edges crossing its border an explicit `direction` (Mermaid otherwise flips it to the opposite of its parent's). The site never shrinks labels below 70%; a wider diagram scrolls sideways and opens full screen.
+- Keep diagrams narrow enough for the text column: lay long chains out `TB` and wide fan-outs `LR`, and give a subgraph with no edges crossing its border an explicit `direction` (Mermaid otherwise flips it to the opposite of its parent's). On the site a diagram that fits shows at full size, from 1200px up reaching into the right margin; one a little too wide shrinks to the column; a wider one shows whole as a thumbnail whose Expand button opens it full screen. The PDF shrinks every diagram to the page, so one drawn too wide prints too small to read.
 
 ## Page Furniture
 
