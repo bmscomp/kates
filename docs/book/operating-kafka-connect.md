@@ -91,7 +91,7 @@ Cross-AZ data transfer costs apply when a connector in zone alpha reads from a d
 
 ### Scheduling Configuration
 
-Three values place the workers: `topologySpreadConstraints` spreads them across zones, `podAntiAffinity` prefers a separate node for each, and `rack` reads each worker's zone from its node's label. The production overlay sets all three:
+Three values place the workers and tell each one its zone: `topologySpreadConstraints` spreads them across zones, `podAntiAffinity` prefers a separate node for each, and `rack` reads each worker's zone from its node's label. The production overlay sets all three:
 
 ```yaml
 # Production (values-prod.yaml)
@@ -463,17 +463,17 @@ The workers read `connect-pg-credentials` through the API only because the chart
 
 ### Rotation Procedures
 
-Only the database password lives outside Kubernetes, so it is the one rotation Strimzi takes no part in. The three Kafka credentials rotate through Strimzi and roll the workers one at a time:
+Of the credentials a worker holds, only the database password lives outside Kubernetes, so it is the one rotation Strimzi takes no part in. The three Kafka credentials rotate through Strimzi and roll the workers one at a time:
 
 | Credential | Rotation Method | Downtime |
 |-----------|----------------|:--------:|
 | Kafka TLS CA | Strimzi auto-rotates 180 days before expiry; across namespaces, `secretSync.watch` re-copies it (otherwise the next `helm upgrade` does) | Zero — rolling restart |
 | SCRAM password | Update `KafkaUser` CR → Strimzi updates Secret; across namespaces, `secretSync.watch` or the next `helm upgrade` re-copies it | Zero — rolling restart |
 | Client certificate (`values-prod.yaml`) | The User Operator renews it; `secretSync.watch` (on in the prod overlay) re-copies it | Zero — rolling restart |
-| Database password | Change it in PostgreSQL → update K8s Secret → restart the connectors that read it | Seconds — connector restart only |
+| Database password | Change it in PostgreSQL → update K8s Secret → restart the tasks of the connectors that read it | Seconds — task restart only |
 | Connect REST API (if exposed) | Ingress-level auth (OAuth2 proxy, mTLS) | N/A |
 
-For the database password, the order of the steps matters. A connector picks up a new password when it restarts, because that is when the secrets config provider reads the Secret again. So change the password in PostgreSQL first, then the Secret, then restart every connector that reads it. The commands below rotate the demo database that `kates deploy` installs in the `database` namespace; for your own database, run the same `ALTER ROLE` your usual way:
+For the database password, what matters is when the tasks restart. A connector's tasks hold its database connections, and each task reads the Secret, through the secrets config provider, when it starts. Restarting only the connector, as `kates kafka connect restart` does, leaves its running tasks on the old password. So change the password in PostgreSQL first, then the Secret, and only then restart the tasks of every connector that reads it. The commands below rotate the demo database that `kates deploy` installs in the `database` namespace; for your own database, run the same `ALTER ROLE` your usual way:
 
 ```bash
 # 1. Change the password in PostgreSQL. A role may change its own password,
@@ -490,13 +490,15 @@ kubectl create secret generic connect-pg-credentials \
   --from-literal=password=NEW_PASSWORD \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# 3. Restart every connector that reads the Secret, so the secrets config
-#    provider reads it again. kates deploy creates these two
-kates kafka connect restart debezium-postgres-source
-kates kafka connect restart jdbc-sink-connector
+# 3. Restart the tasks of every connector that reads the Secret, so each
+#    task reads it again. kates deploy creates these two, with one task each
+kates kafka connect restart-task debezium-postgres-source 0
+kates kafka connect restart-task jdbc-sink-connector 0
 ```
 
-Swap steps 1 and 2 and a restart hands the new password to a database that still expects the old one, so the connector fails authentication. Nothing restarts the workers along the way: `kates kafka connect restart` restarts the connector through its `KafkaConnector` resource, and a change to this Secret rolls no pods.
+A connector with more tasks needs each of them restarted; `kates kafka connect tasks <connector>` lists their ids. Between steps 1 and 2 the database and the Secret disagree, so a task that restarts in that window for another reason, such as a rebalance that moves it to another worker, fails authentication; step 3 brings it back. Nothing restarts the workers along the way: `kates kafka connect restart-task` restarts a task through its connector's `KafkaConnector` resource, and a change to this Secret rolls no pods.
+
+Every `kates deploy --with-kafka-connect` run writes `connect-pg-credentials` again with the demo password, `debezium`. Once you have rotated the demo database, repeat steps 2 and 3 after each such run.
 
 ---
 
@@ -770,7 +772,7 @@ Every connector and task reports `RUNNING` in both views — the CLI reads the `
 - One stretched `KafkaConnect` cluster spans all Availability Zones; topology spread constraints and pod anti-affinity keep workers apart, and the group protocol reassigns tasks off a dead zone in seconds with offsets intact
 - Give containers roughly 2× the JVM heap — off-heap memory is what gets workers OOMKilled — and target 2–5 tasks per worker
 - The internal topics (`*-offsets`, `*-configs`, `*-status`) hold the only persistent state; as long as they survive in Kafka, the cluster is rebuildable from the Helm chart alone
-- Rotate the database password in PostgreSQL first, then the Kubernetes Secret, then restart the connector — in the reverse order the connector restarts straight into failed authentication
+- Rotate the database password in PostgreSQL, then in the Kubernetes Secret, then restart the connectors' tasks — a task reads the Secret only when it starts, so restarting the connector alone leaves its tasks on the old password
 - Upgrades roll one worker at a time with zero downtime, but a Debezium release that changes the offset format makes rollback unsafe — validate in staging with `kates kafka connect test`
 - Most FAILED connectors trace back to credentials, an occupied replication slot, or `wal_level` — start with `kates kafka connect connectors` and the worker logs
 
