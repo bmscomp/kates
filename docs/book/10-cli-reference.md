@@ -232,22 +232,22 @@ contexts:
 Find your question in the table below, then follow its link to the family's commands and flags. The last column says what the family works through: the Kates API, at the URL and with the API key of the context you use; Kubernetes, through the `kubectl` and `helm` the CLI runs against a cluster from your kubeconfig; or files on your machine.
 
 | Family | Commands | The question it answers | What it talks to |
-|:-----|:---------|:---------|:-------|
+|:-----|:--------|:--------|:---------|
 | [Context Management](#context-management) | `ctx set`, `use`, `show`, `export`, `import` | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
-| [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the backend up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno |
+| [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the backend up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno, and `doctor dns` and `doctor network` work through `kubectl` alone |
 | [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs` | What does the Kafka cluster look like, and is it healthy? | Kates API |
 | [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test scaffold` uses only templates built into the CLI |
 | [Report Commands](#report-commands) | `report show`, `summary`, `export`, `diff`, `compare`, `brokers` | What did a run measure, and how does it compare with another run? | Kates API |
 | [Trend Analysis](#trend-analysis) | `trend` | How has one metric moved across a test type's runs over recent days? | Kates API |
 | [Disruption Commands](#disruption-commands) | `disruption run`, `list`, `status`, `timeline`, `types`, `kafka-metrics`, `watch`, `playbook list`, `playbook show`, `playbook run` | What happens to the cluster when a fault hits it, and how fast does it recover? | Kates API |
-| [Chaos Experiment History](#chaos-experiment-history) | `chaos list`, `show` | Which disruption plans ran recently, and what grade did each get? | Kates API |
+| [Chaos Experiment History](#chaos-experiment-history) | `chaos list`, `show` | Which disruption plans ran recently, how did each end, and what SLA grade, if any, did it get? | Kates API |
 | [Resilience](#resilience) | `resilience run` | How much does one fault hurt a test while it runs? | Kates API |
 | [Schedule Commands](#schedule-commands) | `schedule list`, `get`, `create`, `delete` | How do you run the same test on a cron schedule? | Kates API |
 | [Observability & Monitoring](#observability--monitoring) | `dashboard`, `top` | What is running right now, and how is it doing? | Kates API |
 | [Interactive Lab](#interactive-lab) | `lab` | Which settings work best, when you try them one run at a time? | Kates API |
 | [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `clean`, `detect`, `ports`, `auto`, `operator`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
 | [Versions and Operators](#versions-and-operators) | `versions`, `operators list` | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
-| [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes, through `kubectl` and `helm` |
+| [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes, through `kubectl` and `helm`; when a source has no upstream image, `up` and `run` build one with `docker` and, on a Kind cluster, load it there, unless you pass `--skip-build` |
 | [Security Commands](#security-commands) | `security audit`, `tls-inspect`, `auth-test`, `pentest`, `compliance`, `baseline`, `drift`, `gate`, `certs`, `cve`, `secrets`, `netpol`, `acl-map`, `config-diff`, `trend` | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl`, and `security audit` also asks it about Kyverno |
 | [Kyverno Policy Commands](#kyverno-policy-commands) | `kyverno status`, `violations`, `enforce`, `audit`, `detect`, `apply` | Which admission policies guard the cluster, and what do they catch? | Kubernetes, through `kubectl`; `kyverno apply` also runs `helm` |
 | [Kafka Client Commands](#kafka-client-commands) | `kafka brokers`, `topics`, `topic`, `groups`, `group`, `consume`, `produce`, `create-topic`, `alter-topic`, `delete-topic`, `tui`, `connect` | What is in a topic or consumer group, and how do you read, write or change it? | Kates API; `kafka connect` uses `kubectl` |
@@ -262,7 +262,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [MCP Server for AI Agents](#mcp-server-for-ai-agents) | `mcp` | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
 | [Developer & Help Commands](#developer--help-commands) | `docs`, `tldr`, `changelog` | How does a command work, and what does the backend's audit log record? | Nothing for `docs` and `tldr`; `changelog` reads audit events from the Kates API |
 
-Contexts, profiles and snapshots are files in your home directory, so they stay on the machine that made them; `kates ctx export` moves your contexts to another one.
+Contexts, profiles and snapshots are files in your home directory, so they stay on the machine that made them. To move your contexts to another machine, print them with `kates ctx export --reveal`, keys in clear, and load the file there with `kates ctx import --file`.
 
 ### Health, Status & Diagnostics {#health-status--diagnostics}
 
