@@ -20,7 +20,6 @@
     "sre-kates-caused-lag": {"status": "done", "captures": {
       "orders_prime_id": "81a2b3c4", "alert_since": "2026-09-26T09:35:00Z", "orders_culprit_id": "92b3c4d5"}},
     "sre-lag-partition-leader": {"status": "done", "captures": {"pay_prime_id": "a3c4d5e6", "pay_lag_partition": 1}},
-    "sre-stale-running-disruption": {"status": "done", "captures": {"warm_since": "2026-09-26T09:40:03Z", "warm_id": "9f8e7d6c"}},
     "gameday-leader-kill-preview": {"status": "done", "captures": {}},
     "gameday-leader-cascade-fit": {"status": "done", "captures": {}},
     "gameday-controller-kill-uncounted": {"status": "done", "captures": {"cluster_name": "krafter", "ctrl_pool": "controllers", "ctrl_id": 0}},

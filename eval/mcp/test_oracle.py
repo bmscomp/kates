@@ -217,18 +217,6 @@ class Computations(unittest.TestCase):
         with self.assertRaises(oracle.OracleError):
             oracle.expect_lag_partitions(group, fixture("topic_eval_pay.json"), "eval-pay-abc123")
 
-    def test_stale_row_premise(self) -> None:
-        listing = fixture("disruptions_list.json")
-        listing["items"][3]["status"] = "PARTIAL"  # the launcher now records outcomes
-        with self.assertRaises(oracle.OracleError):
-            oracle.expect_stale_running([], listing, "2026-09-26T09:40:03Z", "9f8e7d6c")
-        listing = fixture("disruptions_list.json")
-        since = "2026-09-26T09:40:03Z"
-        stuck_before = {"id": "x", "createdAt": "2026-09-26T09:10:00Z"}
-        self.assertFalse(oracle.expect_stale_running([stuck_before], listing, since, "9f8e7d6c")["test_running"])
-        started_since = {"id": "y", "createdAt": "2026-09-26T09:41:00Z"}
-        self.assertTrue(oracle.expect_stale_running([started_since], listing, since, "9f8e7d6c")["test_running"])
-
     def test_leader_preview_must_name_the_leaders_pod(self) -> None:
         roles = oracle.pod_roles(fixture("cluster_topology.json"))
         dry = fixture("dryrun_leader_kill.json")
@@ -371,7 +359,7 @@ class Command(unittest.TestCase):
         self.run_main("--fixtures", API)
         code, _ = self.run_main("--fixtures", API, "--task", "sec-posture")
         self.assertEqual(code, 0)
-        self.assertEqual(len(load_json(os.path.join(self.dir, "oracle.json"))["tasks"]), 21)
+        self.assertEqual(len(load_json(os.path.join(self.dir, "oracle.json"))["tasks"]), 20)
 
     def test_against_reports_moved_answers(self) -> None:
         self.run_main("--fixtures", API, "--out", os.path.join(self.dir, "before.json"))

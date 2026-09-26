@@ -59,7 +59,7 @@ provisional, and `report.py` exits 3.
 
 | File | Role |
 | --- | --- |
-| `tasks.json` | The task list: 21 tasks, fixed on 2026-09-26, before either agent arm ran but after both were built (above). [`TASKS.md`](TASKS.md) lists them and documents the schema. |
+| `tasks.json` | The task list: 20 tasks, fixed on 2026-09-26, before either agent arm ran but after both were built (above). [`TASKS.md`](TASKS.md) lists them and documents the schema. |
 | `taskfile.py` | The rules every part shares: what a valid task is, `{capture}` placeholders, JSON paths, `forbid`. |
 | `setup.py` | Prepares the lab for each task, as the human: load, baselines, lag, faults. Writes `state.json`. |
 | `oracle.py` | One function per oracle that computes a task's expected answer from the Kates API, as the human. |
@@ -78,12 +78,16 @@ Python 3.9 or later, standard library only.
 
 ## The task list
 
-[`TASKS.md`](TASKS.md) lists the 21 tasks (what each tests, its oracle, its required caveats),
+[`TASKS.md`](TASKS.md) lists the 20 tasks (what each tests, its oracle, its required caveats),
 what setup does to the lab, and the schema in full. `tasks.json` was fixed before either arm ran:
 `fixed_at` is the day, and it is not edited for the rest of the evaluation. The first
-command of a run copies it into the run directory and records its SHA-256; every later command
-of that run reads the copy, and refuses a different list passed with `--tasks`. What the runner
-relies on:
+command of a run that gets past its checks copies it into the run directory and records its
+SHA-256; every later command of that run reads the copy, and refuses a different list passed with
+`--tasks`. When `tasks.json` has changed since, a run that has not yet set up a task, computed an
+answer or scheduled a trial takes the list as it is now and says so; one that has keeps its copy
+and warns on every command. A run that keeps a copy the harness no longer accepts, such as the
+21-task list from before `sre-stale-running-disruption` was retired (TASKS.md, "Left out"), is
+refused: start a new run id. What the runner relies on:
 
 - **`prompt`** is what the user asks, the same for every arm, with no hint about tools
   (`taskfile.validate` refuses a prompt that names a tool, a command, a flag or an interface).
@@ -348,13 +352,13 @@ and grows to about 50,000, so about 420,000 input tokens read over the trial, of
 thinking. With the prices listed in Claude Code's API reference (per million tokens; confirm on
 the pricing page before relying on them):
 
-| Model | Input | Cache write (5 min) | Cache read | Output | One trial | 21 tasks x 2 arms x 3 trials |
+| Model | Input | Cache write (5 min) | Cache read | Output | One trial | 20 tasks x 2 arms x 3 trials |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `claude-opus-5-5` | $4 | $5 | $0.20 | $20 | about $0.44 | about $55 |
-| `claude-sonnet-5` | $2 | $2.50 | $0.20 | $10 | about $0.26 | about $33 |
+| `claude-opus-5-5` | $4 | $5 | $0.20 | $20 | about $0.44 | about $53 |
+| `claude-sonnet-5` | $2 | $2.50 | $0.20 | $10 | about $0.26 | about $31 |
 
 A trial that uses all 30 turns with a 100,000-token context costs several times the estimate;
-`--max-budget-usd 3` caps one. At one to four minutes per trial, the 126 trials take four to
+`--max-budget-usd 3` caps one. At one to four minutes per trial, the 120 trials take two to
 eight hours in sequence (the harness runs one trial at a time, so trials do not compete for the
 lab), plus about 30 minutes of setup, most of it three broker kills and the waits after them. Measure instead of trusting this: after the preflight and the smoke
 run, `metrics.json` holds each trial's `cost_usd`, `tokens` and `wall_clock_s`; multiply their

@@ -487,23 +487,6 @@ def expect_lag_partitions(group: Mapping[str, Any], detail: Mapping[str, Any], t
     }
 
 
-def expect_stale_running(unfinished_tests: list[Mapping[str, Any]], disruptions: Mapping[str, Any], since: str,
-                         stale_id: str) -> dict:
-    start = parse_instant(since)
-    rows = [d["id"] for d in (disruptions.get("items") or [])
-            if d.get("status") == "RUNNING" and parse_instant(d["createdAt"]) >= start]
-    if stale_id not in rows:
-        raise OracleError(f"disruption {stale_id} is no longer stored as RUNNING: the backend now records a plan's "
-                          "outcome, and this task's premise (mcp caveat activity-disruption-rows) no longer holds")
-    return {
-        "test_running": any(parse_instant(r["createdAt"]) >= start for r in unfinished_tests),
-        # By construction: setup waited past the end of the plan it started,
-        # and the harness starts nothing else while the oracle runs.
-        "fault_in_progress": False,
-        "disruption_records_marked_running": sorted(rows),
-    }
-
-
 def expect_leader_kill_preview(dryrun: Mapping[str, Any], roles: Mapping[str, str]) -> dict:
     steps = dryrun.get("steps") or []
     if len(steps) != 1 or steps[0].get("resolvedLeaderId") is None:
@@ -697,13 +680,6 @@ def lag_partitions(api: Any, group: str, topic: str) -> dict:
                                  api.get(f"/api/kafka/topics/{seg(topic)}"), topic)
 
 
-def stale_running(api: Any, since: str, stale_id: str) -> dict:
-    unfinished = []
-    for status in ("PENDING", "RUNNING", "STOPPING"):
-        unfinished += _paged(api, "/api/tests", {"status": status})
-    return expect_stale_running(unfinished, api.get("/api/disruptions", {"size": PAGE_SIZE}), since, stale_id)
-
-
 def leader_kill_preview(api: Any, topic: str, partition: int) -> dict:
     plan = _plan("eval-leader-kill", "kill-leader",
                  {"disruptionType": "POD_KILL", "targetTopic": topic, "targetPartition": int(partition)})
@@ -745,7 +721,7 @@ ORACLES: dict[str, Callable[..., dict]] = {
     for f in (
         topic_min_isr, partition_leader, security_posture, listener_encryption, pentest_and_cve, security_drift,
         run_vs_baseline, noise_band, load_parallel, baseline_spec_mismatch, topic_trend, kates_caused_lag,
-        lag_partitions, stale_running, leader_kill_preview, playbook_preview, playbook_fit, controller_kill_preview,
+        lag_partitions, leader_kill_preview, playbook_preview, playbook_fit, controller_kill_preview,
         disruption_debrief, disruption_compare, hidden_fault_target,
     )
 }
