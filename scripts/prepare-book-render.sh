@@ -19,7 +19,11 @@
 # _quarto.yml, so the build fails when a Part page has front matter (GitHub
 # shows it as a table), when its chapter bullets (`- [Title](file.md)...`) do
 # not name the Part's chapters in _quarto.yml's order, or when a link to a
-# whole chapter does not use that chapter's H1 title as its text.
+# whole chapter does not use that chapter's H1 title as its text. It also
+# fails on a `part:` entry that names a .md file in any other form, such as a
+# path or a trailing comment, which neither this check nor step 4 would
+# recognise. A file name may
+# be quoted, in the entry or in the chapter list.
 set -euo pipefail
 
 cd "$(dirname "$0")/../docs/book"
@@ -47,26 +51,31 @@ def h1(path):
     return None
 
 def part_pages(qy):
-    """(page, [chapters]) for each `- part: <file>.md` entry, in order."""
-    parts, current, indent = [], None, -1
+    """(page, [chapters]) for each `- part: <file>.md` entry, in order, and
+    the `part:` lines that name a .md file in a form this script can't read."""
+    parts, unread, current, indent = [], [], None, -1
     for line in qy.splitlines():
-        m = re.match(r'^(\s*)- part:\s*([\w][\w\-]*\.md)\s*$', line)
+        m = re.match(r'''^(\s*)- part:\s*(["']?)([\w][\w\-]*\.md)\2\s*$''', line)
         if m:
-            current, indent = (m.group(2), []), len(m.group(1))
+            current, indent = (m.group(3), []), len(m.group(1))
             parts.append(current)
             continue
+        if re.match(r'^\s*- part:.*\.md\b', line):
+            unread.append(line.strip())
         if current is None or not line.strip() or line.lstrip().startswith('#'):
             continue
-        chapter = re.match(r'^\s*- ([\w][\w\-]*\.md)\s*$', line)
+        chapter = re.match(r'''^\s*- (["']?)([\w][\w\-]*\.md)\1\s*$''', line)
         if len(line) - len(line.lstrip()) <= indent:
             current = None
         elif chapter:
-            current[1].append(chapter.group(1))
-    return parts
+            current[1].append(chapter.group(2))
+    return parts, unread
 
 with open('_quarto.yml', encoding='utf-8') as fh:
-    problems = []
-    for page, chapters in part_pages(fh.read()):
+    parts, unread = part_pages(fh.read())
+    problems = [f'_quarto.yml: `{u}` must name a file at the top of docs/book, as `- part: part-<slug>.md`'
+                for u in unread]
+    for page, chapters in parts:
         if not os.path.exists(page):
             problems.append(f'{page}: named by a `part:` entry in _quarto.yml, but missing')
             continue
@@ -102,7 +111,7 @@ with open('index.qmd', 'w', encoding='utf-8') as fh:
 
 with open('_quarto.yml', encoding='utf-8') as fh:
     qy = fh.read()
-qy = re.sub(r'^(\s*- (?:part:\s*)?)([\w][\w\-]*)\.md(\s*)$', r'\1\2.qmd\3', qy, flags=re.M)
+qy = re.sub(r'''^(\s*- (?:part:\s*)?)(["']?)([\w][\w\-]*)\.md\2(\s*)$''', r'\1\2\3.qmd\2\4', qy, flags=re.M)
 with open('_quarto.yml', 'w', encoding='utf-8') as fh:
     fh.write(qy)
 
