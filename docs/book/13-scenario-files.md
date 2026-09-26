@@ -87,7 +87,7 @@ A key the scenario's type or backend cannot apply is refused: `kates test apply`
 
 ### Producer Configuration
 
-These keys configure the producer. Two of them depend on the test type: `parallelProducers` counts only for STRESS and CAPACITY, and `targetThroughput` replaces the type's default rate.
+These keys configure the producer. `parallelProducers` counts only for STRESS and CAPACITY, and `targetThroughput` replaces the type's default rate.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -478,7 +478,7 @@ scenarios:
       # records: 1000        # ❌ too low — may miss intermittent issues
 ```
 
-The table gives a recommended minimum for each type; the file above sits well above it for LOAD and INTEGRITY.
+The table gives a recommended minimum for four of the types; the file above sits well above it for LOAD and INTEGRITY.
 
 | Test Type | Recommended Minimum | Why |
 |-----------|:-------------------:|-----|

@@ -826,4 +826,4 @@ Expect a healthy run: dashboards flat where they should be flat (zero under-repl
 - `kates trend` and `kates report diff` turn snapshots into regression detection — compare runs instead of trusting absolute numbers.
 - PrometheusRule alerts ship with the charts and fire on offline partitions, sustained under-replication, and runaway consumer lag — each chart carries its own enable toggle.
 
-You can now read what a run did to the cluster. The next chapters turn from reading the platform to building and operating it, and they start where every Kafka cluster in this repository starts: [Deploying the Strimzi Operator](deploying-strimzi-operator.md) installs the operator that turns a `Kafka` resource into a running cluster.
+You can now read what a run did to the cluster. The next chapters turn from reading the platform to building and operating it, starting with [Deploying the Strimzi Operator](deploying-strimzi-operator.md), which installs the operator that turns a `Kafka` resource into a running cluster.
