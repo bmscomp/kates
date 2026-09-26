@@ -814,7 +814,7 @@ kates kyverno audit kates-pod-security-standards
 
 ::: {.callout-tip}
 **Cross-references:**
-- For Kyverno installation instructions, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#15-kyverno-optional).
+- For Kyverno installation instructions, see [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#kyverno-optional).
 - For Kyverno upgrade procedures, see [Upgrade Playbook](18-upgrade-playbook.md).
 - For a full index of Kyverno-related troubleshooting, see [Troubleshooting Index](appendix-b-troubleshooting.md#deployment-issues).
 :::
