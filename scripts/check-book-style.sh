@@ -8,14 +8,21 @@ fail=0
 
 note() { echo "STYLE: $1" >&2; fail=1; }
 
+# The book's pages: docs/book/*.md and index.qmd, less the pages about the book
+# rather than in it (the same set scripts/book_metrics.py measures).
+pages=()
+for f in docs/book/*.md; do
+  case "${f##*/}" in STYLE.md|README.md|CONCEPTS.md) continue ;; esac
+  pages+=("$f")
+done
+pages+=(docs/book/index.qmd)
+
 # 1. Unlabeled code fences (openers with no language tag)
 while IFS= read -r hit; do
   note "unlabeled code fence -> tag it (text for output/ASCII UI): $hit"
-done < <(python3 - <<'PY'
-import glob, re
-for f in sorted(glob.glob('docs/book/*.md') + ['docs/book/index.qmd']):
-    if f.endswith('STYLE.md'):
-        continue
+done < <(python3 - "${pages[@]}" <<'PY'
+import re, sys
+for f in sys.argv[1:]:
     fence = False
     for i, l in enumerate(open(f, encoding='utf-8'), 1):
         s = l.strip()
@@ -27,24 +34,22 @@ PY
 )
 
 # 2. Bold-blockquote admonitions
-if grep -rn '^> \*\*\(Note\|Tip\|Warning\|Important\|Caution\):\*\*' docs/book/*.md >&2; then
+if grep -n '^> \*\*\(Note\|Tip\|Warning\|Important\|Caution\):\*\*' "${pages[@]}" >&2; then
   note "bold-blockquote admonition -> use ::: callout-*"
 fi
 
 # 3. Chapter-number cross references (numbers drift; use titles)
-if grep -rnE '\[(Chapter|Ch\.?) [0-9]' docs/book/*.md docs/book/index.qmd >&2; then
+if grep -nE '\[(Chapter|Ch\.?) [0-9]' "${pages[@]}" >&2; then
   note "'Chapter N' in link text -> use the target's H1 title"
 fi
 
 # 4. Banned terminology (prose only — fenced code and inline code spans are
 #    exempt, since command/resource names are what they are)
-if python3 - >&2 <<'PY'
-import glob, re, sys
+if python3 - "${pages[@]}" >&2 <<'PY'
+import re, sys
 BANNED = [r'GameDay', r'\bpreflight\b', r'\bKATES\b']
 bad = False
-for f in sorted(glob.glob('docs/book/*.md') + ['docs/book/index.qmd']):
-    if f.endswith('STYLE.md'):
-        continue
+for f in sys.argv[1:]:
     fence = False
     for i, l in enumerate(open(f, encoding='utf-8'), 1):
         if l.strip().startswith('```'):
@@ -64,10 +69,10 @@ then
 fi
 
 # 5. Double blank line after callout close
-if python3 - <<'PY'
-import glob, re, sys
+if python3 - "${pages[@]}" <<'PY'
+import re, sys
 bad = False
-for f in sorted(glob.glob('docs/book/*.md') + ['docs/book/index.qmd']):
+for f in sys.argv[1:]:
     txt = open(f, encoding='utf-8').read()
     for m in re.finditer(r':::\n\n\n+', txt):
         print(f"{f}: double blank line after callout at offset {m.start()}", file=sys.stderr)
