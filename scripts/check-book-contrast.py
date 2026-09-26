@@ -62,7 +62,12 @@ def resolve(palette, value, seen=()):
             raise ValueError(f"reference loop at ${name}")
         if name not in palette:
             raise KeyError(name)
-        return resolve(palette, palette[name], seen + (name,))
+        try:
+            return resolve(palette, palette[name], seen + (name,))
+        except ValueError as error:
+            if str(error).startswith("$"):  # already names the token
+                raise
+            raise ValueError(f"${name}: {error}") from None
     if value.startswith("#"):
         return parse_hex(value)
     m = re.fullmatch(r"rgba?\((.*)\)", value)
@@ -207,7 +212,7 @@ def main():
     args = parser.parse_args()
 
     syntax = read_syntax(args.theme_dir / "kates-code.theme")
-    failures = checked = 0
+    failures = errors = checked = 0
     for scheme in ("light", "dark"):
         palette = read_palette(args.theme_dir / f"kates-{scheme}.scss")
         for area, label, fg_ref, layers, minimum in pairs(syntax):
@@ -217,7 +222,11 @@ def main():
                 fg = over(fg, bg) if fg[3] < 1 else fg
             except KeyError as missing:
                 print(f"ERROR  {scheme:5}  {area}: {label}: ${missing.args[0]} is not defined")
-                failures += 1
+                errors += 1
+                continue
+            except ValueError as error:  # a value this script cannot read, e.g. a Sass function
+                print(f"ERROR  {scheme:5}  {area}: {label}: {error}")
+                errors += 1
                 continue
             value = ratio(fg, bg)
             checked += 1
@@ -229,8 +238,12 @@ def main():
                 print(f"{'PASS' if ok else 'FAIL'}  {value:5.2f}:1  {scheme:5}  {area}: {label}"
                       f"  ({hexof(fg)} on {hexof(bg)}, {kind} needs {minimum}:1)")
 
-    if failures:
-        print(f"\n{failures} of {checked} colour pairs fall short of WCAG AA — see the palettes in docs/book/theme/.")
+    if failures or errors:
+        print()
+        if failures:
+            print(f"{failures} of {checked} colour pairs fall short of WCAG AA — see the palettes in docs/book/theme/.")
+        if errors:
+            print(f"{errors} colour pairs could not be checked; each ERROR line above names the token.")
         return 1
     print(f"OK: all {checked} colour pairs in the book theme meet WCAG AA")
     return 0
