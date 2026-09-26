@@ -150,9 +150,6 @@ graph LR
 The key metrics to watch across phases:
 
 ```mermaid
-%%| label: fig-types-stress-phases
-%%| fig-cap: "Illustrative: how a STRESS run on the Trogdor backend reads step by step, from linear growth through saturation to overload."
-%%| fig-alt: "Three groups of expectations. Phases 1 to 3, healthy: throughput rises linearly, latency is stable, errors are zero. Phase 4, saturation: throughput plateaus, latency rises, GC pressure increases. Phase 5, overload: throughput drops, latency spikes, errors appear."
 graph TD
     subgraph Healthy["Phase 1-3: Healthy"]
         A[Throughput ↑ linearly]
@@ -208,7 +205,7 @@ graph LR
 
 ### Key Metrics
 
-Each row is a phase of the Trogdor profile above, with the question to ask of it. On the native backend, which runs the burst alone, the run has no baseline or recovery phase, so you observe recovery in your monitoring, as Methodology says.
+Each row is a moment around the burst and what to note there. A SPIKE run measures only the burst, so take the baseline P99 from a LOAD run beforehand and watch recovery in your monitoring afterwards.
 
 | Phase | Watch For |
 |-------|-----------|
