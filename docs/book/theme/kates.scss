@@ -147,11 +147,14 @@ body:not(:has(.sidebar-link.active:is([href$="10-cli-reference.html"], [href$="1
 
 // A reading measure for running text: 66 to 75 characters a line. Inter's
 // `ch` (the width of a zero) is wider than its average character, so 68ch
-// would still set about 86 characters a line in the 749px column; 58ch sets
-// about 72. Tables, code, diagrams and callouts keep the full column.
+// barely narrows the 749px column: lines keep a median of 79 characters in
+// Introduction and 84 in Performance Theory. 58ch sets 70 and 71. Tables,
+// code, diagrams and callouts keep the full column. So does the landing
+// page's cover, which Quarto floats inside a paragraph of its own: capping
+// that paragraph would pull the cover in from the column's edge.
 #quarto-document-content,
 #quarto-document-content section {
-  > :is(p, dl, blockquote) {
+  > :is(p:not(:has(> .quarto-cover-image)), dl, blockquote) {
     max-width: $kates-measure;
   }
 
@@ -468,9 +471,10 @@ figure.kates-diagram {
   }
 }
 
-// From 1200px up, a diagram wider than the column takes as much of the right
-// margin as it needs (diagrams.html sets the bleed), and the table of
-// contents steps aside while it passes.
+// From 1200px up, a diagram more than a tenth wider than the column takes as
+// much of the right margin as it needs (diagrams.html sets the bleed; a
+// narrower one shrinks to the column), and the table of contents steps aside
+// while it passes.
 figure.kates-diagram.is-wide {
   z-index: 3;
   margin-right: calc(-1 * var(--kates-diagram-bleed, 0px));
@@ -783,6 +787,12 @@ dialog.kates-diagram-viewer {
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+    // Room between the text and the focus ring (diagrams.html makes the label
+    // a button) above, below and where the text starts; the right side already
+    // has room, and the chevron sits there. The negative margin keeps the text
+    // where it was.
+    padding: 0.15rem 0 0.15rem 0.3rem;
+    margin: -0.15rem 0 -0.15rem -0.3rem;
   }
 
   .sidebar-item-section {
