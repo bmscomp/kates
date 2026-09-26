@@ -18,7 +18,7 @@ The cluster exists but isn't healthy: the Strimzi operator, the brokers, the con
 
 ## Kafka Connectivity
 
-The cluster runs, but a client — Kates, Kafka UI or your own — can't reach it or can't authenticate, or its credentials never arrive.
+A client — Kates, Kafka UI or your own — can't reach the cluster or authenticate to it, or its credentials never arrive.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
