@@ -81,9 +81,11 @@ Python 3.9 or later, standard library only.
 [`TASKS.md`](TASKS.md) lists the 21 tasks (what each tests, its oracle, its required caveats),
 what setup does to the lab, and the schema in full. `tasks.json` was fixed before either arm ran:
 `fixed_at` is the day, and it is not edited for the rest of the evaluation. The first
-command of a run copies it into the run directory and records its SHA-256; every later command
-of that run reads the copy, and refuses a different list passed with `--tasks`. What the runner
-relies on:
+command of a run that gets past its checks copies it into the run directory and records its
+SHA-256; every later command of that run reads the copy, and refuses a different list passed with
+`--tasks`. When `tasks.json` has changed since, a run that has not yet set up a task, computed an
+answer or scheduled a trial takes the list as it is now and says so; one that has keeps its copy
+and warns on every command. What the runner relies on:
 
 - **`prompt`** is what the user asks, the same for every arm, with no hint about tools
   (`taskfile.validate` refuses a prompt that names a tool, a command, a flag or an interface).
