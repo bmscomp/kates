@@ -49,14 +49,14 @@ Lab splits the terminal into two panes:
 
 Read the screen from the top:
 
-1. The header names the Kates API that Lab sends its runs to, the address your CLI is using. It shows only on a terminal at least 100 columns wide.
-2. The left pane holds the settings for the next run. `▸` marks the one that `↑` and `↓` select and `←` and `→` change; on the live screen, that row also opens out to list the values it can take.
-3. Iteration History lists the recent iterations, one row each: its number, throughput, P99, and Δ, the change in throughput from the iteration before it (▲ up, ▼ down). On a very wide terminal, an `Err %` column appears as well.
-4. The two sparklines trace throughput and P99 across every iteration, oldest first, each scaled from its own lowest value (▁) to its highest (█). They appear once there are two iterations.
+1. The header ends with the address of the Kates API that Lab sends its runs to, the one your CLI is using. That part shows only on a terminal at least 100 columns wide.
+2. The left pane holds the settings for the next run. A pointer, `▸`, marks the one that `↑` and `↓` select and `←` and `→` change; on the live screen, that row also opens out to list the values it can take.
+3. Iteration History lists the recent iterations, one row each: its number, throughput, P99, and Δ, the change in throughput from the iteration before it (▲ up, ▼ down). When the right pane is wide enough, an `Err %` column appears as well.
+4. The two sparklines trace throughput and P99 across every iteration, oldest first, each scaled from its own lowest value, the shortest bar (▁), to its highest, the full block (█). They appear once there are two iterations.
 5. The status line says what Lab just did: here, the result of iteration 3. While a test runs, it shows the elapsed seconds and, once Kates reports progress, the live record count, throughput and P99.
 6. The help line lists the keys that work right now. While a test runs it offers only `x` and `ctrl+c`, `c compare` joins it once there are two iterations, and `r retry` after a run fails.
 
-Below 80 columns, the two panes stack one above the other instead of sitting side by side.
+Lab needs a terminal of at least 80 columns by 24 rows; below that it shows a "Terminal too small" message instead of the panes.
 
 ## Keyboard Reference
 
@@ -119,7 +119,7 @@ While a test runs, the status bar shows the iteration number and elapsed time, u
 ⏳ Running iteration #4…  (12s)
 ```
 
-Throughput and latency metrics appear once the test completes.
+Once Kates reports progress, the status bar adds the live record count, throughput and P99.
 
 ## Comparing Iterations
 
