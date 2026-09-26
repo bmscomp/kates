@@ -364,3 +364,8 @@ that are not version-specific.
   be the same cluster.
 - [Version & Compatibility Matrix](appendix-d-versions.md) — the operator and
   Kafka versions this release is built against.
+
+That is the end of moving data between clusters. The last chapter of this part,
+[Recipes & Patterns](14-recipes.md), goes back to Kates itself and combines its
+commands into end-to-end procedures — validating an upgrade, catching a regression
+overnight, certifying a cluster's resilience.
