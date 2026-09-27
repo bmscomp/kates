@@ -120,7 +120,7 @@ Twelve dashboards, and all of them live in one place: [`dashboards/`](https://gi
 
 One chart delivers all twelve: `charts/monitoring` puts every board the repository builds into one ConfigMap, which the Grafana sidecar picks up, and the boards' template variables select the release they show. `charts/kates`, `charts/kates-chaos`, `charts/connect-cluster` and `charts/mirror-maker2` ship no board of their own.
 
-Until this refactor that twelfth board was the exception to *all of them live in one place*: it was hand-written JSON inside `charts/kates-chaos/templates/grafana-dashboard.yaml`, with no panel descriptions, no layout gate over it, and four series or labels that LitmusChaos does not publish. It is now generated from `dashboards/kates-chaos-infra/` like everything else.
+Until this refactor **Kates — Chaos infrastructure** was the exception to *all of them live in one place*: it was hand-written JSON inside `charts/kates-chaos/templates/grafana-dashboard.yaml`, with no panel descriptions, no layout gate over it, and four series or labels that LitmusChaos does not publish. It is now generated from `dashboards/kates-chaos-infra/` like everything else.
 
 ### The JSON Is Generated
 
@@ -481,7 +481,7 @@ The JSON payload carries the run ID, test type, bucket labels and boundaries, an
 }
 ```
 
-Interpretation: at this snapshot, 832 messages fell in the 3–5ms bucket, 456 in the 5–7ms bucket, etc. The `phase` field tells you which test phase was active — compare the latency distribution during `ramp-up` vs. `steady-state` to see the effect of JVM warm-up.
+The counts are cumulative: a row covers everything its task has recorded since the task started, not only the time since the row before, so the difference between two rows of one task is what happened in between. Interpretation: by this snapshot, 832 messages had fallen in the 3–5ms bucket, 456 in the 5–7ms bucket, etc. The `phase` field tells you which test phase was active — compare the latency distribution during `ramp-up` vs. `steady-state` to see the effect of JVM warm-up.
 
 ### What Heatmaps Reveal
 
@@ -548,16 +548,18 @@ A 52% increase in P99 latency with only a 7% drop in throughput suggests the clu
 
 ## Broker Metrics Correlation
 
-`kates report brokers` splits a run across the brokers that lead its topic's partitions, which is how you spot a hot spot caused by leader imbalance. It measures nothing per broker: it shares the run's throughput out by each broker's share of the topic's partition leaders.
+`kates report brokers` splits a run across the cluster's brokers, which is how you spot a hot spot caused by leader imbalance. It measures no per-broker traffic: it shares the run's throughput out by each broker's share of the topic's partition leaders.
 
 ```bash
 kates report brokers <id>
 ```
 
-The command prints one row per broker. Read the columns this way:
+The command prints one row per broker in the cluster, including a broker that leads none of the topic's partitions. Read the columns this way:
 
 | Column | What it shows |
 |--------|---------------|
+| Broker | The broker's ID; a star marks the controller |
+| Host (Rack) | The broker's host, and its rack, or `-` when it has none |
 | Leaders / Total | The topic's partitions this broker leads, out of all of them |
 | Share | That count as a percentage |
 | Throughput | The run's average throughput multiplied by the share |
