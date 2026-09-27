@@ -1,0 +1,21 @@
+{
+  "state": "RUNNING",
+  "spec": {
+    "class": "org.apache.kafka.trogdor.workload.ProduceBenchSpec",
+    "startMs": 1790000000000,
+    "durationMs": 120000,
+    "producerNode": "node0",
+    "bootstrapServers": "broker:9092",
+    "targetMessagesPerSec": 10000,
+    "maxMessages": 600000
+  },
+  "startedMs": 1790000000250,
+  "status": {
+    "totalSent": 300000,
+    "averageLatencyMs": 3.1,
+    "p50LatencyMs": 2,
+    "p95LatencyMs": 8,
+    "p99LatencyMs": 19,
+    "transactionsCommitted": 0
+  }
+}
