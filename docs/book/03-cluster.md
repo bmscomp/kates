@@ -28,7 +28,7 @@ When a test names a topic that doesn't exist yet, Kates creates it with the spec
 
 A [consumer group](appendix-a-glossary.md#gl-consumer-group) is a set of consumers that share the reading of a topic. Kafka assigns each partition to one member of the group, so the members split the topic's partitions between them, and a group gains nothing from more members than partitions. Two groups that read the same topic each read all of it.
 
-As a group reads, it commits offsets: for each partition, the offset of the next record it will read, which Kafka keeps in its internal `__consumer_offsets` topic. The committed offset is where a consumer resumes after a restart or a [rebalance](appendix-a-glossary.md#gl-rebalance). A group with no committed offset starts where its `auto.offset.reset` setting says, and Kates's test consumers say `earliest`: the oldest record still on the topic. A test that names a `consumerGroup` resumes from the offsets that group committed in earlier runs, so give each test a group of its own.
+As a group reads, it commits offsets: for each partition, the offset of the next record it will read, which Kafka keeps in its internal `__consumer_offsets` topic. The committed offset is where a consumer resumes after a restart or a [rebalance](appendix-a-glossary.md#gl-rebalance). A group with no committed offset starts where its `auto.offset.reset` setting says, and the consumers of the native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) say `earliest`: the oldest record still on the topic. A test that names a `consumerGroup` resumes from the offsets that group committed in earlier runs, so give each test a group of its own.
 
 [Consumer lag](appendix-a-glossary.md#gl-consumer-lag) is how far a group trails the log: for each partition, the partition's latest offset minus the group's committed offset, and a group's lag is the sum over its partitions. Lag that keeps growing means the consumers fall further behind the producers; lag that stays level means they keep pace, that many records behind. `kates cluster groups describe <group-id>` computes it this way and shows it per partition, in its Current, End and Lag columns, under the group's total.
 
@@ -36,9 +36,9 @@ As a group reads, it commits offsets: for each partition, the offset of the next
 
 Kafka keeps the cluster's metadata (which brokers are live, which partitions exist, which replica leads each one) in KRaft, its built-in Raft consensus; there is no ZooKeeper. A few controllers hold that metadata as a replicated log, the [metadata log](appendix-a-glossary.md#gl-metadata-log). Brokers fetch the log from them and act on what it says, such as which partitions they lead, so a broker that falls behind on it works from an older picture of the cluster until it catches up.
 
-One controller is active: it writes each change to the metadata log, and a change commits once a [quorum](appendix-a-glossary.md#gl-quorum), a majority of the controllers, has it. `krafter` runs three controllers: the `kafka-cluster` chart's default, and on the [`panda`](appendix-a-glossary.md#gl-panda) Kind cluster one per [zone](appendix-a-glossary.md#gl-zone) in the values `kates deploy` generates. Two must agree, so the quorum survives the loss of one controller. With two down, no metadata change can commit: no partition gets a new leader and no topic is created.
+One controller is active: it writes each change to the metadata log, and a change commits once a [quorum](appendix-a-glossary.md#gl-quorum), a majority of the controllers, has it. `krafter` runs three controllers: the `kafka-cluster` chart's default, and on the [`panda`](appendix-a-glossary.md#gl-panda) Kind cluster one per [zone](appendix-a-glossary.md#gl-zone) in the values `kates deploy` generates. Two must agree, so the quorum survives the loss of one controller. With two down, no metadata change can commit: no partition gets a new leader or a new ISR, and no topic is created.
 
-Each broker sends the controllers regular heartbeats. When a broker's heartbeats stop for longer than its session timeout (`broker.session.timeout.ms`), the active controller [fences](appendix-a-glossary.md#gl-fencing) it. The controller stops counting the broker as live, moves the leadership of the broker's partitions to replicas that are in sync, and stops counting the broker's replicas as in sync. The broker rejoins only when it registers again and catches up with the metadata log.
+Each broker sends the active controller regular heartbeats. When a broker's heartbeats stop for longer than the session timeout (`broker.session.timeout.ms`), the active controller [fences](appendix-a-glossary.md#gl-fencing) it. The controller stops counting the broker as live, moves the leadership of the broker's partitions to replicas that are in sync, and stops counting the broker's replicas as in sync. The controller unfences the broker once its heartbeats get through again and it has caught up with the metadata log; a broker that restarts registers again first.
 
 ## Physical Topology
 
@@ -137,7 +137,7 @@ The diagram follows one `acks=all` write on a healthy `krafter`. Notice that the
 
 ```mermaid
 %%| label: fig-cluster-acks-all-write
-%%| fig-cap: "On a healthy krafter, the leader acknowledges an acks=all write only once both followers have copied it."
+%%| fig-cap: "On a healthy `krafter`, the leader acknowledges an `acks=all` write only once both followers have copied it."
 %%| fig-alt: "Flowchart from left to right. A producer using acks=all sends a write to the partition's leader. Follower 1 and follower 2 each copy the record from the leader. The leader then acknowledges the write to the producer, once both followers have it."
 graph LR
     P["Producer<br/>acks=all"] -->|"1. Write"| L["Leader"]
@@ -166,7 +166,7 @@ This matrix is the most important table in this chapter. It tells you what happe
 | 2 brokers down | No | No | ISR = 1 < `min.insync.replicas`, writes rejected |
 | 3 brokers down | No | No | No leader, cluster unavailable |
 | 1 controller down | Yes | No | Quorum of 2 still holds, metadata operations continue |
-| 2 controllers down | No | No | No quorum — metadata operations halt, brokers freeze |
+| 2 controllers down | Until a leader or ISR must change | No | No quorum: current leaders keep taking writes, but nothing can elect a leader, change an ISR or create a topic |
 | 1 broker + 1 controller | Yes | No | Quorum intact, ISR ≥ 2 |
 
 ::: {.callout-important}
@@ -390,10 +390,10 @@ Expect `info` to list the brokers each in a different zone, `describe` to show `
 ## Summary
 
 - The `krafter` cluster runs dedicated KRaft roles: controllers hold the metadata quorum, brokers handle the data plane, and each pod is pinned to its own simulated zone — so the control plane stays responsive even when the data plane is saturated.
-- With RF=3 and `min.insync.replicas=2`, one broker can fail while writes keep flowing; two failures reject writes but never lose acknowledged data. That availability-for-durability trade drives every chaos experiment you'll design.
+- With RF=3 and `min.insync.replicas=2`, `acks=all` writes keep flowing through one broker failure, and two failures reject them without losing acknowledged data: availability traded for durability.
 - Each broker's 4Gi memory minus a 2Gi fixed heap leaves ~2Gi of page cache — small enough that a lagging consumer hits disk quickly, making this cluster deliberately more sensitive to workload patterns than production hardware.
 - A broker failure plays out in five phases — detection, leader election, ISR shrink, client retry, recovery — and all of them are visible in the heatmap of a Kates test that runs through the failure.
-- Of the operational components, only the Entity Operator runs on `panda`; where Cruise Control, Kafka Exporter or Drain Cleaner run, they can shift a long [test run](appendix-a-glossary.md#gl-test-run).
+- Of the operational components, only the Entity Operator runs on `panda`; where Cruise Control runs, its rebalances can move partitions during a [test run](appendix-a-glossary.md#gl-test-run).
 - You never need to memorize any of this: `kates cluster info`, `topology`, `topics`, `groups`, and `check` give you a live view on demand.
 
 With the machine under the hood mapped, [Performance Theory](04-performance-theory.md) explains how to turn the numbers it produces into conclusions you can trust.
