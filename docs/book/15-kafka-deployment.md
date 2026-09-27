@@ -92,10 +92,10 @@ graph TB
 
 | Aspect | Combined (controller+broker) | Dedicated (separate pools) |
 |--------|:---:|:---:|
-| Metadata isolation | ❌ Heavy I/O can delay elections | ✅ Controllers have predictable latency |
-| Independent scaling | ❌ Must scale together | ✅ Add brokers without touching quorum |
-| Failure blast radius | ❌ One pod loss = quorum + data risk | ✅ Broker loss doesn't affect quorum |
-| Resource tuning | ❌ Single memory/CPU profile | ✅ Controllers: 1Gi, Brokers: 4Gi |
+| Metadata isolation | Poor: heavy I/O can delay elections | Good: controllers have predictable latency |
+| Independent scaling | Poor: must scale together | Good: add brokers without touching quorum |
+| Failure blast radius | Poor: one pod loss = quorum + data risk | Good: broker loss doesn't affect quorum |
+| Resource tuning | Poor: single memory/CPU profile | Good: controllers 1Gi, brokers 4Gi |
 
 ### Why 3 Controllers?
 

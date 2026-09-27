@@ -108,17 +108,34 @@ format:
     documentclass: scrbook
     papersize: a4
     fontsize: 11pt
+    # Fonts, colours, part pages, the graphics clamp, code and output panels
+    # and the cover page live in the header; the filters mark output blocks
+    # and draw the cover. lualatex, for the font fallbacks.
+    include-in-header: theme/pdf-header.tex
+    filters:
+      - theme/pdf-output.lua
+      - theme/pdf-cover.lua
+    pdf-engine: lualatex
     colorlinks: true
-    linkcolor: "NavyBlue"
-    urlcolor: "NavyBlue"
+    # katesblue is the web's link colour, defined in theme/pdf-header.tex.
+    linkcolor: "katesblue"
+    urlcolor: "katesblue"
+    filecolor: "katesblue"
+    toccolor: "katesnavy"
     toc: true
     toc-depth: 2
     number-sections: true
     top-level-division: chapter
-    fig-pos: "H"
+    # Captioned figures, Mermaid ones included, float to where they fit
+    # instead of leaving a gap when the rest of the page is too short.
+    fig-pos: "htbp"
+    # The web's diagram colours come from its stylesheet, which never reaches
+    # the PDF; neutral is Mermaid's own greyscale theme.
+    mermaid:
+      theme: neutral
+    # A 150 mm text block.
     geometry:
       - top=30mm
       - bottom=30mm
-      - left=25mm
-      - right=25mm
-    pdf-engine: xelatex
+      - left=30mm
+      - right=30mm
