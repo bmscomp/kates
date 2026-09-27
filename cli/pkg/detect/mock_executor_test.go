@@ -3,12 +3,16 @@ package detect
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // MockExecutor provides canned responses for unit testing without a live cluster.
 type MockExecutor struct {
 	Responses map[string]string
 	Errors    map[string]error
+
+	mu    sync.Mutex
+	calls []string
 }
 
 func NewMockExecutor() *MockExecutor {
@@ -25,6 +29,9 @@ func (m *MockExecutor) key(name string, args ...string) string {
 
 func (m *MockExecutor) Exec(name string, args ...string) (string, error) {
 	k := m.key(name, args...)
+	m.mu.Lock()
+	m.calls = append(m.calls, k)
+	m.mu.Unlock()
 
 	var matched bool
 	var resErr error
@@ -59,6 +66,14 @@ func (m *MockExecutor) Exec(name string, args ...string) (string, error) {
 		return resResp, resErr
 	}
 	return "", fmt.Errorf("mock: no response for %q", k)
+}
+
+// Calls returns every command Exec was given, in the order the calls arrived,
+// each joined with spaces as the response keys are.
+func (m *MockExecutor) Calls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.calls...)
 }
 
 func (m *MockExecutor) LookPath(file string) (string, error) {

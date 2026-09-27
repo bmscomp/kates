@@ -68,10 +68,12 @@ func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[stri
 			lipgloss.NewStyle().Foreground(clrDim).Italic(true).
 				Render("Run the same command without --dry-run to apply it."))
 	}
-	// --dry-run is not inert, and saying so here is cheaper than the surprise.
-	// The cluster gate, the introspection and the kind StorageClass bootstrap
-	// have already run by the time this prints.
+	// What a dry run did before this printed: the cluster gate and pre-flight
+	// introspection, both reading only. It skipped the kind StorageClass
+	// bootstrap and the introspection probes that create a namespace, a
+	// Secret or pods (detect.Collector.ReadOnly). Its writes are local:
+	// .build/values-detected.yaml, and any Strimzi chart it caches.
 	fmt.Printf("  %s\n\n",
 		lipgloss.NewStyle().Foreground(clrDim).Italic(true).
-			Render("Pre-flight introspection has already run; no Helm release was touched."))
+			Render("Nothing was created in the cluster and no Helm release was touched."))
 }
