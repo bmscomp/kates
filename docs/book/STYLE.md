@@ -52,7 +52,7 @@ A chapter written before the types keeps its objectives and Summary until its re
 
 ## Cross-References
 
-- Link text is the target's title, verbatim: a whole chapter by its H1, `[Kafka Deployment Engineering](15-kafka-deployment.md)`; a section by its heading; a Glossary entry by the term as the sentence writes it. Never "Chapter N" or "Ch N" — numbers are assigned at render time and drift when the order changes.
+- Link text is the target's title, verbatim: a whole chapter by its H1, `[Kafka Deployment Engineering](15-kafka-deployment.md)`; a section by its heading; a Glossary entry by the term itself, singular or plural. Never "Chapter N" or "Ch N" — numbers are assigned at render time and drift when the order changes.
 - Appendices by title too; letters are assigned by Quarto.
 - Refer to a section with a Markdown link to its heading, never "section 3.1", and don't use `@sec-` references.
 
@@ -62,9 +62,9 @@ Each concept has one home chapter that explains it in full: what it is, why it m
 
 - Outside its home, a concept gets its gloss from the registry, or a clause cut from it, and a link to the home section.
 - A new concept gets a registry row and a Glossary entry in the pull request that first teaches it, and a Kates-specific term goes into the Glossary before a chapter uses it.
-- The Glossary has one letter H2 per initial (`## A`) and one H3 per term, with an explicit id: `### Consumer Lag {#gl-consumer-lag}`. The id is `gl-` and a slug of the term in lowercase ASCII, words joined by `-`, punctuation and backticks dropped (`gl-min-insync-replicas`).
+- The Glossary has one letter H2 per initial (`## A`) and one H3 per term, with an explicit id: `### Consumer Lag {#gl-consumer-lag}`. The id is `gl-` and a slug of the term in lowercase ASCII: backticks are dropped, and each run of spaces or punctuation between words becomes one `-`, so `min.insync.replicas` gives `gl-min-insync-replicas`. A parenthetical qualifier is either dropped or folded into the slug: the entry for Percentile (P50, P95, P99, P99.9) is `gl-percentile`, and the one for Context (CLI) is `gl-cli-context`.
 - A `gl-` id is the one explicit id that isn't a GitHub slug: lychee honours it and Quarto uses it, but GitHub's file view doesn't. Set `toc-depth: 2` in the Glossary's front matter, so that its table of contents stops at the letters.
-- An entry is a one-sentence definition for the reader least likely to know the term, an "In Kates" sentence where Kates gives the term a meaning of its own, and a link to its home.
+- An entry is a one-sentence definition for the reader least likely to know the term, one or two "In Kates" sentences where Kates gives the term a meaning of its own, and a link to its home.
 - Link a Glossary term at its first use in each chapter's running prose, such as `[consumer lag](appendix-a-glossary.md#gl-consumer-lag)`. Running prose is paragraphs, list items, blockquotes and table body rows; headings, code, link text, callout titles and table header rows don't count. An inline code span counts only when it is the whole term, and a sentence that defines the term isn't linked.
 
 ## The Running Example
@@ -128,9 +128,9 @@ Use the left column in prose; commands, fields, flags, UI labels and resource na
 | Trogdor (as a benchmark backend only) | Trogdor fault injection, Trogdor chaos | Kates submits only produce, consume and round-trip workload specs to Trogdor; it never injects faults through it |
 | chaos provider: the `litmus-crd`, `kubernetes`, `hybrid` or `noop` provider | chaos backend, chaos engine, the Litmus backend, the Kubernetes backend | What carries out a fault, set by `kates.chaos.provider`: `litmus-crd` (the default), `kubernetes`, `hybrid` (picks one at startup) or `noop` (injects nothing) |
 | gate | quality gate, validation gate, SLA check | A threshold in a scenario's `validate` block, which `kates test apply --wait` checks. "SLA gate" means the same. `kates gate` gives a performance grade |
-| SLA grade, or grade | SLA verdict, SLA score, letter grade (as a name) | The letter a disruption plan's `sla` block earns: A to F, or `-` when nothing could be evaluated. A plan without `sla` gets none |
-| verdict | integrity status, integrity result (for the outcome), SLA verdict | An INTEGRITY run's outcome: PASS, DATA_LOSS, CORRUPTION, ORDERING_VIOLATION or DUPLICATES_DETECTED, read with `kates test get` |
-| SLA | SLO (for Kates's thresholds), SLA contract | Kates's word for targets in a scenario's `validate` block, a plan's `sla` block and `--fail-on-sla-breach`. They're SLO-style targets, not agreements; say so at first use |
+| SLA grade, or grade | SLA verdict, SLA score, letter grade (as a name) | The letter a disruption plan's `sla` block earns: A, B, C, D or F, or `-` when nothing could be evaluated. A plan without `sla` gets none |
+| verdict | integrity status, integrity result (for the outcome), SLA verdict | An INTEGRITY run's outcome: PASS, DATA_LOSS, CORRUPTION, ORDERING_VIOLATION or DUPLICATES_DETECTED, read with `kates test get`. The "SLA Verdict" that `kates report show` prints is a UI label, not a verdict |
+| SLA | SLO (for Kates's thresholds), SLA contract | Kates's word for targets in a scenario's `validate` block, a plan's `sla` block (and `--fail-on-sla-breach`) and the `sla` of a phased `scenario` sent to `POST /api/tests`. They're SLO-style targets, not agreements; say so at first use |
 | performance grade | grade (unqualified), quality gate, score | The letter `kates gate` gives the test run it starts, from its average throughput and P99 against fixed thresholds; `kates benchmark` grades from a score |
 | security grade | grade (unqualified), security score | The letter `kates security audit` gives the cluster from its security checks; `kates security gate --min-grade` fails below it |
 | fault | failure injection, chaos (as a count noun), attack | One injected failure: a disruption type aimed at the pods a selector picks, held for `chaosDurationSec` (a `faultSpec` or `chaosSpec`) |
