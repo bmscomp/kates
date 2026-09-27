@@ -593,7 +593,7 @@ For deep Kafka configuration details (broker tuning, security, Cruise Control, t
 
 ### LitmusChaos
 
-`make all` installs LitmusChaos through `kates deploy`, into the `litmus` namespace. On a stack you build piece by piece, these targets manage it, and `make litmus` installs the same `chaos` release into `kafka` instead:
+`make all` installs LitmusChaos through `kates deploy`, into the `litmus` namespace (`kates-stack` with the single-namespace topology). On a stack you build piece by piece, these targets manage it, and `make litmus` installs the same `chaos` release into `kafka` instead:
 
 ```bash
 # Deploy LitmusChaos operator
@@ -613,7 +613,7 @@ make litmus-gameday
 make chaos-status
 ```
 
-`make litmus-test`, `make litmus-gameday` and the release and pod lists of `make chaos-status` look in `kafka` only, so on a `make all` stack they find no release. To have Kates inject faults without LitmusChaos, change its chaos provider, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
+`make litmus-test`, `make litmus-gameday` and the release and pod lists of `make chaos-status` look in `kafka` only, so on a `make all` stack they find no `chaos` release. To have Kates inject faults without LitmusChaos, change its chaos provider, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
 
 ### Kates API
 
@@ -1044,7 +1044,7 @@ make chaos-status
 kubectl logs -f -l app=chaos-operator -n litmus
 ```
 
-A release that `make litmus` installed runs in `kafka`, not `litmus`: point the first and last commands there. If every step of a disruption comes back `Skipped`, the Kates API is injecting nothing: its chaos provider is `noop`, usually because the configured one wasn't available. `kubectl logs -n kates deploy/kates | grep noop` shows why, and restarting the Kates API Deployment picks the provider again once you've fixed the cause.
+A release that `make litmus` installed runs in `kafka`, not `litmus`, and a single-namespace `make all` stack runs it in `kates-stack`: point the first and last commands there. If every step of a disruption comes back `Skipped`, the Kates API is injecting nothing: its chaos provider is `noop`, usually because the configured one wasn't available. `kubectl logs -n kates deploy/kates | grep noop` (`-n kates-stack` with the single-namespace topology) shows why, and restarting the Kates API Deployment picks the provider again once you've fixed the cause.
 
 For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
 
@@ -1087,7 +1087,7 @@ kates test list
 - Three decisions shape your topology before you deploy anything: namespace isolation (`strimzi-operator`, `kafka`, `kates`, `monitoring`, `litmus` by default), service exposure (NodePort locally, LoadBalancer or Ingress in the cloud), and storage durability — Kafka broker volumes are always persistent.
 - Size for what you measure: under-provisioned brokers benchmark resource contention, not Kafka, and the Minimal profile's 16 GB leaves almost no headroom.
 - Cloud moves are values overlays, not rewrites: `gp3` on EKS, `premium-rwo` on GKE, `managed-premium` on AKS, internal load balancers with source ranges on the bootstrap and every broker, plus workload-identity annotations instead of embedded credentials.
-- `make all` drives the whole deployment through `kates deploy`; per-component targets (`make cluster`, `make monitoring`, `make kafka`, `make litmus`, `make kates`) build the same stack piece by piece.
+- `make all` drives the whole deployment through `kates deploy`; the per-component targets build the pieces one by one, and put LitmusChaos and monitoring in `kafka`.
 - The JVM image runs ZGC because a benchmarking tool's own GC pauses must not pollute its measurements, with the heap at no more than about 70% of the memory limit. The native image starts in ~0.05s but runs Serial GC, so it suits CI and laptops rather than measurement.
 
 Your stack is running — now lock it down: [Security & Compliance](17-security.md) covers authentication, authorization, network policies, and certificate management in depth.

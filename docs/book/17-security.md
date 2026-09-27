@@ -442,8 +442,6 @@ Neither policy restricts the client listeners, for the reason [How the Policies 
 
 Two things declare 9094: `kafka.externalAccess`, which `values-prod.yaml` sets to a NodePort, and `values-detected.yaml`, which adds an `external` listener on every cluster but kind, a NodePort or, on EKS, GKE and AKS, a LoadBalancer. `kates deploy` therefore exposes 9094 outside kind although the base values leave `kafka.externalAccess` off. On EKS, GKE and AKS the detected listener annotates the bootstrap Service only, so every broker's load balancer gets the provider's default, usually a public address, and on EKS and GKE the bootstrap's is public too; only the AKS bootstrap is internal. A default `kates deploy` on those clouds can therefore put 9094 on the internet, with TLS and SCRAM-SHA-512 as its only guard. [Deployment Guide](12-deployment.md#cloud-deployment) replaces that listener with internal load balancers that admit only the ranges you list.
 
-Until you close the listeners, listener authentication and ACLs are what stand between an arbitrary pod and your data.
-
 ### Closing the Listeners
 
 Give every listener in `kafka.listeners` a `networkPolicyPeers` list. One narrow peer is enough, for the reason [How the Policies Combine](#how-the-policies-combine) gives: the pods the chart already admits keep their access, so `networkPolicy.clients` stays the one place where you grant access.
