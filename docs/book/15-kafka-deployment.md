@@ -350,9 +350,11 @@ Topics are declared as `KafkaTopic` CRDs, managed by the Topic Operator:
 | `cdc-heartbeat` | 1 | 3 | 24h | — | Debezium heartbeat |
 | `test-sink-topic` | 3 | 3 | 24h | — | Connect sink-connector validation |
 
-**Partition counts:** these are the platform profile's settings, not a measure of traffic. The Kates API writes none of the `kates-*` topics, and a test produces to whatever topic its spec names ([The Cluster Under Test](03-cluster.md)).
+**Partition counts:** these are the platform profile's settings, not a measure of traffic. The Kates API writes none of the `kates-*` topics above, and a test produces to whatever topic its spec names ([The Cluster Under Test](03-cluster.md)).
 
 **Cleanup policy:** every topic here is `cleanup.policy: delete` — none is compacted, and two of them would break if they were. Debezium writes its schema history without record keys, which a compacted topic refuses, and replays the whole history on restart, so `cdc-schema-history` keeps `retention.ms: -1` and `retention.bytes: -1` (the second overrides the brokers' 10 GiB `log.retention.bytes`). `kates-dlq` is a delete topic because compaction keeps only the latest failure per key and refuses records without one. It has no time limit because it keeps the retention it had as a compacted topic, so an upgrade from that topic deletes nothing by age; only the brokers' `log.retention.bytes` bounds it until you set a `retention.ms` to age failures out.
+
+**The Kates API's own topic:** `kates-test-events` carries each run's lifecycle events to the Kates API's webhook consumer, and it has no `KafkaTopic` resource. The brokers run with `auto.create.topics.enable: false`, so the Kates API creates the topic through the Kafka Admin API when it finds it missing. It checks when it starts and every minute after, and gives the topic one partition, three replicas (fewer on a smaller cluster), `cleanup.policy: delete` and 7 days' retention. The Topic Operator doesn't manage it, so `kubectl get kafkatopics` doesn't list it; `kates cluster topics describe kates-test-events` shows it.
 
 ## Certificate Management
 
