@@ -82,7 +82,7 @@ The Kates API merges `spec` with the test type's defaults, and every key below r
 
 The three `enable` keys take `true` or `false`. `kates test apply` refuses a file where one holds anything else, such as `yes`, `on` or nothing, naming the scenario and the key, before it starts any of the file's tests.
 
-A key the scenario's type or benchmark backend cannot apply is refused: `kates test apply` gets a `400` naming it, and the scenario does not start. That is a rate other than -1 for SPIKE or CAPACITY, which run unthrottled; `consumerGroup` or a fetch setting for a type without a consumer (every type but LOAD, ENDURANCE and INTEGRITY); `enableCrc: true` for any type but INTEGRITY; [`enableIdempotence: true`](appendix-a-glossary.md#gl-idempotent-producer) or `enableTransactions: true` when [`acks`](appendix-a-glossary.md#gl-acks) is not `all` (SPIKE's default is `1`); `enableTransactions: true` with `enableIdempotence: false`, or on the `trogdor` benchmark backend. The [API Reference](11-api-reference.md#post-apitests) lists the rules; [Test Types Deep Dive](05-test-types.md) and [Data Integrity Verification](08-data-integrity.md) cover what the options do.
+A key the scenario's type or benchmark backend cannot apply is refused: `kates test apply` gets a `400` naming it, and the scenario does not start. That is a rate other than -1 for SPIKE or CAPACITY, which run unthrottled; `consumerGroup` or a fetch setting for a type that takes no consumer settings (every type but LOAD, ENDURANCE and INTEGRITY); `enableCrc: true` for any type but INTEGRITY; [`enableIdempotence: true`](appendix-a-glossary.md#gl-idempotent-producer) or `enableTransactions: true` when [`acks`](appendix-a-glossary.md#gl-acks) is not `all` (SPIKE's default is `1`); `enableTransactions: true` with `enableIdempotence: false`, or on the `trogdor` benchmark backend. The [API Reference](11-api-reference.md#post-apitests) lists the rules; [Test Types Deep Dive](05-test-types.md) and [Data Integrity Verification](08-data-integrity.md) cover what the options do.
 :::
 
 ### Producer Configuration
@@ -100,11 +100,11 @@ These keys configure the producer. `parallelProducers` counts only for STRESS an
 | `compressionType` | String | `lz4` | Compression: `none`, `gzip`, `snappy`, `lz4`, `zstd` |
 | `targetThroughput` | Integer | -1 | Producer rate in records/s, for each producer; -1 is unlimited. Replaces the type's default rate (5,000 for ENDURANCE, 10,000 for ROUND_TRIP) |
 | `enableIdempotence` | Boolean | not set | The producer's `enable.idempotence`; not set, the producer is idempotent whenever `acks` is `all` |
-| `enableTransactions` | Boolean | false | Transactional producers, committing every 100 records or every 10 seconds, whichever comes first; a LOAD, ENDURANCE or INTEGRITY consumer then reads with `read_committed` |
+| `enableTransactions` | Boolean | false | Transactional producers, committing every 100 records or every 10 seconds, whichever comes first; any consumer in the run then reads with `read_committed` |
 
 ### Consumer Configuration
 
-Consumer settings matter only for the types that start a consumer — LOAD, ENDURANCE and INTEGRITY — and `numConsumers` is read by none of them.
+Consumer settings apply only to LOAD, ENDURANCE and INTEGRITY. ROUND_TRIP starts a consumer too, but it reads without a group and with the Kafka client's fetch defaults, and no type reads `numConsumers`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -171,7 +171,7 @@ graph LR
 
 ### Performance Gates
 
-These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated.
+These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated. Each gate is checked against every task of the run, not against the report summary, so every task must meet it. A consumer records no latency on the native backend, so there a LOAD run's latency gates judge its producer, while `minThroughputRecPerSec` judges the producer and the consumer alike.
 
 | Field | Type | Description |
 |-------|------|-------------|

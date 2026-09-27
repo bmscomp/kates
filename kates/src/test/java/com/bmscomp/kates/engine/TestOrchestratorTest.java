@@ -849,6 +849,21 @@ class TestOrchestratorTest {
             assertEquals("read_committed", tasks.get(1).getConsumerConfig().get("isolation.level"));
         }
 
+        @Test
+        void aTransactionalRoundTripsConsumerReadsCommitted() {
+            // Its consumer times each record's delivery, and a record in an
+            // open transaction has not been delivered to a read_committed reader.
+            TestSpec req = requested();
+            req.setAcks("all");
+            req.setEnableTransactions(true);
+
+            BenchmarkTask task = orchestrator
+                    .buildTasks(TestType.ROUND_TRIP, orchestrator.applyTypeDefaults(TestType.ROUND_TRIP, req), "run-1")
+                    .get(0);
+
+            assertEquals(Map.of("isolation.level", "read_committed"), task.getConsumerConfig());
+        }
+
         @ParameterizedTest
         @EnumSource(
                 value = TestType.class,
@@ -954,7 +969,13 @@ class TestOrchestratorTest {
             Map<String, String> errors = check(type, "native", req);
 
             assertEquals(Set.of("consumerGroup", "fetchMinBytes", "fetchMaxWaitMs"), errors.keySet());
-            assertTrue(errors.get("consumerGroup").contains("starts no consumer"), errors.toString());
+            assertTrue(
+                    errors.get("consumerGroup")
+                            .contains(
+                                    type == TestType.ROUND_TRIP
+                                            ? "ROUND_TRIP's consumer reads every partition without a group"
+                                            : "starts no consumer"),
+                    errors.toString());
         }
 
         @ParameterizedTest

@@ -185,13 +185,12 @@ func analyzeRun(run *client.TestRun, report *client.Report) []advisorRule {
 	}
 	spec := run.Spec
 
-	var avgThroughput, avgP99 float64
+	var avgThroughput float64
 	for _, r := range run.Results {
 		avgThroughput += r.ThroughputRecordsPerSec
-		avgP99 += r.P99LatencyMs
 	}
 	avgThroughput /= float64(len(run.Results))
-	avgP99 /= float64(len(run.Results))
+	p99 := latencyOf(run.Results).P99Ms
 
 	if spec.BatchSize > 0 && spec.BatchSize <= 16384 && avgThroughput > 10000 {
 		rules = append(rules, advisorRule{
@@ -279,10 +278,10 @@ func analyzeRun(run *client.TestRun, report *client.Report) []advisorRule {
 		})
 	}
 
-	if avgP99 > 100 && spec.BatchSize > 65536 {
+	if p99 > 100 && spec.BatchSize > 65536 {
 		rules = append(rules, advisorRule{
 			Severity: "MED",
-			Title:    fmt.Sprintf("p99=%.0fms with large batch.size=%d — try reducing", avgP99, spec.BatchSize),
+			Title:    fmt.Sprintf("p99=%.0fms with large batch.size=%d — try reducing", p99, spec.BatchSize),
 			Fix:      "Reduce batch.size or linger.ms to trade throughput for latency",
 			Evidence: "large batches increase fill time, raising tail latency",
 		})
@@ -312,17 +311,4 @@ func init() {
 	advisorCmd.Flags().BoolVar(&advisorApply, "apply", false, "Generate a tuned scenario YAML from recommendations")
 	rootCmd.AddCommand(advisorCmd)
 	registerAnalysisCompletions()
-}
-
-func analyzeResults(results []client.PhaseResult) (avgThroughput, avgP99 float64) {
-	if len(results) == 0 {
-		return
-	}
-	for _, r := range results {
-		avgThroughput += r.ThroughputRecordsPerSec
-		avgP99 += r.P99LatencyMs
-	}
-	avgThroughput /= float64(len(results))
-	avgP99 /= float64(len(results))
-	return
 }

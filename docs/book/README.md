@@ -14,7 +14,7 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 |-------|-------------|
 | [Introduction](01-introduction.md) | What Kates is, why it exists, and the problems it solves |
 | [Architecture & Design](02-architecture.md) | Platform architecture, component design, data model, and technology choices |
-| [The Cluster Under Test](03-cluster.md) | Understanding the krafter Kafka cluster topology |
+| [The Cluster Under Test](03-cluster.md) | Understanding `krafter`, the Kafka cluster under test, and its node layout |
 
 **[Part II — Performance Testing](part-performance-testing.md)**
 
@@ -61,7 +61,7 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 | Title | Description |
 |-------|-------------|
 | [CLI Reference](10-cli-reference.md) | Complete Kates CLI command reference with all subcommands and aliases |
-| [REST API Reference](11-api-reference.md) | Backend API endpoints and data models |
+| [REST API Reference](11-api-reference.md) | The Kates API's REST endpoints and data models |
 | [gRPC API Reference](16-grpc-api.md) | Protobuf service definitions, message types, and usage examples |
 
 **Appendices**
@@ -128,7 +128,7 @@ Don't read this book cover-to-cover. Pick a reading path based on what you need:
 
 ### 📋 "I just need a reference"
 - [CLI Reference](10-cli-reference.md) — all commands with examples and workflows
-- [REST API Reference](11-api-reference.md) — backend endpoints and data models
+- [REST API Reference](11-api-reference.md) — the Kates API's endpoints and data models
 - [gRPC API Reference](16-grpc-api.md) — protobuf service definitions
 - [Glossary](appendix-a-glossary.md) — terms and abbreviations
 - [Troubleshooting Index](appendix-b-troubleshooting.md) — symptom → cause → fix
