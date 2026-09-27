@@ -73,6 +73,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.trogdor.spec.ConsumeBenchSpec.class,
             com.bmscomp.kates.trogdor.spec.RoundTripWorkloadSpec.class,
             com.bmscomp.kates.trogdor.TrogdorClient.CreateTaskRequest.class,
+            com.bmscomp.kates.trogdor.TrogdorClient.StopTaskRequest.class,
             // Playbook YAML (loaded by DisruptionPlaybookCatalog, field-mapped)
             com.bmscomp.kates.disruption.DisruptionPlaybookCatalog.PlaybookEntry.class,
             com.bmscomp.kates.disruption.DisruptionPlaybookCatalog.PlaybookStep.class,

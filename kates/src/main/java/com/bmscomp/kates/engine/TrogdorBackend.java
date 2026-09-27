@@ -1,12 +1,16 @@
 package com.bmscomp.kates.engine;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
+import jakarta.ws.rs.WebApplicationException;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 
@@ -29,9 +33,24 @@ public class TrogdorBackend implements BenchmarkBackend {
 
     private final TrogdorClient trogdorClient;
 
+    /**
+     * The Trogdor agents tasks run on, by the node names the coordinator's
+     * platform config gives them. A spec names exactly one; with none, the
+     * coordinator ends the task at once with "Unable to find nodes for task".
+     */
+    private final List<String> agentNodes;
+
+    private final AtomicInteger nextAgent = new AtomicInteger();
+
     @Inject
-    public TrogdorBackend(@RestClient TrogdorClient trogdorClient) {
+    public TrogdorBackend(
+            @RestClient TrogdorClient trogdorClient,
+            @ConfigProperty(name = "kates.trogdor.agent-nodes", defaultValue = "node0") List<String> agentNodes) {
+        if (agentNodes.isEmpty()) {
+            throw new IllegalArgumentException("kates.trogdor.agent-nodes names no Trogdor agent");
+        }
         this.trogdorClient = trogdorClient;
+        this.agentNodes = List.copyOf(agentNodes);
     }
 
     @Override
@@ -59,6 +78,16 @@ public class TrogdorBackend implements BenchmarkBackend {
         try {
             JsonNode taskStatus = trogdorClient.getTask(handle.taskId());
             return fromTrogdorStatus(taskStatus, System.currentTimeMillis());
+        } catch (WebApplicationException e) {
+            if (e.getResponse().getStatus() == 404) {
+                // The coordinator keeps its tasks in memory, so a restart
+                // forgets them; this one will never report again.
+                return BenchmarkStatus.builder(TaskStatus.FAILED)
+                        .error("The Trogdor coordinator has no task " + handle.taskId())
+                        .build();
+            }
+            LOG.warn("Failed to poll Trogdor task: " + handle.taskId(), e);
+            return BenchmarkStatus.builder(TaskStatus.RUNNING).build();
         } catch (Exception e) {
             LOG.warn("Failed to poll Trogdor task: " + handle.taskId(), e);
             return BenchmarkStatus.builder(TaskStatus.RUNNING).build();
@@ -68,7 +97,7 @@ public class TrogdorBackend implements BenchmarkBackend {
     @Override
     public void stop(BenchmarkHandle handle) {
         try {
-            trogdorClient.stopTask(handle.taskId());
+            trogdorClient.stopTask(new TrogdorClient.StopTaskRequest(handle.taskId()));
         } catch (Exception e) {
             LOG.warn("Failed to stop Trogdor task: " + handle.taskId(), e);
         }
@@ -76,40 +105,44 @@ public class TrogdorBackend implements BenchmarkBackend {
 
     // Package-private: what a task becomes on Trogdor is the whole of this
     // backend's work, and checking it through submit would need a coordinator.
+    // Each call takes the next agent in turn, so a run's tasks spread over
+    // every configured agent.
     TrogdorSpec toTrogdorSpec(BenchmarkTask task) {
         return switch (task.getWorkloadType()) {
             case PRODUCE -> {
-                var produce = com.bmscomp.kates.trogdor.spec.ProduceBenchSpec.create(
+                var produce = ProduceBenchSpec.create(
                         resolveBootstrapServers(task),
                         task.getTopic(),
                         task.getPartitions(),
-                        task.getTargetMessagesPerSec(),
+                        trogdorRate(task.getTargetMessagesPerSec()),
                         task.getMaxMessages(),
                         task.getDurationMs(),
                         task.getRecordSize());
+                produce.setProducerNode(nextAgent());
                 produce.getProducerConf().putAll(clientConfig(task.getProducerConfig()));
                 yield produce;
             }
             case CONSUME -> {
-                var consume = com.bmscomp.kates.trogdor.spec.ConsumeBenchSpec.create(
+                var consume = ConsumeBenchSpec.create(
                         resolveBootstrapServers(task),
                         task.getTopic(),
-                        task.getPartitions(),
                         task.getMaxMessages(),
                         task.getDurationMs(),
                         task.getConsumerGroup());
+                consume.setConsumerNode(nextAgent());
                 consume.getConsumerConf().putAll(clientConfig(task.getConsumerConfig()));
                 yield consume;
             }
             case ROUND_TRIP -> {
-                var roundTrip = com.bmscomp.kates.trogdor.spec.RoundTripWorkloadSpec.create(
+                var roundTrip = RoundTripWorkloadSpec.create(
                         resolveBootstrapServers(task),
                         task.getTopic(),
                         task.getPartitions(),
-                        task.getTargetMessagesPerSec(),
+                        trogdorRate(task.getTargetMessagesPerSec()),
                         task.getMaxMessages(),
                         task.getDurationMs(),
                         task.getRecordSize());
+                roundTrip.setClientNode(nextAgent());
                 roundTrip.getProducerConf().putAll(clientConfig(task.getProducerConfig()));
                 roundTrip.getConsumerConf().putAll(clientConfig(task.getConsumerConfig()));
                 yield roundTrip;
@@ -117,6 +150,21 @@ public class TrogdorBackend implements BenchmarkBackend {
             case INTEGRITY, INTEGRITY_CDC ->
                 throw new BenchmarkException("INTEGRITY/CDC tests require the native backend", null);
         };
+    }
+
+    private String nextAgent() {
+        return agentNodes.get(Math.floorMod(nextAgent.getAndIncrement(), agentNodes.size()));
+    }
+
+    /**
+     * A task's rate as Trogdor takes it. Kates writes -1 for no limit, but
+     * Trogdor has no such value: ProduceBench raises any rate to at least one
+     * record per 100 ms throttle period, so -1 ran at 10 records/s, and
+     * RoundTrip refuses a rate under 1 and aborts. The largest rate is, in
+     * effect, no throttle.
+     */
+    static int trogdorRate(int targetMessagesPerSec) {
+        return targetMessagesPerSec > 0 ? targetMessagesPerSec : Integer.MAX_VALUE;
     }
 
     /**

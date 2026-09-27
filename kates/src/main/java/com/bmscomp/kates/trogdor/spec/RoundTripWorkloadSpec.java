@@ -10,13 +10,21 @@ public class RoundTripWorkloadSpec extends TrogdorSpec {
 
     public static final String CLASS_NAME = "org.apache.kafka.trogdor.workload.RoundTripWorkloadSpec";
 
+    /** The agent that runs the task; Trogdor's default, "", names none. */
+    private String clientNode;
+
     private String bootstrapServers;
     private int targetMessagesPerSec;
     private long maxMessages;
     private Map<String, String> producerConf;
     private Map<String, String> consumerConf;
     private Map<String, ProduceBenchSpec.TopicSpec> activeTopics;
-    private int valueSize;
+
+    /**
+     * The record value. Trogdor's spec has no {@code valueSize}, which this
+     * class used to send, so the coordinator refused every round-trip task.
+     */
+    private ProduceBenchSpec.ValueGeneratorSpec valueGenerator;
 
     public RoundTripWorkloadSpec(long durationMs) {
         super(CLASS_NAME, durationMs);
@@ -38,14 +46,25 @@ public class RoundTripWorkloadSpec extends TrogdorSpec {
         spec.setBootstrapServers(bootstrapServers);
         spec.setTargetMessagesPerSec(targetMessagesPerSec);
         spec.setMaxMessages(maxMessages);
-        spec.setValueSize(valueSize);
+
+        ProduceBenchSpec.ValueGeneratorSpec value = new ProduceBenchSpec.ValueGeneratorSpec();
+        value.setSize(valueSize);
+        spec.setValueGenerator(value);
 
         ProduceBenchSpec.TopicSpec topicSpec = new ProduceBenchSpec.TopicSpec();
         topicSpec.setNumPartitions(partitions);
         topicSpec.setReplicationFactor((short) 3);
-        spec.getActiveTopics().put(topicName + "[0-" + (partitions - 1) + "]", topicSpec);
+        spec.getActiveTopics().put(topicName, topicSpec);
 
         return spec;
+    }
+
+    public String getClientNode() {
+        return clientNode;
+    }
+
+    public void setClientNode(String clientNode) {
+        this.clientNode = clientNode;
     }
 
     public String getBootstrapServers() {
@@ -96,11 +115,11 @@ public class RoundTripWorkloadSpec extends TrogdorSpec {
         this.activeTopics = activeTopics;
     }
 
-    public int getValueSize() {
-        return valueSize;
+    public ProduceBenchSpec.ValueGeneratorSpec getValueGenerator() {
+        return valueGenerator;
     }
 
-    public void setValueSize(int valueSize) {
-        this.valueSize = valueSize;
+    public void setValueGenerator(ProduceBenchSpec.ValueGeneratorSpec valueGenerator) {
+        this.valueGenerator = valueGenerator;
     }
 }

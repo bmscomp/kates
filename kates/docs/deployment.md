@@ -65,6 +65,7 @@ metadata:
 data:
   KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
   KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kates.svc:8889"
+  KATES_TROGDOR_AGENT_NODES: "trogdor-agent-0,trogdor-agent-1,trogdor-agent-2"
   KATES_ENGINE_DEFAULT_BACKEND: "native"
   KATES_CHAOS_PROVIDER: "hybrid"
 
@@ -281,7 +282,7 @@ If you are only using performance testing (not disruption testing), you do not n
 
 ### Trogdor Coordinator Deployment
 
-The Trogdor backend requires a running Trogdor Coordinator and at least one Trogdor Agent. These are components of the Apache Kafka project that run as separate JVM processes.
+The Trogdor backend requires a running Trogdor Coordinator and at least one Trogdor Agent. These are components of the Apache Kafka project that run as separate JVM processes. Every process reads the same platform config, `trogdor.conf` (below), and is started with `--node-name`, the name of its entry there. Kates names the agent each task runs on, so `KATES_TROGDOR_AGENT_NODES` (the chart's `trogdor.agentNodes`) must list agent node names from that file; a name the coordinator does not know fails the task with "Unknown node names".
 
 ```yaml
 apiVersion: apps/v1
@@ -303,7 +304,7 @@ spec:
         - name: coordinator
           image: apache/kafka:4.2.0
           command: ["/opt/kafka/bin/trogdor.sh", "coordinator"]
-          args: ["--node.name", "coordinator", "--config", "/etc/trogdor/trogdor.conf"]
+          args: ["--coordinator.config", "/etc/trogdor/trogdor.conf", "--node-name", "coordinator"]
           ports:
             - containerPort: 8889
           volumeMounts:
@@ -330,15 +331,30 @@ spec:
 
 ### Trogdor Agent Deployment
 
-Trogdor Agents are the workers that execute the actual Kafka workloads. You need at least one agent, but for distributed load generation, deploy multiple agents:
+Trogdor Agents are the workers that execute the actual Kafka workloads. Each task runs on one agent, and Kates hands a run's tasks to the agents in `KATES_TROGDOR_AGENT_NODES` in turn, so several agents spread the load. The coordinator calls each agent at the hostname its entry in `trogdor.conf` gives, so the agents need stable names: run them as a StatefulSet behind a headless Service, and start each one with its pod name as its node name.
 
 ```yaml
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: v1
+kind: Service
 metadata:
   name: trogdor-agent
   namespace: kates
 spec:
+  clusterIP: None
+  selector:
+    app: trogdor-agent
+  ports:
+    - port: 8888
+      targetPort: 8888
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: trogdor-agent
+  namespace: kates
+spec:
+  serviceName: trogdor-agent
   replicas: 3
   selector:
     matchLabels:
@@ -352,7 +368,13 @@ spec:
         - name: agent
           image: apache/kafka:4.2.0
           command: ["/opt/kafka/bin/trogdor.sh", "agent"]
-          args: ["--node.name", "agent", "--config", "/etc/trogdor/trogdor.conf"]
+          # trogdor-agent-0, trogdor-agent-1, ...: the node names in trogdor.conf
+          args: ["--agent.config", "/etc/trogdor/trogdor.conf", "--node-name", "$(POD_NAME)"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
             - containerPort: 8888
           volumeMounts:
@@ -366,7 +388,7 @@ spec:
 
 ### Trogdor Configuration
 
-The `trogdor.conf` file configures the coordinator and agents:
+The `trogdor.conf` file configures the coordinator and agents. Each entry under `nodes` is a node name; `trogdor.coordinator.port` and `trogdor.agent.port` are the ports the coordinator and an agent listen on (8889 and 8888 by default). Store it in the `trogdor-config` ConfigMap both workloads mount:
 
 ```json
 {
@@ -374,26 +396,28 @@ The `trogdor.conf` file configures the coordinator and agents:
   "nodes": {
     "coordinator": {
       "hostname": "trogdor-coordinator.kates.svc",
-      "tpiPort": 8889,
-      "agentPort": 8888
+      "trogdor.coordinator.port": 8889
     },
-    "agent0": {
-      "hostname": "trogdor-agent-0.kates.svc",
-      "tpiPort": 8889,
-      "agentPort": 8888
+    "trogdor-agent-0": {
+      "hostname": "trogdor-agent-0.trogdor-agent.kates.svc",
+      "trogdor.agent.port": 8888
     },
-    "agent1": {
-      "hostname": "trogdor-agent-1.kates.svc",
-      "tpiPort": 8889,
-      "agentPort": 8888
+    "trogdor-agent-1": {
+      "hostname": "trogdor-agent-1.trogdor-agent.kates.svc",
+      "trogdor.agent.port": 8888
     },
-    "agent2": {
-      "hostname": "trogdor-agent-2.kates.svc",
-      "tpiPort": 8889,
-      "agentPort": 8888
+    "trogdor-agent-2": {
+      "hostname": "trogdor-agent-2.trogdor-agent.kates.svc",
+      "trogdor.agent.port": 8888
     }
   }
 }
+```
+
+Kates then runs tasks on all three agents with:
+
+```yaml
+KATES_TROGDOR_AGENT_NODES: "trogdor-agent-0,trogdor-agent-1,trogdor-agent-2"
 ```
 
 ### PostgreSQL

@@ -1,6 +1,8 @@
 package com.bmscomp.kates.trogdor.spec;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -10,39 +12,51 @@ public class ConsumeBenchSpec extends TrogdorSpec {
 
     public static final String CLASS_NAME = "org.apache.kafka.trogdor.workload.ConsumeBenchSpec";
 
+    /** The agent that runs the task; Trogdor's default, "", names none. */
+    private String consumerNode;
+
     private String bootstrapServers;
     private long maxMessages;
     private Map<String, String> consumerConf;
-    private Map<String, ProduceBenchSpec.TopicSpec> activeTopics;
+
+    /**
+     * Topic names, a list in Trogdor, where produce and round-trip specs have a
+     * map. A bare name subscribes through {@code consumerGroup}, so several
+     * consumers of one run share the partitions as the native backend's do; a
+     * {@code topic:partition} entry would assign that partition to every one
+     * of them. This used to be the produce spec's map, which the coordinator
+     * refused.
+     */
+    private List<String> activeTopics;
+
     private String consumerGroup;
     private int threadsPerWorker;
 
     public ConsumeBenchSpec(long durationMs) {
         super(CLASS_NAME, durationMs);
         this.consumerConf = new HashMap<>();
-        this.activeTopics = new HashMap<>();
+        this.activeTopics = new ArrayList<>();
         this.threadsPerWorker = 1;
     }
 
     public static ConsumeBenchSpec create(
-            String bootstrapServers,
-            String topicName,
-            int partitions,
-            long maxMessages,
-            long durationMs,
-            String consumerGroup) {
+            String bootstrapServers, String topicName, long maxMessages, long durationMs, String consumerGroup) {
 
         ConsumeBenchSpec spec = new ConsumeBenchSpec(durationMs);
         spec.setBootstrapServers(bootstrapServers);
         spec.setMaxMessages(maxMessages);
         spec.setConsumerGroup(consumerGroup);
-
-        ProduceBenchSpec.TopicSpec topicSpec = new ProduceBenchSpec.TopicSpec();
-        topicSpec.setNumPartitions(partitions);
-        topicSpec.setReplicationFactor((short) 3);
-        spec.getActiveTopics().put(topicName + "[0-" + (partitions - 1) + "]", topicSpec);
+        spec.getActiveTopics().add(topicName);
 
         return spec;
+    }
+
+    public String getConsumerNode() {
+        return consumerNode;
+    }
+
+    public void setConsumerNode(String consumerNode) {
+        this.consumerNode = consumerNode;
     }
 
     public String getBootstrapServers() {
@@ -69,11 +83,11 @@ public class ConsumeBenchSpec extends TrogdorSpec {
         this.consumerConf = consumerConf;
     }
 
-    public Map<String, ProduceBenchSpec.TopicSpec> getActiveTopics() {
+    public List<String> getActiveTopics() {
         return activeTopics;
     }
 
-    public void setActiveTopics(Map<String, ProduceBenchSpec.TopicSpec> activeTopics) {
+    public void setActiveTopics(List<String> activeTopics) {
         this.activeTopics = activeTopics;
     }
 

@@ -364,6 +364,11 @@ kafka:
 trogdor:
   # -- Trogdor coordinator URL
   coordinatorUrl: "http://trogdor-coordinator.kafka.svc:8889"
+  # -- Trogdor agents that run tasks (KATES_TROGDOR_AGENT_NODES): node names
+  # from the coordinator's platform config, comma-separated; a run's tasks take
+  # them in turn. node0 is the name in the trogdor.conf Kafka ships. A name the
+  # coordinator does not know fails the task with "Unknown node names".
+  agentNodes: "node0"
 
 # -- Prometheus the backend queries for a disruption's Kafka metrics
 prometheus:

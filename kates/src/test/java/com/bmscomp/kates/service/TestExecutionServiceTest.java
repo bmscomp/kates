@@ -163,12 +163,12 @@ class TestExecutionServiceTest {
     @Test
     void stopTestCallsStopOnRunningTasks() {
         when(trogdorClient.createTask(any())).thenReturn(emptyResponse());
-        when(trogdorClient.stopTask(anyString())).thenReturn(emptyResponse());
+        when(trogdorClient.stopTask(any(TrogdorClient.StopTaskRequest.class))).thenReturn(emptyResponse());
 
         TestRun run = executionService.executeTest(createRequest(TestType.ROUND_TRIP));
         executionService.stopTest(run.getId());
 
-        verify(trogdorClient, atLeastOnce()).stopTask(anyString());
+        verify(trogdorClient, atLeastOnce()).stopTask(any(TrogdorClient.StopTaskRequest.class));
         em.clear();
         TestRun stopped = repository.findById(run.getId()).orElseThrow();
         assertEquals(TestResult.TaskStatus.STOPPING, stopped.getStatus());
