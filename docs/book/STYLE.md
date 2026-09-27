@@ -48,18 +48,28 @@ A chapter written before the types keeps its objectives and Summary until its re
 - H2/H3 in Title Case, unnumbered, no terminal punctuation except `?`. No heading starts with a hand-typed number (the check is `^#+ \d`), in any chapter. A procedure is an ordered list, or H3s titled "Step N — Verb the Thing".
 - Rename repeated headings so they say something.
 - Troubleshooting symptom headings: Title Case with literal error strings in backticks.
-- Explicit ids: give a heading a `{#id}` only when it is a link target and its GitHub slug differs from Quarto's automatic id, which happens with " — ", " + ", " & " or a leading number (both drop parentheses, backticks and quotes the same way). Always make the id the GitHub slug of the heading text: lowercase, spaces become `-`, punctuation other than `-` and `_` is dropped, leading digits stay, so " — " and " + " become `--`. For example, `### Step 1 — Deploy the Chart {#step-1--deploy-the-chart}`. The link check (lychee, which computes GitHub slugs) and Quarto (which uses the explicit id) then agree; GitHub shows the `{#…}` literally.
+- Explicit ids: give a heading a `{#id}` only when it is a link target and its GitHub slug differs from Quarto's automatic id, which happens with " — ", " + ", " & " or a leading number (both drop parentheses, backticks and quotes the same way). Always make the id the GitHub slug of the heading text: lowercase, spaces become `-`, punctuation other than `-` and `_` is dropped, leading digits stay, so " — " and " + " become `--`. For example, `### Step 1 — Deploy the Chart {#step-1--deploy-the-chart}`. The link check (lychee, which computes GitHub slugs) and Quarto (which uses the explicit id) then agree; GitHub shows the `{#…}` literally. The Glossary's `{#gl-…}` ids are the one exception, as [Concepts and the Glossary](#concepts-and-the-glossary) explains.
 
 ## Cross-References
 
-- Link text is the target's title, verbatim: a whole chapter by its H1, `[Kafka Deployment Engineering](15-kafka-deployment.md)`; a section by its heading; a Glossary entry by the term itself. Never "Chapter N" or "Ch N" — numbers are assigned at render time and drift when the order changes.
+- Link text is the target's title, verbatim: a whole chapter by its H1, `[Kafka Deployment Engineering](15-kafka-deployment.md)`; a section by its heading; a Glossary entry by the term as the sentence writes it. Never "Chapter N" or "Ch N" — numbers are assigned at render time and drift when the order changes.
 - Appendices by title too; letters are assigned by Quarto.
 - Refer to a section with a Markdown link to its heading, never "section 3.1", and don't use `@sec-` references.
 
 ## Concepts and the Glossary
 
-- Each concept has one home chapter that explains it in full: what it is, why it matters, how it works, a worked example on `krafter`, how Kates shows it, and its limits. Everywhere else it gets a one-clause gloss and a link to that section.
-- A Kates-specific term goes into the Glossary before a chapter uses it. Write each definition for the reader least likely to know the term, and end it with a link to the chapter that explains it.
+Each concept has one home chapter that explains it in full: what it is, why it matters, how it works, a worked example on `krafter`, how Kates shows it, and its limits. The [Concept Registry](CONCEPTS.md) lists every concept with its home, the gloss other chapters use and its Glossary anchor.
+
+- Outside its home, a concept gets its gloss from the registry, or a clause cut from it, and a link to the home section.
+- A new concept gets a registry row and a Glossary entry in the pull request that first teaches it, and a Kates-specific term goes into the Glossary before a chapter uses it.
+- The Glossary has one letter H2 per initial (`## A`) and one H3 per term, with an explicit id: `### Consumer Lag {#gl-consumer-lag}`. The id is `gl-` and a slug of the term in lowercase ASCII, words joined by `-`, punctuation and backticks dropped (`gl-min-insync-replicas`).
+- A `gl-` id is the one explicit id that isn't a GitHub slug: lychee honours it and Quarto uses it, but GitHub's file view doesn't. Set `toc-depth: 2` in the Glossary's front matter, so that its table of contents stops at the letters.
+- An entry is a one-sentence definition for the reader least likely to know the term, an "In Kates" sentence where Kates gives the term a meaning of its own, and a link to its home.
+- Link a Glossary term at its first use in each chapter's running prose, such as `[consumer lag](appendix-a-glossary.md#gl-consumer-lag)`. Running prose is paragraphs, list items, blockquotes and table body rows; headings, code, link text, callout titles and table header rows don't count. An inline code span counts only when it is the whole term, and a sentence that defines the term isn't linked.
+
+## The Running Example
+
+Where a chapter needs a worked example, use the book's running example: is `krafter` ready for a payments workload? Write it in the second person ("you run the payments platform"), with no invented people, companies or incidents, and never state an outcome you didn't capture. [The Running Example](CONCEPTS.md#the-running-example) in the Concept Registry gives its targets, names, files and the artifact each Part adds; use its names and values exactly.
 
 ## Callouts
 
@@ -107,22 +117,45 @@ Exactly one blank line after the closing `:::`. Genuine quotations may use plain
 
 ## Terminology
 
-Use the left column in prose; commands, fields and resource names in code stay as they are.
+Use the left column in prose; commands, fields, flags, UI labels and resource names in code stay as they are. The Meaning column is what the word means in this book, checked against the code:
 
-| Use | Not | Notes |
-|-----|-----|-------|
-| Kates | KATES | `kates` (backticked) only as command/namespace/resource |
-| `krafter`, `panda` | bare names | Always backticked; gloss on first use per chapter ("the `krafter` Kafka cluster", "the `panda` Kind cluster") |
-| Game Day | GameDay | The human session; `make gameday` is its automated pipeline |
+| Use | Not | Meaning |
+|------------------|----------------------|--------------------------------------------|
+| Kates | KATES | The product. `kates` (backticked) only as the command, the namespace or a resource name |
+| the Kates API | Kates backend, Kates engine, backend engine, Backend Engine, Benchmark Engine, Kates application | The Quarkus server behind the REST and gRPC APIs, which runs tests and faults. For the workload, say "the Kates API pod" or "Deployment" |
+| the Kates API, the benchmark backend or the chaos provider, whichever is meant | backend, the backend (unqualified) | Unqualified, "backend" can mean any of the three. `backend` stays as the test field and `--backend` as the flag |
+| benchmark backend: the `native` backend, the Trogdor backend | workload engine, workload backend, backend engine, Benchmark Engine | What generates load, set by a test's `backend` field: `native` (the default) runs clients inside the Kates API; `trogdor` submits workloads to a Trogdor coordinator |
+| Trogdor (as a benchmark backend only) | Trogdor fault injection, Trogdor chaos | Kates submits only produce, consume and round-trip workload specs to Trogdor; it never injects faults through it |
+| chaos provider: the `litmus-crd`, `kubernetes`, `hybrid` or `noop` provider | chaos backend, chaos engine, the Litmus backend, the Kubernetes backend | What carries out a fault, set by `kates.chaos.provider`: `litmus-crd` (the default), `kubernetes`, `hybrid` (picks one at startup) or `noop` (injects nothing) |
+| gate | quality gate, validation gate, SLA check | A threshold in a scenario's `validate` block, which `kates test apply --wait` checks. "SLA gate" means the same. `kates gate` gives a performance grade |
+| SLA grade, or grade | SLA verdict, SLA score, letter grade (as a name) | The letter a disruption plan's `sla` block earns: A to F, or `-` when nothing could be evaluated. A plan without `sla` gets none |
+| verdict | integrity status, integrity result (for the outcome), SLA verdict | An INTEGRITY run's outcome: PASS, DATA_LOSS, CORRUPTION, ORDERING_VIOLATION or DUPLICATES_DETECTED, read with `kates test get` |
+| SLA | SLO (for Kates's thresholds), SLA contract | Kates's word for targets in a scenario's `validate` block, a plan's `sla` block and `--fail-on-sla-breach`. They're SLO-style targets, not agreements; say so at first use |
+| performance grade | grade (unqualified), quality gate, score | The letter `kates gate` gives the test run it starts, from its average throughput and P99 against fixed thresholds; `kates benchmark` grades from a score |
+| security grade | grade (unqualified), security score | The letter `kates security audit` gives the cluster from its security checks; `kates security gate --min-grade` fails below it |
+| fault | failure injection, chaos (as a count noun), attack | One injected failure: a disruption type aimed at the pods a selector picks, held for `chaosDurationSec` (a `faultSpec` or `chaosSpec`) |
+| disruption type | fault type, chaos type, experiment type | Which fault a step injects: a `DisruptionType` value, such as `POD_KILL` or `NETWORK_PARTITION`, from the list `kates disruption types` prints |
+| disruption plan, or plan | chaos plan, experiment plan, disruption scenario | A named, ordered list of fault steps with guardrails and an optional `sla` block, run by `kates disruption run --config` or `POST /api/disruptions` |
+| playbook | built-in scenario, chaos scenario | A disruption plan built into Kates, run by name with `kates disruption playbook run`; it can't carry an `sla` block |
+| disruption | disruption test, chaos run, chaos test | One run of a disruption plan or playbook: its ID, status, report, timeline and, when the plan has `sla`, its SLA grade |
+| resilience run | chaos test, combined test; "resilience test" only when quoting the CLI's help or the REST API's section | One Kates test with one fault injected after `steadyStateSec`, run by `kates resilience run`. It reports before-and-after impact, with no safety guard, rollback or grade |
+| chaos experiment | a name for a Kates object | Chaos engineering's unit: faults injected to test a steady-state hypothesis. In Kates you run one as a disruption or a resilience run |
+| Game Day | GameDay, game day | The human session: a team, a hypothesis, a rollback plan, a debrief. `make gameday` runs `scripts/gameday.sh`, its automated pipeline |
 | LitmusChaos | — | Full name on first use per chapter; "Litmus" after |
-| Kafka UI | kafka-ui in prose | `kafka-ui` only as resource/user name |
-| Kubernetes | K8s in prose | K8s acceptable only in space-constrained tables and diagram labels |
-| P50 / P95 / P99 / P99.9 | p99 in prose | Lowercase only inside code, JSON fields, and PromQL |
+| Kafka UI | kafka-ui in prose | `kafka-ui` only as a resource or user name |
+| Kubernetes | K8s in prose | K8s only in space-constrained tables and diagram labels |
+| P50 / P95 / P99 / P99.9 | p99 in prose | Lowercase only inside code, JSON fields and PromQL |
 | pre-flight | preflight | Pre-Flight in Title Case headings |
-| LOAD, ROUND_TRIP, INTEGRITY | Load, Round-Trip | Enum form whenever naming a Kates test type; lowercase "round-trip" only for the generic latency concept |
+| LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY | Load test, Round-Trip, round trip test, latency test | Enum form for Kates test types; TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS and INTEGRATION_CDC complete the `TestType` enum. Lowercase "round-trip" only for the general idea |
 | records per second (prose), rec/s (tables) | records/s, msg/s, messages/s | One unit for throughput |
 | warm-up | warmup in prose | `WARMUP` stays as the scenario phase's name |
+| `krafter` | the Kafka cluster (unglossed), kafka-cluster (a chart, and `make kafka`'s release) | The Kafka cluster under test: the `kafka-cluster` chart's `clusterName` and `kates deploy`'s `--kafka-name` default. Always backticked; gloss on first use per chapter |
+| `panda` | the Kind cluster (unglossed), the local cluster | The three-node Kind cluster `make cluster` creates from `config/cluster.yaml`. Always backticked; gloss on first use per chapter |
+| `alpha`, `sigma`, `gamma` | node-1, zone-a, AZ1 | The three `panda` nodes, each named after the zone its `topology.kubernetes.io/zone` label gives it |
 | zone | rack, AZ, availability zone | The same failure domain here: the `kafka-cluster` chart sets Strimzi's rack from `topology.kubernetes.io/zone` by default; `rack` only for the Strimzi field |
+| isolated topology, single-namespace topology | Isolated Topology (capitalized in prose), multi-namespace topology, single topology | The namespace layout `kates deploy --topology` picks: `isolated` (the default) or `single` (one namespace, `kates-stack` by default). The operator is in `strimzi-operator` either way |
+| node layout | topology (for how nodes, brokers and pods are arranged) | How nodes and pods are arranged, like the Deployment Guide's Minimal, Standard and Production. "Topology" is the namespace layout; `kates cluster topology` keeps its name |
+| RTO, RPO (as measured) | recovery time objective, recovery point objective (for what a report shows) | Measurements in Kates reports: RTO a recovery time, RPO how far before the fault the oldest lost record was sent. `maxRtoMs` and `maxRpoMs` are objectives |
 | `min.insync.replicas` | ISR=2 | The ISR is the set of replicas in sync, not a setting |
 
 ## Punctuation
@@ -145,7 +178,7 @@ Use the left column in prose; commands, fields and resource names in code stay a
 - fenced lines over 90 characters, and Mermaid blocks without `fig-cap` and `fig-alt`;
 - `---` rules, bold Scope blockquotes, and a broken handoff.
 
-A page's counts may fall but never rise, a new page starts at zero, and `[TODO` fails anywhere. The style check and the metrics skip STYLE.md and README.md, which are about the book rather than in it. To see what a page is counted for, and to record a lower count:
+A page's counts may fall but never rise, a new page starts at zero, and `[TODO` fails anywhere. The style check and the metrics skip STYLE.md, README.md and CONCEPTS.md, which are about the book rather than in it. To see what a page is counted for, and to record a lower count:
 
 ```bash
 # Every finding for one page, with line numbers
