@@ -1184,7 +1184,7 @@ kates deploy --dry-run --strimzi-version latest          # shows the resolution,
 ```
 
 ::: {.callout-warning}
-`--dry-run` is not inert. It stops before the Helm pipeline, but the cluster gate, pre-flight introspection, and Kind StorageClass bootstrap all run first — the last of these writes StorageClasses into the cluster. It will not create a Kind cluster, but it is a plan preview, not a read-only mode.
+`--dry-run` creates nothing in the cluster, but it is not inert. The cluster gate, pre-flight introspection and version resolution all run and read the cluster; the Kind StorageClass bootstrap and the introspection probes that create a namespace, a Secret or pods to measure the cluster are skipped. It will not create a Kind cluster or switch `kubectl`'s context. On your machine it writes `.build/values-detected.yaml` in the current directory, replacing the one a previous deploy left there, and caches any Strimzi chart it fetches.
 :::
 
 `deploy` works out which cluster it is deploying to before it asks you anything else — there is no point configuring a deployment that has nowhere to go. What happens next depends on what it finds:

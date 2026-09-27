@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -572,5 +574,129 @@ func TestDeployCommand_KafkaConnectIdempotent(t *testing.T) {
 		if strings.Contains(cmd, "helm upgrade --install krafter") {
 			t.Error("Kafka chart should not be redeployed when already deployed (idempotency)")
 		}
+	}
+}
+
+// threeZoneNodesJSON is a node list whose zones make the inter-AZ latency
+// probe apply.
+const threeZoneNodesJSON = `{"items":[
+  {"metadata":{"name":"node-a","labels":{"topology.kubernetes.io/zone":"alpha"}},"status":{"allocatable":{"cpu":"4","memory":"16Gi"}}},
+  {"metadata":{"name":"node-b","labels":{"topology.kubernetes.io/zone":"beta"}},"status":{"allocatable":{"cpu":"4","memory":"16Gi"}}},
+  {"metadata":{"name":"node-c","labels":{"topology.kubernetes.io/zone":"gamma"}},"status":{"allocatable":{"cpu":"4","memory":"16Gi"}}}
+]}`
+
+// recordingExecutor is a three-zone cluster where every command succeeds,
+// and it keeps each command. A write probe that runs against it gets far
+// enough to be seen: its namespace is "created", and no running pod is
+// found, so the cluster-domain lookup reaches its dns-detect pod.
+type recordingExecutor struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (e *recordingExecutor) LookPath(file string) (string, error) {
+	return "/usr/local/bin/" + file, nil
+}
+
+func (e *recordingExecutor) Exec(name string, args ...string) (string, error) {
+	e.mu.Lock()
+	e.calls = append(e.calls, name+" "+strings.Join(args, " "))
+	e.mu.Unlock()
+	if name == "kubectl" && strings.Join(args, " ") == "get nodes -o json" {
+		return threeZoneNodesJSON, nil
+	}
+	return "", nil
+}
+
+func (e *recordingExecutor) commands() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.calls...)
+}
+
+// clusterWrite matches a kubectl or helm verb that creates, changes or
+// deletes something, wherever the command sits (the Secret probe runs its
+// `kubectl create secret` through `sh -c`).
+var clusterWrite = regexp.MustCompile(`\b(kubectl\s+(create|run|label|annotate|delete|apply|patch|replace|scale|set|expose|taint|cordon|drain|edit)|helm\s+(install|upgrade|uninstall|delete|rollback))\b`)
+
+// kates deploy --dry-run previews; it must not write to the cluster to do
+// it. Introspection used to: its second stage created a namespace and a
+// Secret to audit Secret creation, prober pods in every zone, and a
+// dns-detect pod when no running pod could be read.
+func TestDeployDryRun_WritesNothingToTheCluster(t *testing.T) {
+	origExec, origStdin, origHelm := runExecFn, runExecStdinFn, runHelmFn
+	origOutput, origCombined := runExecOutputFn, runExecCombinedFn
+	origDeployed, origExecutor := isHelmReleaseDeployedFn, defaultExecutor
+	t.Cleanup(func() {
+		runExecFn, runExecStdinFn, runHelmFn = origExec, origStdin, origHelm
+		runExecOutputFn, runExecCombinedFn = origOutput, origCombined
+		isHelmReleaseDeployedFn, defaultExecutor = origDeployed, origExecutor
+	})
+
+	// runExecFn, runExecStdinFn and runHelmFn are deploy's write paths: a
+	// dry run has no business in any of them. runExecOutputFn and
+	// runExecCombinedFn are its reads.
+	var mu sync.Mutex
+	var writes, reads []string
+	record := func(to *[]string, name string, args []string) {
+		mu.Lock()
+		*to = append(*to, name+" "+strings.Join(args, " "))
+		mu.Unlock()
+	}
+	runExecFn = func(_ context.Context, name string, args ...string) error {
+		record(&writes, name, args)
+		return nil
+	}
+	runExecStdinFn = func(_ context.Context, name string, args []string, _ string) error {
+		record(&writes, name, args)
+		return nil
+	}
+	runHelmFn = func(_ context.Context, args ...string) error {
+		record(&writes, "helm", args)
+		return nil
+	}
+	runExecOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		record(&reads, name, args)
+		return stubClusterRead(ctx, name, args...)
+	}
+	runExecCombinedFn = runExecOutputFn
+	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+	detectExec := &recordingExecutor{}
+	defaultExecutor = detectExec
+
+	setDeployFlags(t, func() {
+		deployTopology, deployNamespace = "single", "kates-test"
+		deployWithSchemaRegistry = "apicurio"
+		deployWithChaos, deployWithMonitoring, deployWithCertManager = true, true, true
+		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = false, true, false
+		deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun = true, false, true
+	})
+	// The dry run still writes .build/values-detected.yaml; keep it out of
+	// the package directory.
+	t.Chdir(t.TempDir())
+
+	var err error
+	out := captureStdout(t, func() { err = runDeploy(deployCmd, []string{}) })
+	if err != nil {
+		t.Fatalf("runDeploy --dry-run: %v\n%s", err, out)
+	}
+
+	introspection := detectExec.commands()
+	if len(introspection) == 0 || !sliceContains(introspection, "kubectl get nodes -o json") {
+		t.Fatalf("introspection never ran, so nothing was checked; commands: %v", introspection)
+	}
+	for _, c := range writes {
+		t.Errorf("a dry run took a write path: %s", c)
+	}
+	for _, c := range append(introspection, reads...) {
+		if clusterWrite.MatchString(c) {
+			t.Errorf("a dry run wrote to the cluster: %s", c)
+		}
+	}
+	if _, err := os.Stat(".build/values-detected.yaml"); err != nil {
+		t.Errorf("the dry run should still write its values file: %v", err)
+	}
+	if !strings.Contains(out, "Deployment plan") {
+		t.Errorf("no preview was printed:\n%s", out)
 	}
 }

@@ -161,6 +161,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	executor := defaultExecutor
 	PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")
 	collector := detect.NewCollector(executor)
+	// Introspection is not read-only on its own: it creates a namespace and a
+	// Secret to audit Secret creation, prober pods to measure inter-AZ
+	// latency, and a dns-detect pod when no running pod can be read. The
+	// preview uses none of that, so a dry run collects without it.
+	collector.ReadOnly = deployDryRun
 	if err := collector.Preflight(); err != nil {
 		output.Error(fmt.Sprintf("Preflight failed: %v", err))
 		return err
@@ -171,9 +176,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// collector.Collect() runs. This ensures detect's matchStorageClass() finds
 	// them and writes the correct storageClass names into values-detected.yaml,
 	// so no hardcoded pool overrides are needed in values-kind.yaml.
-	// A dry run must not write StorageClasses into the cluster. Introspection
-	// below stays (it is read-only and the plan needs its data); this is the
-	// one pre-plan step that mutates.
+	// A dry run must not write StorageClasses into the cluster, so it skips
+	// this, as it skips the introspection probes that create things.
 	if quickDetectKind() && !deployDryRun {
 		PrintPhaseItem("Kind cluster detected — bootstrapping zone StorageClasses...")
 		if err := setupKindStorageClasses(context.Background()); err != nil {

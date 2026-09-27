@@ -3,6 +3,8 @@ package detect
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -360,5 +362,139 @@ policy generic-secret-blocked-by-kyverno.rules.restrict-secrets: Secret creation
 	}
 	if audit.PolicyName != "generic-secret-blocked-by-kyverno" {
 		t.Errorf("expected PolicyName 'generic-secret-blocked-by-kyverno', got %q", audit.PolicyName)
+	}
+}
+
+// mutatingVerbs are the kubectl verbs that create, change or delete an object
+// in the cluster. `kubectl auth can-i create` is a question, and its verb is
+// auth.
+var mutatingVerbs = map[string]bool{
+	"create": true, "run": true, "label": true, "annotate": true,
+	"delete": true, "apply": true, "patch": true, "replace": true,
+	"scale": true, "set": true, "expose": true, "taint": true,
+	"cordon": true, "drain": true, "edit": true,
+}
+
+// kubectlVerb finds the verb of every kubectl in a command, including the
+// ones inside an `sh -c` script, which is how the Secret probe hides its
+// `kubectl create secret`.
+var kubectlVerb = regexp.MustCompile(`\bkubectl\s+([a-z-]+)`)
+
+// mutatingCalls returns the calls that would write to the cluster.
+func mutatingCalls(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		for _, m := range kubectlVerb.FindAllStringSubmatch(c, -1) {
+			if mutatingVerbs[m[1]] {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// setupWriteProbeMock is the healthy three-zone cluster, with every write
+// probe reachable: three zones for the latency matrix, and no running pod to
+// read resolv.conf from, so the cluster-domain lookup falls back to its
+// dns-detect pod. The healthy mock's "sh -c" and "kubectl get pods" patterns
+// would otherwise answer the running-pod query.
+func setupWriteProbeMock() *MockExecutor {
+	m := setupHealthyMock()
+	delete(m.Responses, "sh -c")
+	delete(m.Responses, "kubectl get pods")
+	return m
+}
+
+func containsCall(calls []string, parts ...string) bool {
+	for _, c := range calls {
+		found := true
+		for _, p := range parts {
+			if !strings.Contains(c, p) {
+				found = false
+				break
+			}
+		}
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+// The control for the read-only test below: on the same mock, an ordinary
+// collection does issue every write the read-only one must not, so that
+// test's "no writes" cannot pass by never reaching the probes.
+func TestCollect_WriteProbesCreateThings(t *testing.T) {
+	m := setupWriteProbeMock()
+	c := NewCollector(m)
+	c.BenchStorage, c.BenchNetwork, c.BenchDNS = true, true, true
+
+	if _, err := c.Collect(context.Background()); err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	writes := mutatingCalls(m.Calls())
+	for _, want := range []struct {
+		probe string
+		parts []string
+	}{
+		{"secret audit namespace", []string{"kubectl create ns kates-detect-secrets-"}},
+		{"secret audit Secret", []string{"sh -c", "kubectl create secret generic kates-detect-test-sec"}},
+		{"latency namespace", []string{"kubectl create ns kates-detect-latency-"}},
+		{"latency prober pods", []string{"kubectl run prober-"}},
+		{"dns-detect fallback pod", []string{"kubectl run", "dns-detect"}},
+		{"namespace labels", []string{"kubectl label ns"}},
+		{"namespace cleanup", []string{"kubectl delete ns"}},
+	} {
+		if !containsCall(writes, want.parts...) {
+			t.Errorf("%s: no call containing %q among the writes:\n  %s",
+				want.probe, want.parts, strings.Join(writes, "\n  "))
+		}
+	}
+	// Each Bench* probe starts by creating its namespace, so four more than
+	// the two the secret and latency probes create.
+	var namespaces int
+	for _, w := range writes {
+		if strings.HasPrefix(w, "kubectl create ns ") {
+			namespaces++
+		}
+	}
+	if namespaces != 5 {
+		t.Errorf("created %d namespaces, want 5 (secret, latency and three benches)", namespaces)
+	}
+}
+
+// kates deploy --dry-run collects read-only: whatever it previews, it must
+// not create, label or delete anything to do it, benches included.
+func TestCollect_ReadOnlyIssuesNoWrites(t *testing.T) {
+	m := setupWriteProbeMock()
+	c := NewCollector(m)
+	c.ReadOnly = true
+	c.BenchStorage, c.BenchNetwork, c.BenchDNS = true, true, true
+
+	report, err := c.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	if writes := mutatingCalls(m.Calls()); len(writes) > 0 {
+		t.Errorf("a read-only collection wrote to the cluster:\n  %s", strings.Join(writes, "\n  "))
+	}
+
+	// The reads still ran...
+	if len(report.Nodes) != 3 || !report.Strimzi.Running {
+		t.Errorf("reads are missing: %d nodes, Strimzi running %v", len(report.Nodes), report.Strimzi.Running)
+	}
+	// ...and what only a write probe could fill stays empty.
+	if report.SecretAudit != (SecretCreationAudit{}) {
+		t.Errorf("SecretAudit = %+v, want it empty", report.SecretAudit)
+	}
+	if report.Network.LatencyMatrix != nil || report.Network.BandwidthMatrix != nil || report.Network.DNSResults != nil {
+		t.Errorf("network probes filled the report: latency %v, bandwidth %v, dns %v",
+			report.Network.LatencyMatrix, report.Network.BandwidthMatrix, report.Network.DNSResults)
+	}
+	if report.Network.ClusterDomain != "cluster.local" {
+		t.Errorf("ClusterDomain = %q, want the cluster.local default", report.Network.ClusterDomain)
 	}
 }
