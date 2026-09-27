@@ -17,8 +17,14 @@ Performance Theory comes first because it tells you which numbers to distrust; t
 - [Scenario Files & SLA Gates](13-scenario-files.md): how do you keep a test suite in version control and make a missed threshold fail the build? About 15 minutes.
 - [Lab — Interactive Performance Tuning](10b-lab.md): how do you tune one setting at a time and compare the runs side by side? About 5 minutes.
 
+## The Payments Question
+
+This Part turns the throughput and latency targets into a file you can run again and again: `payments-scenarios.yaml`, a scenario file with one LOAD scenario that writes 1 KiB records with `acks=all` to its own topic, `payments-load`. Its gates hold the two targets. `maxP99LatencyMs: 100` fails a run whose P99 from send to acknowledgment passes 100 ms, and `minThroughputRecPerSec` sets the throughput floor. `kates test apply -f payments-scenarios.yaml --wait` runs the scenario and exits 1 when a gate fails.
+
+When a run passes, `kates test baseline set <run-id>` makes it the LOAD baseline, and `kates report regression <run-id>` compares later LOAD runs with it. Kates keeps one baseline per test type, so the payments run replaces any earlier LOAD baseline.
+
 ## Practice
 
 [Tutorial 2: Running Every Test Type](../tutorials/02-all-test-types.md) runs each test type on the lab, from flags or from the built-in templates. The tutorial is for practice; the chapters explain what its numbers mean.
 
-When you compare runs, run them one after another. The backend runs at most three tests at once and refuses a fourth, and runs of one type that set no topic share that type's default topic (`load-test` for LOAD), so runs that overlap measure each other's load.
+When you compare runs, run them one after another. The Kates API runs at most three tests at once and refuses a fourth, and runs of one type that set no topic share that type's default topic (`load-test` for LOAD), so runs that overlap measure each other's load.

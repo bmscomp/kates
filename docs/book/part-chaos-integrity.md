@@ -28,6 +28,12 @@ The chapters inject faults with three `kates` commands, and the one you reach fo
 
 A Game Day is the session your team runs around these commands, from hypothesis to follow-up, and Chaos Engineering Theory shows how to structure one.
 
+## The Payments Question
+
+This Part checks the loss target: `krafter` loses no acknowledged record when one broker or one zone fails. Two disruption plans kill a broker (`payments-broker-loss.json`) and every Kafka pod in zone `alpha` (`payments-zone-loss.json`), and `kates disruption run --config <plan> --fail-on-sla-breach` grades each against its `sla` block. A plan runs no workload of its own: it reads the brokers' metrics from Prometheus. So submit the Part II scenario file with `kates test apply -f payments-scenarios.yaml`, without `--wait`, and run the plan while that LOAD run produces.
+
+A plan can't measure loss, so the verdicts come from two resilience files, `payments-integrity-broker.yaml` and `payments-integrity-zone.yaml`. Each runs an INTEGRITY test through one of the same two faults with `kates resilience run -f <file>`, which can return before its INTEGRITY run ends. Find that run with `kates test list --type INTEGRITY`, wait until it shows `DONE`, and read its `Lost` and `Verdict` with `kates test get <id>`. The target holds when `Lost` is 0. Run the zone file only once the broker file's INTEGRITY run is `DONE`, because the two runs share a topic and a consumer group.
+
 ## Practice
 
 [Tutorial 3: Chaos Engineering with Kates](../tutorials/03-chaos-engineering.md) runs a disruption plan, a playbook and a resilience run on the lab. [Tutorial 4: Data Integrity Under Fire](../tutorials/04-integrity-under-fire.md) kills a broker while an INTEGRITY run is producing, and reads the verdict.
