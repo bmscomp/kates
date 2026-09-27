@@ -4,6 +4,10 @@ This tutorial shows how to integrate Kates into your CI/CD pipeline for automate
 
 ## Overview
 
+Every gate below runs the `kates` CLI on the CI runner, and the API refuses every call without the API key except the one `kates health` makes. The CLI takes the key from the `KATES_API_KEY` environment variable when it is set, so store the key as a masked CI variable under that name.
+
+The gates run in this order, and a failure at any of them blocks the deploy:
+
 ```mermaid
 graph LR
     subgraph Pipeline
@@ -105,6 +109,7 @@ cat > /tmp/chaos-gate.json << 'EOF'
   "name": "ci-chaos-gate",
   "maxAffectedBrokers": 1,
   "autoRollback": true,
+  "sla": { "maxRtoMs": 120000 },
   "steps": [
     {
       "name": "broker-kill",
@@ -112,7 +117,7 @@ cat > /tmp/chaos-gate.json << 'EOF'
         "experimentName": "ci-broker-kill",
         "disruptionType": "POD_KILL",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 15,
         "gracePeriodSec": 0
       },
@@ -133,7 +138,7 @@ kates disruption run \
 echo "✅ Chaos gate passed"
 ```
 
-The `--fail-on-sla-breach` flag causes the CLI to exit with code 1 if any SLA threshold is breached, automatically failing the pipeline.
+The `--fail-on-sla-breach` flag makes the CLI exit with code 1 when a step misses a threshold in the plan's `sla` block, which fails the pipeline. A plan without an `sla` block gets no grade, so the flag has nothing to fail on. This one allows each step two minutes to recover; set the limits your service needs. [SLA Grading](../book/07-chaos-practice.md#sla-grading), in Chaos Engineering in Practice, lists the thresholds a plan can grade.
 
 ## Strategy 3: Integrity Verification
 
@@ -167,15 +172,21 @@ kates report export "$ID" --format junit > integrity-results.xml
 Set up nightly performance tests to catch slow regressions:
 
 A schedule is a name, a cron expression and a test request read from a JSON
-file — `--name`, `--cron` and `--request` are all required:
+file — `--name`, `--cron` and `--request` are all required. The request goes to
+the API as written, so it takes the API's field names (`type`, `numRecords`),
+not a scenario file's `records`. The backend reads the cron expression as five
+fields, in UTC:
 
 ```bash
 cat > nightly-load.json <<'EOF'
-{ "testType": "LOAD", "spec": { "records": 100000, "acks": "all" } }
+{ "type": "LOAD", "spec": { "numRecords": 100000, "acks": "all" } }
 EOF
 
 cat > weekly-integrity.json <<'EOF'
-{ "testType": "INTEGRITY", "spec": { "records": 100000, "acks": "all", "consumers": 1 } }
+{
+  "type": "INTEGRITY",
+  "spec": { "numRecords": 100000, "acks": "all" }
+}
 EOF
 
 # Schedule nightly LOAD test
@@ -244,13 +255,14 @@ cat > /tmp/chaos.json << 'PLAN'
   "name": "ci-gate",
   "maxAffectedBrokers": 1,
   "autoRollback": true,
+  "sla": { "maxRtoMs": 120000 },
   "steps": [{
     "name": "broker-kill",
     "faultSpec": {
       "experimentName": "ci-kill",
       "disruptionType": "POD_KILL",
       "targetNamespace": "kafka",
-      "targetLabel": "strimzi.io/cluster=krafter",
+      "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
       "chaosDurationSec": 15
     },
     "steadyStateSec": 10,

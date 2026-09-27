@@ -4,6 +4,8 @@ Hands-on tutorials for learning Kates — from your first test to advanced chaos
 
 ## Tutorial List
 
+The table gives each tutorial's level, a rough duration, and the tutorials it builds on:
+
 | # | Tutorial | Level | Duration | Prerequisites |
 |:-:|----------|:---:|:---:|:---:|
 | 1 | [Getting Started](01-getting-started.md) | Beginner | 15 min | None |
@@ -54,7 +56,7 @@ Tutorial 1 (Getting Started)
 All tutorials assume:
 - The full stack is deployed (`make all` + `make kates`)
 - The CLI is installed (`make cli-install`)
-- The CLI is configured (`kates ctx set local --url http://localhost:30083`)
+- The CLI is configured with a context that carries the API key, as the Quick Start in [Introduction](../book/01-introduction.md#quick-start) sets it up (`kates ctx set local --url http://localhost:30083 --api-key …`)
 
 ## Resource Requirements
 
