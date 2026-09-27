@@ -252,7 +252,7 @@ grpcurl "${GRPC[@]}" localhost:30083 kates.ClusterService/GetClusterInfo
 grpcurl "${GRPC[@]}" localhost:30083 kates.ClusterService/GetClusterTopology
 ```
 
-Only `nodePools` and `nodes` carry data: each pool's name, role, replica count, and storage, and each node's ID, host, port, rack, role, pool, readiness, and `is_quorum_leader`. That flag marks the node whose ID matches the controller `DescribeCluster` names, so it lands on an arbitrary broker, not on the KRaft quorum leader. The RPC reads Strimzi's `KafkaNodePool` resources and the broker pods through the Kubernetes API, so it fails when the backend runs outside Kubernetes.
+Only `nodePools` and `nodes` carry data: each pool's name, role, replica count, and storage, and each node's ID, host, port, rack, role, pool, readiness, and `is_quorum_leader`. That flag marks the node whose ID matches the controller `DescribeCluster` names, so it lands on an arbitrary broker, not on the KRaft quorum leader. The RPC reads Strimzi's `KafkaNodePool` resources and the broker pods through the Kubernetes API, so it fails when the Kates API runs outside Kubernetes.
 
 #### ListTopics
 

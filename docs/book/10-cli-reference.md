@@ -260,7 +260,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Profile Commands](#profile-commands) | `profile save`, `list`, `compare`, `assert` | Does a new run still perform like one you saved earlier? | Kates API for `save` and `assert`; profiles are files in `~/.kates/profiles` |
 | [Cost Estimation](#cost-estimation) | `cost estimate` | Roughly what would a workload cost to run with a cloud provider? | Nothing: the CLI computes the estimate itself |
 | [Snapshot Commands](#snapshot-commands) | `snapshot create`, `list`, `diff` | What changed in the cluster's brokers, topics and groups between two moments? | Kates API for `create`; snapshots are files in `~/.kates/snapshots` |
-| [Flow Pipelines](#flow-pipelines) | `flow run` | How do you run several tests in a row, with grade gates, from one YAML file? | Kates API, for a pipeline read from a local file |
+| [Flow Pipelines](#flow-pipelines) | `flow run` | How do you run several tests in a row from one YAML file? | Kates API, for a pipeline read from a local file |
 | [Badge Generation](#badge-generation) | `badge` | What badge shows the latest run's grade, P99 or throughput? | Kates API |
 | [Webhook Notifications](#webhook-notifications) | `webhook list`, `add`, `remove` | Which URLs hear about it when a test finishes? | Kates API |
 | [MCP Server for AI Agents](#mcp-server-for-ai-agents) | `mcp` | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
@@ -970,7 +970,7 @@ kates disruption playbook run leader-cascade
 |------|-------------|
 | `--dry-run` | Preview the playbook without injecting any fault; exits 1 when the verdict is UNSAFE |
 
-Run a playbook and wait for its report; the command prints the disruption ID and the final status, or with `-o json` the ID and the report as JSON. With `--dry-run` it fetches the playbook's plan and sends it to the same dry run as `disruption run --dry-run`, which resolves partition leaders, lists the pods each step would hit, and checks the blast radius. It starts nothing. It prints the dry-run result, as JSON with `-o json`, and exits 1 when the verdict is UNSAFE, which is when running the playbook would be refused. The dry run checks RBAC for some fault types only, and reports a missing permission as a step warning, not in the verdict; [Chaos Engineering in Practice](07-chaos-practice.md) lists which.
+Run a playbook and wait for its report; the command prints the disruption ID and the final status, or with `-o json` the ID and the report as JSON. With `--dry-run` it fetches the playbook's plan and sends it to the same dry run as `disruption run --dry-run`, which resolves partition leaders, lists the pods each step would hit, and checks the blast radius. It starts nothing. It prints the dry-run result, as JSON with `-o json`, and exits 1 when the verdict is UNSAFE, which is when running the playbook would be refused. The dry run checks RBAC for some disruption types only, and reports a missing permission as a step warning, not in the verdict; [Chaos Engineering in Practice](07-chaos-practice.md) lists which.
 
 **See also:** [Chaos Engineering Theory](06-chaos-theory.md) for the principles behind chaos engineering, [Chaos Engineering in Practice](07-chaos-practice.md) for step-by-step walkthroughs of disruption plans and resilience runs.
 
@@ -1361,7 +1361,7 @@ kates migrate status | verify | cutover | rollback | down [--name m282-431]
 kates migrate run  --from 2.8.2 [--keep] [--skip-build] [-o json]    # up → verify → cutover → down, one report
 ```
 
-`--from` is resolved to a provider: a version the primary's operator supports becomes a Strimzi cluster; 2.x and 3.x become a `legacy-kafka` cluster (ZooKeeper below 3.3.0, the built KRaft image up to 3.6, the official image from 3.7.0); a version below 2.1.0 is refused (KIP-896). `--to` defaults to the primary as it runs, so the migration ends where the backend, Kafka UI and `kates test` already point. The lab is named `m<from>-<to>` with the dots dropped — `m282-431` for 2.8.2 onto a 4.3.1 primary — every release it creates carries `kates.io/lab` labels, and `status`, `cutover` and `down` find it from the cluster — there is no state file. The report keeps the script's eighteen rows (`cluster reachable` … `cutover froze the target`) and exits `1` on any failed one; `-o json` carries them per row.
+`--from` is resolved to a provider: a version the primary's operator supports becomes a Strimzi cluster; 2.x and 3.x become a `legacy-kafka` cluster (ZooKeeper below 3.3.0, the built KRaft image up to 3.6, the official image from 3.7.0); a version below 2.1.0 is refused (KIP-896). `--to` defaults to the primary as it runs, so the migration ends where the Kates API, Kafka UI and `kates test` already point. The lab is named `m<from>-<to>` with the dots dropped — `m282-431` for 2.8.2 onto a 4.3.1 primary — every release it creates carries `kates.io/lab` labels, and `status`, `cutover` and `down` find it from the cluster — there is no state file. The report keeps the script's eighteen rows (`cluster reachable` … `cutover froze the target`) and exits `1` on any failed one; `-o json` carries them per row.
 
 #### Several sources in one release
 
@@ -1874,7 +1874,7 @@ kates replay <id>
 kates replay abc123
 ```
 
-The replay sends the run's `requestedSpec`, the fields its request set, and the Kates API merges them with the type's defaults as it did the first time. A run stored before the Kates API kept the request has none; it is replayed from its merged spec without `targetThroughput`, `consumerGroup`, the fetch settings and the `enable` options, which that Kates API never applied, so the new run does what the old one did. A scenario run is replayed as a plain run of its base spec, without its phases.
+The replay sends the run's `requestedSpec`, the fields its request set, and the Kates API merges them with the type's defaults as it did the first time. A run stored before the Kates API kept the request has none; it is replayed from its merged spec without `targetThroughput`, `consumerGroup`, the fetch settings and the `enable` options, which the Kates API did not apply then, so the new run does what the old one did. A scenario run is replayed as a plain run of its base spec, without its phases.
 
 #### gate
 
@@ -1892,7 +1892,7 @@ kates gate --min-grade A --timeout 300
 kates gate --min-grade B -o json
 ```
 
-With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. A gate that ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — prints the same object with an `error`, and with `null` for the throughput and P99 it never read. The exit code is the same as with the table.
+With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. When `kates gate` ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — it prints the same object with an `error`, and with `null` for the throughput and P99 it never read. The exit code is the same as with the table.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -2101,7 +2101,9 @@ kates snapshot diff pre-upgrade post-upgrade
 
 ### Flow Pipelines
 
-A flow is a declarative multi-step pipeline defined in YAML. Flows let you chain multiple Kates operations — tests, disruptions, reports, gates — into a single automated sequence. Each step can depend on the output of previous steps, and the pipeline stops on first failure. Use flows for complex validation sequences that would otherwise require a shell script: "run a load test, then a chaos test, then diff the results, then gate on grade B or better."
+A flow is a YAML file of steps that `kates flow run` runs in order; no step reads another's result. A step's `action` is one of three. `test` starts a test of the step's `type`, LOAD when it has none, and fails when the run fails or hasn't finished after about six minutes. `wait` pauses for as many seconds as the step's `records` field gives, 10 when it gives none. `webhook` and `notify` print that a notification went out and pass, but send nothing. The flow skips any other action as unknown, so a step can't run a disruption or compare reports. A step that does not pass, a skipped one included, stops the flow unless it sets `onFail: continue`; either way `kates flow run` exits 1 at the end.
+
+A `test` step's `gate.minGrade` is the only threshold a flow checks, and any value above D fails the step: the flow reads the grade from the run's report, which carries none. A flow injects no fault; run one with `kates disruption run` or `kates resilience run`, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
 
 #### flow
 
@@ -2247,7 +2249,7 @@ Resources, which Claude Code offers as `@` mentions:
 
 Prompts, which Claude Code offers as slash commands: `diagnose_run` (a `run_id`), `did_kates_cause_this` (`since`, and optionally `topic` and `group`), `plan_game_day` (`topic` and `minutes`), `debrief_disruption` (`id`, and optionally `baseline_id`) and `security_posture_check` (optionally `framework`: `cis`, `soc2` or `pci`). A prompt is a template the agent follows with the tools; it reads nothing itself.
 
-What the server never does: start or cancel a test; run a disruption, playbook or template (`preview_disruption` sends only the dry run, `POST /api/disruptions?dryRun=true`, which injects nothing); consume or produce records, or create, alter or delete topics; touch webhooks, schedules, baselines or the security baseline; read the secret scan, the ACL map or the authentication probes; or run `kubectl` or `helm`. The HTTP client it uses sends GET requests and that one dry-run POST to the context's URL, nothing else, follows no redirect, and refuses the record, secret, ACL-map and authentication-probe reads before they are sent. Two reads have side effects in the backend, and their tools say so: reading a test run that is still active makes the backend poll it and save any change of status, as its reconciler does every 5 seconds, and every security audit the backend runs adds a grade to its in-memory history.
+What the server never does: start or cancel a test; run a disruption, playbook or template (`preview_disruption` sends only the dry run, `POST /api/disruptions?dryRun=true`, which injects nothing); consume or produce records, or create, alter or delete topics; touch webhooks, schedules, baselines or the security baseline; read the secret scan, the ACL map or the authentication probes; or run `kubectl` or `helm`. The HTTP client it uses sends GET requests and that one dry-run POST to the context's URL, nothing else, follows no redirect, and refuses the record, secret, ACL-map and authentication-probe reads before they are sent. Two reads have side effects in the Kates API, and their tools say so: reading a test run that is still active makes the Kates API poll it and save any change of status, as its reconciler does every 5 seconds, and every security audit the Kates API runs adds a grade to its in-memory history.
 
 #### Reading the Results
 

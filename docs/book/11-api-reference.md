@@ -6,7 +6,7 @@ toc-depth: 4
 
 ## Introduction
 
-The Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)), serves this RESTful API, which the CLI and other clients use to manage tests, reports, and disruptions. Most CLI commands call it, so a script can do over HTTP what they do. The commands that install and reach the stack run `kubectl` and `helm` instead, and a few only read local files, as the command table in [CLI Reference](10-cli-reference.md#commands) shows. The REST API is what scripts, CI/CD integration and custom dashboards build on.
+The Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)), serves this RESTful API, which the CLI and other clients use to manage tests, reports, and disruptions. Most CLI commands call it, so a script can do over HTTP what they do. The commands that install and reach the stack run `kubectl` and `helm` instead, and a few only read local files, as the [Commands](10-cli-reference.md#commands) table in CLI Reference shows. The REST API is what scripts, CI/CD integration and custom dashboards build on.
 
 **When should you choose the REST API over the CLI or gRPC?** Use the REST API when you need to integrate Kates into shell scripts, automation pipelines, or monitoring systems that work best with JSON over HTTP. It is ideal for `curl`-based workflows, webhook integrations, and any tool that speaks HTTP natively. The API is human-readable and easy to debug — every request and response is plain JSON, so you can inspect traffic with standard tools like `curl`, `httpie`, or browser dev-tools.
 
@@ -237,7 +237,7 @@ List test runs with pagination and filtering.
 
 Get full details of a test run, refreshing its status. The run carries one result entry per task/phase; for INTEGRITY tests each result also includes an `integrity` object (lost/duplicate records, RTO/RPO).
 
-**Response:** `200 OK` (`spec` and `requestedSpec` cut down to four fields; they are the merged spec and the request's own fields shown under [POST /api/tests](#post-apitests)). A run stored before the Kates API kept the request has no `requestedSpec`, and its `spec` shows `targetThroughput`, `consumerGroup`, the fetch settings and the three `enable` options at their Java defaults whatever the request said: that Kates API dropped them, and the run went without them.
+**Response:** `200 OK` (`spec` and `requestedSpec` cut down to four fields; they are the merged spec and the request's own fields shown under [POST /api/tests](#post-apitests)). A run stored before the Kates API kept the request has no `requestedSpec`, and its `spec` shows `targetThroughput`, `consumerGroup`, the fetch settings and the three `enable` options at their Java defaults whatever the request said: the Kates API dropped them then, and the run went without them.
 
 ```json
 {
@@ -281,7 +281,7 @@ These endpoints return a run's results as one JSON report, or export them as CSV
 
 #### GET /api/tests/{id}/report
 
-Get the full test report: the summary, the cluster snapshot, per-broker figures and `overallSlaVerdict`, which says whether the run met its SLA thresholds. The per-broker figures split the run's throughput by each broker's share of the topic's partition leaders when the report was built, not during the run. The Kates API builds a finished run's report the first time something asks for it, then keeps it in memory.
+Get the full test report: the summary, the cluster snapshot, per-broker figures and `overallSlaVerdict`, which says whether the run met its SLA thresholds. The per-broker figures split the run's throughput by each broker's share of the topic's partition leaders when the report was built, not during the run. The Kates API builds a finished run's report the first time something asks for it and keeps it in memory, among the 200 reports it has used most recently. Once the report drops out of those, or the Kates API restarts, the next request builds it again with a new cluster snapshot.
 
 ```json
 {
@@ -365,7 +365,9 @@ Export latency heatmap data. Returns `404` with a plain-text message when the Ka
 }
 ```
 
-*(Arrays truncated for readability — the real heatmap uses 25 latency buckets spanning 0 ms to 10 s. Each row is a 1-second sampling window.)*
+*(Arrays truncated for readability — the real heatmap uses 25 latency buckets spanning 0 ms to 10 s.)*
+
+The Kates API adds a row each time it polls a running native-backend test, every 5 s by default and on each read of the run, and the row counts everything recorded so far in the 25 buckets. A run with several tasks gets one row per running task at each poll, each counting that task's records, and `phase` is the task's scenario phase or, outside a scenario, its workload, such as `produce` or `consume`. [Latency Heatmaps](09-observability.md#latency-heatmaps) in Observability & Monitoring explains how to read one.
 
 ---
 
@@ -518,7 +520,7 @@ Then poll `GET /api/disruptions/{id}` until the status is terminal:
 }
 ```
 
-Disruption IDs are 8-character UUID prefixes. `status` is `RUNNING` while the plan executes, then one of `COMPLETED`, `PARTIAL` (some steps failed), `FAILED`, or `INTERRUPTED` (the process running the plan died; see below). Plans that violate the safety guard are rejected up front and return `422 Unprocessable Entity` with status `REJECTED` (see [Error Responses](#error-responses)). Only one plan may run against a cluster at a time: a `POST` while another plan is in flight returns `409 Conflict`. Concurrent plans would race the rollback state stored on the target and could leave a node pool or StatefulSet under-scaled. [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails) lists every reason the safety guard refuses a plan.
+Disruption IDs are 8-character UUID prefixes. `status` is `RUNNING` while the plan executes, then one of `COMPLETED`, `PARTIAL` (some steps failed), `FAILED`, or `INTERRUPTED` (the process running the plan died; see below). Plans that violate the safety guard are rejected up front and return `422 Unprocessable Entity` with status `REJECTED` (see [Error Responses](#error-responses)). Only one plan may run against a cluster at a time: a `POST` while another plan is in flight returns `409 Conflict`. Concurrent plans would race the rollback state stored on the target and could leave a node pool or StatefulSet under-scaled. [Safety Guardrails](07-chaos-practice.md#safety-guardrails) in Chaos Engineering in Practice lists every reason the safety guard refuses a plan.
 
 > **Orphan recovery.** If the Kates API pod is killed mid-plan, the injected faults would otherwise persist with nothing left to undo them. On startup Kates removes abandoned `managed-by=kates` NetworkPolicies in the Kafka namespace (`kates.chaos.kafka.namespace`), restores the KafkaNodePools and StatefulSets there that still carry a scale-down snapshot, and marks stranded `RUNNING` reports as `INTERRUPTED`. It runs once, at startup, and touches only faults older than `kates.chaos.orphan-recovery.min-age-sec` (default 900), so a fault younger than that when Kates restarts stays until you remove it or Kates restarts again.
 
