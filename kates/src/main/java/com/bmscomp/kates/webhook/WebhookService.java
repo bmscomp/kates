@@ -73,6 +73,13 @@ public class WebhookService {
     @jakarta.inject.Inject
     WebhookUrlValidator urlValidator;
 
+    /**
+     * Transactional because {@link #onTestEvent} calls it on a messaging worker
+     * thread, which has no request context. Without a transaction the injected
+     * EntityManager refuses to work there, so every DONE or FAILED event threw
+     * before reaching a webhook.
+     */
+    @jakarta.transaction.Transactional
     public List<WebhookRegistration> list() {
         return em
                 .createQuery(
@@ -110,7 +117,7 @@ public class WebhookService {
             return;
         }
 
-        List<WebhookRegistration> targets = list();
+        List<WebhookRegistration> targets = self.list();
         if (targets.isEmpty()) {
             return;
         }
