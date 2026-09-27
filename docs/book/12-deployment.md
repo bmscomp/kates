@@ -1,6 +1,6 @@
 # Deployment Guide
 
-> **Scope**: this chapter owns deploying the **Kates stack** — the backend, CLI, monitoring, and chaos tooling, and the topology choices between them. Provisioning the Kafka cluster itself is delegated to [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) (the walkthrough) and [Kafka Deployment Engineering](15-kafka-deployment.md) (the rationale).
+> **Scope**: this chapter owns deploying the **Kates stack** — the Kates API, the CLI, monitoring and chaos tooling, and the topology choices between them. Provisioning the Kafka cluster itself is delegated to [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) (the walkthrough) and [Kafka Deployment Engineering](15-kafka-deployment.md) (the rationale).
 
 Deploying Kates is more than running `make all`. The choices you make *before* running that first command — how many namespaces, what service exposure strategy, how much memory to allocate — ripple through every test you'll run later. A deployment tuned for local experimentation will buckle under production load; a production topology is needless overhead on a laptop.
 
@@ -25,8 +25,8 @@ After this chapter, you can:
 | Helm | 3.14+ | Kubernetes package manager |
 | jq | 1.6+ | JSON processing (optional) |
 | Go | 1.25+ | CLI compilation (if building from source) |
-| Java | 21+ | Backend compilation (if building from source) |
-| Maven | 3.9+ | Backend build (bundled as `mvnw`) |
+| Java | 21+ | Kates API compilation (if building from source) |
+| Maven | 3.9+ | Kates API build (bundled as `mvnw`) |
 
 ---
 
@@ -36,26 +36,29 @@ Before deploying anything, there are three architectural decisions that will sha
 
 ### Single-Namespace vs Multi-Namespace
 
-The simplest deployment puts everything — Kafka, Kates, monitoring, chaos tools — into a single namespace. This is fine for local development on Kind where you want `kubectl get pods` to show everything in one place. But for shared or production environments, multi-namespace isolation is strongly recommended.
+The simplest deployment puts Kafka, the Kates API, Kafka UI, monitoring and LitmusChaos into one namespace, `kates-stack` by default; the Strimzi operator, cert-manager and Kyverno keep their own namespaces either way. This is fine for local development on Kind where you want `kubectl get pods` to show everything in one place. But for shared or production environments, multi-namespace isolation is strongly recommended.
 
 Why? Each namespace can have independent:
 
 - **RBAC policies** — the team running chaos experiments shouldn't need write access to the Kafka namespace
 - **Resource quotas** — prevent the monitoring stack from starving Kafka of memory during a spike
-- **Network policies** — rules on which pods may reach which ports. They add up rather than override, and as the charts ship they leave the Kafka client listeners open to every pod in the cluster: the policy Strimzi generates admits any pod to a listener without `networkPolicyPeers`. A compromised monitoring pod can reach the brokers until you close the listeners — see [Security & Compliance](17-security.md#network-policies)
+- **Network policies** — rules on which pods may reach which ports. As the charts ship, they leave the Kafka client listeners open to every pod in the cluster ([Security & Compliance](17-security.md#how-the-policies-combine))
 
 The isolated topology uses these namespaces by default:
 
 | Namespace | Components | Why Separated |
 |-----------|-----------|---------------|
 | `strimzi-operator` | The Strimzi Cluster Operator, its CRD-upgrade hook and the Drain Cleaner | The operator is its own Helm release (`charts/strimzi-operator`) and owns cluster-scoped objects — the CRDs and its RBAC — which cannot belong to a per-cluster release |
-| `kafka` | Brokers, controllers, Kafka UI, schema registry | The data plane the operator reconciles; a cluster-scoped operator watches it from outside |
-| `kates` | Kates backend, PostgreSQL, CLI service | Application-tier isolation; independent scaling and restart policies |
-| `monitoring` | Prometheus, Grafana, alerting rules | Monitoring must survive application failures — separate namespace ensures it stays up during chaos tests |
-| `litmus` | LitmusChaos operator, experiment runners | Chaos tools need elevated privileges; isolation limits the blast radius of those permissions |
+| `kafka` | Brokers, controllers, Kafka UI, schema registry, and MirrorMaker 2 when you add it | The data plane the operator reconciles; a cluster-scoped operator watches it from outside |
+| `kates` | The Kates API (Deployment `kates`) and its PostgreSQL (StatefulSet `kates-postgresql`) | Application-tier isolation; independent scaling and restart policies |
+| `monitoring` | Prometheus, Grafana, alerting rules | Monitoring must survive application failures — separate namespace ensures it stays up during chaos experiments |
+| `litmus` | The LitmusChaos operator (release `chaos`) | Chaos tools need elevated privileges; isolation limits the blast radius of those permissions |
+| `cert-manager` | cert-manager, installed by default | Its own release, with cluster-wide CRDs; it keeps this namespace in both topologies |
+
+Kyverno (`kyverno`), Kafka Connect (`connect`) and Connect's demo PostgreSQL (`database`) get namespaces of their own when you add them. The ChaosEngines that Kates creates for a fault go to the fault's target namespace, `kafka` by default, not to `litmus`.
 
 ::: {.callout-tip}
-For local Kind deployments, the multi-namespace layout still works — `make all` prompts you to choose between a single-namespace topology (everything in `kates-stack`) and the isolated multi-namespace topology, and the underlying `kates deploy` command defaults to `--topology isolated`. The only time single-namespace makes sense is throwaway CI environments where fast teardown (`kubectl delete namespace`) matters more than isolation.
+For local Kind deployments, the multi-namespace layout still works — `make all` prompts you to choose between a single-namespace topology (everything but the operators in `kates-stack`) and the isolated multi-namespace topology. The underlying `kates deploy` command defaults to `--topology isolated`. The only time single-namespace makes sense is throwaway CI environments where fast teardown (`kubectl delete namespace`) matters more than isolation.
 :::
 
 ### NodePort vs Ingress vs LoadBalancer
@@ -70,12 +73,9 @@ How you expose services outside the cluster depends on where the cluster runs:
 
 The default deployment uses **NodePort** for all services (Grafana on 30080, Kafka UI on 30081, etc.). The Kind cluster does not publish those ports on the host, so `make ports` forwards each service it finds to the same port number on `localhost`. It looks for Grafana and Prometheus only in the `kafka` namespace, not in `monitoring`, where `kates deploy` installs them; [The Cluster Under Test](03-cluster.md#access-points) gives the command that reaches them. Cloud deployments should switch to internal LoadBalancers or Ingress — see the [Cloud Deployment](#cloud-deployment) section for provider-specific annotations.
 
-### Ephemeral vs Persistent Storage for Test Data
+### Where Kates Stores Test Data
 
-Kates stores test results, run metadata, and configuration state in PostgreSQL. The storage decision matters:
-
-- **Ephemeral (emptyDir)**: Data disappears on pod restart. Fine for local development where you're iterating on tests and don't care about historical results.
-- **Persistent (PVC-backed)**: Data survives pod restarts and even cluster upgrades. Required for production deployments where you need historical trend analysis and audit trails.
+The Kates API keeps every run in PostgreSQL. The `kates` chart runs its own PostgreSQL on a 1 GiB PersistentVolumeClaim on the cluster's default StorageClass, so runs survive pod restarts; there is no emptyDir mode. For production, point the chart at an external database instead, with `postgresql.enabled: false` and `externalDatabase`, as `values-prod.yaml` does. Either way, the Kates API deletes finished runs older than 90 days by default, and [Architecture & Design](02-architecture.md) describes what else it keeps.
 
 For Kafka broker storage, **always use persistent volumes** — even in development. Kafka's log retention depends on data being durable, and losing broker data mid-test invalidates results.
 
@@ -89,7 +89,7 @@ graph TB
         direction LR
         MN1["Single Node"]
         MN1 --- MB["3 Brokers + 3 Controllers"]
-        MN1 --- MK["Kates + PostgreSQL"]
+        MN1 --- MK["Kates API + PostgreSQL"]
         MN1 --- MM["Prometheus + Grafana"]
     end
 
@@ -101,7 +101,7 @@ graph TB
         SN1 --- SB1["Broker + Controller"]
         SN2 --- SB2["Broker + Controller"]
         SN3 --- SB3["Broker + Controller"]
-        SN1 --- SK["Kates + PostgreSQL"]
+        SN1 --- SK["Kates API + PostgreSQL"]
         SN2 --- SM["Monitoring"]
         SN3 --- SL["LitmusChaos"]
     end
@@ -109,11 +109,11 @@ graph TB
     subgraph Production["Production (6+ nodes)"]
         direction LR
         PN1["Nodes 1-3: Kafka"]
-        PN4["Node 4: Kates + DB"]
+        PN4["Node 4: Kates API + DB"]
         PN5["Node 5: Monitoring"]
         PN6["Node 6: Chaos + Overflow"]
         PN1 --- PB["3 Brokers + 3 Controllers<br/>dedicated nodes, anti-affinity"]
-        PN4 --- PK["Kates HA + PostgreSQL HA"]
+        PN4 --- PK["Kates API replicas + external PostgreSQL"]
         PN5 --- PM["Prometheus + Grafana<br/>persistent storage"]
         PN6 --- PL["LitmusChaos + spare capacity"]
     end
@@ -146,10 +146,10 @@ The following table shows resource requirements per component. Use this to right
 | Strimzi Operator | 1 | 200m / 500m | 384Mi / 384Mi | — | Watches CRs, low steady-state usage |
 | Cruise Control | 1 | 500m / 1000m | 512Mi / 1Gi | — | Spikes during rebalance calculations |
 | Kafka Exporter | 1 | 100m / 200m | 128Mi / 256Mi | — | Consumer lag metrics |
-| Kates Backend | 1 | 500m / 2000m | 2Gi / 4Gi | — | JVM: `-Xms512m -Xmx2560m` with ZGC — 62.5% of the limit, see [JVM Tuning](#jvm-tuning) |
-| PostgreSQL | 1 | 250m / 500m | 256Mi / 512Mi | 10Gi | Test results and metadata |
+| Kates API (plain `helm install`) | 1 | 500m / 2000m | 2Gi / 4Gi | — | JVM: `-Xms512m -Xmx2560m` with ZGC, 62.5% of the limit; `kates deploy` runs it at 1 CPU / 512Mi, see [JVM Tuning](#jvm-tuning) |
+| PostgreSQL | 1 | 100m / 250m | 128Mi / 256Mi | 1Gi | Test results and metadata |
 | Prometheus | 1 | 500m / 1000m | 1Gi / 2Gi | 50Gi | 30d retention in the generic overlay |
-| Grafana | 1 | 100m / 200m | 128Mi / 256Mi | — | 13 pre-provisioned dashboards |
+| Grafana | 1 | 100m / 200m | 128Mi / 256Mi | — | The repository's dashboards, which [Observability & Monitoring](09-observability.md) lists |
 | LitmusChaos | 1 | 200m / 500m | 256Mi / 512Mi | — | Operator + experiment runners |
 
 ::: {.callout-important}
@@ -167,7 +167,7 @@ Every overlay below keeps its load balancers **internal**: reachable only from i
 For Kafka, the chart passes `kafka.externalAccess.configuration` to the Strimzi listener's `configuration` unchanged. Strimzi creates one load balancer for the bootstrap and one per broker, and each needs the provider's annotations: `bootstrap.annotations` covers the first, `perBrokerAnnotationsTemplate` every broker whatever its node ID, and `loadBalancerSourceRanges` applies to all of them. `perBrokerAnnotationsTemplate` needs Strimzi 1.1.0 or newer (the version the repository pins is in the [Version & Compatibility Matrix](appendix-d-versions.md)). Strimzi 1.0.x does not have the field: the API server rejects the Kafka resource or drops the field, and a dropped field leaves every broker's Service on the provider's default. On 1.0.x, annotate the brokers one by one instead, under `configuration.brokers`, with a `broker` node ID and its `annotations` per entry. Grafana sits behind an internal load balancer too (an internal Ingress on GKE); it serves plain HTTP, so put TLS in front of it before you open it to more clients.
 
 ::: {.callout-important}
-Open a load balancer to the internet only on purpose: switch the scheme (`internet-facing` on EKS; drop the internal annotation on GKE and AKS) and set `loadBalancerSourceRanges` to the public ranges of the clients that need it. On a public load balancer, empty ranges mean `0.0.0.0/0`. `kafka.externalAccess.allowedCidrs` does not replace them. It narrows the chart's own NetworkPolicy rule for the listener, but NetworkPolicies add up, and the policy the Strimzi operator generates for the cluster admits the listener's port from anywhere, because the `externalAccess` preset sets no `networkPolicyPeers` on the listener. Behind a load balancer the address a NetworkPolicy sees is also often a node or the load balancer rather than the client. So the overlays leave `allowedCidrs` empty and filter at the load balancer.
+Open a load balancer to the internet only on purpose: switch the scheme (`internet-facing` on EKS; drop the internal annotation on GKE and AKS) and set `loadBalancerSourceRanges` to the public ranges of the clients that need it. On a public load balancer, empty ranges mean `0.0.0.0/0`. `kafka.externalAccess.allowedCidrs` does not replace them: it narrows only the chart's rule for the port, and Strimzi's policy still admits every source until the listener carries `networkPolicyPeers`, which the preset can't set ([Security & Compliance](17-security.md#how-the-policies-combine)). Behind a load balancer the address a NetworkPolicy sees is also often a node or the load balancer rather than the client. So the overlays leave `allowedCidrs` empty and filter at the load balancer.
 :::
 
 ### Amazon EKS
@@ -176,7 +176,7 @@ Open a load balancer to the internet only on purpose: switch the scheme (`intern
 
 **Load Balancer:** Use an internal AWS Network Load Balancer (NLB) for Kafka external access. NLB operates at L4 (TCP), which is what Kafka's binary protocol requires. The annotations below are read by the AWS Load Balancer Controller, which has to be installed in the cluster: `aws-load-balancer-type: external` hands the Service to it, `aws-load-balancer-nlb-target-type: ip` sends traffic straight to the pod, and `aws-load-balancer-scheme: internal` keeps the NLB inside the VPC. Without the controller the Services stay pending, since the in-tree provider leaves `external` to it.
 
-**IAM:** Use IAM Roles for Service Accounts (IRSA) so the Kates pod can access AWS services (S3 for report storage, CloudWatch for metrics export) without embedding credentials.
+**IAM:** Use IAM Roles for Service Accounts (IRSA) if you give the Kates API pod access to AWS services, so it gets credentials without embedding them.
 
 ```yaml
 # kafka-eks.yaml — overlay for charts/kafka-cluster
@@ -250,7 +250,7 @@ kube-prometheus-stack:
 
 **Ingress:** GKE's built-in Ingress controller integrates with Google Cloud Load Balancing. The annotation `kubernetes.io/ingress.class: "gce-internal"` gives the Kates API and Grafana an internal Application Load Balancer; it has to be the annotation, because GKE's controller does not read `ingressClassName`. An internal Ingress needs a proxy-only subnet in the cluster's region and container-native load balancing, which the `cloud.google.com/neg` Service annotation turns on. A `BackendConfig`, named from the Service with `cloud.google.com/backend-config`, points the load balancer's health check at Kates's readiness endpoint.
 
-With container-native load balancing, the load balancer's proxies connect straight to the pods from addresses in the proxy-only subnet, and its health checks come from `35.191.0.0/16` and `130.211.0.0/22`. GKE's Ingress controller opens the VPC firewall for the health checks but not for the proxies, so create that rule yourself, for Kates's port 8080 and Grafana's 3000; without it the backends never turn healthy and the Ingress answers 502. The Kates chart's own NetworkPolicy, on by default, admits port 8080 from pods only, so on a cluster that enforces NetworkPolicy (GKE Dataplane V2, which Autopilot always runs, or Calico) it drops both the proxies and the health checks. `kates-gke.yaml` adds a rule for them. `10.129.0.0/23` stands for your proxy-only subnet there and in the firewall rule:
+With container-native load balancing, the load balancer's proxies connect straight to the pods from addresses in the proxy-only subnet, and its health checks come from `35.191.0.0/16` and `130.211.0.0/22`. GKE's Ingress controller opens the VPC firewall for the health checks but not for the proxies, so create that rule yourself, for Kates's port 8080 and Grafana's 3000; without it the load balancer's backends never turn healthy and the Ingress answers 502. The Kates chart's own NetworkPolicy, on by default, admits port 8080 from pods only, so on a cluster that enforces NetworkPolicy (GKE Dataplane V2, which Autopilot always runs, or Calico) it drops both the proxies and the health checks. `kates-gke.yaml` adds a rule for them. `10.129.0.0/23` stands for your proxy-only subnet there and in the firewall rule:
 
 ```bash
 gcloud compute firewall-rules create kates-allow-proxy-only-subnet \
@@ -439,7 +439,7 @@ kube-prometheus-stack:
 ```
 
 ::: {.callout-note}
-Each chart is its own Helm release, so each takes its own overlay — there is no single file that spans them. Layer the Kafka one after the platform profile, and the Kates and monitoring ones after the chart's `values-generic.yaml`, the file `kates deploy` applies on a cloud cluster. Without `charts/monitoring/values-generic.yaml` Grafana keeps the chart's default admin password, `admin`, on a load balancer; with it the Grafana chart generates one and stores it in the `monitoring-grafana` Secret.
+Each chart is its own Helm release, so each takes its own overlay — there is no single file that spans them. Layer the Kafka one after the platform profile, and the Kates and monitoring ones after the chart's `values-generic.yaml`, the file `kates deploy` applies on any cluster other than Kind. Without `charts/monitoring/values-generic.yaml` Grafana keeps the chart's default admin password, `admin`, on a load balancer; with it the Grafana chart generates one and stores it in the `monitoring-grafana` Secret.
 :::
 
 `kafka-cluster` and `monitoring` take subcharts from chart repositories — SeaweedFS and kube-prometheus-stack — and `helm dependency build` refuses to fetch them until those repositories are added. Add them once:
@@ -526,6 +526,8 @@ graph TD
     S6 --> S7["Print access points<br/>(Apicurio 30082, Kates 30083;<br/>chaos is execution plane only)"]
 ```
 
+On Kind, `kates deploy` needs a native image of the Kates API, `kates:native-local` or `kates:native`, in local Docker or on the node, and stops at the Kates API step without one. `make kates-native` pulls the published image or builds it and loads it into the cluster; then run `make all` again.
+
 ## Component-by-Component Deployment
 
 If you need to deploy components individually:
@@ -571,7 +573,7 @@ make monitoring
 Deploys:
 
 - Prometheus with Kafka JMX scrape targets
-- Grafana with 13 custom pre-provisioned JSON dashboards
+- Grafana with the repository's dashboards, which [Observability & Monitoring](09-observability.md) lists
 - NodePort service at port 30080
 
 ### Kafka
@@ -591,6 +593,8 @@ For deep Kafka configuration details (broker tuning, security, Cruise Control, t
 
 ### LitmusChaos
 
+`make all` installs LitmusChaos through `kates deploy`, into the `litmus` namespace. On a stack you build piece by piece, these targets manage it, and `make litmus` installs the same `chaos` release into `kafka` instead:
+
 ```bash
 # Deploy LitmusChaos operator
 make litmus
@@ -609,7 +613,9 @@ make litmus-gameday
 make chaos-status
 ```
 
-### Kates Application
+`make litmus-test`, `make litmus-gameday` and the release and pod lists of `make chaos-status` look in `kafka` only, so on a `make all` stack they find no release. To have Kates inject faults without LitmusChaos, change its chaos provider, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
+
+### Kates API
 
 ```bash
 # Build + deploy (full pipeline)
@@ -623,7 +629,7 @@ make kates-deploy    # Apply K8s manifests
 make kates-native
 ```
 
-### Kates Application Configuration
+### Kates API Configuration
 
 #### Fault Tolerance Timeouts
 
@@ -666,7 +672,7 @@ jvm:
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 ```
 
-These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` sizes Kates differently: on a cloud cluster it applies `charts/kates/values-generic.yaml`, a 512Mi limit with `-Xms128m -Xmx256m`, and on Kind it runs the native image, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)).
+These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` sizes the Kates API differently: on any cluster other than Kind it applies `charts/kates/values-generic.yaml`, a 512Mi limit with `-Xms128m -Xmx256m`, and on Kind it runs the native image, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)).
 
 | GC | Max Pause | Throughput Overhead | Best For |
 |----|:-:|:-:|----------|
@@ -711,7 +717,7 @@ For the full list of access points and URLs, see [The Cluster Under Test](03-clu
 
 ## CLI Configuration
 
-The backend requires an API key on every `/api` endpoint except `/api/health`. The chart generates one into the `kates-api-key` Secret. `kates deploy` writes it into whichever CLI context is active when it finishes — on a fresh machine, the built-in `default` context at `http://localhost:8080` — unless that context already holds a key that kates did not put there, and never into a context you create afterwards, so pass the key when you create one:
+The Kates API requires an API key on every `/api` endpoint except `/api/health`. The chart generates one into the `kates-api-key` Secret. `kates deploy` writes it into whichever CLI context is active when it finishes — on a fresh machine, the built-in `default` context at `http://localhost:8080` — unless that context already holds a key that kates did not put there, and never into a context you create afterwards, so pass the key when you create one:
 
 ```bash
 # Connect the CLI to Kates, with the key from the Secret
@@ -801,7 +807,7 @@ graph TB
 | `make kyverno` | Deploy Kyverno policy engine |
 | `make cert-manager` | Deploy cert-manager |
 | `make connect-deploy` | Deploy Kafka Connect cluster |
-| `make kates` | Build + deploy Kates application |
+| `make kates` | Build + deploy the Kates API |
 | `make kates-build` | Build Kates JVM image |
 | `make kates-native` | Load a Kates native image into Kind (see below) |
 | `make kates-deploy` | Apply Kates K8s manifests |
@@ -814,7 +820,7 @@ graph TB
 
 ### Native Image Build
 
-`make kates-native` puts a GraalVM native image of the Kates backend on the Kind node as `kates:native`. It reuses a `kates:native` already in your local Docker, pulls the published `ghcr.io/bmscomp/kates:<appVersion>-native` tag when there is none, and compiles `kates/Dockerfile.native` only when the pull fails; a local image from an older release therefore wins until you remove it with `docker rmi kates:native`. The compile runs Quarkus's native pipeline inside the Mandrel builder image, so it needs no local GraalVM. The target loads the image and deploys nothing. The result is a standalone binary with dramatically faster startup.
+`make kates-native` puts a GraalVM native image of the Kates API on the Kind node as `kates:native`. It reuses a `kates:native` already in your local Docker, pulls the published `ghcr.io/bmscomp/kates:<appVersion>-native` tag when there is none, and compiles `kates/Dockerfile.native` only when the pull fails; a local image from an older release therefore wins until you remove it with `docker rmi kates:native`. The compile runs Quarkus's native pipeline inside the Mandrel builder image, so it needs no local GraalVM. The target loads the image and deploys nothing. The result is a standalone binary with dramatically faster startup.
 
 **Prerequisites** (for the compile):
 
@@ -831,7 +837,7 @@ graph TB
 
 The native image does not run ZGC. It is built with Mandrel, whose only collector apart from Epsilon (which never collects) is the Serial GC, and the build selects no other. Every collection stops the application, and those pauses land in the latencies Kates records. `jvm.options` cannot change that: a native binary does not read `JAVA_TOOL_OPTIONS`. Its maximum heap is `-XX:MaximumHeapSizePercent=75` of the memory limit, passed as container args (`containerArgs` in `charts/kates/values-native.yaml`). That is above the 70% rule for the JVM image, and safely so: a native binary has no metaspace, JIT or code cache to hold beside its heap.
 
-So the two images do different jobs. Run the JVM image wherever Kates's own numbers are the product — continuous benchmarking, SLO gates, capacity planning. Run the native image where startup and footprint matter more than pause consistency: CI jobs, smoke tests, laptops. `kates deploy` on a Kind cluster runs a local native image (`kates:native-local`, else `kates:native`), so a local run measures with Serial GC. On other clusters, `charts/kates/values-native.yaml` switches the chart to the published `-native` tag.
+So the two images do different jobs. Run the JVM image wherever Kates's own numbers are the product — continuous benchmarking, gates, capacity planning. Run the native image where startup and footprint matter more than pause consistency: CI jobs, smoke tests, laptops. `kates deploy` on a Kind cluster runs a local native image (`kates:native-local`, else `kates:native`), so a local run measures with Serial GC. On other clusters `kates deploy` runs the published JVM image; to run the published `-native` tag there, install the chart with `charts/kates/values-native.yaml`.
 
 `make kates-native-local` is the target that deploys: it compiles the working tree into `kates:native-local`, loads it into Kind, installs the chart pinned to it and waits for the rollout, so the check below reads the pod it started.
 
@@ -891,7 +897,7 @@ The `kafka-cluster` chart renders them from `networkPolicy`, unless the values c
 - `networkPolicy.monitoring.namespace` admits the Prometheus scrape, `networkPolicy.apiServer` the rack-awareness init container and the entity operator, and `networkPolicy.operatorNamespace` (default `strimzi-operator`) the operator itself
 - Pods labelled `kates.io/test-pod=true` in the release namespace are always allowed, so Helm tests and CLI clients work without their own entry
 
-None of this narrows the client listeners on its own. NetworkPolicies are additive, so a connection that any policy selecting the pod allows gets through, and the policy the Strimzi Cluster Operator generates for the cluster admits every pod in every namespace to a listener without `networkPolicyPeers`. No listener in the chart's values or in `.build/values-detected.yaml` has them, so ports 9092 and 9093 are open to the whole cluster whatever `networkPolicy.clients` says. So is the metrics port, 9404, which Strimzi opens to every pod while `metrics.enabled` is on, as it is by default. [Security & Compliance](17-security.md#network-policies) shows how to close them and how to test the result.
+As the charts ship, every pod in the cluster can reach the Kafka client listeners. NetworkPolicies add up, and the policy Strimzi generates admits every pod to a listener without `networkPolicyPeers`, whatever `networkPolicy.clients` says ([Security & Compliance](17-security.md#how-the-policies-combine)). The metrics port, 9404, is open to every pod too, while `metrics.enabled` is on.
 
 The `strimzi-operator` chart carries the operator's own policy (`operatorPolicy`, on by default); `kafka-cluster` no longer renders policies that select another release's pods.
 
@@ -914,8 +920,8 @@ Kates uses PostgreSQL as its persistent data store for everything that outlives 
 
 - **Test run metadata** — timestamps, configuration snapshots, which topics and partitions were tested
 - **Performance results** — throughput measurements, latency percentiles (P50/P95/P99), error counts per run
-- **Historical baselines** — aggregated metrics used by the `kates report compare` and `kates test compare` commands to detect regressions
-- **Audit records** — who ran what test, when, and with which parameters
+- **Baselines** — for each test type, the run that `kates report regression` compares new runs with, set with `kates test baseline set`
+- **Audit records** — each action, its target and details, and when it happened; no field records who did it
 
 Why PostgreSQL and not Kafka itself? Kafka is optimized for sequential append and time-windowed retention — it's not designed for the random-access queries that trend analysis and historical comparison require. PostgreSQL gives you indexed queries like "show me P99 latency for topic X across the last 30 runs" that would be impractical with Kafka's log-based storage.
 
@@ -1037,6 +1043,8 @@ make chaos-status
 # View experiment logs
 kubectl logs -f -l app=chaos-operator -n litmus
 ```
+
+A release that `make litmus` installed runs in `kafka`, not `litmus`: point the first and last commands there. If every step of a disruption comes back `Skipped`, the Kates API is injecting nothing: its chaos provider is `noop`, usually because the configured one wasn't available. `kubectl logs -n kates deploy/kates | grep noop` shows why, and restarting the Kates API Deployment picks the provider again once you've fixed the cause.
 
 For the symptom-by-symptom index across the whole book, see the [Troubleshooting Index](appendix-b-troubleshooting.md).
 

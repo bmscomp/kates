@@ -15,13 +15,13 @@ After this chapter, you can:
 
 ## Observability Architecture
 
-Before diving into dashboards and metrics, it helps to understand how data flows from Kafka brokers and the Kates engine into the tools you'll use day-to-day. The architecture has four layers: sources generate data, collectors normalize and transport it, storage backends retain it, and visualization tools let you query and explore.
+Before diving into dashboards and metrics, it helps to understand how data flows from Kafka brokers and the Kates API into the tools you'll use day-to-day. The architecture has four layers: sources generate data, collectors normalize and transport it, storage backends retain it, and visualization tools let you query and explore.
 
 ```mermaid
 graph TB
     subgraph Sources["Data Sources"]
         KB[Kafka Brokers<br/>JMX metrics]
-        KE[Kates Engine<br/>Test metrics]
+        KE[Kates API<br/>Test metrics]
         K8S[Kubernetes<br/>Pod events]
         OTEL[OTel SDK<br/>Trace spans]
     end
@@ -53,7 +53,7 @@ graph TB
     OTEL --> OTLP --> JAEGER --> JUI
 ```
 
-Each Kafka broker exposes its JMX MBeans as Prometheus metrics through the **JMX Prometheus Exporter agent**, configured by the kafka-cluster chart's metrics ConfigMap (`charts/kafka-cluster/templates/metrics-configmap.yaml`). Prometheus scrapes these endpoints (plus the Kates engine's own `/q/metrics`) on its scrape interval — 30 seconds by default. Grafana queries Prometheus to render dashboards. Meanwhile, the Kates engine writes test results to PostgreSQL and exposes them through its REST API — which the CLI consumes for terminal dashboards, trend charts, and heatmap exports.
+Each Kafka broker exposes its JMX MBeans as Prometheus metrics through the **JMX Prometheus Exporter agent**, configured by the kafka-cluster chart's metrics ConfigMap (`charts/kafka-cluster/templates/metrics-configmap.yaml`). Prometheus scrapes these endpoints (plus the Kates API's own `/q/metrics`) on its scrape interval — 30 seconds by default. Grafana queries Prometheus to render dashboards. Meanwhile, the Kates API writes test results to PostgreSQL and serves them through its REST API, which the CLI reads for terminal dashboards and trend charts. Heatmap exports come from the Kates API's memory instead, for its most recent native runs; [Architecture & Design](02-architecture.md) says what lasts how long.
 
 ---
 
@@ -107,18 +107,18 @@ Twelve dashboards, and all of them live in one place: [`dashboards/`](https://gi
 |---|---|---|
 | Kafka — KRaft Operations | `charts/monitoring` | Is the quorum healthy, is metadata committing, has every broker applied it, and what is failing to replicate, serve or store the data underneath? |
 | Kafka — Performance & Load Testing | `charts/monitoring` | What does the cluster do under load — throughput per broker and per zone, where the replication path strains, how saturated the brokers are, and a per-topic, per-partition view while a run is in flight |
-| Kates — Application Health | `charts/monitoring` | Is the Quarkus process behind the benchmark API healthy? |
+| Kates — Application Health | `charts/monitoring` | Is the Kates API's Quarkus process healthy? |
 | Kates — Benchmark (live) | `charts/monitoring` | What is this run doing right now? |
 | Kates — Trend & Regression | `charts/monitoring` | Has performance moved across runs? |
 | Kates — Chaos | `charts/monitoring` | What happened to the cluster and the workload when the experiment fired? |
-| Kates — Chaos infrastructure | `charts/kates-chaos` | Is the LitmusChaos execution plane installed, running, and has it run anything? |
-| Kates — Overview | `charts/kates` | What does one Kates release know about itself, with nothing else installed? |
-| Kyverno Security Policies | `charts/kates` | What did the admission webhook let through, what did it refuse, and what is it costing the API server? |
-| Kafka Connect | `charts/connect-cluster` | Are the workers up, which connectors and tasks are running, what is failing or being dead-lettered? |
-| Kafka MirrorMaker 2 | `charts/mirror-maker2` | Is the mirror up, is it lagging, is it erroring — and if it is lagging, which leg and which end? |
-| Kafka MirrorMaker 2 — migration | `charts/mirror-maker2` | Can I cut over yet, and if not, what is left? |
+| Kates — Chaos infrastructure | `charts/monitoring` | Is the LitmusChaos execution plane installed, running, and has it run anything? |
+| Kates — Overview | `charts/monitoring` | What does one Kates release know about itself, with nothing else installed? |
+| Kyverno Security Policies | `charts/monitoring` | What did the admission webhook let through, what did it refuse, and what is it costing the API server? |
+| Kafka Connect | `charts/monitoring` | Are the workers up, which connectors and tasks are running, what is failing or being dead-lettered? |
+| Kafka MirrorMaker 2 | `charts/monitoring` | Is the mirror up, is it lagging, is it erroring — and if it is lagging, which leg and which end? |
+| Kafka MirrorMaker 2 — migration | `charts/monitoring` | Can I cut over yet, and if not, what is left? |
 
-The chart that delivers a board is the chart that owns the workload it watches. That is why the Connect board ships with `connect-cluster` and both MirrorMaker 2 boards ship with `mirror-maker2`: those charts vendor their own exporter rules, so their boards and their rules stay in step through one version bump. The two Kafka boards and four of the Kates boards ship with `charts/monitoring`, which is where the Grafana lives. **Kates — Overview** is one exception in its family — the application chart ships it, and it reads nothing but series the application publishes about itself, so `charts/kates` plus a Grafana is enough to make it work. **Kates — Chaos infrastructure** is the other, for the same reason read the other way round: `charts/kates-chaos` is the chart that installs LitmusChaos, so it is the chart that ships the board watching it.
+One chart delivers all twelve: `charts/monitoring` puts every board the repository builds into one ConfigMap, which the Grafana sidecar picks up, and the boards' template variables select the release they show. `charts/kates`, `charts/kates-chaos`, `charts/connect-cluster` and `charts/mirror-maker2` ship no board of their own.
 
 Until this refactor that twelfth board was the exception to *all of them live in one place*: it was hand-written JSON inside `charts/kates-chaos/templates/grafana-dashboard.yaml`, with no panel descriptions, no layout gate over it, and four series or labels that LitmusChaos does not publish. It is now generated from `dashboards/kates-chaos-infra/` like everything else.
 
@@ -177,7 +177,7 @@ If you upgrade a `mirror-maker2` release to chart 0.9.0, its two boards arrive u
 
 ## Kates-Specific Dashboards
 
-Six of the twelve boards are tailored to the Kates benchmark engine itself — one live run, trends across runs, application health, chaos correlation, the chaos platform's own health, and the application chart's own self-contained overview. They are unique to Kates and won't exist in a standard Kafka monitoring setup. Four are delivered by `charts/monitoring`; **Kates — Overview** comes from `charts/kates` and **Kates — Chaos infrastructure** from `charts/kates-chaos`.
+Six of the twelve boards are tailored to Kates itself — one live run, trends across runs, application health, chaos correlation, the chaos platform's own health, and a self-contained overview of the Kates API. They are unique to Kates and won't exist in a standard Kafka monitoring setup, and `charts/monitoring` delivers them with the rest.
 
 Each carries a `README.md` beside its `board.py` that documents the board panel by panel and — more usefully — says which metrics come from the application, which from kube-state-metrics, and which from an exporter you have to install yourself. Those READMEs are the reference; this chapter is the tour.
 
@@ -211,7 +211,7 @@ Where the Benchmark dashboard shows one test, the Trend dashboard shows *all* te
 | Latency trend | P99 and P99.9 per run |
 | Volume | Records moved per run — read this before believing the two rows above |
 | Platform totals | Tests completed (by outcome), test duration (P50/P95/P99), SLA pass/fail rate, records processed rate |
-| Disruptions | The engine's own injections: completion rate and duration (P50/P95) |
+| Disruptions | The Kates API's own disruptions: completion rate and duration (P50/P95) |
 
 **Template variables:** `$job`, `$test_type` — both from `kates_tests_completed_total`, which is a platform counter and outlives any run. A variable built on a run-scoped series empties out the moment the cluster goes idle, which is precisely when this board is opened.
 
@@ -219,7 +219,7 @@ Where the Benchmark dashboard shows one test, the Trend dashboard shows *all* te
 
 **File:** `kates-application.json` | **UID:** `kates-application-health` | **Docs:** `dashboards/kates-application/README.md`
 
-This dashboard monitors the Kates engine itself — not Kafka, not the test results, but the Quarkus application running the tests. Use it when the Kates REST API feels slow, when tests are failing to start, or when you suspect the engine itself (not Kafka) is the bottleneck.
+This dashboard monitors the Kates API itself — not Kafka, not the test results, but the Quarkus application running the tests. Use it when the Kates REST API feels slow, when tests are failing to start, or when you suspect the Kates API itself (not Kafka) is the bottleneck.
 
 | Row | Panels |
 |---|---|
@@ -239,9 +239,9 @@ The `jvm_*` names on this board are **Micrometer's**, not the Prometheus JMX age
 
 ### Kates — Overview
 
-**File:** `kates-overview.json` (shipped by `charts/kates`, not the monitoring chart) | **UID:** `kates-overview` | **Title in Grafana:** `KATES — Overview` | **Docs:** `dashboards/kates-overview/README.md`
+**File:** `kates-overview.json` | **UID:** `kates-overview` | **Title in Grafana:** `KATES — Overview` | **Docs:** `dashboards/kates-overview/README.md`
 
-The application chart's own board, and the only one that reads **nothing but metrics the application publishes about itself** — no kube-state-metrics, no cAdvisor, no exporter. Install `charts/kates` and a Grafana and it works. Uptime, active runs, API traffic and latency, the JVM, and the Agroal pool.
+The only board that reads **nothing but metrics the application publishes about itself** — no kube-state-metrics, no cAdvisor, no exporter. A Prometheus that scrapes the Kates API is all it needs. Uptime, active runs, API traffic and latency, the JVM, and the Agroal pool.
 
 Use Application Health instead if you are running the full monitoring stack; it answers a bigger question with more sources.
 
@@ -253,7 +253,7 @@ The arithmetic: 13 panels at HEAD, 3 dropped, 2 added (*Request rate by endpoint
 
 **File:** `kates-chaos.json` | **UID:** `kafka-chaos-dashboard` | **Docs:** `dashboards/kates-chaos/README.md`
 
-This is the most specialized dashboard in the stack. It correlates LitmusChaos experiment status with Kafka cluster health and Kates benchmark performance *on the same timeline*. When you run a chaos test, this dashboard answers the question: "What happened to my cluster and my test when the chaos experiment fired?"
+This is the most specialized dashboard in the stack. It correlates LitmusChaos experiment status with Kafka cluster health and Kates benchmark performance *on the same timeline*. Its header and Experiment history rows read LitmusChaos series only, so a fault from the direct Kubernetes provider, and every `ROLLING_RESTART` and `SCALE_DOWN`, leaves them empty. When you inject a fault, this dashboard answers the question: "What happened to my cluster and my test when the chaos experiment fired?"
 
 | Row | Panels |
 |---|---|
@@ -277,7 +277,7 @@ One more caveat on the header. `Chaos engines running` reads `kube_customresourc
 
 ### Kates — Chaos infrastructure
 
-**File:** `kates-chaos-infra.json` (shipped by `charts/kates-chaos`, not the monitoring chart) | **UID:** `kates-chaos-overview` | **Docs:** `dashboards/kates-chaos-infra/README.md`
+**File:** `kates-chaos-infra.json` | **UID:** `kates-chaos-overview` | **Docs:** `dashboards/kates-chaos-infra/README.md`
 
 The board for the layer underneath the one above: is the LitmusChaos execution plane installed, is its operator running, and has it actually run anything? Six panels, scoped to the namespace Litmus runs in — which is neither the Kafka namespace nor the namespace the experiments target.
 
@@ -300,16 +300,16 @@ Registered by `BenchmarkMetrics.java` and labeled with `run_id`, `test_type`, an
 | `kates_benchmark_active_runs` | Gauge | Number of active benchmark runs |
 | `kates_benchmark_throughput_rec_sec` | Gauge | Current throughput in records/sec |
 | `kates_benchmark_throughput_mb_sec` | Gauge | Current throughput in MB/sec |
-| `kates_benchmark_latency_ms` | Gauge, per `quantile` | Latency percentiles (P50/P95/P99/P99.9), measured by the backend |
+| `kates_benchmark_latency_ms` | Gauge, per `quantile` | Latency percentiles (P50/P95/P99/P99.9), measured by the benchmark backend |
 | `kates_benchmark_latency_ms_max` | Gauge | Worst latency observed in the phase |
 | `kates_benchmark_records_total` | Counter | Records processed, per phase |
 | `kates_benchmark_errors_total` | Counter | Tasks that reached a FAILED state |
 | `kates_benchmark_sla_violations` | Gauge, per `metric` and `severity` | 1 while that SLA constraint is violated, 0 once it recovers |
 
 `kates_benchmark_latency_ms` publishes under the names a Micrometer
-`DistributionSummary` would use, but it is **not** one: the engine never sees
-individual latencies, only the aggregates each poll of a backend returns, so
-the percentiles are the backend's own and are published as gauges carrying a
+`DistributionSummary` would use, but it is **not** one: the Kates API never sees
+individual latencies, only the aggregates each poll of a benchmark backend returns, so
+the percentiles are the benchmark backend's own and are published as gauges carrying a
 `quantile` label. Select the quantile; never `histogram_quantile()` over
 these, and never average two of them together. `http_server_requests_seconds_*`
 on the application board *is* a real histogram — the `HttpLatencyHistogram`
@@ -377,7 +377,7 @@ A one-line system health check — the fastest way to verify that Kates and Kafk
 kates status
 ```
 
-Returns: engine status, Kafka connectivity, active test count, and any warnings.
+Returns one line: the CLI context, the Kates API's health status, whether Kafka is up, and run counts by status.
 
 ### Cluster Watch
 
@@ -458,6 +458,8 @@ kates report export <id> --format heatmap > heatmap.json
 
 There is no output-file flag: when stdout is a terminal, the export is written to an auto-named file; when piped or redirected, it goes to stdout.
 
+The Kates API keeps heatmap rows in memory, for native runs only and for its 50 most recent such runs, so a restart loses them; [Architecture & Design](02-architecture.md) says what else lasts how long.
+
 ### REST API
 
 The CLI's export reads this endpoint, so a script can fetch the same data over HTTP. The `format` parameter picks JSON, the default, or CSV:
@@ -469,7 +471,7 @@ GET /api/tests/{id}/report/heatmap?format=csv
 
 ### Reading Heatmap Data
 
-The JSON payload carries the run ID, test type, bucket labels and boundaries, and a list of rows. Each row is a snapshot of the latency distribution, captured while the engine polls the running test:
+The JSON payload carries the run ID, test type, bucket labels and boundaries, and a list of rows. Each row is a snapshot of the latency distribution, captured while the Kates API polls the running test:
 
 ```json
 {
@@ -546,21 +548,24 @@ A 52% increase in P99 latency with only a 7% drop in throughput suggests the clu
 
 ## Broker Metrics Correlation
 
-Kates captures per-broker metrics as part of every test report. This is particularly valuable for detecting hot spots — situations where one broker is handling significantly more load than the others due to partition leader imbalance.
+`kates report brokers` splits a run across the brokers that lead its topic's partitions, which is how you spot a hot spot caused by leader imbalance. It measures nothing per broker: it shares the run's throughput out by each broker's share of the topic's partition leaders.
 
 ```bash
 kates report brokers <id>
 ```
 
-This shows which broker was under the most pressure during the test:
+The command prints one row per broker. Read the columns this way:
 
-| Broker | Bytes In/s | Bytes Out/s | Request Rate | ISR Changes |
-|:-:|:-:|:-:|:-:|:-:|
-| 0 (leader) | 5.2 MB/s | 10.4 MB/s | 8,500/s | 0 |
-| 1 (follower) | 5.2 MB/s | 0.1 MB/s | 100/s | 0 |
-| 2 (follower) | 5.2 MB/s | 0.1 MB/s | 100/s | 0 |
+| Column | What it shows |
+|--------|---------------|
+| Leaders / Total | The topic's partitions this broker leads, out of all of them |
+| Share | That count as a percentage |
+| Throughput | The run's average throughput multiplied by the share |
+| p99 Latency | The whole run's P99, the same on every row |
+| Skew | How far the broker's throughput sits from the brokers' mean; beyond 20% it is flagged |
+| URP | The topic's partitions with a replica on this broker and fewer in-sync replicas than replicas |
 
-This is particularly valuable after chaos tests — you can see exactly how the load redistributed when a broker went down. If broker 0 was the leader for most partitions and it gets killed, the bytes in/out should redistribute roughly evenly across the surviving brokers. If the redistribution is uneven, your partition assignment strategy may need attention.
+A Balance Score under the table rates how evenly the leaders are spread. The Kates API reads the leaders when it first builds the run's report and keeps that report in memory, so the rows describe the topic at that moment, not during the run, and a restart can change them. For the same reason, they can't show how load moved while a fault was in place.
 
 ---
 
@@ -606,8 +611,6 @@ The `0.1` sampling rate in production means only 10% of requests generate traces
 | Layer | Span Name Pattern | Details |
 |-------|-------------------|---------|
 | JAX-RS | `GET /api/tests/{id}` | HTTP method + path |
-| Kafka Producer | `kates-results send` | Topic, partition, serialized size |
-| Kafka Consumer | `kates-dlq receive` | Topic, consumer group, lag |
 | JDBC | `SELECT test_runs` | SQL operation + table |
 
 ### Viewing Traces
@@ -757,7 +760,7 @@ helm upgrade --install monitoring charts/monitoring \
   --timeout 10m --wait
 ```
 
-The Kates backend reads a disruption's Kafka metrics from this Prometheus, through the Service kube-prometheus-stack creates for the release, `monitoring-kube-prometheus-prometheus`. The kates chart's `prometheus.url` points at it in the `monitoring` namespace, where `kates deploy` installs it, and `kates deploy` sets it for the namespace it uses. After `make monitoring`, the Service is in `kafka`. `make kates` applies the raw manifests in `kates/k8s/`, whose ConfigMap points there already; install the kates chart with `--set prometheus.url=http://monitoring-kube-prometheus-prometheus.kafka.svc:9090 --set networkPolicy.prometheus.namespace=kafka`. Without that, the backend cannot reach Prometheus: a disruption report has no Kafka metrics, and its SLA verdict lists latency and throughput as unevaluated.
+The Kates API reads a disruption's Kafka metrics from this Prometheus, through the Service kube-prometheus-stack creates for the release, `monitoring-kube-prometheus-prometheus`. The kates chart's `prometheus.url` points at it in the `monitoring` namespace, where `kates deploy` installs it, and `kates deploy` sets it for the namespace it uses. After `make monitoring`, the Service is in `kafka`. `make kates` applies the raw manifests in `kates/k8s/`, whose ConfigMap points there already; install the kates chart with `--set prometheus.url=http://monitoring-kube-prometheus-prometheus.kafka.svc:9090 --set networkPolicy.prometheus.namespace=kafka`. Without that, the Kates API cannot reach Prometheus: a disruption report has no Kafka metrics, and its SLA grade leaves the latency and throughput constraints unevaluated.
 
 Since chart 1.5.0 that ConfigMap is the single delivery route: the workload charts (kates 0.9.0, kates-chaos 2.2.0, connect-cluster 2.1.0, mirror-maker2 0.11.0) no longer render their own board copies, and their old dashboard values are refused with the new location named. All twelve boards are picked up by the same Grafana sidecar.
 
@@ -795,7 +798,7 @@ Run a test end-to-end and read the results the way this chapter teaches — clus
 # Forward the API and Grafana; a kates deploy install keeps Grafana in the monitoring namespace
 MONITORING_NS=monitoring make ports
 
-# Quick pre-check: engine and Kafka both reachable
+# Quick pre-check: the Kates API and Kafka both reachable
 kates status
 
 # Run a LOAD test and wait for it to finish (note the test ID it prints)
@@ -819,7 +822,7 @@ Expect a healthy run: dashboards flat where they should be flat (zero under-repl
 ## Summary
 
 - Read dashboards in a fixed order after every run — cluster health, then performance, then broker internals, then replication — and let the pattern, not a single number, tell the story.
-- Every dashboard lives in `dashboards/`, generated from Python by `scripts/gen-dashboards.py` and delivered by the chart that owns the workload it watches — the two Kafka boards and four Kates boards by `charts/monitoring`, the rest by `charts/kates`, `charts/connect-cluster` and `charts/mirror-maker2`. Broker health, quorum identity, Cruise Control and consumer lag stay the Strimzi operator's own boards; these add what those omit.
+- Every dashboard lives in `dashboards/`, generated from Python by `scripts/gen-dashboards.py` and delivered by `charts/monitoring` in one ConfigMap. Broker health, quorum identity, Cruise Control and consumer lag stay the Strimzi operator's own boards; these add what those omit.
 - `dashboards/METRICS.md` says what every series on every board means, how to query it, and whether an empty panel means nothing is wrong or means nothing publishes it. The nine legacy Kafka boards and `legacyKafkaDashboards.enabled` are gone in kates-monitoring 1.3.0.
 - The CLI covers the same ground without a browser: `kates dashboard` for an overview, `kates top` for running tests, `kates status` for a one-line check, and `kates cluster watch` for sparkline trends.
 - Latency heatmaps preserve the full distribution over time; export one with `kates report export <id> --format heatmap` whenever a percentile can't explain a spike.
