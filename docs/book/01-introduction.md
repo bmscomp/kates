@@ -16,8 +16,6 @@ This chapter is for anyone who runs, tests, or is about to inherit an Apache Kaf
 - *Does my cluster recover from a network partition within my [SLA](appendix-a-glossary.md#gl-sla)?*
 - *Is there any data loss under cascading failures?*
 
-This book follows one such question from start to finish: you run the payments platform, and you have to say whether [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster the book's lab runs, is ready for it.
-
 Unlike generic load testing tools, Kates understands Kafka semantics — [producer acknowledgments](appendix-a-glossary.md#gl-acks), consumer group rebalancing, [ISR](appendix-a-glossary.md#gl-isr) tracking, and partition leadership. Unlike basic `kafka-producer-perf-test`, Kates provides structured reports, SLA enforcement, historical trend analysis, and [disruptions](appendix-a-glossary.md#gl-disruption) that a [safety guard](appendix-a-glossary.md#gl-safety-guard) checks before they start.
 
 ## The Problem Space
@@ -187,7 +185,7 @@ To set expectations clearly:
 ## Summary
 
 - Kates — Kafka Advanced Testing & Engineering Suite — pairs performance testing with chaos engineering, and understands Kafka semantics like producer acknowledgments, ISR state, and partition leadership rather than treating the cluster as a black box.
-- Production readiness spans three dimensions — performance, resilience, and data integrity — and Kates checks all three with repeatable tests against targets you set, instead of ad-hoc scripts.
+- Production readiness spans three dimensions — performance, resilience, and data integrity — and Kates checks all three with repeatable tests against targets you set.
 - Five principles shape the design: Kafka-native, Kubernetes-first, SLA-driven, observable, and safe by default.
 - Every test produces structured output — JSON, CSV, JUnit XML, heatmap data — so results feed CI/CD gates and trend analysis, not just terminal scrollback.
 - Kates is a testing and validation platform, not a Kafka distribution, a management UI, or a production monitoring system.

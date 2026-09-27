@@ -11,7 +11,7 @@ Kates has two halves: the `kates` CLI on your machine, and the [Kates API](appen
 
 The half of Kates that does the work isn't on your machine. The `kates` CLI runs where you type; the Kates API runs in the cluster, as one Deployment beside the Kafka cluster it tests. It generates the load, asks for the faults, grades disruption plans and keeps every run in PostgreSQL.
 
-The diagram shows what a default `kates deploy` installs and who calls whom. Solid arrows are the default paths; the dashed ones are the [Trogdor](appendix-a-glossary.md#gl-trogdor) path, which `kates deploy` doesn't set up.
+The diagram shows the main parts of a default `kates deploy` and who calls whom. Solid arrows are the default paths; the dashed ones are the [Trogdor](appendix-a-glossary.md#gl-trogdor) path, which `kates deploy` doesn't set up.
 
 ```mermaid
 %%| label: fig-architecture-parts
@@ -42,14 +42,14 @@ flowchart LR
     PROM -->|"scrapes"| KAFKA
 ```
 
-Read it from the left. The CLI calls the Kates API over REST, with the URL and API key of your [CLI context](appendix-a-glossary.md#gl-cli-context). For the commands that install and reach the stack, such as `kates deploy` and `kates ports`, it runs `kubectl` and `helm` against your current Kubernetes context instead. The [Commands](10-cli-reference.md#commands) table in CLI Reference says which command takes which path. In the cluster, the Kates API talks to [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, as an ordinary Kafka client, and keeps each run in PostgreSQL. On the default [chaos provider](appendix-a-glossary.md#gl-chaos-provider), it creates [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos) resources for each fault. [Prometheus](appendix-a-glossary.md#gl-prometheus) scrapes the [brokers](appendix-a-glossary.md#gl-broker) and the Kates API, and the Kates API reads Prometheus back for a disruption plan's broker metrics.
+Read it from the left. The CLI calls the Kates API over REST, with the URL and API key of your [CLI context](appendix-a-glossary.md#gl-cli-context). For the commands that install and reach the stack, such as `kates deploy` and `kates ports`, it runs `kubectl` and `helm` against your current Kubernetes context instead. The [Commands](10-cli-reference.md#commands) table in CLI Reference says which command takes which path. In the cluster, the Kates API talks to [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, as an ordinary Kafka client, and keeps each run in PostgreSQL. On the default [chaos provider](appendix-a-glossary.md#gl-chaos-provider), it creates [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos) resources for every fault except `ROLLING_RESTART` and `SCALE_DOWN`, which it injects itself through the Kubernetes API. [Prometheus](appendix-a-glossary.md#gl-prometheus) scrapes the [brokers](appendix-a-glossary.md#gl-broker) and the Kates API, and the Kates API reads Prometheus back for a disruption plan's broker metrics.
 
 Each part in the table runs in one place. The namespaces are those of the default [isolated topology](appendix-a-glossary.md#gl-isolated-topology); with `--topology single`, every part below that runs in the cluster, except Trogdor, shares `kates-stack`, as [Single-Namespace vs Multi-Namespace](12-deployment.md#single-namespace-vs-multi-namespace) describes.
 
 | Part | What it does | Where it runs |
 |:--|:--|:--|
 | `kates` CLI | Calls the Kates API, and runs `kubectl` and `helm` for the commands that install, reach and remove the stack | Your machine |
-| Lab, `dashboard`, `top` and `kafka tui` | Terminal views on the Kates API; each Lab iteration starts one [test run](appendix-a-glossary.md#gl-test-run) | Your machine, inside the CLI |
+| Lab, `dashboard`, `top` and `kafka tui` | Terminal views on the Kates API; every run Lab starts, warm-ups and median runs included, is one [test run](appendix-a-glossary.md#gl-test-run) | Your machine, inside the CLI |
 | `kates mcp` | Serves read-only tools to an AI agent, whose MCP client starts it | Your machine, inside the CLI |
 | Kates API | Serves REST and [gRPC](appendix-a-glossary.md#gl-grpc) on port 8080, and runs tests, [disruptions](appendix-a-glossary.md#gl-disruption) and schedules | Deployment `kates`, namespace `kates` |
 | Native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) | Runs a test's producers and consumers on [virtual threads](appendix-a-glossary.md#gl-virtual-thread) inside the Kates API | The Kates API pod |
@@ -121,7 +121,7 @@ The `TestOrchestrator` is the central coordinator. When a test is created, it:
 4. **Polls status** — periodically polls each `BenchmarkHandle` for `BenchmarkStatus` updates
 5. **Collects heatmap data** — on each poll of a running test, stores the latency buckets recorded so far as one [heatmap](appendix-a-glossary.md#gl-heatmap) row
 
-It doesn't build the report. The `ReportGenerator` builds a `TestReport` from the stored run the first time something asks for it, with summary metrics, whether the run met its [SLA](appendix-a-glossary.md#gl-sla) thresholds (targets you set, in the style of an SLO) and broker correlation.
+The Kates API builds a report only when something asks for one. It builds a finished run's report from the stored run the first time it's asked (`ReportGenerator`), with summary metrics, whether the run met its [SLA](appendix-a-glossary.md#gl-sla) thresholds (targets you set, in the style of an SLO) and broker correlation.
 
 ### NativeKafkaBackend
 
@@ -349,7 +349,7 @@ sequenceDiagram
 
 ## Technology Stack
 
-The table lists what Kates is built with and the tools it works beside. A default `kates deploy` installs neither [Jaeger](appendix-a-glossary.md#gl-jaeger), [Velero](appendix-a-glossary.md#gl-velero) and MinIO, nor [Kyverno](appendix-a-glossary.md#gl-kyverno); the parts table in [High-Level Architecture](#high-level-architecture) lists what it does install.
+The table lists what Kates is built with and the tools it works beside. A default `kates deploy` installs neither [Jaeger](appendix-a-glossary.md#gl-jaeger), [Velero](appendix-a-glossary.md#gl-velero) and MinIO, nor [Kyverno](appendix-a-glossary.md#gl-kyverno). It does install the Strimzi operator, cert-manager, Apicurio Registry and Kafka UI, beside the parts in [High-Level Architecture](#high-level-architecture).
 
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
