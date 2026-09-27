@@ -12,10 +12,10 @@ Pick a recipe by the question you need answered. Two of them disrupt the cluster
 | Recipe | Question it answers | Run time | Disrupts the cluster | Prerequisites |
 |--------|---------------------|----------|----------------------|---------------|
 | [Recipe 1: Validate a Kafka Upgrade](#recipe-1-validate-a-kafka-upgrade) | Did the upgrade change performance or data integrity? | Two runs of a three-scenario suite, with the upgrade between them | The upgrade rolls every broker; the tests don't disrupt | The recipe's scenario file, and the [Upgrade Playbook](18-upgrade-playbook.md) procedure |
-| [Recipe 2: Nightly Regression Suite](#recipe-2-nightly-regression-suite) | Is performance drifting from night to night? | One LOAD run of 100,000 records a night; the trend commands read 30 days | No | A running Kates backend, where the scheduler runs |
+| [Recipe 2: Nightly Regression Suite](#recipe-2-nightly-regression-suite) | Is performance drifting from night to night? | One LOAD run of 100,000 records a night; the trend commands read 30 days | No | A running Kates API, where the scheduler runs |
 | [Recipe 3: Pre-Production Chaos Certification](#recipe-3-pre-production-chaos-certification) | Does the cluster keep working through broker loss, a network partition and a zone outage? | Two tests and three playbooks, then a 360 s LOAD run during a broker kill | Yes: it kills Kafka pods and cuts one broker off the network | A cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure` |
 | [Recipe 4: Investigate a Latency Regression](#recipe-4-investigate-a-latency-regression) | Why did P99 latency rise between two runs? | No new runs: it reads results you already have | No | Two finished runs to compare |
-| [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) | What throughput can the cluster sustain? | Up to 20 minutes at the backend's defaults | Yes: it drives the brokers to their limit | A cluster nothing else depends on, and your P99 SLA threshold |
+| [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) | What throughput can the cluster sustain? | Up to 20 minutes at the Kates API's defaults | Yes: it drives the brokers to their limit | A cluster nothing else depends on, and your P99 SLA threshold |
 | [Recipe 6: Producer Tuning](#recipe-6-producer-tuning) | Which producer settings suit your workload? | Four LOAD runs of 100,000 records each | No | The recipe's scenario file |
 
 ## Recipe 1: Validate a Kafka Upgrade {#recipe-1-validate-a-kafka-upgrade}
@@ -103,7 +103,7 @@ scenarios:
       maxP99LatencyMs: 30
 ```
 
-The integrity scenario relies on `acks: all`, which also makes the producer idempotent. `enableIdempotence`, `enableTransactions` and `enableCrc` in a scenario file turn idempotence, transactions and CRC checks on or off explicitly, and the backend refuses a combination the producer cannot run, such as transactions with `acks: 1` (see [Scenario Files & SLA Gates](13-scenario-files.md)).
+The integrity scenario relies on `acks: all`, which also makes the producer idempotent. `enableIdempotence`, `enableTransactions` and `enableCrc` in a scenario file turn idempotence, transactions and CRC checks on or off explicitly. The Kates API refuses a combination the producer cannot run, such as transactions with `acks: 1` (see [Scenario Files & SLA Gates](13-scenario-files.md)).
 
 ---
 
@@ -159,7 +159,7 @@ Expected output:
 ```
 
 ::: {.callout-tip}
-If the schedule doesn't trigger, verify the Kates backend pod is running with `kubectl get pods -n kates -l app.kubernetes.io/name=kates` — the scheduler runs inside the backend, not as a separate pod. The cron expression uses UTC — adjust for your timezone.
+If the schedule doesn't trigger, verify the Kates API pod is running with `kubectl get pods -n kates -l app.kubernetes.io/name=kates` — the scheduler runs inside the Kates API, not as a separate pod. The cron expression uses UTC — adjust for your timezone.
 :::
 
 A sudden spike in the sparkline indicates a regression. Use `kates report diff` to compare the anomalous run against its predecessor.
@@ -180,11 +180,11 @@ Run these tests sequentially. All must pass before the cluster is certified.
 
 ```mermaid
 graph TD
-    L[Load Test\nBaseline perf] --> I[Integrity Test\nZero data loss]
+    L[LOAD run\nBaseline perf] --> I[INTEGRITY run\nZero data loss]
     I --> C1[leader-cascade\nElection recovery]
     C1 --> C2[split-brain\nNetwork partition]
     C2 --> C3[az-failure\nZone outage]
-    C3 --> R[Resilience Test\nPerf under chaos]
+    C3 --> R[Resilience run\nPerf under chaos]
     R --> CERT[Certified ✅]
 ```
 
@@ -211,7 +211,7 @@ kates disruption playbook run split-brain --dry-run && kates disruption playbook
 kates disruption playbook run az-failure --dry-run && kates disruption playbook run az-failure
 ```
 
-**Step 4 — Resilience test (performance + chaos combined):**
+**Step 4 — Resilience run (performance + chaos combined):**
 
 ```bash
 cat > resilience.json << 'EOF'
@@ -233,7 +233,7 @@ EOF
 kates resilience run -f resilience.json
 ```
 
-The rate limit keeps the load running across the fault: 180,000 records at 500 records/s take 360 s, while the fault is triggered after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s). An unthrottled run can finish before the fault is triggered, and then both summaries describe a run the fault never touched. The `spec` goes to the API as written, so it takes the API's field names: `throughput` sets the rate, and LOAD runs one producer and one consumer whatever `numProducers` says. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and a random pick could then kill a controller instead of a broker. [Chaos Engineering in Practice](07-chaos-practice.md) covers the fields.
+The rate limit keeps the load running across the fault: 180,000 records at 500 records per second take 360 s, while the fault is triggered after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s). An unthrottled run can finish before the fault is triggered, and then both summaries describe a run the fault never touched. The `spec` goes to the API as written, so it takes the API's field names: `throughput` sets the rate, and LOAD runs one producer and one consumer whatever `numProducers` says. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and a random pick could then kill a controller instead of a broker. [Chaos Engineering in Practice](07-chaos-practice.md) covers the fields.
 
 Expected output, with illustrative numbers:
 
@@ -273,10 +273,10 @@ Expected output, with illustrative numbers:
   Error Rate               0.0000%
 ```
 
-`Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. The Impact Analysis rows come in a different order from run to run. The command returns as soon as its recovery probes pass, usually while the LOAD run is still producing, so the post-chaos summary covers the run up to that moment. With the rate held at 500 records/s, throughput barely moves, and the fault shows in the latency rows.
+`Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. The Impact Analysis rows come in a different order from run to run. The command returns as soon as its recovery probes pass, usually while the LOAD run is still producing, so the post-chaos summary covers the run up to that moment. With the rate held at 500 records per second, throughput barely moves, and the fault shows in the latency rows.
 
 ::: {.callout-tip}
-A playbook run prints the disruption ID and the final status, and gets no SLA grade: playbook YAML cannot carry an `sla` block. For a hard pass/fail gate in CI — exit code 1 on an SLA violation — save a playbook's plan with `kates disruption playbook show <name> -o json > plan.json`, add an `sla` block, and run it with `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.
+A playbook run prints the disruption ID and the final status, and gets no SLA grade: playbook YAML cannot carry an `sla` block. To fail a CI job on an SLA violation, with exit code 1, save a playbook's plan with `kates disruption playbook show <name> -o json > plan.json`, add an `sla` block, and run it with `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.
 :::
 
 ---
@@ -301,7 +301,7 @@ Look for which metric regressed most: throughput drop, latency spike, or error i
 kates report brokers <bad-id>
 ```
 
-If one broker shows disproportionately high load (bytes in/s, request rate), it may have become a hotspot due to partition imbalance.
+If one broker leads a disproportionate share of the topic's partitions, it may have become a hotspot due to partition imbalance. `report brokers` shows that share as projected throughput and skew: it splits the run's throughput by each broker's share of the topic's partition leaders, taken when the report was built rather than during the run. It doesn't measure each broker's bytes or request rate.
 
 **Step 3 — Export and compare heatmaps:**
 
@@ -311,6 +311,8 @@ kates report export <bad-id> --format heatmap > bad-heatmap.json
 ```
 
 (When run interactively without a redirect, the heatmap is written to `kates-heatmap-<id>.json` in the current directory.)
+
+Both exports work only while the two runs are among the Kates API's 50 most recent `native` runs and its pod hasn't restarted since, because heatmap rows live only in its memory. Kates keeps runs in PostgreSQL, not in Kafka, and some of what you see about a run lives only in the Kates API's memory; [Architecture & Design](02-architecture.md) says what lasts how long.
 
 Heatmap patterns to look for:
 
@@ -360,7 +362,7 @@ If under-replicated or offline partitions show up during the test, the cluster w
 **Goal:** Determine the maximum sustainable throughput for your cluster configuration.
 
 ::: {.callout-caution}
-A CAPACITY test drives the cluster to its limit on purpose: its producers run unthrottled, for up to 20 minutes at the backend's defaults. Every other client competes with it for the brokers' network, disk and CPU while it runs, so run it where nothing else depends on the cluster, and never on production.
+A CAPACITY test drives the cluster to its limit on purpose: its producers run unthrottled, for up to 20 minutes at the Kates API's defaults. Every other client competes with it for the brokers' network, disk and CPU while it runs, so run it where nothing else depends on the cluster, and never on production.
 :::
 
 ### Procedure
