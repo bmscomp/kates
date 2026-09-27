@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -564,9 +563,9 @@ metadata:
 			} else if !isTesting {
 				// Grant superuser and replication to debezium after DB is ready
 				for i := 0; i < 5; i++ {
-					err := exec.CommandContext(ctx, "kubectl", "exec", "-n", deployDbNS, "postgresql-0", "--",
+					_, err := runExecCombinedFn(ctx, "kubectl", "exec", "-n", deployDbNS, "postgresql-0", "--",
 						"env", "PGPASSWORD=postgres", "psql", "-U", "postgres", "-c",
-						"ALTER ROLE debezium SUPERUSER REPLICATION;").Run()
+						"ALTER ROLE debezium SUPERUSER REPLICATION;")
 					if err == nil {
 						break
 					}
