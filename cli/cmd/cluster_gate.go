@@ -148,12 +148,12 @@ func confirmOnlyReachable(c cluster.Context, all []cluster.Context) error {
 
 // useTargetContext makes the cluster the gate chose kubectl's current context.
 //
-// Everything deploy runs after the gate — helm, kubectl, the introspection, the
-// port-forwards — reads the current context, and so does whatever the user
-// types next (make all runs scripts/port-forward.sh straight after). Passing
-// --kube-context/--context down every one of those calls would leave the
-// deploy on one cluster and the user's shell on another; switching once, and
-// saying so, keeps them on the same cluster.
+// Whatever the user types next reads the current context (make all runs
+// scripts/port-forward.sh straight after), so switching once, and saying so,
+// keeps their shell on the cluster the deploy went to. The deploy's own calls
+// do not depend on the switch: runDeploy also pins each of them to the cluster
+// by name (pinKubeContext), because the current context can move again while
+// a deploy runs.
 func useTargetContext(target string) error {
 	current := currentContextName()
 	if target == current {
@@ -258,8 +258,12 @@ func offerKind(d cluster.Decision) (string, error) {
 		return "", fmt.Errorf("no cluster to deploy to, and kind cluster creation was declined")
 	}
 
+	// kind names the context kind-<cluster>. The waits and the untaint that
+	// follow creation go to it by name, not to whatever is current by then.
+	ctxName := "kind-" + cluster.DefaultKindClusterName
+
 	fmt.Println()
-	err = createKindFn(defaultExecutor, cluster.KindOptions{
+	err = createKindFn(kubeContextExecutor{inner: defaultExecutor, kubeContext: ctxName}, cluster.KindOptions{
 		Progress: func(step string) {
 			fmt.Println("  " + gateAccent.Render("→") + " " + step)
 		},
@@ -268,8 +272,6 @@ func offerKind(d cluster.Decision) (string, error) {
 		return "", fmt.Errorf("creating the kind cluster: %w", err)
 	}
 
-	// kind names the context kind-<cluster>.
-	ctxName := "kind-" + cluster.DefaultKindClusterName
 	fmt.Println("  " + gateOK.Render("✓") + " Cluster ready: " + gateAccent.Render(ctxName))
 	return ctxName, nil
 }

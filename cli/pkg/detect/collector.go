@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +18,11 @@ import (
 
 // Collector fetches raw data from the cluster using the provided executor.
 type Collector struct {
-	exec         CommandExecutor
+	exec CommandExecutor
+	// KubeContext is the kube context the executor is pinned to, and the one
+	// the report names. Left empty, the report names what `kubectl config
+	// current-context` prints, and that command ignores --context.
+	KubeContext  string
 	BenchStorage bool
 	BenchNetwork bool
 	BenchDNS     bool
@@ -172,6 +178,9 @@ func (c *Collector) runWriteProbes(ctx context.Context, report *DetectReport) {
 }
 
 func (c *Collector) getContext() string {
+	if c.KubeContext != "" {
+		return c.KubeContext
+	}
 	out, _ := c.exec.Exec("kubectl", "config", "current-context")
 	if out == "" {
 		return "unknown"
@@ -942,11 +951,17 @@ func (c *Collector) checkSecretCreation(ctx context.Context) SecretCreationAudit
 	// Label the namespace
 	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
 
-	// Try to create secret and capture combined stdout/stderr using sh -c
-	cmdStr := fmt.Sprintf("kubectl create secret generic kates-detect-test-sec --from-literal=test-key=test-val -n %s 2>&1", ns)
-	out, err := c.exec.Exec("sh", "-c", cmdStr)
+	// Try to create the secret. A refusal (an admission webhook's included)
+	// is on kubectl's stderr, which the executor returns in the error.
+	_, err = c.exec.Exec("kubectl", "create", "secret", "generic", "kates-detect-test-sec",
+		"--from-literal=test-key=test-val", "-n", ns)
 
 	if err != nil {
+		// Report kubectl's words, not the exit status wrapped around them.
+		out := err.Error()
+		if inner := errors.Unwrap(err); inner != nil {
+			out = strings.TrimPrefix(out, inner.Error()+": ")
+		}
 		audit.SecretCreated = false
 		audit.ErrorMsg = out
 
@@ -1188,6 +1203,11 @@ func (c *Collector) getMonitoringStatus() MonitoringInfo {
 	return info
 }
 
+// serviceCIDRFlag finds the API server's --service-cluster-ip-range value in
+// its command line, as the jsonpath prints it (a JSON array): the first CIDR,
+// up to the quote or comma that ends it.
+var serviceCIDRFlag = regexp.MustCompile(`service-cluster-ip-range=([^",\\]+)`)
+
 func (c *Collector) getNetworkStatus() NetworkInfo {
 	info := NetworkInfo{CNI: "unknown"}
 	if out, _ := c.exec.Exec("kubectl", "get", "pods", "-n", "kube-system", "-l", "k8s-app=calico-node", "--no-headers"); out != "" {
@@ -1231,7 +1251,8 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 	info.ClusterDomain = "cluster.local"
 
 	// Attempt 1: Get from an already running pod
-	podOut, _ := c.exec.Exec("sh", "-c", "kubectl get pods --all-namespaces --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.namespace} {.items[0].metadata.name}' 2>/dev/null || true")
+	podOut, _ := c.exec.Exec("kubectl", "get", "pods", "--all-namespaces", "--field-selector=status.phase=Running",
+		"-o", "jsonpath={.items[0].metadata.namespace} {.items[0].metadata.name}")
 	var resolvContent string
 	if podOut != "" {
 		parts := strings.Fields(podOut)
@@ -1285,12 +1306,14 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		}
 	}
 
-	// For bash pipe commands, we use sh -c
-	svcOut, _ := c.exec.Exec("sh", "-c", "kubectl get pod -n kube-system -l component=kube-apiserver -o jsonpath='{.items[0].spec.containers[0].command}' 2>/dev/null | grep -oE 'service-cluster-ip-range=[^\\\",]+' | cut -d= -f2 | head -1")
-	if svcOut == "" {
-		svcOut = "unknown"
+	// The service CIDR is a flag on the API server's command line, where the
+	// API server runs as a pod (kubeadm, kind).
+	apiserverCmd, _ := c.exec.Exec("kubectl", "get", "pod", "-n", "kube-system", "-l", "component=kube-apiserver",
+		"-o", "jsonpath={.items[0].spec.containers[0].command}")
+	info.ServiceCIDR = "unknown"
+	if m := serviceCIDRFlag.FindStringSubmatch(apiserverCmd); m != nil {
+		info.ServiceCIDR = m[1]
 	}
-	info.ServiceCIDR = svcOut
 
 	return info
 }
