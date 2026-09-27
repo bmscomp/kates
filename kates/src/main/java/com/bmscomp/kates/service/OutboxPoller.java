@@ -3,7 +3,6 @@ package com.bmscomp.kates.service;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -90,33 +89,15 @@ public class OutboxPoller {
             }
             try {
                 TestEvent testEvent = MAPPER.readValue(event.getPayload(), TestEvent.class);
-                // Sent with this transaction suspended. The Kafka connector
-                // subscribes the send here and runs it on its own sending
-                // thread, and context propagation carries the caller's JTA
-                // transaction to that thread with it. This method's commit can
-                // then find the transaction still active on that thread
-                // (ARJUNA012094) and fail with "Enlisted connection used
-                // without active transaction": always on the first send, which
-                // waits for metadata. The send needs no transaction, and
-                // suspending one keeps its row locks.
-                CompletionStage<Void> sent =
-                        QuarkusTransaction.suspendingExisting().call(() -> eventEmitter.send(testEvent));
-                sent.whenComplete((ignored, failure) -> {
-                    // This callback runs on a Kafka sender thread. Both branches
-                    // do blocking JDBC, so they are handed to the shared
-                    // executor rather than stalling the sender.
-                    try {
-                        if (failure != null) {
-                            LOG.errorf("Outbox event %s not acknowledged, will retry: %s", id, failure.getMessage());
-                            executor.get().execute(() -> cleaner.recordFailure(id, describe(failure)));
-                        } else {
-                            // Committed to the broker — safe to forget.
-                            executor.get().execute(() -> cleaner.delete(id));
-                        }
-                    } finally {
-                        inFlight.remove(id);
-                    }
-                });
+                // Hand the event over with this transaction suspended. Quarkus
+                // propagates the caller's transaction to the threads that
+                // continue its work, and against a real broker the send left a
+                // second thread in it: the commit failed ("commiting with 2
+                // threads active", then "Enlisted connection used without active
+                // transaction"). The in-memory connector acknowledges on this
+                // thread, so only a broker shows it. The row locks stay held:
+                // suspending does not end the transaction.
+                QuarkusTransaction.suspendingExisting().run(() -> dispatch(id, testEvent));
             } catch (Exception e) {
                 inFlight.remove(id);
                 LOG.error("Failed to publish outbox event: " + id, e);
@@ -130,6 +111,25 @@ public class OutboxPoller {
                 cleaner.recordFailure(event, describe(e));
             }
         }
+    }
+
+    private void dispatch(UUID id, TestEvent testEvent) {
+        eventEmitter.send(testEvent).whenComplete((ignored, failure) -> {
+            // This callback runs on a Kafka sender thread. Both branches
+            // do blocking JDBC, so they are handed to the shared
+            // executor rather than stalling the sender.
+            try {
+                if (failure != null) {
+                    LOG.errorf("Outbox event %s not acknowledged, will retry: %s", id, failure.getMessage());
+                    executor.get().execute(() -> cleaner.recordFailure(id, describe(failure)));
+                } else {
+                    // Committed to the broker — safe to forget.
+                    executor.get().execute(() -> cleaner.delete(id));
+                }
+            } finally {
+                inFlight.remove(id);
+            }
+        });
     }
 
     private static String describe(Throwable t) {

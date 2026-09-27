@@ -171,7 +171,7 @@ graph LR
 
 ### Performance Gates
 
-These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated.
+These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated. Each gate is checked against every task of the run, not against the report summary, so every task must meet it. A consumer records no latency on the native backend, so there a LOAD run's latency gates judge its producer, while `minThroughputRecPerSec` judges the producer and the consumer alike.
 
 | Field | Type | Description |
 |-------|------|-------------|

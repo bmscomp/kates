@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Kates exposes a gRPC API alongside the REST API for high-throughput programmatic access from CI pipelines, other services, and language-native clients. Both APIs share the same backend service layer, so a test run behaves the same whichever API starts it. The gRPC API covers fewer operations, and this chapter notes each place where it differs from REST: fields it never populates, a filter and a request map it ignores, and a health check that needs the API key.
+Kates exposes a gRPC API alongside the REST API for high-throughput programmatic access from CI pipelines, other services, and language-native clients. The Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)), serves both, so a test run behaves the same whichever API starts it. The gRPC API covers fewer operations, and this chapter notes each place where it differs from REST: fields it never populates, a filter and a request map it ignores, and a health check that needs the API key.
 
 **When should you use gRPC over REST?** Choose gRPC when you need type-safe, high-performance integration from Go, Java, Python, or Rust services. The protobuf contract gives you compile-time type checking, automatic client code generation, and efficient binary serialization — ideal for CI/CD pipelines where reliability and speed matter more than human readability. gRPC's HTTP/2 foundation also provides connection multiplexing.
 
@@ -73,7 +73,7 @@ export KATES_API_KEY="$(kubectl get secret kates-api-key -n kates -o jsonpath='{
 
 ### Schema From `kates.proto` or Reflection
 
-Server reflection is enabled only in the dev profile (`%dev.quarkus.grpc.server.enable-reflection-service=true`). The prod profile, which the chart's backend runs, keeps `quarkus.grpc.server.enable-reflection-service=false`, so `grpcurl` cannot ask a deployed backend for the schema. Give `grpcurl` the proto file from the repository instead. From the repository root, collect the flags every call in this chapter uses into one array:
+Server reflection is enabled only in the dev profile (`%dev.quarkus.grpc.server.enable-reflection-service=true`). The prod profile, which the Kates API runs when the chart installs it, keeps `quarkus.grpc.server.enable-reflection-service=false`, so `grpcurl` cannot ask a deployed Kates API for the schema. Give `grpcurl` the proto file from the repository instead. From the repository root, collect the flags every call in this chapter uses into one array:
 
 ```bash
 GRPC=(-plaintext -import-path kates/src/main/proto -proto kates.proto -H "x-api-key: $KATES_API_KEY")
@@ -213,7 +213,7 @@ grpcurl "${GRPC[@]}" -d '{"id": "a1b2c3d4"}' localhost:30083 kates.TestService/D
 
 ### ClusterService
 
-Use `ClusterService` to read the Kafka cluster the backend is connected to — its brokers, node pools, topics and consumer groups — without changing anything.
+Use `ClusterService` to read the Kafka cluster the Kates API is connected to — its brokers, node pools, topics and consumer groups — without changing anything.
 
 | RPC | Request | Response | Description |
 |-----|---------|----------|-------------|
@@ -252,7 +252,7 @@ grpcurl "${GRPC[@]}" localhost:30083 kates.ClusterService/GetClusterInfo
 grpcurl "${GRPC[@]}" localhost:30083 kates.ClusterService/GetClusterTopology
 ```
 
-Only `nodePools` and `nodes` carry data: each pool's name, role, replica count, and storage, and each node's ID, host, port, rack, role, pool, readiness, and `is_quorum_leader`. That flag marks the node whose ID matches the controller `DescribeCluster` names, so it lands on an arbitrary broker, not on the KRaft quorum leader. The RPC reads Strimzi's `KafkaNodePool` resources and the broker pods through the Kubernetes API, so it fails when the backend runs outside Kubernetes.
+Only `nodePools` and `nodes` carry data: each pool's name, role, replica count, and storage, and each node's ID, host, port, rack, role, pool, readiness, and `is_quorum_leader`. That flag marks the node whose ID matches the controller `DescribeCluster` names, so it lands on an arbitrary broker, not on the KRaft quorum leader. The RPC reads Strimzi's `KafkaNodePool` resources and the broker pods through the Kubernetes API, so it fails when the Kates API runs outside Kubernetes.
 
 #### ListTopics
 
@@ -292,11 +292,11 @@ grpcurl "${GRPC[@]}" -d '{"name": "kates-results"}' localhost:30083 kates.Cluste
 
 ### HealthService
 
-Use `HealthService` to check that the backend is up, which benchmark backend it uses by default, and whether it can reach Kafka.
+Use `HealthService` to check that the Kates API is up, which benchmark backend it uses by default, and whether it can reach Kafka.
 
 | RPC | Request | Response | Description |
 |-----|---------|----------|-------------|
-| `Check` | `Empty` | `HealthResponse` | Engine status + Kafka connectivity |
+| `Check` | `Empty` | `HealthResponse` | Benchmark backends + Kafka connectivity |
 
 ```bash
 grpcurl "${GRPC[@]}" localhost:30083 kates.HealthService/Check
@@ -334,13 +334,13 @@ enum TestType {
 
 ### TestSpec
 
-Proto3 fields carry no wire-level defaults — when a field is unset, the backend applies **per-test-type defaults** (`TestOrchestrator` calls `applyTypeDefaults`, backed by `config/TestTypeDefaults.java` and overridable via `kates.tests.<type>.*` config properties). The values below are the LOAD-type defaults; other test types differ (STRESS uses more producers, ENDURANCE a longer duration, and so on).
+Proto3 fields carry no wire-level defaults — when a field is unset, the Kates API applies **per-test-type defaults** (`TestOrchestrator` calls `applyTypeDefaults`, backed by `config/TestTypeDefaults.java` and overridable via `kates.tests.<type>.*` config properties). The values below are the LOAD-type defaults; other test types differ (STRESS uses more producers, ENDURANCE a longer duration, and so on).
 
 | Field | Type | LOAD default | Description |
 |-------|------|---------|-------------|
 | `num_records` | int64 | 1000000 | Total messages to produce |
 | `record_size` | int32 | 1024 | Message size in bytes |
-| `throughput` | int64 | -1 | Target records/s (-1 = unlimited) |
+| `throughput` | int64 | -1 | Target rec/s (-1 = unlimited) |
 | `acks` | string | "all" | Producer acknowledgment mode |
 | `batch_size` | int32 | 65536 | Producer batch size bytes |
 | `linger_ms` | int32 | 5 | Producer linger delay |
@@ -448,9 +448,9 @@ Generated clients carry no credentials of their own: attach the API key as `x-ap
 
 ## Summary
 
-- gRPC and REST share the same backend service layer, but gRPC covers fewer operations and some of its responses carry less, as the points below list — gRPC is served over the unified Quarkus HTTP port 8080, which `make ports` forwards to `localhost:30083`, not the separate port 9000 the Helm chart still declares
+- gRPC and REST are served by the same Kates API, but gRPC covers fewer operations and some of its responses carry less, as the points below list — gRPC is served over the unified Quarkus HTTP port 8080, which `make ports` forwards to `localhost:30083`, not the separate port 9000 the Helm chart still declares
 - Every RPC, `HealthService/Check` included, needs the API key as `authorization: Bearer <key>` or `x-api-key: <key>` metadata
-- Server reflection is enabled only in the dev profile; against a deployed backend, pass `-import-path kates/src/main/proto -proto kates.proto` to `grpcurl`
+- Server reflection is enabled only in the dev profile; against a deployed Kates API, pass `-import-path kates/src/main/proto -proto kates.proto` to `grpcurl`
 - `CreateTestRequest` exposes only a subset of `TestSpec`; unset fields fall back to per-test-type defaults, and the request's `labels` map is ignored by the current server
 - proto3 JSON output omits zero-valued fields — a missing `id` or `page` in a response means zero, not an error — and some declared fields (`controller_id`, most of `ClusterTopology`, the counts on `ListTopics` items) are never populated at all
 - Kates raises five application status codes — `UNAUTHENTICATED`, `INVALID_ARGUMENT`, `NOT_FOUND`, `FAILED_PRECONDITION` and `INTERNAL`; any other exception surfaces as `UNKNOWN`, and transport-level codes like `UNAVAILABLE` come from the gRPC runtime itself

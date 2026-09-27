@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class RoundTripWorkloadSpec extends TrogdorSpec {
 
-    private static final String CLASS_NAME = "org.apache.kafka.trogdor.workload.RoundTripWorkloadSpec";
+    public static final String CLASS_NAME = "org.apache.kafka.trogdor.workload.RoundTripWorkloadSpec";
 
     private String bootstrapServers;
     private int targetMessagesPerSec;

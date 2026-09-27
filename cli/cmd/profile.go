@@ -84,18 +84,11 @@ var profileSaveCmd = &cobra.Command{
 		if len(run.Results) > 0 {
 			for _, r := range run.Results {
 				profile.Throughput += r.ThroughputRecordsPerSec
-				profile.P50Ms += r.P50LatencyMs
-				profile.P95Ms += r.P95LatencyMs
-				profile.P99Ms += r.P99LatencyMs
-				profile.AvgMs += r.AvgLatencyMs
 				profile.Records += r.RecordsSent
 			}
-			n := float64(len(run.Results))
-			profile.Throughput /= n
-			profile.P50Ms /= n
-			profile.P95Ms /= n
-			profile.P99Ms /= n
-			profile.AvgMs /= n
+			profile.Throughput /= float64(len(run.Results))
+			lat := latencyOf(run.Results)
+			profile.P50Ms, profile.P95Ms, profile.P99Ms, profile.AvgMs = lat.P50Ms, lat.P95Ms, lat.P99Ms, lat.AvgMs
 		}
 
 		if err := saveProfile(profile); err != nil {
@@ -208,15 +201,14 @@ if throughput regression exceeds the threshold.`,
 			return err
 		}
 
-		var throughput, p99 float64
+		var throughput float64
 		if len(run.Results) > 0 {
 			for _, r := range run.Results {
 				throughput += r.ThroughputRecordsPerSec
-				p99 += r.P99LatencyMs
 			}
 			throughput /= float64(len(run.Results))
-			p99 /= float64(len(run.Results))
 		}
+		p99 := latencyOf(run.Results).P99Ms
 
 		throughputDelta := ((throughput - profile.Throughput) / profile.Throughput) * 100
 		p99Delta := ((p99 - profile.P99Ms) / profile.P99Ms) * 100
