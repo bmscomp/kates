@@ -2,11 +2,9 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: prometheus.url sets the backend's Prometheus, defaulting to the
-# Service charts/monitoring creates, and the NetworkPolicy's Prometheus egress
-# reads networkPolicy.prometheus.namespace (default monitoring, as rendered
-# before). Nothing else moves.
-version: 0.10.5
+# Patch: trogdor.agentNodes names the Trogdor agents the backend's tasks run
+# on (KATES_TROGDOR_AGENT_NODES, default node0). Nothing else moves.
+version: 0.10.6
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -30,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "trogdor.agentNodes (KATES_TROGDOR_AGENT_NODES, default node0, the name in the trogdor.conf Kafka ships) names the Trogdor agents the Trogdor backend's tasks run on, comma-separated and taken in turn. A Trogdor spec names the agent that runs it, and the backend named none, so the coordinator ended every task at once with \"Unable to find nodes for task\". Set it to the node names in your coordinator's platform config. It takes an image newer than 1.23.0, whose Trogdor backend could not run a task at all"
     - kind: fixed
       description: "The backend read Prometheus at http://prometheus.monitoring.svc:9090, its built-in default, and no chart creates that Service: charts/monitoring installs kube-prometheus-stack, whose Service is monitoring-kube-prometheus-prometheus. Every disruption on a default install captured no Kafka metrics, and its SLA verdict left latency and throughput unevaluated. prometheus.url (KATES_PROMETHEUS_URL) now defaults to http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090, the Service `kates deploy` installs, and `kates deploy` sets it for the namespace it installs monitoring into"
     - kind: fixed

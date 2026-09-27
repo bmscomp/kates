@@ -1251,7 +1251,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 		Refs: []string{
 			"cli/cmd/apply.go:28-38,160-183,259-271,425-489",
 			mcpJava + "engine/NativeKafkaBackend.java:154-159,299-318",
-			mcpJava + "engine/TrogdorBackend.java:114-115",
+			mcpJava + "engine/TrogdorBackend.java:150-151",
 			mcpJava + "resilience/ResilienceOrchestrator.java:110",
 		},
 	},

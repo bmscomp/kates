@@ -390,7 +390,12 @@
         "trogdor": {
             "type": "object",
             "properties": {
-                "coordinatorUrl": { "type": "string" }
+                "coordinatorUrl": { "type": "string" },
+                "agentNodes": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Trogdor agent node names tasks run on, comma-separated (KATES_TROGDOR_AGENT_NODES)"
+                }
             }
         },
         "prometheus": {

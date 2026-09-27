@@ -33,6 +33,7 @@ data:
   {{- end }}
   {{- end }}
   KATES_TROGDOR_COORDINATOR_URL: {{ .Values.trogdor.coordinatorUrl | quote }}
+  KATES_TROGDOR_AGENT_NODES: {{ .Values.trogdor.agentNodes | quote }}
   {{- with .Values.prometheus.url }}
   KATES_PROMETHEUS_URL: {{ . | quote }}
   {{- end }}
