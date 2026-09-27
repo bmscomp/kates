@@ -2,14 +2,14 @@
   "about": "Per-page counts that scripts/check-book-style.sh won't let grow (see scripts/book_metrics.py). A page missing here must be 0 on all of them. After lowering a count, record it with: python3 scripts/book_metrics.py --update scripts/book-metrics-baseline.json",
   "files": {
     "01-introduction.md": {
-      "bare_headings": 2,
-      "tables_without_lead_in": 1,
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
       "bold_lead_bullets": 4,
       "numbered_headings": 5,
       "formula_openings": 1,
       "changelog_phrases": 0,
       "long_fence_lines": 1,
-      "mermaid_uncaptioned": 2,
+      "mermaid_uncaptioned": 0,
       "hr_rules": 0,
       "scope_blockquotes": 0,
       "broken_handoff": 0
@@ -28,8 +28,8 @@
       "broken_handoff": 0
     },
     "03-cluster.md": {
-      "bare_headings": 4,
-      "tables_without_lead_in": 4,
+      "bare_headings": 1,
+      "tables_without_lead_in": 2,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
       "formula_openings": 0,
@@ -41,72 +41,72 @@
       "broken_handoff": 0
     },
     "04-performance-theory.md": {
-      "bare_headings": 2,
+      "bare_headings": 0,
       "tables_without_lead_in": 0,
       "bold_lead_bullets": 11,
       "numbered_headings": 0,
       "formula_openings": 1,
       "changelog_phrases": 0,
       "long_fence_lines": 0,
-      "mermaid_uncaptioned": 5,
+      "mermaid_uncaptioned": 4,
       "hr_rules": 0,
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
     "05-test-types.md": {
-      "bare_headings": 13,
-      "tables_without_lead_in": 11,
+      "bare_headings": 10,
+      "tables_without_lead_in": 9,
       "bold_lead_bullets": 11,
       "numbered_headings": 0,
       "formula_openings": 1,
       "changelog_phrases": 1,
       "long_fence_lines": 0,
-      "mermaid_uncaptioned": 10,
+      "mermaid_uncaptioned": 9,
       "hr_rules": 7,
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
     "06-chaos-theory.md": {
-      "bare_headings": 2,
-      "tables_without_lead_in": 1,
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
       "bold_lead_bullets": 0,
       "numbered_headings": 5,
       "formula_openings": 1,
       "changelog_phrases": 0,
       "long_fence_lines": 2,
-      "mermaid_uncaptioned": 8,
+      "mermaid_uncaptioned": 6,
       "hr_rules": 0,
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
     "07-chaos-practice.md": {
-      "bare_headings": 3,
+      "bare_headings": 2,
       "tables_without_lead_in": 1,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
       "formula_openings": 1,
       "changelog_phrases": 0,
       "long_fence_lines": 4,
-      "mermaid_uncaptioned": 9,
+      "mermaid_uncaptioned": 4,
       "hr_rules": 0,
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
     "08-data-integrity.md": {
-      "bare_headings": 10,
+      "bare_headings": 5,
       "tables_without_lead_in": 3,
       "bold_lead_bullets": 9,
       "numbered_headings": 4,
       "formula_openings": 0,
       "changelog_phrases": 1,
       "long_fence_lines": 0,
-      "mermaid_uncaptioned": 3,
+      "mermaid_uncaptioned": 1,
       "hr_rules": 0,
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
     "09-observability.md": {
-      "bare_headings": 7,
+      "bare_headings": 5,
       "tables_without_lead_in": 3,
       "bold_lead_bullets": 4,
       "numbered_headings": 0,
@@ -116,10 +116,10 @@
       "mermaid_uncaptioned": 2,
       "hr_rules": 15,
       "scope_blockquotes": 0,
-      "broken_handoff": 1
+      "broken_handoff": 0
     },
     "10-cli-reference.md": {
-      "bare_headings": 7,
+      "bare_headings": 6,
       "tables_without_lead_in": 24,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
@@ -132,7 +132,7 @@
       "broken_handoff": 0
     },
     "10b-lab.md": {
-      "bare_headings": 6,
+      "bare_headings": 2,
       "tables_without_lead_in": 2,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
@@ -145,7 +145,7 @@
       "broken_handoff": 0
     },
     "11-api-reference.md": {
-      "bare_headings": 14,
+      "bare_headings": 6,
       "tables_without_lead_in": 3,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
@@ -171,8 +171,8 @@
       "broken_handoff": 0
     },
     "13-scenario-files.md": {
-      "bare_headings": 15,
-      "tables_without_lead_in": 11,
+      "bare_headings": 5,
+      "tables_without_lead_in": 3,
       "bold_lead_bullets": 4,
       "numbered_headings": 5,
       "formula_openings": 1,
@@ -197,21 +197,21 @@
       "broken_handoff": 0
     },
     "15-kafka-deployment.md": {
-      "bare_headings": 19,
-      "tables_without_lead_in": 10,
+      "bare_headings": 13,
+      "tables_without_lead_in": 9,
       "bold_lead_bullets": 3,
       "numbered_headings": 0,
       "formula_openings": 0,
       "changelog_phrases": 3,
       "long_fence_lines": 2,
-      "mermaid_uncaptioned": 6,
+      "mermaid_uncaptioned": 4,
       "hr_rules": 0,
       "scope_blockquotes": 1,
       "broken_handoff": 0
     },
     "16-grpc-api.md": {
-      "bare_headings": 12,
-      "tables_without_lead_in": 7,
+      "bare_headings": 9,
+      "tables_without_lead_in": 4,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
       "formula_openings": 0,
@@ -220,24 +220,24 @@
       "mermaid_uncaptioned": 1,
       "hr_rules": 12,
       "scope_blockquotes": 0,
-      "broken_handoff": 1
+      "broken_handoff": 0
     },
     "17-security.md": {
-      "bare_headings": 3,
-      "tables_without_lead_in": 4,
+      "bare_headings": 1,
+      "tables_without_lead_in": 2,
       "bold_lead_bullets": 3,
       "numbered_headings": 0,
       "formula_openings": 1,
       "changelog_phrases": 1,
       "long_fence_lines": 5,
-      "mermaid_uncaptioned": 6,
+      "mermaid_uncaptioned": 3,
       "hr_rules": 0,
       "scope_blockquotes": 0,
       "broken_handoff": 0
     },
     "18-upgrade-playbook.md": {
-      "bare_headings": 5,
-      "tables_without_lead_in": 2,
+      "bare_headings": 4,
+      "tables_without_lead_in": 1,
       "bold_lead_bullets": 3,
       "numbered_headings": 0,
       "formula_openings": 1,
@@ -249,14 +249,14 @@
       "broken_handoff": 0
     },
     "19-multi-tenancy.md": {
-      "bare_headings": 7,
-      "tables_without_lead_in": 4,
+      "bare_headings": 6,
+      "tables_without_lead_in": 3,
       "bold_lead_bullets": 4,
       "numbered_headings": 0,
       "formula_openings": 1,
       "changelog_phrases": 0,
       "long_fence_lines": 6,
-      "mermaid_uncaptioned": 3,
+      "mermaid_uncaptioned": 2,
       "hr_rules": 0,
       "scope_blockquotes": 0,
       "broken_handoff": 0
@@ -265,24 +265,24 @@
       "bare_headings": 22,
       "tables_without_lead_in": 5,
       "bold_lead_bullets": 13,
-      "numbered_headings": 83,
+      "numbered_headings": 0,
       "formula_openings": 1,
       "changelog_phrases": 5,
-      "long_fence_lines": 21,
+      "long_fence_lines": 20,
       "mermaid_uncaptioned": 5,
       "hr_rules": 18,
       "scope_blockquotes": 1,
       "broken_handoff": 0
     },
     "21-kafka-connect.md": {
-      "bare_headings": 17,
-      "tables_without_lead_in": 10,
+      "bare_headings": 8,
+      "tables_without_lead_in": 4,
       "bold_lead_bullets": 3,
       "numbered_headings": 3,
       "formula_openings": 2,
       "changelog_phrases": 0,
       "long_fence_lines": 20,
-      "mermaid_uncaptioned": 14,
+      "mermaid_uncaptioned": 9,
       "hr_rules": 5,
       "scope_blockquotes": 1,
       "broken_handoff": 0
@@ -298,7 +298,7 @@
       "mermaid_uncaptioned": 1,
       "hr_rules": 0,
       "scope_blockquotes": 0,
-      "broken_handoff": 1
+      "broken_handoff": 0
     },
     "23-legacy-source-migration.md": {
       "bare_headings": 2,
@@ -311,7 +311,7 @@
       "mermaid_uncaptioned": 1,
       "hr_rules": 0,
       "scope_blockquotes": 0,
-      "broken_handoff": 1
+      "broken_handoff": 0
     },
     "appendix-a-glossary.md": {
       "bare_headings": 0,
@@ -327,8 +327,8 @@
       "broken_handoff": 0
     },
     "appendix-b-troubleshooting.md": {
-      "bare_headings": 10,
-      "tables_without_lead_in": 9,
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
       "formula_openings": 0,
@@ -343,7 +343,7 @@
       "bare_headings": 10,
       "tables_without_lead_in": 9,
       "bold_lead_bullets": 17,
-      "numbered_headings": 9,
+      "numbered_headings": 0,
       "formula_openings": 0,
       "changelog_phrases": 2,
       "long_fence_lines": 2,
@@ -366,14 +366,14 @@
       "broken_handoff": 0
     },
     "deploying-strimzi-operator.md": {
-      "bare_headings": 3,
+      "bare_headings": 0,
       "tables_without_lead_in": 0,
       "bold_lead_bullets": 2,
       "numbered_headings": 0,
       "formula_openings": 0,
       "changelog_phrases": 4,
       "long_fence_lines": 24,
-      "mermaid_uncaptioned": 1,
+      "mermaid_uncaptioned": 0,
       "hr_rules": 0,
       "scope_blockquotes": 1,
       "broken_handoff": 0
@@ -392,17 +392,95 @@
       "broken_handoff": 1
     },
     "operating-kafka-connect.md": {
-      "bare_headings": 14,
-      "tables_without_lead_in": 6,
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
       "bold_lead_bullets": 3,
       "numbered_headings": 0,
       "formula_openings": 0,
       "changelog_phrases": 0,
       "long_fence_lines": 3,
-      "mermaid_uncaptioned": 5,
+      "mermaid_uncaptioned": 1,
       "hr_rules": 5,
       "scope_blockquotes": 1,
-      "broken_handoff": 1
+      "broken_handoff": 0
+    },
+    "part-chaos-integrity.md": {
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
+      "bold_lead_bullets": 0,
+      "numbered_headings": 0,
+      "formula_openings": 0,
+      "changelog_phrases": 0,
+      "long_fence_lines": 0,
+      "mermaid_uncaptioned": 0,
+      "hr_rules": 0,
+      "scope_blockquotes": 0,
+      "broken_handoff": 0
+    },
+    "part-deployment-operations.md": {
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
+      "bold_lead_bullets": 0,
+      "numbered_headings": 0,
+      "formula_openings": 0,
+      "changelog_phrases": 0,
+      "long_fence_lines": 0,
+      "mermaid_uncaptioned": 0,
+      "hr_rules": 0,
+      "scope_blockquotes": 0,
+      "broken_handoff": 0
+    },
+    "part-foundations.md": {
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
+      "bold_lead_bullets": 0,
+      "numbered_headings": 0,
+      "formula_openings": 0,
+      "changelog_phrases": 0,
+      "long_fence_lines": 0,
+      "mermaid_uncaptioned": 0,
+      "hr_rules": 0,
+      "scope_blockquotes": 0,
+      "broken_handoff": 0
+    },
+    "part-observability.md": {
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
+      "bold_lead_bullets": 0,
+      "numbered_headings": 0,
+      "formula_openings": 0,
+      "changelog_phrases": 0,
+      "long_fence_lines": 0,
+      "mermaid_uncaptioned": 0,
+      "hr_rules": 0,
+      "scope_blockquotes": 0,
+      "broken_handoff": 0
+    },
+    "part-performance-testing.md": {
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
+      "bold_lead_bullets": 0,
+      "numbered_headings": 0,
+      "formula_openings": 0,
+      "changelog_phrases": 0,
+      "long_fence_lines": 0,
+      "mermaid_uncaptioned": 0,
+      "hr_rules": 0,
+      "scope_blockquotes": 0,
+      "broken_handoff": 0
+    },
+    "part-reference.md": {
+      "bare_headings": 0,
+      "tables_without_lead_in": 0,
+      "bold_lead_bullets": 0,
+      "numbered_headings": 0,
+      "formula_openings": 0,
+      "changelog_phrases": 0,
+      "long_fence_lines": 0,
+      "mermaid_uncaptioned": 0,
+      "hr_rules": 0,
+      "scope_blockquotes": 0,
+      "broken_handoff": 0
     }
   }
 }
