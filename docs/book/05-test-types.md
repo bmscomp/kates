@@ -5,11 +5,13 @@ This chapter covers the eight core Kates test types, each designed to answer a s
 Whether you're baselining a new cluster or gating a CI pipeline, after this chapter you can:
 
 - Pick the test type that answers the question you're actually asking — steady-state capacity, breaking point, burst recovery, or data safety
-- Configure each type's key parameters and know how the native and Trogdor backends shape the load differently
+- Configure each type's key parameters and know the load each one puts on the cluster, whichever benchmark backend runs it
 - Read the results — recognize saturation, slow leaks, and data loss in the metrics each type reports
 - Run any type from a built-in scenario template instead of hand-rolled flags
 
 ## Test Type Overview
+
+A test type decides the tasks its run starts: how many producers and consumers, at what rate, with which defaults. Both benchmark backends run those same tasks. The default native backend runs them inside the Kates API, and the Trogdor backend (`--backend trogdor`) submits each one to the Trogdor coordinator as a task of its own. Each load shape below therefore holds on either backend, and a section says so where Trogdor differs. The diagram groups the types by the question they answer:
 
 ```mermaid
 graph TB
@@ -120,13 +122,16 @@ For iterative parameter tuning, use `kates lab` instead of individual `test crea
 
 ### Methodology
 
-A STRESS test pushes the cluster well past its comfortable operating point to find the saturation point and characterize the degradation curve. How the load is applied depends on the backend: the default native backend runs several **concurrent unthrottled producers** (`parallelProducers`, default 3), while the Trogdor backend (`--backend trogdor`) **ramps throughput progressively** through five steps, each getting a fifth of the test duration:
+A STRESS test pushes the cluster well past its comfortable operating point to find the saturation point and characterize the degradation curve. It starts `parallelProducers` producers at once, 3 by default, and each one sends as fast as the cluster accepts unless `targetThroughput` sets a rate for it. The profile has no steps, as the diagram shows:
 
 ```mermaid
+%%| label: fig-types-stress-profile
+%%| fig-cap: "A STRESS run starts all its producers together, and each runs at full speed until its records are sent or the duration ends."
+%%| fig-alt: "Flowchart, left to right: start 3 producers at once; each sends unthrottled until its records are sent or the duration ends; collect the results."
 graph LR
-    subgraph Stress["Load Profile (Trogdor backend)"]
+    subgraph Stress["Load Profile"]
         direction LR
-        P1["Phase 1<br/>10K msg/s"] --> P2["Phase 2<br/>25K msg/s"] --> P3["Phase 3<br/>50K msg/s"] --> P4["Phase 4<br/>100K msg/s"] --> P5["Phase 5<br/>Unlimited<br/>until duration ends"]
+        S1["Start<br/>3 producers at once"] --> S2["Full speed<br/>each producer unthrottled<br/>until its records are sent<br/>or the duration ends"] --> S3["Collect<br/>results"]
     end
 ```
 
@@ -140,34 +145,22 @@ graph LR
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `parallelProducers` | 3 | Concurrent producers (native backend) |
-| `durationSeconds` | 900 | Total test duration (Trogdor splits it evenly across the ramp steps) |
-| `records` | 5,000,000 | Enough to sustain the full run |
+| `parallelProducers` | 3 | Producers started at once |
+| `targetThroughput` | -1 (unlimited) | Rate for each producer, in rec/s |
+| `durationSeconds` | 900 | Upper bound on each producer's run |
+| `records` | 5,000,000 | Records for each producer; it stops once they are sent |
 | `recordSizeBytes` | 1024 | Message size |
 
 ### Interpreting Results
 
-The key metrics to watch across phases:
+One STRESS run gives one point on the degradation curve, because its producers start together and run at one level of load. To draw the curve, repeat the run with more producers each time, or a higher `targetThroughput`, and compare the runs with `kates report compare`. Across the series, the metrics pass through three stages:
 
 ```mermaid
-graph TD
-    subgraph Healthy["Phase 1-3: Healthy"]
-        A[Throughput ↑ linearly]
-        B[Latency stable]
-        C[Errors = 0]
-    end
-    
-    subgraph Saturation["Phase 4: Saturation"]
-        D[Throughput plateaus]
-        E[Latency rising]
-        F[GC pressure increasing]
-    end
-    
-    subgraph Overload["Phase 5: Overload"]
-        G[Throughput drops]
-        H[Latency spikes]
-        I[Errors appear]
-    end
+%%| label: fig-types-stress-stages
+%%| fig-cap: "Across STRESS runs at rising load, throughput first grows, then plateaus at saturation, then falls as errors appear."
+%%| fig-alt: "Flowchart, left to right, of three stages. Healthy, at low load: throughput rises with the load, latency is stable, errors are zero. Saturation, near the ceiling: throughput plateaus, latency rises, GC pressure increases. Overload, past the ceiling: throughput drops, latency spikes, errors appear."
+graph LR
+    H["Low load: Healthy<br/>throughput rises with load<br/>latency stable<br/>errors = 0"] --> S["Near the ceiling: Saturation<br/>throughput plateaus<br/>latency rising<br/>GC pressure increasing"] --> O["Past the ceiling: Overload<br/>throughput drops<br/>latency spikes<br/>errors appear"]
 ```
 
 ---
@@ -178,13 +171,16 @@ graph TD
 
 ### Methodology
 
-A SPIKE test simulates a flash-sale or viral event — a sudden, dramatic increase in traffic followed by a return to normal. On the Trogdor backend, the baseline → spike → recovery sequence is automated; the default native backend instead runs a single unthrottled burst producer, so you measure the burst itself and observe recovery in your monitoring.
+A SPIKE test simulates a flash-sale or viral event — a sudden, dramatic increase in traffic followed by a return to normal. The run is the burst alone: one producer, unthrottled from its first record, with `acks=1` by default. The baseline before it and the recovery after it come from outside the run, as the diagram shows:
 
 ```mermaid
+%%| label: fig-types-spike-profile
+%%| fig-cap: "A SPIKE run is only the burst: a LOAD run before it gives the baseline, and your monitoring after it shows the recovery."
+%%| fig-alt: "Flowchart, left to right: before, a LOAD run records your baseline P99; then the SPIKE run, one unthrottled producer with acks=1; after, your monitoring shows the recovery."
 graph LR
-    subgraph Spike["Load Profile (Trogdor backend)"]
+    subgraph Spike["Around a SPIKE Run"]
         direction LR
-        S1["Baseline<br/>1K msg/s<br/>60s"] --> S2["SPIKE!<br/>3 unthrottled producers<br/>120s"] --> S3["Recovery<br/>1K msg/s<br/>60s"]
+        S1["Before<br/>a LOAD run records<br/>your baseline P99"] --> S2["SPIKE run<br/>1 unthrottled producer<br/>acks=1"] --> S3["After<br/>your monitoring<br/>shows the recovery"]
     end
 ```
 
@@ -200,12 +196,12 @@ graph LR
 |-----------|---------|-------------|
 | `records` | 2,000,000 | Total records for the burst |
 | `recordSizeBytes` | 1024 | Message size |
-| `durationSeconds` | 300 | Enough for baseline + spike + recovery |
+| `durationSeconds` | 300 | Upper bound on the burst; the producer stops sooner once its records are sent |
 | `acks` | `1` | Latency-oriented default for burst traffic |
 
 ### Key Metrics
 
-Each row is a moment around the burst and what to note there. A SPIKE run measures only the burst, so take the baseline P99 from a LOAD run beforehand and watch recovery in your monitoring afterwards.
+Each row is a moment around the burst and what to note there. Only the middle row comes from the SPIKE run itself: the baseline P99 comes from the LOAD run before it, and the recovery from your monitoring after it.
 
 | Phase | Watch For |
 |-------|-----------|
@@ -266,15 +262,7 @@ The backend fails any run that is still `RUNNING` 30 minutes after it was create
 
 ### Methodology
 
-A VOLUME test focuses on **data size** rather than request rate. It sends large messages or large total volumes to stress the storage and replication subsystems. The default native backend runs a single producer with large records (10 KB by default); the Trogdor backend runs two workloads in parallel:
-
-```mermaid
-graph TB
-    subgraph Volume["Volume workloads (Trogdor backend, run in parallel)"]
-        V1["Large messages<br/>50K × 100KB"]
-        V2["High count<br/>5M × 1KB"]
-    end
-```
+A VOLUME test focuses on **data size** rather than request rate. It sends large messages or large total volumes to stress the storage and replication subsystems. The run is one producer sending large records, 2,000,000 of 10 KB each by default, as fast as the cluster accepts them unless `targetThroughput` sets a rate.
 
 ### When to Use
 
@@ -312,24 +300,16 @@ scenarios:
 
 ### Methodology
 
-A CAPACITY test removes all artificial throttling and pushes the cluster to its maximum throughput. It finds the ceiling and measures what metric (CPU, disk, memory, network) is the bottleneck. The default native backend runs `parallelProducers` (default 5) unthrottled producers concurrently; the Trogdor backend probes stepped throughput targets:
-
-```mermaid
-graph LR
-    subgraph Capacity["Probe steps (Trogdor backend)"]
-        direction LR
-        C1["5K msg/s"] --> C2["10K msg/s"] --> C3["20K msg/s"] --> C4["40K msg/s"] --> C5["80K msg/s"] --> C6["Unlimited"]
-    end
-```
+A CAPACITY test removes all artificial throttling and pushes the cluster to its maximum throughput. It finds the ceiling and measures what metric (CPU, disk, memory, network) is the bottleneck. The run starts `parallelProducers` producers at once, 5 by default, and every one is unthrottled: the Kates API refuses any rate but -1 for CAPACITY.
 
 ### Configuration
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `parallelProducers` | 5 | Concurrent unthrottled producers (native backend) |
+| `parallelProducers` | 5 | Producers started at once, each unthrottled |
 | `recordSizeBytes` | 1024 | Standard message size |
-| `records` | 10,000,000 | Enough for the full run |
-| `durationSeconds` | 1200 | Test duration |
+| `records` | 10,000,000 | Records for each producer; it stops once they are sent |
+| `durationSeconds` | 1200 | Upper bound on each producer's run |
 
 ### Interpreting Results
 
@@ -433,6 +413,8 @@ graph TB
     V -->|Yes| PASS
     V -->|No| FAIL
 ```
+
+An INTEGRITY run needs the native backend. The Trogdor backend has no workload that numbers and verifies records, so on `--backend trogdor` the run fails as it starts, with the error `INTEGRITY/CDC tests require the native backend`.
 
 ### What It Verifies
 
@@ -567,7 +549,7 @@ The apply blocks until the verification pass completes — on a healthy cluster,
 
 - Every test type answers one specific question — choose by the question you need answered, not by the knobs you want to turn.
 - LOAD establishes the baseline every other result is judged against; STRESS and CAPACITY find the ceiling — STRESS characterizes how the cluster degrades, CAPACITY measures the absolute maximum.
-- The backend changes the load profile: the native backend applies concurrent unthrottled producers, while the Trogdor backend ramps, spikes, or probes in phases — same test type, different shape.
+- The benchmark backend doesn't change a type's load: native and Trogdor start the same producers and consumers, though INTEGRITY runs only on native.
 - ENDURANCE and VOLUME stress the dimensions short tests miss: time (slow leaks, gradual degradation) and data size (storage and replication overhead).
 - INTEGRITY verifies zero loss, zero duplication, and correct ordering with sequence numbers and CRC checks — pair it with chaos through `kates resilience run` for the ultimate durability validation.
 
