@@ -493,16 +493,16 @@ type mcpRunTaskOut struct {
 }
 
 // mcpRunSummaryOut is the report summary without the two fields the backend
-// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:79,83).
+// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:101,105).
 type mcpRunSummaryOut struct {
 	TotalRecords            int64   `json:"totalRecords" jsonschema:"records sent, summed over tasks"`
 	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec" jsonschema:"the mean of the tasks' rates, not their sum"`
 	PeakThroughputRecPerSec float64 `json:"peakThroughputRecPerSec" jsonschema:"the fastest task's rate"`
 	AvgThroughputMBPerSec   float64 `json:"avgThroughputMBPerSec" jsonschema:"the mean of the tasks' rates"`
-	AvgLatencyMs            float64 `json:"avgLatencyMs"`
-	P50LatencyMs            float64 `json:"p50LatencyMs" jsonschema:"the mean of the tasks' p50s"`
-	P95LatencyMs            float64 `json:"p95LatencyMs" jsonschema:"the mean of the tasks' p95s"`
-	P99LatencyMs            float64 `json:"p99LatencyMs" jsonschema:"the mean of the tasks' p99s"`
+	AvgLatencyMs            float64 `json:"avgLatencyMs" jsonschema:"the mean latency of the tasks that measured latency, weighted by records"`
+	P50LatencyMs            float64 `json:"p50LatencyMs" jsonschema:"the p50 of the tasks that measured latency; with several, the highest"`
+	P95LatencyMs            float64 `json:"p95LatencyMs" jsonschema:"the p95 of the tasks that measured latency; with several, the highest"`
+	P99LatencyMs            float64 `json:"p99LatencyMs" jsonschema:"the p99 of the tasks that measured latency; with several, the highest"`
 	MaxLatencyMs            float64 `json:"maxLatencyMs" jsonschema:"the slowest task's maximum"`
 	TasksWithErrors         int64   `json:"tasksWithErrors" jsonschema:"tasks that ended with an error (the backend's totalErrors)"`
 	ErrorRate               float64 `json:"errorRate" jsonschema:"tasksWithErrors divided by records sent; not a share of failed records"`
@@ -2076,13 +2076,16 @@ const (
 var mcpCaveatsRuns = []mcpCaveat{
 	{
 		ID: mcpCaveatSummaryAveragesTasks,
-		Text: "A run's summary averages its tasks rather than measuring the run as a whole: throughput is the mean " +
-			"of the tasks' rates (a LOAD run's producer and consumer alike; not the sum over STRESS producers), peak " +
-			"is the fastest task, the latency percentiles are means of each task's own percentiles, maximum latency " +
-			"is the slowest task's, and errorRate is the number of tasks that ended with an error divided by the " +
-			"records sent, not a share of failed records. The backend always sends p99.9 and duration as 0.",
+		Text: "A run's summary is built from its tasks rather than measured over the run as a whole: throughput is " +
+			"the mean of the tasks' rates (a LOAD run's producer and consumer alike; not the sum over STRESS " +
+			"producers), and peak is the fastest task. Latency comes only from the tasks that measured it, so a LOAD " +
+			"or ENDURANCE run's is its producer's; a consumer records none. Each percentile is the highest such " +
+			"task's, exact with one producer and an upper bound with several; the average is weighted by records, " +
+			"and maximum latency is the slowest task's. errorRate is the number of tasks that ended with an error " +
+			"divided by the records sent, not a share of failed records. The backend always sends p99.9 and " +
+			"duration as 0.",
 		Refs: []string{
-			mcpJava + "util/MetricUtils.java:30-84",
+			mcpJava + "util/MetricUtils.java:52-142",
 			mcpJava + "report/ReportGenerator.java:156-166",
 		},
 	},
@@ -2144,18 +2147,18 @@ var mcpCaveatsRuns = []mcpCaveat{
 	{
 		ID: mcpCaveatRegressionOneBaseline,
 		Text: "The regression check compares the run with the one baseline run set for its test type, whatever that " +
-			"run's spec, and flags a regression on fixed thresholds: average throughput down more than 10%, mean p99 " +
-			"up more than 20%, or errorRate up more than 0.001. It knows nothing of how much runs vary; the noise " +
+			"run's spec, and flags a regression on fixed thresholds: average throughput down more than 10%, p99 up " +
+			"more than 20%, or errorRate up more than 0.001. It knows nothing of how much runs vary; the noise " +
 			"band does.",
 		Refs: []string{mcpJava + "service/BaselineService.java:67-135,148-158"},
 	},
 	{
 		ID: mcpCaveatAdvisorRulesOfThumb,
-		Text: "Advisor recommendations are fixed rules of thumb applied to the stored merged spec and to the mean " +
-			"of the tasks' throughput and p99; the gains they mention were never measured. Two rules compare against " +
-			"the broker count of the cluster now, not when the run ran.",
+		Text: "Advisor recommendations are fixed rules of thumb applied to the stored merged spec, the mean of the " +
+			"tasks' throughput and the p99 of the run's summary; the gains they mention were never measured. Two " +
+			"rules compare against the broker count of the cluster now, not when the run ran.",
 		Refs: []string{
-			mcpJava + "service/AdvisorService.java:24-158",
+			mcpJava + "service/AdvisorService.java:25-154",
 			mcpJava + "service/ClusterHealthService.java:131-142",
 		},
 	},

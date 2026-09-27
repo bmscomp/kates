@@ -44,6 +44,10 @@ The last chapter closes this Part but draws more on Parts II and III: it combine
 
 - [Recipes & Patterns](14-recipes.md): how do you validate an upgrade, run a nightly regression suite or certify resilience, from start to finish? About 5 minutes.
 
+## The Payments Question
+
+This Part moves the payments question from the lab to a cluster you run. In Multi-Tenancy a tenant is one block of `kafka-cluster` chart values in `tenants.yaml`, applied with one `helm upgrade`, and the payments workload becomes the `payments` tenant: a `payments-events` topic and a `KafkaUser` with prefix ACLs on `payments`. The Upgrade Playbook's re-test becomes `payments-scenarios.yaml`, run before and after an upgrade, and `kates report compare <pre-id>,<post-id>` compares the two runs. On that cluster, the answer comes from the same gates, grades and verdicts as in Parts II and III.
+
 ## Practice
 
 For the build chapters, [Tutorial 8 — Deploy, Detect & Clean](../tutorials/08-deploy-and-detect.md) checks a cluster with `kates detect`, deploys the stack with the interactive `kates deploy -i`, and removes it with `kates clean`. [Tutorial 7: Kyverno & Security](../tutorials/07-kyverno-security.md) goes with Security & Compliance: it manages the Kyverno admission policies and runs a security audit.
