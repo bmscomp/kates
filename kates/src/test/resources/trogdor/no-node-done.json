@@ -1,0 +1,17 @@
+{
+  "state": "DONE",
+  "spec": {
+    "class": "org.apache.kafka.trogdor.workload.ProduceBenchSpec",
+    "startMs": 1790000000000,
+    "durationMs": 120000,
+    "producerNode": "",
+    "bootstrapServers": "broker:9092",
+    "targetMessagesPerSec": 10000,
+    "maxMessages": 600000
+  },
+  "startedMs": -1,
+  "doneMs": 1790000000250,
+  "error": "Unable to find nodes for task: Unknown node names: ",
+  "cancelled": false,
+  "status": {}
+}

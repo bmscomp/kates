@@ -417,7 +417,7 @@ scenarios:
 
 ### Limits
 
-End-to-end latency comes only from the native backend. On the Trogdor backend (`--backend trogdor`), Trogdor's round-trip workload counts the records it sends and receives but reports no latency. Every latency field of such a run reads 0, which means not measured. A latency gate such as `maxP99LatencyMs` compares against that 0 and passes, so run ROUND_TRIP on the native backend whenever the latency matters. A record the producer retried can arrive twice, and each arrival is timed: ROUND_TRIP does not check for duplicates, and INTEGRITY does.
+End-to-end latency comes only from the native backend. On the Trogdor backend (`--backend trogdor`), Trogdor's round-trip workload counts the records it sends and receives but reports no latency. The row's records are the ones received, as on the native backend, but every latency field reads 0, which means not measured. A latency gate such as `maxP99LatencyMs` compares against that 0 and passes, so run ROUND_TRIP on the native backend whenever the latency matters. A record the producer retried can arrive twice, and each arrival is timed: ROUND_TRIP does not check for duplicates, and INTEGRITY does.
 
 ---
 

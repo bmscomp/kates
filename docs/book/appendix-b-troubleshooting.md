@@ -25,7 +25,7 @@ A client — Kates, Kafka UI or your own — can't reach the cluster or authenti
 | Kafka UI `CreateContainerConfigError` — secret not found | `KafkaUser` not applied before UI deployment | [Kafka Deployment Engineering](15-kafka-deployment.md#kafka-ui-createcontainerconfigerror) |
 | Kates can't connect to Kafka | Wrong bootstrap address or NetworkPolicy blocking | [Deployment Guide](12-deployment.md#kates-cant-connect-to-kafka) |
 | SCRAM authentication failure | Password rotated or KafkaUser not reconciled | [Security & Compliance](17-security.md#scram-sha-512) |
-| Connection timeout from new namespace | Missing NetworkPolicy entry for the new namespace | [Security & Compliance](17-security.md#testing-network-policies) |
+| Connection timeout from new namespace | The client namespace's own egress policy, such as Kyverno's generated default-deny; after the listeners carry `networkPolicyPeers`, a missing `networkPolicy.clients` entry | [Security & Compliance](17-security.md) |
 | `KafkaUser` secrets never created | Entity Operator (User Operator) only starts after the Kafka CR reaches `Ready` | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#user-secrets-not-appearing) |
 
 ## Kafka Connect
@@ -50,7 +50,7 @@ Tests complete but the numbers look wrong — latency that regresses, splits in 
 | P99 latency regression between test runs | Partition hotspot, GC pauses, or ISR changes | [Recipes & Patterns — Recipe 4](14-recipes.md#recipe-4-investigate-a-latency-regression) |
 | Bimodal latency distribution in heatmap | Some requests hitting page cache, others going to disk | [Performance Theory](04-performance-theory.md#heatmaps-seeing-the-full-picture) |
 | Artificially low latency measurements | Coordinated omission — tool slows down with the system | [Performance Theory](04-performance-theory.md#coordinated-omission) |
-| Stress test results vary wildly between identical runs | JVM warmup (JIT), GC pauses, small sample size — increase records to 500K+, use ZGC, discard first 2–3 warmup iterations | [Performance Theory](04-performance-theory.md#the-long-tail-problem), [Deployment Guide](12-deployment.md#jvm-tuning) |
+| Stress test results vary wildly between identical runs | JVM warm-up (JIT), GC pauses, small sample size — increase records to 500K+, use ZGC, discard first 2–3 warm-up iterations | [Performance Theory](04-performance-theory.md#the-long-tail-problem), [Deployment Guide](12-deployment.md#jvm-tuning) |
 | `KafkaRequestHandlerSaturated` alert | Request handlers over 70% busy — add threads or brokers | [Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) |
 | `KafkaLogFlushLatencyHigh` alert | Disk I/O saturated — check storage class and disk utilization | [Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) |
 
@@ -70,12 +70,12 @@ Pods, images or Helm releases fail while you install the stack or roll it out.
 
 ## CLI Issues
 
-The `kates` CLI itself fails, or can't reach or authenticate to the Kates backend.
+The `kates` CLI itself fails, or can't reach or authenticate to the Kates API.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | `kates health` killed immediately (exit 137) on macOS | macOS blocks unsigned binary — `com.apple.provenance` xattr | [Deployment Guide](12-deployment.md#cli-binary-killed-on-macos) |
-| CLI connection timeout / connection refused | Backend not running or port-forward died | [Deployment Guide](12-deployment.md#kates-cant-connect-to-kafka) |
+| CLI connection timeout / connection refused | Kates API not running or port-forward died | [Deployment Guide](12-deployment.md#kates-cant-connect-to-kafka) |
 | `[401] Missing API key` or `[403] Invalid API key`, while `kates health` works | The CLI context carries no API key or a stale one, or a stale `KATES_API_KEY` is exported, which the CLI prefers to the context's key — only `/api/health` is public | [Deployment Guide](12-deployment.md#cli-configuration) |
 
 ## Chaos Engineering
@@ -86,6 +86,8 @@ A LitmusChaos experiment or a Kates disruption fails to start, has no effect or 
 |---------|-------------|---------|
 | Litmus experiments fail to start | Chaos operator pod not running or RBAC insufficient | [Deployment Guide](12-deployment.md#litmus-experiments-fail) |
 | Disruption doesn't take effect | Target pod selector doesn't match, or NetworkPolicy blocks | [Chaos Engineering in Practice](07-chaos-practice.md) |
+| Every step's `Verdict` in `kates disruption status` is `Skipped` | The Kates API fell back to the `noop` chaos provider, which injects nothing | [Chaos Engineering in Practice](07-chaos-practice.md) |
+| A `DISK_FILL` or `NETWORK_LATENCY` step fails | The `kates-chaos` chart installs no `disk-fill` or `pod-network-latency` experiment for the default `litmus-crd` chaos provider | [Chaos Engineering in Practice](07-chaos-practice.md) |
 | Cluster doesn't recover after chaos | ISR too small, `min.insync.replicas` violated | [Chaos Engineering Theory](06-chaos-theory.md) |
 | **Kates — Chaos** board: `$namespace` picker empty, *Chaos engines running* reads *No data* | No `ChaosEngine` has been created yet, or kube-state-metrics lacks the custom-resource configuration for it (`charts/monitoring` before 1.6.0, or another stack) | [Observability & Monitoring](09-observability.md#kates-specific-dashboards) |
 
@@ -133,7 +135,7 @@ Not every problem is a Kates problem. Use this guide to determine where to focus
 | Symptom Pattern | Likely Layer | What to Check |
 |-----------------|-------------|---------------|
 | `kates health` shows all components UP, but tests fail | **Kafka** | Check broker logs, partition health, ISR state |
-| CLI commands return "connection refused" or timeout | **Kates backend** | Check Kates pod status, port-forward, service endpoints |
+| CLI commands return "connection refused" or timeout | **Kates API** | Check the Kates API pod's status, port-forward, service endpoints |
 | Pods stuck in `Pending`, `CrashLoopBackOff`, or `ImagePullBackOff` | **Kubernetes** | Check node resources, StorageClass, image registry access |
 | Kyverno rejecting pod creation | **Kyverno policies** | Run `kates kyverno violations` to identify which rule is failing |
 | Latency numbers are unreasonably high for all tests | **Infrastructure** | Check node CPU/memory pressure, disk I/O, network bandwidth |
@@ -145,17 +147,17 @@ When filing an issue, include the output of `kates doctor` — it runs a battery
 
 ## Common Issues (Additional)
 
-The stack is up and the Kates backend answers, but a command or a test result isn't what you expect.
+The stack is up and the Kates API answers, but a command or a test result isn't what you expect.
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs" | Missing `ClusterRoleBinding` for the Kates service account — the backend can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
-| Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check Kates backend logs for consumer errors |
+| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs" | Missing `ClusterRoleBinding` for the Kates service account — the Kates API can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
+| Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check the Kates API's logs for consumer errors |
 | `kates trend` shows no data even after running tests | Tests completed but trend queries require at least 2 data points of the same test type | Run the same test type at least twice. Trend analysis needs historical data to draw a line |
 
 ## Quick Diagnostic Commands
 
-Run these for a first snapshot: the Strimzi resources and pods, the operator and broker logs, the Kafka conditions, partition health through the Kates backend, and Kyverno's policies and violations.
+Run these for a first snapshot: the Strimzi resources and pods, the operator and broker logs, the Kafka conditions, partition health through the Kates API, and Kyverno's policies and violations.
 
 ```bash
 # Cluster overview
@@ -174,7 +176,7 @@ kubectl logs <broker-pod> -n kafka --previous --tail=30
 # Kafka status conditions
 kubectl get kafka krafter -n kafka -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}'
 
-# Under-replicated and offline partitions, through the Kates backend
+# Under-replicated and offline partitions, through the Kates API
 kates cluster check
 
 # Kyverno policy status
@@ -221,5 +223,5 @@ kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-consumer-groups.sh \
   --all-groups --describe
 ```
 
-`kates kafka groups` and `kates kafka group <group-name>` answer the lag question through the Kates backend without a broker pod. The client configuration carries a super user's password: it stays in the broker pod, and `kubectl exec -n kafka "${BROKER}" -- rm /tmp/client.properties` removes it when you are done.
+`kates kafka groups` and `kates kafka group <group-name>` answer the lag question through the Kates API without a broker pod. The client configuration carries a super user's password: it stays in the broker pod, and `kubectl exec -n kafka "${BROKER}" -- rm /tmp/client.properties` removes it when you are done.
 
