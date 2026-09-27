@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -131,6 +130,12 @@ type deployDashboardModel struct {
 
 	focusedPane int // 0: components, 1: logs
 	helmVersion string
+
+	// read runs the poller's kubectl queries. It is the seam as it stood when
+	// the dashboard was built: the poller runs on Bubble Tea's goroutines,
+	// some of which outlive the deploy, and runDeploy restores the seams when
+	// it returns (pinKubeContext).
+	read func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
 func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardModel {
@@ -155,9 +160,10 @@ func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardMode
 		componentsViewport: compVp,
 		totalSteps:         totalSteps,
 		compWidth:          60,
+		read:               runExecOutputFn,
 	}
 
-	out, err := exec.CommandContext(ctx, "helm", "version", "--short").Output()
+	out, err := m.read(ctx, "helm", "version", "--short")
 	if err == nil {
 		m.helmVersion = strings.TrimSpace(string(out))
 	} else {
@@ -180,7 +186,7 @@ func (m *deployDashboardModel) RegisterComponent(id, name, group string, targets
 	m.compMap[id] = c
 }
 
-func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd {
+func pollAllWorkloads(ctx context.Context, components []*componentStat, read func(ctx context.Context, name string, args ...string) ([]byte, error)) tea.Cmd {
 	return func() tea.Msg {
 		results := make(map[string][]workloadStat)
 
@@ -196,10 +202,10 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 					continue
 				}
 
-				out, err := exec.CommandContext(ctx, "kubectl", "get", "deploy,sts,ds,strimzipodsets",
+				out, err := read(ctx, "kubectl", "get", "deploy,sts,ds,strimzipodsets",
 					"-n", target.Namespace,
 					"-l", target.Selector,
-					"-o", "json").Output()
+					"-o", "json")
 
 				if err != nil || len(out) == 0 {
 					continue
@@ -260,7 +266,7 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 						}
 					}
 					// Poll pods for this workload to get phase
-					podOut, _ := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", target.Namespace, "-l", target.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}").Output()
+					podOut, _ := read(ctx, "kubectl", "get", "pods", "-n", target.Namespace, "-l", target.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}")
 					phases := strings.Split(strings.TrimSpace(string(podOut)), ",")
 					if len(phases) > 0 && phases[0] != "" {
 						stat.phase = phases[0] // Simplify by just taking the first pod's phase for the workload
@@ -426,7 +432,7 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		cmds = append(cmds,
-			pollAllWorkloads(m.ctx, m.components),
+			pollAllWorkloads(m.ctx, m.components, m.read),
 			tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 		)
 	}
