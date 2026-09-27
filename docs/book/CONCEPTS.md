@@ -8,7 +8,7 @@ Use the registry at three moments:
 - Before you teach a concept that has no row, add one: the concept, its home, a one-sentence gloss that is true of the code, and a Glossary anchor. Add the Glossary entry in the same pull request.
 - When you rename or move a home section, or change what a gloss says, update its row in the same pull request.
 
-A home marked "planned" doesn't exist yet: until the phase that writes it merges, link the chapter by its H1 title, with no fragment. An anchor is the `{#gl-…}` id of a Glossary entry, which you link as `appendix-a-glossary.md#gl-<slug>` with the term as the link text; the entries after "also" are the other terms the home teaches.
+A home marked "planned" doesn't exist yet: until the phase that writes it merges, link the chapter by its H1 title, with no fragment. An anchor is the `{#gl-…}` id of a Glossary entry, which you link as `appendix-a-glossary.md#gl-<slug>` with the term itself as the link text; the entries after "also" are the other terms the home teaches.
 
 This file is about the book rather than in it: the render leaves it out, and the style check and the metrics skip it, as they skip STYLE.md and README.md. The link check reads it, so every link here must resolve.
 
@@ -28,7 +28,7 @@ The Preface is home to the lab, The Cluster Under Test to the Kafka mechanics be
 | Page cache and the memory budget | [Resource Budget](03-cluster.md#resource-budget), in [The Cluster Under Test](03-cluster.md) | A broker's page cache, the memory the operating system uses to serve recent records without touching disk, is roughly its pod memory minus its JVM heap, which the `kafka-cluster` chart's defaults fix at 2048m. | `gl-page-cache` |
 | Listeners: `plain`, `tls` and `external` | [Listeners](03-cluster.md#listeners), in [The Cluster Under Test](03-cluster.md) | `krafter` always has two internal listeners, `plain` on 9092 (SCRAM-SHA-512 without TLS) and `tls` on 9093 (mutual TLS), and an `external` one on 9094 only where the values declare it, so 'plain' means no TLS, not no authentication. | `gl-listener`; also `gl-scram-sha-512`, `gl-mtls` |
 | Strimzi pod names and node IDs | [Physical Topology](03-cluster.md#physical-topology), in [The Cluster Under Test](03-cluster.md) | Strimzi names each Kafka pod after the cluster, its node pool and its node ID, as in `krafter-brokers-alpha-0`, and a fault's `targetBrokerId` picks the broker pod whose name ends in that ID, or the first broker when none does. | `gl-node-id`; also `gl-kafkanodepool` |
-| Where results live, and Kates sharing the cluster it tests | planned: Where Results Live (Phase B), and Kates Shares the Cluster It Tests (Phase C), in [Architecture & Design](02-architecture.md) | The Kates API stores each run in PostgreSQL and, whenever its status changes, queues a lifecycle event in the same transaction for an outbox poller to publish to `kates-test-events` on the cluster under test. | `gl-transactional-outbox`; also `gl-postgresql` |
+| Where results live, and Kates sharing the cluster it tests | planned: Where Results Live (Phase B), and Kates Shares the Cluster It Tests (Phase C), in [Architecture & Design](02-architecture.md) | The Kates API stores each run in PostgreSQL and, whenever its status changes, queues a lifecycle event in the same transaction for an outbox poller to publish to Kafka. | `gl-transactional-outbox`; also `gl-postgresql` |
 
 ## Part II — Performance Testing
 
@@ -49,7 +49,7 @@ Part II is home to measurement: how latency and throughput behave under load, wh
 
 ## Part III — Chaos & Integrity
 
-Part III is home to faults and what they cost: the words for a fault, the chaos provider and safety guard that carry one out, how recovery is measured, and what counts as lost:
+Part III is home to faults and what they cost: the words for a fault, the chaos provider that carries one out and the safety guard that vets it, how recovery is measured, and what counts as lost:
 
 | Concept | Home | Gloss | Glossary anchor |
 |--------------|--------------------|--------------------------------------|------------|
@@ -113,7 +113,7 @@ The reference chapters and the appendices are home to what readers look up, such
 |--------------|--------------------|--------------------------------------|------------|
 | Test spec fields, defaults, refusals, and the merged `spec` versus `requestedSpec` | [POST /api/tests](11-api-reference.md#post-apitests), in [REST API Reference](11-api-reference.md) | The Kates API merges a request's `spec` with its test type's defaults, keeps both the merged `spec` and the `requestedSpec` as sent, and refuses with a 400 any setting the type can't honour. | `gl-test-spec` |
 | Exit codes and the scripting contract | [Exit Codes](10-cli-reference.md#exit-codes), in [CLI Reference](10-cli-reference.md) | `kates test apply --wait` exits 1 when a scenario fails to submit, fails or violates a gate, so a scenario without a `validate` block can't fail a pipeline on its numbers. | `gl-exit-code` |
-| The performance grade (`kates gate`, `benchmark`, `badge`) | planned: How Kates Grades a Run (Phase C), in [CLI Reference](10-cli-reference.md) | `kates gate` starts a test run and grades it from A to F on its average throughput and P99 against fixed thresholds that don't adapt to cluster size, and `kates benchmark` grades a battery of runs from a score instead. | `gl-performance-grade`; also `gl-security-grade` |
+| The performance grade (`kates gate`, `benchmark`, `badge`) | planned: How Kates Grades a Run (Phase C), in [CLI Reference](10-cli-reference.md) | `kates gate` starts a test run and grades it A, B, C, D or F on its average throughput and P99 against fixed thresholds that don't adapt to cluster size, and `kates benchmark` grades a battery of runs from a score instead. | `gl-performance-grade`; also `gl-security-grade` |
 | The CLI context, and which commands go through the API, Kubernetes or local files | [Context Management](10-cli-reference.md#context-management), in [CLI Reference](10-cli-reference.md) | A CLI context, kept in `~/.kates.yaml`, is a named Kates API URL with its API key, proxy and output settings, and it's separate from your `kubectl` context. | `gl-cli-context` |
 | Baselines, profiles and snapshots | planned: a table comparing baselines, profiles and snapshots (Phase C), in [CLI Reference](10-cli-reference.md) | A baseline is a run the Kates API keeps per test type for later runs to compare against, while `kates profile` and `kates snapshot` save a run's metrics and the cluster's state as local files under `~/.kates`. | `gl-baseline`; also `gl-profile`, `gl-snapshot` |
 | The MCP server | [MCP Server for AI Agents](10-cli-reference.md#mcp-server-for-ai-agents), in [CLI Reference](10-cli-reference.md) | `kates mcp` serves Kates to an AI agent over the Model Context Protocol on stdio, read-only, and it never starts load or faults and won't start without an explicit context and an `--allow-cluster` clusterId. | `gl-mcp` |
@@ -182,7 +182,7 @@ Each Part adds one artifact toward the answer, and each artifact is a file, a co
 | V — Deployment & Operations | The tenant block, a re-test around an upgrade, and the readiness sign-off | The scenario file before and after the upgrade, compared with `kates report diff` |
 | VI — Reference | None: the fields, flags and exit codes the files use | The reference chapters |
 
-[Recipes & Patterns](14-recipes.md) closes the book with the readiness sign-off. `krafter` is ready when all three checks hold:
+[Recipes & Patterns](14-recipes.md), the last chapter of Part V, closes the example with the readiness sign-off. `krafter` is ready when all three checks hold:
 
 1. `kates test apply -f payments-scenarios.yaml --wait` exits 0.
 2. Both resilience runs report `Status` COMPLETED, and their INTEGRITY runs, once `DONE`, show `Lost` 0 and an RPO rather than "not measured".
@@ -222,4 +222,5 @@ These wait on the maintainer, so don't write around them:
 - Compression: a Kates record is a 28-byte header padded with zeros, which LOAD's default lz4 compresses to far less than 1 KiB, so the example sets `compressionType: none`, which needs approval.
 - The plans' `sla` blocks: the targets set no recovery time, and a plan's P99 isn't the target's.
 - Duplicates: whether the sign-off needs a PASS verdict or only `Lost` 0, since DUPLICATES_DETECTED loses nothing.
+- Unevaluated checks: `kates disruption run` prints a plan's grade and its `Checks` count but not the constraints it couldn't evaluate, so a `Grade` A can leave out some of the constraints the `sla` block declares. The count is per step, not per constraint, so it doesn't show which were left out; decide how the sign-off's third check confirms that every constraint was graded.
 - Results: no number here was measured, and whether `krafter` meets the targets on `panda` is unknown until someone captures the runs.
