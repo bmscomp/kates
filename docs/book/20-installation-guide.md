@@ -1175,22 +1175,22 @@ This section documents every default topic and user the chart creates. You rarel
 
 ### Default Topics
 
-The chart creates 8 topics, each designed for a specific data pipeline:
+The chart creates these 8 topics. The Kates API writes none of the `kates-*` ones; the last column says what uses each topic.
 
 | Topic | Partitions | Replicas | Retention | Compression | Cleanup | Purpose |
 |-------|:----------:|:--------:|:---------:|:-----------:|:-------:|---------|
-| `kates-events` | 6 | 3 | 2 days | — | delete | Test lifecycle events (suite start/end, test pass/fail) |
-| `kates-results` | 12 | 3 | 7 days | lz4 | delete | Detailed test results with payloads (high throughput) |
-| `kates-metrics` | 6 | 3 | 1 day | lz4 | delete | Real-time metrics pipeline (latency, throughput, resource usage) |
-| `kates-audit` | 3 | 3 | 30 days | — | delete | Audit trail for compliance (who ran what, when) |
-| `kates-dlq` | 3 | 3 | unlimited | — | delete | Dead letter queue for failed messages |
+| `kates-events` | 6 | 3 | 2 days | — | delete | Created by the platform profile; the Kates API doesn't use it |
+| `kates-results` | 12 | 3 | 7 days | lz4 | delete | Read by the Kates API only through a share-group consumer you start |
+| `kates-metrics` | 6 | 3 | 1 day | lz4 | delete | Created by the platform profile; the Kates API doesn't use it |
+| `kates-audit` | 3 | 3 | 30 days | — | delete | Created by the platform profile; the Kates API doesn't use it |
+| `kates-dlq` | 3 | 3 | unlimited | — | delete | Polled every 30 seconds by the Kates API, which logs what arrives |
 | `cdc-schema-history` | 1 | 3 | forever, no size limit | — | delete | Debezium schema history for CDC connectors |
 | `cdc-heartbeat` | 1 | 3 | 1 day | — | delete | CDC liveness heartbeats (detects stalled connectors) |
 | `test-sink-topic` | 3 | 3 | 1 day | — | delete | Sink target for Kafka Connect sink connector validation |
 
 **Why these specific configurations?**
 
-- **Partitions** scale with expected throughput — `kates-results` has 12 partitions because it handles the highest message volume.
+- **Partitions** are the profile's settings, not a measure of traffic: a test produces to whatever topic its spec names, not to these.
 - **Replicas: 3** ensures data survives the loss of any single broker (`min.insync.replicas: 2` across all topics).
 - **Delete cleanup everywhere, compaction nowhere.** Debezium writes its schema history without record keys, which a compacted topic refuses, and replays all of it on restart — so `cdc-schema-history` keeps `retention.ms: -1` and `retention.bytes: -1`, the settings Debezium checks for. `kates-dlq` is a delete topic because compaction keeps only the latest failure per key and refuses records without one. It has no time limit because it keeps the retention it had as a compacted topic, so an upgrade from that topic deletes nothing by age; only the brokers' 10 GiB `log.retention.bytes` bounds each partition. Set a `retention.ms` under `topics.items.kates-dlq.config` to age failures out.
 - **lz4 compression** on high-volume topics reduces storage and network I/O with minimal CPU overhead.

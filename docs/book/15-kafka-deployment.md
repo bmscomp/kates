@@ -213,7 +213,7 @@ default.replication.factor: 3
 min.insync.replicas: 2
 ```
 
-With RF=3 and ISR=2, every `acks=all` write requires at least one follower acknowledgment. This is the primary contributor to producer latency but guarantees zero data loss under single-broker failure.
+With RF=3 and `min.insync.replicas=2`, every `acks=all` write requires at least one follower acknowledgment. This is the primary contributor to producer latency but guarantees zero data loss under single-broker failure.
 
 ### Retention & Storage
 
@@ -341,16 +341,16 @@ Topics are declared as `KafkaTopic` CRDs, managed by the Topic Operator:
 
 | Topic | Partitions | Replicas | Retention | Compression | Purpose |
 |-------|:----------:|:--------:|-----------|:-----------:|---------|
-| `kates-events` | 6 | 3 | 48h | — | Test lifecycle events |
-| `kates-results` | 12 | 3 | 7d | lz4 | Test results and metrics |
-| `kates-metrics` | 6 | 3 | 24h | lz4 | Real-time broker metrics |
-| `kates-audit` | 3 | 3 | 30d | — | Audit trail |
-| `kates-dlq` | 3 | 3 | ∞ | — | Dead letter queue |
+| `kates-events` | 6 | 3 | 48h | — | Created by the platform profile; the Kates API doesn't use it |
+| `kates-results` | 12 | 3 | 7d | lz4 | Read by the Kates API only through a share-group consumer you start |
+| `kates-metrics` | 6 | 3 | 24h | lz4 | Created by the platform profile; the Kates API doesn't use it |
+| `kates-audit` | 3 | 3 | 30d | — | Created by the platform profile; the Kates API doesn't use it |
+| `kates-dlq` | 3 | 3 | ∞ | — | Polled every 30 seconds by the Kates API, which logs what arrives |
 | `cdc-schema-history` | 1 | 3 | ∞, no size limit | — | Debezium schema history |
 | `cdc-heartbeat` | 1 | 3 | 24h | — | Debezium heartbeat |
 | `test-sink-topic` | 3 | 3 | 24h | — | Connect sink-connector validation |
 
-**Partition rationale:** `kates-results` has 12 partitions (4× the broker count) for maximum consumer parallelism during high-throughput test runs. `kates-audit` has 3 (one per broker) since writes are infrequent.
+**Partition counts:** these are the platform profile's settings, not a measure of traffic. The Kates API writes none of the `kates-*` topics, and a test produces to whatever topic its spec names ([The Cluster Under Test](03-cluster.md)).
 
 **Cleanup policy:** every topic here is `cleanup.policy: delete` — none is compacted, and two of them would break if they were. Debezium writes its schema history without record keys, which a compacted topic refuses, and replays the whole history on restart, so `cdc-schema-history` keeps `retention.ms: -1` and `retention.bytes: -1` (the second overrides the brokers' 10 GiB `log.retention.bytes`). `kates-dlq` is a delete topic because compaction keeps only the latest failure per key and refuses records without one. It has no time limit because it keeps the retention it had as a compacted topic, so an upgrade from that topic deletes nothing by age; only the brokers' `log.retention.bytes` bounds it until you set a `retention.ms` to age failures out.
 
