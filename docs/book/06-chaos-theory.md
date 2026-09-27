@@ -94,7 +94,7 @@ Kates has no [disruption type](appendix-a-glossary.md#gl-disruption-type) for di
 
 ### 3. Run Experiments in Production (or Production-Like)
 
-[Chaos experiments](appendix-a-glossary.md#gl-chaos-experiment) in a toy environment prove nothing. The [Kind](appendix-a-glossary.md#gl-kind) cluster in this project is configured to mirror a production node layout:
+[Chaos experiments](appendix-a-glossary.md#gl-chaos-experiment) in a toy environment prove nothing. [`panda`](appendix-a-glossary.md#gl-panda), the [Kind](appendix-a-glossary.md#gl-kind) cluster in this project, is configured to mirror a production node layout:
 
 | Production Property | Kind Equivalent |
 |---|---|
@@ -121,9 +121,9 @@ Start small and expand:
 ```mermaid
 %%| label: fig-chaos-escalation
 %%| fig-cap: "Escalate one rung at a time: from one broker with a known recovery, to two brokers, to a whole zone."
-%%| fig-alt: "Four levels left to right. Level 1: kill 1 broker, with a known recovery. Level 2: a network partition that isolates 1 broker. Level 3: kill 2 brokers, where acks=all writes fail. Level 4: a full zone failure, by node drain."
+%%| fig-alt: "Four levels left to right. Level 1: kill 1 broker, with a known recovery. Level 2: a network partition that isolates 1 broker. Level 3: kill 2 brokers, where acks=all writes fail on the krafter Kafka cluster, whose min.insync.replicas is 2. Level 4: a full zone failure, by node drain."
 graph LR
-    L1["Level 1<br/>Kill 1 broker<br/>Known recovery"] --> L2["Level 2<br/>Network partition<br/>1 broker isolated"] --> L3["Level 3<br/>Kill 2 brokers<br/>acks=all writes fail"] --> L4["Level 4<br/>Full zone failure<br/>Node drain"]
+    L1["Level 1<br/>Kill 1 broker<br/>Known recovery"] --> L2["Level 2<br/>Network partition<br/>1 broker isolated"] --> L3["Level 3<br/>Kill 2 brokers<br/>acks=all writes fail<br/>on krafter"] --> L4["Level 4<br/>Full zone failure<br/>Node drain"]
 ```
 
 In a Kates [disruption plan](appendix-a-glossary.md#gl-disruption-plan), each rung is a `maxAffectedBrokers` value: `1` for the first two, `2` for the third, and the zone's broker count for the last. The `az-failure` playbook caps that last value at `3` when it kills the zone's pods. The [safety guard](appendix-a-glossary.md#gl-safety-guard) refuses a plan that would hit more brokers than that, or every broker: see [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
@@ -271,7 +271,7 @@ Watch these signals while a fault is active. For each one, the table says what a
 | **Leader election rate** | Should equal the number of partitions on the failed broker |
 | **Recovery time** | Time from failure to all ISRs fully expanded |
 
-A Kates [disruption](appendix-a-glossary.md#gl-disruption) reports several of them. `kates disruption kafka-metrics` shows each step's time to full ISR, minimum ISR depth and peak under-replicated partitions, and consumer lag when the plan names a group. A plan's `sla` block can set targets for P99 latency, throughput and how long the Kafka pods take to be Ready again, and the plan's [SLA grade](appendix-a-glossary.md#gl-sla-grade) says how the run met them.
+A Kates [disruption](appendix-a-glossary.md#gl-disruption) reports several of them. `kates disruption kafka-metrics` shows each step's time to full ISR, minimum ISR depth and peak under-replicated partitions when the plan names a topic in `isrTrackingTopic`, and consumer lag when it names a group in `lagTrackingGroupId`. A plan's `sla` block can set targets for P99 latency, throughput and how long the Kafka pods take to be Ready again, and the plan's [SLA grade](appendix-a-glossary.md#gl-sla-grade) says how the run met them.
 
 ## Game Day Pipeline
 

@@ -59,11 +59,11 @@ graph TB
 
 ## Two Ways to Run a Fault
 
-Before you break anything on [`krafter`](appendix-a-glossary.md#gl-krafter), decide which question you're asking, because Kates answers two different ones with two different commands. One question is about the cluster: when a [broker](appendix-a-glossary.md#gl-broker) dies, do its pods come back and its [partitions](appendix-a-glossary.md#gl-partition) recover in time? The other is about a client: while the broker is down, what do your payment producers see, and does every acknowledged record survive?
+Before you break anything on the [`krafter`](appendix-a-glossary.md#gl-krafter) Kafka cluster, decide which question you're asking, because Kates answers two different ones with two different commands. One question is about the cluster: when a [broker](appendix-a-glossary.md#gl-broker) dies, do its pods come back and its [partitions](appendix-a-glossary.md#gl-partition) recover in time? The other is about a client: while the broker is down, what do your payment producers see, and does every acknowledged record survive?
 
-A disruption plan answers the cluster question. It runs one or more steps, each injecting one [fault](appendix-a-glossary.md#gl-fault), and watches the cluster from outside. Pod readiness comes from the Kubernetes API, latency and throughput from [Prometheus](appendix-a-glossary.md#gl-prometheus), and the [ISR](appendix-a-glossary.md#gl-isr) of a topic and the lag of a [consumer group](appendix-a-glossary.md#gl-consumer-group) from Kafka, when the plan names them. A plan sends no records of its own. A playbook is a plan that ships inside Kates, and `kates disruption schedule create` runs a playbook on a cron schedule.
+A disruption plan answers the cluster question. It runs one or more steps, each injecting one [fault](appendix-a-glossary.md#gl-fault), and watches the cluster from outside. Pod readiness comes from the Kubernetes API, and latency and [throughput](appendix-a-glossary.md#gl-throughput) from [Prometheus](appendix-a-glossary.md#gl-prometheus). When the plan names them, Kates also reads the [ISR](appendix-a-glossary.md#gl-isr) of one [topic](appendix-a-glossary.md#gl-topic) and the [consumer lag](appendix-a-glossary.md#gl-consumer-lag) of one [consumer group](appendix-a-glossary.md#gl-consumer-group) from Kafka. A plan sends no records of its own. A playbook is a plan that ships inside Kates, and `kates disruption schedule create` runs a playbook on a cron schedule.
 
-A resilience run answers the client question. It starts a Kates test, such as a [LOAD](appendix-a-glossary.md#gl-test-type) or an INTEGRITY run, waits `steadyStateSec`, and injects one fault while the test runs. It snapshots the test's [throughput](appendix-a-glossary.md#gl-throughput), latency and error rate just before the fault, summarizes the whole run again after the recovery wait, and prints the change. When the question is whether `krafter` can lose an acknowledged payment, an INTEGRITY run through the fault is the one that answers it.
+A resilience run answers the client question. It starts a Kates test, such as a [LOAD](appendix-a-glossary.md#gl-test-type) or an INTEGRITY run, waits `steadyStateSec`, and injects one fault while the test runs. It snapshots the test's throughput, latency and error rate just before the fault, summarizes the whole run again after the recovery wait, and prints the change. When the question is whether `krafter` can lose an acknowledged payment, an INTEGRITY run through the fault is the one that answers it.
 
 Each run of a plan or a playbook is a disruption, with its own ID and report. Either kind of run carries out a chaos experiment: faults injected on purpose to test a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis). A Game Day is the session your team runs around these commands, which [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology) explains; `make gameday` scripts one, and injects its fault with `kubectl` rather than through the [Kates API](appendix-a-glossary.md#gl-kates-api).
 
@@ -165,15 +165,16 @@ The diagram shows the one decision the hybrid provider makes, and when it makes 
 
 ```mermaid
 %%| label: fig-practice-hybrid-provider
-%%| fig-cap: "With `kates.chaos.provider=hybrid`, Kates looks for the LitmusChaos CRDs once, and sends every disruption to the provider it picked."
-%%| fig-alt: "Flowchart. The DisruptionOrchestrator calls the HybridChaosProvider, which asks once whether the Litmus CRDs are installed. If Litmus is detected, it uses the LitmusChaosProvider, which drives the LitmusChaos CRDs. If Litmus is not found, it uses the KubernetesChaosProvider, which calls the Kubernetes API directly for its subset of types."
+%%| fig-cap: "With `kates.chaos.provider=hybrid`, Kates looks for the LitmusChaos CRDs once, and sends every fault to the provider it picked."
+%%| fig-alt: "Flowchart. A fault from the Kates API goes to the hybrid provider, which asks once whether the Litmus CRDs are installed. If Litmus is detected, it uses the litmus-crd provider, which runs Litmus experiments through the LitmusChaos CRDs and hands ROLLING_RESTART and SCALE_DOWN to the kubernetes provider. If Litmus is not found, it uses the kubernetes provider, which calls the Kubernetes API directly for the eight types it implements."
 graph TD
-    DO[DisruptionOrchestrator] --> HCP[HybridChaosProvider<br/>once: are Litmus CRDs installed?]
+    DO[Kates API<br/>a fault to inject] --> HCP[hybrid<br/>once: are Litmus CRDs installed?]
     
-    HCP -->|Litmus detected| LCP[LitmusChaosProvider<br/>all types via Litmus experiments]
-    HCP -->|Litmus not found| KCP[KubernetesChaosProvider<br/>direct API subset]
+    HCP -->|Litmus detected| LCP[litmus-crd<br/>Litmus experiments]
+    HCP -->|Litmus not found| KCP[kubernetes<br/>eight types, directly]
     
     LCP --> LIT[LitmusChaos CRDs]
+    LCP -->|ROLLING_RESTART, SCALE_DOWN| KCP
     KCP --> K8S[Kubernetes API]
 ```
 
@@ -204,7 +205,7 @@ Kates runs Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's 
 
 Strimzi runs Kafka pods from StrimziPodSets and creates no StatefulSet, so `SCALE_DOWN` removes a broker the way you would by hand: it lowers `spec.replicas` of the broker's KafkaNodePool by one, and the Cluster Operator removes the pool's highest [node ID](appendix-a-glossary.md#gl-node-id). The pools come from the pods the step selects: `targetPod` if it's set, otherwise every pod `targetLabel` matches. Each pool with a selected pod loses one broker, so `strimzi.io/pool-name=brokers-sigma` takes one broker out of `brokers-sigma`, and `strimzi.io/component-type=kafka` takes one out of every broker pool. `targetAll` and `targetBrokerId` don't apply. `targetPod` only picks its pool, and Strimzi still removes the pool's highest node ID. Strimzi scales down only broker-only pools, so the step skips pools with the [controller](appendix-a-glossary.md#gl-controller) role, and it refuses to remove the last broker of a cluster.
 
-The operator [reconciles](appendix-a-glossary.md#gl-reconciliation) as soon as the pool changes, but it holds back the removal of a broker that still hosts partition replicas. If the `Kafka` resource has a `remove-brokers` [auto-rebalance](appendix-a-glossary.md#gl-rebalance), as the `kafka-cluster` chart configures by default, [Cruise Control](appendix-a-glossary.md#gl-cruise-control) moves the replicas off first, and the operator removes the broker once it's empty. The step waits for this: `chaosDurationSec` is the budget for the whole removal, draining included, and the step returns as soon as the broker pod is gone. Draining can't finish when the brokers left can't hold every replica, such as a [topic](appendix-a-glossary.md#gl-topic) with [replication factor](appendix-a-glossary.md#gl-rf) 3 on a cluster going from three brokers to two.
+The operator [reconciles](appendix-a-glossary.md#gl-reconciliation) as soon as the pool changes, but it holds back the removal of a broker that still hosts partition replicas. If the `Kafka` resource has a `remove-brokers` [auto-rebalance](appendix-a-glossary.md#gl-rebalance), as the `kafka-cluster` chart configures by default, [Cruise Control](appendix-a-glossary.md#gl-cruise-control) moves the replicas off first, and the operator removes the broker once it's empty. The step waits for this: `chaosDurationSec` is the budget for the whole removal, draining included, and the step returns as soon as the broker pod is gone. Draining can't finish when the brokers left can't hold every replica, such as a topic with [replication factor](appendix-a-glossary.md#gl-rf) 3 on a cluster going from three brokers to two.
 
 A held-back scale-down doesn't go away: the lowered `spec.replicas` stays on the pool, and the operator removes the broker whenever it becomes empty, which could be in the middle of a later step. So when the operator holds the removal back and nothing drains the broker, or the budget runs out, the step fails and Kates gives every pool it lowered its replicas back. With `chaosDurationSec: 0` the step doesn't wait, and it can't tell a removed broker from a held-back one. To remove a broker that still hosts replicas, which is what you do to test losing a broker for good, set `strimzi.io/skip-broker-scaledown-check: "true"` on the `Kafka` resource yourself. Strimzi then removes it with its replicas, and its partitions run on the replicas left.
 
@@ -275,7 +276,7 @@ steps:
 
 ### split-brain
 
-Isolates node 0 via network partition to test cluster consensus under split-brain conditions. For 60 seconds, all traffic between it and the other cluster members is blocked — by a deny-all NetworkPolicy on the pod with the `kubernetes` chaos provider, or by the Litmus `pod-network-partition` experiment. The playbook does not look up the active controller: `targetBrokerId: 0` picks the broker whose pod name ends in `-0`, which is the active controller only if node 0 also has the controller role and leads the metadata [quorum](appendix-a-glossary.md#gl-quorum) at the time. `targetBrokerId` never picks a dedicated controller; to isolate one, name its pod in `targetPod`.
+Aims a `NETWORK_PARTITION` fault at node 0 to test cluster consensus under split-brain conditions. For 60 seconds, the `kubernetes` chaos provider adds a NetworkPolicy with no allow rules to the pod; the `litmus-crd` provider runs the Litmus `pod-network-partition` experiment instead. The playbook does not look up the active controller: `targetBrokerId: 0` picks the broker whose pod name ends in `-0`, which is the active controller only if node 0 also has the controller role and leads the metadata [quorum](appendix-a-glossary.md#gl-quorum) at the time. `targetBrokerId` never picks a dedicated controller; to aim the fault at one, name its pod in `targetPod`.
 
 ```mermaid
 graph LR
@@ -284,12 +285,12 @@ graph LR
         B2[Broker 2]
     end
     
-    subgraph Isolated["Isolated"]
+    subgraph Isolated["Partition target"]
         B0[Broker 0]
     end
     
     B1 ---|"Normal<br/>communication"| B2
-    B0 -.-|"NETWORK_PARTITION<br/>❌ blocked"| Majority
+    B0 -.-|"NETWORK_PARTITION"| Majority
 ```
 
 ```yaml
@@ -456,7 +457,7 @@ Each step contains:
 | `observationWindowSec` | Integer | Seconds to observe after fault injection |
 | `requireRecovery` | Boolean | Whether to wait for every Kafka pod to be Ready again after the fault; a timeout rolls the step back when `autoRollback` is on |
 
-These are the only keys the loader accepts, along with the `faultSpec` fields the playbooks above use; any other key, such as an `sla` block, makes the file fail to load, and Kates leaves it out of the catalog. SLA thresholds and [consumer-lag](appendix-a-glossary.md#gl-consumer-lag) tracking (`lagTrackingGroupId`) need a plan posted to `POST /api/disruptions`. The catalog also loads only the playbooks named in the `PLAYBOOK_NAMES` array of `DisruptionPlaybookCatalog`, so a new playbook file needs its name added there and a rebuild of Kates.
+These are the only keys the loader accepts, along with the `faultSpec` fields the playbooks above use; any other key, such as an `sla` block, makes the file fail to load, and Kates leaves it out of the catalog. SLA thresholds and consumer-lag tracking (`lagTrackingGroupId`) need a plan posted to `POST /api/disruptions`. The catalog also loads only the playbooks named in the `PLAYBOOK_NAMES` array of `DisruptionPlaybookCatalog`, so a new playbook file needs its name added there and a rebuild of Kates.
 
 ### Previewing a Playbook
 
@@ -650,7 +651,7 @@ The intelligence service queries Kafka metadata to resolve which broker currentl
 
 ### ISR Tracking
 
-During execution, Kates captures ISR snapshots:
+When the plan names a topic in `isrTrackingTopic`, Kates captures snapshots of that topic's ISR during each step:
 
 ```bash
 # View ISR tracking data
@@ -666,7 +667,7 @@ Output includes, per step:
 
 ### Consumer Lag Monitoring
 
-For consumer-facing tests, Kates tracks consumer group lag:
+When the plan names a consumer group in `lagTrackingGroupId`, Kates tracks that group's lag during each step:
 
 - [Baseline](appendix-a-glossary.md#gl-baseline) lag before the fault
 - Peak lag during disruption, and the spike over baseline
@@ -729,29 +730,30 @@ If any SLA threshold is breached, the CLI exits with a non-zero code, blocking t
 
 ## Execution Lifecycle
 
-A plan runs its steps one after another, and the diagram shows where a step can fail and roll back without ending the plan:
+A plan runs its steps one after another, and the diagram shows where a step can fail, or miss its recovery, and roll back without ending the plan:
 
 ```mermaid
 %%| label: fig-practice-lifecycle
-%%| fig-cap: "Kates checks a plan once, then runs its steps in order; a step that fails can roll back, and the plan still goes on to the next step."
-%%| fig-alt: "State diagram. A submitted plan is checked, and a refused plan ends as REJECTED. An accepted plan runs each step in order: a steady-state wait, a readiness check of every Kafka pod, the fault, the observation window, and a recovery wait when requireRecovery is on. A pod that is not Ready, an error or a recovery timeout sends the step to its failure path, which rolls back when autoRollback is on. After the last step Kates writes the report, graded when the plan has an sla block, and the plan ends COMPLETED or PARTIAL."
+%%| fig-cap: "Kates checks a plan once, then runs its steps in order; a step that fails or doesn't recover in time can roll back, and the plan still goes on to the next step."
+%%| fig-alt: "State diagram. A submitted plan is checked, and a refused plan ends as REJECTED. An accepted plan runs each step in order: a steady-state wait, a readiness check of every Kafka pod, the fault, the observation window, and a recovery wait when requireRecovery is on. A pod that is not Ready, an error, or a fault with no answer in time fails the step, and a recovery timeout leaves it unrecovered, though it still counts as passed when its fault went in. All three lead to a rollback check, which rolls the step back when autoRollback is on. After the last step Kates writes the report, graded when the plan has an sla block, and the plan ends COMPLETED or PARTIAL."
 stateDiagram-v2
     state "Each step, in order" as Steps
     [*] --> Checking: Plan submitted
     Checking --> REJECTED: Refused by the safety guard
     Checking --> Steps: Accepted
     state Steps {
+        state "Rollback check" as RollbackCheck
         [*] --> SteadyState
         SteadyState --> ReadyCheck: steadyStateSec elapsed
         ReadyCheck --> Fault: Every Kafka pod Ready
-        ReadyCheck --> Failed: A pod not Ready
+        ReadyCheck --> RollbackCheck: A pod not Ready
         Fault --> Observe: Provider answers
-        Fault --> Failed: Error or timeout
+        Fault --> RollbackCheck: Error or timeout
         Observe --> Recovery: observationWindowSec elapsed
         Recovery --> [*]: Pods Ready, or requireRecovery off
-        Recovery --> Failed: Recovery timeout
-        Failed --> Rollback: autoRollback on
-        Failed --> [*]: autoRollback off
+        Recovery --> RollbackCheck: Recovery timeout
+        RollbackCheck --> Rollback: autoRollback on
+        RollbackCheck --> [*]: autoRollback off
         Rollback --> [*]
     }
     Steps --> Report: Last step done
