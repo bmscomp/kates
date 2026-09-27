@@ -72,6 +72,9 @@ var (
 	portsAppNS        string
 	portsMonitoringNS string
 	portsAll          bool
+	// portsKubeContext is the kube context to forward from; "" is kubectl's
+	// current one. Only kates deploy --port-forward sets it (RunPortForwards).
+	portsKubeContext string
 )
 
 var portsCmd = &cobra.Command{
@@ -134,7 +137,7 @@ func runPorts(ctx context.Context) {
 	// ── 1. Discover services ─────────────────────────────────────────────────
 	fmt.Printf("    %s Discovering services...\n", output.DimStyle.Render("⇄"))
 
-	discovered := discoverServices()
+	discovered := discoverServices(ctx)
 
 	specs := matchSpecs(discovered)
 	if len(specs) == 0 {
@@ -181,12 +184,7 @@ func runPorts(ctx context.Context) {
 		if taken[spec.Local] {
 			continue
 		}
-		pfArg := fmt.Sprintf("%d:%d", spec.Local, spec.Remote)
-		cmd := exec.Command("kubectl", "port-forward",
-			spec.Resource,
-			pfArg,
-			"-n", spec.Namespace,
-		)
+		cmd := exec.Command("kubectl", portForwardArgs(spec)...)
 		// Detach from the current process group so forwards survive after
 		// `kates ports` exits and the shell returns to prompt.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -752,13 +750,24 @@ func printPortsSync(w io.Writer, s portsSync) {
 	}
 }
 
+// portForwardArgs is the kubectl command line that forwards spec. The
+// forward is a detached process that outlives kates, so the kube context it
+// reads from has to be on its command line.
+func portForwardArgs(spec portForwardSpec) []string {
+	return withKubeContext(portsKubeContext, "kubectl", []string{"port-forward",
+		spec.Resource,
+		fmt.Sprintf("%d:%d", spec.Local, spec.Remote),
+		"-n", spec.Namespace,
+	})
+}
+
 // discoverServices returns a set of "namespace/service-name" strings for all
 // services currently in the cluster.
-func discoverServices() map[string]bool {
-	out, err := exec.Command("kubectl", "get", "svc", "-A",
+func discoverServices(ctx context.Context) map[string]bool {
+	out, err := runExecOutputFn(ctx, "kubectl", withKubeContext(portsKubeContext, "kubectl", []string{"get", "svc", "-A",
 		"--no-headers",
 		"-o", "custom-columns=NS:.metadata.namespace,NAME:.metadata.name",
-	).Output()
+	})...)
 	if err != nil {
 		return nil
 	}
@@ -856,8 +865,10 @@ func matchSpecs(discovered map[string]bool) []portForwardSpec {
 
 // ── Legacy bridge ────────────────────────────────────────────────────────────
 // RunPortForwards is called by `deploy --port-forward`. It delegates to the
-// same discovery + forward logic as `kates ports`.
-func RunPortForwards(ctx context.Context, kafkaNS, appNS, jaegerNS string) {
+// same discovery + forward logic as `kates ports`, from the cluster the deploy
+// went to.
+func RunPortForwards(ctx context.Context, kubeContext, kafkaNS, appNS, jaegerNS string) {
+	portsKubeContext = kubeContext
 	portsKafkaNS = kafkaNS
 	portsAppNS = appNS
 	portsMonitoringNS = jaegerNS
