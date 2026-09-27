@@ -20,7 +20,10 @@ What it measures, per file (the ones marked * are ratcheted):
                            its own. In the three reference chapters
                            (REFERENCE_FILES), a reference entry is exempt: a
                            command, endpoint or RPC heading (ENTRY_HEADING)
-                           directly over its usage code block.
+                           directly over its usage code block. In the
+                           Glossary, a letter section is exempt: a one-letter
+                           H2 (LETTER_HEADING) directly over its first term's
+                           H3.
   tables_without_lead_in * a table with no prose line directly above it.
   list_heavy_sections      a section with 6+ list lines and 3x more list
                            lines than prose lines.
@@ -166,6 +169,9 @@ ENTRY_HEADING = re.compile(
     r"^#{1,6}\s+(?:[a-z][a-z0-9 -]*|`[^`]+`.*|(?:GET|POST|PUT|PATCH|DELETE)\s.*"
     r"|[A-Z][a-z0-9]+[A-Z]\w*(?:\s*/\s*[A-Z]\w*)*)\s*(?:\{[^}]*\})?\s*$"
 )
+# A Glossary letter section ("## K"), whose first block is its first term's H3.
+LETTER_HEADING = re.compile(r"^##\s+[A-Z]\s*(?:\{[^}]*\})?\s*$")
+TERM_HEADING = re.compile(r"^###\s+\S")
 BOLD_LEAD = re.compile(
     r"^\s*(?:[-*+]|\d+\.)\s+\*\*(?:[^*]+\*\*\s*[:—–-]|[^*]+[:.]\*\*(?:\s|$))"
 )
@@ -439,6 +445,7 @@ def measure(name: str, text: str, handoff_to: str | None = None) -> dict:
     b = page.blocks
     d: dict[str, list] = {k: [] for k in COUNTS}
     reference = name in REFERENCE_FILES
+    glossary = stem(name) == GLOSSARY
 
     for j, blk in enumerate(b):
         nxt = b[j + 1] if j + 1 < len(b) else None
@@ -451,7 +458,13 @@ def measure(name: str, text: str, handoff_to: str | None = None) -> dict:
                     and nxt.lang != "mermaid"
                     and ENTRY_HEADING.match(blk.text)
                 )
-                if not entry:
+                letter = (
+                    glossary
+                    and nxt.kind == "h"
+                    and LETTER_HEADING.match(blk.text)
+                    and TERM_HEADING.match(nxt.text)
+                )
+                if not (entry or letter):
                     d["bare_headings"].append((blk.line, blk.text.strip()))
             if NUMBERED_HEADING.match(blk.text):
                 d["numbered_headings"].append((blk.line, blk.text.strip()))

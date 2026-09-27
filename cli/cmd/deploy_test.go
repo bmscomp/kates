@@ -602,7 +602,8 @@ func (e *recordingExecutor) Exec(name string, args ...string) (string, error) {
 	e.mu.Lock()
 	e.calls = append(e.calls, name+" "+strings.Join(args, " "))
 	e.mu.Unlock()
-	if name == "kubectl" && strings.Join(args, " ") == "get nodes -o json" {
+	// HasPrefix: a deploy appends --context to every kubectl call.
+	if name == "kubectl" && strings.HasPrefix(strings.Join(args, " "), "get nodes -o json") {
 		return threeZoneNodesJSON, nil
 	}
 	return "", nil
@@ -615,8 +616,8 @@ func (e *recordingExecutor) commands() []string {
 }
 
 // clusterWrite matches a kubectl or helm verb that creates, changes or
-// deletes something, wherever the command sits (the Secret probe runs its
-// `kubectl create secret` through `sh -c`).
+// deletes something, wherever the command sits (the storage bench applies
+// its PVC through `sh -c`).
 var clusterWrite = regexp.MustCompile(`\b(kubectl\s+(create|run|label|annotate|delete|apply|patch|replace|scale|set|expose|taint|cordon|drain|edit)|helm\s+(install|upgrade|uninstall|delete|rollback))\b`)
 
 // kates deploy --dry-run previews; it must not write to the cluster to do
@@ -682,7 +683,8 @@ func TestDeployDryRun_WritesNothingToTheCluster(t *testing.T) {
 	}
 
 	introspection := detectExec.commands()
-	if len(introspection) == 0 || !sliceContains(introspection, "kubectl get nodes -o json") {
+	// A dry run introspects the cluster the gate chose, by name.
+	if len(introspection) == 0 || !sliceContains(introspection, "kubectl get nodes -o json --context=test-context") {
 		t.Fatalf("introspection never ran, so nothing was checked; commands: %v", introspection)
 	}
 	for _, c := range writes {
@@ -698,5 +700,158 @@ func TestDeployDryRun_WritesNothingToTheCluster(t *testing.T) {
 	}
 	if !strings.Contains(out, "Deployment plan") {
 		t.Errorf("no preview was printed:\n%s", out)
+	}
+}
+
+// TestRunDeploy_PinsEveryCallToTheChosenCluster runs a deploy with every
+// component on and records each kubectl and helm call at every seam a call can
+// take: the exec seams, helm, the version resolution's runner, and the
+// introspection's executor. Partway through, kubectl's current context moves
+// to another cluster, as it does when `kind create cluster` runs in another
+// terminal. Every call must still resolve to the cluster the gate chose
+// ("test-context", from the stub in init), because each one names it.
+func TestRunDeploy_PinsEveryCallToTheChosenCluster(t *testing.T) {
+	origExec, origStdin, origHelm := runExecFn, runExecStdinFn, runHelmFn
+	origOutput, origCombined, origDeployed := runExecOutputFn, runExecCombinedFn, isHelmReleaseDeployedFn
+	origProc, origExecutor, origVersions := runProcFn, defaultExecutor, resolveVersionPlanFn
+	t.Cleanup(func() {
+		runExecFn, runExecStdinFn, runHelmFn = origExec, origStdin, origHelm
+		runExecOutputFn, runExecCombinedFn, isHelmReleaseDeployedFn = origOutput, origCombined, origDeployed
+		runProcFn, defaultExecutor, resolveVersionPlanFn = origProc, origExecutor, origVersions
+	})
+	setDeployFlags(t, func() {
+		deployTopology, deployWithSchemaRegistry = "isolated", "apicurio"
+		deployWithChaos, deployWithMonitoring, deployWithCertManager = true, true, true
+		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = true, true, true
+		deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun = true, true, false
+	})
+	t.Chdir(t.TempDir()) // .build/values-detected.yaml
+
+	type call struct {
+		seam, name string
+		args       []string
+	}
+	var (
+		mu      sync.Mutex
+		calls   []call
+		current = "test-context"
+	)
+	record := func(seam, name string, args []string) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, call{seam, name, append([]string(nil), args...)})
+		// The first chart install is the moment the current context moves.
+		if name == "helm" && len(args) > 0 && args[0] == "upgrade" {
+			current = "kind-other"
+		}
+	}
+
+	runExecFn = func(_ context.Context, name string, args ...string) error {
+		record("exec", name, args)
+		return nil
+	}
+	runExecStdinFn = func(_ context.Context, name string, args []string, _ string) error {
+		record("stdin", name, args)
+		return nil
+	}
+	runHelmFn = func(_ context.Context, args ...string) error {
+		record("helm", "helm", args)
+		return nil
+	}
+	read := func(seam string) func(context.Context, string, ...string) ([]byte, error) {
+		return func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			record(seam, name, args)
+			// cert-manager waits for its webhooks' CA bundles.
+			if strings.Contains(strings.Join(args, " "), "caBundle") {
+				return []byte("LS0t"), nil
+			}
+			return stubClusterRead(ctx, name, args...)
+		}
+	}
+	runExecOutputFn, runExecCombinedFn = read("output"), read("combined")
+	// The real check, so the release lookups go through the output seam.
+	isHelmReleaseDeployedFn = isHelmReleaseDeployedDefault
+	runProcFn = func(_ context.Context, _, name string, args ...string) (string, error) {
+		record("runner", name, args)
+		return "", nil
+	}
+	resolveVersionPlanFn = func(ctx context.Context, r strimzi.Runner, o versionOptions) (*versionPlan, error) {
+		// What the real resolution asks the cluster first.
+		_, _ = r.Run(ctx, "kubectl", "get", "kafka", "-A", "-o", "json")
+		return stubVersionPlan(o), nil
+	}
+	introspection := &recordingExecutor{}
+	defaultExecutor = introspection
+
+	if err := runDeploy(deployCmd, []string{}); err != nil {
+		t.Fatalf("runDeploy: %v", err)
+	}
+	for _, line := range introspection.commands() {
+		fields := strings.Fields(line)
+		record("introspection", fields[0], fields[1:])
+	}
+
+	// clusterOf is where kubectl or helm sends a call: the context its flag
+	// names, else kubectl's current context.
+	clusterOf := func(c call) (string, int) {
+		flag := kubeContextFlag(c.name) + "="
+		cluster, n := current, 0
+		for _, a := range c.args {
+			if a == "--" {
+				break
+			}
+			if strings.HasPrefix(a, flag) {
+				cluster, n = strings.TrimPrefix(a, flag), n+1
+			}
+		}
+		return cluster, n
+	}
+
+	seams := map[string]int{}
+	var all []string
+	for _, c := range calls {
+		if kubeContextFlag(c.name) == "" {
+			continue
+		}
+		// kubectl config reads and writes the kubeconfig, not a cluster: the
+		// gate's own look at the current context, before anything is pinned.
+		if c.name == "kubectl" && len(c.args) > 0 && c.args[0] == "config" {
+			continue
+		}
+		seams[c.seam]++
+		line := c.seam + ": " + c.name + " " + strings.Join(c.args, " ")
+		all = append(all, line)
+		if cluster, n := clusterOf(c); cluster != "test-context" || n != 1 {
+			t.Errorf("went to %q (%d context flags), want test-context once: %s", cluster, n, line)
+		}
+	}
+	if current != "kind-other" {
+		t.Fatal("the current context never moved, so the test proves nothing")
+	}
+
+	// The paths the fix has to reach, so the loop above checked them.
+	for _, seam := range []string{"exec", "stdin", "helm", "output", "combined", "runner", "introspection"} {
+		if seams[seam] == 0 {
+			t.Errorf("no kubectl or helm call went through the %s seam", seam)
+		}
+	}
+	joined := strings.Join(all, "\n")
+	for _, want := range []string{
+		"helm status",                            // the release lookups
+		"helm upgrade --install monitoring",      // monitoring
+		"helm upgrade kyverno kyverno/kyverno",   // Kyverno's scrape, after monitoring
+		"helm upgrade --install connect-cluster", // Kafka Connect
+		"kubectl get kafkaconnector",             // its connectors
+		"kubectl get secret kates-api-key",       // the API key stored after the deploy
+		"kubectl get daemonset kindnet",          // the kind check before introspection
+		"introspection: kubectl cluster-info",    // introspection
+		"runner: kubectl get kafka -A",           // version resolution
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("no call matching %q was recorded", want)
+		}
+	}
+	if t.Failed() {
+		t.Logf("calls:\n%s", joined)
 	}
 }
