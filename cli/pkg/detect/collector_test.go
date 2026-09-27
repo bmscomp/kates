@@ -2,6 +2,7 @@ package detect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -103,7 +104,7 @@ func setupHealthyMock() *MockExecutor {
 	m.Set("namespace created", "kubectl create ns")
 	m.Set("namespace labeled", "kubectl label ns")
 	m.Set("namespace deleted", "kubectl delete ns")
-	m.Set("secret created", "sh -c")
+	m.Set("secret created", "kubectl create secret")
 
 	// Latency matrix check mocks
 	m.Set("pod run", "kubectl run")
@@ -348,8 +349,10 @@ func TestCheckSecretCreation_KyvernoDenial(t *testing.T) {
 	kyvernoDenialMsg := `Error from server (Forbidden): admission webhook "validate.kyverno.svc-fail" denied the request: 
 policy generic-secret-blocked-by-kyverno.rules.restrict-secrets: Secret creation is blocked in this namespace.`
 
-	m.Set(kyvernoDenialMsg, "sh -c")
-	m.SetError(fmt.Errorf("denied by policy"), "sh -c")
+	// The denial is on kubectl's stderr, which OSExecutor wraps in the error
+	// it returns.
+	m.Set("", "kubectl create secret")
+	m.SetError(fmt.Errorf("%w: %s", errors.New("exit status 1"), kyvernoDenialMsg), "kubectl create secret")
 
 	c := NewCollector(m)
 	audit := c.checkSecretCreation(context.Background())
@@ -362,6 +365,48 @@ policy generic-secret-blocked-by-kyverno.rules.restrict-secrets: Secret creation
 	}
 	if audit.PolicyName != "generic-secret-blocked-by-kyverno" {
 		t.Errorf("expected PolicyName 'generic-secret-blocked-by-kyverno', got %q", audit.PolicyName)
+	}
+	if audit.ErrorMsg != kyvernoDenialMsg {
+		t.Errorf("ErrorMsg = %q, want kubectl's message without the exit status: %q", audit.ErrorMsg, kyvernoDenialMsg)
+	}
+}
+
+// A collector pinned to a kube context reports that context, and the provider
+// it implies, rather than the kubeconfig's current one: `kubectl config
+// current-context` ignores --context.
+func TestCollect_ReportsTheContextItIsPinnedTo(t *testing.T) {
+	m := setupHealthyMock()
+	m.Set("prod-eu", "kubectl", "config", "current-context")
+
+	c := NewCollector(m)
+	c.KubeContext = "kind-panda"
+	report, err := c.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if report.Context != "kind-panda" || report.Provider != "kind" {
+		t.Errorf("report names context %q (provider %q), want kind-panda (kind)", report.Context, report.Provider)
+	}
+}
+
+func TestGetNetworkStatus_ServiceCIDRFromTheAPIServerCommand(t *testing.T) {
+	for _, tt := range []struct {
+		name, command, want string
+	}{
+		{"kubeadm", `["kube-apiserver","--advertise-address=172.18.0.3","--service-cluster-ip-range=10.96.0.0/16","--tls-cert-file=/etc/kubernetes/pki/apiserver.crt"]`, "10.96.0.0/16"},
+		{"dual stack keeps the first", `["kube-apiserver","--service-cluster-ip-range=10.96.0.0/16,fd00:10:96::/112"]`, "10.96.0.0/16"},
+		{"last flag", `["kube-apiserver","--service-cluster-ip-range=10.43.0.0/16"]`, "10.43.0.0/16"},
+		{"no flag", `["kube-apiserver","--secure-port=6443"]`, "unknown"},
+		{"no API server pod", "", "unknown"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewMockExecutor()
+			m.Set(tt.command, "kubectl", "get", "pod", "-n", "kube-system", "-l", "component=kube-apiserver",
+				"-o", "jsonpath={.items[0].spec.containers[0].command}")
+			if got := NewCollector(m).getNetworkStatus().ServiceCIDR; got != tt.want {
+				t.Errorf("ServiceCIDR = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -376,8 +421,8 @@ var mutatingVerbs = map[string]bool{
 }
 
 // kubectlVerb finds the verb of every kubectl in a command, including the
-// ones inside an `sh -c` script, which is how the Secret probe hides its
-// `kubectl create secret`.
+// ones inside an `sh -c` script, which is how the storage bench applies its
+// PVC.
 var kubectlVerb = regexp.MustCompile(`\bkubectl\s+([a-z-]+)`)
 
 // mutatingCalls returns the calls that would write to the cluster.
@@ -397,11 +442,10 @@ func mutatingCalls(calls []string) []string {
 // setupWriteProbeMock is the healthy three-zone cluster, with every write
 // probe reachable: three zones for the latency matrix, and no running pod to
 // read resolv.conf from, so the cluster-domain lookup falls back to its
-// dns-detect pod. The healthy mock's "sh -c" and "kubectl get pods" patterns
-// would otherwise answer the running-pod query.
+// dns-detect pod. The healthy mock's "kubectl get pods" pattern would
+// otherwise answer the running-pod query.
 func setupWriteProbeMock() *MockExecutor {
 	m := setupHealthyMock()
-	delete(m.Responses, "sh -c")
 	delete(m.Responses, "kubectl get pods")
 	return m
 }
@@ -440,7 +484,7 @@ func TestCollect_WriteProbesCreateThings(t *testing.T) {
 		parts []string
 	}{
 		{"secret audit namespace", []string{"kubectl create ns kates-detect-secrets-"}},
-		{"secret audit Secret", []string{"sh -c", "kubectl create secret generic kates-detect-test-sec"}},
+		{"secret audit Secret", []string{"kubectl create secret generic kates-detect-test-sec"}},
 		{"latency namespace", []string{"kubectl create ns kates-detect-latency-"}},
 		{"latency prober pods", []string{"kubectl run prober-"}},
 		{"dns-detect fallback pod", []string{"kubectl run", "dns-detect"}},

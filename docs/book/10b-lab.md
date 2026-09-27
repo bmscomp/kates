@@ -11,16 +11,16 @@ After this chapter, you can:
 - Drive a full tuning session in the Lab TUI — apply presets, adjust parameters, and run measured iterations without leaving the terminal
 - Sweep one parameter across all its values and pinpoint the winner with the diff and pin-and-compare views
 - Stabilize noisy results with warmup and median modes before trusting a number
-- Export every iteration to CSV and save the session as a baseline for later comparison
+- Export every iteration to CSV and save the session as a [baseline](appendix-a-glossary.md#gl-baseline) for later comparison
 
 ## When to Use Lab vs CLI
 
 | Use Case | Tool |
 |----------|------|
 | Quick one-off test | `kates test create --type LOAD --wait` |
-| CI/CD regression gate | `kates test apply -f scenario.yaml --wait` |
+| CI/CD regression [gate](appendix-a-glossary.md#gl-gate) | `kates test apply -f scenario.yaml --wait` |
 | Iterative parameter tuning | **`kates lab`** |
-| Exploring throughput/latency tradeoffs | **`kates lab`** |
+| Exploring [throughput](appendix-a-glossary.md#gl-throughput)/latency tradeoffs | **`kates lab`** |
 | Sweeping a parameter across all values | **`kates lab`** |
 
 ## Layout
@@ -49,10 +49,10 @@ Lab splits the terminal into two panes:
 
 Read the screen from the top:
 
-1. The header ends with the address of the Kates API that Lab sends its runs to, the one your CLI is using. That part shows only on a terminal at least 100 columns wide.
+1. The header ends with the address of the [Kates API](appendix-a-glossary.md#gl-kates-api) that Lab sends its runs to, the one your CLI is using. That part shows only on a terminal at least 100 columns wide.
 2. The left pane holds the settings for the next run. A pointer, `▸`, marks the one that `↑` and `↓` select and `←` and `→` change; on the live screen, that row also opens out to list the values it can take.
-3. Iteration History lists the recent iterations, one row each: its number, throughput, P99, and Δ, the change in throughput from the iteration before it (▲ up, ▼ down). When the right pane is wide enough, an `Err %` column appears as well.
-4. The two sparklines trace throughput and P99 across every iteration, oldest first, each scaled from its own lowest value, the shortest bar (▁), to its highest, the full block (█). They appear once there are two iterations.
+3. Iteration History lists the recent iterations, one row each: its number, throughput, [P99](appendix-a-glossary.md#gl-percentile), and Δ, the change in throughput from the iteration before it (▲ up, ▼ down). When the right pane is wide enough, an `Err %` column appears as well.
+4. The two [sparklines](appendix-a-glossary.md#gl-sparkline) trace throughput and P99 across every iteration, oldest first, each scaled from its own lowest value, the shortest bar (▁), to its highest, the full block (█). They appear once there are two iterations.
 5. The status bar says what Lab just did: here, the result of iteration 3. While a test runs, it shows the elapsed seconds and, once Kates reports progress, the live record count, throughput and P99.
 6. The help line lists the keys that work right now. While a test runs it offers only `x` and `ctrl+c`, `c compare` joins it once there are two iterations, and `r retry` after a run fails.
 
@@ -85,11 +85,11 @@ Presets apply a curated set of parameters for common test scenarios. Press `p` t
 
 | Preset | Goal | Key Settings |
 |--------|------|-------------|
-| **Low Latency** | Minimize P99 | `type=SPIKE`, `acks=1`, `compression=none`, `batchSize=16384`, `lingerMs=0`, `producers=1` |
+| **Low Latency** | Minimize P99 | `type=SPIKE`, [`acks=1`](appendix-a-glossary.md#gl-acks), `compression=none`, `batchSize=16384`, `lingerMs=0`, `producers=1` |
 | **Max Throughput** | Maximize rec/s | `type=STRESS`, `acks=all`, `compression=lz4`, `batchSize=262144`, `lingerMs=50`, `producers=8` |
 | **Durability** | Zero data loss | `type=LOAD`, `acks=all`, `replication=3`, `compression=lz4`, `batchSize=65536`, `lingerMs=5` |
 
-Note that each preset also switches the **Test Type** (`SPIKE`, `STRESS`, or `LOAD`), so the top field changes when you cycle `p`. Presets are starting points — after applying one, fine-tune individual parameters before running.
+Note that each preset also switches the **Test Type** ([`SPIKE`](appendix-a-glossary.md#gl-test-type), `STRESS`, or `LOAD`), so the top field changes when you cycle `p`. Presets are starting points — after applying one, fine-tune individual parameters before running.
 
 ## Iteration Workflow
 
@@ -110,6 +110,8 @@ stateDiagram-v2
 ```
 
 Each completed test creates an **iteration** — a snapshot of parameters and results. Iterations accumulate in the right pane, showing throughput, P99 latency, error rate, and a delta (▲/▼) against the previous iteration.
+
+Each iteration is a full [test run](appendix-a-glossary.md#gl-test-run), created through the Kates API like one from `kates test create`, with an ID of its own. A sweep runs one test per value, and each warm-up run and each of median mode's three runs is a test run too, so every one of them takes a test's time.
 
 ### Live Progress
 
@@ -238,7 +240,7 @@ Two keys handle a run that doesn't finish cleanly: `x` stops a test that is runn
 
 ### Cancel (`x`)
 
-Press `x` during a running test to cancel it immediately. Lab sends a `POST /api/tests/{id}/cancel` request to the backend and returns to the config view.
+Press `x` during a running test to cancel it immediately. Lab sends a `POST /api/tests/{id}/cancel` request to the Kates API and returns to the config view.
 
 ### Retry (`r`)
 
@@ -261,7 +263,7 @@ if durationMs < 60000 {
 }
 ```
 
-This prevents the backend from falling back to its configured default duration (for STRESS tests, `kates.tests.stress.duration-ms` — 15 minutes out of the box) when the workload would finish much faster.
+This prevents the Kates API from falling back to its configured default duration (for STRESS tests, `kates.tests.stress.duration-ms` — 15 minutes out of the box) when the workload would finish much faster.
 
 | Records | Duration |
 |:-------:|:--------:|
@@ -296,6 +298,6 @@ Expect one iteration per batch-size value in the history; the CSV row with the h
 - Auto-sweep (`s`) tests every value of one parameter while holding the rest constant; diff (`d`) and pin-and-compare (`c`) connect parameter changes to metric changes
 - Warmup (`W`) discards JIT-cold runs before measuring, while median mode (`m`) runs three identical tests and keeps the middle result — and median ignores the warmup setting
 - Export (`e`) writes every iteration with its full parameter set to a timestamped CSV, and sessions (`w`/`L`) persist history as a baseline for later comparison
-- Lab derives test duration from record count (roughly one millisecond per record with a 60-second floor), so quick iterations never fall back to the backend's much longer default durations
+- Lab derives test duration from record count (roughly one millisecond per record with a 60-second floor), so quick iterations never fall back to the Kates API's much longer default durations
 
-Your cluster now has a tuned, evidence-backed configuration — [Chaos Engineering Theory](06-chaos-theory.md) asks the harder question of whether it survives when brokers, networks, and disks start failing.
+Your cluster now has a tuned, evidence-backed configuration. Whether it survives when [brokers](appendix-a-glossary.md#gl-broker), networks, and disks start failing is the harder question, and [Chaos Engineering Theory](06-chaos-theory.md) asks it next.

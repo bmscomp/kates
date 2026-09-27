@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ProduceBenchSpec extends TrogdorSpec {
 
-    private static final String CLASS_NAME = "org.apache.kafka.trogdor.workload.ProduceBenchSpec";
+    public static final String CLASS_NAME = "org.apache.kafka.trogdor.workload.ProduceBenchSpec";
 
     private String bootstrapServers;
     private int targetMessagesPerSec;
