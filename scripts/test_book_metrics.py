@@ -185,6 +185,50 @@ class HeadingTest(unittest.TestCase):
         self.assertEqual(lines_of(text, "bare_headings", name="10-cli-reference.md"), [1, 21, 27])
         self.assertEqual(len(lines_of(text, "bare_headings", name="05-test-types.md")), 6)
 
+    def test_glossary_letters_are_exempt_only_over_their_first_term(self):
+        text = """
+        # Glossary
+
+        Terms.
+
+        ## A
+
+        ### `acks` {#gl-acks}
+
+        Definition.
+
+        ## B {#b}
+
+        ### Broker {#gl-broker}
+
+        Definition.
+
+        ## Cc
+
+        ### Controller {#gl-controller}
+
+        Definition.
+
+        ## D
+
+        | Term | Meaning |
+        |------|---------|
+
+        ## E
+
+        #### Too Deep
+
+        Definition.
+        """
+        # A letter H2 over its first term's H3 is exempt, in the Glossary only;
+        # a longer H2, a table under a letter, or a deeper heading still count.
+        self.assertEqual(
+            lines_of(text, "bare_headings", name="appendix-a-glossary.md"), [17, 23, 28]
+        )
+        self.assertEqual(
+            lines_of(text, "bare_headings", name="05-test-types.md"), [5, 11, 17, 23, 28]
+        )
+
     def test_numbered_headings(self):
         text = """
         ## 3. Deploy the Chart

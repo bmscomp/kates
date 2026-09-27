@@ -46,7 +46,7 @@ Each tenant gets:
 - **Prefix-scoped topics** — all topics start with the service name
 - **Dedicated KafkaUser** — own credentials, own ACLs
 - **Resource quotas** — produce/consume rate limits + CPU share
-- **NetworkPolicy entries** — explicit ingress to broker ports
+- **NetworkPolicy entries** — explicit ingress to broker ports, which become the allow list once the listeners carry `networkPolicyPeers`
 
 ## Topic Naming Convention
 
@@ -130,7 +130,7 @@ users:
 
 ### Step 3 — Allow Network Access
 
-`networkPolicy.clients` grants the tenant's pods ingress to the brokers in the chart's `krafter-kafka` policy, which `values-kind.yaml` and `values-dev.yaml` do not render. On its own it keeps no other pod out: NetworkPolicies add up, and the policy the Strimzi operator generates admits every pod in the cluster to a listener without `networkPolicyPeers`, which no listener in the chart's values has. The list becomes the allow list once the listeners carry peers, as [Security & Compliance](17-security.md#network-policies) shows. Name the listeners the tenant may reach and the chart derives their ports from `kafka.listeners`.
+`networkPolicy.clients` grants the tenant's pods ingress to the brokers in the chart's `krafter-kafka` policy, which `values-kind.yaml`, `values-dev.yaml` and a `kates deploy` on a cluster whose CNI it cannot identify (EKS, GKE and AKS excepted) do not render. The entry admits the tenant's pods but keeps no one else out until the listeners carry `networkPolicyPeers` ([Security & Compliance](17-security.md#how-the-policies-combine)). Add it anyway: it becomes the allow list the day they do. Name the listeners the tenant may reach and the chart derives their ports from `kafka.listeners`.
 
 `clients` is a list, and a list in a later values file replaces the earlier one rather than merging with it. `tenants.yaml` therefore carries every entry the release already has — `helm get values krafter -n kafka` lists them (`kafka-cluster` in place of `krafter` for a release `make kafka` installed); a `kates deploy` install has at least the `connect` entry — with the tenant's added. An entry left out is dropped at the next upgrade:
 
@@ -145,7 +145,7 @@ networkPolicy:
 ```
 
 ::: {.callout-important}
-A pod selector is required — there is no namespace-wide grant. `networkPolicies.allowedClientNamespaces`, the 0.4 spelling, never generated a rule and is now answered with a deprecation notice, so a tenant carried over from a 0.4 values file has no network access until it appears here.
+A pod selector is required — there is no namespace-wide grant. `networkPolicies.allowedClientNamespaces`, the 0.4 spelling, never generated a rule and is now answered with a deprecation notice. So a tenant carried over from a 0.4 values file has no grant of its own until it appears here, and loses the brokers once the listeners carry `networkPolicyPeers`.
 :::
 
 ### Step 4 — Configure the Service
@@ -314,7 +314,7 @@ flowchart TD
     B --> C["3. Configure Quotas\n(produce/consume/CPU)"]
     C --> D["4. Create Topics\n(with naming convention)"]
     D --> E["5. Sync Credentials\n(mount Strimzi secret)"]
-    E --> F["6. Add NetworkPolicy\n(allow namespace)"]
+    E --> F["6. Add networkPolicy.clients entry\n(pod selector)"]
     F --> G["7. Verify Access\n(produce/consume test)"]
     G --> H{"Verification\nPassed?"}
     H -->|Yes| I["Tenant Ready ✅"]

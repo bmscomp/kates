@@ -133,12 +133,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Every later step reads kubectl's current context, so the chosen cluster
-	// becomes it. Without this, picking another cluster changed nothing: the
-	// deploy still went wherever kubectl already pointed.
+	// The chosen cluster becomes kubectl's current context, for the commands
+	// the user runs next. The deploy's own kubectl and helm calls name it
+	// instead of reading the current context, so a context switched elsewhere
+	// mid-deploy cannot split the stack across two clusters
+	// (deploy_kubecontext.go).
 	if err := useTargetContext(target); err != nil {
 		return err
 	}
+	defer pinKubeContext(target)()
 	PrintDeployBanner(target)
 
 	// ── Interactive Forms ────────────────────────────────────────────────
@@ -166,6 +169,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// latency, and a dns-detect pod when no running pod can be read. The
 	// preview uses none of that, so a dry run collects without it.
 	collector.ReadOnly = deployDryRun
+	collector.KubeContext = target
 	if err := collector.Preflight(); err != nil {
 		output.Error(fmt.Sprintf("Preflight failed: %v", err))
 		return err
@@ -375,7 +379,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		updateActiveContextAPIKey(ctx, ns.app)
 
 		if deployPortForward {
-			RunPortForwards(ctx, ns.kafka, ns.app, ns.jaeger)
+			RunPortForwards(ctx, target, ns.kafka, ns.app, ns.jaeger)
 		}
 	}
 
@@ -500,7 +504,7 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 	// the actual status to avoid skipping re-installation of broken releases.
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace, "-o", "json").Output()
+	out, err := runExecOutputFn(checkCtx, "helm", "status", release, "-n", namespace, "-o", "json")
 	if err != nil {
 		return false
 	}
@@ -516,8 +520,7 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS string) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, name, "-o", "jsonpath={.metadata.annotations.meta\\.helm\\.sh/release-namespace}")
-	out, err := cmd.Output()
+	out, err := runExecOutputFn(checkCtx, "kubectl", "get", kind, name, "-o", "jsonpath={.metadata.annotations.meta\\.helm\\.sh/release-namespace}")
 	if err != nil {
 		return // resource doesn't exist, nothing to clean
 	}
@@ -526,7 +529,7 @@ func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS str
 		dl.Printf("    - Cleaning stale %s/%s (owned by namespace %q, deploying to %q)\n", kind, name, existingNS, expectedNS)
 		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
 		defer delCancel()
-		exec.CommandContext(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found").Run()
+		_, _ = runExecCombinedFn(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found")
 	}
 }
 
