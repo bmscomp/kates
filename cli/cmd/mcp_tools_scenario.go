@@ -983,6 +983,10 @@ func mcpScnCheckApplies(i int, req *client.CreateTestRequest, fs *mcpScnFindings
 	}
 	if !consumer {
 		why := t + " starts no consumer; only LOAD, ENDURANCE and INTEGRITY do"
+		if t == "ROUND_TRIP" {
+			why = "ROUND_TRIP's consumer reads every partition without a group, with the client's fetch" +
+				" defaults; only LOAD, ENDURANCE and INTEGRITY take consumer settings"
+		}
 		if s.ConsumerGroup != "" {
 			refuse("consumerGroup", why)
 		}

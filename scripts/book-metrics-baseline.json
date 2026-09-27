@@ -54,14 +54,14 @@
       "broken_handoff": 0
     },
     "05-test-types.md": {
-      "bare_headings": 10,
-      "tables_without_lead_in": 9,
+      "bare_headings": 9,
+      "tables_without_lead_in": 8,
       "bold_lead_bullets": 11,
       "numbered_headings": 0,
       "formula_openings": 1,
       "changelog_phrases": 1,
       "long_fence_lines": 0,
-      "mermaid_uncaptioned": 9,
+      "mermaid_uncaptioned": 8,
       "hr_rules": 7,
       "scope_blockquotes": 0,
       "broken_handoff": 0

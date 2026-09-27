@@ -977,7 +977,7 @@ public class TestOrchestrator {
         }
 
         boolean producer = type != TestType.INTEGRATION_CDC;
-        boolean consumer = type == TestType.LOAD || type == TestType.ENDURANCE || type == TestType.INTEGRITY;
+        boolean consumerSettings = type == TestType.LOAD || type == TestType.ENDURANCE || type == TestType.INTEGRITY;
         boolean unthrottled = type == TestType.SPIKE || type == TestType.CAPACITY;
 
         if (!producer || unthrottled) {
@@ -992,8 +992,11 @@ public class TestOrchestrator {
             }
         }
 
-        if (!consumer) {
-            String why = type + " starts no consumer; only LOAD, ENDURANCE and INTEGRITY do";
+        if (!consumerSettings) {
+            String why = type == TestType.ROUND_TRIP
+                    ? "ROUND_TRIP's consumer reads every partition without a group, with the client's fetch"
+                            + " defaults; only LOAD, ENDURANCE and INTEGRITY take consumer settings"
+                    : type + " starts no consumer; only LOAD, ENDURANCE and INTEGRITY do";
             if (requested.hasConsumerGroup()) errors.put("consumerGroup", why);
             if (requested.hasFetchMinBytes()) errors.put("fetchMinBytes", why);
             if (requested.hasFetchMaxWaitMs()) errors.put("fetchMaxWaitMs", why);
@@ -1201,6 +1204,10 @@ public class TestOrchestrator {
                         .durationMs(spec.getDurationMs())
                         .recordSize(spec.getRecordSize())
                         .producerConfig(producerConfig)
+                        // Its consumer takes no fetch settings (inapplicableFields
+                        // refuses them), but a transactional run's must read
+                        // committed: an uncommitted record is not yet delivered.
+                        .consumerConfig(consumerConfig)
                         .enableIdempotence(spec.isEnableIdempotence())
                         .enableTransactions(spec.isEnableTransactions())
                         .build());

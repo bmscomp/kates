@@ -152,7 +152,7 @@ A field the run could not honour is refused rather than ignored: the answer is `
 | Field | Refused when |
 |-------|--------------|
 | `throughput`, `targetThroughput` | Any value but -1 for SPIKE and CAPACITY, which run their producers unthrottled, and for INTEGRATION_CDC, which runs no Kates producer |
-| `consumerGroup`, `fetchMinBytes`, `fetchMaxWaitMs` | The type starts no consumer: every type but LOAD, ENDURANCE and INTEGRITY |
+| `consumerGroup`, `fetchMinBytes`, `fetchMaxWaitMs` | Every type but LOAD, ENDURANCE and INTEGRITY: ROUND_TRIP's consumer uses no group and the client's fetch defaults, and the rest start none |
 | `enableCrc` | `true` for any type but INTEGRITY, the only one that checks CRCs |
 | `enableIdempotence` | `true` when the run's `acks`, the request's or the type's default (SPIKE's is `1`), is not `all`, or for INTEGRATION_CDC |
 | `enableTransactions` | `true` when `acks` is not `all`, when the request sets `enableIdempotence: false`, on the `trogdor` backend, or for INTEGRATION_CDC |
