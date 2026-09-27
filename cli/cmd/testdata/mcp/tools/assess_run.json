@@ -474,6 +474,7 @@
             "description": "the run's report summary; absent when it could not be read",
             "properties": {
               "avgLatencyMs": {
+                "description": "the mean latency of the tasks that measured latency, weighted by records",
                 "type": "number"
               },
               "avgThroughputMBPerSec": {
@@ -493,15 +494,15 @@
                 "type": "number"
               },
               "p50LatencyMs": {
-                "description": "the mean of the tasks' p50s",
+                "description": "the p50 of the tasks that measured latency; with several, the highest",
                 "type": "number"
               },
               "p95LatencyMs": {
-                "description": "the mean of the tasks' p95s",
+                "description": "the p95 of the tasks that measured latency; with several, the highest",
                 "type": "number"
               },
               "p99LatencyMs": {
-                "description": "the mean of the tasks' p99s",
+                "description": "the p99 of the tasks that measured latency; with several, the highest",
                 "type": "number"
               },
               "peakThroughputRecPerSec": {

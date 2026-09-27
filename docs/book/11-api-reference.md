@@ -287,14 +287,15 @@ Get the full test report: the summary, the cluster snapshot, per-broker figures 
 {
   "run": { "id": "a1b2c3d4", "testType": "LOAD", "status": "DONE" },
   "summary": {
-    "totalRecords": 100000,
-    "avgThroughputRecPerSec": 8412.7, "peakThroughputRecPerSec": 9120.4, "avgThroughputMBPerSec": 8.2,
+    "totalRecords": 200000,
+    "avgThroughputRecPerSec": 8405.4, "peakThroughputRecPerSec": 8412.7, "avgThroughputMBPerSec": 8.2,
     "avgLatencyMs": 2.4, "p50LatencyMs": 1.8, "p95LatencyMs": 5.6, "p99LatencyMs": 12.3,
-    "p999LatencyMs": 21.7, "maxLatencyMs": 34.1,
-    "totalErrors": 0, "errorRate": 0.0, "durationMs": 125000
+    "p999LatencyMs": 0.0, "maxLatencyMs": 34.1,
+    "totalErrors": 0, "errorRate": 0.0, "durationMs": 0
   },
   "phases": [
-    { "phaseName": "steady-state", "metrics": { "avgThroughputRecPerSec": 8412.7, "p99LatencyMs": 12.3 } }
+    { "phaseName": "produce", "metrics": { "p99LatencyMs": 12.3 } },
+    { "phaseName": "consume", "metrics": { "p99LatencyMs": 0.0 } }
   ],
   "clusterSnapshot": {
     "clusterId": "4L6g3nShT-eMCtK--X86sw",
@@ -315,6 +316,21 @@ Get the full test report: the summary, the cluster snapshot, per-broker figures 
 ```
 
 When an SLA is violated, `overallSlaVerdict.violations` contains entries of the form `{ "metric": "p99LatencyMs", "threshold": 500.0, "actual": 612.4, "severity": "CRITICAL" }`.
+
+The summary is computed from the run's task rows, and the example is a LOAD run of 100,000 records: one producer row and one consumer row. The table shows how each summary field combines the rows.
+
+| Field | How the task rows combine |
+|-------|---------------------------|
+| `totalRecords` | Summed over every task, producer and consumer alike |
+| `avgThroughputRecPerSec`, `avgThroughputMBPerSec` | The mean of the tasks' rates, not their sum |
+| `peakThroughputRecPerSec` | The fastest task's rate |
+| `p50LatencyMs`, `p95LatencyMs`, `p99LatencyMs` | The producer's; with several producers, the highest of theirs |
+| `avgLatencyMs` | The producers' mean latency, weighted by their records |
+| `maxLatencyMs` | The slowest producer's |
+| `totalErrors`, `errorRate` | Tasks that ended with an error, and that count divided by `totalRecords` |
+| `p999LatencyMs`, `durationMs` | Always 0 |
+
+Latency leaves consumers out because they don't measure it: a consumer's row carries no latency on the native backend and only poll times on Trogdor. A LOAD or ENDURANCE run's P99 is therefore its producer's send-to-acknowledgement P99. A task keeps its percentiles but not its latency histogram, so the percentiles of several producers cannot be merged. The highest of them is an upper bound on the run's percentile, so it never understates the tail. `kates report show`, `report diff`, `report compare`, the regression check, `kates trend` and the resilience comparison all read this summary.
 
 #### GET /api/tests/{id}/report/csv
 

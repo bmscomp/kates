@@ -133,4 +133,30 @@ class AdvisorServiceTest {
         assertTrue(recs.stream()
                 .anyMatch(r -> r.title().contains("p99") && r.title().contains("batch.size")));
     }
+
+    @Test
+    void loadRunP99IsTheProducersNotHalvedByTheConsumer() {
+        when(clusterHealthService.brokerCount()).thenReturn(3);
+        TestSpec spec = new TestSpec();
+        spec.setBatchSize(131072);
+        spec.setCompressionType("lz4");
+        spec.setPartitions(12);
+        spec.setNumProducers(1);
+
+        // The consumer records no latency; averaging its 0 in made this 75 ms,
+        // under the rule's 100 ms, and the rule never fired.
+        TestRun run = new TestRun(TestType.LOAD, spec)
+                .withAddedResult(new TestResult()
+                        .withPhaseName("produce")
+                        .withRecordsSent(10_000)
+                        .withThroughputRecordsPerSec(5000)
+                        .withP99LatencyMs(150))
+                .withAddedResult(new TestResult()
+                        .withPhaseName("consume")
+                        .withRecordsSent(10_000)
+                        .withThroughputRecordsPerSec(5000));
+        var recs = advisorService.analyze(run);
+
+        assertTrue(recs.stream().anyMatch(r -> r.title().startsWith("p99=150ms")), recs.toString());
+    }
 }
