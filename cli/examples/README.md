@@ -47,7 +47,7 @@ Schema: `scenarios: []` with `spec:` (flat map) and `validate:` block.
 | `throughput` | int | Max msg/s; `-1` = unlimited |
 | `numProducers` | int | Parallel producer threads |
 | `numConsumers` | int | Parallel consumer threads |
-| `consumerGroup` | string | Consumer group name; `LOAD`, `ENDURANCE` and `INTEGRITY` only, the backend refuses it for a type that starts no consumer |
+| `consumerGroup` | string | Consumer group name; `LOAD`, `ENDURANCE` and `INTEGRITY` only, the backend refuses it for any other type |
 | `duration` | int | Duration in **seconds** (ENDURANCE) |
 | `acks` | string | `"0"`, `"1"`, or `"all"` |
 | `batchSize` | int | Producer batch size (bytes) |
