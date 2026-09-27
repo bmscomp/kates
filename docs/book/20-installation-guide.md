@@ -90,7 +90,7 @@ The kafka-cluster chart then creates the `PodMonitor` and `PrometheusRule` resou
 
 **Nothing to decide about boards.** Chart 1.3.0 deleted the nine hand-written Kafka and Strimzi boards, along with the `legacyKafkaDashboards.enabled` key that used to gate them; setting that key now does nothing and the chart's NOTES say so on upgrade. They read series names that kafka-cluster 1.0's exporter rules (Strimzi's own) do not produce, so they rendered empty panels.
 
-What `charts/monitoring` ships instead is two Kafka boards — **Kafka — KRaft Operations** and **Kafka — Performance & Load Testing** — plus four Kates boards, all generated from `dashboards/` and all checked against the exporter rules on every build. Broker health, quorum identity, Cruise Control and consumer lag come from the Strimzi operator's own dashboards (`charts/strimzi-operator`, see [Step 2 — Install the Strimzi Operator](#step-2--install-the-strimzi-operator)), and connect-cluster, mirror-maker2 and kates each ship the board for the workload they own. [Observability & Monitoring](09-observability.md) is the tour.
+What `charts/monitoring` ships instead is every board the repository builds, all generated from `dashboards/`: two Kafka boards, **Kafka — KRaft Operations** and **Kafka — Performance & Load Testing**, and the Kates, Kyverno, Kafka Connect and MirrorMaker 2 boards. `make check-metric-contract` holds the Kafka, Kafka Connect and MirrorMaker 2 boards to the exporter rules that must produce what they read. Broker health, quorum identity, Cruise Control and consumer lag come from the Strimzi operator's own dashboards (`charts/strimzi-operator`, see [Step 2 — Install the Strimzi Operator](#step-2--install-the-strimzi-operator)). [Observability & Monitoring](09-observability.md) is the tour.
 
 ### Kyverno (Optional)
 
@@ -114,7 +114,7 @@ You should see the Kyverno admission controller, background controller, cleanup 
 
 When `kyvernoPolicy.enabled=true` is set in the kafka-cluster Helm chart values, the chart deploys a `kafka-pod-security-<namespace>-<cluster>` `ClusterPolicy`, which mutates and validates workloads to enforce restricted Pod Security Standards — non-root, drop ALL capabilities, seccomp `RuntimeDefault`, no privilege escalation, no host namespaces.
 
-The Kates backend chart (`charts/kates`) ships additional `ClusterPolicy` resources, enabled via its own `kyvernoPolicy.*` values:
+The `kates` chart (`charts/kates`), which installs the Kates API, ships additional `ClusterPolicy` resources, enabled via its own `kyvernoPolicy.*` values:
 
 | Policy | What It Does |
 |--------|-------------|
@@ -201,7 +201,7 @@ graph TD
     end
 
     subgraph "Security"
-        NP["NetworkPolicies (12 rules)"]
+        NP["NetworkPolicies"]
         RBAC["ServiceAccount + Role + RoleBinding"]
     end
 
@@ -1087,7 +1087,7 @@ kafka:
 The chart passes `configuration` to the Strimzi listener unchanged. Strimzi creates one LoadBalancer Service for the bootstrap and one per broker, and each needs the provider's annotations: `bootstrap.annotations` covers the first, `perBrokerAnnotationsTemplate` every broker, and `loadBalancerSourceRanges` applies to all of them. `aws-load-balancer-type: external` hands each Service to the AWS Load Balancer Controller (without it the Services stay pending), `nlb-target-type: ip` sends traffic straight to the pod, and `scheme: internal` keeps the NLB inside the VPC. `10.0.0.0/16` stands for your VPC range; add the peered or on-premises ranges your clients run in. `perBrokerAnnotationsTemplate` needs Strimzi 1.1.0 or newer; on 1.0.x, annotate the brokers one by one under `configuration.brokers`, a `broker` node ID and its `annotations` per entry. GKE and AKS take their own internal annotation, on the bootstrap and in `perBrokerAnnotationsTemplate` alike: `networking.gke.io/load-balancer-type: "Internal"` on GKE, and on AKS `service.beta.kubernetes.io/azure-load-balancer-internal: "true"` together with `service.beta.kubernetes.io/azure-deny-all-except-load-balancer-source-ranges: "true"`, without which the Network Security Group still admits the whole VNet. The Kafka overlays of [Deployment Guide](12-deployment.md#cloud-deployment) show each in full. A LoadBalancer Service without provider annotations usually gets a public address.
 
 ::: {.callout-important}
-Open the load balancers to the internet only on purpose: set `aws-load-balancer-scheme: internet-facing` and list the public ranges of the clients that need it in `loadBalancerSourceRanges`, since on a public load balancer empty ranges mean `0.0.0.0/0`. `kafka.externalAccess.allowedCidrs` does not replace them. It narrows the chart's NetworkPolicy rule for the listener, but Strimzi's generated policy admits port 9094 from anywhere, because the preset sets no `networkPolicyPeers` (see [Why Network Policies Matter](#why-network-policies-matter)), and behind a load balancer the address a NetworkPolicy sees is often a node or the load balancer rather than the client.
+Open the load balancers to the internet only on purpose: set `aws-load-balancer-scheme: internet-facing` and list the public ranges of the clients that need it in `loadBalancerSourceRanges`, since on a public load balancer empty ranges mean `0.0.0.0/0`. `kafka.externalAccess.allowedCidrs` does not replace them: it narrows only the chart's rule for the port, and Strimzi's policy still admits every source until the listener carries `networkPolicyPeers`, which the preset can't set ([Security & Compliance](17-security.md#how-the-policies-combine)). Behind a load balancer, the address a NetworkPolicy sees is also often a node or the load balancer rather than the client.
 :::
 
 Writing the external listener into `kafka.listeners` instead replaces the whole list — Helm does not merge lists — so `plain` and `tls` disappear, and with the platform profile the render stops at its first client rule: `networkPolicy.clients "kates" names listener "plain", which kafka.listeners does not have`.
@@ -1175,22 +1175,22 @@ This section documents every default topic and user the chart creates. You rarel
 
 ### Default Topics
 
-The chart creates 8 topics, each designed for a specific data pipeline:
+The chart creates these 8 topics. The Kates API writes none of the `kates-*` ones; the last column says what uses each topic.
 
 | Topic | Partitions | Replicas | Retention | Compression | Cleanup | Purpose |
 |-------|:----------:|:--------:|:---------:|:-----------:|:-------:|---------|
-| `kates-events` | 6 | 3 | 2 days | — | delete | Test lifecycle events (suite start/end, test pass/fail) |
-| `kates-results` | 12 | 3 | 7 days | lz4 | delete | Detailed test results with payloads (high throughput) |
-| `kates-metrics` | 6 | 3 | 1 day | lz4 | delete | Real-time metrics pipeline (latency, throughput, resource usage) |
-| `kates-audit` | 3 | 3 | 30 days | — | delete | Audit trail for compliance (who ran what, when) |
-| `kates-dlq` | 3 | 3 | unlimited | — | delete | Dead letter queue for failed messages |
+| `kates-events` | 6 | 3 | 2 days | — | delete | Created by the platform profile; the Kates API doesn't use it |
+| `kates-results` | 12 | 3 | 7 days | lz4 | delete | Read by the Kates API only through a share-group consumer you start |
+| `kates-metrics` | 6 | 3 | 1 day | lz4 | delete | Created by the platform profile; the Kates API doesn't use it |
+| `kates-audit` | 3 | 3 | 30 days | — | delete | Created by the platform profile; the Kates API doesn't use it |
+| `kates-dlq` | 3 | 3 | unlimited | — | delete | Polled every 30 seconds by the Kates API, which logs what arrives |
 | `cdc-schema-history` | 1 | 3 | forever, no size limit | — | delete | Debezium schema history for CDC connectors |
 | `cdc-heartbeat` | 1 | 3 | 1 day | — | delete | CDC liveness heartbeats (detects stalled connectors) |
 | `test-sink-topic` | 3 | 3 | 1 day | — | delete | Sink target for Kafka Connect sink connector validation |
 
 **Why these specific configurations?**
 
-- **Partitions** scale with expected throughput — `kates-results` has 12 partitions because it handles the highest message volume.
+- **Partitions** are the profile's settings, not a measure of traffic: a test produces to whatever topic its spec names, not to these.
 - **Replicas: 3** ensures data survives the loss of any single broker (`min.insync.replicas: 2` across all topics).
 - **Delete cleanup everywhere, compaction nowhere.** Debezium writes its schema history without record keys, which a compacted topic refuses, and replays all of it on restart — so `cdc-schema-history` keeps `retention.ms: -1` and `retention.bytes: -1`, the settings Debezium checks for. `kates-dlq` is a delete topic because compaction keeps only the latest failure per key and refuses records without one. It has no time limit because it keeps the retention it had as a compacted topic, so an upgrade from that topic deletes nothing by age; only the brokers' 10 GiB `log.retention.bytes` bounds each partition. Set a `retention.ms` under `topics.items.kates-dlq.config` to age failures out.
 - **lz4 compression** on high-volume topics reduces storage and network I/O with minimal CPU overhead.
@@ -1259,7 +1259,7 @@ In a shared Kubernetes cluster, Kafka is a high-value target:
 - It has administrative APIs (port 9090) that can modify cluster state
 - Unauthorized produce/consume can corrupt data pipelines
 
-Two sets of policies select the brokers: the chart's, and one the Strimzi Cluster Operator generates for every Kafka cluster, `krafter-network-policy-kafka`, unless its `STRIMZI_NETWORK_POLICY_GENERATION` is off (it is on by default). NetworkPolicies are additive: a connection is allowed when **any** policy that selects the pod allows it. In Strimzi's policy, a listener without `networkPolicyPeers` admits every pod in every namespace, and no listener in the chart's values or in the values `kates deploy` generates has them. As the charts ship, whatever the values chain, this is who can connect:
+Two sets of policies select the brokers: the chart's, and `krafter-network-policy-kafka`, which the Strimzi Cluster Operator generates for every Kafka cluster. As the charts ship, every pod in the cluster can reach the Kafka client listeners. NetworkPolicies add up, and the policy Strimzi generates admits every pod to a listener without `networkPolicyPeers`, whatever `networkPolicy.clients` says ([Security & Compliance](17-security.md#how-the-policies-combine)). Whatever the values chain, this is who can connect:
 
 | Port | Who Can Connect |
 |------|-----------------|
@@ -1272,7 +1272,7 @@ Port 9094 is declared by `values-prod.yaml` and, on every cluster but kind, by t
 
 Strimzi's policy recognizes the Cluster Operator by the label `strimzi.io/kind: cluster-operator`, in any namespace, unless the operator knows the labels of its own namespace: set `strimzi-kafka-operator.image.operatorNamespaceLabels` on the `strimzi-operator` release, for example to `kubernetes.io/metadata.name=strimzi-operator`, to hold those rules to that namespace.
 
-What the chart's policies add, where they render, is a limit on the egress of the brokers, controllers, Cruise Control, the Entity Operator and the Kafka Exporter, and a deny-all, `krafter-default-deny`, under which Cruise Control, the Entity Operator and the Kafka Exporter accept only what a policy allows them. They do not render under `values-dev.yaml` or `values-kind.yaml`, nor where `kates deploy` could not identify the cluster's CNI, except on EKS, GKE and AKS. So neither `krafter-default-deny` nor `networkPolicy.clients` keeps anyone off the listeners on its own: until you close them, SCRAM authentication and ACLs are what stand between an arbitrary pod and your data. Giving every listener `networkPolicyPeers` closes them and makes `networkPolicy.clients` the allow list; [Security & Compliance](17-security.md#network-policies) shows how, over the values the release already has, and how to test the result.
+What the chart's policies add, where they render, is a limit on the egress of the brokers, controllers, Cruise Control, the Entity Operator and the Kafka Exporter, and a deny-all, `krafter-default-deny`, under which Cruise Control, the Entity Operator and the Kafka Exporter accept only what a policy allows them. They do not render under `values-dev.yaml` or `values-kind.yaml`, nor where `kates deploy` could not identify the cluster's CNI, except on EKS, GKE and AKS. Giving every listener `networkPolicyPeers` closes the client listeners and, wherever the chart's policies render, makes `networkPolicy.clients` the allow list; [Security & Compliance](17-security.md#closing-the-listeners) shows how, over the values the release already has.
 
 ### Traffic Flow Diagram
 
@@ -1331,7 +1331,7 @@ Every policy is named `<clusterName>-…`, which is what lets two Kafka clusters
 
 There is no separate controller policy: in KRaft every node-pool pod carries `strimzi.io/name: <cluster>-kafka`, so `krafter-kafka` covers both roles.
 
-Strimzi's `krafter-network-policy-kafka` sits beside these in every profile, including those where the chart renders none. `krafter-default-deny` allows nothing, so for the pods it selects, whatever no other policy allows is dropped; it does not outvote an allow, so the ingress rules of `krafter-kafka` and of Strimzi's policy add up.
+Strimzi's `krafter-network-policy-kafka` sits beside these in every profile, including those where the chart renders none. `krafter-default-deny` never outvotes an allow ([Security & Compliance](17-security.md#how-the-policies-combine)).
 
 ::: {.callout-note}
 kafka-cluster 1.0 stopped rendering the policies that selected **other releases'** pods — the Cluster Operator's, the drain cleaner's, kafka-ui's, MirrorMaker 2's and Connect's. The operator's and the drain cleaner's belong to `charts/strimzi-operator` (see [Step 2 — Install the Strimzi Operator](#step-2--install-the-strimzi-operator)); kafka-ui, connect-cluster and mirror-maker2 each render their own. The chart's rule for those releases' traffic to the brokers is a `networkPolicy.clients` entry below rather than a policy this chart writes into their namespace.
@@ -1557,7 +1557,7 @@ graph LR
 
 - **Local retention**: 1 day (`tieredStorage.localRetentionMs`, rendered as `log.local.retention.ms`)
 - **Remote retention**: Follows the topic's `retention.ms` setting
-- **Backend**: Any S3-compatible store — SeaweedFS (built-in), AWS S3, MinIO
+- **Storage backend**: Any S3-compatible store — SeaweedFS (built-in), AWS S3, MinIO
 
 Layered over `values-prod.yaml`, which already runs SeaweedFS, the chart's side of turning it on is the file below. The store's side has to be ready first, and [SeaweedFS](#seaweedfs) covers both parts of it: the `kafka-tiered-storage` bucket, which nothing creates for you, and an S3 gateway that accepts the keys in `kafka-seaweedfs-credentials` — with the authentication `values-prod.yaml` turns on, it accepts only keys it generated itself. Without them no segment leaves local disk, and tier 11 of `helm test` fails.
 
@@ -1726,7 +1726,7 @@ externalSecrets:
 |--------|:-------------------:|-----------|
 | `kafka-pod-security-<namespace>-<cluster>` | Both | Non-root, drop ALL capabilities, seccomp RuntimeDefault, no privilege escalation, no host namespaces |
 
-The `kates-workload-standards`, `kates-image-verification`, and `kates-generate-network-policies` policies listed in [Kyverno (Optional)](#kyverno-optional) ship with the Kates backend chart (`charts/kates`), not with kafka-cluster.
+The `kates-workload-standards`, `kates-image-verification`, and `kates-generate-network-policies` policies listed in [Kyverno (Optional)](#kyverno-optional) ship with the `kates` chart (`charts/kates`), which installs the Kates API, not with kafka-cluster.
 
 ```yaml
 kyvernoPolicy:
