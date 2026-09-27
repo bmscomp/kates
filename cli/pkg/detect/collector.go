@@ -20,7 +20,13 @@ type Collector struct {
 	BenchStorage bool
 	BenchNetwork bool
 	BenchDNS     bool
-	OnProgress   func(string)
+	// ReadOnly skips every probe that creates something in the cluster to
+	// measure it: the Secret-creation audit, the inter-AZ latency matrix, the
+	// dns-detect pod the cluster-domain lookup falls back to, and the Bench*
+	// probes whatever their flags say. Their parts of the report stay empty.
+	// kates deploy --dry-run sets it: a plan preview must not write.
+	ReadOnly   bool
+	OnProgress func(string)
 }
 
 func NewCollector(exec CommandExecutor) *Collector {
@@ -121,7 +127,20 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		return nil, err
 	}
 
-	// Concurrent execution of Stage 2 probes
+	if !c.ReadOnly {
+		c.runWriteProbes(ctx, report)
+	}
+
+	report.Strimzi.CapacityStatus = c.checkKafkaCapacity(report, 0.30)
+	report.Security = c.getSecurityAudit(report.Admission)
+
+	return report, nil
+}
+
+// runWriteProbes is stage 2: the probes that learn something by creating it —
+// a namespace, a Secret in it, prober pods — and deleting it afterwards.
+// Collect skips it when the collector is ReadOnly.
+func (c *Collector) runWriteProbes(ctx context.Context, report *DetectReport) {
 	g2, ctx2 := errgroup.WithContext(ctx)
 	g2.Go(func() error {
 		report.SecretAudit = c.checkSecretCreation(ctx2)
@@ -150,11 +169,6 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		})
 	}
 	_ = g2.Wait()
-
-	report.Strimzi.CapacityStatus = c.checkKafkaCapacity(report, 0.30)
-	report.Security = c.getSecurityAudit(report.Admission)
-
-	return report, nil
 }
 
 func (c *Collector) getContext() string {
@@ -1226,8 +1240,9 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		}
 	}
 
-	// Attempt 2: If no running pods, spin up a temporary pod
-	if resolvContent == "" {
+	// Attempt 2: If no running pods, spin up a temporary pod. A read-only
+	// collection keeps the cluster.local default instead.
+	if resolvContent == "" && !c.ReadOnly {
 		resolvContent, _ = c.exec.Exec("kubectl", "run", "--rm", "-i", "--image=busybox:1.36", "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
 	}
 
