@@ -35,6 +35,13 @@ The first four Parts build on one another, so read them in order. [Part I — Fo
 
 [Part V — Deployment & Operations](part-deployment-operations.md) is for the day you deploy, secure, upgrade or extend a cluster, and [Part VI — Reference](part-reference.md) and the appendices are for looking things up. Each Part opens with a page that says what the Part is for, lists its chapters with the question each one answers, and links the tutorials that go with them.
 
+One question runs through Parts I to V: is `krafter`, the Kafka cluster under test, ready for a payments workload? You run the payments platform, and before it moves onto `krafter` you have to say whether the cluster can carry it. The book turns that into targets that a Kates run can check:
+
+- `krafter` takes 2,000 records per second of 1 KiB with `acks=all`, and answers writes with a P99 of 100 ms or less from send to acknowledgment.
+- `krafter` loses no acknowledged record when one broker or one zone fails.
+
+Kates calls thresholds like these SLAs, though they're SLO-style targets that you set, not agreements with anyone. Part I builds the lab and a first run. Part II checks the first target and Part III the second, Part IV explains the numbers both produce, and Part V moves the question from the lab to a cluster you run. On each Part page, The Payments Question says what that Part adds toward the answer.
+
 ## Before You Start
 
 The book's exercises run against a lab on your own machine, so set it up before you reach the Quick Start in [Introduction](01-introduction.md#quick-start).
