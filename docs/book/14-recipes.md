@@ -5,7 +5,7 @@ Practical, ready-to-use recipes for common Kates workflows. Each recipe is a sel
 - Validate a Kafka upgrade by diffing before-and-after runs of the same scenario file with `kates report diff`
 - Schedule a nightly regression suite with `kates schedule create` and spot anomalies with `kates trend`
 - Certify a cluster's resilience with disruption playbooks and a combined `kates resilience run`
-- Diagnose a latency regression and size sustainable capacity from per-phase CAPACITY results
+- Diagnose a latency regression, and find the cluster's sustainable capacity by comparing CAPACITY runs at rising producer counts
 
 Pick a recipe by the question you need answered. Two of them disrupt the cluster on purpose, so check the Disrupts the cluster column before you run one where other people depend on the cluster:
 
@@ -15,7 +15,7 @@ Pick a recipe by the question you need answered. Two of them disrupt the cluster
 | [Recipe 2: Nightly Regression Suite](#recipe-2-nightly-regression-suite) | Is performance drifting from night to night? | One LOAD run of 100,000 records a night; the trend commands read 30 days | No | A running Kates backend, where the scheduler runs |
 | [Recipe 3: Pre-Production Chaos Certification](#recipe-3-pre-production-chaos-certification) | Does the cluster keep working through broker loss, a network partition and a zone outage? | Two tests and three playbooks, then a 360 s LOAD run during a broker kill | Yes: it kills Kafka pods and cuts one broker off the network | A cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure` |
 | [Recipe 4: Investigate a Latency Regression](#recipe-4-investigate-a-latency-regression) | Why did P99 latency rise between two runs? | No new runs: it reads results you already have | No | Two finished runs to compare |
-| [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) | What throughput can the cluster sustain? | Up to 20 minutes at the backend's defaults | Yes: it drives the brokers to their limit | A cluster nothing else depends on, and your P99 SLA threshold |
+| [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) | What throughput can the cluster sustain? | Five CAPACITY runs of up to five minutes each, one after another | Yes: it drives the brokers to their limit | A cluster nothing else depends on, `jq`, and your P99 SLA threshold |
 | [Recipe 6: Producer Tuning](#recipe-6-producer-tuning) | Which producer settings suit your workload? | Four LOAD runs of 100,000 records each | No | The recipe's scenario file |
 
 ## Recipe 1: Validate a Kafka Upgrade {#recipe-1-validate-a-kafka-upgrade}
@@ -357,61 +357,123 @@ If under-replicated or offline partitions show up during the test, the cluster w
 
 ## Recipe 5: Capacity Planning {#recipe-5-capacity-planning}
 
-**Goal:** Determine the maximum sustainable throughput for your cluster configuration.
+A CAPACITY run starts all its producers at once and reports one set of numbers, so a single run can't show where the cluster tops out. To find the ceiling, run CAPACITY tests with 1, 2, 4, 8 and 16 producers, compare them, and read where total throughput stops rising. You need a cluster nothing else depends on, `jq`, and your P99 SLA threshold, and the series takes up to half an hour.
 
-::: {.callout-caution}
-A CAPACITY test drives the cluster to its limit on purpose: its producers run unthrottled, for up to 20 minutes at the backend's defaults. Every other client competes with it for the brokers' network, disk and CPU while it runs, so run it where nothing else depends on the cluster, and never on production.
+::: {.callout-caution title="The series saturates the cluster"}
+Every CAPACITY producer runs unthrottled, so each run drives the brokers to their limit. Other clients compete with it for the brokers' network, disk and CPU while it runs, so run the series where nothing else depends on the cluster, and never on production.
 :::
 
-### Procedure
+### Step 1 — Run the Series
 
-Use the `CAPACITY` test type, which progressively increases load until the cluster degrades:
-
-```bash
-kates test create --type CAPACITY --wait
-```
-
-The capacity test automatically:
-
-1. Starts with a moderate producer count
-2. Increases producers in each phase
-3. Measures throughput and latency at each level
-4. Reports the phase where latency degradation began
-
-### Interpreting Results
+The loop runs one CAPACITY test per producer count, one after another, deletes each run's topic when the run ends, and collects the run IDs:
 
 ```bash
-kates test get <id>
+# One CAPACITY run per producer count, each on its own topic
+IDS=""
+for N in 1 2 4 8 16; do
+  ID=$(kates test create --type CAPACITY --producers "$N" --duration 300 \
+    --topic "capacity-$N" --wait -o json | jq -r .id)
+  kates kafka delete-topic "capacity-$N" --yes
+  echo "producers=$N id=$ID"
+  IDS="${IDS:+$IDS,}$ID"
+done
 ```
 
-The results show per-phase metrics. The last phase before P99 latency exceeded your SLA threshold represents your cluster's sustainable capacity.
+`--wait` makes each `kates test create` return only when its run ends, so the runs never overlap. With `-o json` it prints the finished run, and `jq` picks out its `id`. Each producer stops once it has sent 10,000,000 records of 1 KB or its time runs out, whichever comes first. `--duration 300` gives it five minutes in place of the Kates API's default of 20.
 
-Combine with trend analysis to track capacity changes over time as your cluster configuration evolves:
+Because each run writes to its own topic and the loop deletes it, only one run's records sit on the brokers' disks at a time. At the Kates API's defaults, a 16-producer run can send about 160 GB, and each of the topic's three replicas keeps a copy.
+
+### Step 2 — Compare the Runs
+
+`kates report compare` takes the IDs in the order the loop collected them, and prints every run's summary as JSON:
+
+```bash
+kates report compare "$IDS"
+```
+
+Output, with illustrative numbers and the last four runs trimmed:
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Comparison
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "baselineRunId": "3f9c2a71",
+  "deltas": {
+    "avgLatencyMs": 2027.5862068965519,
+    "maxLatencyMs": 3780.3312629399593,
+    "p99LatencyMs": 3027.941176470588,
+    "throughputRecPerSec": -75.50149998192792,
+    "totalRecords": 485.61433000000005
+  },
+  "runs": [
+    {
+      "backend": "native",
+      "runId": "3f9c2a71",
+      "scenarioName": null,
+      "summary": {
+        "avgLatencyMs": 2.9,
+        "avgThroughputMBPerSec": 48.6333984375,
+        "avgThroughputRecPerSec": 49800.6,
+        "durationMs": 0,
+        "errorRate": 0,
+        "maxLatencyMs": 48.3,
+        "p50LatencyMs": 2.1,
+        "p95LatencyMs": 4.8,
+        "p999LatencyMs": 0,
+        "p99LatencyMs": 6.8,
+        "peakThroughputRecPerSec": 49800.6,
+        "totalErrors": 0,
+        "totalRecords": 10000000
+      },
+      "testType": "CAPACITY"
+    },
+    ...
+  ]
+}
+```
+
+Reading the output:
+
+1. `runs` holds one entry per ID, in the order you passed them, and the four trimmed entries have the same fields. `baselineRunId` is the first, the 1-producer run.
+2. `avgThroughputRecPerSec` is the mean of the producers' rates, not their sum. `peakThroughputRecPerSec` is the fastest producer's rate, and `totalRecords` counts every producer's records.
+3. `deltas` compare only the baseline with the last run, the 16-producer one, in percent. The throughput delta is per producer: at -75.5%, each of 16 producers got about a quarter of a lone producer's rate.
+
+### Step 3 — Find the Ceiling
+
+Multiply each run's `avgThroughputRecPerSec` by its producer count to get the run's total, and set the total beside the run's `p99LatencyMs`. For the illustrative series, rounded:
+
+| Producers | Mean per producer | Run total | P99 |
+|:-:|--:|--:|--:|
+| 1 | 49,800 rec/s | 49,800 rec/s | 6.8 ms |
+| 2 | 47,650 rec/s | 95,300 rec/s | 7.9 ms |
+| 4 | 42,550 rec/s | 170,200 rec/s | 11.6 ms |
+| 8 | 25,050 rec/s | 200,400 rec/s | 38.4 ms |
+| 16 | 12,200 rec/s | 195,200 rec/s | 212.7 ms |
+
+The total stops rising between 8 and 16 producers, so this cluster's ceiling is about 200,000 records per second. The sustainable figure is the highest total whose P99 meets your SLA. With a 50 ms SLA, that's the 8-producer run's 200,400 records per second; with 20 ms, it's the 4-producer run's 170,200.
+
+### Verify the Runs
+
+A run that failed, or one the load generator limited, draws a curve that says nothing about Kafka. Before you trust the ceiling, check for both:
+
+- `kates test list --type CAPACITY` shows every run of the series as `DONE`, and every summary in the comparison has `totalErrors` of 0.
+- On the native backend, the producers run inside the Kates API's pod. If the pod sits at its CPU limit during the larger runs, the curve has found the pod's ceiling, not Kafka's. The Application Health board in [Kates-Specific Dashboards](09-observability.md#kates-specific-dashboards) shows the pod's CPU.
+- If every total is lower than you expect, check that no quota throttles the Kates client: `kubectl get kafkauser kates-backend -n kafka -o yaml` shows no `quotas` section.
+
+### Stop an Interrupted Series
+
+Stopping the loop with Ctrl-C leaves the current run going, because `--wait` only follows it. Find the run with `kates test list --type CAPACITY --status RUNNING` and stop it with `kates test delete <id>`. Then delete its topic with `kates kafka delete-topic capacity-<N> --yes`, where `<N>` is the run's producer count.
+
+### Track the Ceiling Over Time
+
+Rerun the series after any change that moves capacity, such as new broker hardware, a Kafka upgrade or a different partition count, and compare the two curves. `kates trend` charts one summary metric across the CAPACITY runs of a window:
 
 ```bash
 kates trend --type CAPACITY --metric avgThroughputRecPerSec --days 90
 ```
 
-Expected output:
-
-```text
-  ▸ Capacity Test Results
-  ┌───────┬────────────┬───────────────┬──────────────┐
-  │ Phase │ Producers  │ Throughput    │ P99 Latency  │
-  ├───────┼────────────┼───────────────┼──────────────┤
-  │ 1     │ 2          │ 9,800 rec/s   │ 8.1ms        │
-  │ 2     │ 4          │ 18,200 rec/s  │ 11.4ms       │
-  │ 3     │ 8          │ 32,100 rec/s  │ 18.7ms       │
-  │ 4     │ 16         │ 41,500 rec/s  │ 45.2ms       │
-  │ 5     │ 32         │ 38,900 rec/s  │ 210.5ms  ⚠   │
-  └───────┴────────────┴───────────────┴──────────────┘
-  Sustainable capacity: Phase 4 (16 producers, 41,500 rec/s)
-  Degradation detected at Phase 5: P99 exceeded SLA threshold
-```
-
-::: {.callout-tip}
-If capacity results seem unexpectedly low, check that no resource quotas or Kafka user throttling limits are active. Run `kubectl get kafkauser -n kafka -o yaml` and verify the `quotas` section isn't constraining your test user.
-:::
+The trend plots every CAPACITY run's per-producer mean, whatever its producer count, so a series shows up in it as a falling staircase and can flag its larger runs as regressions. It tracks the ceiling when you rerun one producer count at regular intervals, such as the count at the ceiling. To raise the ceiling on the producer side, continue with [Recipe 6: Producer Tuning](#recipe-6-producer-tuning).
 
 ---
 
@@ -488,7 +550,7 @@ If all four runs show nearly identical throughput, the bottleneck is likely not 
 - Nightly regressions are cheapest to catch with `kates schedule create` plus a weekly `kates trend` review — a spike in the sparkline points you at the run to diff.
 - Chaos certification layers its tests: a LOAD baseline, an INTEGRITY check, disruption playbooks, and finally `kates resilience run`, which measures performance during failure.
 - Latency investigations move from `kates report diff` to `kates report brokers` to heatmap export — vertical stripes suggest GC pauses or leader elections, horizontal bands bimodal paths, upward drift saturation.
-- The CAPACITY test type finds sustainable throughput by escalating load in phases: the last phase before P99 latency breaches your SLA is your ceiling.
+- Capacity planning compares CAPACITY runs at rising producer counts: total throughput levels off at the ceiling, and your P99 SLA picks the sustainable point.
 - Producer tuning is a multi-scenario suite compared with `kates report compare` — batching and linger buy throughput at a latency cost, while compression often improves both.
 
 Every command these recipes lean on has more flags and output formats than shown here — the [CLI Reference](10-cli-reference.md) documents the full command surface.
