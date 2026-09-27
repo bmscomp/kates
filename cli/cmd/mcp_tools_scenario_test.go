@@ -244,6 +244,9 @@ func TestMCPDraftScenarioFieldsTheBackendRefuses(t *testing.T) {
   - name: transactions without idempotence
     type: LOAD
     spec: {topic: kates-mcp-d, enableTransactions: true, enableIdempotence: false, enableCrc: false}
+  - name: round trip with a fetch setting
+    type: ROUND_TRIP
+    spec: {topic: kates-mcp-e, fetchMaxWaitMs: 100}
 `
 	_, out := mcpDraft(t, h, map[string]any{"yaml": yamlText})
 	if out.Verdict != mcpScnInvalid {
@@ -260,6 +263,8 @@ func TestMCPDraftScenarioFieldsTheBackendRefuses(t *testing.T) {
 	if f := mcpScnFindingsOn(out, 3, "spec.enableCrc"); len(f) != 0 {
 		t.Errorf("enableCrc: false asks for no CRC check, which a LOAD run honours; findings %+v", f)
 	}
+	// ROUND_TRIP runs a consumer, so the reason is not "starts no consumer".
+	mcpScnHasFinding(t, out, 4, "spec.fetchMaxWaitMs", mcpScnInvalid, "ROUND_TRIP's consumer reads every partition")
 	mcpScnOnlyPinCheck(t, fb)
 }
 

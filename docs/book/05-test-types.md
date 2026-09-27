@@ -331,9 +331,14 @@ The output is a throughput curve, built by running a series of CAPACITY tests wi
 
 ### Methodology
 
-A ROUND_TRIP test measures the complete message lifecycle: the time from when a producer sends a message to when a consumer receives it. This includes producer latency, replication latency, and consumer fetch latency.
+A ROUND_TRIP test measures the complete record lifecycle: the time from when a producer sends a record to when a consumer receives it. That span includes the producer's batching, the replication the leader waits for before the record becomes readable, and the consumer's fetch.
+
+The sequence below marks where the clock starts and stops. Notice that the producer's acknowledgement comes midway, so a run that stopped there would miss the consumer's half of the trip:
 
 ```mermaid
+%%| label: fig-types-round-trip
+%%| fig-cap: "A ROUND_TRIP sample runs from the producer's send to the consumer's receipt; the producer's acknowledgement falls in between and is not the end point."
+%%| fig-alt: "Sequence diagram with four participants: producer, leader, follower and consumer. The producer sends at t1, the leader replicates to the follower, the follower acknowledges, and the leader acknowledges the producer. The consumer then fetches from the leader, which delivers the record at t2. A note across all four reads: round-trip latency equals t2 minus t1."
 sequenceDiagram
     participant P as Producer
     participant L as Leader
@@ -350,14 +355,32 @@ sequenceDiagram
     Note over P,C: Round-trip latency = t₂ - t₁
 ```
 
+On the default native backend, the producer and the consumer both run inside the Kates API, so one clock times both ends of the trip. The consumer starts first and reads every partition of the topic from its current end, without a consumer group, so records that earlier runs left on the topic are never read ahead of this run's. Each record carries the moment it was sent, and the consumer subtracts that moment from the moment the record arrives. Both readings come from the same clock in the same process, so the difference needs no clock synchronization between hosts.
+
+### Reading the Results
+
+A ROUND_TRIP run has one task, and its row reports both sides of the trip. The table says what each field counts on that row:
+
+| Field | On a ROUND_TRIP row |
+|-------|---------------------|
+| Records and throughput | Records that came back to the consumer, the same records the latency describes; the API field is `recordsSent`, as on every row |
+| Latency, P50 to max | Send to receipt, one sample per record received; the producer's acknowledgement time is not part of it |
+| Error | Sends the broker rejected, and acknowledged records that never came back |
+| Status | FAILED when the broker rejected every send or no acknowledged record came back; otherwise DONE |
+
+A shortfall on either side leaves the run DONE and names the count in the error, so a DONE row with an error is a partial result, not a clean one. Once the producer finishes, the consumer waits until every acknowledged record has arrived, or until 10 seconds pass with none of the rest arriving. With `enableTransactions: true`, the consumer reads with `read_committed`, so each record arrives only when its transaction commits, and its latency includes that wait.
+
 ### Configuration
+
+The ROUND_TRIP defaults trade volume for clean samples, and the consumer's settings are fixed:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `parallelProducers` | 1 | Ignored: ROUND_TRIP runs one producer |
 | `numConsumers` | 1 | Ignored: ROUND_TRIP runs one consumer |
 | `records` | 500,000 | Records to measure |
-| `targetThroughput` | 10,000 msg/s | Rate-limited to keep latency measurements clean; the 10,000 is the ROUND_TRIP default, and this key replaces it |
+| `targetThroughput` | 10,000 rec/s | Rate-limited to keep latency measurements clean; the 10,000 is the ROUND_TRIP default, and this key replaces it |
+| `consumerGroup`, `fetchMinBytes`, `fetchMaxWaitMs` | — | Refused with a `400`: the consumer reads without a group, with the Kafka client's fetch defaults |
 
 **Scenario file equivalent:**
 
@@ -371,6 +394,10 @@ scenarios:
       maxP99LatencyMs: 25
       maxAvgLatencyMs: 10
 ```
+
+### Limits
+
+End-to-end latency comes only from the native backend. On the Trogdor backend (`--backend trogdor`), Trogdor's round-trip workload counts the records it sends and receives but reports no latency. The row's records are the ones received, as on the native backend, but every latency field reads 0, which means not measured. A latency gate such as `maxP99LatencyMs` compares against that 0 and passes, so run ROUND_TRIP on the native backend whenever the latency matters. A record the producer retried can arrive twice, and each arrival is timed: ROUND_TRIP does not check for duplicates, and INTEGRITY does.
 
 ---
 

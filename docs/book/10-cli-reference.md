@@ -595,7 +595,7 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 | `--records` | Number of records |
 | `--record-size` | Record payload size in bytes |
 | `--producers` | Number of producers. STRESS and CAPACITY start this many; every other type runs one producer whatever the flag says |
-| `--consumers` | Accepted, but no test type reads it: LOAD, ENDURANCE and INTEGRITY run one consumer, the other types none |
+| `--consumers` | Accepted, but no test type reads it: LOAD, ENDURANCE, INTEGRITY and ROUND_TRIP run one consumer, the other types none |
 | `--consumer-group` | Consumer group, for LOAD, ENDURANCE and INTEGRITY (whose consumer joins it with `-integrity` appended); without it the Kates API names the group. A LOAD or ENDURANCE consumer commits offsets in it, so do not name a group an application uses. Refused for other types (see the callout below) |
 | `--acks` | Producer acks mode: `0`, `1`, `all` |
 | `--topic` | Target topic name |
@@ -612,7 +612,7 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 ::: {.callout-important}
 **`--throughput` sets the rate, and some flags do not apply to every type**
 
-`--throughput` sends `targetThroughput`, which the Kates API uses as the rate of each producer in place of the type's default. That default is unthrottled for most types, and on a default install 5,000 records per second for ENDURANCE and 10,000 for ROUND_TRIP. The API also takes the rate as `throughput`, the name a `kates resilience run` file uses, and that one wins when a request sets both. SPIKE and CAPACITY always run unthrottled, and only LOAD, ENDURANCE and INTEGRITY start a consumer, so the Kates API refuses a `--throughput` rate for the first two, and `--consumer-group` and the fetch flags for types without a consumer: the command fails with `[400] Validation Failed:` and a message naming the field, and no run starts.
+`--throughput` sends `targetThroughput`, which the Kates API uses as the rate of each producer in place of the type's default. That default is unthrottled for most types, and on a default install 5,000 records per second for ENDURANCE and 10,000 for ROUND_TRIP. The API also takes the rate as `throughput`, the name a `kates resilience run` file uses, and that one wins when a request sets both. SPIKE and CAPACITY always run unthrottled, and only LOAD, ENDURANCE and INTEGRITY take consumer settings, so the Kates API refuses a `--throughput` rate for the first two, and `--consumer-group` and the fetch flags for every other type: the command fails with `[400] Validation Failed:` and a message naming the field, and no run starts.
 :::
 
 ::: {.callout-important}
