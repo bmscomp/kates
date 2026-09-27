@@ -166,7 +166,7 @@ A named, ordered list of steps, each a fault with its steady-state wait, observa
 
 ### Disruption Rollback {#gl-disruption-rollback}
 
-What Kates undoes after a failed disruption step while the plan's `autoRollback` is on: the NetworkPolicies it created for a `NETWORK_PARTITION`, or a `SCALE_DOWN`'s missing broker, and nothing for any other fault type. A step fails this way when its recovery check times out (`requireRecovery` on) or when it throws; ISR depth, lag and the SLA grade never trigger it. See [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
+What Kates undoes after a failed disruption step while the plan's `autoRollback` is on: the NetworkPolicies it created for a `NETWORK_PARTITION`, or a `SCALE_DOWN`'s missing broker, and nothing for any other disruption type. A step fails this way when its recovery check times out (`requireRecovery` on) or when it throws; ISR depth, lag and the SLA grade never trigger it. See [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
 
 ### Disruption Type {#gl-disruption-type}
 
