@@ -4,18 +4,18 @@ Chaos engineering is the discipline of experimenting on a distributed system to 
 
 You don't need prior chaos tooling experience — just a working knowledge of Kafka's replication model. After this chapter, you can:
 
-- State a steady-state hypothesis with measurable pass/fail criteria
-- Predict how Kafka behaves during leader election, ISR shrink, and consumer group rebalance
-- Structure a Game Day from hypothesis through follow-up
-- Choose between LitmusChaos, Trogdor, and manual kubectl for a fault injection experiment
+- State a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis) with measurable pass/fail criteria
+- Predict how Kafka behaves during leader election, [ISR shrink](appendix-a-glossary.md#gl-isr-shrink), and [consumer group](appendix-a-glossary.md#gl-consumer-group) rebalance
+- Structure a [Game Day](appendix-a-glossary.md#gl-game-day) from hypothesis through follow-up
+- Say where Kates's [faults](appendix-a-glossary.md#gl-fault) come from, and tell a disruption plan from a [resilience run](appendix-a-glossary.md#gl-resilience-run)
 
 ## Why Chaos Engineering?
 
-Distributed systems fail in ways that are impossible to predict from reading code alone. A Kafka cluster might handle a single broker failure gracefully in theory, but in practice:
+Distributed systems fail in ways that are impossible to predict from reading code alone. A Kafka cluster might handle a single [broker](appendix-a-glossary.md#gl-broker) failure gracefully in theory, but in practice:
 
-- The leader election might take 30 seconds instead of 3
-- Consumer groups might rebalance in a thundering herd
-- The surviving brokers might hit memory pressure from absorbing extra partitions
+- The [leader election](appendix-a-glossary.md#gl-leader-election) might take 30 seconds instead of 3
+- Consumer groups might [rebalance](appendix-a-glossary.md#gl-rebalance) in a thundering herd
+- The surviving brokers might hit memory pressure from absorbing extra [partitions](appendix-a-glossary.md#gl-partition)
 - Network timeouts might cascade into producer retries that amplify the problem
 
 Chaos engineering replaces **hope** with **evidence**.
@@ -48,11 +48,11 @@ The five principles below come from the [Principles of Chaos Engineering](https:
 
 Before injecting chaos, you must define what "normal" looks like. For Kafka, steady state includes:
 
-- All partitions have leaders
-- ISR count equals replication factor
-- Producer throughput meets the target rate
-- Consumer lag is bounded
-- P99 latency is within SLA
+- All partitions have [leaders](appendix-a-glossary.md#gl-partition-leader)
+- [ISR](appendix-a-glossary.md#gl-isr) count equals [replication factor](appendix-a-glossary.md#gl-rf)
+- Producer [throughput](appendix-a-glossary.md#gl-throughput) meets the target rate
+- [Consumer lag](appendix-a-glossary.md#gl-consumer-lag) is bounded
+- [P99](appendix-a-glossary.md#gl-percentile) latency is within [SLA](appendix-a-glossary.md#gl-sla)
 
 ### 2. Vary Real-World Events
 
@@ -90,21 +90,23 @@ graph TB
     end
 ```
 
+Kates has no [disruption type](appendix-a-glossary.md#gl-disruption-type) for disk failure, packet loss, configuration or log corruption, or clock skew; `kates disruption types` lists the ones it has.
+
 ### 3. Run Experiments in Production (or Production-Like)
 
-Chaos experiments in a toy environment prove nothing. The Kind cluster in this project is configured to mirror production topology:
+[Chaos experiments](appendix-a-glossary.md#gl-chaos-experiment) in a toy environment prove nothing. The [Kind](appendix-a-glossary.md#gl-kind) cluster in this project is configured to mirror a production node layout:
 
 | Production Property | Kind Equivalent |
 |---|---|
-| Multi-AZ deployment | 3 nodes with zone labels |
-| Rack-aware replication | Strimzi rack configuration |
+| Multi-zone deployment | 3 nodes with [zone](appendix-a-glossary.md#gl-zone) labels |
+| Zone-aware replication | [Strimzi](appendix-a-glossary.md#gl-strimzi) `rack` configuration |
 | Resource constraints | Memory limits on brokers |
-| Persistent storage | PVCs with zone-specific StorageClasses |
-| Monitoring | Same Prometheus/Grafana stack |
+| Persistent storage | [PVCs](appendix-a-glossary.md#gl-pvc) with zone-specific StorageClasses |
+| Monitoring | Same [Prometheus](appendix-a-glossary.md#gl-prometheus)/[Grafana](appendix-a-glossary.md#gl-grafana) stack |
 
 ### 4. Automate Experiments to Run Continuously
 
-One-off chaos tests are useful; scheduled, repeating chaos tests are powerful. Kates supports cron-based scheduling:
+One-off chaos experiments are useful; scheduled, repeating ones show when a change makes the cluster worse. Kates supports cron-based scheduling: `kates disruption schedule create` repeats a [playbook](appendix-a-glossary.md#gl-playbook), and `kates schedule create` repeats a test, such as a nightly [INTEGRITY](appendix-a-glossary.md#gl-test-type) run:
 
 ```bash
 # Run an integrity test every night at 2 AM
@@ -117,9 +119,14 @@ kates schedule create --name "Nightly Integrity" --cron "0 2 * * *" --request in
 Start small and expand:
 
 ```mermaid
+%%| label: fig-chaos-escalation
+%%| fig-cap: "Escalate one rung at a time: from one broker with a known recovery, to two brokers, to a whole zone."
+%%| fig-alt: "Four levels left to right. Level 1: kill 1 broker, with a known recovery. Level 2: a network partition that isolates 1 broker. Level 3: kill 2 brokers, where acks=all writes fail. Level 4: a full zone failure, by node drain."
 graph LR
-    L1["Level 1<br/>Kill 1 pod<br/>Known recovery"] --> L2["Level 2<br/>Network partition<br/>1 broker isolated"] --> L3["Level 3<br/>Kill 2 pods<br/>Near quorum loss"] --> L4["Level 4<br/>Full AZ failure<br/>Node drain"]
+    L1["Level 1<br/>Kill 1 broker<br/>Known recovery"] --> L2["Level 2<br/>Network partition<br/>1 broker isolated"] --> L3["Level 3<br/>Kill 2 brokers<br/>acks=all writes fail"] --> L4["Level 4<br/>Full zone failure<br/>Node drain"]
 ```
+
+In a Kates [disruption plan](appendix-a-glossary.md#gl-disruption-plan), each rung is a `maxAffectedBrokers` value: `1` for the first two, `2` for the third, and the zone's broker count for the last. The `az-failure` playbook caps that last value at `3` when it kills the zone's pods. The [safety guard](appendix-a-glossary.md#gl-safety-guard) refuses a plan that would hit more brokers than that, or every broker: see [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
 
 ## The Game Day Methodology
 
@@ -162,7 +169,7 @@ graph TD
 
 ### Example Hypothesis
 
-> **Hypothesis:** "When we kill the leader broker for our main topic, producer latency will spike to no more than 500ms during leader election (which should complete within 10 seconds), and zero messages will be lost."
+> **Hypothesis:** "When we kill the leader broker for our main [topic](appendix-a-glossary.md#gl-topic), producer latency will spike to no more than 500ms during leader election (which should complete within 10 seconds), and zero messages will be lost."
 
 This hypothesis is testable, measurable, and has clear pass/fail criteria.
 
@@ -201,7 +208,7 @@ Key timing (with default broker and client configs):
 | Phase | Typical Duration | Depends On |
 |-------|:---:|---|
 | Failure detection | 5–15s | `session.timeout.ms`, health check interval |
-| Leader election | \< 1s | Number of partitions, controller load |
+| Leader election | \< 1s | Number of partitions, [controller](appendix-a-glossary.md#gl-controller) load |
 | Client reconnection | 1–5s | `metadata.max.age.ms`, retry backoff |
 | **Total unavailability** | **6–20s** | Sum of all phases |
 
@@ -256,7 +263,7 @@ Watch these signals while a fault is active. For each one, the table says what a
 
 | Metric | What to Watch |
 |--------|---------------|
-| **Under-replicated partitions** | Should spike briefly, then return to 0 |
+| **[Under-replicated partitions](appendix-a-glossary.md#gl-under-replicated-partition)** | Should spike briefly, then return to 0 |
 | **Offline partitions** | Should be 0 (if RF > failed brokers) |
 | **Active controller changes** | Should happen exactly once per controller failure |
 | **Consumer lag** | Should spike during failure, then drain |
@@ -264,11 +271,11 @@ Watch these signals while a fault is active. For each one, the table says what a
 | **Leader election rate** | Should equal the number of partitions on the failed broker |
 | **Recovery time** | Time from failure to all ISRs fully expanded |
 
-These metrics form the foundation of SLA grading in Kates disruption tests.
+A Kates [disruption](appendix-a-glossary.md#gl-disruption) reports several of them. `kates disruption kafka-metrics` shows each step's time to full ISR, minimum ISR depth and peak under-replicated partitions, and consumer lag when the plan names a group. A plan's `sla` block can set targets for P99 latency, throughput and how long the Kafka pods take to be Ready again, and the plan's [SLA grade](appendix-a-glossary.md#gl-sla-grade) says how the run met them.
 
 ## Game Day Pipeline
 
-A fully automated Game Day follows a 7-phase pipeline. Each phase has a clear entry gate and exit criteria:
+A fully automated Game Day follows a 7-phase pipeline. Each phase has clear entry and exit criteria:
 
 ```mermaid
 flowchart TB
@@ -289,29 +296,14 @@ make gameday
 
 ## Fault Injection Approaches
 
-Kates supports multiple fault injection backends. Choose based on your environment and needs:
+In Kates, where a fault comes from is a deployment setting, not a choice you make per experiment. Every fault goes through one [chaos provider](appendix-a-glossary.md#gl-chaos-provider), a setting of the [Kates API](appendix-a-glossary.md#gl-kates-api): [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos) by default, or the Kubernetes API directly, which needs nothing installed but runs fewer fault types. What you do choose per experiment is how to run the fault. A disruption plan injects faults and watches the cluster from outside, while `kates resilience run` injects one fault under a Kates test and measures what a client sees. [Chaos Engineering in Practice](07-chaos-practice.md) compares the providers and the two ways to run a fault.
 
-| Feature | LitmusChaos | Trogdor | Manual kubectl |
-|---------|:-----------:|:-------:|:--------------:|
-| **Scope** | General-purpose Kubernetes chaos | Kafka-specific fault injection | Ad-hoc pod/network operations |
-| **Installation** | Helm chart + CRDs | Bundled with Apache Kafka | None (built into Kubernetes) |
-| **Kafka awareness** | Low — operates at pod/network level | High — understands partitions, brokers, topics | None |
-| **Experiment types** | Pod kill, network chaos, CPU/memory stress, disk fill | Broker bounce, network degrade, produce/consume workloads | Pod delete, node drain, network policy changes |
-| **Scheduling** | CronWorkflows via Argo or native ChaosSchedule | Trogdor coordinator API | Cron jobs or CI/CD triggers |
-| **Observability** | ChaosResult CRDs + Prometheus metrics | Trogdor status API | Manual log inspection |
-| **Blast radius control** | Annotations, labels, namespace selectors | Agent-level targeting | Manual — requires discipline |
-| **Reproducibility** | Declarative YAML ChaosExperiments | Declarative JSON task specs | Script-dependent |
-| **Best for** | Production chaos with safety guardrails | Kafka-internal workload simulation | Quick smoke tests, debugging |
-| **Kates integration** | Native — `kates disruption run` uses LitmusChaos | Optional — selectable test workload backend (`backend: trogdor` in the test request) | Manual — run alongside Kates tests |
-
-::: {.callout-tip}
-For most Kates users, **LitmusChaos** is the recommended default. It provides the best balance of safety, observability, and Kubernetes-native integration. Use Trogdor when you need Kafka-internal fault injection (e.g., simulating slow brokers at the protocol level), and manual kubectl for quick one-off debugging sessions.
-:::
+Two other tools sit near chaos but inject nothing through Kates. [Trogdor](appendix-a-glossary.md#gl-trogdor) is a [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) in Kates: it generates load, as [Test Types Deep Dive](05-test-types.md) explains, and never injects a fault. A pod you delete by hand with `kubectl` disrupts the cluster just the same, but Kates doesn't know it happened: no plan report lists it, and an INTEGRITY run it hits reports [RPO](appendix-a-glossary.md#gl-rpo) as not measured.
 
 ::: {.callout-tip}
 **Try it**
 
-Write a steady-state hypothesis for the `krafter` Kafka cluster — bounded latency, zero offline partitions, ISR equal to the replication factor — then check each claim against live data:
+Write a steady-state hypothesis for the [`krafter`](appendix-a-glossary.md#gl-krafter) Kafka cluster — bounded latency, zero offline partitions, ISR equal to the replication factor — then check each claim against live data:
 
 ```bash
 # Baseline probe: under-replicated and offline partition counts
@@ -320,7 +312,7 @@ kates cluster check
 # Confirm the topology your hypothesis assumes (brokers per zone)
 kates cluster topology
 
-# List the faults you could inject against it
+# List the disruption types (your chaos provider may not run them all)
 kates disruption types
 ```
 
@@ -332,8 +324,8 @@ Expect `kates cluster check` to report zero under-replicated and zero offline pa
 - Chaos engineering replaces hope with evidence: hypothesize steady state, inject real-world faults, and measure the gap between prediction and behavior.
 - A useful hypothesis is testable and measurable — bounded latency spike, bounded recovery time, zero message loss — with explicit pass/fail criteria.
 - Kafka fails in specific ways: leader election costs seconds of partition unavailability, ISR shrink erodes durability before availability, and eager rebalances stop the entire consumer group.
-- Minimize blast radius — start with a single pod kill and a known recovery path, and escalate only after each level passes.
-- The Game Day pipeline — pre-flight, baseline, chaos, observe, recover, post-flight, report — automates the full methodology via `make gameday`.
-- LitmusChaos is the default fault injection backend; reach for Trogdor when the fault must live inside Kafka's protocol, and manual kubectl for quick smoke tests.
+- Minimize [blast radius](appendix-a-glossary.md#gl-blast-radius) — start with a single pod kill and a known recovery path, and escalate only after each level passes.
+- The Game Day pipeline — pre-flight, [baseline](appendix-a-glossary.md#gl-baseline), chaos, observe, recover, post-flight, report — automates the full methodology via `make gameday`.
+- Kates injects faults through one chaos provider, LitmusChaos by default; Trogdor generates load, and a manual `kubectl` fault leaves no Kates record.
 
-[Chaos Engineering in Practice](07-chaos-practice.md) turns these principles into runnable disruption tests — playbooks, safety guardrails, and SLA grading included.
+[Chaos Engineering in Practice](07-chaos-practice.md) turns these principles into runnable disruption plans — playbooks, safety guardrails, and SLA grading included.
