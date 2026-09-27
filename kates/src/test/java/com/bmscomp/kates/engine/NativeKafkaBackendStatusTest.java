@@ -106,6 +106,77 @@ class NativeKafkaBackendStatusTest {
         assertNull(state.error);
     }
 
+    /** A round trip's records are the ones that came back; its sends are counted apart. */
+    private NativeKafkaBackend.WorkerState finishRoundTrip(long sent, long rejected, long received) {
+        BenchmarkTask task = task(BenchmarkTask.WorkloadType.ROUND_TRIP);
+        NativeKafkaBackend.WorkerState state = new NativeKafkaBackend.WorkerState(task);
+        state.status = TaskStatus.RUNNING;
+        state.recordsSent.set(sent);
+        state.errors.set(rejected);
+        state.recordsProcessed.set(received);
+        if (rejected > 0) {
+            state.recordSendError(new org.apache.kafka.common.errors.TimeoutException("expired"));
+        }
+        backend.applyPostConditions(task, state);
+        return state;
+    }
+
+    @Test
+    @DisplayName("a round trip whose every record came back is clean")
+    void roundTripWithEverythingBackSucceeds() {
+        NativeKafkaBackend.WorkerState state = finishRoundTrip(1000, 0, 1000);
+
+        assertEquals(TaskStatus.DONE, state.status);
+        assertNull(state.error);
+    }
+
+    @Test
+    @DisplayName("a round trip whose every send was rejected has not succeeded")
+    void roundTripWithAllSendsRejectedFails() {
+        NativeKafkaBackend.WorkerState state = finishRoundTrip(500, 500, 0);
+
+        assertEquals(TaskStatus.FAILED, state.status);
+        assertTrue(state.error.contains("All 500 sends"), state.error);
+        assertTrue(state.error.contains("expired"), state.error);
+    }
+
+    @Test
+    @DisplayName("a round trip that got nothing back has measured nothing")
+    void roundTripWithNothingBackFails() {
+        // The producer alone looks like a clean run; the latency it would have
+        // reported was never end to end.
+        NativeKafkaBackend.WorkerState state = finishRoundTrip(1000, 0, 0);
+
+        assertEquals(TaskStatus.FAILED, state.status);
+        assertTrue(state.error.contains("None of the 1000"), state.error);
+        assertTrue(state.error.contains("kates-run-1"), state.error);
+    }
+
+    @Test
+    @DisplayName("records missing on either side are a result, and each side is named")
+    void roundTripShortfallsAreRecorded() {
+        NativeKafkaBackend.WorkerState state = finishRoundTrip(1000, 3, 990);
+
+        assertEquals(TaskStatus.DONE, state.status);
+        assertTrue(state.error.contains("3 of 1000 sends were rejected: expired"), state.error);
+        assertTrue(state.error.contains("7 of 997 acknowledged records did not come back"), state.error);
+    }
+
+    @Test
+    @DisplayName("a round trip told to stop early is obeying, not failing")
+    void stoppedRoundTripIsNotAFailure() {
+        BenchmarkTask task = task(BenchmarkTask.WorkloadType.ROUND_TRIP);
+        NativeKafkaBackend.WorkerState state = new NativeKafkaBackend.WorkerState(task);
+        state.status = TaskStatus.RUNNING;
+        state.recordsSent.set(1000);
+        state.stopRequested.set(true);
+
+        backend.applyPostConditions(task, state);
+
+        assertEquals(TaskStatus.DONE, state.status);
+        assertNull(state.error);
+    }
+
     @Test
     @DisplayName("CDC keeps the status its own service decided")
     void integrityCdcStatusIsLeftAlone() {

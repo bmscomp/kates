@@ -22,9 +22,10 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.persistence.ProfileEntity;
+import com.bmscomp.kates.report.ReportSummary;
 import com.bmscomp.kates.service.TestRunRepository;
+import com.bmscomp.kates.util.MetricUtils;
 
 @Path("/api/profiles")
 @Produces(MediaType.APPLICATION_JSON)
@@ -92,22 +93,15 @@ public class ProfileResource {
                             req.runId());
 
                     if (!run.getResults().isEmpty()) {
-                        double throughput = 0, p50 = 0, p95 = 0, p99 = 0, avg = 0, records = 0;
-                        int n = run.getResults().size();
-                        for (TestResult r : run.getResults()) {
-                            throughput += r.getThroughputRecordsPerSec();
-                            p50 += r.getP50LatencyMs();
-                            p95 += r.getP95LatencyMs();
-                            p99 += r.getP99LatencyMs();
-                            avg += r.getAvgLatencyMs();
-                            records += r.getRecordsSent();
-                        }
-                        profile.setThroughput(throughput / n);
-                        profile.setP50Ms(p50 / n);
-                        profile.setP95Ms(p95 / n);
-                        profile.setP99Ms(p99 / n);
-                        profile.setAvgMs(avg / n);
-                        profile.setRecords(records);
+                        // The run's summary, so a profile's latencies match its
+                        // report's rather than averaging the consumer's 0s in.
+                        ReportSummary summary = MetricUtils.computeSummary(run.getResults());
+                        profile.setThroughput(summary.avgThroughputRecPerSec());
+                        profile.setP50Ms(summary.p50LatencyMs());
+                        profile.setP95Ms(summary.p95LatencyMs());
+                        profile.setP99Ms(summary.p99LatencyMs());
+                        profile.setAvgMs(summary.avgLatencyMs());
+                        profile.setRecords((double) summary.totalRecords());
                     }
 
                     em.persist(profile);

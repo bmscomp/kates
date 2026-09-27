@@ -1199,6 +1199,10 @@ The chart creates these 8 topics. The Kates API writes none of the `kates-*` one
 An existing `kates-dlq` that was created compacted takes `cleanup.policy: delete` on the next upgrade and keeps its records: `retention.ms` stays unlimited, so nothing is deleted by age. Under delete, the brokers' `log.retention.bytes` — 10 GiB per partition in the chart's values — applies to it as well, so only a partition already over that size loses its oldest segments.
 :::
 
+The chart doesn't create `kates-test-events`, the one topic the Kates API writes itself. The topic carries each run's lifecycle events from the Kates API's outbox to its webhook consumer, so no webhook fires without it. `krafter` doesn't create a topic on first use (`auto.create.topics.enable: false`), so the Kates API creates this one through the Kafka Admin API. It checks when it starts and every minute after, and gives the topic one partition, three replicas (fewer on a smaller cluster), `cleanup.policy: delete` and 7 days' retention. A `kates-test-events` that already exists keeps its settings.
+
+The same applies when the Kates API tests a Kafka cluster you run yourself, as long as its Kafka principal may create topics; on `krafter`, `kates-backend` is a super user, so no ACL applies to it. If your principal may not, create `kates-test-events` yourself with the settings above. On a cluster with ACLs, grant the principal Read and Write on the topic, and Read on the consumer group `kates-webhooks`. Every replica of the Kates API reads the topic in that one group and resumes from the offsets it committed, so an event published while no replica was reading still reaches the webhooks. To use another group name, set `MP_MESSAGING_INCOMING_TEST_EVENTS_IN_GROUP_ID` through `extraEnv`. Until the topic exists, the Kates API logs `The outbox topic kates-test-events is missing and could not be created`, and each lifecycle event ends in the `outbox_dead_letters` table. To stop the Kates API from checking for the topic and creating it, set `KATES_OUTBOX_TOPIC_CHECK_INTERVAL` to `off` through the `kates` chart's `extraEnv`.
+
 To list all topics using the kates CLI:
 
 ```bash

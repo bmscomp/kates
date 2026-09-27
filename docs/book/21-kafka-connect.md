@@ -681,7 +681,7 @@ EOS requires `min.insync.replicas >= 2` on the data topics and `acks=all` on the
 | Scenario | Recommendation |
 |----------|---------------|
 | Sink-only connectors | Not applicable — EOS is for source connectors only |
-| Extremely high throughput (>100k records/s) | EOS adds ~5% latency — benchmark first |
+| Extremely high throughput (>100k rec/s) | EOS adds ~5% latency — benchmark first |
 | Non-critical data (metrics, logs) | Disable (`exactlyOnce.enabled: false`) for better throughput; at-least-once is acceptable |
 
 ---

@@ -57,12 +57,7 @@ README files, GitHub PRs, or dashboards.`,
 
 		case "p99":
 			if len(run.Results) > 0 {
-				var avg float64
-				for _, r := range run.Results {
-					avg += r.P99LatencyMs
-				}
-				avg /= float64(len(run.Results))
-				value = fmt.Sprintf("%.0fms", avg)
+				value = fmt.Sprintf("%.0fms", latencyOf(run.Results).P99Ms)
 			} else {
 				value = "N/A"
 			}

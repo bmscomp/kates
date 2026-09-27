@@ -310,6 +310,8 @@ The `kafka-cluster` chart's platform profile creates these topics as [`KafkaTopi
 
 A test produces to whatever topic its spec names, so these topics carry traffic only when a test or a script names them, as several example [scenario files](appendix-a-glossary.md#gl-scenario-file) in `cli/examples` do. Their partition counts, retention and compression are the profile's settings, not a measure of any traffic Kates generates.
 
+The one topic the Kates API writes on its own isn't in the table, because the profile doesn't create it. `kates-test-events` carries each run's lifecycle events to the Kates API's webhook consumer, and `krafter` doesn't create a topic on first use (`auto.create.topics.enable: false`). So the Kates API creates it through the Kafka Admin API, checking when it starts and every minute after. It gives the topic one partition, three replicas (fewer on a smaller cluster), `cleanup.policy: delete` and 7 days' retention, and leaves an existing `kates-test-events` as it is. [Where Results Live](02-architecture.md#where-results-live) follows an event through it.
+
 ## Operational Components
 
 Beyond the brokers and controllers, the cluster can include several components that affect how the system behaves under test. On `panda`, only the [Entity Operator](appendix-a-glossary.md#gl-entity-operator) of these four runs:

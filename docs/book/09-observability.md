@@ -499,6 +499,8 @@ The counts are cumulative: a row covers everything its task has recorded since t
 
 Individual test results are snapshots. Trend analysis turns those snapshots into a movie, letting you see how performance evolves over days and weeks. This is how you catch regressions early — before they reach production.
 
+Without `--phase`, each point is the run's report summary, whose latency comes from its producers: a LOAD run's consumer measures none, so it is left out rather than averaged in. With `--phase`, each point is that phase's own summary. The table under [GET /api/tests/{id}/report](11-api-reference.md#get-apitestsidreport), in the REST API Reference, shows how each metric combines a run's tasks.
+
 ```bash
 # View P99 latency trend for LOAD tests over the last 30 days
 kates trend --type LOAD --metric p99LatencyMs --days 30
@@ -521,7 +523,7 @@ A sudden upward spike in the sparkline chart indicates a regression. That spike 
 
 ## Report Comparison
 
-Kates supports comparing multiple test runs side-by-side. This is essential for answering the question "did my change make things better or worse?" — comparing before/after runs eliminates the noise of absolute numbers and focuses on relative change.
+Kates supports comparing multiple test runs side-by-side. This is essential for answering the question "did my change make things better or worse?" — comparing before/after runs eliminates the noise of absolute numbers and focuses on relative change. Both commands compare the runs' report summaries, so their latency comes from the runs' producers, as a trend's does.
 
 ```bash
 # Compare two runs

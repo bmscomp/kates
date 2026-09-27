@@ -54,14 +54,14 @@
       "broken_handoff": 0
     },
     "05-test-types.md": {
-      "bare_headings": 10,
-      "tables_without_lead_in": 9,
+      "bare_headings": 9,
+      "tables_without_lead_in": 8,
       "bold_lead_bullets": 11,
       "numbered_headings": 0,
       "formula_openings": 1,
       "changelog_phrases": 1,
       "long_fence_lines": 0,
-      "mermaid_uncaptioned": 9,
+      "mermaid_uncaptioned": 8,
       "hr_rules": 7,
       "scope_blockquotes": 0,
       "broken_handoff": 0
@@ -151,7 +151,7 @@
       "numbered_headings": 0,
       "formula_openings": 0,
       "changelog_phrases": 0,
-      "long_fence_lines": 52,
+      "long_fence_lines": 51,
       "mermaid_uncaptioned": 0,
       "hr_rules": 13,
       "scope_blockquotes": 0,
@@ -184,7 +184,7 @@
       "broken_handoff": 0
     },
     "14-recipes.md": {
-      "bare_headings": 3,
+      "bare_headings": 2,
       "tables_without_lead_in": 0,
       "bold_lead_bullets": 0,
       "numbered_headings": 0,
