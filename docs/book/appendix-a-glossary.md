@@ -206,7 +206,7 @@ One injected failure: a disruption type aimed at the pods a label selector picks
 
 ### Fencing {#gl-fencing}
 
-The KRaft controller's act of ceasing to count a broker as live once its session expires, so the broker leads no partition and leaves every ISR until it registers again. See [The Cluster Under Test](03-cluster.md#the-kraft-quorum).
+The KRaft controller's act of ceasing to count a broker as live once its session expires, so the broker loses the leadership of its partitions and leaves every ISR. The controller unfences it once its heartbeats get through again and it has caught up with the metadata log; a broker that restarts registers again first. See [The Cluster Under Test](03-cluster.md#the-kraft-quorum).
 
 ## G
 
@@ -268,7 +268,7 @@ The default namespace layout of `kates deploy` (`--topology isolated`): Kafka, t
 
 ### ISR {#gl-isr}
 
-The in-sync replicas: the replicas of a partition that are caught up with its leader, the leader included; an `acks=all` write waits for all of them. On `krafter` the ISR of a healthy partition is all three replicas; `min.insync.replicas` is the floor below which writes stop, not the ISR's size. See [The Cluster Under Test](03-cluster.md#replication-configuration).
+The in-sync replicas: the replicas of a partition that are caught up with its leader, the leader included; an `acks=all` write waits for all of them. On `krafter` the ISR of a healthy partition is all three replicas; `min.insync.replicas` is the floor below which `acks=all` writes stop, not the ISR's size. See [The Cluster Under Test](03-cluster.md#replication-configuration).
 
 ### ISR Shrink {#gl-isr-shrink}
 
@@ -392,7 +392,7 @@ The rule that every series an alert or a dashboard panel reads is one the chart'
 
 ### `min.insync.replicas` {#gl-min-insync-replicas}
 
-The smallest ISR a partition's leader accepts an `acks=all` write with: a floor, not a target, below which the leader refuses such writes rather than keep too few copies. 2 on `krafter` (3 replicas), so one broker can fail without stopping writes and a second stops them. A test's `minInsyncReplicas` sets it when Kates creates the test topic; a topic that already exists keeps its own. See [The Cluster Under Test](03-cluster.md#replication-configuration).
+The smallest ISR a partition's leader accepts an `acks=all` write with: a floor, not a target, below which the leader refuses such writes rather than keep too few copies. 2 on `krafter` (3 replicas), so one broker can fail without stopping `acks=all` writes, and a second stops them. A test's `minInsyncReplicas` sets it when Kates creates the test topic; a topic that already exists keeps its own. See [The Cluster Under Test](03-cluster.md#replication-configuration).
 
 ### MirrorMaker 2 {#gl-mirrormaker-2}
 
@@ -558,7 +558,7 @@ A container security setting that mounts the root filesystem read-only, so the c
 
 ### Rebalance {#gl-rebalance}
 
-Three things in this book: a consumer-group rebalance reassigns a group's partitions when a member joins or leaves; a Kafka Connect rebalance reassigns tasks among workers; a Cruise Control rebalance moves partition replicas between brokers. Kates's test consumers use the classic group protocol. Under the eager protocol every member stops during a consumer-group rebalance; cooperative and KIP-848 rebalances pause only the partitions that move. See [Chaos Engineering Theory](06-chaos-theory.md#consumer-group-rebalance).
+Three things in this book: a consumer-group rebalance reassigns a group's partitions when a member joins or leaves; a Kafka Connect rebalance reassigns tasks among workers; a Cruise Control rebalance moves partition replicas between brokers. The native benchmark backend's consumers use the classic group protocol. Under the eager protocol every member stops during a consumer-group rebalance; cooperative and KIP-848 rebalances pause only the partitions that move. See [Chaos Engineering Theory](06-chaos-theory.md#consumer-group-rebalance).
 
 ### Recipe {#gl-recipe}
 
