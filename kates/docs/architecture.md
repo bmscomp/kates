@@ -124,7 +124,6 @@ com.bmscomp.kates
 │   └── TestScheduler      Cron-based test scheduling
 │
 └── service/              Business logic
-    ├── TestExecutionService   Legacy orchestration (Trogdor-only)
     ├── TestRunRepository      In-memory storage (being replaced by JPA)
     └── KafkaAdminService      Topic/cluster management (AdminClient)
 ```
