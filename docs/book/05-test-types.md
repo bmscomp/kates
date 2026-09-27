@@ -221,7 +221,7 @@ Each row is a moment around the burst and what to note there. A SPIKE run measur
 
 ### Methodology
 
-An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended period** — up to 30 minutes on a default install, hours once you raise the [Kates API](appendix-a-glossary.md#gl-kates-api)'s run limit — to detect slow resource leaks and gradual degradation.
+An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended period** — up to 30 minutes on a default install, hours once you raise the run limit of the [Kates API](appendix-a-glossary.md#gl-kates-api), the service in the cluster that runs your tests — to detect slow resource leaks and gradual degradation.
 
 ```mermaid
 graph LR
@@ -476,7 +476,7 @@ scenarios:
 
 ### Integrity + Chaos
 
-The real power of INTEGRITY tests emerges when combined with chaos engineering. An INTEGRITY run injects no [fault](appendix-a-glossary.md#gl-fault) by itself: `kates resilience run` pairs a test request with one fault, injected while the test runs. That pairing is a [resilience run](appendix-a-glossary.md#gl-resilience-run), one of the two ways Kates runs a [chaos experiment](appendix-a-glossary.md#gl-chaos-experiment), and it doesn't go through the safety guard that checks a disruption plan (see [Chaos Engineering in Practice](07-chaos-practice.md)):
+The real power of INTEGRITY tests emerges when combined with chaos engineering. An INTEGRITY run injects no [fault](appendix-a-glossary.md#gl-fault) by itself: `kates resilience run` pairs a test request with one fault, injected while the test runs. That pairing is a [resilience run](appendix-a-glossary.md#gl-resilience-run), one of the two ways Kates runs a [chaos experiment](appendix-a-glossary.md#gl-chaos-experiment), and it doesn't go through the [safety guard](appendix-a-glossary.md#gl-safety-guard) that checks a disruption plan (see [Chaos Engineering in Practice](07-chaos-practice.md)):
 
 ```yaml
 # resilience-integrity.yaml
