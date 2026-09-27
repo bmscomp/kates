@@ -161,7 +161,7 @@ Two more ideas explain why an acknowledged record survives a change of leader. A
 This matrix is the most important table in this chapter. It tells you what happens to `acks=all` writes when things go wrong, and it is the basis for every chaos experiment you'll design.
 
 | Failure Scenario | Write Available? | Data Loss? | Why |
-|------------------|:---:|:---:|-----|
+|----------------------|:----------------:|:----------:|--------------------------------------------|
 | 1 broker down | Yes | No | ISR still ≥ 2, `min.insync.replicas` satisfied |
 | 2 brokers down | No | No | ISR = 1 < `min.insync.replicas`, writes rejected |
 | 3 brokers down | No | No | No leader, cluster unavailable |
