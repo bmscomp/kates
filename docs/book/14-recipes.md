@@ -171,7 +171,7 @@ A sudden spike in the sparkline indicates a regression. Use `kates report diff` 
 **Goal:** Build confidence that a Kafka cluster meets resilience SLAs before deploying to production.
 
 ::: {.callout-caution}
-This recipe breaks the cluster on purpose. `leader-cascade` kills the brokers leading `__consumer_offsets` partitions 0 and 1, one after the other; `split-brain` cuts broker 0 off from the other cluster members for 60 seconds; `az-failure` kills every Kafka pod in zone `alpha`; and Step 4 kills a broker while a LOAD test runs. Anything else using the cluster goes through the same failures, so run the recipe where nothing else depends on the cluster, and never on production.
+This recipe breaks the cluster on purpose. `leader-cascade` kills the brokers leading `__consumer_offsets` partitions 0 and 1, one after the other; `split-brain` aims a `NETWORK_PARTITION` fault at broker 0 for 60 seconds; `az-failure` kills every Kafka pod in zone `alpha`; and Step 4 kills a broker while a LOAD test runs. Anything else using the cluster goes through the same failures, so run the recipe where nothing else depends on the cluster, and never on production.
 :::
 
 ### Procedure
