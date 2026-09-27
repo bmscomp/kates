@@ -63,6 +63,8 @@ scenarios:
 
 ### Scenario Fields
 
+Each entry in `scenarios` takes these five fields. Only `type` is required; `spec` and `validate` carry the settings and the gates that the next two sections describe.
+
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
 | `name` | String | | Human-readable scenario name (displayed in output) |
@@ -85,6 +87,8 @@ A key the scenario's type or backend cannot apply is refused: `kates test apply`
 
 ### Producer Configuration
 
+These keys configure the producer. `parallelProducers` counts only for STRESS and CAPACITY, and `targetThroughput` replaces the type's default rate.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `records` | Integer | 1,000,000 | Number of records to produce |
@@ -100,6 +104,8 @@ A key the scenario's type or backend cannot apply is refused: `kates test apply`
 
 ### Consumer Configuration
 
+Consumer settings matter only for the types that start a consumer — LOAD, ENDURANCE and INTEGRITY — and `numConsumers` is read by none of them.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `numConsumers` | Integer | 1 | Read by no test type |
@@ -108,6 +114,8 @@ A key the scenario's type or backend cannot apply is refused: `kates test apply`
 | `fetchMaxWaitMs` | Integer | 500 | The consumer's `fetch.max.wait.ms`, for LOAD, ENDURANCE and INTEGRITY |
 
 ### Topic Configuration
+
+The first key names the topic a run writes to; the other three describe the layout Kates creates that topic with.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -161,6 +169,8 @@ graph LR
 
 ### Performance Gates
 
+These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated.
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `maxP99LatencyMs` | Float | Maximum acceptable P99 latency in milliseconds |
@@ -170,12 +180,16 @@ graph LR
 
 ### Resilience Gates
 
+These gates judge recovery, so they need a run that measured it. When a run reports no RTO or no RPO, the summary marks the gate *not evaluable*, and the exit code is unchanged.
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `maxRtoMs` | Float | Maximum Recovery Time Objective in milliseconds. If the run reports no RTO, the summary marks the gate *not evaluable* rather than passing it; the exit code is unchanged |
 | `maxRpoMs` | Float | Maximum Recovery Point Objective in milliseconds. RPO is measured from a chaos start time; a run without one reports RPO as not measured, and the summary marks the gate *not evaluable* rather than passing it; the exit code is unchanged |
 
 ### Integrity Gates
+
+These gates cap the loss, disorder and corruption an INTEGRITY run may report, and 0 is the strict setting for each.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -184,6 +198,8 @@ graph LR
 | `maxCrcFailures` | Integer | Maximum CRC32 checksum failures (0 = no corruption) |
 
 ## Examples
+
+Each example is a complete scenario file that you can run with `kates test apply -f`.
 
 ### Simple Load Test with Performance SLA
 
@@ -274,7 +290,11 @@ scenarios:
 
 ## Running Scenario Files
 
+One command runs a whole file, and one flag decides how. With `--wait`, `kates test apply` runs the scenarios one after another and checks each one's gates; without it, the command submits them all and checks nothing.
+
 ### Basic Execution
+
+The two forms differ only in `--wait`:
 
 ```bash
 # Submit all scenarios in the file (fire-and-forget — they run concurrently, with no SLA evaluation)
@@ -457,6 +477,8 @@ scenarios:
       records: 100000        # ✅ good — 100K for integrity tests
       # records: 1000        # ❌ too low — may miss intermittent issues
 ```
+
+The table gives a recommended minimum for four of the types; the file above sits well above it for LOAD and INTEGRITY.
 
 | Test Type | Recommended Minimum | Why |
 |-----------|:-------------------:|-----|

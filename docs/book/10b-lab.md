@@ -39,22 +39,24 @@ Lab splits the terminal into two panes:
 │    Compression   [lz4]   │  2   52.1K rec/s  8ms  ▲15%  │
 │    Batch Size    [16384] │  3   48.7K rec/s 11ms  ▼7%   │
 │    Linger ms     [0]     │                              │
-│    Partitions    [6]     │  Throughput: ▃▇▅             │
-│    Replication   [3]     │  P99 ms:     ▅▂▄             │
-│                          │                              │
-│                          │  Latency Distribution        │
-│                          │  <1ms  ██████████████  50%   │
-│                          │  1-5ms ████████        30%   │
-│                          │  5-10  ████            15%   │
-│                          │  10-50 █                4%   │
-│                          │  50+ms ▏                1%   │
+│    Partitions    [6]     │  Throughput: ▁█▄             │
+│    Replication   [3]     │  P99 ms:     █▁▆             │
 ├──────────────────────────┴──────────────────────────────┤
 │  ✓ #3 — 48.7K rec/s, p99=11.00ms                        │
 │  ↑↓ navigate  ←→ change  Enter run  p preset  d diff    │
 └─────────────────────────────────────────────────────────┘
 ```
 
-The left pane shows configurable parameters. The right pane shows iteration history with sparklines and a latency histogram that adapts to the last result's P99 value.
+Read the screen from the top:
+
+1. The header ends with the address of the Kates API that Lab sends its runs to, the one your CLI is using. That part shows only on a terminal at least 100 columns wide.
+2. The left pane holds the settings for the next run. A pointer, `▸`, marks the one that `↑` and `↓` select and `←` and `→` change; on the live screen, that row also opens out to list the values it can take.
+3. Iteration History lists the recent iterations, one row each: its number, throughput, P99, and Δ, the change in throughput from the iteration before it (▲ up, ▼ down). When the right pane is wide enough, an `Err %` column appears as well.
+4. The two sparklines trace throughput and P99 across every iteration, oldest first, each scaled from its own lowest value, the shortest bar (▁), to its highest, the full block (█). They appear once there are two iterations.
+5. The status bar says what Lab just did: here, the result of iteration 3. While a test runs, it shows the elapsed seconds and, once Kates reports progress, the live record count, throughput and P99.
+6. The help line lists the keys that work right now. While a test runs it offers only `x` and `ctrl+c`, `c compare` joins it once there are two iterations, and `r retry` after a run fails.
+
+Lab needs a terminal of at least 80 columns by 24 rows; below that it shows a "Terminal too small" message instead of the panes.
 
 ## Keyboard Reference
 
@@ -91,6 +93,8 @@ Note that each preset also switches the **Test Type** (`SPIKE`, `STRESS`, or `LO
 
 ## Iteration Workflow
 
+Lab moves between a few states as you work: you set parameters, a test runs, and you compare the results. The diagram shows the main keys that move you from one state to the next.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Config: kates lab
@@ -115,9 +119,11 @@ While a test runs, the status bar shows the iteration number and elapsed time, u
 ⏳ Running iteration #4…  (12s)
 ```
 
-Throughput and latency metrics appear once the test completes.
+Once Kates reports progress, the status bar adds the live record count, throughput and P99.
 
 ## Comparing Iterations
+
+Two views put iterations side by side: `d` compares the last two, or the pair you pinned, and `c` lets you pick any two.
 
 ### Quick Diff (`d`)
 
@@ -164,6 +170,8 @@ Auto-sweep systematically tests every value of a parameter while holding all oth
 2. Press `s`
 3. Lab runs a test for each value: 16384 → 32768 → 65536 → 131072 → 262144
 
+From the second step on, the status bar names the value each step tries as it starts:
+
 ```text
 ⟳ Sweep Batch Size = 65536 (3/5)
 ```
@@ -204,6 +212,8 @@ Median mode ignores the warmup setting: pressing `m` always runs exactly 3 back-
 
 ## Export & Sessions
 
+Results leave Lab in two ways: `e` writes every iteration to a CSV file, and `w` saves the session to a file that `L` loads again later.
+
 ### CSV Export (`e`)
 
 Exports all iterations with full parameters to a timestamped CSV file:
@@ -223,6 +233,8 @@ Sessions persist iteration history and current parameter positions to `~/.kates-
 - Keep a baseline session for regression comparison
 
 ## Cancel & Retry
+
+Two keys handle a run that doesn't finish cleanly: `x` stops a test that is running, and `r` repeats one that failed.
 
 ### Cancel (`x`)
 

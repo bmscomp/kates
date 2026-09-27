@@ -89,6 +89,7 @@ Under normal conditions, end-to-end latency on a local Kind cluster typically la
 **Never use average latency as your primary metric.** Here's why:
 
 Consider two systems over 100 requests:
+
 - **System A**: 99 requests at 5ms, 1 request at 500ms → Average = 9.95ms
 - **System B**: 100 requests at 10ms → Average = 10ms
 
@@ -109,6 +110,8 @@ Percentiles tell you about the **distribution** of latency, not just the center:
 Kates reports the mean plus P50, P95, P99, P99.9, and Max for every test run.
 
 ### The Long Tail Problem
+
+A run's percentiles can sit far apart. In the illustrative distribution below, P50 is 5 ms while the slowest request takes 2 s, and the list after it names what causes that tail in Kafka.
 
 ```mermaid
 graph LR
@@ -139,7 +142,12 @@ One of the most insidious measurement errors in load testing is **coordinated om
 
 ### How It Happens
 
+Follow a tool that sends one request every 10 ms but waits for each response before it sends the next. Watch what happens to the requests it should have sent while Kafka stalls for 200 ms.
+
 ```mermaid
+%%| label: fig-perf-coordinated-omission
+%%| fig-cap: "Coordinated omission: a tool that waits for each response stops sending during a stall, so it records one slow request and never measures the ones it should have sent."
+%%| fig-alt: "Sequence diagram between a load test tool and Kafka. Requests 1 and 2 go out 10 ms apart and return in 5 ms. Request 3 goes out at 20 ms, Kafka pauses 200 ms for garbage collection, and the response arrives at 220 ms. Request 4 is sent only at 220 ms instead of 30 ms and returns at 225 ms, so the tool records 5 ms for it, while a user who expected a response at 35 ms waited 195 ms."
 sequenceDiagram
     participant Tool as Load Test Tool
     participant System as Kafka

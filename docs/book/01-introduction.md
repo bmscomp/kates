@@ -23,6 +23,9 @@ Unlike generic load testing tools, Kates understands Kafka semantics — produce
 Running Kafka in production requires confidence in three dimensions:
 
 ```mermaid
+%%| label: fig-intro-readiness
+%%| fig-cap: "Production readiness rests on performance, resilience and data integrity, each with the properties you test for it."
+%%| fig-alt: "Tree diagram. Production Readiness branches into Performance, Resilience and Data Integrity. Performance covers throughput under load, latency percentiles and capacity limits. Resilience covers broker failure recovery, network partition tolerance and cascading failure handling. Data Integrity covers zero message loss, ordering guarantees and exactly-once semantics."
 graph LR
     A[Production Readiness] --> B[Performance]
     A --> C[Resilience]
@@ -69,6 +72,8 @@ Disruption tests include safety guardrails: maximum affected broker limits, auto
 
 ## Feature Overview
 
+Each row is one area of Kates and the features it offers there. The first three rows answer the three dimensions above; the rest cover how you watch a run, export and grade its results, drive Kates from the CLI, schedule runs, and combine a performance test with chaos.
+
 | Category | Features |
 |----------|----------|
 | **Performance Testing** | Load, Stress, Spike, Endurance, Volume, Capacity, Round-Trip, and Integrity test types |
@@ -83,7 +88,12 @@ Disruption tests include safety guardrails: maximum affected broker limits, auto
 
 ## How Kates Fits Into Your Workflow
 
+The diagram places Kates in a delivery pipeline as two gates. Read it from the top: a change passes a performance gate before staging and a chaos gate before production, and after release, scheduled tests feed a trend that sends any regression to the same block-and-alert step.
+
 ```mermaid
+%%| label: fig-intro-workflow
+%%| fig-cap: "Kates as two gates in a delivery pipeline: performance before staging, resilience before production, and scheduled tests watching the trend afterwards."
+%%| fig-alt: "Flowchart in three groups. Development: a code change goes to the build pipeline. Kates: the build reaches a performance gate; an SLA pass leads to a staging deploy and then a chaos gate, and a resilience pass leads to a production deploy. An SLA fail or a recovery fail leads to Block and Alert. Ongoing: the production deploy is followed by scheduled tests and trend analysis, and a regression also leads to Block and Alert."
 graph TB
     subgraph Development
         A[Code Change] --> B[Build Pipeline]

@@ -67,6 +67,8 @@ graph LR
 
 ### Example
 
+The first command runs a quick baseline. The second runs closer to production, with 2048-byte records, a topic of its own and `acks=all` spelled out.
+
 ```bash
 # Quick baseline
 kates test create --type LOAD --records 100000 --wait
@@ -203,6 +205,8 @@ graph LR
 
 ### Key Metrics
 
+Each row is a moment around the burst and what to note there. A SPIKE run measures only the burst, so take the baseline P99 from a LOAD run beforehand and watch recovery in your monitoring afterwards.
+
 | Phase | Watch For |
 |-------|-----------|
 | Pre-spike baseline | Record your normal P99 |
@@ -228,6 +232,8 @@ graph LR
 ```
 
 ### What It Detects
+
+Each row is a slow failure and the symptom it leaves over a long run: drift that a short test ends before it can show.
 
 | Problem | How It Manifests |
 |---------|------------------|
@@ -397,6 +403,9 @@ scenarios:
 The INTEGRITY test is the most critical test type. It produces messages with **monotonic sequence numbers**, tracks acknowledgments, and then consumes all messages to verify completeness.
 
 ```mermaid
+%%| label: fig-types-integrity-flow
+%%| fig-cap: "An INTEGRITY run numbers every record it sends, reads the topic back, and compares what was acknowledged with what came back."
+%%| fig-alt: "Flowchart. The producer sends messages with sequence numbers 1 to N and tracks acknowledgments. The messages pass through Kafka replication and storage to a consumer that reads them all and verifies the sequences for gaps. The tracked acknowledgments and the verified sequences meet at a decision, all sequences accounted for: yes gives PASS with zero data loss, no gives DATA_LOSS with the lost ranges identified."
 graph TB
     subgraph Producer
         P[Produce messages<br/>seq: 1, 2, 3, ..., N]

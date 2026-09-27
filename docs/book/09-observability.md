@@ -353,6 +353,7 @@ kates dash
 ```
 
 It shows:
+
 - System health status
 - Active tests count
 - Recent test results table
@@ -391,6 +392,7 @@ kates cluster watch --interval 10
 ```
 
 The display shows:
+
 - **Broker status** — count, controller identity
 - **Partition health** — under-replicated ▁▂▃ sparkline, offline ▁▁▁ sparkline
 - **Partition count** — total and per-topic breakdown with trend
@@ -441,6 +443,8 @@ The 25 heatmap buckets (defined by `HEATMAP_BOUNDARIES` in `LatencyHistogram.jav
 
 ### Exporting Heatmaps
 
+`kates report export` writes a run's heatmap as JSON or as CSV, and the `--format` flag picks which:
+
 ```bash
 # JSON (for Grafana) — run in a terminal, this writes kates-heatmap-<id>.json
 kates report export <id> --format heatmap
@@ -455,6 +459,8 @@ kates report export <id> --format heatmap > heatmap.json
 There is no output-file flag: when stdout is a terminal, the export is written to an auto-named file; when piped or redirected, it goes to stdout.
 
 ### REST API
+
+The CLI's export reads this endpoint, so a script can fetch the same data over HTTP. The `format` parameter picks JSON, the default, or CSV:
 
 ```text
 GET /api/tests/{id}/report/heatmap?format=json
@@ -820,4 +826,4 @@ Expect a healthy run: dashboards flat where they should be flat (zero under-repl
 - `kates trend` and `kates report diff` turn snapshots into regression detection — compare runs instead of trusting absolute numbers.
 - PrometheusRule alerts ship with the charts and fire on offline partitions, sustained under-replication, and runaway consumer lag — each chart carries its own enable toggle.
 
-With the observability stack in place, the next step is standing up the cluster it watches: [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) walks through that deployment from an empty namespace to a running Kafka.
+You can now read what a run did to the cluster. The next chapters turn from reading the platform to building and operating it, starting with [Deploying the Strimzi Operator](deploying-strimzi-operator.md), which installs the operator that turns a `Kafka` resource into a running cluster.

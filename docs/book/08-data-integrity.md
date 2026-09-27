@@ -94,6 +94,9 @@ The producer maintains:
 The consumer reads all messages and builds a bitmap of received sequence numbers:
 
 ```mermaid
+%%| label: fig-integrity-lost-ranges
+%%| fig-cap: "The consumer marks each sequence number it reads back. An acknowledged sequence it never reads is lost, and consecutive lost sequences are reported as one range."
+%%| fig-alt: "A row of received sequence numbers 1 to 8: 1, 2, 3, 5, 6 and 8 are present, 4 and 7 are missing. The result lists the lost ranges 4 to 4 and 7 to 7, two messages lost."
 graph LR
     subgraph Received
         direction LR
@@ -235,6 +238,9 @@ The `spec` of a resilience file goes to the API as written, so it takes the API'
 The combined flow looks like this:
 
 ```mermaid
+%%| label: fig-integrity-under-chaos
+%%| fig-cap: "`kates resilience run` starts the INTEGRITY run, marks the chaos start and deletes a broker pod, and can return before the ISR is whole; the verdict and RPO come later, from the INTEGRITY run itself."
+%%| fig-alt: "Sequence diagram with kates resilience run, the INTEGRITY producer, the Kafka cluster and the INTEGRITY consumer. The resilience run starts the producer at 500 records per second, and the producer sends sequenced records with acks=all. After 30 seconds of steady state, the resilience run marks the chaos start and deletes one broker pod, and the same broker is deleted again every 10 seconds until 60 seconds. Sends to the lost leaders are retried, a leader election runs and the ISR shrinks to 2. The resilience run returns once its probes pass, often before the ISR is whole. The broker restarts and rejoins the ISR, and the producer keeps going until 180,000 records are sent. The consumer then reads the topic from the start and reconciles acknowledged against consumed sequences, and the verdict and RPO are read with kates test get."
 sequenceDiagram
     participant Res as kates resilience run
     participant Producer as INTEGRITY producer
@@ -311,7 +317,11 @@ A clean run contains only the final `SUMMARY` event.
 
 ## Interpreting Integrity Results
 
+Every INTEGRITY run ends its report with the same Data Integrity section. The examples below show how it reads for a clean run, for a run that lost records, and for a clean run whose producer hit errors during a broker failure.
+
 ### PASS — Zero Data Loss
+
+Every count that could signal trouble reads zero, and `RPO` reads `not measured` because nothing marked a fault on this run:
 
 ```text
   ▸ Data Integrity
@@ -330,6 +340,8 @@ A clean run contains only the final `SUMMARY` event.
 This is the expected result for a properly configured cluster with `acks=all` and `min.insync.replicas=2`, even during single-broker failures. `RPO` reads `not measured` on a standalone run: it gets a value only when a resilience run marks a fault on the run, as in Integrity Under Chaos above.
 
 ### DATA_LOSS — Messages Missing
+
+Look at `Lost` and at the Lost Ranges table under it: two acknowledged records never came back, and the table gives their sequence numbers:
 
 ```text
   ▸ Data Integrity
@@ -363,6 +375,8 @@ Data loss indicates a serious issue. Common causes:
 | Log truncation | Follower promoted with less data than old leader |
 
 ### PASS with Unacked Messages
+
+This run overlapped a broker failure. `Producer RTO` is there because some sends failed, and `RPO` has a value because a chaos start was marked on the run; the verdict is still PASS:
 
 ```text
   ▸ Data Integrity
@@ -407,6 +421,7 @@ Each disruption type can expose different integrity issues:
 ### 4. Test with Production-Like Configuration
 
 Integrity tests are only meaningful if the topic configuration matches production:
+
 - Same replication factor
 - Same `min.insync.replicas`
 - Same `acks` mode
@@ -452,6 +467,8 @@ With `--wait`, `kates test apply` shows a spinner per scenario and a summary tab
 Internally the test runs its produce phase to completion, then consumes everything back from the beginning, then reconciles ACKed against consumed sequence numbers. The topic is named after the test type (`integrity-test`) unless overridden with the `topic` spec field.
 
 ### Step 3 — Read the Verification Report
+
+Once the run is `DONE`, read its report with the ID the summary printed:
 
 ```bash
 kates test get <id>
