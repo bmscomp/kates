@@ -89,7 +89,7 @@ Every workflow also shares three conventions: a `concurrency` group per branch (
 
 ## Backend CI (`ci.yml`)
 
-**Purpose:** Validates backend code, CLI code, Helm chart integrity, Kyverno policies, and config YAML on every push and pull request.
+**Purpose:** Validates the Kates API's code, CLI code, Helm chart integrity, Kyverno policies, and config YAML on every push and pull request.
 
 **Triggers:**
 - Push to `main` branch (paths in the table above)
@@ -100,7 +100,7 @@ Every workflow also shares three conventions: a `concurrency` group per branch (
 | Job | Runtime | Description |
 |-----|---------|-------------|
 | **Detect Changes** | `dorny/paths-filter` | Splits the run into `code`, `helm` and `yaml` categories. Every job below keys its `if:` off one of them, except Kyverno Policy Validation, which always runs |
-| **Build & Test** | Java 21 (Temurin) | Compiles the Quarkus backend and runs the test suite with `./mvnw verify`, publishes the surefire *and* failsafe JUnit reports as a check, uploads the JaCoCo report and writes its totals to the run summary |
+| **Build & Test** | Java 21 (Temurin) | Compiles the Kates API, a Quarkus application, and runs the test suite with `./mvnw verify`, publishes the surefire *and* failsafe JUnit reports as a check, uploads the JaCoCo report and writes its totals to the run summary |
 | **Dependency CVE scan** | — | Trivy over the Maven tree and `govulncheck` over the Go module, as its own job so a new CVE and a failing test are two different red checks |
 | **CLI Tests** | Go 1.25 | Runs `go test -race` across all CLI packages, then the terminal-compatibility and CLI style harnesses |
 | **Helm Lint** | Helm v3.17.0 | Lints, renders and schema-validates every chart under `charts/`, and runs the repository's cross-file consistency checks |
@@ -300,7 +300,7 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 
 ## Publish Kates Docker Image (`publish-docker.yml`)
 
-**Purpose:** Builds and pushes the production Kates backend image to GitHub Container Registry (GHCR) and Docker Hub.
+**Purpose:** Builds and pushes the Kates API images, JVM and native (`-native` tag), to GitHub Container Registry (GHCR) and Docker Hub.
 
 **Triggers:**
 - Tag push matching `v*` (e.g., `v1.0.0`, `v2.3.1-rc1`)
