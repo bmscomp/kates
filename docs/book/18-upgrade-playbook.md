@@ -2,7 +2,7 @@
 
 This chapter provides step-by-step procedures for upgrading every component in the Kates stack. Each procedure includes pre-flight checks, rollback plans, and validation steps. It's written for the engineer who owns the upgrade window — the one who must answer "can we still roll back?" before anything moves. After this chapter, you can:
 
-- Upgrade Kafka, the Strimzi operator, Kyverno, and the Kates application in the correct order, with a Velero backup and a recorded baseline taken first
+- Upgrade Kafka, the Strimzi operator, Kyverno, and the Kates API in the correct order, with a Velero backup and a recorded baseline taken first
 - Validate an upgrade quantitatively by comparing post-upgrade runs against the pre-upgrade baseline with `kates report compare`
 - Pick the right rollback path per component — and recognize the KRaft `metadataVersion` point of no return before crossing it
 - Run the pre- and post-upgrade checklists as a repeatable drill rather than a one-off scramble
@@ -195,9 +195,9 @@ kubectl get pods -n strimzi-operator -l app=strimzi-drain-cleaner
 
 If `operator-current.yaml` sets `strimziVersion`, the release runs an operator other than the repository's pin, and upgrading it from `charts/strimzi-operator` would change the operator as well — stop and upgrade the operator first.
 
-## Kates Application Upgrade
+## Kates API Upgrade
 
-The chart pins the backend image: `values.yaml` sets `image.tag` to the release's version (the chart's `appVersion`), and the generic, corporate and production overlays pin a tag of their own. Building or pulling a newer image changes nothing the Deployment runs, and `kubectl rollout restart` only restarts the pinned tag. An upgrade is a `helm upgrade` of the `kates` release that sets the new tag, from the values the release runs with and from a checkout of the version you are moving to, so the chart's templates and the image agree:
+The `kates` chart installs the Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)). The chart pins its image: `values.yaml` sets `image.tag` to the release's version (the chart's `appVersion`), and the generic, corporate and production overlays pin a tag of their own. Building or pulling a newer image changes nothing the Deployment runs, and `kubectl rollout restart` only restarts the pinned tag. An upgrade is a `helm upgrade` of the `kates` release that sets the new tag, from the values the release runs with and from a checkout of the version you are moving to, so the chart's templates and the image agree:
 
 ```bash
 # Every value the release was installed with — its files and its --set flags
@@ -211,9 +211,9 @@ helm upgrade kates charts/kates -n kates \
 
 The native image is published as `<new-version>-native`, the tag `values-native.yaml` pins; set that instead on a release that runs it.
 
-This procedure, and the Helm rollback below, apply to a backend that `kates deploy` or the chart installed. `make kates-deploy` applies the raw manifests in `kates/k8s/` and creates no release, so `helm get values kates` fails with `release: not found`. There, set the new image in `kates/k8s/deployment.yaml`, apply it again with `kubectl apply -f kates/k8s/deployment.yaml`, and verify as below.
+This procedure, and the Helm rollback below, apply to a Kates API that `kates deploy` or the chart installed. `make kates-deploy` applies the raw manifests in `kates/k8s/` and creates no release, so `helm get values kates` fails with `release: not found`. There, set the new image in `kates/k8s/deployment.yaml`, apply it again with `kubectl apply -f kates/k8s/deployment.yaml`, and verify as below.
 
-Verify that the new pods rolled out, run the new image, and answer. No `kates` command reports the backend's version — `kates version` reports the CLI's — so the Deployment's image is the evidence:
+Verify that the new pods rolled out, run the new image, and answer. No `kates` command reports the Kates API's version — `kates version` reports the CLI's — so the Deployment's image is the evidence:
 
 ```bash
 kubectl rollout status deployment/kates -n kates --timeout=300s
@@ -486,7 +486,7 @@ kates test create --type LOAD --records 10000 --wait
 If the new Strimzi version migrated CRDs to a new API version (e.g., `v1beta2` → `v1`), rolling back the operator will **not** revert the CRDs. You must manually restore the CRDs from backup or re-apply the old CRD definitions.
 :::
 
-### Kates Application Rollback
+### Kates API Rollback
 
 **Step 1 — Roll the release back:**
 
@@ -528,7 +528,7 @@ kates test create --type LOAD --records 50000 --wait
 | KRaft metadata format | **Not reversible** | N/A | ⛔ Critical |
 | Strimzi operator | Helm rollback | 2–5 min | Low |
 | Strimzi CRD migration | Manual CRD restore from backup | 5–15 min | High |
-| Kates application | Helm rollback | 1–2 min | Low |
+| Kates API | Helm rollback | 1–2 min | Low |
 | Monitoring stack | Helm rollback | 2–5 min | Low |
 | Kyverno | Helm rollback + CRD restore | 5–10 min | Medium |
 
@@ -537,10 +537,10 @@ kates test create --type LOAD --records 50000 --wait
 - Always upgrade the Strimzi operator before Kafka, take a Velero backup and record LOAD and INTEGRITY baselines before either, and run `make gameday` after any upgrade.
 - A Kafka version bump is a `helm upgrade` that starts from the release's current values (`helm get values`), sets `kafkaVersion` and pins `kafka.metadataVersion` to what the cluster runs; a chain rebuilt from the repository's files without `.build/values-detected.yaml` renames the node pools. `kates deploy --kafka-version` does not upgrade a running cluster. Strimzi rolls the brokers one at a time with PDB constraints honored.
 - Upgrade a production Strimzi operator with the pause-and-verify procedure in [Deploying the Strimzi Operator](deploying-strimzi-operator.md#upgrading-the-operator): the CLI pauses nothing, and every `kates deploy` re-applies the operator release with the Kind or generic overlay, dropping what `values-prod.yaml` added.
-- The Kates backend upgrades through Helm too: the chart pins the image, so set the new `image.tag` on the `kates` release — a rebuild and a `kubectl rollout restart` run the old tag again.
+- The Kates API upgrades through Helm too: the chart pins the image, so set the new `image.tag` on the `kates` release — a rebuild and a `kubectl rollout restart` run the old tag again.
 - Hold `spec.kafka.metadataVersion` at the previous level until the new brokers pass validation — raising it makes downgrade irreversible.
 - Kyverno upgrades go CRDs first, controller second; afterwards verify with `kates kyverno status` and confirm `PolicyException` resources still use a served API version.
 - A Helm rollback of the Strimzi operator does not revert migrated CRDs — those need a manual restore from backup.
-- Post-upgrade validation is quantitative: performance within 10% of the recorded baseline, an integrity test with zero data loss, and a green Game Day run.
+- Post-upgrade validation is quantitative: performance within 10% of the recorded baseline, an integrity test with zero data loss, and a green `make gameday` run.
 
 With every component upgrade rehearsed and reversible, the remaining moving piece is the integration layer itself: [Kafka Connect & CDC Pipelines](21-kafka-connect.md) covers deploying and operating Kafka Connect with Debezium CDC.

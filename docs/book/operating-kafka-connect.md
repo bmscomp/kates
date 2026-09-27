@@ -293,7 +293,7 @@ kates kafka connect test
 helm test connect-cluster --namespace connect --timeout 180s --logs
 ```
 
-The `kates kafka connect test` command runs a full end-to-end CDC integration test against the backend, with a Bubble Tea progress UI showing each phase (DB setup → topic creation → source deploy → sink deploy → verification → cleanup).
+The `kates kafka connect test` command starts an INTEGRATION_CDC run on the Kates API, a full end-to-end CDC integration test. A Bubble Tea progress UI follows the run through each phase (DB setup → topic creation → source deploy → sink deploy → verification → cleanup).
 
 The connectivity test pod (`test-01-connect.yaml`) checks the credentials Secret, the `KafkaConnect` `Ready` condition, and the running workers. It then calls the REST API on port 8083 from inside a worker, which the NetworkPolicy admits — the root endpoint, and `/connector-plugins` against `tests.expectedPlugins` plus each `plugins[].expect` — and finally checks each declared connector's state and tasks. The last pod (`test-03-test-connectors.yaml`) waits for every test connector to reach RUNNING with all its tasks running. The test topics are created in the Kafka namespace, and `values-prod.yaml` turns the test connectors off because they need the platform's demo PostgreSQL.
 
@@ -304,7 +304,7 @@ The chart's `networkpolicy.yaml` ships a default-deny posture: a deny-all Ingres
 | Flow | Setting |
 |------|---------|
 | Ingress: metrics scrape (9404) | `networkPolicy.monitoring` (namespace `monitoring`) |
-| Ingress: REST API (8083) | `networkPolicy.restApi.clients` (default: the Kates backend), the Cluster Operator in `networkPolicy.strimziOperatorNamespace` (default `strimzi-operator`), and the other workers; `networkPolicy.restApi.allowAll` opens it to any source |
+| Ingress: REST API (8083) | `networkPolicy.restApi.clients` (default: the Kates API pods in `kates`), the Cluster Operator in `networkPolicy.strimziOperatorNamespace` (default `strimzi-operator`), and the other workers; `networkPolicy.restApi.allowAll` opens it to any source |
 | Egress: DNS, Kubernetes API | `networkPolicy.dns`, `networkPolicy.apiServer` (the secrets config provider reads Secrets through the API) |
 | Egress: Kafka | The Kafka namespace's `strimzi.io/cluster` pods, on the ports the bootstrap dials (9092, or 9093 with TLS); `networkPolicy.kafka.ports` fixes the list and refuses a bootstrap port outside it |
 | Egress: Schema Registry, OTLP | `schemaRegistry.enabled` (the registry pods' `schemaRegistry.targetPort`, 8080, and the Service `port`), `tracing.endpoint` |
