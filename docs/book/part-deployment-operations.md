@@ -46,7 +46,7 @@ The last chapter closes this Part but draws more on Parts II and III: it combine
 
 ## The Payments Question
 
-This Part moves the payments question from the lab to a cluster you run. In Multi-Tenancy a tenant is one block of `kafka-cluster` chart values in `tenants.yaml`, applied with one `helm upgrade`, and the payments workload becomes the `payments` tenant: a `payments-events` topic and a `KafkaUser` with prefix ACLs on `payments`. The Upgrade Playbook's re-test becomes `payments-scenarios.yaml`, run before and after an upgrade, with `kates report diff <before-id> <after-id>` to compare the two runs. On that cluster, the answer comes from the same gates, grades and verdicts as in Parts II and III.
+This Part moves the payments question from the lab to a cluster you run. In Multi-Tenancy a tenant is one block of `kafka-cluster` chart values in `tenants.yaml`, applied with one `helm upgrade`, and the payments workload becomes the `payments` tenant: a `payments-events` topic and a `KafkaUser` with prefix ACLs on `payments`. The Upgrade Playbook's re-test becomes `payments-scenarios.yaml`, run before and after an upgrade, and `kates report compare <pre-id>,<post-id>` compares the two runs. On that cluster, the answer comes from the same gates, grades and verdicts as in Parts II and III.
 
 ## Practice
 

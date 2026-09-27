@@ -19,7 +19,7 @@ Performance Theory comes first because it tells you which numbers to distrust; t
 
 ## The Payments Question
 
-This Part turns the throughput and latency targets into a file you can run again and again: `payments-scenarios.yaml`, a scenario file with one LOAD scenario that writes 1 KiB records with `acks=all` to its own topic, `payments-load`. Its gates hold the two targets. `maxP99LatencyMs: 100` fails a run whose P99 from send to acknowledgment passes 100 ms, and `minThroughputRecPerSec` sets the throughput floor. `kates test apply -f payments-scenarios.yaml --wait` runs the scenario and exits 1 when a gate fails.
+This Part turns the throughput and latency targets into a file you can run again and again, `payments-scenarios.yaml`. It's a scenario file with one LOAD scenario, which offers 2,000 records per second of 1 KiB with `acks=all` to its own topic, `payments-load`. Its `maxP99LatencyMs: 100` gate holds the latency target: it fails a run whose P99 from send to acknowledgment passes 100 ms. `minThroughputRecPerSec` sets a throughput floor below that offered rate, since a run's measured rate always lands under the rate it's given. `kates test apply -f payments-scenarios.yaml --wait` runs the scenario and exits 1 when a gate fails.
 
 When a run passes, `kates test baseline set <run-id>` makes it the LOAD baseline, and `kates report regression <run-id>` compares later LOAD runs with it. Kates keeps one baseline per test type, so the payments run replaces any earlier LOAD baseline.
 
