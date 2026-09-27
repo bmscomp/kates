@@ -1,12 +1,12 @@
 # Scenario Files & SLA Gates
 
-Scenario files are the declarative way to define, execute, and validate Kates test runs. Rather than stringing together CLI flags, you describe one or more test scenarios in a YAML (or JSON) file and let Kates orchestrate everything — including automated pass/fail enforcement against SLA thresholds.
+Scenario files are the declarative way to define, execute, and validate Kates [test runs](appendix-a-glossary.md#gl-test-run). Rather than stringing together CLI flags, you describe one or more test scenarios in a YAML (or JSON) file and let Kates orchestrate everything — including automated pass/fail enforcement against [SLA](appendix-a-glossary.md#gl-sla) thresholds. Kates calls those thresholds SLAs, though they work like SLOs: targets you set, not agreements with anyone.
 
 This chapter is for engineers graduating from ad-hoc `kates test create` runs to version-controlled, CI-gated test suites. After this chapter, you can:
 
-- Describe a multi-scenario test suite in YAML, with `spec` parameters and `validate` SLA gates
+- Describe a multi-scenario test suite in YAML, with [`spec`](appendix-a-glossary.md#gl-test-spec) parameters and `validate` SLA [gates](appendix-a-glossary.md#gl-gate)
 - Run a suite with `kates test apply -f` and read its pass/fail summary
-- Wire the exit code into a CI/CD pipeline so performance regressions block the merge
+- Wire the [exit code](appendix-a-glossary.md#gl-exit-code) into a CI/CD pipeline so performance regressions block the merge
 - Spot the common scenario-file mistakes and predict how the CLI reacts to each
 
 ## Why Scenario Files?
@@ -68,21 +68,21 @@ Each entry in `scenarios` takes these five fields. Only `type` is required; `spe
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
 | `name` | String | | Human-readable scenario name (displayed in output) |
-| `type` | String | Yes | Test type: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`, `TUNE_REPLICATION`, `TUNE_ACKS`, `TUNE_BATCHING`, `TUNE_COMPRESSION`, `TUNE_PARTITIONS`, or `INTEGRATION_CDC`. Case-insensitive — the CLI upper-cases the value before submitting |
-| `backend` | String | | Backend engine (default: `native`) |
+| `type` | String | Yes | Test type: [`LOAD`](appendix-a-glossary.md#gl-test-type), `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`, `TUNE_REPLICATION`, `TUNE_ACKS`, `TUNE_BATCHING`, `TUNE_COMPRESSION`, `TUNE_PARTITIONS`, or `INTEGRATION_CDC`. Case-insensitive — the CLI upper-cases the value before submitting |
+| `backend` | String | | [Benchmark backend](appendix-a-glossary.md#gl-benchmark-backend): `native` or `trogdor` (default: `native`) |
 | `spec` | Object | | Test specification — see Spec Reference below |
-| `validate` | Object | | SLA validation gates — see Validation Reference below |
+| `validate` | Object | | SLA gates — see Validation Reference below |
 
 ## Spec Reference
 
-The `spec` object controls all test parameters. Every field is optional; the backend fills in defaults per test type (configurable via its `kates.tests.<type>.*` properties), so a STRESS test defaults to larger batches and more producers than a ROUND_TRIP test. The defaults shown below are the stock values for a LOAD test — other types differ.
+The `spec` object controls all test parameters. Every field is optional. The [Kates API](appendix-a-glossary.md#gl-kates-api), the service in the cluster that runs your tests, fills in defaults per test type (configurable via its `kates.tests.<type>.*` properties), so a STRESS test defaults to larger batches and more producers than a ROUND_TRIP test. The defaults shown below are the stock values for a LOAD test — other types differ.
 
 ::: {.callout-important}
-The backend merges `spec` with the test type's defaults, and every key below reaches the run. `targetThroughput` sets the producer rate in place of the type's default. `parallelProducers` counts only for STRESS and CAPACITY, and no test type reads `numConsumers`, so a LOAD scenario runs one producer and one consumer whatever they say.
+The Kates API merges `spec` with the test type's defaults, and every key below reaches the run. `targetThroughput` sets the producer rate in place of the type's default. `parallelProducers` counts only for STRESS and CAPACITY, and no test type reads `numConsumers`, so a LOAD scenario runs one producer and one consumer whatever they say.
 
-The three `enable` keys take `true` or `false`. `kates test apply` refuses a file where one holds anything else, such as `yes`, `on` or nothing, naming the scenario and the key, before it starts any of the file's tests; such a value used to be sent as `false`.
+The three `enable` keys take `true` or `false`. `kates test apply` refuses a file where one holds anything else, such as `yes`, `on` or nothing, naming the scenario and the key, before it starts any of the file's tests.
 
-A key the scenario's type or backend cannot apply is refused: `kates test apply` gets a `400` naming it, and the scenario does not start. That is a rate other than -1 for SPIKE or CAPACITY, which run unthrottled; `consumerGroup` or a fetch setting for a type without a consumer (every type but LOAD, ENDURANCE and INTEGRITY); `enableCrc: true` for any type but INTEGRITY; `enableIdempotence: true` or `enableTransactions: true` when `acks` is not `all` (SPIKE's default is `1`); `enableTransactions: true` with `enableIdempotence: false`, or on the `trogdor` backend. The [API Reference](11-api-reference.md#post-apitests) lists the rules; [Test Types Deep Dive](05-test-types.md) and [Data Integrity Verification](08-data-integrity.md) cover what the options do.
+A key the scenario's type or benchmark backend cannot apply is refused: `kates test apply` gets a `400` naming it, and the scenario does not start. That is a rate other than -1 for SPIKE or CAPACITY, which run unthrottled; `consumerGroup` or a fetch setting for a type without a consumer (every type but LOAD, ENDURANCE and INTEGRITY); `enableCrc: true` for any type but INTEGRITY; [`enableIdempotence: true`](appendix-a-glossary.md#gl-idempotent-producer) or `enableTransactions: true` when [`acks`](appendix-a-glossary.md#gl-acks) is not `all` (SPIKE's default is `1`); `enableTransactions: true` with `enableIdempotence: false`, or on the `trogdor` benchmark backend. The [API Reference](11-api-reference.md#post-apitests) lists the rules; [Test Types Deep Dive](05-test-types.md) and [Data Integrity Verification](08-data-integrity.md) cover what the options do.
 :::
 
 ### Producer Configuration
@@ -109,7 +109,7 @@ Consumer settings matter only for the types that start a consumer — LOAD, ENDU
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `numConsumers` | Integer | 1 | Read by no test type |
-| `consumerGroup` | String | auto | The consumer's group, for LOAD, ENDURANCE and INTEGRITY; not empty or blank. A group with committed offsets on the topic resumes from them, and a LOAD or ENDURANCE consumer commits as it reads, so use a group of the test's own, not one an application reads with. An INTEGRITY consumer joins it with `-integrity` appended (`integrity-cg-integrity` when not set) |
+| `consumerGroup` | String | auto | The consumer's group, for LOAD, ENDURANCE and INTEGRITY; not empty or blank. A group with committed [offsets](appendix-a-glossary.md#gl-offset) on the [topic](appendix-a-glossary.md#gl-topic) resumes from them, and a LOAD or ENDURANCE consumer commits as it reads, so use a group of the test's own, not one an application reads with. An INTEGRITY consumer joins it with `-integrity` appended (`integrity-cg-integrity` when not set) |
 | `fetchMinBytes` | Integer | 1 | The consumer's `fetch.min.bytes`, for LOAD, ENDURANCE and INTEGRITY |
 | `fetchMaxWaitMs` | Integer | 500 | The consumer's `fetch.max.wait.ms`, for LOAD, ENDURANCE and INTEGRITY |
 
@@ -120,9 +120,9 @@ The first key names the topic a run writes to; the other three describe the layo
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `topic` | String | auto (`<type>-test`) | Target topic name |
-| `partitions` | Integer | 3 | Number of topic partitions |
-| `replicationFactor` | Integer | 3 | Topic replication factor |
-| `minInsyncReplicas` | Integer | 2 | Minimum in-sync replicas |
+| [`partitions`](appendix-a-glossary.md#gl-partition) | Integer | 3 | Number of topic partitions |
+| [`replicationFactor`](appendix-a-glossary.md#gl-rf) | Integer | 3 | Topic replication factor |
+| [`minInsyncReplicas`](appendix-a-glossary.md#gl-min-insync-replicas) | Integer | 2 | Minimum [in-sync replicas](appendix-a-glossary.md#gl-isr) |
 
 ### Test Execution
 
@@ -134,11 +134,13 @@ The first key names the topic a run writes to; the other three describe the layo
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enableCrc` | Boolean | true | Whether an INTEGRITY run verifies a CRC32 checksum on each record; `false` turns the check off. `true` is refused for any other type |
+| `enableCrc` | Boolean | true | Whether an INTEGRITY run verifies a [CRC32](appendix-a-glossary.md#gl-crc32) checksum on each record; `false` turns the check off. `true` is refused for any other type |
 
 ## Validation Reference (SLA Gates)
 
 The `validate` section defines pass/fail criteria that the CLI checks after each test completes. If any threshold is breached, the violation is listed in the summary table and the CLI exits with a non-zero status code — making it ideal for CI/CD gate enforcement.
+
+Each threshold in `validate` is a gate. Kates has two other words for a result, and neither names a gate. A disruption plan's `sla` block earns an SLA grade, a letter from A to F, as [SLA Grading](07-chaos-practice.md#sla-grading) explains. An INTEGRITY run ends with a verdict, such as PASS or DATA_LOSS, as [Interpreting Integrity Results](08-data-integrity.md#interpreting-integrity-results) explains.
 
 ::: {.callout-warning}
 SLA gates are only evaluated when you run `kates test apply` with `--wait`. Without it, scenarios are fire-and-forget: each one is submitted (status `SUBMITTED`), no gate is ever checked, and how the tests turn out never affects the exit status. A scenario that fails to submit still makes the CLI exit 1.
@@ -173,14 +175,14 @@ These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `maxP99LatencyMs` | Float | Maximum acceptable P99 latency in milliseconds |
+| `maxP99LatencyMs` | Float | Maximum acceptable [P99](appendix-a-glossary.md#gl-percentile) latency in milliseconds |
 | `maxAvgLatencyMs` | Float | Maximum acceptable average latency in milliseconds |
-| `minThroughputRecPerSec` | Float | Minimum acceptable throughput in records per second |
+| `minThroughputRecPerSec` | Float | Minimum acceptable [throughput](appendix-a-glossary.md#gl-throughput) in records per second |
 | `maxErrorRate` | Float | Maximum acceptable error rate. Accepted in the file, but not currently evaluated by the CLI's gate check |
 
 ### Resilience Gates
 
-These gates judge recovery, so they need a run that measured it. When a run reports no RTO or no RPO, the summary marks the gate *not evaluable*, and the exit code is unchanged.
+These gates judge recovery, so they need a run that measured it. When a run reports no [RTO](appendix-a-glossary.md#gl-rto) or no [RPO](appendix-a-glossary.md#gl-rpo), the summary marks the gate *not evaluable*, and the exit code is unchanged.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -304,12 +306,12 @@ kates test apply -f scenarios.yaml
 kates test apply -f scenarios.yaml --wait
 ```
 
-Use `--wait` whenever the scenarios are meant to be compared, as in the [Tuning Comparison](#tuning-comparison) file. Without it, the scenarios run at the same time: scenarios of one type that set no `topic` share that type's default topic (`load-test` for LOAD), so each measures the load of the others, and the backend runs at most three tests at once (`kates.engine.max-concurrent-tests`), refusing any further scenario with `429 Too Many Requests`.
+Use `--wait` whenever the scenarios are meant to be compared, as in the [Tuning Comparison](#tuning-comparison) file. Without it, the scenarios run at the same time: scenarios of one type that set no `topic` share that type's default topic (`load-test` for LOAD), so each measures the load of the others, and the Kates API runs at most three tests at once (`kates.engine.max-concurrent-tests`), refusing any further scenario with `429 Too Many Requests`.
 
 ### How Execution Works
 
 1. Kates parses the file (YAML or JSON) — a malformed file aborts the run with the raw parse error; there is no further schema validation on the client side
-2. Each scenario is submitted to the backend sequentially
+2. Each scenario is submitted to the Kates API sequentially
 3. If `--wait` is specified, Kates polls until each test completes before submitting the next
 4. SLA gates are evaluated for each completed scenario — this only happens with `--wait`; without it, every scenario is left as `SUBMITTED` and never validated
 5. A summary table is printed showing each scenario's result
@@ -408,11 +410,11 @@ The library covers the common cases: `quick-load` (fast smoke test), `production
 
 ## Common Mistakes
 
-The CLI does not validate scenario files against a schema — a file either parses or it doesn't, and everything else is checked by the backend when the scenario is submitted. These are the most frequent mistakes and what actually happens when you make them.
+The CLI does not validate scenario files against a schema — a file either parses or it doesn't, and everything else is checked by the Kates API when the scenario is submitted. These are the most frequent mistakes and what actually happens when you make them.
 
 ### 1. Missing Required Field (`type`)
 
-`type` is the only required field, but the CLI does not check for it. The scenario is submitted as-is and the backend rejects it with a 400 (its request validation requires a test type), so the scenario shows a `✖ Failed: ...` line and is marked `FAILED` in the summary table.
+`type` is the only required field, but the CLI does not check for it. The scenario is submitted as-is and the Kates API rejects it with a 400 (its request validation requires a test type), so the scenario shows a `✖ Failed: ...` line and is marked `FAILED` in the summary table.
 
 **Fix:** Add the `type` field to every scenario:
 
@@ -426,7 +428,7 @@ scenarios:
 
 ### 2. Invalid Test Type Name
 
-Case is not the problem — the CLI upper-cases the type before submitting, so `load` and `Load` work fine. What fails is a name that isn't a real test type: the backend rejects it at submission and the scenario is marked `FAILED`.
+Case is not the problem — the CLI upper-cases the type before submitting, so `load` and `Load` work fine. What fails is a name that isn't a real test type: the Kates API rejects it at submission and the scenario is marked `FAILED`.
 
 **Fix:** Use one of the valid type names:
 
@@ -483,13 +485,13 @@ The table gives a recommended minimum for four of the types; the file above sits
 | Test Type | Recommended Minimum | Why |
 |-----------|:-------------------:|-----|
 | LOAD | 10,000 | Enough samples for stable percentile calculations |
-| STRESS | 50,000 | Need sustained load to detect saturation |
+| STRESS | 50,000 | Need sustained load to detect [saturation](appendix-a-glossary.md#gl-saturation-point) |
 | INTEGRITY | 50,000 | Higher counts catch intermittent data loss |
 | ROUND_TRIP | 5,000 | Latency measurement is per-message, so fewer needed |
 
 ### 5. Setting Both `records` and `durationSeconds`
 
-Kates does not treat this as a conflict — no error is raised, both values are forwarded to the backend, and the run stops at whichever bound is hit first. That silent "whichever comes first" behavior is easy to misread when you look at results later, so keep the intent explicit.
+Kates does not treat this as a conflict — no error is raised, both values are forwarded to the Kates API, and the run stops at whichever bound is hit first. That silent "whichever comes first" behavior is easy to misread when you look at results later, so keep the intent explicit.
 
 **Fix:** Set only the termination condition you mean:
 
@@ -521,7 +523,7 @@ kates test scaffold export quick-load
 
 # Edit quick-load.yaml: change maxP99LatencyMs from 100 to 1
 
-# Run with gates enabled, then check the verdict
+# Run with gates enabled, then check the exit code
 kates test apply -f quick-load.yaml --wait
 echo $?
 ```
@@ -531,10 +533,10 @@ No real cluster delivers a 1 ms P99, so the summary table marks the scenario `DO
 
 ## Summary
 
-- A scenario file is a `scenarios:` list in YAML or JSON; `type` is the only field a scenario must carry, and the backend fills in per-type defaults for everything else
+- A scenario file is a `scenarios:` list in YAML or JSON; `type` is the only field a scenario must carry, and the Kates API fills in per-type defaults for everything else
 - SLA gates in the `validate` block are evaluated only with `--wait` — without it, `kates test apply` is fire-and-forget, and how the runs turn out never affects its exit status
 - `kates test apply` exits 1 when any scenario fails to submit, with or without `--wait`; with `--wait` it also exits 1 when a scenario finishes `FAILED`, is lost track of (`ERROR`), or violates a gate, and a run that completes without a `validate` block passes whatever its numbers
-- The CLI never validates a file against a schema: malformed YAML aborts the run with the raw parse error, while an invalid `type` travels to the backend and is rejected there
+- The CLI never validates a file against a schema: malformed YAML aborts the run with the raw parse error, while an invalid `type` travels to the Kates API and is rejected there
 - Start from a `kates test scaffold export` template instead of a blank file — edit a known-good scenario, then run it with `kates test apply -f`
 
 Scenario files lock a winning configuration into Git; finding that configuration interactively is the job of [Lab — Interactive Performance Tuning](10b-lab.md).
