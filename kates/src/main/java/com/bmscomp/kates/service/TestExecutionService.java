@@ -142,7 +142,7 @@ public class TestExecutionService {
         for (TestResult result : run.getResults()) {
             if (result.getStatus() == TestResult.TaskStatus.RUNNING) {
                 try {
-                    trogdorClient.stopTask(result.getTaskId());
+                    trogdorClient.stopTask(new TrogdorClient.StopTaskRequest(result.getTaskId()));
                     result = result.withStatus(TestResult.TaskStatus.STOPPING);
                     run = run.withUpdatedResult(result);
                 } catch (Exception e) {

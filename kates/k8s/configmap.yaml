@@ -14,6 +14,8 @@ data:
   KATES_KAFKA_SASL_MECHANISM: "SCRAM-SHA-512"
   KATES_KAFKA_SASL_USERNAME: "kates-backend"
   KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kafka.svc:8889"
+  # Trogdor agents tasks run on, by node name in the coordinator's trogdor.conf
+  KATES_TROGDOR_AGENT_NODES: "node0"
 
   # API security
   # Set KATES_API_SECURITY_ENABLED=false to disable auth entirely (dev only).

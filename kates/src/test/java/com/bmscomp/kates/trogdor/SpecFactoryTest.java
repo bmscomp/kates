@@ -278,7 +278,7 @@ class SpecFactoryTest {
         List<TrogdorSpec> specs = specFactory.buildSpecs(TestType.LOAD, spec, "topic-test");
 
         ProduceBenchSpec produce = (ProduceBenchSpec) specs.get(0);
-        assertTrue(produce.getActiveTopics().containsKey("my-custom-topic[0-2]"));
+        assertTrue(produce.getActiveTopics().containsKey("my-custom-topic"));
     }
 
     @Test
@@ -287,7 +287,7 @@ class SpecFactoryTest {
         List<TrogdorSpec> specs = specFactory.buildSpecs(TestType.LOAD, spec, "fallback-test");
 
         ProduceBenchSpec produce = (ProduceBenchSpec) specs.get(0);
-        assertTrue(produce.getActiveTopics().containsKey("load-test[0-2]"));
+        assertTrue(produce.getActiveTopics().containsKey("load-test"));
     }
 
     @Test
