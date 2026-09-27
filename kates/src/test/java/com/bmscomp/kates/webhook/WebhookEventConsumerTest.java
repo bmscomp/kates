@@ -8,11 +8,14 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -53,6 +56,9 @@ class WebhookEventConsumerTest {
 
     @Inject
     WebhookService webhookService;
+
+    @Inject
+    EntityManager em;
 
     private HttpServer server;
     private final BlockingQueue<String> received = new LinkedBlockingQueue<>();
@@ -97,5 +103,30 @@ class WebhookEventConsumerTest {
         assertTrue(delivery.contains("\"status\":\"DONE\""), "payload was " + delivery);
         assertNull(
                 received.poll(SILENCE_WINDOW.toMillis(), TimeUnit.MILLISECONDS), "the RUNNING event must not notify");
+    }
+
+    /**
+     * The consumer group re-reads the topic from its start when it has no
+     * committed offset, and the topic can hold events older than
+     * processed_events remembers. Such an event may have notified already, so it
+     * must not notify again.
+     */
+    @Test
+    void anEventOlderThanTheLedgerIsSkipped() throws Exception {
+        InMemorySource<TestEvent> events = connector.source("test-events-in");
+        String staleRun = "stale-run-" + UUID.randomUUID();
+        String freshRun = "fresh-run-" + UUID.randomUUID();
+        long eightDaysAgo = Instant.now().minus(8, ChronoUnit.DAYS).toEpochMilli();
+
+        events.send(new TestEvent(staleRun, "LOAD", TestResult.TaskStatus.DONE, "", eightDaysAgo));
+        events.send(new TestEvent(freshRun, "LOAD", TestResult.TaskStatus.DONE, "", System.currentTimeMillis()));
+
+        String delivery = received.poll(DELIVERY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        assertNotNull(delivery, "the fresh DONE event, sent after the stale one, must call the webhook");
+        assertTrue(delivery.contains(freshRun), "the stale event must not notify, but this did: " + delivery);
+        assertNull(received.poll(SILENCE_WINDOW.toMillis(), TimeUnit.MILLISECONDS), "only the fresh event notifies");
+        assertNull(
+                em.find(ProcessedEventEntity.class, staleRun + ":DONE"),
+                "a skipped event leaves no ledger row for the next sweep to prune");
     }
 }

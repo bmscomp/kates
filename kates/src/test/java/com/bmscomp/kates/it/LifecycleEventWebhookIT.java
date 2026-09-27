@@ -10,6 +10,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -25,8 +26,11 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.Config;
+import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.Node;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigResource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -181,6 +185,20 @@ class LifecycleEventWebhookIT {
         assertNull(
                 received.poll(SILENCE_WINDOW.toMillis(), TimeUnit.MILLISECONDS),
                 "PENDING and RUNNING reach the consumer too, but only a terminal status notifies");
+
+        // The consumer commits what it has read in a group every replica shares,
+        // so a pod that replaces this one starts after these events, and reads
+        // anything published while no pod was reading.
+        TopicPartition partition = new TopicPartition(EventBusTestProfile.TOPIC, 0);
+        AdminClient admin = adminService.sharedAdminClient();
+        long end = admin.listOffsets(Map.of(partition, OffsetSpec.latest()))
+                .partitionResult(partition)
+                .get(ADMIN_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .offset();
+        assertTrue(end >= 3, "the three events are on the topic's one partition");
+        assertTrue(
+                ItSupport.waitUntil(DELIVERY_TIMEOUT, () -> committedOffset(admin, partition) == end),
+                EventBusTestProfile.GROUP + " committed every event it read");
     }
 
     /** Waits for the provisioner's startup check; nothing in the test creates the topic. */
@@ -201,6 +219,19 @@ class LifecycleEventWebhookIT {
         });
         assertTrue(exists, "the Kates API creates " + EventBusTestProfile.TOPIC + " without being asked");
         return found.get();
+    }
+
+    /** The webhook consumer group's committed offset on {@code partition}, or -1 if it has none. */
+    private static long committedOffset(AdminClient admin, TopicPartition partition) {
+        try {
+            OffsetAndMetadata committed = admin.listConsumerGroupOffsets(EventBusTestProfile.GROUP)
+                    .partitionsToOffsetAndMetadata()
+                    .get(ADMIN_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .get(partition);
+            return committed == null ? -1 : committed.offset();
+        } catch (Exception e) {
+            return -1;
+        }
     }
 
     private static Config configOf(AdminClient admin, ConfigResource resource) throws Exception {
