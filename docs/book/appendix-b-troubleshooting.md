@@ -4,6 +4,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 
 ## Kafka Cluster
 
+The cluster exists but isn't healthy: the Strimzi operator, the brokers, the controller quorum or Cruise Control crash, stall, report an error or raise an alert.
+
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Strimzi operator `CrashLoopBackOff` with `UnsupportedVersionException` | Local chart has mismatched Kafka image map | [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-crashloopbackoff) |
@@ -16,6 +18,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 
 ## Kafka Connectivity
 
+A client — Kates, Kafka UI or your own — can't reach the cluster or authenticate to it, or its credentials never arrive.
+
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Kafka UI `CreateContainerConfigError` — secret not found | `KafkaUser` not applied before UI deployment | [Kafka Deployment Engineering](15-kafka-deployment.md#kafka-ui-createcontainerconfigerror) |
@@ -25,6 +29,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | `KafkaUser` secrets never created | Entity Operator (User Operator) only starts after the Kafka CR reaches `Ready` | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#user-secrets-not-appearing) |
 
 ## Kafka Connect
+
+A Kafka Connect release misbehaves: its workers restart or keep rebalancing, a connector fails or is refused at render time, or the PostgreSQL database a Debezium connector reads grows on disk.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
@@ -37,6 +43,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 
 ## Performance Issues
 
+Tests complete but the numbers look wrong — latency that regresses, splits in two or looks too good, results that vary between identical runs — or a broker raises a request-handler or log-flush alert.
+
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | P99 latency regression between test runs | Partition hotspot, GC pauses, or ISR changes | [Recipes & Patterns — Recipe 4](14-recipes.md#recipe-4-investigate-a-latency-regression) |
@@ -48,6 +56,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 
 ## Deployment Issues
 
+Pods, images or Helm releases fail while you install the stack or roll it out.
+
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Images won't load into Kind | Registry unreachable or platform mismatch (arm64/amd64) | [Deployment Guide](12-deployment.md#images-wont-load) |
@@ -56,9 +66,11 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | PDB blocks rolling restart | Only 1 pod can be unavailable — intentional safety behavior | [Upgrade Playbook](18-upgrade-playbook.md#common-upgrade-issues) |
 | Entity Operator never starts | Kafka CR hasn't reached `Ready` — check operator logs for `UnforceableProblem` | [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 | PostgreSQL pod `CrashLoopBackOff` with `could not create lock file` | `readOnlyRootFilesystem: true` mutated by Kyverno — mount `emptyDir` at `/var/run/postgresql` and `/tmp` | [Deployment Guide](12-deployment.md#read-only-filesystem-compliance) |
-| Pod admission rejected with Kyverno policy violation | Pod doesn't meet PSS standards — run `kates kyverno violations` to identify failing rules, then fix the manifest or add a `PolicyException` | [Security & Compliance](17-security.md#kyverno-policy-integration--admission-control) |
+| Pod admission rejected with Kyverno policy violation | Pod doesn't meet PSS standards — run `kates kyverno violations` to identify failing rules, then fix the manifest or add a `PolicyException` | [Security & Compliance](17-security.md#cluster-policies) |
 
 ## CLI Issues
+
+The `kates` CLI itself fails, or can't reach or authenticate to the Kates backend.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
@@ -68,19 +80,23 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 
 ## Chaos Engineering
 
+A LitmusChaos experiment or a Kates disruption fails to start, has no effect or leaves a cluster that doesn't recover, or the **Kates — Chaos** board shows no data.
+
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Litmus experiments fail to start | Chaos operator pod not running or RBAC insufficient | [Deployment Guide](12-deployment.md#litmus-experiments-fail) |
 | Disruption doesn't take effect | Target pod selector doesn't match, or NetworkPolicy blocks | [Chaos Engineering in Practice](07-chaos-practice.md) |
 | Cluster doesn't recover after chaos | ISR too small, `min.insync.replicas` violated | [Chaos Engineering Theory](06-chaos-theory.md) |
-| **Kates — Chaos** board: `$namespace` picker empty, *Chaos engines running* reads *No data* | No `ChaosEngine` has been created yet, or kube-state-metrics lacks the custom-resource configuration for it (`charts/monitoring` before 1.6.0, or another stack) | [Observability & Monitoring](09-observability.md#kates--chaos) |
+| **Kates — Chaos** board: `$namespace` picker empty, *Chaos engines running* reads *No data* | No `ChaosEngine` has been created yet, or kube-state-metrics lacks the custom-resource configuration for it (`charts/monitoring` before 1.6.0, or another stack) | [Observability & Monitoring](09-observability.md#kates-specific-dashboards) |
 
 ## Upgrades
+
+Something that worked before an operator or Kafka upgrade fails or slows down after it.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | `UnsupportedVersionException` after operator upgrade | Kafka version not supported by new operator version | [Upgrade Playbook](18-upgrade-playbook.md#version-compatibility-matrix) |
-| Topics not reconciling after CRD API change | CRDs still using deprecated `v1beta2` | [Upgrade Playbook](18-upgrade-playbook.md#post-upgrade--api-migration) |
+| Topics not reconciling after CRD API change | CRDs still using deprecated `v1beta2` | [Upgrade Playbook](18-upgrade-playbook.md#strimzi-operator-upgrade) |
 | Performance regression after Kafka upgrade | New version defaults changed — compare baseline tests | [Upgrade Playbook](18-upgrade-playbook.md#procedure) |
 
 ## Connectivity Debugging Flowchart
@@ -129,6 +145,8 @@ When filing an issue, include the output of `kates doctor` — it runs a battery
 
 ## Common Issues (Additional)
 
+The stack is up and the Kates backend answers, but a command or a test result isn't what you expect.
+
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs" | Missing `ClusterRoleBinding` for the Kates service account — the backend can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
@@ -136,6 +154,8 @@ When filing an issue, include the output of `kates doctor` — it runs a battery
 | `kates trend` shows no data even after running tests | Tests completed but trend queries require at least 2 data points of the same test type | Run the same test type at least twice. Trend analysis needs historical data to draw a line |
 
 ## Quick Diagnostic Commands
+
+Run these for a first snapshot: the Strimzi resources and pods, the operator and broker logs, the Kafka conditions, partition health through the Kates backend, and Kyverno's policies and violations.
 
 ```bash
 # Cluster overview

@@ -87,7 +87,7 @@ Every workflow also shares three conventions: a `concurrency` group per branch (
 
 ---
 
-## 1. Backend CI (`ci.yml`)
+## Backend CI (`ci.yml`)
 
 **Purpose:** Validates backend code, CLI code, Helm chart integrity, Kyverno policies, and config YAML on every push and pull request.
 
@@ -132,7 +132,7 @@ This job grew well past `helm lint charts/kates`. In order:
 
 ---
 
-## 2. Kafka Charts CI (`ci-kafka-charts.yml`)
+## Kafka Charts CI (`ci-kafka-charts.yml`)
 
 **Purpose:** Checks the Strimzi charts — `strimzi-operator`, `kafka-cluster`, `connect-cluster`, `mirror-maker2`, and the `kafka-common` library they share — the way `ci-mirror-maker2.yml` checks MirrorMaker 2: rendered across every overlay and toggle, not only on defaults.
 
@@ -190,7 +190,7 @@ This job costs minutes and a cluster, which is why it runs weekly and on demand 
 
 ---
 
-## 3. MirrorMaker 2 CI (`ci-mirror-maker2.yml`)
+## MirrorMaker 2 CI (`ci-mirror-maker2.yml`)
 
 **Purpose:** Validates the `mirror-maker2` chart, the migration path it exists for, and the metrics its dashboard reads. Three jobs with very different costs.
 
@@ -226,7 +226,7 @@ The rest of the job:
 
 ---
 
-## 4. Docker Build Validation (`ci-docker.yml`)
+## Docker Build Validation (`ci-docker.yml`)
 
 **Purpose:** Validates that the Kates Docker images build successfully without pushing to a registry.
 
@@ -260,7 +260,7 @@ strategy:
 
 ---
 
-## 5. Integration Tests (`integration.yml`)
+## Integration Tests (`integration.yml`)
 
 **Purpose:** Spins up an ephemeral Kind cluster and validates what needs a real Kubernetes API — cluster topology, the `kates detect` compatibility gate, and server-side dry-runs of the Kafka manifests. Chart linting and config parsing are `ci.yml`'s job and are not repeated here.
 
@@ -298,7 +298,7 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 
 ---
 
-## 6. Publish Kates Docker Image (`publish-docker.yml`)
+## Publish Kates Docker Image (`publish-docker.yml`)
 
 **Purpose:** Builds and pushes the production Kates backend image to GitHub Container Registry (GHCR) and Docker Hub.
 
@@ -334,7 +334,7 @@ The pins are **not** declared in the workflow. The `load-versions` composite act
 
 ---
 
-## 7. Publish Kates Tester Image (`publish-tester.yml`)
+## Publish Kates Tester Image (`publish-tester.yml`)
 
 **Purpose:** Builds and pushes the `kates-tester` image — a lightweight container used in Helm test hooks and integration testing.
 
@@ -357,7 +357,7 @@ A tag is too late to find out that the Dockerfile no longer builds: the build ch
 
 ---
 
-## 8. Publish Kafka Connect Image (`publish-connect.yml`)
+## Publish Kafka Connect Image (`publish-connect.yml`)
 
 **Purpose:** Builds and pushes the enterprise Kafka Connect image — Debezium CDC, the Apicurio Registry converters, and the Aiven JDBC and S3 connectors — to GHCR and Docker Hub.
 
@@ -386,7 +386,7 @@ The `update-charts` job is what keeps `charts/connect-cluster` honest: it rewrit
 
 ---
 
-## 9. Release (`release.yml`)
+## Release (`release.yml`)
 
 **Purpose:** The one workflow a version tag starts. It cross-compiles the Kates CLI for all supported platforms, calls the three image workflows above, and — only once every image is built, verified and signed — creates the GitHub Release, updates the Homebrew tap, and `brew install`s the result on a macOS runner.
 
