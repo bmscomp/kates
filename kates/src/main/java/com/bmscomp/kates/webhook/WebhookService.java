@@ -5,6 +5,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -73,6 +75,12 @@ public class WebhookService {
     @jakarta.inject.Inject
     WebhookUrlValidator urlValidator;
 
+    /** How long processed_events remembers an event; see {@link #olderThanLedger}. */
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "kates.outbox.processed-events-retention-days",
+            defaultValue = "7")
+    int processedRetentionDays;
+
     /**
      * Transactional because {@link #onTestEvent} calls it on a messaging worker
      * thread, which has no request context. Without a transaction the injected
@@ -108,6 +116,12 @@ public class WebhookService {
     @org.eclipse.microprofile.reactive.messaging.Incoming("test-events-in")
     public void onTestEvent(com.bmscomp.kates.domain.events.TestEvent event) {
         String idempotencyKey = event.getTestId() + ":" + event.getStatus().name();
+        if (olderThanLedger(event)) {
+            LOG.infof(
+                    "Skipping test event %s from %s: older than the %d days processed_events remembers",
+                    idempotencyKey, Instant.ofEpochMilli(event.getTimestamp()), processedRetentionDays);
+            return;
+        }
         if (!self.checkAndMarkProcessed(idempotencyKey)) {
             LOG.info("Skipping duplicate test event: " + idempotencyKey);
             return;
@@ -132,6 +146,24 @@ public class WebhookService {
         for (WebhookRegistration reg : targets) {
             fireAsync(reg, payload);
         }
+    }
+
+    /**
+     * Whether processed_events may already have forgotten this event.
+     *
+     * <p>The consumer group reads the topic from its start whenever it has no
+     * committed offset ({@code auto.offset.reset=earliest}), and the topic can
+     * keep an event longer than the ledger does: Kafka deletes whole segments, so
+     * an event outlives {@code retention.ms} by up to a segment's age, and a topic
+     * someone else created can keep events for as long as they chose. A ledger
+     * row is written when the event is first read, which is after the event's own
+     * timestamp, so an event younger than the ledger's window is still recognised
+     * if it was handled. An older one may have been handled and can't be checked,
+     * and a webhook that late would tell its receiver nothing it can act on.
+     */
+    private boolean olderThanLedger(com.bmscomp.kates.domain.events.TestEvent event) {
+        return Instant.ofEpochMilli(event.getTimestamp())
+                .isBefore(Instant.now().minus(processedRetentionDays, ChronoUnit.DAYS));
     }
 
     @jakarta.transaction.Transactional(jakarta.transaction.Transactional.TxType.REQUIRES_NEW)

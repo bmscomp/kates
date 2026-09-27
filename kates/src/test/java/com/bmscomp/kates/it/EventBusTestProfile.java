@@ -14,14 +14,18 @@ import java.util.Map;
  * <p>The outbox poller stays off, as in {@link NoSchedulersTestProfile}, so the
  * test publishes when it chooses to.
  *
- * <p>{@code auto.offset.reset=earliest} because the webhook consumer joins a
- * group of its own on every start, and with the default {@code latest} an event
- * published before the group's first assignment is skipped. The test publishes
- * as soon as the topic exists, which can be before that assignment.
+ * <p>The consumer's group and offset reset are production's, from {@code
+ * application.properties}: the tests are about that consumer. This profile used
+ * to force {@code auto.offset.reset=earliest}, because the consumer then joined
+ * a new group at every start and, with {@code latest}, skipped an event
+ * published before the group's first assignment.
  */
 public class EventBusTestProfile extends NoSchedulersTestProfile {
 
     static final String TOPIC = "kates-test-events";
+
+    /** The webhook consumer's group, set in {@code application.properties} and not overridden here. */
+    static final String GROUP = "kates-webhooks";
 
     @Override
     public Map<String, String> getConfigOverrides() {
@@ -30,7 +34,6 @@ public class EventBusTestProfile extends NoSchedulersTestProfile {
         overrides.put("mp.messaging.outgoing.test-events-out.topic", TOPIC);
         overrides.put("mp.messaging.incoming.test-events-in.connector", "smallrye-kafka");
         overrides.put("mp.messaging.incoming.test-events-in.topic", TOPIC);
-        overrides.put("mp.messaging.incoming.test-events-in.auto.offset.reset", "earliest");
         overrides.put("kates.webhooks.allow-loopback", "true");
         return overrides;
     }
