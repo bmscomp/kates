@@ -394,6 +394,8 @@ The backup phase reads `Completed` and both tests pass; note the LOAD test ID â€
 
 ## Common Upgrade Issues
 
+Find the error or the behavior you see in the Issue column. The first row is what you get when you ask for a Kafka version the running operator can't run, which is why the operator goes first:
+
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | `UnsupportedVersionException` | The requested Kafka version is outside the running operator's window | Upgrade the operator first, as in [Strimzi Operator Upgrade](#strimzi-operator-upgrade) â€” by hand in production; `kates versions` prints the running operator's window |

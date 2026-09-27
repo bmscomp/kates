@@ -30,6 +30,9 @@ Thirteen of the operator's own seventeen resources are cluster-scoped, and every
 The operator is not a subchart of `kafka-cluster`, and it never becomes one. The reason is a chicken-and-egg problem in Helm's own validation order:
 
 ```mermaid
+%%| label: fig-op-two-releases
+%%| fig-cap: "The operator and the Kafka cluster are two releases, because the CRDs must exist before any Kafka resource can validate."
+%%| fig-alt: "Two releases. strimzi-operator, in the strimzi-operator namespace, holds the Strimzi CRDs, applied from crds/ on install, and the Cluster Operator Deployment. kafka-cluster, in the kafka namespace, holds the Kafka resource krafter, the KafkaNodePool resources and the KafkaUser and KafkaTopic resources. Arrows show that the CRDs' schema must exist before those resources validate, and that the operator reconciles the Kafka resource into StrimziPodSets, pods and Secrets."
 graph TB
     subgraph Release1["Release: strimzi-operator (namespace: strimzi-operator)"]
         CRD["Strimzi CRDs<br/>(crds/ — applied on install)"]
@@ -89,6 +92,8 @@ Templating the CRDs would hand `helm uninstall` the power to delete every Kafka 
 
 ## Deploying the Operator
 
+This section installs the operator on a cluster that has none. If one is already running, go to [Upgrading the Operator](#upgrading-the-operator) instead, or to [Migrating from the Ad-Hoc Install](#migrating-from-the-ad-hoc-install) if it came from the old `oci://` release. When the install finishes, the operator Deployment is running and the ten Strimzi CRDs are `Established`.
+
 ### Prerequisites
 
 The chart declares a subchart, so the dependency must be fetched **before** any Helm operation — template, lint, install, or upgrade:
@@ -112,6 +117,8 @@ Error: An error occurred while checking for chart dependencies. You may need to 
 The dependency build pulls from `quay.io`, and the CRD hook fetches from `github.com`. Both are required egress paths; the first one is not new, since the ad-hoc install this chart replaces already pulled the same chart from the same registry.
 
 ### Fresh Install
+
+On a cluster with no Strimzi operator, the install is two commands. The first repeats the prerequisite, so the block runs as it stands:
 
 ```bash
 helm dependency build charts/strimzi-operator
@@ -569,6 +576,8 @@ The hook's own log is deliberately not part of this check. Helm deletes a succes
 :::
 
 ## Troubleshooting
+
+Each heading below is either the error text Helm prints or the state you find the release or its clusters in, so search for what you see.
 
 ### `found in Chart.yaml, but missing in charts/ directory: strimzi-kafka-operator`
 

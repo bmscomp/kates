@@ -237,14 +237,24 @@ throughput. Never point production traffic at it.
 ## Where to Go Next
 
 The step-by-step procedures live outside the book, next to the code they drive:
-`docs/tutorials/10-mirror-maker2-installation.md` for setup,
-`11-migrating-kafka-2x-to-4x.md` and `12-migrating-kafka-3x-to-4x.md` for the two
-migration paths, and `docs/mirror-maker2-runbook.md` for the cutover checklist
-and the failure table. Chart reference: `charts/mirror-maker2/README.md`. Two
-operational helpers are worth knowing by name: `kates migrate target topics`
+
+- [Tutorial 10: Installing and Setting Up MirrorMaker 2](../tutorials/10-mirror-maker2-installation.md)
+  for setup
+- [Tutorial 11: Migrating Kafka 2.x to 4.x with MirrorMaker 2](../tutorials/11-migrating-kafka-2x-to-4x.md)
+  and [Tutorial 12: Migrating Kafka 3.x to 4.x with MirrorMaker 2](../tutorials/12-migrating-kafka-3x-to-4x.md)
+  for the two migration paths
+- [MirrorMaker 2 Runbook — Cutover, Rollback, Troubleshooting](../mirror-maker2-runbook.md)
+  for the cutover checklist and the failure table
+- [mirror-maker2](../../charts/mirror-maker2/README.md), the chart reference
+
+Two operational helpers are worth knowing by name: `kates migrate target topics`
 lists what the mirror created on the target (the Topic Operator is
 unidirectional, so `kubectl get kafkatopics` never will), and
 `kates migrate target offsets <topic>` sums a topic's end offsets with whichever
 offset tool the target's Kafka line ships. The `make mm2-topics` and
 `make mm2-migration-test` targets still work and print the `kates migrate`
 command they now stand for.
+
+That covers the mirror. When the source is old, the other half of the problem is
+the source itself: [Migrating a Legacy Kafka Source](23-legacy-source-migration.md)
+covers what its age changes around the mirror, and it is the chapter to read next.

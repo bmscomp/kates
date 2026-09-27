@@ -7,7 +7,18 @@ Practical, ready-to-use recipes for common Kates workflows. Each recipe is a sel
 - Certify a cluster's resilience with disruption playbooks and a combined `kates resilience run`
 - Diagnose a latency regression and size sustainable capacity from per-phase CAPACITY results
 
-## Recipe 1: Validate a Kafka Upgrade
+Pick a recipe by the question you need answered. Two of them disrupt the cluster on purpose, so check the Disrupts the cluster column before you run one where other people depend on the cluster:
+
+| Recipe | Question it answers | Run time | Disrupts the cluster | Prerequisites |
+|--------|---------------------|----------|----------------------|---------------|
+| [Recipe 1: Validate a Kafka Upgrade](#recipe-1-validate-a-kafka-upgrade) | Did the upgrade change performance or data integrity? | Two runs of a three-scenario suite, with the upgrade between them | The upgrade rolls every broker; the tests don't disrupt | The recipe's scenario file, and the [Upgrade Playbook](18-upgrade-playbook.md) procedure |
+| [Recipe 2: Nightly Regression Suite](#recipe-2-nightly-regression-suite) | Is performance drifting from night to night? | One LOAD run of 100,000 records a night; the trend commands read 30 days | No | A running Kates backend, where the scheduler runs |
+| [Recipe 3: Pre-Production Chaos Certification](#recipe-3-pre-production-chaos-certification) | Does the cluster keep working through broker loss, a network partition and a zone outage? | Two tests and three playbooks, then a 360 s LOAD run during a broker kill | Yes: it kills Kafka pods and cuts one broker off the network | A cluster nothing else depends on, with a Kafka pool pinned to zone `alpha` for `az-failure` |
+| [Recipe 4: Investigate a Latency Regression](#recipe-4-investigate-a-latency-regression) | Why did P99 latency rise between two runs? | No new runs: it reads results you already have | No | Two finished runs to compare |
+| [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) | What throughput can the cluster sustain? | Up to 20 minutes at the backend's defaults | Yes: it drives the brokers to their limit | A cluster nothing else depends on, and your P99 SLA threshold |
+| [Recipe 6: Producer Tuning](#recipe-6-producer-tuning) | Which producer settings suit your workload? | Four LOAD runs of 100,000 records each | No | The recipe's scenario file |
+
+## Recipe 1: Validate a Kafka Upgrade {#recipe-1-validate-a-kafka-upgrade}
 
 **Goal:** Prove that a Kafka version upgrade doesn't introduce regressions in performance or data integrity.
 
@@ -96,7 +107,7 @@ The integrity scenario relies on `acks: all`, which also makes the producer idem
 
 ---
 
-## Recipe 2: Nightly Regression Suite
+## Recipe 2: Nightly Regression Suite {#recipe-2-nightly-regression-suite}
 
 **Goal:** Detect performance regressions early by running a test suite every night and monitoring trends.
 
@@ -155,9 +166,13 @@ A sudden spike in the sparkline indicates a regression. Use `kates report diff` 
 
 ---
 
-## Recipe 3: Pre-Production Chaos Certification
+## Recipe 3: Pre-Production Chaos Certification {#recipe-3-pre-production-chaos-certification}
 
 **Goal:** Build confidence that a Kafka cluster meets resilience SLAs before deploying to production.
+
+::: {.callout-caution}
+This recipe breaks the cluster on purpose. `leader-cascade` kills the brokers leading `__consumer_offsets` partitions 0 and 1, one after the other; `split-brain` cuts broker 0 off from the other cluster members for 60 seconds; `az-failure` kills every Kafka pod in zone `alpha`; and Step 4 kills a broker while a LOAD test runs. Anything else using the cluster goes through the same failures, so run the recipe where nothing else depends on the cluster, and never on production.
+:::
 
 ### Procedure
 
@@ -266,7 +281,7 @@ A playbook run prints the disruption ID and the final status, and gets no SLA gr
 
 ---
 
-## Recipe 4: Investigate a Latency Regression
+## Recipe 4: Investigate a Latency Regression {#recipe-4-investigate-a-latency-regression}
 
 **Goal:** Diagnose why P99 latency increased between two test runs.
 
@@ -340,9 +355,13 @@ If under-replicated or offline partitions show up during the test, the cluster w
 
 ---
 
-## Recipe 5: Capacity Planning
+## Recipe 5: Capacity Planning {#recipe-5-capacity-planning}
 
 **Goal:** Determine the maximum sustainable throughput for your cluster configuration.
+
+::: {.callout-caution}
+A CAPACITY test drives the cluster to its limit on purpose: its producers run unthrottled, for up to 20 minutes at the backend's defaults. Every other client competes with it for the brokers' network, disk and CPU while it runs, so run it where nothing else depends on the cluster, and never on production.
+:::
 
 ### Procedure
 
@@ -353,6 +372,7 @@ kates test create --type CAPACITY --wait
 ```
 
 The capacity test automatically:
+
 1. Starts with a moderate producer count
 2. Increases producers in each phase
 3. Measures throughput and latency at each level
@@ -395,7 +415,7 @@ If capacity results seem unexpectedly low, check that no resource quotas or Kafk
 
 ---
 
-## Recipe 6: Producer Tuning
+## Recipe 6: Producer Tuning {#recipe-6-producer-tuning}
 
 **Goal:** Find the optimal producer configuration for your workload.
 

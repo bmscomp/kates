@@ -42,6 +42,8 @@ The default performance test listener (`plain`, port 9092) uses SCRAM authentica
 
 ## Security Architecture Overview
 
+The diagram shows who talks to whom across the platform, and over which protocol and port. One hop deserves a second look: the Kates backend reaches the brokers on the `plain` listener, port 9092, where SCRAM authenticates the client but nothing encrypts the traffic.
+
 ```mermaid
 graph TB
     subgraph External
@@ -168,6 +170,9 @@ Authentication tells Kafka who you are. Authorization tells Kafka what you're al
 Kafka uses **simple ACL authorization** with principal-based access control:
 
 ```mermaid
+%%| label: fig-sec-acl-model
+%%| fig-cap: "A KafkaUser maps to a principal, and every operation that principal attempts is checked against the ACL rules."
+%%| fig-alt: "A KafkaUser maps to the principal User:user-name, which is checked against the ACL rules, each a resource, an operation and a host. The rules allow or deny access to a topic, a group or the cluster."
 graph LR
     User[KafkaUser] -->|"maps to"| Principal["Principal<br/>User:user-name"]
     Principal -->|"checked against"| ACL["ACL Rules<br/>(resource, operation, host)"]
@@ -305,6 +310,9 @@ kubectl get secret admin-user -n kafka -o jsonpath="{.data.password}" | base64 -
 Strimzi manages two independent CA hierarchies — one for cluster-internal communication and one for client authentication:
 
 ```mermaid
+%%| label: fig-sec-ca-hierarchies
+%%| fig-cap: "Strimzi's two CAs: the Cluster CA signs the cluster's own certificates, the Clients CA signs certificates for TLS users."
+%%| fig-alt: "Two CA trees. The Cluster CA, valid five years and renewed 180 days before expiry, signs the broker, controller and Cruise Control certificates. The Clients CA, with the same validity and renewal, signs the client certificates of KafkaUsers whose authentication type is tls."
 graph TD
     ClusterCA["Cluster CA<br/>5yr validity<br/>Renew 180d before expiry"] --> BrokerCert["Broker Certs"]
     ClusterCA --> ControllerCert["Controller Certs"]
@@ -605,6 +613,8 @@ kubectl run np-probe -n default --rm -i --restart=Never --image="$IMAGE" -- bash
 
 ## Container Security
 
+The `kafka-cluster` chart hardens the broker and controller pods by default: every `KafkaNodePool` it renders carries the security contexts below in its pod template, and a pool's `podSecurityContext` and `containerSecurityContext` values merge over them.
+
 ### Security Contexts
 
 Every container in the Kates platform runs with a hardened security context. These settings follow the Kubernetes Pod Security Standards (PSS) at the **restricted** level:
@@ -622,6 +632,8 @@ template:
       runAsNonRoot: true
       fsGroup: 1001
 ```
+
+Each setting takes away one thing an attacker who gets into the container could use:
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
@@ -650,6 +662,9 @@ The `litmus-chaos` user intentionally has no quotas. Chaos experiments sometimes
 The Kates platform integrates **Kyverno** as a Kubernetes-native policy engine for enforcing security standards via admission control. Think of Kyverno as a security guard at the door of your cluster — it inspects every resource creation and modification request and either fixes it, approves it, or rejects it.
 
 ```mermaid
+%%| label: fig-sec-kyverno-admission
+%%| fig-cap: "Kyverno sits in the admission path: it patches a resource, then validates it, and only Enforce mode rejects a failure."
+%%| fig-alt: "A kubectl apply or Helm install reaches the Kyverno webhook, which mutates the resource into a patched one and validates it. A pass goes on to the Kubernetes API. A failure is rejected in Enforce mode and passed to the Kubernetes API in Audit mode."
 graph LR
     subgraph Admission Pipeline
         Req["kubectl apply / Helm install"] --> Webhook["Kyverno Webhook"]
@@ -804,6 +819,8 @@ kates kyverno enforce kates-pod-security-standards
 # Switch a policy back to Audit mode (log-only)
 kates kyverno audit kates-pod-security-standards
 ```
+
+The table adds the commands' short aliases, where they have any, and what each one reads or changes:
 
 | Command | Aliases | Description |
 |---------|---------|-------------|

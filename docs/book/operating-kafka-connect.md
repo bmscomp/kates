@@ -16,6 +16,9 @@ After this chapter, you can:
 The connect-cluster chart uses the **Stretched Cluster** strategy — a single `KafkaConnect` resource spanning all Availability Zones.
 
 ```mermaid
+%%| label: fig-okc-stretched-cluster
+%%| fig-cap: "One Connect group spans all three zones and shares one set of internal topics."
+%%| fig-alt: "Three Connect workers, one in each of the zones alpha, sigma and gamma, all exchange group-protocol traffic with the shared connect-offsets topic, which sits beside the connect-configs and connect-status topics."
 graph TB
     subgraph AZ_Alpha["AZ: alpha"]
         W0["Worker 0"]
@@ -55,6 +58,9 @@ graph TB
 When an entire Availability Zone goes offline:
 
 ```mermaid
+%%| label: fig-okc-az-failure
+%%| fig-cap: "When zone sigma goes offline, the framework moves its tasks to the workers that remain."
+%%| fig-alt: "Sequence diagram. The worker in zone sigma stops sending heartbeats; the Connect framework detects the missing worker, triggers a rebalance and reassigns sigma's tasks to the workers in alpha and gamma, which resume from the last committed offset."
 sequenceDiagram
     participant AZ_A as Worker (alpha)
     participant AZ_S as Worker (sigma) 💀
@@ -70,6 +76,8 @@ sequenceDiagram
     Note over AZ_A,AZ_G: Connectors resume from last committed offset
 ```
 
+Whatever the event, the framework moves the tasks, and the offsets survive because they live in a Kafka topic:
+
 | Event | Behavior |
 |-------|----------|
 | Worker pod dies | Framework rebalances tasks to surviving workers (seconds) |
@@ -82,6 +90,8 @@ Cross-AZ data transfer costs apply when a connector in zone alpha reads from a d
 :::
 
 ### Scheduling Configuration
+
+Three values place the workers and tell each one its zone: `topologySpreadConstraints` spreads them across zones, `podAntiAffinity` prefers a separate node for each, and `rack` reads each worker's zone from its node's label. The production overlay sets all three:
 
 ```yaml
 # Production (values-prod.yaml)
@@ -104,6 +114,8 @@ The base values use `whenUnsatisfiable: ScheduleAnyway`, so single-node clusters
 
 ## Capacity Planning
 
+Capacity comes down to how much memory each worker needs, how the connectors' tasks spread across the workers, and roughly what one worker can move.
+
 ### Worker Sizing
 
 Each Connect worker consumes memory proportional to the number of tasks it runs and the batch sizes configured:
@@ -113,6 +125,8 @@ Worker Memory = JVM Heap + Off-Heap
              = (-Xmx) + (Direct Buffers + Thread Stacks + JMX + GC Overhead)
              ≈ -Xmx × 2
 ```
+
+Each row pairs a workload with a worker count and a heap, and gives the container at least twice that heap, as the formula requires:
 
 | Workload | Workers | Heap (-Xmx) | Container Memory | CPU |
 |----------|:-------:|:-----------:|:----------------:|:---:|
@@ -144,6 +158,7 @@ graph TB
 ```
 
 **Rules of thumb:**
+
 - Debezium source connectors: always `tasksMax: 1` (limited by replication slot)
 - JDBC sink connectors: `tasksMax` = number of topic partitions (for parallelism)
 - Mirror connectors: `tasksMax` = number of source partitions
@@ -165,6 +180,8 @@ Approximate throughput per worker (single connector, 1Gi heap, 1 CPU):
 
 ## Performance Tuning
 
+When a pipeline falls behind, three layers of batching are worth checking: the producer Connect writes to Kafka with, the consumer a sink connector reads with, and the connector's own settings. Each table gives the default and the value to try.
+
 ### Producer Tuning
 
 Connect's internal producer sends records to Kafka. These settings control batching and throughput:
@@ -179,6 +196,8 @@ Connect's internal producer sends records to Kafka. These settings control batch
 
 ### Consumer Tuning (Sink Connectors)
 
+Each sink task reads through a consumer built from the workers' `consumer.*` settings. The first two settings make each fetch and each poll larger; the third is already set by the chart's default `extraConfig`:
+
 | Setting | Default | Tuned | Effect |
 |---------|---------|-------|--------|
 | `consumer.fetch.min.bytes` | 1 | 65536 | Wait for 64KB before returning fetch |
@@ -186,6 +205,8 @@ Connect's internal producer sends records to Kafka. These settings control batch
 | `consumer.auto.offset.reset` | `latest` | `earliest` | Chart default — don't miss records |
 
 ### Connector-Level Tuning
+
+These settings belong to a connector rather than to the workers, so they go in that connector's own `config`. The Type column says which connector reads each one:
 
 | Setting | Type | Default | Recommended | Notes |
 |---------|------|---------|-------------|-------|
@@ -202,6 +223,8 @@ Monitor `rate(kafka_connect_source_task_metrics_source_record_poll_total[5m])` a
 ---
 
 ## Observability
+
+Two things tell you how the workers are doing: the Prometheus alerts the chart renders, each linked to its runbook entry, and the Grafana board you read when one fires.
 
 ### Prometheus Alerts
 
@@ -291,6 +314,9 @@ The chart's `networkpolicy.yaml` ships a default-deny posture: a deny-all Ingres
 For the default `kates deploy` layout — workers in `connect`, brokers in `kafka` — the flows look like this:
 
 ```mermaid
+%%| label: fig-okc-network-flows
+%%| fig-cap: "The flows the chart's policy admits when the workers run in connect and the brokers in kafka."
+%%| fig-alt: "The Connect workers in the connect namespace reach the Kafka brokers in the kafka namespace on 9092, or 9093 with TLS, and PostgreSQL in the database namespace on 5432. Prometheus in the monitoring namespace scrapes the workers on 9404, and the Cluster Operator in the strimzi-operator namespace calls their REST API on 8083."
 graph LR
     subgraph connect_ns["connect namespace"]
         CW["Connect Workers<br/>REST API :8083"]
@@ -405,9 +431,16 @@ restApi:
 
 ## Security & Credential Rotation
 
+A worker holds three credentials: the cluster CA it trusts, its own Kafka user's password or certificate, and the database password its connectors log in with. This section shows where each one comes from and how to rotate it.
+
 ### Credential Architecture
 
+Strimzi mounts the CA and the Kafka user's Secret into the worker pods. The database Secret is never mounted: the secrets config provider reads it through the Kubernetes API.
+
 ```mermaid
+%%| label: fig-okc-credentials
+%%| fig-cap: "Where a worker's three credentials come from."
+%%| fig-alt: "Three Kubernetes Secrets feed a Connect worker pod. Strimzi mounts krafter-cluster-ca-cert into the TLS truststore and kates-connect, a SCRAM password or client certificate, into the SASL configuration. The secrets config provider reads connect-pg-credentials, the database password, through the Kubernetes API."
 graph TB
     subgraph K8s Secrets
         S1["krafter-cluster-ca-cert<br/>(TLS CA)"] 
@@ -430,36 +463,48 @@ The workers read `connect-pg-credentials` through the API only because the chart
 
 ### Rotation Procedures
 
+Of the credentials a worker holds, only the database password lives outside Kubernetes, so it is the one rotation Strimzi takes no part in. The three Kafka credentials rotate through Strimzi and roll the workers one at a time:
+
 | Credential | Rotation Method | Downtime |
 |-----------|----------------|:--------:|
 | Kafka TLS CA | Strimzi auto-rotates 180 days before expiry; across namespaces, `secretSync.watch` re-copies it (otherwise the next `helm upgrade` does) | Zero — rolling restart |
 | SCRAM password | Update `KafkaUser` CR → Strimzi updates Secret; across namespaces, `secretSync.watch` or the next `helm upgrade` re-copies it | Zero — rolling restart |
 | Client certificate (`values-prod.yaml`) | The User Operator renews it; `secretSync.watch` (on in the prod overlay) re-copies it | Zero — rolling restart |
-| Database password | Update K8s Secret → restart the connector | Seconds — connector restart only |
+| Database password | Change it in PostgreSQL → update K8s Secret → restart the tasks of the connectors that read it | Seconds — task restart only |
 | Connect REST API (if exposed) | Ingress-level auth (OAuth2 proxy, mTLS) | N/A |
 
-**Database credential rotation:**
+For the database password, what matters is when the tasks restart. A connector's tasks hold its database connections, and each task reads the Secret, through the secrets config provider, when it starts. Restarting only the connector, as `kates kafka connect restart` does, leaves its running tasks on the old password. So change the password in PostgreSQL first, then the Secret, and only then restart the tasks of every connector that reads it. The commands below rotate the demo database that `kates deploy` installs in the `database` namespace; for your own database, run the same `ALTER ROLE` your usual way:
 
 ```bash
-# 1. Update the secret
+# 1. Change the password in PostgreSQL. A role may change its own password,
+#    so this logs in as debezium with the password it has now
+kubectl exec -n database postgresql-0 -- /bin/bash -lc \
+  "PGPASSWORD=OLD_PASSWORD /opt/bitnami/postgresql/bin/psql \
+  -h 127.0.0.1 -U debezium -d orders \
+  -c \"ALTER ROLE debezium PASSWORD 'NEW_PASSWORD';\""
+
+# 2. Update the Secret the connectors read
 kubectl create secret generic connect-pg-credentials \
   -n connect \
   --from-literal=username=debezium \
   --from-literal=password=NEW_PASSWORD \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# 2. Restart the connector — the secrets config provider re-reads
-#    the Secret when the connector configuration is (re)applied
-kates kafka connect restart debezium-postgres-source
+# 3. Restart the tasks of every connector that reads the Secret, so each
+#    task reads it again. kates deploy creates these two, with one task each
+kates kafka connect restart-task debezium-postgres-source 0
+kates kafka connect restart-task jdbc-sink-connector 0
 ```
 
-::: {.callout-important}
-Update the database password in PostgreSQL **before** updating the Kubernetes Secret. If you update the Secret first, Connect workers will restart and immediately fail authentication.
-:::
+A connector with more tasks needs each of them restarted; `kates kafka connect tasks <connector>` lists their ids. Between steps 1 and 2 the database and the Secret disagree, so a task that restarts in that window for another reason, such as a rebalance that moves it to another worker, fails authentication; step 3 brings it back. Nothing restarts the workers along the way: `kates kafka connect restart-task` restarts a task through its connector's `KafkaConnector` resource, and a change to this Secret rolls no pods.
+
+Every `kates deploy --with-kafka-connect` run writes `connect-pg-credentials` again with the demo password, `debezium`. Once you have rotated the demo database, repeat steps 2 and 3 after each such run.
 
 ---
 
 ## Upgrade Procedures
+
+Two things get upgraded here: the image the workers run, when Debezium or Kafka moves, and the chart itself. Both go through `helm upgrade` from the values the release runs with, and both can be rolled back.
 
 ### Upgrading the Connect Image
 
@@ -501,6 +546,8 @@ The upgrade rolls the workers once (the metrics ConfigMap key is now `metrics-co
 
 ### Upgrade Checklist
 
+The checklist takes an image upgrade through dev or staging before production, and says how to verify each step:
+
 | Step | Action | Verify |
 |:----:|--------|--------|
 | 1 | Read Debezium migration guide | Breaking changes documented |
@@ -512,6 +559,8 @@ The upgrade rolls the workers once (the metrics ConfigMap key is now `metrics-co
 | 7 | Monitor for 24h | No alerts, no lag increase |
 
 ### Rolling Back
+
+Either return to the previous Helm revision, or pin the previous image and upgrade to it from the values the release runs with:
 
 ```bash
 # Rollback to previous Helm release
@@ -534,6 +583,8 @@ If the new Debezium version changed the internal offset format, rolling back may
 ---
 
 ## Disaster Recovery
+
+Connect keeps its state in Kafka, so what you can recover depends on what survives there. The scenarios below cover losing the internal topics and losing the whole Connect deployment.
 
 ### Scenario: Internal Topics Deleted
 
@@ -589,6 +640,8 @@ The Connect cluster itself is stateless — all state lives in Kafka topics. Bac
 
 ## Troubleshooting
 
+Each entry starts from what you see — a connector's state, an alert, a pod's exit reason, a PostgreSQL disk that keeps growing, or a failed `helm upgrade` — and gives the cause and the fix.
+
 ### Connector Stuck in FAILED State
 
 **Symptom:** `KafkaConnector` status shows `FAILED` with `io.debezium.DebeziumException`
@@ -620,6 +673,7 @@ kates kafka connect logs
 **Cause:** A large number of connectors/tasks being reassigned, or workers repeatedly leaving and rejoining the group. (The chart also sets `group.initial.rebalance.delay.ms: 3000`, which adds a fixed 3-second wait before the *first* assignment when the group forms — that delay is intentional and not the problem here.)
 
 **Fix:** If rebalancing takes more than 5 minutes, check for:
+
 - Workers crashing during rebalance (check pod events)
 - Network policies blocking inter-worker communication on port 8083
 - Insufficient memory causing OOM kills during task assignment
@@ -647,6 +701,7 @@ resources:
 **Cause:** The Debezium connector is down or paused, but the replication slot retains WAL segments
 
 **Fix:**
+
 1. Resume or restart the connector to drain the slot
 2. If the connector is permanently removed, drop the slot:
 
@@ -717,8 +772,8 @@ Every connector and task reports `RUNNING` in both views — the CLI reads the `
 - One stretched `KafkaConnect` cluster spans all Availability Zones; topology spread constraints and pod anti-affinity keep workers apart, and the group protocol reassigns tasks off a dead zone in seconds with offsets intact
 - Give containers roughly 2× the JVM heap — off-heap memory is what gets workers OOMKilled — and target 2–5 tasks per worker
 - The internal topics (`*-offsets`, `*-configs`, `*-status`) hold the only persistent state; as long as they survive in Kafka, the cluster is rebuildable from the Helm chart alone
-- Rotate the database password in PostgreSQL first, then the Kubernetes Secret, then restart the connector — in the reverse order the connector restarts straight into failed authentication
+- Rotate the database password in PostgreSQL, then in the Kubernetes Secret, then restart the connectors' tasks — a task reads the Secret only when it starts, so restarting the connector alone leaves its tasks on the old password
 - Upgrades roll one worker at a time with zero downtime, but a Debezium release that changes the offset format makes rollback unsafe — validate in staging with `kates kafka connect test`
 - Most FAILED connectors trace back to credentials, an occupied replication slot, or `wal_level` — start with `kates kafka connect connectors` and the worker logs
 
-Next, [Recipes & Patterns](14-recipes.md) combines individual commands like these into end-to-end procedures — upgrade validation, scheduled regression suites, and resilience certification.
+MirrorMaker 2 runs on the same machinery you have just learned to operate — workers, tasks, rebalances and internal topics — with one difference: it talks to two Kafka clusters instead of one. [Cross-Cluster Replication and Migration](22-mirror-maker2-migration.md) starts from there.

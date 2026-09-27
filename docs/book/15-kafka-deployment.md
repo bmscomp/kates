@@ -46,6 +46,7 @@ sequenceDiagram
 ```
 
 Key behaviors:
+
 - **Config-only changes** (e.g., `num.io.threads`) trigger a rolling restart of affected pods
 - **Storage changes** require manual intervention — Strimzi will not shrink PVCs
 - **Version upgrades** are performed as a rolling update, one broker at a time
@@ -124,6 +125,8 @@ Three is the minimum for fault tolerance. Five gives diminishing returns for loc
 Each component type is modeled as a `KafkaNodePool` — the modern Strimzi way to manage heterogeneous node groups.
 
 ### Controller Pool
+
+One pool holds the three KRaft controllers, and gives them the `controller` role only:
 
 ```yaml
 apiVersion: kafka.strimzi.io/v1
@@ -240,6 +243,8 @@ Default quotas prevent a single runaway producer or consumer from starving other
 
 ### Kafka 4.x Features
 
+The key below turns on share groups. The chart renders it, like every `group.share.*` and `share.*` key, only when `kafkaVersion` is 4.2.0 or newer:
+
 ```yaml
 group.share.enable: true  # KIP-932 Share Groups
 ```
@@ -247,6 +252,8 @@ group.share.enable: true  # KIP-932 Share Groups
 Share Groups enable queue-style (competing consumer) semantics alongside traditional consumer groups — useful for job distribution workloads.
 
 ### KRaft Quorum Tuning
+
+The chart's defaults set three of the quorum's timeouts:
 
 ```yaml
 controller.quorum.election.timeout.ms: 5000
@@ -258,7 +265,12 @@ These control how quickly the Raft quorum detects a failed controller and elects
 
 ## Listeners & Authentication
 
+Clients reach the brokers through up to three listeners, and the diagram shows which client uses which:
+
 ```mermaid
+%%| label: fig-kde-listeners
+%%| fig-cap: "Which client uses which listener: the in-cluster services use plain, and external exists only where the values chain declares it."
+%%| fig-alt: "The Kates backend, Kafka UI and Apicurio connect to the plain listener on 9092 with SCRAM-SHA-512. An external CLI connects to the external listener on 9094, a NodePort or load balancer with SCRAM, which exists only where declared. A dashed line marks the Kates backend's encrypted option, the tls listener on 9093 with mTLS."
 graph LR
     subgraph Clients
         Kates[Kates Backend]
@@ -279,6 +291,8 @@ graph LR
     External --> E
     Kates -.->|"encrypted"| T
 ```
+
+The table adds each listener's type and whether it encrypts the traffic:
 
 | Listener | Port | Type | Auth | TLS | Use Case |
 |----------|------|------|------|-----|----------|
@@ -446,6 +460,8 @@ Both live under the `strimzi-kafka-operator:` key in the wrapper chart, whose sc
 
 ## Operational Components
 
+Four components run beside the brokers and controllers, and none of them carries client traffic: Cruise Control rebalances partitions, Kafka Exporter publishes consumer lag, the Strimzi Drain Cleaner handles node drains, and the Entity Operator turns `KafkaTopic` and `KafkaUser` resources into topics and credentials.
+
 ### Cruise Control
 
 Cruise Control provides automated partition rebalancing based on broker resource utilization:
@@ -587,6 +603,9 @@ kubectl apply -f config/kafka/kafka-backup.yaml
 `deploy-kafka.sh` is Helm-chart-driven and reconciles two releases in order: the operator wrapper (`charts/strimzi-operator`), then the cluster (`charts/kafka-cluster`, which templates the Kafka CR, node pools, users, topics, alerts and network policies). Each chart gets its own `helm dependency build` — the wrapper's fetches the upstream operator subchart, the cluster's fetches the `kafka-common` library and SeaweedFS — and the cluster's values chain is always the platform profile followed by the environment overlay:
 
 ```mermaid
+%%| label: fig-kde-deploy-flow
+%%| fig-cap: "What deploy-kafka.sh does, in order: the operator release first, then the cluster release."
+%%| fig-alt: "Flowchart. deploy-kafka.sh ensures the kafka and strimzi-operator namespaces, builds the strimzi-operator chart's dependencies, installs or upgrades the strimzi-operator release, where the CRD hook runs, and waits for the kafkas CRD to be Established. It then builds the kafka-cluster chart's dependencies; on kind only, it applies the zone StorageClasses. It builds the values chain, platform profile first and environment overlay second, adopts existing KafkaTopics and KafkaUsers into the release, installs or upgrades kafka-cluster, waits up to 10 minutes for krafter to be Ready, waits for the KafkaUser Secrets and finishes."
 graph TD
     A["Ensure kafka + strimzi-operator namespaces"] --> B["helm dependency build<br/>charts/strimzi-operator<br/>(upstream operator subchart)"]
     B --> C["helm upgrade --install strimzi-operator<br/>charts/strimzi-operator --reset-values --wait<br/>(unconditional: the CRD hook runs here)"]
@@ -629,6 +648,8 @@ Expect the Kafka CR to report Ready, every node pool at its desired replica coun
 :::
 
 ## Troubleshooting
+
+Each entry names the symptom, then its cause and the fix.
 
 ### Strimzi Operator CrashLoopBackOff
 
@@ -687,6 +708,7 @@ Kafka CR Ready → Entity Operator deploys → User Operator reconciles KafkaUse
 If the Kafka CR hasn't reached `Ready` (e.g., due to a NetworkPolicy blocking the operator), the Entity Operator never starts and no user secrets are created.
 
 **Fix:**
+
 1. Ensure the Kafka CR reaches `Ready` before deploying Kafka UI
 2. The `deploy-kafka-ui.sh` script includes a wait loop for the `kafka-ui` Secret (up to 180s) to handle this race condition
 3. If the secret never appears, check Kafka CR status and operator logs:
@@ -701,6 +723,7 @@ kubectl get pods -n kafka -l strimzi.io/name=krafter-entity-operator
 **Symptom:** Kafka CR stuck on `NotReady` with `UnforceableProblem: An error while trying to determine the active controller`
 
 **Cause:** The Strimzi operator's `describeMetadataQuorum` admin API call to port 9090 times out. Most commonly caused by:
+
 - An operator NetworkPolicy with empty egress — `strimzi-kafka-operator.operatorNetworkPolicy.enabled: true` with upstream's unrestricted `egress: [{}]` replaced by an empty list
 - A watch scope that does not cover the Kafka namespace, which leaves the wrapper's own `strimzi-operator` policy with no egress rule for those pods (its `kates.io/watch-scope` annotation is the fastest way to see what it admits)
 - Resource pressure on the active controller pod causing admin API timeouts
