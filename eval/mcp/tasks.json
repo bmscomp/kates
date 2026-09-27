@@ -205,7 +205,7 @@
       "arms": ["mcp", "cli"],
       "trials": 3,
       "timeout_s": 900,
-      "notes": "The band is assess_run's rule, which the CLI skill spells out with jq: earlier DONE runs of the same type and backend, not from a scenario, with an identical stored spec. The topic carries run_tag, so exactly four runs match (the baseline and three like it); the 8-producer and 512-byte runs have other specs and must be left out. The p99 of a run is its report summary's, the mean of its producer's and consumer's p99. An answer that builds the band from the type's trend mixes specs and gets other numbers. A good answer gives the four runs' range, the candidate's p99, where it falls, and says a difference inside the range is noise."
+      "notes": "The band is assess_run's rule, which the CLI skill spells out with jq: earlier DONE runs of the same type and backend, not from a scenario, with an identical stored spec. The topic carries run_tag, so exactly four runs match (the baseline and three like it); the 8-producer and 512-byte runs have other specs and must be left out. The p99 of a run is its report summary's, which for a LOAD run is its producer's p99 (the consumer records no latency). An answer that builds the band from the type's trend mixes specs and gets other numbers. A good answer gives the four runs' range, the candidate's p99, where it falls, and says a difference inside the range is noise."
     },
     {
       "id": "run-load-parallel-producers",
