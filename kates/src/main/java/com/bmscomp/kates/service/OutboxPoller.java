@@ -3,6 +3,7 @@ package com.bmscomp.kates.service;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -10,6 +11,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.reactive.messaging.Channel;
 import org.eclipse.microprofile.reactive.messaging.Emitter;
@@ -88,7 +90,18 @@ public class OutboxPoller {
             }
             try {
                 TestEvent testEvent = MAPPER.readValue(event.getPayload(), TestEvent.class);
-                eventEmitter.send(testEvent).whenComplete((ignored, failure) -> {
+                // Sent with this transaction suspended. The Kafka connector
+                // subscribes the send here and runs it on its own sending
+                // thread, and context propagation carries the caller's JTA
+                // transaction to that thread with it. This method's commit can
+                // then find the transaction still active on that thread
+                // (ARJUNA012094) and fail with "Enlisted connection used
+                // without active transaction": always on the first send, which
+                // waits for metadata. The send needs no transaction, and
+                // suspending one keeps its row locks.
+                CompletionStage<Void> sent =
+                        QuarkusTransaction.suspendingExisting().call(() -> eventEmitter.send(testEvent));
+                sent.whenComplete((ignored, failure) -> {
                     // This callback runs on a Kafka sender thread. Both branches
                     // do blocking JDBC, so they are handed to the shared
                     // executor rather than stalling the sender.
