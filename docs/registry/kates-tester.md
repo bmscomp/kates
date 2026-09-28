@@ -45,7 +45,7 @@ the image's own OCI label so the two cannot drift). It follows the Kafka the cha
 the Debian packages are whatever trixie ships — this is a diagnostics image, and
 freshness matters more than reproducibility.
 
-> From the first release after 1.23.0. The `1.23.0` tag and older ship the Kafka 3.7.0 CLI
+> From 1.24.0. The `1.23.0` tag and older ship the Kafka 3.7.0 CLI
 > on `debian:bookworm-slim`, with that line's CVEs (kafka-clients, ZooKeeper, Jetty 9.4).
 >
 > The Kafka **CLI** is 4.3.1, the Kafka the charts deploy. A 4.x client talks to brokers
@@ -98,8 +98,8 @@ Override it like any other value:
 
 ```yaml
 testImages:
-  kubectl: ghcr.io/bmscomp/kates-tester:1.23.0
-  kafka:   ghcr.io/bmscomp/kates-tester:1.23.0
+  kubectl: ghcr.io/bmscomp/kates-tester:1.24.0
+  kafka:   ghcr.io/bmscomp/kates-tester:1.24.0
 ```
 
 ---
@@ -155,7 +155,7 @@ docker run --rm -it -v "$HOME/.kube:/home/kates/.kube:ro" \
 
 | Tag | Meaning |
 |---|---|
-| `1.23.0` | Release version — what the charts pin |
+| `1.24.0` | Release version — what the charts pin |
 | `latest` | Latest default-branch build |
 | `sha-<short-sha>` | Exact commit |
 
