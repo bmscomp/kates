@@ -155,7 +155,7 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 		releases = filterByComponent(releases, component)
 		// If filtering for 'connect' and no releases found, try auto-detecting the connect namespace
 		if len(releases) == 0 && component == "connect" {
-			detectedNS := detectConnectNamespace()
+			detectedNS := detectConnectNamespace(cmd.Context())
 			if detectedNS != ns {
 				connectReleases := discoverHelmReleases(detectedNS)
 				connectReleases = filterByComponent(connectReleases, component)
