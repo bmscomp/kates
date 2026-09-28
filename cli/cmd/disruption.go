@@ -48,14 +48,24 @@ var disruptionRunCmd = &cobra.Command{
 			return runDryRun(plan)
 		}
 
-		// Above a table only, as in runDryRun: ahead of -o json it would
-		// leave stdout unreadable as JSON.
+		ctx := commandContext(cmd)
+		accepted, err := apiClient.StartDisruption(ctx, plan)
+		if err != nil {
+			return cmdErr("Disruption test failed: " + err.Error())
+		}
+		// Named as soon as it is accepted: the id used to come only with the
+		// report, so a run interrupted while waiting left chaos going under
+		// an id nobody had seen. Above a table only, as in runDryRun: ahead
+		// of -o json it would leave stdout unreadable as JSON.
 		if outputMode != "json" {
-			fmt.Println(output.AccentStyle.Render("◉ Running disruption plan..."))
+			fmt.Println(output.AccentStyle.Render("◉ Running disruption plan " + output.Printable(accepted.ID) + "..."))
 		}
 
-		result, err := apiClient.RunDisruption(context.Background(), plan)
+		result, err := apiClient.AwaitDisruption(ctx, accepted)
 		if err != nil {
+			if ctx.Err() != nil {
+				return stopFollowingDisruption(accepted.ID)
+			}
 			return cmdErr("Disruption test failed: " + err.Error())
 		}
 
@@ -521,6 +531,7 @@ func init() {
 	disruptionRunCmd.Flags().BoolVar(&failOnSlaBreach, "fail-on-sla-breach", false, "Exit with code 1 if SLA is violated (for CI/CD pipelines)")
 	disruptionRunCmd.Flags().StringVar(&outputJUnit, "output-junit", "", "Write JUnit XML report to file (for CI/CD integration)")
 
+	interruptible(disruptionRunCmd)
 	disruptionCmd.AddCommand(disruptionRunCmd)
 	disruptionCmd.AddCommand(disruptionListCmd)
 	disruptionCmd.AddCommand(disruptionStatusCmd)

@@ -656,6 +656,18 @@ func isTerminalDisruptionStatus(status string) bool {
 // error while the chaos kept running. The blocking behaviour callers expect is
 // preserved here; only the transport changed.
 func (c *Client) RunDisruption(ctx context.Context, plan interface{}) (*DisruptionRunResponse, error) {
+	accepted, err := c.StartDisruption(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	return c.AwaitDisruption(ctx, accepted)
+}
+
+// StartDisruption submits a plan and returns as soon as the API has accepted
+// it, with the id it runs under, so a caller can name the run before waiting
+// for it: RunDisruption did both in one call, and a caller interrupted while
+// it waited had never seen the id of the chaos it left running.
+func (c *Client) StartDisruption(ctx context.Context, plan interface{}) (*DisruptionAccepted, error) {
 	accepted, err := postJSON[*DisruptionAccepted](c, ctx, "/api/disruptions", plan)
 	if err != nil {
 		return nil, err
@@ -663,7 +675,12 @@ func (c *Client) RunDisruption(ctx context.Context, plan interface{}) (*Disrupti
 	if accepted == nil || accepted.ID == "" {
 		return nil, fmt.Errorf("backend did not return a disruption id")
 	}
+	return accepted, nil
+}
 
+// AwaitDisruption waits for the report of a disruption StartDisruption or
+// StartPlaybook started. It returns ctx's error when ctx ends first.
+func (c *Client) AwaitDisruption(ctx context.Context, accepted *DisruptionAccepted) (*DisruptionRunResponse, error) {
 	return c.awaitDisruptionFrom(ctx, accepted.ID, accepted.Status)
 }
 
@@ -847,6 +864,16 @@ func (c *Client) PlaybookList(ctx context.Context) ([]PlaybookEntry, error) {
 // the life of the plan — which outlived proxy read timeouts and left the caller
 // with a gateway error while the chaos continued.
 func (c *Client) PlaybookRun(ctx context.Context, name string) (*DisruptionRunResponse, error) {
+	accepted, err := c.StartPlaybook(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return c.AwaitDisruption(ctx, accepted)
+}
+
+// StartPlaybook starts a named playbook and returns as soon as the API has
+// accepted it, as StartDisruption does for a plan.
+func (c *Client) StartPlaybook(ctx context.Context, name string) (*DisruptionAccepted, error) {
 	path, err := pathf("/api/disruptions/playbooks/%s", name)
 	if err != nil {
 		return nil, err
@@ -858,7 +885,7 @@ func (c *Client) PlaybookRun(ctx context.Context, name string) (*DisruptionRunRe
 	if accepted == nil || accepted.ID == "" {
 		return nil, fmt.Errorf("backend did not return a disruption id for playbook %q", name)
 	}
-	return c.awaitDisruptionFrom(ctx, accepted.ID, accepted.Status)
+	return accepted, nil
 }
 
 func (c *Client) DisruptionScheduleList(ctx context.Context) ([]DisruptionScheduleEntry, error) {

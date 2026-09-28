@@ -18,6 +18,7 @@ func init() {
 	disruptionCmd.AddCommand(disruptionPlaybookCmd)
 	disruptionPlaybookCmd.AddCommand(disruptionPlaybookListCmd)
 	disruptionPlaybookCmd.AddCommand(disruptionPlaybookShowCmd)
+	interruptible(disruptionPlaybookRunCmd)
 	disruptionPlaybookCmd.AddCommand(disruptionPlaybookRunCmd)
 	disruptionPlaybookRunCmd.Flags().BoolVar(&playbookRunDryRun, "dry-run", false,
 		"Preview the playbook without injecting any fault (lists the pods each step hits, checks the blast radius; exits 1 if UNSAFE)")
@@ -171,13 +172,22 @@ UNSAFE, which is when running the playbook would be refused.`,
 			}
 			return runDryRun(plan)
 		}
-		// With -o json, stdout carries the result and nothing else, as it
-		// does for the dry run.
-		if outputMode != "json" {
-			fmt.Fprintf(output.Out, "  🎯 Running playbook: %s\n", name)
-		}
-		result, err := apiClient.PlaybookRun(context.Background(), name)
+		ctx := commandContext(cmd)
+		accepted, err := apiClient.StartPlaybook(ctx, name)
 		if err != nil {
+			return fmt.Errorf("failed to run playbook: %w", err)
+		}
+		// Named as soon as it is accepted, so an interrupted wait leaves it
+		// followable. With -o json, stdout carries the result and nothing
+		// else, as it does for the dry run.
+		if outputMode != "json" {
+			fmt.Fprintf(output.Out, "  🎯 Running playbook: %s (disruption %s)\n", name, output.Printable(accepted.ID))
+		}
+		result, err := apiClient.AwaitDisruption(ctx, accepted)
+		if err != nil {
+			if ctx.Err() != nil {
+				return stopFollowingDisruption(accepted.ID)
+			}
 			return fmt.Errorf("failed to run playbook: %w", err)
 		}
 		if outputMode == "json" {

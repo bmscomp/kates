@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func stubPoll(t *testing.T, seq []func() (*client.TestRun, error)) {
 	t.Helper()
 	origGet, origInterval := pollGetTestFn, pollInterval
 	i := 0
-	pollGetTestFn = func(string) (*client.TestRun, error) {
+	pollGetTestFn = func(context.Context, string) (*client.TestRun, error) {
 		f := seq[i]
 		if i < len(seq)-1 {
 			i++ // hold on the last response so retries see a stable state
@@ -49,7 +50,7 @@ func TestPollPlain_FailedStatusIsReturned(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	status, err := pollUntilDonePlain("test-1234", &out)
+	status, err := pollUntilDonePlain(context.Background(), "test-1234", &out)
 	if err != nil {
 		t.Fatalf("pollUntilDonePlain: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestPollPlain_CompletedStatus(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	status, err := pollUntilDonePlain("test-1234", &out)
+	status, err := pollUntilDonePlain(context.Background(), "test-1234", &out)
 	if err != nil || status != "COMPLETED" {
 		t.Fatalf("got (%q, %v), want (COMPLETED, nil)", status, err)
 	}
@@ -89,7 +90,7 @@ func TestPollPlain_OneLinePerStatusChange(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	if _, err := pollUntilDonePlain("test-1234", &out); err != nil {
+	if _, err := pollUntilDonePlain(context.Background(), "test-1234", &out); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,7 +117,7 @@ func TestPollPlain_ConnectionLostIsAnError(t *testing.T) {
 
 	var out bytes.Buffer
 	start := time.Now()
-	_, err := pollUntilDonePlain("test-1234", &out)
+	_, err := pollUntilDonePlain(context.Background(), "test-1234", &out)
 	if err == nil {
 		t.Fatal("a lost connection must surface as an error, not silence")
 	}
@@ -136,7 +137,7 @@ func TestPollPlain_TransientErrorRecovers(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	status, err := pollUntilDonePlain("test-1234", &out)
+	status, err := pollUntilDonePlain(context.Background(), "test-1234", &out)
 	if err != nil || status != "COMPLETED" {
 		t.Fatalf("got (%q, %v), want recovery to (COMPLETED, nil)", status, err)
 	}

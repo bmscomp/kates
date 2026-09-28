@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,11 +32,15 @@ type runsBackend struct {
 	runs     map[string]string // run id → GET /api/tests/{id} for runs the test did not create
 	stuck    map[string]bool   // test type → its runs answer RUNNING to every poll
 	failPost bool
+	// refuseCancel answers POST /api/tests/{id}/cancel with the 409 the API
+	// gives for a run that is not running.
+	refuseCancel bool
 
-	mu      sync.Mutex
-	created []string          // test types, in the order created
-	typeOf  map[string]string // created run id → test type
-	polls   map[string]int
+	mu        sync.Mutex
+	created   []string          // test types, in the order created
+	typeOf    map[string]string // created run id → test type
+	polls     map[string]int
+	cancelled []string // run ids, in the order cancelled
 }
 
 func newRunsBackend(t *testing.T) *runsBackend {
@@ -106,6 +111,17 @@ func (b *runsBackend) serve(w http.ResponseWriter, r *http.Request) {
 		b.typeOf[id] = req.TestType
 		b.mu.Unlock()
 		_, _ = fmt.Fprintf(w, `{"id":%q,"testType":%q,"status":"PENDING"}`, id, req.TestType)
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/tests/") && strings.HasSuffix(path, "/cancel"):
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/tests/"), "/cancel")
+		if b.refuseCancel {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"status":409,"error":"Conflict","message":"Test is not running (status: DONE)"}`)
+			return
+		}
+		b.mu.Lock()
+		b.cancelled = append(b.cancelled, id)
+		b.mu.Unlock()
+		_, _ = fmt.Fprintf(w, `{"id":%q,"status":"FAILED","reason":"cancelled"}`, id)
 	case r.Method == http.MethodGet && path == "/api/tests/tuning/types":
 		_, _ = io.WriteString(w, `[{"type":"TUNE_BATCHING","parameter":"batch.size","steps":4,"description":"Sweep batch.size"}]`)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/tests/"):
@@ -146,6 +162,20 @@ func (b *runsBackend) serve(w http.ResponseWriter, r *http.Request) {
 		b.t.Errorf("unexpected request %s %s", r.Method, r.URL)
 		w.WriteHeader(http.StatusTeapot)
 	}
+}
+
+// cancelledRuns returns the run ids cancelled so far, in order.
+func (b *runsBackend) cancelledRuns() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.cancelled...)
+}
+
+// pollCount is how many times run id has been polled.
+func (b *runsBackend) pollCount(id string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.polls[id]
 }
 
 // createdTypes returns the test types created so far, in order.
@@ -694,7 +724,7 @@ func TestApply_WhichWait(t *testing.T) {
 			origTUI := waitForTestTUI
 			t.Cleanup(func() { waitForTestTUI = origTUI })
 			usedTUI := false
-			waitForTestTUI = func(id, name string) (*client.TestRun, error) {
+			waitForTestTUI = func(_ context.Context, id, name string) (*client.TestRun, error) {
 				usedTUI = true
 				return &client.TestRun{ID: id, TestType: "LOAD", Status: "DONE"}, nil
 			}
