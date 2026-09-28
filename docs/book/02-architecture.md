@@ -349,7 +349,7 @@ sequenceDiagram
 
 ## Technology Stack
 
-The table lists what Kates is built with and the tools it works beside. A default `kates deploy` installs neither [Jaeger](appendix-a-glossary.md#gl-jaeger), [Velero](appendix-a-glossary.md#gl-velero) and MinIO, nor [Kyverno](appendix-a-glossary.md#gl-kyverno). It does install the Strimzi operator, cert-manager, Apicurio Registry and Kafka UI, beside the parts in [High-Level Architecture](#high-level-architecture).
+The table lists what Kates is built with and the tools it works beside. A default `kates deploy` installs neither [Jaeger](appendix-a-glossary.md#gl-jaeger), [Velero](appendix-a-glossary.md#gl-velero) and its SeaweedFS object store, nor [Kyverno](appendix-a-glossary.md#gl-kyverno). It does install the Strimzi operator, cert-manager, Apicurio Registry and Kafka UI, beside the parts in [High-Level Architecture](#high-level-architecture).
 
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
@@ -366,7 +366,7 @@ The table lists what Kates is built with and the tools it works beside. A defaul
 | Tracing | Jaeger ([OTLP](appendix-a-glossary.md#gl-otlp)) | 2.15.0 | Distributed trace collection |
 | Registry | [Apicurio](appendix-a-glossary.md#gl-apicurio-registry) | Latest | Schema registry for Kafka |
 | Database | PostgreSQL | Latest | Test results and schedule persistence |
-| Backup | Velero + MinIO | Latest | Cluster backup and restore |
+| Backup | Velero + SeaweedFS | Latest | Cluster backup and restore |
 | Policy Engine | Kyverno | Latest | Admission control, PSS enforcement, NetworkPolicy generation |
 
 The pinned versions above are a snapshot for orientation; the [Version & Compatibility Matrix](appendix-d-versions.md) is generated from `versions.env` and the charts, and it wins when the two disagree.

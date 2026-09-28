@@ -6,7 +6,7 @@ source "${SCRIPT_DIR}/common.sh"
 
 NAMESPACE="kafka"
 
-info "Deploying MinIO and Velero..."
+info "Deploying SeaweedFS and Velero..."
 
 # Skip if already running
 if deployment_exists velero velero; then
@@ -18,14 +18,28 @@ fi
 
 ensure_namespace ${NAMESPACE}
 
-info "Installing MinIO..."
-helm upgrade --install minio "${CHARTS_DIR}/minio" \
-  --namespace ${NAMESPACE} \
-  --values config/velero/minio-values.yaml \
-  --wait \
-  --timeout 5m
+# The object store Velero writes to. It was MinIO until MinIO stopped serving
+# its images anonymously; config/velero/seaweedfs.yaml says why and what
+# replaces it. A Job's pod template cannot change in place, so the bucket Job
+# is recreated on every run; it passes at once when the bucket is there.
+info "Installing SeaweedFS..."
+kubectl delete job velero-seaweedfs-bucket -n ${NAMESPACE} --ignore-not-found >/dev/null
+kubectl apply -n ${NAMESPACE} -f config/velero/seaweedfs.yaml
+kubectl rollout status deployment/velero-seaweedfs -n ${NAMESPACE} --timeout=5m
+if ! kubectl wait --for=condition=complete job/velero-seaweedfs-bucket -n ${NAMESPACE} --timeout=5m; then
+    error "The velero bucket was not created — the Job's last lines:"
+    kubectl logs job/velero-seaweedfs-bucket -n ${NAMESPACE} --tail=20 >&2 || true
+    exit 1
+fi
 
-info "MinIO deployed successfully."
+info "SeaweedFS deployed successfully."
+
+# Not removed automatically: uninstalling the old chart deletes its volume, and
+# with it every backup Velero wrote there.
+if helm status minio -n ${NAMESPACE} &>/dev/null; then
+    warn "The MinIO release from an earlier 'make velero' is still installed. Velero no longer"
+    warn "writes to it; its backups stay there until you remove it: helm uninstall minio -n ${NAMESPACE}"
+fi
 
 info "Installing Velero..."
 helm upgrade --install velero "${CHARTS_DIR}/velero" \
