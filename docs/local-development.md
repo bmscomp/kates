@@ -53,7 +53,7 @@ target is idempotent and can be invoked independently or composed via dependency
 | `make apicurio` | Deploys the Apicurio Schema Registry with KafkaSQL persistence and schema compatibility enforcement. |
 | `make litmus` | Deploys the Kates Chaos stack (the LitmusChaos execution plane) with the Kind overlay. |
 | `make chaos-ui` | Explains how to drive chaos — the chart ships the execution plane only, with no web portal to port-forward. Use `make chaos-status` to inspect state. |
-| `make velero` | Deploys Velero backup with MinIO as the S3-compatible storage backend. |
+| `make velero` | Deploys Velero backup with SeaweedFS as the S3-compatible storage backend (`config/velero/seaweedfs.yaml`). |
 | `make ports` | Starts port-forwarding for all core services to localhost. |
 | `make status` | Displays the current status of the Kind cluster, deployed services, and pod health. |
 | `make destroy` | Destroys the Kind cluster and removes all associated resources, including the local Docker registry. `FORCE=1` skips the prompt; `make clean` is an alias. |

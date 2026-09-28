@@ -1,0 +1,241 @@
+# SeaweedFS: the S3 endpoint Velero writes its backups to (`make velero`).
+#
+# This used to be MinIO, from charts/minio. MinIO no longer serves its images
+# anonymously (docker.io/minio/minio and quay.io/minio/minio answer 401), and
+# the docker.io/bitnami images that chart defaulted to are gone. So the store is
+# SeaweedFS at the version the kafka-cluster chart's tiered storage runs, as one
+# process (master, volume server, filer and S3 gateway) with Velero's key pair
+# as its only identity. No preallocation and 64 MB volumes, so a lab's backups
+# do not reserve gigabytes of disk up front.
+#
+# scripts/deploy-velero.sh applies this into the namespace Velero runs in and
+# waits for the bucket Job. The key pair here and in velero-values.yaml must
+# match. The pods satisfy the restricted checks of the kafka-cluster chart's
+# Kyverno policy, which may cover that namespace.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: velero-seaweedfs
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/instance: velero-seaweedfs
+    app.kubernetes.io/component: object-store
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: velero
+  AWS_SECRET_ACCESS_KEY: velero123
+  s3.json: |
+    {"identities": [{"name": "velero", "credentials": [{"accessKey": "velero", "secretKey": "velero123"}], "actions": ["Admin", "Read", "List", "Tagging", "Write"]}]}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: velero-seaweedfs-data
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/instance: velero-seaweedfs
+    app.kubernetes.io/component: object-store
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: velero-seaweedfs
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/instance: velero-seaweedfs
+    app.kubernetes.io/component: object-store
+spec:
+  replicas: 1
+  # One writer on a ReadWriteOnce volume: the old pod goes before the new one
+  # starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: velero-seaweedfs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: seaweedfs
+        app.kubernetes.io/instance: velero-seaweedfs
+        app.kubernetes.io/component: object-store
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: seaweedfs
+          image: docker.io/chrislusf/seaweedfs:3.68
+          imagePullPolicy: IfNotPresent
+          # The image's entrypoint prepends -dir=/data and its own volume
+          # defaults; the later flags here win. Empty folders go with their
+          # last object: Velero finds backups by listing the prefixes under
+          # backups/, and a deleted backup's folder would still be listed.
+          args:
+            - server
+            - -s3
+            - -s3.config=/etc/seaweedfs-s3/s3.json
+            - -s3.allowEmptyFolder=false
+            - -master.volumePreallocate=false
+            - -master.volumeSizeLimitMB=64
+          ports:
+            - name: s3
+              containerPort: 8333
+          startupProbe:
+            httpGet:
+              path: /status
+              port: s3
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: s3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: s3
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            # Not /etc/seaweedfs: that would hide the image's filer.toml, which
+            # keeps the filer's metadata under /data.
+            - name: s3-config
+              mountPath: /etc/seaweedfs-s3
+              readOnly: true
+            # The filer and the S3 gateway talk over Unix sockets they create
+            # in /tmp (seaweedfs-filer-8888.sock, seaweedfs-s3-8333.sock).
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: velero-seaweedfs-data
+        - name: s3-config
+          secret:
+            secretName: velero-seaweedfs
+            items:
+              - key: s3.json
+                path: s3.json
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: velero-seaweedfs
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/instance: velero-seaweedfs
+    app.kubernetes.io/component: object-store
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: velero-seaweedfs
+  ports:
+    - name: s3
+      port: 8333
+      targetPort: s3
+---
+# SeaweedFS creates no bucket on its own, and a BackupStorageLocation whose
+# bucket is missing never becomes Available. The gateway takes a while to
+# accept one after the pod starts, hence the loop. Idempotent: an existing
+# bucket passes the head-bucket check. deploy-velero.sh deletes the Job before
+# applying this file, since a Job's pod template cannot be changed in place.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: velero-seaweedfs-bucket
+  labels:
+    app.kubernetes.io/name: seaweedfs
+    app.kubernetes.io/instance: velero-seaweedfs
+    app.kubernetes.io/component: bucket
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: seaweedfs
+        app.kubernetes.io/instance: velero-seaweedfs-bucket
+        app.kubernetes.io/component: bucket
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: create-bucket
+          image: docker.io/amazon/aws-cli:2.37.4
+          imagePullPolicy: IfNotPresent
+          command: [/bin/sh, -c]
+          args:
+            - |
+              for i in $(seq 1 90); do
+                aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null && { echo "bucket $BUCKET is there"; exit 0; }
+                aws s3 mb "s3://$BUCKET" && exit 0
+                sleep 2
+              done
+              echo "the gateway at $AWS_ENDPOINT_URL never accepted bucket $BUCKET" >&2
+              exit 1
+          env:
+            - name: BUCKET
+              value: velero
+            - name: AWS_ENDPOINT_URL
+              value: http://velero-seaweedfs:8333
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: velero-seaweedfs
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: velero-seaweedfs
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_REQUEST_CHECKSUM_CALCULATION
+              value: when_required
+            - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+              value: when_required
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
