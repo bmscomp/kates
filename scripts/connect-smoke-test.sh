@@ -9,7 +9,7 @@
 # a driver that was pruned on purpose but is still referenced in a config
 # example. None of that shows up until a worker scans the plugin path and a
 # connector is asked to move a record. So this boots the real image as a
-# distributed worker against a throwaway Kafka and MinIO, and checks:
+# distributed worker against a throwaway Kafka and S3 endpoint, and checks:
 #
 #   plugin scan       every plugin directory loads — no LinkageError, no plugin
 #                     silently dropped
@@ -32,7 +32,8 @@
 # Environment (every fixture is pinned — see FIXTURES below):
 #   CONNECT_PORT   host port for the worker REST API
 #   KAFKA_IMAGE    broker image
-#   MINIO_IMAGE    S3 endpoint image
+#   S3_IMAGE       S3 endpoint image (SeaweedFS)
+#   AWSCLI_IMAGE   S3 client for bucket setup and checks
 #   JDK_IMAGE      JDK used for the probes
 #   APICURIO_IMAGE schema registry image
 #   PG_IMAGE       Postgres used for the CDC test
@@ -44,14 +45,18 @@ source "${SCRIPT_DIR}/common.sh"
 IMAGE="${1:-connect:latest}"
 
 # FIXTURES. Pinned, not :latest. This suite asserts exact behaviour — that the
-# Avro converter finds a v3 registry API at a particular path, that mc takes the
-# flags used below — so on a floating tag a red run asks "which upstream release
+# Avro converter finds a v3 registry API at a particular path, that the S3
+# gateway honours the identities file below — so on a floating tag a red run asks "which upstream release
 # shipped today?" before it can say anything about the image under test. The
 # registry pin is the interesting one: it matches the Apicurio converter
 # distribution in Dockerfile.connect and the apicurio-registry chart's
 # appVersion, so this test exercises the pairing the platform actually deploys.
 KAFKA_IMAGE="${KAFKA_IMAGE:-apache/kafka:4.0.0}"
-MINIO_IMAGE="${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}"
+# MinIO no longer serves its images anonymously (quay.io and Docker Hub both
+# answer 401), so the S3 endpoint is SeaweedFS, the version the kafka-cluster
+# chart's tiered storage runs, and the AWS CLI stands in for mc.
+S3_IMAGE="${S3_IMAGE:-chrislusf/seaweedfs:3.68}"
+AWSCLI_IMAGE="${AWSCLI_IMAGE:-amazon/aws-cli:2.37.4}"
 JDK_IMAGE="${JDK_IMAGE:-eclipse-temurin:21-jdk-alpine}"
 APICURIO_IMAGE="${APICURIO_IMAGE:-apicurio/apicurio-registry:3.3.0}"
 PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
@@ -59,7 +64,7 @@ PORT="${CONNECT_PORT:-18083}"
 
 NET="connect-smoke-$$"
 KAFKA="connect-smoke-kafka-$$"
-MINIO="connect-smoke-minio-$$"
+S3_HOST="connect-smoke-s3-$$"
 WORKER="connect-smoke-worker-$$"
 APICURIO="connect-smoke-apicurio-$$"
 PG="connect-smoke-pg-$$"
@@ -76,13 +81,19 @@ pass() { info  "  ✅ $*"; }
 fail() { error "  ❌ $*"; FAILURES=$((FAILURES + 1)); }
 
 cleanup() {
-    docker rm -f "$WORKER" "$KAFKA" "$MINIO" "$APICURIO" "$PG" >/dev/null 2>&1 || true
+    docker rm -f "$WORKER" "$KAFKA" "$S3_HOST" "$APICURIO" "$PG" >/dev/null 2>&1 || true
     docker network rm "$NET" >/dev/null 2>&1 || true
     rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
 
-mc() { docker run --rm --network "$NET" --entrypoint sh "$MINIO_IMAGE" -c "mc alias set s3 http://$MINIO:9000 $AWS_KEY $AWS_SECRET >/dev/null 2>&1; $*"; }
+S3_ENDPOINT="http://$S3_HOST:8333"
+s3() {   # s3 <aws cli arguments…>, against the fixture's gateway
+    docker run --rm --network "$NET" \
+        -e AWS_ACCESS_KEY_ID="$AWS_KEY" -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET" -e AWS_DEFAULT_REGION=us-east-1 \
+        -e AWS_REQUEST_CHECKSUM_CALCULATION=when_required -e AWS_RESPONSE_CHECKSUM_VALIDATION=when_required \
+        "$AWSCLI_IMAGE" --endpoint-url "$S3_ENDPOINT" "$@"
+}
 
 # Exit 75 (EX_TEMPFAIL) is this suite saying it could not RUN — a fixture that
 # would not pull, a container that would not start — as opposed to running and
@@ -133,7 +144,7 @@ bold "🔌 Smoke-testing $IMAGE"
 # Up front on purpose: a registry outage should cost the first ten seconds of a
 # run, not the last minute of one.
 step "\n[0/6] Fixtures"
-for fixture in "$KAFKA_IMAGE" "$MINIO_IMAGE" "$JDK_IMAGE" "$APICURIO_IMAGE" "$PG_IMAGE"; do
+for fixture in "$KAFKA_IMAGE" "$S3_IMAGE" "$AWSCLI_IMAGE" "$JDK_IMAGE" "$APICURIO_IMAGE" "$PG_IMAGE"; do
     pull_fixture "$fixture"
 done
 
@@ -198,11 +209,27 @@ start "$KAFKA" \
     -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
     -e KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0 \
     "$KAFKA_IMAGE"
-start "$MINIO" \
-    -e MINIO_ROOT_USER="$AWS_KEY" -e MINIO_ROOT_PASSWORD="$AWS_SECRET" \
-    "$MINIO_IMAGE" server /data
-sleep 15
-mc "mc mb s3/$BUCKET" >/dev/null
+# One SeaweedFS process: master, volume server, filer and the S3 gateway, with
+# the test's key pair as its only identity. No preallocation, and small volumes,
+# so it does not reserve gigabytes of runner disk for three records.
+cat > "$WORKDIR/s3.json" <<JSON
+{"identities": [{"name": "smoke", "credentials": [{"accessKey": "$AWS_KEY", "secretKey": "$AWS_SECRET"}], "actions": ["Admin", "Read", "List", "Tagging", "Write"]}]}
+JSON
+chmod a+r "$WORKDIR/s3.json"
+start "$S3_HOST" -v "$WORKDIR/s3.json:/etc/seaweedfs/s3.json:ro" \
+    "$S3_IMAGE" server -s3 -s3.config=/etc/seaweedfs/s3.json \
+    -master.volumePreallocate=false -master.volumeSizeLimitMB=64
+# The gateway takes a while to accept a bucket (about 17 s on a laptop).
+BUCKET_UP=""
+for i in $(seq 1 45); do
+    s3 s3 mb "s3://$BUCKET" >/dev/null 2>&1 && { BUCKET_UP=yes; break; }
+    sleep 2
+done
+[ -n "$BUCKET_UP" ] || {
+    error "the S3 fixture ($S3_IMAGE) never accepted bucket $BUCKET — last 20 lines:"
+    docker logs "$S3_HOST" 2>&1 | tail -20 | sed 's/^/    /' >&2
+    exit "$INFRA"
+}
 
 # offset.flush.interval.ms is deliberately short: the S3 sink writes its file on
 # offset commit, and the default 60s turns this test into a minute of waiting.
@@ -268,7 +295,7 @@ curl -sf -X POST -H "Content-Type: application/json" "localhost:$PORT/connectors
     \"aws.access.key.id\": \"$AWS_KEY\",
     \"aws.secret.access.key\": \"$AWS_SECRET\",
     \"aws.s3.bucket.name\": \"$BUCKET\",
-    \"aws.s3.endpoint\": \"http://$MINIO:9000\",
+    \"aws.s3.endpoint\": \"$S3_ENDPOINT\",
     \"aws.s3.region\": \"us-east-1\",
     \"format.output.type\": \"jsonl\",
     \"format.output.fields\": \"key,value,offset,timestamp\",
@@ -279,13 +306,13 @@ curl -sf -X POST -H "Content-Type: application/json" "localhost:$PORT/connectors
   }}" >/dev/null
 
 for i in $(seq 1 30); do
-    OBJECTS=$(mc "mc ls --recursive s3/$BUCKET" 2>/dev/null | tr -d '\r' || true)
+    OBJECTS=$(s3 s3 ls --recursive "s3://$BUCKET" 2>/dev/null | tr -d '\r' || true)
     [ -n "$OBJECTS" ] && break
     sleep 2
 done
 if [ -n "${OBJECTS:-}" ]; then
     pass "sink wrote to S3: $(echo "$OBJECTS" | tr -s ' ' | cut -d' ' -f4- | tr '\n' ' ')"
-    BODY=$(mc "mc cat s3/$BUCKET/$TOPIC-0-0" 2>/dev/null || true)
+    BODY=$(s3 s3 cp "s3://$BUCKET/$TOPIC-0-0" - 2>/dev/null || true)
     echo "$BODY" | grep -q '"item":"keyboard"' \
         && pass "object contents match the produced records" \
         || fail "object written but payload unexpected: $(echo "$BODY" | head -c 200)"
@@ -304,7 +331,7 @@ curl -sf -X POST -H "Content-Type: application/json" "localhost:$PORT/connectors
     \"aws.access.key.id\": \"$AWS_KEY\",
     \"aws.secret.access.key\": \"$AWS_SECRET\",
     \"aws.s3.bucket.name\": \"$BUCKET\",
-    \"aws.s3.endpoint\": \"http://$MINIO:9000\",
+    \"aws.s3.endpoint\": \"$S3_ENDPOINT\",
     \"aws.s3.region\": \"us-east-1\",
     \"topic\": \"$REPLAY\",
     \"input.format\": \"jsonl\",
