@@ -92,7 +92,7 @@ graph TB
 
 Kates has no [disruption type](appendix-a-glossary.md#gl-disruption-type) for disk failure, packet loss, configuration or log corruption, or clock skew; `kates disruption types` lists the ones it has.
 
-### 3. Run Experiments in Production (or Production-Like)
+### 3. Run Experiments in Production (or Production-Like) {#3-run-experiments-in-production-or-production-like}
 
 [Chaos experiments](appendix-a-glossary.md#gl-chaos-experiment) in a toy environment prove nothing. [`panda`](appendix-a-glossary.md#gl-panda), the [Kind](appendix-a-glossary.md#gl-kind) cluster in this project, is configured to mirror a production node layout:
 
@@ -104,6 +104,8 @@ Kates has no [disruption type](appendix-a-glossary.md#gl-disruption-type) for di
 | Persistent storage | [PVCs](appendix-a-glossary.md#gl-pvc) with zone-specific StorageClasses |
 | Monitoring | Same [Prometheus](appendix-a-glossary.md#gl-prometheus)/[Grafana](appendix-a-glossary.md#gl-grafana) stack |
 
+The principle asks for production because only production has the traffic, clients and data your hypothesis is about. This book takes it in two steps. You run an experiment first on a production-like cluster, `panda` or a staging copy of production, where a refuted hypothesis breaks nothing anyone depends on. Once it holds there, you repeat it in production, starting on the lowest rung of [5. Minimize Blast Radius](#5-minimize-blast-radius) and climbing one rung at a time.
+
 ### 4. Automate Experiments to Run Continuously
 
 One-off chaos experiments are useful; scheduled, repeating ones show when a change makes the cluster worse. Kates supports cron-based scheduling: `kates disruption schedule create` repeats a [playbook](appendix-a-glossary.md#gl-playbook), and `kates schedule create` repeats a test, such as a nightly [INTEGRITY](appendix-a-glossary.md#gl-test-type) run:
@@ -114,7 +116,7 @@ One-off chaos experiments are useful; scheduled, repeating ones show when a chan
 kates schedule create --name "Nightly Integrity" --cron "0 2 * * *" --request integrity.json
 ```
 
-### 5. Minimize Blast Radius
+### 5. Minimize Blast Radius {#5-minimize-blast-radius}
 
 Start small and expand:
 

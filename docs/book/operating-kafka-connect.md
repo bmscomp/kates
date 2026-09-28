@@ -6,9 +6,9 @@ Building a Connect pipeline is half the job; keeping it healthy in production is
 
 After this chapter, you can:
 
-- Place and size Connect workers so an Availability Zone failure costs a short rebalance, not an outage
+- Place and size Connect workers so an Availability Zone failure costs a rebalance, not an outage
 - Tune producer, consumer, and connector batching when throughput stalls
-- Rotate database credentials and roll out image upgrades with zero downtime
+- Rotate database credentials without restarting a worker, and roll out image upgrades one worker at a time
 - Trace a FAILED connector from alert to root cause with the CLI, the REST API, and worker logs
 
 ## Multi-AZ Deployment Strategy
@@ -59,8 +59,8 @@ When an entire Availability Zone goes offline:
 
 ```mermaid
 %%| label: fig-okc-az-failure
-%%| fig-cap: "When zone sigma goes offline, the framework moves its tasks to the workers that remain."
-%%| fig-alt: "Sequence diagram. The worker in zone sigma stops sending heartbeats; the Connect framework detects the missing worker, triggers a rebalance and reassigns sigma's tasks to the workers in alpha and gamma, which resume from the last committed offset."
+%%| fig-cap: "When zone sigma goes offline, the framework holds its tasks for the rebalance delay, then moves them to the workers that remain."
+%%| fig-alt: "Sequence diagram. The worker in zone sigma stops sending heartbeats; the Connect framework detects the missing worker, triggers a rebalance, holds sigma's tasks unassigned until scheduled.rebalance.max.delay.ms runs out, and then reassigns them to the workers in alpha and gamma, which resume from the last committed offset."
 sequenceDiagram
     participant AZ_A as Worker (alpha)
     participant AZ_S as Worker (sigma) 💀
@@ -71,6 +71,7 @@ sequenceDiagram
     AZ_S--xKC: Heartbeat timeout
     KC->>KC: Detect missing worker
     KC->>KC: Trigger rebalance
+    KC->>KC: Hold sigma's tasks for scheduled.rebalance.max.delay.ms
     KC->>AZ_A: Reassign connector tasks from sigma
     KC->>AZ_G: Reassign connector tasks from sigma
     Note over AZ_A,AZ_G: Connectors resume from last committed offset
@@ -80,13 +81,15 @@ Whatever the event, the framework moves the tasks, and the offsets survive becau
 
 | Event | Behavior |
 |-------|----------|
-| Worker pod dies | Framework rebalances tasks to surviving workers (seconds) |
-| Entire AZ offline | Framework reassigns all tasks from dead workers |
+| Worker pod dies | Its connectors and tasks stay unassigned for up to `scheduled.rebalance.max.delay.ms` (5 minutes by default), then move to the restarted or surviving workers |
+| Entire AZ offline | Framework reassigns all tasks from dead workers, after the same delay |
 | AZ recovers | Workers rejoin, framework rebalances to restore even distribution |
 | Offset continuity | Preserved — offsets stored in shared Kafka topic |
 
+A departed worker's connectors and tasks don't move at once. Under incremental cooperative rebalancing (KIP-415), the group leader waits up to `scheduled.rebalance.max.delay.ms` for the worker to return before it hands its work to others, and a restarted pod gets that work back only when the wait ends. The Kafka default is 5 minutes, and the `connect-cluster` chart doesn't change it, so a crashed worker's CDC stream can pause for that long. Set it under `extraConfig` to trade faster failover for more task movement while pods restart.
+
 ::: {.callout-note}
-Cross-AZ data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. This is an acceptable tradeoff for seamless failover — CDC downtime during a rebalance is typically under 30 seconds.
+Cross-AZ data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. That's the price of a single group that fails over on its own, with no second cluster to promote.
 :::
 
 ### Scheduling Configuration
@@ -528,7 +531,7 @@ helm upgrade connect-cluster charts/connect-cluster \
 
 `make connect-push` publishes the Debezium-only tag (`connect:3.7.0`). The chart's own pin is the fully qualified `<debezium>-kafka-<kafka>` tag, and it lives in two places: `image` in `values.yaml` and the `kates.io/connect-image` annotation in `Chart.yaml`. `kates deploy` runs whatever `values.yaml` pins. A `v*` release tag runs `.github/workflows/publish-connect.yml`, which publishes the qualified tag and moves both pins together, and `scripts/check-versions.sh` fails when the pins disagree with each other, with `Dockerfile.connect`, or with the Kafka pin. `Chart.yaml` `appVersion` is the Kafka version the workers run (the `version` value), not the Debezium version. The chart refuses `:latest` and untagged images.
 
-Strimzi performs a **rolling restart** — one worker at a time. Connectors are rebalanced to surviving workers during each restart, ensuring zero downtime.
+Strimzi performs a **rolling restart** — one worker at a time. Each restarted worker's connectors and tasks can wait up to the rebalance delay described under [AZ Failure Behavior](#az-failure-behavior) before they run again. Workers that leave while one delay runs get their work back when that same delay ends, so a rollout quicker than the delay can leave most of the group's tasks paused at once.
 
 ### Upgrading the Chart from 1.x
 
@@ -773,7 +776,7 @@ Every connector and task reports `RUNNING` in both views — the CLI reads the `
 - Give containers roughly 2× the JVM heap — off-heap memory is what gets workers OOMKilled — and target 2–5 tasks per worker
 - The internal topics (`*-offsets`, `*-configs`, `*-status`) hold the only persistent state; as long as they survive in Kafka, the cluster is rebuildable from the Helm chart alone
 - Rotate the database password in PostgreSQL, then in the Kubernetes Secret, then restart the connectors' tasks — a task reads the Secret only when it starts, so restarting the connector alone leaves its tasks on the old password
-- Upgrades roll one worker at a time with zero downtime, but a Debezium release that changes the offset format makes rollback unsafe — validate in staging with `kates kafka connect test`
+- Upgrades roll one worker at a time and can pause each worker's tasks for the rebalance delay, and a Debezium release that changes the offset format makes rollback unsafe — validate in staging with `kates kafka connect test`
 - Most FAILED connectors trace back to credentials, an occupied replication slot, or `wal_level` — start with `kates kafka connect connectors` and the worker logs
 
 MirrorMaker 2 runs on the same machinery you have just learned to operate — workers, tasks, rebalances and internal topics — with one difference: it talks to two Kafka clusters instead of one. [Cross-Cluster Replication and Migration](22-mirror-maker2-migration.md) starts from there.
