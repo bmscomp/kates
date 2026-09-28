@@ -4,8 +4,7 @@ description: >-
   `helm dependency build` for each requested chart, in the order given, with
   the repository's retry wrapper. Order matters for the umbrella: kates-platform
   packages its file:// subcharts as they are on disk, so their own dependencies
-  have to be built first. minio and apicurio-registry vendor theirs in-tree and
-  are never listed here.
+  have to be built first.
 inputs:
   charts:
     description: Space-separated chart directory names under charts/, built in this order

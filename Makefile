@@ -694,7 +694,7 @@ connect-build:  ## Build the Kafka Connect image with its open-source connector 
 test-full:  ## Run every local check: guards, charts, unit tests, images, Connect and Kates smoke tests
 	scripts/full-local-test.sh $(PHASES)
 
-connect-smoke-test:  ## Boot the Connect image against throwaway Kafka + MinIO and verify it
+connect-smoke-test:  ## Boot the Connect image against throwaway Kafka + S3 and verify it
 	@DBZ_VERSION=$$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | head -n1 | cut -d= -f2); \
 	TAG=$${DBZ_VERSION%.Final}; \
 	scripts/connect-smoke-test.sh connect:$${TAG}

@@ -2849,7 +2849,7 @@ Whether and how much acknowledged data Kafka then loses is an empirical question
    - eBPF error injection via `bpf_override_return`, where the kernel is built with `CONFIG_BPF_KPROBE_OVERRIDE` and the target function allows error injection.
 
    The kernel capabilities could not be checked while writing this section, so the capability report (§14.3) gains `errorInjection` and `fuse` flags.
-5. **`ObjectStoreFault`** for tiered storage and object-store-backed designs. The repository already ships a MinIO chart.
+5. **`ObjectStoreFault`** for tiered storage and object-store-backed designs. The repository already runs SeaweedFS as an S3 store, as the `kafka-cluster` subchart and as `make velero`'s backup target.
    - **v1:** L4 faults (latency, loss, partition) toward a new peer class, `ObjectStore`, resolved from the tiered-storage configuration.
    - **v2:** L7 transient errors (HTTP 503 `SlowDown`, 500, connection resets) through an agent-hosted HTTP fault proxy inside the target's netns, bound the same way as the DNS responder (§11.3.6). Only plain-HTTP in-cluster endpoints qualify, because TLS endpoints can't be intercepted without breaking TLS.
 6. **Blast radius** treats corrupted or un-fsynced-loss replicas as *lost* for the partitions they hold, not merely unavailable.
