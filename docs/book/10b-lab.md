@@ -182,7 +182,7 @@ After the sweep completes, the iteration history shows results for all values si
 
 ## Warmup Mode (`W`)
 
-The JVM needs time to JIT-compile hot code paths. The first 1–3 runs in a fresh session are typically slower and noisier than subsequent runs. Warmup mode discards a configurable number of iterations before recording the measured one.
+The brokers run on JVMs, and a JVM needs time to JIT-compile its hot code paths. On a [Kind](appendix-a-glossary.md#gl-kind) cluster the Kates API is a [GraalVM native image](appendix-a-glossary.md#gl-graalvm-native-image), compiled ahead of time, so only the brokers warm up; elsewhere `kates deploy` runs the Kates API's JVM image, which warms up too. The first 1–3 runs in a fresh session are typically slower and noisier than subsequent runs. Warmup mode discards a configurable number of iterations before recording the measured one.
 
 Press `W` to cycle the warmup count (1 → 2 → 3 → 4 → 5 → off):
 
@@ -190,7 +190,7 @@ Press `W` to cycle the warmup count (1 → 2 → 3 → 4 → 5 → off):
 🔥 Warmup: 2 iteration(s) before measuring
 ```
 
-When you press `Enter`, Lab runs 2 silent warmup iterations (results discarded) then runs the real measured iteration. This ensures the JVM is fully warmed up before collecting data.
+When you press `Enter`, Lab runs 2 silent warmup iterations (results discarded) then runs the real measured iteration, so the JVMs have had those runs to warm up before Lab collects data.
 
 ::: {.callout-tip}
 For stress tests with `acks=all`, set warmup to **2**. For quick load tests, **1** is usually enough.

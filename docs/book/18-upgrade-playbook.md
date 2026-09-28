@@ -449,8 +449,8 @@ kates test create --type INTEGRITY --records 50000 --wait
 kates test get <id>
 ```
 
-::: {.callout-warning}
-Kafka version rollback is **NOT possible** once the KRaft metadata version has been raised. Strimzi controls this through `spec.kafka.metadataVersion` in the Kafka CR (exposed as `kafka.metadataVersion` in the `kafka-cluster` chart values): upgrade the broker `version` first while leaving `metadataVersion` at the previous level — in that state a rollback is still possible. Once you raise `metadataVersion`, the brokers can no longer read the older metadata format and downgrade is irreversible. Only bump `metadataVersion` after the new version has passed validation.
+::: {.callout-warning title="Raising the metadata version can be one-way"}
+A rollback needs an older Kafka that supports the cluster's metadata version, so hold `kafka.metadataVersion` at the level the cluster runs until the new version passes validation. Lowering it again is a safe downgrade, which Kafka allows only when no level in between changed the metadata format; Strimzi attempts it and reports a warning in the `Kafka` resource's status when Kafka refuses. KIP-778 also describes an unsafe downgrade that drops metadata, but Kafka doesn't implement it and Strimzi never attempts it, so a raise across a metadata change is one-way.
 :::
 
 ### Strimzi Operator Rollback
@@ -525,7 +525,7 @@ kates test create --type LOAD --records 50000 --wait
 | Component | Rollback Method | Time Estimate | Risk Level |
 |-----------|----------------|:-------------:|:----------:|
 | Kafka version | `kafkaVersion` revert with `helm upgrade` + rolling restart | 10–30 min | Medium |
-| KRaft metadata format | **Not reversible** | N/A | ⛔ Critical |
+| KRaft metadata format | Safe downgrade only; **not reversible** across a metadata change | N/A | ⛔ Critical |
 | Strimzi operator | Helm rollback | 2–5 min | Low |
 | Strimzi CRD migration | Manual CRD restore from backup | 5–15 min | High |
 | Kates API | Helm rollback | 1–2 min | Low |
@@ -538,7 +538,7 @@ kates test create --type LOAD --records 50000 --wait
 - A Kafka version bump is a `helm upgrade` that starts from the release's current values (`helm get values`), sets `kafkaVersion` and pins `kafka.metadataVersion` to what the cluster runs; a chain rebuilt from the repository's files without `.build/values-detected.yaml` renames the node pools. `kates deploy --kafka-version` does not upgrade a running cluster. Strimzi rolls the brokers one at a time with PDB constraints honored.
 - Upgrade a production Strimzi operator with the pause-and-verify procedure in [Deploying the Strimzi Operator](deploying-strimzi-operator.md#upgrading-the-operator): the CLI pauses nothing, and every `kates deploy` re-applies the operator release with the Kind or generic overlay, dropping what `values-prod.yaml` added.
 - The Kates API upgrades through Helm too: the chart pins the image, so set the new `image.tag` on the `kates` release — a rebuild and a `kubectl rollout restart` run the old tag again.
-- Hold `spec.kafka.metadataVersion` at the previous level until the new brokers pass validation — raising it makes downgrade irreversible.
+- Hold `spec.kafka.metadataVersion` at the previous level until the new brokers pass validation — raising it can make downgrade irreversible.
 - Kyverno upgrades go CRDs first, controller second; afterwards verify with `kates kyverno status` and confirm `PolicyException` resources still use a served API version.
 - A Helm rollback of the Strimzi operator does not revert migrated CRDs — those need a manual restore from backup.
 - Post-upgrade validation is quantitative: performance within 10% of the recorded baseline, an integrity test with zero data loss, and a green `make gameday` run.

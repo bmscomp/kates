@@ -182,6 +182,10 @@ A Strimzi webhook that intercepts the eviction of a Kafka pod during a node drai
 
 ## E
 
+### Eligible Leader Replicas {#gl-eligible-leader-replicas}
+
+The replicas of a partition that left its ISR while it was below `min.insync.replicas`, and so still hold every acknowledged record; when the ISR is empty, the controller elects the leader from them. A broker that registers again after an unclean shutdown is dropped from both lists. Kafka calls them ELR (KIP-966) and turns them on for a cluster created at metadata version 4.1-IV0 or later, which includes a `krafter` created from the `kafka-cluster` chart. See [The Cluster Under Test](03-cluster.md#replication-configuration).
+
 ### emptyDir {#gl-emptydir}
 
 A Kubernetes volume that starts empty on the pod's node and is deleted with the pod, used for writable scratch paths when the root filesystem is read-only. See [Deployment Guide](12-deployment.md#read-only-filesystem-compliance).

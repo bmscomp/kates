@@ -133,7 +133,7 @@ Uses `acks=all` and verifies that all ACKed messages are consumable:
 kates test create --type INTEGRITY --records 100000 --acks all --wait
 ```
 
-Expected result: **zero data loss**. If messages are ACKed with `acks=all`, Kafka guarantees they are persisted on [`min.insync.replicas`](appendix-a-glossary.md#gl-min-insync-replicas) brokers.
+Expected result: **zero data loss**. With `acks=all` the leader acknowledges a record only once every replica in the [ISR](appendix-a-glossary.md#gl-isr) has written it to its log, and it refuses the write while the ISR is smaller than [`min.insync.replicas`](appendix-a-glossary.md#gl-min-insync-replicas). Written means the broker's [page cache](appendix-a-glossary.md#gl-page-cache), not its disk: Kafka doesn't wait for an fsync, so an acknowledged record survives because several brokers hold it, not because one of them flushed it.
 
 ### Idempotent Integrity
 
@@ -408,11 +408,13 @@ Each [disruption type](appendix-a-glossary.md#gl-disruption-type) can expose dif
 
 | Disruption | Integrity Risk |
 |-----------|---------------|
-| `POD_KILL` | Messages in [page cache](appendix-a-glossary.md#gl-page-cache) not flushed to disk |
-| `NETWORK_PARTITION` | Split-brain; both sides accepting writes |
+| `POD_KILL` | No controlled shutdown: leadership moves only after [fencing](appendix-a-glossary.md#gl-fencing); `acks=1` records its followers hadn't copied are lost |
+| `NETWORK_PARTITION` | The controller fences the isolated broker and moves its leaderships; `acks=1` writes it still acknowledges are lost when it rejoins |
 | `DISK_FILL` | Log segments can't be written |
 | `ROLLING_RESTART` | Brief window during graceful shutdown |
 | `CPU_STRESS` | Replication falls behind, [ISR shrinks](appendix-a-glossary.md#gl-isr-shrink) |
+
+With `acks=all` on [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, whose `min.insync.replicas` is 2, neither `POD_KILL` nor `NETWORK_PARTITION` should lose an acknowledged record. A killed broker's node keeps its page cache, so what the broker wrote survives the kill even if it never reached the disk. Only a node that loses power or crashes drops writes that weren't flushed, and no disruption type does that. An isolated leader can't acknowledge an `acks=all` write either: its followers can't fetch the record, and only the controller, which it can't reach, can shrink its ISR.
 
 ### 3. Use Sufficient Record Count
 
