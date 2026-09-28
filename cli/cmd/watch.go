@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,7 +36,18 @@ var testWatchCmd = &cobra.Command{
 			defer func() { pollInterval = origInterval }()
 		}
 
-		status, err := pollUntilDone(id)
+		status, err := pollUntilDone(commandContext(cmd), id)
+		if errors.Is(err, errStoppedWaiting) {
+			// Watching someone's run and stopping is not a failure: the
+			// test carries on, and this says so.
+			state := "running"
+			if status != "" {
+				state = strings.ToLower(status)
+			}
+			output.Hint(fmt.Sprintf("Stopped watching; test %s is still %s. Resume: kates test watch %s",
+				truncID(id), state, id))
+			return nil
+		}
 		if err != nil {
 			return cmdErr("Lost track of test " + truncID(id) + ": " + err.Error())
 		}
@@ -64,6 +76,7 @@ const maxStaleRetries = 5
 const maxConnRetries = 10
 
 type pollModel struct {
+	ctx            context.Context
 	id             string
 	progress       progress.Model
 	elapsed        time.Duration
@@ -83,12 +96,13 @@ type pollModel struct {
 	err            error
 }
 
-func newPollModel(id string) pollModel {
+func newPollModel(ctx context.Context, id string) pollModel {
 	p := progress.New(
 		progress.WithDefaultGradient(),
 		progress.WithWidth(40),
 	)
 	return pollModel{
+		ctx:       ctx,
 		id:        id,
 		progress:  p,
 		startTime: time.Now(),
@@ -110,14 +124,14 @@ func (m pollModel) tickCmd() tea.Cmd {
 
 func (m pollModel) fetchTest() tea.Cmd {
 	return func() tea.Msg {
-		result, err := apiClient.GetTest(context.Background(), m.id)
+		result, err := apiClient.GetTest(m.ctx, m.id)
 		return pollResultMsg{test: result, err: err}
 	}
 }
 
 func (m pollModel) fetchSummary() tea.Cmd {
 	return func() tea.Msg {
-		summary, _ := apiClient.ReportSummary(context.Background(), m.id)
+		summary, _ := apiClient.ReportSummary(m.ctx, m.id)
 		return pollDoneMsg{summary: summary}
 	}
 }
@@ -370,8 +384,8 @@ func isStaleResult(results []client.PhaseResult) bool {
 // Seams for tests: the plain poll loop must be drivable without a server or a
 // real clock.
 var (
-	pollGetTestFn = func(id string) (*client.TestRun, error) {
-		return apiClient.GetTest(context.Background(), id)
+	pollGetTestFn = func(ctx context.Context, id string) (*client.TestRun, error) {
+		return apiClient.GetTest(ctx, id)
 	}
 	pollInterval = 2 * time.Second
 )
@@ -392,37 +406,63 @@ func isFailedStatus(status string) bool {
 // Without a terminal this skips bubbletea entirely — tea cannot open /dev/tty
 // there, so the old path turned "no TTY" into a crash before any status was
 // ever polled — and runs a plain append-only loop instead.
-func pollUntilDone(id string) (string, error) {
+//
+// A follow stopped before the test finished, by q or Ctrl-C in the terminal
+// UI or by ctx, returns the last status seen and errStoppedWaiting. That used
+// to be a nil error, so `create --wait` exited 0 on Ctrl-C with its test
+// still running; each caller now decides what stopping means for it.
+func pollUntilDone(ctx context.Context, id string) (string, error) {
 	if !IsInteractive() {
-		return pollUntilDonePlain(id, os.Stdout)
+		return pollUntilDonePlain(ctx, id, os.Stdout)
 	}
-	m := newPollModel(id)
-	final, err := tea.NewProgram(m).Run()
+	m := newPollModel(ctx, id)
+	final, err := tea.NewProgram(m, tea.WithContext(ctx)).Run()
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, tea.ErrInterrupted) || errors.Is(err, tea.ErrProgramKilled) {
+			return lastPolledStatus(final), errStoppedWaiting
+		}
 		return "", fmt.Errorf("watch UI error: %w", err)
 	}
 	fm := final.(pollModel)
 	if fm.err != nil {
 		return "", fm.err
 	}
-	// A detach (q) surfaces the last status seen; only terminal failure
-	// statuses are errors for callers.
+	// The UI quits by itself once the test ends. Quitting before that was
+	// the user (q, Ctrl-C), or Bubble Tea on SIGTERM.
+	if !fm.done && !fm.failed {
+		return fm.lastStatus, errStoppedWaiting
+	}
 	return fm.lastStatus, nil
+}
+
+func lastPolledStatus(m tea.Model) string {
+	if pm, ok := m.(pollModel); ok {
+		return pm.lastStatus
+	}
+	return ""
 }
 
 // pollUntilDonePlain is the non-interactive follower: one line per status
 // change, append-only, no escape codes — the format CI logs can rely on.
-func pollUntilDonePlain(id string, w io.Writer) (string, error) {
+func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, error) {
 	lastStatus := ""
 	retries := 0
 	for {
-		test, err := pollGetTestFn(id)
+		test, err := pollGetTestFn(ctx, id)
 		if err != nil {
+			// A poll cut off by the stop is not a lost connection. One that
+			// answered is still reported: a run that finished as the stop
+			// came has nothing left to stop.
+			if ctx.Err() != nil {
+				return lastStatus, errStoppedWaiting
+			}
 			retries++
 			if retries > maxConnRetries {
 				return "", fmt.Errorf("connection lost after %d retries: %w", maxConnRetries, err)
 			}
-			time.Sleep(pollInterval)
+			if !sleepCtx(ctx, pollInterval) {
+				return lastStatus, errStoppedWaiting
+			}
 			continue
 		}
 		retries = 0
@@ -446,7 +486,22 @@ func pollUntilDonePlain(id string, w io.Writer) (string, error) {
 		case "DONE", "COMPLETED", "FAILED", "ERROR":
 			return status, nil
 		}
-		time.Sleep(pollInterval)
+		if !sleepCtx(ctx, pollInterval) {
+			return lastStatus, errStoppedWaiting
+		}
+	}
+}
+
+// sleepCtx sleeps for d, or until ctx is done; it reports whether it slept
+// the whole time.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 

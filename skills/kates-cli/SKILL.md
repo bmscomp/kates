@@ -34,9 +34,9 @@ kates test list --context lab -o json | jq .total   # needs the key; /api/health
 
 | Starts load | Injects a fault | Changes or deletes state |
 | --- | --- | --- |
-| `test create`, `test apply`, `replay`, `gate`, `benchmark`, `tune run`, `flow run`, `schedule create` | `disruption run` and `disruption playbook run` without `--dry-run`, `resilience run`, `flow run` (its chaos steps), `disruption schedule create` | `test delete`, `test cleanup`, `test baseline set` and `unset`, `security baseline --save`, `profile save`, `snapshot create`, `kafka create-topic`, `alter-topic`, `delete-topic` and `produce`, `schedule delete`, `disruption schedule delete`, `webhook add` and `remove`, `kyverno apply`, `enforce` and `audit`, `auto`, `deploy`, `clean`, `operator`, `migrate` (its `plan` and `status` commands only read), `init`, `ports`, `ctx use`, `delete` and `import` |
+| `test create`, `test apply`, `replay`, `gate`, `benchmark`, `tune run`, `flow run`, `schedule create` | `disruption run` and `disruption playbook run` without `--dry-run`, `resilience run`, `flow run` (its chaos steps), `disruption schedule create` | `test delete`, `test cancel`, `test cleanup`, `test baseline set` and `unset`, `security baseline --save`, `profile save`, `snapshot create`, `kafka create-topic`, `alter-topic`, `delete-topic` and `produce`, `schedule delete`, `disruption schedule delete`, `webhook add` and `remove`, `kyverno apply`, `enforce` and `audit`, `auto`, `deploy`, `clean`, `operator`, `migrate` (its `plan` and `status` commands only read), `init`, `ports`, `ctx use`, `delete` and `import` |
 
-Give the human the exact command. `test create --dry-run`, `disruption run --config <file> --dry-run`, `disruption playbook run <name> --dry-run`, `flow run -f <file> --dry-run` and `test cleanup --dry-run` start nothing and are yours to run. `kates test delete <id>` stops a run and deletes it with its results, and is for the human only; no CLI command cancels a run and keeps it.
+Give the human the exact command. `test create --dry-run`, `disruption run --config <file> --dry-run`, `disruption playbook run <name> --dry-run`, `flow run -f <file> --dry-run` and `test cleanup --dry-run` start nothing and are yours to run. `kates test delete <id>` stops a run and deletes it with its results, and `kates test cancel <id>` stops it and keeps it, stored as FAILED; both are for the human only.
 
 **Read exit codes with care.** `0` means the command did its job; `1` means it failed, a gate failed, or a dry run found the plan UNSAFE. Exceptions: `cluster alerts` exits 1 whenever a critical alert rule is defined, firing or not, which on a default install is always; `advisor` exits 0 when the run or its report is missing (its `status` says which); `security audit` exits 0 when the backend reports that the check itself failed. The [CLI Reference](../../docs/book/10-cli-reference.md#exit-codes) lists the rest.
 
@@ -127,7 +127,7 @@ Match the lagging partitions to their leaders (run `kafka topic` for each topic 
 - Audit rows record no actor, and only the test endpoints write them: disruptions, topics and schedules leave none. Runs have no owner. You can say a Kates run was active, not who started it.
 - A run has a creation time and a status, not an end time.
 - Cluster info and the partition health check are cached for 30 seconds, and cluster info lists the brokers the Kafka admin API returns, which leaves out one that is down. `cluster alerts` lists alert rules that are defined, not alerts that are firing; an empty list can also mean the rules could not be read.
-- `kates test delete <id>` stops a run and deletes it with its results; it is for the human only. No CLI command cancels a run and keeps it: the human who wants that calls `POST /api/tests/{id}/cancel`.
+- `kates test delete <id>` stops a run and deletes it with its results, and `kates test cancel <id>` stops it and keeps it, stored as FAILED; both are for the human only. Interrupting `test apply --wait`, `test create --wait` or `replay --wait` cancels the run it started; interrupting `disruption run` leaves its plan running.
 
 ### Planning a Game Day
 

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 
@@ -19,7 +18,7 @@ var replayCmd = &cobra.Command{
 	Example: "  kates replay 69acdf31 --wait",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		ctx := commandContext(cmd)
 		// MCPRun keeps both specs as the backend sent them.
 		original, err := apiClient.MCPRun(ctx, args[0])
 		if err != nil {
@@ -51,7 +50,10 @@ var replayCmd = &cobra.Command{
 
 		if replayWait {
 			fmt.Println()
-			status, err := pollUntilDone(result.ID)
+			status, err := pollUntilDone(ctx, result.ID)
+			if stoppedWaiting(ctx, err) {
+				return stopStartedRun(result.ID)
+			}
 			if err != nil {
 				return cmdErr("Lost track of test " + truncID(result.ID) + ": " + err.Error())
 			}
@@ -100,6 +102,7 @@ func replaySpec(run *client.MCPRun) (json.RawMessage, error) {
 }
 
 func init() {
-	replayCmd.Flags().BoolVar(&replayWait, "wait", false, "Wait for test to complete")
+	replayCmd.Flags().BoolVar(&replayWait, "wait", false, "Wait for test to complete; Ctrl-C cancels it")
+	interruptible(replayCmd)
 	rootCmd.AddCommand(replayCmd)
 }

@@ -607,7 +607,7 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 | `--fetch-min-bytes` | Consumer `fetch.min.bytes`, for LOAD, ENDURANCE and INTEGRITY |
 | `--fetch-max-wait-ms` | Consumer `fetch.max.wait.ms`, for LOAD, ENDURANCE and INTEGRITY |
 | `--backend` | Benchmark backend: `native` or `trogdor` (default: the Kates API's `kates.engine.default-backend`, `native`) |
-| `--wait` | Wait for test completion |
+| `--wait` | Wait for test completion; Ctrl-C cancels the run and exits 130 |
 
 ::: {.callout-important}
 **`--throughput` sets the rate, and some flags do not apply to every type**
@@ -663,13 +663,22 @@ kates test delete <id>
 kates test rm <id>
 ```
 
+#### test cancel
+
+```bash
+kates test cancel <id>
+kates test cancel <id> <id> -o json
+```
+
+Cancel runs that are `PENDING` or `RUNNING` and keep them. Each run's tasks stop, the run gives back its place among the runs the Kates API allows at once, and it is stored as `FAILED`, each unfinished task with the error `Cancelled by user`. A run that has already finished cannot be cancelled; the CLI says so for that run and exits 1, as it does whenever a run on the line was not cancelled. With `-o json` it prints one object per run: its `id`, whether it was `cancelled`, and the `error` when it was not.
+
 #### test watch
 
 ```bash
 kates test watch <id>
 ```
 
-Live-stream test progress to the terminal.
+Live-stream test progress to the terminal. Stopping it, with `q` or Ctrl-C, leaves the test running.
 
 #### test apply
 
@@ -682,6 +691,8 @@ kates test apply -f scenario.yaml --wait -o json
 Apply a YAML scenario file. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
 
 In a terminal, `--wait` shows a spinner while each run goes. Without one (a pipe, a CI job, an agent's shell) or with `--plain`, it prints a plain line to stderr each time a run's status changes, such as `quick (3f8a2c1e): RUNNING`. With `-o json` stdout carries only the summary as JSON: each scenario's `name`, `type`, `runId`, `status` and `error`, and with `--wait`, for a scenario with a `validate` block, an `sla` object with its `violations` and the gates that were `notEvaluable`. A scenario that failed to submit has no `runId`. The exit code is the same in every mode.
+
+Ctrl-C while `--wait` waits, or `q` in the spinner, stops the apply. The run it is waiting for is cancelled, as `kates test cancel` would cancel it, and the scenarios after it are not started. The summary shows that scenario as `CANCELLED`, or as `INTERRUPTED` with the command to cancel it when the cancel failed, the JSON summary carries `"interrupted": true`, and the CLI exits 130. A CI job that is cancelled stops the apply the same way, through the SIGTERM it sends.
 
 #### test scaffold
 
@@ -886,6 +897,8 @@ kates disruption run --config plan.json --fail-on-sla-breach --output-junit resu
 | `--fail-on-sla-breach` | Exit with non-zero if SLA is breached |
 | `--output-junit` | Write JUnit XML to file |
 
+The command prints the disruption ID as soon as the Kates API accepts the plan, then waits for the report. Ctrl-C stops the wait, not the plan: the Kates API cannot cancel a running plan, so it runs to its end. The CLI prints the ID with `kates disruption status <id>` to follow it, and exits 130.
+
 #### disruption list
 
 ```bash
@@ -970,7 +983,7 @@ kates disruption playbook run leader-cascade
 |------|-------------|
 | `--dry-run` | Preview the playbook without injecting any fault; exits 1 when the verdict is UNSAFE |
 
-Run a playbook and wait for its report; the command prints the disruption ID and the final status, or with `-o json` the ID and the report as JSON. With `--dry-run` it fetches the playbook's plan and sends it to the same dry run as `disruption run --dry-run`, which resolves partition leaders, lists the pods each step would hit, and checks the blast radius. It starts nothing. It prints the dry-run result, as JSON with `-o json`, and exits 1 when the verdict is UNSAFE, which is when running the playbook would be refused. The dry run checks RBAC for some disruption types only, and reports a missing permission as a step warning, not in the verdict; [Chaos Engineering in Practice](07-chaos-practice.md) lists which.
+Run a playbook and wait for its report; the command prints the disruption ID as soon as the playbook is accepted, and the final status, or with `-o json` the ID and the report as JSON. Ctrl-C stops the wait and leaves the plan running, as for `disruption run`. With `--dry-run` it fetches the playbook's plan and sends it to the same dry run as `disruption run --dry-run`, which resolves partition leaders, lists the pods each step would hit, and checks the blast radius. It starts nothing. It prints the dry-run result, as JSON with `-o json`, and exits 1 when the verdict is UNSAFE, which is when running the playbook would be refused. The dry run checks RBAC for some disruption types only, and reports a missing permission as a step warning, not in the verdict; [Chaos Engineering in Practice](07-chaos-practice.md) lists which.
 
 **See also:** [Chaos Engineering Theory](06-chaos-theory.md) for the principles behind chaos engineering, [Chaos Engineering in Practice](07-chaos-practice.md) for step-by-step walkthroughs of disruption plans and resilience runs.
 
@@ -1871,8 +1884,10 @@ Re-run a previous test with the same parameters.
 
 ```bash
 kates replay <id>
-kates replay abc123
+kates replay abc123 --wait
 ```
+
+With `--wait` it follows the new run as `test create --wait` does, and Ctrl-C cancels that run and exits 130.
 
 The replay sends the run's `requestedSpec`, the fields its request set, and the Kates API merges them with the type's defaults as it did the first time. A run stored before the Kates API kept the request has none; it is replayed from its merged spec without `targetThroughput`, `consumerGroup`, the fetch settings and the `enable` options, which the Kates API did not apply then, so the new run does what the old one did. A scenario run is replayed as a plain run of its base spec, without its phases.
 
@@ -2391,10 +2406,12 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 | `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
 | `1` | The operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), or a confirmation was declined or could not be asked |
 | `2` | `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`) |
+| `130` | Ctrl-C or SIGTERM stopped a command that starts work and waits for it, after it cancelled the test it started |
 
 Consequences worth knowing in scripts:
 
 - `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
+- `test apply --wait`, `test create --wait` and `replay --wait` cancel the run they are waiting for when interrupted, and exit `130`. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
 - `kates cluster alerts` exits `1` wherever a critical alert rule is defined, firing or not, which on a default install means always — see its section above.
 - A declined confirmation exits `1` in `deploy`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
 - Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.

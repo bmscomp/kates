@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -56,7 +57,11 @@ validate block.
 In a terminal --wait shows a spinner. Without one (a pipe, a CI job, an agent's
 shell), or with --plain, it prints a plain line to stderr each time a run's
 status changes instead. With -o json it prints nothing but the summary, as
-JSON on stdout. The exit code is the same in every mode.`,
+JSON on stdout. The exit code is the same in every mode.
+
+Ctrl-C (or q in the spinner) while it waits stops the apply: the run it is
+waiting for is cancelled, the scenarios after it are not started, and kates
+exits 130 after the summary.`,
 	Example: `  kates test apply -f load-test.yaml
   kates test apply -f scenarios.yaml --wait
   kates test apply -f scenarios.yaml --wait -o json
@@ -125,8 +130,13 @@ JSON on stdout. The exit code is the same in every mode.`,
 		}
 
 		res := applyResult{File: applyFile, Waited: applyWait, Scenarios: make([]applyScenarioResult, 0, len(sf.Scenarios))}
+		ctx := commandContext(cmd)
 
 		for i, scenario := range sf.Scenarios {
+			if ctx.Err() != nil {
+				res.Interrupted = true
+				break
+			}
 			name := scenario.Name
 			if name == "" {
 				name = fmt.Sprintf("Scenario %d", i+1)
@@ -142,8 +152,16 @@ JSON on stdout. The exit code is the same in every mode.`,
 
 			sr := applyScenarioResult{Name: name, Type: strings.ToUpper(scenario.Type)}
 			req := scenarioToRequest(scenario)
-			result, err := apiClient.CreateTest(context.Background(), req)
+			result, err := apiClient.CreateTest(ctx, req)
 			if err != nil {
+				if ctx.Err() != nil {
+					// Interrupted mid-request: whether the run was created
+					// is unknown, and there is no id to cancel it by.
+					sr.Status, sr.Error = "INTERRUPTED", "interrupted while creating the run; check kates test list"
+					res.Scenarios = append(res.Scenarios, sr)
+					res.Interrupted = true
+					break
+				}
 				if !jsonOut {
 					output.Error("  Failed: " + err.Error())
 				}
@@ -165,9 +183,19 @@ JSON on stdout. The exit code is the same in every mode.`,
 
 			var finalResult *client.TestRun
 			if useTUI {
-				finalResult, err = waitForTestTUI(result.ID, name)
+				finalResult, err = waitForTestTUI(ctx, result.ID, name)
 			} else {
-				finalResult, err = waitForTestPlain(context.Background(), result.ID, name, progress)
+				finalResult, err = waitForTestPlain(ctx, result.ID, name, progress)
+			}
+			if err != nil && stoppedWaiting(ctx, err) {
+				// Ctrl-C used to end only this scenario's wait: it became an
+				// ERROR row, the run went on, and the next scenario started.
+				var note string
+				sr.Status, note = cancelStartedRun(result.ID)
+				sr.Error = "interrupted; " + note
+				res.Scenarios = append(res.Scenarios, sr)
+				res.Interrupted = true
+				break
 			}
 			if err != nil {
 				sr.Status, sr.Error = "ERROR", err.Error()
@@ -204,6 +232,14 @@ JSON on stdout. The exit code is the same in every mode.`,
 			renderApplySummary(res, hasUnevaluable)
 		}
 
+		if res.Interrupted {
+			if notRun := len(sf.Scenarios) - len(res.Scenarios); notRun > 0 {
+				interruptNote(fmt.Sprintf("Interrupted: the %d scenario(s) after it were not started.", notRun))
+			} else {
+				interruptNote("Interrupted.")
+			}
+			return errInterrupted
+		}
 		if hasViolation {
 			// A silentErr instead of os.Exit(1): the same exit code, and a
 			// test can run the command without it ending the test binary.
@@ -229,11 +265,16 @@ type applyResult struct {
 	File      string                `json:"file"`
 	Waited    bool                  `json:"waited"`
 	Scenarios []applyScenarioResult `json:"scenarios"`
+	// Interrupted is set when Ctrl-C stopped the apply. Scenarios then holds
+	// the ones it reached; the rest were not started.
+	Interrupted bool `json:"interrupted,omitempty"`
 }
 
 // applyScenarioResult is one scenario's row. Status is SUBMITTED without
 // --wait, the run's final status with it, FAILED (no RunID) when the run
 // could not be created and ERROR when waiting failed; Error then says why.
+// When Ctrl-C stopped the wait it is CANCELLED once the run is cancelled, or
+// INTERRUPTED when that is unknown or failed.
 type applyScenarioResult struct {
 	Name   string          `json:"name"`
 	Type   string          `json:"type"`
@@ -489,6 +530,7 @@ func unevaluableSLAs(run *client.TestRun, v *ValidationSpec) []string {
 }
 
 type waitModel struct {
+	ctx    context.Context
 	id     string
 	name   string
 	spin   spinner.Model
@@ -513,7 +555,7 @@ var applyPollInterval = 2 * time.Second
 func (m waitModel) fetchTest() tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(applyPollInterval)
-		res, err := apiClient.GetTest(context.Background(), m.id)
+		res, err := apiClient.GetTest(m.ctx, m.id)
 		return waitResultMsg{test: res, err: err}
 	}
 }
@@ -522,7 +564,7 @@ func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
-			m.err = fmt.Errorf("aborted")
+			m.err = errStoppedWaiting
 			return m, tea.Quit
 		}
 	case waitResultMsg:
@@ -560,27 +602,36 @@ func (m waitModel) View() string {
 // starting a Bubble Tea program. It holds waitForTest by default.
 var waitForTestTUI = waitForTest
 
-func waitForTest(id, name string) (*client.TestRun, error) {
+func waitForTest(ctx context.Context, id, name string) (*client.TestRun, error) {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = output.AccentStyle
 
 	m := waitModel{
+		ctx:    ctx,
 		id:     id,
 		name:   name,
 		spin:   s,
 		status: "WAITING",
 	}
 
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithContext(ctx))
 	finalModel, err := p.Run()
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, tea.ErrInterrupted) || errors.Is(err, tea.ErrProgramKilled) {
+			return nil, errStoppedWaiting
+		}
 		return nil, err
 	}
 
 	wm := finalModel.(waitModel)
 	if wm.err != nil {
 		return nil, wm.err
+	}
+	if wm.result == nil {
+		// Bubble Tea quits by itself on SIGTERM, with no result and no
+		// error; apply then read the status of a nil run and panicked.
+		return nil, errStoppedWaiting
 	}
 	return wm.result, nil
 }
@@ -615,6 +666,7 @@ func waitForTestPlain(ctx context.Context, id, name string, progress io.Writer) 
 
 func init() {
 	testApplyCmd.Flags().StringVarP(&applyFile, "file", "f", "", "Path to scenario YAML/JSON file (required)")
-	testApplyCmd.Flags().BoolVar(&applyWait, "wait", false, "Wait for each test to complete before starting next")
+	testApplyCmd.Flags().BoolVar(&applyWait, "wait", false, "Wait for each test to complete before starting the next; Ctrl-C cancels the running one and stops")
+	interruptible(testApplyCmd)
 	testCmd.AddCommand(testApplyCmd)
 }

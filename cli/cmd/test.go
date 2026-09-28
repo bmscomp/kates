@@ -374,7 +374,8 @@ var testCreateCmd = &cobra.Command{
 			return nil
 		}
 
-		result, err := apiClient.CreateTest(context.Background(), req)
+		ctx := commandContext(cmd)
+		result, err := apiClient.CreateTest(ctx, req)
 		if err != nil {
 			return cmdErr("Failed to create test: " + err.Error())
 		}
@@ -387,7 +388,10 @@ var testCreateCmd = &cobra.Command{
 			// json + --wait previously returned HERE, before waiting at all —
 			// the flag was silently ignored. Follow silently, then emit the
 			// FINAL state, which is the object a json consumer actually wants.
-			status, err := pollUntilDonePlain(result.ID, io.Discard)
+			status, err := pollUntilDonePlain(ctx, result.ID, io.Discard)
+			if stoppedWaiting(ctx, err) {
+				return stopStartedRun(result.ID)
+			}
 			if err != nil {
 				return cmdErr("Lost track of test " + truncID(result.ID) + ": " + err.Error())
 			}
@@ -411,7 +415,12 @@ var testCreateCmd = &cobra.Command{
 
 		if createWait {
 			fmt.Println()
-			status, err := pollUntilDone(result.ID)
+			status, err := pollUntilDone(ctx, result.ID)
+			if stoppedWaiting(ctx, err) {
+				// It started the run, so stopping means cancelling it: this
+				// used to exit 0 and leave the test running.
+				return stopStartedRun(result.ID)
+			}
 			if err != nil {
 				// Unknown outcome is not success. Exiting 0 here is how CI
 				// stayed green while load tests failed.
@@ -441,6 +450,58 @@ var testDeleteCmd = &cobra.Command{
 		output.Success("Test deleted: " + truncID(args[0]))
 		return nil
 	},
+}
+
+var testCancelCmd = &cobra.Command{
+	Use:   "cancel <id>...",
+	Short: "Cancel pending or running test runs",
+	Long: `Cancel one or more test runs that are pending or running. Their tasks stop,
+the run gives back its place among the runs the Kates API allows at once, and
+it is stored as FAILED, each unfinished task with the error "Cancelled by
+user".
+
+A run that has already finished cannot be cancelled; kates says so and exits 1.
+Ctrl-C while test apply, test create or replay waits cancels the run it started
+the same way.`,
+	Example: `  kates test cancel 69acdf31
+  kates test cancel 69acdf31 7c1e2b90 -o json`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := commandContext(cmd)
+		results := make([]testCancelResult, 0, len(args))
+		failed := 0
+		for _, id := range args {
+			r := testCancelResult{ID: id}
+			if err := apiClient.CancelTest(ctx, id); err != nil {
+				failed++
+				r.Error = err.Error()
+				if outputMode != "json" {
+					output.Error("Not cancelled: " + id + ": " + err.Error())
+				}
+			} else {
+				r.Cancelled = true
+				if outputMode != "json" {
+					output.Success("Cancelled: " + id)
+				}
+			}
+			results = append(results, r)
+		}
+		if outputMode == "json" {
+			output.JSON(results)
+		}
+		if failed > 0 {
+			// Each failure has been said already, per run.
+			return &silentErr{msg: fmt.Sprintf("%d of %d run(s) not cancelled", failed, len(args))}
+		}
+		return nil
+	},
+}
+
+// testCancelResult is one run's row in kates test cancel -o json.
+type testCancelResult struct {
+	ID        string `json:"id"`
+	Cancelled bool   `json:"cancelled"`
+	Error     string `json:"error,omitempty"`
 }
 
 func runInteractiveTestCreate() error {
@@ -583,7 +644,7 @@ func init() {
 	testCreateCmd.Flags().IntVar(&createRecordSize, "record-size", 0, "Record size in bytes")
 	testCreateCmd.Flags().IntVar(&createDuration, "duration", 0, "Duration in seconds")
 	testCreateCmd.Flags().StringVar(&createTopic, "topic", "", "Kafka topic name")
-	testCreateCmd.Flags().BoolVar(&createWait, "wait", false, "Wait for test to complete and print results")
+	testCreateCmd.Flags().BoolVar(&createWait, "wait", false, "Wait for test to complete and print results; Ctrl-C cancels it")
 	testCreateCmd.Flags().StringVar(&createAcks, "acks", "", "Producer acks: 0, 1, or all (default: all)")
 	testCreateCmd.Flags().IntVar(&createBatchSize, "batch-size", 0, "Producer batch size in bytes (default: 65536)")
 	testCreateCmd.Flags().IntVar(&createLingerMs, "linger-ms", 0, "Producer linger time in ms (default: 5)")
@@ -597,11 +658,13 @@ func init() {
 	testCreateCmd.Flags().IntVar(&createFetchMinBytes, "fetch-min-bytes", 0, "Consumer fetch.min.bytes (default: 1)")
 	testCreateCmd.Flags().IntVar(&createFetchMaxWaitMs, "fetch-max-wait-ms", 0, "Consumer fetch.max.wait.ms (default: 500)")
 	testCreateCmd.Flags().BoolVar(&testDryRun, "dry-run", false, "Print request JSON without executing")
+	interruptible(testCreateCmd)
 
 	testCmd.AddCommand(testListCmd)
 	testCmd.AddCommand(testGetCmd)
 	testCmd.AddCommand(testCreateCmd)
 	testCmd.AddCommand(testDeleteCmd)
+	testCmd.AddCommand(testCancelCmd)
 	testCmd.AddCommand(testTypesCmd)
 	testCmd.AddCommand(testBackendsCmd)
 	rootCmd.AddCommand(testCmd)
