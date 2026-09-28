@@ -104,6 +104,25 @@ book:
     - appendix-b-troubleshooting.md
     - appendix-c-cicd.md
     - appendix-d-versions.md
+    # Unnumbered, after the appendices: the list of works cited.
+    - references.md
+
+# Citations. `[@key]` in a page cites the entry `key` in references.bib, and
+# renders as its number, linked to the References page. Quarto runs citeproc
+# on each page on its own, so a style that numbers by order of citation would
+# restart at [1] on every page. Instead the ACM style numbers the whole
+# bibliography in alphabetical order of first author, and nocite hands every
+# page all of it, so a work has one number everywhere. theme/citations.lua runs
+# citeproc in place of Quarto (citeproc: false) and keeps the list off every
+# page but References. The style is citation-style-language/styles'
+# association-for-computing-machinery.csl at c18c1a491dc6, unmodified (CC BY-SA
+# 3.0).
+bibliography: references.bib
+csl: theme/association-for-computing-machinery.csl
+nocite: |
+  @*
+citeproc: false
+link-citations: true
 
 format:
   html:
@@ -117,6 +136,9 @@ format:
     highlight-style: theme/kates-code.theme
     include-in-header: theme/head.html
     include-after-body: theme/diagrams.html
+    filters:
+      - path: theme/citations.lua
+        at: post-render
     language:
       search-text-placeholder: "Search the book (/)"
     toc: true
@@ -138,6 +160,8 @@ format:
     filters:
       - theme/pdf-output.lua
       - theme/pdf-cover.lua
+      - path: theme/citations.lua
+        at: post-render
     pdf-engine: lualatex
     colorlinks: true
     # katesblue is the web's link colour, defined in theme/pdf-header.tex.

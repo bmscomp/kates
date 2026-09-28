@@ -455,7 +455,7 @@ Multiply each run's `avgThroughputRecPerSec` by its producer count to get the ru
 | 8 | 25,050 rec/s | 200,400 rec/s | 38.4 ms |
 | 16 | 12,200 rec/s | 195,200 rec/s | 212.7 ms |
 
-The total stops rising between 8 and 16 producers, so this cluster's ceiling is about 200,000 records per second. The sustainable figure is the highest total whose P99 meets your SLA. With a 50 ms SLA, that's the 8-producer run's 200,400 records per second; with 20 ms, it's the 4-producer run's 170,200.
+The total stops rising between 8 and 16 producers, so this cluster's ceiling is about 200,000 records per second. The sustainable figure is the highest total whose P99 meets your SLA [@jain1991art]. With a 50 ms SLA, that's the 8-producer run's 200,400 records per second; with 20 ms, it's the 4-producer run's 170,200.
 
 ### Verify the Runs
 

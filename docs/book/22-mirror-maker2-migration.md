@@ -3,7 +3,7 @@
 MirrorMaker 2 is Kafka Connect wearing a specific hat. A `KafkaMirrorMaker2`
 custom resource *is* a Connect cluster, running two built-in connectors —
 `MirrorSourceConnector` and `MirrorCheckpointConnector` — whose job is to copy
-records and consumer offsets from one Kafka cluster to another. Everything you
+records and consumer offsets from one Kafka cluster to another [@kip382]. Everything you
 know about operating Connect applies: workers, tasks, rebalances, internal
 topics, the REST layer.
 
@@ -67,7 +67,7 @@ Four things make it sharp.
 
 ### The Protocol Floor
 
-[KIP-896](https://cwiki.apache.org/confluence/x/K5sODg) removed the pre-2.1
+KIP-896 [@kip896] removed the pre-2.1
 client protocol API versions in Kafka 4.0. MirrorMaker 2's consumer is an
 ordinary Kafka client of whatever version the workers run, so a 4.x MirrorMaker
 can read brokers **2.1 and newer, and nothing older**. Below that the broker
@@ -117,7 +117,7 @@ prefix, which is what stops a loopback from re-mirroring `source.orders` as
 `MirrorSourceConnector` moves records. `MirrorCheckpointConnector` moves
 *positions* — it maps each source consumer group's committed offsets onto the
 equivalent target offsets, through the `offset-syncs` topic, and writes them to
-the target's `__consumer_offsets` when `sync.group.offsets.enabled` is true.
+the target's `__consumer_offsets` when `sync.group.offsets.enabled` is true [@kip545].
 
 Without it a migration is data-only: every record is on the target, and no
 consumer knows where to resume, so each one replays from the beginning or skips

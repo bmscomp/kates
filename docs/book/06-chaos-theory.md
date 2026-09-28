@@ -1,6 +1,6 @@
 # Chaos Engineering Theory
 
-Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production. This chapter covers the theory — [Chaos Engineering in Practice](07-chaos-practice.md) covers how Kates implements it.
+Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production [@principlesofchaos2019; @basiri2016chaos]. This chapter covers the theory — [Chaos Engineering in Practice](07-chaos-practice.md) covers how Kates implements it.
 
 You don't need prior chaos tooling experience — just a working knowledge of Kafka's replication model. After this chapter, you can:
 
@@ -42,7 +42,7 @@ graph TD
 
 ## Core Principles
 
-The five principles below come from the [Principles of Chaos Engineering](https://principlesofchaos.org). Each section restates one of them for a Kafka cluster.
+The five principles below come from the Principles of Chaos Engineering [@principlesofchaos2019; @rosenthal2020chaos]. Each section restates one of them for a Kafka cluster.
 
 ### 1. Build a Hypothesis Around Steady State
 
@@ -108,7 +108,7 @@ The principle asks for production because only production has the traffic, clien
 
 ### 4. Automate Experiments to Run Continuously
 
-One-off chaos experiments are useful; scheduled, repeating ones show when a change makes the cluster worse. Kates supports cron-based scheduling: `kates disruption schedule create` repeats a [playbook](appendix-a-glossary.md#gl-playbook), and `kates schedule create` repeats a test, such as a nightly [INTEGRITY](appendix-a-glossary.md#gl-test-type) run:
+One-off chaos experiments are useful; scheduled, repeating ones show when a change makes the cluster worse [@basiri2019automating]. Kates supports cron-based scheduling: `kates disruption schedule create` repeats a [playbook](appendix-a-glossary.md#gl-playbook), and `kates schedule create` repeats a test, such as a nightly [INTEGRITY](appendix-a-glossary.md#gl-test-type) run:
 
 ```bash
 # Run an integrity test every night at 2 AM
@@ -132,7 +132,7 @@ In a Kates [disruption plan](appendix-a-glossary.md#gl-disruption-plan), each ru
 
 ## The Game Day Methodology
 
-A **Game Day** is a structured chaos engineering session. Here's the process:
+A **Game Day** is a structured chaos engineering session [@robbins2012resilience; @allspaw2012fault]. Here's the process:
 
 ```mermaid
 graph TD
@@ -216,7 +216,7 @@ Key timing (with default broker and client configs):
 
 ### ISR Shrink and Expand
 
-When a follower falls behind (or a broker recovers), the ISR changes:
+When a follower falls behind (or a broker recovers), the ISR changes [@wang2015building]:
 
 ```mermaid
 stateDiagram-v2
@@ -257,7 +257,7 @@ sequenceDiagram
     Note over C1,C3: Processing resumes
 ```
 
-The diagram shows the classic **eager** protocol, where all consumers in the group stop processing during a rebalance — a "stop-the-world" pause that can last seconds to minutes depending on group size and partition count. Cooperative incremental rebalancing (KIP-429) shrinks the pause to only the partitions that actually move, and the next-generation consumer group protocol (KIP-848, `group.protocol=consumer`) removes the global synchronization barrier entirely. Kates test workloads can exercise either protocol via the per-test-type `group-protocol` setting (default: `classic`).
+The diagram shows the classic **eager** protocol, where all consumers in the group stop processing during a rebalance — a "stop-the-world" pause that can last seconds to minutes depending on group size and partition count. Cooperative incremental rebalancing (KIP-429 [@kip429]) shrinks the pause to only the partitions that actually move, and the next-generation consumer group protocol (KIP-848 [@kip848], `group.protocol=consumer`) removes the global synchronization barrier entirely. Kates test workloads can exercise either protocol via the per-test-type `group-protocol` setting (default: `classic`).
 
 ## Key Metrics During Chaos
 

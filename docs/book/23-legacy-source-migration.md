@@ -18,13 +18,13 @@ discoverable from a failing pod.
 ## The Cliff, and Where It Is
 
 Kafka 4.0 removed the client protocol API versions that predate Kafka 2.1
-([KIP-896](https://cwiki.apache.org/confluence/display/KAFKA/KIP-896%3A+Remove+old+client+protocol+API+versions+in+Kafka+4.0)).
+(KIP-896 [@kip896]).
 The MirrorMaker 2 workers are 4.x clients, so the rule lands on them directly:
 
 > users should ensure their brokers are running at least Apache Kafka 2.1
 > before upgrading their Java clients to Apache Kafka 4.0
 
-[KIP-1124](https://cwiki.apache.org/confluence/display/KAFKA/KIP-1124%3A+Providing+a+clear+Kafka+Client+upgrade+path+for+4.x)
+KIP-1124 [@kip1124]
 states the consequence without hedging: 2.1 is the oldest version compatible
 with 4.0, and 4.0 clients require a broker of 2.1 or newer.
 
@@ -108,7 +108,7 @@ against the source.
 Kafka 4.0 is the first release with no ZooKeeper at all, and every `zookeeper.*`
 broker setting is gone along with it. KRaft was declared production-ready in
 3.3 and ZooKeeper mode was deprecated in 3.5
-([KIP-833](https://cwiki.apache.org/confluence/display/KAFKA/KIP-833%3A+Mark+KRaft+as+Production+Ready)),
+(KIP-833 [@kip833]),
 which is why the 3.x releases are called bridge releases.
 
 None of this reaches MirrorMaker 2. The mirror talks to the source over the
@@ -127,7 +127,7 @@ A 4.x distribution is missing things a 2.x runbook assumes, and the failures are
 "command not found" rather than anything explanatory.
 
 `kafka-get-offsets.sh` arrived in **3.0**
-([KIP-635](https://cwiki.apache.org/confluence/display/KAFKA/KIP-635%3A+GetOffsetShell%3A+support+for+multiple+topics+and+consumer+configuration+override)).
+(KIP-635 [@kip635]).
 Which form you use depends on the distribution you are typing into, not on the
 broker you are pointing at — a modern client reads any broker above the 2.1
 floor:
@@ -194,12 +194,12 @@ If the source has not been touched in years, its brokers were configured when
 the defaults were different. A 4.x client applies today's defaults:
 
 - **Hostname verification** is on. `ssl.endpoint.identification.algorithm`
-  defaulted to empty before 2.0 and to `https` after, so a source whose broker
+  defaulted to empty before 2.0 and to `https` after [@kip294], so a source whose broker
   certificates have no matching SANs fails the handshake. That is a real
   security improvement, not a bug to work around — but it is better to discover
   it in a pre-flight probe than in a stalled connector.
-- **TLSv1 and TLSv1.1 are disabled** since 2.5, and TLSv1.3 is negotiated where
-  both ends support it since 2.6. A source pinned to TLSv1 needs its listener
+- **TLSv1 and TLSv1.1 are disabled** since 2.5 [@kip553], and TLSv1.3 is negotiated where
+  both ends support it since 2.6 [@kip573]. A source pinned to TLSv1 needs its listener
   moved before the mirror can connect.
 - **`JndiLoginModule` is disabled by default** since 3.4, and 4.0 ships with an
   empty allow-list for OAUTHBEARER token endpoints
@@ -215,7 +215,7 @@ migration presets.
 ### Message Formats: the Half That Surprises People
 
 Message formats v0 and v1 were deprecated in 3.0 and removed in 4.0
-([KIP-724](https://cwiki.apache.org/confluence/display/KAFKA/KIP-724%3A+Drop+support+for+message+formats+v0+and+v1)),
+(KIP-724 [@kip724]),
 and `log.message.format.version` no longer exists as a setting. What that means
 in practice is more precise than "old formats are gone":
 
@@ -257,7 +257,7 @@ One setting deserves its own note, because its version story is the opposite of
 what it looks like. `offset-syncs.topic.location` decides which cluster holds
 the `mm2-offset-syncs` topic, and moving it to the target is what lets you
 mirror a source you may only read
-([KIP-716](https://cwiki.apache.org/confluence/display/KAFKA/KIP-716%3A+Allow+configuring+the+location+of+the+offset-syncs+topic+with+MirrorMaker2)).
+(KIP-716 [@kip716]).
 It arrived in Kafka **3.0** — but it is a MirrorMaker-side setting, so what
 matters is the version of MirrorMaker, not of the source. **A 2.x source does
 not prevent it.** Since these workers run on the 4.x line, a read-only 2.x

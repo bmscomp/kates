@@ -1,6 +1,6 @@
 # Scenario Files & SLA Gates
 
-Scenario files are the declarative way to define, execute, and validate Kates [test runs](appendix-a-glossary.md#gl-test-run). Rather than stringing together CLI flags, you describe one or more test scenarios in a YAML (or JSON) file and let Kates orchestrate everything — including automated pass/fail enforcement against [SLA](appendix-a-glossary.md#gl-sla) thresholds. Kates calls those thresholds SLAs, though they work like SLOs: targets you set, not agreements with anyone.
+Scenario files are the declarative way to define, execute, and validate Kates [test runs](appendix-a-glossary.md#gl-test-run). Rather than stringing together CLI flags, you describe one or more test scenarios in a YAML (or JSON) file and let Kates orchestrate everything — including automated pass/fail enforcement against [SLA](appendix-a-glossary.md#gl-sla) thresholds. Kates calls those thresholds SLAs, though they work like SLOs: targets you set, not agreements with anyone [@beyer2016site].
 
 This chapter is for engineers graduating from ad-hoc `kates test create` runs to version-controlled, CI-gated test suites. After this chapter, you can:
 

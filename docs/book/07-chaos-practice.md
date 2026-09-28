@@ -65,7 +65,7 @@ A disruption plan answers the cluster question. It runs one or more steps, each 
 
 A resilience run answers the client question. It starts a Kates test, such as a [LOAD](appendix-a-glossary.md#gl-test-type) or an INTEGRITY run, waits `steadyStateSec`, and injects one fault while the test runs. It snapshots the test's throughput, latency and error rate just before the fault, summarizes the whole run again after the recovery wait, and prints the change. When the question is whether `krafter` can lose an acknowledged payment, an INTEGRITY run through the fault is the one that answers it.
 
-Each run of a plan or a playbook is a disruption, with its own ID and report. Either kind of run carries out a chaos experiment: faults injected on purpose to test a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis). A Game Day is the session your team runs around these commands, which [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology) explains; `make gameday` scripts one, and injects its fault with `kubectl` rather than through the [Kates API](appendix-a-glossary.md#gl-kates-api).
+Each run of a plan or a playbook is a disruption, with its own ID and report. Either kind of run carries out a chaos experiment: faults injected on purpose to test a [steady-state hypothesis](appendix-a-glossary.md#gl-steady-state-hypothesis) [@basiri2016chaos]. A Game Day is the session your team runs around these commands, which [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology) explains; `make gameday` scripts one, and injects its fault with `kubectl` rather than through the [Kates API](appendix-a-glossary.md#gl-kates-api).
 
 The table sets a plan and a resilience run side by side. Read the guard, rollback and report rows before you choose, because that's where the two differ most.
 
@@ -276,7 +276,7 @@ steps:
 
 ### split-brain
 
-Aims a `NETWORK_PARTITION` fault at node 0 to test cluster consensus under split-brain conditions. For 60 seconds, the `kubernetes` chaos provider adds a NetworkPolicy with no allow rules to the pod; the `litmus-crd` provider runs the Litmus `pod-network-partition` experiment instead. The playbook does not look up the active controller: `targetBrokerId: 0` picks the broker whose pod name ends in `-0`, which is the active controller only if node 0 also has the controller role and leads the metadata [quorum](appendix-a-glossary.md#gl-quorum) at the time. `targetBrokerId` never picks a dedicated controller; to aim the fault at one, name its pod in `targetPod`.
+Aims a `NETWORK_PARTITION` fault at node 0 to test cluster consensus under split-brain conditions [@bailis2014network; @alquraan2018analysis]. For 60 seconds, the `kubernetes` chaos provider adds a NetworkPolicy with no allow rules to the pod; the `litmus-crd` provider runs the Litmus `pod-network-partition` experiment instead. The playbook does not look up the active controller: `targetBrokerId: 0` picks the broker whose pod name ends in `-0`, which is the active controller only if node 0 also has the controller role and leads the metadata [quorum](appendix-a-glossary.md#gl-quorum) at the time. `targetBrokerId` never picks a dedicated controller; to aim the fault at one, name its pod in `targetPod`.
 
 ```mermaid
 graph LR

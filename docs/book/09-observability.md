@@ -81,11 +81,11 @@ Every panel in that row carries `topic=""`. Kafka registers the throughput meter
 
 ### Step 3: Investigate Latency Sources
 
-If your P99 was higher than expected, open the **Broker Internals** section of the same board. **Request and response queue size** growing during the test means requests were arriving faster than the broker could process them; a healthy cluster keeps this near zero. **Request handler idle (windowed)** is the better saturation signal — below 0.3 the broker itself is the bottleneck, and that is exactly what `KafkaRequestHandlerSaturated` fires on.
+If your P99 was higher than expected, open the **Broker Internals** section of the same board. **Request and response queue size** growing during the test means requests were arriving faster than the broker could process them; a healthy cluster keeps this near zero. **Request handler idle (windowed)** is the better saturation signal [@gregg2013thinking] — below 0.3 the broker itself is the bottleneck, and that is exactly what `KafkaRequestHandlerSaturated` fires on.
 
 Read it beside **Request handler idle (lifetime mean)**, which is deliberately on the same board. The lifetime form is a mean since the broker started, so a node up for a week and saturated for an hour still reads a comfortable number. When the two disagree, the windowed one is the one describing your test.
 
-With `acks=all`, every produce request is parked in the broker's produce purgatory until all ISR members replicate it. There is no dedicated purgatory panel, but a clean request queue combined with high produce latency usually means replication — not request processing — is the bottleneck; verify that in the next step.
+With `acks=all`, every produce request is parked in the broker's produce purgatory until all ISR members replicate it [@wang2015building]. There is no dedicated purgatory panel, but a clean request queue combined with high produce latency usually means replication — not request processing — is the bottleneck; verify that in the next step.
 
 ### Step 4: Verify Replication
 
@@ -404,7 +404,7 @@ Sparklines use Unicode block characters (▁▂▃▄▅▆▇█) to show the t
 
 ## Latency Heatmaps
 
-Heatmaps are Kates's most powerful observability feature. They preserve the **full latency distribution over time**, revealing patterns invisible in aggregate percentiles. Where a P99 metric tells you "99% of requests were under 15ms," a heatmap tells you "*when* the slow requests happened, *how many* there were, and *whether the pattern was sustained or momentary*."
+Heatmaps are Kates's most powerful observability feature. They preserve the **full latency distribution over time**, revealing patterns invisible in aggregate percentiles [@gregg2010visualizing]. Where a P99 metric tells you "99% of requests were under 15ms," a heatmap tells you "*when* the slow requests happened, *how many* there were, and *whether the pattern was sustained or momentary*."
 
 For the theory behind why heatmaps matter and why percentiles alone are insufficient, see [Performance Theory](04-performance-theory.md#heatmaps-seeing-the-full-picture).
 
@@ -544,7 +544,7 @@ The diff command highlights meaningful differences with directional indicators:
 | Avg Latency | 4.1ms | 5.8ms | +41.5%, regressed |
 | Error Rate | 0.00% | 0.00% | — |
 
-A 52% increase in P99 latency with only a 7% drop in throughput suggests the cluster is near its saturation point — small increases in load cause disproportionate latency increases. See [Performance Theory](04-performance-theory.md#the-two-pillars-throughput-and-latency) for why this non-linear relationship exists.
+A 52% increase in P99 latency with only a 7% drop in throughput suggests the cluster is near its saturation point — small increases in load cause disproportionate latency increases [@harcholbalter2013performance]. See [Performance Theory](04-performance-theory.md#the-two-pillars-throughput-and-latency) for why this non-linear relationship exists.
 
 ---
 
@@ -592,7 +592,7 @@ When stdout is a terminal, each export is written to an auto-named file (`kates-
 
 ## Distributed Tracing
 
-Kates uses **OpenTelemetry** to propagate traces across the entire request lifecycle — from REST API entry through Kafka producer/consumer operations to database queries. Tracing answers a different question than metrics: where metrics tell you *what* happened, traces tell you *where the time went* for a specific request.
+Kates uses **OpenTelemetry** to propagate traces across the entire request lifecycle — from REST API entry through Kafka producer/consumer operations to database queries [@w3c2021tracecontext]. Tracing answers a different question than metrics: where metrics tell you *what* happened, traces tell you *where the time went* for a specific request.
 
 ### Configuration
 
@@ -607,7 +607,7 @@ Tracing is configured in `application.properties`:
 | `quarkus.otel.traces.sampler.arg` | `0.1` (prod) / `1.0` (dev) | 10% sampling in prod, 100% in dev |
 
 ::: {.callout-note}
-The `0.1` sampling rate in production means only 10% of requests generate traces. This is a deliberate trade-off — tracing adds overhead, and at high throughput you don't need every request traced to spot patterns. In development, 100% sampling is used so you can trace any request.
+The `0.1` sampling rate in production means only 10% of requests generate traces. This is a deliberate trade-off — tracing adds overhead, and at high throughput you don't need every request traced to spot patterns [@sigelman2010dapper]. In development, 100% sampling is used so you can trace any request.
 :::
 
 ### What Gets Traced

@@ -198,7 +198,7 @@ For stress tests with `acks=all`, set warmup to **2**. For quick load tests, **1
 
 ## Median Mode (`m`)
 
-Even after warmup, individual runs vary due to GC pauses, I/O scheduling, and OS jitter. Median mode runs the **same configuration 3 times** and records only the median result (by throughput), eliminating outliers.
+Even after warmup, individual runs vary due to GC pauses, I/O scheduling, and OS jitter [@georges2007statistically]. Median mode runs the **same configuration 3 times** and records only the median result (by throughput), eliminating outliers.
 
 Press `m` to start:
 

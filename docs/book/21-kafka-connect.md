@@ -621,7 +621,7 @@ For chart development and CI pipelines, Makefile targets are also available:
 
 ## Exactly-Once Semantics
 
-Kafka Connect supports **exactly-once source** (EOS) delivery — guaranteeing that each source record is written to Kafka exactly once, even if a worker crashes mid-batch.
+Kafka Connect supports **exactly-once source** (EOS) delivery — guaranteeing that each source record is written to Kafka exactly once, even if a worker crashes mid-batch [@kip618].
 
 ### How EOS Works
 
@@ -834,7 +834,7 @@ Changing the converter from `JsonConverter` to `AvroConverter` on an existing co
 
 ## Dead Letter Queue (DLQ)
 
-When a sink connector encounters a record it cannot process (malformed data, schema mismatch, downstream failure), it can route the record to a Dead Letter Queue instead of failing the entire task.
+When a sink connector encounters a record it cannot process (malformed data, schema mismatch, downstream failure), it can route the record to a Dead Letter Queue instead of failing the entire task [@kip298; @hohpe2003enterprise].
 
 ### DLQ Flow
 
@@ -891,7 +891,7 @@ The three patterns below are what CDC is for in practice: publishing events with
 
 ### Pattern 1: Transactional Outbox
 
-The Outbox pattern avoids dual-write problems by writing events to an `outbox` table in the same database transaction as the business data. Debezium captures the outbox table and routes events to Kafka.
+The Outbox pattern avoids dual-write problems by writing events to an `outbox` table in the same database transaction as the business data [@richardson2018microservices; @kleppmann2017designing]. Debezium captures the outbox table and routes events to Kafka.
 
 ```mermaid
 sequenceDiagram

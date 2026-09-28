@@ -86,7 +86,7 @@ Whatever the event, the framework moves the tasks, and the offsets survive becau
 | AZ recovers | Workers rejoin, framework rebalances to restore even distribution |
 | Offset continuity | Preserved — offsets stored in shared Kafka topic |
 
-A departed worker's connectors and tasks don't move at once. Under incremental cooperative rebalancing (KIP-415), the group leader waits up to `scheduled.rebalance.max.delay.ms` for the worker to return before it hands its work to others, and a restarted pod gets that work back only when the wait ends. The Kafka default is 5 minutes, and the `connect-cluster` chart doesn't change it, so a crashed worker's CDC stream can pause for that long. Set it under `extraConfig` to trade faster failover for more task movement while pods restart.
+A departed worker's connectors and tasks don't move at once. Under incremental cooperative rebalancing (KIP-415 [@kip415]), the group leader waits up to `scheduled.rebalance.max.delay.ms` for the worker to return before it hands its work to others, and a restarted pod gets that work back only when the wait ends. The Kafka default is 5 minutes, and the `connect-cluster` chart doesn't change it, so a crashed worker's CDC stream can pause for that long. Set it under `extraConfig` to trade faster failover for more task movement while pods restart.
 
 ::: {.callout-note}
 Cross-AZ data transfer costs apply when a connector in zone alpha reads from a database in zone sigma. That's the price of a single group that fails over on its own, with no second cluster to promote.
