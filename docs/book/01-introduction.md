@@ -60,7 +60,7 @@ Kates runs inside Kubernetes and targets [Strimzi](appendix-a-glossary.md#gl-str
 
 ### 3. SLA-Driven
 
-Every test can carry the targets it must meet. Kates calls them SLA thresholds, though they work like SLOs: targets you set, not agreements with anyone. In a scenario file they are [gates](appendix-a-glossary.md#gl-gate), which `kates test apply --wait` checks after each run, exiting 1 when one is missed. A disruption plan's thresholds earn it an [SLA grade](appendix-a-glossary.md#gl-sla-grade) from A to F instead. This makes Kates suitable for CI/CD pipelines where a performance regression should block deployment.
+Every test can carry the targets it must meet. Kates calls them SLA thresholds, though they work like SLOs: targets you set, not agreements with anyone [@beyer2016site]. In a scenario file they are [gates](appendix-a-glossary.md#gl-gate), which `kates test apply --wait` checks after each run, exiting 1 when one is missed. A disruption plan's thresholds earn it an [SLA grade](appendix-a-glossary.md#gl-sla-grade) from A to F instead. This makes Kates suitable for CI/CD pipelines where a performance regression should block deployment.
 
 ### 4. Observable
 

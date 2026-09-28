@@ -1376,7 +1376,7 @@ Two combinations the chart refuses at render time are refused by the CLI first, 
 
 #### Read-only sources
 
-`--read-only-source` (on `plan`, `up`, `run` and `migrate mirror deploy`) sets `readOnlySource: true` on every mirror, which the chart turns into `offset-syncs.topic.location: target` ([KIP-716](https://cwiki.apache.org/confluence/display/KAFKA/KIP-716:+Allow+configuring+the+location+of+the+offset-syncs+topic+with+MirrorMaker2)) on both connectors and into the matching target ACL. It is **off by default**, and the difference is what the source principal must be granted:
+`--read-only-source` (on `plan`, `up`, `run` and `migrate mirror deploy`) sets `readOnlySource: true` on every mirror, which the chart turns into `offset-syncs.topic.location: target` (KIP-716 [@kip716]) on both connectors and into the matching target ACL. It is **off by default**, and the difference is what the source principal must be granted:
 
 | `--read-only-source` | `offset-syncs.topic.location` | The source principal needs |
 |:---|:---|:---|

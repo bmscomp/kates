@@ -18,7 +18,7 @@ The rest of this chapter, and of the book, describes `krafter` in Kafka's own te
 
 ### Topics, Partitions and Leaders
 
-Kafka stores records in [topics](appendix-a-glossary.md#gl-topic): named streams that producers write to and consumers read from. Each topic is split into [partitions](appendix-a-glossary.md#gl-partition), which are ordered, append-only logs that different brokers can hold and different consumers can read at the same time. Within its partition, each record has an [offset](appendix-a-glossary.md#gl-offset): its position, a number that only grows.
+Kafka stores records in [topics](appendix-a-glossary.md#gl-topic): named streams that producers write to and consumers read from. Each topic is split into [partitions](appendix-a-glossary.md#gl-partition), which are ordered, append-only logs that different brokers can hold and different consumers can read at the same time [@kreps2011kafka]. Within its partition, each record has an [offset](appendix-a-glossary.md#gl-offset): its position, a number that only grows.
 
 Each partition is kept as several replicas on different brokers, three on `krafter`. One replica is the partition's [leader](appendix-a-glossary.md#gl-partition-leader), and it takes every write to the partition; the others, its followers, copy the leader's log. How many copies a write must reach before the leader acknowledges it is the subject of [Replication Configuration](#replication-configuration), and what happens when a leader's broker fails is the subject of [What Happens During a Broker Failure](#what-happens-during-a-broker-failure).
 
@@ -34,11 +34,11 @@ As a group reads, it commits offsets: for each partition, the offset of the next
 
 ### The KRaft Quorum
 
-Kafka keeps the cluster's metadata (which brokers are live, which partitions exist, which replica leads each one) in KRaft, its built-in Raft consensus; there is no ZooKeeper. A few controllers hold that metadata as a replicated log, the [metadata log](appendix-a-glossary.md#gl-metadata-log). Brokers fetch the log from them and act on what it says, such as which partitions they lead, so a broker that falls behind on it works from an older picture of the cluster until it catches up.
+Kafka keeps the cluster's metadata (which brokers are live, which partitions exist, which replica leads each one) in KRaft, its built-in Raft consensus; there is no ZooKeeper [@ongaro2014search; @kip500; @kip595]. A few controllers hold that metadata as a replicated log, the [metadata log](appendix-a-glossary.md#gl-metadata-log). Brokers fetch the log from them and act on what it says, such as which partitions they lead, so a broker that falls behind on it works from an older picture of the cluster until it catches up.
 
 One controller is active: it writes each change to the metadata log, and a change commits once a [quorum](appendix-a-glossary.md#gl-quorum), a majority of the controllers, has it. `krafter` runs three controllers: the `kafka-cluster` chart's default, and on the [`panda`](appendix-a-glossary.md#gl-panda) Kind cluster one per [zone](appendix-a-glossary.md#gl-zone) in the values `kates deploy` generates. Two must agree, so the quorum survives the loss of one controller. With two down, no metadata change can commit: no partition gets a new leader or a new ISR, and no topic is created.
 
-Each broker sends the active controller regular heartbeats. When a broker's heartbeats stop for longer than the session timeout (`broker.session.timeout.ms`), the active controller [fences](appendix-a-glossary.md#gl-fencing) it. The controller stops counting the broker as live, moves the leadership of the broker's partitions to replicas that are in sync, and stops counting the broker's replicas as in sync. The controller unfences the broker once its heartbeats get through again and it has caught up with the metadata log; a broker that restarts registers again first.
+Each broker sends the active controller regular heartbeats. When a broker's heartbeats stop for longer than the session timeout (`broker.session.timeout.ms`), the active controller [fences](appendix-a-glossary.md#gl-fencing) it [@kip631]. The controller stops counting the broker as live, moves the leadership of the broker's partitions to replicas that are in sync, and stops counting the broker's replicas as in sync. The controller unfences the broker once its heartbeats get through again and it has caught up with the metadata log; a broker that restarts registers again first.
 
 ## Physical Topology
 
@@ -94,7 +94,7 @@ In production, Kafka brokers are spread across zones so that a single zone failu
 Strimzi's `rack` configuration uses these labels to ensure:
 
 - Each broker is pinned to exactly one zone via `nodeAffinity` (per-zone [`KafkaNodePool`](appendix-a-glossary.md#gl-kafkanodepool))
-- Partition replicas are spread across zones (rack-aware assignment)
+- Partition replicas are spread across zones (rack-aware assignment [@kip36])
 - [PVCs](appendix-a-glossary.md#gl-pvc) use zone-specific `StorageClass` resources for data locality
 
 ::: {.callout-tip}
@@ -127,7 +127,7 @@ Three settings decide what an acknowledged write means on `krafter`, and they're
 
 The [replication factor](appendix-a-glossary.md#gl-rf), 3 (the `kafka-cluster` chart's `default.replication.factor`), is how many copies of each partition exist. With three brokers, that's one copy on every broker.
 
-The in-sync replica set, the [ISR](appendix-a-glossary.md#gl-isr), is which of those copies are caught up with the leader right now, the leader's own included. On a healthy cluster, all three are.
+The in-sync replica set, the [ISR](appendix-a-glossary.md#gl-isr), is which of those copies are caught up with the leader right now, the leader's own included [@wang2015building]. On a healthy cluster, all three are.
 
 `min.insync.replicas`, which the chart sets to 2, is the smallest ISR the leader accepts an `acks=all` write with. It's a floor, not a target.
 
@@ -152,11 +152,11 @@ A producer using `acks=all` waits for every replica currently in the ISR, not ju
 
 Kafka's internal topics follow the same pattern. Consumer offsets and transaction state are replicated three times (`offsets.topic.replication.factor`, `transaction.state.log.replication.factor`), and transactions need two in-sync copies (`transaction.state.log.min.isr`), so they keep working with one broker down.
 
-Two more ideas explain why an acknowledged record survives a change of leader. A partition's [high watermark](appendix-a-glossary.md#gl-high-watermark) is the offset below which every replica in its ISR has the records, and consumers read only below it. When a new leader takes over, a replica holding records past the new leader's log deletes them to match: that's [log truncation](appendix-a-glossary.md#gl-log-truncation), and under `acks=all` it only ever removes records that no producer was told were written.
+Two more ideas explain why an acknowledged record survives a change of leader. A partition's [high watermark](appendix-a-glossary.md#gl-high-watermark) is the offset below which every replica in its ISR has the records, and consumers read only below it. When a new leader takes over, a replica holding records past the new leader's log deletes them to match: that's [log truncation](appendix-a-glossary.md#gl-log-truncation), and under `acks=all` it only ever removes records that no producer was told were written [@kip101; @kip279].
 
-[Unclean leader election](appendix-a-glossary.md#gl-unclean-leader-election) is one way around that guarantee. It elects a leader from outside the ISR when no in-sync replica is left, which brings the partition back at the price of the records only the lost replicas had. `krafter` turns it off (`unclean.leader.election.enable: false`), so a partition with no in-sync replica stays offline instead, and the chart ships an alert, `KafkaUncleanLeaderElection`, for the day one happens. That's what makes the matrix's "no data loss" hold: with `acks=all`, an acknowledged record is on every in-sync replica, and Kafka elects a new leader only from the ISR.
+[Unclean leader election](appendix-a-glossary.md#gl-unclean-leader-election) is one way around that guarantee. It elects a leader from outside the ISR when no in-sync replica is left, which brings the partition back at the price of the records only the lost replicas had [@kingsbury2013jepsen]. `krafter` turns it off (`unclean.leader.election.enable: false`), so a partition with no in-sync replica stays offline instead, and the chart ships an alert, `KafkaUncleanLeaderElection`, for the day one happens. That's what makes the matrix's "no data loss" hold: with `acks=all`, an acknowledged record is on every in-sync replica, and Kafka elects a new leader only from the ISR.
 
-A node that loses power or crashes is the other way around the guarantee. A replica holds a record once it has written it to its log, which means the page cache rather than the disk, so a broker whose node goes down can come back without records it had acknowledged. If that broker was the last one left in the ISR, it could lead again and make the others truncate those records. [Eligible leader replicas](appendix-a-glossary.md#gl-eligible-leader-replicas) (ELR), from KIP-966, close that gap. When a broker registers again after an unclean shutdown, the controller drops it from the ISR and from the ELR, so it can't lead. When the ISR falls below `min.insync.replicas`, the high watermark stops advancing, so the replicas that leave the ISR still hold every acknowledged record and stay eligible to lead.
+A node that loses power or crashes is the other way around the guarantee. A replica holds a record once it has written it to its log, which means the page cache rather than the disk, so a broker whose node goes down can come back without records it had acknowledged. If that broker was the last one left in the ISR, it could lead again and make the others truncate those records. [Eligible leader replicas](appendix-a-glossary.md#gl-eligible-leader-replicas) (ELR), from KIP-966 [@kip966], close that gap. When a broker registers again after an unclean shutdown, the controller drops it from the ISR and from the ELR, so it can't lead. When the ISR falls below `min.insync.replicas`, the high watermark stops advancing, so the replicas that leave the ISR still hold every acknowledged record and stay eligible to lead.
 
 Kafka turns ELR on for a cluster created at metadata version 4.1-IV0 or later, and Strimzi formats a new cluster's storage at its `metadataVersion`, so a `krafter` created from the `kafka-cluster` chart has it. A cluster first created on an older Kafka keeps it off, because Strimzi raises only `metadata.version`. There, turn it on with `kafka-features.sh upgrade --feature eligible.leader.replicas.version=1`.
 
@@ -174,7 +174,7 @@ This matrix is the most important table in this chapter. It tells you what happe
 | 1 broker + 1 controller | Yes | No | Quorum intact, ISR ≥ 2 |
 
 ::: {.callout-important}
-Notice that **2 brokers down** means writes are rejected, but **no data is lost**. This is the difference between *availability* and *durability*. With `min.insync.replicas=2`, Kafka trades availability for durability — it would rather refuse writes than risk losing data. Understanding this trade-off is fundamental to designing meaningful chaos experiments.
+Notice that **2 brokers down** means writes are rejected, but **no data is lost**. This is the difference between *availability* and *durability*. With `min.insync.replicas=2`, Kafka trades availability for durability — it would rather refuse writes than risk losing data [@kleppmann2017designing]. Understanding this trade-off is fundamental to designing meaningful chaos experiments.
 :::
 
 ### What Happens During a Broker Failure

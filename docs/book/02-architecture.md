@@ -125,7 +125,7 @@ The Kates API builds a report only when something asks for one. It builds a fini
 
 ### NativeKafkaBackend
 
-The native benchmark backend (`NativeKafkaBackend`) runs each test's producers and consumers on virtual threads inside the Kates API. It is one of two benchmark backends; the other, `trogdor`, sends the workload to a Trogdor coordinator, and [Test Types Deep Dive](05-test-types.md) compares them. Its workers:
+The native benchmark backend (`NativeKafkaBackend`) runs each test's producers and consumers on virtual threads inside the Kates API [@jep444]. It is one of two benchmark backends; the other, `trogdor`, sends the workload to a Trogdor coordinator, and [Test Types Deep Dive](05-test-types.md) compares them. Its workers:
 
 - **Produce** messages with configurable record size, [acknowledgment mode](appendix-a-glossary.md#gl-acks), and throughput throttling
 - **Consume** messages with configurable [consumer group](appendix-a-glossary.md#gl-consumer-group), fetch settings, and poll timeout
@@ -391,7 +391,7 @@ The table lists what Kates keeps about a run, where each piece lives and how lon
 
 Two consequences follow. A Grafana board built on per-run meters stops getting data when the run ends, while `kates trend` and `report show` still answer, because the runs they read are in PostgreSQL. And a report isn't a record. The Kates API builds a finished run's report the first time something asks for it and keeps it in memory. The broker figures that `report brokers` prints therefore describe the topic's [partition leaders](appendix-a-glossary.md#gl-partition-leader) at that moment, not during the run, and a restart can change them.
 
-No Kafka topic holds a run's results. The Kates API writes them only to PostgreSQL. When a run changes status, it also writes a lifecycle event to an outbox table in the same transaction, for a poller to publish to Kafka, the [transactional outbox](appendix-a-glossary.md#gl-transactional-outbox) pattern. The event carries the run's ID, type, status and time, never its results. The topics that the `kafka-cluster` chart's platform profile creates on `krafter`, such as `kates-results`, hold none of them either.
+No Kafka topic holds a run's results. The Kates API writes them only to PostgreSQL. When a run changes status, it also writes a lifecycle event to an outbox table in the same transaction, for a poller to publish to Kafka, the [transactional outbox](appendix-a-glossary.md#gl-transactional-outbox) pattern [@richardson2018microservices]. The event carries the run's ID, type, status and time, never its results. The topics that the `kafka-cluster` chart's platform profile creates on `krafter`, such as `kates-results`, hold none of them either.
 
 The events go to `kates-test-events`, a topic the Kates API creates for itself on the cluster it tests ([Topics](03-cluster.md#topics) gives its settings), and the Kates API reads them back from it. A `DONE` or `FAILED` event read there is what calls the registered [webhooks](10-cli-reference.md#webhook-notifications), so a webhook fires only once its event has made the round trip through Kafka. The poller deletes an event from the outbox when the broker acknowledges it. While Kafka is unreachable the events wait in the outbox and the poller retries them. After `kates.outbox.max-attempts` failed sends, 10 by default and at least 10 minutes when no broker answers, it moves an event to the `outbox_dead_letters` table, and that event's webhooks never fire.
 
@@ -488,7 +488,7 @@ erDiagram
 
 ## Graceful Degradation
 
-Distributed systems fail in partial ways. Kates is designed to degrade gracefully rather than crash catastrophically when its dependencies become unavailable.
+Distributed systems fail in partial ways [@waldo1997note]. Kates is designed to degrade gracefully rather than crash catastrophically when its dependencies become unavailable.
 
 | Failure Scenario | What Happens | Recovery |
 |------------------|-------------|----------|

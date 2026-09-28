@@ -83,7 +83,38 @@ then
   note "normalize to exactly one blank line after ':::'"
 fi
 
-# 6. Structure ratchet (scripts/book_metrics.py, tested first): per-page counts
+# 6. Citations and references.bib agree: every [@key] names an entry, and every
+#    entry is cited somewhere (references.md lists them all, so an uncited one
+#    would appear there with nothing pointing at it). Code is exempt.
+if python3 - docs/book/references.bib "${pages[@]}" <<'PY'
+import re, sys
+bib_path, pages = sys.argv[1], sys.argv[2:]
+bib = set(re.findall(r'^@\w+\{([^,\s]+),', open(bib_path, encoding='utf-8').read(), re.M))
+cited, bad = set(), False
+for f in pages:
+    fence = False
+    for i, l in enumerate(open(f, encoding='utf-8'), 1):
+        if l.strip().startswith('```'):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        for group in re.findall(r'\[(-?@[^\]]+)\]', re.sub(r'`[^`]*`', '', l)):
+            for key in re.findall(r'@([\w:.-]+)', group):
+                cited.add(key)
+                if key not in bib:
+                    print(f"{f}:{i}: cites @{key}, which references.bib doesn't have", file=sys.stderr)
+                    bad = True
+for key in sorted(bib - cited):
+    print(f"{bib_path}: @{key} is never cited", file=sys.stderr)
+    bad = True
+sys.exit(0 if bad else 1)
+PY
+then
+  note "citations and docs/book/references.bib disagree (see STYLE.md, Citations)"
+fi
+
+# 7. Structure ratchet (scripts/book_metrics.py, tested first): per-page counts
 #    of bare headings, tables without a lead-in, hand-numbered headings, broken
 #    handoffs, long fenced lines and the rest may fall but never rise above
 #    scripts/book-metrics-baseline.json; a new page starts at zero, and '[TODO'

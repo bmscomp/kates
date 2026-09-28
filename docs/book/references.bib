@@ -1,0 +1,634 @@
+% The works the book cites; references.md lists them, numbered in alphabetical
+% order of first author (the ACM style in theme/). Cite one with [@key] in a
+% page; STYLE.md says when to. Every entry must be cited somewhere, and every
+% field checked against the source itself: the DOI record, the publisher's or
+% conference's page, the RFC Editor, OpenJDK, W3C, or the KIP's page on the
+% Apache wiki. A KIP's author is the one its page names, else the page's
+% creator; its date is the page's creation date.
+%
+% Keys: surname of the first author, year, first word of the title
+% (dean2013tail); kipN, jepN and rfcN for proposals and standards.
+
+% ── Papers and articles ─────────────────────────────────────────────────────
+
+@article{allspaw2012fault,
+  author  = {Allspaw, John},
+  title   = {Fault Injection in Production: Making the Case for Resilience Testing},
+  journal = {Queue},
+  volume  = {10},
+  number  = {8},
+  pages   = {30--35},
+  year    = {2012},
+  doi     = {10.1145/2346916.2353017},
+}
+
+@inproceedings{alquraan2018analysis,
+  author    = {Alquraan, Ahmed and Takruri, Hatem and Alfatafta, Mohammed and Al-Kiswany, Samer},
+  title     = {An Analysis of Network-Partitioning Failures in Cloud Systems},
+  booktitle = {{13th USENIX Symposium on Operating Systems Design and Implementation (OSDI 18)}},
+  publisher = {USENIX Association},
+  pages     = {51--68},
+  year      = {2018},
+  url       = {https://www.usenix.org/conference/osdi18/presentation/alquraan},
+}
+
+@article{bailis2014network,
+  author  = {Bailis, Peter and Kingsbury, Kyle},
+  title   = {The Network Is Reliable},
+  journal = {Communications of the ACM},
+  volume  = {57},
+  number  = {9},
+  pages   = {48--55},
+  year    = {2014},
+  doi     = {10.1145/2643130},
+}
+
+@article{basiri2016chaos,
+  author  = {Basiri, Ali and Behnam, Niosha and de Rooij, Ruud and Hochstein, Lorin and Kosewski, Luke and Reynolds, Justin and Rosenthal, Casey},
+  title   = {Chaos Engineering},
+  journal = {IEEE Software},
+  volume  = {33},
+  number  = {3},
+  pages   = {35--41},
+  year    = {2016},
+  doi     = {10.1109/MS.2016.60},
+}
+
+@inproceedings{basiri2019automating,
+  author    = {Basiri, Ali and Hochstein, Lorin and Jones, Nora and Tucker, Haley},
+  title     = {Automating Chaos Experiments in Production},
+  booktitle = {{2019 IEEE/ACM 41st International Conference on Software Engineering: Software Engineering in Practice (ICSE-SEIP)}},
+  publisher = {IEEE},
+  pages     = {31--40},
+  year      = {2019},
+  doi       = {10.1109/ICSE-SEIP.2019.00012},
+}
+
+@article{dean2013tail,
+  author  = {Dean, Jeffrey and Barroso, Luiz Andr{\'e}},
+  title   = {The Tail at Scale},
+  journal = {Communications of the ACM},
+  volume  = {56},
+  number  = {2},
+  pages   = {74--80},
+  year    = {2013},
+  doi     = {10.1145/2408776.2408794},
+}
+
+@inproceedings{georges2007statistically,
+  author    = {Georges, Andy and Buytaert, Dries and Eeckhout, Lieven},
+  title     = {Statistically Rigorous {Java} Performance Evaluation},
+  booktitle = {{Proceedings of the 22nd Annual ACM SIGPLAN Conference on Object-Oriented Programming Systems, Languages and Applications (OOPSLA '07)}},
+  publisher = {ACM},
+  pages     = {57--76},
+  year      = {2007},
+  doi       = {10.1145/1297027.1297033},
+}
+
+@article{gregg2010visualizing,
+  author  = {Gregg, Brendan},
+  title   = {Visualizing System Latency},
+  journal = {Communications of the ACM},
+  volume  = {53},
+  number  = {7},
+  pages   = {48--54},
+  year    = {2010},
+  doi     = {10.1145/1785414.1785435},
+}
+
+@article{gregg2013thinking,
+  author  = {Gregg, Brendan},
+  title   = {Thinking Methodically about Performance},
+  journal = {Communications of the ACM},
+  volume  = {56},
+  number  = {2},
+  pages   = {45--51},
+  year    = {2013},
+  doi     = {10.1145/2408776.2408791},
+}
+
+@inproceedings{kreps2011kafka,
+  author    = {Kreps, Jay and Narkhede, Neha and Rao, Jun},
+  title     = {Kafka: A Distributed Messaging System for Log Processing},
+  booktitle = {{NetDB '11}},
+  location  = {Athens, Greece},
+  date      = {2011-06-12},
+  url       = {https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf},
+}
+
+@inproceedings{ongaro2014search,
+  author    = {Ongaro, Diego and Ousterhout, John},
+  title     = {In Search of an Understandable Consensus Algorithm},
+  booktitle = {{2014 USENIX Annual Technical Conference (USENIX ATC 14)}},
+  publisher = {USENIX Association},
+  pages     = {305--319},
+  year      = {2014},
+  url       = {https://www.usenix.org/conference/atc14/technical-sessions/presentation/ongaro},
+}
+
+@article{robbins2012resilience,
+  author  = {Robbins, Jesse and Krishnan, Kripa and Allspaw, John and Limoncelli, Thomas A.},
+  title   = {Resilience Engineering: Learning to Embrace Failure},
+  journal = {Queue},
+  volume  = {10},
+  number  = {9},
+  pages   = {20--28},
+  year    = {2012},
+  doi     = {10.1145/2367376.2371297},
+}
+
+@article{saltzer1975protection,
+  author  = {Saltzer, Jerome H. and Schroeder, Michael D.},
+  title   = {The Protection of Information in Computer Systems},
+  journal = {Proceedings of the IEEE},
+  volume  = {63},
+  number  = {9},
+  pages   = {1278--1308},
+  year    = {1975},
+  doi     = {10.1109/PROC.1975.9939},
+}
+
+@inproceedings{schroeder2006open,
+  author    = {Schroeder, Bianca and Wierman, Adam and Harchol-Balter, Mor},
+  title     = {Open Versus Closed: A Cautionary Tale},
+  booktitle = {{3rd Symposium on Networked Systems Design and Implementation (NSDI 06)}},
+  publisher = {USENIX Association},
+  year      = {2006},
+  url       = {https://www.usenix.org/conference/nsdi-06/open-versus-closed-cautionary-tale},
+}
+
+@report{sigelman2010dapper,
+  author      = {Sigelman, Benjamin H. and Barroso, Luiz Andr{\'e} and Burrows, Mike and Stephenson, Pat and Plakal, Manoj and Beaver, Donald and Jaspan, Saul and Shanbhag, Chandan},
+  title       = {Dapper, a Large-Scale Distributed Systems Tracing Infrastructure},
+  titleaddon  = {{Technical report}},
+  type        = {Technical Report},
+  institution = {Google, Inc.},
+  year        = {2010},
+  url         = {https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/},
+}
+
+@incollection{waldo1997note,
+  author    = {Waldo, Jim and Wyant, Geoff and Wollrath, Ann and Kendall, Sam},
+  title     = {A Note on Distributed Computing},
+  booktitle = {{Mobile Object Systems: Towards the Programmable Internet}},
+  publisher = {Springer},
+  pages     = {49--64},
+  year      = {1997},
+  doi       = {10.1007/3-540-62852-5_6},
+}
+
+@article{wang2015building,
+  author  = {Wang, Guozhang and Koshy, Joel and Subramanian, Sriram and Paramasivam, Kartik and Zadeh, Mammad and Narkhede, Neha and Rao, Jun and Kreps, Jay and Stein, Joe},
+  title   = {Building a Replicated Logging System with {Apache Kafka}},
+  journal = {Proceedings of the VLDB Endowment},
+  volume  = {8},
+  number  = {12},
+  pages   = {1654--1655},
+  year    = {2015},
+  doi     = {10.14778/2824032.2824063},
+}
+
+@inproceedings{wang2021consistency,
+  author    = {Wang, Guozhang and Chen, Lei and Dikshit, Ayusman and Gustafson, Jason and Chen, Boyang and Sax, Matthias J. and Roesler, John and Blee-Goldman, Sophie and Cadonna, Bruno and Mehta, Apurva and Madan, Varun and Rao, Jun},
+  title     = {Consistency and Completeness: Rethinking Distributed Stream Processing in {Apache Kafka}},
+  booktitle = {{Proceedings of the 2021 International Conference on Management of Data (SIGMOD '21)}},
+  publisher = {ACM},
+  pages     = {2602--2613},
+  year      = {2021},
+  doi       = {10.1145/3448016.3457556},
+}
+
+% ── Books ───────────────────────────────────────────────────────────────────
+
+@book{beyer2016site,
+  editor    = {Beyer, Betsy and Jones, Chris and Petoff, Jennifer and Murphy, Niall Richard},
+  title     = {Site Reliability Engineering: How {Google} Runs Production Systems},
+  publisher = {O'Reilly Media},
+  year      = {2016},
+  isbn      = {978-1-4919-2912-4},
+}
+
+@book{gunther2007guerrilla,
+  author    = {Gunther, Neil J.},
+  title     = {Guerrilla Capacity Planning: A Tactical Approach to Planning for Highly Scalable Applications and Services},
+  publisher = {Springer},
+  year      = {2007},
+  doi       = {10.1007/978-3-540-31010-5},
+}
+
+@book{harcholbalter2013performance,
+  author    = {Harchol-Balter, Mor},
+  title     = {Performance Modeling and Design of Computer Systems: Queueing Theory in Action},
+  publisher = {Cambridge University Press},
+  year      = {2013},
+  isbn      = {978-1-107-02750-3},
+}
+
+@book{hohpe2003enterprise,
+  author    = {Hohpe, Gregor and Woolf, Bobby},
+  title     = {Enterprise Integration Patterns: Designing, Building, and Deploying Messaging Solutions},
+  publisher = {Addison-Wesley},
+  year      = {2003},
+  isbn      = {978-0-321-20068-6},
+}
+
+@book{jain1991art,
+  author    = {Jain, Raj},
+  title     = {The Art of Computer Systems Performance Analysis: Techniques for Experimental Design, Measurement, Simulation, and Modeling},
+  publisher = {Wiley},
+  year      = {1991},
+  isbn      = {978-0-471-50336-1},
+}
+
+@book{kleppmann2017designing,
+  author    = {Kleppmann, Martin},
+  title     = {Designing Data-Intensive Applications: The Big Ideas Behind Reliable, Scalable, and Maintainable Systems},
+  publisher = {O'Reilly Media},
+  year      = {2017},
+  isbn      = {978-1-4493-7332-0},
+}
+
+@book{richardson2018microservices,
+  author    = {Richardson, Chris},
+  title     = {Microservices Patterns: With Examples in {Java}},
+  publisher = {Manning Publications},
+  year      = {2018},
+  isbn      = {978-1-61729-454-9},
+}
+
+@book{rosenthal2020chaos,
+  author    = {Rosenthal, Casey and Jones, Nora},
+  title     = {Chaos Engineering: System Resiliency in Practice},
+  publisher = {O'Reilly Media},
+  year      = {2020},
+  isbn      = {978-1-4920-4386-7},
+}
+
+% ── Standards, reports and other documents ─────────────────────────────────
+
+@online{kingsbury2013jepsen,
+  author       = {Kingsbury, Kyle},
+  title        = {Jepsen: {Kafka}},
+  titleaddon   = {{Jepsen analysis, aphyr.com}},
+  date         = {2013-09-24},
+  url          = {https://aphyr.com/posts/293-call-me-maybe-kafka},
+  urldate      = {2026-09-28},
+}
+
+@online{principlesofchaos2019,
+  title   = {{Principles of Chaos Engineering}},
+  date    = {2019-03},
+  url     = {https://principlesofchaos.org},
+  urldate = {2026-09-28},
+}
+
+@report{rfc5802,
+  author      = {Newman, Chris and Menon-Sen, Abhijit and Melnikov, Alexey and Williams, Nicolas},
+  title       = {Salted Challenge Response Authentication Mechanism ({SCRAM}) {SASL} and {GSS-API} Mechanisms},
+  titleaddon  = {{RFC 5802}},
+  type        = {RFC},
+  number      = {5802},
+  institution = {RFC Editor},
+  date        = {2010-07},
+  doi         = {10.17487/RFC5802},
+}
+
+@report{rfc8446,
+  author      = {Rescorla, Eric},
+  title       = {The Transport Layer Security ({TLS}) Protocol Version 1.3},
+  titleaddon  = {{RFC 8446}},
+  type        = {RFC},
+  number      = {8446},
+  institution = {RFC Editor},
+  date        = {2018-08},
+  doi         = {10.17487/RFC8446},
+}
+
+@report{swanson2010contingency,
+  author      = {Swanson, Marianne and Bowen, Pauline and Phillips, Amy and Gallup, Dean and Lynes, David},
+  title       = {Contingency Planning Guide for Federal Information Systems},
+  titleaddon  = {{NIST Special Publication 800-34 Rev. 1}},
+  type        = {NIST Special Publication},
+  number      = {800-34 Rev. 1},
+  institution = {{National Institute of Standards and Technology}},
+  date        = {2010-05},
+  doi         = {10.6028/NIST.SP.800-34r1},
+}
+
+@online{tene2013how,
+  author       = {Tene, Gil},
+  title        = {How {NOT} to Measure Latency},
+  titleaddon   = {{Presentation, InfoQ}},
+  date         = {2013-04-04},
+  url          = {https://www.infoq.com/presentations/latency-pitfalls/},
+  urldate      = {2026-09-28},
+}
+
+@online{w3c2021tracecontext,
+  editor       = {Kanzhelev, Sergey and McLean, Morgan and Reitbauer, Alois and Drutu, Bogdan and Molnar, Nik and Shkuro, Yuri},
+  title        = {{Trace Context}},
+  titleaddon   = {{W3C Recommendation}},
+  date         = {2021-11-23},
+  url          = {https://www.w3.org/TR/2021/REC-trace-context-1-20211123/},
+}
+
+% ── JDK Enhancement Proposals ───────────────────────────────────────────────
+
+@online{jep439,
+  author       = {Karlsson, Stefan},
+  title        = {{JEP} 439: Generational {ZGC}},
+  titleaddon   = {{JDK Enhancement Proposal}},
+  year         = {2023},
+  url          = {https://openjdk.org/jeps/439},
+  urldate      = {2026-09-28},
+}
+
+@online{jep444,
+  author       = {Bateman, Alan},
+  title        = {{JEP} 444: Virtual Threads},
+  titleaddon   = {{JDK Enhancement Proposal}},
+  year         = {2023},
+  url          = {https://openjdk.org/jeps/444},
+  urldate      = {2026-09-28},
+}
+
+@online{jep474,
+  author       = {Boldt-Christmas, Axel},
+  title        = {{JEP} 474: {ZGC}: Generational Mode by Default},
+  titleaddon   = {{JDK Enhancement Proposal}},
+  year         = {2024},
+  url          = {https://openjdk.org/jeps/474},
+  urldate      = {2026-09-28},
+}
+
+% ── Kafka Improvement Proposals ─────────────────────────────────────────────
+
+@online{kip13,
+  author       = {Auradkar, Aditya},
+  title        = {{KIP-13: Quotas}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2015-02-24},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=51812210},
+  urldate      = {2026-09-28},
+}
+
+@online{kip36,
+  author       = {Wang, Allen},
+  title        = {{KIP-36: Rack aware replica assignment}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2015-09-27},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=61321028},
+  urldate      = {2026-09-28},
+}
+
+@online{kip84,
+  author       = {Sivaram, Rajini},
+  title        = {{KIP-84: Support SASL SCRAM mechanisms}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2016-10-04},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=65873453},
+  urldate      = {2026-09-28},
+}
+
+@online{kip98,
+  author       = {Mehta, Apurva},
+  title        = {{KIP-98: Exactly Once Delivery and Transactional Messaging}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2016-11-30},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=66854913},
+  urldate      = {2026-09-28},
+}
+
+@online{kip101,
+  author       = {Stopford, Ben},
+  title        = {{KIP-101: Alter Replication Protocol to use Leader Epoch rather than High Watermark for Truncation}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2016-12-09},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=67634337},
+  urldate      = {2026-09-28},
+}
+
+@online{kip279,
+  author       = {Povzner, Anna},
+  title        = {{KIP-279: Fix log divergence between leader and follower after fast leader fail over}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2018-04-04},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=75978352},
+  urldate      = {2026-09-28},
+}
+
+@online{kip294,
+  author       = {Sivaram, Rajini},
+  title        = {{KIP-294: Enable TLS hostname verification by default}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2018-05-04},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=80452840},
+  urldate      = {2026-09-28},
+}
+
+@online{kip298,
+  author       = {Satish, Arjun},
+  title        = {{KIP-298: Error Handling in Connect}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2018-05-08},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=80453065},
+  urldate      = {2026-09-28},
+}
+
+@online{kip382,
+  author       = {Dolan, Ryanne},
+  title        = {{KIP-382: MirrorMaker 2.0}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2018-10-11},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=95650722},
+  urldate      = {2026-09-28},
+}
+
+@online{kip405,
+  author       = {Duggana, Satish and Chintalapani, Sriharsha and Zheng, Ying and Srinivas, Suresh},
+  title        = {{KIP-405: Kafka Tiered Storage}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2018-12-14},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=97554472},
+  urldate      = {2026-09-28},
+}
+
+@online{kip415,
+  author       = {Karantasis, Konstantine},
+  title        = {{KIP-415: Incremental Cooperative Rebalancing in Kafka Connect}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2019-01-11},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=100828003},
+  urldate      = {2026-09-28},
+}
+
+@online{kip429,
+  author       = {Chen, Boyang},
+  title        = {{KIP-429: Kafka Consumer Incremental Rebalance Protocol}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2019-02-12},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=103090108},
+  urldate      = {2026-09-28},
+}
+
+@online{kip500,
+  author       = {McCabe, Colin},
+  title        = {{KIP-500: Replace ZooKeeper with a Self-Managed Metadata Quorum}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2019-07-29},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=123898922},
+  urldate      = {2026-09-28},
+}
+
+@online{kip545,
+  author       = {Zhang, Ning},
+  title        = {{KIP-545: support automated consumer offset sync across clusters in MM 2.0}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2019-10-23},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=133632115},
+  urldate      = {2026-09-28},
+}
+
+@online{kip553,
+  author       = {Izhikov, Nikolay},
+  title        = {{KIP-553: Disable all SSL protocols except TLSV1.2 by default}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2019-12-24},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=142641956},
+  urldate      = {2026-09-28},
+}
+
+@online{kip573,
+  author       = {Izhikov, Nikolay},
+  title        = {{KIP-573: Enable TLSv1.3 by default}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2020-02-21},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=148638811},
+  urldate      = {2026-09-28},
+}
+
+@online{kip595,
+  author       = {Gustafson, Jason},
+  title        = {{KIP-595: A Raft Protocol for the Metadata Quorum}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2020-04-15},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=148647470},
+  urldate      = {2026-09-28},
+}
+
+@online{kip618,
+  author       = {Egerton, Chris},
+  title        = {{KIP-618: Exactly-Once Support for Source Connectors}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2020-05-16},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=153816406},
+  urldate      = {2026-09-28},
+}
+
+@online{kip631,
+  author       = {McCabe, Colin},
+  title        = {{KIP-631: The Quorum-based Kafka Controller}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2020-06-24},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=158864865},
+  urldate      = {2026-09-28},
+}
+
+@online{kip635,
+  author       = {Tashoyan, Arseniy},
+  title        = {{KIP-635: GetOffsetShell: support for multiple topics and consumer configuration override}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2018-06-01},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=85473664},
+  urldate      = {2026-09-28},
+}
+
+@online{kip679,
+  author       = {Tan, Cheng},
+  title        = {{KIP-679: Producer will enable the strongest delivery guarantee by default}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2020-10-19},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=165221843},
+  urldate      = {2026-09-28},
+}
+
+@online{kip716,
+  author       = {Maison, Mickael},
+  title        = {{KIP-716: Allow configuring the location of the offset-syncs topic with MirrorMaker2}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2021-02-26},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=173087775},
+  urldate      = {2026-09-28},
+}
+
+@online{kip724,
+  author       = {Juma, Ismael},
+  title        = {{KIP-724: Drop support for message formats v0 and v1}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2021-03-21},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=177047878},
+  urldate      = {2026-09-28},
+}
+
+@online{kip778,
+  author       = {Arthur, David},
+  title        = {{KIP-778: KRaft to KRaft Upgrades}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2021-09-24},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=188746840},
+  urldate      = {2026-09-28},
+}
+
+@online{kip833,
+  author       = {McCabe, Colin},
+  title        = {{KIP-833: Mark KRaft as Production Ready}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2022-05-03},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=211882739},
+  urldate      = {2026-09-28},
+}
+
+@online{kip848,
+  author       = {Jacot, David},
+  title        = {{KIP-848: The Next Generation of the Consumer Rebalance Protocol}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2022-06-14},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=217387038},
+  urldate      = {2026-09-28},
+}
+
+@online{kip896,
+  author       = {Juma, Ismael},
+  title        = {{KIP-896: Remove old client protocol API versions in Kafka 4.0}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2022-12-28},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=235838251},
+  urldate      = {2026-09-28},
+}
+
+@online{kip932,
+  author       = {Schofield, Andrew},
+  title        = {{KIP-932: Queues for Kafka}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2023-05-15},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=255070434},
+  urldate      = {2026-09-28},
+}
+
+@online{kip966,
+  author       = {Liu, Calvin},
+  title        = {{KIP-966: Eligible Leader Replicas}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2023-08-10},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=263426970},
+  urldate      = {2026-09-28},
+}
+
+@online{kip1124,
+  author       = {Tseng, Kuan Po},
+  title        = {{KIP-1124: Providing a clear Kafka Client upgrade path for 4.x}},
+  titleaddon   = {{Kafka Improvement Proposal}},
+  date         = {2025-01-07},
+  url          = {https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=337676747},
+  urldate      = {2026-09-28},
+}

@@ -124,7 +124,7 @@ A KRaft node that holds the cluster's metadata — which brokers are live, which
 
 ### Coordinated Omission {#gl-coordinated-omission}
 
-A measurement bias: when the system stalls, a tool that waits for each response stalls with it and never sends the requests that would have waited, so the worst latencies go unrecorded. The native benchmark backend sends without waiting for acknowledgments and paces to the target rate, but it doesn't correct for the bias, so a stall that blocks the producer is under-recorded; cross-check with the heatmap. See [Performance Theory](04-performance-theory.md#coordinated-omission).
+A measurement bias: when the system stalls, a tool that waits for each response stalls with it and never sends the requests that would have waited, so the worst latencies go unrecorded [@tene2013how]. The native benchmark backend sends without waiting for acknowledgments and paces to the target rate, but it doesn't correct for the bias, so a stall that blocks the producer is under-recorded; cross-check with the heatmap. See [Performance Theory](04-performance-theory.md#coordinated-omission).
 
 ### Cosign {#gl-cosign}
 
@@ -184,7 +184,7 @@ A Strimzi webhook that intercepts the eviction of a Kafka pod during a node drai
 
 ### Eligible Leader Replicas {#gl-eligible-leader-replicas}
 
-The replicas of a partition that left its ISR while it was below `min.insync.replicas`, and so still hold every acknowledged record; when the ISR is empty, the controller elects the leader from them. A broker that registers again after an unclean shutdown is dropped from both lists. Kafka calls them ELR (KIP-966) and turns them on for a cluster created at metadata version 4.1-IV0 or later, which includes a `krafter` created from the `kafka-cluster` chart. See [The Cluster Under Test](03-cluster.md#replication-configuration).
+The replicas of a partition that left its ISR while it was below `min.insync.replicas`, and so still hold every acknowledged record; when the ISR is empty, the controller elects the leader from them. A broker that registers again after an unclean shutdown is dropped from both lists. Kafka calls them ELR (KIP-966 [@kip966]) and turns them on for a cluster created at metadata version 4.1-IV0 or later, which includes a `krafter` created from the `kafka-cluster` chart. See [The Cluster Under Test](03-cluster.md#replication-configuration).
 
 ### emptyDir {#gl-emptydir}
 
@@ -196,7 +196,7 @@ The Strimzi pod that runs a Kafka cluster's Topic Operator and User Operator, wh
 
 ### Exactly-Once Semantics {#gl-exactly-once-semantics}
 
-A guarantee that each record takes effect once despite retries and crashes; Kafka builds it from idempotent producers and transactions, and Kafka Connect adds exactly-once delivery for source connectors. See [Kafka Connect & CDC Pipelines](21-kafka-connect.md#exactly-once-semantics).
+A guarantee that each record takes effect once despite retries and crashes; Kafka builds it from idempotent producers and transactions [@kip98], and Kafka Connect adds exactly-once delivery for source connectors [@kip618]. See [Kafka Connect & CDC Pipelines](21-kafka-connect.md#exactly-once-semantics).
 
 ### Exit Code {#gl-exit-code}
 
@@ -216,7 +216,7 @@ The KRaft controller's act of ceasing to count a broker as live once its session
 
 ### Game Day {#gl-game-day}
 
-A planned session in which a team runs chaos experiments against a written hypothesis, with a rollback plan and a debrief. `make gameday` runs `scripts/gameday.sh`, an automated seven-phase version: pre-flight, baseline, chaos injection, observation, recovery validation, post-flight and report. See [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology).
+A planned session in which a team runs chaos experiments against a written hypothesis, with a rollback plan and a debrief [@robbins2012resilience]. `make gameday` runs `scripts/gameday.sh`, an automated seven-phase version: pre-flight, baseline, chaos injection, observation, recovery validation, post-flight and report. See [Chaos Engineering Theory](06-chaos-theory.md#the-game-day-methodology).
 
 ### Gate {#gl-gate}
 
@@ -264,7 +264,7 @@ The offset below which every replica in a partition's ISR has the records; consu
 
 ### Idempotent Producer {#gl-idempotent-producer}
 
-A Kafka producer whose retried sends the broker writes only once, so a retry can't duplicate a record; the Kafka producer is idempotent by default whenever `acks` is `all`. `enableIdempotence` sets it explicitly; the Kates API refuses it, and `enableTransactions`, unless `acks` is `all`. See [Data Integrity Verification](08-data-integrity.md#integrity-modes).
+A Kafka producer whose retried sends the broker writes only once, so a retry can't duplicate a record [@kip98]; the Kafka producer is idempotent by default whenever `acks` is `all` [@kip679]. `enableIdempotence` sets it explicitly; the Kates API refuses it, and `enableTransactions`, unless `acks` is `all`. See [Data Integrity Verification](08-data-integrity.md#integrity-modes).
 
 ### Isolated Topology {#gl-isolated-topology}
 
@@ -272,7 +272,7 @@ The default namespace layout of `kates deploy` (`--topology isolated`): Kafka, t
 
 ### ISR {#gl-isr}
 
-The in-sync replicas: the replicas of a partition that are caught up with its leader, the leader included; an `acks=all` write waits for all of them. On `krafter` the ISR of a healthy partition is all three replicas; `min.insync.replicas` is the floor below which `acks=all` writes stop, not the ISR's size. See [The Cluster Under Test](03-cluster.md#replication-configuration).
+The in-sync replicas: the replicas of a partition that are caught up with its leader, the leader included; an `acks=all` write waits for all of them [@wang2015building]. On `krafter` the ISR of a healthy partition is all three replicas; `min.insync.replicas` is the floor below which `acks=all` writes stop, not the ISR's size. See [The Cluster Under Test](03-cluster.md#replication-configuration).
 
 ### ISR Shrink {#gl-isr-shrink}
 
@@ -336,7 +336,7 @@ Kubernetes IN Docker: a tool that runs a Kubernetes cluster in Docker containers
 
 ### KRaft {#gl-kraft}
 
-Kafka's built-in Raft consensus, in which a quorum of controllers keeps the cluster's metadata in a replicated log instead of ZooKeeper. `krafter` runs three dedicated controllers, so its quorum survives one controller loss. See [The Cluster Under Test](03-cluster.md#the-kraft-quorum).
+Kafka's built-in Raft consensus, in which a quorum of controllers keeps the cluster's metadata in a replicated log instead of ZooKeeper [@ongaro2014search; @kip500; @kip595]. `krafter` runs three dedicated controllers, so its quorum survives one controller loss. See [The Cluster Under Test](03-cluster.md#the-kraft-quorum).
 
 ### `krafter` {#gl-krafter}
 
@@ -370,7 +370,7 @@ A Kubernetes-native chaos engineering framework whose `ChaosEngine` and `ChaosEx
 
 ### Log Truncation {#gl-log-truncation}
 
-A replica deleting records past the point it shares with the new leader so its log matches, which loses records only when the new leader lacked them. See [The Cluster Under Test](03-cluster.md#replication-configuration).
+A replica deleting records past the point it shares with the new leader so its log matches, which loses records only when the new leader lacked them [@kip101; @kip279]. See [The Cluster Under Test](03-cluster.md#replication-configuration).
 
 ### Lost Record {#gl-lost-record}
 
@@ -400,11 +400,11 @@ The smallest ISR a partition's leader accepts an `acks=all` write with: a floor,
 
 ### MirrorMaker 2 {#gl-mirrormaker-2}
 
-Kafka Connect connectors that copy topics from a source cluster to a target cluster and translate consumer-group offsets between them. The `mirror-maker2` chart deploys it; `kates deploy --with-mirror-maker2` adds a loopback mirror of the primary cluster. See [Cross-Cluster Replication and Migration](22-mirror-maker2-migration.md#the-model).
+Kafka Connect connectors that copy topics from a source cluster to a target cluster and translate consumer-group offsets between them [@kip382]. The `mirror-maker2` chart deploys it; `kates deploy --with-mirror-maker2` adds a loopback mirror of the primary cluster. See [Cross-Cluster Replication and Migration](22-mirror-maker2-migration.md#the-model).
 
 ### mTLS {#gl-mtls}
 
-Mutual TLS: both client and server present certificates, so each authenticates the other. `krafter`'s `tls` listener, on port 9093, authenticates clients this way. See [Security & Compliance](17-security.md#mtls-mutual-tls).
+Mutual TLS: both client and server present certificates, so each authenticates the other [@rfc8446]. `krafter`'s `tls` listener, on port 9093, authenticates clients this way. See [Security & Compliance](17-security.md#mtls-mutual-tls).
 
 ## N
 
@@ -436,7 +436,7 @@ MirrorMaker 2 mapping a consumer group's committed source offsets to target offs
 
 ### Open-Loop Load {#gl-open-loop-load}
 
-Load whose send schedule doesn't depend on responses, as opposed to closed-loop load, which sends each request only after the previous answer and so slows down with the system. The native benchmark backend is open-loop until its producer's buffer fills, when sends block and the loop closes again. See [Performance Theory](04-performance-theory.md#coordinated-omission).
+Load whose send schedule doesn't depend on responses, as opposed to closed-loop load, which sends each request only after the previous answer and so slows down with the system [@schroeder2006open]. The native benchmark backend is open-loop until its producer's buffer fills, when sends block and the loop closes again. See [Performance Theory](04-performance-theory.md#coordinated-omission).
 
 ### Operator {#gl-operator}
 
@@ -458,7 +458,7 @@ The three-node Kind cluster the book's lab runs on, created by `make cluster` (o
 
 ### Partition {#gl-partition}
 
-One ordered, append-only log of a topic's records; a topic is split into partitions so several brokers and consumers can share it. See [The Cluster Under Test](03-cluster.md#topics-partitions-and-leaders).
+One ordered, append-only log of a topic's records; a topic is split into partitions so several brokers and consumers can share it [@kreps2011kafka]. See [The Cluster Under Test](03-cluster.md#topics-partitions-and-leaders).
 
 ### Partition Leader {#gl-partition-leader}
 
@@ -530,7 +530,7 @@ Protocol Buffers: Google's language-neutral binary format for structured message
 
 ### Protocol Floor {#gl-protocol-floor}
 
-The oldest broker a Kafka 4.x client can talk to: Kafka 4.0 removed the client protocol versions older than Kafka 2.1 (KIP-896), so a 4.x MirrorMaker 2 reads only from 2.1 or newer. See [Migrating a Legacy Kafka Source](23-legacy-source-migration.md#the-cliff-and-where-it-is).
+The oldest broker a Kafka 4.x client can talk to: Kafka 4.0 removed the client protocol versions older than Kafka 2.1 (KIP-896 [@kip896]), so a 4.x MirrorMaker 2 reads only from 2.1 or newer. See [Migrating a Legacy Kafka Source](23-legacy-source-migration.md#the-cliff-and-where-it-is).
 
 ### Purgatory {#gl-purgatory}
 
@@ -548,7 +548,7 @@ The majority of Raft voters that must agree before a metadata change commits: tw
 
 ### Quota {#gl-quota}
 
-A broker-enforced cap on a client's byte rate or request time, measured over a time window; the broker enforces it by delaying responses, so a throttled client sees latency rather than errors. See [Multi-Tenancy](19-multi-tenancy.md#quota-strategy).
+A broker-enforced cap on a client's byte rate or request time, measured over a time window; the broker enforces it by delaying responses, so a throttled client sees latency rather than errors [@kip13]. See [Multi-Tenancy](19-multi-tenancy.md#quota-strategy).
 
 ## R
 
@@ -562,7 +562,7 @@ A container security setting that mounts the root filesystem read-only, so the c
 
 ### Rebalance {#gl-rebalance}
 
-Three things in this book: a consumer-group rebalance reassigns a group's partitions when a member joins or leaves; a Kafka Connect rebalance reassigns tasks among workers; a Cruise Control rebalance moves partition replicas between brokers. The native benchmark backend's consumers use the classic group protocol. Under the eager protocol every member stops during a consumer-group rebalance; cooperative and KIP-848 rebalances pause only the partitions that move. See [Chaos Engineering Theory](06-chaos-theory.md#consumer-group-rebalance).
+Three things in this book: a consumer-group rebalance reassigns a group's partitions when a member joins or leaves; a Kafka Connect rebalance reassigns tasks among workers; a Cruise Control rebalance moves partition replicas between brokers. The native benchmark backend's consumers use the classic group protocol. Under the eager protocol every member stops during a consumer-group rebalance; cooperative [@kip429] and KIP-848 [@kip848] rebalances pause only the partitions that move. See [Chaos Engineering Theory](06-chaos-theory.md#consumer-group-rebalance).
 
 ### Recipe {#gl-recipe}
 
@@ -598,11 +598,11 @@ Replication factor: how many copies of each partition the cluster keeps, one per
 
 ### RPO {#gl-rpo}
 
-Recovery point objective: how much recently written data a failure may lose, measured in time. Kates measures it rather than sets it. An INTEGRITY run inside a resilience run reports how long before the fault its oldest lost acknowledged record was sent: `0 ms` when none was lost, 'not measured' without a marked fault. A gate's `maxRpoMs` is the objective. See [Data Integrity Verification](08-data-integrity.md#integrity-under-chaos).
+Recovery point objective: how much recently written data a failure may lose, measured in time [@swanson2010contingency]. Kates measures it rather than sets it. An INTEGRITY run inside a resilience run reports how long before the fault its oldest lost acknowledged record was sent: `0 ms` when none was lost, 'not measured' without a marked fault. A gate's `maxRpoMs` is the objective. See [Data Integrity Verification](08-data-integrity.md#integrity-under-chaos).
 
 ### RTO {#gl-rto}
 
-Recovery time objective: how long recovery from a failure may take. Kates measures recovery three ways: the ISR whole again (`kates disruption kafka-metrics`), the broker pods ready again (what a plan's `maxRtoMs` grades), and an INTEGRITY run's longest send or read gap (Producer and Consumer RTO). The gate or threshold is the objective. See [Chaos Engineering Theory](06-chaos-theory.md#key-metrics-during-chaos).
+Recovery time objective: how long recovery from a failure may take [@swanson2010contingency]. Kates measures recovery three ways: the ISR whole again (`kates disruption kafka-metrics`), the broker pods ready again (what a plan's `maxRtoMs` grades), and an INTEGRITY run's longest send or read gap (Producer and Consumer RTO). The gate or threshold is the objective. See [Chaos Engineering Theory](06-chaos-theory.md#key-metrics-during-chaos).
 
 ## S
 
@@ -620,7 +620,7 @@ A YAML or JSON file with a `scenarios` list, each a test type, a `spec` and opti
 
 ### SCRAM-SHA-512 {#gl-scram-sha-512}
 
-A salted challenge-response password mechanism for Kafka authentication. `krafter`'s `plain` listener (9092) and the `external` listener (9094) use it. See [Security & Compliance](17-security.md#scram-sha-512).
+A salted challenge-response password mechanism for Kafka authentication [@rfc5802; @kip84]. `krafter`'s `plain` listener (9092) and the `external` listener (9094) use it. See [Security & Compliance](17-security.md#scram-sha-512).
 
 ### Secret {#gl-secret}
 
@@ -632,7 +632,7 @@ The letter, A to F, that `kates security audit` gives a cluster from how many of
 
 ### Share Group {#gl-share-group}
 
-A Kafka 4.x consumer grouping (KIP-932) in which members share partitions record by record, queue-style, instead of owning whole partitions. The Kates API exposes one over `/api/share-groups`. See [Kafka Deployment Engineering](15-kafka-deployment.md).
+A Kafka 4.x consumer grouping (KIP-932 [@kip932]) in which members share partitions record by record, queue-style, instead of owning whole partitions. The Kates API exposes one over `/api/share-groups`. See [Kafka Deployment Engineering](15-kafka-deployment.md).
 
 ### Single-Namespace Topology {#gl-single-namespace-topology}
 
@@ -652,7 +652,7 @@ Service level indicator: the measured quantity an objective is set on, such as P
 
 ### SLO {#gl-slo}
 
-Service level objective: a target for an SLI over a period, such as P99 under 100 ms for 99.9% of a month. Kates's 'SLA' thresholds are SLO-style targets for one run. See [Observability & Monitoring](09-observability.md#alerting).
+Service level objective: a target for an SLI over a period, such as P99 under 100 ms for 99.9% of a month [@beyer2016site]. Kates's 'SLA' thresholds are SLO-style targets for one run. See [Observability & Monitoring](09-observability.md#alerting).
 
 ### SMT {#gl-smt}
 
@@ -672,7 +672,7 @@ Server-Sent Events: a server streaming updates to a client over one long-lived H
 
 ### Steady-State Hypothesis {#gl-steady-state-hypothesis}
 
-A statement, in numbers you can measure, of what a system should show before, during and after a fault, such as a P99 bound and zero lost records: the claim a chaos experiment tests. See [Chaos Engineering Theory](06-chaos-theory.md).
+A statement, in numbers you can measure, of what a system should show before, during and after a fault, such as a P99 bound and zero lost records: the claim a chaos experiment tests [@basiri2016chaos]. See [Chaos Engineering Theory](06-chaos-theory.md).
 
 ### Strimzi {#gl-strimzi}
 
@@ -714,7 +714,7 @@ How much a system delivers per unit of time, in records per second (rec/s in tab
 
 ### Tiered Storage {#gl-tiered-storage}
 
-A Kafka feature (KIP-405) that moves older log segments to object storage, so brokers keep less on local disk. The `kafka-cluster` chart supports it only with a Kafka image that carries a remote storage manager plugin. See [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#tiered-storage).
+A Kafka feature (KIP-405 [@kip405]) that moves older log segments to object storage, so brokers keep less on local disk. The `kafka-cluster` chart supports it only with a Kafka image that carries a remote storage manager plugin. See [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#tiered-storage).
 
 ### Tombstone {#gl-tombstone}
 
@@ -730,7 +730,7 @@ In this book, the namespace layout `kates deploy --topology` picks: the [isolate
 
 ### Transactional Outbox {#gl-transactional-outbox}
 
-A pattern that writes a change and an event about it to the database in one transaction, then has a separate relay publish the event, so neither is lost if the process dies in between. The Kates API stores each run in PostgreSQL and, whenever its status changes, records a lifecycle event in the same transaction; a separate poller sends the event to Kafka and deletes it only once the broker acknowledges it. See [Architecture & Design](02-architecture.md#graceful-degradation).
+A pattern that writes a change and an event about it to the database in one transaction, then has a separate relay publish the event, so neither is lost if the process dies in between [@richardson2018microservices]. The Kates API stores each run in PostgreSQL and, whenever its status changes, records a lifecycle event in the same transaction; a separate poller sends the event to Kafka and deletes it only once the broker acknowledges it. See [Architecture & Design](02-architecture.md#graceful-degradation).
 
 ### Trogdor {#gl-trogdor}
 

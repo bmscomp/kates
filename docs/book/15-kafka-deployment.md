@@ -100,7 +100,7 @@ graph TB
 
 ### Why 3 Controllers?
 
-KRaft uses **Raft consensus** requiring a majority quorum for metadata operations:
+KRaft uses **Raft consensus** requiring a majority quorum for metadata operations [@ongaro2014search; @kip595]:
 
 | Controllers | Quorum | Tolerated failures |
 |:-----------:|:------:|:------------------:|
@@ -213,7 +213,7 @@ default.replication.factor: 3
 min.insync.replicas: 2
 ```
 
-With RF=3 and `min.insync.replicas=2`, every `acks=all` write requires at least one follower acknowledgment. This is the primary contributor to producer latency but guarantees zero data loss under single-broker failure.
+With RF=3 and `min.insync.replicas=2`, every `acks=all` write requires at least one follower acknowledgment [@wang2015building]. This is the primary contributor to producer latency but guarantees zero data loss under single-broker failure.
 
 ### Retention & Storage
 
@@ -249,7 +249,7 @@ The key below turns on share groups. The chart renders it, like every `group.sha
 group.share.enable: true  # KIP-932 Share Groups
 ```
 
-Share Groups enable queue-style (competing consumer) semantics alongside traditional consumer groups — useful for job distribution workloads.
+Share Groups enable queue-style (competing consumer) semantics alongside traditional consumer groups [@kip932; @hohpe2003enterprise] — useful for job distribution workloads.
 
 ### KRaft Quorum Tuning
 
