@@ -41,8 +41,13 @@ permissions:
   packages: write
   id-token: write # cosign keyless signing, build provenance
 
+# A literal name, not github.workflow: called from release.yml, github.workflow
+# is the caller's ("Release"), so the three publish workflows shared one group.
+# A group holds one running and one pending job, so on the v1.24.0 tag the
+# third workflow to queue cancelled the second (the kates image), and the
+# Release, which needs every image, was skipped.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: publish-docker-${{ github.ref }}
   cancel-in-progress: false
 
 env:
