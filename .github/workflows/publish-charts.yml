@@ -65,8 +65,7 @@ jobs:
 
       # helm package refuses a chart whose declared dependencies are not
       # built. Order matters: the kafka-common consumers before the umbrella,
-      # which packages its file:// subcharts as they are on disk. minio and
-      # apicurio-registry vendor theirs in-tree and are left alone.
+      # which packages its file:// subcharts as they are on disk.
       - name: Build chart dependencies
         uses: ./.github/actions/helm-deps
         with:

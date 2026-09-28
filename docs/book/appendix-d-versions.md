@@ -24,7 +24,6 @@ Every version the platform pins, in one place. This table is generated from the 
 | `kates-platform` chart | 0.7.0 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
 | `kates` chart | 0.10.7 (app 1.24.0) | `charts/kates/Chart.yaml` |
 | `legacy-kafka` chart | 0.2.0 (app 3.9.1) | `charts/legacy-kafka/Chart.yaml` |
-| `minio` chart | 17.0.22 (app 2025.7.23) | `charts/minio/Chart.yaml` |
 | `mirror-maker2` chart | 0.11.2 (app 4.3.1) | `charts/mirror-maker2/Chart.yaml` |
 | `monitoring` chart | 1.6.0 (app 82.4.3) | `charts/monitoring/Chart.yaml` |
 | `strimzi-operator` chart | 0.3.2 (app 1.2.0) | `charts/strimzi-operator/Chart.yaml` |
