@@ -168,9 +168,16 @@ Use the left column in prose; commands, fields, flags, UI labels and resource na
 - Documenting a command? It must exist — link or name the implementing source file in the PR description.
 - Use one fixed set of names across chapters, and label every number with the environment it came from ("a LOAD run on `panda`").
 
+## Citations
+
+- Cite a published work where the book states what it established: a paper, a book, a standard or RFC, a JDK Enhancement Proposal, or the Kafka Improvement Proposal (KIP) that defines a feature a chapter explains. Product manuals, Strimzi and Helm how-tos, and Kates's own behavior get links or source references, not citations.
+- Write `[@key]` at the end of the clause the work supports, before its punctuation: `…in a replicated log [@ongaro2014search].` Several works share one bracket: `[@kip98; @wang2021consistency]`. Name a KIP in the prose when its number means something to the reader, as `KIP-896 [@kip896]`, and don't also link it inline.
+- Cite at a concept's first explanation in each chapter and at its Glossary entry, not at every mention. Headings, table cells, Summaries and code carry no citations.
+- A new work gets an entry in `references.bib`, each field checked against the source itself, as the file's header says. The site and the PDF render `[@key]` as a number linked to [References](references.md), which lists every entry, numbered in alphabetical order of first author. GitHub's file view shows the key.
+
 ## What CI Checks
 
-`scripts/check-book-style.sh` runs in the docs workflow. It fails on an unlabeled code fence, a bold-blockquote admonition, "Chapter N" in link text, a banned term in prose, or a double blank line after `:::`. It then tests and runs the ratchet, `scripts/book_metrics.py`, against `scripts/book-metrics-baseline.json`, which holds each page's count of:
+`scripts/check-book-style.sh` runs in the docs workflow. It fails on an unlabeled code fence, a bold-blockquote admonition, "Chapter N" in link text, a banned term in prose, a double blank line after `:::`, a citation of a key `references.bib` doesn't have, or an entry there that nothing cites. It then tests and runs the ratchet, `scripts/book_metrics.py`, against `scripts/book-metrics-baseline.json`, which holds each page's count of:
 
 - bare headings at any level, not only H2 and H3: a heading followed directly by another heading, a table or a code block (reference entries are exempt);
 - tables without a lead-in, bold-label bullets and hand-numbered headings;

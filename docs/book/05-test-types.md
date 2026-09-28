@@ -153,7 +153,7 @@ graph LR
 
 ### Interpreting Results
 
-One STRESS run gives one point on the degradation curve, because its producers start together and run at one level of load. To draw the curve, repeat the run with more producers each time, or a higher `targetThroughput`, and compare the runs with `kates report compare`. Across the series, the metrics pass through three stages:
+One STRESS run gives one point on the degradation curve, because its producers start together and run at one level of load. To draw the curve, repeat the run with more producers each time, or a higher `targetThroughput`, and compare the runs with `kates report compare`. Across the series, the metrics pass through three stages [@gunther2007guerrilla]:
 
 ```mermaid
 %%| label: fig-types-stress-stages

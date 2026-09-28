@@ -137,7 +137,7 @@ Expected result: **zero data loss**. With `acks=all` the leader acknowledges a r
 
 ### Idempotent Integrity
 
-Kafka's producer idempotency lets the broker discard a retried send it has already written, which gives [exactly-once](appendix-a-glossary.md#gl-exactly-once-semantics) delivery to the log. The Kafka producer enables it by default whenever `acks` is `all`, the INTEGRITY default, and leaves it off when `acks` is `1` or `0`, so the standard run above is already idempotent. The file below asks for it with `enableIdempotence: true`, which sets the producer's `enable.idempotence`; with `acks: "1"` the Kates API would refuse the file, because the producer cannot be idempotent without `acks=all`:
+Kafka's producer idempotency lets the broker discard a retried send it has already written, which gives [exactly-once](appendix-a-glossary.md#gl-exactly-once-semantics) delivery to the log [@kip98]. The Kafka producer enables it by default whenever `acks` is `all` [@kip679], the INTEGRITY default, and leaves it off when `acks` is `1` or `0`, so the standard run above is already idempotent. The file below asks for it with `enableIdempotence: true`, which sets the producer's `enable.idempotence`; with `acks: "1"` the Kates API would refuse the file, because the producer cannot be idempotent without `acks=all`:
 
 ```yaml
 scenarios:
@@ -157,7 +157,7 @@ With idempotency, even if the producer retries a send (due to transient network 
 
 ### Transactional Integrity
 
-Kafka transactions add atomic, exactly-once writes on top of idempotence. The built-in `integrity-tx` template asks for transactions, idempotence and CRC verification, and the run has all three: its producer commits a transaction every 100 records, or sooner when 10 seconds pass first, and the verifying consumer reads with `read_committed`, so it counts only committed records. The run has one producer and one consumer whatever `parallelProducers` and `numConsumers` say:
+Kafka transactions add atomic, exactly-once writes on top of idempotence [@kip98; @wang2021consistency]. The built-in `integrity-tx` template asks for transactions, idempotence and CRC verification, and the run has all three: its producer commits a transaction every 100 records, or sooner when 10 seconds pass first, and the verifying consumer reads with `read_committed`, so it counts only committed records. The run has one producer and one consumer whatever `parallelProducers` and `numConsumers` say:
 
 ```bash
 # Export the built-in integrity-tx template, then run it

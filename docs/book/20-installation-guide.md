@@ -1547,7 +1547,7 @@ The platform's topics, users, super user and client NetworkPolicy grants are the
 
 ### Tiered Storage
 
-**Why it exists:** Kafka's local disk storage is expensive and finite. Tiered storage (Kafka 3.6+ KIP-405) moves cold log segments to cheap object storage while keeping hot data on local SSDs for low-latency reads.
+**Why it exists:** Kafka's local disk storage is expensive and finite. Tiered storage (Kafka 3.6+ KIP-405 [@kip405]) moves cold log segments to cheap object storage while keeping hot data on local SSDs for low-latency reads.
 
 **How it works:**
 

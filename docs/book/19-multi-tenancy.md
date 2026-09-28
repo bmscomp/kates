@@ -257,7 +257,7 @@ sequenceDiagram
     Broker-->>Producer: OK
 ```
 
-When a client exceeds its quota, the broker delays its response by a calculated time. The client SDK handles this transparently — no errors, just increased latency.
+When a client exceeds its quota, the broker delays its response by a calculated time [@kip13]. The client SDK handles this transparently — no errors, just increased latency.
 
 ## Partition Planning
 

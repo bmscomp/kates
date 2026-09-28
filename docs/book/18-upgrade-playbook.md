@@ -450,7 +450,7 @@ kates test get <id>
 ```
 
 ::: {.callout-warning title="Raising the metadata version can be one-way"}
-A rollback needs an older Kafka that supports the cluster's metadata version, so hold `kafka.metadataVersion` at the level the cluster runs until the new version passes validation. Lowering it again is a safe downgrade, which Kafka allows only when no level in between changed the metadata format; Strimzi attempts it and reports a warning in the `Kafka` resource's status when Kafka refuses. KIP-778 also describes an unsafe downgrade that drops metadata, but Kafka doesn't implement it and Strimzi never attempts it, so a raise across a metadata change is one-way.
+A rollback needs an older Kafka that supports the cluster's metadata version, so hold `kafka.metadataVersion` at the level the cluster runs until the new version passes validation. Lowering it again is a safe downgrade, which Kafka allows only when no level in between changed the metadata format; Strimzi attempts it and reports a warning in the `Kafka` resource's status when Kafka refuses. KIP-778 [@kip778] also describes an unsafe downgrade that drops metadata, but Kafka doesn't implement it and Strimzi never attempts it, so a raise across a metadata change is one-way.
 :::
 
 ### Strimzi Operator Rollback

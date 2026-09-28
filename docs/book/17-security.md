@@ -95,7 +95,7 @@ The chart's base values declare only `plain` and `tls`. `values-prod.yaml` and, 
 
 ### SCRAM-SHA-512
 
-SCRAM (Salted Challenge Response Authentication Mechanism) is a password-based authentication protocol that never sends the password over the wire. Instead, the client and server exchange salted hashes in a challenge-response sequence. SHA-512 provides strong hashing — brute-forcing a SCRAM-SHA-512 password is computationally expensive.
+SCRAM (Salted Challenge Response Authentication Mechanism) is a password-based authentication protocol that never sends the password over the wire [@rfc5802; @kip84]. Instead, the client and server exchange salted hashes in a challenge-response sequence. SHA-512 provides strong hashing — brute-forcing a SCRAM-SHA-512 password is computationally expensive.
 
 Strimzi generates SCRAM credentials automatically when you create a `KafkaUser` resource. The password is stored in a Kubernetes Secret with the same name as the user:
 
@@ -159,7 +159,7 @@ From step 1 until the restarted pod is Ready, Kates cannot open a new connection
 
 ### mTLS (Mutual TLS)
 
-The TLS listener requires both server and client certificates. Strimzi issues client certificates via the Clients CA when a `KafkaUser` uses `authentication.type: tls`. This provides the strongest authentication — both sides cryptographically verify each other's identity, and the connection is encrypted end-to-end.
+The TLS listener requires both server and client certificates [@rfc8446]. Strimzi issues client certificates via the Clients CA when a `KafkaUser` uses `authentication.type: tls`. This provides the strongest authentication — both sides cryptographically verify each other's identity, and the connection is encrypted end-to-end.
 
 ## Authorization
 
@@ -181,7 +181,7 @@ graph LR
 
 A `KafkaUser` authenticating with SCRAM-SHA-512 maps to the principal `User:<username>`. Only users with `authentication.type: tls` get certificate-based principals, whose name is the certificate's Distinguished Name (e.g., `User:CN=my-service`).
 
-Every Kafka operation (produce, consume, describe, create, delete) is checked against the ACL list. If no matching rule is found, the operation is denied by default. This is a **deny-by-default** model — you must explicitly grant every permission.
+Every Kafka operation (produce, consume, describe, create, delete) is checked against the ACL list. If no matching rule is found, the operation is denied by default. This is a **deny-by-default** model [@saltzer1975protection] — you must explicitly grant every permission.
 
 ### User Permissions Matrix
 
@@ -199,7 +199,7 @@ The `kates-backend` user has superUser status because it needs to create test to
 
 ### Adding a New Service
 
-When you onboard a new service to your Kafka cluster, follow the principle of least privilege — grant only the permissions the service actually needs. Here's a template:
+When you onboard a new service to your Kafka cluster, follow the principle of least privilege [@saltzer1975protection] — grant only the permissions the service actually needs. Here's a template:
 
 ```yaml
 apiVersion: kafka.strimzi.io/v1

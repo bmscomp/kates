@@ -16,7 +16,7 @@ Every performance measurement reduces to two fundamental questions:
 1. **How much work can the system do?** → Throughput
 2. **How long does each unit of work take?** → Latency
 
-These two metrics have a **complex, non-linear relationship**. Increasing throughput eventually causes latency to rise, and that inflection point is exactly what performance testing is designed to find.
+These two metrics have a **complex, non-linear relationship**. Increasing throughput eventually causes latency to rise, and that inflection point is exactly what performance testing is designed to find [@jain1991art].
 
 ```mermaid
 graph LR
@@ -93,7 +93,7 @@ Consider two systems over 100 requests:
 - **System A**: 99 requests at 5ms, 1 request at 500ms → Average = 9.95ms
 - **System B**: 100 requests at 10ms → Average = 10ms
 
-System A has a better average, but 1% of its users experience 50x worse performance. In production, that 1% often represents your most important customers (large payloads, complex transactions).
+System A has a better average, but 1% of its users experience 50x worse performance. In production, that 1% often represents your most important customers (large payloads, complex transactions). The tail also weighs more as a system grows: an operation that waits on several servers is as slow as the slowest of them [@dean2013tail].
 
 ### The Percentile Solution
 
@@ -133,12 +133,12 @@ In Kafka, tail latency is caused by:
 - **[Controller](appendix-a-glossary.md#gl-controller) elections** — [KRaft](appendix-a-glossary.md#gl-kraft) metadata operations can cause brief pauses
 
 ::: {.callout-tip}
-GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size. Kates's JVM image runs generational ZGC (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default), both under the chart's defaults and under the [values overlay](appendix-a-glossary.md#gl-values-overlay) `kates deploy` applies on any cluster other than Kind. On Kind, `kates deploy` runs the [native image](appendix-a-glossary.md#gl-graalvm-native-image) instead, which runs the Serial GC, so the tail latencies of a local run include its pauses — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
+GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size [@jep439]. Kates's JVM image runs generational ZGC (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default [@jep474]), both under the chart's defaults and under the [values overlay](appendix-a-glossary.md#gl-values-overlay) `kates deploy` applies on any cluster other than Kind. On Kind, `kates deploy` runs the [native image](appendix-a-glossary.md#gl-graalvm-native-image) instead, which runs the Serial GC, so the tail latencies of a local run include its pauses — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
 :::
 
 ## Coordinated Omission
 
-One of the most insidious measurement errors in load testing is **coordinated omission**. It occurs when your measurement tool slows down along with the system, causing it to miss the worst-case latencies.
+One of the most insidious measurement errors in load testing is **coordinated omission**. It occurs when your measurement tool slows down along with the system, causing it to miss the worst-case latencies [@tene2013how].
 
 ### How It Happens
 
@@ -174,13 +174,13 @@ During the stall, the tool should have sent 19 more requests (at t=30, 40, 50...
 
 ### How Kates Handles It
 
-Kates's native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) mitigates the classic [closed-loop](appendix-a-glossary.md#gl-open-loop-load) form of coordinated omission by sending asynchronously. Its producer loop never waits for an acknowledgment before dispatching the next record, and when a target rate is configured it keeps pacing sends at that rate regardless of response times. A slow response therefore does not hold back subsequent sends.
+Kates's native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) mitigates the classic [closed-loop](appendix-a-glossary.md#gl-open-loop-load) [@schroeder2006open] form of coordinated omission by sending asynchronously. Its producer loop never waits for an acknowledgment before dispatching the next record, and when a target rate is configured it keeps pacing sends at that rate regardless of response times. A slow response therefore does not hold back subsequent sends.
 
 Know the limits, though: Kates does not apply coordinated-omission correction. The `LatencyHistogram` records only the observations that actually occurred — there is no gap detection and no back-filling of latencies for send slots missed during a stall. If the producer itself blocks (for example, its internal buffer fills while a broker pauses), the percentiles for that window understate what a steady stream of clients would have experienced. For stall-heavy workloads, cross-check the percentiles against the latency [heatmap](appendix-a-glossary.md#gl-heatmap), which makes those windows visible.
 
 ## Heatmaps: Seeing the Full Picture
 
-Percentiles compress the latency distribution into a few numbers. Heatmaps preserve the **full distribution over time**, revealing patterns invisible in aggregate metrics.
+Percentiles compress the latency distribution into a few numbers. Heatmaps preserve the **full distribution over time**, revealing patterns invisible in aggregate metrics [@gregg2010visualizing].
 
 ```mermaid
 graph TD
@@ -210,7 +210,7 @@ Each heatmap row contains counts across logarithmic latency buckets, snapshotted
 
 ## Statistical Significance
 
-Running a test once and drawing conclusions is dangerous. Performance measurements are inherently noisy due to:
+Running a test once and drawing conclusions is dangerous [@georges2007statistically]. Performance measurements are inherently noisy due to:
 
 - JVM warm-up (JIT compilation, class loading)
 - OS-level scheduling jitter
@@ -254,7 +254,7 @@ There is no universal "good" latency or throughput. It depends entirely on your 
 | Batch data pipeline | \< 1s | 1M+ rec/s |
 | Financial transactions | \< 5ms | 1K–10K rec/s |
 
-Kates lets you set [SLA](appendix-a-glossary.md#gl-sla) thresholds per test scenario, targets you choose in the style of an SLO rather than a contract, so "good" is whatever you define it to be.
+Kates lets you set [SLA](appendix-a-glossary.md#gl-sla) thresholds per test scenario, targets you choose in the style of an SLO [@beyer2016site] rather than a contract, so "good" is whatever you define it to be.
 
 ::: {.callout-tip}
 **Try it**
