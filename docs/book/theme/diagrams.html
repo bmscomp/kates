@@ -1,6 +1,7 @@
 <script>
-// Mermaid diagrams for the Kates book: legible sizing and a full-screen viewer.
-// Also keyboard access to what scrolls sideways and to the sidebar's parts.
+// Mermaid diagrams for the Kates book: the book's diagram style, legible
+// sizing and a full-screen viewer. Also keyboard access to what scrolls
+// sideways and to the sidebar's parts.
 //
 // Quarto renders each diagram in the browser on `load` and lets it shrink to
 // the text column, so a wide flowchart ends up with 3px labels. This shows a
@@ -21,14 +22,125 @@
   const wideScreen = window.matchMedia("(min-width: 1200px)");
   const margin = document.getElementById("quarto-margin-sidebar");
 
+  // The label sizes and weights of the book's diagram style. Mermaid measures
+  // each label while it draws, inside the diagram's own <style> and before
+  // the page's stylesheet reaches it, so anything that changes a label's size
+  // goes to Mermaid here, and a box is sized for the text it holds. Colours
+  // stay in theme/kates.scss.
+  const LABEL_CSS = `
+    .nodeLabel, .nodeLabel p { font-weight: 500; }
+    .cluster-label .nodeLabel, .cluster-label .nodeLabel p {
+      font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+    }
+    .edgeLabel, .edgeLabel p { font-size: 14px; }
+    .label.name .nodeLabel, .label.name .nodeLabel p { font-weight: 700; }
+    .label.attribute-type .nodeLabel, .label.attribute-type .nodeLabel p,
+    .label.attribute-name .nodeLabel, .label.attribute-name .nodeLabel p { font-weight: 400; }
+    .label.attribute-keys .nodeLabel, .label.attribute-keys .nodeLabel p {
+      font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    }
+    text.actor > tspan { font-weight: 600 !important; }
+    .labelText, .labelText > tspan {
+      font-size: 11px !important; font-weight: 700 !important;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .loopText > tspan { font-style: italic; }
+  `;
+
   // Measure labels in the font they are drawn in. Quarto's mermaid-init.js has
   // already called initialize(); calling it again before `load` keeps Quarto's
-  // options and swaps Mermaid's default Trebuchet for the book's font, so boxes
-  // are sized for the text they hold.
+  // options, swaps Mermaid's default Trebuchet for the book's font and adds
+  // the label style above. A subgraph keeps room above and below its title.
   if (window.mermaid && typeof mermaidOpts !== "undefined") {
     const font = getComputedStyle(document.documentElement)
       .getPropertyValue("--mermaid-font-family").trim();
-    if (font) mermaid.initialize({ ...mermaidOpts, fontFamily: font });
+    mermaid.initialize({
+      ...mermaidOpts,
+      ...(font ? { fontFamily: font } : {}),
+      themeCSS: (mermaidOpts.themeCSS || "") + LABEL_CSS,
+      flowchart: { ...mermaidOpts.flowchart, subGraphTitleMargin: { top: 8, bottom: 6 } },
+    });
+  }
+
+  // ── Shape ──────────────────────────────────────────────────────────────────
+  // What CSS cannot do to an SVG in every browser: round the corners of
+  // cards, zones and notes, and move each subgraph's title from the middle
+  // of its top edge, where edges into the subgraph run through it, to the
+  // top left corner. An edge can still cross the corner, so the title is
+  // also drawn last, over the edges, on a chip in the zone's tint
+  // (theme/kates.scss) that hides the line behind the text. Mermaid wraps a
+  // title longer than 200px, and does not make room for the extra lines, so
+  // a long title is put back on one line where its zone is wide enough; one
+  // that still reaches a node stays under it, as Mermaid drew it, rather
+  // than cover it. Done to the rendered SVG, so the full-screen copy
+  // inherits it.
+
+  const RADIUS = { card: 8, zone: 12, note: 6 };
+  const TITLE_INSET = 12;
+
+  function round(rect, radius) {
+    const r = Math.max(radius, parseFloat(rect.getAttribute("rx")) || 0);
+    rect.setAttribute("rx", r);
+    rect.setAttribute("ry", r);
+  }
+
+  // Put a wrapped title on one line, if that fits inside its zone
+  function unwrap(title, rect, svg) {
+    const box = title.querySelector("foreignObject");
+    const text = box?.firstElementChild;
+    const scale = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width;
+    if (!text || !(scale > 0)) return;
+    const wrapped = text.getAttribute("style");
+    Object.assign(text.style, { whiteSpace: "nowrap", width: "auto", maxWidth: "none", display: "table-cell" });
+    const line = text.getBoundingClientRect();
+    if (line.width / scale > rect.width.baseVal.value - 2 * TITLE_INSET) {
+      text.setAttribute("style", wrapped);
+      return;
+    }
+    box.setAttribute("width", line.width / scale);
+    box.setAttribute("height", line.height / scale);
+  }
+
+  function overlapsNode(title, svg) {
+    const t = title.querySelector("foreignObject > *")?.getBoundingClientRect();
+    if (!t) return false;
+    return [...svg.querySelectorAll("g.node")].some((node) => {
+      const n = node.getBoundingClientRect();
+      return t.left < n.right - 1 && t.right > n.left + 1 && t.top < n.bottom - 1 && t.bottom > n.top + 1;
+    });
+  }
+
+  function shape(svg) {
+    svg.querySelectorAll(".node rect.label-container, rect.actor")
+      .forEach((rect) => round(rect, RADIUS.card));
+    svg.querySelectorAll("rect.note").forEach((rect) => round(rect, RADIUS.note));
+    for (const cluster of svg.querySelectorAll("g.cluster")) {
+      const rect = cluster.querySelector(":scope > rect");
+      const title = cluster.querySelector(":scope > g.cluster-label");
+      if (!rect) continue;
+      round(rect, RADIUS.zone);
+      const place = title?.transform.baseVal.consolidate();
+      if (!place || !title.textContent.trim()) continue;
+      unwrap(title, rect, svg);
+      title.setAttribute("transform",
+        `translate(${rect.x.baseVal.value + TITLE_INSET}, ${place.matrix.f})`);
+      // The clusters' group sits at the origin of the root that draws the
+      // edges, so the title keeps its place when it moves to the end of it.
+      const root = cluster.parentElement?.parentElement;
+      if (root?.matches("g.root") && !cluster.parentElement.hasAttribute("transform")
+          && !overlapsNode(title, svg)) {
+        title.classList.add("kates-group-title");
+        root.append(title);
+        // A zone the diagram colours itself (`style X fill:...`) is usually
+        // translucent: lay the same tint over the plate, as the zone does
+        const tint = rect.style.fill;
+        const chip = title.querySelector("p");
+        if (tint && chip) {
+          chip.style.setProperty("background",
+            `linear-gradient(${tint}, ${tint}), var(--mermaid-bg-color)`, "important");
+        }
+      }
+    }
   }
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -134,6 +246,7 @@
     const figure = svg.closest("figure");
     if (!frame || !figure || figure.classList.contains("kates-diagram")) return;
 
+    shape(svg);
     figure.classList.add("kates-diagram");
     frame.classList.add("kates-diagram-frame");
     // Quarto's cell wrapper scrolls its overflow, which would clip a plate

@@ -65,15 +65,24 @@ $kates-scroll-shadow: rgba(19, 29, 66, 0.2);
 $kates-diagram-note-bg: #fff8db;
 $kates-diagram-note-border: #e3cb72;
 
+// Nodes are white cards on the plate, lifted by a soft shadow; their border
+// keeps 3:1 against the plate and the group tint around them.
 $mermaid-bg-color: $kates-diagram-bg;
-$mermaid-node-bg-color: #eaf2fd;
-$mermaid-node-fg-color: #5877ad;
+$mermaid-node-bg-color: #ffffff;
+$mermaid-node-fg-color: #7089b8;
 $mermaid-fg-color: $body-color;
 $mermaid-fg-color--lighter: #b9c6dc;
 $mermaid-fg-color--lightest: #f1f5fb;
 $mermaid-label-bg-color: $kates-diagram-bg;
 $mermaid-label-fg-color: #16213f;
 $mermaid-edge-color: #52607d;
+
+// Group titles, sequence frame tags (loop, opt, alt), the header of an ER
+// table and its alternate rows, and the shadow under each card
+$kates-diagram-group-fg: #4d6a9e;
+$kates-diagram-tint: #e8f0fb;
+$kates-diagram-row-alt: #f6f9fd;
+$kates-diagram-shadow: rgba(19, 29, 66, 0.1);
 
 // Cover
 $kates-cover-shadow: rgba(19, 29, 66, 0.45);

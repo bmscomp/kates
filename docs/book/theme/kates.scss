@@ -572,25 +572,100 @@ figure.kates-diagram.is-oversized .kates-diagram-hint {
 
 // Mermaid colours come from the --mermaid-* variables Quarto derives from the
 // $mermaid-* palette. These rules cover what Mermaid's own base theme paints
-// with fixed colours, so both colour schemes stay legible.
+// with fixed colours, so both colour schemes stay legible, and draw the
+// book's diagram style: nodes are white cards with a soft shadow, a subgraph
+// is a tinted zone with a dashed edge and a small title in the corner, edge
+// labels sit on pills, and an optional (dotted) edge is a row of round dots.
+// Mermaid's own rules are scoped by the diagram's id, so these need
+// !important to win. Sizes and weights that change how big a label is are
+// not here: Mermaid measures labels while it draws, before this stylesheet
+// reaches them, so diagrams.html hands those to Mermaid itself. The corner
+// radii and the title's place are drawn there too.
 svg.mermaid-js {
+  // Edge labels: a pill in the plate's colour, which also masks the line
+  // behind the text. The padding is taken back by the negative margin, so
+  // the pill grows around the label without moving it.
   .edgeLabel,
-  .edgeLabel p,
   .edgeLabel span,
   .labelBkg {
-    background-color: var(--mermaid-label-bg-color) !important;
+    background-color: transparent !important;
     color: var(--mermaid-edge-color) !important;
   }
 
-  .cluster-label span,
-  .cluster-label p {
-    color: var(--mermaid-label-fg-color) !important;
+  .edgeLabel p {
+    margin: -1px -0.55em !important;
+    padding: 1px 0.55em;
+    text-align: center;
+    background-color: var(--mermaid-label-bg-color) !important;
+    border-radius: 0.8em;
+    box-shadow: 0 0 0 1px $kates-border;
+    color: var(--mermaid-edge-color) !important;
   }
 
   .node .label,
   .nodeLabel,
   .nodeLabel p {
     color: var(--mermaid-label-fg-color) !important;
+  }
+
+  // A group's title is a nodeLabel too, so this comes after the rule above.
+  // diagrams.html draws the title over the edges, on a chip in the zone's
+  // own tint (it sets the chip itself for a zone a diagram colours), so an
+  // edge that crosses the corner passes behind the text.
+  .cluster-label .nodeLabel,
+  .cluster-label .nodeLabel p {
+    color: $kates-diagram-group-fg !important;
+  }
+
+  // In the corner, a title too long for one line wraps from the left
+  .cluster-label foreignObject > div {
+    text-align: left !important;
+  }
+
+  .kates-group-title foreignObject {
+    overflow: visible;
+  }
+
+  .kates-group-title .nodeLabel p {
+    margin: 0 -0.35em !important;
+    padding: 0 0.35em;
+    border-radius: 0.3em;
+    background: var(--mermaid-fg-color--lightest) !important;
+  }
+
+  // Cards: flowchart and state nodes, sequence participants, ER tables
+  .node .label-container,
+  .node.default > g:first-child,
+  rect.actor {
+    filter: drop-shadow(0 1px 2px $kates-diagram-shadow);
+  }
+
+  .node .label-container,
+  .node .label-container path,
+  rect.actor {
+    stroke-width: 1.25px !important;
+  }
+
+  rect.actor {
+    fill: var(--mermaid-node-bg-color) !important;
+    stroke: var(--mermaid-node-fg-color) !important;
+  }
+
+  // Subgraphs: a tinted zone; the dashes say it groups, not that it is a box
+  .cluster > rect {
+    stroke-width: 1px !important;
+    stroke-dasharray: 5 4;
+  }
+
+  // Edges: a firmer line, and dotted edges as round dots
+  .edge-thickness-normal {
+    stroke-width: 1.5px !important;
+  }
+
+  .edge-pattern-dotted {
+    stroke-dasharray: 0.1 5 !important;
+    stroke-linecap: round;
+    stroke-width: 2px !important;
   }
 
   .note,
@@ -604,13 +679,21 @@ svg.mermaid-js {
     fill: var(--mermaid-label-fg-color) !important;
   }
 
+  // Sequence diagrams: dashed lifelines, firmer messages, and each frame
+  // (loop, opt, alt) tagged in the corner like a group title
   .actor-line {
     stroke: var(--mermaid-fg-color--lighter) !important;
+    stroke-dasharray: 3 5;
+  }
+
+  .messageLine0,
+  .messageLine1 {
+    stroke-width: 1.5px !important;
   }
 
   .labelBox {
-    fill: var(--mermaid-node-bg-color) !important;
-    stroke: var(--mermaid-node-fg-color) !important;
+    fill: $kates-diagram-tint !important;
+    stroke: none !important;
   }
 
   .loopLine {
@@ -618,6 +701,10 @@ svg.mermaid-js {
   }
 
   .labelText,
+  .labelText > tspan {
+    fill: $kates-link !important;
+  }
+
   .loopText,
   .loopText > tspan {
     fill: var(--mermaid-label-fg-color) !important;
@@ -629,6 +716,44 @@ svg.mermaid-js {
 
   // autonumber digits sit on an edge-coloured disc, so take the background
   .sequenceNumber {
+    fill: var(--mermaid-bg-color) !important;
+  }
+
+  // ER tables: a tinted header row over zebra rows, keys in the link colour
+  .node.default > g:first-child > path:first-child {
+    fill: $kates-diagram-tint !important;
+  }
+
+  .row-rect-odd > path:first-child {
+    fill: var(--mermaid-node-bg-color) !important;
+  }
+
+  .row-rect-even > path:first-child {
+    fill: $kates-diagram-row-alt !important;
+  }
+
+  .row-rect-odd > path,
+  .row-rect-even > path,
+  .divider > path {
+    stroke: var(--mermaid-fg-color--lighter) !important;
+  }
+
+  .label.attribute-type p {
+    color: $kates-muted !important;
+  }
+
+  .label.attribute-keys p {
+    color: $kates-link !important;
+  }
+
+  // Quarto colours the crow's feet by marker id, but Mermaid now prefixes
+  // each id with the diagram's, so without this they are drawn black
+  .marker.er path,
+  .marker.er circle {
+    stroke: var(--mermaid-edge-color) !important;
+  }
+
+  .marker.er circle {
     fill: var(--mermaid-bg-color) !important;
   }
 }
