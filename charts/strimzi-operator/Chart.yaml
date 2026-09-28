@@ -1,9 +1,9 @@
 apiVersion: v2
 name: strimzi-operator
-# Patch: the CRD-hook and Helm-test image moves to kates-tester 1.23.0, the
-# tag the v1.23.0 release publishes; every Strimzi chart pins the same one.
+# Patch: the CRD-hook and Helm-test image moves to kates-tester 1.24.0, the
+# tag the v1.24.0 release publishes; every Strimzi chart pins the same one.
 # Templates and defaults are otherwise unchanged.
-version: 0.3.1
+version: 0.3.2
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
@@ -30,6 +30,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.24.0, the tag the v1.24.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image changes this time: its Kafka CLI moves from 3.7.0 on debian:bookworm-slim to 4.3.1 on debian:trixie-slim, the Kafka the charts deploy, without the 3.7 line's kafka-clients, ZooKeeper and Jetty 9.4 CVEs (#184). A 4.x CLI talks to brokers 2.1 and newer"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: added
