@@ -492,7 +492,12 @@ func resolveFallbackURL(url string, checkPort func(string) bool) string {
 }
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := interruptContext(os.Args[1:])
+	defer stop()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		if errors.Is(err, errInterrupted) {
+			os.Exit(interruptedExitCode)
+		}
 		// silentErr was already printed (styled) by cmdErr. Everything else
 		// goes through the same styled channel, so a plain fmt.Errorf from a
 		// RunE reads like every other kates error instead of a bare line —

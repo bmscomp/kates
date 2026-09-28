@@ -143,6 +143,7 @@ func registerTestCompletions() {
 
 	testGetCmd.ValidArgsFunction = completeRunIDs
 	testDeleteCmd.ValidArgsFunction = completeRunIDs
+	testCancelCmd.ValidArgsFunction = completeRunIDs
 	testExportCmd.ValidArgsFunction = completeDoneRunIDs
 	testFlameCmd.ValidArgsFunction = completeDoneRunIDs
 

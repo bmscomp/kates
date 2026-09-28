@@ -539,6 +539,21 @@
     - test list
     - test cleanup
 
+- name: test cancel
+  category: Test
+  synopsis: "kates test cancel <id>..."
+  short: "Cancel pending or running test runs, and keep them"
+  description: |
+    Stops each run's tasks and stores the run as FAILED, each unfinished
+    task with the error "Cancelled by user". A run that has already
+    finished cannot be cancelled, and the command exits 1.
+  examples:
+    - "kates test cancel abc123"
+    - "kates test cancel abc123 def456 -o json"
+  see_also:
+    - test delete
+    - test watch
+
 - name: test apply
   category: Test
   synopsis: "kates test apply [flags]"
