@@ -410,9 +410,12 @@ public class P {
   }
 }
 JAVA
+# Classes and the file go to the container's own /tmp: the JDK container runs as
+# root, and a root-owned directory left in $WORKDIR is one the cleanup trap
+# cannot delete, which turns a green run into exit 1.
 for d in aiven-s3-sink aiven-s3-source; do
     PARQUET=$(docker run --rm -v "$WORKDIR":/w -w /w "$JDK_IMAGE" sh -c \
-        "javac -cp '/w/$d/*' -d '/w/p-$d' P.java >/dev/null 2>&1 && java -cp '/w/p-$d:/w/$d/*' P '/w/p-$d/x.parquet'" 2>/dev/null || true)
+        "javac -cp '/w/$d/*' -d /tmp/p P.java >/dev/null 2>&1 && java -cp '/tmp/p:/w/$d/*' P /tmp/p/x.parquet" 2>/dev/null || true)
     echo "$PARQUET" | grep -q "PARQUET magic=PAR1 rows=3 schema=true" \
         && pass "$d writes Parquet through its own jars ($(echo "$PARQUET" | cut -d' ' -f5-))" \
         || fail "$d could not write Parquet: ${PARQUET:-no output}"
