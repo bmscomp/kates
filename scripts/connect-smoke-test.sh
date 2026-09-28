@@ -152,6 +152,17 @@ LOOSE=$(docker run --rm --entrypoint sh "$IMAGE" -c 'find /opt/kafka/plugins -na
     && pass "no loose .class files beside the jars (S3 source archive pruned)" \
     || fail "$LOOSE loose .class files on the plugin path — the S3 source prune did not run"
 
+# Dockerfile.connect swaps the Avro and Parquet jars Aiven's S3 archives bundle
+# (CRITICAL CVEs) and drops the base image's Kafka Exporter binary (Go 1.24.0).
+STALE=$(docker run --rm --entrypoint sh "$IMAGE" -c \
+    'find /opt/kafka/plugins/aiven-s3-sink /opt/kafka/plugins/aiven-s3-source \( -name "avro-1.11.[0-3].jar" -o -name "parquet-*-1.15.0.jar" \) | wc -l')
+[ "$STALE" -eq 0 ] \
+    && pass "S3 plugins carry the patched Avro and Parquet (no avro < 1.11.4, no parquet 1.15.0)" \
+    || fail "$STALE vulnerable Avro/Parquet jar(s) left in the S3 plugins — the override did not run"
+docker run --rm --entrypoint sh "$IMAGE" -c 'test ! -e /opt/kafka-exporter' \
+    && pass "no Kafka Exporter binary (Connect never runs it; Go 1.24.0, CVE-2025-68121)" \
+    || fail "/opt/kafka-exporter is still in the image"
+
 # ── 2. Does every plugin directory load? ─────────────────────────────────────
 step "\n[2/6] Plugin scan (connect-plugin-path)"
 docker run --rm --entrypoint sh "$IMAGE" \
@@ -312,6 +323,73 @@ COUNT=$(echo "$REPLAYED" | grep -c 'item' || true)
 [ "$COUNT" -eq 3 ] \
     && pass "source replayed all 3 records back into $REPLAY" \
     || { fail "source replayed $COUNT/3 records"; curl -s "localhost:$PORT/connectors/smoke-s3-source/status" | head -c 600; }
+
+# The round trip above is jsonl, which never touches Avro or Parquet, and those
+# are the jars Dockerfile.connect swaps in both plugins. Write a Parquet file
+# through each plugin's own jars and read its footer back. Only writing: neither
+# Aiven archive bundles hadoop-mapreduce, which every Parquet reader class needs,
+# so the S3 source's input.format=parquet fails in this image as it does in
+# Aiven's own archive; the footer is parsed with parquet-format-structures.
+CID=$(docker create "$IMAGE")
+for d in aiven-s3-sink aiven-s3-source; do
+    docker cp "$CID":/opt/kafka/plugins/$d "$WORKDIR/" >/dev/null
+done
+docker rm "$CID" >/dev/null
+cat > "$WORKDIR/P.java" <<'JAVA'
+import java.io.ByteArrayInputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.parquet.avro.AvroParquetWriter;
+import org.apache.parquet.format.FileMetaData;
+import org.apache.parquet.format.KeyValue;
+import org.apache.parquet.format.Util;
+import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.io.LocalOutputFile;
+public class P {
+  static String jar(Class<?> c) {
+    String p = c.getProtectionDomain().getCodeSource().getLocation().getPath();
+    return p.substring(p.lastIndexOf('/') + 1);
+  }
+  public static void main(String[] a) throws Exception {
+    Schema s = new Schema.Parser().parse(
+        "{\"type\":\"record\",\"name\":\"Order\",\"fields\":[{\"name\":\"id\",\"type\":\"int\"},{\"name\":\"item\",\"type\":\"string\"}]}");
+    java.nio.file.Path f = Paths.get(a[0]);
+    Files.deleteIfExists(f);
+    try (ParquetWriter<GenericRecord> w =
+        AvroParquetWriter.<GenericRecord>builder(new LocalOutputFile(f)).withSchema(s).build()) {
+      for (int i = 1; i <= 3; i++) {
+        GenericRecord r = new GenericData.Record(s);
+        r.put("id", i);
+        r.put("item", "item-" + i);
+        w.write(r);
+      }
+    }
+    // Footer: <FileMetaData><4-byte little-endian length>"PAR1".
+    byte[] b = Files.readAllBytes(f);
+    int n = ByteBuffer.wrap(b, b.length - 8, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+    FileMetaData md = Util.readFileMetaData(new ByteArrayInputStream(b, b.length - 8 - n, n));
+    String avro = null;
+    for (KeyValue kv : md.getKey_value_metadata()) {
+      if (kv.getKey().equals("parquet.avro.schema")) avro = kv.getValue();
+    }
+    System.out.println("PARQUET magic=" + new String(b, 0, 4) + " rows=" + md.getNum_rows()
+        + " schema=" + new Schema.Parser().parse(avro).equals(s)
+        + " " + jar(Schema.class) + " " + jar(AvroParquetWriter.class) + " " + jar(Util.class));
+  }
+}
+JAVA
+for d in aiven-s3-sink aiven-s3-source; do
+    PARQUET=$(docker run --rm -v "$WORKDIR":/w -w /w "$JDK_IMAGE" sh -c \
+        "javac -cp '/w/$d/*' -d '/w/p-$d' P.java >/dev/null 2>&1 && java -cp '/w/p-$d:/w/$d/*' P '/w/p-$d/x.parquet'" 2>/dev/null || true)
+    echo "$PARQUET" | grep -q "PARQUET magic=PAR1 rows=3 schema=true" \
+        && pass "$d writes Parquet through its own jars ($(echo "$PARQUET" | cut -d' ' -f5-))" \
+        || fail "$d could not write Parquet: ${PARQUET:-no output}"
+done
 
 # The Debezium scripting SMT: assert the worker offers both transformations.
 # It cannot be exercised through the S3 sink — Connect instantiates a transform

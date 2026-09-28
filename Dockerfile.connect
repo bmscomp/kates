@@ -112,6 +112,28 @@ RUN mkdir -p aiven-s3-source && \
         esac; \
     done
 
+# Avro and Parquet in both S3 archives carry CRITICAL CVEs fixed in patch
+# releases: CVE-2024-47561 (Avro schema parsing, RCE; sink bundles 1.11.0,
+# source 1.11.3) and CVE-2025-30065 (parquet-avro 1.15.0, arbitrary code
+# execution). 3.4.3 is Aiven's latest, so each plugin's copies are swapped for
+# the newest patch of the same line: Avro 1.11.5, and every parquet-* jar at
+# 1.15.2 so the Parquet modules stay in step (1.11.5 and 1.15.2 also fix
+# CVE-2025-33042 and CVE-2025-46762). The build fails if an archive stops
+# bundling the jar it replaces; that is the cue to drop the override.
+ARG AVRO_VERSION=1.11.5
+ARG PARQUET_VERSION=1.15.2
+RUN for dir in aiven-s3-sink aiven-s3-source; do \
+        old=$(ls "$dir"/avro-1.11.[0-4].jar) && rm "$old" && \
+        curl -sfL "https://repo1.maven.org/maven2/org/apache/avro/avro/${AVRO_VERSION}/avro-${AVRO_VERSION}.jar" \
+            -o "$dir/avro-${AVRO_VERSION}.jar" || exit 1; \
+        for m in parquet-avro parquet-column parquet-common parquet-encoding \
+                 parquet-format-structures parquet-hadoop parquet-jackson; do \
+            rm "$dir/$m-1.15.0.jar" && \
+            curl -sfL "https://repo1.maven.org/maven2/org/apache/parquet/$m/${PARQUET_VERSION}/$m-${PARQUET_VERSION}.jar" \
+                -o "$dir/$m-${PARQUET_VERSION}.jar" || exit 1; \
+        done; \
+    done
+
 # ── Apicurio Schema Registry Integration ─────────────────────────────────────
 # Apicurio converters enable schema governance with Avro, JSON Schema, and
 # Protobuf serialization. Required when connecting to Apicurio Registry.
@@ -156,6 +178,12 @@ ARG AIVEN_S3_VERSION=3.4.3
 
 USER root:root
 COPY --from=download /plugins/ /opt/kafka/plugins/
+# The base image is Strimzi's Kafka image, which also carries the Kafka
+# Exporter for the operator's exporter Deployment. That Deployment runs
+# Strimzi's own image, never this one, and a Connect worker never starts the
+# exporter; its binary is built with Go 1.24.0 (CVE-2025-68121, CRITICAL,
+# crypto/tls). Removing it takes the CVE out of the image.
+RUN rm -rf /opt/kafka-exporter
 USER 1001
 
 # ─── OCI Image Labels (https://github.com/opencontainers/image-spec) ─────────
