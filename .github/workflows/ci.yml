@@ -245,9 +245,7 @@ jobs:
       # Charts whose dependency tgzs are gitignored (charts/*/charts/) must be
       # fetched before the render loop. seaweedfs (kafka-cluster), litmus-core
       # (kates-chaos) and kube-prometheus-stack (monitoring) come from classic
-      # Helm repos; kates-platform resolves local file:// deps. minio and
-      # apicurio-registry vendor their dependencies in-tree, so they are left
-      # untouched (their upstream Bitnami repo is deprecated).
+      # Helm repos; kates-platform resolves local file:// deps.
       # mirror-maker2 and connect-cluster come before kates-platform: the
       # umbrella packages its file:// subcharts as they are on disk.
       - name: Build chart dependencies

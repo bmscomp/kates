@@ -214,7 +214,6 @@ When you install charts with Helm directly:
 | [`kates-platform`](charts/kates-platform/) | 0.7.0 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
 | [`kates`](charts/kates/) | 0.10.7 | 1.24.0 | Kates — Kafka Advanced Testing & Engineering Suite |
 | [`legacy-kafka`](charts/legacy-kafka/) | 0.2.0 | 3.9.1 | A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to migrate FROM — the replication source that the pinned Strimzi release cannot deploy |
-| [`minio`](charts/minio/) | 17.0.22 | 2025.7.23 | MinIO object storage (S3-compatible), vendored from the Bitnami chart |
 | [`mirror-maker2`](charts/mirror-maker2/) | 0.11.2 | 4.3.1 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |
 | [`monitoring`](charts/monitoring/) | 1.6.0 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
 | [`strimzi-operator`](charts/strimzi-operator/) | 0.3.2 | 1.2.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
