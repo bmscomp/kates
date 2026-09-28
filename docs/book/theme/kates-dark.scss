@@ -79,13 +79,20 @@ $kates-diagram-note-border: #7a6a2e;
 
 $mermaid-bg-color: $kates-diagram-bg;
 $mermaid-node-bg-color: #17223f;
-$mermaid-node-fg-color: #6f8fc4;
+$mermaid-node-fg-color: #5b78ad;
 $mermaid-fg-color: $body-color;
 $mermaid-fg-color--lighter: #3b4a70;
 $mermaid-fg-color--lightest: #141e38;
 $mermaid-label-bg-color: $kates-diagram-bg;
 $mermaid-label-fg-color: #e6ecf7;
 $mermaid-edge-color: #a3b2cf;
+
+// Group titles, sequence frame tags (loop, opt, alt), the header of an ER
+// table and its alternate rows, and the shadow under each card
+$kates-diagram-group-fg: #8ea6d0;
+$kates-diagram-tint: #1a2a4a;
+$kates-diagram-row-alt: #141e38;
+$kates-diagram-shadow: rgba(0, 0, 0, 0.35);
 
 // Cover
 $kates-cover-shadow: rgba(0, 0, 0, 0.7);
