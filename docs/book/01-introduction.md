@@ -72,19 +72,19 @@ Kates refuses a disruption plan that would hit every broker, or more brokers tha
 
 ## Feature Overview
 
-Each row is one area of Kates and the features it offers there. The first three rows answer the three dimensions above. The rest cover how you watch a run, export its results and check them against your targets, drive Kates from the CLI, schedule runs, and combine a performance test with chaos.
+The table maps each area of Kates to what it gives you. The first three rows match the three areas in the diagram above.
 
 | Category | Features |
 |----------|----------|
-| **Performance Testing** | LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP and INTEGRITY test types |
-| **Chaos Engineering** | Kubernetes-native [disruption types](appendix-a-glossary.md#gl-disruption-type), 6 built-in [playbooks](appendix-a-glossary.md#gl-playbook), a safety guard that caps the brokers a plan hits, rollback of scale-downs and of the partitions Kates creates |
-| **Data Integrity** | Sequence tracking, [idempotency](appendix-a-glossary.md#gl-idempotent-producer) validation, [exactly-once](appendix-a-glossary.md#gl-exactly-once-semantics) verification, gap detection |
-| **Observability** | Latency heatmaps, broker metrics correlation, historical trends, [sparkline](appendix-a-glossary.md#gl-sparkline) charts |
-| **Export Formats** | JSON, CSV, JUnit XML, Grafana-compatible heatmap JSON |
-| **SLA Enforcement** | Gates on [throughput](appendix-a-glossary.md#gl-throughput), latency, recovery and data loss per scenario; an SLA grade for each disruption plan with an `sla` block |
-| **CLI** | Commands covering test management, reports, cluster inspection, and disruption control |
-| **Scheduling** | Cron-based recurring tests for regression detection |
-| **Resilience Testing** | Resilience runs: one Kates test with one fault injected while it runs, reported as before-and-after impact |
+| Performance Testing | LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP and INTEGRITY test types |
+| Chaos Engineering | Kubernetes-native [disruption types](appendix-a-glossary.md#gl-disruption-type), 6 built-in [playbooks](appendix-a-glossary.md#gl-playbook), a safety guard that caps the brokers a plan hits, rollback of scale-downs and of the partitions Kates creates |
+| Data Integrity | Sequence tracking, [idempotency](appendix-a-glossary.md#gl-idempotent-producer) validation, [exactly-once](appendix-a-glossary.md#gl-exactly-once-semantics) verification, gap detection |
+| Observability | Latency heatmaps, broker metrics correlation, historical trends, [sparkline](appendix-a-glossary.md#gl-sparkline) charts |
+| Export Formats | JSON, CSV, JUnit XML, Grafana-compatible heatmap JSON |
+| SLA Enforcement | Gates on [throughput](appendix-a-glossary.md#gl-throughput), latency, recovery and data loss per scenario; an SLA grade for each disruption plan with an `sla` block |
+| CLI | `kates test`, `kates report`, `kates cluster`, `kates disruption` and `kates trend`, among others |
+| Scheduling | Cron-based recurring tests for regression detection |
+| Resilience Testing | Resilience runs: one Kates test with one fault injected while it runs, reported as before-and-after impact |
 
 ## How Kates Fits Into Your Workflow
 
