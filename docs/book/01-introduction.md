@@ -184,11 +184,11 @@ To set expectations clearly:
 
 ## Summary
 
-- Kates — Kafka Advanced Testing & Engineering Suite — pairs performance testing with chaos engineering, and understands Kafka semantics like producer acknowledgments, ISR state, and partition leadership rather than treating the cluster as a black box.
-- Production readiness spans three dimensions — performance, resilience, and data integrity — and Kates checks all three with repeatable tests against targets you set.
-- Five principles shape the design: Kafka-native, Kubernetes-first, SLA-driven, observable, and safe by default.
-- Every test produces structured output — JSON, CSV, JUnit XML, heatmap data — so results feed CI/CD gates and trend analysis, not just terminal scrollback.
-- Kates is a testing and validation platform, not a Kafka distribution, a management UI, or a production monitoring system.
+- Kates pairs performance testing with chaos engineering, and its tests use Kafka's own settings instead of treating the cluster as a black box.
+- Production readiness has three parts: performance, resilience and data integrity. Kates checks each with repeatable tests against targets you set.
+- Five principles shape the design: Kafka-native, Kubernetes-first, SLA-driven, observable and safe by default.
+- Every run produces structured output, so CI gates and trend analysis can use the results.
+- Kates is a testing and validation tool, not a Kafka distribution, a management UI or a production monitoring system.
 
 Next, [Architecture & Design](02-architecture.md) opens the hood: it shows the two halves of Kates, what runs where, and where a run's results live.
 
