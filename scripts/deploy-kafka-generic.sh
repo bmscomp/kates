@@ -7,6 +7,7 @@
 #   ./scripts/deploy-kafka-generic.sh               # interactive (prompts before deploy)
 #   ./scripts/deploy-kafka-generic.sh --yes          # non-interactive (auto-approve)
 #   ./scripts/deploy-kafka-generic.sh -f extra.yaml  # merge additional values overlay
+#                                                    # (repeatable; later files win)
 #   ./scripts/deploy-kafka-generic.sh --skip-tests   # skip Helm test after deploy
 
 set -euo pipefail
@@ -23,23 +24,24 @@ AUTO_OVERLAY=""
 
 # Parse arguments
 AUTO_APPROVE=false
-EXTRA_VALUES=""
+EXTRA_VALUES=()
 SKIP_TESTS=false
 RUN_TESTS=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes|-y)       AUTO_APPROVE=true; shift ;;
-        --values|-f)    EXTRA_VALUES="$2"; shift 2 ;;
+        --values|-f)    EXTRA_VALUES+=("$2"); shift 2 ;;
         --skip-tests)   SKIP_TESTS=true; shift ;;
         --run-tests)    RUN_TESTS=true; SKIP_TESTS=false; shift ;;
         -h|--help)
-            echo "Usage: $0 [--yes] [--values extra.yaml] [--skip-tests] [--run-tests]"
+            echo "Usage: $0 [--yes] [--values extra.yaml]... [--skip-tests] [--run-tests]"
             echo ""
             echo "Deploy Kafka to any Kubernetes cluster using auto-detected configuration."
             echo ""
             echo "Options:"
             echo "  -y, --yes          Skip review prompt (non-interactive)"
             echo "  -f, --values FILE  Merge additional values overlay on top of detected values"
+            echo "                     (repeatable; a later file wins over an earlier one)"
             echo "  --skip-tests       Skip Helm test after deployment"
             echo "  --run-tests        Force Helm tests even when auto-skip would apply (e.g. Kind)"
             echo "  -h, --help         Show this help"
@@ -84,14 +86,16 @@ echo "────────────────────────�
 cat "${DETECTED_VALUES}"
 echo "─────────────────────────────────────────────"
 
-if [ -n "${EXTRA_VALUES}" ]; then
-    if [ -f "${EXTRA_VALUES}" ]; then
-        info "Additional overlay: ${EXTRA_VALUES}"
+# ${EXTRA_VALUES[@]+...}: bash 3.2, macOS's /bin/bash, calls an empty array
+# unbound under set -u.
+for extra in ${EXTRA_VALUES[@]+"${EXTRA_VALUES[@]}"}; do
+    if [ -f "${extra}" ]; then
+        info "Additional overlay: ${extra}"
     else
-        error "Extra values file not found: ${EXTRA_VALUES}"
+        error "Extra values file not found: ${extra}"
         exit 1
     fi
-fi
+done
 
 # Resolve environment/provider overlay automatically.
 # Priority: explicit ENV (from Makefile) -> detected provider.
@@ -196,7 +200,9 @@ done
 # detected values so the overlays can still change any of it.
 VALUES_ARGS=(-f "${DETECTED_VALUES}" -f "${CHART_DIR}/values-platform.yaml")
 [ -n "${AUTO_OVERLAY}" ] && VALUES_ARGS+=(-f "${AUTO_OVERLAY}")
-[ -n "${EXTRA_VALUES}" ] && VALUES_ARGS+=(-f "${EXTRA_VALUES}")
+for extra in ${EXTRA_VALUES[@]+"${EXTRA_VALUES[@]}"}; do
+    VALUES_ARGS+=(-f "${extra}")
+done
 
 info "  Release:    ${RELEASE_NAME}"
 info "  Namespace:  ${NAMESPACE}"

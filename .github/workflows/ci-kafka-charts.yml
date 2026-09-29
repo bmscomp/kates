@@ -569,13 +569,18 @@ jobs:
           set -euo pipefail
           helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
           scripts/retry.sh 5 helm dependency build charts/kafka-cluster/
+          # One install with both files, and the script waits for Kafka. The
+          # live file used to go on in a second upgrade that scaled the brokers
+          # from values-ci's one to its two: the first broker rolled, and
+          # Cruise Control's add-brokers rebalance was still running when
+          # Connect's leg installed Connect. In one run, Connect's pod then
+          # came up ten minutes late.
           ./scripts/deploy-kafka-generic.sh --yes --skip-tests \
-            -f charts/kafka-cluster/values-ci.yaml
-          # The release deploy-kafka-generic.sh installs (its RELEASE_NAME);
-          # krafter is the Kafka resource inside it, as the wait below reads.
-          helm upgrade kafka-cluster charts/kafka-cluster -n kafka --reuse-values \
+            -f charts/kafka-cluster/values-ci.yaml \
             -f scripts/metric-contract/live/kafka-cluster.yaml
-          kubectl -n kafka wait kafka/krafter --for=condition=Ready --timeout=600s
+          # The script carries on when every pod runs but Kafka is not Ready;
+          # this job must not.
+          kubectl -n kafka wait kafka/krafter --for=condition=Ready --timeout=300s
 
       # Traffic, so the per-topic, request and consumer-group beans exist at
       # all: a cluster nobody has written to registers a fraction of them.
@@ -752,10 +757,16 @@ jobs:
         run: |
           mkdir -p /tmp/diag
           kubectl get all -A > /tmp/diag/all.txt 2>&1 || true
-          kubectl -n kafka get kafka,kafkanodepools,kafkaconnects,kafkaconnectors,kafkausers -o yaml > /tmp/diag/crs.yaml 2>&1 || true
-          kubectl -n kafka get events --sort-by=.lastTimestamp > /tmp/diag/events.txt 2>&1 || true
-          for p in $(kubectl -n kafka get pods -o name 2>/dev/null); do
-            kubectl -n kafka logs "$p" --all-containers --tail=300 > "/tmp/diag/$(basename "$p").log" 2>&1 || true
+          kubectl -n kafka get kafka,kafkanodepools,kafkaconnects,kafkaconnectors,kafkausers,kafkarebalances,strimzipodsets -o yaml > /tmp/diag/crs.yaml 2>&1 || true
+          # The operator's log too: a resource that never gets a status (the
+          # KafkaConnect that waited ten minutes for its pod) is explained
+          # only there.
+          for ns in kafka strimzi-operator; do
+            kubectl -n "$ns" get events --sort-by=.lastTimestamp > "/tmp/diag/events-$ns.txt" 2>&1 || true
+            for p in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
+              kubectl -n "$ns" logs "$p" --all-containers --tail=2000 \
+                > "/tmp/diag/$ns-$(basename "$p").log" 2>&1 || true
+            done
           done
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
