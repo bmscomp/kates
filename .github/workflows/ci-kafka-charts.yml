@@ -711,6 +711,9 @@ jobs:
       # judging a full query here would report a dozen failures on healthy
       # boards. The script's own docstring sets out the rule.
       - name: The boards can see the series this cluster publishes
+        # A hang here showed only as the whole job cancelled at its 45-minute
+        # limit; a step timeout fails this step instead, and sooner.
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           args=""
