@@ -1,0 +1,79 @@
+# Scale profile — a large estate, not a laptop.
+#
+#   helm upgrade --install mm2 charts/mirror-maker2 \
+#     -f charts/mirror-maker2/values-prod.yaml \
+#     -f charts/mirror-maker2/values-scale.yaml
+#
+# THREE THINGS DOMINATE MirrorMaker's cost at scale, and the defaults are
+# tuned for none of them:
+#
+#   1. TASKS, not replicas. Connect distributes at most sum(tasksMax) tasks;
+#      workers beyond that idle. tasksMax's own ceiling is the number of
+#      partitions the pattern selects, so 16 here assumes a source with at
+#      least that many. The chart refuses an autoscaler whose maxReplicas
+#      exceeds the task budget rather than letting you scale into nothing.
+#
+#   2. TOPIC REFRESH. The default rescans the source's metadata every 60s.
+#      On a 10 000-partition cluster that is a measurable, permanent load on
+#      both ends for the sake of noticing a new topic a few minutes sooner.
+#      Ten minutes is the trade this profile makes; raise it further on a
+#      cluster whose topic set is stable.
+#
+#   3. BATCHING. The producer defaults favour latency. A mirror is a bulk
+#      copier: linger and batch buy throughput, and the records are already
+#      not real-time by the time they arrive.
+replicas: 6
+
+autoscaling:
+  enabled: true
+  minReplicas: 4
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+jvmOptions:
+  -Xms: 4096m
+  -Xmx: 4096m
+
+resources:
+  requests:
+    memory: 6Gi
+    cpu: "2"
+  limits:
+    memory: 8Gi
+    cpu: "4"
+
+mirrors:
+  - source:
+      alias: source
+      clusterName: "krafter"
+      namespace: "kafka"
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2"
+        secretName: "kates-mm2"
+        secretKey: "password"
+    topicsPattern: ".*"
+    groupsPattern: ".*"
+    sourceConnector:
+      # 12 + 4 = 16 tasks, which is the autoscaler's ceiling above.
+      tasksMax: 12
+      config:
+        replication.factor: 3
+        offset-syncs.topic.replication.factor: 3
+        sync.topic.acls.enabled: "false"
+        # See (2): the scan is not free.
+        refresh.topics.interval.seconds: 600
+        # See (3): bulk copy, not request/response.
+        producer.override.linger.ms: 100
+        producer.override.batch.size: 262144
+        producer.override.compression.type: lz4
+        producer.override.max.request.size: 2097152
+        consumer.override.max.poll.records: 2000
+        consumer.override.receive.buffer.bytes: 4194304
+    checkpointConnector:
+      tasksMax: 4
+      config:
+        checkpoints.topic.replication.factor: 3
+        sync.group.offsets.enabled: "true"
+        refresh.groups.interval.seconds: 600

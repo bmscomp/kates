@@ -10,7 +10,12 @@ If you haven't already deployed the cluster, run:
 make all
 ```
 
-This creates the Kind cluster, pulls all container images, and deploys Kafka, monitoring, and LitmusChaos.
+This creates the Kind cluster, pulls all container images, and deploys Kafka, monitoring, and LitmusChaos. This is a one-time setup step — it takes 5–10 minutes on a fresh machine.
+
+`make all` prompts for a topology before it does anything. Choose **2, isolated namespaces** — the rest of this tutorial uses the namespaces that choice creates (`kafka`, `kates`, `monitoring`, `litmus`). Option 1 puts the whole stack in a single `kates-stack` namespace instead, which is fine for a scratch cluster but means every `-n <namespace>` below needs changing.
+
+> [!TIP]
+> If `make all` fails with image pull errors, check your internet connection and Docker disk space (`docker system df`). Kind needs at least 20GB of free disk space.
 
 Verify everything is running:
 
@@ -26,7 +31,7 @@ Expected output: all pods across `kafka`, `monitoring`, and `litmus` namespaces 
 make kates
 ```
 
-This builds the Kates Quarkus application, creates a Docker image, loads it into Kind, and deploys it to the `kates` namespace.
+This builds the Kates Quarkus application, creates a Docker image, loads it into Kind, and deploys it to the `kates` namespace. The backend exposes a REST API on port 30083 that the CLI uses for all commands.
 
 Verify:
 
@@ -63,6 +68,9 @@ Expected output:
   API         ✅ Responsive
 ```
 
+> [!TIP]
+> If the health check fails, verify all pods are running with `kubectl get pods -A` and check the Kates backend logs with `kubectl logs -n kates -l app.kubernetes.io/name=kates`. The most common cause is the backend pod not being ready yet — wait 30 seconds and retry.
+
 Explore the cluster:
 
 ```bash
@@ -78,7 +86,7 @@ kates dashboard
 
 ## Step 5: Run Your First Test
 
-Let's run a simple LOAD test — 100,000 messages with default settings:
+Let's run a simple LOAD test — 100,000 messages with default settings. This sends messages to a Kafka topic at maximum speed and measures how fast your cluster can process them:
 
 ```bash
 kates test create --type LOAD --records 100000 --wait
@@ -141,16 +149,21 @@ The report includes:
 
 ## Step 8: Export the Data
 
-```bash
-# JSON (programmatic consumption)
-kates report export <id> --format json -o report.json
+`export` writes to stdout, so redirect it to a file. The formats are `csv`,
+`junit`, `heatmap`, `heatmap-csv`, `md` and `html`:
 
-# CSV (spreadsheet analysis)
-kates report export <id> --format csv -o report.csv
+```bash
+# CSV (spreadsheet analysis) — the default format
+kates report export <id> --format csv > report.csv
 
 # Heatmap (Grafana visualization)
-kates report export <id> --format heatmap -o heatmap.json
+kates report export <id> --format heatmap > heatmap.json
+
+# JUnit (CI test reporting)
+kates report export <id> --format junit > report.xml
 ```
+
+For the report as JSON, ask `show` for it instead: `kates report show <id> -o json`.
 
 ## Step 9: Run a Test with Consumers
 

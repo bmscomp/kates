@@ -1,0 +1,13 @@
+# File provisioning for the compat harness. Route C in dashboards/README.md
+# uses the same shape; this one points at a directory the harness fills.
+apiVersion: 1
+providers:
+  - name: kates
+    orgId: 1
+    folder: Kates
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

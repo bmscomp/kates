@@ -1,17 +1,43 @@
-# Generic cluster overlay for connect-cluster
-# Disables components that require extra operators (like Prometheus CRDs)
+# kind overlay for connect-cluster, used by `kates deploy` on kind.
+#
+# The image is deliberately NOT overridden here. kind pulls the same published
+# image every other cluster runs — ghcr.io/bmscomp/connect:<debezium>-kafka-<kafka>
+# from values.yaml. That tag is a release artefact, so it exists for the pins
+# this repo declares; check-versions.sh asserts the Debezium line in the pin is
+# the one Dockerfile.connect builds.
+#
+# To run an image built from the working tree — a plugin change, a Debezium bump
+# not yet published — build it, then override the pin for that deploy:
+#
+#   make connect-build        # also loads the qualified tag into the kind cluster
+#   helm upgrade --install connect-cluster charts/connect-cluster -n connect \
+#     -f charts/connect-cluster/values-kind.yaml --set image=connect:<debezium>
+#
+# `make connect-build` also loads the image under the qualified tag values.yaml
+# names, so on kind a fresh local build shadows the registry copy without any
+# override at all (the pull policy is IfNotPresent).
 
-alerts:
-  enabled: false
-
-podMonitors:
-  enabled: false
-
-dashboards:
-  enabled: false
-
-networkPolicy:
-  enabled: false
+# Monitoring stays on, as in values-generic.yaml: the chart renders the
+# PodMonitor and alerts only where the monitoring.coreos.com/v1 API exists,
+# and holding them off here is what left the Connect board empty on kind.
 
 tracing:
   enabled: false
+
+networkPolicy:
+  egress:
+    databases:
+      - namespace: kates
+        port: 5432
+        podSelector:
+          app.kubernetes.io/name: postgresql
+
+schemaRegistry:
+  enabled: true
+
+# The kates CLI applies its own CDC connectors next to this release; their
+# configs read these Secrets through the config provider.
+rbac:
+  secretNames:
+    - connect-pg-credentials
+    - kates-connect

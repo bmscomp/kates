@@ -1,30 +1,46 @@
-name: Docker Build Validation
+name: CI · Docker
 
 on:
   push:
     branches: [main]
-    paths:
-      - "kates/**"
-      - "cli/**"
-      - "images.env"
-      - "versions.env"
-      - ".github/workflows/ci-docker.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "kates/**"
-      - "cli/**"
-      - "images.env"
-      - "versions.env"
-      - ".github/workflows/ci-docker.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            image:
+              - 'kates/**'
+              - '!kates/**/*.md'
+              - 'cli/**'
+              - '!cli/**/*.md'
+              - 'images.env'
+              - 'versions.env'
+              - '.github/workflows/ci-docker.yml'
+
   build-validation:
     name: Build ${{ matrix.variant }} (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -37,16 +53,9 @@ jobs:
             runner: ubuntu-latest
             qemu: false
 
-          - variant: native
-            arch: amd64
-            platform: linux/amd64
-            dockerfile: kates/Dockerfile.native
-            runner: ubuntu-latest
-            qemu: false
-
           # --- arm64 build (native ARM runner, JVM only) ---
-          # native/arm64 is excluded: GraalVM native-image is too slow
-          # for CI even on native runners (~12 min) — validated at release time.
+          # native builds (amd64 + arm64) are excluded: GraalVM native-image
+          # is too slow for PR CI (~7-12 min) — validated at release time.
           - variant: jvm
             arch: arm64
             platform: linux/arm64
@@ -55,13 +64,13 @@ jobs:
             qemu: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build image (no push)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -70,3 +79,15 @@ jobs:
           tags: kates:ci-${{ matrix.variant }}-${{ matrix.arch }}
           cache-from: type=gha,scope=ci-${{ matrix.variant }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=ci-${{ matrix.variant }}-${{ matrix.arch }}
+
+  gate:
+    name: Gate · Docker
+    if: always()
+    needs: [changes, build-validation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

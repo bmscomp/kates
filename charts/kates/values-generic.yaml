@@ -1,9 +1,11 @@
 # Kates — Generic Kubernetes Cluster Overlay
 # Cloud-native defaults for any standard Kubernetes environment
 
+# No image.tag here: `kates deploy` applies this file on every cluster that is
+# not kind, so a pin here would override the release values.yaml names, which
+# has to carry the health endpoints the probes use (>= 1.22.0).
 image:
   repository: ghcr.io/bmscomp/kates
-  tag: "1.17.0"
   pullPolicy: IfNotPresent
 
 resources:
@@ -14,8 +16,10 @@ resources:
     memory: "512Mi"
     cpu: "1000m"
 
+# ZGenerational: on the JDK 21 image, -XX:+UseZGC alone runs the single-
+# generation mode; values.yaml and values-prod.yaml run the generational one.
 jvm:
-  options: "-Xms128m -Xmx256m -XX:+UseZGC"
+  options: "-Xms128m -Xmx256m -XX:+UseZGC -XX:+ZGenerational"
 
 networkPolicy:
   enabled: true

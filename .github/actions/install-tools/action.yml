@@ -1,0 +1,66 @@
+name: Install CLI tools
+description: >-
+  Installs kubeconform and/or the Kyverno CLI at the versions versions.env
+  pins, from a per-version cache so the release download happens once per pin
+  bump rather than on every run. Run load-versions first.
+inputs:
+  kubeconform:
+    description: Install kubeconform (KUBECONFORM_VERSION)
+    required: false
+    default: "false"
+  kyverno:
+    description: Install the Kyverno CLI (KYVERNO_CLI_VERSION)
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Require the pins
+      shell: bash
+      env:
+        WANT_KUBECONFORM: ${{ inputs.kubeconform }}
+        WANT_KYVERNO: ${{ inputs.kyverno }}
+      run: |
+        set -euo pipefail
+        if [ "${WANT_KUBECONFORM}" = "true" ] && [ -z "${KUBECONFORM_VERSION:-}" ]; then
+          echo "::error::KUBECONFORM_VERSION is unset — run .github/actions/load-versions first"; exit 1
+        fi
+        if [ "${WANT_KYVERNO}" = "true" ] && [ -z "${KYVERNO_CLI_VERSION:-}" ]; then
+          echo "::error::KYVERNO_CLI_VERSION is unset — run .github/actions/load-versions first"; exit 1
+        fi
+        mkdir -p "${RUNNER_TEMP}/tools"
+
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      id: cache
+      with:
+        path: ${{ runner.temp }}/tools
+        key: tools-${{ runner.os }}-${{ runner.arch }}-kubeconform-${{ inputs.kubeconform == 'true' && env.KUBECONFORM_VERSION || 'no' }}-kyverno-${{ inputs.kyverno == 'true' && env.KYVERNO_CLI_VERSION || 'no' }}
+
+    - name: Download
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        WANT_KUBECONFORM: ${{ inputs.kubeconform }}
+        WANT_KYVERNO: ${{ inputs.kyverno }}
+      run: |
+        set -euo pipefail
+        cd "${RUNNER_TEMP}/tools"
+        # --fail and retries: a release-asset hiccup once saved an HTML error
+        # page in place of the archive, which tar rejected as "not in gzip format".
+        fetch() { curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o "$1" "$2"; }
+        if [ "${WANT_KUBECONFORM}" = "true" ]; then
+          fetch kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf kubeconform.tgz kubeconform && rm kubeconform.tgz
+        fi
+        if [ "${WANT_KYVERNO}" = "true" ]; then
+          fetch kyverno.tgz "https://github.com/kyverno/kyverno/releases/download/${KYVERNO_CLI_VERSION}/kyverno-cli_${KYVERNO_CLI_VERSION}_linux_x86_64.tar.gz"
+          tar -xzf kyverno.tgz kyverno && rm kyverno.tgz
+        fi
+
+    - name: Put on PATH
+      shell: bash
+      run: |
+        set -euo pipefail
+        chmod +x "${RUNNER_TEMP}"/tools/*
+        echo "${RUNNER_TEMP}/tools" >> "$GITHUB_PATH"
+        ls -l "${RUNNER_TEMP}/tools"

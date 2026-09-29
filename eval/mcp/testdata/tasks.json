@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "fixed_at": "2026-09-26",
+  "tasks": [
+    {
+      "id": "sec-posture",
+      "persona": "security",
+      "prompt": "Where does the lab Kafka cluster stand on security, and what changed since the baseline saved at {baseline_ts}?",
+      "answer_fields": [
+        {
+          "name": "grade",
+          "type": "string",
+          "description": "the cluster's security grade, one letter"
+        },
+        {
+          "name": "failing_checks",
+          "type": "number",
+          "description": "how many checks fail"
+        },
+        {
+          "name": "drifted_checks",
+          "type": "string[]",
+          "description": "names of the checks that changed since the baseline"
+        }
+      ],
+      "setup": [
+        {
+          "kind": "kates",
+          "args": [
+            "security",
+            "baseline",
+            "--save",
+            "-o",
+            "json"
+          ],
+          "capture": {
+            "baseline_ts": "$.timestamp"
+          }
+        },
+        {
+          "kind": "wait",
+          "seconds": 0.01
+        }
+      ],
+      "oracle": {
+        "fn": "security_grade",
+        "args": {
+          "baseline_ts": "{baseline_ts}"
+        }
+      },
+      "checks": [
+        {
+          "field": "grade",
+          "kind": "exact"
+        },
+        {
+          "field": "failing_checks",
+          "kind": "number",
+          "tolerance": 0,
+          "tolerance_kind": "abs"
+        },
+        {
+          "field": "drifted_checks",
+          "kind": "set"
+        }
+      ],
+      "required_caveats": [
+        {
+          "id": "pentest-config-only",
+          "any_of": [
+            "configuration only",
+            "config-only",
+            "attacks nothing",
+            "attack nothing"
+          ]
+        },
+        {
+          "id": "cve-static-list",
+          "any_of": [
+            "fixed list",
+            "static list",
+            "seven cves",
+            "7 cves"
+          ]
+        }
+      ],
+      "arms": [
+        "mcp",
+        "cli"
+      ],
+      "trials": 3,
+      "timeout_s": 60,
+      "notes": "Fixture for the harness tests: a posture and drift question with a known grade."
+    },
+    {
+      "id": "run-noise",
+      "persona": "platform",
+      "prompt": "Is LOAD run {run_id} faster than usual, or within the noise of earlier runs with the same spec?",
+      "answer_fields": [
+        {
+          "name": "verdict",
+          "type": "string",
+          "description": "below, within or above the noise band"
+        },
+        {
+          "name": "p99_ms",
+          "type": "number",
+          "description": "the run's p99 latency in milliseconds"
+        },
+        {
+          "name": "band_runs",
+          "type": "number",
+          "description": "how many earlier runs the band is built from"
+        }
+      ],
+      "setup": [
+        {
+          "kind": "kates",
+          "args": [
+            "test",
+            "list",
+            "--type",
+            "LOAD",
+            "--status",
+            "DONE",
+            "--size",
+            "1",
+            "-o",
+            "json"
+          ],
+          "capture": {
+            "run_id": "$.items[0].id"
+          }
+        }
+      ],
+      "oracle": {
+        "fn": "run_noise",
+        "args": {
+          "run_id": "{run_id}"
+        }
+      },
+      "checks": [
+        {
+          "field": "verdict",
+          "kind": "exact"
+        },
+        {
+          "field": "p99_ms",
+          "kind": "number",
+          "tolerance": 5,
+          "tolerance_kind": "pct"
+        },
+        {
+          "field": "band_runs",
+          "kind": "number",
+          "tolerance": 0,
+          "tolerance_kind": "abs"
+        }
+      ],
+      "required_caveats": [
+        {
+          "id": "load-single-producer",
+          "any_of": [
+            "one producer",
+            "single producer"
+          ]
+        }
+      ],
+      "forbid": {
+        "mcp": [
+          "disruption_report"
+        ],
+        "cli": [
+          "kates disruption status",
+          "kubectl"
+        ]
+      },
+      "arms": [
+        "mcp",
+        "cli"
+      ],
+      "trials": 3,
+      "timeout_s": 60,
+      "notes": "Fixture: a run judged against its noise band; forbids a tool to exercise forbid handling."
+    }
+  ]
+}

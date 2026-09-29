@@ -1,0 +1,43 @@
+# Kind (local development) overlay for kafka-ui
+# Integrates with the local Apicurio Schema Registry and Kafka Connect cluster.
+
+service:
+  type: NodePort
+  nodePort: 30081
+
+kafkaUser:
+  # Managed by the krafter chart in this stack; avoid Helm ownership conflicts.
+  enabled: false
+
+schemaRegistry:
+  enabled: true
+  url: "http://apicurio-apicurio-registry.kafka.svc:80/apis/ccompat/v7"
+
+kafkaConnect:
+  enabled: true
+  name: "connect-cluster"
+  url: "http://connect-connect-cluster-rest-api.kafka.svc:8083"
+
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+auth:
+  enabled: true
+  type: LOGIN_FORM
+  username: admin
+  passwordSecret: kafka-ui-web-password
+  rbac:
+    enabled: false
+    roles: []

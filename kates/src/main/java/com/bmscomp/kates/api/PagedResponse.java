@@ -1,6 +1,7 @@
 package com.bmscomp.kates.api;
 
 import java.util.List;
+
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**

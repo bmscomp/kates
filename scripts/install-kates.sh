@@ -3,7 +3,7 @@ set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 BINARY="kates"
-REPO_BASE_URL="${KATES_DOWNLOAD_URL:-https://github.com/klster/kates-cli/releases/latest/download}"
+REPO_BASE_URL="${KATES_DOWNLOAD_URL:-https://github.com/bmscomp/kates/releases/latest/download}"
 
 detect_platform() {
   local os arch

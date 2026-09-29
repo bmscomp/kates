@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -15,7 +14,7 @@ import (
 func waitComponentReadySilent(ctx context.Context, namespace, selector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		out, err := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", namespace, "-l", selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}").Output()
+		out, err := runExecOutputFn(ctx, "kubectl", "get", "pods", "-n", namespace, "-l", selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}")
 		if err == nil {
 			phases := strings.Split(strings.TrimSpace(string(out)), ",")
 			allReady := true
@@ -47,7 +46,7 @@ func waitComponentReadySilent(ctx context.Context, namespace, selector string, t
 func waitCustomResourceReadySilent(ctx context.Context, kind, namespace, selector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		out, err := exec.CommandContext(ctx, "kubectl", "get", kind, "-n", namespace, "-l", selector, "-o", "jsonpath={range .items[*]}{.status.conditions[?(@.type==\"Ready\")].status}{','}{end}").Output()
+		out, err := runExecOutputFn(ctx, "kubectl", "get", kind, "-n", namespace, "-l", selector, "-o", "jsonpath={range .items[*]}{.status.conditions[?(@.type==\"Ready\")].status}{','}{end}")
 		if err == nil {
 			statuses := strings.Split(strings.TrimSpace(string(out)), ",")
 			allReady := true
@@ -74,7 +73,7 @@ func waitCustomResourceReadySilent(ctx context.Context, kind, namespace, selecto
 }
 
 func waitKafkaUsersReadySilent(ctx context.Context, namespace string, timeout time.Duration) error {
-	return waitCustomResourceReadySilent(ctx, "kafkauser", namespace, "strimzi.io/cluster=krafter", timeout)
+	return waitCustomResourceReadySilent(ctx, "kafkauser", namespace, "strimzi.io/cluster="+deployKafkaName, timeout)
 }
 
 func waitConnectorReadySilent(ctx context.Context, namespace string, timeout time.Duration) error {

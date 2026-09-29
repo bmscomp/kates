@@ -5,9 +5,10 @@ import java.util.List;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
+import com.bmscomp.kates.report.ReportSummary;
+import com.bmscomp.kates.util.MetricUtils;
 
 /**
  * Server-side rule engine that analyzes test results and cluster state
@@ -29,17 +30,11 @@ public class AdvisorService {
         }
 
         TestSpec spec = run.getSpec();
-        double avgThroughput = 0, avgP99 = 0;
-        int count = 0;
-        for (TestResult r : run.getResults()) {
-            avgThroughput += r.getThroughputRecordsPerSec();
-            avgP99 += r.getP99LatencyMs();
-            count++;
-        }
-        if (count > 0) {
-            avgThroughput /= count;
-            avgP99 /= count;
-        }
+        // The run's summary rather than a mean over its tasks: a LOAD run's
+        // consumer measures no latency, and averaging its 0 in halved the p99.
+        ReportSummary summary = MetricUtils.computeSummary(run.getResults());
+        double avgThroughput = summary.avgThroughputRecPerSec();
+        double p99 = summary.p99LatencyMs();
 
         int clusterBrokers = clusterHealthService.brokerCount();
 
@@ -127,10 +122,10 @@ public class AdvisorService {
                     "small records amplify per-message metadata costs"));
         }
 
-        if (avgP99 > 100 && spec.getBatchSize() > 65536) {
+        if (p99 > 100 && spec.getBatchSize() > 65536) {
             rules.add(new Recommendation(
                     "MED",
-                    String.format("p99=%.0fms with large batch.size=%d — try reducing", avgP99, spec.getBatchSize()),
+                    String.format("p99=%.0fms with large batch.size=%d — try reducing", p99, spec.getBatchSize()),
                     "Reduce batch.size or linger.ms to trade throughput for latency",
                     "large batches increase fill time, raising tail latency"));
         }

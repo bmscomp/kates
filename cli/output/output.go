@@ -7,10 +7,12 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/pkg/theme"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 	"golang.org/x/term"
 )
 
@@ -19,6 +21,33 @@ func TermWidth() int {
 		return w
 	}
 	return 120
+}
+
+var plainMode bool
+
+// SetPlain only ever forces the color profile DOWN. With plain=false it leaves
+// lipgloss's automatic termenv detection in charge, which is what honors
+// NO_COLOR, TERM=dumb, non-truecolor terminals (tmux without Tc, Terminal.app
+// get ANSI-256/16 conversions instead of raw 38;2 sequences), and the
+// downgrade to no styling when stdout is a pipe. The previous version forced
+// TrueColor on every run, which defeated all of that at once: escape codes in
+// piped output and CI logs, and NO_COLOR silently ignored.
+func SetPlain(plain bool) {
+	plainMode = plain
+	if plain {
+		lipgloss.SetColorProfile(termenv.Ascii)
+	}
+}
+
+// ColumnWidth returns the width available for a column after reserving
+// 'reserved' characters, with a guaranteed minimum of 'minWidth'.
+// Use this instead of duplicating terminal-width calculations.
+func ColumnWidth(reserved, minWidth int) int {
+	w := TermWidth() - reserved
+	if w < minWidth {
+		return minWidth
+	}
+	return w
 }
 
 var (
@@ -102,22 +131,36 @@ func StatusBadge(status string) string {
 	upper := strings.ToUpper(status)
 	switch upper {
 	case "UP", "DONE", "PASS", "COMPLETED", "ENABLED":
-		return SuccessStyle.Bold(true).Render("● " + upper)
+		return SuccessStyle.Bold(true).Render(Glyphs().Bullet + " " + upper)
 	case "RUNNING", "PENDING":
-		return AccentStyle.Bold(true).Render("◉ " + upper)
+		return AccentStyle.Bold(true).Render(Glyphs().DotOn + " " + upper)
 	case "DEGRADED", "STOPPING":
-		return WarningStyle.Bold(true).Render("◈ " + upper)
+		return WarningStyle.Bold(true).Render(Glyphs().Diamond + " " + upper)
 	case "DOWN", "FAILED", "ERROR", "FAIL":
-		return ErrorStyle.Render("✖ " + upper)
+		return ErrorStyle.Render(Glyphs().Cross + " " + upper)
 	case "DISABLED":
-		return DimStyle.Render("○ " + upper)
+		return DimStyle.Render(Glyphs().Ring + " " + upper)
 	default:
-		return DimStyle.Render("○ " + status)
+		return DimStyle.Render(Glyphs().Ring + " " + status)
 	}
 }
 
+// ClearFrame starts a new frame of a refreshing display. When clear is true
+// (an interactive terminal) it clears the screen; otherwise it emits a
+// timestamped separator so redirected output stays append-only — a log full
+// of clear-screen sequences is unreadable in an editor and unparseable by
+// tools, and `... | head` used to emit them forever.
+func ClearFrame(clear bool) {
+	if clear {
+		fmt.Fprint(Out, "\033[2J\033[H")
+		return
+	}
+	g := Glyphs()
+	fmt.Fprintln(Out, DimStyle.Render(strings.Repeat(g.Rule, 8)+" "+time.Now().Format("15:04:05")+" "+strings.Repeat(g.Rule, 8)))
+}
+
 func Header(text string) {
-	bar := lipgloss.NewStyle().Foreground(Purple).Render("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	bar := lipgloss.NewStyle().Foreground(Purple).Render(strings.Repeat(Glyphs().HeavyRule, 42))
 	title := lipgloss.NewStyle().Bold(true).Foreground(HeaderColor).Render("  " + text)
 	fmt.Fprintln(Out)
 	fmt.Fprintln(Out, bar)
@@ -127,7 +170,7 @@ func Header(text string) {
 
 func SubHeader(text string) {
 	fmt.Fprintln(Out)
-	fmt.Fprintln(Out, SubHeaderStyle.Render("▸ "+text))
+	fmt.Fprintln(Out, SubHeaderStyle.Render(Glyphs().Arrow+" "+text))
 }
 
 func KeyValue(key, value string) {
@@ -140,15 +183,15 @@ func KeyValueIndent(key, value string, indent int) {
 }
 
 func Success(msg string) {
-	fmt.Fprintln(Out, SuccessStyle.Render("  ✓ "+msg))
+	fmt.Fprintln(Out, SuccessStyle.Render("  "+Glyphs().Check+" "+msg))
 }
 
 func Warn(msg string) {
-	fmt.Fprintln(Out, WarningStyle.Render("  ⚠ "+msg))
+	fmt.Fprintln(Out, WarningStyle.Render("  "+Glyphs().Warn+" "+msg))
 }
 
 func Error(msg string) {
-	fmt.Fprintln(Err, ErrorStyle.Render("  ✖ "+msg))
+	fmt.Fprintln(Err, ErrorStyle.Render("  "+Glyphs().Cross+" "+msg))
 }
 
 func Hint(msg string) {
@@ -203,7 +246,7 @@ func Table(headers []string, rows [][]string) {
 		headerLine += "  " + headerFg.Render(PadRight(h, widths[i]))
 	}
 	for i := range headers {
-		sepLine += "  " + sepFg.Render(strings.Repeat("─", widths[i]))
+		sepLine += "  " + sepFg.Render(strings.Repeat(Glyphs().Rule, widths[i]))
 	}
 
 	fmt.Fprintln(Out, headerLine)
@@ -268,7 +311,17 @@ func Banner(title, subtitle string) {
 	fmt.Fprintln(Out, box.Render(content))
 }
 
+// MetricBar renders a consumption-style bar where approaching max is BAD —
+// latency against a budget, disk against capacity. Green when low, red when
+// near the ceiling. For metrics where high is good (throughput against a
+// target), use MetricBarDir with higherIsBetter=true; using this one inverts
+// the color story.
 func MetricBar(label string, value, max float64) {
+	MetricBarDir(label, value, max, false)
+}
+
+// MetricBarDir renders a metric bar with an explicit direction of goodness.
+func MetricBarDir(label string, value, max float64, higherIsBetter bool) {
 	barWidth := 20
 	filled := int((value / max) * float64(barWidth))
 	if filled > barWidth {
@@ -278,13 +331,17 @@ func MetricBar(label string, value, max float64) {
 		filled = 0
 	}
 
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	bar := strings.Repeat(Glyphs().BarFull, filled) + strings.Repeat(Glyphs().BarEmpty, barWidth-filled)
 
-	barColor := Green
 	ratio := value / max
-	if ratio > 0.8 {
+	good := ratio
+	if !higherIsBetter {
+		good = 1 - ratio
+	}
+	barColor := Green
+	if good < 0.2 {
 		barColor = Red
-	} else if ratio > 0.5 {
+	} else if good < 0.5 {
 		barColor = Amber
 	}
 
@@ -296,7 +353,7 @@ func Sparkline(values []float64) string {
 	if len(values) == 0 {
 		return ""
 	}
-	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	blocks := Glyphs().Spark
 	min, max := values[0], values[0]
 	for _, v := range values {
 		if v < min {
@@ -328,7 +385,7 @@ func SparklineColored(values []float64, higherIsBetter bool) string {
 	if len(values) == 0 {
 		return ""
 	}
-	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	blocks := Glyphs().Spark
 	min, max := values[0], values[0]
 	for _, v := range values {
 		if v < min {
@@ -403,9 +460,9 @@ func ConfigList(title string, entries []ConfigEntry) {
 		}
 	}
 
-	titleStyled := lipgloss.NewStyle().Bold(true).Foreground(Indigo).Render("▸ " + title)
+	titleStyled := lipgloss.NewStyle().Bold(true).Foreground(Indigo).Render(Glyphs().Arrow + " " + title)
 	countStyled := lipgloss.NewStyle().Foreground(Gray).Render(fmt.Sprintf("  (%d)", len(entries)))
-	sep := lipgloss.NewStyle().Foreground(SeparatorColor).Render(strings.Repeat("─", 50))
+	sep := lipgloss.NewStyle().Foreground(SeparatorColor).Render(strings.Repeat(Glyphs().Rule, 50))
 
 	fmt.Fprintln(Out)
 	fmt.Fprintln(Out, titleStyled+countStyled)

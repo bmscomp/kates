@@ -41,8 +41,11 @@ public class KafkaClientResource {
     private final KafkaClientService kafkaClientService;
 
     @Inject
-    public KafkaClientResource(TopicService topicService, ConsumerGroupService consumerGroupService,
-                               ClusterHealthService clusterHealthService, KafkaClientService kafkaClientService) {
+    public KafkaClientResource(
+            TopicService topicService,
+            ConsumerGroupService consumerGroupService,
+            ClusterHealthService clusterHealthService,
+            KafkaClientService kafkaClientService) {
         this.topicService = topicService;
         this.consumerGroupService = consumerGroupService;
         this.clusterHealthService = clusterHealthService;

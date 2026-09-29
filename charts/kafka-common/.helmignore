@@ -1,0 +1,13 @@
+.DS_Store
+*.swp
+*.bak
+*.tmp
+*.orig
+.git/
+.gitignore
+.idea/
+*.tmproj
+.vscode/
+# The test harness is an application chart that exercises the library; it is
+# not part of the published library.
+tests/

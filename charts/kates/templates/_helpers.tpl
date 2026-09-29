@@ -20,7 +20,7 @@ app.kubernetes.io/name: {{ include "kates.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/part-of: klster
+app.kubernetes.io/part-of: kates
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -43,9 +43,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{- define "kates.postgresql.jdbcUrl" -}}
-{{- if .Values.postgresql.useSubchart -}}
-jdbc:postgresql://{{ .Release.Name }}-postgresqlha-postgresql.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:5432/{{ .Values.postgresql.auth.database }}
-{{- else if .Values.postgresql.enabled -}}
+{{- if .Values.postgresql.enabled -}}
 jdbc:postgresql://{{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:5432/{{ .Values.postgresql.auth.database }}
 {{- else -}}
 jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port | default 5432 }}/{{ .Values.externalDatabase.database }}

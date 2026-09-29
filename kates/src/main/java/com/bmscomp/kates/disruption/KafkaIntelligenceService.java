@@ -5,22 +5,20 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import com.bmscomp.kates.config.KafkaSecurityConfig;
+import com.bmscomp.kates.service.KafkaAdminService;
 
 /**
  * Kafka intelligence layer for disruption tests.
@@ -36,15 +34,11 @@ public class KafkaIntelligenceService {
     private static final Logger LOG = Logger.getLogger(KafkaIntelligenceService.class);
     private static final int TIMEOUT_SECONDS = 15;
 
-    private final String bootstrapServers;
-    private final KafkaSecurityConfig securityConfig;
+    private final KafkaAdminService adminService;
 
     @Inject
-    public KafkaIntelligenceService(
-            @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
-            KafkaSecurityConfig securityConfig) {
-        this.bootstrapServers = bootstrapServers;
-        this.securityConfig = securityConfig;
+    public KafkaIntelligenceService(KafkaAdminService adminService) {
+        this.adminService = adminService;
     }
 
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
@@ -53,13 +47,9 @@ public class KafkaIntelligenceService {
         return t;
     });
 
-    private AdminClient createClient() {
-        Properties props = new Properties();
-        props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "10000");
-        props.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, "15000");
-        securityConfig.apply(props);
-        return AdminClient.create(props);
+    @PreDestroy
+    void shutdown() {
+        scheduler.shutdownNow();
     }
 
     /**
@@ -68,7 +58,10 @@ public class KafkaIntelligenceService {
      * @return broker ID, or -1 if resolution fails
      */
     public int resolveLeaderBrokerId(String topic, int partition) {
-        try (AdminClient client = createClient()) {
+        // Reuse the shared, lifecycle-managed AdminClient (do NOT close it)
+        // instead of bootstrapping a new broker connection per call.
+        AdminClient client = adminService.sharedAdminClient();
+        try {
             var desc = client.describeTopics(Collections.singleton(topic))
                     .allTopicNames()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -135,7 +128,8 @@ public class KafkaIntelligenceService {
         private void poll() {
             if (!running.get()) return;
 
-            try (AdminClient client = createClient()) {
+            AdminClient client = adminService.sharedAdminClient();
+            try {
                 var desc = client.describeTopics(Collections.singleton(topic))
                         .allTopicNames()
                         .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -248,7 +242,8 @@ public class KafkaIntelligenceService {
         private void poll() {
             if (!running.get()) return;
 
-            try (AdminClient client = createClient()) {
+            AdminClient client = adminService.sharedAdminClient();
+            try {
                 Map<TopicPartition, OffsetAndMetadata> offsets = client.listConsumerGroupOffsets(groupId)
                         .partitionsToOffsetAndMetadata()
                         .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);

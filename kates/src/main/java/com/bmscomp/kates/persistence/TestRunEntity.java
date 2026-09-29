@@ -29,6 +29,17 @@ public class TestRunEntity {
     @Column(length = 36)
     private String id;
 
+    /**
+     * Optimistic lock. refreshStatus, stopTest, the timeout reaper and orphan
+     * recovery all read-modify-write the same row, and without this the last
+     * writer silently won — the reaper could overwrite a completion that landed
+     * while it was deciding the run had timed out. A conflicting write now
+     * fails loudly instead of corrupting the run's final state.
+     */
+    @jakarta.persistence.Version
+    @Column(name = "version", nullable = false)
+    private long version;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "test_type", length = 32)
     private TestType testType;
@@ -48,6 +59,10 @@ public class TestRunEntity {
 
     @Column(name = "spec_json", columnDefinition = "TEXT")
     private String specJson;
+
+    /** The request's own fields, beside the merged spec_json; null on rows older than V23. */
+    @Column(name = "requested_spec_json", columnDefinition = "TEXT")
+    private String requestedSpecJson;
 
     @Column(name = "sla_json", columnDefinition = "TEXT")
     private String slaJson;
@@ -72,6 +87,11 @@ public class TestRunEntity {
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    /** Managed by the persistence provider; exposed for tests and diagnostics. */
+    public long getVersion() {
+        return version;
     }
 
     public TestType getTestType() {
@@ -120,6 +140,14 @@ public class TestRunEntity {
 
     public void setSpecJson(String specJson) {
         this.specJson = specJson;
+    }
+
+    public String getRequestedSpecJson() {
+        return requestedSpecJson;
+    }
+
+    public void setRequestedSpecJson(String requestedSpecJson) {
+        this.requestedSpecJson = requestedSpecJson;
     }
 
     public String getSlaJson() {

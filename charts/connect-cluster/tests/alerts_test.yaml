@@ -1,0 +1,36 @@
+suite: alerts
+templates:
+  - alerts.yaml
+release:
+  name: cc
+  namespace: connect
+capabilities:
+  apiVersions:
+    - monitoring.coreos.com/v1
+tests:
+  - it: keeps the thresholds when `thresholds:` is written empty
+    set:
+      alerts:
+        enabled: true
+        thresholds: null
+    asserts:
+      - matchRegex:
+          path: 'spec.groups[0].rules[1].expr'
+          pattern: '> 0\.1$'
+      - notMatchRegex:
+          path: 'spec.groups[1].rules[3].expr'
+          pattern: '>\s*$'
+      - matchRegex:
+          path: 'spec.groups[0].rules[3].expr'
+          pattern: '> 0\.85'
+
+  - it: scopes the sink lag alert to the Kafka cluster's namespace and its own sinks
+    set:
+      kafka: { namespace: kafka }
+      connectors:
+        s: { class: com.example.SomeSinkConnector, config: { topics: t } }
+      testConnectors: null
+    asserts:
+      - matchRegex:
+          path: 'spec.groups[1].rules[7].expr'
+          pattern: 'kafka_consumergroup_lag\{namespace="kafka", consumergroup=~"connect-s"\}'

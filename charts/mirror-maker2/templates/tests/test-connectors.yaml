@@ -1,0 +1,165 @@
+{{- $kubectl := .Values.testImages.kubectl }}
+{{- $sa := printf "%s-test" (include "mirror-maker2.fullname" .) }}
+{{- $targetAlias := .Values.target.alias | default "target" }}
+{{- /*
+WHY THIS TEST EXISTS, AND WHY IT IS NOT test-mm2 WITH MORE STEPS:
+
+`kubectl wait --for=condition=Ready` on a KafkaMirrorMaker2 asks whether the
+Connect WORKERS are up. It is satisfied before a single record has crossed, and
+it stays satisfied while the MirrorSourceConnector is failing on a missing
+source-side ACL — the single most common way this chart is misconfigured.
+
+The operator writes the real answer to .status.connectors[], which is what this
+reads: every connector RUNNING, and no task in FAILED. A chart whose only test
+is "Ready" is a chart that reports success on a dead mirror.
+
+PER SOURCE, NOT IN AGGREGATE. Strimzi names each connector
+`<sourceAlias>-><targetAlias>.Mirror{Source,Checkpoint}Connector`, so the alias
+is recoverable from the name — and on a fan-in release that is the only thing
+worth knowing. "5 of 6 connectors RUNNING" sends you reading logs; "[west] its
+MirrorSourceConnector is FAILED" sends you to the west cluster's ACLs. Each
+leg is checked, named and counted separately under one failure counter, and
+every leg is checked even after one has failed: two broken sources and one
+broken source are different diagnoses.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "mirror-maker2.fullname" . }}-test-connectors
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.componentLabels" (dict "component" "test" "ctx" .) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ $sa }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: test
+      image: {{ $kubectl }}
+      {{- include "mirror-maker2.imagePullPolicy" $ | nindent 6 }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      command: ['sh', '-c']
+      args:
+        - |
+          set -u
+          MM2={{ include "mirror-maker2.fullname" . }}
+          NS={{ include "mirror-maker2.namespace" . }}
+          DEADLINE=$(( $(date +%s) + 240 ))
+          # No writable filesystem on this pod (readOnlyRootFilesystem, no
+          # emptyDir): everything below stays in variables and pipes.
+
+          # The connectors are created after the workers are Ready, so a first
+          # look almost always finds an empty list. Poll rather than fail.
+          while :; do
+            STATES=$(kubectl -n "$NS" get kafkamirrormaker2 "$MM2" \
+              -o jsonpath='{range .status.connectors[*]}{.name}={.connector.state}{"\n"}{end}' 2>/dev/null || true)
+            [ -n "$STATES" ] && break
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "❌ no connectors reported in .status.connectors after 240s"
+              echo "   The workers may be Ready while the connectors never started."
+              kubectl -n "$NS" get kafkamirrormaker2 "$MM2" -o jsonpath='{.status}' || true
+              exit 1
+            fi
+            echo "waiting for the operator to report connector status..."
+            sleep 10
+          done
+
+          # Task states, keyed by connector name, so a FAILED task can be
+          # attributed to the leg it belongs to instead of to the release.
+          TASKS=$(kubectl -n "$NS" get kafkamirrormaker2 "$MM2" \
+            -o jsonpath='{range .status.connectors[*]}{.name}={range .tasks[*]}{.state}{","}{end}{"\n"}{end}' 2>/dev/null || true)
+
+          echo "─── connector states ───"
+          echo "$STATES"
+          echo "────────────────────────"
+
+          RC=0
+          EXPECTED={{ mul (len .Values.mirrors) 2 }}
+          FOUND=$(echo "$STATES" | grep -c '=' || true)
+          if [ "$FOUND" -lt "$EXPECTED" ]; then
+            echo "❌ expected $EXPECTED connectors ({{ len .Values.mirrors }} mirror(s) × source+checkpoint), found $FOUND"
+            RC=1
+          fi
+
+          # One leg. Called once per mirror with that mirror's source alias;
+          # every message carries it.
+          #
+          # `stopped` and `paused` are legitimate — that is a cutover, not a
+          # fault — so they are reported, not failed on. FAILED is a fault.
+          # Every connector is listed before the verdict: stopping at the first
+          # bad one hides the second.
+          # A `for` over newline-split lines, not `echo | while`: the pipe
+          # would run the loop in a subshell and BAD would never reach here.
+          # (Not a heredoc either — rendered through YAML, its terminator
+          # would be indented, and an indented terminator never closes.)
+          check_leg() {   # <source alias>
+            A="$1"
+            # index($0,p)==1 is a literal prefix match: an alias may contain a
+            # dot or a dash, and `grep "^$A->"` would read those as a regex.
+            LEG=$(printf '%s\n' "$STATES" | awk -v p="$A->" 'index($0,p)==1')
+            LEG_N=$(printf '%s\n' "$LEG" | grep -c '=' || true)
+            if [ "${LEG_N:-0}" -lt 2 ]; then
+              echo "  ❌ [$A] found $LEG_N of its 2 connectors (MirrorSource + MirrorCheckpoint)."
+              echo "     Expected names: $A->{{ $targetAlias }}.MirrorSourceConnector and"
+              echo "     $A->{{ $targetAlias }}.MirrorCheckpointConnector"
+              return 1
+            fi
+
+            BAD=0
+            OLDIFS=$IFS
+            IFS='
+          '
+            for LINE in $LEG; do
+              IFS=$OLDIFS
+              NAME=${LINE%%=*}; STATE=${LINE#*=}
+              [ -z "$NAME" ] && continue
+              case "$STATE" in
+                RUNNING) echo "  ✅ [$A] $NAME RUNNING" ;;
+                PAUSED|STOPPED)
+                  echo "  ⏸  [$A] $NAME $STATE — deliberate if you are mid-cutover" ;;
+                *)
+                  echo "  ❌ [$A] $NAME $STATE"
+                  BAD=$((BAD + 1)) ;;
+              esac
+            done
+            IFS=$OLDIFS
+
+            LEG_FAILED=$(printf '%s\n' "$TASKS" | awk -v p="$A->" 'index($0,p)==1' \
+              | grep -o 'FAILED' | grep -c . || true)
+            if [ "${LEG_FAILED:-0}" -gt 0 ]; then
+              echo "  ❌ [$A] $LEG_FAILED task(s) in FAILED state"
+              kubectl -n "$NS" get kafkamirrormaker2 "$MM2" \
+                -o jsonpath='{range .status.connectors[*]}{.name}{": "}{range .tasks[*]}{.state}{" "}{.trace}{"\n"}{end}{end}' 2>/dev/null \
+                | awk -v p="$A->" 'index($0,p)==1' | head -10
+              BAD=$((BAD + 1))
+            fi
+
+            [ "$BAD" -gt 0 ] && return 1
+            return 0
+          }
+
+          {{- range .Values.mirrors }}
+          check_leg "{{ .source.alias | default "source" }}" || RC=1
+          {{- end }}
+
+          if [ "$RC" -ne 0 ]; then
+            echo ""
+            echo "  The ❌ lines above name the leg. Most likely cause for a leg that is"
+            echo "  not RUNNING: that SOURCE's KafkaUser lacks READ/DESCRIBE on the"
+            echo "  mirrored topics and groups. Those clusters are not managed by this"
+            echo "  chart, so nothing here can grant it — see the chart README."
+            exit 1
+          fi
+          echo "✅ every mirror connector is healthy, on all {{ len .Values.mirrors }} leg(s)"

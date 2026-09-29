@@ -1,19 +1,29 @@
 {{- if .Values.rbac.enabled }}
+{{- $sa := include "kates-chaos.serviceAccountName" . }}
+{{- $targets := include "kates-chaos.targetNamespaces" . | fromYamlArray }}
+{{- range $t := $targets }}
+{{- if eq ($t.role | default "target") "target" }}
+---
+# ── Target namespace {{ $t.name }}: fault-injection identity + Role ───────────
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: litmus-admin
-  namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+  name: {{ $sa }}
+  namespace: {{ $t.name }}
   labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
+  {{- with include "kates-chaos.annotations" $ }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: litmus-admin
-  namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+  name: {{ $sa }}
+  namespace: {{ $t.name }}
   labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["pods", "events", "pods/log", "pods/exec", "pods/eviction"]
@@ -37,19 +47,23 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: litmus-admin
-  namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+  name: {{ $sa }}
+  namespace: {{ $t.name }}
   labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: litmus-admin
+  name: {{ $sa }}
 subjects:
   - kind: ServiceAccount
-    name: litmus-admin
-    namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+    name: {{ $sa }}
+    namespace: {{ $t.name }}
+{{- end }}
+{{- end }}
+{{- if .Values.rbac.nodeChaos.enabled }}
 ---
+# ── Cluster-scoped RBAC for node-level chaos ─────────────────────────────────
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -78,16 +92,24 @@ roleRef:
   kind: ClusterRole
   name: {{ include "kates-chaos.fullname" . }}-node-chaos
 subjects:
+  {{- range $t := $targets }}
+  {{- if eq ($t.role | default "target") "target" }}
   - kind: ServiceAccount
-    name: litmus-admin
-    namespace: {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+    name: {{ $sa }}
+    namespace: {{ $t.name }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+{{- range $t := $targets }}
+{{- if eq ($t.role | default "target") "coordinator" }}
 ---
+# ── Coordinator namespace {{ $t.name }}: create engines + read results ────────
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "kates-chaos.fullname" . }}-kates-coordinator
+  name: {{ include "kates-chaos.fullname" $ }}-coordinator-{{ $t.name }}
   labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
 rules:
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosengines", "chaosresults"]
@@ -96,15 +118,17 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "kates-chaos.fullname" . }}-kates-coordinator
+  name: {{ include "kates-chaos.fullname" $ }}-coordinator-{{ $t.name }}
   labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "kates-chaos.fullname" . }}-kates-coordinator
+  name: {{ include "kates-chaos.fullname" $ }}-coordinator-{{ $t.name }}
 subjects:
   - kind: ServiceAccount
-    name: default
-    namespace: {{ .Values.rbac.katesNamespace | default "kates" }}
+    name: {{ $t.serviceAccount | default "default" }}
+    namespace: {{ $t.name }}
+{{- end }}
+{{- end }}
 {{- end }}

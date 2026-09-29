@@ -1,15 +1,30 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Resilience Test: SCALE_DOWN — Broker Pool Contraction
 # ─────────────────────────────────────────────────────────────────────────────
-# Scales the sigma broker pool from 1 replica to 0, simulating an emergency
-# cordon or a planned capacity reduction. Verifies that Strimzi rebalances
-# partition leaders off sigma before the pod is terminated.
+# Scales the sigma broker pool from 1 replica to 0, simulating the loss of a
+# broker for good. Kates lowers spec.replicas of the brokers-sigma
+# KafkaNodePool, and the Strimzi Cluster Operator removes the broker.
+#
+# Strimzi holds back the removal of a broker that still hosts partition
+# replicas. The remove-brokers auto-rebalance of the krafter cluster would
+# move them off first, but with three brokers and RF=3 there is nowhere to
+# move them. Without the annotation below, the step fails after
+# chaosDurationSec and Kates puts the pool back to 1 replica. To remove the
+# broker together with its replicas, first run:
+#
+#   kubectl annotate kafka krafter -n kafka strimzi.io/skip-broker-scaledown-check=true
 #
 # Hypothesis:
-#   Strimzi refuses to scale down a broker with active partition assignments
-#   until all partitions are reassigned. Kates SCALE_DOWN disruption performs
-#   the reassignment before scaling. With RF=3 and 2 remaining brokers,
-#   min.isr=2 is still satisfied. Producers see no errors.
+#   With RF=3 and 2 brokers left, every partition keeps 2 in-sync replicas,
+#   so min.isr=2 is still satisfied. Producers with acks=all see no errors.
+#
+# A resilience test does not bring the broker back. Kates orphan recovery
+# does, if Kates restarts 15 minutes or more after the test. To restore it
+# yourself:
+#
+#   kubectl patch kafkanodepool brokers-sigma -n kafka --type merge -p '{"spec":{"replicas":1}}'
+#   kubectl annotate kafkanodepool brokers-sigma -n kafka kates.io/original-replicas- kates.io/scaled-down-at-
+#   kubectl annotate kafka krafter -n kafka strimzi.io/skip-broker-scaledown-check-
 #
 # Usage:
 #   kates resilience run -f cli/examples/resilience-scale-down.yaml
@@ -22,8 +37,8 @@ testRequest:
     partitions: 6
     replicationFactor: 3
     minInsyncReplicas: 2
-    durationMs: 180000        # 3 min — covers the full scale-down + recovery
-    numRecords: 540000
+    durationMs: 300000        # 5 min — covers steady state, the removal budget and recovery
+    numRecords: 900000
     recordSize: 1024
     throughput: 3000
     numProducers: 3
@@ -40,9 +55,8 @@ chaosSpec:
   disruptionType: SCALE_DOWN
   targetNamespace: kafka
   targetLabel: "strimzi.io/pool-name=brokers-sigma"
-  chaosDurationSec: 60
+  chaosDurationSec: 120       # budget for the operator to remove the broker
   delayBeforeSec: 0
-  gracePeriodSec: 30
 
 steadyStateSec: 30
 maxRecoveryWaitSec: 120

@@ -1,9 +1,9 @@
 # Tiered Storage configuration for Apache Kafka 4.2 (KIP-405).
-# Offloads cold log segments to S3-compatible object storage (MinIO).
+# Offloads cold log segments to S3-compatible object storage (SeaweedFS).
 #
 # Prerequisites:
-#   1. MinIO must be deployed (already in config/velero/)
-#   2. Create bucket: mc mb minio/kafka-tiered-storage
+#   1. SeaweedFS must be deployed (config/velero/seaweedfs.yaml, by `make velero`)
+#   2. Create bucket: aws --endpoint-url http://velero-seaweedfs.kafka.svc:8333 s3 mb s3://kafka-tiered-storage
 #   3. The kafka-tiered-storage-credentials secret must exist (see below)
 #
 # This ConfigMap is referenced by kafka.yaml via remote.log.storage config.
@@ -17,8 +17,8 @@ metadata:
     strimzi.io/cluster: krafter
 type: Opaque
 stringData:
-  AWS_ACCESS_KEY_ID: minio
-  AWS_SECRET_ACCESS_KEY: minio123
+  AWS_ACCESS_KEY_ID: velero
+  AWS_SECRET_ACCESS_KEY: velero123
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -33,12 +33,12 @@ data:
     # Remote Log Manager (KIP-405)
     remote.log.storage.system.enable=true
 
-    # Remote Storage Manager — S3-compatible (MinIO)
+    # Remote Storage Manager — S3-compatible (SeaweedFS)
     remote.log.storage.manager.class.name=org.apache.kafka.server.log.remote.storage.RemoteLogManager
     remote.log.storage.manager.impl.prefix=rsm.config.
     rsm.config.s3.bucket.name=kafka-tiered-storage
     rsm.config.s3.region=us-east-1
-    rsm.config.s3.endpoint.url=http://minio.velero.svc:9000
+    rsm.config.s3.endpoint.url=http://velero-seaweedfs.kafka.svc:8333
     rsm.config.s3.path.style.access.enabled=true
 
     # Remote Log Metadata Manager

@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kafka-ui.fullname" . }}-config
+  namespace: {{ include "kafka-ui.namespace" . }}
+  labels:
+    {{- include "kafka-ui.labels" . | nindent 4 }}
+data:
+  config.yml: |
+    kafka:
+      clusters:
+        - name: {{ .Values.kafka.clusterName }}
+          bootstrapServers: {{ include "kafka-ui.bootstrapServers" . }}
+          properties:
+            {{- if .Values.kafka.tls.enabled }}
+            security.protocol: SASL_SSL
+            {{- else }}
+            security.protocol: SASL_PLAINTEXT
+            {{- end }}
+            sasl.mechanism: SCRAM-SHA-512
+            sasl.jaas.config: >-
+              org.apache.kafka.common.security.scram.ScramLoginModule required
+              username="{{ .Values.kafkaUser.name }}"
+              password="${KAFKA_UI_PASSWORD}";
+            {{- if .Values.kafka.tls.enabled }}
+            ssl.truststore.type: PEM
+            ssl.truststore.location: /etc/kafka-ui/certs/{{ .Values.kafka.tls.certificateKey | default "ca.crt" }}
+            {{- end }}
+          {{- if .Values.schemaRegistry.enabled }}
+          schemaRegistry: {{ include "kafka-ui.schemaRegistryUrl" . }}
+          {{- if .Values.schemaRegistry.auth.enabled }}
+          schemaRegistryAuth:
+            username: {{ .Values.schemaRegistry.auth.username }}
+            # Password is injected from a Secret via the env var below.
+            password: ${SCHEMA_REGISTRY_PASSWORD}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.kafkaConnect.enabled }}
+          kafkaConnect:
+            - name: {{ .Values.kafkaConnect.name | default "connect-cluster" }}
+              address: {{ include "kafka-ui.kafkaConnectUrl" . }}
+              {{- if .Values.kafkaConnect.auth.enabled }}
+              username: {{ .Values.kafkaConnect.auth.username }}
+              password: ${KAFKA_CONNECT_PASSWORD}
+              {{- end }}
+          {{- end }}
+
+    auth:
+      type: {{ .Values.auth.type | default "DISABLED" }}
+    {{- if and .Values.auth.enabled (eq .Values.auth.type "LOGIN_FORM") .Values.auth.username }}
+    spring:
+      security:
+        user:
+          name: {{ .Values.auth.username }}
+          password: ${KAFKA_UI_WEB_PASSWORD}
+    {{- end }}
+    {{- if and .Values.auth.rbac .Values.auth.rbac.enabled }}
+    rbac:
+      roles:
+        {{- toYaml .Values.auth.rbac.roles | nindent 8 }}
+    {{- end }}
+    management:
+      health:
+        ldap:
+          enabled: false
+    {{- with .Values.extraConfig }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}

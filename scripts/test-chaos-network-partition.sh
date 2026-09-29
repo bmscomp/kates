@@ -50,7 +50,7 @@ echo ""
 # ── Prerequisites ─────────────────────────────────────────────────────────
 step "Step 1: Verifying prerequisites..."
 if ! kubectl get chaosexperiment pod-network-partition -n "${NAMESPACE}" &>/dev/null; then
-    error "ChaosExperiment 'pod-network-partition' not found. Run 'make chaos' first."
+    error "ChaosExperiment 'pod-network-partition' not found. Run './scripts/setup-kafka-chaos.sh' first."
     exit 1
 fi
 info "✓ Prerequisites satisfied"

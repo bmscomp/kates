@@ -328,8 +328,7 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 			},
 		},
 		Kafka:         g.buildKafka(topologyKey),
-		Dashboards:    g.buildDashboards(),
-		PodMonitors:   g.buildPodMonitors(),
+		Monitoring:    g.buildMonitoring(),
 		Alerts:        g.buildAlerts(),
 		NetPolicies:   g.buildNetworkPolicies(),
 		Topics:        GenFeature{Enabled: true},
@@ -359,122 +358,6 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 				"jvmOptions": map[string]interface{}{
 					"-Xms": "128m",
 					"-Xmx": "256m",
-				},
-			},
-		},
-		Users: GenUsers{
-			Enabled: true,
-			Items: []GenUser{
-				{
-					Name: "kates-backend",
-					Authentication: GenUserAuth{
-						Type: "scram-sha-512",
-					},
-					Authorization: &GenUserAuthz{
-						Type: "simple",
-						Acls: []GenAcl{
-							{
-								Resource: GenAclResource{
-									Type: "cluster",
-								},
-								Operations: []string{"All"},
-							},
-							{
-								Resource: GenAclResource{
-									Type:        "topic",
-									Name:        "*",
-									PatternType: "literal",
-								},
-								Operations: []string{"All"},
-							},
-							{
-								Resource: GenAclResource{
-									Type:        "group",
-									Name:        "*",
-									PatternType: "literal",
-								},
-								Operations: []string{"All"},
-							},
-						},
-					},
-				},
-				{
-					Name: "kates-connect",
-					Authentication: GenUserAuth{
-						Type: "scram-sha-512",
-					},
-					Quotas: &GenUserQuotas{
-						ProducerByteRate:  52428800,
-						ConsumerByteRate:  52428800,
-						RequestPercentage: 25,
-					},
-					Authorization: &GenUserAuthz{
-						Type: "simple",
-						Acls: []GenAcl{
-							{
-								Resource: GenAclResource{
-									Type:        "topic",
-									Name:        "kates-connect-",
-									PatternType: "prefix",
-								},
-								Operations: []string{"Read", "Write", "Create", "Describe"},
-							},
-							{
-								Resource: GenAclResource{
-									Type:        "topic",
-									Name:        "kates-",
-									PatternType: "prefix",
-								},
-								Operations: []string{"Read", "Write", "Create", "Describe"},
-							},
-							{
-								Resource: GenAclResource{
-									Type:        "transactionalId",
-									Name:        "connect-cluster-",
-									PatternType: "prefix",
-								},
-								Operations: []string{"Write", "Describe"},
-							},
-							{
-								Resource: GenAclResource{
-									Type:        "transactionalId",
-									Name:        "kates-connect-",
-									PatternType: "prefix",
-								},
-								Operations: []string{"Write", "Describe"},
-							},
-							{
-								Resource: GenAclResource{
-									Type:        "topic",
-									Name:        "cdc",
-									PatternType: "prefix",
-								},
-								Operations: []string{"Read", "Write", "Create", "Describe"},
-							},
-							{
-								Resource: GenAclResource{
-									Type:        "topic",
-									Name:        "__debezium",
-									PatternType: "prefix",
-								},
-								Operations: []string{"Read", "Write", "Create", "Describe"},
-							},
-							{
-								Resource: GenAclResource{
-									Type:        "group",
-									Name:        "kates-connect",
-									PatternType: "prefix",
-								},
-								Operations: []string{"Read", "Describe"},
-							},
-							{
-								Resource: GenAclResource{
-									Type: "cluster",
-								},
-								Operations: []string{"Describe"},
-							},
-						},
-					},
 				},
 			},
 		},
@@ -842,25 +725,22 @@ func (g *ValuesGenerator) buildExternalListener() *GenListener {
 }
 
 // ── Monitoring ───────────────────────────────────────────────────────────────
+//
+// Scrape and rules follow the CRDs the cluster has at detection time: a
+// PodMonitor on a cluster without prometheus-operator is a Helm install that
+// fails, and a Kafka without one on a cluster that has it is a set of boards
+// with nothing to show. Both were hard-coded false for a while, to keep a
+// `kates auto` cluster light — the weight is Cruise Control and the Kafka
+// Exporter (still off here), not a scrape config. `kates deploy` runs
+// detection before it installs monitoring, so it does not rely on this and
+// says what it wants with --set.
 
-func (g *ValuesGenerator) buildDashboards() GenDashboards {
-	return GenDashboards{Enabled: false, Namespace: "monitoring"}
-}
-
-func (g *ValuesGenerator) buildPodMonitors() GenPodMonitors {
-	pm := GenPodMonitors{Enabled: false}
-	if pm.Enabled && g.Report.Monitoring.ReleaseLabel != "" {
-		pm.Labels = map[string]string{"release": g.Report.Monitoring.ReleaseLabel}
-	}
-	return pm
+func (g *ValuesGenerator) buildMonitoring() GenMonitoring {
+	return GenMonitoring{PodMonitor: GenPodMonitor{Enabled: g.Report.Monitoring.PodMonitorCRD}}
 }
 
 func (g *ValuesGenerator) buildAlerts() GenAlerts {
-	a := GenAlerts{Enabled: false}
-	if a.Enabled && g.Report.Monitoring.ReleaseLabel != "" {
-		a.Labels = map[string]string{"release": g.Report.Monitoring.ReleaseLabel}
-	}
-	return a
+	return GenAlerts{Enabled: g.Report.Monitoring.PodMonitorCRD && g.Report.Monitoring.PrometheusRuleCRD}
 }
 
 // ── Network Policies ─────────────────────────────────────────────────────────

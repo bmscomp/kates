@@ -2,6 +2,10 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
+        "productionMode": {
+            "type": "boolean",
+            "description": "Enable production guard rails: rendering fails if insecure defaults would reach the cluster"
+        },
         "replicaCount": {
             "type": "integer",
             "minimum": 1,
@@ -56,6 +60,7 @@
             "type": "object",
             "properties": {
                 "create": { "type": "boolean" },
+                "directChaos": { "type": "boolean" },
                 "extraRules": { "type": "array" }
             }
         },
@@ -322,6 +327,7 @@
                     "type": "string",
                     "minLength": 0
                 },
+                "topicNamespace": { "type": "string" },
                 "clientRack": { "type": "string" },
                 "security": {
                     "type": "object",
@@ -384,7 +390,21 @@
         "trogdor": {
             "type": "object",
             "properties": {
-                "coordinatorUrl": { "type": "string" }
+                "coordinatorUrl": { "type": "string" },
+                "agentNodes": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Trogdor agent node names tasks run on, comma-separated (KATES_TROGDOR_AGENT_NODES)"
+                }
+            }
+        },
+        "prometheus": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Prometheus base URL the backend queries for disruption metrics (KATES_PROMETHEUS_URL); empty leaves the backend's own default"
+                }
             }
         },
         "engine": {
@@ -471,7 +491,15 @@
                     "type": "object",
                     "properties": {
                         "enabled": { "type": "boolean" },
-                        "labels": { "type": "object" }
+                        "namespace": { "type": "string" },
+                        "label": { "type": "string" },
+                        "labelValue": { "type": "string" },
+                        "folder": { "type": "string" },
+                        "labels": {
+                            "type": "object",
+                            "description": "Extra labels, merged with (not replacing) label/labelValue",
+                            "additionalProperties": { "type": "string" }
+                        }
                     }
                 }
             }
@@ -480,7 +508,6 @@
             "type": "object",
             "properties": {
                 "enabled": { "type": "boolean" },
-                "useSubchart": { "type": "boolean" },
                 "image": {
                     "type": "object",
                     "properties": {
@@ -528,22 +555,6 @@
                 "password": { "type": "string" },
                 "existingSecret": { "type": "string" },
                 "passwordKey": { "type": "string" }
-            }
-        },
-        "postgresqlHA": {
-            "type": "object",
-            "properties": {
-                "auth": {
-                    "type": "object",
-                    "properties": {
-                        "database": { "type": "string" },
-                        "username": { "type": "string" },
-                        "password": { "type": "string" }
-                    }
-                },
-                "architecture": { "type": "string", "enum": [ "standalone", "replication" ] },
-                "primary": { "type": "object" },
-                "readReplicas": { "type": "object" }
             }
         },
         "defaults": {

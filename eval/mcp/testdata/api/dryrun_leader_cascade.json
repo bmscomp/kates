@@ -1,0 +1,28 @@
+{
+  "wouldSucceed": true,
+  "totalBrokers": 3,
+  "steps": [
+    {
+      "name": "kill-leader-partition-0",
+      "disruptionType": "POD_KILL",
+      "targetPod": "krafter-brokers-3",
+      "resolvedLeaderId": 3,
+      "affectedPods": [
+        "krafter-brokers-3"
+      ],
+      "warnings": []
+    },
+    {
+      "name": "kill-leader-partition-1",
+      "disruptionType": "POD_KILL",
+      "targetPod": "krafter-brokers-5",
+      "resolvedLeaderId": 5,
+      "affectedPods": [
+        "krafter-brokers-5"
+      ],
+      "warnings": []
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/common.sh"
 ENV="${ENV:-kind}"
 CHART_DIR="${ROOT_DIR}/charts/kates"
 RELEASE_NAME="kates"
-NAMESPACE="${NAMESPACE:-kafka}"
+NAMESPACE="${NAMESPACE:-kates}"
 CLUSTER_NAME="${CLUSTER_NAME:-krafter}"
 
 info "Deploying Kates (env=${ENV})..."

@@ -1,0 +1,23 @@
+apiVersion: v2
+name: kafka-common
+description: Library chart — the templates the Strimzi charts share (names and labels, rails, Kafka client authentication, the Connect worker spec, KafkaUser, secret sync, NetworkPolicy and monitoring fragments, the Grafana grid, the preflight probe)
+type: library
+version: 0.1.0
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
+keywords:
+  - kafka
+  - strimzi
+  - library
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
+annotations:
+  artifacthub.io/category: streaming-messaging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: added
+      description: First release — the templates mirror-maker2 0.8.0, kafka-cluster 1.0.0 and connect-cluster 2.0.0 are built on, lifted from mirror-maker2 0.7 (docs/kafka-charts-refactor-plan.md §3.3), plus the Grafana grid layout and the preflight probe

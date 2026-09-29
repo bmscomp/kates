@@ -22,6 +22,7 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.chaos.ChaosProvider;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
@@ -39,8 +40,15 @@ import com.bmscomp.kates.service.TestRunRepository;
 @Tag(name = "Tests")
 public class TestResource {
 
+    /**
+     * Retry-After for a 429. Runs last minutes, so a short retry would just
+     * bounce; a minute is the smallest interval likely to find a free slot.
+     */
+    private static final String RETRY_AFTER_SECONDS = "60";
+
     private final TestOrchestrator orchestrator;
     private final TestRunRepository repository;
+    private final ChaosProvider chaosProvider;
 
     @Inject
     BaselineService baselineService;
@@ -49,9 +57,13 @@ public class TestResource {
     AuditService auditService;
 
     @Inject
-    public TestResource(TestOrchestrator orchestrator, TestRunRepository repository) {
+    public TestResource(
+            TestOrchestrator orchestrator,
+            TestRunRepository repository,
+            @jakarta.inject.Named("kubernetes") ChaosProvider chaosProvider) {
         this.orchestrator = orchestrator;
         this.repository = repository;
+        this.chaosProvider = chaosProvider;
     }
 
     @POST
@@ -59,11 +71,31 @@ public class TestResource {
             summary = "Create and execute a test",
             description = "Submits a new performance test run for asynchronous execution")
     @APIResponse(responseCode = "202", description = "Test accepted for execution")
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid request, including a spec field the test type or backend cannot apply;"
+                    + " fieldErrors names each field")
+    @APIResponse(responseCode = "429", description = "Concurrency limit reached — retry later")
     public Response createTest(@Valid CreateTestRequest request) {
         var result = orchestrator.executeTest(request);
         if (result.isFailure()) {
+            Exception failure = result.asFailure().orElseThrow();
+            // A full engine is a temporary condition, not a malformed request.
+            // Returning 400 for it made the two indistinguishable to clients and
+            // to CI, which then retried nothing and failed the build instead.
+            if (failure instanceof com.bmscomp.kates.engine.ConcurrencyLimitException) {
+                return Response.status(429)
+                        .header("Retry-After", RETRY_AFTER_SECONDS)
+                        .entity(ApiError.of(429, "Too Many Requests", failure.getMessage()))
+                        .build();
+            }
+            if (failure instanceof com.bmscomp.kates.engine.InvalidTestSpecException invalid) {
+                return Response.status(400)
+                        .entity(ApiError.validationFailed(invalid.getMessage(), invalid.getFieldErrors()))
+                        .build();
+            }
             return Response.status(400)
-                    .entity(ApiError.of(400, "Bad Request", result.asFailure().orElseThrow().getMessage()))
+                    .entity(ApiError.of(400, "Bad Request", failure.getMessage()))
                     .build();
         }
         TestRun run = result.asSuccess().orElseThrow();
@@ -73,9 +105,13 @@ public class TestResource {
 
     @POST
     @Path("/bulk")
-    @Operation(summary = "Create multiple tests", description = "Submits up to 10 test runs in a single request")
+    @Operation(
+            summary = "Create multiple tests",
+            description = "Submits up to 10 test runs in a single request. Requests beyond"
+                    + " kates.engine.max-concurrent-tests (default 3) are reported as"
+                    + " per-item failures rather than being queued.")
     @APIResponse(responseCode = "202", description = "Tests accepted for execution")
-    public Response bulkCreate(List<CreateTestRequest> requests) {
+    public Response bulkCreate(List<@Valid CreateTestRequest> requests) {
         if (requests == null || requests.isEmpty()) {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "At least one test request required"))
@@ -91,11 +127,13 @@ public class TestResource {
             try {
                 var testResult = orchestrator.executeTest(req);
                 if (testResult.isFailure()) {
-                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(testResult.asFailure().orElseThrow().getMessage()));
+                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(
+                            testResult.asFailure().orElseThrow().getMessage()));
                 } else {
                     TestRun run = testResult.asSuccess().orElseThrow();
                     auditService.record("CREATE", "test", run.getId(), req.getType() + " bulk test");
-                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.success(run.getId(), run.getStatus().name()));
+                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.success(
+                            run.getId(), run.getStatus().name()));
                 }
             } catch (Exception e) {
                 results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(e.getMessage()));
@@ -161,8 +199,9 @@ public class TestResource {
         if (status != null && !status.isEmpty()) {
             try {
                 TestResult.TaskStatus taskStatus = TestResult.TaskStatus.valueOf(status.toUpperCase());
-                List<TestRun> content = repository.findByStatus(taskStatus);
-                return Response.ok(new PagedResponse<>(content, 0, content.size(), content.size()))
+                List<TestRun> content = repository.findByStatusPaged(taskStatus, safePage, safeSize);
+                long total = repository.countByStatus(taskStatus);
+                return Response.ok(new PagedResponse<>(content, safePage, safeSize, total))
                         .build();
             } catch (IllegalArgumentException e) {
                 return Response.status(Response.Status.BAD_REQUEST)
@@ -179,7 +218,13 @@ public class TestResource {
 
     @GET
     @Path("/{id}")
-    @Operation(summary = "Get a test run", description = "Returns a single test run by ID, refreshing its status")
+    @Operation(
+            summary = "Get a test run",
+            description = "Returns a single test run by ID, refreshing its status. spec is what the run used, the"
+                    + " request merged with its test type's defaults; a field no type has a default for"
+                    + " (consumerGroup, targetThroughput, the fetch settings, the enable options) appears only"
+                    + " when the request set it. requestedSpec is the request's own spec fields, absent on runs"
+                    + " stored before it was kept")
     @APIResponse(responseCode = "200", description = "Test run details")
     @APIResponse(responseCode = "404", description = "Test run not found")
     public Response getTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
@@ -215,46 +260,44 @@ public class TestResource {
 
     @POST
     @Path("/{id}/cancel")
+    // Overrides the class-level @Consumes(APPLICATION_JSON). Cancel takes no
+    // body, so a client sends none and therefore no Content-Type — which JAX-RS
+    // treats as application/octet-stream, matches against application/json, and
+    // rejects with 415. `curl -X POST .../cancel` could never cancel anything;
+    // only a client that invented a Content-Type header for an empty body got
+    // through.
+    @Consumes(MediaType.WILDCARD)
     @Operation(
             summary = "Cancel a running test",
-            description = "Safely stops all tasks and marks the test as CANCELLED")
-    @APIResponse(responseCode = "200", description = "Test cancelled")
+            description = "Stops the run's tasks and stores the run as FAILED, each unfinished task with the error"
+                    + " \"Cancelled by user\". There is no CANCELLED status: the answer says FAILED, as every later"
+                    + " read does, with reason \"cancelled\".")
+    @APIResponse(responseCode = "200", description = "Test cancelled and stored as FAILED")
     @APIResponse(responseCode = "404", description = "Test run not found")
     @APIResponse(responseCode = "409", description = "Test is not running")
     public Response cancelTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        return repository
-                .findById(id)
+        java.util.Optional<TestRun> cancelled;
+        try {
+            cancelled = orchestrator.cancelTest(id);
+        } catch (com.bmscomp.kates.engine.RunNotCancellableException e) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(new ApiError(409, "Conflict", e.getMessage()))
+                    .build();
+        }
+        return cancelled
                 .map(run -> {
-                    var status = run.getStatus();
-                    if (status != com.bmscomp.kates.domain.TestResult.TaskStatus.RUNNING
-                            && status != com.bmscomp.kates.domain.TestResult.TaskStatus.PENDING) {
-                        return Response.status(Response.Status.CONFLICT)
-                                .entity(new ApiError(409, "Conflict", "Test is not running (status: " + status + ")"))
-                                .build();
-                    }
-                    orchestrator.stopTest(id);
-                    run = run.withStatus(com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED);
-                    
-                    if (run.getResults() != null) {
-                        java.util.List<com.bmscomp.kates.domain.TestResult> updatedResults = new java.util.ArrayList<>();
-                        for (var result : run.getResults()) {
-                            if (result.getStatus() == com.bmscomp.kates.domain.TestResult.TaskStatus.RUNNING
-                                    || result.getStatus() == com.bmscomp.kates.domain.TestResult.TaskStatus.PENDING) {
-                                result = result.withStatus(com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED)
-                                               .withError("Cancelled by user")
-                                               .withEndTime(java.time.Instant.now().toString());
-                            }
-                            updatedResults.add(result);
-                        }
-                        run = run.withResults(updatedResults);
-                    }
-                    
-                    repository.save(run);
                     auditService.record("CANCEL", "test", id, "Test cancelled by user");
+                    // status is what the run is stored as, FAILED; reason
+                    // says why, which the stored status cannot.
                     return Response.ok(java.util.Map.of(
-                                    "id", run.getId(),
-                                    "status", "CANCELLED",
-                                    "message", "Test cancelled successfully"))
+                                    "id",
+                                    run.getId(),
+                                    "status",
+                                    run.getStatus().name(),
+                                    "reason",
+                                    "cancelled",
+                                    "message",
+                                    "Test cancelled; it is stored as FAILED"))
                             .build();
                 })
                 .orElse(Response.status(Response.Status.NOT_FOUND)
@@ -357,11 +400,7 @@ public class TestResource {
     }
 
     private com.bmscomp.kates.domain.BaselineResponse baselineToResponse(BaselineEntity b) {
-        return new com.bmscomp.kates.domain.BaselineResponse(
-            b.getTestType().name(),
-            b.getRunId(),
-            b.getSetAt()
-        );
+        return new com.bmscomp.kates.domain.BaselineResponse(b.getTestType().name(), b.getRunId(), b.getSetAt());
     }
 
     private TestType parseBaselineType(String typeStr) {

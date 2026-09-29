@@ -1,15 +1,21 @@
 {{- if .Values.pdb.enabled }}
+{{- if not .Values.pdb.selector }}
+{{- fail "pdb.enabled=true requires pdb.selector (this chart ships no stateful workload to protect by default)" }}
+{{- end }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "kates-chaos.fullname" . }}-mongodb
+  name: {{ include "kates-chaos.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
 spec:
-  minAvailable: 1
+  {{- if .Values.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.pdb.minAvailable | default 1 }}
+  {{- end }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: mongodb
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- toYaml .Values.pdb.selector | nindent 6 }}
 {{- end }}

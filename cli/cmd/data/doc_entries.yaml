@@ -1,0 +1,2549 @@
+# Auto-generated from doc_entries.go — 93 entries
+- name: health
+  category: Core
+  synopsis: "kates health"
+  short: "Show Kates system health and Kafka connectivity"
+  description: |
+    Displays the overall health status of the Kates platform,
+    including the backend engine, Kafka cluster connectivity,
+    bootstrap servers, and the active test backend.
+  examples:
+    - "kates health"
+    - "kates health -o json"
+  see_also:
+    - status
+    - doctor
+
+- name: status
+  category: Core
+  synopsis: "kates status"
+  short: "Quick one-line status of Kates and running tests"
+  description: |
+    Prints a compact single-line summary showing system state,
+    active test count, and last completed test.
+  examples:
+    - "kates status"
+  see_also:
+    - health
+    - top
+
+- name: version
+  category: Core
+  synopsis: "kates version"
+  short: "CLI, API, and runtime version info"
+  description: |
+    Displays the CLI version, the connected API server version,
+    and runtime environment details.
+  examples:
+    - "kates version"
+    - "kates version -o json"
+
+- name: doctor
+  category: Core
+  synopsis: "kates doctor"
+  short: "Pre-flight cluster readiness checklist"
+  description: |
+    Runs a series of diagnostic checks against the Kafka cluster
+    and Kates backend to verify everything is properly configured
+    and ready for testing. Checks connectivity, topic access,
+    broker health, and engine availability.
+  examples:
+    - "kates doctor"
+  see_also:
+    - health
+    - cluster check
+
+- name: cluster info
+  category: Cluster
+  synopsis: "kates cluster info"
+  short: "Show Kafka cluster metadata"
+  description: |
+    Displays cluster ID, broker count, controller node,
+    and per-broker details including host, port, and rack/AZ.
+  examples:
+    - "kates cluster info"
+    - "kates cluster info -o json"
+  see_also:
+    - kafka brokers
+    - cluster check
+
+- name: cluster topics
+  category: Cluster
+  synopsis: "kates cluster topics"
+  short: "List all Kafka topics"
+  description: "Lists all topics in the Kafka cluster with basic metadata."
+  examples:
+    - "kates cluster topics"
+  see_also:
+    - kafka topics
+    - cluster topics describe
+
+- name: cluster topics describe
+  category: Cluster
+  synopsis: "kates cluster topics describe <topic-name>"
+  short: "Show detailed topic metadata, configs, and partition health"
+  description: |
+    Displays comprehensive topic information including partition
+    assignments, leader/ISR status, replication factor, and
+    non-default topic configurations.
+  examples:
+    - "kates cluster topics describe my-topic"
+    - "kates cluster topics describe my-topic -o json"
+  see_also:
+    - kafka topic
+    - cluster topics
+
+- name: cluster broker configs
+  category: Cluster
+  synopsis: "kates cluster broker configs <broker-id>"
+  short: "Show non-default configuration for a broker"
+  description: |
+    Displays broker-level configuration entries grouped by source
+    (STATIC_BROKER_CONFIG, DYNAMIC_BROKER_CONFIG, etc.),
+    highlighting read-only settings.
+  examples:
+    - "kates cluster broker configs 0"
+  see_also:
+    - cluster info
+    - kafka brokers
+
+- name: cluster check
+  category: Cluster
+  synopsis: "kates cluster check"
+  short: "Comprehensive cluster health check"
+  description: |
+    Runs a full health assessment of the Kafka cluster including
+    broker availability, under-replicated partitions, offline
+    partitions, consumer group states, and ISR health.
+  examples:
+    - "kates cluster check"
+    - "kates cluster check -o json"
+  see_also:
+    - doctor
+    - cluster info
+    - cluster topology
+
+- name: cluster topology
+  category: Cluster
+  synopsis: "kates cluster topology [flags]"
+  short: "Full Strimzi/Kafka cluster topology with 26 sections"
+  description: |
+    Displays a comprehensive view of the entire Kafka cluster
+    including Kubernetes platform, Strimzi operator, KRaft
+    controllers, broker node pools, entity operator, Cruise
+    Control, Kafka Exporter, TLS certificates, metrics,
+    managed topics, users, consumer groups, ACLs, log
+    directories, feature flags, KafkaRebalances, Drain
+    Cleaner, StrimziPodSets, NetworkPolicies, PVCs,
+    Services, Endpoints, Connect, and MirrorMaker2.
+
+    Requires the Kates backend to be deployed on Kubernetes
+    with access to Strimzi CRDs and AdminClient APIs.
+  examples:
+    - "kates cluster topology"
+    - "kates cluster topology -o json"
+  see_also:
+    - cluster info
+    - cluster check
+    - cluster alerts
+
+- name: cluster alerts
+  category: Cluster
+  synopsis: "kates cluster alerts [flags]"
+  short: "Show critical Kafka health alerts from PrometheusRules"
+  description: |
+    Reads PrometheusRule CRDs from the cluster and displays
+    critical and warning alerts that affect Kafka health.
+    Alerts are sorted by severity (critical first), showing
+    name, group, firing threshold, PromQL expression, and
+    description.
+
+    Returns exit code 2 when critical alerts are configured,
+    making it suitable for CI/CD health gates.
+
+    Covers 16 alert rules across 8 groups: cluster health,
+    consumer lag, KRaft stability, network latency, operator
+    availability, replication, performance, Cruise Control,
+    and certificate expiry.
+  flags:
+    - name: "--severity"
+      type: string
+      desc: "Filter by severity: critical or warning"
+    - name: "--group"
+      type: string
+      desc: "Filter by alert group (e.g. kafka.cluster, kafka.kraft)"
+  examples:
+    - "kates cluster alerts"
+    - "kates cluster alerts --severity critical"
+    - "kates cluster alerts --group kafka.kraft"
+    - "kates cluster alerts -o json"
+    - "kates cluster alerts --severity critical && echo 'safe'"
+  see_also:
+    - cluster topology
+    - cluster check
+
+- name: cluster groups
+  category: Cluster
+  synopsis: "kates cluster groups"
+  short: "List consumer groups with state and members"
+  description: |
+    Lists all Kafka consumer groups with their current state
+    (STABLE, EMPTY, DEAD) and active member count.
+  examples:
+    - "kates cluster groups"
+  see_also:
+    - kafka groups
+    - cluster groups describe
+
+- name: cluster groups describe
+  category: Cluster
+  synopsis: "kates cluster groups describe <group-id>"
+  short: "Show consumer group detail with per-partition lag"
+  description: |
+    Displays detailed consumer group information including
+    per-partition current offset, end offset, and lag.
+  examples:
+    - "kates cluster groups describe my-consumer-group"
+  see_also:
+    - kafka group
+    - cluster groups
+
+- name: cluster watch
+  category: Cluster
+  synopsis: "kates cluster watch [flags]"
+  short: "Live-watch Kafka cluster health (refreshing dashboard)"
+  flags:
+    - name: "--interval"
+      type: int
+      default: "5"
+      desc: "Refresh interval in seconds"
+  examples:
+    - "kates cluster watch"
+    - "kates cluster watch --interval 10"
+  see_also:
+    - cluster check
+    - dashboard
+
+- name: kafka brokers
+  category: Kafka
+  synopsis: "kates kafka brokers"
+  short: "List brokers with ID, host, port, rack, and controller status"
+  description: |
+    Displays a table of all Kafka brokers with their network
+    endpoints, rack/AZ assignments, and controller designation.
+  examples:
+    - "kates kafka brokers"
+    - "kates kafka brokers -o json"
+  see_also:
+    - cluster info
+    - kafka topics
+
+- name: kafka topics
+  category: Kafka
+  synopsis: "kates kafka topics [flags]"
+  short: "List all topics with partition, replication, and ISR health"
+  description: |
+    Lists all Kafka topics with colour-coded ISR health badges,
+    partition counts, and replication factors. Supports substring
+    filtering.
+  flags:
+    - name: "--filter"
+      type: string
+      desc: "Filter topics by substring match"
+  examples:
+    - "kates kafka topics"
+    - "kates kafka topics --filter perf"
+    - "kates kafka topics -o json"
+  see_also:
+    - kafka topic
+    - kafka create-topic
+
+- name: kafka topic
+  category: Kafka
+  synopsis: "kates kafka topic <name>"
+  short: "Describe a topic — partitions, ISR, offsets, and configuration"
+  description: |
+    Shows detailed topic information including per-partition
+    leader assignments, ISR membership, replica lists, and
+    all topic-level configuration entries.
+  examples:
+    - "kates kafka topic my-topic"
+    - "kates kafka topic __consumer_offsets -o json"
+  see_also:
+    - kafka topics
+    - kafka alter-topic
+    - kafka consume
+
+- name: kafka groups
+  category: Kafka
+  synopsis: "kates kafka groups"
+  short: "List consumer groups with state, members, and lag summary"
+  description: |
+    Lists all consumer groups with colour-coded state badges
+    (STABLE, EMPTY, DEAD) and member counts.
+  examples:
+    - "kates kafka groups"
+    - "kates kafka groups -o json"
+  see_also:
+    - kafka group
+    - cluster groups
+
+- name: kafka group
+  category: Kafka
+  synopsis: "kates kafka group <id>"
+  short: "Describe a consumer group with per-partition offsets and lag"
+  description: |
+    Displays detailed consumer group information including state,
+    member count, total lag, and per-partition offset breakdown
+    with colour-coded lag highlights.
+  examples:
+    - "kates kafka group my-consumer-group"
+  see_also:
+    - kafka groups
+    - cluster groups describe
+
+- name: kafka consume
+  category: Kafka
+  synopsis: "kates kafka consume <topic> [flags]"
+  short: "Fetch records from a topic (latest N or tail with --follow)"
+  description: |
+    Fetches the latest N records from a Kafka topic and displays
+    them in a table with partition, offset, timestamp, key, and
+    value columns. Use --follow to continuously tail new records.
+  flags:
+    - name: "--offset"
+      type: string
+      default: "latest"
+      desc: "Offset reset: latest or earliest"
+    - name: "--limit"
+      type: int
+      default: "20"
+      desc: "Maximum number of records to fetch"
+    - name: "--follow"
+      short: "-f"
+      type: bool
+      desc: "Tail the topic continuously (like tail -f)"
+  examples:
+    - "kates kafka consume my-topic"
+    - "kates kafka consume my-topic --offset earliest --limit 100"
+    - "kates kafka consume my-topic -f"
+    - "kates kafka consume my-topic -o json"
+  see_also:
+    - kafka produce
+    - kafka topic
+
+- name: kafka produce
+  category: Kafka
+  synopsis: "kates kafka produce <topic> [flags]"
+  short: "Produce a record to a topic (from flag or stdin)"
+  description: |
+    Produces a single record to a Kafka topic. The value can be
+    provided via the --value flag or interactively from stdin.
+    Returns partition and offset of the produced record.
+  flags:
+    - name: "--key"
+      type: string
+      desc: "Record key (optional)"
+    - name: "--value"
+      short: "-v"
+      type: string
+      desc: "Record value to produce"
+  examples:
+    - "kates kafka produce my-topic --value '{\"event\":\"test\"}'"
+    - "kates kafka produce my-topic --key user-123 --value hello"
+    - "echo 'payload' | kates kafka produce my-topic"
+  see_also:
+    - kafka consume
+    - kafka topic
+
+- name: kafka create-topic
+  category: Kafka
+  synopsis: "kates kafka create-topic <name> [flags]"
+  short: "Create a new topic with partition, replication, and config options"
+  description: |
+    Creates a new Kafka topic with the specified number of
+    partitions and replication factor. Supports setting arbitrary
+    topic-level configuration entries via repeatable --config flags.
+  flags:
+    - name: "--partitions"
+      type: int
+      default: "1"
+      desc: "Number of partitions"
+    - name: "--replication-factor"
+      type: int
+      default: "1"
+      desc: "Replication factor"
+    - name: "--config"
+      type: string
+      desc: "Topic config entry as key=value (repeatable)"
+  examples:
+    - "kates kafka create-topic events --partitions 6 --replication-factor 3"
+    - "kates kafka create-topic logs --partitions 3 --config retention.ms=86400000"
+    - "kates kafka create-topic compact-topic --config cleanup.policy=compact"
+  see_also:
+    - kafka alter-topic
+    - kafka delete-topic
+    - kafka topics
+
+- name: kafka alter-topic
+  category: Kafka
+  synopsis: "kates kafka alter-topic <name> [flags]"
+  short: "Alter topic configuration entries"
+  description: |
+    Modifies topic-level configuration using incremental alter.
+    Specify one or more --config key=value pairs. Only the
+    specified configs are changed; others remain untouched.
+  flags:
+    - name: "--config"
+      type: string
+      desc: "Config entry to set as key=value (repeatable)"
+  examples:
+    - "kates kafka alter-topic my-topic --config retention.ms=172800000"
+    - "kates kafka alter-topic my-topic --config cleanup.policy=compact --config max.message.bytes=2097152"
+  see_also:
+    - kafka create-topic
+    - kafka topic
+
+- name: kafka delete-topic
+  category: Kafka
+  synopsis: "kates kafka delete-topic <name> [flags]"
+  short: "Delete a topic (with confirmation prompt)"
+  description: |
+    Permanently deletes a Kafka topic and all its data.
+    Prompts for confirmation unless --yes is specified.
+  flags:
+    - name: "--yes"
+      type: bool
+      desc: "Skip confirmation prompt"
+  examples:
+    - "kates kafka delete-topic old-events"
+    - "kates kafka delete-topic old-events --yes"
+  see_also:
+    - kafka create-topic
+    - kafka topics
+
+- name: kafka tui
+  category: Kafka
+  synopsis: "kates kafka tui"
+  short: "Launch interactive Kafka explorer (full-screen TUI)"
+  description: |
+    Opens a full-screen interactive TUI with three tabs:
+    Brokers, Topics, and Groups. Navigate with arrow keys,
+    search with /, consume records with c, and quit with q.
+  examples:
+    - "kates kafka tui"
+  see_also:
+    - kafka topics
+    - kafka brokers
+    - kafka groups
+
+- name: test list
+  category: Test
+  synopsis: "kates test list [flags]"
+  short: "List test runs with optional filters"
+  description: |
+    Lists all performance test runs with type, status, duration,
+    and key metrics. Supports filtering by test type and status.
+  flags:
+    - name: "--type"
+      type: string
+      desc: "Filter by test type (LOAD, STRESS, SPIKE, etc.)"
+    - name: "--status"
+      type: string
+      desc: "Filter by status (PENDING, RUNNING, DONE, FAILED)"
+    - name: "--page"
+      type: int
+      default: "0"
+      desc: "Page number"
+    - name: "--size"
+      type: int
+      default: "20"
+      desc: "Page size"
+  examples:
+    - "kates test list"
+    - "kates test list --type LOAD --status DONE"
+    - "kates test list --size 50"
+  see_also:
+    - test get
+    - test create
+
+- name: test get
+  category: Test
+  synopsis: "kates test get <id>"
+  short: "Show details of a specific test run"
+  description: |
+    Displays full details of a test run including configuration,
+    phase results, metrics, and SLA verdict.
+  examples:
+    - "kates test get abc123"
+    - "kates test get abc123 -o json"
+  see_also:
+    - test list
+    - report show
+
+- name: test create
+  category: Test
+  synopsis: "kates test create [flags]"
+  short: "Start a new performance test"
+  description: |
+    Creates and starts a new performance test with the specified
+    type, record count, and configuration. Supports all 8 test
+    types: LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY,
+    ROUND_TRIP, and INTEGRITY.
+  flags:
+    - name: "--type"
+      type: string
+      default: "LOAD"
+      desc: "Test type"
+    - name: "--records"
+      type: int
+      default: "50000"
+      desc: "Number of records to produce"
+    - name: "--producers"
+      type: int
+      desc: "Number of parallel producers"
+    - name: "--consumers"
+      type: int
+      desc: "Number of consumers"
+    - name: "--partitions"
+      type: int
+      desc: "Topic partition count"
+    - name: "--replication-factor"
+      type: int
+      desc: "Topic replication factor"
+    - name: "--record-size"
+      type: int
+      desc: "Record size in bytes"
+    - name: "--acks"
+      type: string
+      desc: "Producer acks setting (all, 1, 0)"
+    - name: "--backend"
+      type: string
+      desc: "Test backend to use"
+  examples:
+    - "kates test create --type LOAD --records 100000"
+    - "kates test create --type STRESS --producers 8 --records 200000"
+    - "kates test create --type SPIKE --records 50000 --acks all"
+  see_also:
+    - test list
+    - test get
+    - scaffold
+
+- name: test delete
+  category: Test
+  synopsis: "kates test delete <id>"
+  short: "Delete a test run"
+  examples:
+    - "kates test delete abc123"
+  see_also:
+    - test list
+    - test cleanup
+
+- name: test cancel
+  category: Test
+  synopsis: "kates test cancel <id>..."
+  short: "Cancel pending or running test runs, and keep them"
+  description: |
+    Stops each run's tasks and stores the run as FAILED, each unfinished
+    task with the error "Cancelled by user". A run that has already
+    finished cannot be cancelled, and the command exits 1.
+  examples:
+    - "kates test cancel abc123"
+    - "kates test cancel abc123 def456 -o json"
+  see_also:
+    - test delete
+    - test watch
+
+- name: test apply
+  category: Test
+  synopsis: "kates test apply [flags]"
+  short: "Apply a YAML test scenario definition"
+  description: |
+    Creates and runs a test from a YAML scenario file. Supports
+    multi-phase scenarios with SLA gates for CI/CD pipelines.
+    Use --wait to block until completion.
+  flags:
+    - name: "--file"
+      short: "-f"
+      type: string
+      desc: "Path to scenario YAML file (required)"
+    - name: "--wait"
+      type: bool
+      desc: "Wait for test to complete before returning"
+  examples:
+    - "kates test apply -f scenario.yaml"
+    - "kates test apply -f scenario.yaml --wait"
+  see_also:
+    - scaffold
+    - test create
+
+- name: test cleanup
+  category: Test
+  synopsis: "kates test cleanup [flags]"
+  short: "Delete orphaned tests stuck in RUNNING state"
+  flags:
+    - name: "--dry-run"
+      type: bool
+      desc: "Preview what would be deleted without actually deleting"
+  examples:
+    - "kates test cleanup"
+    - "kates test cleanup --dry-run"
+  see_also:
+    - test list
+    - test delete
+
+- name: test compare
+  category: Test
+  synopsis: "kates test compare <id1> <id2>"
+  short: "Side-by-side comparison of two test runs"
+  description: |
+    Displays a side-by-side metric diff of two test runs with
+    percentage change indicators and sparkline trends.
+  examples:
+    - "kates test compare abc123 def456"
+  see_also:
+    - report compare
+    - diff
+
+- name: test summary
+  category: Test
+  synopsis: "kates test summary"
+  short: "Aggregate statistics across all completed tests"
+  description: |
+    Shows aggregate stats across all completed test runs including
+    total count by type, average metrics, and overall pass rate.
+  examples:
+    - "kates test summary"
+  see_also:
+    - test list
+    - trend
+
+- name: test export
+  category: Test
+  synopsis: "kates test export <id> [flags]"
+  short: "Export test results to a file (CSV or JSON)"
+  flags:
+    - name: "--format"
+      type: string
+      default: "csv"
+      desc: "Export format: csv or json"
+    - name: "--file"
+      short: "-f"
+      type: string
+      desc: "Output file path (default: <id>.<format>)"
+  examples:
+    - "kates test export abc123"
+    - "kates test export abc123 --format json -f results.json"
+  see_also:
+    - report export
+
+- name: test flame
+  category: Test
+  synopsis: "kates test flame <id>"
+  short: "ASCII latency distribution chart for a test run"
+  description: |
+    Renders an ASCII histogram showing the latency distribution
+    of a test run, highlighting p50, p95, p99, and max values.
+  examples:
+    - "kates test flame abc123"
+  see_also:
+    - report show
+    - test get
+
+- name: test baseline set
+  category: Baseline
+  synopsis: "kates test baseline set <run-id>"
+  short: "Mark a test run as the baseline for its type"
+  description: |
+    Designates the specified test run as the baseline for its
+    test type. Future regression checks compare against this run.
+  examples:
+    - "kates test baseline set abc123"
+  see_also:
+    - test baseline show
+    - test baseline list
+    - report regression
+
+- name: test baseline unset
+  category: Baseline
+  synopsis: "kates test baseline unset <type>"
+  short: "Remove the baseline for a test type"
+  examples:
+    - "kates test baseline unset LOAD"
+  see_also:
+    - test baseline set
+    - test baseline list
+
+- name: test baseline show
+  category: Baseline
+  synopsis: "kates test baseline show <type>"
+  short: "Show the current baseline for a test type"
+  description: |
+    Displays the run ID, test type, and timestamp of the
+    currently configured baseline.
+  examples:
+    - "kates test baseline show LOAD"
+    - "kates test baseline show STRESS -o json"
+  see_also:
+    - test baseline set
+    - test baseline list
+
+- name: test baseline list
+  category: Baseline
+  synopsis: "kates test baseline list"
+  short: "List all configured baselines"
+  description: |
+    Displays a table of all test types that have a baseline
+    configured, with run IDs and timestamps.
+  examples:
+    - "kates test baseline list"
+    - "kates test baseline list -o json"
+  see_also:
+    - test baseline set
+    - test baseline show
+
+- name: report regression
+  category: Baseline
+  synopsis: "kates report regression <run-id>"
+  short: "Compare a test run against its type's baseline"
+  description: |
+    Performs a regression check comparing the specified run's
+    metrics against the baseline. Reports throughput, latency,
+    and error rate deltas with colour-coded ▲/▼ indicators.
+    Flags regression when throughput drops >10%, P99 rises >20%,
+    or error rate increases.
+  examples:
+    - "kates report regression abc123"
+    - "kates report regression abc123 -o json"
+  see_also:
+    - test baseline set
+    - test baseline list
+    - report show
+
+- name: tune run
+  category: Tuning
+  synopsis: "kates tune run <type>"
+  short: "Run a parameter sweep tuning test"
+  description: |
+    Executes a tuning test that sweeps a single configuration
+    parameter across multiple values. Types: TUNE_REPLICATION,
+    TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS.
+  examples:
+    - "kates tune run compression"
+    - "kates tune run TUNE_BATCHING"
+  see_also:
+    - tune report
+    - tune types
+
+- name: tune report
+  category: Tuning
+  synopsis: "kates tune report <run-id>"
+  short: "Show tuning comparison report"
+  description: |
+    Displays a ranked comparison table of each parameter value
+    tested, with throughput, latency, and error rate columns.
+    Marks the best (★) and worst (▼) configurations.
+  examples:
+    - "kates tune report abc123"
+  see_also:
+    - tune run
+    - tune types
+
+- name: tune types
+  category: Tuning
+  synopsis: "kates tune types"
+  short: "List available tuning tests"
+  description: |
+    Shows all available tuning test types with their target
+    parameter, number of sweep steps, and description.
+  examples:
+    - "kates tune types"
+  see_also:
+    - tune run
+    - tune report
+
+- name: report show
+  category: Report
+  synopsis: "kates report show <id>"
+  short: "Show the full report for a test run"
+  description: |
+    Displays the complete performance report with summary metrics,
+    per-phase breakdowns, SLA verdict, and violation details.
+  examples:
+    - "kates report show abc123"
+    - "kates report show abc123 -o json"
+  see_also:
+    - report summary
+    - report export
+
+- name: report summary
+  category: Report
+  synopsis: "kates report summary <id>"
+  short: "Show compact summary metrics for a test run"
+  description: |
+    Displays a one-screen summary of the most important metrics:
+    throughput, latency percentiles, error rate, and SLA status.
+  examples:
+    - "kates report summary abc123"
+  see_also:
+    - report show
+    - test get
+
+- name: report compare
+  category: Report
+  synopsis: "kates report compare <id1,id2,...>"
+  short: "Compare metrics across multiple test runs"
+  examples:
+    - "kates report compare abc123,def456"
+  see_also:
+    - test compare
+    - diff
+
+- name: report export
+  category: Report
+  synopsis: "kates report export <id> [flags]"
+  short: "Export report as CSV, JUnit XML, Heatmap, Markdown, or HTML"
+  description: |
+    Exports a test report in the specified format. CSV and JUnit
+    are ideal for CI integration. Markdown embeds well in GitHub PRs.
+    HTML generates a self-contained dark-mode dashboard with
+    throughput grids, latency bars, SLA badges, and phase breakdowns.
+  flags:
+    - name: "--format"
+      type: string
+      default: "csv"
+      desc: "Export format: csv, junit, heatmap, heatmap-csv, md, or html"
+  examples:
+    - "kates report export abc123"
+    - "kates report export abc123 --format junit"
+    - "kates report export abc123 --format md"
+    - "kates report export abc123 --format html"
+    - "kates report export abc123 --format heatmap"
+  see_also:
+    - report show
+
+- name: report brokers
+  category: Report
+  synopsis: "kates report brokers <run-id>"
+  short: "Show per-broker metric breakdown for a test run"
+  description: |
+    Displays throughput, latency, and partition metrics for each
+    broker during a test run, including leader share and skew.
+  examples:
+    - "kates report brokers abc123"
+  see_also:
+    - report snapshot
+    - report show
+
+- name: report snapshot
+  category: Report
+  synopsis: "kates report snapshot <run-id>"
+  short: "Show cluster topology captured at test time"
+  description: |
+    Displays the cluster snapshot taken at the start of a test,
+    including broker layout, partition assignments, and ISR state.
+  examples:
+    - "kates report snapshot abc123"
+  see_also:
+    - report brokers
+
+- name: trend
+  category: Analysis
+  synopsis: "kates trend [flags]"
+  short: "Historical performance trends with sparkline charts"
+  description: |
+    Analyzes performance trends over time for a specific test type
+    and metric. Shows baseline, data points with sparklines, and
+    highlights any regressions.
+  flags:
+    - name: "--type"
+      type: string
+      default: "LOAD"
+      desc: "Test type to analyze"
+    - name: "--metric"
+      type: string
+      default: "p99LatencyMs"
+      desc: "Metric to track"
+    - name: "--days"
+      type: int
+      default: "30"
+      desc: "Lookback period in days"
+    - name: "--baseline-window"
+      type: int
+      default: "5"
+      desc: "Number of runs for baseline calculation"
+    - name: "--phase"
+      type: string
+      desc: "Filter to a specific test phase"
+  examples:
+    - "kates trend"
+    - "kates trend --type STRESS --metric avgThroughputRecPerSec"
+    - "kates trend --days 14 --phase spike"
+  see_also:
+    - benchmark
+    - test summary
+
+- name: benchmark
+  category: Analysis
+  synopsis: "kates benchmark [flags]"
+  short: "Run a full test battery with letter-grade scorecard"
+  description: |
+    Executes LOAD → STRESS → SPIKE tests in sequence and produces
+    a letter-grade scorecard (A through F) based on throughput,
+    latency, and error rate thresholds.
+  flags:
+    - name: "--records"
+      type: int
+      default: "50000"
+      desc: "Records per test"
+    - name: "--backend"
+      type: string
+      desc: "Test backend to use"
+  examples:
+    - "kates benchmark"
+    - "kates benchmark --records 100000"
+  see_also:
+    - gate
+    - test create
+
+- name: gate
+  category: Analysis
+  synopsis: "kates gate [flags]"
+  short: "CI quality gate — exit non-zero if grade is below threshold"
+  description: |
+    Runs a test and assigns a letter grade. Exits with code 1 if
+    the grade is below the specified minimum. Designed for CI/CD
+    pipeline integration.
+  flags:
+    - name: "--min-grade"
+      type: string
+      default: "C"
+      desc: "Minimum passing grade (A, B, C, D, F)"
+    - name: "--type"
+      type: string
+      default: "LOAD"
+      desc: "Test type to run"
+    - name: "--records"
+      type: int
+      default: "50000"
+      desc: "Number of records"
+    - name: "--backend"
+      type: string
+      desc: "Benchmark backend"
+    - name: "--timeout"
+      type: int
+      default: "180"
+      desc: "Timeout in seconds"
+  examples:
+    - "kates gate --min-grade B --type STRESS"
+    - "kates gate --min-grade A --records 100000 --timeout 300"
+  see_also:
+    - benchmark
+    - test create
+
+- name: explain
+  category: Analysis
+  synopsis: "kates explain <id>"
+  short: "Plain-English summary and verdict for a test run"
+  description: |
+    Generates a human-readable narrative explaining what happened
+    during a test run, including performance highlights, anomalies,
+    and a final verdict.
+  examples:
+    - "kates explain abc123"
+  see_also:
+    - report show
+    - test get
+
+- name: replay
+  category: Analysis
+  synopsis: "kates replay <id>"
+  short: "Re-run a previous test with the same parameters"
+  description: |
+    Creates a new test run using the exact same configuration
+    as a previous run. Useful for reproducibility testing.
+  examples:
+    - "kates replay abc123"
+  see_also:
+    - test create
+    - test get
+
+- name: diff
+  category: Analysis
+  synopsis: "kates diff <id1> <id2>"
+  short: "Side-by-side comparison of two test run reports"
+  examples:
+    - "kates diff abc123 def456"
+  see_also:
+    - test compare
+    - report compare
+
+- name: scenario-diff
+  category: Analysis
+  synopsis: "kates scenario-diff <id> [flags]"
+  short: "Compare a scenario YAML against actual test results"
+  description: |
+    Loads a YAML scenario and compares its expected SLA thresholds
+    against the actual results of a completed test run.
+  examples:
+    - "kates scenario-diff abc123 -f scenario.yaml"
+  see_also:
+    - test apply
+    - diff
+
+- name: disruption run
+  category: Disruption
+  synopsis: "kates disruption run [flags]"
+  short: "Execute a disruption plan from a JSON config file"
+  description: |
+    Runs chaos engineering experiments against the Kafka cluster
+    using LitmusChaos. Supports dry-run mode, SLA breach detection,
+    and JUnit output for CI/CD integration.
+  flags:
+    - name: "--config"
+      type: string
+      desc: "Path to disruption plan JSON config (required)"
+    - name: "--dry-run"
+      type: bool
+      desc: "Validate plan without executing; exits 1 when the verdict is UNSAFE"
+    - name: "--fail-on-sla-breach"
+      type: bool
+      desc: "Exit code 1 if SLA is violated"
+    - name: "--output-junit"
+      type: string
+      desc: "Write JUnit XML report to file"
+  examples:
+    - "kates disruption run --config plan.json"
+    - "kates disruption run --config plan.json --dry-run"
+    - "kates disruption run --config plan.json --fail-on-sla-breach --output-junit report.xml"
+  see_also:
+    - disruption types
+    - disruption playbook list
+
+- name: disruption list
+  category: Disruption
+  synopsis: "kates disruption list"
+  short: "List recent disruption test reports"
+  examples:
+    - "kates disruption list"
+  see_also:
+    - disruption status
+
+- name: disruption status
+  category: Disruption
+  synopsis: "kates disruption status <id>"
+  short: "Show disruption test report"
+  examples:
+    - "kates disruption status abc123"
+  see_also:
+    - disruption list
+    - disruption timeline
+
+- name: disruption timeline
+  category: Disruption
+  synopsis: "kates disruption timeline <id>"
+  short: "Show pod event timeline for a disruption test"
+  examples:
+    - "kates disruption timeline abc123"
+  see_also:
+    - disruption status
+
+- name: disruption types
+  category: Disruption
+  synopsis: "kates disruption types"
+  short: "List available disruption types"
+  examples:
+    - "kates disruption types"
+  see_also:
+    - disruption run
+
+- name: disruption kafka-metrics
+  category: Disruption
+  synopsis: "kates disruption kafka-metrics <id>"
+  short: "Show Kafka intelligence metrics for a disruption test"
+  description: |
+    Displays ISR tracking, consumer lag, and leader targeting
+    metrics collected during a disruption experiment.
+  examples:
+    - "kates disruption kafka-metrics abc123"
+  see_also:
+    - disruption status
+
+- name: disruption watch
+  category: Disruption
+  synopsis: "kates disruption watch <id>"
+  short: "Stream real-time progress events from a running disruption"
+  description: |
+    The backend emits the events under the plan's name, not under
+    the disruption ID, so for that ID no events arrive yet. Follow
+    a run with 'kates disruption status <id>' until it does.
+  examples:
+    - "kates disruption watch abc123"
+  see_also:
+    - disruption status
+
+- name: disruption playbook list
+  category: Disruption
+  synopsis: "kates disruption playbook list"
+  short: "List available disruption playbooks"
+  examples:
+    - "kates disruption playbook list"
+  see_also:
+    - disruption playbook show
+    - disruption playbook run
+
+- name: disruption playbook show
+  category: Disruption
+  synopsis: "kates disruption playbook show <name>"
+  short: "Show the disruption plan a playbook runs"
+  description: |
+    Prints the plan the backend resolves from the playbook's YAML:
+    each step's fault, targets, the fields that size a fault of its
+    type, and timings, with the defaults the YAML leaves out filled
+    in. With -o json it prints the plan as the backend returns it,
+    which 'kates disruption run --config' accepts.
+  examples:
+    - "kates disruption playbook show leader-cascade"
+    - "kates disruption playbook show leader-cascade -o json > plan.json"
+  see_also:
+    - disruption playbook run
+    - disruption playbook list
+
+- name: disruption playbook run
+  category: Disruption
+  synopsis: "kates disruption playbook run <name> [flags]"
+  short: "Execute a pre-built disruption playbook"
+  description: |
+    Runs the playbook and waits for its report. With --dry-run it
+    sends the playbook's plan to the disruption dry run instead,
+    which lists the pods each step would hit and checks the blast
+    radius without injecting any fault, and exits 1 when the
+    verdict is UNSAFE. With -o json it prints the result as JSON.
+  flags:
+    - name: "--dry-run"
+      type: bool
+      desc: "Preview the blast radius without injecting any fault; exits 1 when the verdict is UNSAFE"
+  examples:
+    - "kates disruption playbook run leader-cascade --dry-run"
+    - "kates disruption playbook run leader-cascade"
+  see_also:
+    - disruption playbook show
+    - disruption playbook list
+    - disruption run
+
+- name: disruption schedule list
+  category: Disruption
+  synopsis: "kates disruption schedule list"
+  short: "List disruption schedules"
+  examples:
+    - "kates disruption schedule list"
+  see_also:
+    - disruption schedule create
+
+- name: disruption schedule create
+  category: Disruption
+  synopsis: "kates disruption schedule create <name> [flags]"
+  short: "Create a new disruption schedule"
+  flags:
+    - name: "--playbook"
+      type: string
+      desc: "Playbook name"
+    - name: "--cron"
+      type: string
+      desc: "Cron expression (5-field)"
+  examples:
+    - "kates disruption schedule create nightly-chaos --playbook broker-kill --cron '0 3 * * *'"
+  see_also:
+    - disruption schedule list
+
+- name: disruption schedule delete
+  category: Disruption
+  synopsis: "kates disruption schedule delete <id>"
+  short: "Delete a disruption schedule"
+  examples:
+    - "kates disruption schedule delete abc123"
+  see_also:
+    - disruption schedule list
+
+- name: schedule list
+  category: Scheduling
+  synopsis: "kates schedule list"
+  short: "List all scheduled tests"
+  examples:
+    - "kates schedule list"
+  see_also:
+    - schedule get
+    - schedule create
+
+- name: schedule get
+  category: Scheduling
+  synopsis: "kates schedule get <id>"
+  short: "Show details of a scheduled test"
+  examples:
+    - "kates schedule get s1"
+  see_also:
+    - schedule list
+
+- name: schedule create
+  category: Scheduling
+  synopsis: "kates schedule create [flags]"
+  short: "Create a new scheduled test"
+  description: |
+    Creates a recurring test schedule using a cron expression.
+    The scheduled test runs automatically at the specified interval.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Schedule name (required)"
+    - name: "--cron"
+      type: string
+      desc: "Cron expression (required)"
+    - name: "--type"
+      type: string
+      desc: "Test type"
+    - name: "--enabled"
+      type: bool
+      default: "true"
+      desc: "Whether the schedule is active"
+  examples:
+    - "kates schedule create --name nightly-load --cron '0 0 * * *' --type LOAD"
+  see_also:
+    - schedule list
+    - schedule delete
+
+- name: schedule delete
+  category: Scheduling
+  synopsis: "kates schedule delete <id>"
+  short: "Delete a scheduled test"
+  examples:
+    - "kates schedule delete s1"
+  see_also:
+    - schedule list
+
+- name: resilience run
+  category: Resilience
+  synopsis: "kates resilience run [flags]"
+  short: "Run combined performance + chaos resilience tests"
+  description: |
+    Executes a combined performance and chaos resilience test
+    using a JSON configuration file. Measures impact deltas
+    between baseline and chaos states.
+  flags:
+    - name: "--config"
+      type: string
+      desc: "Path to resilience test config JSON (required)"
+  examples:
+    - "kates resilience run --config resilience.json"
+  see_also:
+    - disruption run
+    - benchmark
+
+- name: ctx show
+  category: Config
+  synopsis: "kates ctx show"
+  short: "Show all contexts and current selection"
+  examples:
+    - "kates ctx show"
+  see_also:
+    - ctx set
+    - ctx use
+
+- name: ctx set
+  category: Config
+  synopsis: "kates ctx set <name> [flags]"
+  short: "Create or update a context"
+  flags:
+    - name: "--url"
+      type: string
+      desc: "Kates API base URL (required)"
+    - name: "--output"
+      type: string
+      desc: "Default output format for this context"
+  examples:
+    - "kates ctx set local --url http://localhost:30083"
+    - "kates ctx set staging --url https://kates.staging.internal --output json"
+  see_also:
+    - ctx use
+    - ctx show
+
+- name: ctx use
+  category: Config
+  synopsis: "kates ctx use <name>"
+  short: "Switch to a context"
+  examples:
+    - "kates ctx use local"
+    - "kates ctx use staging"
+  see_also:
+    - ctx set
+    - ctx show
+
+- name: ctx delete
+  category: Config
+  synopsis: "kates ctx delete <name>"
+  short: "Remove a context"
+  examples:
+    - "kates ctx delete old-server"
+  see_also:
+    - ctx show
+
+- name: ctx current
+  category: Config
+  synopsis: "kates ctx current"
+  short: "Print the active context name and URL"
+  examples:
+    - "kates ctx current"
+  see_also:
+    - ctx show
+    - ctx use
+
+- name: dashboard
+  category: Observability
+  synopsis: "kates dashboard [flags]"
+  short: "Full-screen monitoring dashboard with live metrics"
+  description: |
+    Launches a full-screen terminal dashboard showing live
+    system health, running tests, recent results, and cluster
+    metrics. Refreshes automatically.
+  flags:
+    - name: "--interval"
+      type: int
+      default: "3"
+      desc: "Refresh interval in seconds"
+  examples:
+    - "kates dashboard"
+    - "kates dash"
+    - "kates dashboard --interval 10"
+  see_also:
+    - top
+    - cluster watch
+
+- name: top
+  category: Observability
+  synopsis: "kates top"
+  short: "Live view of running tests (like kubectl top)"
+  description: |
+    Displays a continuously refreshing view of active test runs
+    with real-time progress and metrics.
+  examples:
+    - "kates top"
+  see_also:
+    - dashboard
+    - test list
+
+- name: webhook list
+  category: Observability
+  synopsis: "kates webhook list"
+  short: "List registered webhooks"
+  examples:
+    - "kates webhook list"
+  see_also:
+    - webhook register
+    - webhook delete
+
+- name: webhook register
+  category: Observability
+  synopsis: "kates webhook register <name> --url <url>"
+  short: "Register a webhook for test completion events"
+  flags:
+    - name: "--url"
+      type: string
+      desc: "Webhook endpoint URL (required)"
+  examples:
+    - "kates webhook register slack-notify --url https://hooks.slack.com/services/xxx"
+  see_also:
+    - webhook list
+    - webhook delete
+
+- name: webhook delete
+  category: Observability
+  synopsis: "kates webhook delete <name>"
+  short: "Remove a registered webhook"
+  examples:
+    - "kates webhook delete slack-notify"
+  see_also:
+    - webhook list
+
+- name: test scaffold
+  category: Toolbox
+  synopsis: "kates test scaffold [subcommand]"
+  short: "Browse and export built-in test scenario templates"
+  description: |
+    The scenario library ships 7 curated YAML templates embedded
+    in the CLI binary via embed.FS. Use 'list' to browse, 'show'
+    for a syntax-highlighted preview, and 'export' to write to disk.
+  examples:
+    - "kates test scaffold list"
+    - "kates test scaffold show quick-load"
+    - "kates test scaffold export ci-gate"
+    - "kates test scaffold export --all"
+  see_also:
+    - test apply
+    - init
+
+- name: test scaffold list
+  category: Toolbox
+  synopsis: "kates test scaffold list"
+  short: "List all 7 built-in scenario templates"
+  description: |
+    Displays a table of all embedded scenario templates with
+    name, test type, and description. Templates cover quick-load,
+    production-load, stress-test, endurance-soak, exactly-once,
+    spike-test, and ci-gate scenarios.
+  examples:
+    - "kates test scaffold list"
+  see_also:
+    - test scaffold show
+    - test scaffold export
+
+- name: test scaffold show
+  category: Toolbox
+  synopsis: "kates test scaffold show <name>"
+  short: "Preview a scenario template with syntax highlighting"
+  description: |
+    Renders the YAML content of a built-in scenario template
+    with syntax-highlighted keys. Shows export and run hints.
+  examples:
+    - "kates test scaffold show quick-load"
+    - "kates test scaffold show production-load"
+  see_also:
+    - test scaffold list
+    - test scaffold export
+
+- name: test scaffold export
+  category: Toolbox
+  synopsis: "kates test scaffold export [name] [flags]"
+  short: "Export scenario template(s) to the file system"
+  description: |
+    Writes one or all scenario templates from the embedded
+    library to the current directory (or --dir). Skips files
+    that already exist.
+  flags:
+    - name: "--all"
+      type: bool
+      desc: "Export all 7 templates"
+    - name: "--dir"
+      short: "-d"
+      type: string
+      desc: "Output directory (default: current)"
+  examples:
+    - "kates test scaffold export quick-load"
+    - "kates test scaffold export --all"
+    - "kates test scaffold export production-load --dir ./scenarios/"
+  see_also:
+    - test scaffold list
+    - test apply
+
+- name: init
+  category: Toolbox
+  synopsis: "kates init [flags]"
+  short: "Initialize a new Kates workspace with config, scenarios, and CI gate"
+  description: |
+    Sets up a complete Kates project in the current directory:
+    1) Creates ~/.kates.yaml with a named context.
+    2) Exports all 7 built-in scenario templates to scenarios/.
+    3) Generates kates-ci.sh — a CI pipeline gate script with
+       KATES_URL env var support and exit code propagation.
+  flags:
+    - name: "--name"
+      type: string
+      default: "default"
+      desc: "Context name"
+    - name: "--url"
+      type: string
+      default: "http://localhost:8080"
+      desc: "Kates API URL"
+    - name: "--dir"
+      type: string
+      default: "."
+      desc: "Project directory to scaffold into"
+    - name: "--no-scenarios"
+      type: bool
+      desc: "Skip scenario template export"
+    - name: "--no-ci"
+      type: bool
+      desc: "Skip CI gate script generation"
+  examples:
+    - "kates init"
+    - "kates init --url http://kates.internal:8080 --name production"
+    - "kates init --no-scenarios --no-ci"
+  see_also:
+    - test scaffold list
+    - ctx set
+
+- name: audit
+  category: Observability
+  synopsis: "kates audit [flags]"
+  short: "Show audit log of all mutating operations"
+  description: |
+    Displays a chronological log of all mutations (test creates/deletes,
+    topic changes, disruption runs) with timestamps, action types,
+    and details. Supports filtering by event type and time range.
+    Action badges: green "+ CREATE", red "- DELETE", cyan "~ UPDATE".
+  flags:
+    - name: "--limit"
+      type: int
+      default: "50"
+      desc: "Maximum number of events to show"
+    - name: "--type"
+      type: string
+      desc: "Filter by event type (test, topic, disruption, resilience)"
+    - name: "--since"
+      type: string
+      desc: "Show events after this ISO-8601 timestamp"
+  examples:
+    - "kates audit"
+    - "kates audit --limit 20 --type test"
+    - "kates audit --type topic --since 2024-01-01T00:00:00Z"
+    - "kates audit -o json"
+  see_also:
+    - test list
+    - dashboard
+
+- name: cluster diff
+  category: Analysis
+  synopsis: "kates cluster diff --from <ctx> --to <ctx>"
+  short: "Compare Kafka cluster state between two contexts"
+  description: |
+    Compares topics, consumer groups, and configurations between
+    two named contexts. Shows added, removed, and changed resources
+    in a colour-coded diff table.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source context name (required)"
+    - name: "--to"
+      type: string
+      desc: "Target context name (required)"
+  examples:
+    - "kates cluster diff --from local --to staging"
+    - "kates cluster diff --from dev --to production"
+  see_also:
+    - ctx show
+    - cluster info
+
+- name: ctx export
+  category: Config
+  synopsis: "kates ctx export [name]"
+  short: "Export context(s) as YAML for team sharing"
+  description: |
+    Marshals the specified context (or all contexts if no name given)
+    to YAML on stdout. Compatible with 'kates ctx import'. API keys and
+    proxy passwords are masked and key-source is left out, unless
+    --reveal is given.
+  examples:
+    - "kates ctx export staging > kates-staging.yaml"
+    - "kates ctx export > all-contexts.yaml"
+  see_also:
+    - ctx import
+    - ctx show
+
+- name: ctx import
+  category: Config
+  synopsis: "kates ctx import [flags]"
+  short: "Import contexts from YAML file or stdin"
+  description: |
+    Reads context definitions from a YAML file (or stdin) and
+    merges them into ~/.kates.yaml. Existing contexts with the
+    same name are overwritten. A masked API key is never stored:
+    an existing context keeps its key only while the file leaves
+    its URL, proxy and insecure setting unchanged.
+  flags:
+    - name: "--file"
+      short: "-f"
+      type: string
+      desc: "Path to YAML file (default: stdin)"
+  examples:
+    - "kates ctx import -f kates-staging.yaml"
+    - "cat contexts.yaml | kates ctx import"
+  see_also:
+    - ctx export
+    - ctx show
+
+- name: plugin list
+  category: Toolbox
+  synopsis: "kates plugin list"
+  short: "List discovered plugin commands"
+  description: |
+    Scans ~/.kates/plugins/ and $PATH for executables prefixed
+    with 'kates-' and displays them with their full paths.
+    Plugins are invoked as 'kates <name>' (e.g., kates-hello → kates hello).
+  examples:
+    - "kates plugin list"
+  see_also:
+    - init
+
+- name: migrate pairs
+  category: Migration
+  synopsis: "kates migrate pairs [--target-cluster krafter] [--target-namespace kafka]"
+  short: "Every old → new Kafka pair this cluster can stand up now"
+  description: |
+    Lists the source versions a migration lab can be built from, grouped by
+    the provider each would get — the legacy-kafka chart (ZooKeeper below
+    3.3.0, the built KRaft image below 3.7.0, the official image from there)
+    or Strimzi — and the targets the primary operator's window allows, with
+    the primary's own version in brackets. Read from the operator on the
+    cluster, or from the vendored chart when none is installed.
+  flags:
+    - name: "--target-cluster"
+      type: string
+      default: "krafter"
+      desc: "Name of the target Kafka (the platform's primary)"
+    - name: "--target-namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the target Kafka"
+  examples:
+    - "kates migrate pairs"
+    - "kates migrate pairs -o json"
+  see_also:
+    - migrate plan
+    - migrate up
+
+- name: migrate plan
+  category: Migration
+  synopsis: "kates migrate plan --from <version> [--from <version>…] [--to <version>] [flags]"
+  short: "What 'migrate up' would create for a pair of versions — nothing changes"
+  description: |
+    Resolves the pair against the cluster — the primary operator's window and
+    scope, the target Kafka, the provider each source gets — and prints the
+    lab up would create: namespaces, releases, provider, mode and image of
+    every source, the operator, the target, the mirror's policy,
+    minSourceVersion, preflight and topics, where the offset-syncs topic
+    lives and what the source principal therefore needs, the values files it
+    would write and the helm commands. -o json prints the same as a
+    document. Under cluster scope a version the cluster-wide operator has
+    dropped is planned as a legacy source, and the plan says why.
+
+    --from is repeatable: several sources are mirrored into the one target
+    by one MirrorMaker 2 release, each with its own alias (src282, src391),
+    namespace, release, credential, corpus topic and row. A combination the
+    chart would refuse at render time — two sources sharing an alias, or two
+    writing one topic name under the identity policy — is refused here
+    first, naming both --from values, without touching the cluster.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source Kafka version, x.y.z (required; repeat it to mirror several sources into one target)"
+    - name: "--to"
+      type: string
+      desc: "Target Kafka version (default: the primary as it runs)"
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: m<from>[-<from>…]-<to> with the dots removed)"
+    - name: "--source-provider"
+      type: string
+      default: "auto"
+      desc: "Who runs the source: auto, strimzi or legacy"
+    - name: "--source-strimzi-version"
+      type: string
+      desc: "Operator version of a Strimzi source in its own namespace (namespace scope)"
+    - name: "--policy"
+      type: string
+      default: "identity"
+      desc: "Replication policy: identity (keep topic names) or default (<alias>.<topic>)"
+    - name: "--topics"
+      type: string
+      default: "kates.orders"
+      desc: "Corpus topics to seed and mirror, comma-separated (with several --from the lab's own corpus is kates.orders.<alias> per source)"
+    - name: "--read-only-source"
+      type: bool
+      desc: "Write nothing to the source: offset-syncs go to the target (KIP-716), so the source principal needs Read and Describe only"
+    - name: "--messages"
+      type: int
+      default: "200"
+      desc: "Records to produce per topic"
+    - name: "--sasl"
+      type: bool
+      desc: "Put the legacy source behind its SASL/PLAIN listener"
+    - name: "--interactive"
+      short: "-i"
+      type: bool
+      desc: "Pick the pair, the policy and the corpus interactively"
+  examples:
+    - "kates migrate plan --from 2.8.2"
+    - "kates migrate plan --from 3.9.1 --policy default"
+    - "kates migrate plan --from 2.8.2 --from 3.9.1"
+    - "kates migrate plan --from 4.2.1 -o json"
+  see_also:
+    - migrate pairs
+    - migrate up
+
+- name: migrate up
+  category: Migration
+  synopsis: "kates migrate up --from <version> [--from <version>…] [--to <version>] [flags]"
+  short: "Create the migration lab: the old Kafka, the mirror, ready to verify"
+  description: |
+    Stands up the lab plan describes: the prerequisites (cluster reachable,
+    Strimzi CRDs, target Kafka Ready, target credentials), the built image
+    when a source needs one, each source's namespace and legacy-kafka
+    release, each source credential, the MirrorMaker 2 release with the era
+    preset and the generated values, then waits for the CR to be Ready and
+    every connector RUNNING. Every step is a row of the report; the exit code
+    is 1 on any failed row. Every release carries kates.io/lab=<name>, which
+    is how status, verify, cutover and down find the lab again.
+
+    --from is repeatable: several sources are mirrored into the one target by
+    one MirrorMaker 2 release. Each gets its own alias derived from its
+    version (src282, src391), its own namespace, release, credential and
+    corpus topic, its own entry in the mirror's values, and its own rows in
+    the report. The lab is named m282-391-430; a single source keeps the
+    names it has always had.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source Kafka version, x.y.z (required; repeat it to mirror several sources into one target)"
+    - name: "--to"
+      type: string
+      desc: "Target Kafka version (default: the primary as it runs)"
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: m<from>[-<from>…]-<to> with the dots removed)"
+    - name: "--source-provider"
+      type: string
+      default: "auto"
+      desc: "Who runs the source: auto, strimzi or legacy"
+    - name: "--policy"
+      type: string
+      default: "identity"
+      desc: "Replication policy: identity or default"
+    - name: "--topics"
+      type: string
+      default: "kates.orders"
+      desc: "Corpus topics to seed and mirror, comma-separated (with several --from the lab's own corpus is kates.orders.<alias> per source)"
+    - name: "--read-only-source"
+      type: bool
+      desc: "Write nothing to the source: offset-syncs go to the target (KIP-716), so the source principal needs Read and Describe only. For a --from-bootstrap cluster you do not own; the lab's own source does not need it"
+    - name: "--messages"
+      type: int
+      default: "200"
+      desc: "Records to produce per topic"
+    - name: "--sasl"
+      type: bool
+      desc: "Put the legacy source behind its SASL/PLAIN listener"
+    - name: "--values-source"
+      type: string
+      desc: "Extra values file layered on the source's generated values"
+    - name: "--values-mirror"
+      type: string
+      desc: "Extra values file layered on the mirror's generated values"
+    - name: "--skip-build"
+      type: bool
+      desc: "Do not build/load the source image (assume it is present)"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Per-phase wait budget in seconds"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+    - name: "--interactive"
+      short: "-i"
+      type: bool
+      desc: "Pick the pair, the policy and the corpus interactively"
+  examples:
+    - "kates migrate up --from 2.8.2"
+    - "kates migrate up --from 3.9.1 --policy default --name m391-430-default --yes"
+    - "kates migrate up --from 2.8.2 --from 3.9.1 --yes"
+    - "kates migrate up --from 2.8.2 --sasl --topics kates.orders,kates.payments"
+  see_also:
+    - migrate plan
+    - migrate verify
+    - migrate down
+
+- name: migrate status
+  category: Migration
+  synopsis: "kates migrate status [--name <lab>] [--watch]"
+  short: "The lab as the cluster sees it: source, target, mirror CR, connectors, end offsets"
+  description: |
+    Finds the lab by its kates.io/lab label and prints its source, its
+    target, the KafkaMirrorMaker2 CR's readiness and every connector's state,
+    and — best effort, through a client pod on each side — the end offsets of
+    the mirrored topics on both ends. --watch repeats every 10 seconds.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--watch"
+      short: "-w"
+      type: bool
+      desc: "Repeat every 10 seconds"
+    - name: "--offsets"
+      type: bool
+      default: "true"
+      desc: "Read the end offsets on both ends through client pods"
+  examples:
+    - "kates migrate status"
+    - "kates migrate status --name m282-430 --watch"
+    - "kates migrate status -o json"
+  see_also:
+    - migrate verify
+    - migrate mirror status
+
+- name: migrate verify
+  category: Migration
+  synopsis: "kates migrate verify [--name <lab>] | --from-bootstrap host:9092 --source-version <v> [flags]"
+  short: "Seed the source, read the corpus back off the target, check the offset translation"
+  description: |
+    The migration scripts' phases 3–9 against a lab (found by label) or a
+    real source (--from-bootstrap): a known corpus is produced to the source
+    through a client pod running the source's own image, a consumer group
+    commits on it, the replicated topic is awaited on the target, the corpus
+    is read back as kates-mm2 and compared — every distinct record — and the
+    group's translated position is checked. Every assertion is a row; the
+    exit code is 1 on any failed row. The client pods are removed at the end
+    unless --keep.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--from-bootstrap"
+      type: string
+      desc: "Verify against a real source at this bootstrap address instead of a lab"
+    - name: "--source-version"
+      type: string
+      desc: "Kafka version of the --from-bootstrap source"
+    - name: "--source-secret"
+      type: string
+      desc: "Secret in the target namespace holding the source password under \"password\""
+    - name: "--source-user"
+      type: string
+      desc: "Username for the --from-bootstrap source"
+    - name: "--source-mechanism"
+      type: string
+      default: "plain"
+      desc: "SASL mechanism of the --from-bootstrap source"
+    - name: "--messages"
+      type: int
+      default: "200"
+      desc: "Records to produce per topic"
+    - name: "--keep"
+      type: bool
+      desc: "Leave the client pods in place"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Per-phase wait budget in seconds"
+  examples:
+    - "kates migrate verify --name m282-430"
+    - "kates migrate verify --from-bootstrap old-kafka.example:9092 --source-version 2.8.2 --source-secret old-reader --source-user reader"
+    - "kates migrate verify -o json"
+  see_also:
+    - migrate up
+    - migrate cutover
+
+- name: migrate cutover
+  category: Migration
+  synopsis: "kates migrate cutover [--name <lab>] [--yes]"
+  short: "Stop the source connector, keep the checkpoints running, prove the target is frozen"
+  description: |
+    Applies charts/mirror-maker2/values-cutover.yaml on top of the mirror's
+    values: the source connector goes STOPPED (data replication ends), the
+    checkpoint connector stays RUNNING (offset translation continues for the
+    consumers that have not moved yet). Then it produces more records to the
+    source and proves the target's end offsets do not move. Needs --yes or a
+    confirmation.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Wait budget in seconds"
+  examples:
+    - "kates migrate cutover --name m282-430 --yes"
+  see_also:
+    - migrate rollback
+    - migrate mirror cutover
+
+- name: migrate rollback
+  category: Migration
+  synopsis: "kates migrate rollback [--name <lab>] [--yes]"
+  short: "Reverse a cutover: the source connector running again"
+  description: |
+    Removes the cutover overlay: stopped → running resumes from the committed
+    offsets, so nothing is re-read from the start — but anything produced to
+    the TARGET in the meantime is not replicated backwards. A rollback after
+    producers have moved is a data merge, not a switch. Needs --yes or a
+    confirmation.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate rollback --name m282-430 --yes"
+  see_also:
+    - migrate cutover
+
+- name: migrate down
+  category: Migration
+  synopsis: "kates migrate down [--name <lab>] [--yes]"
+  short: "Remove the lab: the mirror, the source, the lab's topics on the target — found by label"
+  description: |
+    Finds the lab by its kates.io/lab label and removes exactly what up
+    created: the mirror release and its kept CR, the source release, the
+    source namespace when the lab created it (it carries the label), the
+    lab's topics on the target (the mirrored topics and the mirror's own,
+    through KafkaTopic resources), the credential Secrets and the client
+    pods. Nothing without the label is touched. Needs --yes or a
+    confirmation.
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single lab on the cluster)"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate down --name m282-430 --yes"
+    - "kates migrate down"
+  see_also:
+    - migrate up
+    - migrate status
+
+- name: migrate run
+  category: Migration
+  synopsis: "kates migrate run --from <version> [--from <version>…] [--to <version>] [--keep] [--skip-build] [--timeout 600] [--yes] [-o json]"
+  short: "up → verify → cutover → down: one report, one exit code"
+  description: |
+    The CI leg: creates the lab, runs the verification, rehearses the cutover
+    and removes the lab, printing one report — the migration scripts'
+    eighteen rows (cluster reachable … cutover froze the target) under a
+    header that states the pair, the providers, the operator, the policy and
+    where the offset-syncs topic lives. With several --from values every
+    source is its own leg: the per-source rows are named by its alias
+    ("record count [src391]"), while the rows about the release itself stay
+    single. The exit code is 1 on any failed row. --keep leaves the lab in
+    place and prints how to inspect and remove it; --skip-build assumes the
+    source image is present; --source-version is accepted as an alias of
+    --from.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source Kafka version, x.y.z (required; repeatable; --source-version is an alias)"
+    - name: "--to"
+      type: string
+      desc: "Target Kafka version (default: the primary as it runs)"
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: m<from>[-<from>…]-<to> with the dots removed)"
+    - name: "--policy"
+      type: string
+      default: "identity"
+      desc: "Replication policy: identity or default"
+    - name: "--topics"
+      type: string
+      default: "kates.orders"
+      desc: "Corpus topics to seed and mirror, comma-separated (with several --from the lab's own corpus is kates.orders.<alias> per source)"
+    - name: "--read-only-source"
+      type: bool
+      desc: "Write nothing to the source: offset-syncs go to the target (KIP-716), so the source principal needs Read and Describe only"
+    - name: "--messages"
+      type: int
+      default: "200"
+      desc: "Records to produce per topic"
+    - name: "--keep"
+      type: bool
+      desc: "Leave the lab running for inspection"
+    - name: "--skip-build"
+      type: bool
+      desc: "Do not build/load the source image (assume it is present)"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Per-phase wait budget in seconds"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate run --from 2.8.2 --skip-build --timeout 600 --yes"
+    - "kates migrate run --from 3.9.1 --policy default --name m391-430-default --yes"
+    - "kates migrate run --from 2.8.2 --from 3.9.1 --skip-build --yes"
+    - "kates migrate run --from 3.9.1 --keep -o json"
+  see_also:
+    - migrate up
+    - migrate verify
+    - migrate down
+
+- name: migrate image build
+  category: Migration
+  synopsis: "kates migrate image build --version <kafka version> [--scala 2.13] [--jre 11] [--os-release jammy] [--platform p] [--load | --push] [--registry r]"
+  short: "Build the legacy Kafka image from Dockerfile.legacy-kafka, verify it, load it into kind"
+  description: |
+    Builds <registry>/kates-legacy-kafka:<version> from Dockerfile.legacy-kafka
+    (the Apache tarball, checksum-verified, on a pinned Temurin JRE — 11 for
+    2.x, 17 from 3.x), checks the image really contains that Kafka version,
+    and loads it into the kind cluster (--load) or pushes it (--push, buildx,
+    multi-platform capable). --load and --push are mutually exclusive: a
+    pushed manifest list is not in the local daemon for kind to load. The
+    official apache/kafka image starts at 3.7.0; every line below needs this.
+  flags:
+    - name: "--version"
+      type: string
+      default: "2.8.2"
+      desc: "Kafka version to package"
+    - name: "--scala"
+      type: string
+      default: "2.13"
+      desc: "Scala build of the tarball"
+    - name: "--jre"
+      type: string
+      desc: "Temurin JRE major version (default: 11 for 2.x, 17 for 3.x)"
+    - name: "--os-release"
+      type: string
+      default: "jammy"
+      desc: "Ubuntu release of the Temurin base image"
+    - name: "--platform"
+      type: string
+      desc: "Buildx platform(s), e.g. linux/arm64 or a comma list"
+    - name: "--registry"
+      type: string
+      default: "ghcr.io/bmscomp"
+      desc: "Image registry/namespace"
+    - name: "--load"
+      type: bool
+      desc: "Load the image into the kind cluster after building"
+    - name: "--push"
+      type: bool
+      desc: "Push the image to the registry (mutually exclusive with --load)"
+  examples:
+    - "kates migrate image build --version 2.8.2 --load"
+    - "kates migrate image build --version 2.8.2 --platform linux/amd64,linux/arm64 --push"
+  see_also:
+    - migrate source deploy
+    - migrate up
+
+- name: migrate source deploy
+  category: Migration
+  synopsis: "kates migrate source deploy --version <v> [--namespace ns] [--release r] [--image i] [--topic a,b] [--sasl] [--values f] [--yes]"
+  short: "Deploy a legacy Kafka source (charts/legacy-kafka) and wait for it to serve"
+  description: |
+    The source half of a lab on its own: the namespace (labelled
+    kates.io/lab), the generated values, the legacy-kafka release with the
+    era chosen from the version (ZooKeeper below 3.3.0, the built KRaft image
+    below 3.7.0, the official image from there), its Helm test, and — with
+    --sasl — the credential Secret the mirror will read. The image is built
+    and loaded first when the version needs one (--skip-build assumes it is
+    present).
+  flags:
+    - name: "--version"
+      type: string
+      desc: "Kafka version of the source, x.y.z, at least 2.1.0 (required)"
+    - name: "--provider"
+      type: string
+      default: "auto"
+      desc: "Who runs the source: auto, strimzi or legacy"
+    - name: "--namespace"
+      type: string
+      desc: "Namespace of the source (default: kafka-<lab>-src)"
+    - name: "--release"
+      type: string
+      desc: "Helm release of the source (default: <lab>-src)"
+    - name: "--image"
+      type: string
+      desc: "Broker image override"
+    - name: "--topic"
+      type: string
+      default: "kates.orders"
+      desc: "Topics to pre-create, comma-separated"
+    - name: "--sasl"
+      type: bool
+      desc: "Enable the SASL/PLAIN listener and write its credential for the mirror"
+    - name: "--values"
+      type: string
+      desc: "Extra values file layered on the generated values"
+    - name: "--skip-build"
+      type: bool
+      desc: "Do not build/load the source image"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate source deploy --version 2.8.2"
+    - "kates migrate source deploy --version 3.9.1 --namespace kafka-old --release old"
+  see_also:
+    - migrate mirror deploy
+    - migrate source status
+    - migrate source remove
+
+- name: migrate source status
+  category: Migration
+  synopsis: "kates migrate source status [--name <lab> | --namespace <ns>]"
+  short: "Broker (and ZooKeeper) readiness, version and bootstrap of a legacy source"
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single source on the cluster)"
+    - name: "--namespace"
+      type: string
+      desc: "Namespace of a source deployed without a lab name"
+  examples:
+    - "kates migrate source status --name m282-430"
+    - "kates migrate source status -o json"
+  see_also:
+    - migrate source deploy
+    - migrate status
+
+- name: migrate source remove
+  category: Migration
+  synopsis: "kates migrate source remove [--name <lab> | --namespace <ns>] [--yes]"
+  short: "Remove a legacy source: its release, its namespace when the lab created it, its credential"
+  flags:
+    - name: "--name"
+      type: string
+      desc: "Lab name (default: the single source on the cluster)"
+    - name: "--namespace"
+      type: string
+      desc: "Namespace of a source deployed without a lab name"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate source remove --name m282-430 --yes"
+  see_also:
+    - migrate down
+
+- name: migrate mirror deploy
+  category: Migration
+  synopsis: "kates migrate mirror deploy --from <source name> | --from-bootstrap host:9092 --source-version <v> [--policy p] [--read-only-source] [--release r] [--namespace ns] [--values f] [--dry-run] [--yes]"
+  short: "Install MirrorMaker 2 from a source cluster to the target, with the era preset and generated values"
+  description: |
+    Installs charts/mirror-maker2 in the target's namespace for one source:
+    --from names a source by its lab or release (resolved through the
+    cluster), --from-bootstrap gives a raw address with --source-version and,
+    for an authenticated listener, --source-secret, --source-user and
+    --source-mechanism. The values are written from the pair (policy,
+    minSourceVersion, preflight, the topic list, replication factors from the
+    target's broker count) on top of the era preset, after values-kind.yaml
+    on kind; --read-only-source keeps every MirrorMaker write on the target,
+    which is what a source you may only read needs; --dry-run prints the helm
+    command and the values file and stops.
+  flags:
+    - name: "--from"
+      type: string
+      desc: "Source cluster by lab or release name"
+    - name: "--from-bootstrap"
+      type: string
+      desc: "Source bootstrap address, host:port (with --source-version)"
+    - name: "--source-version"
+      type: string
+      desc: "Kafka version of the --from-bootstrap source"
+    - name: "--source-secret"
+      type: string
+      desc: "Secret in the mirror's namespace holding the source password under \"password\""
+    - name: "--source-user"
+      type: string
+      desc: "Username for the source listener"
+    - name: "--source-mechanism"
+      type: string
+      default: "plain"
+      desc: "SASL mechanism of the source: plain, scram-sha-256 or scram-sha-512"
+    - name: "--policy"
+      type: string
+      default: "identity"
+      desc: "Replication policy: identity or default"
+    - name: "--topics"
+      type: string
+      default: "kates.orders"
+      desc: "Topics to mirror, comma-separated"
+    - name: "--read-only-source"
+      type: bool
+      desc: "Write nothing to the source: offset-syncs go to the target (KIP-716), so the source principal needs Read and Describe only"
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror (the target's)"
+    - name: "--target-cluster"
+      type: string
+      default: "krafter"
+      desc: "Target Kafka cluster"
+    - name: "--values"
+      type: string
+      desc: "Extra values file layered on the generated values"
+    - name: "--dry-run"
+      type: bool
+      desc: "Print the helm command and the values file, install nothing"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate mirror deploy --from m282-430-src"
+    - "kates migrate mirror deploy --from-bootstrap old.example:9092 --source-version 3.9.1 --policy default --dry-run"
+    - "kates migrate mirror deploy --from-bootstrap old.example:9092 --source-version 3.9.1 --read-only-source"
+  see_also:
+    - migrate source deploy
+    - migrate mirror status
+    - migrate up
+
+- name: migrate mirror status
+  category: Migration
+  synopsis: "kates migrate mirror status [--release <r>] [--namespace ns] [--wait]"
+  short: "CR readiness and every connector's state; --wait blocks until every connector runs"
+  flags:
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: the single lab's mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror"
+    - name: "--wait"
+      type: bool
+      desc: "Block until the CR is Ready and every connector RUNNING"
+    - name: "--timeout"
+      type: int
+      default: "600"
+      desc: "Wait budget in seconds"
+  examples:
+    - "kates migrate mirror status --release mm2-m282-430 --wait"
+    - "kates migrate mirror status -o json"
+  see_also:
+    - migrate status
+
+- name: migrate mirror cutover
+  category: Migration
+  synopsis: "kates migrate mirror cutover [--release <r>] [--namespace ns] [--yes] [--dry-run]"
+  short: "Apply values-cutover.yaml: source connector stopped, checkpoints running"
+  flags:
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: the single lab's mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror"
+    - name: "--dry-run"
+      type: bool
+      desc: "Print the helm command and stop"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate mirror cutover --release mm2 --yes"
+  see_also:
+    - migrate cutover
+    - migrate mirror rollback
+
+- name: migrate mirror rollback
+  category: Migration
+  synopsis: "kates migrate mirror rollback [--release <r>] [--namespace ns] [--yes] [--dry-run]"
+  short: "Reverse a cutover: both connectors running again"
+  flags:
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: the single lab's mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror"
+    - name: "--dry-run"
+      type: bool
+      desc: "Print the helm command and stop"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate mirror rollback --release mm2 --yes"
+  see_also:
+    - migrate rollback
+    - migrate mirror cutover
+
+- name: migrate mirror remove
+  category: Migration
+  synopsis: "kates migrate mirror remove [--release <r>] [--namespace ns] [--yes]"
+  short: "helm uninstall the mirror and delete the kept CR"
+  description: |
+    keepOnDelete annotates the KafkaMirrorMaker2 with resource-policy: keep,
+    so helm uninstall alone leaves replication running — right in
+    production, wrong when tearing down. This removes both.
+  flags:
+    - name: "--release"
+      type: string
+      desc: "Helm release of the mirror (default: the single lab's mm2-<lab>)"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the mirror"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Assume yes and never prompt (fails instead of asking)"
+  examples:
+    - "kates migrate mirror remove --release mm2 --yes"
+  see_also:
+    - migrate down
+
+- name: migrate target topics
+  category: Migration
+  synopsis: "kates migrate target topics [--namespace kafka] [--cluster krafter] [--user kates-mm2]"
+  short: "List the topics on the target, asked of the brokers as the MM2 user"
+  description: |
+    The Topic Operator is unidirectional: topics MirrorMaker creates never
+    become KafkaTopic resources, so only the brokers can say what a mirror
+    created. Runs kafka-topics.sh from a client pod the broker NetworkPolicy
+    admits, as the given user, with the credential written into the pod and
+    never on a command line.
+  flags:
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the Kafka cluster"
+    - name: "--cluster"
+      type: string
+      default: "krafter"
+      desc: "Strimzi cluster name"
+    - name: "--user"
+      type: string
+      default: "kates-mm2"
+      desc: "KafkaUser whose Secret holds the SCRAM password"
+  examples:
+    - "kates migrate target topics"
+    - "kates migrate target topics -o json"
+  see_also:
+    - migrate target offsets
+    - migrate target groups
+
+- name: migrate target offsets
+  category: Migration
+  synopsis: "kates migrate target offsets <topic> [--partitions] [--namespace kafka] [--cluster krafter] [--user kates-mm2]"
+  short: "Sum a topic's end offsets on the target (--partitions for the per-partition lines)"
+  description: |
+    "Is the mirror replicating?" has one honest answer: the target's end
+    offsets, read twice, moving. Uses whichever offset tool the target's
+    Kafka line ships (kafka-get-offsets.sh from 3.0, GetOffsetShell before).
+  flags:
+    - name: "--partitions"
+      type: bool
+      desc: "Print the per-partition lines too"
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the Kafka cluster"
+    - name: "--cluster"
+      type: string
+      default: "krafter"
+      desc: "Strimzi cluster name"
+    - name: "--user"
+      type: string
+      default: "kates-mm2"
+      desc: "KafkaUser whose Secret holds the SCRAM password"
+  examples:
+    - "kates migrate target offsets kates.orders"
+    - "kates migrate target offsets kates.orders --partitions -o json"
+  see_also:
+    - migrate target topics
+
+- name: migrate target groups
+  category: Migration
+  synopsis: "kates migrate target groups [--namespace kafka] [--cluster krafter] [--user kates-mm2]"
+  short: "List the consumer groups on the target"
+  flags:
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the Kafka cluster"
+    - name: "--cluster"
+      type: string
+      default: "krafter"
+      desc: "Strimzi cluster name"
+    - name: "--user"
+      type: string
+      default: "kates-mm2"
+      desc: "KafkaUser whose Secret holds the SCRAM password"
+  examples:
+    - "kates migrate target groups"
+  see_also:
+    - migrate target group
+
+- name: migrate target group
+  category: Migration
+  synopsis: "kates migrate target group <group> [--namespace kafka] [--cluster krafter] [--user kates-mm2]"
+  short: "Describe one consumer group on the target: its translated positions"
+  flags:
+    - name: "--namespace"
+      type: string
+      default: "kafka"
+      desc: "Namespace of the Kafka cluster"
+    - name: "--cluster"
+      type: string
+      default: "krafter"
+      desc: "Strimzi cluster name"
+    - name: "--user"
+      type: string
+      default: "kates-mm2"
+      desc: "KafkaUser whose Secret holds the SCRAM password"
+  examples:
+    - "kates migrate target group kates-migration-m282-430"
+    - "kates migrate target group kates-migration-m282-430 -o json"
+  see_also:
+    - migrate target groups
+    - migrate verify
+
+- name: deploy
+  category: Versions
+  synopsis: "kates deploy [--operator-scope cluster|namespace] [--strimzi-version V] [--kafka-version V] [--kafka-name NAME]"
+  short: "Deploy the Kates stack, choosing the Strimzi operator scope and the operator and Kafka versions"
+  description: |
+    Deploys the platform. Before any Helm call, the versions are resolved:
+    the operator version, its chart (fetched and read, never guessed), the
+    Kafka versions that operator supports, the Kafka version for the primary
+    (--kafka-version, or the newest supported), the metadata version, and
+    what the operator already installed on the cluster allows (same,
+    upgrade, refused downgrade, scope change). A refusal happens in seconds
+    and names the window and the ways forward.
+
+    The operator version is the repository pin, except that a cluster
+    already running a NEWER operator keeps it: the pin is a default, and a
+    default must not propose a downgrade nobody asked for. The Kafka window
+    then comes from that operator, not from the pin. --strimzi-version is a
+    request rather than a default, so naming an older version reaches the
+    downgrade refusal (Strimzi has no operator downgrade; kates clean is
+    the way back).
+
+    On a kind cluster the backend runs the native image built from the
+    working tree (kates:native-local, pinned with pullPolicy: Never by
+    charts/kates/values-native-local.yaml) rather than the published one:
+    a local deploy should run your bytes, and the chart's appVersion can be
+    ahead of what is on the registry. deploy loads the image onto the node
+    when local Docker has it, and refuses before installing when it exists
+    nowhere — naming `make kates-image-native-local`, which builds it. Every
+    other cluster keeps ghcr.io/bmscomp/kates.
+
+    --operator-scope cluster (default) installs one operator watching every
+    namespace; only its Kafka versions can run under Strimzi. namespace
+    installs one operator per Kafka namespace, so older Kafka lines can run
+    beside the primary under their own operator (kates migrate up).
+
+    The wizard (kates deploy -i, or a bare kates deploy on a terminal) walks
+    four screens: what to deploy (topology, schema registry, sizing, the
+    components — including MirrorMaker 2 as a loopback mirror of the
+    primary); the versions (mono cluster or namespace-scoped operators, the
+    Strimzi version, then a Kafka version chosen from exactly that operator's
+    window); the namespaces; and a review of everything as it will resolve,
+    with one confirmation before the first Helm call.
+  examples:
+    - "kates deploy"
+    - "kates deploy -i"
+    - "kates deploy --with-mirror-maker2"
+    - "kates deploy --kafka-version 4.2.1"
+    - "kates deploy --strimzi-version 1.0.1 --kafka-version 4.2.0"
+    - "kates deploy --operator-scope namespace"
+    - "kates deploy --dry-run --strimzi-version latest"
+  see_also:
+    - versions
+    - operators list
+    - migrate up
+  flags:
+    - name: operator-scope
+      type: string
+      default: cluster
+      desc: "cluster: one operator watching every namespace; namespace: one per Kafka namespace"
+    - name: strimzi-version
+      type: string
+      default: "(the repository pin)"
+      desc: "Strimzi operator version to install; 'latest' for the newest published"
+    - name: strimzi-chart
+      type: string
+      desc: "Local strimzi-kafka-operator tarball (air-gapped mirrors)"
+    - name: kafka-version
+      type: string
+      default: "(newest the operator supports)"
+      desc: "Kafka version of the primary cluster; 'latest' spells the default"
+    - name: kafka-name
+      type: string
+      default: krafter
+      desc: "Name of the primary Kafka cluster"
+    - name: with-mirror-maker2
+      type: bool
+      default: "false"
+      desc: "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)"
+    - name: mm2-ns
+      type: string
+      default: kafka
+      desc: "Namespace for MirrorMaker 2 when topology is 'isolated'"
+
+- name: versions
+  category: Versions
+  synopsis: "kates versions [--offline]"
+  short: "Strimzi and Kafka versions this cluster can run, and how"
+  description: |
+    Every Strimzi operator installed on the current cluster (or, without a
+    cluster, the repository's pin), the Kafka versions each supports, and
+    the ranges the legacy-kafka chart runs without an operator. Nothing is
+    a table in the CLI: windows are read from the operator charts and the
+    live operator Deployments.
+  examples:
+    - "kates versions"
+    - "kates versions -o json"
+  see_also:
+    - versions strimzi
+    - versions kafka
+    - operators list
+
+- name: versions strimzi
+  category: Versions
+  synopsis: "kates versions strimzi [--all] [--refresh] [--resolve]"
+  short: "Published Strimzi operator versions and their status relative to the pin"
+  description: |
+    Reads the Strimzi Helm index (cached 24h) and lists the operator
+    versions: pinned, newer than pinned, supported, or below this platform's
+    floor (hidden unless --all). The Kafka window is shown for every chart
+    already cached; --resolve pulls the others.
+  examples:
+    - "kates versions strimzi"
+    - "kates versions strimzi --resolve"
+    - "kates versions strimzi --all -o json"
+  see_also:
+    - versions kafka
+    - deploy
+
+- name: versions kafka
+  category: Versions
+  synopsis: "kates versions kafka [--strimzi-version V]"
+  short: "The Kafka versions one Strimzi operator version supports"
+  description: |
+    Reads (pulling and caching if needed) the chart of one operator version
+    and prints its Kafka window, the newest entry, the CRD API it serves and
+    stores, and the metadata version the CLI derives for each entry.
+  examples:
+    - "kates versions kafka"
+    - "kates versions kafka --strimzi-version 1.0.1"
+  see_also:
+    - versions strimzi
+    - deploy
+
+- name: operators list
+  category: Versions
+  synopsis: "kates operators list [--kafka-ns NS]"
+  short: "Every Strimzi Cluster Operator on this cluster: version, scope, watched namespaces, window, role"
+  description: |
+    Discovers the operators from their Deployments (nothing is registered):
+    under cluster scope one line; under namespace scope the map of which
+    operator runs which namespaces, which one is the primary's (it owns the
+    CRDs and cluster RBAC), and whether each additional operator is adjacent
+    to it — the configuration Strimzi tests.
+  examples:
+    - "kates operators list"
+    - "kates operators list -o json"
+  see_also:
+    - versions
+    - deploy

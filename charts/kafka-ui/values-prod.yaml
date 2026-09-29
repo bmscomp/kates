@@ -1,0 +1,62 @@
+# Production overlay for kafka-ui
+replicas: 2
+
+auth:
+  enabled: true
+  type: "LOGIN_FORM"
+  # Web password is auto-generated and preserved across upgrades. Retrieve with:
+  #   kubectl get secret kafka-ui-web-password -o jsonpath='{.data.password}' | base64 -d
+  # Or set auth.existingSecret / auth.password to manage it yourself.
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: kafka-ui.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: kafka-ui-tls
+      hosts:
+        - kafka-ui.example.com
+
+kafka:
+  tls:
+    enabled: true
+    # Strimzi-generated cluster CA cert (named <clusterName>-cluster-ca-cert)
+    trustedCertificateSecret: krafter-cluster-ca-cert
+    certificateKey: ca.crt
+
+schemaRegistry:
+  enabled: true
+  # url: "http://apicurio-registry.kafka.svc:8080/apis/ccompat/v7"
+
+kafkaConnect:
+  enabled: true
+  name: "connect-cluster"
+  # url: "http://connect-cluster-connect-api.kafka.svc:8083"
+
+networkPolicy:
+  enabled: true
+
+# Spread the two replicas and protect them during disruptions.
+pdb:
+  enabled: true
+  minAvailable: 1
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app: kafka-ui
+
+metrics:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: monitoring

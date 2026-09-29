@@ -103,7 +103,7 @@ The observation period (called `observeAfterSec` in Kates) determines how long y
 
 - For `POD_KILL` with `replication.factor=3`: minimum 60 seconds (30s for ISR eviction + 30s for catch-up)
 - For `NETWORK_PARTITION` with 30-second duration: minimum 90 seconds (partition duration + ISR recovery + consumer lag recovery)
-- For `ROLLING_RESTART` of 3 brokers: minimum 120 seconds (each restart takes ~30s + ISR recovery overlap)
+- For `ROLLING_RESTART`: minimum 120 seconds after the roll (the step waits for the Cluster Operator to finish restarting every broker, so the window covers the last broker's ISR catch-up, not the roll itself)
 
 Setting the observation window too short is a common mistake that leads to misleading results. The disruption report might show "ISR not recovered" when in reality it would have recovered 10 seconds later. When in doubt, use a longer observation window — the only cost is test execution time.
 

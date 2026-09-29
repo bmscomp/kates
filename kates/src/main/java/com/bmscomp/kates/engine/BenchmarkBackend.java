@@ -20,4 +20,12 @@ public interface BenchmarkBackend {
 
     /** Request graceful stop of a running task. */
     void stop(BenchmarkHandle handle);
+
+    /**
+     * Tells a running task that a fault was injected at {@code chaosStartNanos},
+     * a {@link System#nanoTime()} reading from this JVM, so an integrity task
+     * can measure RPO from it. Only an in-process backend shares that clock;
+     * the default ignores it.
+     */
+    default void markChaosStart(BenchmarkHandle handle, long chaosStartNanos) {}
 }

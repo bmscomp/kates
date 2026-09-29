@@ -61,7 +61,7 @@ fi
 step "Verifying prerequisites..."
 for exp in pod-delete pod-cpu-hog pod-network-partition; do
     if ! kubectl get chaosexperiment "${exp}" -n "${NAMESPACE}" &>/dev/null; then
-        error "ChaosExperiment '${exp}' not found. Run 'make chaos' first."
+        error "ChaosExperiment '${exp}' not found. Run './scripts/setup-kafka-chaos.sh' first."
         exit 1
     fi
 done

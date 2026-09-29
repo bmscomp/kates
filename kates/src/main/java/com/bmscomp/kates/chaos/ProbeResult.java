@@ -5,12 +5,7 @@ import java.time.Instant;
 /**
  * Result of evaluating a probe during a resilience test.
  */
-public record ProbeResult(
-        String name,
-        boolean passed,
-        String output,
-        long durationMs,
-        Instant evaluatedAt) {
+public record ProbeResult(String name, boolean passed, String output, long durationMs, Instant evaluatedAt) {
 
     public static ProbeResult pass(String name, String output, long durationMs) {
         return new ProbeResult(name, true, output, durationMs, Instant.now());

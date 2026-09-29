@@ -1,0 +1,46 @@
+{{- if and .Values.podMonitors.enabled (not .Values.metrics.enabled) }}
+{{- fail "podMonitors.enabled requires metrics.enabled=true — Strimzi only opens the metrics port (which the PodMonitor scrapes) when metricsConfig is set." }}
+{{- end }}
+{{- if and .Values.podMonitors.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- $type := .Values.metrics.type | default "jmxPrometheusExporter" }}
+{{- /*
+The scrape target follows metrics.type, because the two are different
+mechanisms and only one of them is a sidecar-shaped JMX scrape:
+
+  jmxPrometheusExporter   the Prometheus JMX exporter agent runs beside the
+                          worker, reads the MBeans through the rules in
+                          metrics-configmap.yml, and serves them on the
+                          container port Strimzi opens for it.
+  strimziMetricsReporter  a Kafka MetricsReporter plugin inside the worker
+                          publishes the metric registry as Prometheus text on
+                          its own HTTP listener. No exporter, no JMX, no
+                          ConfigMap — the allow-list on the CR is the whole
+                          configuration.
+
+Both are values (podMonitors.scrape.<type>) rather than constants: a PodMonitor
+naming a port the pod does not have scrapes nothing and reports nothing, and
+that failure is invisible until an alert that should have fired did not.
+*/}}
+{{- /*
+The endpoint carries the same relabelings connect-cluster and kafka-cluster
+apply. Without them these series arrive with no `strimzi_io_cluster`, which is
+why the MirrorMaker boards had to select workers by a pod-name regex built from
+the release name — a selector no dashboard variable can express.
+*/}}
+{{- $ep := (index (.Values.podMonitors.scrape | default dict) $type) | default dict }}
+{{- $labels := include "mirror-maker2.labels" . }}
+{{- with .Values.podMonitors.labels }}
+{{- $labels = printf "%s\n%s" $labels (toYaml .) }}
+{{- end }}
+{{- include "kafka-common.podMonitor" (dict
+      "name" (include "mirror-maker2.fullname" .)
+      "namespace" (include "mirror-maker2.namespace" .)
+      "labels" $labels
+      "selector" (include "mirror-maker2.podSelectorLabels" . | fromYaml)
+      "endpoint" (dict
+          "port" ($ep.port | default "tcp-prometheus")
+          "path" ($ep.path | default "/metrics")
+          "interval" .Values.monitoring.interval
+          "scrapeTimeout" .Values.monitoring.scrapeTimeout
+          "relabelings" (include "kafka-common.strimziRelabelings" . | fromYamlArray))) }}
+{{- end }}

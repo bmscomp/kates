@@ -1,0 +1,23 @@
+# Kates — Chaos. Delivered by charts/monitoring, whose ConfigMap template
+# globs `dashboards/*.json` inside the chart.
+#
+# The uid is kept from the file this replaces (grafana-chaos-dashboard.json)
+# so that existing Grafana links, playlists and annotations keep resolving.
+uid: kafka-chaos-dashboard
+title: Kates — Chaos
+description: >-
+  The Litmus experiment timeline with the Kafka cluster and the Kates
+  benchmark run laid over it: what was injected, what the brokers did, and
+  what the workload underneath actually experienced.
+tags:
+  - kafka
+  - chaos
+  - litmus
+  - kates
+refresh: 30s
+# A GameDay is an hour of experiments; the fault windows are minutes.
+time_from: now-1h
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kates-chaos.json

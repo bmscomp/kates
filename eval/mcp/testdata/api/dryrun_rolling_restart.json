@@ -1,0 +1,23 @@
+{
+  "wouldSucceed": true,
+  "totalBrokers": 3,
+  "steps": [
+    {
+      "name": "rolling-restart-brokers",
+      "disruptionType": "ROLLING_RESTART",
+      "targetPod": "krafter-brokers-3,krafter-brokers-4,krafter-brokers-5,krafter-controllers-0,krafter-controllers-1,krafter-controllers-2",
+      "resolvedLeaderId": null,
+      "affectedPods": [
+        "krafter-brokers-3",
+        "krafter-brokers-4",
+        "krafter-brokers-5",
+        "krafter-controllers-0",
+        "krafter-controllers-1",
+        "krafter-controllers-2"
+      ],
+      "warnings": []
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

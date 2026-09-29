@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 type ProgressMsg string

@@ -3,10 +3,13 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 )
 
@@ -157,7 +160,17 @@ var testGetCmd = &cobra.Command{
 			}
 			if maxThroughput > 0 {
 				fmt.Println()
-				output.MetricBar("Throughput", maxThroughput, 100000)
+				// Only draw a bar when the run had a target rate: a bar needs
+				// a meaningful ceiling, and the old hardcoded 100k made high
+				// throughput render RED (the consumption palette read "good"
+				// as "dangerous") while any slow test looked healthily green.
+				// The rate is spec.throughput, what the producers honoured;
+				// targetThroughput is only the name a request may give it.
+				if result.Spec != nil && result.Spec.Throughput > 0 {
+					output.MetricBarDir("Throughput", maxThroughput, float64(result.Spec.Throughput), true)
+				} else {
+					output.KeyValue("Peak Throughput", fmtNum(maxThroughput)+" rec/s")
+				}
 			}
 
 			for _, r := range result.Results {
@@ -176,11 +189,15 @@ var testGetCmd = &cobra.Command{
 					if ir.ConsumerRtoMs > 0 {
 						output.KeyValue("Consumer RTO", fmt.Sprintf("%.0f ms", ir.ConsumerRtoMs))
 					}
-					if ir.MaxRtoMs > 0 {
-						output.KeyValue("Max RTO", fmt.Sprintf("%.0f ms", ir.MaxRtoMs))
+					if rto, ok := ir.MeasuredMaxRtoMs(); ok && rto > 0 {
+						output.KeyValue("Max RTO", fmt.Sprintf("%.0f ms", rto))
 					}
-					if ir.RpoMs > 0 {
-						output.KeyValue("RPO", fmt.Sprintf("%.0f ms", ir.RpoMs))
+					// A measured zero RPO is shown; an unmeasured one says so
+					// rather than disappearing or reading as zero.
+					if rpo, ok := ir.MeasuredRpoMs(); ok {
+						output.KeyValue("RPO", fmt.Sprintf("%.0f ms", rpo))
+					} else {
+						output.KeyValue("RPO", "not measured")
 					}
 					if ir.CrcVerified {
 						output.KeyValue("CRC Failures", fmtNum(float64(ir.CrcFailures)))
@@ -309,6 +326,16 @@ var testCreateCmd = &cobra.Command{
   kates test create --type LOAD --records 100000 --consumers 4 --consumer-group perf-cg
   kates test create --type LOAD --records 100000 --throughput 10000 --fetch-min-bytes 1048576`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// IsInteractive is the one guard: the previous check looked at stdout
+		// only, so `echo | kates test create` (TTY stdout, piped stdin) sent
+		// huh hunting for input on a pipe. It also ignored isTesting and
+		// TERM=dumb.
+		if cmd.Flags().NFlag() == 0 && IsInteractive() {
+			if err := runInteractiveTestCreate(); err != nil {
+				return err
+			}
+		}
+
 		upperType := strings.ToUpper(createType)
 		if !isValidTestType(upperType) {
 			return cmdErr(fmt.Sprintf("Unknown test type %q. Valid types: %s",
@@ -325,7 +352,7 @@ var testCreateCmd = &cobra.Command{
 				Records:           createRecords,
 				ParallelProducers: createProducers,
 				RecordSizeBytes:   createRecordSize,
-				DurationSeconds:   createDuration * 1000,
+				DurationMs:        createDuration * 1000,
 				Topic:             createTopic,
 				Acks:              createAcks,
 				BatchSize:         createBatchSize,
@@ -347,13 +374,35 @@ var testCreateCmd = &cobra.Command{
 			return nil
 		}
 
-		result, err := apiClient.CreateTest(context.Background(), req)
+		ctx := commandContext(cmd)
+		result, err := apiClient.CreateTest(ctx, req)
 		if err != nil {
 			return cmdErr("Failed to create test: " + err.Error())
 		}
 
 		if outputMode == "json" {
-			output.JSON(result)
+			if !createWait {
+				output.JSON(result)
+				return nil
+			}
+			// json + --wait previously returned HERE, before waiting at all —
+			// the flag was silently ignored. Follow silently, then emit the
+			// FINAL state, which is the object a json consumer actually wants.
+			status, err := pollUntilDonePlain(ctx, result.ID, io.Discard)
+			if stoppedWaiting(ctx, err) {
+				return stopStartedRun(result.ID)
+			}
+			if err != nil {
+				return cmdErr("Lost track of test " + truncID(result.ID) + ": " + err.Error())
+			}
+			final, gerr := apiClient.GetTest(context.Background(), result.ID)
+			if gerr != nil {
+				return cmdErr("Failed to fetch final state: " + gerr.Error())
+			}
+			output.JSON(final)
+			if isFailedStatus(status) {
+				return cmdErr("test " + truncID(result.ID) + " finished " + status)
+			}
 			return nil
 		}
 
@@ -366,7 +415,21 @@ var testCreateCmd = &cobra.Command{
 
 		if createWait {
 			fmt.Println()
-			pollUntilDone(result.ID)
+			status, err := pollUntilDone(ctx, result.ID)
+			if stoppedWaiting(ctx, err) {
+				// It started the run, so stopping means cancelling it: this
+				// used to exit 0 and leave the test running.
+				return stopStartedRun(result.ID)
+			}
+			if err != nil {
+				// Unknown outcome is not success. Exiting 0 here is how CI
+				// stayed green while load tests failed.
+				return cmdErr("Lost track of test " + truncID(result.ID) + ": " + err.Error())
+			}
+			if isFailedStatus(status) {
+				return cmdErr("test " + truncID(result.ID) + " finished " + status +
+					" — details: kates test get " + result.ID)
+			}
 		} else {
 			output.Hint("Track progress: kates test watch " + result.ID)
 		}
@@ -387,6 +450,117 @@ var testDeleteCmd = &cobra.Command{
 		output.Success("Test deleted: " + truncID(args[0]))
 		return nil
 	},
+}
+
+var testCancelCmd = &cobra.Command{
+	Use:   "cancel <id>...",
+	Short: "Cancel pending or running test runs",
+	Long: `Cancel one or more test runs that are pending or running. Their tasks stop,
+the run gives back its place among the runs the Kates API allows at once, and
+it is stored as FAILED, each unfinished task with the error "Cancelled by
+user".
+
+A run that has already finished cannot be cancelled; kates says so and exits 1.
+Ctrl-C while test apply, test create or replay waits cancels the run it started
+the same way.`,
+	Example: `  kates test cancel 69acdf31
+  kates test cancel 69acdf31 7c1e2b90 -o json`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := commandContext(cmd)
+		results := make([]testCancelResult, 0, len(args))
+		failed := 0
+		for _, id := range args {
+			r := testCancelResult{ID: id}
+			if err := apiClient.CancelTest(ctx, id); err != nil {
+				failed++
+				r.Error = err.Error()
+				if outputMode != "json" {
+					output.Error("Not cancelled: " + id + ": " + err.Error())
+				}
+			} else {
+				r.Cancelled = true
+				if outputMode != "json" {
+					output.Success("Cancelled: " + id)
+				}
+			}
+			results = append(results, r)
+		}
+		if outputMode == "json" {
+			output.JSON(results)
+		}
+		if failed > 0 {
+			// Each failure has been said already, per run.
+			return &silentErr{msg: fmt.Sprintf("%d of %d run(s) not cancelled", failed, len(args))}
+		}
+		return nil
+	},
+}
+
+// testCancelResult is one run's row in kates test cancel -o json.
+type testCancelResult struct {
+	ID        string `json:"id"`
+	Cancelled bool   `json:"cancelled"`
+	Error     string `json:"error,omitempty"`
+}
+
+func runInteractiveTestCreate() error {
+	var recordsStr, durationStr string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Test Type").
+				Options(
+					huh.NewOption("LOAD (Maximum throughput)", "LOAD"),
+					huh.NewOption("STRESS (Find breaking point)", "STRESS"),
+					huh.NewOption("ENDURANCE (Sustained over time)", "ENDURANCE"),
+					huh.NewOption("VOLUME", "VOLUME"),
+				).
+				Value(&createType),
+			huh.NewInput().
+				Title("Number of Records").
+				Description("Leave blank if specifying duration").
+				Validate(optionalPositiveInt).
+				Value(&recordsStr),
+			huh.NewInput().
+				Title("Duration (seconds)").
+				Description("Leave blank if specifying records").
+				Validate(optionalPositiveInt).
+				Value(&durationStr),
+			huh.NewConfirm().
+				Title("Wait for completion?").
+				Value(&createWait),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		return err
+	}
+
+	// The form validated these, so Atoi cannot fail here — but the old code
+	// silently discarded errors, meaning a typo like "10k" created a test
+	// with zero records and no explanation.
+	if recordsStr != "" {
+		createRecords, _ = strconv.Atoi(recordsStr)
+	}
+	if durationStr != "" {
+		createDuration, _ = strconv.Atoi(durationStr)
+	}
+	return nil
+}
+
+// optionalPositiveInt validates a wizard field that may be blank or a positive
+// integer — rejecting input at the form, where the user can fix it, instead of
+// silently dropping it after.
+func optionalPositiveInt(s string) error {
+	if s == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return fmt.Errorf("enter a positive whole number (or leave blank)")
+	}
+	return nil
 }
 
 func hasSpecOverrides() bool {
@@ -470,7 +644,7 @@ func init() {
 	testCreateCmd.Flags().IntVar(&createRecordSize, "record-size", 0, "Record size in bytes")
 	testCreateCmd.Flags().IntVar(&createDuration, "duration", 0, "Duration in seconds")
 	testCreateCmd.Flags().StringVar(&createTopic, "topic", "", "Kafka topic name")
-	testCreateCmd.Flags().BoolVar(&createWait, "wait", false, "Wait for test to complete and print results")
+	testCreateCmd.Flags().BoolVar(&createWait, "wait", false, "Wait for test to complete and print results; Ctrl-C cancels it")
 	testCreateCmd.Flags().StringVar(&createAcks, "acks", "", "Producer acks: 0, 1, or all (default: all)")
 	testCreateCmd.Flags().IntVar(&createBatchSize, "batch-size", 0, "Producer batch size in bytes (default: 65536)")
 	testCreateCmd.Flags().IntVar(&createLingerMs, "linger-ms", 0, "Producer linger time in ms (default: 5)")
@@ -484,11 +658,13 @@ func init() {
 	testCreateCmd.Flags().IntVar(&createFetchMinBytes, "fetch-min-bytes", 0, "Consumer fetch.min.bytes (default: 1)")
 	testCreateCmd.Flags().IntVar(&createFetchMaxWaitMs, "fetch-max-wait-ms", 0, "Consumer fetch.max.wait.ms (default: 500)")
 	testCreateCmd.Flags().BoolVar(&testDryRun, "dry-run", false, "Print request JSON without executing")
+	interruptible(testCreateCmd)
 
 	testCmd.AddCommand(testListCmd)
 	testCmd.AddCommand(testGetCmd)
 	testCmd.AddCommand(testCreateCmd)
 	testCmd.AddCommand(testDeleteCmd)
+	testCmd.AddCommand(testCancelCmd)
 	testCmd.AddCommand(testTypesCmd)
 	testCmd.AddCommand(testBackendsCmd)
 	rootCmd.AddCommand(testCmd)

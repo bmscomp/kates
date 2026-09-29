@@ -27,8 +27,7 @@ class TrogdorSpecSerializationTest {
 
     @Test
     void consumeBenchSpecSerializesCorrectClass() throws Exception {
-        ConsumeBenchSpec spec =
-                ConsumeBenchSpec.create("localhost:9092", "test-topic", 3, 100_000, 60_000, "test-group");
+        ConsumeBenchSpec spec = ConsumeBenchSpec.create("localhost:9092", "test-topic", 100_000, 60_000, "test-group");
 
         JsonNode json = mapper.valueToTree(spec);
         assertEquals(
@@ -57,12 +56,32 @@ class TrogdorSpecSerializationTest {
     }
 
     @Test
-    void activeTopicsKeyFormatIsCorrect() throws Exception {
+    void activeTopicsKeyIsTheTopicWithItsPartitionCount() throws Exception {
         ProduceBenchSpec spec = ProduceBenchSpec.create("localhost:9092", "perf-topic", 6, 1000, 100_000, 60_000, 1024);
 
         JsonNode json = mapper.valueToTree(spec);
         JsonNode topics = json.get("activeTopics");
-        assertTrue(topics.has("perf-topic[0-5]"), "Topic key should be 'perf-topic[0-5]' for 6 partitions");
+        // Trogdor expands a range in the key into topics: "perf-topic[0-5]"
+        // was six topics, perf-topic0 to perf-topic5.
+        assertEquals(1, topics.size());
+        assertEquals(6, topics.get("perf-topic").get("numPartitions").asInt());
+    }
+
+    @Test
+    void consumeActiveTopicsIsAListOfNames() throws Exception {
+        ConsumeBenchSpec spec = ConsumeBenchSpec.create("broker:9092", "perf-topic", 100_000, 60_000, "my-group");
+
+        JsonNode topics = mapper.valueToTree(spec).get("activeTopics");
+        assertTrue(topics.isArray(), "Trogdor's ConsumeBenchSpec takes a List<String>");
+        assertEquals("perf-topic", topics.get(0).asText());
+        assertEquals(1, topics.size());
+    }
+
+    @Test
+    void produceBenchSpecHasNoTotalProducers() throws Exception {
+        ProduceBenchSpec spec = ProduceBenchSpec.create("localhost:9092", "topic", 3, 1000, 100_000, 60_000, 1024);
+
+        assertFalse(mapper.valueToTree(spec).has("totalProducers"), "Trogdor refuses a spec with it");
     }
 
     @Test
@@ -82,7 +101,7 @@ class TrogdorSpecSerializationTest {
 
     @Test
     void consumeBenchSpecContainsConsumerGroup() throws Exception {
-        ConsumeBenchSpec spec = ConsumeBenchSpec.create("broker:9092", "topic", 3, 100_000, 60_000, "my-group");
+        ConsumeBenchSpec spec = ConsumeBenchSpec.create("broker:9092", "topic", 100_000, 60_000, "my-group");
 
         JsonNode json = mapper.valueToTree(spec);
         assertEquals("my-group", json.get("consumerGroup").asText());
@@ -90,19 +109,33 @@ class TrogdorSpecSerializationTest {
     }
 
     @Test
-    void roundTripSpecContainsValueSize() throws Exception {
+    void roundTripSpecCarriesItsValueSizeAsAGenerator() throws Exception {
         RoundTripWorkloadSpec spec = RoundTripWorkloadSpec.create("broker:9092", "topic", 3, 500, 50_000, 30_000, 4096);
 
         JsonNode json = mapper.valueToTree(spec);
-        assertEquals(4096, json.get("valueSize").asInt());
+        assertFalse(json.has("valueSize"), "Trogdor's RoundTripWorkloadSpec has no valueSize");
+        assertEquals("constant", json.get("valueGenerator").get("type").asText());
+        assertEquals(4096, json.get("valueGenerator").get("size").asInt());
         assertEquals(500, json.get("targetMessagesPerSec").asInt());
     }
 
     @Test
-    void valueGeneratorSpecSerializesSize() throws Exception {
+    void valueGeneratorSpecSerializesItsTypeAndSize() throws Exception {
         ProduceBenchSpec spec = ProduceBenchSpec.create("localhost:9092", "topic", 3, 1000, 100_000, 60_000, 8192);
 
         JsonNode json = mapper.valueToTree(spec);
+        assertEquals(
+                "constant", json.get("valueGenerator").get("type").asText(), "Trogdor refuses a generator without");
         assertEquals(8192, json.get("valueGenerator").get("size").asInt());
+    }
+
+    @Test
+    void keyGeneratorSpecSerializesItsType() throws Exception {
+        ProduceBenchSpec spec = ProduceBenchSpec.create("localhost:9092", "topic", 3, 1000, 100_000, 60_000, 8192);
+        spec.setKeyGenerator(new ProduceBenchSpec.KeyGeneratorSpec());
+
+        JsonNode json = mapper.valueToTree(spec);
+        assertEquals("sequential", json.get("keyGenerator").get("type").asText());
+        assertEquals(4, json.get("keyGenerator").get("size").asInt());
     }
 }

@@ -2,7 +2,6 @@ package com.bmscomp.kates.service;
 
 import java.util.Properties;
 import java.util.concurrent.locks.ReentrantLock;
-
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -11,6 +10,9 @@ import jakarta.inject.Inject;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.faulttolerance.CircuitBreaker;
+import org.eclipse.microprofile.faulttolerance.Fallback;
+import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.config.KafkaSecurityConfig;
@@ -85,7 +87,34 @@ public class KafkaAdminService {
         }
     }
 
+    /**
+     * The shared, lifecycle-managed AdminClient for collaborators in other
+     * packages. Callers MUST NOT close it — its lifecycle is owned here
+     * (@PostConstruct / @PreDestroy). Reusing this avoids re-bootstrapping a
+     * broker connection on every call.
+     */
+    public AdminClient sharedAdminClient() {
+        return getClient();
+    }
+
     public String getBootstrapServers() {
         return bootstrapServers;
+    }
+
+    @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10000)
+    @Timeout(5000)
+    @Fallback(fallbackMethod = "fallbackPing")
+    public boolean ping() {
+        try {
+            getClient().describeCluster().clusterId().get(4, java.util.concurrent.TimeUnit.SECONDS);
+            return true;
+        } catch (Exception e) {
+            throw new RuntimeException("Ping failed", e);
+        }
+    }
+
+    public boolean fallbackPing() {
+        LOG.warn("Circuit breaker open or ping timed out. Returning degraded fallback state.");
+        return false;
     }
 }

@@ -2,22 +2,21 @@ package com.bmscomp.kates.grpc;
 
 import java.util.List;
 import java.util.stream.Collectors;
+import jakarta.inject.Inject;
 
 import io.grpc.Status;
 import io.quarkus.grpc.GrpcService;
 import io.smallrye.common.annotation.Blocking;
 import io.smallrye.mutiny.Uni;
-import jakarta.inject.Inject;
 
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.engine.TestOrchestrator;
+import com.bmscomp.kates.grpc.proto.*;
 import com.bmscomp.kates.service.TestRunRepository;
 import com.bmscomp.kates.util.Result;
-
-import com.bmscomp.kates.grpc.proto.*;
 
 /**
  * gRPC implementation of the TestService — delegates to the same
@@ -39,7 +38,9 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
         return Uni.createFrom().item(() -> {
             TestType type = ProtoMapper.toDomainType(request.getType());
             if (type == null) {
-                throw Status.INVALID_ARGUMENT.withDescription("Test type is required").asRuntimeException();
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("Test type is required")
+                        .asRuntimeException();
             }
 
             CreateTestRequest domainReq = new CreateTestRequest();
@@ -63,7 +64,8 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
     @Override
     public Uni<com.bmscomp.kates.grpc.proto.TestRun> getTest(GetTestRequest request) {
         return Uni.createFrom().item(() -> {
-            TestRun run = repository.findById(request.getId())
+            TestRun run = repository
+                    .findById(request.getId())
                     .orElseThrow(() -> Status.NOT_FOUND
                             .withDescription("Test not found: " + request.getId())
                             .asRuntimeException());
@@ -107,21 +109,29 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
     @Override
     public Uni<com.bmscomp.kates.grpc.proto.TestRun> cancelTest(CancelTestRequest request) {
         return Uni.createFrom().item(() -> {
-            TestRun run = repository.findById(request.getId())
-                    .orElseThrow(() -> Status.NOT_FOUND
-                            .withDescription("Test not found: " + request.getId())
-                            .asRuntimeException());
-
-            orchestrator.stopTest(request.getId());
-            TestRun updated = repository.findById(request.getId()).orElse(run);
-            return ProtoMapper.toProto(updated);
+            // The same cancel as POST /api/tests/{id}/cancel: the run is
+            // stored as FAILED and this answers with it as stored. It used to
+            // only stop the tasks, which left the run STOPPING (answered as
+            // CANCELLED) until a poll settled it, and marked a run that had
+            // already finished as STOPPING too.
+            try {
+                return orchestrator
+                        .cancelTest(request.getId())
+                        .map(ProtoMapper::toProto)
+                        .orElseThrow(() -> Status.NOT_FOUND
+                                .withDescription("Test not found: " + request.getId())
+                                .asRuntimeException());
+            } catch (com.bmscomp.kates.engine.RunNotCancellableException e) {
+                throw Status.FAILED_PRECONDITION.withDescription(e.getMessage()).asRuntimeException();
+            }
         });
     }
 
     @Override
     public Uni<com.google.protobuf.Empty> deleteTest(DeleteTestRequest request) {
         return Uni.createFrom().item(() -> {
-            repository.findById(request.getId())
+            repository
+                    .findById(request.getId())
                     .orElseThrow(() -> Status.NOT_FOUND
                             .withDescription("Test not found: " + request.getId())
                             .asRuntimeException());

@@ -11,7 +11,7 @@
 #   replica.lag.time.max.ms (30s), it is evicted from ISR. With min.isr=2
 #   and acks=all, producers stall until ISR recovers. No data loss expected.
 #
-# What to watch in Grafana (open with: make monitoring-ui):
+# What to watch in Grafana (at http://localhost:30080, admin/admin):
 #   kafka_server_replicamanager_isrshrinks_total
 #   kafka_server_replicamanager_isrexpands_total
 #   kafka_network_request_totaltime_99thpercentile
@@ -49,7 +49,7 @@ echo ""
 # ── Prerequisites ──────────────────────────────────────────────────────────
 step "Step 1: Verifying prerequisites..."
 if ! kubectl get chaosexperiment pod-cpu-hog -n "${NAMESPACE}" &>/dev/null; then
-    error "ChaosExperiment 'pod-cpu-hog' not found. Run 'make chaos' first."
+    error "ChaosExperiment 'pod-cpu-hog' not found. Run './scripts/setup-kafka-chaos.sh' first."
     exit 1
 fi
 info "✓ Prerequisites satisfied"

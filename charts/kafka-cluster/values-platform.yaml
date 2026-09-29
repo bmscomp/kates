@@ -1,0 +1,14 @@
+# The kates platform profile: the platform's topics, users, super user and
+# client NetworkPolicy grants (profiles/platform.yaml, merged under your
+# values). `kates deploy`, scripts/deploy-kafka*.sh and the kates-platform
+# umbrella select it; layer it BEFORE any environment overlay, so that the
+# environment still has the last word on sizes, storage and replicas:
+#
+#   helm upgrade --install krafter charts/kafka-cluster -n kafka \
+#     -f charts/kafka-cluster/values-platform.yaml \
+#     -f charts/kafka-cluster/values-prod.yaml
+#
+# To change one item, set it by name after this file, e.g.
+#   --set topics.items.kates-events.partitions=12
+#   --set users.items.kafka-ui.enabled=false
+profile: platform

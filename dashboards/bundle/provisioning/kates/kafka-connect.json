@@ -1,0 +1,2191 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "One Kafka Connect group: whether the workers are up, which connectors and tasks are running, how much data is moving, what is failing or being dead-lettered, and whether a restart will reprocess.",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "targetBlank": true,
+      "title": "Kafka Connect runbook",
+      "type": "link",
+      "url": "https://github.com/bmscomp/kates/blob/main/docs/connect-cluster-runbook.md"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How many worker pods answered Prometheus' last scrape. `up` is synthetic \u2014 Prometheus writes one per target \u2014 so this counts scrape targets, not Ready pods: a worker that is running but whose metrics port stopped answering reads as down here while the KafkaConnect still reports Ready. Below the release's replica count for 3 minutes is KafkaConnectWorkerDown. The `or vector(0)` is what makes an empty result draw a zero rather than *No data*, so a release with no workers left is visibly zero instead of visibly blank \u2014 and the thresholds are red at zero, because no worker up is the outage rather than the resting state.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum(up{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Workers up",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Connectors registered with the group, counted by name. `kafka_connect_connector_metrics` is a synthetic `1` the exporter emits once per connector *per attribute* \u2014 class, type, version and status are four series sharing that one name and differing only in which label they carry \u2014 so the `max by (connector)` is not an aggregation over workers, it is what collapses those four back into one connector. Every worker reports every connector, so this is a group-wide count.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "count(max by (connector) (kafka_connect_connector_metrics{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})) or vector(0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Connectors",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Connectors whose own status is `failed` \u2014 connector scope, which means the connector's `start()` or its configuration, not its data path. KafkaConnectConnectorFailed reads this. It is not the common failure: a connector normally stays RUNNING while its tasks die, which is the stat to the right. `status` is a label, so a connector that recovers stops publishing the `failed` series rather than publishing it as zero \u2014 the series goes stale and the count falls on its own. That is what the zero fallback is for, and why it is anchored to the workers' rebalance series: 'no failed connectors' and 'no workers being scraped' must not both draw a green zero.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(count(max by (connector) (kafka_connect_connector_metrics{status=\"failed\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}))) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Failed connectors",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Tasks in the `failed` state across every connector. Task scope, not connector scope, and that is the whole point: a connector with four tasks and one failure reports RUNNING on its CR and on the stat to the left, keeps replicating three quarters of its partitions, and appears only here. Each series is a synthetic `1` per (connector, task, status), so the sum is a count of tasks. KafkaConnectTaskFailed fires on it after 2 minutes. The zero fallback is anchored \u2014 see 'Failed connectors'.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(kafka_connect_connector_task_status{status=\"failed\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Failed tasks",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Running tasks over declared tasks, group-wide \u2014 the SLI behind the `connect:tasks_running:ratio` recording rule and the task-availability SLO. Both counts are *per worker*: `connector-running-task-count` is what one worker runs, so the sums are over workers and the ratio only means anything while every worker is scraping. That is also its blind spot. A worker that disappears takes its tasks out of the numerator and the denominator at the same instant, so this can read 1.0 for the length of a rebalance while tasks are in fact unassigned. Read it beside 'Workers up'.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum(kafka_connect_worker_metrics_connector_running_task_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) / sum(kafka_connect_worker_metrics_connector_total_task_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Tasks running",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Errors the tasks logged, per second over five minutes. `total-errors-logged` is cumulative since the task started, but the exporter's COUNTER rules key off a `-total` *suffix* and this attribute wears its `total` at the front, so the series is published typed GAUGE while only ever going up. `rate()` is still the right function: Prometheus' type metadata does not change what `rate()` computes, and its reset handling is exactly what a task restart needs. Above `alerts.thresholds.errorRatePerSecond` is KafkaConnectErrorsLogged. The zero fallback is anchored \u2014 see 'Failed connectors'.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(rate(kafka_connect_task_error_metrics_total_errors_logged{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m]))) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Record errors /s",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 7,
+      "panels": [],
+      "title": "Connectors and tasks",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "One row per connector with the state the workers report: running, paused, stopped, failed, unassigned, restarting or destroyed. `status!=\"\"` is load-bearing. The exporter publishes class, type, version and status as four series of the same name, each carrying a different label, and an absent label matches `\"\"` in PromQL \u2014 without the filter this table would show four rows per connector, three of them with an empty status. `max` rather than `sum` because every worker in the group reports the same connector, and summing would count the workers.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "id": 8,
+      "options": {
+        "footer": {
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (connector, status) (kafka_connect_connector_metrics{status!=\"\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Connector status",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "One row per task, and the only place a PARTIALLY failed connector is visible: the CR says Ready, the connector says RUNNING, and one of its four tasks has been dead since the last rebalance \u2014 the partitions that task owned simply stopped, silently. A task runs on exactly one worker, so each row sums a single series and reads 1; it is a `sum` rather than a `max` so that a task counted twice mid-reassignment shows as 2 instead of being hidden.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 5
+      },
+      "id": 9,
+      "options": {
+        "footer": {
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector, task, status) (kafka_connect_connector_task_status{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Task status",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "What the group coordinator assigned to each worker, from that worker's own view of the last rebalance. This is assignment, not health: it says where tasks were *sent*, while the task-status table says what they are *doing*. A worker sitting at zero after a rebalance while the others carry double is an assignment that did not spread \u2014 usually a connector whose `tasks.max` is below the worker count, or a worker that joined late. The bean is labelled by client id; `by (pod)` uses the scrape's own pod label, which is one per worker.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 5
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (kafka_connect_coordinator_metrics_assigned_tasks{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Tasks per worker",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The fraction of Kafka's own sampling window each task spent running, and the fraction it spent paused. This is what separates 'running' from 'running *now*': the task-status table is a snapshot taken at scrape time, so a task that dies and restarts every twenty seconds reads RUNNING on most scrapes while its running ratio sits near 0.4. Paused is deliberate \u2014 a connector someone paused reads 0 running and 1 paused, and that is not an incident. Both are already normalised to 0\u20131 over Kafka's window; neither is a counter, so neither takes `rate()`.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(max by (connector, task) (kafka_connect_connector_task_metrics_running_ratio{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}), \"kind\", \"running\", \"\", \"\") or label_replace(max by (connector, task) (kafka_connect_connector_task_metrics_pause_ratio{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}), \"kind\", \"paused\", \"\", \"\")",
+          "legendFormat": "{{connector}}/{{task}} {{kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Task running and paused ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Topic partitions the sink tasks of each connector currently hold, summed over its tasks. It should equal the partition count of the topics the connector subscribes to. Anything less means a task is holding no assignment, which is how a sink quietly stops consuming part of its input while every task reports RUNNING and the throughput panels merely look lower than yesterday. It drops to zero for the length of every consumer-group rebalance, so read a dip against 'Rebalances /s' before treating it as a fault. Source connectors publish no such series and are simply absent here.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (kafka_connect_sink_task_metrics_partition_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Sink partitions assigned",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "id": 13,
+      "panels": [],
+      "title": "Throughput",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Records the source tasks pulled out of the upstream system, per second, per connector. `source-record-poll-total` does end in `-total`, so the exporter types it a true COUNTER and `rate()` is unambiguously right. Compare it with the panel to its right: poll is what the connector read, write is what reached Kafka, and a standing gap between them is what the transforms removed. Flat at zero on a RUNNING source for `alerts.thresholds.sourceIdleMinutes` is KafkaConnectSourceIdle, which is opt-in because a source that polls nothing can be entirely normal.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 22
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (rate(kafka_connect_source_task_metrics_source_record_poll_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m]))",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Source records polled /s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Records the source tasks handed to the producer for Kafka, per second, per connector. Persistently below the poll rate is records being filtered or transformed away \u2014 not a backlog, which shows up as 'Source records in flight' climbing instead. A true counter, summed over every task of the connector on every worker.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 22
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (rate(kafka_connect_source_task_metrics_source_record_write_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m]))",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Source records written /s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Records polled from the source and not yet acknowledged by Kafka, per connector \u2014 the source connector's own backlog. It grows when the produce path is the bottleneck rather than the upstream system, and the collapsed Client path section at the bottom of this board reads that path directly: producer request latency, errors and retries. A gauge, summed over tasks.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 22
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (kafka_connect_source_task_metrics_source_record_active_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Source records in flight",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Records the sink tasks consumed from Kafka, per second, per connector \u2014 the *read* side of a sink, what came out of the topic before the connector tried to write it anywhere. On its own it says the consumer is working; it says nothing about the destination, which is the panel to its right.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 30
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (rate(kafka_connect_sink_task_metrics_sink_record_read_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m]))",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Sink records read /s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Records the sink tasks passed to `SinkTask.put()`, per second, per connector \u2014 what the connector attempted to write to the destination, after transforms. Lower than the read rate means records are being dropped by an SMT or a predicate. Equal to the read rate while lag grows means the destination is slow and the connector is keeping up with it, which is a capacity problem rather than a Connect problem.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 30
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (rate(kafka_connect_sink_task_metrics_sink_record_send_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m]))",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Sink records put /s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The largest gap, over the partitions a sink connector holds, between the offsets its consumer has reached and the offsets the task has committed. Read the name carefully, because this is lag *inside the task* \u2014 records it has taken delivery of and not yet acknowledged \u2014 and not the number of records still waiting unread in the topic. The backlog an operator usually means by 'sink lag' is the consumer group's, `kafka_consumergroup_lag`, which the Kafka Exporter on the Kafka cluster publishes and which KafkaConnectSinkLag alerts on at `alerts.thresholds.sinkLagRecords`; it is not on this board because the workers do not produce it. The closest thing here is 'Consumer lag (max)' in the Client path section, which the sink's own consumer measures against the end of the log. Use this panel to catch a task that has stopped committing, and those two for how far behind the destination really is.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 30
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (connector) (kafka_connect_sink_task_metrics_sink_record_lag_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Sink lag (max records behind)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "id": 20,
+      "panels": [],
+      "title": "Errors and dead letter queue",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Per connector, the same series the header stat totals and KafkaConnectErrorsLogged reads. A connector configured with `errors.tolerance=all` logs every failure here and goes on reporting RUNNING for as long as you let it, so this panel and the two beside it are the only places that shows. Cumulative but published typed GAUGE, for the reason the header stat gives; `rate()` over it is correct.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 39
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (rate(kafka_connect_task_error_metrics_total_errors_logged{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m]))",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Errors logged /s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "What the errors did to the records. A *failure* is a record the task could not convert or deliver; a *skip* is a failure the task was configured to tolerate, so the record is gone and the connector is still green. Skips are the one error mode neither a lag panel nor a status table can show \u2014 the pipeline is healthy, the throughput is normal, and the destination is quietly missing rows. The two are separate attributes of the same bean, so `label_replace` gives each a `kind` to draw them apart.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 39
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(sum by (connector) (rate(kafka_connect_task_error_metrics_total_record_failures{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m])), \"kind\", \"failed\", \"\", \"\") or label_replace(sum by (connector) (rate(kafka_connect_task_error_metrics_total_records_skipped{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m])), \"kind\", \"skipped\", \"\", \"\")",
+          "legendFormat": "{{connector}} {{kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Record failures and skips /s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Records diverted to the dead-letter topic, and the writes to that topic which themselves failed. A rising `written` line is KafkaConnectDeadLetterWrites: the connector is behaving as configured and somebody has to drain the DLQ. A rising `failed` line is KafkaConnectDeadLetterFailures and is the worse of the two \u2014 the escape hatch is broken, so those records are in neither the destination nor the dead-letter topic and there is nothing left to replay them from.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 39
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(sum by (connector) (rate(kafka_connect_task_error_metrics_deadletterqueue_produce_requests{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m])), \"kind\", \"written\", \"\", \"\") or label_replace(sum by (connector) (rate(kafka_connect_task_error_metrics_deadletterqueue_produce_failures{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m])), \"kind\", \"failed\", \"\", \"\")",
+          "legendFormat": "{{connector}} {{kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Dead letter queue /s",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "id": 24,
+      "panels": [],
+      "title": "Offset commits",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How long a task's offset commit takes, in milliseconds, worst task per connector. Kafka averages this over its own metric window before the exporter ever sees it, so the value is already an average and `max by (connector)` picks the slowest task rather than averaging an average. Commits that run longer than `offset.flush.interval.ms` push the task off its schedule, and the first symptom is throughput sagging with not one error anywhere on the board.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 48
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (connector) (kafka_connect_connector_task_metrics_offset_commit_avg_time_ms{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Offset commit time (avg)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The share of a task's recent commit attempts that failed. Kafka calls the attribute a percentage and publishes a fraction between 0 and 1, which is why the panel is in `percentunit` and why KafkaConnectOffsetCommitFailures fires at `> 0` rather than at `> 1`. What it costs you is paid at restart: a task resumes from its last committed offset, so a connector that has not committed for an hour reprocesses an hour \u2014 duplicates downstream for a sink, re-read source rows for a source.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 48
+      },
+      "id": 26,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (connector) (kafka_connect_connector_task_metrics_offset_commit_failure_percentage{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Offset commit failures",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Successful offset commits per second for the sink tasks. `offset-commit-completion-rate` is already a rate \u2014 Kafka computes it per second over its own window \u2014 so it is read as it is; `rate()` over it would be the rate of a rate. Sitting at zero while 'Sink records read /s' is not zero means the task is consuming and never recording where it got to, and the next restart replays all of it.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 48
+      },
+      "id": 27,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (kafka_connect_sink_task_metrics_offset_commit_completion_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Sink offset commits /s",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "id": 28,
+      "panels": [],
+      "title": "Workers",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Completed group rebalances per second, per worker. No task processes data during a rebalance, so a storm reads downstream as intermittent lag with nothing failed and nothing logged. Above `alerts.thresholds.rebalanceRatePerSecond` for 5 minutes is KafkaConnectRebalanceStorm. Every worker rebalances together, so the lines move as one; a single worker moving alone is that worker joining and leaving. This attribute does end in `-total`, so it is a genuine COUNTER and `rate()` is right.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 57
+      },
+      "id": 29,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m])",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Rebalances /s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Mean duration of the recent rebalances each worker took part in. Frequent rebalances and long rebalances are different faults: frequent is usually a worker that keeps leaving the group \u2014 a liveness probe, a GC pause, `session.timeout.ms` set too tight \u2014 while long is usually a large number of connectors and tasks to reassign. Left per worker on purpose: during a rebalance the workers disagree, and the disagreement is the information.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 57
+      },
+      "id": 30,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kafka_connect_worker_rebalance_metrics_rebalance_avg_time_ms{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Rebalance time (avg)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Connectors and tasks that failed to start in the last 15 minutes, counted apart. These are worker-scope counters, so a failure here happened before the connector or task ever reached the status table: a bad plugin path, a class the worker cannot load, a configuration the connector rejected in `start()`. A worker crash-looping on startup never appears in the task panels at all, and this is where it shows. `increase()` over 15 minutes rather than a rate, because these are rare events and a per-second rate of a rare event is unreadable.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 57
+      },
+      "id": 31,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(sum(increase(kafka_connect_worker_metrics_connector_startup_failure_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[15m])), \"kind\", \"connector\", \"\", \"\") or label_replace(sum(increase(kafka_connect_worker_metrics_task_startup_failure_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[15m])), \"kind\", \"task\", \"\", \"\")",
+          "legendFormat": "{{kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Startup failures (15m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "1 while the worker is rebalancing, 0 otherwise. This is the series KafkaConnectRebalanceTooLong fires on \u2014 `max(...) == 1` held for 5 minutes \u2014 and until this board had a panel for it, the only place it existed was inside that alert, so the page had nowhere to look. A line stuck at 1 is a rebalance that never converged, usually a worker that cannot complete the join, and it takes the *whole group's* tasks out of service rather than that worker's share of them.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "max": 1,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kafka_connect_worker_rebalance_metrics_rebalancing{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Rebalance in progress",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How long each worker has been stable. A healthy group draws one line climbing steadily; a sawtooth is the storm above seen from the other side, where the height of each tooth is how long the group managed to stay still between rebalances. This is the panel for a connector whose throughput is fine on average and terrible in bursts. Kafka resets the attribute to zero at every rebalance, so never `rate()` it \u2014 the drops are the signal, not counter resets to be corrected away.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 65
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kafka_connect_worker_rebalance_metrics_time_since_last_rebalance_ms{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Time since last rebalance",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Worker heap, under both spellings of the name: the JMX exporter agent renamed `jvm_memory_bytes_used` to `jvm_memory_used_bytes` in its 1.x line, and which one a given worker image ships is not something a panel should have to know, so `or` takes whichever exists. Connect workers under memory pressure rarely crash \u2014 they slow down, and it surfaces as lag, or as rebalances caused by GC pauses long enough to miss a heartbeat.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 73
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (jvm_memory_used_bytes{area=\"heap\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} or jvm_memory_bytes_used{area=\"heap\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Heap used",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The same heap against the JVM's maximum, which is the form KafkaConnectWorkerHeapHigh uses (`alerts.thresholds.heapUsagePercent`). Both halves of the division carry the `or` over the two exporter spellings, so the ratio cannot end up with a 1.x numerator over an 0.x denominator and render nothing at all \u2014 which is the failure mode that writing only one spelling produces, and it looks exactly like an idle cluster.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 73
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (jvm_memory_used_bytes{area=\"heap\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} or jvm_memory_bytes_used{area=\"heap\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) / sum by (pod) (jvm_memory_max_bytes{area=\"heap\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} or jvm_memory_bytes_max{area=\"heap\", namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{pod}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Heap used / max",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 81
+      },
+      "id": 36,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The producers underneath the tasks \u2014 one per source connector task, plus the workers' own producers for the internal offset, config and status topics. `record-send-rate` is a Kafka rate already, read as it is rather than through `rate()`. Grouped by `clientid` and not by connector because these are client beans: Connect names the client `connector-producer-<connector>-<task>`, so the connector is inside the string but is not a label.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 82
+          },
+          "id": 37,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (clientid) (kafka_producer_producer_record_send_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+              "legendFormat": "{{clientid}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Producer records sent /s",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Send errors and retries for those same producers. A retry is the client absorbing a transient failure; an error is what it gave up on, and a record that errors here never reached Kafka at all. Both climbing while the send rate holds steady is Kafka rejecting or throttling the writes \u2014 a broker-side answer, not a connector one. Two Kafka-computed rates, drawn apart with `label_replace`.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 82
+          },
+          "id": 38,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "label_replace(sum by (clientid) (kafka_producer_producer_record_error_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}), \"kind\", \"error\", \"\", \"\") or label_replace(sum by (clientid) (kafka_producer_producer_record_retry_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}), \"kind\", \"retry\", \"\", \"\")",
+              "legendFormat": "{{clientid}} {{kind}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Producer errors and retries /s",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mean round trip to the broker for the tasks' producers. This is the first thing to look at when 'Source records in flight' is climbing with no errors anywhere: the tasks are polling fine and the produce path is the queue. Already an average over Kafka's window; `max by (clientid)` picks the worst client rather than averaging averages together.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 82
+          },
+          "id": 39,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max by (clientid) (kafka_producer_producer_request_latency_avg{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+              "legendFormat": "{{clientid}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Producer request latency (avg)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The consumers underneath the sink tasks, and the workers' own consumers of the internal topics. Another Kafka-computed rate, read as it is. Compare it with 'Sink records put /s': consuming quickly and putting slowly is a slow destination, and the records caught in between are what the next panel measures.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 90
+          },
+          "id": 40,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (clientid) (kafka_consumer_consumer_fetch_manager_records_consumed_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+              "legendFormat": "{{clientid}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Consumer records /s",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The real backlog: for each client, the largest number of records any of its partitions still holds beyond the position that consumer has reached. This \u2014 rather than 'Sink lag (max records behind)' in the Throughput section \u2014 is the panel that answers 'how far behind is this sink', and it is the same quantity KafkaConnectSinkLag alerts on, measured by the client instead of by the Kafka Exporter. It also covers the workers' own consumers of the internal config and status topics, which belong to no connector and so appear in none of the sink panels: a worker lagging on the status topic is a worker running on a stale view of the group.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 90
+          },
+          "id": 41,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "max by (clientid) (kafka_consumer_consumer_fetch_manager_records_lag_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+              "legendFormat": "{{clientid}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Consumer lag (max)",
+          "type": "timeseries"
+        }
+      ],
+      "title": "Client path",
+      "type": "row"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "kafka",
+    "connect",
+    "strimzi",
+    "kates"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 0,
+        "label": "Data source",
+        "name": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total, namespace)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Namespace",
+        "multi": false,
+        "name": "namespace",
+        "options": [],
+        "query": {
+          "query": "label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total, namespace)",
+          "refId": "namespace-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\"}, strimzi_io_cluster)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Connect cluster",
+        "multi": false,
+        "name": "cluster",
+        "options": [],
+        "query": {
+          "query": "label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\"}, strimzi_io_cluster)",
+          "refId": "cluster-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Kafka Connect",
+  "uid": "kates-connect",
+  "version": 1
+}

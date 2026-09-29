@@ -1,5 +1,6 @@
 package com.bmscomp.kates.domain;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -10,7 +11,9 @@ public class CreateTestRequest {
     @NotNull(message = "Test type is required")
     private TestType type;
 
+    @Valid
     private TestSpec spec;
+
     private String backend;
     private TestScenario scenario;
 

@@ -1,0 +1,102 @@
+/*-- scss:defaults --*/
+
+// Dark palette: the cover's darkest blue, taken darker still for a reading
+// background, with the sky accent carrying links. Every text colour here
+// clears WCAG AA (4.5:1) against the surface it sits on;
+// scripts/check-book-contrast.py checks every pair in CI.
+
+// Brand and text
+$kates-heading: #f1f4fa;
+$kates-link: #7ab6f5;
+$kates-accent: #5fa9ee;
+$kates-number: #8ea6d0;
+$kates-strong: #f1f4fa;
+$kates-muted: #95a2bd;
+$kates-sidebar-fg: #c3cce0;
+
+// Surfaces and lines
+$kates-border: #243150;
+$kates-border-strong: #33426a;
+$kates-surface: #131c33;
+$kates-active-bg: rgba(122, 182, 245, 0.1);
+$kates-row-hover: #121b31;
+
+// Bootstrap
+$body-bg: #0e1425;
+$body-color: #d3dbea;
+$primary: $kates-link;
+$secondary: #95a2bd;
+$link-color: $kates-link;
+$headings-color: $kates-heading;
+$text-muted: $kates-muted;
+$border-color: $kates-border;
+$input-bg: #131c33;
+$input-color: $body-color;
+$input-border-color: $kates-border;
+$input-placeholder-color: $kates-muted;
+$dropdown-bg: #131c33;
+$dropdown-color: $body-color;
+$dropdown-border-color: $kates-border;
+$dropdown-link-color: $body-color;
+$dropdown-link-hover-bg: #1b2542;
+$table-color: $body-color;
+$table-border-color: $kates-border;
+
+// Inline code: a faint tint with no border, so it sits inside the sentence
+$code-bg: #182038;
+$code-color: #dbe4f6;
+
+// Code blocks: a step lighter than the page, so they separate from it
+$code-block-bg: #121b36;
+$kates-code-block-border: #2c3a60;
+$kates-code-block-fg: #e3e9f5;
+$kates-code-file-bg: #1a2547;
+$kates-code-file-fg: #c3cde2;
+$btn-code-copy-color: #9fb0cf;
+$btn-code-copy-color-active: $kates-accent;
+$kates-code-scroll-shadow: rgba(159, 176, 207, 0.3);
+
+// Command output (`text` fences): set into the page, below it, now that
+// the code blocks sit a step above it
+$kates-output-bg: #0b1120;
+$kates-output-fg: #cfd8ea;
+$kates-output-rule: #4a6699;
+
+// Callouts: caution is the only red; important is indigo, warning amber
+$callout-color-note: #5fa9ee;
+$callout-color-tip: #4ade80;
+$callout-color-important: #818cf8;
+$callout-color-warning: #fbbf24;
+$callout-color-caution: #f87171;
+$kates-callout-tint: 0.06;
+$kates-callout-header-tint: 0.13;
+
+// Diagrams
+$kates-diagram-bg: #10182c;
+$kates-scroll-shadow: rgba(0, 0, 0, 0.55);
+$kates-diagram-note-bg: #2e2a1a;
+$kates-diagram-note-border: #7a6a2e;
+
+$mermaid-bg-color: $kates-diagram-bg;
+$mermaid-node-bg-color: #17223f;
+$mermaid-node-fg-color: #5b78ad;
+$mermaid-fg-color: $body-color;
+$mermaid-fg-color--lighter: #3b4a70;
+$mermaid-fg-color--lightest: #141e38;
+$mermaid-label-bg-color: $kates-diagram-bg;
+$mermaid-label-fg-color: #e6ecf7;
+$mermaid-edge-color: #a3b2cf;
+
+// Group titles, sequence frame tags (loop, opt, alt), the header of an ER
+// table and its alternate rows, and the shadow under each card
+$kates-diagram-group-fg: #8ea6d0;
+$kates-diagram-tint: #1a2a4a;
+$kates-diagram-row-alt: #141e38;
+$kates-diagram-shadow: rgba(0, 0, 0, 0.35);
+
+// Cover
+$kates-cover-shadow: rgba(0, 0, 0, 0.7);
+
+// Keyboard focus: a ring that clears 3:1 against the page and the code blocks
+$kates-focus-ring: $kates-link;
+$kates-focus-ring-on-code: $kates-link;

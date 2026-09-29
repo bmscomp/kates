@@ -1,64 +1,96 @@
-name: Integration Tests
+name: CI · Integration
+
+# What needs a real cluster, and only that. Helm lint, template rendering,
+# kubeconform and the config YAML parse all live in CI · Backend; they used to
+# be repeated here (with `helm dependency build || true`, so a broken chart
+# lint here was a false green anyway).
 
 on:
   push:
     branches: [main]
-    paths:
-      - "cli/**"
-      - "kates/**"
-      - "images.env"
-      - "versions.env"
-      - "Makefile"
-      - ".github/workflows/integration.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "cli/**"
-      - "kates/**"
-      - "images.env"
-      - "versions.env"
-      - "Makefile"
-      - ".github/workflows/integration.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  KIND_VERSION: v0.27.0
-  KUBECTL_VERSION: v1.33.0
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cluster: ${{ steps.filter.outputs.cluster || 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        # Manual runs have no diff to filter on; the `|| 'true'` above runs
+        # everything for them.
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            cluster:
+              - 'cli/**'
+              - '!cli/**/*.md'
+              - 'kates/**'
+              - '!kates/**/*.md'
+              - 'config/**'
+              - 'images.env'
+              - 'versions.env'
+              - 'Makefile'
+              - '.github/workflows/integration.yml'
+
   integration:
     name: Kind Cluster Smoke Tests
+    needs: changes
+    if: needs.changes.outputs.cluster == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Kind
-        run: |
-          curl -Lo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
-          chmod +x kind
-          sudo mv kind /usr/local/bin/
+      # versions.env is the single source of truth; the action fails if a pin
+      # is missing, which is the point: a silently empty KIND_VERSION would
+      # request https://kind.sigs.k8s.io/dl//kind-linux-amd64 and install a 404.
+      - uses: ./.github/actions/load-versions
 
-      - name: Install kubectl
-        run: |
-          curl -Lo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
-
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v3.17.0
+          version: ${{ env.HELM_VERSION }}
 
+      # helm/kind-action rather than two hand-rolled curls. Those hardcoded
+      # kind-linux-amd64, verified no checksum, cached nothing, and — being shell
+      # inside a run block — were invisible to Dependabot, which is how the pin
+      # reached eighteen months old without anyone noticing.
+      #
+      # node_image is deliberately NOT passed: config/cluster.yaml names the
+      # image per node and check-versions.sh asserts it against versions.env.
+      # Passing it here as well would create a second source of truth, and the
+      # flag silently wins over the file.
       - name: Create Kind cluster
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: ci-test
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
         run: |
-          kind create cluster --config config/cluster.yaml --name ci-test
           kubectl cluster-info --context kind-ci-test
-          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+          # kind-action's `wait` covers the control plane; the workers join after
+          # it returns, and the zone checks below need all three.
+          kubectl wait --for=condition=Ready nodes --all --timeout=180s
 
       - name: Validate cluster topology
+        id: topology
         run: |
           echo "Checking node labels..."
           for zone in alpha sigma gamma; do
@@ -69,9 +101,9 @@ jobs:
             fi
           done
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25"
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
 
       - name: Build kates CLI
@@ -79,49 +111,14 @@ jobs:
         run: go build -o ../build/kates .
 
       - name: "CI Gate: kates detect --fail-on-error"
+        id: detect
         run: |
           echo "Running cluster compatibility check..."
           ./build/kates detect --fail-on-error --quiet
           echo "✅ Cluster is compatible with Kafka deployment"
 
-      - name: Helm lint — all charts
-        run: |
-          helm repo add bitnami https://charts.bitnami.com/bitnami
-          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-          helm repo update
-          for chart in charts/*/; do
-            if [ -f "${chart}/Chart.yaml" ]; then
-              echo "Building dependencies for ${chart}..."
-              helm dependency build "${chart}" || true
-              echo "Linting ${chart}..."
-              helm lint "${chart}"
-            fi
-          done
-
-      - name: YAML validation — all config
-        run: |
-          pip3 install pyyaml --quiet
-          python3 -c "
-          import yaml, pathlib, sys
-          failed = 0
-          for f in sorted(pathlib.Path('config').rglob('*.yaml')):
-              try:
-                  list(yaml.safe_load_all(f.read_text()))
-                  print(f'✅ {f}')
-              except Exception as e:
-                  print(f'❌ {f}: {e}')
-                  failed += 1
-          for f in sorted(pathlib.Path('config').rglob('*.yml')):
-              try:
-                  list(yaml.safe_load_all(f.read_text()))
-                  print(f'✅ {f}')
-              except Exception as e:
-                  print(f'❌ {f}: {e}')
-                  failed += 1
-          sys.exit(1 if failed else 0)
-          "
-
       - name: Apply storage classes
+        id: storage
         run: kubectl apply -f config/storage/storage-classes.yaml
 
       - name: Create namespaces
@@ -137,32 +134,54 @@ jobs:
           echo "✅ Kafka config files are syntactically valid Kubernetes manifests"
 
       - name: Verify NetworkPolicies
+        id: netpol
         run: |
           kubectl apply -f config/kafka/kafka-networkpolicies.yaml --dry-run=server
           echo "✅ NetworkPolicies are valid"
 
       - name: Verify monitoring config
+        id: monitoring
         run: |
           echo "Jaeger Helm values present:"
           test -f config/monitoring/jaeger-values.yaml && echo "✅ jaeger-values.yaml"
           test -f config/monitoring/jaeger-values-offline.yaml && echo "✅ jaeger-values-offline.yaml"
 
+      # Reads each step's real outcome. The previous table printed ✅ on every
+      # row under `if: always()`, so a failed run still summarised as green.
       - name: Summary
         if: always()
+        env:
+          TOPOLOGY: ${{ steps.topology.outcome }}
+          DETECT: ${{ steps.detect.outcome }}
+          STORAGE: ${{ steps.storage.outcome }}
+          NETPOL: ${{ steps.netpol.outcome }}
+          MONITORING: ${{ steps.monitoring.outcome }}
         run: |
-          echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Kind cluster creation | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| 3-zone topology | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| kates detect gate | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Helm lint | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| YAML validation | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Storage classes | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| NetworkPolicies | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Jaeger manifests | ✅ |" >> $GITHUB_STEP_SUMMARY
+          mark() { case "$1" in success) echo "✅" ;; skipped) echo "⏭️" ;; *) echo "❌" ;; esac; }
+          {
+            echo "## Integration Test Results"
+            echo
+            echo "| Check | Status |"
+            echo "|-------|--------|"
+            echo "| 3-zone topology | $(mark "$TOPOLOGY") |"
+            echo "| kates detect gate | $(mark "$DETECT") |"
+            echo "| Storage classes | $(mark "$STORAGE") |"
+            echo "| NetworkPolicies | $(mark "$NETPOL") |"
+            echo "| Jaeger manifests | $(mark "$MONITORING") |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Cleanup
-        if: always()
-        run: kind delete cluster --name ci-test
+      # No explicit teardown: helm/kind-action registers a post step that deletes
+      # the cluster it created, on success and on failure alike. A `kind delete`
+      # here would only race it.
+
+  gate:
+    name: Gate · Integration
+    if: always()
+    needs: [changes, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

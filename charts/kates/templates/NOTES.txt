@@ -58,9 +58,7 @@
   {{- if .Values.metrics.prometheusRule.enabled }}
     PrometheusRule enabled — alerts (KatesDown, KatesHighErrorRate) are active.
   {{- end }}
-  {{- if .Values.metrics.grafanaDashboard.enabled }}
-    Grafana dashboard auto-provisioned (13 panels).
-  {{- end }}
+    Grafana boards are delivered by charts/monitoring (dashboards.enabled there).
 {{- end }}
 
 {{- if .Values.networkPolicy.enabled }}

@@ -16,6 +16,10 @@ data:
               org.apache.kafka.common.security.scram.ScramLoginModule required
               username="kafka-ui"
               password="${KAFKA_UI_PASSWORD}";
+          schemaRegistry: http://apicurio-apicurio-registry.kafka.svc:8080/apis/ccompat/v7
+          kafkaConnect:
+            - name: connect-cluster
+              address: http://connect-cluster-connect-api.kafka.svc:8083
 
     auth:
       type: DISABLED
@@ -43,7 +47,7 @@ spec:
     spec:
       containers:
       - name: kafka-ui
-        image: provectuslabs/kafka-ui:v0.7.2
+        image: ghcr.io/kafbat/kafka-ui:v1.5.0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
@@ -66,8 +70,8 @@ spec:
           mountPath: /etc/kafkaui
         resources:
           requests:
-            memory: "1Gi"
-            cpu: "500m"
+            memory: "512Mi"
+            cpu: "250m"
           limits:
             memory: "2Gi"
             cpu: "1000m"
@@ -82,8 +86,8 @@ spec:
           httpGet:
             path: /actuator/health
             port: 8080
-          initialDelaySeconds: 60
-          periodSeconds: 30
+          initialDelaySeconds: 30
+          periodSeconds: 10
           timeoutSeconds: 10
       volumes:
       - name: config

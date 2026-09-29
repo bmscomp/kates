@@ -1,6 +1,6 @@
 # Kates Helm Chart
 
-Install [Kates](https://github.com/klster/kates) — Kafka Advanced Testing & Engineering Suite — on any Kubernetes cluster.
+Install [Kates](https://github.com/bmscomp/kates) — Kafka Advanced Testing & Engineering Suite — on any Kubernetes cluster.
 
 > **Schema validated** — `values.schema.json` catches invalid config at install time.
 
@@ -32,12 +32,14 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `image.repository` | `kates` | Container image name |
-| `image.tag` | `latest` | Container image tag |
+| `image.repository` | `ghcr.io/bmscomp/kates` | Container image name |
+| `image.tag` | `1.24.0` | Container image tag, pinned in `values.yaml` to match the chart's `appVersion`. Keep it at 1.22.0 or newer: the probes use health endpoints older images lack |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy |
 | `replicaCount` | `1` | Number of Kates pods |
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address |
+| `kafka.topicNamespace` | `""` | Namespace for CDC test `KafkaTopic` CRs (`""` = auto-detect) |
 | `engine.defaultBackend` | `native` | Benchmark engine (`native` or `trogdor`) |
+| `prometheus.url` | `http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090` | Prometheus the backend queries for a disruption's Kafka metrics: kube-prometheus-stack's Service for `charts/monitoring` installed as release `monitoring` in namespace `monitoring`, as `kates deploy` does. After `make monitoring`, which uses namespace `kafka`, set `http://monitoring-kube-prometheus-prometheus.kafka.svc:9090` and `networkPolicy.prometheus.namespace=kafka` |
 
 ### Networking
 
@@ -51,11 +53,19 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `ingress.certManager.enabled` | `false` | Auto-create TLS via cert-manager |
 | `ingress.certManager.issuerName` | `""` | cert-manager issuer name |
 | `ingress.certManager.issuerKind` | `ClusterIssuer` | Issuer kind |
-| `networkPolicy.enabled` | `false` | Enable NetworkPolicy |
+| `networkPolicy.enabled` | `true` | Enable NetworkPolicy |
 | `networkPolicy.kafka.namespace` | `kafka` | Kafka egress target namespace |
 | `networkPolicy.kafka.port` | `9092` | Kafka egress target port |
-| `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace |
+| `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace: the one `prometheus.url` points into |
 | `networkPolicy.prometheus.port` | `9090` | Prometheus egress target port |
+
+Upgrading from chart 0.10.4 or earlier: those charts ignored
+`networkPolicy.prometheus.namespace` and always allowed egress to
+`monitoring`, while their `values.yaml` said `kafka`. A values file copied
+from one of them (`helm show values`) still says `kafka`, which now takes
+effect and moves the egress there while `prometheus.url` points into
+`monitoring`, so the backend loses Prometheus. Remove that line, or set it to
+the namespace your Prometheus runs in.
 
 ### Security
 
@@ -66,19 +76,47 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
 | `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
-| `rbac.create` | `true` | Create ClusterRole/ClusterRoleBinding for Litmus CRD access |
+| `rbac.create` | `true` | Create the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads) |
+| `rbac.directChaos` | `false` | Grant the writes the direct Kubernetes chaos backend makes; see [Chaos permissions](#chaos-permissions) |
 | `rbac.extraRules` | `[]` | Additional RBAC rules to append |
+
+### Chaos permissions
+
+With the default chaos provider, `litmus-crd`, Kates only creates and watches `ChaosEngine`s: Litmus runs every experiment as its own `litmus-admin` service account, and the default ClusterRole covers that. The direct Kubernetes backend (`kubernetes`, or `hybrid` on a cluster without Litmus CRDs) injects the faults itself, so it needs write access the default role does not grant. `rbac.directChaos=true` adds it:
+
+| Resource | Verbs | Used by |
+|----------|-------|---------|
+| `networking.k8s.io` `networkpolicies` | `create`, `delete`, `deletecollection` | `NETWORK_PARTITION` creates a deny-all policy; cleanup and rollback delete by label, startup orphan recovery by name |
+| `apps` `statefulsets/scale` | `get`, `update` | On a Kafka that Strimzi does not manage: `SCALE_DOWN`, its rollback and orphan recovery set replicas |
+| `pods/ephemeralcontainers` | `update` | `CPU_STRESS` and `IO_STRESS` add a stress container to the target pod |
+
+`ROLLING_RESTART` needs none of these, on either backend, and neither does `SCALE_DOWN` on a Strimzi cluster. On a Strimzi cluster `ROLLING_RESTART` annotates the Kafka pods for the Strimzi Cluster Operator to roll, and on a plain StatefulSet, such as `charts/legacy-kafka`, it restarts the StatefulSet. `SCALE_DOWN` lowers `spec.replicas` of a KafkaNodePool. Both run on either backend, so the default role grants `patch` on pods, on StatefulSets and on `kafkanodepools`. On a Kafka that Strimzi does not manage, `SCALE_DOWN` also patches the StatefulSet, to record its original replica count.
+
+These rules are cluster-wide, like the rest of the role, and `pods/ephemeralcontainers` lets Kates start a container in any pod. Leave them off unless you use the direct backend. It is selected with an environment variable:
+
+```yaml
+extraEnv:
+  - name: KATES_CHAOS_PROVIDER
+    value: kubernetes
+rbac:
+  directChaos: true
+```
 
 ### Probes & Lifecycle
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `probes.startup.path` | `/q/health/started` | Startup probe path |
-| `probes.readiness.path` | `/api/health` | Readiness probe path |
+| `probes.readiness.path` | `/q/health/ready` | Readiness probe path. Do not point this at `/api/health` — that endpoint makes a live Kafka AdminClient call per request and will fail the probe whenever brokers are slow |
 | `probes.liveness.path` | `/q/health/live` | Liveness probe path |
-| `probes.startup.failureThreshold` | `30` | Startup probe max failures |
+| `probes.startup.failureThreshold` | `60` | Startup probe max failures (x `periodSeconds` = JVM boot budget) |
+| `probes.startup.timeoutSeconds` | `3` | Startup probe timeout |
 | `probes.readiness.periodSeconds` | `10` | Readiness check interval |
+| `probes.readiness.timeoutSeconds` | `5` | Readiness probe timeout (k8s default of 1s is too tight) |
+| `probes.readiness.failureThreshold` | `3` | Readiness probe max failures |
 | `probes.liveness.periodSeconds` | `30` | Liveness check interval |
+| `probes.liveness.timeoutSeconds` | `5` | Liveness probe timeout |
+| `probes.liveness.failureThreshold` | `3` | Liveness probe max failures |
 | `lifecycle.preStopSleepSeconds` | `5` | Pre-stop sleep for graceful drain |
 
 ### Scaling & Availability
@@ -113,7 +151,21 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `metrics.serviceMonitor.metricRelabelings` | `[]` | Metric relabeling rules |
 | `metrics.serviceMonitor.relabelings` | `[]` | Target relabeling rules |
 | `metrics.prometheusRule.enabled` | `false` | Enable alerting rules |
-| `metrics.grafanaDashboard.enabled` | `false` | Auto-provision Grafana dashboard |
+| ~~`metrics.grafanaDashboard.*`~~ | — | **REMOVED in 0.9.0** — the KATES — Overview board is delivered by `charts/monitoring` (`dashboards.enabled` there); setting any of these keys is refused with that location named |
+| ~~`kyvernoPolicy.grafanaDashboard`~~ / ~~`grafanaDashboardNamespace`~~ | — | **REMOVED in 0.9.0** — the Kyverno board is delivered by `charts/monitoring` too |
+
+[`dashboards/README.md`](../../dashboards/README.md#installing-these-anywhere)
+has the four install routes — Helm via `charts/monitoring`, the API
+installer, file provisioning and a plain ConfigMap bundle — and every knob.
+
+What `/q/metrics` publishes is the application's doing, not the chart's, and
+two things the boards read are settings Quarkus does not default to:
+`quarkus.datasource.metrics.enabled` (the Agroal pool row) and the
+`HttpLatencyHistogram` `MeterFilter` (the buckets behind the request-latency
+percentiles). Images newer than `1.22.0` ship both; on `1.22.0` and older,
+**Kates — Application Health** and **KATES — Overview** draw everything
+except the pool row and the latency percentiles, and no chart value changes
+that — `image.tag` does.
 
 ### Operations
 
@@ -157,8 +209,6 @@ helm install kates ./charts/kates \
 ```bash
 helm install kates ./charts/kates \
   --namespace kates --create-namespace \
-  --set image.repository=ghcr.io/klster/kates \
-  --set image.tag=1.0.0 \
   --set kafka.bootstrapServers=my-kafka:9092 \
   --set postgresql.enabled=false \
   --set externalDatabase.enabled=true \
@@ -174,22 +224,22 @@ helm install kates ./charts/kates \
   --set networkPolicy.enabled=true \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.prometheusRule.enabled=true \
-  --set metrics.grafanaDashboard.enabled=true \
   --set backup.enabled=true \
   --set cleanup.enabled=true
 ```
 
 ## Example: EKS with ALB Ingress
 
+The repository is an ECR mirror of `ghcr.io/bmscomp/kates` holding the tag `values.yaml` names. The ALB is internal: reachable from the VPC only.
+
 ```bash
 helm install kates ./charts/kates \
   --namespace kates --create-namespace \
   --set image.repository=123456789.dkr.ecr.us-east-1.amazonaws.com/kates \
-  --set image.tag=1.0.0 \
   --set kafka.bootstrapServers=b-1.msk-cluster.kafka.us-east-1.amazonaws.com:9092 \
   --set ingress.enabled=true \
   --set ingress.className=alb \
-  --set ingress.annotations."alb\.ingress\.kubernetes\.io/scheme"=internet-facing \
+  --set ingress.annotations."alb\.ingress\.kubernetes\.io/scheme"=internal \
   --set ingress.annotations."alb\.ingress\.kubernetes\.io/target-type"=ip \
   --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::role/kates
 ```

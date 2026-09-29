@@ -3,10 +3,10 @@ package com.bmscomp.kates.service;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import jakarta.inject.Inject;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.domain.TestResult;
@@ -25,9 +25,8 @@ class AdvisorServiceTest {
 
     private TestRun createRunWithMetrics(TestSpec spec, double throughput, double p99) {
         TestRun run = new TestRun(TestType.LOAD, spec);
-        TestResult result = new TestResult()
-                .withThroughputRecordsPerSec(throughput)
-                .withP99LatencyMs(p99);
+        TestResult result =
+                new TestResult().withThroughputRecordsPerSec(throughput).withP99LatencyMs(p99);
         return run.withAddedResult(result);
     }
 
@@ -57,8 +56,7 @@ class AdvisorServiceTest {
         TestRun run = createRunWithMetrics(spec, 50_000, 10);
         var recs = advisorService.analyze(run);
 
-        assertTrue(recs.stream().anyMatch(r ->
-                r.title().contains("batch.size") && "HIGH".equals(r.severity())));
+        assertTrue(recs.stream().anyMatch(r -> r.title().contains("batch.size") && "HIGH".equals(r.severity())));
     }
 
     @Test
@@ -73,8 +71,7 @@ class AdvisorServiceTest {
         TestRun run = createRunWithMetrics(spec, 10_000, 5);
         var recs = advisorService.analyze(run);
 
-        assertTrue(recs.stream().anyMatch(r ->
-                r.title().contains("linger.ms=0")));
+        assertTrue(recs.stream().anyMatch(r -> r.title().contains("linger.ms=0")));
     }
 
     @Test
@@ -89,8 +86,8 @@ class AdvisorServiceTest {
         TestRun run = createRunWithMetrics(spec, 1000, 5);
         var recs = advisorService.analyze(run);
 
-        assertTrue(recs.stream().anyMatch(r ->
-                r.title().contains("exceeds cluster size") && "HIGH".equals(r.severity())));
+        assertTrue(
+                recs.stream().anyMatch(r -> r.title().contains("exceeds cluster size") && "HIGH".equals(r.severity())));
     }
 
     @Test
@@ -104,8 +101,7 @@ class AdvisorServiceTest {
         TestRun run = createRunWithMetrics(spec, 30_000, 5);
         var recs = advisorService.analyze(run);
 
-        assertTrue(recs.stream().anyMatch(r ->
-                r.title().contains("compression")));
+        assertTrue(recs.stream().anyMatch(r -> r.title().contains("compression")));
     }
 
     @Test
@@ -119,8 +115,7 @@ class AdvisorServiceTest {
         TestRun run = createRunWithMetrics(spec, 1000, 5);
         var recs = advisorService.analyze(run);
 
-        assertTrue(recs.stream().anyMatch(r ->
-                r.title().contains("gzip") && "MED".equals(r.severity())));
+        assertTrue(recs.stream().anyMatch(r -> r.title().contains("gzip") && "MED".equals(r.severity())));
     }
 
     @Test
@@ -135,7 +130,33 @@ class AdvisorServiceTest {
         TestRun run = createRunWithMetrics(spec, 5000, 200);
         var recs = advisorService.analyze(run);
 
-        assertTrue(recs.stream().anyMatch(r ->
-                r.title().contains("p99") && r.title().contains("batch.size")));
+        assertTrue(recs.stream()
+                .anyMatch(r -> r.title().contains("p99") && r.title().contains("batch.size")));
+    }
+
+    @Test
+    void loadRunP99IsTheProducersNotHalvedByTheConsumer() {
+        when(clusterHealthService.brokerCount()).thenReturn(3);
+        TestSpec spec = new TestSpec();
+        spec.setBatchSize(131072);
+        spec.setCompressionType("lz4");
+        spec.setPartitions(12);
+        spec.setNumProducers(1);
+
+        // The consumer records no latency; averaging its 0 in made this 75 ms,
+        // under the rule's 100 ms, and the rule never fired.
+        TestRun run = new TestRun(TestType.LOAD, spec)
+                .withAddedResult(new TestResult()
+                        .withPhaseName("produce")
+                        .withRecordsSent(10_000)
+                        .withThroughputRecordsPerSec(5000)
+                        .withP99LatencyMs(150))
+                .withAddedResult(new TestResult()
+                        .withPhaseName("consume")
+                        .withRecordsSent(10_000)
+                        .withThroughputRecordsPerSec(5000));
+        var recs = advisorService.analyze(run);
+
+        assertTrue(recs.stream().anyMatch(r -> r.title().startsWith("p99=150ms")), recs.toString());
     }
 }

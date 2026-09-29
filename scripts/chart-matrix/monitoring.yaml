@@ -1,0 +1,104 @@
+# Render matrix for charts/monitoring — read by scripts/check-chart-matrix.py.
+#
+# This chart had no matrix, and the gap was not cosmetic. Its only
+# PrometheusRule lives behind `chaosAlerts.enabled`, which defaults to false,
+# so nothing in the repository had ever rendered it: not the matrix (no entry),
+# not the metric contract (no render to read), not the dashboards job (that one
+# reads boards). The file sat there containing
+#
+#   max without(instance) (producer, consumer)
+#
+# which is not valid PromQL — an aggregation takes one expression, not two — so
+# Prometheus would have refused the whole PrometheusRule and loaded none of its
+# four groups, including the three that were correct. A toggle nothing renders
+# is a toggle nothing checks, so every case below turns something on.
+#
+# Every assertion names the object it is about. This chart pulls in
+# kube-prometheus-stack, which renders around thirty PrometheusRules and as
+# many ConfigMaps of its own; an unscoped `kind: PrometheusRule` assertion is a
+# claim about all of them.
+chart: charts/monitoring
+namespace: monitoring
+release: monitoring
+apiVersions: [monitoring.coreos.com/v1]
+
+renders:
+  - name: base
+    assert:
+      - why: "the chaos rules are off by default"
+        kind: PrometheusRule
+        name: kafka-chaos-alerts
+        count: 0
+      - why: "the boards this repository generates are delivered by default"
+        kind: ConfigMap
+        name: monitoring-kates-dashboards
+        path: metadata/labels/grafana_dashboard
+        equals: "1"
+
+  - name: chaos alerts on
+    set: [chaosAlerts.enabled=true]
+    assert:
+      - kind: PrometheusRule
+        name: kafka-chaos-alerts
+        count: 1
+      - why: "the four SLA alerts are present, and are the ones the board names"
+        kind: PrometheusRule
+        name: kafka-chaos-alerts
+        path: spec/groups/*/rules/*/alert
+        matches: KafkaRTOExceedsSLA
+      - kind: PrometheusRule
+        name: kafka-chaos-alerts
+        path: spec/groups/*/rules/*/alert
+        matches: KafkaDataLossDetected
+      - why: "their inputs are series the Kates application publishes (see
+              BenchmarkMetrics), not the kafka_chaos_* names nothing produced"
+        kind: PrometheusRule
+        name: kafka-chaos-alerts
+        path: spec/groups/*/rules/*/expr
+        matches: kates_integrity_result_max_rto_seconds
+      - kind: PrometheusRule
+        name: kafka-chaos-alerts
+        path: spec/groups/*/rules/*/expr
+        notMatches: kafka_chaos_e2e_latency_ms
+      - kind: PrometheusRule
+        name: kafka-chaos-alerts
+        path: spec/groups/*/rules/*/expr
+        notMatches: kafka_chaos_producer_throughput_records_per_sec
+
+  - name: chaos alerts on, in another Kafka namespace
+    set: [chaosAlerts.enabled=true, kafkaNamespace=kafka-prod]
+    assert:
+      - why: "the experiment alerts follow kafkaNamespace rather than hardcoding it"
+        kind: PrometheusRule
+        name: kafka-chaos-alerts
+        path: spec/groups/*/rules/*/expr
+        matches: 'namespace="kafka-prod"'
+
+  - name: kind
+    values: [values-kind.yaml]
+    set: [chaosAlerts.enabled=true]
+
+  - name: generic
+    values: [values-generic.yaml]
+    set: [chaosAlerts.enabled=true]
+
+  - name: dashboards off
+    set: [dashboards.enabled=false, chaosAlerts.enabled=true]
+    assert:
+      - why: "the boards go, the rules stay — they are independent knobs"
+        kind: ConfigMap
+        name: monitoring-kates-dashboards
+        count: 0
+      - kind: PrometheusRule
+        name: kafka-chaos-alerts
+        count: 1
+
+  - name: monitoring API absent
+    matrixApiVersions: false
+    set: [chaosAlerts.enabled=true]
+    assert:
+      - why: "no PrometheusRule without the CRD, rather than a render the
+              API server rejects"
+        kind: PrometheusRule
+        name: kafka-chaos-alerts
+        count: 0

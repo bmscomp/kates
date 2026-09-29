@@ -1,0 +1,120 @@
+{{- if eq (include "legacy-kafka.mode" .) "zookeeper" }}
+{{- $fullname := include "legacy-kafka.fullname" . }}
+{{- $ns := include "legacy-kafka.namespace" . }}
+{{- $zk := .Values.zookeeper }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}-zookeeper
+  namespace: {{ $ns }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zookeeper
+spec:
+  serviceName: {{ include "legacy-kafka.zookeeperService" . }}
+  replicas: {{ $zk.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "legacy-kafka.zookeeperSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "legacy-kafka.labels" . | nindent 8 }}
+        app.kubernetes.io/component: zookeeper
+      annotations:
+        checksum/scripts: {{ include (print $.Template.BasePath "/configmap-scripts.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "legacy-kafka.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: zookeeper
+          # The SAME image as the broker. The Kafka tarball ships ZooKeeper, so
+          # a separate zookeeper image would only add a second pin that can
+          # drift out of the version pairing this chart exists to reproduce.
+          image: {{ include "legacy-kafka.image" . | quote }}
+          imagePullPolicy: {{ .Values.kafka.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["/bin/sh", "/opt/kates/bin/zookeeper-entrypoint.sh"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KAFKA_HEAP_OPTS
+              value: {{ $zk.heapOpts | quote }}
+            - name: LOG_DIR
+              value: /tmp/zookeeper-logs
+          ports:
+            - name: client
+              containerPort: 2181
+            - name: peer
+              containerPort: 2888
+            - name: leader
+              containerPort: 3888
+          readinessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            {{- toYaml $zk.resources | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/kates/bin
+            - name: data
+              mountPath: {{ $zk.dataDir }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ $fullname }}-scripts
+            defaultMode: 0755
+        - name: tmp
+          emptyDir: {}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
+  {{- /* ZooKeeper's dataDir has to follow the broker's storage decision. When
+         the brokers had PVCs and ZooKeeper did not, a ZooKeeper restart wiped
+         the topic metadata, ISR state and broker registrations while the
+         partition data on the broker's PVC survived — leaving a broker holding
+         logs for topics the cluster no longer believes exist. */}}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}
+{{- end }}

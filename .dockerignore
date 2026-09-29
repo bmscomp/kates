@@ -1,0 +1,52 @@
+# Build context exclusions for the ROOT-context image build
+# (`docker build -f kates/Dockerfile .`, used by `make kates-image-local` and
+# the publish workflow).
+#
+# kates/.dockerignore does NOT apply here — Docker reads the one at the context
+# root — so without this file the whole repository is uploaded to the daemon on
+# every build: the git history, the vendored Strimzi operator, and hundreds of
+# megabytes of previous build output. `COPY cli/ ./` would then also drag
+# prebuilt CLI binaries into the Go builder stage, where they shadow nothing but
+# cost time on every layer.
+#
+# Everything the Dockerfile actually needs is kates/pom.xml, kates/.mvn,
+# kates/mvnw, kates/src and cli/ sources.
+
+# Version control and CI
+.git/
+.github/
+.gitignore
+.gitmodules
+
+# Build output
+**/target/
+cli/dist/
+cli/bin/
+cli/.build/
+bin/
+build/
+
+# Vendored upstream chart source — never part of the image
+strimzi-kafka-operator/
+
+# Charts, scenarios and scripts are deployment-time assets, not build inputs
+charts/
+scenarios/
+scripts/
+config/
+proxy/
+tester/
+
+# Docs and notes
+docs/
+**/*.md
+!README.md
+
+# Local artefacts
+*.log
+*.tgz
+.idea/
+.vscode/
+.metals/
+.bsp/
+**/*.iml

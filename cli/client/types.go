@@ -154,18 +154,22 @@ type TopoUsers struct {
 	Items []map[string]interface{} `json:"items,omitempty"`
 }
 
-// TestRun from GET /api/tests/:id and POST /api/tests
+// TestRun from GET /api/tests/:id and POST /api/tests. RequestedSpec is the
+// request's own spec fields, under their API names, kept raw so that it can be
+// sent again as it was; Spec is what the run used. A run stored before the
+// backend kept the request has no RequestedSpec.
 type TestRun struct {
-	ID           string        `json:"id"`
-	TestType     string        `json:"testType"`
-	Status       string        `json:"status"`
-	Backend      string        `json:"backend"`
-	ScenarioName string        `json:"scenarioName"`
-	CreatedAt    string        `json:"createdAt"`
-	Spec         *TestSpec     `json:"spec,omitempty"`
-	Results      []PhaseResult  `json:"results,omitempty"`
-	CdcPhases    map[string]int64 `json:"cdcPhases,omitempty"`
-	CdcPhase     string           `json:"currentPhase,omitempty"`
+	ID            string           `json:"id"`
+	TestType      string           `json:"testType"`
+	Status        string           `json:"status"`
+	Backend       string           `json:"backend"`
+	ScenarioName  string           `json:"scenarioName"`
+	CreatedAt     string           `json:"createdAt"`
+	Spec          *TestSpec        `json:"spec,omitempty"`
+	RequestedSpec json.RawMessage  `json:"requestedSpec,omitempty"`
+	Results       []PhaseResult    `json:"results,omitempty"`
+	CdcPhases     map[string]int64 `json:"cdcPhases,omitempty"`
+	CdcPhase      string           `json:"currentPhase,omitempty"`
 }
 
 type PhaseResult struct {
@@ -193,8 +197,8 @@ type IntegrityResult struct {
 	LostRanges          []LostRange      `json:"lostRanges,omitempty"`
 	ProducerRtoMs       float64          `json:"producerRtoMs,omitempty"`
 	ConsumerRtoMs       float64          `json:"consumerRtoMs,omitempty"`
-	MaxRtoMs            float64          `json:"maxRtoMs,omitempty"`
-	RpoMs               float64          `json:"rpoMs,omitempty"`
+	MaxRtoMs            *float64         `json:"maxRtoMs,omitempty"`
+	RpoMs               *float64         `json:"rpoMs,omitempty"`
 	OutOfOrderCount     int64            `json:"outOfOrderCount"`
 	CrcFailures         int64            `json:"crcFailures"`
 	OrderingVerified    bool             `json:"orderingVerified"`
@@ -203,6 +207,26 @@ type IntegrityResult struct {
 	TransactionsEnabled bool             `json:"transactionsEnabled"`
 	Verdict             string           `json:"verdict,omitempty"`
 	Timeline            []IntegrityEvent `json:"timeline,omitempty"`
+}
+
+// MeasuredMaxRtoMs returns the worst RTO and whether the run reported one. A
+// missing key (a backend that predates the field) is not a zero RTO.
+func (ir *IntegrityResult) MeasuredMaxRtoMs() (float64, bool) {
+	return measuredMs(ir.MaxRtoMs)
+}
+
+// MeasuredRpoMs returns the RPO and whether it was measured. The backend sends
+// -1 when it had no chaos start to measure from, and an older backend sends
+// nothing; neither is a zero RPO, and neither may pass a maxRpoMs gate.
+func (ir *IntegrityResult) MeasuredRpoMs() (float64, bool) {
+	return measuredMs(ir.RpoMs)
+}
+
+func measuredMs(v *float64) (float64, bool) {
+	if v == nil || *v < 0 {
+		return 0, false
+	}
+	return *v, true
 }
 
 type IntegrityEvent struct {
@@ -394,9 +418,11 @@ type CreateScheduleRequest struct {
 	TestRequest    interface{} `json:"testRequest"`
 }
 
-// ResilienceResult from POST /api/resilience
+// ResilienceResult from POST /api/resilience. Error says why, when Status is
+// ERROR.
 type ResilienceResult struct {
 	Status           string             `json:"status"`
+	Error            string             `json:"error,omitempty"`
 	ChaosOutcome     *ChaosOutcome      `json:"chaosOutcome,omitempty"`
 	ImpactDeltas     map[string]float64 `json:"impactDeltas,omitempty"`
 	PreChaosSummary  *ReportSummary     `json:"preChaosSummary,omitempty"`
@@ -421,11 +447,29 @@ type CreateTestRequest struct {
 	Spec     *TestSpec `json:"spec,omitempty"`
 }
 
+// RerunTestRequest is a POST /api/tests whose spec is JSON the backend served,
+// sent back as it came. Through TestSpec, whose fields are omitempty, a spec
+// lost every 0 it held (lingerMs 0 became the type's default) and every field
+// TestSpec does not name.
+type RerunTestRequest struct {
+	TestType string          `json:"type"`
+	Backend  string          `json:"backend,omitempty"`
+	Spec     json.RawMessage `json:"spec,omitempty"`
+}
+
+// TestSpec is a request's spec, or the spec a run used. The three Enable
+// fields are pointers so that an explicit false is sent: as plain bools under
+// omitempty they dropped it, and a scenario's enableCrc: false or
+// enableIdempotence: false reached the backend as nothing, which runs with CRC
+// checks on and leaves idempotence to the Kafka client. Throughput is the rate
+// the run used; TargetThroughput is the other name a request may give it, the
+// one scenario files and --throughput send, and the backend takes it as the
+// rate when a request sets no throughput.
 type TestSpec struct {
 	Records            int    `json:"numRecords,omitempty"`
 	ParallelProducers  int    `json:"numProducers,omitempty"`
 	RecordSizeBytes    int    `json:"recordSize,omitempty"`
-	DurationSeconds    int    `json:"durationMs,omitempty"`
+	DurationMs         int    `json:"durationMs,omitempty"`
 	Topic              string `json:"topic,omitempty"`
 	Acks               string `json:"acks,omitempty"`
 	BatchSize          int    `json:"batchSize,omitempty"`
@@ -436,12 +480,13 @@ type TestSpec struct {
 	Partitions         int    `json:"partitions,omitempty"`
 	MinInsyncReplicas  int    `json:"minInsyncReplicas,omitempty"`
 	ConsumerGroup      string `json:"consumerGroup,omitempty"`
+	Throughput         int    `json:"throughput,omitempty"`
 	TargetThroughput   int    `json:"targetThroughput,omitempty"`
 	FetchMinBytes      int    `json:"fetchMinBytes,omitempty"`
 	FetchMaxWaitMs     int    `json:"fetchMaxWaitMs,omitempty"`
-	EnableIdempotence  bool   `json:"enableIdempotence,omitempty"`
-	EnableTransactions bool   `json:"enableTransactions,omitempty"`
-	EnableCrc          bool   `json:"enableCrc,omitempty"`
+	EnableIdempotence  *bool  `json:"enableIdempotence,omitempty"`
+	EnableTransactions *bool  `json:"enableTransactions,omitempty"`
+	EnableCrc          *bool  `json:"enableCrc,omitempty"`
 }
 
 // TopicDetail from GET /api/cluster/topics/{name}
@@ -451,7 +496,12 @@ type TopicDetail struct {
 	ReplicationFactor int               `json:"replicationFactor"`
 	Internal          bool              `json:"internal"`
 	Configs           map[string]string `json:"configs,omitempty"`
-	PartitionInfo     []PartitionInfo   `json:"partitionInfo,omitempty"`
+	// ConfigSources names, for each key in Configs, what set the value in
+	// force: Kafka's ConfigSource (DYNAMIC_TOPIC_CONFIG, STATIC_BROKER_CONFIG,
+	// DEFAULT_CONFIG, ...). Absent from a backend that kept only topic-level
+	// and default entries, which left out any key set at broker level.
+	ConfigSources map[string]string `json:"configSources,omitempty"`
+	PartitionInfo []PartitionInfo   `json:"partitionInfo,omitempty"`
 }
 
 type PartitionInfo struct {
@@ -503,7 +553,20 @@ type ClusterHealthReport struct {
 	Partitions      int                   `json:"partitions"`
 	ConsumerGroups  int                   `json:"consumerGroups"`
 	PartitionHealth PartitionHealthReport `json:"partitionHealth"`
-	Status          string                `json:"status"`
+	// KraftQuorum is absent when the admin API cannot describe the metadata
+	// quorum (a ZooKeeper cluster, or an old broker).
+	KraftQuorum *KraftQuorumHealth `json:"kraftQuorum,omitempty"`
+	Status      string             `json:"status"`
+}
+
+// KraftQuorumHealth is the KRaft metadata quorum as /api/cluster/check reports
+// it; no leader turns the check's status CRITICAL.
+type KraftQuorumHealth struct {
+	LeaderID  int    `json:"leaderId"`
+	Voters    int    `json:"voters"`
+	Observers int    `json:"observers"`
+	HasLeader bool   `json:"hasLeader"`
+	Issue     string `json:"issue,omitempty"`
 }
 
 type PartitionHealthReport struct {
@@ -512,7 +575,16 @@ type PartitionHealthReport struct {
 	Problems        []map[string]interface{} `json:"problems,omitempty"`
 }
 
-// DisruptionRunResponse from POST /api/disruptions
+// DisruptionAccepted is the 202 body from POST /api/disruptions — the plan was
+// accepted and is running; the report is fetched separately by id.
+type DisruptionAccepted struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	PlanName string `json:"planName"`
+}
+
+// DisruptionRunResponse is what RunDisruption returns once the plan reaches a
+// terminal state (assembled from the accepted id plus the fetched report).
 type DisruptionRunResponse struct {
 	ID     string           `json:"id"`
 	Report DisruptionReport `json:"report"`

@@ -11,6 +11,13 @@ metadata:
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+{{- /* The chart's own pods (the Helm tests, the backup hooks) run as this
+       account, so its pull secrets are theirs. The operator's pods take
+       theirs from the Kafka CR's template instead. */}}
+{{- with (.Values.global).imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

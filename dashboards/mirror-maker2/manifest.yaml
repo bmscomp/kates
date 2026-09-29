@@ -1,0 +1,34 @@
+# The mirror board — a MirrorMaker 2 release that runs for months.
+#
+# Delivered by charts/monitoring with every other board. Through
+# mirror-maker2 0.10.0 the chart shipped a per-release copy with `uid` and
+# `title` rewritten; central delivery ships this one file, and the
+# `$namespace`/`$cluster` template variables separate releases. See
+# README.md.
+uid: kates-mm2
+title: Kafka MirrorMaker 2
+tags: [kafka, mirrormaker2, replication, kates]
+refresh: 30s
+time_from: now-6h
+links:
+  - title: MirrorMaker 2 runbook
+    type: link
+    icon: doc
+    url: https://github.com/bmscomp/kates/blob/main/docs/mirror-maker2-runbook.md
+    targetBlank: true
+
+# Until mirror-maker2 0.11.0 the generator also built no-slo and identity
+# variants and the chart picked one from its values (§6.1 of the refactor
+# plan). Central delivery ships the full board to every cluster instead:
+#
+#   * the Replication SLO row reads `mm2:*` recorded series, which exist only
+#     where the recording PrometheusRule is installed — elsewhere the row
+#     shows its styled no-data state rather than being cut;
+#   * under an identity replication policy the per-source lag panel has no
+#     topic prefix to match and stays empty; the panel description says so.
+#     README.md has the details.
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/mirror-maker2.json
+    variant: default

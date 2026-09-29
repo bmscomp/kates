@@ -1,86 +1,144 @@
 package com.bmscomp.kates.engine;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.ToDoubleFunction;
+
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Tags;
+import org.HdrHistogram.Histogram;
+import org.HdrHistogram.Recorder;
 
 /**
- * Thread-safe latency histogram that records latency values in microsecond precision
- * and computes accurate percentiles (p50, p95, p99, p99.9).
+ * Thread-safe latency recorder backed by an HdrHistogram, exported to
+ * Micrometer as p50/p95/p99/p999/max gauges.
  *
- * <p>Uses a logarithmic bucketing scheme for memory-efficient storage while
- * maintaining good accuracy across a wide latency range (0–10 seconds).
+ * <p><b>Identity matters.</b> The gauges are tagged {@code id=<id>} and
+ * Micrometer deduplicates on name+tags, so every histogram sharing an id maps to
+ * ONE meter. When every worker constructed this with the default {@code
+ * "global"} id, only the first run of the JVM's lifetime was ever exported —
+ * behind a weak reference that went stale once that run was collected, leaving
+ * every subsequent run's percentiles invisible. Callers must pass an id unique
+ * to the run/task, and {@link #close()} on completion so the series does not
+ * accumulate (run ids are unbounded).
  */
-public class LatencyHistogram {
+public class LatencyHistogram implements AutoCloseable {
 
-    private static final int BUCKET_COUNT = 1024;
-    private static final double MAX_TRACKABLE_MS = 10_000.0;
-    private static final double LOG_BASE = Math.log(MAX_TRACKABLE_MS + 1);
+    private static final long LOWEST_TRACKABLE_US = 1L;
+    private static final long HIGHEST_TRACKABLE_US = 60_000_000L;
+    private static final int SIGNIFICANT_DIGITS = 3;
 
-    private final long[] buckets = new long[BUCKET_COUNT];
-    private final AtomicLong totalCount = new AtomicLong(0);
-    private volatile double maxValue = 0;
-    private volatile double sumValue = 0;
-    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    /**
+     * Lock-free recording side. Recording previously took a WRITE lock per
+     * sample, so on a multi-producer run every producer serialized through the
+     * measurement path and the tool became its own throughput ceiling — it
+     * could not measure the loads it induced. {@link Recorder} lets writers
+     * record without a lock and hands readers a stable interval snapshot.
+     */
+    private final Recorder recorder = new Recorder(LOWEST_TRACKABLE_US, HIGHEST_TRACKABLE_US, SIGNIFICANT_DIGITS);
 
-    public void recordLatency(double latencyMs) {
-        int bucket = toBucket(Math.max(0, Math.min(latencyMs, MAX_TRACKABLE_MS)));
-        lock.writeLock().lock();
-        try {
-            buckets[bucket]++;
-            totalCount.incrementAndGet();
-            sumValue += latencyMs;
-            if (latencyMs > maxValue) {
-                maxValue = latencyMs;
-            }
-        } finally {
-            lock.writeLock().unlock();
+    /** Everything recorded so far, accumulated from drained intervals. */
+    private final Histogram cumulative = new Histogram(LOWEST_TRACKABLE_US, HIGHEST_TRACKABLE_US, SIGNIFICANT_DIGITS);
+
+    /** Recycled interval buffer, per HdrHistogram's recommended usage. */
+    private Histogram intervalRecycle;
+
+    /**
+     * Guards the READ side only (drain + cumulative). Reads happen on the
+     * status-poll path, not per record, so contention here is irrelevant.
+     */
+    private final Object readLock = new Object();
+
+    /** Samples recorded at the ceiling because they exceeded the tracked range. */
+    private final java.util.concurrent.atomic.AtomicLong clampedSamples = new java.util.concurrent.atomic.AtomicLong();
+
+    private final String id;
+    private final List<Meter.Id> meterIds = new ArrayList<>();
+
+    public LatencyHistogram(String id) {
+        this.id = id;
+        registerGauge("kates.latency.p50", h -> h.getPercentile(50));
+        registerGauge("kates.latency.p95", h -> h.getPercentile(95));
+        registerGauge("kates.latency.p99", h -> h.getPercentile(99));
+        registerGauge("kates.latency.p999", h -> h.getPercentile(99.9));
+        registerGauge("kates.latency.max", LatencyHistogram::getMax);
+    }
+
+    private void registerGauge(String name, ToDoubleFunction<LatencyHistogram> reader) {
+        // Weak reference (Micrometer's default for Gauge.builder) so a missed
+        // close() cannot pin the histogram in memory.
+        Gauge gauge = Gauge.builder(name, this, reader).tags(Tags.of("id", id)).register(Metrics.globalRegistry);
+        meterIds.add(gauge.getId());
+    }
+
+    /** The id these gauges are tagged with. */
+    public String getId() {
+        return id;
+    }
+
+    /**
+     * Unregisters this histogram's gauges. Idempotent.
+     */
+    @Override
+    public void close() {
+        for (Meter.Id meterId : meterIds) {
+            Metrics.globalRegistry.remove(meterId);
         }
+        meterIds.clear();
+    }
+
+    /** Hot path: no lock taken. */
+    public void recordLatency(double latencyMs) {
+        long latencyUs = (long) (Math.max(0, latencyMs) * 1000.0);
+        if (latencyUs > HIGHEST_TRACKABLE_US) {
+            // Counted, not just clamped: silently recording a 5-minute stall as
+            // the 60s ceiling makes max and p999 look like a healthy tail.
+            clampedSamples.incrementAndGet();
+        }
+        recorder.recordValue(Math.min(HIGHEST_TRACKABLE_US, Math.max(1, latencyUs)));
+    }
+
+    /**
+     * Folds everything recorded since the last drain into {@link #cumulative}.
+     * Callers must hold {@link #readLock}.
+     */
+    private void drainIntoCumulative() {
+        intervalRecycle = recorder.getIntervalHistogram(intervalRecycle);
+        cumulative.add(intervalRecycle);
     }
 
     public double getPercentile(double percentile) {
-        lock.readLock().lock();
-        try {
-            long total = totalCount.get();
-            if (total == 0) return 0;
-
-            long threshold = (long) Math.ceil(total * percentile / 100.0);
-            long cumulative = 0;
-            for (int i = 0; i < BUCKET_COUNT; i++) {
-                cumulative += buckets[i];
-                if (cumulative >= threshold) {
-                    return fromBucket(i);
-                }
-            }
-            return maxValue;
-        } finally {
-            lock.readLock().unlock();
+        synchronized (readLock) {
+            drainIntoCumulative();
+            return cumulative.getValueAtPercentile(percentile) / 1000.0;
         }
     }
 
     public long getTotalCount() {
-        return totalCount.get();
+        synchronized (readLock) {
+            drainIntoCumulative();
+            return cumulative.getTotalCount();
+        }
     }
 
     public double getMean() {
-        lock.readLock().lock();
-        try {
-            long total = totalCount.get();
-            return total == 0 ? 0 : sumValue / total;
-        } finally {
-            lock.readLock().unlock();
+        synchronized (readLock) {
+            drainIntoCumulative();
+            return cumulative.getMean() / 1000.0;
         }
     }
 
     public double getMax() {
-        return maxValue;
+        synchronized (readLock) {
+            drainIntoCumulative();
+            return cumulative.getMaxValue() / 1000.0;
+        }
     }
 
-    /**
-     * Returns a named snapshot of common percentiles.
-     */
     public Map<String, Double> snapshot() {
         Map<String, Double> result = new LinkedHashMap<>();
         result.put("mean", getMean());
@@ -92,84 +150,75 @@ public class LatencyHistogram {
         return result;
     }
 
-    /**
-     * Resets all counters. Useful between phases.
-     */
     public void reset() {
-        lock.writeLock().lock();
-        try {
-            Arrays.fill(buckets, 0);
-            totalCount.set(0);
-            maxValue = 0;
-            sumValue = 0;
-        } finally {
-            lock.writeLock().unlock();
+        synchronized (readLock) {
+            // recorder.reset() discards the active interval outright, so there
+            // is nothing to drain first — an earlier comment here claimed there
+            // was, describing code that never existed. The recycle buffer goes
+            // with it: reusing a histogram that belonged to the discarded
+            // interval would fold stale samples into the next read.
+            recorder.reset();
+            intervalRecycle = null;
+            cumulative.reset();
+            clampedSamples.set(0);
         }
     }
+
     /**
-     * 32 logarithmic bucket boundaries (in ms) for heatmap export.
-     * Covers 0 → 10,000 ms with increasing granularity at lower latencies.
+     * Samples that exceeded {@link #HIGHEST_TRACKABLE_US} and were recorded at
+     * the ceiling instead.
+     *
+     * <p>Worth surfacing: a stalled broker produces latencies far beyond the
+     * tracked range, and clamping quietly understates max and the top
+     * percentiles exactly when they matter most. A non-zero count here means
+     * "the tail is at least this bad", not "the tail is this bad".
      */
+    public long clampedSampleCount() {
+        return clampedSamples.get();
+    }
+
     public static final double[] HEATMAP_BOUNDARIES = {
         0, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500,
         10000
     };
 
-    /**
-     * Compresses 1024 internal buckets into {@link #HEATMAP_BOUNDARIES} ranges.
-     * Returns an array of length {@code HEATMAP_BOUNDARIES.length - 1} where each
-     * entry is the count of latencies falling within that range.
-     */
+    /** Heatmap buckets over everything recorded so far. */
     public long[] exportBuckets() {
-        int heatmapLen = HEATMAP_BOUNDARIES.length - 1;
-        long[] heatmap = new long[heatmapLen];
-        lock.readLock().lock();
-        try {
-            for (int i = 0; i < BUCKET_COUNT; i++) {
-                if (buckets[i] == 0) continue;
-                double latencyMs = fromBucket(i);
-                int target = findHeatmapBucket(latencyMs);
-                heatmap[target] += buckets[i];
-            }
-        } finally {
-            lock.readLock().unlock();
+        synchronized (readLock) {
+            drainIntoCumulative();
+            return bucketize(cumulative);
         }
-        return heatmap;
     }
 
     /**
-     * Atomically captures the current bucket distribution compressed to heatmap
-     * boundaries and resets all counters. Used for windowed collection.
+     * Heatmap buckets for everything recorded since the last reset, then clears
+     * the histogram — the interval a heatmap row represents.
+     *
+     * <p>Note this also discards the cumulative percentiles, so a caller that
+     * polls this on a schedule makes the run's reported latency cover only the
+     * final interval. Nothing in the engine calls it today ({@link
+     * #exportBuckets()} is used on the poll path); wiring it up should come with
+     * a deliberate decision about that trade-off.
      */
     public long[] snapshotAndReset() {
-        int heatmapLen = HEATMAP_BOUNDARIES.length - 1;
-        long[] heatmap = new long[heatmapLen];
-        lock.writeLock().lock();
-        try {
-            for (int i = 0; i < BUCKET_COUNT; i++) {
-                if (buckets[i] == 0) continue;
-                double latencyMs = fromBucket(i);
-                int target = findHeatmapBucket(latencyMs);
-                heatmap[target] += buckets[i];
-            }
-            Arrays.fill(buckets, 0);
-            totalCount.set(0);
-            maxValue = 0;
-            sumValue = 0;
-        } finally {
-            lock.writeLock().unlock();
+        synchronized (readLock) {
+            drainIntoCumulative();
+            long[] heatmap = bucketize(cumulative);
+            recorder.reset();
+            intervalRecycle = null;
+            cumulative.reset();
+            return heatmap;
+        }
+    }
+
+    private static long[] bucketize(Histogram source) {
+        long[] heatmap = new long[HEATMAP_BOUNDARIES.length - 1];
+        for (var iterationValue : source.recordedValues()) {
+            double latencyMs = iterationValue.getValueIteratedTo() / 1000.0;
+            int target = findHeatmapBucket(latencyMs);
+            heatmap[target] += iterationValue.getCountAddedInThisIterationStep();
         }
         return heatmap;
-    }
-
-    private int toBucket(double latencyMs) {
-        if (latencyMs <= 0) return 0;
-        int bucket = (int) (Math.log(latencyMs + 1) / LOG_BASE * (BUCKET_COUNT - 1));
-        return Math.min(bucket, BUCKET_COUNT - 1);
-    }
-
-    private double fromBucket(int bucket) {
-        return Math.exp((double) bucket / (BUCKET_COUNT - 1) * LOG_BASE) - 1;
     }
 
     private static int findHeatmapBucket(double latencyMs) {

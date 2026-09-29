@@ -8,6 +8,11 @@ global:
   # -- Kubernetes cluster DNS domain
   clusterDomain: "cluster.local"
 
+# -- Enable production guard rails: template rendering fails if insecure
+# chart defaults (e.g. the default database password) would reach the
+# cluster. Enabled in values-prod.yaml; leave false for dev/kind.
+productionMode: false
+
 # -- Number of KATES replicas
 replicaCount: 1
 
@@ -15,8 +20,9 @@ replicaCount: 1
 image:
   # -- Image repository
   repository: ghcr.io/bmscomp/kates
-  # -- Image tag
-  tag: "1.18.3"
+  # -- Image tag. Must be the release that carries the non-blocking health
+  # endpoints the probe defaults below depend on (>= 1.22.0).
+  tag: "1.24.0"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
@@ -46,6 +52,11 @@ serviceAccount:
 rbac:
   # -- Create ClusterRole and ClusterRoleBinding
   create: true
+  # -- Grant the writes the direct Kubernetes chaos backend makes itself
+  # (KATES_CHAOS_PROVIDER=kubernetes, or hybrid without Litmus): NetworkPolicies,
+  # StatefulSet scaling, and pod ephemeral containers. Litmus runs its
+  # experiments as litmus-admin and needs none of this.
+  directChaos: false
   # -- Extra RBAC rules (e.g. for Litmus Chaos integration)
   extraRules: []
 
@@ -118,9 +129,30 @@ resources:
     memory: "4Gi"
     cpu: "2"
 
+# -- Flyway schema migration behaviour
+flyway:
+  # -- Repair the schema history on startup before migrating.
+  #
+  # DEVELOPMENT ONLY. It fixes "Migration checksum mismatch", which happens when
+  # an unreleased migration is edited after a local database already applied it.
+  # On a real database that mismatch means the file and the schema genuinely
+  # disagree, and silently rewriting the history hides it — so this stays off by
+  # default and is enabled in the local overlays.
+  repairAtStart: false
+
+# -- Container args, replacing the image's CMD. Empty means "use the image's
+# own default". The native image sets its heap percentage through CMD, since a
+# native binary ignores JAVA_TOOL_OPTIONS; override it here rather than
+# rebuilding the image.
+containerArgs: []
+
 # -- JVM configuration
+#
+# JVM IMAGE ONLY. A GraalVM native image does not read JAVA_TOOL_OPTIONS, so
+# everything here is silently ignored when running a `-native` tag — see
+# values-native.yaml, which empties it for that reason.
 jvm:
-  # -- JVM options passed via JAVA_TOOL_OPTIONS
+  # -- JVM options passed via JAVA_TOOL_OPTIONS (ignored by the native image)
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 
 # -- Pod-level security context (PSS restricted compliant)
@@ -238,22 +270,39 @@ apiKey:
   secretKey: "api-key"
 
 # -- Health probe configuration
+#
+# Every probe points at a MicroProfile health endpoint, never at a business
+# endpoint. `/api/health` looks like the obvious readiness URL but calls
+# ClusterHealthService.isReachable() — an uncached AdminClient round-trip with a
+# 5s blocking get — on every request. Since a probe's timeoutSeconds defaults to
+# 1s, a cluster whose Kafka is still coming up fails EVERY readiness probe and
+# the pod never goes Ready, even though the app is fine. `/q/health/ready` reads
+# the periodically-refreshed KafkaReachabilityCache instead and never blocks on a
+# broker.
 probes:
   # -- Startup probe (gates readiness/liveness probes)
   startup:
     path: /q/health/started
-    failureThreshold: 30
+    # 60 x 2s = 120s of JVM boot budget. 30 (60s) is not enough on a
+    # CPU-constrained node: the kubelet kills the container mid-boot and the
+    # restart loop reads as "kates takes forever to start".
+    failureThreshold: 60
     periodSeconds: 2
+    timeoutSeconds: 3
   # -- Readiness probe
   readiness:
-    path: /api/health
+    path: /q/health/ready
     initialDelaySeconds: 5
     periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
   # -- Liveness probe
   liveness:
     path: /q/health/live
     initialDelaySeconds: 15
     periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
 
 # -- Container lifecycle hooks
 lifecycle:
@@ -271,6 +320,8 @@ initContainers:
 kafka:
   # -- Kafka bootstrap servers
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+  # -- Namespace where CDC integration test KafkaTopic CRs are managed (empty = auto-detect)
+  topicNamespace: ""
   # -- Client rack ID for rack-aware consumption
   clientRack: ""
   # -- Security protocol
@@ -313,6 +364,23 @@ kafka:
 trogdor:
   # -- Trogdor coordinator URL
   coordinatorUrl: "http://trogdor-coordinator.kafka.svc:8889"
+  # -- Trogdor agents that run tasks (KATES_TROGDOR_AGENT_NODES): node names
+  # from the coordinator's platform config, comma-separated; a run's tasks take
+  # them in turn. node0 is the name in the trogdor.conf Kafka ships. A name the
+  # coordinator does not know fails the task with "Unknown node names".
+  agentNodes: "node0"
+
+# -- Prometheus the backend queries for a disruption's Kafka metrics
+prometheus:
+  # -- Prometheus base URL (KATES_PROMETHEUS_URL). The default is the Service
+  # kube-prometheus-stack creates for charts/monitoring installed as release
+  # `monitoring` in namespace `monitoring`, which is what `kates deploy` does
+  # (it sets this for the namespace it uses). `make monitoring` installs that
+  # release in namespace `kafka`: set
+  # http://monitoring-kube-prometheus-prometheus.kafka.svc:9090 there, and
+  # networkPolicy.prometheus.namespace to kafka. Unreachable, a disruption's
+  # Prometheus metrics are missing and its SLA verdict lists them unevaluated.
+  url: "http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"
 
 # -- Benchmark engine configuration
 engine:
@@ -338,7 +406,7 @@ faultTolerance:
 # -- NetworkPolicy configuration
 networkPolicy:
   # -- Enable NetworkPolicy
-  enabled: false
+  enabled: true
   # -- Ingress rules
   ingressRules:
     - from:
@@ -355,9 +423,10 @@ networkPolicy:
   kafka:
     namespace: kafka
     port: 9092
-  # -- Prometheus egress configuration
+  # -- Prometheus egress configuration: the namespace prometheus.url points
+  # into. The policy used to allow `monitoring` whatever this said.
   prometheus:
-    namespace: kafka
+    namespace: monitoring
     port: 9090
   # -- Extra egress rules
   egressRules: []
@@ -406,21 +475,21 @@ metrics:
         annotations:
           summary: "KATES high error rate"
           description: "KATES is returning more than 10% 5xx responses."
-  # -- Grafana dashboard auto-provisioning
-  grafanaDashboard:
-    # -- Enable Grafana dashboard ConfigMap
-    enabled: false
-    # -- Labels for Grafana sidecar discovery
-    labels:
-      grafana_dashboard: "1"
+  # -- GONE in 0.9.0: the "KATES — Overview" board (dashboards/kates-overview/)
+  # is delivered by charts/monitoring with every other board in dashboards/
+  # (its `dashboards.enabled`), scoped to a release by its `$job` template
+  # variable. A release that still sets any `metrics.grafanaDashboard.*` key
+  # is REFUSED with the new location named (this chart has no values schema,
+  # so without the refusal the key would be accepted and silently ignored).
 
-# -- Bundled PostgreSQL configuration
+# -- Bundled PostgreSQL configuration.
+# A self-contained single-instance StatefulSet on the official `postgres`
+# image (no Bitnami). For production HA, set enabled=false and point
+# externalDatabase at a managed cluster (CloudNativePG recommended).
 postgresql:
   # -- Deploy bundled PostgreSQL
   enabled: true
-  # -- Use Bitnami PostgreSQL subchart instead
-  useSubchart: false
-  # -- PostgreSQL image
+  # -- PostgreSQL image (official library image; Alpine variants also work)
   image:
     repository: postgres
     tag: "16"
@@ -436,6 +505,12 @@ postgresql:
     existingSecret: ""
     # -- Key in the existing Secret
     passwordKey: "password"
+  # -- Node selector for the embedded PostgreSQL pod (dev/test only)
+  nodeSelector: {}
+  # -- Tolerations for the embedded PostgreSQL pod
+  tolerations: []
+  # -- Affinity rules for the embedded PostgreSQL pod
+  affinity: {}
   # -- PVC storage configuration
   storage:
     # -- Storage size
@@ -468,7 +543,10 @@ postgresql:
     # -- Minimum pool size
     minSize: "5"
 
-# -- External database configuration (when postgresql.enabled=false)
+# -- External database configuration (when postgresql.enabled=false).
+# Recommended for production HA: run a CloudNativePG `Cluster` (official
+# postgres images, streaming replication, backups) and point host/port at its
+# `-rw` service, e.g. host: kates-db-rw.database.svc — no Bitnami involved.
 externalDatabase:
   # -- Enable external database
   enabled: false
@@ -486,21 +564,6 @@ externalDatabase:
   existingSecret: ""
   # -- Key in the existing Secret
   passwordKey: "password"
-
-# -- Bitnami PostgreSQL HA subchart values (when postgresql.useSubchart=true)
-postgresqlHA:
-  auth:
-    database: kates
-    username: kates
-    password: kates
-  architecture: replication
-  primary:
-    persistence:
-      size: 10Gi
-  readReplicas:
-    replicaCount: 2
-    persistence:
-      size: 10Gi
 
 # -- Default benchmark parameters (fallback for all test types)
 defaults:
@@ -646,10 +709,12 @@ kyvernoPolicy:
     - registry.k8s.io/
     - quay.io/strimzi/
     - curlimages/
-  # -- Deploy Kyverno Grafana dashboard ConfigMap
-  grafanaDashboard: false
-  # -- Target namespace for the dashboard ConfigMap (must match Grafana sidecar namespace)
-  grafanaDashboardNamespace: monitoring
+  # -- GONE in 0.9.0: the Kyverno board (dashboards/kyverno-security/) is
+  # delivered by charts/monitoring with every other board in dashboards/ (its
+  # `dashboards.enabled`) — one Kyverno per cluster, one board, and it belongs
+  # where the rest of the cluster's boards live. `grafanaDashboard` (both the
+  # bool and the map shape) and `grafanaDashboardNamespace` are REFUSED if
+  # set, with the new location named.
   # -- Cosign image signature verification
   cosign:
     # -- Enable image signature verification via Cosign

@@ -34,7 +34,7 @@ Schema: `scenarios: []` with `spec:` (flat map) and `validate:` block.
 | `perf-endurance.yaml` | `ENDURANCE` | 10-min soak at 6k msg/s | 3P/3C, duration=600 |
 | `perf-volume.yaml` | `VOLUME` | 64 KB payloads | 1 MB batch, snappy |
 | `perf-capacity.yaml` | `CAPACITY` | Max throughput discovery | 6P, 12 partitions, 3 steps |
-| `perf-round-trip.yaml` | `ROUND_TRIP` | E2E latency, p99 < 50ms | linger=0, fetchMinBytes=1 |
+| `perf-round-trip.yaml` | `ROUND_TRIP` | E2E latency, p99 < 50ms | linger=0, no compression |
 | `perf-integrity.yaml` | `INTEGRITY` | Exactly-once + CRC | transactions=true, enableCrc=true |
 
 ### `spec` field reference
@@ -47,7 +47,7 @@ Schema: `scenarios: []` with `spec:` (flat map) and `validate:` block.
 | `throughput` | int | Max msg/s; `-1` = unlimited |
 | `numProducers` | int | Parallel producer threads |
 | `numConsumers` | int | Parallel consumer threads |
-| `consumerGroup` | string | Consumer group name |
+| `consumerGroup` | string | Consumer group name; `LOAD`, `ENDURANCE` and `INTEGRITY` only, the backend refuses it for any other type |
 | `duration` | int | Duration in **seconds** (ENDURANCE) |
 | `acks` | string | `"0"`, `"1"`, or `"all"` |
 | `batchSize` | int | Producer batch size (bytes) |
@@ -56,11 +56,11 @@ Schema: `scenarios: []` with `spec:` (flat map) and `validate:` block.
 | `partitions` | int | Partition count |
 | `replicationFactor` | int | Replication factor |
 | `minInsyncReplicas` | int | `min.insync.replicas` |
-| `fetchMinBytes` | int | Consumer `fetch.min.bytes` |
-| `fetchMaxWaitMs` | int | Consumer `fetch.max.wait.ms` |
+| `fetchMinBytes` | int | Consumer `fetch.min.bytes`; same three types |
+| `fetchMaxWaitMs` | int | Consumer `fetch.max.wait.ms`; same three types |
 | `enableIdempotence` | bool | Idempotent producer |
 | `enableTransactions` | bool | Transactional EOS |
-| `enableCrc` | bool | CRC payload verification |
+| `enableCrc` | bool | CRC payload verification; `INTEGRITY` only |
 
 ### `validate` field reference
 
@@ -92,7 +92,7 @@ Schema: `testRequest` + `chaosSpec` + `steadyStateSec` + `probes`.
 | `resilience-memory-stress.yaml` | `MEMORY_STRESS` | 500 MB native memory | brokers-sigma |
 | `resilience-io-stress.yaml` | `IO_STRESS` | 80% disk saturation | brokers-alpha |
 | `resilience-dns-error.yaml` | `DNS_ERROR` | CoreDNS failures | all brokers |
-| `resilience-rolling-restart.yaml` | `ROLLING_RESTART` | Rolling upgrade, 30s delay | all brokers |
+| `resilience-rolling-restart.yaml` | `ROLLING_RESTART` | Strimzi rolling update, one pod at a time | all brokers |
 | `resilience-node-drain.yaml` | `NODE_DRAIN` | Node maintenance eviction | brokers-gamma |
 | `resilience-leader-election.yaml` | `LEADER_ELECTION` | Force re-election all partitions | all brokers |
 | `resilience-scale-down.yaml` | `SCALE_DOWN` | Pool contraction to 0 | brokers-sigma |

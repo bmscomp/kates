@@ -16,6 +16,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/bmscomp/kates/cli/pkg/theme"
 )
 
 var (
@@ -38,11 +40,14 @@ func init() {
 	deployStatusCmd.Flags().StringVar(&deployTopology, "topology", "isolated", "Deployment topology: 'isolated' (separate namespaces) or 'single' (one namespace)")
 	deployStatusCmd.Flags().StringVar(&deployNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
 	deployStatusCmd.Flags().StringVar(&deployKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
+	deployStatusCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
 	deployStatusCmd.Flags().StringVar(&deployConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
 	deployStatusCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components when topology is 'isolated'")
+	deployStatusCmd.Flags().StringVar(&deployKafkaUINS, "ui-ns", "kafka", "Namespace for Kafka UI when topology is 'isolated'")
+	deployStatusCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
 
 	deployStatusCmd.Flags().BoolVarP(&deployStatusInteractive, "interactive", "i", false, "Enable interactive Bubble Tea status loader")
 	deployStatusCmd.Flags().StringVarP(&deployStatusOutput, "output", "o", "table", "Output format: table or json")
@@ -149,36 +154,64 @@ type k8sWorkload struct {
 	} `json:"status"`
 }
 
-func runDeployStatus(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+type helmStatusRelease struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Status    string `json:"status"`
+}
 
-	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS string
-	if deployTopology == "single" {
-		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
-	} else {
-		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS
-	}
+type componentSpec struct {
+	Group     string
+	Icon      string
+	Name      string
+	Release   string
+	Namespace string
+	Kind      string
+	Resource  string
+}
 
-	components := []struct {
-		Group     string
-		Icon      string
-		Name      string
-		Release   string
-		Namespace string
-		Kind      string
-		Resource  string
-	}{
-		{"A", "☸️", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator"},
+// statusComponents is what `kates deploy status` inspects, in display order.
+// It is a function so a test can assert every Kind here is one the health
+// check handles — the check used to name the Strimzi kinds it knew, and a
+// component whose kind was not on that list reported a blank "Unknown"
+// forever without anything failing.
+func statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS string) []componentSpec {
+	return []componentSpec{
+		{"A", "🦊", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator"},
 		{"A", "🔐", "Cert-Manager", "cert-manager", "cert-manager", "pod", "-l app.kubernetes.io/instance=cert-manager"},
-		{"A", "🛡️", "Kyverno", "kyverno", "kyverno", "pod", "-l app.kubernetes.io/instance=kyverno"},
-		{"B", "📨", "Kafka (krafter)", "krafter", kafkaNS, "kafkas.kafka.strimzi.io", "krafter"},
+		{"A", "🚦", "Kyverno", "kyverno", "kyverno", "pod", "-l app.kubernetes.io/instance=kyverno"},
+		{"B", "📨", "Kafka (" + deployKafkaName + ")", deployKafkaName, kafkaNS, "kafkas.kafka.strimzi.io", deployKafkaName},
 		{"B", "🐘", "PostgreSQL (CDC)", "postgresql", dbNS, "statefulset", "postgresql"},
 		{"B", "🔗", "Kafka Connect", "connect-cluster", connectNS, "kafkaconnects.kafka.strimzi.io", "connect-cluster"},
 		{"B", "📊", "Monitoring Stack", "monitoring", jaegerNS, "pod", "-l release=monitoring"},
 		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio"},
 		{"C", "📦", "Kates Backend", "kates", appNS, "pod", "-l app.kubernetes.io/instance=kates"},
+		{"C", "💻", "Kafka UI", "kafka-ui", kafkaUINS, "pod", "-l app.kubernetes.io/name=kafka-ui"},
+		{"C", "🔁", "MirrorMaker 2", "mm2", deployMM2NS, "kafkamirrormaker2s.kafka.strimzi.io", "mm2-mirror-maker2"},
 		{"C", "🧪", "Litmus Chaos", "chaos", chaosNS, "pod", "-l app.kubernetes.io/instance=chaos"},
 	}
+}
+
+// healthCheckKinds is every Kind getHealthStatusV2 knows how to check. The
+// test walks statusComponents against it.
+func healthCheckKinds(kind string) bool {
+	return kind == "pod" || kind == "statefulset" || kind == "deployment" || strimziCR(kind)
+}
+
+func runDeployStatus(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+
+	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS string
+	if deployTopology == "single" {
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
+		deployMM2NS = deployNamespace
+	} else {
+		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS, deployKafkaUINS
+	}
+
+	helmIndex := loadHelmReleaseIndex(ctx)
+
+	components := statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS)
 
 	// Route based on flags
 	if deployStatusOutput == "json" {
@@ -223,9 +256,9 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 				Release:   c.Release,
 				Namespace: c.Namespace,
 			}
-			st.HelmStatus = getHelmStatus(ctx, c.Release, c.Namespace)
+			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, c.Release, c.Namespace)
 			if st.HelmStatus == "deployed" {
-				st.Health, st.Details = getHealthStatus(ctx, c.Kind, c.Resource, c.Namespace)
+				st.Health, st.Details = getHealthStatus(ctx, c.Kind, c.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
 				st.Details = "Not deployed"
@@ -243,8 +276,61 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 
 // ── V1 Existing Logic (Retained for default sequential flow) ──
 
+func loadHelmReleaseIndex(ctx context.Context) map[string][]helmStatusRelease {
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(checkCtx, "helm", "list", "-A", "-o", "json")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return nil
+	}
+
+	var releases []helmStatusRelease
+	if err := json.Unmarshal(out, &releases); err != nil {
+		return nil
+	}
+
+	index := make(map[string][]helmStatusRelease, len(releases))
+	for _, rel := range releases {
+		index[rel.Name] = append(index[rel.Name], rel)
+	}
+	return index
+}
+
+func lookupHelmRelease(index map[string][]helmStatusRelease, release, namespace string) (status, resolvedNamespace string, ok bool) {
+	if index == nil {
+		return "", namespace, false
+	}
+
+	releases, exists := index[release]
+	if !exists || len(releases) == 0 {
+		return "", namespace, false
+	}
+
+	for _, rel := range releases {
+		if rel.Namespace == namespace {
+			return strings.ToLower(rel.Status), namespace, true
+		}
+	}
+
+	// Fallback: if a release name is unique cluster-wide, trust that namespace.
+	if len(releases) == 1 {
+		return strings.ToLower(releases[0].Status), releases[0].Namespace, true
+	}
+
+	return "", namespace, false
+}
+
+func getHelmStatusWithNamespace(ctx context.Context, index map[string][]helmStatusRelease, release, namespace string) (status, resolvedNamespace string) {
+	if st, ns, ok := lookupHelmRelease(index, release, namespace); ok {
+		return st, ns
+	}
+	return getHelmStatus(ctx, release, namespace), namespace
+}
+
 func getHelmStatus(ctx context.Context, release, namespace string) string {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
 	if err := cmd.Run(); err == nil {
@@ -253,77 +339,41 @@ func getHelmStatus(ctx context.Context, release, namespace string) string {
 	return "missing"
 }
 
-func getHealthStatus(ctx context.Context, kind, resource, namespace string) (string, string) {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if kind == "pod" {
-		args := append([]string{"get", "pods", "-n", namespace}, strings.Split(resource, " ")...)
-		args = append(args, "--no-headers")
-		cmd := exec.CommandContext(checkCtx, "kubectl", args...)
-		out, err := cmd.Output()
-		if err != nil || len(out) == 0 {
-			return "Unknown", "No pods found"
-		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		running := 0
-		for _, l := range lines {
-			if strings.Contains(l, "Running") || strings.Contains(l, "Completed") {
-				running++
-			}
-		}
-		if running == len(lines) {
-			return "Healthy", fmt.Sprintf("%d/%d pods running", running, len(lines))
-		}
-		return "Degraded", fmt.Sprintf("%d/%d pods running", running, len(lines))
-	} else if kind == "kafkas.kafka.strimzi.io" || kind == "kafkaconnects.kafka.strimzi.io" {
-		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
-		if err != nil {
-			errMsg := strings.TrimSpace(stderr.String())
-			if errMsg == "" {
-				errMsg = err.Error()
-			}
-			return "Unknown", "Error: " + errMsg
-		}
-		status := strings.TrimSpace(string(out))
-		if status == "True" {
-			return "Healthy", kind + " CRD is Ready"
-		}
-		return "Degraded", kind + " CRD not ready"
-	} else if kind == "statefulset" || kind == "deployment" {
-		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "jsonpath={.status.readyReplicas}/{.status.replicas}")
-		out, err := cmd.Output()
-		if err != nil {
-			return "Unknown", "Resource not found"
-		}
-		val := string(out)
-		if val == "" || val == "/" {
-			return "Degraded", "0/0 replicas ready"
-		}
-		parts := strings.Split(val, "/")
-		if len(parts) == 2 && parts[0] == parts[1] {
-			return "Healthy", val + " replicas ready"
-		}
-		return "Degraded", val + " replicas ready"
+// strimziCR reports whether a component's kind is a Strimzi custom resource.
+//
+// Every Strimzi CR carries the operator's Ready condition, so one test serves
+// all of them — Kafka, Connect, MirrorMaker 2, and whatever is added next.
+// This used to be two hard-coded names, which is how MirrorMaker 2 came to
+// report a blank "Unknown" in the status table: nobody added
+// kafkamirrormaker2s to the list. The V2 path had the same shape with a
+// DIFFERENT list ("kafka", "kafkaconnect") that no component spec has ever
+// passed, so in JSON and interactive output every Strimzi resource was
+// Unknown — a list of names is a thing that goes stale, and this had gone
+// stale twice.
+func strimziCR(kind string) bool {
+	if strings.HasSuffix(kind, ".kafka.strimzi.io") {
+		return true
 	}
+	// The short forms kubectl also accepts, for a caller that passes one.
+	switch kind {
+	case "kafka", "kafkaconnect", "kafkamirrormaker2", "kafkatopic", "kafkauser", "kafkanodepool":
+		return true
+	}
+	return false
+}
 
-	return "Unknown", ""
+// getHealthStatus is the table view's health check: the same check the JSON
+// and interactive views run, without the structured detail. Sharing one
+// implementation means the three views cannot disagree about whether a
+// component is healthy, and the table gains what only V2 used to report — the
+// REASON something is degraded ("container kates in CrashLoopBackOff" rather
+// than a bare "0/1 pods running").
+func getHealthStatus(ctx context.Context, kind, resource, namespace string) (string, string) {
+	health, details, _ := getHealthStatusV2(ctx, kind, resource, namespace)
+	return health, details
 }
 
 // ── V2 Enhanced Logic (Used in Interactive and JSON output modes) ──
-
-func getHelmStatusV2(ctx context.Context, release, namespace string) string {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
-	if err := cmd.Run(); err == nil {
-		return "deployed"
-	}
-	return "missing"
-}
 
 func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (string, string, interface{}) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -342,11 +392,20 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 		}
 		health, details, raw := parsePodListHealth(out)
 		return health, details, raw
-	} else if kind == "kafka" || kind == "kafkaconnect" {
+	} else if strimziCR(kind) {
 		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "json")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
 		if err != nil {
-			return "Unknown", "Resource not found: " + err.Error(), nil
+			// kubectl's own words: "NotFound" and "the server doesn't have a
+			// resource type" are different problems and the reader can act on
+			// the difference.
+			msg := strings.TrimSpace(stderr.String())
+			if msg == "" {
+				msg = err.Error()
+			}
+			return "Unknown", msg, nil
 		}
 		health, details, raw := parseKafkaHealth(out, kind)
 		return health, details, raw
@@ -360,7 +419,9 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 		return health, details, raw
 	}
 
-	return "Unknown", "", nil
+	// A kind nobody checks is a bug in the component table, not a mystery to
+	// print as an empty cell: say which kind went unhandled.
+	return "Unknown", "no health check for kind " + kind, nil
 }
 
 // ── JSON Parsers ──
@@ -518,29 +579,14 @@ func parseWorkloadHealth(data []byte) (string, string, WorkloadDetail) {
 
 // ── Parallel Runner for JSON Output ──
 
-func runJSONStatus(ctx context.Context, components []struct {
-	Group     string
-	Icon      string
-	Name      string
-	Release   string
-	Namespace string
-	Kind      string
-	Resource  string
-}) ([]ComponentStatus, error) {
+func runJSONStatus(ctx context.Context, components []componentSpec) ([]ComponentStatus, error) {
 	var wg sync.WaitGroup
 	statuses := make([]ComponentStatus, len(components))
+	helmIndex := loadHelmReleaseIndex(ctx)
 
 	for i, c := range components {
 		wg.Add(1)
-		go func(idx int, comp struct {
-			Group     string
-			Icon      string
-			Name      string
-			Release   string
-			Namespace string
-			Kind      string
-			Resource  string
-		}) {
+		go func(idx int, comp componentSpec) {
 			defer wg.Done()
 			st := ComponentStatus{
 				Group:     comp.Group,
@@ -549,9 +595,9 @@ func runJSONStatus(ctx context.Context, components []struct {
 				Release:   comp.Release,
 				Namespace: comp.Namespace,
 			}
-			st.HelmStatus = getHelmStatusV2(ctx, comp.Release, comp.Namespace)
+			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, comp.Release, comp.Namespace)
 			if st.HelmStatus == "deployed" {
-				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, comp.Namespace)
+				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
 				st.Details = "Not deployed"
@@ -572,21 +618,13 @@ type compStatusUpdateMsg struct {
 }
 
 type interactiveStatusModel struct {
-	components []struct {
-		Group     string
-		Icon      string
-		Name      string
-		Release   string
-		Namespace string
-		Kind      string
-		Resource  string
-	}
-	statuses []ComponentStatus
-	checking []bool
-	done     []bool
-	spinner  spinner.Model
-	ctx      context.Context
-	cancel   context.CancelFunc
+	components []componentSpec
+	statuses   []ComponentStatus
+	checking   []bool
+	done       []bool
+	spinner    spinner.Model
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 func (m interactiveStatusModel) Init() tea.Cmd {
@@ -628,26 +666,24 @@ func (m interactiveStatusModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
+		Foreground(theme.OnDark).
 		Background(clrAccent).
 		Padding(0, 1).
 		Render(" ⎈ Gathering Kates Deployment Status "))
 	b.WriteString("\n")
 
-	groupNames := map[string]string{
-		"A": "Operators & CRDs",
-		"B": "Core Infrastructure",
-		"C": "Applications",
-	}
-
 	prevGroup := ""
 	for i, c := range m.components {
 		if c.Group != prevGroup {
-			b.WriteString(fmt.Sprintf("\n  %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render(groupNames[c.Group])))
+			b.WriteString(fmt.Sprintf("\n  %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render(componentGroupNames[c.Group])))
 			prevGroup = c.Group
 		}
 
-		compName := c.Icon + " " + c.Name
+		iconStr := c.Icon
+		if visualWidth(iconStr) == 1 {
+			iconStr += " "
+		}
+		compName := iconStr + " " + c.Name
 		nameStyle := lipgloss.NewStyle().Foreground(clrText)
 		var statusStr string
 
@@ -679,17 +715,10 @@ func (m interactiveStatusModel) View() string {
 	return b.String()
 }
 
-func runInteractiveStatus(ctx context.Context, components []struct {
-	Group     string
-	Icon      string
-	Name      string
-	Release   string
-	Namespace string
-	Kind      string
-	Resource  string
-}) ([]ComponentStatus, error) {
+func runInteractiveStatus(ctx context.Context, components []componentSpec) ([]ComponentStatus, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	helmIndex := loadHelmReleaseIndex(ctx)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -710,15 +739,7 @@ func runInteractiveStatus(ctx context.Context, components []struct {
 	// Launch checks concurrently
 	for i, c := range components {
 		m.checking[i] = true
-		go func(idx int, comp struct {
-			Group     string
-			Icon      string
-			Name      string
-			Release   string
-			Namespace string
-			Kind      string
-			Resource  string
-		}) {
+		go func(idx int, comp componentSpec) {
 			st := ComponentStatus{
 				Group:     comp.Group,
 				Icon:      comp.Icon,
@@ -726,9 +747,9 @@ func runInteractiveStatus(ctx context.Context, components []struct {
 				Release:   comp.Release,
 				Namespace: comp.Namespace,
 			}
-			st.HelmStatus = getHelmStatusV2(ctx, comp.Release, comp.Namespace)
+			st.HelmStatus, st.Namespace = getHelmStatusWithNamespace(ctx, helmIndex, comp.Release, comp.Namespace)
 			if st.HelmStatus == "deployed" {
-				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, comp.Namespace)
+				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
 				st.Details = "Not deployed"
@@ -751,7 +772,7 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 
 	banner := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
+		Foreground(theme.OnDark).
 		Background(clrAccent).
 		Padding(0, 1).
 		Render(" ⎈ Kates Deployment Status ")
@@ -760,11 +781,6 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 	groups := map[string][]ComponentStatus{"A": {}, "B": {}, "C": {}}
 	for _, s := range statuses {
 		groups[s.Group] = append(groups[s.Group], s)
-	}
-	groupNames := map[string]string{
-		"A": "Operators & CRDs",
-		"B": "Core Infrastructure",
-		"C": "Applications",
 	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(clrCyan)
@@ -784,7 +800,7 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 			continue
 		}
 		fmt.Println()
-		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, groupNames[g])))
+		fmt.Println(headerStyle.Render(fmt.Sprintf("  Group %s — %s", g, componentGroupNames[g])))
 		fmt.Println(colHeaders)
 		fmt.Println("  " + sepLine)
 		for _, s := range groups[g] {
@@ -795,10 +811,15 @@ func RenderStatusDashboard(statuses []ComponentStatus) {
 }
 
 func printStatusRow(s ComponentStatus) {
-	nameStr := s.Icon + " " + s.Name
-	// Emoji icons render as 2 cells in terminals, but runewidth often
-	// miscounts them (e.g. ☸️ with VS16 reports width 1 instead of 2).
-	// Use a fixed 2-cell icon slot + 1 space + text width for padding.
+	iconStr := s.Icon
+	if visualWidth(iconStr) == 1 {
+		iconStr += " "
+	}
+	nameStr := iconStr + " " + s.Name
+	// The icon slot is a fixed two cells. That holds because every component
+	// icon is an Emoji_Presentation=Yes code point (see deploy_ui.go): the
+	// terminal draws two cells and runewidth counts two. The visualWidth==1
+	// guard above is the fallback for anything that slips past that rule.
 	nameLen := 2 + 1 + visualWidth(s.Name)
 	namePad := 25 - nameLen
 	if namePad < 1 {

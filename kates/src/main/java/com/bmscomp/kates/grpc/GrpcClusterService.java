@@ -4,18 +4,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import jakarta.inject.Inject;
 
 import io.quarkus.grpc.GrpcService;
 import io.smallrye.common.annotation.Blocking;
 import io.smallrye.mutiny.Uni;
-import jakarta.inject.Inject;
 
+import com.bmscomp.kates.grpc.proto.*;
 import com.bmscomp.kates.service.ClusterHealthService;
 import com.bmscomp.kates.service.ClusterTopologyService;
 import com.bmscomp.kates.service.ConsumerGroupService;
 import com.bmscomp.kates.service.TopicService;
-
-import com.bmscomp.kates.grpc.proto.*;
 
 /**
  * gRPC implementation of the ClusterService — introspects the Kafka cluster
@@ -80,10 +79,8 @@ public class GrpcClusterService extends MutinyClusterServiceGrpc.ClusterServiceI
             int to = Math.min(from + size, total);
             List<String> pageItems = sorted.subList(from, to);
 
-            var builder = ListTopicsResponse.newBuilder()
-                    .setPage(page)
-                    .setSize(size)
-                    .setTotal(total);
+            var builder =
+                    ListTopicsResponse.newBuilder().setPage(page).setSize(size).setTotal(total);
 
             for (String name : pageItems) {
                 builder.addItems(TopicInfo.newBuilder().setName(name).build());
@@ -96,8 +93,7 @@ public class GrpcClusterService extends MutinyClusterServiceGrpc.ClusterServiceI
     public Uni<TopicDetail> getTopicDetail(GetTopicRequest request) {
         return Uni.createFrom().item(() -> {
             Map<String, Object> detail = topicService.describeTopicDetail(request.getName());
-            var builder = TopicDetail.newBuilder()
-                    .setName(request.getName());
+            var builder = TopicDetail.newBuilder().setName(request.getName());
 
             if (detail.get("partitions") instanceof Number n) builder.setPartitions(n.intValue());
             if (detail.get("replicationFactor") instanceof Number n) builder.setReplicationFactor(n.intValue());
@@ -123,10 +119,8 @@ public class GrpcClusterService extends MutinyClusterServiceGrpc.ClusterServiceI
             int to = Math.min(from + size, total);
             List<Map<String, Object>> pageItems = all.subList(from, to);
 
-            var builder = ListGroupsResponse.newBuilder()
-                    .setPage(page)
-                    .setSize(size)
-                    .setTotal(total);
+            var builder =
+                    ListGroupsResponse.newBuilder().setPage(page).setSize(size).setTotal(total);
 
             for (Map<String, Object> g : pageItems) {
                 var gb = ConsumerGroupInfo.newBuilder();
@@ -146,8 +140,10 @@ public class GrpcClusterService extends MutinyClusterServiceGrpc.ClusterServiceI
             Map<String, Object> topo = clusterTopologyService.describeTopology();
             var builder = ClusterTopology.newBuilder();
 
-            if (topo.get("clusterName") != null) builder.setClusterName(topo.get("clusterName").toString());
-            if (topo.get("kafkaVersion") != null) builder.setKafkaVersion(topo.get("kafkaVersion").toString());
+            if (topo.get("clusterName") != null)
+                builder.setClusterName(topo.get("clusterName").toString());
+            if (topo.get("kafkaVersion") != null)
+                builder.setKafkaVersion(topo.get("kafkaVersion").toString());
             if (topo.get("kraftMode") instanceof Boolean b) builder.setKraftMode(b);
             if (topo.get("controllerQuorumLeader") instanceof Number n) builder.setControllerQuorumLeader(n.intValue());
 
@@ -158,8 +154,10 @@ public class GrpcClusterService extends MutinyClusterServiceGrpc.ClusterServiceI
                         if (pm.get("name") != null) pb.setName(pm.get("name").toString());
                         if (pm.get("role") != null) pb.setRole(pm.get("role").toString());
                         if (pm.get("replicas") instanceof Number n) pb.setReplicas(n.intValue());
-                        if (pm.get("storageType") != null) pb.setStorageType(pm.get("storageType").toString());
-                        if (pm.get("storageSize") != null) pb.setStorageSize(pm.get("storageSize").toString());
+                        if (pm.get("storageType") != null)
+                            pb.setStorageType(pm.get("storageType").toString());
+                        if (pm.get("storageSize") != null)
+                            pb.setStorageSize(pm.get("storageSize").toString());
                         builder.addNodePools(pb.build());
                     }
                 }
@@ -175,7 +173,8 @@ public class GrpcClusterService extends MutinyClusterServiceGrpc.ClusterServiceI
                         if (nm.get("rack") != null) nb.setRack(nm.get("rack").toString());
                         if (nm.get("role") != null) nb.setRole(nm.get("role").toString());
                         if (nm.get("pool") != null) nb.setPool(nm.get("pool").toString());
-                        if (nm.get("status") != null) nb.setStatus(nm.get("status").toString());
+                        if (nm.get("status") != null)
+                            nb.setStatus(nm.get("status").toString());
                         if (nm.get("isQuorumLeader") instanceof Boolean b) nb.setIsQuorumLeader(b);
                         builder.addNodes(nb.build());
                     }

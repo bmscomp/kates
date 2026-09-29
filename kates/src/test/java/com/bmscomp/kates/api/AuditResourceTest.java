@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
 import java.util.Map;
 
-import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -28,9 +28,13 @@ class AuditResourceTest {
         Mockito.when(auditService.list(500, null, null)).thenReturn(events);
 
         var response = RestAssured.given()
-                .when().get("/api/audit")
-                .then().statusCode(200)
-                .extract().body().jsonPath();
+                .when()
+                .get("/api/audit")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .jsonPath();
 
         assertEquals(2, response.getInt("count"));
         assertEquals(2, response.getList("items").size());
@@ -47,9 +51,13 @@ class AuditResourceTest {
 
         var response = RestAssured.given()
                 .queryParam("size", 2)
-                .when().get("/api/audit")
-                .then().statusCode(200)
-                .extract().body().jsonPath();
+                .when()
+                .get("/api/audit")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .jsonPath();
 
         assertEquals(2, response.getList("items").size());
         assertEquals(3, response.getInt("total"));
@@ -61,9 +69,13 @@ class AuditResourceTest {
 
         var response = RestAssured.given()
                 .queryParam("type", "topic")
-                .when().get("/api/audit")
-                .then().statusCode(200)
-                .extract().body().jsonPath();
+                .when()
+                .get("/api/audit")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .jsonPath();
 
         assertEquals(0, response.getInt("count"));
     }

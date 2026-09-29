@@ -1,0 +1,29 @@
+suite: rails
+templates:
+  - rails.yaml
+tests:
+  - it: accepts tags, digests and registry ports
+    set:
+      images: {a: "quay.io/strimzi/kafka:1.2.0", b: "registry:5000/kafka:1", c: "kafka@sha256:abc"}
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: refuses :latest
+    set:
+      images: {image: "quay.io/strimzi/kafka:latest"}
+    asserts:
+      - failedTemplate: {errorPattern: "image is \"quay.io/strimzi/kafka:latest\", which resolves to a floating tag"}
+  - it: refuses an untagged image behind a registry port
+    set:
+      images: {image: "registry:5000/kafka"}
+    asserts:
+      - failedTemplate: {errorPattern: "resolves to a floating tag"}
+  - it: refuses a bootstrap port the egress rule does not admit
+    set:
+      bootstrapPorts: {bootstrap: "a:9092,b:9094", ports: [9092, 9093]}
+    asserts:
+      - failedTemplate: {errorPattern: "dials port 9094, but networkPolicy.kafka.ports allows only 9092, 9093"}
+  - it: accepts admitted bootstrap ports
+    set:
+      bootstrapPorts: {bootstrap: "a:9092, b:9093", ports: [9092, 9093]}
+    asserts:
+      - hasDocuments: {count: 0}

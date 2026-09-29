@@ -1,0 +1,71 @@
+# Failback overlay — mirroring the OTHER way, after a failover.
+#
+# This is not an overlay you add to a running release. It is a SEPARATE
+# release, in the opposite direction: what was the target is now the source.
+#
+#   helm upgrade --install mm2-back charts/mirror-maker2 -n kafka \
+#     -f charts/mirror-maker2/values-prod.yaml \
+#     -f charts/mirror-maker2/values-failback.yaml \
+#     --set target.clusterName=<the original cluster> \
+#     --set mirrors[0].source.clusterName=<the failover cluster>
+#
+# THE RULE THAT MAKES THIS SAFE: the forward mirror must be gone first —
+# uninstalled, or its source connector stopped and its release deleted. Under
+# an identity policy the two directions re-read each other's output under the
+# same topic names, forever; under the default policy they do not loop, but
+# they do produce `east.east.orders` and a support ticket. The chart refuses
+# the identity case when it can see the forward CR (replicationPolicy.
+# allowBidirectional overrides, for provably disjoint patterns).
+#
+# THE ORDER, WHICH IS THE WHOLE PROCEDURE:
+#   1. Stop producing to the failover cluster.
+#   2. Uninstall or stop the forward mirror. Confirm no KafkaMirrorMaker2 in
+#      the namespace still lists the original cluster as a SOURCE.
+#   3. Install this one and let it drain — the failover cluster has records
+#      the original never saw.
+#   4. Move consumers back, using the translated offsets as in a cutover.
+#   5. Cut over (values-cutover.yaml) and remove this release.
+#
+# The mirror below starts STOPPED on purpose. A failback that begins
+# replicating the moment `helm install` returns is one nobody has checked the
+# direction of yet; start it deliberately with:
+#   helm upgrade mm2-back ... --set cutover.enabled=false
+cutover:
+  enabled: true
+  sourceConnectorState: stopped
+  checkpointConnectorState: stopped
+
+# Names that say which direction this is, so `helm list` and the Connect
+# groups are readable during an incident.
+target:
+  groupId: "mirror-maker2-failback"
+
+# The source is left DELIBERATELY unset. An empty clusterName would otherwise
+# fall back to the chart's default (krafter/kafka) — the same cluster as the
+# target — and render a mirror that reads from and writes to one cluster. The
+# `required` below turns that into a render-time refusal naming the flag,
+# rather than a self-mirror discovered in production.
+mirrors:
+  - source:
+      alias: failback
+      clusterName: ""
+      namespace: "kafka"
+      bootstrapServers: ""
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2"
+        secretName: "kates-mm2"
+        secretKey: "password"
+    topicsPattern: ".*"
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 3
+      config:
+        replication.factor: 3
+        offset-syncs.topic.replication.factor: 3
+        sync.topic.acls.enabled: "false"
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 3
+        sync.group.offsets.enabled: "true"

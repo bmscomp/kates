@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/pkg/theme"
 )
 
 type labParam struct {
@@ -115,7 +115,15 @@ type LabModel struct {
 	lastTestReq *client.CreateTestRequest
 }
 
+type labTestStartedMsg struct {
+	run     *client.TestRun
+	req     *client.CreateTestRequest
+	records int
+}
+
 type labTestDoneMsg struct {
+	testID  string // empty when the test never got created
+	req     *client.CreateTestRequest
 	run     *client.TestRun
 	summary *client.ReportSummary
 	err     error
@@ -124,9 +132,17 @@ type labTestDoneMsg struct {
 type labTickMsg struct{}
 
 type labProgressMsg struct {
+	testID     string
+	deadline   time.Time
+	maxWait    time.Duration
+	hasStats   bool
 	records    int64
 	throughput float64
 	latency    float64
+	// pollErr carries a failed poll to the status line. Retrying is correct —
+	// silence about WHY the spinner spins is the bug this fixes: polls used to
+	// fail invisibly for up to the 20-minute deadline.
+	pollErr string
 }
 
 func NewLab(c *client.Client, url string) LabModel {
@@ -154,7 +170,20 @@ func NewLab(c *client.Client, url string) LabModel {
 func RunLab(c *client.Client, url string) error {
 	m := NewLab(c, url)
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err := p.Run()
+	final, err := p.Run()
+	// Quitting mid-run used to cancel only the local context; the server-side
+	// test kept running, orphaned, burning cluster resources with nothing
+	// watching it. Best-effort cancel after the program exits — commands
+	// dispatched during Quit never run, so this cannot live inside Update.
+	if fm, ok := final.(LabModel); ok && fm.quitting && fm.runTestID != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if cerr := c.CancelTest(ctx, fm.runTestID); cerr == nil {
+			fmt.Println("Cancelled running test " + fm.runTestID)
+		} else {
+			fmt.Println("Note: test " + fm.runTestID + " may still be running on the server (cancel failed: " + cerr.Error() + ")")
+		}
+	}
 	return err
 }
 
@@ -179,11 +208,29 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Quit
 			case "x":
-				if m.cancelFn != nil && m.runTestID != "" {
+				if m.cancelFn != nil {
 					m.cancelFn()
-					_ = m.client.CancelTest(context.Background(), m.runTestID)
+					// Fire the server-side cancel as a command. It used to run
+					// synchronously HERE, inside Update — freezing the entire
+					// TUI for up to the 30s client timeout.
+					var cancelCmd tea.Cmd
+					if id := m.runTestID; id != "" {
+						c := m.client
+						cancelCmd = func() tea.Msg {
+							ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+							defer cancel()
+							_ = c.CancelTest(ctx, id)
+							return nil
+						}
+					}
 					m.running = false
+					m.runTestID = ""
+					m.sweepActive = false
+					m.medianActive = false
+					m.medianResults = nil
+					m.warmupRemaining = 0
 					m.status = warnStyle.Render("⏹ Test cancelled")
+					return m, cancelCmd
 				}
 				return m, nil
 			}
@@ -274,7 +321,7 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			if !m.sweepActive {
 				m.startSweep()
-				return m, nil
+				return m, tea.Batch(m.runTest(), m.tickElapsed())
 			}
 		case "W":
 			if !m.running {
@@ -307,12 +354,21 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "e":
 			if len(m.iterations) > 0 {
-				path := m.exportCSV()
-				m.status = healthyStyle.Render("✓ Exported to " + path)
+				// Report what actually happened. This used to render
+				// "✓ Exported" unconditionally — a full disk or read-only
+				// home directory produced a success message and no file.
+				if path, err := m.exportCSV(); err != nil {
+					m.status = warnStyle.Render("⚠ Export failed: " + err.Error())
+				} else {
+					m.status = healthyStyle.Render("✓ Exported to " + path)
+				}
 			}
 		case "w":
-			path := m.saveSession()
-			m.status = healthyStyle.Render("✓ Session saved to " + path)
+			if path, err := m.saveSession(); err != nil {
+				m.status = warnStyle.Render("⚠ Save failed: " + err.Error())
+			} else {
+				m.status = healthyStyle.Render("✓ Session saved to " + path)
+			}
 		case "L":
 			if path, ok := m.loadSession(); ok {
 				m.status = healthyStyle.Render("✓ Session loaded from " + path)
@@ -337,9 +393,28 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.view = labConfig
 		}
 
+	case labTestStartedMsg:
+		if !m.running {
+			return m, nil // cancelled while the test was being created
+		}
+		m.runTestID = msg.run.ID
+		m.lastTestReq = msg.req
+		maxWait := m.pollMaxWait(msg.records)
+		return m, m.pollTestOnce(msg.run.ID, time.Now().Add(maxWait), maxWait)
+
 	case labTestDoneMsg:
+		if msg.testID != "" && msg.testID != m.runTestID {
+			return m, nil // stale result from a cancelled run
+		}
+		if msg.testID == "" && !m.running {
+			return m, nil // create failed after the run was cancelled
+		}
 		m.running = false
+		m.runTestID = ""
 		if msg.err != nil {
+			if msg.req != nil {
+				m.lastTestReq = msg.req
+			}
 			m.lastError = msg.err
 			m.status = errorStyle.Render("✖ " + msg.err.Error() + "  ·  press r to retry")
 			if m.sweepActive {
@@ -351,26 +426,30 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		iter := m.buildIteration(msg.run, msg.summary)
 
-		// Warmup: discard this iteration silently
+		// Warmup: discard this iteration silently.
+		// The tick chain from the initial run is still alive (running never
+		// observably went false), so continuations must not start another one.
 		if m.warmupRemaining > 0 {
 			m.warmupRemaining--
 			if m.warmupRemaining > 0 {
 				m.running = true
 				m.elapsed = 0
+				m.liveRecords = 0
 				ctx, cancel := context.WithCancel(context.Background())
 				m.cancelCtx = ctx
 				m.cancelFn = cancel
 				m.status = filterActiveStyle.Render(fmt.Sprintf("🔥 Warmup %d/%d…", m.warmupCount-m.warmupRemaining+1, m.warmupCount))
-				return m, tea.Batch(m.runTest(), m.tickElapsed())
+				return m, m.runTest()
 			}
 			// Last warmup done — now run the real iteration
 			m.running = true
 			m.elapsed = 0
+			m.liveRecords = 0
 			ctx, cancel := context.WithCancel(context.Background())
 			m.cancelCtx = ctx
 			m.cancelFn = cancel
 			m.status = filterActiveStyle.Render("⏳ Running measured iteration…")
-			return m, tea.Batch(m.runTest(), m.tickElapsed())
+			return m, m.runTest()
 		}
 
 		// Median mode: collect 3 runs, report median
@@ -380,11 +459,12 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.medianRemaining > 0 {
 				m.running = true
 				m.elapsed = 0
+				m.liveRecords = 0
 				ctx, cancel := context.WithCancel(context.Background())
 				m.cancelCtx = ctx
 				m.cancelFn = cancel
 				m.status = filterActiveStyle.Render(fmt.Sprintf("📊 Median mode: running %d/3…", 3-m.medianRemaining+1))
-				return m, tea.Batch(m.runTest(), m.tickElapsed())
+				return m, m.runTest()
 			}
 			// All 3 done — pick the median by throughput
 			median := m.computeMedianIteration()
@@ -406,10 +486,20 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case labProgressMsg:
-		m.liveRecords = msg.records
-		m.liveThroughput = msg.throughput
-		m.liveLatency = msg.latency
-		return m, nil
+		if !m.running || msg.testID != m.runTestID {
+			return m, nil // stale poll from a cancelled run
+		}
+		if msg.hasStats {
+			m.liveRecords = msg.records
+			m.liveThroughput = msg.throughput
+			m.liveLatency = msg.latency
+		}
+		if msg.pollErr != "" {
+			m.status = warnStyle.Render("⚠ poll failed (retrying): " + msg.pollErr)
+		} else if msg.hasStats {
+			m.status = filterActiveStyle.Render("⏳ Running iteration #" + fmt.Sprintf("%d", len(m.iterations)+1) + "…")
+		}
+		return m, m.pollTestOnce(msg.testID, msg.deadline, msg.maxWait)
 
 	case labTickMsg:
 		if m.running {
@@ -423,6 +513,12 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m LabModel) View() string {
 	if m.quitting {
 		return ""
+	}
+
+	// Below the supported floor, render the shared card instead of a layout
+	// that clips into garbage.
+	if TooSmall(m.width, m.height) {
+		return TooSmallCard(m.width, m.height)
 	}
 
 	w := m.width
@@ -631,10 +727,10 @@ func (m LabModel) viewParams(width int) string {
 		}
 	}
 
-	if len(m.iterations) > 0 {
-		last := m.iterations[len(m.iterations)-1]
-		b.WriteString("\n" + m.latencyHistogram(last.P99Ms, width))
-	}
+	// No latency histogram here on purpose. The panel this replaced invented
+	// its bucket percentages from p99 alone (three hardcoded distributions
+	// selected by range) — it looked like measurement but was decoration.
+	// If the server ever returns real latency buckets, render those.
 
 	return b.String()
 }
@@ -783,62 +879,6 @@ func (m LabModel) viewResults(width int) string {
 	return b.String()
 }
 
-func (m LabModel) latencyHistogram(p99 float64, width int) string {
-	if p99 <= 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("  " + dimStyle.Render("Latency Distribution") + "\n")
-
-	buckets := []struct {
-		label string
-		pct   float64
-	}{
-		{"<1ms ", 0.10},
-		{"1-5ms", 0.25},
-		{"5-10 ", 0.30},
-		{"10-50", 0.20},
-		{"50+ms", 0.15},
-	}
-
-	if p99 < 5 {
-		buckets[0].pct = 0.50
-		buckets[1].pct = 0.30
-		buckets[2].pct = 0.15
-		buckets[3].pct = 0.04
-		buckets[4].pct = 0.01
-	} else if p99 > 100 {
-		buckets[0].pct = 0.02
-		buckets[1].pct = 0.08
-		buckets[2].pct = 0.15
-		buckets[3].pct = 0.35
-		buckets[4].pct = 0.40
-	}
-
-	maxBar := width - 16
-	if maxBar < 8 {
-		maxBar = 8
-	}
-	if maxBar > 40 {
-		maxBar = 40
-	}
-
-	for _, bk := range buckets {
-		barLen := int(bk.pct * float64(maxBar))
-		if barLen < 1 {
-			barLen = 1
-		}
-		bar := strings.Repeat("█", barLen)
-		pctStr := fmt.Sprintf("%4.0f%%", bk.pct*100)
-		sb.WriteString(fmt.Sprintf("  %s  %s  %s\n",
-			dimStyle.Render(bk.label),
-			healthyStyle.Render(bar),
-			dimStyle.Render(pctStr),
-		))
-	}
-	return sb.String()
-}
-
 func (m LabModel) viewPinSelect() string {
 	var sb strings.Builder
 	sb.WriteString(detailTitleStyle.Render("Select Iterations to Compare") + "\n\n")
@@ -942,7 +982,7 @@ func (m LabModel) viewDiff(width int) string {
 
 	writeDiffRow("Throughput", a.Throughput, b.Throughput, " rec/s", true)
 	writeDiffRow("P99 Latency", a.P99Ms, b.P99Ms, " ms", false)
-	writeDiffRow("Avg Latency", a.ErrorRate, b.ErrorRate, " ms", false)
+	writeDiffRow("Avg Latency", a.AvgMs, b.AvgMs, " ms", false)
 
 	if a.Params != nil && b.Params != nil {
 		sb.WriteString("\n" + dimStyle.Render("  Parameter Changes") + "\n")
@@ -985,7 +1025,7 @@ func (m LabModel) buildSpec() (*client.TestSpec, *client.CreateTestRequest) {
 	if durationMs < 60000 {
 		durationMs = 60000
 	}
-	spec.DurationSeconds = durationMs
+	spec.DurationMs = durationMs
 
 	req := &client.CreateTestRequest{
 		TestType: m.paramVal("type"),
@@ -1002,18 +1042,17 @@ func (m LabModel) currentParams() map[string]string {
 	return params
 }
 
+// runTest and retryTest run as tea.Cmd goroutines against a copy of the
+// model, so they must not assign model fields — anything the UI needs back
+// (run ID, request) travels in labTestStartedMsg and is applied in Update.
 func (m LabModel) runTest() tea.Cmd {
 	return func() tea.Msg {
 		spec, req := m.buildSpec()
-		m.lastTestReq = req
-
 		run, err := m.client.CreateTest(m.cancelCtx, req)
 		if err != nil {
-			return labTestDoneMsg{err: err}
+			return labTestDoneMsg{req: req, err: err}
 		}
-		m.runTestID = run.ID
-
-		return m.pollTest(run.ID, spec.Records)
+		return labTestStartedMsg{run: run, req: req, records: spec.Records}
 	}
 }
 
@@ -1025,19 +1064,18 @@ func (m LabModel) retryTest() tea.Cmd {
 
 		run, err := m.client.CreateTest(m.cancelCtx, m.lastTestReq)
 		if err != nil {
-			return labTestDoneMsg{err: err}
+			return labTestDoneMsg{req: m.lastTestReq, err: err}
 		}
-		m.runTestID = run.ID
 
 		records := 50000
 		if m.lastTestReq.Spec != nil {
 			records = m.lastTestReq.Spec.Records
 		}
-		return m.pollTest(run.ID, records)
+		return labTestStartedMsg{run: run, req: m.lastTestReq, records: records}
 	}
 }
 
-func (m LabModel) pollTest(testID string, records int) tea.Msg {
+func (m LabModel) pollMaxWait(records int) time.Duration {
 	maxWait := 6 * time.Minute
 	testType := strings.ToUpper(m.paramVal("type"))
 
@@ -1049,33 +1087,48 @@ func (m LabModel) pollTest(testID string, records int) tea.Msg {
 	case records >= 500_000:
 		maxWait = 10 * time.Minute
 	}
+	return maxWait
+}
 
-	deadline := time.Now().Add(maxWait)
-	for time.Now().Before(deadline) {
+// pollTestOnce performs a single poll cycle and returns either a progress
+// message (which re-dispatches it) or the final result, so live stats can
+// flow back to the UI between polls.
+func (m LabModel) pollTestOnce(testID string, deadline time.Time, maxWait time.Duration) tea.Cmd {
+	return func() tea.Msg {
 		select {
 		case <-m.cancelCtx.Done():
-			return labTestDoneMsg{err: fmt.Errorf("test cancelled")}
+			return labTestDoneMsg{testID: testID, err: fmt.Errorf("test cancelled")}
 		case <-time.After(2 * time.Second):
+		}
+		if !time.Now().Before(deadline) {
+			return labTestDoneMsg{testID: testID, err: fmt.Errorf("test timed out after %s", maxWait.Truncate(time.Minute))}
 		}
 
 		updated, err := m.client.GetTest(context.Background(), testID)
 		if err != nil {
-			continue
-		}
-
-		if len(updated.Results) > 0 {
-			r := updated.Results[0]
-			// Send progress but we can't in this architecture — it updates on done
-			_ = r
+			return labProgressMsg{testID: testID, deadline: deadline, maxWait: maxWait, pollErr: err.Error()}
 		}
 
 		status := strings.ToUpper(updated.Status)
 		if status == "DONE" || status == "COMPLETED" || status == "FAILED" || status == "ERROR" {
 			summary, _ := m.client.ReportSummary(context.Background(), testID)
-			return labTestDoneMsg{run: updated, summary: summary}
+			return labTestDoneMsg{testID: testID, run: updated, summary: summary}
 		}
+
+		msg := labProgressMsg{testID: testID, deadline: deadline, maxWait: maxWait}
+		if len(updated.Results) > 0 {
+			var sent float64
+			for _, r := range updated.Results {
+				sent += r.RecordsSent
+			}
+			last := updated.Results[len(updated.Results)-1]
+			msg.hasStats = true
+			msg.records = int64(sent)
+			msg.throughput = last.ThroughputRecordsPerSec
+			msg.latency = last.P99LatencyMs
+		}
+		return msg
 	}
-	return labTestDoneMsg{err: fmt.Errorf("test timed out after %s", maxWait.Truncate(time.Minute))}
 }
 
 func (m *LabModel) buildIteration(run *client.TestRun, summary *client.ReportSummary) labIteration {
@@ -1203,20 +1256,20 @@ func (m *LabModel) nextSweepStep() tea.Cmd {
 	return nil
 }
 
-func (m LabModel) exportCSV() string {
+func (m LabModel) exportCSV() (string, error) {
 	dir, _ := os.UserHomeDir()
 	path := filepath.Join(dir, fmt.Sprintf("kates-lab-%s.csv", time.Now().Format("20060102-150405")))
 
 	var sb strings.Builder
-	sb.WriteString("iteration,throughput_rec_s,p99_ms,avg_latency_ms,delta,test_id")
+	sb.WriteString("iteration,throughput_rec_s,p99_ms,avg_latency_ms,error_rate,delta,test_id")
 	for _, p := range m.params {
 		sb.WriteString("," + p.Key)
 	}
 	sb.WriteString("\n")
 
 	for _, iter := range m.iterations {
-		sb.WriteString(fmt.Sprintf("%d,%.2f,%.2f,%.2f,%s,%s",
-			iter.Number, iter.Throughput, iter.P99Ms, iter.ErrorRate,
+		sb.WriteString(fmt.Sprintf("%d,%.2f,%.2f,%.2f,%.2f,%s,%s",
+			iter.Number, iter.Throughput, iter.P99Ms, iter.AvgMs, iter.ErrorRate,
 			stripAnsi(iter.Delta), iter.TestID))
 		for _, p := range m.params {
 			val := ""
@@ -1228,8 +1281,10 @@ func (m LabModel) exportCSV() string {
 		sb.WriteString("\n")
 	}
 
-	_ = os.WriteFile(path, []byte(sb.String()), 0644)
-	return path
+	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 type labSession struct {
@@ -1241,6 +1296,7 @@ type labSessionIter struct {
 	Number     int               `json:"number"`
 	Throughput float64           `json:"throughput"`
 	P99Ms      float64           `json:"p99Ms"`
+	AvgMs      float64           `json:"avgMs"`
 	ErrorRate  float64           `json:"errorRate"`
 	TestID     string            `json:"testId"`
 	Params     map[string]string `json:"params"`
@@ -1251,7 +1307,7 @@ type labSessionParam struct {
 	Current int    `json:"current"`
 }
 
-func (m LabModel) saveSession() string {
+func (m LabModel) saveSession() (string, error) {
 	dir, _ := os.UserHomeDir()
 	path := filepath.Join(dir, ".kates-lab-session.json")
 
@@ -1261,6 +1317,7 @@ func (m LabModel) saveSession() string {
 			Number:     iter.Number,
 			Throughput: iter.Throughput,
 			P99Ms:      iter.P99Ms,
+			AvgMs:      iter.AvgMs,
 			ErrorRate:  iter.ErrorRate,
 			TestID:     iter.TestID,
 			Params:     iter.Params,
@@ -1273,9 +1330,14 @@ func (m LabModel) saveSession() string {
 		})
 	}
 
-	data, _ := json.MarshalIndent(session, "", "  ")
-	_ = os.WriteFile(path, data, 0644)
-	return path
+	data, err := json.MarshalIndent(session, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func (m *LabModel) loadSession() (string, bool) {
@@ -1298,6 +1360,7 @@ func (m *LabModel) loadSession() (string, bool) {
 			Number:     si.Number,
 			Throughput: si.Throughput,
 			P99Ms:      si.P99Ms,
+			AvgMs:      si.AvgMs,
 			ErrorRate:  si.ErrorRate,
 			TestID:     si.TestID,
 			Params:     si.Params,
@@ -1318,7 +1381,7 @@ func (m *LabModel) loadSession() (string, bool) {
 
 	for _, sp := range session.Params {
 		for pi := range m.params {
-			if m.params[pi].Key == sp.Key {
+			if m.params[pi].Key == sp.Key && sp.Current >= 0 && sp.Current < len(m.params[pi].Values) {
 				m.params[pi].Current = sp.Current
 			}
 		}

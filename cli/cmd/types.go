@@ -3,7 +3,7 @@ package cmd
 import (
 	"strings"
 
-	"github.com/klster/kates-cli/client"
+	"github.com/bmscomp/kates/cli/client"
 )
 
 // TestCounts holds aggregated test status counts.

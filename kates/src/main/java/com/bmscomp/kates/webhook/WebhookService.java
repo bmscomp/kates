@@ -5,15 +5,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
-
 import jakarta.enterprise.context.ApplicationScoped;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
-
-import com.bmscomp.kates.domain.TestRun;
 
 /**
  * Sends HTTP POST notifications to registered webhook URLs
@@ -26,7 +24,6 @@ public class WebhookService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private volatile HttpClient httpClient;
-    private final List<WebhookRegistration> registrations = new CopyOnWriteArrayList<>();
 
     private HttpClient http() {
         HttpClient client = httpClient;
@@ -44,40 +41,155 @@ public class WebhookService {
         return client;
     }
 
+    /** Persisted (V16): registrations previously lived in memory and were lost on restart. */
+    @jakarta.transaction.Transactional
     public void register(WebhookRegistration registration) {
-        registrations.add(registration);
+        // Explicit upsert by name (@Id). A merge() of a fresh instance did not
+        // reliably update an existing row here (an integration test caught a
+        // re-registration keeping the old URL), so find-then-update-or-persist.
+        WebhookRegistrationEntity existing = em.find(WebhookRegistrationEntity.class, registration.name());
+        if (existing == null) {
+            em.persist(new WebhookRegistrationEntity(registration.name(), registration.url(), registration.events()));
+        } else {
+            existing.setUrl(registration.url());
+            existing.setEvents(registration.events());
+        }
         LOG.infof("Registered webhook: %s → %s", registration.name(), registration.url());
     }
 
+    @jakarta.transaction.Transactional
     public void unregister(String name) {
-        registrations.removeIf(r -> r.name().equals(name));
+        WebhookRegistrationEntity entity = em.find(WebhookRegistrationEntity.class, name);
+        if (entity != null) {
+            em.remove(entity);
+        }
         LOG.infof("Unregistered webhook: %s", name);
     }
 
+    @jakarta.inject.Inject
+    jakarta.persistence.EntityManager em;
+
+    @jakarta.inject.Inject
+    WebhookService self;
+
+    @jakarta.inject.Inject
+    WebhookUrlValidator urlValidator;
+
+    /** How long processed_events remembers an event; see {@link #olderThanLedger}. */
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "kates.outbox.processed-events-retention-days",
+            defaultValue = "7")
+    int processedRetentionDays;
+
+    /**
+     * Transactional because {@link #onTestEvent} calls it on a messaging worker
+     * thread, which has no request context. Without a transaction the injected
+     * EntityManager refuses to work there, so every DONE or FAILED event threw
+     * before reaching a webhook.
+     */
+    @jakarta.transaction.Transactional
     public List<WebhookRegistration> list() {
-        return List.copyOf(registrations);
+        return em
+                .createQuery(
+                        "SELECT w FROM WebhookRegistrationEntity w ORDER BY w.name", WebhookRegistrationEntity.class)
+                .getResultList()
+                .stream()
+                .map(w -> new WebhookRegistration(w.getName(), w.getUrl(), w.getEvents()))
+                .toList();
     }
 
-    public void fireTestCompleted(TestRun run) {
-        if (registrations.isEmpty()) {
+    @jakarta.transaction.Transactional(jakarta.transaction.Transactional.TxType.REQUIRES_NEW)
+    public boolean checkAndMarkProcessed(String idempotencyKey) {
+        try {
+            if (em.find(ProcessedEventEntity.class, idempotencyKey) != null) {
+                return false;
+            }
+            em.persist(new ProcessedEventEntity(idempotencyKey));
+            em.flush();
+            return true;
+        } catch (Exception e) {
+            LOG.warn("Duplicate event detected (concurrent): " + idempotencyKey);
+            return false;
+        }
+    }
+
+    @org.eclipse.microprofile.reactive.messaging.Incoming("test-events-in")
+    public void onTestEvent(com.bmscomp.kates.domain.events.TestEvent event) {
+        String idempotencyKey = event.getTestId() + ":" + event.getStatus().name();
+        if (olderThanLedger(event)) {
+            LOG.infof(
+                    "Skipping test event %s from %s: older than the %d days processed_events remembers",
+                    idempotencyKey, Instant.ofEpochMilli(event.getTimestamp()), processedRetentionDays);
+            return;
+        }
+        if (!self.checkAndMarkProcessed(idempotencyKey)) {
+            LOG.info("Skipping duplicate test event: " + idempotencyKey);
+            return;
+        }
+        if (event.getStatus() != com.bmscomp.kates.domain.TestResult.TaskStatus.DONE
+                && event.getStatus() != com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED) {
+            return;
+        }
+
+        List<WebhookRegistration> targets = self.list();
+        if (targets.isEmpty()) {
             return;
         }
 
         var payload = new WebhookPayload(
                 "test.completed",
-                run.getId(),
-                run.getTestType() != null ? run.getTestType().name() : "UNKNOWN",
-                run.getStatus().name(),
-                run.getCreatedAt());
+                event.getTestId(),
+                event.getTestType() != null ? event.getTestType() : "UNKNOWN",
+                event.getStatus().name(),
+                java.time.Instant.ofEpochMilli(event.getTimestamp()).toString());
 
-        for (WebhookRegistration reg : registrations) {
+        for (WebhookRegistration reg : targets) {
             fireAsync(reg, payload);
         }
     }
 
+    /**
+     * Whether processed_events may already have forgotten this event.
+     *
+     * <p>The consumer group reads the topic from its start whenever it has no
+     * committed offset ({@code auto.offset.reset=earliest}), and the topic can
+     * keep an event longer than the ledger does: Kafka deletes whole segments, so
+     * an event outlives {@code retention.ms} by up to a segment's age, and a topic
+     * someone else created can keep events for as long as they chose. A ledger
+     * row is written when the event is first read, which is after the event's own
+     * timestamp, so an event younger than the ledger's window is still recognised
+     * if it was handled. An older one may have been handled and can't be checked,
+     * and a webhook that late would tell its receiver nothing it can act on.
+     */
+    private boolean olderThanLedger(com.bmscomp.kates.domain.events.TestEvent event) {
+        return Instant.ofEpochMilli(event.getTimestamp())
+                .isBefore(Instant.now().minus(processedRetentionDays, ChronoUnit.DAYS));
+    }
+
+    @jakarta.transaction.Transactional(jakarta.transaction.Transactional.TxType.REQUIRES_NEW)
+    public void saveToDlq(WebhookRegistration reg, WebhookPayload payload, String errorMessage) {
+        try {
+            String jsonPayload = MAPPER.writeValueAsString(payload);
+            WebhookDlqEntity dlqEntity = new WebhookDlqEntity(reg.name(), reg.url(), jsonPayload, errorMessage);
+            em.persist(dlqEntity);
+        } catch (Exception e) {
+            LOG.error("Failed to persist DLQ event for webhook: " + reg.name(), e);
+        }
+    }
+
     private void fireAsync(WebhookRegistration reg, WebhookPayload payload) {
+        // Re-validate at delivery time: DNS may have changed since registration
+        // (rebinding), and registrations predating the SSRF guard get checked too.
+        try {
+            urlValidator.validate(reg.url());
+        } catch (IllegalArgumentException e) {
+            LOG.errorf("Refusing webhook delivery to %s (%s): %s", reg.name(), reg.url(), e.getMessage());
+            self.saveToDlq(reg, payload, "Blocked by URL policy: " + e.getMessage());
+            return;
+        }
         Thread.startVirtualThread(() -> {
             int maxAttempts = 3;
+            String lastError = "Unknown error";
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
                     String json = MAPPER.writeValueAsString(payload);
@@ -95,10 +207,12 @@ public class WebhookService {
                         LOG.debugf("Webhook %s delivered (attempt %d): %d", reg.name(), attempt, response.statusCode());
                         return;
                     }
+                    lastError = "HTTP " + response.statusCode();
                     LOG.warnf(
                             "Webhook %s returned %d (attempt %d/%d)",
                             reg.name(), response.statusCode(), attempt, maxAttempts);
                 } catch (Exception e) {
+                    lastError = e.getMessage();
                     LOG.warnf(
                             "Webhook %s failed (attempt %d/%d): %s", reg.name(), attempt, maxAttempts, e.getMessage());
                 }
@@ -113,14 +227,13 @@ public class WebhookService {
                 }
             }
             LOG.errorf(
-                    "Webhook %s delivery failed after %d attempts for event %s",
+                    "Webhook %s delivery failed after %d attempts for event %s. Sending to DLQ.",
                     reg.name(), maxAttempts, payload.event());
+            self.saveToDlq(reg, payload, lastError);
         });
     }
 
-    public record WebhookRegistration(String name, String url, String events) {
-    }
+    public record WebhookRegistration(String name, String url, String events) {}
 
-    public record WebhookPayload(String event, String testId, String testType, String status, String timestamp) {
-    }
+    public record WebhookPayload(String event, String testId, String testType, String status, String timestamp) {}
 }

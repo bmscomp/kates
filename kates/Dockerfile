@@ -1,5 +1,7 @@
 # Stage 1: Build the KATES CLI (Go)
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS cli-builder
+# Base images pinned by digest for reproducibility (tag kept for readability).
+# Digests are the multi-arch manifest-list digests; refresh with Renovate/Dependabot.
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS cli-builder
 ENV GOTOOLCHAIN=auto
 WORKDIR /cli
 COPY cli/go.mod cli/go.sum ./
@@ -9,12 +11,12 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
   -trimpath \
   -ldflags="-s -w \
-  -X github.com/klster/kates-cli/cmd.Version=1.0.0 \
-  -X github.com/klster/kates-cli/cmd.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -X github.com/bmscomp/kates/cli/cmd.Version=1.0.0 \
+  -X github.com/bmscomp/kates/cli/cmd.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -o /kates .
 
 # Stage 2: Build the Java application
-FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jdk AS builder
+FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk@sha256:da9d3a4f7650db39b918fc5a2c3da76556fb8cc8e5f3767cdea0bb409286951a AS builder
 WORKDIR /build
 
 COPY kates/pom.xml .
@@ -25,10 +27,10 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 COPY kates/src src
 RUN --mount=type=cache,target=/root/.m2 \
-  ./mvnw package -DskipTests -B
+  ./mvnw package -DskipTests -Dnet.bytebuddy.experimental=true -B
 
 # Stage 3: Runtime — Java app + CLI on PATH
-FROM eclipse-temurin:25-jre
+FROM eclipse-temurin:21-jre@sha256:273396ed5998598ed1091e8d72711c2d36980a0e65103859c55a4e977a41ffd3
 WORKDIR /app
 
 COPY --from=builder /build/target/quarkus-app/ ./
@@ -44,7 +46,26 @@ ENV HOME=/home/kates
 
 EXPOSE 8080
 
+# /q/health/live, not /api/health: the latter makes a live Kafka AdminClient
+# call per request, so it blows the 3s timeout and reports the container
+# unhealthy whenever the broker under test is slow or down — which for a Kafka
+# testing tool is a normal, expected state, not a broken container.
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD curl -f http://localhost:8080/api/health || exit 1
+  CMD curl -f http://localhost:8080/q/health/live || exit 1
 
 ENTRYPOINT ["java", "-jar", "quarkus-run.jar"]
+
+# Labels last: a LABEL change invalidates every following instruction in the
+# build cache, and descriptions get edited far more often than the app does.
+#
+# version/revision/created are deliberately NOT here. They change on every
+# commit, so baking them in would bust the cache constantly; CI supplies them
+# as index annotations at push time instead.
+LABEL org.opencontainers.image.title="kates" \
+      org.opencontainers.image.description="Kates backend — a Kubernetes-native platform for performance testing, chaos engineering and operational resilience auditing of Apache Kafka clusters. Bundles the Quarkus REST/gRPC API server and the kates CLI on the PATH. Runs as non-root, serves on port 8080, liveness at /q/health/live." \
+      org.opencontainers.image.source="https://github.com/bmscomp/kates" \
+      org.opencontainers.image.url="https://github.com/bmscomp/kates" \
+      org.opencontainers.image.documentation="https://github.com/bmscomp/kates/blob/main/docs/registry/kates.md" \
+      org.opencontainers.image.vendor="bmscomp" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.name="docker.io/library/eclipse-temurin:21-jre"

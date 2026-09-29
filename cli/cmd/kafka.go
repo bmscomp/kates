@@ -8,10 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
-	"github.com/klster/kates-cli/tui"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +42,7 @@ var kafkaBrokersCmd = &cobra.Command{
 
 		clusterLabel := "Kafka Cluster"
 		if info.ClusterID != "" {
-			clusterLabel += "  " + dimStyle.Render(info.ClusterID)
+			clusterLabel += "  " + output.DimStyle.Render(info.ClusterID)
 		}
 		output.Banner(clusterLabel, fmt.Sprintf("%v brokers", info.BrokerCount))
 
@@ -62,9 +61,9 @@ var kafkaBrokersCmd = &cobra.Command{
 			idStr := fmt.Sprintf("%v", b.ID)
 			role := ""
 			if idStr == controllerID {
-				role = leaderStyle.Render("★ CONTROLLER")
+				role = output.WarningStyle.Render("★ CONTROLLER")
 			} else {
-				role = dimStyle.Render("follower")
+				role = output.DimStyle.Render("follower")
 			}
 			rack := fmt.Sprintf("%v", b.Rack)
 			if rack == "<nil>" || rack == "" {
@@ -105,7 +104,7 @@ var kafkaTopicsCmd = &cobra.Command{
 
 		label := fmt.Sprintf("Kafka Topics (%d)", len(topics))
 		if filterFlag != "" {
-			label += dimStyle.Render("  filter: " + filterFlag)
+			label += output.DimStyle.Render("  filter: " + filterFlag)
 		}
 		output.Header(label)
 
@@ -153,7 +152,7 @@ var kafkaTopicCmd = &cobra.Command{
 		internal, _ := detail["internal"].(bool)
 		internalLabel := ""
 		if internal {
-			internalLabel = "  " + dimStyle.Render("(internal)")
+			internalLabel = "  " + output.DimStyle.Render("(internal)")
 		}
 		partitions := fmt.Sprintf("%v", detail["partitions"])
 		rf := fmt.Sprintf("%v", detail["replicationFactor"])
@@ -162,11 +161,23 @@ var kafkaTopicCmd = &cobra.Command{
 
 		if configs, ok := detail["configs"].(map[string]interface{}); ok && len(configs) > 0 {
 			output.SubHeader("Configuration")
+			// As in `kates cluster topics describe`: values in force, with
+			// where each comes from when the backend says.
+			sources, _ := detail["configSources"].(map[string]interface{})
+			headers := []string{"Config", "Value"}
+			if len(sources) > 0 {
+				headers = append(headers, "Source")
+			}
 			configRows := make([][]string, 0, len(configs))
 			for k, v := range configs {
-				configRows = append(configRows, []string{k, fmt.Sprintf("%v", v)})
+				row := []string{k, fmt.Sprintf("%v", v)}
+				if len(sources) > 0 {
+					src, _ := sources[k].(string)
+					row = append(row, src)
+				}
+				configRows = append(configRows, row)
 			}
-			output.Table([]string{"Config", "Value"}, configRows)
+			output.Table(headers, configRows)
 		}
 
 		if piRaw, ok := detail["partitionInfo"].([]interface{}); ok && len(piRaw) > 0 {
@@ -239,7 +250,7 @@ var kafkaGroupsCmd = &cobra.Command{
 			case "STABLE":
 				stateLabel = healthyBadge("● STABLE")
 			case "EMPTY":
-				stateLabel = dimStyle.Render("○ EMPTY")
+				stateLabel = output.DimStyle.Render("○ EMPTY")
 			case "DEAD", "DEAD_MEMBER":
 				stateLabel = errorBadge("✖ DEAD")
 			}
@@ -282,7 +293,7 @@ var kafkaGroupCmd = &cobra.Command{
 		if state == "STABLE" {
 			stateLabel = healthyBadge("● STABLE")
 		} else if state == "EMPTY" {
-			stateLabel = dimStyle.Render("○ EMPTY")
+			stateLabel = output.DimStyle.Render("○ EMPTY")
 		} else {
 			stateLabel = warnBadge("⚠ " + state)
 		}
@@ -352,7 +363,7 @@ var kafkaConsumeCmd = &cobra.Command{
 		for _, r := range records {
 			key := fmt.Sprintf("%v", r.Key)
 			if key == "<nil>" {
-				key = dimStyle.Render("(null)")
+				key = output.DimStyle.Render("(null)")
 			}
 			value := fmt.Sprintf("%v", r.Value)
 			if len(value) > 80 {
@@ -385,7 +396,7 @@ var kafkaProduceCmd = &cobra.Command{
 		value := produceValue
 
 		if value == "" {
-			fmt.Print(promptStyle.Render("Value (or pipe via stdin): "))
+			fmt.Print(output.AccentStyle.Render("Value (or pipe via stdin): "))
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
 				value = scanner.Text()
@@ -408,7 +419,7 @@ var kafkaProduceCmd = &cobra.Command{
 
 		output.Success(fmt.Sprintf(
 			"Produced to %s — partition %v, offset %v",
-			leaderStyle.Render(meta.Topic),
+			output.WarningStyle.Render(meta.Topic),
 			meta.Partition,
 			meta.Offset,
 		))
@@ -457,7 +468,7 @@ var kafkaCreateTopicCmd = &cobra.Command{
 		rf := fmt.Sprintf("%v", result["replicationFactor"])
 		output.Success(fmt.Sprintf(
 			"Created topic %s — partitions: %s, replication-factor: %s",
-			leaderStyle.Render(name), partitions, rf,
+			output.WarningStyle.Render(name), partitions, rf,
 		))
 		return nil
 	},
@@ -495,7 +506,7 @@ var kafkaAlterTopicCmd = &cobra.Command{
 
 		output.Success(fmt.Sprintf(
 			"Updated %s config(s) on topic %s",
-			strconv.Itoa(len(cfg)), leaderStyle.Render(name),
+			strconv.Itoa(len(cfg)), output.WarningStyle.Render(name),
 		))
 
 		rows := make([][]string, 0, len(cfg))
@@ -517,15 +528,15 @@ var kafkaDeleteTopicCmd = &cobra.Command{
 		name := args[0]
 
 		if !deleteTopicYes {
-			fmt.Printf("%s Delete topic %s? This cannot be undone. [y/N] ",
-				errorBadge("⚠"), leaderStyle.Render(name))
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-				if answer != "y" && answer != "yes" {
-					output.Hint("Cancelled.")
-					return nil
-				}
+			ok, err := confirm(fmt.Sprintf("%s Delete topic %s? This cannot be undone.",
+				errorBadge("⚠"), output.WarningStyle.Render(name)))
+			if err != nil {
+				return cmdErr("aborted: " + err.Error())
+			}
+			if !ok {
+				// A declined destructive action exits non-zero so scripts that
+				// forgot --yes fail loudly instead of reporting success.
+				return cmdErr("aborted: topic not deleted")
 			}
 		}
 
@@ -539,7 +550,7 @@ var kafkaDeleteTopicCmd = &cobra.Command{
 			return cmdErr("Failed to delete topic: " + err.Error())
 		}
 
-		output.Success(fmt.Sprintf("Deleted topic %s", leaderStyle.Render(name)))
+		output.Success(fmt.Sprintf("Deleted topic %s", output.WarningStyle.Render(name)))
 		return nil
 	},
 }
@@ -548,6 +559,10 @@ var kafkaTuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Launch interactive Kafka explorer (full-screen TUI)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !IsInteractive() {
+			return cmdErr("kates kafka tui is a full-screen TUI and needs a terminal.\n" +
+				"  For scripted access use: kates kafka topics / brokers / groups")
+		}
 		return tui.Run(apiClient)
 	},
 }
@@ -567,46 +582,40 @@ func consumeTail(topic string) error {
 				continue
 			}
 			seen[key] = true
-			keyStr := dimStyle.Render(fmt.Sprintf("[p%v @%v]", r.Partition, r.Offset))
+			keyStr := output.DimStyle.Render(fmt.Sprintf("[p%v @%v]", r.Partition, r.Offset))
 			valueStr := fmt.Sprintf("%v", r.Value)
 			fmt.Printf("%s %s\n", keyStr, valueStr)
 		}
 	}
 }
 
-var (
-	leaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
-	dimStyle    = lipgloss.NewStyle().Faint(true)
-	promptStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
-)
-
 func healthyBadge(s string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render(s)
+	return output.SuccessStyle.Render(s)
 }
 
 func warnBadge(s string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(s)
+	return output.WarningStyle.Render(s)
 }
 
 func topicTypeLabel(name string, internal bool) string {
 	if internal {
-		return dimStyle.Render("internal")
+		return output.DimStyle.Render("internal")
 	}
 	lower := strings.ToLower(name)
 	switch {
 	case strings.HasSuffix(lower, "-test"):
 		return output.AccentStyle.Render("test")
 	case strings.HasPrefix(lower, "kates-"):
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render("system")
+		return output.AccentStyle.Render("system")
 	case strings.HasPrefix(lower, "strimzi."):
-		return dimStyle.Render("strimzi")
+		return output.DimStyle.Render("strimzi")
 	default:
 		return ""
 	}
 }
 
 func errorBadge(s string) string {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(s)
+	return output.ErrorStyle.Render(s)
 }
 
 func highlightLag(lag string) string {

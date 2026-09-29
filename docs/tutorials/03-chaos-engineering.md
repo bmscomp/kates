@@ -8,26 +8,43 @@ This tutorial teaches you to inject controlled failures into your Kafka cluster 
 - LitmusChaos deployed (`make litmus`)
 - A baseline LOAD test completed (from Tutorial 1)
 
-## Part 1: Direct Disruption with Makefile
+## Part 1: The Chaos Execution Plane
 
-The quickest way to run chaos experiments is through the Makefile:
+The `kates-chaos` chart deploys the LitmusChaos execution plane — the operator
+and the ChaosExperiment definitions — but no web portal and no per-experiment
+Make targets. There are two Make targets, one to install it and one to look at
+it:
 
 ```bash
-# Kill a Kafka broker pod
-make chaos-kafka-pod-delete
+# Deploy the chaos execution plane (Kind overlay)
+make litmus
 
-# Create a network partition
-make chaos-kafka-network-partition
-
-# Stress CPU on a broker
-make chaos-kafka-cpu-stress
-
-# Run ALL chaos experiments
-make chaos-kafka-all
-
-# Check experiment status
-make chaos-kafka-status
+# Show the release, its pods, and the chaos CRs in the namespace
+make chaos-status
 ```
+
+The experiments the chart installs are `pod-delete`, `pod-cpu-hog`,
+`pod-memory-hog`, `pod-network-partition`, `pod-io-stress`, `pod-dns-error`
+(all namespaced) and `node-drain` (cluster-scoped).
+
+Running one means creating a `ChaosEngine`. Declaratively, that is an entry
+under the chart's `engines:` map:
+
+```yaml
+# values-chaos.yaml
+engines:
+  kafka-pod-delete:
+    enabled: true
+    appLabel: "strimzi.io/kind=Kafka"
+    experiment: pod-delete
+    duration: 30
+    interval: 10
+    force: true
+    podsAffectedPerc: "50"
+```
+
+Everything from Part 2 on drives the same machinery through the CLI instead,
+which is what you want for anything repeatable.
 
 Monitor the cluster during chaos:
 
@@ -36,8 +53,28 @@ Monitor the cluster during chaos:
 kubectl get pods -n kafka -w
 
 # In another terminal — watch Grafana
-# Open http://localhost:30080 → Kafka Cluster Health dashboard
+# Open http://localhost:30080 → "Kates — Chaos"
 ```
+
+> **Not the "Kafka Cluster Health" board.** It was one of the nine legacy Kafka
+> boards behind `legacyKafkaDashboards.enabled` in `charts/monitoring`, and both
+> the boards and the flag are gone in 1.3.0 — they read series names that
+> kafka-cluster 1.0's exporter rules (Strimzi's own) do not produce, so their
+> panels came up empty. For the cluster's side of a chaos run, open **Kafka —
+> KRaft Operations**; for broker health as a machine, the Strimzi operator's own
+> `strimzi-kafka.json`. Every board this repository ships now lives in
+> `dashboards/`, with a README each and a metric reference in
+> `dashboards/METRICS.md` — including the last holdout, `charts/kates-chaos`'s
+> own board, which until chart 2.1.0 was hand-written JSON inside its template.
+
+> **If "Kates — Chaos" is empty, open "Kates — Chaos infrastructure" next.**
+> That board (uid `kates-chaos-overview`, delivered by `charts/monitoring`
+> with every other board) answers whether the LitmusChaos
+> execution plane is installed and running at all, which is a different
+> question from what a fault did to the cluster. Its two kube-state-metrics
+> panels fill whether or not Litmus is scraped, so a green operator tile beside
+> blank Litmus panels means the chaos-exporter is off — it is, by default
+> (`litmus-core.exporter.enabled`) — rather than that nothing ran.
 
 ## Part 2: Kates Disruption Plans
 
@@ -53,20 +90,23 @@ Output:
 
 ```
   Available Disruption Types
-  ┌────────────────────┬──────────────────────────────────────────────┐
-  │ Type               │ Description                                  │
-  ├────────────────────┼──────────────────────────────────────────────┤
-  │ POD_KILL           │ Immediately terminate a broker pod            │
-  │ POD_DELETE         │ Gracefully delete a broker pod                │
-  │ NETWORK_PARTITION  │ Isolate a broker from the cluster             │
-  │ NETWORK_LATENCY    │ Inject latency into broker network            │
-  │ CPU_STRESS         │ Saturate CPU on a broker node                 │
-  │ DISK_FILL          │ Fill the broker's persistent volume           │
-  │ ROLLING_RESTART    │ Restart all brokers sequentially              │
-  │ LEADER_ELECTION    │ Force leader re-election for a partition      │
-  │ SCALE_DOWN         │ Reduce the number of broker replicas          │
-  │ NODE_DRAIN         │ Drain a Kubernetes node                       │
-  └────────────────────┴──────────────────────────────────────────────┘
+  ┌────────────────────┬──────────────────────────────────────────────────────────────┐
+  │ Type               │ Description                                                  │
+  ├────────────────────┼──────────────────────────────────────────────────────────────┤
+  │ POD_KILL           │ Force-delete a broker pod (SIGKILL, gracePeriod=0)            │
+  │ POD_DELETE         │ Gracefully delete a broker pod (SIGTERM with grace period)    │
+  │ NETWORK_PARTITION  │ Isolate a broker from peers via NetworkPolicy                 │
+  │ NETWORK_LATENCY    │ Inject network latency on broker interfaces                   │
+  │ CPU_STRESS         │ Exhaust CPU on broker container                               │
+  │ MEMORY_STRESS      │ Consume memory on broker container to simulate OOM pressure   │
+  │ IO_STRESS          │ Inject disk I/O pressure on broker storage                    │
+  │ DNS_ERROR          │ Inject DNS resolution failures on broker pods                 │
+  │ DISK_FILL          │ Fill broker log directory to simulate storage pressure        │
+  │ ROLLING_RESTART    │ Trigger StatefulSet rolling restart                           │
+  │ LEADER_ELECTION    │ Kill the controller broker to force leader election           │
+  │ SCALE_DOWN         │ Remove a broker from each selected KafkaNodePool              │
+  │ NODE_DRAIN         │ Drain the Kubernetes node hosting a broker                    │
+  └────────────────────┴──────────────────────────────────────────────────────────────┘
 ```
 
 ### Step 2: Create a Disruption Plan
@@ -80,12 +120,12 @@ Create a file called `broker-kill-plan.json`:
   "autoRollback": true,
   "steps": [
     {
-      "name": "kill-broker-0",
+      "name": "kill-one-broker",
       "faultSpec": {
         "experimentName": "broker-kill",
         "disruptionType": "POD_KILL",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 30,
         "gracePeriodSec": 0
       },
@@ -96,6 +136,10 @@ Create a file called `broker-kill-plan.json`:
   ]
 }
 ```
+
+The step hits one pod at random among those the selector matches.
+`strimzi.io/cluster=krafter` would match every pod Strimzi runs for the cluster,
+the KRaft controllers included, so the selector names the brokers.
 
 ### Step 3: Dry Run
 
@@ -110,6 +154,8 @@ The dry run checks:
 - Plan is syntactically valid
 - Target namespace and labels are correct
 
+When the safety guard would refuse the plan, the verdict is UNSAFE and the command exits 1, so a script can stop here.
+
 ### Step 4: Execute
 
 ```bash
@@ -121,8 +167,8 @@ Expected output:
 ```
   ◉ Executing disruption plan: single-broker-kill
 
-  Step 1/1: kill-broker-0
-  ────────────────────────
+  Step 1/1: kill-one-broker
+  ──────────────────────────
   Type         POD_KILL
   Target       kafka/krafter-pool-alpha-0
   Duration     30s
@@ -191,7 +237,7 @@ graph LR
 
 ### az-failure
 
-Simulates a full availability zone failure — drains a Kubernetes node:
+Simulates a full availability zone failure — kills every Kafka pod labelled `zone=alpha` at once (`targetAll: true`):
 
 ```mermaid
 graph TB
@@ -199,9 +245,9 @@ graph TB
         N1[alpha ✅] & N2[sigma ✅] & N3[gamma ✅]
     end
     subgraph After
-        N1b[alpha ❌ DRAINED] & N2b[sigma ✅] & N3b[gamma ✅]
+        N1b[alpha ❌ KILLED] & N2b[sigma ✅] & N3b[gamma ✅]
     end
-    Before -->|"NODE_DRAIN"| After
+    Before -->|"POD_KILL"| After
 ```
 
 ### rolling-restart
@@ -216,26 +262,47 @@ Network-isolates the consumer to test rebalancing behavior.
 
 Fills broker disk to trigger log retention.
 
+### Preview, Then Run
+
+Read a playbook's plan and preview it before you run it. The dry run lists the pods each step would hit and checks the blast radius; it kills nothing:
+
+```bash
+# The steps the playbook runs, with the defaults its YAML leaves out
+kates disruption playbook show leader-cascade
+
+# Which brokers it would kill right now
+kates disruption playbook run leader-cascade --dry-run
+
+# Run it and wait for the report
+kates disruption playbook run leader-cascade
+```
+
 ## Part 4: Resilience Testing (Performance + Chaos)
 
 The most powerful mode — run a performance test while simultaneously injecting chaos:
 
 ### Step 1: Create a Resilience Config
 
+The `testRequest` goes to the API as written, so it takes the API's field names
+(`type`, `numRecords`, `recordSize`), not a scenario file's `records` or
+`recordSizeBytes`:
+
 ```json
 {
   "testRequest": {
-    "testType": "LOAD",
+    "type": "LOAD",
     "spec": {
-      "records": 200000,
-      "producers": 4,
-      "recordSizeBytes": 1024,
+      "numRecords": 200000,
+      "throughput": 1000,
+      "recordSize": 1024,
       "acks": "all"
     }
   },
   "chaosSpec": {
     "experimentName": "kafka-pod-kill",
-    "targetNamespace": "kafka"
+    "disruptionType": "POD_KILL",
+    "targetNamespace": "kafka",
+    "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
   },
   "steadyStateSec": 30
 }
@@ -243,52 +310,39 @@ The most powerful mode — run a performance test while simultaneously injecting
 
 Save as `resilience-test.json`.
 
+The fault comes after the 30 seconds of `steadyStateSec`, so the run must still
+be producing then. A LOAD run is unthrottled unless you set `throughput`, and at
+1,000 records per second these 200,000 records take about 200 seconds. Keep
+`disruptionType`: without it the direct Kubernetes provider refuses the fault,
+and LitmusChaos looks for a ChaosExperiment named after `experimentName`, which
+the chart does not install. The selector names the brokers, as in Part 2.
+
 ### Step 2: Execute
 
 ```bash
-kates resilience run --config resilience-test.json
+kates resilience run -f resilience-test.json
 ```
 
 ### Step 3: Interpret the Impact Analysis
 
-```
-  Resilience Test Results
-  ───────────────────────
-  Status     COMPLETED ✅
+The command returns once the fault has ended and the backend has waited for the
+cluster to recover, which can be before the LOAD run finishes, and prints four
+blocks:
 
-  Chaos Outcome
-  ─────────────
-  Experiment   kafka-pod-kill
-  Verdict      PASS ✅
-  Duration     30s
+| Block | What it shows |
+|-------|---------------|
+| Status | `COMPLETED` when the chaos outcome passed, `CHAOS_FAILED` when it did not, `ERROR` with the reason when the run failed, `INTERRUPTED` when the backend was interrupted before the run ended |
+| Chaos Outcome | The experiment, its verdict, and how long the fault lasted |
+| Impact Analysis (% change) | How `throughputRecPerSec`, `avgLatencyMs`, `p99LatencyMs`, `maxLatencyMs` and `errorRate` changed, with ▲ or ▼ beside a change beyond 10% |
+| Pre-Chaos Baseline, Post-Chaos Impact | The run's throughput, P99 latency and error rate so far: just before the fault, and again once the cluster has recovered or the recovery wait, 120 seconds by default, has run out |
 
-  Impact Analysis (% change)
-  ┌─────────────────────────────┬──────────┬───┐
-  │ Metric                      │ Change   │   │
-  ├─────────────────────────────┼──────────┼───┤
-  │ throughputRecordsPerSec     │ -15.6%   │ ▼ │
-  │ p99LatencyMs                │ +596.7%  │ ▲ │
-  │ errorRate                   │ +0.3%    │   │
-  └─────────────────────────────┴──────────┴───┘
-
-  Pre-Chaos Baseline
-  ──────────────────
-  Throughput    45,000 rec/s
-  P99 Latency   12.3ms
-  Error Rate    0.0000%
-
-  Post-Chaos Impact
-  ─────────────────
-  Throughput    38,000 rec/s
-  P99 Latency   85.7ms
-  Error Rate    0.3000%
-```
-
-**Interpretation:**
-- Throughput dropped 15.6% — the cluster absorbed the impact
-- P99 latency spiked nearly 6x — during leader election
-- Error rate was 0.3% — a few messages timed out and were retried
-- Overall verdict: PASS — the cluster recovered and no data was lost
+Read the Impact Analysis first: it is the cost of the fault. With three replicas
+and `min.insync.replicas=2`, losing one broker should cost latency while
+partition leaders move, and no records. A LOAD run does not check for lost
+records, though. To prove that nothing was lost, run an INTEGRITY test through
+the fault, as [Tutorial 4](04-integrity-under-fire.md) does. `kates test list`
+shows the LOAD run, and `kates report show <id>` its full report once it has
+finished.
 
 ## Part 5: Multi-Step Disruption Plans
 
@@ -306,7 +360,7 @@ For comprehensive testing, create multi-step plans:
         "experimentName": "graceful",
         "disruptionType": "POD_DELETE",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 10
       },
       "steadyStateSec": 15,
@@ -319,7 +373,7 @@ For comprehensive testing, create multi-step plans:
         "experimentName": "hard-kill",
         "disruptionType": "POD_KILL",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 10,
         "gracePeriodSec": 0
       },
@@ -333,7 +387,7 @@ For comprehensive testing, create multi-step plans:
         "experimentName": "cpu-stress",
         "disruptionType": "CPU_STRESS",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
         "chaosDurationSec": 60
       },
       "steadyStateSec": 15,
@@ -351,9 +405,11 @@ kates disruption run --config full-suite.json --dry-run
 # Execute
 kates disruption run --config full-suite.json
 
-# Watch progress in real-time
-kates disruption watch <id>
+# Follow its progress
+kates disruption status <id>
 ```
+
+`kates disruption watch <id>` is meant to stream the run's progress, but the backend emits its events under the plan's name rather than the disruption ID, so for now it receives nothing; `kates disruption status <id>` shows where the run stands.
 
 ## What's Next?
 

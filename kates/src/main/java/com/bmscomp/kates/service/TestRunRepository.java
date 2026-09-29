@@ -19,9 +19,82 @@ public class TestRunRepository {
     @Inject
     EntityManager em;
 
+    /**
+     * Shared, thread-safe mapper. A new ObjectMapper was being constructed on
+     * every save — each one builds and warms its own serializer cache, so the
+     * write path paid that cost per persisted run instead of once per process.
+     */
+    private static final com.fasterxml.jackson.databind.ObjectMapper OUTBOX_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * Saves a run only if its persisted status is still {@code expectedCurrent}
+     * — a compare-and-set on the run's state.
+     *
+     * <p>Needed because a plain save is last-write-wins: the timeout reaper
+     * decides a run has expired, and by the time it writes FAILED a real
+     * completion may already have landed, silently overwriting it. The
+     * {@code @Version} column alone does not catch this, since every save
+     * re-reads the freshest row and therefore never sees a stale version. This
+     * check does, by refusing to write over a state that moved on.
+     *
+     * @return true if the run was saved, false if another writer changed its
+     *     status first (the caller should leave it alone)
+     */
+    @Transactional
+    public boolean saveIfStatus(TestRun run, com.bmscomp.kates.domain.TestResult.TaskStatus expectedCurrent) {
+        // Row lock so the status cannot change between this check and the write.
+        // save() below runs in THIS transaction (self-invocation, so its own
+        // @Transactional does not start a new one) — which is exactly what makes
+        // the check and the write atomic.
+        TestRunEntity existing =
+                em.find(TestRunEntity.class, run.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        if (existing == null || existing.getStatus() != expectedCurrent) {
+            return false;
+        }
+        save(run);
+        return true;
+    }
+
     @Transactional
     public void save(TestRun run) {
-        em.merge(EntityMapper.toEntity(run));
+        TestRunEntity existing = em.find(TestRunEntity.class, run.getId());
+        com.bmscomp.kates.domain.TestResult.TaskStatus previousStatus = existing != null ? existing.getStatus() : null;
+
+        if (existing == null) {
+            em.persist(EntityMapper.toEntity(run));
+        } else {
+            // Mutate the MANAGED entity so Hibernate dirty-checks it. merge() of
+            // a freshly built graph re-created every child with a null id, which
+            // under orphanRemoval deleted and re-inserted the entire results
+            // collection on every status poll.
+            EntityMapper.updateEntity(existing, run);
+        }
+
+        // Enqueue an outbox event only on a real state CHANGE. This used to fire
+        // on every save — including each status poll and every reaper pass — so
+        // the outbox filled with duplicate test.lifecycle events for runs whose
+        // state had not moved, and the poller republished them all.
+        if (previousStatus == run.getStatus()) {
+            return;
+        }
+
+        try {
+            com.bmscomp.kates.domain.events.TestEvent testEvent = new com.bmscomp.kates.domain.events.TestEvent(
+                    run.getId(),
+                    run.getTestType() != null ? run.getTestType().name() : "UNKNOWN",
+                    run.getStatus(),
+                    "",
+                    System.currentTimeMillis());
+            String payload = OUTBOX_MAPPER.writeValueAsString(testEvent);
+
+            com.bmscomp.kates.persistence.OutboxEventEntity outboxEvent =
+                    new com.bmscomp.kates.persistence.OutboxEventEntity(
+                            run.getId(), "TestRun", "test.lifecycle", payload);
+            em.persist(outboxEvent);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to persist outbox event", e);
+        }
     }
 
     public Optional<TestRun> findById(String id) {
@@ -79,15 +152,12 @@ public class TestRunRepository {
     public List<TestRun> findByLabelJsonb(String key, String value) {
         try {
             String jsonPattern = "{\"" + key + "\":\"" + value + "\"}";
-            return ((List<TestRunEntity>) em
-                    .createNativeQuery(
-                            "SELECT * FROM test_runs WHERE labels_json @> CAST(:pattern AS jsonb) ORDER BY created_at DESC",
-                            TestRunEntity.class)
-                    .setParameter("pattern", jsonPattern)
-                    .getResultList())
-                    .stream()
-                    .map(EntityMapper::toDomainSummary)
-                    .collect(Collectors.toList());
+            return ((List<TestRunEntity>) em.createNativeQuery(
+                                    "SELECT * FROM test_runs WHERE labels_json @> CAST(:pattern AS jsonb) ORDER BY created_at DESC",
+                                    TestRunEntity.class)
+                            .setParameter("pattern", jsonPattern)
+                            .getResultList())
+                    .stream().map(EntityMapper::toDomainSummary).collect(Collectors.toList());
         } catch (Exception e) {
             return findByLabel(key, value);
         }
@@ -139,6 +209,26 @@ public class TestRunRepository {
     public long countByType(TestType type) {
         return em.createQuery("SELECT COUNT(r) FROM TestRunEntity r WHERE r.testType = :type", Long.class)
                 .setParameter("type", type)
+                .getSingleResult();
+    }
+
+    public List<TestRun> findByStatusPaged(com.bmscomp.kates.domain.TestResult.TaskStatus status, int page, int size) {
+        return em
+                .createQuery(
+                        "SELECT r FROM TestRunEntity r WHERE r.status = :status ORDER BY r.createdAt DESC",
+                        TestRunEntity.class)
+                .setParameter("status", status)
+                .setFirstResult(page * size)
+                .setMaxResults(size)
+                .getResultList()
+                .stream()
+                .map(EntityMapper::toDomainSummary)
+                .collect(Collectors.toList());
+    }
+
+    public long countByStatus(com.bmscomp.kates.domain.TestResult.TaskStatus status) {
+        return em.createQuery("SELECT COUNT(r) FROM TestRunEntity r WHERE r.status = :status", Long.class)
+                .setParameter("status", status)
                 .getSingleResult();
     }
 

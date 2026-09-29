@@ -1,0 +1,45 @@
+# Kafka 2.8.2 — the 2.x migration source.
+#
+# 2.x has no KRaft, so this is ZooKeeper mode. There is also no official Apache
+# Kafka container image below 3.7.0 (KIP-975 starts there), so this overlay
+# points at the image built by Dockerfile.legacy-kafka:
+#
+#   make legacy-kafka-image            # build + load into kind
+#   scripts/build-legacy-kafka-image.sh --version 2.8.2 --load
+#
+# Kafka is pure Java, so that image is architecture-neutral — which matters,
+# because no 2.8 image with an arm64 variant exists anywhere upstream.
+#
+# 2.8.2 is the last 2.x release, and it is comfortably above the KIP-896 floor
+# (broker >= 2.1) that a 4.x MirrorMaker 2 client enforces. Anything at or below
+# 2.0.x cannot be mirrored by a 4.x MM2 at all — see the two-hop path in
+# docs/tutorials/11-migrating-kafka-2x-to-4x.md.
+mode: zookeeper
+
+kafka:
+  version: "2.8.2"
+  image: "ghcr.io/bmscomp/kates-legacy-kafka:2.8.2"
+  replicas: 1
+  replicationFactor: 1
+  heapOpts: "-Xms512m -Xmx512m"
+  config:
+    # The era default. Named explicitly because a migration reader should see
+    # what protocol the source is actually speaking.
+    inter.broker.protocol.version: "2.8"
+    log.message.format.version: "2.8"
+    log.retention.hours: 168
+
+zookeeper:
+  replicas: 1
+  heapOpts: "-Xms256m -Xmx256m"
+
+topics:
+  - name: kates.orders
+    partitions: 3
+    replicationFactor: 1
+  - name: kates.payments
+    partitions: 3
+    replicationFactor: 1
+  - name: kates.audit
+    partitions: 1
+    replicationFactor: 1

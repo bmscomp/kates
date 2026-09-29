@@ -1,0 +1,134 @@
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- $k := include "connect-cluster.kafka" . | fromYaml }}
+{{- $name := include "connect-cluster.fullname" . }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $name }}-test-connect
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "connect-cluster.serviceAccountName" . }}
+  restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    fsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: connect
+      image: {{ .Values.testImages.kubectl }}
+      {{- include "connect-cluster.imagePullPolicy" . | nindent 6 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          FAIL=0; PASS=0
+          ok()   { PASS=$((PASS+1)); echo "  ✓ $1"; }
+          fail() { FAIL=$((FAIL+1)); echo "  ✗ $1"; }
+          info() { echo "  ℹ $1"; }
+
+          CONNECT={{ $name | quote }}
+          NS={{ include "connect-cluster.namespace" . | quote }}
+          SELECTOR="strimzi.io/name=${CONNECT}-connect"
+          REST="http://${CONNECT}-connect-api.${NS}.svc:8083"
+          worker() { kubectl get pods -n "$NS" -l "$SELECTOR" --field-selector=status.phase=Running -o name | head -1; }
+          rest()   { kubectl exec -n "$NS" "$(worker)" -- curl -sf --connect-timeout 10 --max-time 30 "${REST}$1"; }
+
+          {{- with ($k.authentication).secretName }}
+          echo ""
+          echo "=== Tier 0: credentials ==="
+          if kubectl get secret {{ . | quote }} -n "$NS" >/dev/null 2>&1; then
+            ok "Secret {{ . }} is present"
+          else
+            fail "Secret {{ . }} is missing in $NS{{ if $.Values.kafkaUser.create }} — check the User Operator and the secret-sync Job{{ else }} — create it, or set kafkaUser.create=true{{ end }}"
+          fi
+          {{- end }}
+
+          echo ""
+          echo "=== Tier 1: KafkaConnect Ready ==="
+          READY=$(kubectl get kafkaconnect "$CONNECT" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+          if [ "$READY" = "True" ]; then
+            ok "KafkaConnect $CONNECT is Ready"
+          else
+            fail "KafkaConnect $CONNECT Ready=${READY:-<none>}"
+            info "$(kubectl get kafkaconnect "$CONNECT" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null)"
+          fi
+
+          echo ""
+          echo "=== Tier 2: workers ==="
+          RUNNING=$(kubectl get pods -n "$NS" -l "$SELECTOR" --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          {{- if include "kafka-common.enabled" (list (.Values.autoscaling).enabled false) }}
+          EXPECTED={{ .Values.autoscaling.minReplicas | default 3 }}   # the HPA may run more
+          {{- else }}
+          EXPECTED={{ .Values.replicas }}
+          {{- end }}
+          if [ "$RUNNING" -ge "$EXPECTED" ]; then ok "$RUNNING worker(s) running"; else fail "$RUNNING of $EXPECTED worker(s) running"; fi
+
+          echo ""
+          echo "=== Tier 3: REST API ==="
+          # From inside a worker: the REST port admits the workers themselves,
+          # the operator and the declared clients, not this pod.
+          INFO=$(rest /)
+          if [ -n "$INFO" ]; then
+            ok "REST API answers: $(echo "$INFO" | grep -o '"version":"[^"]*"' | head -1)"
+          else
+            fail "REST API at $REST did not answer"
+          fi
+
+          echo ""
+          echo "=== Tier 4: plugins ==="
+          PLUGINS=$(rest /connector-plugins)
+          if [ -z "$PLUGINS" ]; then
+            fail "could not list the connector plugins"
+          else
+            info "$(echo "$PLUGINS" | grep -o '"class"' | wc -l | tr -d ' ') plugin(s) offered"
+            # A plugin whose jars cannot load is dropped from this list while
+            # the worker starts anyway — so each expected class is named.
+            for WANT in {{ range $r.expectedPlugins }}{{ . | quote }} {{ end }}; do
+              if echo "$PLUGINS" | grep -q "\"$WANT\""; then ok "offered: $WANT"; else fail "MISSING: $WANT"; fi
+            done
+          fi
+
+          {{- with $r.connectors }}
+          echo ""
+          echo "=== Tier 5: connectors ==="
+          {{- range . }}
+          C={{ .name | quote }}
+          READY=$(kubectl get kafkaconnector "$C" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+          STATE=$(kubectl get kafkaconnector "$C" -n "$NS" -o jsonpath='{.status.connectorStatus.connector.state}' 2>/dev/null)
+          TASKS=$(kubectl get kafkaconnector "$C" -n "$NS" -o jsonpath='{range .status.connectorStatus.tasks[*]}{.state}{"\n"}{end}' 2>/dev/null | grep -c . || true)
+          BAD=$(kubectl get kafkaconnector "$C" -n "$NS" -o jsonpath='{range .status.connectorStatus.tasks[*]}{.state}{"\n"}{end}' 2>/dev/null | grep -vc '^RUNNING$\|^PAUSED$\|^STOPPED$' || true)
+          {{- $want := upper (.state | default "running") }}
+          # A connector with no tasks at all is a real failure (a source whose
+          # pattern matched nothing, a connector that produced no task
+          # configs), and counting only BAD lines would call it healthy.
+          if [ "$READY" = "True" ] && [ "$STATE" = {{ $want | quote }} ] && [ "${TASKS:-0}" -gt 0 ] && [ "${BAD:-0}" -eq 0 ]; then
+            ok "$C is {{ $want }} with ${TASKS} task(s)"
+          else
+            fail "$C: Ready=${READY:-<none>} state=${STATE:-<none>} (want {{ $want }}), ${TASKS:-0} task(s), ${BAD:-?} not running"
+          fi
+          {{- end }}
+          {{- end }}
+
+          echo ""
+          echo "Connect: $PASS passed, $FAIL failed"
+          [ "$FAIL" -eq 0 ]
+      securityContext:
+        {{- include "connect-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

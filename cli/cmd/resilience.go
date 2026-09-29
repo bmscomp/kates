@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -25,6 +25,7 @@ type ResilienceConfig struct {
 		TargetNamespace  string            `yaml:"targetNamespace,omitempty" json:"targetNamespace,omitempty"`
 		TargetLabel      string            `yaml:"targetLabel,omitempty" json:"targetLabel,omitempty"`
 		TargetPod        string            `yaml:"targetPod,omitempty" json:"targetPod,omitempty"`
+		TargetAll        bool              `yaml:"targetAll,omitempty" json:"targetAll,omitempty"`
 		ChaosDurationSec int               `yaml:"chaosDurationSec,omitempty" json:"chaosDurationSec,omitempty"`
 		DelayBeforeSec   int               `yaml:"delayBeforeSec,omitempty" json:"delayBeforeSec,omitempty"`
 		DisruptionType   string            `yaml:"disruptionType,omitempty" json:"disruptionType,omitempty"`
@@ -140,6 +141,9 @@ var resilienceRunCmd = &cobra.Command{
 
 		output.Header("Resilience Test Results")
 		output.KeyValue("Status", output.StatusBadge(result.Status))
+		if result.Error != "" {
+			output.KeyValue("Error", result.Error)
+		}
 
 		if chaos := result.ChaosOutcome; chaos != nil {
 			output.SubHeader("Chaos Outcome")

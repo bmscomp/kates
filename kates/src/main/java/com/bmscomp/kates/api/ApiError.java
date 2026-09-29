@@ -27,6 +27,17 @@ public class ApiError {
         return new ApiError(status, error, message);
     }
 
+    /**
+     * A 400 with the body a failed bean validation has, for a check made in
+     * code: fieldErrors names each field, and the message names them too, for
+     * clients that print only the message.
+     */
+    public static ApiError validationFailed(String message, Map<String, String> fieldErrors) {
+        ApiError error = new ApiError(400, "Validation Failed", message);
+        error.setFieldErrors(fieldErrors);
+        return error;
+    }
+
     public int getStatus() {
         return status;
     }

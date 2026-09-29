@@ -1,0 +1,1904 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "icon": "doc",
+      "targetBlank": true,
+      "title": "Cutover checklist (runbook)",
+      "type": "link",
+      "url": "https://github.com/bmscomp/kates/blob/main/docs/mirror-maker2-runbook.md#cutover-checklist"
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "Can I cut over yet?",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "DRAINED when all three of: replication lag below 5000ms, nothing in flight, and no failed tasks. The first factor of the query is the workers' own task count with no `or vector(0)` fallback, so a release that is reporting NOTHING reads as No data rather than as drained \u2014 every other factor defaults to the healthy value when its series is absent, and without that guard a dead scrape would show green. It also does NOT know whether producers have stopped writing to the source: no MirrorMaker metric says that, and confirming the source's end offsets are static (twice, 60 seconds apart) is still step 1 of the runbook's checklist. DRAINED means the mirror has caught up with what it was given, not that the source is quiet.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 0,
+                  "text": "NOT YET"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 1,
+                  "text": "DRAINED"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 1,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(kafka_connect_worker_metrics_task_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) >= bool 0) * ((max(kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0) or vector(0)) < bool 5000) * ((sum(kafka_connect_source_task_metrics_source_record_active_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) or vector(0)) == bool 0) * ((sum(kafka_connect_worker_metrics_connector_failed_task_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) or vector(0)) == bool 0)",
+          "legendFormat": "ready",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Safe to cut over?",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The newest record's end-to-end latency, across every mirrored topic. Green below 5000ms, the value the go/no-go panel uses. Zero is what the checklist asks for; this is the number that says how close you are.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 5000
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(max(kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0)) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "legendFormat": "lag",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Replication lag",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Polled from the source and not yet acknowledged by the target. This is the 'one full refresh interval to drain what was in flight' of the checklist, as a number rather than a wait.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(kafka_connect_source_task_metrics_source_record_active_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "legendFormat": "in flight",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Records in flight",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How long until the fetchers reach the end of the source's log, at the rate the record age has been falling over the last ten minutes. Negative means it is getting further behind, not closer \u2014 the mirror is losing to the producers, and no amount of waiting will drain it.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max(kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0) / -deriv(max(kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0)[10m:])",
+          "legendFormat": "eta",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Catch-up ETA",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Any failed task means part of the mirror is not replicating, and the partitions that task owned are behind by an unknown amount. A cutover on top of this loses those records.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(kafka_connect_worker_metrics_connector_failed_task_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "legendFormat": "failed",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Failed tasks",
+      "type": "stat"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 7,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The hour of day with the least crossing the mirror, averaged over the last 7 days, and how much crosses then. This is the migration window the traffic points at: the fewest records to stop at the source, the least to drain, the fewest consumers reading. UTC, because hour() knows no other zone. No data is a mirror with no samples yet.",
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 1,
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 7
+          },
+          "id": 8,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "bottomk(1, label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 0))[7d:30m]), \"hour\", \"00\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 1))[7d:30m]), \"hour\", \"01\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 2))[7d:30m]), \"hour\", \"02\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 3))[7d:30m]), \"hour\", \"03\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 4))[7d:30m]), \"hour\", \"04\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 5))[7d:30m]), \"hour\", \"05\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 6))[7d:30m]), \"hour\", \"06\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 7))[7d:30m]), \"hour\", \"07\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 8))[7d:30m]), \"hour\", \"08\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 9))[7d:30m]), \"hour\", \"09\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 10))[7d:30m]), \"hour\", \"10\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 11))[7d:30m]), \"hour\", \"11\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 12))[7d:30m]), \"hour\", \"12\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 13))[7d:30m]), \"hour\", \"13\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 14))[7d:30m]), \"hour\", \"14\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 15))[7d:30m]), \"hour\", \"15\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 16))[7d:30m]), \"hour\", \"16\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 17))[7d:30m]), \"hour\", \"17\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 18))[7d:30m]), \"hour\", \"18\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 19))[7d:30m]), \"hour\", \"19\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 20))[7d:30m]), \"hour\", \"20\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 21))[7d:30m]), \"hour\", \"21\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 22))[7d:30m]), \"hour\", \"22\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 23))[7d:30m]), \"hour\", \"23\", \"\", \"\"))",
+              "legendFormat": "{{hour}}:00",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Quietest hour (UTC)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The other end of the same profile \u2014 the hour to avoid, and the size of the gap between the two. A busiest hour barely above the quietest is a source with no daily pattern, and then the window is whenever the people are ready rather than whenever the traffic is.",
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 1,
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 7
+          },
+          "id": 9,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "topk(1, label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 0))[7d:30m]), \"hour\", \"00\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 1))[7d:30m]), \"hour\", \"01\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 2))[7d:30m]), \"hour\", \"02\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 3))[7d:30m]), \"hour\", \"03\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 4))[7d:30m]), \"hour\", \"04\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 5))[7d:30m]), \"hour\", \"05\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 6))[7d:30m]), \"hour\", \"06\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 7))[7d:30m]), \"hour\", \"07\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 8))[7d:30m]), \"hour\", \"08\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 9))[7d:30m]), \"hour\", \"09\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 10))[7d:30m]), \"hour\", \"10\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 11))[7d:30m]), \"hour\", \"11\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 12))[7d:30m]), \"hour\", \"12\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 13))[7d:30m]), \"hour\", \"13\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 14))[7d:30m]), \"hour\", \"14\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 15))[7d:30m]), \"hour\", \"15\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 16))[7d:30m]), \"hour\", \"16\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 17))[7d:30m]), \"hour\", \"17\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 18))[7d:30m]), \"hour\", \"18\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 19))[7d:30m]), \"hour\", \"19\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 20))[7d:30m]), \"hour\", \"20\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 21))[7d:30m]), \"hour\", \"21\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 22))[7d:30m]), \"hour\", \"22\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 23))[7d:30m]), \"hour\", \"23\", \"\", \"\"))",
+              "legendFormat": "{{hour}}:00",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Busiest hour (UTC)",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "What is crossing right now as a multiple of the quietest hour's average: 1 is as quiet as this source ever gets, 5 is five times busier than its best hour. Green within one and a half times, amber to three, red beyond \u2014 a cutover started in red drains against a source still at full flow.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "decimals": 1,
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1.5
+                  },
+                  {
+                    "color": "red",
+                    "value": 3
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 7
+          },
+          "id": 10,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) / on() bottomk(1, label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 0))[7d:30m]), \"hour\", \"00\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 1))[7d:30m]), \"hour\", \"01\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 2))[7d:30m]), \"hour\", \"02\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 3))[7d:30m]), \"hour\", \"03\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 4))[7d:30m]), \"hour\", \"04\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 5))[7d:30m]), \"hour\", \"05\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 6))[7d:30m]), \"hour\", \"06\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 7))[7d:30m]), \"hour\", \"07\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 8))[7d:30m]), \"hour\", \"08\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 9))[7d:30m]), \"hour\", \"09\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 10))[7d:30m]), \"hour\", \"10\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 11))[7d:30m]), \"hour\", \"11\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 12))[7d:30m]), \"hour\", \"12\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 13))[7d:30m]), \"hour\", \"13\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 14))[7d:30m]), \"hour\", \"14\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 15))[7d:30m]), \"hour\", \"15\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 16))[7d:30m]), \"hour\", \"16\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 17))[7d:30m]), \"hour\", \"17\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 18))[7d:30m]), \"hour\", \"18\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 19))[7d:30m]), \"hour\", \"19\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 20))[7d:30m]), \"hour\", \"20\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 21))[7d:30m]), \"hour\", \"21\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 22))[7d:30m]), \"hour\", \"22\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 23))[7d:30m]), \"hour\", \"23\", \"\", \"\"))",
+              "legendFormat": "now / quietest",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Now, against the quietest hour",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Records crossing the mirror this instant, the number the profile is built from. The zero is anchored to the workers' own rebalance series, so a release Prometheus is not scraping reads No data rather than quiet.",
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 1,
+              "mappings": [
+                {
+                  "options": {
+                    "match": "null",
+                    "result": {
+                      "color": "text",
+                      "index": 0,
+                      "text": "No data"
+                    }
+                  },
+                  "type": "special"
+                }
+              ],
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 7
+          },
+          "id": 11,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "(sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+              "legendFormat": "records/s",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Crossing now",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The daily shape of the source's traffic as the mirror saw it: one bar per hour of day, each the average of every half-hour sample of the last 7 days that fell in that hour. The trough is the window; a bar missing at one end is an hour the mirror has not seen yet \u2014 it has been up for less than a day. Hours are UTC.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "fillOpacity": 80
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 11
+          },
+          "id": 12,
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "orientation": "vertical",
+            "showValue": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 0))[7d:30m]), \"hour\", \"00\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 1))[7d:30m]), \"hour\", \"01\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 2))[7d:30m]), \"hour\", \"02\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 3))[7d:30m]), \"hour\", \"03\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 4))[7d:30m]), \"hour\", \"04\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 5))[7d:30m]), \"hour\", \"05\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 6))[7d:30m]), \"hour\", \"06\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 7))[7d:30m]), \"hour\", \"07\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 8))[7d:30m]), \"hour\", \"08\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 9))[7d:30m]), \"hour\", \"09\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 10))[7d:30m]), \"hour\", \"10\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 11))[7d:30m]), \"hour\", \"11\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 12))[7d:30m]), \"hour\", \"12\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 13))[7d:30m]), \"hour\", \"13\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 14))[7d:30m]), \"hour\", \"14\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 15))[7d:30m]), \"hour\", \"15\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 16))[7d:30m]), \"hour\", \"16\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 17))[7d:30m]), \"hour\", \"17\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 18))[7d:30m]), \"hour\", \"18\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 19))[7d:30m]), \"hour\", \"19\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 20))[7d:30m]), \"hour\", \"20\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 21))[7d:30m]), \"hour\", \"21\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 22))[7d:30m]), \"hour\", \"22\", \"\", \"\") or label_replace(avg_over_time((sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) and on() (hour() == 23))[7d:30m]), \"hour\", \"23\", \"\", \"\")",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "{{hour}}",
+              "range": false,
+              "refId": "A"
+            }
+          ],
+          "title": "Records crossing by hour of day (UTC), last 7 days",
+          "type": "barchart"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "The same traffic as it happened, so the profile can be read against the days that made it: a weekend that flattens the curve, a batch that runs at the same hour every night, a trend the average hides. Drawn over the last 7 days whatever the board's time range says.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "spanNulls": false
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 11
+          },
+          "id": 13,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+              "legendFormat": "records/s",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "timeFrom": "7d",
+          "title": "Records crossing /s, last 7 days",
+          "type": "timeseries"
+        }
+      ],
+      "title": "Migration window \u2014 when the traffic says it can be done",
+      "type": "row"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 14,
+      "panels": [],
+      "title": "Draining",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The drain, topic by topic. The line is 5000ms. A topic that flattens above the line while the others fall is the one holding the cutover up \u2014 usually a partition whose task died, or a topic still being produced to.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 5000
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (topic) (kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0)",
+          "legendFormat": "{{topic}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Replication lag, per topic",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How far behind the source's log the fetchers are reading. This is the series the catch-up ETA extrapolates: a straight line down is a healthy drain, a flat line at the top is a mirror that is keeping pace with production rather than catching up.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (topic) (kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0)",
+          "legendFormat": "{{topic}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Record age at the source",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The drain rate, per connector. Once producers have stopped this should fall to zero and stay there \u2014 and staying at zero for a full refresh interval, with lag at zero, is what 'drained' means. It falling to zero while lag is still high means something stopped, not that it finished.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (rate(kafka_connect_source_task_metrics_source_record_write_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[1m]))",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Records crossing /s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The mirror's own backlog over the window. It has to reach zero and stay there before a cutover: records in flight at the moment the source connector stops are records that were read from the source and never written to the target.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (kafka_connect_source_task_metrics_source_record_active_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Records in flight",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 19,
+      "panels": [],
+      "title": "Consumer groups \u2014 will they resume in the right place?",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Every consumer group MirrorMaker has translated a position for, and how old that position is. A group missing from this table has no position on the target: move it and it starts from its auto.offset.reset, which on a migration means replaying the topic or skipping everything already replicated. Amber past 60000ms.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Translation age"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 60000
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 20,
+      "options": {
+        "footer": {
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (source, group) (kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Translated positions, by group",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value": "Translation age",
+              "group": "Consumer group",
+              "source": "Source"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The same numbers as a trend. Flat lines while records are still crossing mean checkpoints are being written and not moving \u2014 a failover or a cutover then resumes those consumers where they were when the line went flat.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 25
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (group) (kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{group}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Translation age over the window",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The checkpoint connector's write rate. It keeps running through a cutover on purpose \u2014 consumers move one at a time and every one that has not moved still needs its position translated. Zero here during a cutover is the classic mistake: all the data on the target, and no consumer knowing where to start.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 25
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(rate(kafka_connect_source_task_metrics_source_record_write_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\",connector=~\".*MirrorCheckpointConnector\"}[1m]))) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "legendFormat": "checkpoints/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Checkpoints emitted /s",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "id": 23,
+      "panels": [],
+      "title": "Topics \u2014 what is crossing",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Lag and record age side by side for every topic the mirror writes. The table is the cutover's punch list: a topic is done when both columns are at zero and stay there. Topic names here are the REPLICATED names \u2014 under a prefixing policy they start with the source alias; under an identity policy they are the source's own names.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Lag"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 5000
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Record age"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "id": 24,
+      "options": {
+        "footer": {
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (topic) (kafka_connect_mirror_source_connector_replication_latency_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0)",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by (topic) (kafka_connect_mirror_source_connector_record_age_ms_max{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"} >= 0)",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (topic) (kafka_connect_mirror_source_connector_record_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "C"
+        }
+      ],
+      "title": "Per replicated topic",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true
+            },
+            "renameByName": {
+              "Value #A": "Lag",
+              "Value #B": "Record age",
+              "Value #C": "Records /s",
+              "topic": "Topic"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "byte-rate is already a rate, so it is read as is. Useful for sizing the window rather than for the go/no-go: a topic moving megabytes a second will take longer to drain than the lag number alone suggests.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (topic) (kafka_connect_mirror_source_connector_byte_rate{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"})",
+          "legendFormat": "{{topic}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Bytes crossing /s, per topic",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "id": 26,
+      "panels": [],
+      "title": "Cutover state",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "RUNNING until the cutover overlay is applied, STOPPED after. `stopped` releases the connector's tasks \u2014 which is why this reads zero rather than merely idle \u2014 so a worker restart cannot resume replication behind producers that have already moved to the target. STOPPED is drawn from a zero, so the zero is anchored to the workers' own rebalance series: a release Prometheus cannot see reads No data rather than STOPPED.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "blue",
+                  "index": 0,
+                  "text": "STOPPED"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "from": 0.5,
+                "result": {
+                  "color": "green",
+                  "index": 1,
+                  "text": "RUNNING"
+                },
+                "to": 100000
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 2,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 43
+      },
+      "id": 27,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(kafka_connect_worker_metrics_connector_running_task_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\",connector=~\".*MirrorSourceConnector\"})) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "legendFormat": "source",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Source connector",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Must stay RUNNING through the cutover and until the last consumer has moved. Stopping both connectors together is the classic cutover mistake: every record is on the target and no consumer knows where to start reading it.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 0,
+                  "text": "STOPPED"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "from": 0.5,
+                "result": {
+                  "color": "green",
+                  "index": 1,
+                  "text": "RUNNING"
+                },
+                "to": 100000
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 2,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 43
+      },
+      "id": 28,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(kafka_connect_worker_metrics_connector_running_task_count{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\",connector=~\".*MirrorCheckpointConnector\"})) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "legendFormat": "checkpoint",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Checkpoint connector",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Records the SOURCE connector is writing, now. After the cutover this must be zero and stay zero \u2014 a non-zero reading here means the freeze did not take, and records are still arriving behind whatever your new producers are appending to the target. The zero is anchored \u2014 see 'Source connector'.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 43
+      },
+      "id": 29,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(rate(kafka_connect_source_task_metrics_source_record_write_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\",connector=~\".*MirrorSourceConnector\"}[1m]))) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "legendFormat": "records/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Still replicating /s",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Errors logged by any task in the window. A migration that starts erroring mid-drain is one where the lag number stops meaning what you think it means \u2014 records may be being skipped rather than replicated.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "No data"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 43
+      },
+      "id": 30,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(rate(kafka_connect_task_error_metrics_total_errors_logged{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[5m]))) or (sum(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}) * 0)",
+          "legendFormat": "errors/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Errors /s",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The picture a cutover should make: the source connector's line drops to zero and stays there, the checkpoint connector's keeps going. Both at zero means offset translation stopped too, and every consumer that has not moved yet is stranded.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "id": 31,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (connector) (rate(kafka_connect_source_task_metrics_source_record_write_total{namespace=\"$namespace\", strimzi_io_cluster=\"$cluster\"}[1m]))",
+          "legendFormat": "{{connector}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "The freeze, per connector",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": [
+    "kafka",
+    "mirrormaker2",
+    "migration",
+    "cutover",
+    "kates"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 0,
+        "label": "Data source",
+        "name": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total, namespace)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Namespace",
+        "multi": false,
+        "name": "namespace",
+        "options": [],
+        "query": {
+          "query": "label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total, namespace)",
+          "refId": "namespace-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\"}, strimzi_io_cluster)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "MirrorMaker 2 cluster",
+        "multi": false,
+        "name": "cluster",
+        "options": [],
+        "query": {
+          "query": "label_values(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{namespace=\"$namespace\"}, strimzi_io_cluster)",
+          "refId": "cluster-variable-query"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Kafka MirrorMaker 2 \u2014 migration",
+  "uid": "kates-mm2-mig",
+  "version": 1
+}

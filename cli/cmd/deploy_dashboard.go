@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"github.com/charmbracelet/x/ansi"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/output"
-	"github.com/klster/kates-cli/pkg/theme"
 )
 
 // ── Controller Interface for deploy.go ─────────────────────────────────────
@@ -26,8 +26,13 @@ type DashboardController struct {
 	p *tea.Program
 }
 
+// Every method tolerates a nil receiver. dl is a package-level pointer set
+// when the dashboard starts, so any path that runs without one — a unit test,
+// a step that moved earlier than the dashboard's construction — would
+// otherwise panic mid-deploy on a log line. Logging is never worth a crash.
+
 func (c *DashboardController) Printf(format string, a ...any) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(logMsg{text: fmt.Sprintf(format, a...)})
 	} else {
 		fmt.Printf(format, a...)
@@ -35,7 +40,7 @@ func (c *DashboardController) Printf(format string, a ...any) {
 }
 
 func (c *DashboardController) Println(a ...any) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(logMsg{text: fmt.Sprint(a...)})
 	} else {
 		fmt.Println(a...)
@@ -43,19 +48,19 @@ func (c *DashboardController) Println(a ...any) {
 }
 
 func (c *DashboardController) StartComponent(id string, timeout time.Duration) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(compStatusMsg{id: id, active: true, timeout: timeout})
 	}
 }
 
 func (c *DashboardController) FinishComponent(id string, success bool) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(compStatusMsg{id: id, active: false, done: true, success: success})
 	}
 }
 
 func (c *DashboardController) UpdateProgress(current, total int) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(progressMsg{current: current, total: total})
 	}
 }
@@ -122,6 +127,15 @@ type deployDashboardModel struct {
 	width     int
 	height    int
 	compWidth int
+
+	focusedPane int // 0: components, 1: logs
+	helmVersion string
+
+	// read runs the poller's kubectl queries. It is the seam as it stood when
+	// the dashboard was built: the poller runs on Bubble Tea's goroutines,
+	// some of which outlive the deploy, and runDeploy restores the seams when
+	// it returns (pinKubeContext).
+	read func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
 func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardModel {
@@ -146,6 +160,14 @@ func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardMode
 		componentsViewport: compVp,
 		totalSteps:         totalSteps,
 		compWidth:          60,
+		read:               runExecOutputFn,
+	}
+
+	out, err := m.read(ctx, "helm", "version", "--short")
+	if err == nil {
+		m.helmVersion = strings.TrimSpace(string(out))
+	} else {
+		m.helmVersion = "unknown"
 	}
 
 	return m
@@ -155,16 +177,16 @@ func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardMode
 
 func (m *deployDashboardModel) RegisterComponent(id, name, group string, targets ...Target) {
 	c := &componentStat{
-		ID:        id,
-		Name:      name,
-		Targets:   targets,
-		Group:     group,
+		ID:      id,
+		Name:    name,
+		Targets: targets,
+		Group:   group,
 	}
 	m.components = append(m.components, c)
 	m.compMap[id] = c
 }
 
-func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd {
+func pollAllWorkloads(ctx context.Context, components []*componentStat, read func(ctx context.Context, name string, args ...string) ([]byte, error)) tea.Cmd {
 	return func() tea.Msg {
 		results := make(map[string][]workloadStat)
 
@@ -180,10 +202,10 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 					continue
 				}
 
-				out, err := exec.CommandContext(ctx, "kubectl", "get", "deploy,sts,ds,strimzipodsets",
+				out, err := read(ctx, "kubectl", "get", "deploy,sts,ds,strimzipodsets",
 					"-n", target.Namespace,
 					"-l", target.Selector,
-					"-o", "json").Output()
+					"-o", "json")
 
 				if err != nil || len(out) == 0 {
 					continue
@@ -244,7 +266,7 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 						}
 					}
 					// Poll pods for this workload to get phase
-					podOut, _ := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", target.Namespace, "-l", target.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}").Output()
+					podOut, _ := read(ctx, "kubectl", "get", "pods", "-n", target.Namespace, "-l", target.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}")
 					phases := strings.Split(strings.TrimSpace(string(podOut)), ",")
 					if len(phases) > 0 && phases[0] != "" {
 						stat.phase = phases[0] // Simplify by just taking the first pod's phase for the workload
@@ -253,13 +275,38 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 					workloads = append(workloads, stat)
 				}
 			}
-			
+
 			sort.Slice(workloads, func(i, j int) bool { return workloads[i].name < workloads[j].name })
 			results[c.ID] = workloads
 		}
 
 		return allWorkloadsMsg{workloads: results}
 	}
+}
+
+// sanitizeLogLine strips variation selector-16 (U+FE0F). The padding stack
+// (viewport/lipgloss via go-runewidth) counts emoji+VS16 sequences as ONE
+// cell while terminals render TWO — so every "⏭️ …" line pushed the pane's
+// right border out by a column, producing the ragged edge. Without VS16 the
+// base rune renders text-style at the width runewidth already computes.
+func sanitizeLogLine(s string) string {
+	return strings.ReplaceAll(s, "\ufe0f", "")
+}
+
+// buildLogContent joins the log ring with every line truncated to the pane
+// width. Lines were previously passed through untouched, so one over-long
+// helm message stretched the box past the terminal edge and the border
+// wrapped into fragments.
+func (m deployDashboardModel) buildLogContent() string {
+	w := m.logsViewport.Width
+	if w <= 0 {
+		return strings.Join(m.logs, "\n")
+	}
+	out := make([]string, 0, len(m.logs))
+	for _, l := range m.logs {
+		out = append(out, ansi.Truncate(l, w, "…"))
+	}
+	return strings.Join(out, "\n")
 }
 
 func (m deployDashboardModel) Init() tea.Cmd {
@@ -276,13 +323,13 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		
+
 		// 6 for header/footer (progress bar + padding)
 		viewHeight := msg.Height - 6
 		if viewHeight < 5 {
 			viewHeight = 5
 		}
-		
+
 		// Components pane is responsive
 		compWidth := msg.Width * 55 / 100
 		if compWidth > 70 {
@@ -291,39 +338,58 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if compWidth < 50 {
 			compWidth = 50
 		}
-		m.compWidth = compWidth
-		logsWidth := msg.Width - compWidth - 4 // 4 for spacing/margins
+		m.compWidth = compWidth - 2
+
+		// One row width for the whole dashboard: header and panes must end at
+		// the same column. The header renders at msg.Width-2 total (content
+		// width + its border), while the old pane math produced msg.Width-4 —
+		// so the panes row sat 2-4 columns short of the header's right edge.
+		rowWidth := msg.Width - 2
+		logsWidth := rowWidth - compWidth // rendered log pane incl. its border
 		if logsWidth < 20 {
 			logsWidth = 20
 		}
 
-		m.componentsViewport.Width = compWidth
-		m.componentsViewport.Height = viewHeight
-		
-		m.logsViewport.Width = logsWidth
-		m.logsViewport.Height = viewHeight
+		m.componentsViewport.Width = compWidth - 2
+		m.componentsViewport.Height = viewHeight - 2
+
+		m.logsViewport.Width = logsWidth - 2
+		m.logsViewport.Height = viewHeight - 2
+		// Stored lines were truncated for the old width; rebuild for the new.
+		m.logsViewport.SetContent(m.buildLogContent())
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			m.cancel() // cancel context for background workers
 			return m, tea.Quit
 		}
+		if msg.String() == "tab" {
+			m.focusedPane = (m.focusedPane + 1) % 2
+			return m, nil
+		}
+
 		var cmd tea.Cmd
-		m.componentsViewport, cmd = m.componentsViewport.Update(msg)
+		if m.focusedPane == 0 {
+			m.componentsViewport, cmd = m.componentsViewport.Update(msg)
+		} else {
+			m.logsViewport, cmd = m.logsViewport.Update(msg)
+		}
 		cmds = append(cmds, cmd)
 
 	case logMsg:
 		lines := strings.Split(strings.TrimSpace(msg.text), "\n")
 		for _, l := range lines {
 			if l != "" {
-				m.logs = append(m.logs, l)
+				m.logs = append(m.logs, sanitizeLogLine(l))
 			}
 		}
 		if len(m.logs) > 100 {
 			m.logs = m.logs[len(m.logs)-100:]
 		}
-		m.logsViewport.SetContent(strings.Join(m.logs, "\n"))
-		m.logsViewport.GotoBottom()
+		m.logsViewport.SetContent(m.buildLogContent())
+		if m.logsViewport.AtBottom() || len(m.logs) < m.logsViewport.Height {
+			m.logsViewport.GotoBottom()
+		}
 
 	case compStatusMsg:
 		if c, ok := m.compMap[msg.id]; ok {
@@ -366,7 +432,7 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		cmds = append(cmds,
-			pollAllWorkloads(m.ctx, m.components),
+			pollAllWorkloads(m.ctx, m.components, m.read),
 			tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 		)
 	}
@@ -376,14 +442,6 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
-}
-
-func padRight(content string, length int) string {
-	w := lipgloss.Width(content)
-	if w >= length {
-		return content
-	}
-	return content + strings.Repeat(" ", length-w)
 }
 
 func (m deployDashboardModel) View() string {
@@ -405,24 +463,18 @@ func (m deployDashboardModel) View() string {
 		isLastInGroup := (i == len(m.components)-1 || m.components[i+1].Group != c.Group)
 
 		if isFirstInGroup {
-			groupNames := map[string]string{"A": "Operators", "B": "Infrastructure", "C": "Applications"}
-			label := groupNames[c.Group]
+			label := componentGroupNames[c.Group]
 			if label == "" {
 				label = c.Group
-			}
-			title := fmt.Sprintf("─ %s ", label)
-			padding := (m.compWidth - 2) - lipgloss.Width(title)
-			if padding < 0 {
-				padding = 0
 			}
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			b.WriteString(fmt.Sprintf("╭%s%s╮\n", title, strings.Repeat("─", padding)))
+			b.WriteString(fmt.Sprintf("%s\n", lipgloss.NewStyle().Bold(true).Foreground(theme.Accent).Render("── "+label)))
 		}
 
 		if !c.Active && !c.Done {
-			b.WriteString(fmt.Sprintf("│ %s │\n", padRight(output.DimStyle.Render("◯ Pending..."), m.compWidth-4)))
+			b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("◯ Pending...")))
 		} else {
 			icon := m.spinner.View()
 			if c.Done {
@@ -442,15 +494,19 @@ func (m deployDashboardModel) View() string {
 				}
 			}
 
+			nsStr := ""
+			if len(c.Targets) > 0 {
+				nsStr = " [" + c.Targets[0].Namespace + "]"
+			}
 			boldStyle := lipgloss.NewStyle().Bold(true)
-			leftPart := fmt.Sprintf("%s %s", icon, boldStyle.Render(c.Name))
+			leftPart := fmt.Sprintf("%s %s%s", icon, boldStyle.Render(c.Name), output.DimStyle.Render(nsStr))
 			rightPart := statusText
-			// We have "│ " (2) and " │" (2), leaving compWidth-4 for leftPart + spaces + rightPart
-			spaces := (m.compWidth - 4) - lipgloss.Width(leftPart) - lipgloss.Width(rightPart)
+			// We just use m.compWidth for total width
+			spaces := m.compWidth - lipgloss.Width(leftPart) - lipgloss.Width(rightPart)
 			if spaces < 1 {
 				spaces = 1
 			}
-			b.WriteString(fmt.Sprintf("│ %s%s%s │\n", leftPart, strings.Repeat(" ", spaces), rightPart))
+			b.WriteString(fmt.Sprintf("%s%s%s\n", leftPart, strings.Repeat(" ", spaces), rightPart))
 
 			// Render timeout bar if active
 			if c.Active && !c.Done && c.Timeout > 0 {
@@ -471,11 +527,11 @@ func (m deployDashboardModel) View() string {
 					renderProgressBar(int(elapsed.Seconds()), int(c.Timeout.Seconds()), 15, false, true),
 					eM, eS, tM, tS)
 
-				tSpaces := (m.compWidth - 4) - lipgloss.Width(tLeft) - lipgloss.Width(tRight)
+				tSpaces := m.compWidth - lipgloss.Width(tLeft) - lipgloss.Width(tRight)
 				if tSpaces < 1 {
 					tSpaces = 1
 				}
-				b.WriteString(fmt.Sprintf("│ %s%s%s │\n", tLeft, strings.Repeat(" ", tSpaces), output.DimStyle.Render(tRight)))
+				b.WriteString(fmt.Sprintf("%s%s%s\n", tLeft, strings.Repeat(" ", tSpaces), output.DimStyle.Render(tRight)))
 			}
 
 			for _, w := range c.Workloads {
@@ -510,23 +566,16 @@ func (m deployDashboardModel) View() string {
 
 				wLeft := fmt.Sprintf("  %s", output.DimStyle.Render(name)) // removed one space
 				wRight := fmt.Sprintf("[%s] %2d/%-2d %s", renderProgressBar(barReady, barTotal, 10, false, false), w.ready, w.expected, status)
-				// We have "│ " (2) and " │" (2), leaving compWidth-4 for wLeft + wSpaces + wRight
-				wSpaces := (m.compWidth - 4) - lipgloss.Width(wLeft) - lipgloss.Width(wRight)
+				wSpaces := m.compWidth - lipgloss.Width(wLeft) - lipgloss.Width(wRight)
 				if wSpaces < 1 {
 					wSpaces = 1
 				}
-				b.WriteString(fmt.Sprintf("│ %s%s%s │\n", wLeft, strings.Repeat(" ", wSpaces), wRight))
+				b.WriteString(fmt.Sprintf("%s%s%s\n", wLeft, strings.Repeat(" ", wSpaces), wRight))
 			}
 		}
 
 		if isLastInGroup {
-			b.WriteString(fmt.Sprintf("╰%s╯\n", strings.Repeat("─", m.compWidth-2)))
-		} else {
-			// Optional: draw an inner separator or just a blank line between components?
-			// Let's just draw an inner separator for clarity if there are workloads, otherwise just list them.
-			// Actually, if we just list them tightly, it's very clean, similar to the requested design.
-			// Let's add a subtle inner dashed line if we want, or just nothing.
-			// I'll leave it without an inner separator to match standard bubble tea layouts.
+			b.WriteString("\n")
 		}
 
 		prevGroup = c.Group
@@ -544,19 +593,42 @@ func (m deployDashboardModel) View() string {
 			break
 		}
 	}
-	if activeIdx >= 0 {
+	if activeIdx >= 0 && m.focusedPane != 0 {
 		pct := float64(activeIdx) / float64(len(m.components))
 		targetLine := int(pct * float64(m.componentsViewport.TotalLineCount()))
 		m.componentsViewport.SetYOffset(targetLine)
 	}
 
 	var out strings.Builder
-	out.WriteString(fmt.Sprintf("\n📦 Kates Cluster Deployment: %s %.0f%% (%d/%d Steps)\n\n", bar, pct*100, m.currentStep, m.totalSteps))
-	
-	split := lipgloss.JoinHorizontal(lipgloss.Top, 
-		m.componentsViewport.View(),
-		"    ", // padding between columns
-		m.logsViewport.View(),
+
+	headerStyle := lipgloss.NewStyle().
+		Padding(0, 1).
+		Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(theme.Accent).
+		// Content width; +2 border columns renders the header at m.width-2 —
+		// the same rowWidth the panes fill, so the right edges align.
+		Width(m.width - 4)
+
+	headerContent := fmt.Sprintf("📦 Kates Cluster Deployment: %s %.0f%% (%d/%d Steps) │ Helm: %s", bar, pct*100, m.currentStep, m.totalSteps, m.helmVersion)
+	out.WriteString(headerStyle.Render(headerContent) + "\n")
+
+	compBorderStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	if m.focusedPane == 0 {
+		compBorderStyle = compBorderStyle.BorderForeground(theme.Accent)
+	} else {
+		compBorderStyle = compBorderStyle.BorderForeground(theme.Subtle)
+	}
+
+	logBorderStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	if m.focusedPane == 1 {
+		logBorderStyle = logBorderStyle.BorderForeground(theme.Accent)
+	} else {
+		logBorderStyle = logBorderStyle.BorderForeground(theme.Subtle)
+	}
+
+	split := lipgloss.JoinHorizontal(lipgloss.Top,
+		compBorderStyle.Render(m.componentsViewport.View()),
+		logBorderStyle.Render(m.logsViewport.View()),
 	)
 	out.WriteString(split)
 	out.WriteString("\n")

@@ -1,10 +1,10 @@
-{{- if .Values.networkPolicies.enabled }}
-{{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
-{{- $katesNamespace := .Values.rbac.katesNamespace | default "kates" }}
+{{- if eq (include "kates-chaos.networkPolicyEnabled" .) "true" }}
+{{- $np := .Values.networkPolicy | default dict }}
+{{- $targets := include "kates-chaos.targetNamespaces" . | fromYamlArray }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "kates-chaos.fullname" . }}-allow-internal
+  name: {{ include "kates-chaos.fullname" . }}-chaos-infra
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kates-chaos.labels" . | nindent 4 }}
@@ -16,32 +16,65 @@ spec:
     - Ingress
     - Egress
   ingress:
+    # Intra-release traffic (operator ↔ exporter, etc.)
     - from:
-        - namespaceSelector: {}
-          podSelector:
+        - podSelector:
             matchLabels:
               app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- if (($np.monitoring).enabled | default true) }}
+    # Prometheus scrape of the chaos exporter
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.monitoring.namespace | default "monitoring" }}
+      ports:
+        - protocol: TCP
+          port: {{ $np.monitoring.port | default 8080 }}
+    {{- end }}
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   egress:
+    # Intra-release traffic
     - to:
-        - namespaceSelector: {}
-          podSelector:
+        - podSelector:
             matchLabels:
               app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- if (($np.apiServer).enabled | default true) }}
+    # Kubernetes API server (required by the chaos operator)
     - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              strimzi.io/kind: Kafka
+        {{- with ($np.apiServer).ipBlock }}
+        - ipBlock:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
+      ports:
+        {{- range ($np.apiServer).ports | default (list 443 6443) }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- if (($np.targets).enabled | default true) }}
+    # Fault injection / coordination into chaos target namespaces
+    {{- range $t := $targets }}
     - to:
-        - namespaceSelector: {}
-          podSelector:
+        - namespaceSelector:
             matchLabels:
-              app.kubernetes.io/name: kates
+              kubernetes.io/metadata.name: {{ $t.name }}
+    {{- end }}
+    {{- end }}
+    {{- if (($np.dns).enabled | default true) }}
+    # DNS resolution
     - to:
         - namespaceSelector: {}
       ports:
+        {{- range ($np.dns).ports | default (list 53) }}
         - protocol: UDP
-          port: 53
+          port: {{ . }}
         - protocol: TCP
-          port: 53
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}

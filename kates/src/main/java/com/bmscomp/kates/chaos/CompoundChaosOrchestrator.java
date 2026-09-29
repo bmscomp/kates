@@ -10,6 +10,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
+import org.jboss.logging.Logger;
+
 /**
  * Orchestrates compound fault injection by executing multiple chaos providers
  * simultaneously. Enables complex failure scenarios like
@@ -17,6 +19,8 @@ import jakarta.inject.Inject;
  */
 @ApplicationScoped
 public class CompoundChaosOrchestrator {
+
+    private static final Logger LOG = Logger.getLogger(CompoundChaosOrchestrator.class);
 
     @Inject
     Instance<ChaosProvider> providers;
@@ -127,8 +131,21 @@ public class CompoundChaosOrchestrator {
      */
     public List<String> availableProviders() {
         List<String> names = new ArrayList<>();
-        for (ChaosProvider p : providers) {
-            names.add(p.name() + (p.isAvailable() ? " (available)" : " (unavailable)"));
+        // Handles, not a plain for-each over the Instance: iterating it
+        // INSTANTIATES each provider, and a provider whose construction fails
+        // (HybridChaosProvider needs a KubernetesClient, which there is no way
+        // to build with no kubeconfig and no service account) propagates out of
+        // the iterator. That turned "list the providers" into a 500 on every
+        // machine without a cluster — including CI, while passing on a laptop
+        // that happened to have a kubeconfig. A provider that cannot even be
+        // created is exactly what this endpoint exists to report.
+        for (Instance.Handle<ChaosProvider> handle : providers.handles()) {
+            try {
+                ChaosProvider p = handle.get();
+                names.add(p.name() + (p.isAvailable() ? " (available)" : " (unavailable)"));
+            } catch (Exception e) {
+                LOG.warnf("Chaos provider could not be inspected, omitting it: %s", e.getMessage());
+            }
         }
         return names;
     }

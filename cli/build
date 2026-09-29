@@ -4,7 +4,7 @@ set -euo pipefail
 VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")}"
 COMMIT="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")}"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-MODULE="github.com/klster/kates-cli/cmd"
+MODULE="github.com/bmscomp/kates/cli/cmd"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 
 LDFLAGS="-s -w \

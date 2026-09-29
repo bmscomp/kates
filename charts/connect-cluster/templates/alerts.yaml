@@ -1,0 +1,253 @@
+{{- /*
+Alerts and recording rules for this release's workers.
+
+Every expression carries the release selector (namespace + worker pod names):
+without it, two Connect groups in one Prometheus fire each other's alerts.
+Every alert links its section of docs/connect-cluster-runbook.md; the anchor
+is the alert name in lower case. The names read the JMX exporter rules in
+files/metrics/connect-metrics.yaml, and scripts/metric-contract proves them.
+
+A KafkaConnect stays Ready while its connectors fail — Ready means the workers
+are up. Everything below is a way for the data path to be broken without the
+CR noticing.
+*/}}
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- if and .Values.alerts.enabled $r.metrics.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+{{- $name := include "connect-cluster.fullname" . }}
+{{- $ns := include "connect-cluster.namespace" . }}
+{{- $sel := include "kafka-common.promSelector" (dict "namespace" $ns "pod" (printf "%s-connect-[0-9]+" $name)) }}
+{{- $th := $r.thresholds }}
+{{- $rb := .Values.alerts.runbookBaseUrl }}
+{{- $as := .Values.autoscaling | default dict }}
+{{- $minWorkers := ternary ($as.minReplicas | default 3) .Values.replicas (eq (include "kafka-common.enabled" (list $as.enabled false)) "true") }}
+{{- $sinkGroups := list }}
+{{- range $r.connectors }}{{ if .sink }}{{ $sinkGroups = append $sinkGroups (printf "connect-%s" .name | regexQuoteMeta) }}{{ end }}{{ end }}
+{{- $slo := .Values.alerts.slo | default dict }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $name }}-alerts
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kafka-common.labels" (dict "ctx" . "component" "connect" "partOf" "kates" "extra" (.Values.alerts.labels | default dict)) | nindent 4 }}
+spec:
+  groups:
+    - name: {{ $name }}.workers
+      rules:
+        # Fewer workers answering scrapes than the release runs. (1.x once
+        # alerted on `connector_count == 0`, true of any idle worker.)
+        - alert: KafkaConnectWorkerDown
+          expr: (sum(up{ {{- $sel -}} }) or vector(0)) < {{ $minWorkers }}
+          for: 3m
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: workers are down"
+            description: "{{ "{{" }} $value {{ "}}" }} of {{ $minWorkers }} worker(s) of {{ $name }} are being scraped."
+            runbook_url: "{{ $rb }}#kafkaconnectworkerdown"
+
+        - alert: KafkaConnectRebalanceStorm
+          expr: max(rate(kafka_connect_worker_rebalance_metrics_completed_rebalances_total{ {{- $sel -}} }[5m])) > {{ $th.rebalanceRatePerSecond }}
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: rebalancing continuously"
+            description: "Workers complete {{ "{{" }} $value | humanize {{ "}}" }} rebalances/s. Tasks do not run during a rebalance."
+            runbook_url: "{{ $rb }}#kafkaconnectrebalancestorm"
+
+        - alert: KafkaConnectRebalanceTooLong
+          expr: max(kafka_connect_worker_rebalance_metrics_rebalancing{ {{- $sel -}} }) == 1
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: a rebalance has not finished"
+            description: "A rebalance of {{ $name }} has been in progress for more than 5 minutes."
+            runbook_url: "{{ $rb }}#kafkaconnectrebalancetoolong"
+
+        # Both JVM metric generations are read (the exporter's 1.x line
+        # renamed jvm_memory_bytes_* to jvm_memory_*_bytes).
+        - alert: KafkaConnectWorkerHeapHigh
+          expr: |
+            sum by (pod) (jvm_memory_used_bytes{area="heap", {{ $sel }}} or jvm_memory_bytes_used{area="heap", {{ $sel }}})
+            / sum by (pod) (jvm_memory_max_bytes{area="heap", {{ $sel }}} or jvm_memory_bytes_max{area="heap", {{ $sel }}})
+            > {{ divf $th.heapUsagePercent 100.0 }}
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: worker heap above {{ $th.heapUsagePercent }}%"
+            description: "Worker {{ "{{" }} $labels.pod {{ "}}" }} heap is at {{ "{{" }} $value | humanizePercentage {{ "}}" }}."
+            runbook_url: "{{ $rb }}#kafkaconnectworkerheaphigh"
+
+    - name: {{ $name }}.connectors
+      rules:
+        - alert: KafkaConnectConnectorFailed
+          expr: max by (connector) (kafka_connect_connector_metrics{status="failed", {{ $sel }}}) > 0
+          for: 2m
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: connector {{ "{{" }} $labels.connector {{ "}}" }} failed"
+            description: "The connector itself (not one of its tasks) is FAILED; none of its tasks run."
+            runbook_url: "{{ $rb }}#kafkaconnectconnectorfailed"
+
+        - alert: KafkaConnectTaskFailed
+          expr: sum by (connector) (kafka_connect_connector_task_status{status="failed", {{ $sel }}}) > 0
+          for: 2m
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: {{ "{{" }} $labels.connector {{ "}}" }} has failed tasks"
+            description: "{{ "{{" }} $value {{ "}}" }} task(s) of {{ "{{" }} $labels.connector {{ "}}" }} are FAILED. The KafkaConnector can still report Ready."
+            runbook_url: "{{ $rb }}#kafkaconnecttaskfailed"
+
+        # Both sides summed per connector: tasks neither running nor paused
+        # are failed, unassigned or restarting.
+        - alert: KafkaConnectTasksNotRunning
+          expr: |
+            sum by (connector) (kafka_connect_worker_metrics_connector_total_task_count{ {{- $sel -}} })
+            - sum by (connector) (kafka_connect_worker_metrics_connector_running_task_count{ {{- $sel -}} })
+            - sum by (connector) (kafka_connect_worker_metrics_connector_paused_task_count{ {{- $sel -}} })
+            > 0
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: {{ "{{" }} $labels.connector {{ "}}" }} has tasks that do not run"
+            description: "{{ "{{" }} $value {{ "}}" }} task(s) of {{ "{{" }} $labels.connector {{ "}}" }} have been failed, unassigned or restarting for 5 minutes."
+            runbook_url: "{{ $rb }}#kafkaconnecttasksnotrunning"
+
+        - alert: KafkaConnectErrorsLogged
+          expr: sum by (connector) (rate(kafka_connect_task_error_metrics_total_errors_logged{ {{- $sel -}} }[5m])) > {{ $th.errorRatePerSecond }}
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: {{ "{{" }} $labels.connector {{ "}}" }} is logging record errors"
+            description: "{{ "{{" }} $labels.connector {{ "}}" }} logs {{ "{{" }} $value | humanize {{ "}}" }} errors/s."
+            runbook_url: "{{ $rb }}#kafkaconnecterrorslogged"
+
+        - alert: KafkaConnectDeadLetterWrites
+          expr: sum by (connector) (rate(kafka_connect_task_error_metrics_deadletterqueue_produce_requests{ {{- $sel -}} }[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: {{ "{{" }} $labels.connector {{ "}}" }} is dead-lettering records"
+            description: "{{ "{{" }} $labels.connector {{ "}}" }} sends {{ "{{" }} $value | humanize {{ "}}" }} records/s to its dead letter queue."
+            runbook_url: "{{ $rb }}#kafkaconnectdeadletterwrites"
+
+        - alert: KafkaConnectDeadLetterFailures
+          expr: sum by (connector) (rate(kafka_connect_task_error_metrics_deadletterqueue_produce_failures{ {{- $sel -}} }[5m])) > 0
+          for: 2m
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: {{ "{{" }} $labels.connector {{ "}}" }} cannot write its dead letter queue"
+            description: "Failed records of {{ "{{" }} $labels.connector {{ "}}" }} are being lost: the dead letter queue refuses them."
+            runbook_url: "{{ $rb }}#kafkaconnectdeadletterfailures"
+
+        - alert: KafkaConnectOffsetCommitFailures
+          expr: max by (connector) (kafka_connect_connector_task_metrics_offset_commit_failure_percentage{ {{- $sel -}} }) > 0
+          for: 10m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: {{ "{{" }} $labels.connector {{ "}}" }} fails to commit offsets"
+            description: "Offset commits of {{ "{{" }} $labels.connector {{ "}}" }} fail; a restart would reprocess records."
+            runbook_url: "{{ $rb }}#kafkaconnectoffsetcommitfailures"
+
+        {{- if include "kafka-common.enabled" (list (.Values.alerts.sourceIdle | default dict).enabled false) }}
+        # Opt-in: a source can be idle by design. Only running connectors
+        # that have polled before are considered.
+        - alert: KafkaConnectSourceIdle
+          expr: |
+            sum by (connector) (rate(kafka_connect_source_task_metrics_source_record_poll_total{ {{- $sel -}} }[{{ $th.sourceIdleMinutes }}m])) == 0
+            and on (connector) max by (connector) (kafka_connect_connector_metrics{status="running", {{ $sel }}}) > 0
+          for: {{ $th.sourceIdleMinutes }}m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: source {{ "{{" }} $labels.connector {{ "}}" }} produces nothing"
+            description: "{{ "{{" }} $labels.connector {{ "}}" }} has polled no records for {{ $th.sourceIdleMinutes }} minutes."
+            runbook_url: "{{ $rb }}#kafkaconnectsourceidle"
+        {{- end }}
+
+        {{- if and $sinkGroups (include "kafka-common.enabled" (list (.Values.alerts.sinkLag | default dict).enabled true)) }}
+        # The sink connectors declared here consume as connect-<connector>;
+        # kafka-cluster's Kafka Exporter publishes their lag.
+        - alert: KafkaConnectSinkLag
+          expr: sum by (consumergroup) (kafka_consumergroup_lag{namespace={{ include "connect-cluster.kafkaNamespace" . | quote }}, consumergroup=~"{{ join "|" $sinkGroups }}"}) > {{ $th.sinkLagRecords }}
+          for: 10m
+          labels:
+            severity: warning
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: sink {{ "{{" }} $labels.consumergroup {{ "}}" }} is falling behind"
+            description: "{{ "{{" }} $labels.consumergroup {{ "}}" }} is {{ "{{" }} $value | humanize {{ "}}" }} records behind."
+            runbook_url: "{{ $rb }}#kafkaconnectsinklag"
+        {{- end }}
+
+    - name: {{ $name }}.records
+      rules:
+        - record: connect:tasks_running:ratio
+          expr: |
+            label_replace(
+              sum(kafka_connect_worker_metrics_connector_running_task_count{ {{- $sel -}} })
+              / sum(kafka_connect_worker_metrics_connector_total_task_count{ {{- $sel -}} }),
+              "cluster", "{{ $name }}", "", "")
+        - record: connect:records_processed:rate5m
+          expr: |
+            label_replace(
+              sum by (connector) (rate(kafka_connect_source_task_metrics_source_record_poll_total{ {{- $sel -}} }[5m]))
+              or sum by (connector) (rate(kafka_connect_sink_task_metrics_sink_record_read_total{ {{- $sel -}} }[5m])),
+              "cluster", "{{ $name }}", "", "")
+        - record: connect:errors:rate5m
+          expr: |
+            label_replace(
+              sum by (connector) (rate(kafka_connect_task_error_metrics_total_errors_logged{ {{- $sel -}} }[5m])),
+              "cluster", "{{ $name }}", "", "")
+    {{- if include "kafka-common.enabled" (list $slo.enabled false) }}
+    {{- $budget := subf 1.0 $slo.target }}
+
+    # Task availability: the fraction of declared tasks that run. The budget
+    # is 1 - target; the alert fires when both windows of a pair burn it
+    # `burnRate` times faster than the target allows.
+    - name: {{ $name }}.slo
+      rules:
+        {{- range $w := list "5m" "30m" "1h" "6h" }}
+        - record: connect:task_unavailability:ratio_avg{{ $w }}
+          expr: 1 - avg_over_time(connect:tasks_running:ratio{cluster="{{ $name }}"}[{{ $w }}])
+        {{- end }}
+        - alert: KafkaConnectTaskAvailabilitySLOBurning
+          expr: |
+            (
+              connect:task_unavailability:ratio_avg1h{cluster="{{ $name }}"} > {{ mulf $slo.burnRate $budget }}
+              and connect:task_unavailability:ratio_avg5m{cluster="{{ $name }}"} > {{ mulf $slo.burnRate $budget }}
+            ) or (
+              connect:task_unavailability:ratio_avg6h{cluster="{{ $name }}"} > {{ mulf (divf $slo.burnRate 2.4) $budget }}
+              and connect:task_unavailability:ratio_avg30m{cluster="{{ $name }}"} > {{ mulf (divf $slo.burnRate 2.4) $budget }}
+            )
+          labels:
+            severity: critical
+            cluster: {{ $name }}
+          annotations:
+            summary: "Kafka Connect {{ $name }}: the task availability budget is burning"
+            description: "Tasks are down often enough to spend the {{ $slo.target }} objective's error budget {{ $slo.burnRate }}× too fast."
+            runbook_url: "{{ $rb }}#kafkaconnecttaskavailabilitysloburning"
+    {{- end }}
+{{- end }}

@@ -9,7 +9,7 @@ metadata:
   labels:
     strimzi.io/cluster: krafter
 spec:
-  version: 4.2.0
+  version: 4.3.0
   replicas: 1
   connectCluster: target
   clusters:

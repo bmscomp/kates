@@ -1,0 +1,66 @@
+suite: bootstrap and clientTlsAuth
+templates:
+  - client.yaml
+tests:
+  - it: computes the in-cluster bootstrap
+    set:
+      cluster: {clusterName: east, namespace: dc1}
+    asserts:
+      - equal: {path: data.bootstrap, value: "east-kafka-bootstrap.dc1.svc.cluster.local:9092"}
+  - it: uses the TLS port and the configured domain
+    set:
+      cluster: {tls: {enabled: true, trustedCertificateSecret: ca}}
+      global.clusterDomain: corp.local
+    asserts:
+      - equal: {path: data.bootstrap, value: "krafter-kafka-bootstrap.kafka.svc.corp.local:9093"}
+  - it: honours an explicit listener port and bootstrap
+    set:
+      cluster: {listenerPort: 9095}
+    asserts:
+      - matchRegex: {path: data.bootstrap, pattern: ":9095$"}
+  - it: renders scram credentials
+    set:
+      cluster: {authentication: {type: scram-sha-512, username: u}}
+    asserts:
+      - matchRegex: {path: data.tlsAuth, pattern: 'username: "u"'}
+      - matchRegex: {path: data.tlsAuth, pattern: 'secretName: "u"'}
+  - it: renders plain credentials (0.x rendered a bare type)
+    set:
+      cluster: {authentication: {type: plain}}
+    asserts:
+      - matchRegex: {path: data.tlsAuth, pattern: 'username: "harness-user"'}
+  - it: renders tls client certificates
+    set:
+      cluster: {tls: {enabled: true, trustedCertificateSecret: ca}, authentication: {type: tls, username: u}}
+    asserts:
+      - matchRegex: {path: data.tlsAuth, pattern: 'certificateAndKey:'}
+      - matchRegex: {path: data.tlsAuth, pattern: 'secretName: "u-tls"'}
+  - it: renders custom (OAuth) authentication
+    set:
+      cluster:
+        authentication:
+          type: custom
+          custom: {sasl: true, config: {sasl.mechanism: OAUTHBEARER}}
+    asserts:
+      - matchRegex: {path: data.tlsAuth, pattern: 'sasl: true'}
+      - matchRegex: {path: data.tlsAuth, pattern: 'sasl.mechanism: OAUTHBEARER'}
+  - it: refuses custom without configuration
+    set:
+      cluster: {authentication: {type: custom}}
+    asserts:
+      - failedTemplate: {errorPattern: "authentication.type=custom needs"}
+  - it: refuses custom sasl without sasl properties
+    set:
+      cluster: {authentication: {type: custom, custom: {sasl: true, config: {ssl.keystore.type: PKCS12}}}}
+    asserts:
+      - failedTemplate: {errorPattern: "carries no sasl"}
+  - it: refuses an authentication type the v1 API does not have
+    set:
+      cluster: {authentication: {type: oauth}}
+    asserts:
+      - failedTemplate: {errorPattern: "is not one the Strimzi v1 API accepts"}
+  - it: refuses TLS without a trusted certificate secret
+    set:
+      cluster: {tls: {enabled: true}}
+    asserts:
+      - failedTemplate: {errorPattern: "trustedCertificateSecret is required"}

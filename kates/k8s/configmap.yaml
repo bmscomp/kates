@@ -2,11 +2,11 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: kates-config
-  namespace: kafka
+  namespace: kates
   labels:
     app: kates
     app.kubernetes.io/name: kates
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
 data:
   # Kafka cluster
   KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
@@ -14,21 +14,29 @@ data:
   KATES_KAFKA_SASL_MECHANISM: "SCRAM-SHA-512"
   KATES_KAFKA_SASL_USERNAME: "kates-backend"
   KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kafka.svc:8889"
+  # Trogdor agents tasks run on, by node name in the coordinator's trogdor.conf
+  KATES_TROGDOR_AGENT_NODES: "node0"
 
   # API security
   # Set KATES_API_SECURITY_ENABLED=false to disable auth entirely (dev only).
-  # Change KATES_API_KEY to a strong random value before exposing externally.
+  # KATES_API_KEY lives in the 'kates-secrets' Secret (see secret.yaml.example)
+  # — never in this ConfigMap. The app refuses to start without it.
   KATES_API_SECURITY_ENABLED: "true"
-  KATES_API_KEY: "changeme"
 
   # Benchmark engine (native | trogdor)
   KATES_ENGINE_DEFAULT_BACKEND: "native"
 
+  # Prometheus, for a disruption's Kafka metrics: the Service kube-prometheus-stack
+  # creates for `make monitoring`, which installs release `monitoring` into
+  # namespace kafka. The backend's own default names namespace monitoring,
+  # where `kates deploy` installs it.
+  KATES_PROMETHEUS_URL: "http://monitoring-kube-prometheus-prometheus.kafka.svc:9090"
+
   # PostgreSQL datasource
   QUARKUS_DATASOURCE_DB_KIND: "postgresql"
   QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://postgres.kates.svc:5432/kates"
-  QUARKUS_DATASOURCE_USERNAME: "kates"
-  QUARKUS_DATASOURCE_PASSWORD: "kates"
+  # Credentials (QUARKUS_DATASOURCE_USERNAME/PASSWORD) come from the
+  # 'kates-secrets' Secret — see secret.yaml.example.
   QUARKUS_DATASOURCE_JDBC_MAX_SIZE: "20"
   QUARKUS_HIBERNATE_ORM_SCHEMA_MANAGEMENT_STRATEGY: "none"
   QUARKUS_HIBERNATE_ORM_LOG_SQL: "false"

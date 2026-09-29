@@ -112,9 +112,8 @@ public class EventStreamResource {
                 continue;
             }
             try {
-                OutboundSseEvent heartbeat = sse.newEventBuilder()
-                        .comment("heartbeat")
-                        .build();
+                OutboundSseEvent heartbeat =
+                        sse.newEventBuilder().comment("heartbeat").build();
                 sub.sink().send(heartbeat);
             } catch (Exception e) {
                 iter.remove();
@@ -126,4 +125,3 @@ public class EventStreamResource {
         }
     }
 }
-

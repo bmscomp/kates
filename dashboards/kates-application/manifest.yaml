@@ -1,0 +1,26 @@
+# Kates — Application Health. Delivered by charts/monitoring, whose
+# ConfigMap template globs `dashboards/*.json` inside the chart, so the
+# generator writes the copy there rather than into a `files/` directory.
+#
+# Unlike the per-release boards (connect-cluster, mirror-maker2), the uid and
+# title here are final: this board is scoped by template variables, so one
+# copy in a Grafana serves every Kates install it can see.
+uid: kates-application-health
+title: Kates — Application Health
+description: >-
+  The Quarkus process behind the benchmark API: HTTP traffic and errors, JVM
+  heap and GC, the Agroal connection pool, and what the kubelet sees of the
+  container.
+tags:
+  - kates
+  - application
+  - health
+  - quarkus
+refresh: 30s
+# An hour is enough to see a deploy, a restart loop or a leak start. Longer
+# belongs on kates-trend.
+time_from: now-1h
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kates-application.json

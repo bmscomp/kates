@@ -1,0 +1,45 @@
+{{- if (index .Values "kafka-cluster").enabled }}
+{{- $clusterName := (index .Values "kafka-cluster").clusterName | default "krafter" }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-platform-test
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kates-platform
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+  containers:
+    - name: platform-test
+      image: {{ .Values.test.image }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        requests:
+          memory: 32Mi
+          cpu: 25m
+        limits:
+          memory: 64Mi
+          cpu: 100m
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "Checking Kafka bootstrap reachability ({{ $clusterName }}-kafka-bootstrap:9092)..."
+          nc -z -w 5 {{ $clusterName }}-kafka-bootstrap.{{ .Release.Namespace }}.svc 9092
+          echo "Kafka bootstrap reachable."
+{{- end }}

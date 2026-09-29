@@ -1,0 +1,56 @@
+{{- if and (eq ((.Values.logging).type | default "inline") "external") (not (.Values.logging).valueFrom) }}
+{{- /*
+The ConfigMap behind `logging.type: external`. The CR template wires it in
+automatically (spec.logging.valueFrom.configMapKeyRef → this map), so the
+whole configuration is:
+
+  logging:
+    type: external
+    mirrorLevel: DEBUG        # optional; INFO by default
+    rootLevel: INFO           # optional
+    extraLoggers: {}          # optional, logger name → level
+
+Supply your own `logging.valueFrom` instead and this map is not rendered.
+
+The mirror-specific logger is the point. `org.apache.kafka.connect.mirror` at
+DEBUG is how you find out WHY a mirror is not replicating — it logs the topic
+refresh, what matched the pattern and what did not, and the offset-sync
+decisions. At INFO none of that is visible, and the CR says Ready throughout.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mirror-maker2.fullname" . }}-logging
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+data:
+  log4j2.properties: |-
+    name = MirrorMaker2Config
+
+    appender.console.type = Console
+    appender.console.name = STDOUT
+    appender.console.layout.type = PatternLayout
+    appender.console.layout.pattern = %d{yyyy-MM-dd HH:mm:ss} %-5p [%t] %c{1}:%L - %m%n
+
+    rootLogger.level = {{ ((.Values.logging).rootLevel) | default "INFO" }}
+    rootLogger.appenderRef.console.ref = STDOUT
+
+    logger.mirror.name = org.apache.kafka.connect.mirror
+    logger.mirror.level = {{ ((.Values.logging).mirrorLevel) | default "INFO" }}
+
+    logger.runtime.name = org.apache.kafka.connect.runtime
+    logger.runtime.level = INFO
+
+    # Two loggers that are noise at INFO and drown the ones above.
+    logger.reflections.name = org.reflections
+    logger.reflections.level = ERROR
+
+    logger.clients.name = org.apache.kafka.clients
+    logger.clients.level = WARN
+    {{- range $name, $level := ((.Values.logging).extraLoggers | default dict) }}
+
+    logger.{{ $name | replace "." "_" }}.name = {{ $name }}
+    logger.{{ $name | replace "." "_" }}.level = {{ $level }}
+    {{- end }}
+{{- end }}

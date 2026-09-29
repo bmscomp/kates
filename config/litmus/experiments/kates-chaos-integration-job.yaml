@@ -5,7 +5,7 @@ metadata:
   namespace: kafka
   labels:
     app.kubernetes.io/managed-by: kates
-    kates.klster.com/component: chaos-integration
+    kates.bmscomp.github.io/component: chaos-integration
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 86400
