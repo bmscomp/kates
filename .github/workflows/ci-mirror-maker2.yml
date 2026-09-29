@@ -57,6 +57,7 @@ jobs:
     outputs:
       # Scheduled and manual runs have no diff to filter on: everything runs.
       chart: ${{ steps.filter.outputs.chart || 'true' }}
+      live: ${{ steps.filter.outputs.live || 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -82,6 +83,22 @@ jobs:
               - 'docs/mirror-maker2-runbook.md'
               - '.github/workflows/ci-mirror-maker2.yml'
               - '.github/actions/**'
+            # What metrics-live stands up, scrapes and checks the scrape against.
+            live:
+              - 'charts/mirror-maker2/**'
+              - 'charts/kafka-common/**'
+              - 'charts/kafka-cluster/**'
+              - 'charts/strimzi-operator/**'
+              - 'scripts/deploy-kafka-generic.sh'
+              - 'scripts/check-metric-contract.sh'
+              - 'scripts/metric-contract/**'
+              - 'cli/cmd/migrate*.go'
+              - 'cli/pkg/migrate/**'
+              - 'config/cluster.yaml'
+              - 'config/storage/**'
+              - 'images.env'
+              - 'versions.env'
+              - '.github/workflows/ci-mirror-maker2.yml'
 
   chart:
     name: Chart validation
@@ -1348,10 +1365,17 @@ jobs:
   # the label rather than on every push.
   metrics-live:
     name: Metric contract (live scrape)
+    needs: changes
+    # Weekly, on demand, on a pull request that changes what it stands up or
+    # checks, and on any pull request labelled test-migration. It ran only on
+    # the first three, and a chart change it would have caught at once (the
+    # dashboard block, removed while this job's values still set it) failed
+    # every weekly run instead.
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule' ||
-      contains(github.event.pull_request.labels.*.name, 'test-migration')
+      contains(github.event.pull_request.labels.*.name, 'test-migration') ||
+      (github.event_name == 'pull_request' && needs.changes.outputs.live == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -1489,7 +1513,7 @@ jobs:
   gate:
     name: Gate · MirrorMaker 2
     if: always()
-    needs: [changes, chart]
+    needs: [changes, chart, metrics-live]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
