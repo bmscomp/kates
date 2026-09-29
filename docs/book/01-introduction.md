@@ -22,7 +22,7 @@ A generic load testing tool treats Kafka as an endpoint that accepts requests. K
 
 ## The Problem Space
 
-Running Kafka in production requires confidence in three dimensions:
+Before you trust a cluster with production traffic, you need answers in three areas, and each one is tested differently. The diagram splits each area into the properties you test for it:
 
 ```mermaid
 %%| label: fig-intro-readiness
@@ -46,7 +46,7 @@ graph LR
     D --> D3[Exactly-once semantics]
 ```
 
-Most teams validate these properties manually — running ad-hoc scripts, eyeballing [Grafana](appendix-a-glossary.md#gl-grafana) dashboards, and hoping their cluster survives the next incident. Kates replaces this with **repeatable, automated tests checked against targets you set**.
+Most teams check these by hand: a perf-test script, a [Grafana](appendix-a-glossary.md#gl-grafana) dashboard watched while someone deletes a pod, and a judgment call. Kates turns the same checks into tests you can repeat, run in a pipeline and check against targets you set.
 
 ## Design Philosophy
 
