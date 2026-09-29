@@ -1,0 +1,51 @@
+<script>
+// The side panels of the Kates book (theme/kates.scss, "Side panels"): the
+// contents folded at the top of a chapter below 1200px, and part labels in
+// the sidebar that stay on one line.
+(() => {
+  "use strict";
+
+  // ── The contents, folded ──────────────────────────────────────────────────
+  // Quarto prints a second copy of the contents at the top of the chapter
+  // (toc-location: right-body), open and titled like the margin's. Below
+  // 1200px it is the only copy on screen. Fold it into a <details>, so a
+  // reader on a phone opens it when they want it. Give it the margin's "Edit
+  // this page" and "Report an issue", which go with the margin. The copy
+  // repeats the margin's ids (toc-title, and toc-<section> on each entry), so
+  // drop them: an id names one element.
+  const copy = document.getElementById("TOC-body");
+  if (copy && !copy.querySelector(".kates-toc-fold")) {
+    const fold = document.createElement("details");
+    fold.className = "kates-toc-fold";
+    const summary = document.createElement("summary");
+    summary.textContent = "On this page";
+    copy.querySelector("#toc-title")?.remove();
+    for (const el of copy.querySelectorAll("[id]")) el.removeAttribute("id");
+    fold.append(summary, ...copy.childNodes);
+    const actions = document.querySelector("#TOC .toc-actions");
+    if (actions) fold.append(actions.cloneNode(true));
+    copy.append(fold);
+    copy.setAttribute("aria-label", "On this page");
+  }
+
+  // ── Whole part labels ─────────────────────────────────────────────────────
+  // A part label stays on one line and ends in an ellipsis where the sidebar
+  // is too narrow for it. Give exactly those labels the whole label as a
+  // tooltip. The sidebar's width changes with the window, and when it opens
+  // as a drawer on a narrow screen.
+  const labels = document.querySelectorAll(
+    ".sidebar-navigation .sidebar-item-section > .sidebar-item-container > .sidebar-item-text");
+  const sidebar = document.getElementById("quarto-sidebar");
+  const markCut = () => {
+    for (const label of labels) {
+      const text = label.textContent.trim();
+      if (label.scrollWidth > label.clientWidth) label.title = text;
+      else if (label.title === text) label.removeAttribute("title");
+    }
+  };
+  if (sidebar && labels.length && window.ResizeObserver) {
+    new ResizeObserver(markCut).observe(sidebar);
+    document.fonts?.ready.then(markCut); // the web font changes label widths
+  }
+})();
+</script>
