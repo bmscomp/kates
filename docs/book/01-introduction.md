@@ -9,14 +9,14 @@ This chapter is for anyone who runs, tests, or is about to inherit an Apache Kaf
 
 ## What Is Kates?
 
-**Kates** — Kafka Advanced Testing & Engineering Suite — is a purpose-built platform for performance testing and chaos engineering on Apache Kafka clusters. It has two halves: the `kates` CLI on your machine, and the [Kates API](appendix-a-glossary.md#gl-kates-api), a service in the cluster that generates load, drives faults and keeps every run in PostgreSQL. [Architecture & Design](02-architecture.md) shows the parts. Together they answer questions like these:
+Kates (Kafka Advanced Testing & Engineering Suite) is a tool for performance testing and chaos engineering on Apache Kafka clusters. It has two halves: the `kates` CLI on your machine, and the [Kates API](appendix-a-glossary.md#gl-kates-api), a service in the cluster that generates load, drives faults and keeps every run in PostgreSQL. [Architecture & Design](02-architecture.md) shows the parts. Together they answer questions like these:
 
-- *How many messages per second can my cluster sustain before latency degrades?*
+- *How many records per second can my cluster sustain before latency degrades?*
 - *What happens to in-flight messages when a [broker](appendix-a-glossary.md#gl-broker) dies?*
 - *Does my cluster recover from a network partition within my [SLA](appendix-a-glossary.md#gl-sla)?*
 - *Is there any data loss under cascading failures?*
 
-Unlike generic load testing tools, Kates understands Kafka semantics — [producer acknowledgments](appendix-a-glossary.md#gl-acks), consumer group rebalancing, [ISR](appendix-a-glossary.md#gl-isr) tracking, and partition leadership. Unlike basic `kafka-producer-perf-test`, Kates provides structured reports, SLA enforcement, historical trend analysis, and [disruptions](appendix-a-glossary.md#gl-disruption) that a [safety guard](appendix-a-glossary.md#gl-safety-guard) checks before they start.
+A generic load testing tool treats Kafka as an endpoint that accepts requests. Kates sets [producer acknowledgments](appendix-a-glossary.md#gl-acks), batching and consumer group settings for each test, and a fault can aim at a partition's leader while Kates tracks the [ISR](appendix-a-glossary.md#gl-isr). `kafka-producer-perf-test` prints its numbers and exits; Kates stores every run, checks it against your targets and keeps the history for trends. A [safety guard](appendix-a-glossary.md#gl-safety-guard) checks each [disruption](appendix-a-glossary.md#gl-disruption) before it starts.
 
 ## The Problem Space
 
