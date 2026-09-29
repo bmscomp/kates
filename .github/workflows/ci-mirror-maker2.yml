@@ -1443,7 +1443,9 @@ jobs:
       # per-partition source series and the checkpoint series do not exist —
       # a fresh mirror exposes only the worker-level beans.
       - name: Prove records and offsets cross (populates every mirror series)
-        run: build/kates migrate verify --timeout 600 --yes
+        # No --yes: verify has none, and asks nothing, since it seeds and
+        # reads only the lab's own topics and group.
+        run: build/kates migrate verify --timeout 600
 
       # One worker is enough: the exporter config is the same on every pod.
       # The checkpoint series is the last to appear (checkpoints are emitted
