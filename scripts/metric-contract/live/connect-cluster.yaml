@@ -19,8 +19,8 @@ monitoring:
     enabled: false
 alerts:
   enabled: false
-dashboards:
-  enabled: false
+# No dashboards key: the chart has refused one since 2.1.0, and the Connect
+# board comes from charts/monitoring.
 # The CI cluster has one broker.
 config:
   replicationFactor: 1

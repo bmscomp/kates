@@ -13,5 +13,5 @@ podMonitors:
   enabled: false
 alerts:
   enabled: false
-dashboard:
-  enabled: false
+# No dashboard key: the chart has refused one since 0.11.0, and the boards
+# come from charts/monitoring.
