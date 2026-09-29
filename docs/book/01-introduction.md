@@ -115,7 +115,7 @@ graph TB
     end
 ```
 
-Kates can serve as both a **development-time validation tool** (run a quick load test before merging) and a **production-readiness gate** (run the full chaos suite before promoting to production).
+Day to day, that means two uses: a quick LOAD test before you merge a change, and the full chaos suite before you promote a release to production.
 
 ## Quick Start
 
