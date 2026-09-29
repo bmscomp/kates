@@ -24,7 +24,7 @@ graph LR
         INT[integration.yml<br/>Integration Tests]
     end
 
-    subgraph Live["Live scrape (schedule / dispatch only)"]
+    subgraph Live["Live scrape (schedule, dispatch, PRs on its inputs)"]
         ML[metrics-live jobs<br/>Kind + real brokers]
     end
 
@@ -48,6 +48,7 @@ graph LR
     Manual --> INT
     Sched --> ML
     Manual --> ML
+    PR --> ML
     Tag --> RC
     RC -->|"workflow_call"| PD
     RC -->|"workflow_call"| PT
@@ -80,6 +81,8 @@ The filters used to be workflow-level `paths:` blocks, and the move is not cosme
 | `lint.yml` | one category per linter: workflows, scripts, Dockerfiles, YAML, Go, Java, the Makefile |
 
 The `ci.yml`, `ci-docker.yml` and `integration.yml` filters exclude `**/*.md` under the source trees, so a README edit does not trigger a build. `ci-mirror-maker2.yml` is the deliberate exception: its filter lists `docs/mirror-maker2-runbook.md`, because one of its checks asserts that every `runbook_url` anchor the alerts point at is a real heading in that file, and a heading rename must therefore run the job. Scheduled and manual runs have no diff to filter on, and run everything.
+
+`ci-kafka-charts.yml` and `ci-mirror-maker2.yml` classify the diff a second time, as `live`. That filter lists what the workflow's `metrics-live` job deploys, runs or checks: the charts it installs, `scripts/deploy-kafka-generic.sh`, the metric contract, the Kind cluster's config, `images.env`, `versions.env` and the workflow itself. A pull request that touches one of them runs the job.
 
 `ci.yml`'s `helm` category includes `config/cluster.yaml`, because `scripts/check-versions.sh` asserts the Kind node image tags in that file against `versions.env`. `ci-mirror-maker2.yml` adds `labeled` to its pull-request event types; without it the `test-migration` label would fire nothing and the job it gates would be unreachable on a pull request.
 
@@ -140,7 +143,7 @@ This job grew well past `helm lint charts/kates`. In order:
 
 - Push to `main` and pull requests, on the chart and checker paths in the table above
 - Manual `workflow_dispatch`
-- A weekly `schedule` (Mondays, 05:00 UTC), which is the only automatic trigger for the live-scrape job
+- A weekly `schedule` (Mondays, 05:00 UTC)
 
 ### What It Runs
 
@@ -148,7 +151,7 @@ This job grew well past `helm lint charts/kates`. In order:
 |-----|------|-------------|
 | **kafka-common** | Every push and pull request | Lints the library, builds the dependencies of its harness chart (`charts/kafka-common/tests/harness`), and runs `helm unittest` against it |
 | **`<chart>`** (the render matrix) | Every push and pull request, one job per chart | Renders the chart across its documented shapes and checks every render |
-| **Metric contract (live scrape, `<chart>`)** | `workflow_dispatch` or `schedule` only, for `kafka-cluster` and `connect-cluster` | Stands up a Kind cluster, runs Kafka (and Connect), scrapes the pods, and diffs the metric catalogue against the capture |
+| **Metric contract (live scrape, `<chart>`)** | A pull request on the `live` paths, `workflow_dispatch` or `schedule`, never a push; for `kafka-cluster` and `connect-cluster` | Stands up a Kind cluster, runs Kafka (and Connect), scrapes the pods, and diffs the metric catalogue against the capture |
 
 ### The Library Job
 
@@ -178,14 +181,16 @@ The remaining steps in each matrix job:
 
 ### The Live Scrape
 
-`metrics-live` asks the one question a render cannot answer: what does a real worker actually expose? It creates a three-zone Kind cluster from `config/cluster.yaml`, deploys Strimzi and Kafka through `scripts/deploy-kafka-generic.sh` with `charts/kafka-cluster/values-ci.yaml`, layers `scripts/metric-contract/live/kafka-cluster.yaml` on top to turn the exporter agent on, produces and consumes real traffic as the platform's own principal, port-forwards each exporter's `/metrics`, and runs the contract against the capture.
+`metrics-live` asks the one question a render cannot answer: what does a real worker actually expose? It creates a three-zone Kind cluster from `config/cluster.yaml` and deploys Strimzi and Kafka through `scripts/deploy-kafka-generic.sh`, with `scripts/metric-contract/live/kafka-cluster.yaml` layered on `charts/kafka-cluster/values-ci.yaml` in the same install. The live file turns on the exporter agent, the Kafka Exporter and Cruise Control, and runs two brokers, because Strimzi refuses Cruise Control beside one. The job then produces and consumes real traffic as the platform's own principal, port-forwards each exporter's `/metrics`, and runs the contract against the capture.
 
 The traffic step is not ceremony. A cluster nobody has written to registers a fraction of its per-topic, request and consumer-group beans, so scraping an idle broker would pass a contract that a busy one fails. For the `connect-cluster` leg the job additionally waits for at least two connectors to report `RUNNING`, since the task and client beans do not exist until a connector runs.
 
-Captures are uploaded as an artifact with a 14-day retention, so a note about an uncatalogued series can be turned into a catalogue entry without paying for another cluster. On failure the job collects cluster state, custom resources, events and pod logs into a second artifact.
+The contract asks whether each series a board reads exists. `scripts/check-dashboards-live.py --scrape` then asks whether each board query finds it: it loads the capture into a throwaway Prometheus and evaluates every selector on every board. That step is advisory. The capture is raw exporter output, without the labels a PodMonitor adds at scrape time (`namespace`, `pod`, the `strimzi_io_*` family). The boards' `namespace` and `cluster` variables are built on those labels, so they resolve to nothing, and the check fails every query scoped by them. The report still prints, and still annotates the run.
+
+Captures are uploaded as an artifact with a 14-day retention, so a note about an uncatalogued series can be turned into a catalogue entry without paying for another cluster. On failure the job collects cluster state, custom resources, events, and the logs of the Kafka pods and the Strimzi operator into a second artifact.
 
 ::: {.callout-important}
-This job costs minutes and a cluster, which is why it runs weekly and on demand rather than on every push. Nothing on the pull-request path depends on it — the render-time contract check in the `matrix` job is what gates a merge.
+This job costs minutes and a cluster, so a pull request runs it only when it touches the `live` paths, and `Gate · Kafka charts` then requires it to pass. The weekly and manual runs catch what breaks without a commit, such as a new runner image or a change in an upstream chart repository. On any other pull request, the render-time contract check in the `matrix` job is what gates a merge.
 :::
 
 ---
@@ -200,7 +205,7 @@ This job costs minutes and a cluster, which is why it runs weekly and on demand 
 |-----|------|---------|
 | **Chart validation** | Every push and pull request on the paths above | default |
 | **Migration e2e (Kafka `<source>` → 4.x)** | `workflow_dispatch`, or a pull request carrying the `test-migration` label | 50 minutes |
-| **Metric contract (live scrape)** | `workflow_dispatch`, the weekly `schedule` (Mondays, 05:30 UTC), or the `test-migration` label | 40 minutes |
+| **Metric contract (live scrape)** | A pull request on the `live` paths or with the `test-migration` label, `workflow_dispatch`, or the weekly `schedule` (Mondays, 05:30 UTC) | 40 minutes |
 
 ### Chart Validation
 
@@ -449,7 +454,7 @@ graph LR
     end
 
     subgraph "Weekly / on demand"
-        G[metrics-live jobs]
+        G[metrics-live jobs<br/>also on PRs to their inputs]
         S[security.yml rescan]
     end
 
@@ -470,7 +475,7 @@ graph LR
 
 **PR / Push flow:** Every pull request and push to `main` runs the validation workflows in parallel. They are not chained — each classifies the diff on its own, so a chart-only change runs the chart jobs and skips everything else, while a change to `cli/pkg/migrate/` runs jobs in `ci.yml`, `lint.yml`, `integration.yml` and `ci-mirror-maker2.yml`. Each workflow's `Gate ·` job is what branch protection requires.
 
-**Scheduled flow:** The `metrics-live` jobs are gated by an `if:` inside the chart workflows rather than by a separate file, so they share their workflow's paths and checks but run only on the weekly schedule, on a manual dispatch, or (for MirrorMaker 2) on the `test-migration` label. `security.yml` rescans the image tags the charts currently pin every Tuesday, and `native.yml` builds the native image nightly. A scheduled run that fails opens an issue labelled `ci-failure` (one per workflow, commented on while it stays open) instead of going unnoticed in the Actions tab.
+**Scheduled flow:** The `metrics-live` jobs are gated by an `if:` inside the chart workflows rather than by a separate file, so they share their workflow's checks. They run on the weekly schedule, on a manual dispatch, on a pull request that touches their `live` paths, and (for MirrorMaker 2) on the `test-migration` label. They never run on a push to `main`, because the pull request already ran them. `security.yml` rescans the image tags the charts currently pin every Tuesday, and `native.yml` builds the native image nightly. A scheduled run that fails opens an issue labelled `ci-failure` (one per workflow, commented on while it stays open) instead of going unnoticed in the Actions tab.
 
 **Release flow:** When a version tag is pushed, `release.yml` builds the CLI and calls the three image workflows; the GitHub Release and the Homebrew tap are published only after all of them have verified and signed what they pushed.
 
