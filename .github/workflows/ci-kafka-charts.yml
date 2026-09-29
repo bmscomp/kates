@@ -10,7 +10,10 @@ name: CI · Kafka charts
 # checks every series the rules and dashboards read against the capture — and
 # the catalogue against the capture both ways, so an attribute a Kafka upgrade
 # renames shows up here before it shows up as an empty panel. Minutes and a
-# cluster, so weekly and on demand rather than on every push.
+# cluster, so not on every push: weekly, on demand, and on a pull request that
+# changes what it deploys or checks (the `live` filter). Weekly alone was not
+# enough: a refactor renamed the release it upgrades, and every weekly run
+# failed until someone read one.
 #
 # `matrix` renders each chart through scripts/chart-matrix/<chart>.yaml and
 # checks every render against the Strimzi CRDs the repository pins
@@ -48,6 +51,7 @@ jobs:
     outputs:
       # Scheduled and manual runs have no diff to filter on: everything runs.
       charts: ${{ steps.filter.outputs.charts || 'true' }}
+      live: ${{ steps.filter.outputs.live || 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -80,6 +84,22 @@ jobs:
               - 'versions.env'
               - '.github/workflows/ci-kafka-charts.yml'
               - '.github/actions/**'
+            # What metrics-live deploys, scrapes and checks the scrape against.
+            live:
+              - 'charts/kafka-cluster/**'
+              - 'charts/connect-cluster/**'
+              - 'charts/kafka-common/**'
+              - 'charts/strimzi-operator/**'
+              - 'scripts/deploy-kafka-generic.sh'
+              - 'scripts/check-metric-contract.sh'
+              - 'scripts/metric-contract/**'
+              - 'scripts/check-dashboards-live.py'
+              - 'dashboards/**'
+              - 'config/cluster.yaml'
+              - 'config/storage/**'
+              - 'images.env'
+              - 'versions.env'
+              - '.github/workflows/ci-kafka-charts.yml'
 
   # Every board in dashboards/ is generated, and every chart copy of one is
   # generated from the same source. This job proves both, holds every board to
@@ -494,12 +514,11 @@ jobs:
   # ── Live scrape ───────────────────────────────────────────────────────────
   metrics-live:
     name: Metric contract (live scrape, ${{ matrix.chart }})
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    needs: changes
+    # Never on a push: the pull request ran it, and the weekly run covers main.
+    if: github.event_name != 'push' && needs.changes.outputs.live == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
-      contents: read
-      issues: write # notify-scheduled-failure
     strategy:
       fail-fast: false
       matrix:
@@ -550,11 +569,18 @@ jobs:
           set -euo pipefail
           helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
           scripts/retry.sh 5 helm dependency build charts/kafka-cluster/
+          # One install with both files, and the script waits for Kafka. The
+          # live file used to go on in a second upgrade that scaled the brokers
+          # from values-ci's one to its two: the first broker rolled, and
+          # Cruise Control's add-brokers rebalance was still running when
+          # Connect's leg installed Connect. In one run, Connect's pod then
+          # came up ten minutes late.
           ./scripts/deploy-kafka-generic.sh --yes --skip-tests \
-            -f charts/kafka-cluster/values-ci.yaml
-          helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values \
+            -f charts/kafka-cluster/values-ci.yaml \
             -f scripts/metric-contract/live/kafka-cluster.yaml
-          kubectl -n kafka wait kafka/krafter --for=condition=Ready --timeout=600s
+          # The script carries on when every pod runs but Kafka is not Ready;
+          # this job must not.
+          kubectl -n kafka wait kafka/krafter --for=condition=Ready --timeout=300s
 
       # Traffic, so the per-topic, request and consumer-group beans exist at
       # all: a cluster nobody has written to registers a fraction of them.
@@ -690,6 +716,17 @@ jobs:
       # judging a full query here would report a dozen failures on healthy
       # boards. The script's own docstring sets out the rule.
       - name: The boards can see the series this cluster publishes
+        # A hang here showed only as the whole job cancelled at its 45-minute
+        # limit; a step timeout fails this step instead, and sooner.
+        timeout-minutes: 10
+        # Advisory until the throwaway Prometheus attaches the labels a
+        # PodMonitor adds at scrape time. The captures are raw exporter output,
+        # so namespace, pod and the strimzi_io_* labels every board scopes by
+        # are never on them: each board's namespace and cluster variables come
+        # out empty, and every panel scoped by them fails (131 selectors on the
+        # kafka-cluster leg and 34 on connect-cluster, the first time this step
+        # ran). Its report still prints and still annotates the run.
+        continue-on-error: true
         run: |
           set -euo pipefail
           args=""
@@ -720,10 +757,16 @@ jobs:
         run: |
           mkdir -p /tmp/diag
           kubectl get all -A > /tmp/diag/all.txt 2>&1 || true
-          kubectl -n kafka get kafka,kafkanodepools,kafkaconnects,kafkaconnectors,kafkausers -o yaml > /tmp/diag/crs.yaml 2>&1 || true
-          kubectl -n kafka get events --sort-by=.lastTimestamp > /tmp/diag/events.txt 2>&1 || true
-          for p in $(kubectl -n kafka get pods -o name 2>/dev/null); do
-            kubectl -n kafka logs "$p" --all-containers --tail=300 > "/tmp/diag/$(basename "$p").log" 2>&1 || true
+          kubectl -n kafka get kafka,kafkanodepools,kafkaconnects,kafkaconnectors,kafkausers,kafkarebalances,strimzipodsets -o yaml > /tmp/diag/crs.yaml 2>&1 || true
+          # The operator's log too: a resource that never gets a status (the
+          # KafkaConnect that waited ten minutes for its pod) is explained
+          # only there.
+          for ns in kafka strimzi-operator; do
+            kubectl -n "$ns" get events --sort-by=.lastTimestamp > "/tmp/diag/events-$ns.txt" 2>&1 || true
+            for p in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
+              kubectl -n "$ns" logs "$p" --all-containers --tail=2000 \
+                > "/tmp/diag/$ns-$(basename "$p").log" 2>&1 || true
+            done
           done
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -733,16 +776,10 @@ jobs:
           path: /tmp/diag/
           retention-days: 7
 
-      - name: Open an issue for a failed weekly run
-        if: failure() && github.event_name == 'schedule'
-        uses: ./.github/actions/notify-scheduled-failure
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
   gate:
     name: Gate · Kafka charts
     if: always()
-    needs: [changes, dashboards, library, matrix]
+    needs: [changes, dashboards, library, matrix, metrics-live]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -750,3 +787,21 @@ jobs:
       - uses: ./.github/actions/ci-gate
         with:
           needs: ${{ toJSON(needs) }}
+
+  # One issue per failed weekly run, whichever job failed. It was a step in
+  # each metrics-live leg, so a run where both legs failed filed two issues:
+  # each searched for an open one before the other had created it.
+  notify:
+    name: Open an issue for a failed weekly run
+    needs: gate
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/notify-scheduled-failure
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -24,11 +24,16 @@ type procRunner struct{}
 // error carries the command's stderr, so callers can show why kubectl or
 // helm refused without a second call.
 func (procRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
-	return runProc(ctx, "", name, args...)
+	out, err := runProc(ctx, "", name, args...)
+	return strings.TrimSpace(out), err
 }
 
 // RunInput is Run with data on stdin — `kubectl apply -f -`, `kubectl exec
-// -i … -- tee`, the console producer.
+// -i … -- tee`, the console producer — except that it returns stdout as the
+// process wrote it, which is what podrun.Runner promises. podrun.WriteFile
+// compares tee's echo with what it wrote, byte for byte: trimmed, the echo of
+// any file ending in a newline, every client.properties among them, came back
+// one byte short, and `kates migrate verify` failed before its first record.
 func (procRunner) RunInput(ctx context.Context, stdin string, name string, args ...string) (string, error) {
 	return runProc(ctx, stdin, name, args...)
 }
@@ -60,7 +65,7 @@ func runProcDefault(ctx context.Context, stdin, name string, args ...string) (st
 		}
 		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(shown, " "), err, msg)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
 
 // defaultRunner is the process runner every non-deploy command uses.

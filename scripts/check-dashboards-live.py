@@ -70,6 +70,7 @@ import argparse
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import sys
@@ -320,12 +321,21 @@ def serve_captures(paths: list[Path], workdir: Path) -> tuple[subprocess.Popen, 
         # declares; each is served separately so Prometheus never sees a
         # duplicate declaration in one body.
         shutil.copyfile(p, target / "metrics")
+    # -u: a piped stdout is block-buffered, and http.server prints its
+    # "Serving HTTP on ... port N" line without flushing it. The readline below
+    # then waited for a line that never came, past its deadline and on until
+    # the CI job's own 45-minute limit.
     proc = subprocess.Popen(
-        [sys.executable, "-m", "http.server", "0", "--bind", "127.0.0.1"],
+        [sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1"],
         cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     port = None
     deadline = time.time() + 30
     while time.time() < deadline:
+        # readline blocks, so the deadline holds only if it is checked while
+        # waiting for output, not between lines.
+        ready, _, _ = select.select([proc.stdout], [], [], max(0.0, deadline - time.time()))
+        if not ready:
+            break
         line = proc.stdout.readline()
         m = re.search(r"port (\d+)", line or "")
         if m:
