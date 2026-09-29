@@ -45,7 +45,7 @@ spec:
                 criteria: ">="
                 value: "10.0"  # Minimum 10 records/sec
               source:
-                image: soldevelo/kubectl:latest
+                image: ghcr.io/bmscomp/kates-tester:1.24.0
                 hostNetwork: false
 ---
 # Standalone producer throughput ConfigMap for reuse

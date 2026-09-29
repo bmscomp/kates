@@ -618,10 +618,10 @@ fi
 
 # ---------------------------------------------------------------------------
 # The tester image the Strimzi charts' Helm tests, hooks and secret-sync jobs
-# run. ghcr.io/bmscomp/kates-tester is published with each Kates release, so
-# every chart pins the same tag, and it is the kates chart's appVersion
-# (docs/kafka-charts-refactor-plan.md, M4). A chart left behind runs test
-# tooling a release older than the rest.
+# run, and the Litmus experiments' probes and jobs. ghcr.io/bmscomp/kates-tester
+# is published with each Kates release, so every pin carries the same tag, and
+# it is the kates chart's appVersion (docs/kafka-charts-refactor-plan.md, M4).
+# A file left behind runs tooling a release older than the rest.
 # ---------------------------------------------------------------------------
 kates_app_version=$(grep -E '^appVersion:' charts/kates/Chart.yaml | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/' || true)
 echo ""
@@ -639,7 +639,8 @@ while IFS= read -r hit; do
   fi
 done < <(grep -HE '^[[:space:]]*[A-Za-z]+:[[:space:]]*"?ghcr.io/bmscomp/kates-tester:' \
            charts/strimzi-operator/values*.yaml charts/kafka-cluster/values*.yaml \
-           charts/connect-cluster/values*.yaml charts/mirror-maker2/values*.yaml 2>/dev/null)
+           charts/connect-cluster/values*.yaml charts/mirror-maker2/values*.yaml \
+           config/litmus/experiments/*.yaml 2>/dev/null)
 if [[ -z "$kates_app_version" ]]; then
   echo "ERROR: could not read charts/kates/Chart.yaml appVersion" >&2
   fail=1
@@ -650,11 +651,11 @@ elif [[ "$tester_pins" -lt 4 ]]; then
   echo "ERROR: found ${tester_pins} kates-tester pin(s) in the Strimzi charts; expected at least 4." >&2
   fail=1
 elif [[ "$tester_drift" -ne 0 ]]; then
-  echo "DRIFT: a Strimzi chart pins kates-tester at a tag other than ${kates_app_version}." >&2
-  echo "  Move every testImages pin to ghcr.io/bmscomp/kates-tester:${kates_app_version}." >&2
+  echo "DRIFT: a pin above names kates-tester at a tag other than ${kates_app_version}." >&2
+  echo "  Move every pin listed to ghcr.io/bmscomp/kates-tester:${kates_app_version}." >&2
   fail=1
 else
-  echo "OK: every Strimzi chart runs kates-tester:${kates_app_version}."
+  echo "OK: every Strimzi chart and Litmus experiment runs kates-tester:${kates_app_version}."
 fi
 
 # The Kafka CLI inside the tester is the Kafka the charts deploy. Left on 3.7
