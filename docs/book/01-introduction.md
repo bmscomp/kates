@@ -1,11 +1,13 @@
 # Introduction
 
-This chapter is for anyone who runs, tests, or is about to inherit an Apache Kafka cluster — platform engineers, SREs, and developers alike. After this chapter, you can:
+You find out how a Kafka cluster handles a [broker](appendix-a-glossary.md#gl-broker) failure on the day a broker fails, unless you've already tried it. Kates lets you try it first: it puts load on the cluster, injects the failure, and checks the numbers against targets you set. It's built for the people who run, test or are about to inherit an Apache Kafka cluster: platform engineers, SREs and developers.
+
+After this chapter, you can:
 
 - Explain what Kates does and how it differs from generic load testing tools
-- Name the five design principles that shape every Kates feature
+- Name the five design principles behind Kates
 - Run your first [LOAD](appendix-a-glossary.md#gl-test-type) test from the CLI and read its report
-- Decide where Kates fits — and doesn't fit — in your toolchain
+- Decide where Kates fits in your toolchain, and where it doesn't
 
 ## What Is Kates?
 
