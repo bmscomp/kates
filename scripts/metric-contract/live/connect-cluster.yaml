@@ -46,9 +46,19 @@ resources:
   limits: { memory: 2Gi, cpu: 1000m }
 testConnectors: []
 testTopics: []
+# Both connectors are MirrorMaker's, which in a Connect cluster of their own
+# open their own admin client to the target through target.cluster.*;
+# nothing derives it from the worker's connection. Without it both failed at
+# start ("You must set either bootstrap.servers or bootstrap.controllers"),
+# ran no task, and the scrape carried no task, source or error series. The
+# target here is the cluster the worker runs on, reached as the worker is.
 connectorDefaults:
   config:
     replication.factor: "1"
+    target.cluster.bootstrap.servers: krafter-kafka-bootstrap.kafka.svc.cluster.local:9092
+    target.cluster.security.protocol: SASL_PLAINTEXT
+    target.cluster.sasl.mechanism: SCRAM-SHA-512
+    target.cluster.sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"live-connect\" password=\"${secrets:kafka/live-connect:password}\";"
 connectors:
   live-heartbeat:
     class: org.apache.kafka.connect.mirror.MirrorHeartbeatConnector
