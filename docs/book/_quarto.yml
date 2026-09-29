@@ -135,7 +135,9 @@ format:
     respect-user-color-scheme: true
     highlight-style: theme/kates-code.theme
     include-in-header: theme/head.html
-    include-after-body: theme/diagrams.html
+    include-after-body:
+      - theme/diagrams.html
+      - theme/panels.html
     filters:
       - path: theme/citations.lua
         at: post-render
@@ -143,6 +145,12 @@ format:
       search-text-placeholder: "Search the book (/)"
     toc: true
     toc-depth: 3
+    # The contents sit in the right margin from 1200px up and at the top of
+    # the chapter below that, folded. Quarto prints both copies and shows
+    # both; theme/kates.scss shows one, and theme/panels.html folds the other.
+    toc-location: right-body
+    # h2 entries, and the h3 entries of the section being read
+    toc-expand: 1
     # Number chapters and sections (5.2), not every heading below them.
     number-depth: 2
     code-copy: true

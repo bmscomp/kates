@@ -929,15 +929,25 @@ dialog.kates-diagram-viewer {
     // where it was.
     padding: 0.15rem 0 0.15rem 0.3rem;
     margin: -0.15rem 0 -0.15rem -0.3rem;
+    // One line at every width. "Part V — Deployment & Operations" needs 270px
+    // and the sidebar never gives a label more than 198px, so a long label
+    // ends in an ellipsis; theme/panels.html shows the whole label in its
+    // tooltip.
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .sidebar-item-section {
     margin-top: 0.9rem;
   }
 
+  // Sized so every chapter title takes one or two lines from 1200px up;
+  // at 0.87rem and 1.4 "Cross-Cluster Replication and Migration" took three.
   .sidebar-section.depth1 .sidebar-link {
-    font-size: 0.87rem;
-    line-height: 1.4;
+    font-size: 0.84rem;
+    line-height: 1.3;
   }
 
   .sidebar-item-container {
@@ -957,11 +967,11 @@ dialog.kates-diagram-viewer {
 
     > .chapter-number,
     > .chapter-title {
-      font-size: 0.87rem;
+      font-size: 0.84rem;
     }
 
     > .chapter-number {
-      flex: 0 0 1.9em;
+      flex: 0 0 1.6em;
     }
   }
 
@@ -1024,6 +1034,151 @@ nav[role="doc-toc"] {
 
   &:hover {
     color: $kates-link;
+  }
+}
+
+// ── Side panels ─────────────────────────────────────────────────────────────
+// The contents sit in the right margin from 1200px up. Below that, the margin
+// squeezed the text to 508px at 768px, and to 533px beside the navigation at
+// 1000px. So below 1200px the margin gives way, and the copy Quarto prints at
+// the top of the chapter (toc-location: right-body) stands in for it, folded
+// by theme/panels.html. Quarto shows both copies at every width except a
+// phone's, where it hides both; this shows exactly one.
+
+#TOC-body {
+  display: none;
+}
+
+@include media-breakpoint-down(xl) {
+  // …and the "Table of contents" button that reader mode pins in its place
+  #quarto-margin-sidebar,
+  #quarto-toc-toggle {
+    display: none;
+  }
+
+  // The id outranks Quarto's nav[role=doc-toc] { display: none } below 768px
+  nav#TOC-body {
+    display: block;
+  }
+}
+
+// The margin's grid tracks stay when it is hidden. From 768px up the text
+// runs on into them, up to its usual measure, and sits centred in the room;
+// below 768px the grid has a single column, so there's nothing to take.
+@include media-breakpoint-between(md, xl) {
+  #quarto-content.page-columns > #quarto-document-content {
+    grid-column: body-content-start / page-end;
+    justify-self: center;
+    width: 100%;
+    max-width: calc(800px - 3em);
+  }
+}
+
+.kates-toc-fold {
+  margin: 1.25rem 0 2rem;
+  border: 1px solid $kates-border;
+  border-radius: $border-radius-lg;
+
+  > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 0.9rem;
+    color: $kates-muted;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    list-style: none;
+    cursor: pointer;
+    border-radius: inherit;
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+
+    // A chevron that points right when folded and down when open
+    &::before {
+      content: "";
+      width: 0.45em;
+      height: 0.45em;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(-45deg);
+      transition: transform 0.15s ease;
+    }
+
+    &:hover {
+      color: $kates-link;
+    }
+  }
+
+  &[open] > summary::before {
+    transform: rotate(45deg);
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  > ul {
+    padding: 0 0.9rem 0.75rem;
+  }
+
+  ul ul {
+    padding-left: 1.1rem;
+  }
+
+  li a {
+    display: block;
+    padding: 0.2rem 0;
+    color: $kates-sidebar-fg;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    text-decoration: none;
+
+    &:hover {
+      color: $kates-link;
+    }
+  }
+
+  .header-section-number {
+    margin-right: 0.35em;
+    color: $kates-muted;
+    font-variant-numeric: tabular-nums;
+  }
+
+  // "Edit this page" and "Report an issue", from the margin
+  .toc-actions {
+    padding: 0.6rem 0.9rem 0.75rem;
+    border-top: 1px solid $kates-border;
+
+    ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 1.25rem;
+    }
+
+    a {
+      color: $kates-muted;
+      font-size: 0.8rem;
+
+      &:hover {
+        color: $kates-link;
+      }
+    }
+
+    .bi {
+      margin-right: 0.35em;
+    }
+  }
+}
+
+@media print {
+  #TOC-body {
+    display: none !important;
   }
 }
 
