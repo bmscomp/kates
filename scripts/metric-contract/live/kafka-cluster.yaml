@@ -17,6 +17,14 @@ alerts:
 dashboards:
   enabled: false
 # One broker, so every internal topic is RF 1 (values-ci sets the rest).
+# Two brokers: Strimzi refuses Cruise Control on a cluster with one ("Cruise
+# Control cannot be deployed with a Kafka cluster which has only one broker"),
+# and values-ci.yaml, which this is layered on, runs one. The Kafka resource
+# then sat NotReady and the rest of this file never applied.
+nodePools:
+  roleDefaults:
+    broker:
+      replicas: 2
 cruiseControl:
   enabled: true
   config:
