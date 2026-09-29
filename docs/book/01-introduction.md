@@ -177,12 +177,12 @@ Expect a throughput summary, a latency distribution from average through [P99](a
 
 ## What Kates Is Not
 
-To set expectations clearly:
+Kates leaves several nearby jobs to other tools:
 
-- **Not a Confluent Platform replacement** — Kates is a testing and validation tool, not a managed Kafka distribution. It works alongside Confluent, Strimzi, or any Kafka deployment.
-- **Not a general-purpose load tester** — Kates understands Kafka semantics (ISR tracking, consumer [rebalancing](appendix-a-glossary.md#gl-rebalance), [partition](appendix-a-glossary.md#gl-partition) leadership). Use k6, Gatling, or Locust for HTTP/gRPC load testing.
-- **Not a Kafka management UI** — for browsing topics, consumer groups, and cluster state in a web interface, use [Kafka UI](https://github.com/kafbat/kafka-ui) (which Kates deploys alongside).
-- **Not a production monitoring system** — Kates is designed for testing and validation environments. For production monitoring, use [Prometheus](appendix-a-glossary.md#gl-prometheus) + Grafana directly (which Kates also deploys for its own observability).
+- It isn't a Confluent Platform replacement or a managed Kafka distribution. It tests clusters that Confluent, Strimzi or any other Kafka deployment runs.
+- It isn't a general-purpose load tester. Its tests are built around Kafka behavior, such as ISR tracking, consumer [rebalancing](appendix-a-glossary.md#gl-rebalance) and [partition](appendix-a-glossary.md#gl-partition) leadership. For HTTP or gRPC load, use k6, Gatling or Locust.
+- It isn't a Kafka management UI. To browse topics, consumer groups and cluster state in a browser, use [Kafka UI](https://github.com/kafbat/kafka-ui), which Kates deploys alongside the cluster.
+- It isn't a production monitoring system. Kates is designed for testing and validation environments, so monitor production with [Prometheus](appendix-a-glossary.md#gl-prometheus) and Grafana directly. Kates deploys both too, for its own observability.
 
 ## Summary
 
