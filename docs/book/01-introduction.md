@@ -52,7 +52,7 @@ Kates was built around five principles:
 
 ### 1. Kafka-Native
 
-Every test type understands Kafka protocol semantics. The native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend), which generates a test's load by default, runs real Kafka producers and consumers with the `acks`, batching, compression and [consumer group](appendix-a-glossary.md#gl-consumer-group) settings of the test's spec. A [disruption plan](appendix-a-glossary.md#gl-disruption-plan) can aim a fault at a partition's leader and track a [topic](appendix-a-glossary.md#gl-topic)'s ISR while the fault runs.
+The native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend), which generates a test's load by default, runs real Kafka producers and consumers with the `acks`, batching, compression and [consumer group](appendix-a-glossary.md#gl-consumer-group) settings of the test's spec. A [disruption plan](appendix-a-glossary.md#gl-disruption-plan) can aim a fault at a partition's leader and track a [topic](appendix-a-glossary.md#gl-topic)'s ISR while the fault runs.
 
 ### 2. Kubernetes-First
 
@@ -60,15 +60,15 @@ Kates runs inside Kubernetes and targets [Strimzi](appendix-a-glossary.md#gl-str
 
 ### 3. SLA-Driven
 
-Every test can carry the targets it must meet. Kates calls them SLA thresholds, though they work like SLOs: targets you set, not agreements with anyone [@beyer2016site]. In a scenario file they are [gates](appendix-a-glossary.md#gl-gate), which `kates test apply --wait` checks after each run, exiting 1 when one is missed. A disruption plan's thresholds earn it an [SLA grade](appendix-a-glossary.md#gl-sla-grade) from A to F instead. This makes Kates suitable for CI/CD pipelines where a performance regression should block deployment.
+Every test can carry the targets it must meet. Kates calls them SLA thresholds, though they work like SLOs: targets you set, not agreements with anyone [@beyer2016site]. In a scenario file they are [gates](appendix-a-glossary.md#gl-gate), which `kates test apply --wait` checks after each run, exiting 1 when one is missed. A disruption plan's thresholds earn it an [SLA grade](appendix-a-glossary.md#gl-sla-grade) from A to F instead. So a CI job can fail the build when throughput drops or P99 rises past a gate.
 
 ### 4. Observable
 
-All test execution produces structured data — JSON reports, CSV exports, JUnit XML for CI integration, and latency [heatmaps](appendix-a-glossary.md#gl-heatmap) for deep analysis. The live dashboard and `kates top` provide real-time visibility during test execution.
+Every run produces a JSON report, which you can export as CSV, as JUnit XML for CI, or as [heatmap](appendix-a-glossary.md#gl-heatmap) data that shows how latency spread over time. While a test runs, `kates top` and the live dashboard show it as it happens.
 
 ### 5. Safe by Default
 
-Kates refuses a disruption plan that would hit every broker, or more brokers than the plan's `maxAffectedBrokers` allows, and it checks that every Kafka pod is Ready before each fault. By default, when a step fails, [rollback](appendix-a-glossary.md#gl-disruption-rollback) gives back a broker that a scale-down removed and deletes the NetworkPolicies Kates created for a network partition. This safety guard counts brokers, not replicas. It doesn't read the ISR or the KRaft quorum, and a [resilience run](appendix-a-glossary.md#gl-resilience-run) doesn't go through it. [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails) says exactly what it checks.
+Kates refuses a disruption plan that would hit every broker, or more brokers than the plan's `maxAffectedBrokers` allows. Before each fault, it checks that every Kafka pod is Ready. By default, when a step fails, [rollback](appendix-a-glossary.md#gl-disruption-rollback) gives back a broker that a scale-down removed and deletes the NetworkPolicies Kates created for a network partition. This safety guard counts brokers, not replicas. It doesn't read the ISR or the KRaft quorum, and a [resilience run](appendix-a-glossary.md#gl-resilience-run) doesn't go through it. [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails) says exactly what it checks.
 
 ## Feature Overview
 
