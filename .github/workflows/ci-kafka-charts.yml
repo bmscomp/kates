@@ -714,6 +714,14 @@ jobs:
         # A hang here showed only as the whole job cancelled at its 45-minute
         # limit; a step timeout fails this step instead, and sooner.
         timeout-minutes: 10
+        # Advisory until the throwaway Prometheus attaches the labels a
+        # PodMonitor adds at scrape time. The captures are raw exporter output,
+        # so namespace, pod and the strimzi_io_* labels every board scopes by
+        # are never on them: each board's namespace and cluster variables come
+        # out empty, and every panel scoped by them fails (131 selectors on the
+        # kafka-cluster leg and 34 on connect-cluster, the first time this step
+        # ran). Its report still prints and still annotates the run.
+        continue-on-error: true
         run: |
           set -euo pipefail
           args=""
