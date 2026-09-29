@@ -144,20 +144,20 @@ kates test list
 kates report show <id>
 ```
 
-Every `/api` endpoint except `/api/health` requires the [API key](appendix-a-glossary.md#gl-api-key), which the `kates` chart generates into the `kates-api-key` [Secret](appendix-a-glossary.md#gl-secret). `kates deploy` writes the key into whichever [CLI context](appendix-a-glossary.md#gl-cli-context) is active when it finishes — on a fresh machine, the built-in `default` context at `http://localhost:8080` — unless that context already holds a key that kates did not put there, and never into a context you create afterwards, so `kates ctx set` needs `--api-key`, as above. Because the health endpoint is public, `kates health` succeeds even without a key; every other command in the block needs one, starting with `kates test create`, which fails with `[401] Missing API key` when the context has none.
+Every `/api` endpoint except `/api/health` requires the [API key](appendix-a-glossary.md#gl-api-key), which the `kates` chart generates into the `kates-api-key` [Secret](appendix-a-glossary.md#gl-secret). That's why `kates health` succeeds without a key, while `kates test create` fails with `[401] Missing API key` when the context has none. `kates deploy` writes the key into whichever [CLI context](appendix-a-glossary.md#gl-cli-context) is active when it finishes: on a fresh machine, that's the built-in `default` context at `http://localhost:8080`. It leaves alone a key that kates didn't put there, and it never writes into a context you create afterwards, so `kates ctx set` above passes `--api-key`.
 
-::: {.callout-note}
-`kates ports` does both steps at once: it forwards the API to `localhost:8080` rather than 30083, points a CLI context of its own, `ports`, at that address with the key from the `kates-api-key` Secret, and makes `ports` the current context. It creates that context the first time and changes no other, so a context you set up yourself keeps its URL and key. It stops every `kubectl port-forward` already running, including those `make ports` started. With the [single-namespace topology](appendix-a-glossary.md#gl-single-namespace-topology) (option 1 in `make all`), the Kates API and its API-key Secret live in `kates-stack`: use `-n kates-stack` in the `kubectl` command, and `KATES_NS=kates-stack make ports` for the API forward.
+::: {.callout-note title="Shortcut: kates ports"}
+`kates ports` does both steps at once. It forwards the API to `localhost:8080` rather than 30083, points a CLI context of its own, `ports`, at that address with the key from the `kates-api-key` Secret, and makes `ports` the current context. It creates that context the first time and changes no other, and it stops every `kubectl port-forward` already running, including those `make ports` started.
 :::
+
+With the [single-namespace topology](appendix-a-glossary.md#gl-single-namespace-topology) (option 1 in `make all`), the Kates API and its API-key Secret live in `kates-stack`: use `-n kates-stack` in the `kubectl` command, and `KATES_NS=kates-stack make ports` for the API forward.
 
 The REST and [gRPC](appendix-a-glossary.md#gl-grpc) examples in this book read the same key from the `KATES_API_KEY` variable; [REST API Reference](11-api-reference.md#authentication) shows how to export it.
 
 For a complete setup guide, see [Deployment Guide](12-deployment.md). For hands-on tutorials, see the [Tutorials](https://github.com/bmscomp/kates/tree/main/docs/tutorials) directory.
 
-::: {.callout-tip}
-**Try it**
-
-Once the Quick Start connection works, take the report pipeline for a spin:
+::: {.callout-tip title="Try it: What Does acks=all Cost You?"}
+Once the Quick Start connection works, run the same test with `acks=1` and compare it with your first run:
 
 ```bash
 kates test types
