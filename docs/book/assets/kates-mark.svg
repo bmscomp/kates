@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Kates">
-  <!-- The cover's broker ring and recovery arc (assets/cover.svg) in white on
-       the blue of its title band, so the one file reads on light and dark
-       backgrounds and still holds together as a 16px favicon. -->
+  <!-- A broker ring and recovery arc in white on the book's blue, so the one
+       file reads on light and dark backgrounds and still holds together as a
+       16px favicon. -->
   <defs>
     <linearGradient id="kates-mark-tile" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#2e7ae5"/>
