@@ -70,6 +70,9 @@ jobs:
               -X ${MODULE}.BuildDate=${BUILD_DATE}" \
             -o kates .
 
+      # scripts/install-kates.sh unpacks this layout, and
+      # scripts/check-install-kates.sh packs its stand-in the same way:
+      # change the three together.
       - name: Package tarball
         working-directory: cli
         run: |

@@ -113,6 +113,11 @@ jobs:
           # tables, and are excluded rather than fixed across 72 scripts.
           shellcheck -x -S warning -e SC2317,SC2034,SC2155 scripts/*.sh kates-ci.sh
 
+      # install-kates.sh against tarballs packed as release.yml packs them.
+      # It failed against every release until this ran it.
+      - name: install-kates.sh installs a release
+        run: scripts/check-install-kates.sh
+
   dockerfiles:
     name: hadolint
     needs: changes

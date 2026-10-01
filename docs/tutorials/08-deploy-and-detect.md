@@ -200,19 +200,19 @@ When you're done, tear down the entire stack:
 kates clean
 ```
 
-The clean command proceeds through 6 phases:
+The clean command names the cluster it is about to clean (kubectl's current context), lists what it will remove, and asks. Nothing changes until you confirm. Then it proceeds through 6 phases:
 
-1. **Port-forward cleanup** — Kills background port-forwards
+1. **Port-forward cleanup** — Stops the `kubectl port-forward` processes into the namespaces it deletes
 2. **Strimzi CR removal** — Deletes Kafka CRs so the operator can process finalizers
 3. **Finalizer stripping** — Removes stuck finalizers to prevent namespace locks
 4. **Helm uninstall** — Uninstalls all releases in dependency order
 5. **Namespace deletion** — Removes all managed namespaces
 6. **CRD cleanup** — Deletes custom resource definitions
 
-For CI/CD pipelines, use `--force` to skip the confirmation prompt:
+For CI/CD pipelines, use `--yes` to skip the confirmation prompt. Without a terminal and without `--yes`, the command refuses and exits 1:
 
 ```bash
-kates clean --force
+kates clean --yes
 ```
 
 ---

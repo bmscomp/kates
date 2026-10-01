@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -69,15 +70,18 @@ func loadConfig() Config {
 // loadConfig only warns about but updateConfig refuses to write over: saving
 // the defaults in its place would lose every context in it for good.
 func readConfig() (Config, error) {
-	cfg := Config{
-		CurrentContext: "default",
-		Contexts:       map[string]Context{"default": {URL: "http://localhost:8080", Output: "table"}},
-	}
 	data, err := os.ReadFile(configPath())
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		err = nil
-	case err == nil:
+	if errors.Is(err, fs.ErrNotExist) {
+		return Config{
+			CurrentContext: "default",
+			Contexts:       map[string]Context{"default": {URL: "http://localhost:8080", Output: "table"}},
+		}, nil
+	}
+	// A file's contexts are its own. Unmarshalling into the defaults merged
+	// them in, so every save (kates ctx set, kates ports) added a "default"
+	// context pointing at localhost to a file that had none.
+	var cfg Config
+	if err == nil {
 		err = yaml.Unmarshal(data, &cfg)
 	}
 	if cfg.Contexts == nil {
@@ -267,15 +271,43 @@ func followSymlinks(path string) (string, error) {
 	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
 }
 
-func activeContext(cfg Config) Context {
-	name := cfg.CurrentContext
+// contextFromEnv records that contextFlag came from KATES_CONTEXT, so an error
+// about it can say where the name came from.
+var contextFromEnv bool
+
+// resolveContext returns the context commands talk to, by name: the one
+// --context or KATES_CONTEXT names, or else the config's current context.
+//
+// A name the config does not have used to fall back to http://localhost:8080
+// without a word, so `--context prdo` sent its requests to whatever answered
+// on this machine, without the context's API key. It is an error now. No name
+// at all, and "default", still mean the built-in localhost context, as they
+// do with no config file.
+func resolveContext(cfg Config) (string, Context, error) {
+	name, from := cfg.CurrentContext, "the current context in "+configPath()
 	if contextFlag != "" {
-		name = contextFlag
+		name, from = contextFlag, "--context"
+		if contextFromEnv {
+			from = "KATES_CONTEXT"
+		}
 	}
 	if ctx, ok := cfg.Contexts[name]; ok {
-		return ctx
+		return name, ctx, nil
 	}
-	return Context{URL: "http://localhost:8080", Output: "table"}
+	if name == "" || name == "default" {
+		return "default", Context{URL: "http://localhost:8080", Output: "table"}, nil
+	}
+	known := make([]string, 0, len(cfg.Contexts))
+	for n := range cfg.Contexts {
+		known = append(known, n)
+	}
+	sort.Strings(known)
+	have := "it has none"
+	if len(known) > 0 {
+		have = "it has " + strings.Join(known, ", ")
+	}
+	return name, Context{}, fmt.Errorf("context %q, from %s, is not in %s (%s). Create it with: kates ctx set %s --url <url>",
+		name, from, configPath(), have, name)
 }
 
 const helpTemplate = `
@@ -413,11 +445,11 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if contextFlag == "" {
 			if envCtx := os.Getenv("KATES_CONTEXT"); envCtx != "" {
-				contextFlag = envCtx
+				contextFlag, contextFromEnv = envCtx, true
 			}
 		}
 		cfg := loadConfig()
-		ctx := activeContext(cfg)
+		_, ctx, ctxErr := resolveContext(cfg)
 		urlOverridden := apiURL != ""
 		if apiURL == "" {
 			if envURL := os.Getenv("KATES_URL"); envURL != "" {
@@ -472,6 +504,11 @@ var rootCmd = &cobra.Command{
 			Insecure: ctx.Insecure,
 		}
 		apiClient = client.NewWithOptions(opts)
+		if ctxErr != nil {
+			// Commands that never call the API, kates ctx set among them,
+			// still run; every API call reports the missing context.
+			apiClient = client.Failing(ctxErr)
+		}
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,

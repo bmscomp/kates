@@ -182,7 +182,7 @@ kates --url http://other-server:8080 health
 kates --context staging test list
 ```
 
-The `kates` chart turns API-key authentication on by default and generates the key into the `kates-api-key` Secret; the command above reads it from the `kates` namespace of the default install. The URL answers only while something forwards the API to it: `make ports` forwards it to `localhost:30083`, `kates ports` to `localhost:8080`, and when only one of those two ports answers, the CLI uses that one. `kates health` reads a public endpoint and succeeds without a key, so check a new context with `kates test list` instead. `kates ctx set` stores a context without switching to it — the configuration always carries a built-in `default` context pointing at `http://localhost:8080` — so follow it with `kates ctx use`.
+The `kates` chart turns API-key authentication on by default and generates the key into the `kates-api-key` Secret; the command above reads it from the `kates` namespace of the default install. The URL answers only while something forwards the API to it: `make ports` forwards it to `localhost:30083`, `kates ports` to `localhost:8080`, and when only one of those two ports answers, the CLI uses that one. `kates health` reads a public endpoint and succeeds without a key, so check a new context with `kates test list` instead. `kates ctx set` switches to the context it stores only when that is the only context, and on a fresh machine the configuration starts with a built-in `default` context pointing at `http://localhost:8080`, so follow it with `kates ctx use`.
 
 `--url` and `KATES_URL` take the context's API key, proxy and `insecure` setting only to the context's own host. The port may differ, `localhost` and `127.0.0.1` count as one host, and plain HTTP never gets what the context sends over HTTPS. For another server, pass `--api-key` or set `KATES_API_KEY`; without either, the CLI says on stderr that it is not sending the context's key, and the request goes without one.
 
@@ -232,6 +232,8 @@ contexts:
 | `--api-key` | | API key for this call, in place of the context's |
 | `--plain` | | Disable interactive prompts and fancy UI formatting |
 | `--help` | `-h` | Show help |
+
+`--context`, or `KATES_CONTEXT` when the flag is not given, has to name a context in `~/.kates.yaml`, and so does the current context when neither does. A name that is not there fails every command that calls the Kates API, before any request is sent, and the error lists the names that are there. Commands that don't call the API still run, so `kates ctx set` can create the context `KATES_CONTEXT` names. `default` and no name at all still mean `http://localhost:8080`, as they do before any context exists.
 
 ## Commands
 
@@ -673,6 +675,20 @@ kates test cancel <id> <id> -o json
 ```
 
 Cancel runs that are `PENDING` or `RUNNING` and keep them. Each run's tasks stop, the run gives back its place among the runs the Kates API allows at once, and it is stored as `FAILED`, each unfinished task with the error `Cancelled by user`. A run that has already finished cannot be cancelled; the CLI says so for that run and exits 1, as it does whenever a run on the line was not cancelled. With `-o json` it prints one object per run: its `id`, whether it was `cancelled`, and the `error` when it was not.
+
+#### test cleanup
+
+Aliases: `gc`, `prune`
+
+```bash
+kates test cleanup --dry-run
+kates test cleanup
+kates test cleanup --older-than 2h --yes
+```
+
+Delete runs that are still `RUNNING` long after they should have ended. A run counts as orphaned when it is more than `--older-than` (default `30m`) past its planned end, which is its start plus the `durationMs` in its spec. The command lists those runs and asks before deleting them; without a terminal it refuses unless `--yes` is given. `--dry-run` only lists them. Deleting a run stops it and removes it with its results, as `kates test delete` does. To stop a run and keep it, use `kates test cancel`. The CLI exits 1 when a delete fails or when you decline.
+
+The Kates API already marks a run `FAILED` once it has been `RUNNING` longer than `kates.engine.max-duration-ms`, 30 minutes by default, so a run this command finds is one that limit did not catch.
 
 #### test watch
 
@@ -1268,8 +1284,10 @@ Remove all Kates-managed resources and namespaces.
 
 ```bash
 kates clean
-kates clean --force
+kates clean --yes
 ```
+
+`kates clean` works on kubectl's current context. It names that cluster, lists the Helm releases, namespaces and CRDs it will remove, and asks before removing anything; without a terminal it refuses unless `--yes` is given (`--force` does the same). Every kubectl and helm call it then makes names that context, so switching contexts in another terminal while it runs does not move the teardown. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes and leaves every other forward running.
 
 #### detect
 
@@ -1323,7 +1341,10 @@ Initialize a new Kates workspace with config, scenarios, and CI gate.
 
 ```bash
 kates init
+kates init --name staging --url https://kates-staging.example.com
 ```
+
+`kates init` adds the `--name` context (default `default`) to `~/.kates.yaml`, makes it current, and keeps every other context. A context of that name that already exists is kept as it is, API key included, and the generated `kates-ci.sh` points at its URL. Given a different `--url` for it, `kates init` refuses and exits 1 without writing anything; change the context with `kates ctx set` instead.
 
 #### upgrade
 
@@ -2415,7 +2436,7 @@ Consequences worth knowing in scripts:
 - `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
 - `test apply --wait`, `test create --wait` and `replay --wait` cancel the run they are waiting for when interrupted, and exit `130`. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
 - `kates cluster alerts` exits `1` wherever a critical alert rule is defined, firing or not, which on a default install means always — see its section above.
-- A declined confirmation exits `1` in `deploy`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
+- A declined confirmation exits `1` in `deploy`, `clean`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
 - Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.
 
 ::: {.callout-warning}
@@ -2423,7 +2444,6 @@ Consequences worth knowing in scripts:
 
 Some commands report a failure on screen and still exit `0`, so a script cannot rely on their status. Among them:
 
-- `kates clean` when you decline its confirmation: it prints `Cancelled.` Unattended runs pass `--force`.
 - `kates ctx use`, `kates ctx delete` and `kates ctx export --name` with a context that does not exist, `kates ctx import` with a file it cannot read or parse, and a mistyped subcommand under a command group — `kates ctx list`, for instance — which prints the group's help.
 - `kates status` when the API does not answer or rejects the API key: it prints `unreachable`.
 - `kates ports` when it finds no Kates services, some forwards fail, or the API rejects a key it checks.

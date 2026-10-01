@@ -22,6 +22,10 @@ func TestHelperRunKates(t *testing.T) {
 	if os.Getenv("KATES_TEST_RUN_AS_CLI") != "1" {
 		t.Skip("runs only as runKates' subprocess")
 	}
+	// TestMain points HOME at an empty directory, in this process too.
+	if home := os.Getenv("KATES_TEST_HOME"); home != "" {
+		os.Setenv("HOME", home)
+	}
 	rootCmd.SetArgs(strings.Fields(os.Getenv("KATES_TEST_ARGS")))
 	Execute()
 	os.Exit(0)

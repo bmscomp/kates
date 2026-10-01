@@ -22,6 +22,10 @@ type Client struct {
 	HTTPClient *http.Client
 	MaxRetries int
 	APIKey     string
+
+	// setupErr, when set, is what every request returns instead of being
+	// sent (Failing).
+	setupErr error
 }
 
 type ClientOptions struct {
@@ -91,6 +95,16 @@ func shouldBypassProxy(baseURL string) bool {
 
 func New(baseURL string) *Client {
 	return NewWithOptions(ClientOptions{BaseURL: baseURL})
+}
+
+// Failing returns a client whose every request fails with err without being
+// sent. It stands in when the settings that would choose the server are
+// wrong: a command that never calls the API still runs, and one that does
+// reports err rather than reaching some other server.
+func Failing(err error) *Client {
+	c := New("")
+	c.setupErr = err
+	return c
 }
 
 func NewWithAPIKey(baseURL, apiKey string) *Client {
@@ -177,6 +191,9 @@ func (c *Client) doRequest(ctx context.Context, req *http.Request, retryable boo
 // doRequestWith sends req through hc, which is c.HTTPClient except for calls
 // that carry their own deadline (postJSONWithTimeout).
 func (c *Client) doRequestWith(ctx context.Context, hc *http.Client, req *http.Request, retryable bool) ([]byte, error) {
+	if c.setupErr != nil {
+		return nil, c.setupErr
+	}
 	attempts := 1
 	if retryable {
 		attempts = c.MaxRetries
@@ -791,6 +808,9 @@ const maxStreamErrorBody = 4096
 // not take the client's 60-second timeout, which would cut a stream that
 // runs for minutes: ctx bounds it instead.
 func (c *Client) DisruptionStream(ctx context.Context, id string) (io.ReadCloser, error) {
+	if c.setupErr != nil {
+		return nil, c.setupErr
+	}
 	u, err := c.DisruptionStreamURL(id)
 	if err != nil {
 		return nil, err
