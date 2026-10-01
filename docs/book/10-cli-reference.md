@@ -672,6 +672,20 @@ kates test cancel <id> <id> -o json
 
 Cancel runs that are `PENDING` or `RUNNING` and keep them. Each run's tasks stop, the run gives back its place among the runs the Kates API allows at once, and it is stored as `FAILED`, each unfinished task with the error `Cancelled by user`. A run that has already finished cannot be cancelled; the CLI says so for that run and exits 1, as it does whenever a run on the line was not cancelled. With `-o json` it prints one object per run: its `id`, whether it was `cancelled`, and the `error` when it was not.
 
+#### test cleanup
+
+Aliases: `gc`, `prune`
+
+```bash
+kates test cleanup --dry-run
+kates test cleanup
+kates test cleanup --older-than 2h --yes
+```
+
+Delete runs that are still `RUNNING` long after they should have ended. A run counts as orphaned when it is more than `--older-than` (default `30m`) past its planned end, which is its start plus the `durationMs` in its spec. The command lists those runs and asks before deleting them; without a terminal it refuses unless `--yes` is given. `--dry-run` only lists them. Deleting a run stops it and removes it with its results, as `kates test delete` does. To stop a run and keep it, use `kates test cancel`. The CLI exits 1 when a delete fails or when you decline.
+
+The Kates API already marks a run `FAILED` once it has been `RUNNING` longer than `kates.engine.max-duration-ms`, 30 minutes by default, so a run this command finds is one that limit did not catch.
+
 #### test watch
 
 ```bash
