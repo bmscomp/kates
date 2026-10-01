@@ -274,7 +274,7 @@ func runPorts(ctx context.Context) {
 		fmt.Printf("      %s\n\n", output.DimStyle.Render("They are running in the background. You can continue typing commands in this terminal."))
 	} else {
 		fmt.Printf("    %s %s\n", errStyle.Render("⚠"), boldStyle.Render("Some port forwards failed to establish."))
-		fmt.Printf("      %s\n\n", output.DimStyle.Render("Check if the pods are ready or run 'kates clean' to reset."))
+		fmt.Printf("      %s\n\n", output.DimStyle.Render("Check that the pods are ready, then run 'kates ports' again."))
 	}
 }
 

@@ -400,7 +400,8 @@ func TestCtxImport_ClearsKeySource(t *testing.T) {
 
 // TestCtxCommands runs the context commands that change the config, which now
 // read it under the config lock (updateConfig), and checks each one's effect
-// on the file and its report, including a name the config does not have.
+// on the file and its report, including a name the config does not have. The
+// contexts are the file's own: a save used to add a "default" it never had.
 func TestCtxCommands(t *testing.T) {
 	start := Config{CurrentContext: "local", Contexts: map[string]Context{
 		"local": {URL: "http://localhost:8080", Output: "table", APIKey: "local-key"},
@@ -420,32 +421,32 @@ func TestCtxCommands(t *testing.T) {
 				ctxSetURL, ctxSetAPIKey = "https://lab.example.com", "lab-key"
 				return ctxSetCmd.RunE(ctxSetCmd, []string{"lab"})
 			},
-			wantCurrent: "local", wantNames: []string{"default", "lab", "local", "mcp"},
+			wantCurrent: "local", wantNames: []string{"lab", "local", "mcp"},
 			wantOut: "Context 'lab' → https://lab.example.com",
 		},
 		{
 			name:        "use switches the current context",
 			run:         func() error { ctxUseCmd.Run(ctxUseCmd, []string{"mcp"}); return nil },
-			wantCurrent: "mcp", wantNames: []string{"default", "local", "mcp"},
+			wantCurrent: "mcp", wantNames: []string{"local", "mcp"},
 			wantOut: "Switched to 'mcp' → http://localhost:8080",
 		},
 		{
 			name:        "use of a missing context changes nothing",
 			run:         func() error { ctxUseCmd.Run(ctxUseCmd, []string{"nope"}); return nil },
-			wantCurrent: "local", wantNames: []string{"default", "local", "mcp"},
+			wantCurrent: "local", wantNames: []string{"local", "mcp"},
 			wantOut: "Context 'nope' not found", unchanged: true,
 		},
 		{
 			name:        "delete of the current context picks another",
 			run:         func() error { ctxDeleteCmd.Run(ctxDeleteCmd, []string{"local"}); return nil },
-			wantNames:   []string{"default", "mcp"},
+			wantNames:   []string{"mcp"},
 			wantOut:     "Context 'local' deleted",
 			wantCurrent: "", // any remaining context; checked below
 		},
 		{
 			name:        "delete of a missing context changes nothing",
 			run:         func() error { ctxDeleteCmd.Run(ctxDeleteCmd, []string{"nope"}); return nil },
-			wantCurrent: "local", wantNames: []string{"default", "local", "mcp"},
+			wantCurrent: "local", wantNames: []string{"local", "mcp"},
 			wantOut: "Context 'nope' not found", unchanged: true,
 		},
 	}

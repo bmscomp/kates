@@ -129,7 +129,7 @@ kates clean --force   # uninstall the stack and keep the cluster; without --forc
 make destroy          # delete the Kind cluster panda (FORCE=1 skips the prompt)
 ```
 
-`kates clean` also deletes the Strimzi, Litmus, Prometheus Operator, cert-manager and Kyverno CRDs cluster-wide, and stops every `kubectl port-forward` on the machine. Do not point it at a shared cluster.
+`kates clean` works on kubectl's current context and names it before asking. It also deletes the Strimzi, Litmus, Prometheus Operator, cert-manager and Kyverno CRDs cluster-wide, so do not point it at a shared cluster. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes.
 
 ## Other clusters
 

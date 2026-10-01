@@ -214,12 +214,18 @@ var ctxCurrentCmd = &cobra.Command{
 	Short: "Print the active context name and URL",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg := loadConfig()
-		if cfg.CurrentContext == "" {
+		if cfg.CurrentContext == "" && contextFlag == "" {
 			output.Warn("No active context. Run: kates ctx set <name> --url <url>")
 			return
 		}
-		ctx := activeContext(cfg)
-		output.Success(fmt.Sprintf("%s → %s", cfg.CurrentContext, ctx.URL))
+		// The name --context or KATES_CONTEXT gives, when it gives one: it
+		// used to print the file's current name beside the other one's URL.
+		name, ctx, err := resolveContext(cfg)
+		if err != nil {
+			output.Error(err.Error())
+			return
+		}
+		output.Success(fmt.Sprintf("%s → %s", name, ctx.URL))
 	},
 }
 
