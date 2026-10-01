@@ -20,7 +20,7 @@
         <kafka.version>3.9.2</kafka.version>
         <lz4.version>1.11.3</lz4.version>
         <snappy.version>1.1.10.8</snappy.version>
-        <zstd.version>1.5.7-18</zstd.version>
+        <zstd.version>1.5.7-20</zstd.version>
         <netty.version>4.1.138.Final</netty.version>
         <spotless.version>3.10.3</spotless.version>
         <palantir-format.version>2.89.0</palantir-format.version>
