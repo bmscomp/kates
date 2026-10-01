@@ -15,8 +15,10 @@ var statusCmd = &cobra.Command{
 	Short: "Quick one-line status of Kates and running tests",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := loadConfig()
-		ctxName := cfg.CurrentContext
-		ctx := activeContext(cfg)
+		ctxName, ctx, err := resolveContext(cfg)
+		if err != nil {
+			return cmdErr(err.Error())
+		}
 
 		var health *client.HealthResponse
 		var paged *client.PagedTests

@@ -231,6 +231,8 @@ contexts:
 | `--plain` | | Disable interactive prompts and fancy UI formatting |
 | `--help` | `-h` | Show help |
 
+`--context`, or `KATES_CONTEXT` when the flag is not given, has to name a context in `~/.kates.yaml`, and so does the current context when neither does. A name that is not there fails every command that calls the Kates API, before any request is sent, and the error lists the names that are there. Commands that don't call the API still run, so `kates ctx set` can create the context `KATES_CONTEXT` names. `default` and no name at all still mean `http://localhost:8080`, as they do before any context exists.
+
 ## Commands
 
 Find your question in the table below, then follow its link to the family's commands and flags. The last column says what the family works through: the Kates API, at the URL and with the API key of the context you use; Kubernetes, through the `kubectl` and `helm` the CLI runs against a cluster from your kubeconfig; or files on your machine.
