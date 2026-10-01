@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -449,12 +450,23 @@ var rootCmd = &cobra.Command{
 		}
 		cfg := loadConfig()
 		_, ctx, ctxErr := resolveContext(cfg)
+		urlOverridden := apiURL != ""
 		if apiURL == "" {
 			if envURL := os.Getenv("KATES_URL"); envURL != "" {
-				apiURL = envURL
+				apiURL, urlOverridden = envURL, true
 			} else {
 				apiURL = ctx.URL
 			}
+		}
+		// The context's API key, proxy and TLS setting belong to its server.
+		// They used to go with whatever URL --url or KATES_URL gave, so the
+		// key was sent to that host too.
+		if urlOverridden && !contextServes(apiURL, ctx.URL) {
+			if ctx.APIKey != "" && apiKeyFlag == "" && os.Getenv("KATES_API_KEY") == "" {
+				fmt.Fprintf(output.Err, "  ! Not sending the context's API key to %s, which is not the context's server (%s). Pass --api-key or set KATES_API_KEY for it.\n",
+					mcpRedactURL(apiURL), mcpRedactURL(ctx.URL))
+			}
+			ctx = Context{Output: ctx.Output}
 		}
 
 		// Apply dynamic local port fallback if using localhost/127.0.0.1
@@ -511,21 +523,57 @@ func isPortReachable(addr string) bool {
 	return true
 }
 
-func resolveFallbackURL(url string, checkPort func(string) bool) string {
-	if strings.Contains(url, "localhost:8080") || strings.Contains(url, "127.0.0.1:8080") {
-		if !checkPort("127.0.0.1:8080") {
-			if checkPort("127.0.0.1:30083") {
-				return strings.Replace(url, "8080", "30083", 1)
-			}
-		}
-	} else if strings.Contains(url, "localhost:30083") || strings.Contains(url, "127.0.0.1:30083") {
-		if !checkPort("127.0.0.1:30083") {
-			if checkPort("127.0.0.1:8080") {
-				return strings.Replace(url, "30083", "8080", 1)
-			}
-		}
+// resolveFallbackURL moves a local API URL between the two ports the Kates
+// API is reached on locally, 8080 (kates ports) and 30083 (a Kind NodePort),
+// when its own port does not answer and the other does.
+//
+// It used to match "localhost:8080" anywhere in the URL and replace the first
+// "8080" in it, so a host such as my-localhost:8080, or a query string
+// holding the text, was rewritten too. It now looks at the host and port.
+func resolveFallbackURL(rawURL string, checkPort func(string) bool) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || !isLoopbackHost(u.Hostname()) {
+		return rawURL
 	}
-	return url
+	other := map[string]string{"8080": "30083", "30083": "8080"}[u.Port()]
+	if other == "" || checkPort("127.0.0.1:"+u.Port()) || !checkPort("127.0.0.1:"+other) {
+		return rawURL
+	}
+	u.Host = net.JoinHostPort(u.Hostname(), other)
+	return u.String()
+}
+
+// contextServes reports whether target is the server of the context whose URL
+// is contextURL, so that the context's API key, proxy and TLS setting may go
+// with it: the same host, localhost and the loopback addresses counting as
+// one, and not plain HTTP where the context uses HTTPS. The port may differ:
+// the API is reached on 8080 through kates ports and on 30083 on Kind.
+func contextServes(target, contextURL string) bool {
+	t, err := url.Parse(target)
+	if err != nil {
+		return false
+	}
+	c, err := url.Parse(contextURL)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(c.Scheme, "https") && !strings.EqualFold(t.Scheme, "https") {
+		return false
+	}
+	th, ch := t.Hostname(), c.Hostname()
+	if th == "" || ch == "" {
+		return false
+	}
+	return strings.EqualFold(th, ch) || (isLoopbackHost(th) && isLoopbackHost(ch))
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback address.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func Execute() {
