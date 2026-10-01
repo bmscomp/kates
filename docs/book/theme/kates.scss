@@ -4,12 +4,18 @@
 // schemes. Every colour lives in kates-light.scss / kates-dark.scss, so this
 // file only reads the $kates-* palette and never defines a colour itself.
 
-// Typography — the web fonts are requested in theme/head.html.
+// Typography — the web fonts are requested in theme/head.html. EB Garamond
+// sets the chapter: its text, headings, tables and callouts (see "The
+// chapter's type" below). Inter sets the interface around it, the sidebar,
+// the contents and the page navigation, and the diagrams, whose boxes Mermaid
+// sizes from the text it measures. JetBrains Mono sets code.
 $font-family-sans-serif: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+$kates-serif: "EB Garamond", Garamond, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
 $font-family-monospace: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 $line-height-base: 1.7;
-$headings-font-weight: 700;
-$headings-line-height: 1.25;
+// EB Garamond's semibold: its bold is heavy at heading sizes.
+$headings-font-weight: 600;
+$headings-line-height: 1.2;
 $link-decoration: none;
 
 // Shape
@@ -18,8 +24,9 @@ $border-radius-sm: 0.375rem;
 $border-radius-lg: 0.75rem;
 
 // Code. Inline code is sized relative to its surroundings (em) so it scales
-// inside headings and tables.
-$code-font-size: 0.86em;
+// inside headings and tables. JetBrains Mono's x-height is about a third
+// larger than EB Garamond's, so 0.78em sets its lowercase level with the text.
+$code-font-size: 0.78em;
 $code-block-font-size: 0.84rem;
 $code-block-bg-padding: 0.95rem 1.15rem;
 
@@ -44,21 +51,63 @@ body {
   font-feature-settings: "cv05", "cv08";
 }
 
+// ── The chapter's type ──────────────────────────────────────────────────────
+// EB Garamond for everything in the chapter column. Its x-height is small, so
+// the text is set at 1.2rem (20.4px) to read as large as Inter did at 17px;
+// the interface around it keeps Inter at its own sizes. Figures are lining, as
+// in the PDF: versions, ports and counts stand level with the capitals.
+#quarto-document-content {
+  font-family: $kates-serif;
+  font-size: 1.2rem;
+  line-height: 1.6;
+  // Inter's character variants mean nothing here; Garamond keeps its own
+  // ligatures and kerning.
+  font-feature-settings: normal;
+  font-kerning: normal;
+  font-variant-numeric: lining-nums;
+
+  // Quarto sets captions in rem, a size below the interface's text in this
+  // face; keep them a step below the chapter's.
+  figcaption {
+    font-size: 0.85em;
+  }
+
+  // The interface that sits in the chapter keeps Inter: the contents folded
+  // in above the text below 1200px, and the diagrams' Expand button and hint.
+  :is(#TOC-body, .kates-toc-fold, .kates-diagram-expand, .kates-diagram-hint) {
+    font-family: $font-family-sans-serif;
+    font-feature-settings: "cv05", "cv08";
+    font-variant-numeric: normal;
+  }
+
+  // The title block's labels (Author, Published) in small capitals, like the
+  // part name above each chapter title.
+  .quarto-title-meta-heading {
+    font-size: 1.05rem;
+    letter-spacing: 0.06em;
+    text-transform: none;
+    font-variant-caps: all-small-caps;
+  }
+}
+
+// On a phone, 20.4px sets a median of 42 characters a line, and a tenth of
+// the lines at 34 or fewer where a long word wraps; 19px sets 44 and 39.
+@include media-breakpoint-down(sm) {
+  #quarto-document-content {
+    font-size: 1.12rem;
+  }
+}
+
 ::selection {
   background-color: rgba($kates-link, 0.2);
 }
 
 // ── Headings ────────────────────────────────────────────────────────────────
 
-h1, h2, h3, h4, h5, h6 {
-  letter-spacing: -0.012em;
-}
-
 .quarto-title-block .quarto-title h1.title {
-  font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.6rem);
-  font-weight: 800;
-  letter-spacing: -0.028em;
-  line-height: 1.12;
+  font-size: clamp(2.1rem, 1.6rem + 1.9vw, 3.1rem);
+  font-weight: 500;
+  line-height: 1.1;
   margin-bottom: 0.35rem;
 
   .chapter-number {
@@ -71,12 +120,13 @@ h1, h2, h3, h4, h5, h6 {
 #quarto-document-content .quarto-title-breadcrumbs {
   margin-bottom: 0.6rem;
 
+  // Small capitals, the type's own, rather than shrunken uppercase
   .breadcrumb {
     margin-bottom: 0;
-    font-size: 0.74rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: 1.05rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    font-variant-caps: all-small-caps;
   }
 
   .breadcrumb-item a {
@@ -92,7 +142,7 @@ h1, h2, h3, h4, h5, h6 {
 #quarto-document-content {
   > section > h2,
   h2.anchored {
-    font-size: 1.6rem;
+    font-size: 1.95rem;
     margin-top: 3rem;
     margin-bottom: 1rem;
     padding-bottom: 0.5rem;
@@ -100,41 +150,41 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   h3.anchored {
-    font-size: 1.27rem;
+    font-size: 1.5rem;
     margin-top: 2.25rem;
     margin-bottom: 0.75rem;
   }
 
   h4.anchored {
-    font-size: 1.08rem;
+    font-size: 1.25rem;
     margin-top: 1.75rem;
   }
 
   .header-section-number {
     color: $kates-number;
     font-weight: 600;
-    font-variant-numeric: tabular-nums;
+    font-variant-numeric: lining-nums tabular-nums;
     margin-right: 0.3em;
   }
 }
 
-// H4 is a small uppercase label rather than a fourth size of bold text. The
+// H4 is a small-capitals label rather than a fourth size of bold text. The
 // three reference pages keep the plain H4: there each one names a command,
 // endpoint or RPC, and capitals would misspell it. They are found by the
 // sidebar's active link, since file names are the book's stable identifiers;
 // a browser without :has() keeps the plain H4 everywhere.
 body:not(:has(.sidebar-link.active:is([href$="10-cli-reference.html"], [href$="11-api-reference.html"], [href$="16-grpc-api.html"])))
   #quarto-document-content h4.anchored {
-  font-size: 0.8rem;
-  font-weight: 700;
+  font-size: 1.2rem;
+  font-weight: 600;
   line-height: 1.4;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-variant-caps: all-small-caps;
   margin-top: 2rem;
   margin-bottom: 0.6rem;
 
   code {
-    text-transform: none;
+    font-variant-caps: normal;
     letter-spacing: normal;
   }
 }
@@ -178,8 +228,11 @@ body:not(:has(.sidebar-link.active:is([href$="10-cli-reference.html"], [href$="1
     }
   }
 
+  // The semibold, as the PDF's bold: Garamond's bold is heavy in a line of
+  // text.
   strong {
     color: $kates-strong;
+    font-weight: 600;
   }
 
   hr {
@@ -198,7 +251,7 @@ blockquote,
 
 kbd {
   font-family: $font-family-monospace;
-  font-size: 0.8em;
+  font-size: 0.74em;
   color: $body-color;
   background-color: $kates-surface;
   border: 1px solid $kates-border;
@@ -245,7 +298,7 @@ kbd {
 
 // Headings already carry weight; keep their code at heading size
 #quarto-document-content :is(h1, h2, h3, h4) code:not(.sourceCode) {
-  font-size: 0.9em;
+  font-size: 0.82em;
   font-weight: inherit;
 }
 
@@ -365,10 +418,16 @@ div.callout {
     margin-bottom: 0;
   }
 
-  // A step below body text, so a callout reads as an aside
+  // A step below the chapter's text, so a callout reads as an aside. Quarto
+  // sets the header and body at 0.9rem, smaller in this face than the
+  // sidebar's Inter.
+  #quarto-document-content & > .callout-header,
+  #quarto-document-content & .callout-body {
+    font-size: 0.9em;
+  }
+
   .callout-body-container {
-    font-size: 0.95rem;
-    line-height: 1.6;
+    line-height: 1.55;
   }
 }
 
@@ -386,8 +445,9 @@ div.callout {
 // ── Tables ──────────────────────────────────────────────────────────────────
 
 #quarto-document-content table.table {
-  font-size: 0.9rem;
-  line-height: 1.55;
+  font-size: 0.85em;
+  line-height: 1.5;
+  font-variant-numeric: lining-nums tabular-nums;
   margin: 1.25rem 0 1.75rem;
   border: 1px solid $kates-border;
   border-collapse: separate;

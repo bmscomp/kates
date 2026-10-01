@@ -72,6 +72,9 @@ jobs:
           # the reason this step cannot just call quarto: without it lualatex
           # and tlmgr are installed but not on PATH for the render below.
           echo "$HOME/bin" >> "$GITHUB_PATH"
+          # The book's text face. Ubuntu's fonts-ebgaramond is the older
+          # "EB Garamond 12", with a bold but no semibold or bold italic.
+          scripts/retry.sh 3 "$HOME/bin/tlmgr" install ebgaramond
           scripts/retry.sh 3 quarto install chromium --no-prompt
 
       - name: Note a degraded PDF build
@@ -147,11 +150,12 @@ jobs:
 
       - uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b # v2.2.0
 
-      # docs/book/theme/pdf-header.tex sets Inter for text and JetBrains Mono
-      # for code, as on the web, and takes the characters they lack (check
-      # marks, triangles, warning signs, emoji) from Noto Sans Symbols 2,
-      # Noto Sans Symbols, Noto Sans Math and Symbola. rsvg-convert draws the
-      # cover page (docs/book/theme/pdf-cover.lua).
+      # docs/book/theme/pdf-header.tex sets EB Garamond for text and headings,
+      # JetBrains Mono for code and Inter for a few labels, as on the web, and
+      # takes the characters they lack (check marks, triangles, warning signs,
+      # emoji) from Noto Sans Symbols 2, Noto Sans Symbols, Noto Sans Math and
+      # Symbola. EB Garamond comes from TeX Live (next step). rsvg-convert
+      # draws the cover page (docs/book/theme/pdf-cover.lua).
       - name: Install fonts and rsvg-convert
         run: |
           set -euo pipefail
@@ -167,6 +171,8 @@ jobs:
           set -euo pipefail
           scripts/retry.sh 3 quarto install tool tinytex --no-prompt --log-level warning
           echo "$HOME/bin" >> "$GITHUB_PATH"
+          # See the build job for why TeX Live's EB Garamond, not Ubuntu's.
+          scripts/retry.sh 3 "$HOME/bin/tlmgr" install ebgaramond
           scripts/retry.sh 3 quarto install chromium --no-prompt
 
       - name: Prepare sources for Quarto
