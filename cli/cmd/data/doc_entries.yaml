@@ -1439,7 +1439,9 @@
   short: "Initialize a new Kates workspace with config, scenarios, and CI gate"
   description: |
     Sets up a complete Kates project in the current directory:
-    1) Creates ~/.kates.yaml with a named context.
+    1) Adds a named context to ~/.kates.yaml and makes it current,
+       keeping the other contexts. An existing context of that name is
+       kept; init refuses to give it a different --url.
     2) Exports all 7 built-in scenario templates to scenarios/.
     3) Generates kates-ci.sh — a CI pipeline gate script with
        KATES_URL env var support and exit code propagation.
