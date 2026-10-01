@@ -1321,7 +1321,10 @@ Initialize a new Kates workspace with config, scenarios, and CI gate.
 
 ```bash
 kates init
+kates init --name staging --url https://kates-staging.example.com
 ```
+
+`kates init` adds the `--name` context (default `default`) to `~/.kates.yaml`, makes it current, and keeps every other context. A context of that name that already exists is kept as it is, API key included, and the generated `kates-ci.sh` points at its URL. Given a different `--url` for it, `kates init` refuses and exits 1 without writing anything; change the context with `kates ctx set` instead.
 
 #### upgrade
 
