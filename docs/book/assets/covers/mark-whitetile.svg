@@ -1,19 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Kates">
-  <!-- The cover's helm (assets/cover.svg; docs/assets/kates-logo.svg) in its own navy #102a66 and blue
-       #3092f8 on a rounded tile shaded from white to #e8f3ff with a #bfe0ff hairline,
-       like the cover's light top half; the tile carries it on dark sidebars and tabs.
-       Simplified from kates-logo.svg for 16px and 44px: the thin blue inner ring, the two rim
-       dashes between the streams and the navy-and-blue fragment beside the C-arrowhead
-       are dropped (sub-pixel there, they speckled the streams and joined the arrowhead
-       to the upper stream); the seven handles are 15% wider; the gear's centre hole is
-       r38, not r31.5, so it still shows at 16px. -->
-  <defs>
-    <linearGradient id="kates-mark-tile" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e8f3ff"/>
-    </linearGradient>
-  </defs>
-  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="url(#kates-mark-tile)" stroke="#bfe0ff" stroke-width="1"/>
+  <!-- The cover's helm (assets/cover.svg; docs/assets/kates-logo.svg) in its own navy and blue on a
+       white rounded tile with a pale-blue hairline edge, as on the cover's light top
+       half. The white tile carries it on the dark sidebar and on dark tab strips.
+       Changes from kates-logo.svg, for 16px and 44px: the thin blue inner ring of the rim
+       and the two small rim dashes between the streams are dropped (sub-pixel there:
+       they tinted the rim and speckled the streams); the seven handles are 15% wider
+       (same length) so they stay solid spokes at 16px; the gear's centre hole is
+       r38 instead of r31.5 so it still shows as a light dot at 16px. -->
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="#ffffff" stroke="#bfe0ff" stroke-width="1"/>
   <g transform="translate(32 32) scale(0.077) translate(-513 -512)">
     <g fill="#102a66">
       <!-- rim: outer ring, open on the right where the streams leave -->
@@ -30,6 +24,8 @@
       <path fill-rule="evenodd" d="M577.8 545.2A3 3 0 0 0 578.4 548.7L590.5 560.8A92.4 92.4 0 0 1 560.8 590.5L548.7 578.4A3 3 0 0 0 545.2 577.8A73.7 73.7 0 0 1 535.1 582A3 3 0 0 0 533 584.8L533 635A4 4 0 0 1 529 639L495 639A4 4 0 0 1 491 635L491 584.8A3 3 0 0 0 488.9 582A73.7 73.7 0 0 1 478.8 577.8A3 3 0 0 0 475.3 578.4L439.9 613.8A4 4 0 0 1 434.2 613.8L410.2 589.8A4 4 0 0 1 410.2 584.1L445.6 548.7A3 3 0 0 0 446.2 545.2A73.7 73.7 0 0 1 442 535.1A3 3 0 0 0 439.2 533L389 533A4 4 0 0 1 385 529L385 495A4 4 0 0 1 389 491L439.2 491A3 3 0 0 0 442 488.9A73.7 73.7 0 0 1 446.2 478.8A3 3 0 0 0 445.6 475.3L410.2 439.9A4 4 0 0 1 410.2 434.2L434.2 410.2A4 4 0 0 1 439.9 410.2L475.3 445.6A3 3 0 0 0 478.8 446.2A73.7 73.7 0 0 1 488.9 442A3 3 0 0 0 491 439.2L491 389A4 4 0 0 1 495 385L529 385A4 4 0 0 1 533 389L533 439.2A3 3 0 0 0 535.1 442A73.7 73.7 0 0 1 545.2 446.2A3 3 0 0 0 548.7 445.6L584.1 410.2A4 4 0 0 1 589.8 410.2L613.8 434.2A4 4 0 0 1 613.8 439.9L578.4 475.3A3 3 0 0 0 577.8 478.8A73.7 73.7 0 0 1 577.8 545.2ZM474 512a38 38 0 1 0 76 0a38 38 0 1 0 -76 0Z"/>
       <!-- rim showing between the upper and middle streams -->
       <path d="M652.6 527.1L699.5 479.6A36.3 36.3 0 0 0 726.4 492.1C729 492.1 731.5 492.5 734.6 493.1L742 496L742 531.5L684 531.5L671.3 535.3Z"/>
+      <!-- rim fragment beside the arrowhead -->
+      <path d="M595.8 399.2L618.9 374.7A174 174 0 0 1 663 425.5L639 452A140.5 140.5 0 0 0 595.8 399.2Z"/>
     </g>
     <g fill="#3092f8">
       <!-- C arrow around the gear, ending in the lower stream -->
@@ -40,6 +36,8 @@
       <path d="M683.5 531.5L705.1 509A55 55 0 0 1 744.8 492.1L835.7 492.1L835.7 468.8L893.9 511.8L835.7 555L835.7 531.5Z"/>
       <!-- tail over the lower-right tooth, with the leaf -->
       <path d="M564 628C582 608.4 580.9 609.7 559.6 589.3A90.8 90.8 0 0 0 589.3 559.6C598.7 569 608.3 579.5 620.1 565.1C634 548 633 538.6 654.3 525L671.5 535C656.9 544 647.3 550.4 638.2 565.6C654.6 553.3 664 551 682.6 546L678 565.6C661.9 566.1 651.4 565.1 635.8 573.4C614.2 584.7 608.8 597 591.1 611.1C579.6 620.3 576 621.2 564 628Z"/>
+      <!-- fragment beside the arrowhead -->
+      <path d="M595.8 399.2L618.9 374.7A174 174 0 0 1 663 425.5Z"/>
     </g>
   </g>
 </svg>
