@@ -68,15 +68,18 @@ func loadConfig() Config {
 // loadConfig only warns about but updateConfig refuses to write over: saving
 // the defaults in its place would lose every context in it for good.
 func readConfig() (Config, error) {
-	cfg := Config{
-		CurrentContext: "default",
-		Contexts:       map[string]Context{"default": {URL: "http://localhost:8080", Output: "table"}},
-	}
 	data, err := os.ReadFile(configPath())
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		err = nil
-	case err == nil:
+	if errors.Is(err, fs.ErrNotExist) {
+		return Config{
+			CurrentContext: "default",
+			Contexts:       map[string]Context{"default": {URL: "http://localhost:8080", Output: "table"}},
+		}, nil
+	}
+	// A file's contexts are its own. Unmarshalling into the defaults merged
+	// them in, so every save (kates ctx set, kates ports) added a "default"
+	// context pointing at localhost to a file that had none.
+	var cfg Config
+	if err == nil {
 		err = yaml.Unmarshal(data, &cfg)
 	}
 	if cfg.Contexts == nil {
