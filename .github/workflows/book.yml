@@ -74,7 +74,11 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
           # The book's text face. Ubuntu's fonts-ebgaramond is the older
           # "EB Garamond 12", with a bold but no semibold or bold italic.
-          scripts/retry.sh 3 "$HOME/bin/tlmgr" install ebgaramond
+          # tlmgr is in TinyTeX's own tree: quarto installs TinyTeX in
+          # ~/.TinyTeX, and links its tools into a bin directory only when
+          # given --update-path, so there is no ~/bin/tlmgr.
+          tlmgr=("$HOME"/.TinyTeX/bin/*/tlmgr)
+          scripts/retry.sh 3 "${tlmgr[0]}" install ebgaramond
           scripts/retry.sh 3 quarto install chromium --no-prompt
 
       - name: Note a degraded PDF build
@@ -171,8 +175,10 @@ jobs:
           set -euo pipefail
           scripts/retry.sh 3 quarto install tool tinytex --no-prompt --log-level warning
           echo "$HOME/bin" >> "$GITHUB_PATH"
-          # See the build job for why TeX Live's EB Garamond, not Ubuntu's.
-          scripts/retry.sh 3 "$HOME/bin/tlmgr" install ebgaramond
+          # See the build job for why TeX Live's EB Garamond, not Ubuntu's,
+          # and why tlmgr is found this way.
+          tlmgr=("$HOME"/.TinyTeX/bin/*/tlmgr)
+          scripts/retry.sh 3 "${tlmgr[0]}" install ebgaramond
           scripts/retry.sh 3 quarto install chromium --no-prompt
 
       - name: Prepare sources for Quarto
