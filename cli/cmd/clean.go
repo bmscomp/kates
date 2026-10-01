@@ -9,10 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -23,9 +21,12 @@ var cleanCmd = &cobra.Command{
 	Long: `Tears down the entire Kates stack by uninstalling all Helm releases
 and deleting all managed namespaces. This is the inverse of 'kates deploy'.
 
-Examples:
-  kates clean            # interactive, with confirmation
-  kates clean --force    # skip confirmation prompt`,
+It works on kubectl's current context, which it names before asking, and
+sends every kubectl and helm call to that context by name. It lists what it
+will remove and asks first; without a terminal, pass --yes. Only after that
+does it stop the kubectl port-forwards into the namespaces it deletes.`,
+	Example: `  kates clean         # list what goes, then ask
+  kates clean --yes   # no prompt, for scripts (--force does the same)`,
 	RunE: runClean,
 }
 
@@ -44,7 +45,8 @@ var (
 )
 
 func init() {
-	cleanCmd.Flags().BoolVar(&cleanForce, "force", false, "Skip confirmation prompt")
+	cleanCmd.Flags().BoolVarP(&cleanForce, "yes", "y", false, "Skip the confirmation prompt")
+	cleanCmd.Flags().BoolVar(&cleanForce, "force", false, "Same as --yes")
 	cleanCmd.Flags().BoolVarP(&cleanVerbose, "verbose", "v", false, "Show full command output during cleanup")
 	cleanCmd.Flags().StringVar(&cleanTopology, "topology", "", "Topology to clean: 'isolated' or 'single'. If empty, cleans both.")
 	cleanCmd.Flags().StringVar(&cleanNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
@@ -117,24 +119,17 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
 		Render(strings.Repeat("─", 35)))
 
-	// ── Clean up active port forwards ──
-	fmt.Printf("    %s Terminating background port-forwards...\n", lipgloss.NewStyle().Foreground(clrDim).Render("🧹"))
-	myPid := os.Getpid()
-	if out, err := exec.Command("pgrep", "-f", "ports").Output(); err == nil {
-		for _, pidStr := range strings.Fields(string(out)) {
-			var pid int
-			if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil && pid != myPid {
-				if cmdOut, err := exec.Command("ps", "-p", pidStr, "-o", "command=").Output(); err == nil {
-					cmdLine := string(cmdOut)
-					if strings.Contains(cmdLine, "kates") {
-						_ = syscall.Kill(pid, syscall.SIGTERM)
-					}
-				}
-			}
-		}
+	// ── The cluster ──
+	// Every call below names this context. Read once and pinned, the context
+	// cannot move under a teardown that takes minutes: a `kubectl config
+	// use-context` in another terminal used to send the rest of the deletes
+	// to that cluster.
+	kubeContext, err := cleanKubeContext()
+	if err != nil {
+		return cmdErr(err.Error())
 	}
-	_ = exec.Command("pkill", "-f", "kubectl port-forward").Run()
-	time.Sleep(500 * time.Millisecond)
+	defer pinCleanContext(kubeContext)()
+	fmt.Printf("    Cluster: %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(kubeContext))
 
 	// Operator CRD resource types that may carry finalizers or webhooks.
 	operatorCRDTypes := []string{
@@ -404,26 +399,36 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// ── Confirmation ──
+	// Nothing above changed anything, so declining leaves the machine and
+	// the cluster as they were.
 	if !cleanForce {
-		var confirmed bool
-		err := huh.NewConfirm().
-			Title("Are you sure you want to delete all Kates resources?").
-			Description("This action cannot be undone.").
-			Affirmative("Yes, clean everything").
-			Negative("Cancel").
-			Value(&confirmed).
-			WithTheme(ThemeKates()).
-			Run()
+		ok, err := confirm(fmt.Sprintf("Delete all of this from %s? This cannot be undone.", kubeContext))
 		if err != nil {
-			return err
+			return cmdErr("aborted: " + err.Error())
 		}
-		if !confirmed {
-			fmt.Println(lipgloss.NewStyle().Foreground(clrDim).Render("  Cancelled."))
-			return nil
+		if !ok {
+			// A declined destructive action exits non-zero so scripts that
+			// forgot --yes fail loudly instead of reporting success.
+			return cmdErr("aborted: nothing removed")
 		}
 	}
 
 	fmt.Println()
+
+	// ── Port-forwards into the namespaces about to go ──
+	if len(existingNS) > 0 {
+		deleting := map[string]bool{}
+		for _, ns := range existingNS {
+			deleting[ns] = true
+		}
+		stopped := stopPortForwards(func(p portForwardProc) bool {
+			return deleting[p.Namespace] && (p.Context == "" || p.Context == kubeContext)
+		})
+		if stopped > 0 {
+			fmt.Printf("    %s Stopped %s into these namespaces\n",
+				lipgloss.NewStyle().Foreground(clrDim).Render("🧹"), plural(stopped, "port-forward", "port-forwards"))
+		}
+	}
 
 	okStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
 	errStyle := lipgloss.NewStyle().Foreground(clrRed)
@@ -589,4 +594,33 @@ func runClean(cmd *cobra.Command, args []string) error {
 		Render(fmt.Sprintf("  ✅ Cluster cleaned successfully in %s.", elapsed)))
 	fmt.Println()
 	return nil
+}
+
+// cleanKubeContext returns kubectl's current context, the cluster kates clean
+// works on.
+func cleanKubeContext() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := cleanRunOutput(ctx, "kubectl", "config", "current-context")
+	name := strings.TrimSpace(string(out))
+	if err != nil || name == "" {
+		return "", fmt.Errorf("kubectl has no current context, so there is no cluster to clean.\n" +
+			"  Choose one first:  kubectl config use-context <name>")
+	}
+	return name, nil
+}
+
+// pinCleanContext points every kubectl and helm call kates clean makes at
+// kubeContext, and returns the function that undoes it. It wraps the seams
+// rather than replacing them, so a test's stub still receives each call,
+// flag included.
+func pinCleanContext(kubeContext string) (unpin func()) {
+	runFn, outputFn := cleanRunFn, cleanRunOutputFn
+	cleanRunFn = func(ctx context.Context, name string, args ...string) error {
+		return runFn(ctx, name, withKubeContext(kubeContext, name, args)...)
+	}
+	cleanRunOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return outputFn(ctx, name, withKubeContext(kubeContext, name, args)...)
+	}
+	return func() { cleanRunFn, cleanRunOutputFn = runFn, outputFn }
 }
