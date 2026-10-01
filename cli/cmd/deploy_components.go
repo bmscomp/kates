@@ -1055,7 +1055,10 @@ data:
 			helmArgs := []string{
 				"upgrade", "--install", "kafka-ui", "charts/kafka-ui",
 				"-n", kafkaUINS, "--create-namespace",
-				"--set", "kafka.clusterName=" + clusterName,
+				// The primary's name, as for MirrorMaker 2 below. This read
+				// clusterName, the --cluster-name flag of kates detect, so
+				// --kafka-name left kafka-ui on a cluster named krafter.
+				"--set", "kafka.clusterName=" + dc.primary.Name,
 				"--set", "kafka.namespace=" + kafkaNS,
 				"--timeout", "5m",
 			}
