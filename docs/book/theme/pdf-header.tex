@@ -11,20 +11,23 @@
 \definecolor{katesoutputrule}{HTML}{9FB3D6}
 
 % ── Fonts ───────────────────────────────────────────────────────────────────
-% The web's type: Inter for text and headings, JetBrains Mono for code. Each
-% face is used only when it is installed, so a render on a machine without
-% them still works, in the next font on the list (Latin Modern if none is).
-% Characters a face lacks (check marks, triangles, warning signs, the Lab
-% mockup's emoji) come from a fallback list instead of vanishing. The pdf job
-% in .github/workflows/book.yml installs Inter, JetBrains Mono, the Noto
-% symbol fonts and Symbola, and fails on any "Missing character" in the log.
+% The web's type: EB Garamond for text and headings, JetBrains Mono for code,
+% and Inter for the few labels set in sans, such as the output panels' tab.
+% Each face is used only when it is installed, so a render on a machine
+% without them still works, in the next font on the list (Latin Modern if none
+% is). Characters a face lacks (check marks, triangles, warning signs, the
+% Lab mockup's emoji) come from a fallback list instead of vanishing. The pdf
+% job in .github/workflows/book.yml installs EB Garamond (TeX Live's
+% ebgaramond), Inter, JetBrains Mono, the Noto symbol fonts and Symbola, and
+% fails on any "Missing character" in the log.
 \ifLuaTeX
 \makeatletter
 \newcommand*\kates@pick[2]{% #1: macro to set, #2: candidate faces, in order
   \let#1\relax
   \@for\kates@face:=#2\do{%
     \ifx#1\relax\IfFontExistsTF{\kates@face}{\let#1\kates@face}{}\fi}}
-\kates@pick\kates@text{Inter,Helvetica Neue,Arial,DejaVu Sans}
+\kates@pick\kates@text{EB Garamond,EB Garamond 12,TeX Gyre Pagella,Palatino,Georgia}
+\kates@pick\kates@sans{Inter,Helvetica Neue,Arial,DejaVu Sans}
 \kates@pick\kates@code{JetBrains Mono,DejaVu Sans Mono,Menlo}
 % Symbols, then emoji drawn in black and white. The last two are macOS system
 % fonts, so a local render loses fewer characters.
@@ -39,17 +42,29 @@
   \directlua{luaotfload.add_fallback("katesfallback", {\kates@fallbacks})}
   \def\kates@features{RawFeature={fallback=katesfallback}}
 \fi
+% Lining figures, as on the web: versions, ports and counts read level with
+% the capitals. Bold is EB Garamond's semibold, as the web's headings and
+% strong text are, where the family has one (TeX Live's has; the older
+% "EB Garamond 12" has a bold only).
+\def\kates@textfeatures{,Numbers=Lining}
+\IfFontExistsTF{EB Garamond SemiBold}{%
+  \def\kates@garamond{EB Garamond}%
+  \ifx\kates@text\kates@garamond
+    \def\kates@textfeatures{,Numbers=Lining,BoldFont={EB Garamond SemiBold},BoldItalicFont={EB Garamond SemiBold Italic}}%
+  \fi}{}
 % Inter's alternates that tell l, I and 1 apart in resource names and flags,
 % as the web sets them (kates.scss). Only Inter has them under these names.
 \def\kates@inter{Inter}
-\ifx\kates@text\kates@inter
-  \def\kates@textfeatures{,RawFeature={+cv05;+cv08}}
+\ifx\kates@sans\kates@inter
+  \def\kates@sansfeatures{,RawFeature={+cv05;+cv08}}
 \else
-  \def\kates@textfeatures{}
+  \def\kates@sansfeatures{}
 \fi
 \ifx\kates@text\relax\else
   \expandafter\setmainfont\expandafter{\kates@text}[\kates@features\kates@textfeatures]
-  \expandafter\setsansfont\expandafter{\kates@text}[\kates@features\kates@textfeatures]
+\fi
+\ifx\kates@sans\relax\else
+  \expandafter\setsansfont\expandafter{\kates@sans}[\kates@features\kates@sansfeatures]
 \fi
 \ifx\kates@code\relax\else
   \expandafter\setmonofont\expandafter{\kates@code}[\kates@features]
@@ -96,8 +111,10 @@
 \renewcommand{\textfraction}{0.1}
 \renewcommand{\floatpagefraction}{0.75}
 
-% Headings, the title and links in the brand blue; running heads and page
-% numbers recede.
+% Headings, the title and links in the brand blue, in EB Garamond as on the
+% web (KOMA sets them in sans by default); running heads and page numbers
+% recede.
+\setkomafont{disposition}{\normalcolor\rmfamily\bfseries}
 \addtokomafont{disposition}{\color{katesblue}}
 \addtokomafont{title}{\color{katesblue}}
 \addtokomafont{subtitle}{\color{katesnavy}}
@@ -116,7 +133,7 @@
 \addtokomafont{chapterentry}{\color{katesnavy}}
 
 % Room in the table of contents for three-digit page numbers and for section
-% numbers such as 26.10: Inter's digits are wider than the defaults allow for.
+% numbers such as 26.10, which the defaults do not allow for.
 \makeatletter
 \renewcommand*{\@pnumwidth}{2.2em}
 \makeatother
@@ -164,12 +181,13 @@
 \@ifundefined{Highlighting}{}{%
   \RecustomVerbatimEnvironment{Highlighting}{Verbatim}%
     {commandchars=\\\{\},fontsize=\footnotesize}}
-% Inline code at 0.86 of the text around it, as on the web ($code-font-size in
-% kates.scss): at the same size, JetBrains Mono's lowercase is about an eighth
-% wider than Inter's, and its x-height no smaller. Pandoc writes inline code
-% as \texttt; code blocks and output panels set their own size.
+% Inline code at 0.78 of the text around it, as on the web ($code-font-size in
+% kates.scss): JetBrains Mono's x-height is about a third larger than EB
+% Garamond's, so at 0.78 its lowercase stands level with the text's. Pandoc
+% writes inline code as \texttt; code blocks and output panels set their own
+% size.
 \DeclareTextFontCommand{\texttt}{%
-  \ttfamily\fontsize{\fpeval{0.86*\f@size}}{\f@baselineskip}\selectfont}
+  \ttfamily\fontsize{\fpeval{0.78*\f@size}}{\f@baselineskip}\selectfont}
 \makeatother
 
 % `text` fences (terminal output and ASCII screens), as theme/pdf-output.lua
