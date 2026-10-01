@@ -67,7 +67,7 @@ kates test delete <id>
 | `test compare` | Side-by-side metric comparison of two runs |
 | `test summary` | Aggregate statistics across all completed tests |
 | `test flame` | ASCII latency distribution histogram |
-| `test cleanup` | Delete orphaned RUNNING tests (stuck >5 minutes) |
+| `test cleanup` | Delete orphaned RUNNING tests (more than 30 minutes past their planned end) |
 | `test export` | Export results to CSV or JSON file |
 
 #### test scaffold
@@ -140,11 +140,12 @@ Renders horizontal bars for Avg, P50, P95, P99, and Max latency, colour-coded gr
 Detect and delete tests stuck in RUNNING state:
 
 ```bash
-kates test cleanup              # deletes orphans
-kates test cleanup --dry-run    # preview only
+kates test cleanup --dry-run           # list the orphans, delete nothing
+kates test cleanup                     # list them, then ask before deleting
+kates test cleanup --older-than 2h -y  # no prompt, for scripts
 ```
 
-A test is considered orphaned if it has been in RUNNING state for more than 5 minutes.
+A test is orphaned when it is still RUNNING more than `--older-than` (default 30 minutes) after its planned end: its start plus the duration in its spec. Without a terminal the command refuses unless `--yes` is given.
 
 #### test export
 

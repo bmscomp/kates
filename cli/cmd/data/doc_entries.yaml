@@ -581,13 +581,25 @@
   category: Test
   synopsis: "kates test cleanup [flags]"
   short: "Delete orphaned tests stuck in RUNNING state"
+  description: |
+    Deletes runs still RUNNING more than --older-than after their planned
+    end (their start plus the duration in their spec). Lists them and asks
+    first; without a terminal, pass --yes.
   flags:
     - name: "--dry-run"
       type: bool
       desc: "Preview what would be deleted without actually deleting"
+    - name: "--older-than"
+      type: duration
+      desc: "How long past its planned end a RUNNING test must be to count as orphaned (default 30m)"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Delete without asking"
   examples:
-    - "kates test cleanup"
     - "kates test cleanup --dry-run"
+    - "kates test cleanup"
+    - "kates test cleanup --older-than 2h --yes"
   see_also:
     - test list
     - test delete
