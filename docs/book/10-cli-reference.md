@@ -1266,8 +1266,10 @@ Remove all Kates-managed resources and namespaces.
 
 ```bash
 kates clean
-kates clean --force
+kates clean --yes
 ```
+
+`kates clean` works on kubectl's current context. It names that cluster, lists the Helm releases, namespaces and CRDs it will remove, and asks before removing anything; without a terminal it refuses unless `--yes` is given (`--force` does the same). Every kubectl and helm call it then makes names that context, so switching contexts in another terminal while it runs does not move the teardown. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes and leaves every other forward running.
 
 #### detect
 
@@ -2413,7 +2415,7 @@ Consequences worth knowing in scripts:
 - `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
 - `test apply --wait`, `test create --wait` and `replay --wait` cancel the run they are waiting for when interrupted, and exit `130`. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
 - `kates cluster alerts` exits `1` wherever a critical alert rule is defined, firing or not, which on a default install means always — see its section above.
-- A declined confirmation exits `1` in `deploy`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
+- A declined confirmation exits `1` in `deploy`, `clean`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
 - Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.
 
 ::: {.callout-warning}
@@ -2421,7 +2423,6 @@ Consequences worth knowing in scripts:
 
 Some commands report a failure on screen and still exit `0`, so a script cannot rely on their status. Among them:
 
-- `kates clean` when you decline its confirmation: it prints `Cancelled.` Unattended runs pass `--force`.
 - `kates ctx use`, `kates ctx delete` and `kates ctx export --name` with a context that does not exist, `kates ctx import` with a file it cannot read or parse, and a mistyped subcommand under a command group — `kates ctx list`, for instance — which prints the group's help.
 - `kates status` when the API does not answer or rejects the API key: it prints `unreachable`.
 - `kates ports` when it finds no Kates services, some forwards fail, or the API rejects a key it checks.
