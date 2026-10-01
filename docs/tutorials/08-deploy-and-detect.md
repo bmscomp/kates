@@ -209,6 +209,8 @@ The clean command names the cluster it is about to clean (kubectl's current cont
 5. **Namespace deletion** — Removes all managed namespaces
 6. **CRD cleanup** — Deletes custom resource definitions
 
+On a cluster that other software shares, the list ends with what clean keeps: an operator and its CRDs that objects outside the stack still use, or a namespace that also holds someone else's Helm release.
+
 For CI/CD pipelines, use `--yes` to skip the confirmation prompt. Without a terminal and without `--yes`, the command refuses and exits 1:
 
 ```bash

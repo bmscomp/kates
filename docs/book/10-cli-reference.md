@@ -1271,6 +1271,14 @@ kates clean --yes
 
 `kates clean` works on kubectl's current context. It names that cluster, lists the Helm releases, namespaces and CRDs it will remove, and asks before removing anything; without a terminal it refuses unless `--yes` is given (`--force` does the same). Every kubectl and helm call it then makes names that context, so switching contexts in another terminal while it runs does not move the teardown. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes and leaves every other forward running.
 
+On a cluster shared with other software, `kates clean` leaves what that software uses, and lists each thing it keeps with the reason:
+
+- the cert-manager, Kyverno and Strimzi operators, with their namespaces and CRDs, and the Litmus and Prometheus Operator CRDs, while objects of their kinds exist outside the namespaces it deletes: a Certificate, Kafka, ServiceMonitor or policy elsewhere, or a cluster-scoped one that no release of the stack installed. Deleting a CRD deletes every object of its kind on the cluster;
+- a namespace that also holds a Helm release the stack does not include;
+- the `kates` and `litmus` ClusterRoles and ClusterRoleBindings when a Helm release outside the stack installed them.
+
+When it cannot tell, because listing the objects or the releases fails, it keeps. On a cluster that holds only the stack, it keeps nothing.
+
 #### detect
 
 Aliases: `preflight-cluster`, `cluster-check`
