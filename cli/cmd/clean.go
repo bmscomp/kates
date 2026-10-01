@@ -7,6 +7,7 @@ import (
 	"github.com/bmscomp/kates/cli/output"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -131,7 +132,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 	defer pinCleanContext(kubeContext)()
 	fmt.Printf("    Cluster: %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(kubeContext))
 
-	// Operator CRD resource types that may carry finalizers or webhooks.
+	// Operator CRD resource types that may carry finalizers or webhooks,
+	// deleted and stripped of finalizers in each namespace being deleted.
+	// Namespaced kinds only: kubectl ignores -n for a cluster-scoped kind, so
+	// `kubectl delete clusterissuers --all -n kates` deleted every
+	// ClusterIssuer on the cluster, and every ClusterPolicy likewise. The
+	// stack's own ClusterPolicies go with their Helm releases.
 	operatorCRDTypes := []string{
 		// Strimzi
 		"kafkas.kafka.strimzi.io",
@@ -148,9 +154,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 		// Cert-Manager
 		"certificates.cert-manager.io",
 		"issuers.cert-manager.io",
-		"clusterissuers.cert-manager.io",
 		// Kyverno
-		"clusterpolicies.kyverno.io",
 		"policies.kyverno.io",
 	}
 
@@ -277,10 +281,13 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println(lipgloss.NewStyle().Foreground(clrText).Render("  Scanning cluster..."))
 
 	var installed []helmRelease
+	var helmList []helmReleaseJSON
+	helmListed := false
 	helmOut, helmErr := cleanRunOutput(ctx, "helm", "list", "-A", "-o", "json")
 	if helmErr == nil {
 		var list []helmReleaseJSON
 		if err := json.Unmarshal(helmOut, &list); err == nil {
+			helmList, helmListed = list, true
 			for _, r := range allReleases {
 				for _, l := range list {
 					if l.Name == r.Name && l.Namespace == r.Namespace {
@@ -347,9 +354,103 @@ func runClean(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(installed) == 0 && len(existingNS) == 0 && len(existingCRDs) == 0 {
+	// ── What stays for others ──
+	// Step 1 below deletes custom resources inside the namespaces being
+	// deleted, of every kind present, kept groups' included.
+	presentCRDs := append([]string(nil), existingCRDs...)
+	var kept []keptItem
+	operatorNS := map[string]bool{}
+	for _, r := range operatorReleases {
+		operatorNS[r.Namespace] = true
+	}
+
+	// A namespace with a Helm release kates does not install is someone
+	// else's too: deleting it would delete that release's objects.
+	var nsGoing []string
+	for _, ns := range existingNS {
+		switch {
+		case !helmListed:
+			kept = append(kept, keptItem{"namespace " + ns, "could not list Helm releases to see what else is in it"})
+		default:
+			if foreign := foreignReleases(helmList, ns, allReleases); len(foreign) > 0 {
+				kept = append(kept, keptItem{"namespace " + ns, "it also holds " + plural(len(foreign), "release", "releases") + " kates does not install: " + strings.Join(foreign, ", ")})
+				continue
+			}
+			nsGoing = append(nsGoing, ns)
+		}
+	}
+	existingNS = nsGoing
+
+	// An operator, its namespace and its CRDs stay while something outside
+	// the stack uses them.
+	deleting := map[string]bool{}
+	for _, ns := range existingNS {
+		if !operatorNS[ns] {
+			deleting[ns] = true
+		}
+	}
+	present := map[string]bool{}
+	for _, crd := range existingCRDs {
+		present[crd] = true
+	}
+	for _, g := range cleanCRDGroups() {
+		why := groupInUse(ctx, g, present, deleting)
+		if why == "" {
+			continue
+		}
+		what := g.Name + " CRDs"
+		drop := map[string]bool{}
+		for _, crd := range g.CRDs {
+			drop[crd] = true
+		}
+		existingCRDs = slices.DeleteFunc(existingCRDs, func(crd string) bool { return drop[crd] })
+		if op := g.Operator; op != nil {
+			what = g.Name + " operator, its namespace and its CRDs"
+			installed = slices.DeleteFunc(installed, func(r helmRelease) bool { return r == *op })
+			existingNS = slices.DeleteFunc(existingNS, func(ns string) bool { return ns == op.Namespace })
+		}
+		kept = append(kept, keptItem{what, why})
+	}
+
+	// ClusterRoles go by name, unless a release outside the stack installed
+	// them.
+	going := map[string]bool{}
+	for _, ns := range existingNS {
+		going[ns] = true
+	}
+	var clusterGoing []struct{ Kind, Name string }
+	for _, cr := range clusterResources {
+		owner, exists, err := clusterObjectOwner(ctx, cr.Kind, cr.Name)
+		switch {
+		case err != nil:
+			kept = append(kept, keptItem{cr.Kind + " " + cr.Name, "could not read it to see what installed it"})
+		case !exists:
+		case owner == "" || going[owner]:
+			clusterGoing = append(clusterGoing, cr)
+		default:
+			kept = append(kept, keptItem{cr.Kind + " " + cr.Name, "installed by a Helm release in " + owner})
+		}
+	}
+	clusterResources = clusterGoing
+
+	printKept := func() {
+		if len(kept) == 0 {
+			return
+		}
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Kept:"))
+		for _, k := range kept {
+			fmt.Printf("  %s %s %s\n", lipgloss.NewStyle().Foreground(clrGreen).Render("•"),
+				lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(k.What),
+				lipgloss.NewStyle().Foreground(clrDim).Render("— "+k.Why))
+		}
+	}
+
+	if len(installed) == 0 && len(existingNS) == 0 && len(existingCRDs) == 0 && len(clusterResources) == 0 {
+		printKept()
+		fmt.Println()
 		fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Bold(true).
-			Render("  ✓ Cluster is already clean. Nothing to do."))
+			Render("  ✓ Nothing to remove."))
 		fmt.Println()
 		return nil
 	}
@@ -396,6 +497,15 @@ func runClean(cmd *cobra.Command, args []string) error {
 			)
 		}
 	}
+
+	if len(clusterResources) > 0 {
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Cluster-scoped:"))
+		for _, cr := range clusterResources {
+			fmt.Printf("  %s %s\n", bulletStyle.Render("✖"), nameStyle.Render(cr.Kind+" "+cr.Name))
+		}
+	}
+	printKept()
 	fmt.Println()
 
 	// ── Confirmation ──
@@ -436,7 +546,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// Filter operator CRD types actually present in cluster
 	var activeCRDTypes []string
 	for _, crdType := range operatorCRDTypes {
-		for _, ecrd := range existingCRDs {
+		for _, ecrd := range presentCRDs {
 			if ecrd == crdType {
 				activeCRDTypes = append(activeCRDTypes, crdType)
 				break

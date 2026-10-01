@@ -21,10 +21,14 @@ func init() {
 }
 
 // currentContextReply answers `kubectl config current-context` for the clean
-// stubs below, with the flag pinning would add if it ever reached it.
+// stubs below, and the lists clean reads to see what else uses a CRD, with
+// no objects.
 func currentContextReply(name string, args []string) ([]byte, bool) {
 	if name == "kubectl" && len(args) >= 2 && args[0] == "config" && args[1] == "current-context" {
 		return []byte("kind-test\n"), true
+	}
+	if name == "kubectl" && len(args) >= 4 && args[0] == "get" && args[2] == "-A" && args[3] == "-o" {
+		return []byte(`{"items":[]}`), true
 	}
 	return nil, false
 }
@@ -342,11 +346,25 @@ type cleanFixture struct {
 	listed   bool
 	stopped  []int
 	contexts []string // what `kubectl config current-context` answers, in turn
+
+	helmList   string            // what `helm list -A -o json` answers
+	namespaces string            // what the namespace list holds
+	crds       string            // the CRDs on the cluster
+	objects    map[string]string // `kubectl get <kinds> -A -o json` by kinds; {"items":[]} otherwise
+	clusterObj map[string]string // `kubectl get <kind> <name> -o json` by "kind/name"; "" otherwise
+	failList   bool              // the object lists fail
 }
 
 func newCleanFixture(t *testing.T) *cleanFixture {
 	t.Helper()
-	f := &cleanFixture{contexts: []string{"kind-test"}}
+	f := &cleanFixture{
+		contexts:   []string{"kind-test"},
+		helmList:   `[{"name":"kates","namespace":"kates-single-test"}]`,
+		namespaces: "default kates-single-test prod",
+		crds:       "kafkas.kafka.strimzi.io",
+		objects:    map[string]string{},
+		clusterObj: map[string]string{},
+	}
 
 	prevRun, prevOutput := cleanRunFn, cleanRunOutputFn
 	prevList, prevStop := listProcessesFn, stopProcessFn
@@ -381,11 +399,21 @@ func newCleanFixture(t *testing.T) *cleanFixture {
 			}
 			return []byte(answer + "\n"), nil
 		case name == "helm" && args[0] == "list":
-			return []byte(`[{"name":"kates","namespace":"kates-single-test"}]`), nil
+			return []byte(f.helmList), nil
 		case name == "kubectl" && args[0] == "get" && args[1] == "namespaces":
-			return []byte("default kates-single-test prod"), nil
+			return []byte(f.namespaces), nil
 		case name == "kubectl" && args[0] == "get" && args[1] == "crd":
-			return []byte("kafkas.kafka.strimzi.io"), nil
+			return []byte(f.crds), nil
+		case name == "kubectl" && args[0] == "get" && len(args) > 3 && args[2] == "-A":
+			if f.failList {
+				return nil, fmt.Errorf("the server is currently unable to handle the request")
+			}
+			if out, ok := f.objects[args[1]]; ok {
+				return []byte(out), nil
+			}
+			return []byte(`{"items":[]}`), nil
+		case name == "kubectl" && args[0] == "get" && len(args) > 3 && args[3] == "-o":
+			return []byte(f.clusterObj[args[1]+"/"+args[2]]), nil
 		}
 		return nil, nil
 	}
@@ -553,5 +581,164 @@ func TestParsePortForward(t *testing.T) {
 		if ok != tt.ok || got != tt.want {
 			t.Errorf("parsePortForward(%q) = %+v, %v; want %+v, %v", tt.cmdLine, got, ok, tt.want, tt.ok)
 		}
+	}
+}
+
+// ran reports whether any recorded call contains every one of parts.
+func (f *cleanFixture) ran(parts ...string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.calls {
+		all := true
+		for _, p := range parts {
+			if !strings.Contains(c, p) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
+// A Certificate in another namespace keeps cert-manager: its release, its
+// namespace and its CRDs. Deleting the CRDs would delete that Certificate;
+// clean used to do it, and to uninstall a cert-manager that kates deploy
+// had found already installed and left alone.
+func TestClean_KeepsAnOperatorUsedElsewhere(t *testing.T) {
+	f := newCleanFixture(t)
+	f.helmList = `[{"name":"kates","namespace":"kates-single-test"},{"name":"cert-manager","namespace":"cert-manager"},
+		{"name":"strimzi-operator","namespace":"strimzi-operator"}]`
+	f.namespaces = "default kates-single-test cert-manager strimzi-operator web"
+	f.crds = "kafkas.kafka.strimzi.io certificates.cert-manager.io issuers.cert-manager.io clusterissuers.cert-manager.io"
+	f.objects["certificates.cert-manager.io,issuers.cert-manager.io,clusterissuers.cert-manager.io"] = `{"items":[
+		{"kind":"Certificate","metadata":{"name":"web-tls","namespace":"web"}},
+		{"kind":"Certificate","metadata":{"name":"kafka-tls","namespace":"kates-single-test"}},
+		{"kind":"ClusterIssuer","metadata":{"name":"selfsigned-issuer"}}]}`
+	f.objects["kafkas.kafka.strimzi.io"] = `{"items":[
+		{"kind":"Kafka","metadata":{"name":"krafter","namespace":"kates-single-test"}}]}`
+	cleanForce = true
+
+	stdout := commandStdout(t, func() error { return runClean(cleanCmd, nil) })
+
+	if f.ran("helm uninstall cert-manager") || f.ran("delete namespace cert-manager") || f.ran("delete crd", "certificates.cert-manager.io") {
+		t.Errorf("removed cert-manager, which a Certificate in web uses:\n%s", strings.Join(f.calls, "\n"))
+	}
+	if !f.ran("helm uninstall strimzi-operator") || !f.ran("delete crd", "kafkas.kafka.strimzi.io") {
+		t.Errorf("kept Strimzi, which only the stack uses:\n%s", strings.Join(f.calls, "\n"))
+	}
+	if !strings.Contains(string(stdout), "cert-manager operator, its namespace and its CRDs") ||
+		!strings.Contains(string(stdout), "1 Certificate in web") {
+		t.Errorf("the list does not say what was kept and why:\n%s", stdout)
+	}
+}
+
+// A namespace that also holds a release kates does not install is kept; the
+// stack's releases in it are still uninstalled.
+func TestClean_KeepsANamespaceWithAnotherRelease(t *testing.T) {
+	f := newCleanFixture(t)
+	f.helmList = `[{"name":"kates","namespace":"kates-single-test"},{"name":"orders","namespace":"kates-single-test"}]`
+	cleanForce = true
+
+	stdout := commandStdout(t, func() error { return runClean(cleanCmd, nil) })
+
+	if f.ran("delete namespace kates-single-test") {
+		t.Error("deleted a namespace that holds the orders release")
+	}
+	if !f.ran("helm uninstall kates -n kates-single-test") {
+		t.Error("did not uninstall the stack's own release")
+	}
+	if !strings.Contains(string(stdout), "kates does not install: orders") {
+		t.Errorf("the list does not name the other release:\n%s", stdout)
+	}
+}
+
+// When the objects cannot be listed, nothing says the CRDs are unused, so
+// they stay.
+func TestClean_KeepsWhatItCannotCheck(t *testing.T) {
+	f := newCleanFixture(t)
+	f.failList = true
+	cleanForce = true
+
+	stdout := commandStdout(t, func() error { return runClean(cleanCmd, nil) })
+
+	if f.ran("delete crd") {
+		t.Error("deleted CRDs whose use it could not check")
+	}
+	if !strings.Contains(string(stdout), "could not list its objects") {
+		t.Errorf("the list does not say why the CRDs stay:\n%s", stdout)
+	}
+}
+
+// The kates and litmus ClusterRoles go by name only when no release outside
+// the stack installed them.
+func TestClean_KeepsAClusterRoleAnotherReleaseOwns(t *testing.T) {
+	f := newCleanFixture(t)
+	f.clusterObj["clusterrole/kates"] = `{"kind":"ClusterRole","metadata":{"name":"kates"}}`
+	f.clusterObj["clusterrole/litmus"] = `{"kind":"ClusterRole","metadata":{"name":"litmus",
+		"annotations":{"meta.helm.sh/release-namespace":"platform-chaos"}}}`
+	cleanForce = true
+
+	stdout := commandStdout(t, func() error { return runClean(cleanCmd, nil) })
+
+	if !f.ran("delete clusterrole kates") {
+		t.Error("did not delete the kates ClusterRole, which no release owns")
+	}
+	if f.ran("delete clusterrole litmus") || f.ran("delete clusterrolebinding") {
+		t.Errorf("deleted a cluster-scoped object it should keep or that is not there:\n%s", strings.Join(f.calls, "\n"))
+	}
+	if !strings.Contains(string(stdout), "in platform-chaos") {
+		t.Errorf("the list does not say who owns the litmus ClusterRole:\n%s", stdout)
+	}
+}
+
+func TestGroupInUse_CountsOnlyObjectsOutsideTheStack(t *testing.T) {
+	prev := cleanRunOutputFn
+	t.Cleanup(func() { cleanRunOutputFn = prev })
+	var reply string
+	cleanRunOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte(reply), nil }
+
+	kyverno := cleanCRDGroups()[2]
+	present := map[string]bool{"clusterpolicies.kyverno.io": true, "policies.kyverno.io": true}
+	deleting := map[string]bool{"kates": true}
+	for _, tt := range []struct {
+		name, items string
+		inUse       bool
+	}{
+		{"none", ``, false},
+		{"a policy in a namespace being deleted", `{"kind":"Policy","metadata":{"name":"p","namespace":"kates"}}`, false},
+		{"a policy in the operator's namespace", `{"kind":"Policy","metadata":{"name":"p","namespace":"kyverno"}}`, false},
+		{"a ClusterPolicy a stack release installed", `{"kind":"ClusterPolicy","metadata":{"name":"p","annotations":{"meta.helm.sh/release-namespace":"kates"}}}`, false},
+		{"a ClusterPolicy from elsewhere", `{"kind":"ClusterPolicy","metadata":{"name":"p","annotations":{"meta.helm.sh/release-namespace":"platform"}}}`, true},
+		{"a ClusterPolicy applied by hand", `{"kind":"ClusterPolicy","metadata":{"name":"require-labels"}}`, true},
+		{"a policy in another namespace", `{"kind":"Policy","metadata":{"name":"p","namespace":"payments"}}`, true},
+	} {
+		reply = `{"items":[` + tt.items + `]}`
+		why := groupInUse(context.Background(), kyverno, present, deleting)
+		if (why != "") != tt.inUse {
+			t.Errorf("%s: groupInUse = %q, want in use %v", tt.name, why, tt.inUse)
+		}
+	}
+}
+
+// kubectl ignores -n for a cluster-scoped kind, so clean's per-namespace
+// `delete <kind> --all -n <ns>` deleted every ClusterIssuer and every
+// ClusterPolicy on the cluster.
+func TestClean_DeletesNoClusterScopedKindWithAll(t *testing.T) {
+	f := newCleanFixture(t)
+	f.crds = "certificates.cert-manager.io issuers.cert-manager.io clusterissuers.cert-manager.io clusterpolicies.kyverno.io policies.kyverno.io"
+	cleanForce = true
+
+	commandStdout(t, func() error { return runClean(cleanCmd, nil) })
+
+	for _, kind := range []string{"clusterissuers.cert-manager.io", "clusterpolicies.kyverno.io"} {
+		if f.ran("delete "+kind, "--all") || f.ran("get "+kind+" -n") || f.ran("patch "+kind) {
+			t.Errorf("ran a per-namespace call on cluster-scoped %s:\n%s", kind, strings.Join(f.calls, "\n"))
+		}
+	}
+	if !f.ran("delete certificates.cert-manager.io --all -n kates-single-test") {
+		t.Errorf("did not delete the Certificates in the namespace being deleted:\n%s", strings.Join(f.calls, "\n"))
 	}
 }
