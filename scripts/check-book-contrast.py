@@ -9,9 +9,9 @@ rings and other non-text marks need 3:1 (WCAG 1.4.11).
 
 Translucent surfaces (callout tints, a glossary entry under the pointer) are
 composited over the page first, in the order the theme stacks them, and so
-is a translucent foreground (the reading-progress line). When kates.scss
-changes a tint or an opacity it draws with a literal alpha, update
-SCSS_ALPHAS below.
+is a translucent foreground (the reading-progress line, the sidebar's tool
+icons). When kates.scss changes a tint or an opacity it draws with a literal
+alpha, update SCSS_ALPHAS below.
 
 Usage: scripts/check-book-contrast.py [--verbose] [--theme-dir DIR]
 Exits 1 when a pair falls short; used by the docs CI.
@@ -30,8 +30,9 @@ NON_TEXT = 3.0
 # Alphas that kates.scss uses directly rather than through a palette token
 SCSS_ALPHAS = {
     "link-code-tint": 0.07,  # #quarto-document-content a code
-    "narrow-table-head": 0.04,  # table header below the md breakpoint
+    "narrow-table-head": 0.04,  # header of a table that scrolls (kates-table-scroll)
     "progress-line": 0.85,  # .kates-progress, the reading-progress line
+    "navigation-tool": 0.7,  # the sidebar's tool icons (.quarto-navigation-tool)
 }
 
 CALLOUTS = ["note", "tip", "important", "warning", "caution"]
@@ -128,7 +129,7 @@ def pairs(syntax):
         ("body", "muted text: captions, blockquotes, footer", "$kates-muted", page, TEXT),
         ("body", "section numbers", "$kates-number", page, TEXT),
         ("body", "table header", "$kates-heading", page + ["$kates-surface"], TEXT),
-        ("body", "table header on a narrow screen", "$kates-heading",
+        ("body", "header of a table that scrolls", "$kates-heading",
          page + [("$kates-heading", SCSS_ALPHAS["narrow-table-head"])], TEXT),
         ("body", "table row on hover", "$body-color", page + ["$kates-row-hover"], TEXT),
         ("body", "keyboard keys", "$body-color", page + ["$kates-surface"], TEXT),
@@ -158,12 +159,15 @@ def pairs(syntax):
             ("callouts", f"{name}: icon and rule", c, header, NON_TEXT),
         ]
     hot = page + ["$kates-gloss-hot"]
+    tool = SCSS_ALPHAS["navigation-tool"]
     out += [
         # The panels: the navigation, and the contents and glossary in the
         # margin (all on the page); the contents folded into the chapter
         ("panels", "entries, part numerals, section numbers and labels", "$kates-chrome", page, TEXT),
-        ("panels", "notes (a chapter's question, a definition) and tool icons",
-         "$kates-chrome-note", page, TEXT),
+        ("panels", "notes (a chapter's question, a definition)", "$kates-chrome-note", page, TEXT),
+        ("panels", "tool icons (GitHub, PDF, colour scheme, reader mode, search)",
+         ("$kates-chrome-note", tool), page, NON_TEXT),
+        ("panels", "tool icon under the pointer", ("$kates-link", tool), page, NON_TEXT),
         ("panels", "entries in reach, the book title, glossary terms on screen",
          "$kates-chrome-strong", page, TEXT),
         ("panels", "current entry, and the entry under the pointer", "$kates-link", page, TEXT),
@@ -210,6 +214,7 @@ def pairs(syntax):
         ("diagrams", "Expand button", "$kates-muted", page, TEXT),
         # Keyboard focus rings
         ("focus", "ring on the page", "$kates-focus-ring", page, NON_TEXT),
+        ("focus", "ring on a tool icon, drawn at the icon's opacity", ("$kates-focus-ring", tool), page, NON_TEXT),
         ("focus", "ring on a diagram", "$kates-focus-ring", ["$kates-diagram-bg"], NON_TEXT),
         ("focus", "ring on a page navigation link under the pointer", "$kates-focus-ring",
          page + ["$kates-active-bg"], NON_TEXT),
