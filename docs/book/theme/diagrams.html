@@ -54,6 +54,26 @@
   if (window.mermaid && typeof mermaidOpts !== "undefined") {
     const font = getComputedStyle(document.documentElement)
       .getPropertyValue("--mermaid-font-family").trim();
+    // The diagrams are about all the page sets in this font, so the browser
+    // fetches it only on demand, and Quarto has Mermaid draw on `load`, which
+    // does not wait for it: a first-time reader would get boxes measured in a
+    // fallback face, too small for their text. Fetch it now, and hold each
+    // drawing until it is in (or 3s have passed). mermaidAPI is frozen, so it
+    // is replaced rather than patched.
+    if (font && document.fonts) {
+      const fontIn = Promise.race([
+        Promise.all(["400", "italic 400"].map((face) => document.fonts.load(`${face} 16px ${font}`))),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]).catch(() => {});
+      const api = mermaid.mermaidAPI;
+      mermaid.mermaidAPI = Object.freeze({
+        ...api,
+        render: async (...args) => {
+          await fontIn;
+          return api.render(...args);
+        },
+      });
+    }
     mermaid.initialize({
       ...mermaidOpts,
       ...(font ? { fontFamily: font } : {}),

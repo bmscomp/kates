@@ -5,10 +5,11 @@
 // file only reads the $kates-* palette and never defines a colour itself.
 
 // Typography — the web fonts are requested in theme/head.html. EB Garamond
-// sets the chapter: its text, headings, tables and callouts (see "The
-// chapter's type" below). Inter sets the interface around it, the sidebar,
-// the contents and the page navigation, and the diagrams, whose boxes Mermaid
-// sizes from the text it measures. JetBrains Mono sets code.
+// sets the book: the chapter's text, headings, tables and callouts, and the
+// panels around it, so the page reads as one book (see "The chapter's type"
+// below). Inter sets what is left of the interface, the search and the
+// diagrams' controls, and the diagrams, whose boxes Mermaid sizes from the
+// text it measures. JetBrains Mono sets code.
 $font-family-sans-serif: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 $kates-serif: "EB Garamond", Garamond, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
 $font-family-monospace: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -33,6 +34,13 @@ $code-block-bg-padding: 0.95rem 1.15rem;
 // Running text, measured with Introduction at 17px: see "Prose" below
 $kates-measure: 58ch;
 
+// The panels beside the text: entries at 17px, their notes (the question
+// under a chapter, a glossary definition) at 16px, and labels in small
+// capitals at the size of the part name above the chapter title.
+$kates-panel-font-size: 17px;
+$kates-panel-note-size: 16px;
+$kates-panel-label-size: 1.05rem;
+
 // Callouts and the chapter table of contents
 $callout-border-width: 4px;
 $callout-margin-top: 1.5rem;
@@ -51,14 +59,27 @@ body {
   font-feature-settings: "cv05", "cv08";
 }
 
+// The size of the chapter's text: 1.2rem, and from 1200px up a size that
+// grows with the window ("The page, from 1200px up"). The page's bands are
+// measured from it, and so is the line both panels start on: one text size
+// plus 11px down the page, which sets their first lines on the baseline of
+// the part name above the chapter title. Below 1200px nothing steps out of
+// the text column (--kates-bleed, read by theme/reader.html).
+:root {
+  --kates-text: 1.2rem;
+  --kates-head: calc(var(--kates-text) + 11px);
+  --kates-bleed: 0px;
+}
+
 // ── The chapter's type ──────────────────────────────────────────────────────
 // EB Garamond for everything in the chapter column. Its x-height is small, so
-// the text is set at 1.2rem (20.4px) to read as large as Inter did at 17px;
-// the interface around it keeps Inter at its own sizes. Figures are lining, as
-// in the PDF: versions, ports and counts stand level with the capitals.
+// the text is set at 1.2rem (20.4px) to read as large as Inter did at 17px,
+// and from 1200px up at --kates-text, which grows to 22px on a wide screen.
+// Figures are lining, as in the PDF: versions, ports and counts stand level
+// with the capitals.
 #quarto-document-content {
   font-family: $kates-serif;
-  font-size: 1.2rem;
+  font-size: var(--kates-text);
   line-height: 1.6;
   // Inter's character variants mean nothing here; Garamond keeps its own
   // ligatures and kerning.
@@ -66,15 +87,20 @@ body {
   font-kerning: normal;
   font-variant-numeric: lining-nums;
 
+  // A little more leading for the larger text of a wide screen
+  @include media-breakpoint-up(xl) {
+    line-height: 1.66;
+  }
+
   // Quarto sets captions in rem, a size below the interface's text in this
   // face; keep them a step below the chapter's.
   figcaption {
     font-size: 0.85em;
   }
 
-  // The interface that sits in the chapter keeps Inter: the contents folded
-  // in above the text below 1200px, and the diagrams' Expand button and hint.
-  :is(#TOC-body, .kates-toc-fold, .kates-diagram-expand, .kates-diagram-hint) {
+  // The diagrams' Expand button and hint keep Inter, like the diagrams they
+  // belong to.
+  :is(.kates-diagram-expand, .kates-diagram-hint) {
     font-family: $font-family-sans-serif;
     font-feature-settings: "cv05", "cv08";
     font-variant-numeric: normal;
@@ -96,6 +122,34 @@ body {
   #quarto-document-content {
     font-size: 1.12rem;
   }
+}
+
+// The panels around the chapter are set in its Garamond too, at their own
+// sizes: the navigation, the margin, the previous and next links under the
+// chapter, the top bar of a narrow screen and the footer. The contents
+// folded into the chapter below 1200px take the chapter's.
+#quarto-sidebar,
+#quarto-margin-sidebar,
+.page-navigation,
+.quarto-secondary-nav,
+.nav-footer {
+  font-family: $kates-serif;
+  font-feature-settings: normal;
+  font-kerning: normal;
+  font-variant-numeric: lining-nums;
+}
+
+// The panels' labels (Table of contents, Glossary, Previous, Next): the
+// type's own small capitals, at the size of the part name above the chapter
+// title, with which they share a baseline.
+@mixin kates-panel-label {
+  font-size: $kates-panel-label-size;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.07em;
+  text-transform: none;
+  font-variant-caps: all-small-caps;
+  color: $kates-chrome;
 }
 
 ::selection {
@@ -140,19 +194,35 @@ body {
 }
 
 #quarto-document-content {
+  // The rule under a section heading is a hairline, like the panels' rules
   > section > h2,
   h2.anchored {
     font-size: 1.95rem;
     margin-top: 3rem;
     margin-bottom: 1rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid $kates-border;
+    border-bottom: 1px solid $kates-rule;
   }
 
   h3.anchored {
     font-size: 1.5rem;
     margin-top: 2.25rem;
     margin-bottom: 0.75rem;
+  }
+
+  // From 1200px up the text grows with the window: the headings are sized
+  // from it, and take more room above them
+  @include media-breakpoint-up(xl) {
+    > section > h2,
+    h2.anchored {
+      font-size: 1.6em;
+      margin-top: 2.2em;
+    }
+
+    h3.anchored {
+      font-size: 1.25em;
+      margin-top: 1.9em;
+    }
   }
 
   h4.anchored {
@@ -201,15 +271,30 @@ body:not(:has(.sidebar-link.active:is([href$="10-cli-reference.html"], [href$="1
 // Introduction and 84 in Performance Theory. 58ch sets 70 and 71. Tables,
 // code, diagrams and callouts keep the full column. So does the landing
 // page's cover, which Quarto floats inside a paragraph of its own: capping
-// that paragraph would pull the cover in from the column's edge.
-#quarto-document-content,
-#quarto-document-content section {
-  > :is(p:not(:has(> .quarto-cover-image)), dl, blockquote) {
-    max-width: $kates-measure;
-  }
+// that paragraph would pull the cover in from the column's edge. From 1200px
+// up the column is itself the measure ("The page, from 1200px up"), and
+// running text fills it.
+@include media-breakpoint-down(xl) {
+  #quarto-document-content,
+  #quarto-document-content section {
+    > :is(p:not(:has(> .quarto-cover-image)), dl, blockquote) {
+      max-width: $kates-measure;
+    }
 
-  > :is(ul, ol) {
-    max-width: calc(#{$kates-measure} + 2rem);
+    > :is(ul, ol) {
+      max-width: calc(#{$kates-measure} + 2rem);
+    }
+  }
+}
+
+// Lists: tighter leading inside an item and a clear step between items, so
+// an item that wraps reads as one. The breadcrumbs, the navigation lists and
+// the folded contents keep their own spacing.
+#quarto-document-content :is(ul, ol):not(.breadcrumb, .nav, .kates-toc-fold ul) > li {
+  line-height: 1.5;
+
+  & + li {
+    margin-top: 0.42em;
   }
 }
 
@@ -947,75 +1032,283 @@ dialog.kates-diagram-viewer {
   }
 }
 
-// ── Sidebar ─────────────────────────────────────────────────────────────────
+// ── The page, from 1200px up ────────────────────────────────────────────────
+// Five bands that all grow with the window: an edge, the navigation, the text
+// and its two outsets, the contents, an edge. The text column is its own
+// measure, 25.5 times the text's size (about 63 characters a line), so
+// running text fills it. A table, a code block or a diagram steps out into
+// the outsets, equally on both sides, only when the column is too narrow for
+// it, and only as far as it needs: theme/reader.html marks it .kates-wide
+// and gives it --kates-out. The rest keep to the column, under their
+// headings. diagrams.html then lays a diagram out in its cell's wider room,
+// and one wider still reaches on into the right margin ("Diagrams"). Below
+// 1200px Quarto's grid stands ("Side panels").
 
-.sidebar-header {
-  .sidebar-logo {
-    max-width: 44px;
-    max-height: 44px;
-    margin-bottom: 0.6rem;
+@include media-breakpoint-up(xl) {
+  :root {
+    --kates-text: clamp(20.4px, calc(17.2px + 0.25vw), 22px);
+    --kates-edge: clamp(24px, 2.6vw, 56px);
+    --kates-panel-width: clamp(236px, 19vw, 380px);
+    --kates-gap: clamp(32px, 2.5vw, 56px);
+    --kates-column: calc(var(--kates-text) * 25.5);
+    // How far wide material may step out on each side: the room the other
+    // bands leave, less 16px of air, and never more than 168px
+    --kates-bleed: clamp(0px, calc((100vw - 2 * var(--kates-edge) - 2 * var(--kates-panel-width) - 2 * var(--kates-gap) - var(--kates-column)) / 2 - 16px), 168px);
   }
 
-  .sidebar-title a {
-    color: $kates-heading;
-    font-size: 1.12rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
-    line-height: 1.3;
+  #quarto-content.page-columns {
+    grid-template-columns:
+      [screen-start] var(--kates-edge)
+      [screen-start-inset page-start] var(--kates-panel-width)
+      [page-start-inset] var(--kates-gap)
+      [body-start-outset] minmax(0, 1fr)
+      [body-start body-content-start] var(--kates-column)
+      [body-content-end body-end] minmax(0, 1fr)
+      [body-end-outset] var(--kates-gap)
+      [page-end-inset] var(--kates-panel-width)
+      [page-end screen-end-inset] var(--kates-edge)
+      [screen-end];
   }
 
-  // The GitHub, PDF, colour-scheme, reader-mode and search icons get a row
-  // of their own under the title instead of trailing its last word.
-  .sidebar-title .sidebar-tools-main {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    margin-top: 0.55rem;
-    margin-left: -0.25rem;
+  #quarto-content > #quarto-sidebar {
+    grid-column: page-start / page-start-inset;
+  }
+
+  #quarto-content > #quarto-margin-sidebar {
+    grid-column: page-end-inset / page-end;
+  }
+
+  // Wide material steps out as far as it needs, and never past the outsets
+  #quarto-document-content > .kates-wide,
+  #quarto-document-content section > .kates-wide {
+    --kates-step: min(var(--kates-out, var(--kates-bleed)), var(--kates-bleed));
+
+    &:is(div.code-copy-outer-scaffold, div.sourceCode, div.cell, pre:not(.sourceCode)) {
+      margin-left: calc(-1 * var(--kates-step));
+      margin-right: calc(-1 * var(--kates-step));
+    }
+
+    &:is(table.table) {
+      width: calc(100% + 2 * var(--kates-step));
+      max-width: none;
+      margin-left: calc(-1 * var(--kates-step));
+      margin-right: calc(-1 * var(--kates-step));
+    }
   }
 }
 
-.sidebar-navigation {
-  // Part headings only — chapters keep their normal case
-  .sidebar-item-section > .sidebar-item-container > .sidebar-item-text {
-    color: $kates-muted;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    // Room between the text and the focus ring (diagrams.html makes the label
-    // a button) above, below and where the text starts; the right side already
-    // has room, and the chevron sits there. The negative margin keeps the text
-    // where it was.
-    padding: 0.15rem 0 0.15rem 0.3rem;
-    margin: -0.15rem 0 -0.15rem -0.3rem;
-    // One line at every width. "Part V — Deployment & Operations" needs 270px
-    // and the sidebar never gives a label more than 198px, so a long label
-    // ends in an ellipsis; theme/panels.html shows the whole label in its
-    // tooltip.
+// ── Sidebar ─────────────────────────────────────────────────────────────────
+// A contents page for the book: the parts by their numerals in a hanging
+// column, the open part's chapters under it, and under the chapter being
+// read the question its part page says it answers; previous and next at the
+// foot. It is chrome, muted until the reader reaches for it. theme/reader.html
+// splits the part labels, fetches the questions and builds the foot.
+
+$kates-part-hang: 2.15em; // the part numerals' column
+
+// From 992px up the navigation stands beside the text, as tall as the
+// window: the title on top, previous and next at the foot, and the menu
+// between them scrolling on its own. It starts on the panels' first line.
+@include media-breakpoint-up(lg) {
+  #quarto-content > #quarto-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    max-height: 100vh;
+    width: auto;
+    max-width: none;
+    display: flex;
+    flex-direction: column;
+    padding: var(--kates-head) 12px 20px 6px;
+  }
+}
+
+// The title, with the book's mark centred on its first line, and the tools
+// (GitHub, PDF, colour scheme, reader mode, search) in a row under it.
+// Bootstrap's spacing classes on the header (.mt-2, .pt-lg-2) are
+// !important, so the header's own spacing has to be too.
+#quarto-sidebar .sidebar-header {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 18px 0 clamp(16px, 2.6vh, 34px) !important;
+  padding: 0 0 0 6px !important;
+
+  // Beside the text the header starts on the panels' first line
+  @include media-breakpoint-up(lg) {
+    margin-top: 0 !important;
+  }
+
+  .sidebar-logo-link {
+    flex: none;
+  }
+
+  .sidebar-logo {
+    width: 36px;
+    height: 36px;
+    max-width: none;
+    max-height: none;
+    margin: -7px 0 0;
+    opacity: $kates-sidebar-logo-opacity;
+    transition: opacity 0.2s ease;
+  }
+
+  .sidebar-logo-link:is(:hover, :focus-visible) .sidebar-logo {
+    opacity: 1;
+  }
+
+  .sidebar-title {
     min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    margin-top: 0;
+
+    > a {
+      display: block;
+      margin-top: -1px; // its baseline on the panels' first line
+      color: $kates-chrome-strong;
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: 0;
+      line-height: 1.15;
+    }
   }
 
-  .sidebar-item-section {
-    margin-top: 0.9rem;
+  // The tools get a row of their own under the title instead of trailing
+  // its last word. Their icons are glyphs, sized by the links that hold them.
+  .sidebar-title .sidebar-tools-main {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 8px;
+    margin-left: -0.25rem;
+
+    a {
+      font-size: 1.12rem;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      line-height: 1.3;
+    }
   }
 
-  // Sized so every chapter title takes one or two lines from 1200px up;
-  // at 0.87rem and 1.4 "Cross-Cluster Replication and Migration" took three.
-  .sidebar-section.depth1 .sidebar-link {
-    font-size: 0.84rem;
+  .quarto-navigation-tool,
+  .quarto-navigation-tool .bi {
+    color: $kates-chrome-note;
+  }
+
+  .quarto-navigation-tool:hover,
+  .quarto-navigation-tool:hover .bi {
+    color: $kates-link;
+  }
+}
+
+// The menu scrolls on its own between the title and the foot
+#quarto-sidebar .sidebar-menu-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 2px 10px 12px 6px;
+
+  // Bootstrap's .mt-1 on the list is !important too
+  > ul {
+    margin-top: 0 !important;
+  }
+}
+
+#quarto-sidebar {
+  // Every entry at the panels' size, in place of Quarto's sizes by width
+  // and depth
+  .sidebar-item {
+    font-size: $kates-panel-font-size;
+  }
+
+  .sidebar-link,
+  .sidebar-link .menu-text {
+    font-size: $kates-panel-font-size;
     line-height: 1.3;
   }
 
   .sidebar-item-container {
-    border-radius: $border-radius-sm;
+    padding: clamp(2px, 0.42vh, 5px) 0 clamp(2px, 0.42vh, 5px) 10px;
   }
 
-  .sidebar-item-container:has(> .sidebar-link.active) {
-    background-color: $kates-active-bg;
+  .sidebar-item-section {
+    margin-top: clamp(6px, 1.25vh, 18px);
+  }
+
+  .sidebar-section.depth1 {
+    padding: 2px 0 2px $kates-part-hang;
+  }
+
+  // The preface and the other pages outside a part line up with the parts'
+  // names
+  .sidebar-menu-container > ul > .sidebar-item:not(.sidebar-item-section) > .sidebar-item-container {
+    margin-left: $kates-part-hang;
+  }
+
+  // Part labels: the numeral hangs in its own column (reader.html splits
+  // "Part II — Performance Testing", and keeps the whole label as the
+  // tooltip), and the name is set like a chapter's, a little heavier. A long
+  // name wraps under itself, in the drawer too, where Quarto keeps the menu
+  // on one line. The padding is room between the text and the focus ring
+  // (diagrams.html makes a label without a page a button) above, below and
+  // where the text starts; the negative margin keeps the text where it was.
+  .sidebar-item-section > .sidebar-item-container > .sidebar-item-text {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    padding: 0.15rem 0 0.15rem 0.3rem;
+    margin: -0.15rem 0 -0.15rem -0.3rem;
+    white-space: normal;
+    font-weight: 500;
+  }
+
+  .kates-part .menu-text {
+    display: flex;
+    align-items: baseline;
+    width: 100%;
+  }
+
+  .kates-part .kates-part-no {
+    flex: 0 0 $kates-part-hang;
+    color: $kates-chrome;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    font-variant-caps: all-small-caps;
+  }
+
+  .kates-part .kates-part-name {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .kates-part.kates-part-plain .menu-text {
+    padding-left: $kates-part-hang;
+  }
+
+  // Muted until the reader reaches for it: the entries darken while the
+  // pointer or the keyboard is in the navigation, and so does the open
+  // part's name; the entry under the pointer takes the accent.
+  .sidebar-link {
+    color: $kates-chrome;
+    transition: color 0.2s ease;
+  }
+
+  &:is(:hover, :focus-within) .sidebar-link:not(.active, :hover),
+  .sidebar-item-section:has(.sidebar-link.active) > .sidebar-item-container > .sidebar-item-text:not(:hover) {
+    color: $kates-chrome-strong;
+  }
+
+  .sidebar-link:hover,
+  .sidebar-link:hover .kates-part-no {
+    color: $kates-link;
+  }
+
+  .sidebar-link .chapter-number {
+    color: $kates-chrome;
+    font-variant-numeric: tabular-nums;
   }
 
   // Numbered chapters: a fixed number column, so wrapped titles hang
@@ -1023,72 +1316,423 @@ dialog.kates-diagram-viewer {
   .menu-text:has(> .chapter-number) {
     display: flex;
     align-items: baseline;
-    font-size: 0; // drops the &nbsp; Quarto puts between number and title
-
-    > .chapter-number,
-    > .chapter-title {
-      font-size: 0.84rem;
-    }
 
     > .chapter-number {
-      flex: 0 0 1.6em;
+      flex: 0 0 1.5em;
     }
   }
 
-  .sidebar-link {
-    color: $kates-sidebar-fg;
+  // The chapter being read: the accent, the semibold and a short rule
+  .sidebar-item-container:has(> .sidebar-link.active) {
+    box-shadow: inset 2px 0 0 $kates-link;
+  }
 
-    &:hover {
-      color: $kates-link;
-    }
+  .sidebar-link.active,
+  .sidebar-link.active .chapter-number {
+    color: $kates-link;
+    font-weight: 600;
+  }
 
-    &.active {
-      color: $kates-link;
-      font-weight: 600;
-    }
+  .sidebar-item-toggle .bi {
+    color: $kates-chrome;
+    font-size: 0.72em;
+  }
+}
 
-    .chapter-number {
-      color: $kates-muted;
-      font-variant-numeric: tabular-nums;
-    }
+// What the chapter being read answers, in its part page's words
+.kates-blurb {
+  white-space: normal;
+  overflow-wrap: break-word;
+  margin: 2px 0 6px;
+  padding: 0 0 0 calc(10px + 1.5em);
+  color: $kates-chrome-note;
+  font-size: $kates-panel-note-size;
+  font-style: italic;
+  line-height: 1.38;
+  hyphens: none;
+}
 
-    &.active .chapter-number {
-      color: inherit;
-    }
+.kates-blurb code,
+.kates-turn-blurb code {
+  font-size: 0.82em;
+  font-style: normal;
+  color: inherit;
+  background: none;
+  padding: 0;
+}
+
+// Previous and next chapter, at the foot of the navigation. The menu keeps
+// at least 30px of air above the rule: its own 12px foot and this margin.
+// Quarto pads every child of the sidebar 1em at the top and the right; the
+// left padding lines the links up with the parts' names.
+.kates-turn {
+  flex: none;
+  display: grid;
+  gap: clamp(8px, 1.3vh, 14px);
+  margin: 18px 10px 0 6px;
+  padding-left: calc(10px + #{$kates-part-hang});
+  border-top: 1px solid $kates-rule;
+
+  a {
+    display: grid;
+    gap: 1px;
+    color: $kates-chrome;
+    text-decoration: none;
+    font-size: $kates-panel-font-size;
+    line-height: 1.3;
+    transition: color 0.2s ease;
+  }
+
+  .kates-turn-label {
+    @include kates-panel-label;
+    line-height: 1.2;
+  }
+
+  .kates-turn-title .chapter-number {
+    margin-right: 0.35em;
+  }
+
+  .kates-turn-blurb {
+    margin-top: 2px;
+    color: $kates-chrome-note;
+    font-size: $kates-panel-note-size;
+    font-style: italic;
+    line-height: 1.38;
+  }
+
+  a:hover .kates-turn-blurb {
+    color: inherit;
+  }
+
+  a:hover,
+  a:hover .kates-turn-label {
+    color: $kates-link;
+  }
+}
+
+#quarto-sidebar:is(:hover, :focus-within) .kates-turn a:not(:hover) .kates-turn-title {
+  color: $kates-chrome-strong;
+}
+
+// On a short window the menu keeps its room: the next chapter's question
+// gives way first, then previous and next (the chapter's own previous and
+// next stay at its foot). reader.html does the same whenever the open part
+// needs the room anyway: .kates-tight drops the question, .kates-tighter the
+// whole foot, so the menu never has to scroll because of it. Below 1200px
+// the navigation is narrow, or a drawer, and has no foot.
+@media (max-height: 980px) {
+  .kates-turn .kates-turn-blurb {
+    display: none;
+  }
+}
+
+#quarto-sidebar:is(.kates-tight, .kates-tighter) .kates-turn .kates-turn-blurb,
+#quarto-sidebar.kates-tighter .kates-turn {
+  display: none;
+}
+
+@media (max-height: 820px), (max-width: 1199.98px) {
+  .kates-turn {
+    display: none;
+  }
+}
+
+// Between the drawer and the wide page the navigation is narrow: it keeps to
+// the chapter titles, and the book's title takes a smaller size
+@include media-breakpoint-between(lg, xl) {
+  .kates-blurb {
+    display: none;
+  }
+
+  #quarto-sidebar .sidebar-header .sidebar-title > a {
+    font-size: 19px;
   }
 }
 
 // ── Table of contents ───────────────────────────────────────────────────────
+// The margin, from 1200px up: the chapter's contents on a rail that fills
+// down to the section being read, the glossary terms of the passage being
+// read under them, and "Edit this page" and "Report an issue" at the foot.
+// Muted, like the navigation, until the reader reaches for it.
+// theme/reader.html builds the rail's scroll box, the glossary and the foot.
 
-#TOC,
-nav[role="doc-toc"] {
-  #toc-title {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: $kates-muted;
-  }
-
-  .nav-link {
-    color: $kates-sidebar-fg;
-    line-height: 1.4;
-
-    &:hover {
-      color: $kates-link;
-    }
-
-    &.active {
-      color: $kates-link;
-      font-weight: 600;
-    }
-  }
-
-  .header-section-number {
-    color: $kates-muted;
+@include media-breakpoint-up(xl) {
+  #quarto-content > #quarto-margin-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    max-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: var(--kates-head) 6px 20px 12px;
   }
 }
 
+#quarto-margin-sidebar {
+  nav#TOC {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 62%;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    margin: 0;
+  }
+
+  #toc-title {
+    @include kates-panel-label;
+    flex: none;
+    margin: 0 0 12px;
+    padding: 0;
+    border: 0;
+  }
+}
+
+// The contents scroll in a box of their own, which keeps the section being
+// read in view
+.kates-toc-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 3px 6px 4px 0; // room for the focus ring of the first entry
+}
+
+#TOC ul.kates-rail {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 16px;
+  border: 0;
+  font-size: $kates-panel-font-size; // the em of --kates-num, set by reader.html
+
+  // The rail: a hairline track, and over it a firmer line that fills down
+  // to the section being read (--kates-fill, set by reader.html)
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1px;
+    background: $kates-rail;
+  }
+
+  &::before {
+    bottom: 0;
+  }
+
+  &::after {
+    width: 2px;
+    height: var(--kates-fill, 0px);
+    background: $kates-link;
+    transition: height 0.3s ease;
+  }
+
+  // Sub-sections hang under their parent's title, past the number column
+  ul {
+    padding-left: var(--kates-num, 2.2em);
+    border: 0;
+    font-size: $kates-panel-font-size;
+  }
+
+  .nav-link {
+    display: block;
+    padding: 4px 0;
+    margin: 0;
+    border: 0;
+    color: $kates-chrome;
+    font-size: $kates-panel-font-size;
+    line-height: 1.3;
+    transition: color 0.2s ease;
+  }
+
+  ul .nav-link {
+    font-size: $kates-panel-note-size;
+    padding: 2px 0;
+  }
+
+  .nav-link.active {
+    color: $kates-link;
+    font-weight: 600;
+  }
+
+  > li > .nav-link {
+    display: flex;
+    align-items: baseline;
+  }
+
+  // Section numbers keep the chrome colour when the titles darken, set
+  // apart by their own column and tabular figures
+  .header-section-number {
+    flex: 0 0 var(--kates-num, 2.2em);
+    color: $kates-chrome;
+    font-variant-numeric: lining-nums tabular-nums;
+    letter-spacing: 0.02em;
+  }
+
+  .nav-link.active .header-section-number,
+  .nav-link:hover .header-section-number {
+    color: inherit;
+  }
+}
+
+#quarto-margin-sidebar:is(:hover, :focus-within) #TOC ul.kates-rail .nav-link:not(.active, :hover) {
+  color: $kates-chrome-strong;
+}
+
+#TOC ul.kates-rail .nav-link:hover {
+  color: $kates-link;
+}
+
+// The glossary terms of the passage being read, with Appendix A's own
+// definitions, in the room the contents leave
+.kates-gloss {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: clamp(16px, 3vh, 30px);
+  padding-top: 14px;
+  border-top: 1px solid $kates-rule;
+
+  &[hidden] {
+    display: none;
+  }
+
+  dl {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0 0 0 -8px;
+    overflow: hidden;
+  }
+}
+
+#quarto-margin-sidebar .kates-gloss-title {
+  @include kates-panel-label;
+  flex: none;
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+}
+
+// An entry: the term, and its definition's first sentence, whole. An entry
+// that does not fit is left out (reader.html), never cut.
+.kates-term {
+  margin: 0 0 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+
+  &[hidden] {
+    display: none;
+  }
+
+  dt {
+    font-weight: 600;
+    font-size: $kates-panel-font-size;
+    line-height: 1.25;
+    margin: 0;
+  }
+
+  dt a {
+    color: $kates-chrome-strong;
+    text-decoration: none;
+  }
+
+  dd {
+    margin: 1px 0 0;
+    color: $kates-chrome-note;
+    font-size: $kates-panel-note-size;
+    line-height: 1.38;
+  }
+
+  dd code {
+    font-size: 0.8em;
+    color: inherit;
+    background: none;
+    padding: 0;
+    word-break: break-word;
+  }
+
+  // The terms on screen are set darker than the ones coming up
+  &:not(.is-here) dt a {
+    color: $kates-chrome;
+  }
+
+  dt a:hover {
+    color: $kates-link;
+  }
+
+  &.is-new {
+    animation: kates-arrive 0.35s ease both;
+  }
+
+  // A term under the pointer in the text lights up its entry. On the wash
+  // the definition darkens, to keep 4.5:1.
+  &.is-hot {
+    background: $kates-gloss-hot;
+
+    dt a {
+      color: $kates-link;
+    }
+
+    dd {
+      color: $kates-chrome-strong;
+    }
+  }
+}
+
+@keyframes kates-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+// "Edit this page" and "Report an issue": a quiet foot to the margin
+#quarto-margin-sidebar > .toc-actions {
+  flex: none;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid $kates-rule;
+
+  ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 18px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  a {
+    color: $kates-chrome;
+    font-size: $kates-panel-note-size;
+    padding: 0;
+  }
+
+  a:hover {
+    color: $kates-link;
+  }
+
+  .bi {
+    margin-right: 0.3em;
+  }
+}
+
+#quarto-margin-sidebar > .kates-gloss:not([hidden]) + .toc-actions {
+  margin-top: 8px;
+}
+
+// The same links wherever else Quarto prints them: in the footer on a phone,
+// and in reader mode's menu
 .toc-actions a {
   color: $kates-muted;
 
@@ -1139,16 +1783,18 @@ nav[role="doc-toc"] {
   border: 1px solid $kates-border;
   border-radius: $border-radius-lg;
 
+  // Its title in small capitals, like the margin's labels
   > summary {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.65rem 0.9rem;
     color: $kates-muted;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: $kates-panel-font-size;
+    font-weight: 600;
+    letter-spacing: 0.075em;
+    text-transform: none;
+    font-variant-caps: all-small-caps;
     list-style: none;
     cursor: pointer;
     border-radius: inherit;
@@ -1195,7 +1841,7 @@ nav[role="doc-toc"] {
     display: block;
     padding: 0.2rem 0;
     color: $kates-sidebar-fg;
-    font-size: 0.9rem;
+    font-size: $kates-panel-font-size;
     line-height: 1.4;
     text-decoration: none;
 
@@ -1223,7 +1869,7 @@ nav[role="doc-toc"] {
 
     a {
       color: $kates-muted;
-      font-size: 0.8rem;
+      font-size: $kates-panel-font-size;
 
       &:hover {
         color: $kates-link;
@@ -1266,7 +1912,7 @@ nav[role="doc-toc"] {
     height: 100%;
     padding: 0.85rem 1rem;
     color: $kates-heading;
-    font-weight: 600;
+    font-weight: 500;
     border: 1px solid $kates-border;
     border-radius: $border-radius-lg;
     transition: border-color 0.15s ease, background-color 0.15s ease;
@@ -1281,14 +1927,16 @@ nav[role="doc-toc"] {
     justify-content: flex-end;
   }
 
+  // "Previous" and "Next" in small capitals, like the panels' labels
   .nav-page-text::before {
     display: block;
     margin-bottom: 0.15rem;
     color: $kates-muted;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: $kates-panel-label-size;
+    font-weight: 600;
+    letter-spacing: 0.075em;
+    text-transform: none;
+    font-variant-caps: all-small-caps;
   }
 
   .nav-page-previous .nav-page-text::before {
@@ -1307,7 +1955,8 @@ nav[role="doc-toc"] {
 
 // ── Top bar (below the sidebar breakpoint) ──────────────────────────────────
 // The breadcrumb there reads "Part I — Foundations > 1 Introduction" and
-// wraps onto two lines on a phone; show the chapter alone, on one line.
+// wraps onto two lines on a phone; show the chapter alone, on one line, at
+// about the size of the text below it.
 
 @include media-breakpoint-down(lg) {
   .quarto-secondary-nav .quarto-page-breadcrumbs {
@@ -1315,6 +1964,7 @@ nav[role="doc-toc"] {
 
     .breadcrumb {
       flex-wrap: nowrap;
+      font-size: 19px;
     }
 
     .breadcrumb-item:not(:last-child) {
@@ -1339,7 +1989,7 @@ nav[role="doc-toc"] {
 
 .nav-footer {
   border-top: 1px solid $kates-border;
-  font-size: 0.8rem;
+  font-size: $kates-panel-note-size;
   color: $kates-muted;
 
   a {
@@ -1348,6 +1998,48 @@ nav[role="doc-toc"] {
     &:hover {
       color: $kates-link;
     }
+  }
+}
+
+// ── Reading progress ────────────────────────────────────────────────────────
+// A thin line along the top of the window that fills as the chapter is read
+// (theme/reader.html sets its scale).
+
+.kates-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1100;
+  height: 2px;
+  background: $kates-link;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+// The panels follow the reader with motion; a reader who asks for less
+// motion gets the same states without it
+@media (prefers-reduced-motion: reduce) {
+  #TOC ul.kates-rail::after,
+  #TOC ul.kates-rail .nav-link,
+  #quarto-sidebar .sidebar-link,
+  #quarto-sidebar .sidebar-header .sidebar-logo,
+  .kates-turn a,
+  .kates-term,
+  .kates-term.is-new {
+    transition: none;
+    animation: none;
+  }
+}
+
+// What follows the reader on screen has nothing to say on paper
+@media print {
+  .kates-progress,
+  .kates-turn,
+  .kates-gloss {
+    display: none;
   }
 }
 

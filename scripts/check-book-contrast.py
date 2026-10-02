@@ -7,9 +7,11 @@ theme draws against the surface it sits on: body text, code, callouts, links,
 the sidebar and contents, and diagram labels. Text needs 4.5:1. Icons, focus
 rings and other non-text marks need 3:1 (WCAG 1.4.11).
 
-Translucent surfaces (callout tints, the active sidebar entry) are composited
-over the page first, in the order the theme stacks them. When kates.scss
-changes a tint it draws with a literal alpha, update SCSS_ALPHAS below.
+Translucent surfaces (callout tints, a glossary entry under the pointer) are
+composited over the page first, in the order the theme stacks them, and so
+is a translucent foreground (the reading-progress line). When kates.scss
+changes a tint or an opacity it draws with a literal alpha, update
+SCSS_ALPHAS below.
 
 Usage: scripts/check-book-contrast.py [--verbose] [--theme-dir DIR]
 Exits 1 when a pair falls short; used by the docs CI.
@@ -29,6 +31,7 @@ NON_TEXT = 3.0
 SCSS_ALPHAS = {
     "link-code-tint": 0.07,  # #quarto-document-content a code
     "narrow-table-head": 0.04,  # table header below the md breakpoint
+    "progress-line": 0.85,  # .kates-progress, the reading-progress line
 }
 
 CALLOUTS = ["note", "tip", "important", "warning", "caution"]
@@ -111,7 +114,9 @@ def hexof(colour):
 
 # ── The pairs ───────────────────────────────────────────────────────────────
 # Each surface is a stack of layers, bottom first; a layer is a palette
-# reference, or (colour reference, alpha reference or number) for a tint.
+# reference, or (colour reference, alpha reference or number) for a tint. A
+# foreground is a palette reference, a hex colour, or such a tint, drawn over
+# the surface.
 
 def pairs(syntax):
     page = ["$body-bg"]
@@ -152,12 +157,27 @@ def pairs(syntax):
             ("callouts", f"{name}: links", "$kates-link", body, TEXT),
             ("callouts", f"{name}: icon and rule", c, header, NON_TEXT),
         ]
+    hot = page + ["$kates-gloss-hot"]
     out += [
-        # Sidebar and the chapter contents (both sit on the page)
-        ("sidebar", "book title", "$kates-heading", page, TEXT),
-        ("sidebar", "entries", "$kates-sidebar-fg", page, TEXT),
-        ("sidebar", "part labels and chapter numbers", "$kates-muted", page, TEXT),
-        ("sidebar", "current entry", "$kates-link", page + ["$kates-active-bg"], TEXT),
+        # The panels: the navigation, and the contents and glossary in the
+        # margin (all on the page); the contents folded into the chapter
+        ("panels", "entries, part numerals, section numbers and labels", "$kates-chrome", page, TEXT),
+        ("panels", "notes (a chapter's question, a definition) and tool icons",
+         "$kates-chrome-note", page, TEXT),
+        ("panels", "entries in reach, the book title, glossary terms on screen",
+         "$kates-chrome-strong", page, TEXT),
+        ("panels", "current entry, and the entry under the pointer", "$kates-link", page, TEXT),
+        ("panels", "glossary term whose word is under the pointer", "$kates-link", hot, TEXT),
+        ("panels", "its definition", "$kates-chrome-strong", hot, TEXT),
+        ("panels", "contents rail, filled to the section being read", "$kates-link", page, NON_TEXT),
+        ("panels", "reading-progress line",
+         ("$kates-link", SCSS_ALPHAS["progress-line"]), page, NON_TEXT),
+        ("panels", "folded contents: entries", "$kates-sidebar-fg", page, TEXT),
+        ("panels", "folded contents: title and section numbers", "$kates-muted", page, TEXT),
+        # Previous and next under the chapter
+        ("page navigation", "title under the pointer", "$kates-heading", page + ["$kates-active-bg"], TEXT),
+        ("page navigation", "Previous and Next under the pointer", "$kates-muted",
+         page + ["$kates-active-bg"], TEXT),
         # Diagrams
         ("diagrams", "node labels", "$mermaid-label-fg-color",
          ["$kates-diagram-bg", "$mermaid-node-bg-color"], TEXT),
@@ -191,7 +211,7 @@ def pairs(syntax):
         # Keyboard focus rings
         ("focus", "ring on the page", "$kates-focus-ring", page, NON_TEXT),
         ("focus", "ring on a diagram", "$kates-focus-ring", ["$kates-diagram-bg"], NON_TEXT),
-        ("focus", "ring on the current sidebar entry", "$kates-focus-ring",
+        ("focus", "ring on a page navigation link under the pointer", "$kates-focus-ring",
          page + ["$kates-active-bg"], NON_TEXT),
         ("focus", "ring on a code block", "$kates-focus-ring-on-code", ["$code-block-bg"], NON_TEXT),
     ]
@@ -239,8 +259,11 @@ def main():
         for area, label, fg_ref, layers, minimum in pairs(syntax):
             try:
                 bg = surface(palette, layers)
-                fg = parse_hex(fg_ref) if fg_ref.startswith("#") else resolve(palette, fg_ref)
-                fg = over(fg, bg) if fg[3] < 1 else fg
+                if isinstance(fg_ref, tuple):  # a tint, drawn over the surface
+                    fg = surface(palette, layers + [fg_ref])
+                else:
+                    fg = parse_hex(fg_ref) if fg_ref.startswith("#") else resolve(palette, fg_ref)
+                    fg = over(fg, bg) if fg[3] < 1 else fg
             except KeyError as missing:
                 print(f"ERROR  {scheme:5}  {area}: {label}: ${missing.args[0]} is not defined")
                 errors += 1
