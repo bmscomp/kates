@@ -1,6 +1,6 @@
 # Cover proposals
 
-Four covers were drawn for the book when it moved to EB Garamond. Each uses the old Kates helm (`docs/assets/kates-logo.svg`) for its art, and its words are EB Garamond outlines, so it looks the same wherever it is shown. An editor's review scored each and gave its main risk. The book uses **Evolution**: [`../cover.svg`](../cover.svg) is this proposal with the title in SemiBold instead of Bold, as the review asked.
+Four covers were drawn for the book when it moved to EB Garamond. Each uses the old Kates helm (`docs/assets/kates-logo.svg`) for its art, and its words are EB Garamond outlines, so it looks the same wherever it is shown. An editor's review scored each and gave its main risk. The book uses **Tri-band**: [`../cover.svg`](../cover.svg) is that proposal unchanged. Before it, the book used Evolution with its title in SemiBold instead of Bold, as the review asked: [`evolution-semibold.svg`](evolution-semibold.svg).
 
 | Proposal | Score | What it does, and its main risk |
 |:--|:--|:--|

@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Kates">
   <!-- The cover's helm (assets/cover.svg; docs/assets/kates-logo.svg) in its own navy #102a66 and blue
        #3092f8 on a rounded tile shaded from white to #e8f3ff with a #bfe0ff hairline,
-       like the cover's light top half; the tile carries it on dark sidebars and tabs.
+       as on the light top of the first EB Garamond cover; the tile carries it on dark sidebars and tabs.
        Simplified from kates-logo.svg for 16px and 44px: the thin blue inner ring, the two rim
        dashes between the streams and the navy-and-blue fragment beside the C-arrowhead
        are dropped (sub-pixel there, they speckled the streams and joined the arrowhead
