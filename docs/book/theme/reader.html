@@ -5,7 +5,8 @@
 // into the folded contents before this moves them to the foot of the margin.
 //   - a thin reading-progress line along the top of the window
 //   - wide material (.kates-wide): only the code, tables and diagrams that the
-//     text column is too narrow for step out into the outsets
+//     text column is too narrow for step out into the outsets, and a table
+//     still too wide scrolls in its own box (.kates-scroll)
 //   - part labels with their numerals in a hanging column, and under the
 //     chapter being read (and the next one) the question its part page says
 //     it answers, with the part page's reading time
@@ -52,8 +53,11 @@
   // is marked when the column is too narrow for it, and steps out only as
   // far as it needs: a table to its own width (so a short table is not
   // stretched), code to its longest line, a diagram to the width it is
-  // drawn at. Everything else keeps to the column, under its heading.
-  const wideQuery = window.matchMedia("(min-width: 1200px)");
+  // drawn at. Everything else keeps to the column, under its heading. Below
+  // 1200px there are no outsets (--kates-bleed is 0), and from 768px up a
+  // table too wide for the column is still marked to scroll in its own box,
+  // rather than widen the page (below 768px every table does).
+  const tableQuery = window.matchMedia("(min-width: 768px)");
   const kinds = "div.code-copy-outer-scaffold, div.sourceCode, div.cell, pre, table.table";
   const blocks = [...main.querySelectorAll(`:scope > :is(${kinds}), section > :is(${kinds})`)];
   const drawnWidth = (el) => {
@@ -65,31 +69,44 @@
     const box = el.viewBox && el.viewBox.baseVal;
     return box ? box.width : 0;
   };
+  // Which boxes scroll sideways may have changed: diagrams.html puts those
+  // in the tab order
+  const widened = () => window.dispatchEvent(new Event("kates:widened"));
   const widen = () => {
     for (const b of blocks) {
-      b.classList.remove("kates-wide");
+      b.classList.remove("kates-wide", "kates-scroll");
       b.style.removeProperty("--kates-out");
     }
-    if (!wideQuery.matches || !blocks.length) return;
+    if (!tableQuery.matches || !blocks.length) {
+      widened();
+      return;
+    }
     const probe = document.createElement("div");
     probe.style.cssText = "position:absolute;visibility:hidden;height:0;width:var(--kates-bleed)";
     main.append(probe);
-    const bleed = probe.getBoundingClientRect().width;
+    const measured = probe.getBoundingClientRect().width;
     probe.remove();
-    if (bleed < 24) return;
+    const bleed = measured < 24 ? 0 : measured;
     const cs = getComputedStyle(main);
     const col = main.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    // A table still too wide once it has stepped out as far as it may
+    // scrolls in its own box, rather than run on under the margin
+    const scrolls = new Set();
     // How much wider than the column each block wants to be
     const wants = blocks.map((b) => {
       if (b.matches("table")) {
         const { width, maxWidth } = b.style;
-        b.style.width = "max-content";
         b.style.maxWidth = "none";
+        b.style.width = "min-content";
+        const least = b.getBoundingClientRect().width;
+        b.style.width = "max-content";
         const natural = b.getBoundingClientRect().width;
         b.style.width = width;
         b.style.maxWidth = maxWidth;
+        if (least - col > 2 * bleed + 1) scrolls.add(b);
         return natural - col;
       }
+      if (!bleed) return 0;
       const pres = b.matches("pre") ? [b] : [...b.querySelectorAll("pre")];
       const code = Math.max(0, ...pres.map((pre) => pre.scrollWidth - pre.clientWidth));
       // A diagram's plate (the padding and borders around it) comes on top
@@ -108,10 +125,12 @@
       return Math.max(code ? code + 8 : 0, drawn);
     });
     blocks.forEach((b, i) => {
-      if (wants[i] <= 1) return;
+      if (scrolls.has(b)) b.classList.add("kates-scroll");
+      if (!bleed || wants[i] <= 1) return;
       b.style.setProperty("--kates-out", `${Math.min(bleed, Math.ceil(wants[i] / 2))}px`);
       b.classList.add("kates-wide");
     });
+    widened();
   };
   widen();
   const rewiden = frame(widen);
@@ -125,6 +144,18 @@
       && (n.matches(media) || n.querySelector(media))));
     if (landed) rewiden();
   }).observe(main, { childList: true, subtree: true });
+
+  // ── Addresses in the references ───────────────────────────────────────────
+  // A long address in the references may break after any of its slashes but
+  // the two of "https://", so it keeps to the column instead of running past
+  // it. Nowhere else: on a phone, where it has to, it may break anywhere
+  // ("The references", kates.scss).
+  for (const a of main.querySelectorAll(".csl-entry a[href]")) {
+    if (a.children.length || !/^https?:\/\//.test(a.textContent)) continue;
+    const parts = a.textContent.split(/(?<=[^/:]\/)(?!\/)/);
+    if (parts.length < 2) continue;
+    a.replaceChildren(...parts.flatMap((p, i) => (i ? [document.createElement("wbr"), p] : [p])));
+  }
 
   // ── Part labels: the numeral in a hanging column ──────────────────────────
   // "Part II — Performance Testing" becomes "II" and "Performance Testing";
@@ -208,10 +239,57 @@
     sidebar.classList.add("kates-tight");
     if (over()) sidebar.classList.add("kates-tighter");
   };
+  // Quarto brings the current entry into view by scrolling the whole
+  // navigation, but from 992px up only the menu scrolls: when the entry (and
+  // its question) is out of the menu's view, while the page settles or after
+  // the menu changes size, scroll the menu to put the entry about a third of
+  // the way down. The menu starts at the top of an entry, and goes back to
+  // one if the web fonts arriving change the entries' heights under it, so
+  // that it never opens on a line cut in half.
+  const besideText = window.matchMedia("(min-width: 992px)");
+  const laidOut = (el) => el && el.getClientRects().length > 0;
+  const reveal = () => {
+    if (!menu || !besideText.matches) return;
+    const active = menu.querySelector("li.sidebar-item a.active");
+    if (!active) return;
+    const box = menu.getBoundingClientRect();
+    const at = (y) => y - box.top + menu.scrollTop; // in the menu's own terms
+    const blurb = active.closest(".sidebar-item").querySelector(":scope > .kates-blurb");
+    const top = at(active.getBoundingClientRect().top);
+    const bottom = at((laidOut(blurb) ? blurb : active).getBoundingClientRect().bottom);
+    const seen = (from) => top >= from && bottom <= from + menu.clientHeight;
+    // The lines of text, which the menu's top edge must not cut
+    const lines = [...menu.querySelectorAll(".sidebar-item-container .menu-text, .kates-blurb")]
+      .filter(laidOut).map((el) => el.getBoundingClientRect())
+      .map((r) => [at(r.top), at(r.bottom)]);
+    const whole = (from) => !lines.some(([t, b]) => t < from - 0.5 && b > from + 0.5);
+    if (seen(menu.scrollTop) && whole(menu.scrollTop)) return;
+    const max = menu.scrollHeight - menu.clientHeight;
+    const want = seen(menu.scrollTop) ? menu.scrollTop
+      : Math.max(0, Math.min(max, top - menu.clientHeight * 0.3));
+    // Where an entry starts, with 2px of air above it
+    const starts = [...menu.querySelectorAll(".sidebar-item-container")]
+      .filter(laidOut)
+      .map((c) => Math.max(0, Math.round(at(c.getBoundingClientRect().top)) - 2))
+      .filter((y) => y <= max);
+    // The first entry at or below that line, else the last one above it
+    const next = starts.find((y) => y >= want);
+    const prev = starts.filter((y) => y <= want).pop();
+    menu.scrollTop = [next, prev].find((y) => y !== undefined && seen(y) && whole(y)) ?? want;
+  };
+  const settle = () => { tighten(); reveal(); };
   if (menu) {
     window.addEventListener("resize", frame(tighten));
-    // The web fonts change how much room the menu needs
-    if (document.fonts) document.fonts.ready.then(tighten);
+    // The menu changes size with the window, with the foot under it, and
+    // at the end of a chapter (see "Clear of the footer" below)
+    new ResizeObserver(frame(reveal)).observe(menu);
+    // The web fonts change how much room the menu needs, and the entries'
+    // heights
+    if (document.fonts) {
+      document.fonts.ready.then(settle);
+      document.fonts.addEventListener("loadingdone", frame(settle));
+    }
+    reveal();
   }
   const activeChapter = sidebar && sidebar.querySelector(".sidebar-section .sidebar-link.active");
   if (activeChapter) {
@@ -221,7 +299,7 @@
       p.className = "kates-blurb";
       p.append(...nodes);
       activeChapter.closest(".sidebar-item").append(p);
-      tighten();
+      settle();
     });
   }
 
@@ -256,17 +334,65 @@
           b.className = "kates-turn-blurb";
           b.append(...nodes);
           link.append(b);
-          tighten();
+          settle();
         });
       }
     }
     if (turn.children.length) sidebar.append(turn);
-    tighten();
+    settle();
   };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", buildTurn, { once: true });
   } else {
     buildTurn();
+  }
+
+  // ── Clear of the footer ───────────────────────────────────────────────────
+  // Beside the text the panels stand as tall as the window and stick to its
+  // top. At the end of a chapter the footer would push them up, and take
+  // their heads (the book's title, the contents' label) off the screen; they
+  // give up the footer's height at their foot instead. Not on a page whose
+  // content is shorter than the window, where the panels' own height sets
+  // the page's. Quarto prints the footer after this script.
+  const clearOfFooter = () => {
+    const footer = document.querySelector("footer.footer");
+    const pager = document.querySelector("#quarto-content > nav.page-navigation");
+    const panels = [sidebar, document.getElementById("quarto-margin-sidebar")].filter(Boolean);
+    if (!footer || !panels.length) return;
+    let sticky = [];
+    let cleared = 0;
+    const clear = () => {
+      const over = sticky.length
+        ? Math.max(0, Math.ceil(window.innerHeight - footer.getBoundingClientRect().top)) : 0;
+      if (over === cleared) return;
+      cleared = over;
+      for (const p of sticky) {
+        if (over) p.style.height = `calc(100vh - ${over}px)`;
+        else p.style.removeProperty("height");
+      }
+      // The menu keeps its room as on a shorter window: previous and next
+      // give way first, and the chapter's own are on screen above the footer
+      if (sticky.includes(sidebar)) tighten();
+    };
+    const measure = () => {
+      for (const p of panels) p.style.removeProperty("height");
+      cleared = 0;
+      const tall = main.offsetHeight + (pager ? pager.offsetHeight : 0) > window.innerHeight;
+      sticky = tall && besideText.matches
+        ? panels.filter((p) => p.getClientRects().length && getComputedStyle(p).position === "sticky")
+        : [];
+      clear();
+      tighten();
+    };
+    window.addEventListener("scroll", frame(clear), { passive: true });
+    window.addEventListener("resize", frame(measure));
+    window.addEventListener("load", measure);
+    measure();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", clearOfFooter, { once: true });
+  } else {
+    clearOfFooter();
   }
 
   // ── The contents ──────────────────────────────────────────────────────────
@@ -280,6 +406,18 @@
   list.before(scroller);
   scroller.append(list);
   list.classList.add("kates-rail");
+  // A section's number stands in a column of its own, and its title beside
+  // it in one box, so that a title with code in it ("Backend CI (ci.yml)")
+  // wraps as one line of text rather than as a column per piece
+  for (const link of list.querySelectorAll(":scope > li > a.nav-link")) {
+    const number = link.querySelector(":scope > .header-section-number");
+    const words = [...link.childNodes].filter((n) => n !== number);
+    if (!words.length) continue;
+    const title = document.createElement("span");
+    title.className = "kates-toc-title";
+    title.append(...words);
+    link.append(title);
+  }
   // The number column fits the longest section number ("13.10")
   const longest = Math.max(0, ...[...list.querySelectorAll(":scope > li > a .header-section-number")]
     .map((n) => n.textContent.trim().length));
@@ -307,6 +445,10 @@
   const onGlossary = /appendix-a-glossary\.html$/.test(location.pathname);
   const termLinks = onGlossary ? [] : [...main.querySelectorAll('a[href*="appendix-a-glossary.html#"]')]
     .filter((a) => !a.closest("#TOC-body, nav"));
+  // The contents leave room for the glossary only on a page that has terms
+  // for it, which is known before the glossary loads, so they do not jump
+  // (and see measureRoom below)
+  margin.classList.toggle("kates-has-gloss", termLinks.length > 0);
   const idOf = (a) => decodeURIComponent(new URL(a.href).hash.slice(1));
   const occurrences = termLinks.map((a) => ({ id: idOf(a), link: a }));
 
@@ -370,9 +512,59 @@
     }
   };
 
+  // An entry: the term, linked to Appendix A, and its definition
+  const entryItem = (id) => {
+    const entry = entries.get(id);
+    const item = document.createElement("div");
+    item.className = "kates-term";
+    item.dataset.term = id;
+    const dt = document.createElement("dt");
+    const a = document.createElement("a");
+    const href = new URL(glossaryUrl);
+    href.hash = id;
+    a.href = href.href;
+    a.textContent = entry.name;
+    dt.append(a);
+    const dd = document.createElement("dd");
+    dd.append(entry.body.cloneNode(true));
+    item.append(dt, dd);
+    return item;
+  };
+
+  // Whether the room under the contents holds the shortest of the page's
+  // entries. On a window too short for any of them the glossary never shows,
+  // and the contents take its room back. Measured when the glossary arrives
+  // and when the window changes size, never as the reader scrolls, so the
+  // contents do not jump.
+  let roomy = false;
+  // What the margin holds has changed size or place: diagrams.html measures
+  // again which of its parts a wide diagram passes under
+  const marginChanged = () => window.dispatchEvent(new Event("kates:margin"));
+  const measureRoom = () => {
+    // Measuring swaps the entries out, which would drop the focus
+    if (dl.contains(document.activeElement)) return;
+    const ids = entries ? [...new Set(occurrences.map((o) => o.id))].filter((id) => entries.has(id)) : [];
+    roomy = false;
+    if (ids.length) {
+      margin.classList.add("kates-has-gloss");
+      const hidden = gloss.hidden;
+      const kept = [...dl.children];
+      gloss.hidden = false;
+      const probes = ids.map(entryItem);
+      dl.replaceChildren(...probes);
+      const room = dl.clientHeight;
+      roomy = probes.some((item) => item.offsetHeight <= room);
+      dl.replaceChildren(...kept);
+      gloss.hidden = hidden;
+    }
+    margin.classList.toggle("kates-has-gloss", roomy);
+    marginChanged();
+  };
+
   // The margin follows the page: the terms on screen first (set darker),
   // then the ones coming up; near the end it backs up to stay full. Entries
-  // that do not fit whole are left out rather than cut.
+  // that do not fit whole are left out rather than cut, except one that
+  // holds the keyboard's focus.
   const WINDOW = 6;
   let shownKey = "";
   const fit = () => {
@@ -381,11 +573,17 @@
     for (const item of dl.children) {
       item.hidden = false;
       used = item.offsetTop - dl.offsetTop + item.offsetHeight;
-      item.hidden = used > room;
+      item.hidden = used > room && !item.contains(document.activeElement);
     }
+    // With no entry left whole, no label over an empty box either
+    gloss.hidden = ![...dl.children].some((item) => !item.hidden);
+    marginChanged();
   };
   const followGlossary = () => {
-    if (!entries || !occurrences.length) { gloss.hidden = true; return; }
+    if (!roomy) {
+      if (!gloss.hidden) { gloss.hidden = true; marginChanged(); }
+      return;
+    }
     const vh = window.innerHeight;
     const boxes = occurrences.map((o) => o.link.getBoundingClientRect());
     const shown = (b) => b.width > 0 || b.height > 0;
@@ -403,26 +601,20 @@
     const here = new Set(occurrences.filter((o, i) => shown(boxes[i]) && boxes[i].bottom > 0 && boxes[i].top < vh).map((o) => o.id));
     const key = ids.map((id) => `${id}${here.has(id) ? "*" : ""}`).join(",");
     if (key === shownKey) return;
+    // While the keyboard is in the glossary its entries stay where they
+    // are, and the focus with them, until the focus moves on
+    if (dl.contains(document.activeElement)) {
+      for (const item of dl.children) item.classList.toggle("is-here", here.has(item.dataset.term));
+      return;
+    }
     shownKey = key;
     const old = new Map([...dl.children].map((item) => [item.dataset.term, item]));
     dl.replaceChildren(...ids.map((id) => {
       let item = old.get(id);
       if (!item) {
-        const entry = entries.get(id);
-        item = document.createElement("div");
-        item.className = "kates-term is-new";
-        item.dataset.term = id;
+        item = entryItem(id);
+        item.classList.add("is-new");
         item.addEventListener("animationend", () => item.classList.remove("is-new"), { once: true });
-        const dt = document.createElement("dt");
-        const a = document.createElement("a");
-        const href = new URL(glossaryUrl);
-        href.hash = id;
-        a.href = href.href;
-        a.textContent = entry.name;
-        dt.append(a);
-        const dd = document.createElement("dd");
-        dd.append(entry.body.cloneNode(true));
-        item.append(dt, dd);
       }
       item.classList.toggle("is-here", here.has(id));
       return item;
@@ -445,30 +637,92 @@
 
   // ── Following the reader ──────────────────────────────────────────────────
   // The contents: Quarto marks the section being read .active; the rail
-  // fills down to it and its scroll box keeps it in view.
+  // fills down to it and its scroll box keeps it in view, about a third of
+  // the way down. As in the navigation, the box starts at the top of an
+  // entry, never on a line cut in half: also when a section's sub-sections
+  // fold away under it. Near the end of the list the box takes a little room
+  // under it (--kates-room) to reach the next entry's top.
+  let room = 0;
   const followContents = () => {
-    const links = [...list.querySelectorAll("a.nav-link")];
+    const links = [...list.querySelectorAll("a.nav-link")].filter((a) => a.getClientRects().length);
     if (!links.length) return;
     const active = links.filter((a) => a.classList.contains("active")).pop() || links[0];
     const lr = list.getBoundingClientRect();
     const ar = active.getBoundingClientRect();
     list.style.setProperty("--kates-fill", `${Math.max(0, Math.round(ar.bottom - lr.top))}px`);
     const sr = scroller.getBoundingClientRect();
-    if (ar.top < sr.top + 8 || ar.bottom > sr.bottom - 8) {
-      scroller.scrollTo({
-        top: scroller.scrollTop + (ar.top - sr.top) - scroller.clientHeight * 0.3,
-        behavior: calm.matches ? "auto" : "smooth",
-      });
+    const at = (y) => y - sr.top + scroller.scrollTop; // in the box's own terms
+    // Each entry's lines, inside its padding, which the box's top edge must
+    // not cut; and where each entry starts, with 3px of air above it
+    const lines = links.map((a) => {
+      const r = a.getBoundingClientRect();
+      const cs = getComputedStyle(a);
+      return [at(r.top) + parseFloat(cs.paddingTop), at(r.bottom) - parseFloat(cs.paddingBottom)];
+    });
+    const starts = links.map((a) => Math.max(0, Math.round(at(a.getBoundingClientRect().top)) - 3));
+    const whole = (y) => y <= 0 || !lines.some(([t, b]) => t < y - 1 && b > y + 1);
+    const out = ar.top < sr.top + 8 || ar.bottom > sr.bottom - 8;
+    if (!out && whole(scroller.scrollTop)) return;
+    const max = scroller.scrollHeight - scroller.clientHeight - room;
+    const want = out ? Math.max(0, Math.min(max, at(ar.top) - scroller.clientHeight * 0.3))
+      : Math.min(max, scroller.scrollTop);
+    const seen = (y) => at(ar.top) >= y && at(ar.bottom) <= y + scroller.clientHeight;
+    const next = starts.find((y) => y >= want && y <= max);
+    const prev = starts.filter((y) => y <= want).pop();
+    const top = [next, prev].find((y) => y !== undefined && seen(y));
+    const past = top === undefined ? starts.find((y) => y > max && seen(y)) : undefined;
+    // The room only grows until the window changes size, so that the
+    // list never jumps back under the reader
+    if (past !== undefined && past - max > room) {
+      room = past - max;
+      scroller.style.setProperty("--kates-room", `${room}px`);
     }
+    scroller.scrollTo({
+      top: top ?? past ?? want,
+      behavior: calm.matches ? "auto" : "smooth",
+    });
   };
   new MutationObserver(frame(followContents)).observe(list, { subtree: true, attributes: true, attributeFilter: ["class"] });
+  // A section's sub-sections fold away as the reader moves on, and the box
+  // may be left scrolled to a line cut in half. As they unfold the box grows
+  // and pushes the glossary down into less room, so the glossary fits its
+  // entries again; its terms are the same, so following the page would not.
+  const refit = () => {
+    if (!roomy || !dl.children.length) return;
+    gloss.hidden = false;
+    fit();
+  };
+  new ResizeObserver(frame(() => {
+    followContents();
+    refit();
+  })).observe(list);
   const onMove = frame(followGlossary);
-  const refollow = () => { shownKey = ""; onMove(); followContents(); };
+  let loaded = false;
+  const refollow = () => {
+    if (loaded) measureRoom();
+    shownKey = "";
+    onMove();
+    room = 0;
+    scroller.style.removeProperty("--kates-room");
+    followContents();
+  };
   window.addEventListener("scroll", onMove, { passive: true });
-  window.addEventListener("resize", refollow);
+  window.addEventListener("resize", frame(refollow));
   // The web fonts change how much of the margin each entry takes
   if (document.fonts) document.fonts.ready.then(refollow);
+  // The margin gives up room at the end of a chapter ("Clear of the
+  // footer"): the glossary fits its entries to what is left, and the
+  // contents keep the section being read in view
+  new ResizeObserver(frame(() => {
+    shownKey = "";
+    onMove();
+    followContents();
+  })).observe(margin);
+  // Once the keyboard leaves the glossary it catches up with the page
+  dl.addEventListener("focusout", (e) => {
+    if (!dl.contains(e.relatedTarget)) onMove();
+  });
   followContents();
-  loadGlossary().then(followGlossary);
+  loadGlossary().then(() => { loaded = true; refollow(); });
 })();
 </script>

@@ -128,8 +128,21 @@ body {
 // sizes: the navigation, the margin, the previous and next links under the
 // chapter, the top bar of a narrow screen and the footer. The contents
 // folded into the chapter below 1200px take the chapter's.
+//
+// Reader mode folds the navigation and the margin into drop-downs, each
+// holding a copy of its panel under another id (Quarto's
+// #quarto-sidebarnav-toggle and #quarto-toc-toggle). The panels' own rules
+// reach the copies through $kates-nav and $kates-margin, and through
+// $kates-margin-box those that name the margin's children, which in the
+// copy are children of the drop-down's box. The rules that place the panels
+// on the page do not.
+$kates-nav: ":is(#quarto-sidebar, #quarto-sidebarnav-toggle)";
+$kates-margin: ":is(#quarto-margin-sidebar, #quarto-toc-toggle)";
+$kates-margin-box: ":is(#quarto-margin-sidebar, #quarto-toc-toggle > .quarto-sidebar-toggle-contents)";
+
 #quarto-sidebar,
 #quarto-margin-sidebar,
+.quarto-sidebar-toggle-contents,
 .page-navigation,
 .quarto-secondary-nav,
 .nav-footer {
@@ -137,6 +150,20 @@ body {
   font-feature-settings: normal;
   font-kerning: normal;
   font-variant-numeric: lining-nums;
+}
+
+// Quarto makes an open drop-down's box as tall as the window, under its
+// title bar, so the last lines of the navigation (Next, at its foot) could
+// never be scrolled into view: the drop-down as a whole keeps to the window.
+.quarto-sidebar-toggle.expanded {
+  display: flex;
+  flex-direction: column;
+  max-height: 100vh;
+
+  > .quarto-sidebar-toggle-contents {
+    flex: 0 1 auto;
+    min-height: 0;
+  }
 }
 
 // The panels' labels (Table of contents, Glossary, Previous, Next): the
@@ -343,6 +370,15 @@ kbd {
   border-bottom-width: 2px;
   border-radius: 0.3em;
   padding: 0.1em 0.4em;
+}
+
+// The references: on a phone a long DOI or URL breaks where it has to,
+// rather than push the page wider than the screen. On a wider page it breaks
+// only after a slash (theme/reader.html, "Addresses in the references").
+@include media-breakpoint-down(md) {
+  .csl-entry {
+    overflow-wrap: anywhere;
+  }
 }
 
 // ── Inline code ─────────────────────────────────────────────────────────────
@@ -569,20 +605,34 @@ div.callout {
 
 // Wide tables scroll inside their own box on narrow screens instead of
 // widening the page, with the same edge shadows as code and diagrams. The
-// header tint is translucent so the shadows show through it.
+// header tint is translucent so the shadows show through it. From 768px up
+// only a table too wide for the text column does: theme/reader.html marks it
+// .kates-scroll, and from 1200px up only once it has stepped out into the
+// outsets as far as it may, rather than run on under the margin ("The page,
+// from 1200px up"). A table that fits keeps the column's width.
+@mixin kates-table-scroll {
+  display: block;
+  overflow-x: auto;
+  @include kates-scroll-shadows($body-bg, $kates-scroll-shadow);
+
+  > thead > tr > th {
+    background-color: rgba($kates-heading, 0.04);
+  }
+
+  > tbody > tr:hover > * {
+    background-color: transparent;
+  }
+}
+
 @include media-breakpoint-down(md) {
   #quarto-document-content table.table {
-    display: block;
-    overflow-x: auto;
-    @include kates-scroll-shadows($body-bg, $kates-scroll-shadow);
+    @include kates-table-scroll;
+  }
+}
 
-    > thead > tr > th {
-      background-color: rgba($kates-heading, 0.04);
-    }
-
-    > tbody > tr:hover > * {
-      background-color: transparent;
-    }
+@include media-breakpoint-up(md) {
+  #quarto-document-content table.table.kates-scroll {
+    @include kates-table-scroll;
   }
 }
 
@@ -622,7 +672,8 @@ figure.kates-diagram {
 
 // From 1200px up, a diagram more than a tenth wider than the column takes as
 // much of the right margin as it needs (diagrams.html sets the bleed; a
-// narrower one shrinks to the column), and the table of contents steps aside
+// narrower one shrinks to the column), and what it passes under in the
+// margin (the contents, the glossary, the links at its foot) steps aside
 // while it passes.
 figure.kates-diagram.is-wide {
   z-index: 3;
@@ -640,7 +691,7 @@ figure.kates-diagram.is-wide {
   overflow: visible;
 }
 
-#quarto-margin-sidebar {
+#quarto-margin-sidebar > * {
   transition: opacity 0.15s ease, visibility 0s linear 0s;
 
   &.kates-yield {
@@ -648,6 +699,21 @@ figure.kates-diagram.is-wide {
     visibility: hidden;
     transition: opacity 0.15s ease, visibility 0s linear 0.15s;
   }
+}
+
+// A part that holds the keyboard's focus does not step aside, which would
+// drop the focus: it stays on top of the diagram instead, on the page's
+// ground, until the focus moves on (.kates-hold, diagrams.html). Quarto's
+// own z-index for the margin is #quarto-content.page-columns's.
+#quarto-content.page-columns > #quarto-margin-sidebar:has(> .kates-hold) {
+  z-index: 4;
+}
+
+// A gutter of the same ground around it keeps the diagram's labels from
+// running into its text, without moving anything
+#quarto-margin-sidebar > .kates-hold {
+  background-color: $body-bg;
+  box-shadow: -16px 0 0 0 $body-bg;
 }
 
 .kates-diagram-expand {
@@ -1041,8 +1107,9 @@ dialog.kates-diagram-viewer {
 // it, and only as far as it needs: theme/reader.html marks it .kates-wide
 // and gives it --kates-out. The rest keep to the column, under their
 // headings. diagrams.html then lays a diagram out in its cell's wider room,
-// and one wider still reaches on into the right margin ("Diagrams"). Below
-// 1200px Quarto's grid stands ("Side panels").
+// and one wider still reaches on into the right margin ("Diagrams"); a
+// table wider still scrolls in its own box ("Tables"). Below 1200px Quarto's
+// grid stands ("Side panels").
 
 @include media-breakpoint-up(xl) {
   :root {
@@ -1106,6 +1173,33 @@ dialog.kates-diagram-viewer {
 
 $kates-part-hang: 2.15em; // the part numerals' column
 
+// Below 992px the navigation is a drawer, where Quarto keeps the menu on one
+// line. At the panels' size the longest titles ran the drawer past a phone's
+// edge, chevrons and all, so its entries wrap under themselves once it is
+// open. Not while it opens: it slides in sideways, and titles wrapping to its
+// growing width would throw off Quarto's scroll to the current entry.
+@include media-breakpoint-down(lg) {
+  #quarto-sidebar.show .sidebar-menu-container {
+    white-space: normal;
+  }
+
+  // Quarto opens the drawer 45px down and at least as tall as the window,
+  // which leaves its foot under the window's edge: its last entry could not
+  // be scrolled into view. The drawer ends at the window's edge instead.
+  // Its width came from the longest line, the chapter's question; on a
+  // tablet that covered most of the screen, so the question wraps instead.
+  #quarto-sidebar.sidebar-navigation {
+    min-height: 0;
+    max-height: calc(100vh - 45px);
+    max-height: calc(100dvh - 45px);
+    overflow-y: auto;
+  }
+
+  #quarto-sidebar:is(.show, .collapsing) {
+    max-width: min(100vw, 26rem);
+  }
+}
+
 // From 992px up the navigation stands beside the text, as tall as the
 // window: the title on top, previous and next at the foot, and the menu
 // between them scrolling on its own. It starts on the panels' first line.
@@ -1127,7 +1221,7 @@ $kates-part-hang: 2.15em; // the part numerals' column
 // (GitHub, PDF, colour scheme, reader mode, search) in a row under it.
 // Bootstrap's spacing classes on the header (.mt-2, .pt-lg-2) are
 // !important, so the header's own spacing has to be too.
-#quarto-sidebar .sidebar-header {
+#{$kates-nav} .sidebar-header {
   flex: none;
   display: flex;
   align-items: flex-start;
@@ -1190,6 +1284,12 @@ $kates-part-hang: 2.15em; // the part numerals' column
     }
   }
 
+  // Quarto draws the tools at 0.7 opacity. It is restated here because
+  // scripts/check-book-contrast.py checks the icons at that strength.
+  .quarto-navigation-tool {
+    opacity: 0.7;
+  }
+
   .quarto-navigation-tool,
   .quarto-navigation-tool .bi {
     color: $kates-chrome-note;
@@ -1201,8 +1301,15 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
-// The menu scrolls on its own between the title and the foot
-#quarto-sidebar .sidebar-menu-container {
+// The menu scrolls on its own between the title and the foot, and only the
+// menu: from 992px up it is positioned, so what is placed absolutely inside
+// it (the visually hidden "Part" before each numeral) is clipped by it too,
+// instead of lengthening the navigation into a scroll range of its own.
+// Quarto scrolls the navigation to bring the current entry into view; with
+// no range to scroll, theme/reader.html scrolls the menu instead. The drawer
+// below 992px is a scroll box of its own, which Quarto's scroll measures
+// from, so there the menu stays unpositioned.
+#{$kates-nav} .sidebar-menu-container {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1210,13 +1317,17 @@ $kates-part-hang: 2.15em; // the part numerals' column
   scrollbar-width: thin;
   padding: 2px 10px 12px 6px;
 
+  @include media-breakpoint-up(lg) {
+    position: relative;
+  }
+
   // Bootstrap's .mt-1 on the list is !important too
   > ul {
     margin-top: 0 !important;
   }
 }
 
-#quarto-sidebar {
+#{$kates-nav} {
   // Every entry at the panels' size, in place of Quarto's sizes by width
   // and depth
   .sidebar-item {
@@ -1297,7 +1408,7 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 
   &:is(:hover, :focus-within) .sidebar-link:not(.active, :hover),
-  .sidebar-item-section:has(.sidebar-link.active) > .sidebar-item-container > .sidebar-item-text:not(:hover) {
+  .sidebar-item-section:has(.sidebar-link.active) > .sidebar-item-container > .sidebar-item-text:not(:hover, .active) {
     color: $kates-chrome-strong;
   }
 
@@ -1322,13 +1433,16 @@ $kates-part-hang: 2.15em; // the part numerals' column
     }
   }
 
-  // The chapter being read: the accent, the semibold and a short rule
+  // The chapter being read: the accent, the semibold and a short rule. On
+  // a part's own page its label takes the same marks, the numeral with it,
+  // and the rule stands at the numeral as it does at a chapter's number.
   .sidebar-item-container:has(> .sidebar-link.active) {
     box-shadow: inset 2px 0 0 $kates-link;
   }
 
   .sidebar-link.active,
-  .sidebar-link.active .chapter-number {
+  .sidebar-link.active :is(.chapter-number, .kates-part-no),
+  .sidebar-item-section > .sidebar-item-container > .sidebar-item-text.active {
     color: $kates-link;
     font-weight: 600;
   }
@@ -1336,6 +1450,22 @@ $kates-part-hang: 2.15em; // the part numerals' column
   .sidebar-item-toggle .bi {
     color: $kates-chrome;
     font-size: 0.72em;
+  }
+
+  // The chevron is a 24px target, centred on it, without moving anything
+  // drawn: the menu's right padding has room for it
+  .sidebar-item-toggle {
+    position: relative;
+
+    &::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 24px;
+      height: 24px;
+      transform: translate(-50%, -50%);
+    }
   }
 }
 
@@ -1410,16 +1540,17 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
-#quarto-sidebar:is(:hover, :focus-within) .kates-turn a:not(:hover) .kates-turn-title {
+#{$kates-nav}:is(:hover, :focus-within) .kates-turn a:not(:hover) .kates-turn-title {
   color: $kates-chrome-strong;
 }
 
 // On a short window the menu keeps its room: the next chapter's question
 // gives way first, then previous and next (the chapter's own previous and
 // next stay at its foot). reader.html does the same whenever the open part
-// needs the room anyway: .kates-tight drops the question, .kates-tighter the
-// whole foot, so the menu never has to scroll because of it. Below 1200px
-// the navigation is narrow, or a drawer, and has no foot.
+// needs the room anyway, and at the end of a chapter, where the navigation
+// gives the footer its height: .kates-tight drops the question,
+// .kates-tighter the whole foot, so the menu never has to scroll because of
+// it. Below 1200px the navigation is narrow, or a drawer, and has no foot.
 @media (max-height: 980px) {
   .kates-turn .kates-turn-blurb {
     display: none;
@@ -1437,15 +1568,91 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
-// Between the drawer and the wide page the navigation is narrow: it keeps to
-// the chapter titles, and the book's title takes a smaller size
+// Between the drawer and the wide page the navigation is narrow: Quarto's
+// grid gives it 180px at 992px and 249px at 1199px. It keeps to the chapter
+// titles, the book's title takes a smaller size, and so do the entries, on
+// narrower columns, so that the longest word of a title ("Troubleshooting")
+// still fits beside its number at 992px. The navigation takes 10px of the
+// gutter beside the text for it, and the tools close up. A word that still
+// does not fit (a larger default font, a scroll bar that takes room) breaks
+// rather than run out of the panel.
 @include media-breakpoint-between(lg, xl) {
   .kates-blurb {
     display: none;
   }
 
-  #quarto-sidebar .sidebar-header .sidebar-title > a {
-    font-size: 19px;
+  #quarto-content > #quarto-sidebar {
+    margin-right: -10px;
+    padding-right: 6px;
+    padding-left: 0;
+  }
+
+  #{$kates-nav} {
+    .sidebar-header {
+      gap: 8px;
+    }
+
+    .sidebar-header .sidebar-title > a {
+      font-size: 19px;
+    }
+
+    // Bootstrap's .px-1 on each tool is !important. Each tool keeps a
+    // target 24px across, the icon centred in it. A row that still runs out
+    // of room wraps rather than spill past the panel.
+    .sidebar-header .sidebar-title .sidebar-tools-main {
+      flex-wrap: wrap;
+      gap: 0;
+      margin-left: -0.15rem;
+
+      > .quarto-navigation-tool {
+        min-width: 24px;
+        padding-right: 0.15rem !important;
+        padding-left: 0.15rem !important;
+        text-align: center;
+      }
+    }
+
+    .sidebar-menu-container {
+      padding-right: 4px;
+      padding-left: 4px;
+    }
+
+    .sidebar-item,
+    .sidebar-link,
+    .sidebar-link .menu-text {
+      font-size: 16px;
+    }
+
+    .sidebar-item-container {
+      padding-left: 8px;
+    }
+
+    // The part numerals' column, in pixels here so that the numerals, at
+    // their own size, line up with the entries under them
+    .sidebar-section.depth1 {
+      padding-left: 26px;
+    }
+
+    .sidebar-menu-container > ul > .sidebar-item:not(.sidebar-item-section) > .sidebar-item-container {
+      margin-left: 26px;
+    }
+
+    .kates-part .kates-part-no {
+      flex-basis: 26px;
+      font-size: 17px;
+    }
+
+    .kates-part.kates-part-plain .menu-text {
+      padding-left: 26px;
+    }
+
+    .menu-text:has(> .chapter-number) > .chapter-number {
+      flex-basis: 1.3em;
+    }
+
+    .sidebar-link .menu-text {
+      overflow-wrap: anywhere;
+    }
   }
 }
 
@@ -1469,15 +1676,22 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
-#quarto-margin-sidebar {
+#{$kates-margin} {
   nav#TOC {
     flex: 0 1 auto;
     min-height: 0;
-    max-height: 62%;
     display: flex;
     flex-direction: column;
     padding: 0;
     margin: 0;
+  }
+
+  // Until reader.html puts the list in its scroll box, and without a
+  // script at all, the list scrolls on its own above the links at its foot
+  nav#TOC > ul {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   #toc-title {
@@ -1489,15 +1703,25 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
+// When the chapter links to the glossary the contents take at most the top
+// 62% of the margin, and its terms the room under them; otherwise the
+// contents have all the room down to the foot (reader.html marks the
+// margin .kates-has-gloss).
+#quarto-margin-sidebar.kates-has-gloss nav#TOC {
+  max-height: 62%;
+}
+
 // The contents scroll in a box of their own, which keeps the section being
-// read in view
+// read in view. The padding is room for the focus ring of the first entry,
+// and at the foot whatever reader.html adds to bring an entry's top to the
+// box's top edge near the end of the list (--kates-room).
 .kates-toc-scroll {
   flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  padding: 3px 6px 4px 0; // room for the focus ring of the first entry
+  padding: 3px 6px calc(4px + var(--kates-room, 0px)) 0;
 }
 
 #TOC ul.kates-rail {
@@ -1523,9 +1747,12 @@ $kates-part-hang: 2.15em; // the part numerals' column
     bottom: 0;
   }
 
+  // Never past the list's foot while it moves: in the scroll box it would
+  // lengthen the list, and the box would scroll on as it shrank back
   &::after {
     width: 2px;
     height: var(--kates-fill, 0px);
+    max-height: 100%;
     background: $kates-link;
     transition: height 0.3s ease;
   }
@@ -1558,6 +1785,9 @@ $kates-part-hang: 2.15em; // the part numerals' column
     font-weight: 600;
   }
 
+  // A section's number in its column and its title beside it (reader.html
+  // puts the title in a box of its own, so a title with code in it wraps as
+  // one line of text)
   > li > .nav-link {
     display: flex;
     align-items: baseline;
@@ -1578,7 +1808,14 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
-#quarto-margin-sidebar:is(:hover, :focus-within) #TOC ul.kates-rail .nav-link:not(.active, :hover) {
+// Code in a title wraps with it, in Quarto's list too, and a file name
+// longer than the panel is wide breaks rather than run out of it
+#TOC code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#{$kates-margin}:is(:hover, :focus-within) #TOC ul.kates-rail .nav-link:not(.active, :hover) {
   color: $kates-chrome-strong;
 }
 
@@ -1609,7 +1846,7 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
-#quarto-margin-sidebar .kates-gloss-title {
+#{$kates-margin} .kates-gloss-title {
   @include kates-panel-label;
   flex: none;
   margin: 0 0 8px;
@@ -1697,7 +1934,7 @@ $kates-part-hang: 2.15em; // the part numerals' column
 }
 
 // "Edit this page" and "Report an issue": a quiet foot to the margin
-#quarto-margin-sidebar > .toc-actions {
+#{$kates-margin-box} > .toc-actions {
   flex: none;
   margin-top: auto;
   padding-top: 12px;
@@ -1727,7 +1964,7 @@ $kates-part-hang: 2.15em; // the part numerals' column
   }
 }
 
-#quarto-margin-sidebar > .kates-gloss:not([hidden]) + .toc-actions {
+#{$kates-margin-box} > .kates-gloss:not([hidden]) + .toc-actions {
   margin-top: 8px;
 }
 
@@ -1927,6 +2164,16 @@ $kates-part-hang: 2.15em; // the part numerals' column
     justify-content: flex-end;
   }
 
+  // The titles at the panels' size, as at the foot of the navigation, in
+  // place of Quarto's 0.875rem: Garamond's small x-height makes that read
+  // smaller than the labels above them
+  .nav-page-text {
+    font-size: $kates-panel-font-size;
+    // A title on two lines reads as one, and leaves no word alone on the last
+    line-height: 1.3;
+    text-wrap: balance;
+  }
+
   // "Previous" and "Next" in small capitals, like the panels' labels
   .nav-page-text::before {
     display: block;
@@ -1962,7 +2209,10 @@ $kates-part-hang: 2.15em; // the part numerals' column
   .quarto-secondary-nav .quarto-page-breadcrumbs {
     min-width: 0;
 
+    // The list gives way before the search button does, and the title
+    // ends in an ellipsis rather than run under it
     .breadcrumb {
+      min-width: 0;
       flex-wrap: nowrap;
       font-size: 19px;
     }
@@ -2024,11 +2274,12 @@ $kates-part-hang: 2.15em; // the part numerals' column
 @media (prefers-reduced-motion: reduce) {
   #TOC ul.kates-rail::after,
   #TOC ul.kates-rail .nav-link,
-  #quarto-sidebar .sidebar-link,
-  #quarto-sidebar .sidebar-header .sidebar-logo,
+  #{$kates-nav} .sidebar-link,
+  #{$kates-nav} .sidebar-header .sidebar-logo,
   .kates-turn a,
   .kates-term,
-  .kates-term.is-new {
+  .kates-term.is-new,
+  .kates-toc-fold > summary::before {
     transition: none;
     animation: none;
   }
