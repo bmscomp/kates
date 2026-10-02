@@ -224,32 +224,58 @@
     yieldMargin();
   }
 
-  // The table of contents steps aside while a diagram that reaches into the
-  // margin passes under it: one that overlaps the contents both across and
-  // down the page, not one that only takes the gutter beside the column.
+  // The part of a margin child with something on it: the glossary's box
+  // runs on down to the foot of the margin, its entries need not
+  function inkBox(child) {
+    const box = child.getBoundingClientRect();
+    if (!box.width || !box.height) return null;
+    const last = [...child.querySelectorAll(".kates-term:not([hidden])")].pop();
+    return last ? { left: box.left, top: box.top, bottom: last.getBoundingClientRect().bottom } : box;
+  }
+
+  // What the margin holds (the contents, the glossary, the links at its
+  // foot) steps aside while a diagram that reaches into the margin passes
+  // under it, each part on its own: the part the diagram overlaps both
+  // across and down the page, not one above or below it, and not for a
+  // diagram that only takes the gutter beside the column. A diagram that
+  // comes within 12px of a part counts as over it, since its plate would
+  // stand against the part's text with no air between. A part that holds
+  // the keyboard's focus stays, over the diagram (.kates-hold), since one
+  // that steps aside drops the focus.
+  function measureYield() {
+    if (!margin) return;
+    const figures = [...document.querySelectorAll("figure.kates-diagram.is-wide")]
+      .map((figure) => figure.getBoundingClientRect());
+    const focus = document.activeElement;
+    for (const child of margin.children) {
+      const box = inkBox(child);
+      const hit = !!box && figures.some((r) => r.right > box.left - 12 && r.bottom > box.top && r.top < box.bottom);
+      const hold = hit && child.contains(focus) && focus.matches(":focus-visible");
+      child.classList.toggle("kates-yield", hit && !hold);
+      child.classList.toggle("kates-hold", hold);
+    }
+  }
   let yieldQueued = false;
   function yieldMargin() {
     if (!margin || yieldQueued) return;
     yieldQueued = true;
     requestAnimationFrame(() => {
       yieldQueued = false;
-      // The margin column is as tall as the window; its contents are not
-      const boxes = [...margin.children].map((child) => child.getBoundingClientRect())
-        .filter((box) => box.width > 0 && box.height > 0);
-      if (!boxes.length) return;
-      const left = Math.min(...boxes.map((box) => box.left));
-      const top = Math.min(...boxes.map((box) => box.top));
-      const bottom = Math.max(...boxes.map((box) => box.bottom));
-      const hit = [...document.querySelectorAll("figure.kates-diagram.is-wide")].some((figure) => {
-        const r = figure.getBoundingClientRect();
-        return r.right > left && r.bottom > top && r.top < bottom;
-      });
-      margin.classList.toggle("kates-yield", hit);
+      measureYield();
     });
   }
   window.addEventListener("scroll", () => {
     if (document.querySelector("figure.kates-diagram.is-wide")) yieldMargin();
   }, { passive: true });
+  margin?.addEventListener("focusin", yieldMargin);
+  margin?.addEventListener("focusout", yieldMargin);
+  // The margin also changes on its own as the reader scrolls: the glossary
+  // follows the passage being read (theme/reader.html), on the same scroll
+  // as this, and says when it has changed. Measure again at once, so that a
+  // diagram is never left over an entry that has just come in.
+  window.addEventListener("kates:margin", () => {
+    if (document.querySelector("figure.kates-diagram.is-wide")) measureYield();
+  });
 
   const resizes = new ResizeObserver((entries) => {
     for (const entry of entries) {
@@ -440,10 +466,11 @@
   }
 
   // ── Keyboard access to sideways scrolling ──────────────────────────────────
-  // Code blocks, command output and (on narrow screens) tables scroll
-  // sideways inside their own box. A box that overflows gets tabindex="0", so
-  // a keyboard can reach it and scroll it with the arrow keys; the theme
-  // draws the focus ring. A box that fits is left out of the tab order.
+  // Code blocks, command output and tables (on a phone, or too wide for the
+  // column) scroll sideways inside their own box. A box that overflows gets
+  // tabindex="0", so a keyboard can reach it and scroll it with the arrow
+  // keys; the theme draws the focus ring. A box that fits is left out of the
+  // tab order.
 
   const SCROLLERS = [
     "div.sourceCode > pre.sourceCode",
@@ -477,6 +504,8 @@
   window.addEventListener("load", queueScrollers);
   window.addEventListener("resize", queueScrollers);
   document.fonts?.ready.then(queueScrollers); // web fonts change line widths
+  // theme/reader.html steps wide blocks out, or has a table scroll
+  window.addEventListener("kates:widened", queueScrollers);
 
   // ── Keyboard access to the sidebar's parts ─────────────────────────────────
   // Only the current part starts open (collapse-level: 1 in _quarto.yml). A
