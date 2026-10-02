@@ -21,6 +21,20 @@ $kates-surface: #f6f8fc;
 $kates-active-bg: rgba(29, 99, 199, 0.08);
 $kates-row-hover: #f8fafd;
 
+// The panels beside the text (the navigation, the contents and the glossary
+// in the margin): chrome muted until the reader reaches for it, so the eye
+// stays on the text, and hairlines a step lighter than the borders. The
+// panels' notes, set at 16px in italic, take a darker step of their own.
+$kates-chrome: #66708c;
+$kates-chrome-note: #5b6580;
+$kates-chrome-strong: #2b3553;
+$kates-rule: #e8ecf3;
+$kates-rail: #dfe5ee;
+// A glossary entry whose term is under the pointer in the text
+$kates-gloss-hot: rgba($kates-link, 0.09);
+// The mark beside the book's title: its pale tile sits well on white
+$kates-sidebar-logo-opacity: 1;
+
 // Bootstrap
 $body-bg: #ffffff;
 $body-color: #1f2937;

@@ -1,0 +1,474 @@
+<script>
+// The reader's aids of the Kates book (theme/kates.scss: "The page, from
+// 1200px up", "Sidebar", "Table of contents" and "Reading progress"). Runs
+// after theme/panels.html, which copies the margin's "Edit this page" links
+// into the folded contents before this moves them to the foot of the margin.
+//   - a thin reading-progress line along the top of the window
+//   - wide material (.kates-wide): only the code, tables and diagrams that the
+//     text column is too narrow for step out into the outsets
+//   - part labels with their numerals in a hanging column, and under the
+//     chapter being read (and the next one) the question its part page says
+//     it answers, with the part page's reading time
+//   - the contents: a rail that fills down to the section being read, kept
+//     in view inside its own scroll box
+//   - the glossary terms of the passage being read, with Appendix A's own
+//     definitions, in the margin under the contents
+//   - the previous and next chapter at the foot of the navigation
+(() => {
+  "use strict";
+
+  const main = document.getElementById("quarto-document-content");
+  if (!main) return;
+  const frame = (fn) => {
+    let queued = false;
+    return () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; fn(); });
+    };
+  };
+
+  // ── Reading progress ──────────────────────────────────────────────────────
+  const bar = document.createElement("div");
+  bar.className = "kates-progress";
+  bar.setAttribute("aria-hidden", "true");
+  document.body.append(bar);
+  const progress = () => {
+    const box = main.getBoundingClientRect();
+    const run = box.height - window.innerHeight;
+    const p = run > 0 ? Math.min(1, Math.max(0, -box.top / run)) : 1;
+    bar.style.transform = `scaleX(${p.toFixed(4)})`;
+  };
+  const onScroll = frame(progress);
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  window.addEventListener("load", onScroll);
+  progress();
+  const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  // ── Wide material ─────────────────────────────────────────────────────────
+  // The theme lets a block step out into the outsets, equally on both sides,
+  // only when it is marked .kates-wide, and by --kates-out at most. A block
+  // is marked when the column is too narrow for it, and steps out only as
+  // far as it needs: a table to its own width (so a short table is not
+  // stretched), code to its longest line, a diagram to the width it is
+  // drawn at. Everything else keeps to the column, under its heading.
+  const wideQuery = window.matchMedia("(min-width: 1200px)");
+  const kinds = "div.code-copy-outer-scaffold, div.sourceCode, div.cell, pre, table.table";
+  const blocks = [...main.querySelectorAll(`:scope > :is(${kinds}), section > :is(${kinds})`)];
+  const drawnWidth = (el) => {
+    const attr = el.getAttribute("width");
+    if (attr && !attr.includes("%") && parseFloat(attr)) return parseFloat(attr);
+    if (el.tagName === "IMG") return el.naturalWidth || 0;
+    const max = parseFloat(el.style.maxWidth);
+    if (max) return max;
+    const box = el.viewBox && el.viewBox.baseVal;
+    return box ? box.width : 0;
+  };
+  const widen = () => {
+    for (const b of blocks) {
+      b.classList.remove("kates-wide");
+      b.style.removeProperty("--kates-out");
+    }
+    if (!wideQuery.matches || !blocks.length) return;
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:absolute;visibility:hidden;height:0;width:var(--kates-bleed)";
+    main.append(probe);
+    const bleed = probe.getBoundingClientRect().width;
+    probe.remove();
+    if (bleed < 24) return;
+    const cs = getComputedStyle(main);
+    const col = main.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    // How much wider than the column each block wants to be
+    const wants = blocks.map((b) => {
+      if (b.matches("table")) {
+        const { width, maxWidth } = b.style;
+        b.style.width = "max-content";
+        b.style.maxWidth = "none";
+        const natural = b.getBoundingClientRect().width;
+        b.style.width = width;
+        b.style.maxWidth = maxWidth;
+        return natural - col;
+      }
+      const pres = b.matches("pre") ? [b] : [...b.querySelectorAll("pre")];
+      const code = Math.max(0, ...pres.map((pre) => pre.scrollWidth - pre.clientWidth));
+      // A diagram's plate (the padding and borders around it) comes on top
+      const plate = (el) => {
+        let sum = 0;
+        for (let a = el.parentElement; a && a !== main; a = a.parentElement) {
+          const st = getComputedStyle(a);
+          sum += ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"]
+            .reduce((t, side) => t + parseFloat(st[side]), 0);
+          if (a === b) break;
+        }
+        return sum;
+      };
+      const drawn = Math.max(0, ...[...b.querySelectorAll("svg, img")]
+        .map((el) => drawnWidth(el) + plate(el) - col));
+      return Math.max(code ? code + 8 : 0, drawn);
+    });
+    blocks.forEach((b, i) => {
+      if (wants[i] <= 1) return;
+      b.style.setProperty("--kates-out", `${Math.min(bleed, Math.ceil(wants[i] / 2))}px`);
+      b.classList.add("kates-wide");
+    });
+  };
+  widen();
+  const rewiden = frame(widen);
+  window.addEventListener("resize", rewiden);
+  window.addEventListener("load", rewiden);
+  if (document.fonts) document.fonts.ready.then(rewiden);
+  // Diagrams are drawn after the page loads: measure again when they land
+  const media = "svg, img, table, pre";
+  new MutationObserver((records) => {
+    const landed = records.some((r) => [...r.addedNodes].some((n) => n.nodeType === 1
+      && (n.matches(media) || n.querySelector(media))));
+    if (landed) rewiden();
+  }).observe(main, { childList: true, subtree: true });
+
+  // ── Part labels: the numeral in a hanging column ──────────────────────────
+  // "Part II — Performance Testing" becomes "II" and "Performance Testing";
+  // the word "Part" stays for screen readers, and the whole label is the
+  // tooltip.
+  const sidebar = document.getElementById("quarto-sidebar");
+  if (sidebar) {
+    for (const text of sidebar.querySelectorAll(
+      ".sidebar-item-section > .sidebar-item-container > .sidebar-item-text .menu-text")) {
+      if (text.querySelector(".kates-part-name")) continue;
+      const label = text.textContent.replace(/\s+/g, " ").trim();
+      const m = label.match(/^Part\s+([IVXLC]+)\s+[—–-]\s+(.+)$/);
+      const name = document.createElement("span");
+      name.className = "kates-part-name";
+      name.textContent = m ? m[2] : label;
+      const link = text.closest(".sidebar-item-text");
+      link.classList.add("kates-part");
+      if (m) {
+        const no = document.createElement("span");
+        no.className = "kates-part-no";
+        const word = document.createElement("span");
+        word.className = "visually-hidden";
+        word.textContent = "Part ";
+        no.append(word, m[1]);
+        text.replaceChildren(no, name);
+        link.title = label;
+      } else {
+        link.classList.add("kates-part-plain");
+        text.replaceChildren(name);
+      }
+    }
+  }
+
+  // ── What each chapter answers, from its part page ─────────────────────────
+  // Every part page lists its chapters as "[Title](file): question? About N
+  // minutes." Those words go under the chapter being read, and under the
+  // next chapter at the foot of the navigation.
+  const pages = new Map();
+  const partPage = (url) => {
+    if (!pages.has(url)) {
+      pages.set(url, fetch(url, { credentials: "same-origin" })
+        .then((r) => (r.ok ? r.text() : ""))
+        .then((html) => new DOMParser().parseFromString(html, "text/html"))
+        .catch(() => null));
+    }
+    return pages.get(url);
+  };
+  const samePage = (a, b) => new URL(a, location.href).pathname === new URL(b, location.href).pathname;
+  const blurbFor = async (chapterHref) => {
+    if (!sidebar) return null;
+    const entry = [...sidebar.querySelectorAll(".sidebar-section .sidebar-link")]
+      .find((a) => samePage(a.href, chapterHref));
+    const part = entry && entry.closest(".sidebar-item-section")
+      ?.querySelector(":scope > .sidebar-item-container > a.sidebar-item-text");
+    const partHref = part && part.getAttribute("href");
+    if (!partHref || partHref.startsWith("#")) return null;
+    const doc = await partPage(part.href);
+    if (!doc) return null;
+    const base = part.href;
+    for (const li of doc.querySelectorAll("main li")) {
+      const first = li.firstElementChild;
+      if (!first || first.tagName !== "A" || li.firstChild !== first) continue;
+      if (!samePage(new URL(first.getAttribute("href"), base).href, chapterHref)) continue;
+      const nodes = [...li.childNodes].slice(1).map((n) => document.importNode(n, true));
+      if (!nodes.length || nodes[0].nodeType !== Node.TEXT_NODE) return null;
+      nodes[0].textContent = nodes[0].textContent.replace(/^\s*:\s*/, "");
+      const t = nodes[0].textContent;
+      nodes[0].textContent = t.charAt(0).toUpperCase() + t.slice(1);
+      return nodes;
+    }
+    return null;
+  };
+  const menu = sidebar && sidebar.querySelector(".sidebar-menu-container");
+  // When the menu runs out of room the next chapter's question goes first
+  // (.kates-tight), then the whole foot (.kates-tighter)
+  const tighten = () => {
+    if (!menu) return;
+    const over = () => menu.scrollHeight > menu.clientHeight + 2;
+    sidebar.classList.remove("kates-tight", "kates-tighter");
+    if (!over()) return;
+    sidebar.classList.add("kates-tight");
+    if (over()) sidebar.classList.add("kates-tighter");
+  };
+  if (menu) {
+    window.addEventListener("resize", frame(tighten));
+    // The web fonts change how much room the menu needs
+    if (document.fonts) document.fonts.ready.then(tighten);
+  }
+  const activeChapter = sidebar && sidebar.querySelector(".sidebar-section .sidebar-link.active");
+  if (activeChapter) {
+    blurbFor(activeChapter.href).then((nodes) => {
+      if (!nodes) return;
+      const p = document.createElement("p");
+      p.className = "kates-blurb";
+      p.append(...nodes);
+      activeChapter.closest(".sidebar-item").append(p);
+      tighten();
+    });
+  }
+
+  // ── Previous and next, at the foot of the navigation ──────────────────────
+  // Quarto prints the chapter's own previous and next after this script, so
+  // the foot is built from them once the page is read in.
+  const buildTurn = () => {
+    const pager = document.querySelector("nav.page-navigation");
+    if (!sidebar || !pager || sidebar.querySelector(".kates-turn")) return;
+    const turn = document.createElement("nav");
+    turn.className = "kates-turn";
+    turn.setAttribute("aria-label", "Previous and next chapter");
+    for (const [side, label] of [["previous", "Previous"], ["next", "Next"]]) {
+      const from = pager.querySelector(`.nav-page-${side} a.pagination-link`);
+      const text = from && from.querySelector(".nav-page-text");
+      if (!text) continue;
+      const link = document.createElement("a");
+      link.href = from.getAttribute("href");
+      link.className = `kates-turn-${side}`;
+      const l = document.createElement("span");
+      l.className = "kates-turn-label";
+      l.textContent = label;
+      const t = document.createElement("span");
+      t.className = "kates-turn-title";
+      t.append(...[...text.childNodes].map((n) => n.cloneNode(true)));
+      link.append(l, t);
+      turn.append(link);
+      if (side === "next") {
+        blurbFor(link.href).then((nodes) => {
+          if (!nodes) return;
+          const b = document.createElement("span");
+          b.className = "kates-turn-blurb";
+          b.append(...nodes);
+          link.append(b);
+          tighten();
+        });
+      }
+    }
+    if (turn.children.length) sidebar.append(turn);
+    tighten();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", buildTurn, { once: true });
+  } else {
+    buildTurn();
+  }
+
+  // ── The contents ──────────────────────────────────────────────────────────
+  const margin = document.getElementById("quarto-margin-sidebar");
+  const toc = document.getElementById("TOC");
+  const list = toc && toc.querySelector(":scope > ul");
+  if (!margin || !toc || !list) return;
+
+  const scroller = document.createElement("div");
+  scroller.className = "kates-toc-scroll";
+  list.before(scroller);
+  scroller.append(list);
+  list.classList.add("kates-rail");
+  // The number column fits the longest section number ("13.10")
+  const longest = Math.max(0, ...[...list.querySelectorAll(":scope > li > a .header-section-number")]
+    .map((n) => n.textContent.trim().length));
+  if (longest) list.style.setProperty("--kates-num", `${(longest * 0.5 + 0.75).toFixed(2)}em`);
+
+  const actions = toc.querySelector(".toc-actions");
+
+  // ── Glossary terms ────────────────────────────────────────────────────────
+  // Not an <aside>: Quarto takes every aside on the page for content set in
+  // the margin, and folds the margin away into a menu to make room for it.
+  const gloss = document.createElement("div");
+  gloss.className = "kates-gloss";
+  gloss.hidden = true;
+  gloss.setAttribute("role", "complementary");
+  gloss.setAttribute("aria-label", "Glossary terms in this passage");
+  const glossTitle = document.createElement("h2");
+  glossTitle.className = "kates-gloss-title";
+  glossTitle.textContent = "Glossary";
+  const dl = document.createElement("dl");
+  gloss.append(glossTitle, dl);
+  margin.append(gloss);
+  if (actions) margin.append(actions);
+
+  // Not on the glossary itself, where every entry is already on the page
+  const onGlossary = /appendix-a-glossary\.html$/.test(location.pathname);
+  const termLinks = onGlossary ? [] : [...main.querySelectorAll('a[href*="appendix-a-glossary.html#"]')]
+    .filter((a) => !a.closest("#TOC-body, nav"));
+  const idOf = (a) => decodeURIComponent(new URL(a.href).hash.slice(1));
+  const occurrences = termLinks.map((a) => ({ id: idOf(a), link: a }));
+
+  let entries = null; // id -> { name, body: DocumentFragment }
+  const glossaryUrl = termLinks.length ? (() => { const u = new URL(termLinks[0].href); u.hash = ""; return u; })() : null;
+
+  // An entry's first sentence, the definition proper, with its code kept
+  // and its links made plain text. "See CDC." gives CDC's definition.
+  const definition = (doc, section, hops = 1) => {
+    const p = section.querySelector(":scope > p");
+    if (!p) return null;
+    const text = p.textContent.replace(/\s+/g, " ").trim();
+    const links = p.querySelectorAll("a");
+    if (hops > 0 && /^See [^.]+\.$/.test(text) && links.length === 1) {
+      const target = doc.getElementById((links[0].getAttribute("href") || "").replace(/^.*#/, ""));
+      if (target) return definition(doc, target, hops - 1);
+    }
+    const clone = document.importNode(p, true);
+    // Citations point at the References page, which the margin does not show
+    for (const cite of clone.querySelectorAll(".citation")) {
+      const before = cite.previousSibling;
+      if (before && before.nodeType === Node.TEXT_NODE) before.textContent = before.textContent.replace(/\s+$/, "");
+      cite.remove();
+    }
+    for (const a of clone.querySelectorAll("a")) a.replaceWith(...a.childNodes);
+    clone.normalize();
+    const full = clone.textContent;
+    const m = full.match(/^[\s\S]*?(?<!\b(?:e\.g|i\.e|vs|etc|cf))[.!?](?=\s|$)/);
+    const cut = m ? m[0].length : full.length;
+    const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
+    const after = [];
+    let seen = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const len = node.textContent.length;
+      if (seen >= cut) after.push(node);
+      else if (seen + len > cut) node.textContent = node.textContent.slice(0, cut - seen);
+      seen += len;
+    }
+    after.forEach((node) => node.remove());
+    for (const el of [...clone.querySelectorAll("*")].reverse()) if (!el.textContent.trim()) el.remove();
+    const body = document.createDocumentFragment();
+    body.append(...clone.childNodes);
+    return body.textContent.trim() ? body : null;
+  };
+
+  const loadGlossary = async () => {
+    if (!glossaryUrl) return;
+    try {
+      const html = await (await fetch(glossaryUrl, { credentials: "same-origin" })).text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      entries = new Map();
+      for (const section of doc.querySelectorAll('section[id^="gl-"]')) {
+        const heading = section.querySelector(":scope > h3, :scope > h2");
+        if (!heading) continue;
+        const name = heading.textContent.replace(/\s+/g, " ").trim();
+        const body = definition(doc, section);
+        if (name && body) entries.set(section.id, { name, body });
+      }
+    } catch (e) {
+      entries = null;
+    }
+  };
+
+  // The margin follows the page: the terms on screen first (set darker),
+  // then the ones coming up; near the end it backs up to stay full. Entries
+  // that do not fit whole are left out rather than cut.
+  const WINDOW = 6;
+  let shownKey = "";
+  const fit = () => {
+    const room = dl.clientHeight;
+    let used = 0;
+    for (const item of dl.children) {
+      item.hidden = false;
+      used = item.offsetTop - dl.offsetTop + item.offsetHeight;
+      item.hidden = used > room;
+    }
+  };
+  const followGlossary = () => {
+    if (!entries || !occurrences.length) { gloss.hidden = true; return; }
+    const vh = window.innerHeight;
+    const boxes = occurrences.map((o) => o.link.getBoundingClientRect());
+    const shown = (b) => b.width > 0 || b.height > 0;
+    let start = boxes.findIndex((b) => shown(b) && b.bottom > vh * 0.06);
+    if (start < 0) start = occurrences.length;
+    const ids = [];
+    for (let i = start; i < occurrences.length && ids.length < WINDOW; i++) {
+      const id = occurrences[i].id;
+      if (entries.has(id) && !ids.includes(id)) ids.push(id);
+    }
+    for (let i = start - 1; i >= 0 && ids.length < WINDOW; i--) {
+      const id = occurrences[i].id;
+      if (entries.has(id) && !ids.includes(id)) ids.unshift(id);
+    }
+    const here = new Set(occurrences.filter((o, i) => shown(boxes[i]) && boxes[i].bottom > 0 && boxes[i].top < vh).map((o) => o.id));
+    const key = ids.map((id) => `${id}${here.has(id) ? "*" : ""}`).join(",");
+    if (key === shownKey) return;
+    shownKey = key;
+    const old = new Map([...dl.children].map((item) => [item.dataset.term, item]));
+    dl.replaceChildren(...ids.map((id) => {
+      let item = old.get(id);
+      if (!item) {
+        const entry = entries.get(id);
+        item = document.createElement("div");
+        item.className = "kates-term is-new";
+        item.dataset.term = id;
+        item.addEventListener("animationend", () => item.classList.remove("is-new"), { once: true });
+        const dt = document.createElement("dt");
+        const a = document.createElement("a");
+        const href = new URL(glossaryUrl);
+        href.hash = id;
+        a.href = href.href;
+        a.textContent = entry.name;
+        dt.append(a);
+        const dd = document.createElement("dd");
+        dd.append(entry.body.cloneNode(true));
+        item.append(dt, dd);
+      }
+      item.classList.toggle("is-here", here.has(id));
+      return item;
+    }));
+    gloss.hidden = ids.length === 0;
+    fit();
+  };
+
+  // A term in the text lights up its entry in the margin
+  const hot = (a, on) => {
+    const item = dl.querySelector(`.kates-term[data-term="${CSS.escape(idOf(a))}"]`);
+    if (item) item.classList.toggle("is-hot", on);
+  };
+  for (const a of termLinks) {
+    a.addEventListener("mouseenter", () => hot(a, true));
+    a.addEventListener("mouseleave", () => hot(a, false));
+    a.addEventListener("focus", () => hot(a, true));
+    a.addEventListener("blur", () => hot(a, false));
+  }
+
+  // ── Following the reader ──────────────────────────────────────────────────
+  // The contents: Quarto marks the section being read .active; the rail
+  // fills down to it and its scroll box keeps it in view.
+  const followContents = () => {
+    const links = [...list.querySelectorAll("a.nav-link")];
+    if (!links.length) return;
+    const active = links.filter((a) => a.classList.contains("active")).pop() || links[0];
+    const lr = list.getBoundingClientRect();
+    const ar = active.getBoundingClientRect();
+    list.style.setProperty("--kates-fill", `${Math.max(0, Math.round(ar.bottom - lr.top))}px`);
+    const sr = scroller.getBoundingClientRect();
+    if (ar.top < sr.top + 8 || ar.bottom > sr.bottom - 8) {
+      scroller.scrollTo({
+        top: scroller.scrollTop + (ar.top - sr.top) - scroller.clientHeight * 0.3,
+        behavior: calm.matches ? "auto" : "smooth",
+      });
+    }
+  };
+  new MutationObserver(frame(followContents)).observe(list, { subtree: true, attributes: true, attributeFilter: ["class"] });
+  const onMove = frame(followGlossary);
+  const refollow = () => { shownKey = ""; onMove(); followContents(); };
+  window.addEventListener("scroll", onMove, { passive: true });
+  window.addEventListener("resize", refollow);
+  // The web fonts change how much of the margin each entry takes
+  if (document.fonts) document.fonts.ready.then(refollow);
+  followContents();
+  loadGlossary().then(followGlossary);
+})();
+</script>

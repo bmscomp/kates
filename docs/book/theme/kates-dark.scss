@@ -21,6 +21,21 @@ $kates-surface: #131c33;
 $kates-active-bg: rgba(122, 182, 245, 0.1);
 $kates-row-hover: #121b31;
 
+// The panels beside the text (the navigation, the contents and the glossary
+// in the margin): chrome muted until the reader reaches for it, so the eye
+// stays on the text, and hairlines a step darker than the borders. On the
+// dark page the panels' small italic notes read well in the chrome itself.
+$kates-chrome: #8794b0;
+$kates-chrome-note: $kates-chrome;
+$kates-chrome-strong: #dbe2f0;
+$kates-rule: #1c2641;
+$kates-rail: #26324f;
+// A glossary entry whose term is under the pointer in the text
+$kates-gloss-hot: rgba($kates-link, 0.12);
+// The mark's pale tile would glare on the dark page: it steps back with the
+// chrome, and comes forward under the pointer
+$kates-sidebar-logo-opacity: 0.8;
+
 // Bootstrap
 $body-bg: #0e1425;
 $body-color: #d3dbea;
