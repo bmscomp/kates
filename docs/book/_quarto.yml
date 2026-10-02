@@ -135,9 +135,12 @@ format:
     respect-user-color-scheme: true
     highlight-style: theme/kates-code.theme
     include-in-header: theme/head.html
+    # reader.html runs after panels.html: it moves the margin's "Edit this
+    # page" links, which panels.html copies into the folded contents first.
     include-after-body:
       - theme/diagrams.html
       - theme/panels.html
+      - theme/reader.html
     filters:
       - path: theme/citations.lua
         at: post-render
