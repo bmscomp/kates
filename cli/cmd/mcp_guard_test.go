@@ -655,7 +655,7 @@ func TestMCPEnvelopeCarriesCaveats(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
 	h := newMCPHarness(t, fb, withMCPTools(
 		mcpTestTool("noted", func(ctx context.Context, call *mcpCall, _ struct{}) (struct{}, error) {
-			call.Caveat(mcpCaveatReaper30Minutes, mcpCaveatLoadSingleProducer) // one static, one new
+			call.Caveat(mcpCaveatReaperDeadline, mcpCaveatLoadSingleProducer) // one static, one new
 			return struct{}{}, nil
 		}, mcpCaveatLoadSingleProducer),
 		mcpTestTool("typo", func(ctx context.Context, call *mcpCall, _ struct{}) (struct{}, error) {
@@ -672,7 +672,7 @@ func TestMCPEnvelopeCarriesCaveats(t *testing.T) {
 			t.Errorf("caveat %s carries the wrong text: %q", c.ID, c.Text)
 		}
 	}
-	if strings.Join(ids, ",") != "load-single-producer,reaper-30-minutes" {
+	if strings.Join(ids, ",") != "load-single-producer,reaper-deadline" {
 		t.Errorf("caveats = %v, want the static one first and no repeats", ids)
 	}
 
