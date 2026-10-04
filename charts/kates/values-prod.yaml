@@ -23,16 +23,19 @@ resources:
 jvm:
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 
-autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 8
-  targetCPUUtilizationPercentage: 70
+# One pod, no autoscaler: the Kates API keeps its runs in memory, and a pod
+# that starts fails the runs another is executing (see replicaCount in
+# values.yaml). The schema refuses anything else.
+replicaCount: 1
 
+autoscaling:
+  enabled: false
+
+# A budget for one pod has to allow its eviction, or every node drain waits on
+# it forever: maxUnavailable, never minAvailable.
 podDisruptionBudget:
   enabled: true
-  minAvailable: "50%"
-  maxUnavailable: ""
+  maxUnavailable: 1
 
 topologySpreadConstraints:
   - maxSkew: 1

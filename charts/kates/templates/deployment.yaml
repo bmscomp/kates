@@ -17,10 +17,10 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
-  {{- with .Values.strategy }}
+  {{- /* Recreate even when a values file nulls strategy out: without one, the
+         API server defaults to a RollingUpdate that surges a second pod. */}}
   strategy:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- toYaml (.Values.strategy | default (dict "type" "Recreate")) | nindent 4 }}
   selector:
     matchLabels:
       {{- include "kates.selectorLabels" . | nindent 6 }}

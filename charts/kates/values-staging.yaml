@@ -1,4 +1,6 @@
-replicaCount: 2
+# One pod, as everywhere: a second one fails the runs the first is executing
+# (see replicaCount in values.yaml). The schema refuses more.
+replicaCount: 1
 
 image:
   pullPolicy: IfNotPresent
@@ -19,6 +21,8 @@ jvm:
 autoscaling:
   enabled: false
 
+# maxUnavailable, never minAvailable: with one pod, a minimum blocks every
+# node drain.
 podDisruptionBudget:
   enabled: true
   maxUnavailable: 1

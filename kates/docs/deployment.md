@@ -133,6 +133,8 @@ metadata:
     app: kates
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kates
@@ -187,6 +189,7 @@ spec:
 
 Key things to note:
 
+- **One replica, rolled with `Recreate`** — Kates keeps each run's workers, the concurrent-run limit (`TestOrchestrator`), the disruption lease (`DisruptionConcurrencyGuard`) and the SSE subscribers in the pod's memory, and a pod that starts marks every `RUNNING` run in the database `FAILED` (`TestOrchestrator.recoverOrphans`). A second pod fails the runs the first one is executing, and the two can each run a disruption plan against the same cluster, so do not scale the Deployment or put an autoscaler on it. Without a `strategy`, Kubernetes rolls a Deployment with a `RollingUpdate` that starts the new pod before stopping the old one; `Recreate` stops the old pod first, at the cost of a gap until the new pod is Ready. The Helm chart enforces both.
 - **serviceAccountName** — Kates needs a service account with permissions to interact with the Kafka cluster (for AdminClient operations) and the Kubernetes API (for pod watching, deployment scaling, and RBAC checks during disruption tests). See the RBAC section below.
 - **envFrom** — loads all ConfigMap entries as environment variables
 - **Database credentials** — stored in a Kubernetes Secret, not the ConfigMap
