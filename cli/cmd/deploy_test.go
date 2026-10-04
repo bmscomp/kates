@@ -476,6 +476,62 @@ func TestDeployCommand_KafkaConnectParameters(t *testing.T) {
 	if !foundPgSecret {
 		t.Error("connect-pg-credentials Secret creation command was not invoked")
 	}
+
+	// 4. The backend may read that database's password Secret, and only in
+	// its namespace: the chart's ClusterRole grants no Secret at all.
+	foundKates := false
+	for _, cmd := range executedCommands {
+		if strings.Contains(cmd, "helm upgrade --install kates charts/kates") {
+			foundKates = true
+			if !strings.Contains(cmd, "--set rbac.cdcSecretNamespaces={database}") {
+				t.Errorf("Expected the kates release to grant the CDC Secret in 'database', got: %s", cmd)
+			}
+		}
+	}
+	if !foundKates {
+		t.Error("Kates deployment command was not executed")
+	}
+}
+
+// The INTEGRATION_CDC test reads the Secret postgresql in the database's
+// namespace, which the kates chart grants only in the namespaces it is
+// given. Naming a namespace that does not exist fails the install, so the
+// grant follows the database: the one this run installs or an earlier one.
+func TestCdcSecretArgsFollowTheDatabase(t *testing.T) {
+	origDeployed := isHelmReleaseDeployedFn
+	defer func() {
+		isHelmReleaseDeployedFn = origDeployed
+		deployWithKafkaConnect = false
+		deployDbNS = "database"
+	}()
+	dc := &deployContext{ctx: context.Background()}
+	deployDbNS = "cdc-db"
+
+	var asked []string
+	dbInstalled := false
+	isHelmReleaseDeployedFn = func(ctx context.Context, release, namespace string) bool {
+		asked = append(asked, namespace+"/"+release)
+		return dbInstalled
+	}
+	want := "--set rbac.cdcSecretNamespaces={cdc-db}"
+
+	deployWithKafkaConnect = true
+	if got := strings.Join(dc.cdcSecretArgs(), " "); got != want {
+		t.Errorf("with --with-kafka-connect: cdcSecretArgs = %q, want %q", got, want)
+	}
+
+	deployWithKafkaConnect = false
+	if args := dc.cdcSecretArgs(); args != nil {
+		t.Errorf("no database and no --with-kafka-connect: want no grant, got %q", args)
+	}
+	if len(asked) == 0 || asked[len(asked)-1] != "cdc-db/postgresql" {
+		t.Errorf("expected a check for release postgresql in cdc-db, asked %v", asked)
+	}
+
+	dbInstalled = true
+	if got := strings.Join(dc.cdcSecretArgs(), " "); got != want {
+		t.Errorf("database from an earlier run: cdcSecretArgs = %q, want %q", got, want)
+	}
 }
 
 func TestDeployCommand_KafkaConnectIdempotent(t *testing.T) {

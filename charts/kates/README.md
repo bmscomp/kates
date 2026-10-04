@@ -76,9 +76,24 @@ the namespace your Prometheus runs in.
 | `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
 | `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
-| `rbac.create` | `true` | Create the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads) |
+| `rbac.create` | `true` | Create the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads; no Secrets) |
 | `rbac.directChaos` | `false` | Grant the writes the direct Kubernetes chaos backend makes; see [Chaos permissions](#chaos-permissions) |
+| `rbac.cdcSecretNamespaces` | `[]` | Namespaces where the `INTEGRATION_CDC` test may read its database's password; see [Secret access](#secret-access) |
 | `rbac.extraRules` | `[]` | Additional RBAC rules to append |
+
+### Secret access
+
+The ClusterRole grants nothing on Secrets. The backend gets its own credentials from the kubelet, as environment variables and volumes, and reads one Secret through the API: the `INTEGRATION_CDC` test takes its database's password from the Secret `postgresql` (key `postgres-password`). It connects to the PostgreSQL behind the first Service labelled `app.kubernetes.io/name=postgresql`, in any namespace, or in `database` when there is none. For each namespace in `rbac.cdcSecretNamespaces` the chart creates a Role with `get` on that one Secret and binds it to the backend's ServiceAccount:
+
+```yaml
+rbac:
+  cdcSecretNamespaces:
+    - database   # where `kates deploy --with-kafka-connect` installs the CDC database
+```
+
+The list is empty by default, since a Role in a namespace that does not exist fails the install. `kates deploy` sets it to `--db-ns` when it installs the CDC database, or finds one an earlier run installed. With the list empty, an `INTEGRATION_CDC` run fails at `DB_SETUP` with a `Forbidden` error naming the Secret.
+
+Upgrading from 0.10.7 or earlier: the ClusterRole there granted `get`, `list` and `watch` on every Secret in the cluster. A release that runs `INTEGRATION_CDC` and is installed with Helm directly needs `rbac.cdcSecretNamespaces` set.
 
 ### Chaos permissions
 

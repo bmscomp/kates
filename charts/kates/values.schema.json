@@ -61,6 +61,15 @@
             "properties": {
                 "create": { "type": "boolean" },
                 "directChaos": { "type": "boolean" },
+                "cdcSecretNamespaces": {
+                    "type": "array",
+                    "description": "Namespaces where the INTEGRATION_CDC test may get the Secret postgresql, its database's password; one Role each",
+                    "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+                        "maxLength": 63
+                    }
+                },
                 "extraRules": { "type": "array" }
             }
         },
