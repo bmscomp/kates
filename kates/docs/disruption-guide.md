@@ -158,6 +158,8 @@ The `FaultSpec` is deliberately backend-agnostic. Whether you are using Litmus C
 
 The defaults apply to a `faultSpec` posted as JSON as well as to a playbook step: a field the JSON leaves out gets the value in this table, and a field it sets, `0` included, keeps that value. So an omitted `targetBrokerId` means one random matching pod, and `"targetBrokerId": 0` means the broker pod whose name ends in `-0`. The same holds for each entry of `probes`.
 
+Each number from `chaosDurationSec` to `gracePeriodSec` has a range, and a fault with one outside it is refused before anything is injected (see [Parameter Limits](#parameter-limits)).
+
 ### Leader-Aware Targeting: The Killer Feature
 
 Most chaos engineering tools operate at the infrastructure level — they kill pods, partition networks, or stress CPUs. But they do not understand *what* is running inside those pods. You tell them "kill pod X" and they kill pod X. If you want to kill the leader of a specific Kafka partition, you first need to figure out which pod hosts that leader, which means querying the Kafka AdminClient, parsing the response, and building the right pod name. This is tedious, error-prone, and defeats the purpose of automation.
@@ -354,6 +356,12 @@ Every disruption plan declares a `maxAffectedBrokers` value. Before executing th
 Only brokers count. The guard lists the pods in `kates.chaos.kafka.namespace` that match `kates.chaos.kafka.label`, `strimzi.io/component-type=kafka` by default, which matches the KRaft controllers as well as the brokers. A pod is a broker if Strimzi labels it `strimzi.io/broker-role=true`, so a node with both roles counts and a dedicated controller does not. On the default cluster, with brokers 0–2 and controllers 3–5, that makes three brokers, not six: a plan that kills all three is rejected. A controller a step hits, such as the one in a failed zone, is listed in the dry run but not counted. `targetBrokerId` picks among the brokers only, so `targetBrokerId: 3` does not hit controller 3: it falls back to the first broker, and the dry run warns about it. A pod without the role label, such as Kafka not run by Strimzi, counts as a broker.
 
 This prevents a common mistake: using a broad label selector like `strimzi.io/component-type=kafka` (which matches every Kafka pod) when you only intended to affect one. Without blast radius validation, a typo in a label selector could take down your entire cluster.
+
+### Parameter Limits
+
+A typo in a number does as much damage as one in a selector: a stress meant for 60 seconds that runs for 60,000, or `cpuCores: 0`, which Litmus reads as every core. So every fault's parameters are checked against the `kates.chaos.limits.*` ceilings before anything is injected, whichever way the fault comes in: a plan, a playbook, a template, a schedule, a compound run or a resilience run. A plan with a fault outside them is rejected like any other unsafe plan; a compound or resilience run gets a `400` naming each parameter.
+
+With the defaults, `chaosDurationSec` runs from 0 to 3,600 seconds, `delayBeforeSec` from 0 to 600, `gracePeriodSec` from 0 to 300, `networkLatencyMs` from 1 to 30,000, `fillPercentage` from 1 to 100, `cpuCores` and `ioWorkers` from 1 to 64, and `memoryMb` from 1 to 32,768. The [configuration reference](overview.md#chaos-limits) names the setting for each ceiling. A fault undone when its duration ends needs a `chaosDurationSec` of at least 1: `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL` and `NODE_DRAIN`. `envOverrides` may not set `TOTAL_CHAOS_DURATION` or `RAMP_TIME`, which would run a Litmus experiment past the limits.
 
 ### RBAC Permission Verification
 

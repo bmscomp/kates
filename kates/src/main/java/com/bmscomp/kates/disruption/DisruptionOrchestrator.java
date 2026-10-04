@@ -305,8 +305,12 @@ public class DisruptionOrchestrator {
                     DisruptionEventBus.EventType.FAULT_INJECTED,
                     step.name(),
                     "Fault injected: " + spec.experimentName());
-            ChaosOutcome outcome =
-                    chaosCoordinator.triggerFault(spec).get(spec.chaosDurationSec() + 120, TimeUnit.SECONDS);
+            // The delay counts: the kubernetes provider waits it out before it
+            // injects, and a step that stopped waiting first went on while the
+            // fault was still to come.
+            ChaosOutcome outcome = chaosCoordinator
+                    .triggerFault(spec)
+                    .get(spec.delayBeforeSec() + spec.chaosDurationSec() + 120, TimeUnit.SECONDS);
 
             if (step.observationWindowSec() > 0) {
                 LOG.info("  Observing for " + step.observationWindowSec() + "s");

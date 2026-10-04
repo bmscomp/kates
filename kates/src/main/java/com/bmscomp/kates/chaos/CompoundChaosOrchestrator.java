@@ -25,6 +25,9 @@ public class CompoundChaosOrchestrator {
     @Inject
     Instance<ChaosProvider> providers;
 
+    @Inject
+    FaultLimits limits;
+
     public record CompoundFault(FaultSpec spec, String providerName) {}
 
     public record CompoundOutcome(boolean allSucceeded, List<ProviderOutcome> results) {}
@@ -34,8 +37,12 @@ public class CompoundChaosOrchestrator {
     /**
      * Executes multiple faults in parallel across potentially different providers.
      * Each fault is paired with its target provider name.
+     *
+     * @throws IllegalArgumentException when a fault has no spec or a parameter
+     *         outside the chaos limits; no fault is triggered then
      */
     public CompoundOutcome executeConcurrent(List<CompoundFault> faults, int timeoutSec) {
+        checkLimits(faults);
         List<CompletableFuture<ProviderOutcome>> futures = new ArrayList<>();
 
         for (CompoundFault fault : faults) {
@@ -88,8 +95,12 @@ public class CompoundChaosOrchestrator {
 
     /**
      * Executes faults sequentially with configurable delay between each.
+     *
+     * @throws IllegalArgumentException when a fault has no spec or a parameter
+     *         outside the chaos limits; no fault is triggered then
      */
     public CompoundOutcome executeSequential(List<CompoundFault> faults, int delayBetweenSec) {
+        checkLimits(faults);
         List<ProviderOutcome> results = new ArrayList<>();
         boolean allOk = true;
 
@@ -148,6 +159,28 @@ public class CompoundChaosOrchestrator {
             }
         }
         return names;
+    }
+
+    /**
+     * Refuses the whole run, before any fault is triggered, when one fault has
+     * no spec or a parameter outside the chaos limits. A compound run calls the
+     * providers itself, past the coordinator and the safety guard, so this is
+     * the only check its faults get.
+     */
+    private void checkLimits(List<CompoundFault> faults) {
+        List<String> refused = new ArrayList<>();
+        for (int i = 0; i < faults.size(); i++) {
+            String path = "faults[" + i + "].faultSpec";
+            FaultSpec spec = faults.get(i).spec();
+            if (spec == null) {
+                refused.add(path + " is required");
+                continue;
+            }
+            limits.violations(spec).forEach((field, why) -> refused.add(path + "." + field + " " + why));
+        }
+        if (!refused.isEmpty()) {
+            throw new IllegalArgumentException("No fault was triggered: " + String.join("; ", refused));
+        }
     }
 
     private ChaosProvider resolveProvider(String name) {

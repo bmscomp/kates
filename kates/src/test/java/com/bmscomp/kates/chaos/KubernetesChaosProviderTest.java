@@ -2,6 +2,7 @@ package com.bmscomp.kates.chaos;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -12,6 +13,7 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
@@ -684,6 +686,71 @@ public class KubernetesChaosProviderTest {
         assertFalse(outcome.isPass());
         assertTrue(outcome.failureReason().contains("No pods found"), outcome.failureReason());
         assertEquals(3, remainingPods().size());
+    }
+
+    /** Every request the API server has had since the last call, as "METHOD path". */
+    private List<String> requests() throws InterruptedException {
+        List<String> seen = new ArrayList<>();
+        for (RecordedRequest r; (r = server.takeRequest(0, TimeUnit.MILLISECONDS)) != null; ) {
+            seen.add(r.getMethod() + " " + r.getPath());
+        }
+        return seen;
+    }
+
+    @Test
+    void aPartitionWithoutADurationIsStillRemoved() throws Exception {
+        createZonedBrokers();
+        // The chaos limits refuse it now. One that got past them used to cut
+        // the pod off until rollback, or for good.
+        FaultSpec spec = FaultSpec.builder("split")
+                .targetPod("krafter-brokers-0")
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(0)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertTrue(
+                requests().contains("POST /apis/networking.k8s.io/v1/namespaces/kafka/networkpolicies"),
+                "the partition went in");
+        assertEquals(
+                List.of(),
+                client.network().networkPolicies().inAnyNamespace().list().getItems(),
+                "and came out");
+    }
+
+    /**
+     * A partition that failed after isolating some pods left them cut off: a
+     * failed fault gets no rollback, and nothing else removed the policies.
+     */
+    @Test
+    void aPartitionThatFailsHalfWayIsRemoved() throws Exception {
+        createZonedBrokers();
+        // Left by an earlier fault, so isolating krafter-brokers-1 fails with a conflict.
+        client.network()
+                .networkPolicies()
+                .inNamespace("kafka")
+                .resource(new NetworkPolicyBuilder()
+                        .withNewMetadata()
+                        .withName("kates-netpol-krafter-brokers-1")
+                        .addToLabels("managed-by", "kates")
+                        .endMetadata()
+                        .build())
+                .create();
+        FaultSpec spec = FaultSpec.builder("split-zone")
+                .targetLabel("strimzi.io/component-type=kafka,zone=alpha")
+                .targetAll(true)
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(60)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertEquals(
+                List.of(),
+                client.network().networkPolicies().inAnyNamespace().list().getItems());
     }
 
     @Test

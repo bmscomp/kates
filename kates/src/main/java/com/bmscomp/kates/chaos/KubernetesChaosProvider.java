@@ -66,10 +66,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
     /** How often ROLLING_RESTART checks whether the roll has finished. */
     long rollPollIntervalMs = 5_000;
 
-    /**
-     * A roll that did not finish within {@code chaosDurationSec}. Not retried:
-     * a retry would annotate the pods again and wait another full budget.
-     */
+    /** A roll that did not finish within {@code chaosDurationSec}. */
     public static class IncompleteRollException extends RuntimeException {
         public IncompleteRollException(String message) {
             super(message);
@@ -82,7 +79,6 @@ public class KubernetesChaosProvider implements ChaosProvider {
     /**
      * A scale-down the Strimzi Cluster Operator held back or did not finish
      * within {@code chaosDurationSec}; the node pools have their replicas back.
-     * Not retried: a retry would lower them again and wait another full budget.
      */
     public static class IncompleteScaleDownException extends RuntimeException {
         public IncompleteScaleDownException(String message) {
@@ -104,16 +100,22 @@ public class KubernetesChaosProvider implements ChaosProvider {
         return "kubernetes";
     }
 
-    @Retry(
-            maxRetries = 3,
-            delay = 1000,
-            abortOn = {IncompleteRollException.class, IncompleteScaleDownException.class})
-    @org.eclipse.microprofile.faulttolerance.CircuitBreaker(
-            requestVolumeThreshold = 4,
-            failureRatio = 0.5,
-            delay = 10000,
-            skipOn = {IncompleteRollException.class, IncompleteScaleDownException.class})
-    public void applyDisruption(FaultSpec spec, String engineName) throws Exception {
+    /**
+     * Injects the fault, once. Nothing here is retried, as a whole or in part:
+     * every step changes the cluster, and a call the API server carried out
+     * but whose answer the client lost looks like a failure. Retried, the
+     * injection ran again on what the first attempt had changed: another pod
+     * picked at random and killed, a StatefulSet scaled down from the count the
+     * first attempt left. A failure fails the fault instead. Only removing a
+     * partition is retried ({@link #cleanup}), and its failure does not inject
+     * the partition again.
+     *
+     * <p>No circuit breaker either. One breaker served every fault in the
+     * application, so a plan's failed faults refused the next plan's with an
+     * error that said nothing about it, and a few faults per plan are no load
+     * to shed from the API server.
+     */
+    private void applyDisruption(FaultSpec spec, String engineName) throws Exception {
         if (spec.disruptionType() == null) {
             throw new IllegalArgumentException("No disruptionType set — use the builder");
         }
@@ -125,7 +127,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
         switch (spec.disruptionType()) {
             case POD_KILL -> executePodKill(spec);
             case POD_DELETE -> executePodDelete(spec);
-            case NETWORK_PARTITION -> executeNetworkPartition(spec);
+            case NETWORK_PARTITION -> executeNetworkPartition(spec, engineName);
             case ROLLING_RESTART -> executeRollingRestart(spec);
             case SCALE_DOWN -> executeScaleDown(spec);
             case LEADER_ELECTION -> executePodKill(spec);
@@ -134,11 +136,6 @@ public class KubernetesChaosProvider implements ChaosProvider {
             default ->
                 throw new UnsupportedOperationException(
                         "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
-        }
-
-        if (spec.chaosDurationSec() > 0 && spec.disruptionType() == DisruptionType.NETWORK_PARTITION) {
-            Thread.sleep(spec.chaosDurationSec() * 1000L);
-            cleanup(engineName);
         }
     }
 
@@ -151,7 +148,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     String engineName = spec.experimentName() + "-" + System.currentTimeMillis();
 
                     try {
-                        self.applyDisruption(spec, engineName);
+                        applyDisruption(spec, engineName);
                         return ChaosOutcome.success(
                                 engineName, spec.experimentName(), start, Instant.now(), startNanos, null, null, null);
 
@@ -168,7 +165,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                                 null,
                                 null);
                     } catch (Exception e) {
-                        LOG.error("Fault injection failed after retries", e);
+                        LOG.error("Fault injection failed", e);
                         return ChaosOutcome.failure(
                                 engineName,
                                 spec.experimentName(),
@@ -206,9 +203,52 @@ public class KubernetesChaosProvider implements ChaosProvider {
         }
     }
 
-    private void executeNetworkPartition(FaultSpec spec) {
-        for (String podName : PodTargets.resolve(client, spec)) {
-            isolatePod(spec, podName);
+    /**
+     * Isolates the target pods for {@code chaosDurationSec}, then removes the
+     * partition, whatever the duration, and also when isolating a later pod
+     * failed or the wait was interrupted: a NetworkPolicy left behind cuts the
+     * pod off until rollback, which a failed fault does not get.
+     */
+    private void executeNetworkPartition(FaultSpec spec, String engineName) throws InterruptedException {
+        Exception failure = null;
+        try {
+            for (String podName : PodTargets.resolve(client, spec)) {
+                isolatePod(spec, podName);
+            }
+            // The chaos limits refuse a partition without a duration; one that
+            // gets here anyway is a blip.
+            Thread.sleep(Math.max(0, spec.chaosDurationSec()) * 1000L);
+        } catch (RuntimeException | InterruptedException e) {
+            failure = e;
+            throw e;
+        } finally {
+            removePartition(spec.targetNamespace(), engineName, failure);
+        }
+    }
+
+    /**
+     * Removes every Kates NetworkPolicy with {@link #cleanup}, which its own
+     * {@code @Retry} retries. When that fails as well, the fault fails saying
+     * the pods may still be cut off, and the failure of the partition itself,
+     * if any, goes along as suppressed. A failed fault gets no rollback, so the
+     * message says how to remove them.
+     */
+    private void removePartition(String namespace, String engineName, Exception failure) {
+        try {
+            self.cleanup(engineName);
+        } catch (RuntimeException e) {
+            IllegalStateException notRemoved = new IllegalStateException(
+                    "NETWORK_PARTITION: could not remove the NetworkPolicies, so the pods may still be cut off."
+                            + " Remove them with kubectl delete networkpolicy -n " + namespace
+                            + " -l managed-by=kates. " + e.getMessage(),
+                    e);
+            if (failure != null) {
+                notRemoved.addSuppressed(failure);
+            }
+            if (failure instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw notRemoved;
         }
     }
 
@@ -425,6 +465,9 @@ public class KubernetesChaosProvider implements ChaosProvider {
         if (ss == null) {
             throw new IllegalStateException("StatefulSet not found: " + name);
         }
+        // Read once, and the scale below sets an absolute count from it. A
+        // request the client sends again sets the same count, and nothing reads
+        // the count again, so a scale whose answer was lost removes one replica.
         int current = ss.getSpec().getReplicas() != null ? ss.getSpec().getReplicas() : 1;
         if (current <= 1) {
             LOG.info("SCALE_DOWN: StatefulSet " + name + " has one replica, leaving it");
@@ -511,6 +554,11 @@ public class KubernetesChaosProvider implements ChaosProvider {
         return ChaosStatus.COMPLETED;
     }
 
+    /**
+     * Removes every NetworkPolicy Kates made, in every namespace. The one write
+     * here that is retried: it deletes by label, so doing it again removes
+     * nothing more, and a policy left in place keeps a pod cut off.
+     */
     @Retry(maxRetries = 3, delay = 2000)
     @Timeout(15000)
     @Override

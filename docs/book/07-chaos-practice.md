@@ -75,7 +75,7 @@ The table sets a plan and a resilience run side by side. Read the guard, rollbac
 | Faults | One per step | One |
 | Workload | None | The Kates test in `testRequest` |
 | What it measures | Pod recovery, Prometheus snapshots before and after each fault, and ISR and lag when asked | The test's throughput, latency and error rate just before the fault, and again over the whole run after the recovery wait |
-| Safety guard | Checks the plan before the first fault, and the Kafka pods before each fault | None |
+| Safety guard | Checks the plan before the first fault, and the Kafka pods before each fault | None, apart from the [fault parameter limits](#fault-parameter-limits) |
 | Another plan running | Refused | Not checked |
 | Rollback | After a step fails its recovery check or errors, with `autoRollback` | None |
 | Grade | An [SLA grade](appendix-a-glossary.md#gl-sla-grade) when the plan has an `sla` block | None |
@@ -145,6 +145,8 @@ The `kubernetes` provider implements these disruptions against the Kubernetes AP
 | `CPU_STRESS` | Stress ephemeral container injected into the pod | Saturates CPU on the broker pod |
 | `IO_STRESS` | Stress ephemeral container injected into the pod | Injects disk I/O pressure on broker storage |
 
+The provider injects each fault once, and doesn't try it again when a call fails. The API server may have carried out the call and lost only its answer. A second try would then act on what the first changed: it would kill another pod picked at random, or scale a StatefulSet down from the count the first try left. The step fails instead. A partition that fails or is interrupted removes its NetworkPolicies all the same, as at the end of its duration, and a failed node pool scale-down gives the pools their replicas back. Removing a partition is the one call the provider retries, up to three more times, because doing it again removes nothing more.
+
 ### LitmusChaos Integration
 
 On the default `litmus-crd` provider, Kates maps every disruption type but two to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). The exceptions are `ROLLING_RESTART`, because no Litmus experiment does a rolling restart, and `SCALE_DOWN`, because `pod-delete` kills a broker that its [StrimziPodSet](appendix-a-glossary.md#gl-strimzipodset) brings straight back. The `litmus-crd` provider hands both to the `kubernetes` provider, so they run the same way on both. Five types are only available through Litmus:
@@ -207,7 +209,7 @@ Strimzi runs Kafka pods from StrimziPodSets and creates no StatefulSet, so `SCAL
 
 The operator [reconciles](appendix-a-glossary.md#gl-reconciliation) as soon as the pool changes, but it holds back the removal of a broker that still hosts partition replicas. If the `Kafka` resource has a `remove-brokers` [auto-rebalance](appendix-a-glossary.md#gl-rebalance), as the `kafka-cluster` chart configures by default, [Cruise Control](appendix-a-glossary.md#gl-cruise-control) moves the replicas off first, and the operator removes the broker once it's empty. The step waits for this: `chaosDurationSec` is the budget for the whole removal, draining included, and the step returns as soon as the broker pod is gone. Draining can't finish when the brokers left can't hold every replica, such as a topic with [replication factor](appendix-a-glossary.md#gl-rf) 3 on a cluster going from three brokers to two.
 
-A held-back scale-down doesn't go away: the lowered `spec.replicas` stays on the pool, and the operator removes the broker whenever it becomes empty, which could be in the middle of a later step. So when the operator holds the removal back and nothing drains the broker, or the budget runs out, the step fails and Kates gives every pool it lowered its replicas back. With `chaosDurationSec: 0` the step doesn't wait, and it can't tell a removed broker from a held-back one. To remove a broker that still hosts replicas, which is what you do to test losing a broker for good, set `strimzi.io/skip-broker-scaledown-check: "true"` on the `Kafka` resource yourself. Strimzi then removes it with its replicas, and its partitions run on the replicas left.
+A held-back scale-down doesn't go away: the lowered `spec.replicas` stays on the pool, and the operator removes the broker whenever it becomes empty, which could be in the middle of a later step. So when the operator holds the removal back and nothing drains the broker, or the budget runs out, or lowering a pool fails, the step fails and Kates gives every pool it lowered, or tried to, its replicas back. With `chaosDurationSec: 0` the step doesn't wait, and it can't tell a removed broker from a held-back one. To remove a broker that still hosts replicas, which is what you do to test losing a broker for good, set `strimzi.io/skip-broker-scaledown-check: "true"` on the `Kafka` resource yourself. Strimzi then removes it with its replicas, and its partitions run on the replicas left.
 
 A step that succeeds leaves the pool one broker short. Kates records the original count on the pool in the `kates.io/original-replicas` annotation, and `autoRollback` restores it from there when a step with `requireRecovery: true` fails its recovery check, as does orphan recovery when Kates restarts. On a scale-up Strimzi gives the new broker the lowest free node ID, unless the pool sets `strimzi.io/next-node-ids`. That's normally the ID it removed, so the broker comes back with its old volume when the pool keeps its claims (`deleteClaim: false`). The Kates service account needs `patch` on `kafkanodepools`, which the `kates` chart grants.
 
@@ -523,7 +525,7 @@ A disruption plan breaks the cluster on purpose, so Kates checks it before it br
 
 ### What Kates Checks Before a Plan Starts
 
-When you run a plan or a playbook, Kates lists the pods in `kates.chaos.kafka.namespace` (`kafka`) that match `kates.chaos.kafka.label` (`strimzi.io/component-type=kafka`). It works out which brokers each step would hit, and refuses the plan at any of the checks in this diagram:
+When you run a plan or a playbook, Kates checks each step's fault against the [fault parameter limits](#fault-parameter-limits), whatever the cluster holds. It also lists the pods in `kates.chaos.kafka.namespace` (`kafka`) that match `kates.chaos.kafka.label` (`strimzi.io/component-type=kafka`). It works out which brokers each step would hit, and refuses the plan at any of the checks in this diagram:
 
 ```mermaid
 %%| label: fig-practice-safety-guard
@@ -548,6 +550,7 @@ A refused plan starts nothing. Over the API it returns `422` with status `REJECT
 |-----------------------------|----------------|
 | `No broker pods found matching label '…' in namespace '…'` | Point `kates.chaos.kafka.namespace` and `kates.chaos.kafka.label` at your cluster, and check that the Kates API can list pods there |
 | `Step '…': …`, naming a selector that doesn't parse | Fix that step's `targetLabel` |
+| `Step '…':`, then a fault parameter that `is below` its floor or `is above the limit of` its ceiling | Bring the parameter into its range, or raise the limit (see [Fault Parameter Limits](#fault-parameter-limits)) |
 | `Plan would affect N brokers but maxAffectedBrokers=M` | Narrow the selectors, or raise the limit if you mean it |
 | `Plan would affect ALL N brokers — cluster would lose availability` | Narrow the selectors: Kates never runs a plan that hits every broker |
 
@@ -559,11 +562,10 @@ The label matches the KRaft controllers as well, so Kates counts as brokers only
 
 A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step whose selector looks in a namespace other than the brokers' counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts the pods its selector picks, not the brokers on the node it drains. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker.
 
-Kates runs the plan anyway, with a warning in `validationWarnings`, in four cases:
+Kates runs the plan anyway, with a warning in `validationWarnings`, in three cases:
 
 - The plan leaves exactly one broker untouched.
 - A step is a `SCALE_DOWN`, whose broker stays removed until rollback puts it back.
-- A `NETWORK_PARTITION` step sets `chaosDurationSec` to `0` (left out, it's 30), so its NetworkPolicy stays until something deletes it.
 - The `sla` block sets a threshold a plan can't evaluate (see [SLA Grading](#sla-grading)).
 
 Only one plan runs against the cluster at a time. While one runs, Kates refuses a second, with `409 Conflict` over the API, because both would rely on the original replica counts that rollback restores from.
@@ -574,12 +576,33 @@ The plan check sees the cluster as it is when you submit the plan, and a plan ru
 
 If one isn't, the step fails with `Cluster is not in a stable baseline state before injection` and injects nothing. A failed step doesn't end the plan. Kates goes on to the next step, which makes the same check, and marks the plan `PARTIAL` at the end.
 
+### Fault Parameter Limits
+
+Every number in a fault spec has a range, and Kates refuses a fault with one outside it before anything is injected. A plan is checked before its first fault, whether you post it or it comes from a playbook, a template or a schedule, and one with a fault outside its range ends `REJECTED`. A resilience run's `chaosSpec` is checked before its test starts, and every fault of a compound run (`POST /api/disruptions/compound`) before any goes in; both get a `400` naming each parameter. The ranges are generous on purpose: they stop a typo or a runaway value, not a fault you mean to run. The table gives each range with the defaults, and the Kates API setting that raises its ceiling:
+
+| Parameter | Range with the defaults | Setting for the ceiling |
+|-----------|-------------------------|-------------------------|
+| `chaosDurationSec` | 0 to 3,600 seconds | `kates.chaos.limits.max-duration-sec` |
+| `delayBeforeSec` | 0 to 600 seconds | `kates.chaos.limits.max-delay-sec` |
+| `networkLatencyMs` | 1 to 30,000 milliseconds | `kates.chaos.limits.max-network-latency-ms` |
+| `fillPercentage` | 1 to 100 | `kates.chaos.limits.max-fill-percentage` |
+| `cpuCores` | 1 to 64 | `kates.chaos.limits.max-cpu-cores` |
+| `memoryMb` | 1 to 32,768 | `kates.chaos.limits.max-memory-mb` |
+| `ioWorkers` | 1 to 64 | `kates.chaos.limits.max-io-workers` |
+| `gracePeriodSec` | 0 to 300 seconds | `kates.chaos.limits.max-grace-period-sec` |
+
+Kates checks every parameter whatever the fault's type, so a value no provider reads has to be in range too. A field you leave out gets its default, which is always in range.
+
+Two rules go beyond the table. First, a fault that ends only when its duration does needs a `chaosDurationSec` of at least 1: `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL` and `NODE_DRAIN`. The others may set `0`, because a deleted pod comes back by itself, and a `ROLLING_RESTART` or `SCALE_DOWN` with `0` doesn't wait. Second, `envOverrides` may not set `TOTAL_CHAOS_DURATION` or `RAMP_TIME`, which would run a Litmus experiment past the limits.
+
+The duration ceiling matters most on `kubernetes`, where a CPU or IO stress runs in an ephemeral container that Kubernetes can't remove: its duration is all that stops it. A `ROLLING_RESTART`'s `chaosDurationSec` is its wait for the Cluster Operator to roll every pod, so on a cluster whose roll takes over an hour, raise `kates.chaos.limits.max-duration-sec`.
+
 ### What Rollback Undoes
 
 Rollback runs only while the plan's `autoRollback` is on, which is the default, and only in two cases:
 
 1. The step sets `requireRecovery: true`, and within `kates.chaos.recovery.timeout-sec`, 300 seconds by default, no Kafka pod reports Ready after the fault, or not every Kafka pod is Running and Ready again. The step's `rollbackReason` reads `Recovery timeout exceeded 300s`.
-2. The step fails with an error: for example, the check before the fault fails, or the fault hasn't finished within its `chaosDurationSec` plus 120 seconds. The reason reads `Exception:` and the error.
+2. The step fails with an error: for example, the check before the fault fails, or the fault hasn't finished within its `delayBeforeSec` and `chaosDurationSec` plus 120 seconds. The reason reads `Exception:` and the error.
 
 Nothing else triggers it. A shrinking ISR, a consumer-lag spike, a [P99](appendix-a-glossary.md#gl-percentile) spike, a failed SLA grade and a fault the chaos provider reports as failed don't. Kates records the ISR and the lag for the report, and grades the plan after its last step. `requireRecovery` is off unless a step sets it, so in a plan you write, rollback runs only on an error until you turn it on. Every built-in playbook turns it on for every step.
 
@@ -587,7 +610,7 @@ What rollback does depends on the fault. The table lists what it undoes, and wha
 
 | Fault | What rollback does | What ends the fault otherwise |
 |-------|--------------------|-------------------------------|
-| `NETWORK_PARTITION` | Deletes every NetworkPolicy labeled `managed-by=kates` in the step's namespace, the label the `kubernetes` provider puts on its policies | On `kubernetes`, Kates deletes its policies when `chaosDurationSec` ends, and with `0` they stay; Litmus gets `chaosDurationSec` as its duration |
+| `NETWORK_PARTITION` | Deletes every NetworkPolicy labeled `managed-by=kates` in the step's namespace, the label the `kubernetes` provider puts on its policies | On `kubernetes`, Kates deletes its policies when `chaosDurationSec` ends, or as soon as the partition fails; Litmus gets `chaosDurationSec` as its duration |
 | `SCALE_DOWN` | Gives every KafkaNodePool and StatefulSet in the step's namespace that carries `kates.io/original-replicas` its replicas back | Nothing: the broker stays removed until rollback, or until orphan recovery when the Kates API restarts |
 | Every other type | Nothing, although the step report still says it rolled back | The StrimziPodSet recreates a deleted pod; a stress container on `kubernetes` stops after `chaosDurationSec`; Litmus gets `chaosDurationSec` as its duration |
 
@@ -608,7 +631,7 @@ These four fields shape what the guard and rollback do, and the table says what 
 | `requireRecovery` | Waits for every Kafka pod to be Ready again, and measures the recovery time `maxRtoMs` grades; a timeout is a failed recovery | `false` |
 | `isrTrackingTopic` | Records the topic's ISR during each step, for the report; it never fails or rolls back a step | unset |
 
-With every default, a plan has no broker limit except "not every broker", and it rolls back only on an error. Set `maxAffectedBrokers` and `requireRecovery` yourself; [Built-In Playbooks](#built-in-playbooks) shows the values the playbooks use. Three settings of the Kates API, not of the plan, shape the checks. `kates.chaos.kafka.namespace` and `kates.chaos.kafka.label` choose the pods Kates counts and checks. `kates.chaos.recovery.timeout-sec` sets the recovery timeout.
+With every default, a plan has no broker limit except "not every broker", and it rolls back only on an error. Set `maxAffectedBrokers` and `requireRecovery` yourself; [Built-In Playbooks](#built-in-playbooks) shows the values the playbooks use. Settings of the Kates API, not of the plan, shape the checks too. `kates.chaos.kafka.namespace` and `kates.chaos.kafka.label` choose the pods Kates counts and checks. `kates.chaos.recovery.timeout-sec` sets the recovery timeout. The `kates.chaos.limits.*` settings set the ceilings in [Fault Parameter Limits](#fault-parameter-limits).
 
 ::: {.callout-tip title="Try it: Would losing zone alpha pass the guard?"}
 Preview `az-failure` against `krafter` without killing anything: `kates disruption playbook run az-failure --dry-run`. Read the pods the step lists, the warnings, and whether the answer is SAFE or UNSAFE. Only the brokers count against the playbook's `maxAffectedBrokers: 3`, so a KRaft controller in zone alpha, if there is one, appears in the list and not in the count.
@@ -623,7 +646,7 @@ The guard counts brokers and reads pod readiness, and nothing more. Each of thes
 - A step whose selector looks in another namespace, such as the consumers `consumer-isolation` isolates in `kates`, counts no broker, whatever it hits.
 - Steps that pick one pod at random from the same selector count as one broker between them, although each can hit a different broker.
 - A `NODE_DRAIN` step counts the pods its selector picks, not the brokers on the node it drains.
-- A resilience run (`kates resilience run`) doesn't go through the guard at all: no broker count, no one-plan rule, no check before the fault and no rollback.
+- A resilience run (`kates resilience run`) doesn't go through the guard at all: no broker count, no one-plan rule, no check before the fault and no rollback. Only the [fault parameter limits](#fault-parameter-limits) apply to it.
 - `make gameday` doesn't go through it either: it deletes a broker pod with `kubectl`.
 - The one-plan rule lives in the Kates API process, so it holds only while one Kates API pod runs. The `kates` chart refuses a second replica and rolls with `Recreate`, so it never runs two.
 - Orphan recovery covers the Kafka namespace only. A NetworkPolicy that a Kates API left in another namespace when it died stays until you run `kubectl delete networkpolicy -n <namespace> -l managed-by=kates`.

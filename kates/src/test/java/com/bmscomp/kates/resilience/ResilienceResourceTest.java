@@ -50,6 +50,38 @@ class ResilienceResourceTest {
                 .body("message", containsString("spec.throughput"));
     }
 
+    /**
+     * A resilience run never went through the safety guard, so its fault went
+     * in with any parameter. The coordinator refuses it now, but only after
+     * the benchmark has run, so it is refused here, before the stream starts.
+     */
+    @Test
+    void aChaosSpecOutsideTheChaosLimitsIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\"},\"chaosSpec\":{\"experimentName\":\"split\","
+                        + "\"disruptionType\":\"NETWORK_PARTITION\",\"chaosDurationSec\":0}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body(
+                        "fieldErrors.chaosDurationSec",
+                        is("0 is below 1, and a NETWORK_PARTITION is undone only when its duration ends"))
+                .body("message", startsWith("chaosSpec.chaosDurationSec: 0 is below 1"));
+    }
+
+    @Test
+    void aScenarioOverrideOutsideTheChaosLimitsIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"chaosDurationSec\":86400}")
+                .when()
+                .post("/api/resilience/scenarios/network-split")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors.chaosDurationSec", containsString("kates.chaos.limits.max-duration-sec"));
+    }
+
     @Test
     void listScenariosReturnsSevenEntries() {
         given().when().get("/api/resilience/scenarios").then().statusCode(200).body("$.size()", is(7));
