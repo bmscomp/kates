@@ -62,6 +62,15 @@ rbac:
   # StatefulSet scaling, and pod ephemeral containers. Litmus runs its
   # experiments as litmus-admin and needs none of this.
   directChaos: false
+  # -- Namespaces where the INTEGRATION_CDC test may read its database's
+  # password: a Role in each grants get on the Secret `postgresql` (key
+  # postgres-password), the only Secret the Kates API reads. The test uses the
+  # PostgreSQL behind the first Service labelled
+  # app.kubernetes.io/name=postgresql in any namespace, or in `database` when
+  # there is none. `kates deploy --with-kafka-connect` installs it there and
+  # sets this to that namespace. Each one must exist before the install.
+  # Empty grants nothing, and an INTEGRATION_CDC run then fails at DB_SETUP.
+  cdcSecretNamespaces: []
   # -- Extra RBAC rules (e.g. for Litmus Chaos integration)
   extraRules: []
 

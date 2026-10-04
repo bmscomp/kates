@@ -298,6 +298,8 @@ helm test connect-cluster --namespace connect --timeout 180s --logs
 
 The `kates kafka connect test` command starts an INTEGRATION_CDC run on the Kates API, a full end-to-end CDC integration test. A Bubble Tea progress UI follows the run through each phase (DB setup → topic creation → source deploy → sink deploy → verification → cleanup).
 
+The run reads the demo database's password from its Secret, `postgresql` in `database`. The Kates API may read that Secret only in the namespaces the `kates` chart's `rbac.cdcSecretNamespaces` lists, which `kates deploy --with-kafka-connect` sets to the database's namespace. Without that grant, the run fails at DB setup with a `Forbidden` error.
+
 The connectivity test pod (`test-01-connect.yaml`) checks the credentials Secret, the `KafkaConnect` `Ready` condition, and the running workers. It then calls the REST API on port 8083 from inside a worker, which the NetworkPolicy admits — the root endpoint, and `/connector-plugins` against `tests.expectedPlugins` plus each `plugins[].expect` — and finally checks each declared connector's state and tasks. The last pod (`test-03-test-connectors.yaml`) waits for every test connector to reach RUNNING with all its tasks running. The test topics are created in the Kafka namespace, and `values-prod.yaml` turns the test connectors off because they need the platform's demo PostgreSQL.
 
 ## Network Policies

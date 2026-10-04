@@ -283,6 +283,40 @@ The permissions break down as follows:
 
 If you are only using performance testing (not disruption testing), you do not need these RBAC permissions. A minimal service account with no cluster-level permissions is sufficient.
 
+### Secret Access for the CDC Test
+
+None of the roles above grants anything on Secrets, and Kates needs no such grant: the kubelet hands the pod its own credentials (the `secretKeyRef` entries in the Deployment above). The one Secret Kates reads through the API is the password of the `INTEGRATION_CDC` test's source database (`CdcIntegrationService`): the Secret `postgresql`, key `postgres-password`, in the namespace of the first Service labelled `app.kubernetes.io/name=postgresql`, or `database` when there is none. Grant `get` on that Secret alone, in that namespace:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kates-cdc-secret-reader
+  namespace: database
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["postgresql"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kates-cdc-secret-reader
+  namespace: database
+subjects:
+  - kind: ServiceAccount
+    name: kates-sa
+    namespace: kates
+roleRef:
+  kind: Role
+  name: kates-cdc-secret-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+The Helm chart renders the same pair for each namespace in `rbac.cdcSecretNamespaces`, which `kates deploy --with-kafka-connect` sets to the database's namespace. Without it, an `INTEGRATION_CDC` run fails at `DB_SETUP` with a `Forbidden` error.
+
 ### Trogdor Coordinator Deployment
 
 The Trogdor backend requires a running Trogdor Coordinator and at least one Trogdor Agent. These are components of the Apache Kafka project that run as separate JVM processes. Every process reads the same platform config, `trogdor.conf` (below), and is started with `--node-name`, the name of its entry there. Kates names the agent each task runs on, so `KATES_TROGDOR_AGENT_NODES` (the chart's `trogdor.agentNodes`) must list agent node names from that file; a name the coordinator does not know fails the task with "Unknown node names".
