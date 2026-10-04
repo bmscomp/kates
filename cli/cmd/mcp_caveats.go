@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -9,12 +10,15 @@ import (
 
 // mcpCaveatID names one entry of the caveat catalogue. Results carry the ids
 // and texts of the caveats that apply to them; kates://caveats lists them all
-// with the source files each was checked against.
+// with the source files each was checked against. Clients may key on an id,
+// so an id keeps its meaning: a caveat whose meaning changes gets a new one,
+// as reaper-deadline replaced reaper-30-minutes when runs got deadlines of
+// their own.
 type mcpCaveatID string
 
 const (
 	mcpCaveatLoadSingleProducer    mcpCaveatID = "load-single-producer"
-	mcpCaveatReaper30Minutes       mcpCaveatID = "reaper-30-minutes"
+	mcpCaveatReaperDeadline        mcpCaveatID = "reaper-deadline"
 	mcpCaveatMergedSpecOnly        mcpCaveatID = "merged-spec-only"
 	mcpCaveatPentestConfigOnly     mcpCaveatID = "pentest-config-only"
 	mcpCaveatCVEFixedList          mcpCaveatID = "cve-fixed-list"
@@ -53,13 +57,26 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{mcpJava + "engine/TestOrchestrator.java:1147-1156"},
 	},
 	{
-		ID: mcpCaveatReaper30Minutes,
-		Text: "A run still RUNNING 30 minutes after it was created is marked FAILED with a timeout error by a reaper " +
-			"that checks every 60 seconds. The limit is kates.engine.max-duration-ms (default 1800000) and counts " +
-			"time spent waiting to start.",
+		ID: mcpCaveatReaperDeadline,
+		Text: "A run still RUNNING past its deadline is marked FAILED by a reaper that checks every 60 seconds. The " +
+			"deadline counts from the run's creation, so time spent waiting to start counts. A current Kates API sets " +
+			"it when it creates the run: how long the run is set to last, at most kates.engine.max-duration-ms " +
+			"(default 7200000), plus kates.engine.reaper-grace-ms (default 300000). That length is the spec's " +
+			"durationMs, twice that for INTEGRITY, which reads its records back for up to as long again, or a " +
+			"scenario's phases added up; an INTEGRATION_CDC run, which no duration bounds, gets the cap. That API " +
+			"refuses with 400 a request set to last longer than the cap, and when it fails a run, each task that had " +
+			"not finished gets an error that starts \"Timeout:\" and the others keep their results. An older Kates " +
+			"API fails every run 30 minutes after its creation (max-duration-ms, default 1800000), whatever the run " +
+			"was set to last, and deletes the task results of each run it fails, and of each run a restart left " +
+			"RUNNING, so such a run has no tasks. Neither /api/health nor a run says which of the two the API is.",
 		Refs: []string{
-			"kates/src/main/resources/application.properties:281-282",
-			mcpJava + "engine/TestTimeoutReaper.java:32-56",
+			"kates/src/main/resources/application.properties:317-331",
+			mcpJava + "engine/TestTimeoutReaper.java:39-47,50-136",
+			mcpJava + "engine/TestOrchestrator.java:127-149,180-183,345,963-1034",
+			mcpJava + "persistence/EntityMapper.java:144-153",
+			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
+			mcpJava + "domain/TestRun.java:478-481",
+			mcpJava + "api/HealthResource.java:48-69",
 		},
 	},
 	{
@@ -184,6 +201,37 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "The backend caches cluster info and the partition health check for 30 seconds, so those figures can be up to 30 seconds old.",
 		Refs: []string{mcpJava + "service/ClusterHealthService.java:45,72-89,233-236,367-368"},
 	},
+}
+
+// When reaper-deadline applies. These tools cannot tell which reaper the
+// Kates API runs, so they hold a run to both: an older API fails every run
+// mcpReaperOlderLimitMs after its creation, and a current one refuses a run
+// set to last longer than kates.engine.max-duration-ms, mcpReaperMaxDurationMs
+// as Kates ships it (application.properties:322).
+// TestMCPReaperLimitsMatchTheBackend holds the second to the backend.
+const (
+	mcpReaperOlderLimitMs  = 30 * 60 * 1000
+	mcpReaperMaxDurationMs = 2 * 60 * 60 * 1000
+)
+
+// mcpPlannedDurationMs is how long a run of this type with this durationMs is
+// set to last, counted from its creation, as a current Kates API works it out
+// (TestOrchestrator.plannedDurationMs): the duration, twice that for
+// INTEGRITY, which reads its records back for up to as long again. ok is false
+// for INTEGRATION_CDC, which no duration bounds. A scenario's stored spec is
+// not validated, so the double is held at the largest int64 rather than wrap.
+func mcpPlannedDurationMs(testType string, durationMs int64) (ms int64, ok bool) {
+	d := max(durationMs, 0)
+	switch testType {
+	case "INTEGRATION_CDC":
+		return 0, false
+	case "INTEGRITY":
+		if d > math.MaxInt64/2 {
+			return math.MaxInt64, true
+		}
+		return 2 * d, true
+	}
+	return d, true
 }
 
 // mcpCaveats is the catalogue: the shared entries, then each tool group's own

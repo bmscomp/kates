@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,7 +31,7 @@ func mcpJoinCaveatIDs(lists ...[]mcpCaveatID) []mcpCaveatID {
 
 var mcpCaveatIDsCore = []mcpCaveatID{
 	mcpCaveatLoadSingleProducer,
-	mcpCaveatReaper30Minutes,
+	mcpCaveatReaperDeadline,
 	mcpCaveatMergedSpecOnly,
 	mcpCaveatPentestConfigOnly,
 	mcpCaveatCVEFixedList,
@@ -66,6 +67,70 @@ func TestMCPCaveatCatalogue(t *testing.T) {
 		}
 		if strings.ContainsAny(c.Text, "«»") {
 			t.Errorf("caveat %q: fence markers do not belong in caveat text", id)
+		}
+	}
+}
+
+// TestMCPCaveatRetiredIDs: an id whose caveat changed meaning stays retired,
+// so a client keying on it never reads the new meaning under the old id.
+func TestMCPCaveatRetiredIDs(t *testing.T) {
+	for _, id := range []mcpCaveatID{"reaper-30-minutes"} {
+		if _, ok := mcpCaveatIndex[id]; ok {
+			t.Errorf("caveat id %q is retired; give a changed caveat a new id", id)
+		}
+	}
+}
+
+func TestMCPPlannedDurationMs(t *testing.T) {
+	for _, tt := range []struct {
+		typ        string
+		durationMs int64
+		want       int64
+		ok         bool
+	}{
+		{"LOAD", 600_000, 600_000, true},
+		{"ENDURANCE", 3_600_000, 3_600_000, true},
+		{"INTEGRITY", 900_000, 1_800_000, true},
+		{"LOAD", -5, 0, true},
+		// A scenario's stored spec is not validated: the double holds at the
+		// largest value rather than wrapping to a short run.
+		{"INTEGRITY", math.MaxInt64/2 + 1, math.MaxInt64, true},
+		{"INTEGRATION_CDC", 600_000, 0, false},
+	} {
+		got, ok := mcpPlannedDurationMs(tt.typ, tt.durationMs)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("mcpPlannedDurationMs(%s, %d) = %d, %v; want %d, %v", tt.typ, tt.durationMs, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+// TestMCPReaperLimitsMatchTheBackend holds mcpReaperMaxDurationMs to
+// kates.engine.max-duration-ms as Kates ships it: application.properties, and
+// the @ConfigProperty fallbacks of the reaper and of the orchestrator, which
+// refuses a longer run. Neither the kates chart nor kates/k8s sets it.
+func TestMCPReaperLimitsMatchTheBackend(t *testing.T) {
+	read := func(path string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(path)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	want := strconv.Itoa(mcpReaperMaxDurationMs)
+	props := read("kates/src/main/resources/application.properties")
+	if m := regexp.MustCompile(`(?m)^kates\.engine\.max-duration-ms=(.*)$`).FindStringSubmatch(props); m == nil || strings.TrimSpace(m[1]) != want {
+		t.Errorf("application.properties sets kates.engine.max-duration-ms as %q; the tools assume %s", m, want)
+	}
+	fallback := regexp.MustCompile(`name = "kates\.engine\.max-duration-ms", defaultValue = "([^"]*)"`)
+	for _, f := range []string{"engine/TestTimeoutReaper.java", "engine/TestOrchestrator.java"} {
+		if m := fallback.FindStringSubmatch(read(mcpJava + f)); m == nil || m[1] != want {
+			t.Errorf("%s falls back to %q for kates.engine.max-duration-ms; the tools assume %s", f, m, want)
+		}
+	}
+	for _, f := range []string{"charts/kates/values.yaml", "charts/kates/templates/configmap.yaml", "kates/k8s/configmap.yaml"} {
+		if s := read(f); strings.Contains(s, "max-duration") || strings.Contains(s, "MAX_DURATION") {
+			t.Errorf("%s sets the longest run; the tools assume the %s ms application.properties ships", f, want)
 		}
 	}
 }

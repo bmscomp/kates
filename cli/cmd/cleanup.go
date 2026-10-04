@@ -15,10 +15,14 @@ var (
 	cleanupOlderThan time.Duration
 )
 
-// defaultCleanupOlderThan is the API's own limit on a run's age,
-// kates.engine.max-duration-ms, whose timeout reaper fails a RUNNING run that
-// old. The threshold used to be 5 minutes from the run's start, so cleanup
-// deleted a healthy 10-minute ENDURANCE run halfway through, with its results.
+// defaultCleanupOlderThan is how far past its planned end a RUNNING run must
+// be before cleanup calls it orphaned, which leaves the Kates API's timeout
+// reaper room to fail it first. A current API fails a run five minutes
+// (kates.engine.reaper-grace-ms) after the duration it is set to last, counted
+// from its creation, and an older one every run 30 minutes after its creation
+// (kates.engine.max-duration-ms as it then shipped). The threshold used to be
+// 5 minutes from the run's start, so cleanup deleted a healthy 10-minute
+// ENDURANCE run halfway through, with its results.
 const defaultCleanupOlderThan = 30 * time.Minute
 
 var testCleanupCmd = &cobra.Command{
@@ -28,8 +32,9 @@ var testCleanupCmd = &cobra.Command{
 	Long: `Delete test runs that still say RUNNING long after they should have ended.
 
 A run is orphaned when it is RUNNING more than --older-than after its planned
-end: its start plus the duration in its spec. A run inside that window is left
-alone, however long it has been running.
+end: its start plus the duration in its spec, twice that for INTEGRITY, which
+reads its records back for up to as long again. A run inside that window is
+left alone, however long it has been running.
 
 kates lists the runs it would delete and asks before deleting them. Deleting a
 run stops it and removes it with its results; kates test cancel stops a run and
@@ -123,7 +128,7 @@ func runTestCleanup(cmd *cobra.Command, args []string) error {
 type orphanedRun struct {
 	Run     client.TestRun
 	Started time.Time
-	Planned time.Duration // the spec's duration; 0 when it has none
+	Planned time.Duration // the spec's duration, twice that for INTEGRITY; 0 when it has none
 	Overdue time.Duration // how long past its planned end it still runs
 }
 
@@ -140,6 +145,14 @@ func findOrphanedRuns(runs []client.TestRun, now time.Time, olderThan time.Durat
 		var planned time.Duration
 		if run.Spec != nil && run.Spec.DurationMs > 0 {
 			planned = time.Duration(run.Spec.DurationMs) * time.Millisecond
+			// An INTEGRITY run reads its records back for up to its duration
+			// again once it has produced them, and the Kates API allows it
+			// both (TestOrchestrator.plannedDurationMs). Counted once, a run
+			// producing for more than 25 minutes would be called orphaned
+			// while it was still reading.
+			if run.TestType == "INTEGRITY" {
+				planned *= 2
+			}
 		}
 		overdue := now.Sub(started.Add(planned))
 		if overdue > olderThan {

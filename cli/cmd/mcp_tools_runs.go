@@ -172,11 +172,6 @@ const (
 	mcpActivityPageSize     = 50
 	mcpActivityMaxPages     = 4
 	mcpActivityDefaultSince = "1h"
-
-	// The reaper's default limit (kates.engine.max-duration-ms,
-	// application.properties:282; TestTimeoutReaper.java:32-56) and the
-	// ENDURANCE default duration, which exceeds it (application.properties:56).
-	mcpReaperDefaultMs = 1_800_000
 )
 
 // The values TestSpec's bean validation accepts (domain/TestSpec.java:36,50,
@@ -353,25 +348,28 @@ func mcpRunRowFrom(call *mcpCall, r client.MCPRun) mcpRunRow {
 }
 
 // mcpRunRowsCaveats adds the caveats a list of runs needs: a FAILED row may
-// be a reaped or a cancelled run, and an active row whose stored duration
-// reaches the reaper's limit will be reaped before it ends.
+// be a reaped or a cancelled run, and an older Kates API reaps an active row
+// set to last 30 minutes or more before it ends.
 func mcpRunRowsCaveats(call *mcpCall, rows []mcpRunRow) {
 	for _, r := range rows {
 		if r.Status == "FAILED" {
-			call.Caveat(mcpCaveatReaper30Minutes, mcpCaveatCancelStoredAsFailed)
+			call.Caveat(mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed)
 		}
 		if r.outlastsReaper {
-			call.Caveat(mcpCaveatReaper30Minutes)
+			call.Caveat(mcpCaveatReaperDeadline)
 		}
 	}
 }
 
 // mcpRunOutlastsReaper reports whether a run that has not finished is set to
-// run as long as the reaper's default limit or longer. The reaper fails any
-// RUNNING run created before that limit, whatever its spec
-// (TestTimeoutReaper.java:37-56), and counts time spent PENDING. A spec
-// without a duration is judged by its type: only ENDURANCE defaults past the
-// limit (application.properties:33-70).
+// last 30 minutes or more, an INTEGRITY run's read-back included
+// (mcpPlannedDurationMs). An older Kates API fails such a run before it ends,
+// 30 minutes after its creation, time spent PENDING included
+// (V24__run_planned_duration.sql:8-10); a current one gives it a deadline of
+// its own, and these tools cannot tell which the API is. A scenario run's
+// stored spec is its base spec, whose duration stands in for its phases'. A
+// spec without a duration is judged by its type: only ENDURANCE defaults to
+// 30 minutes or more (application.properties:58-114).
 func mcpRunOutlastsReaper(run *client.MCPRun) bool {
 	if run.Status != "RUNNING" && run.Status != "PENDING" {
 		return false
@@ -380,7 +378,8 @@ func mcpRunOutlastsReaper(run *client.MCPRun) bool {
 		DurationMs *int64 `json:"durationMs"`
 	}
 	if len(bytes.TrimSpace(run.Spec)) > 0 && json.Unmarshal(run.Spec, &w) == nil && w.DurationMs != nil {
-		return *w.DurationMs >= mcpReaperDefaultMs
+		planned, ok := mcpPlannedDurationMs(run.TestType, *w.DurationMs)
+		return ok && planned >= mcpReaperOlderLimitMs
 	}
 	return run.TestType == "ENDURANCE"
 }
@@ -822,10 +821,10 @@ func mcpRunCaveats(call *mcpCall, run *client.MCPRun) {
 		call.Caveat(mcpCaveatTuningOneMeasurement)
 	}
 	if run.Status == "FAILED" {
-		call.Caveat(mcpCaveatReaper30Minutes, mcpCaveatCancelStoredAsFailed)
+		call.Caveat(mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed)
 	}
 	if mcpRunOutlastsReaper(run) {
-		call.Caveat(mcpCaveatReaper30Minutes)
+		call.Caveat(mcpCaveatReaperDeadline)
 	}
 	if run.ScenarioName != "" {
 		call.Caveat(mcpCaveatScenarioBaseSpecOnly)
