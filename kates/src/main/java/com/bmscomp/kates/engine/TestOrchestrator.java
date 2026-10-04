@@ -116,11 +116,19 @@ public class TestOrchestrator {
             return;
         }
         LOG.infof("Recovering %d orphaned RUNNING tests from previous lifecycle", orphans.size());
-        for (TestRun run : orphans) {
+        for (TestRun orphan : orphans) {
+            // findByStatus reads runs without their task results. Read the run
+            // whole, so that each task that had not finished is failed with the
+            // reason and every task is written back with what it measured.
+            TestRun run = repository.findById(orphan.getId()).orElse(null);
+            if (run == null) {
+                continue;
+            }
             run = run.withStatus(TestResult.TaskStatus.FAILED);
             List<TestResult> newResults = new java.util.ArrayList<>();
             for (TestResult result : run.getResults()) {
-                if (result.getStatus() == TestResult.TaskStatus.RUNNING) {
+                if (result.getStatus() == TestResult.TaskStatus.RUNNING
+                        || result.getStatus() == TestResult.TaskStatus.PENDING) {
                     result = result.withStatus(TestResult.TaskStatus.FAILED)
                             .withError("Recovered: test was orphaned after server restart");
                 }

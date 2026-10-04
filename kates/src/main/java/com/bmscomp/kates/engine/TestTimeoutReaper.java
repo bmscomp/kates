@@ -41,11 +41,19 @@ public class TestTimeoutReaper {
 
         Instant cutoff = Instant.now().minus(Duration.ofMillis(maxDurationMs));
 
-        for (TestRun run : running) {
-            if (run.getCreatedAt() == null) continue;
+        for (TestRun summary : running) {
+            if (summary.getCreatedAt() == null) continue;
             try {
-                Instant created = Instant.parse(run.getCreatedAt());
+                Instant created = Instant.parse(summary.getCreatedAt());
                 if (created.isBefore(cutoff)) {
+                    // findByStatus reads runs without their task results. Read
+                    // the run whole, so that each task that had not finished is
+                    // failed with the reason and every task is written back
+                    // with what it measured.
+                    TestRun run = repository.findById(summary.getId()).orElse(null);
+                    if (run == null) {
+                        continue;
+                    }
                     LOG.warnf("Test %s exceeded max duration (%dms) — marking as FAILED", run.getId(), maxDurationMs);
                     run = run.withStatus(TestResult.TaskStatus.FAILED);
                     List<TestResult> newResults = new java.util.ArrayList<>();
@@ -80,7 +88,7 @@ public class TestTimeoutReaper {
                 // conflict — the latter means a real completion landed while we
                 // were deciding this run had timed out, so leaving it alone is
                 // exactly right. Either way the next sweep re-evaluates.
-                LOG.debugf("Skipping run %s this sweep: %s", run.getId(), e.getMessage());
+                LOG.debugf("Skipping run %s this sweep: %s", summary.getId(), e.getMessage());
             }
         }
     }

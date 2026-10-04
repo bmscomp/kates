@@ -222,15 +222,30 @@ class EntityMapperTest {
         assertTrue(entity.getResults().contains(keptBefore), "the surviving child keeps its identity");
     }
 
+    /**
+     * A run read without its results, as toDomainSummary reads one, carries
+     * none. Saving it used to clear the collection, and orphanRemoval then
+     * deleted every task row: what the timeout reaper and orphan recovery did
+     * to each run they failed.
+     */
     @Test
-    void updateEntityWithNoResultsClearsChildren() {
+    void updateEntityWithNoResultsKeepsTheStoredOnes() {
         TestRun initial = new TestRun(TestType.LOAD, new TestSpec())
-                .withResults(java.util.List.of(result("task-1", TestResult.TaskStatus.RUNNING, 1)));
+                .withResults(java.util.List.of(
+                        result("task-1", TestResult.TaskStatus.DONE, 500),
+                        result("task-2", TestResult.TaskStatus.RUNNING, 60)));
         TestRunEntity entity = EntityMapper.toEntity(initial);
+        TestResultEntity firstBefore = entity.getResults().get(0);
 
-        EntityMapper.updateEntity(entity, initial.withResults(java.util.List.of()));
+        TestRun summary = EntityMapper.toDomainSummary(entity).withStatus(TestResult.TaskStatus.FAILED);
+        assertTrue(summary.getResults().isEmpty());
+        EntityMapper.updateEntity(entity, summary);
 
-        assertTrue(entity.getResults().isEmpty());
+        assertEquals(TestResult.TaskStatus.FAILED, entity.getStatus());
+        assertEquals(2, entity.getResults().size(), "no result row is dropped");
+        assertSame(firstBefore, entity.getResults().get(0));
+        assertEquals(500, firstBefore.getRecordsSent());
+        assertEquals(TestResult.TaskStatus.RUNNING, entity.getResults().get(1).getStatus());
     }
 
     @Test
