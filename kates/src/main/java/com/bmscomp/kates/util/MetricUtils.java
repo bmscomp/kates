@@ -124,6 +124,15 @@ public final class MetricUtils {
         return candidates.stream().filter(MetricUtils::reportsLatency).toList();
     }
 
+    /**
+     * Whether {@link #computeSummary} has any latency to report for these rows.
+     * When it has none, every latency figure of the summary is 0, which means
+     * "not measured", not a run faster than any gate.
+     */
+    public static boolean measuredLatency(List<TestResult> results) {
+        return results != null && !latencyRows(results).isEmpty();
+    }
+
     /** The phase name TestOrchestrator gives a CONSUME task's row (phaseNameFor). */
     private static boolean isConsumer(TestResult result) {
         return "consume".equals(result.getPhaseName());

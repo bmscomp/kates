@@ -11,7 +11,13 @@ import com.bmscomp.kates.report.TestReport;
 /**
  * Exports a {@link TestReport} as JUnit XML format.
  * Each test result maps to a {@code <testcase>} element.
- * SLA violations map to {@code <failure>} elements.
+ * SLA violations map to {@code <failure>} elements, a FAILED run's status
+ * among them: the report's verdict names it first.
+ *
+ * <p>The suite always holds a test case, and its {@code tests} and
+ * {@code failures} count every case and every failure. A FAILED run with no
+ * task rows exported {@code tests="0" failures="0"}, an empty suite that CI
+ * reads as a pass, and a task's error was a failure the counts left out.
  */
 @ApplicationScoped
 public class JunitXmlExporter {
@@ -22,63 +28,82 @@ public class JunitXmlExporter {
 
         String suiteName =
                 report.getMetadata() != null ? report.getMetadata().getOrDefault("testType", "kates") : "kates";
-        List<TestResult> results = report.getRun() != null ? report.getRun().getResults() : List.of();
-        int failures = report.getOverallSlaVerdict() != null
-                        && !report.getOverallSlaVerdict().passed()
-                ? report.getOverallSlaVerdict().violations().size()
-                : 0;
+        List<TestResult> results = report.getRun() != null && report.getRun().getResults() != null
+                ? report.getRun().getResults()
+                : List.of();
+        List<SlaViolation> violations = report.getOverallSlaVerdict() != null
+                ? report.getOverallSlaVerdict().violations()
+                : List.of();
+        // No task row and nothing violated, which a finished run has only when
+        // it ran nothing and failed nothing: the run itself is then the test
+        // case, so the suite is never empty.
+        boolean runCase = results.isEmpty() && violations.isEmpty();
+        long failures = results.stream().filter(r -> r.getError() != null).count() + violations.size();
 
         sb.append("<testsuite name=\"")
                 .append(xmlEscape(suiteName))
                 .append("\" tests=\"")
-                .append(results != null ? results.size() : 0)
+                .append(results.size() + violations.size() + (runCase ? 1 : 0))
                 .append("\" failures=\"")
                 .append(failures)
                 .append("\" errors=\"0\">\n");
 
-        if (results != null) {
-            for (TestResult r : results) {
-                String caseName = r.getPhaseName() != null ? r.getPhaseName() : r.getTaskId();
-                sb.append("  <testcase name=\"")
-                        .append(xmlEscape(caseName))
-                        .append("\" classname=\"kates.")
-                        .append(xmlEscape(suiteName))
-                        .append("\" time=\"")
-                        .append(String.format("%.3f", computeDurationSec(r)))
-                        .append("\"");
+        for (TestResult r : results) {
+            String caseName = r.getPhaseName() != null ? r.getPhaseName() : r.getTaskId();
+            sb.append("  <testcase name=\"")
+                    .append(xmlEscape(caseName))
+                    .append("\" classname=\"kates.")
+                    .append(xmlEscape(suiteName))
+                    .append("\" time=\"")
+                    .append(String.format("%.3f", computeDurationSec(r)))
+                    .append("\"");
 
-                if (r.getError() != null) {
-                    sb.append(">\n");
-                    sb.append("    <failure message=\"")
-                            .append(xmlEscape(r.getError()))
-                            .append("\" type=\"Error\"/>\n");
-                    sb.append("  </testcase>\n");
-                } else {
-                    sb.append("/>\n");
-                }
+            if (r.getError() != null) {
+                sb.append(">\n");
+                sb.append("    <failure message=\"")
+                        .append(xmlEscape(r.getError()))
+                        .append("\" type=\"Error\"/>\n");
+                sb.append("  </testcase>\n");
+            } else {
+                sb.append("/>\n");
             }
         }
 
         // Emit SLA violations as system-level failures
-        if (report.getOverallSlaVerdict() != null
-                && !report.getOverallSlaVerdict().violations().isEmpty()) {
-            for (SlaViolation v : report.getOverallSlaVerdict().violations()) {
-                sb.append("  <testcase name=\"SLA-")
-                        .append(xmlEscape(v.metric()))
-                        .append("\" classname=\"kates.sla\">\n");
-                sb.append("    <failure message=\"")
-                        .append(xmlEscape(v.metric()))
-                        .append(" threshold=")
-                        .append(String.format("%.2f", v.threshold()))
-                        .append(" actual=")
-                        .append(String.format("%.2f", v.actual()))
-                        .append("\" type=\"SlaViolation\"/>\n");
-                sb.append("  </testcase>\n");
-            }
+        for (SlaViolation v : violations) {
+            sb.append("  <testcase name=\"SLA-").append(xmlEscape(v.metric())).append("\" classname=\"kates.sla\">\n");
+            sb.append("    <failure message=\"")
+                    .append(xmlEscape(failureMessage(v)))
+                    .append("\" type=\"SlaViolation\"/>\n");
+            sb.append("  </testcase>\n");
+        }
+
+        if (runCase) {
+            String runName = report.getRun() != null && report.getRun().getId() != null
+                    ? report.getRun().getId()
+                    : suiteName;
+            sb.append("  <testcase name=\"")
+                    .append(xmlEscape(runName))
+                    .append("\" classname=\"kates.")
+                    .append(xmlEscape(suiteName))
+                    .append("\"/>\n");
         }
 
         sb.append("</testsuite>\n");
         return sb.toString();
+    }
+
+    /**
+     * A violation as one line. A reason replaces the numbers it stands in for:
+     * "p99LatencyMs not measured (threshold=50.00)", "status FAILED: ...".
+     */
+    private static String failureMessage(SlaViolation v) {
+        if (v.reason() == null) {
+            return v.metric() + " threshold=" + String.format("%.2f", v.threshold()) + " actual="
+                    + String.format("%.2f", v.actual());
+        }
+        String message = v.metric() + " " + v.reason();
+        return v.threshold() >= 0 ? message + " (threshold=" + String.format("%.2f", v.threshold()) + ")" : message;
     }
 
     private String xmlEscape(String value) {

@@ -966,7 +966,7 @@ var mcpBandMetrics = []struct {
 }
 
 // mcpCompareMetrics maps the deltas the backend's compare sends to the
-// summary value each is computed from (ReportResource.java:298-307).
+// summary value each is computed from (ReportResource.java:315-324).
 var mcpCompareMetrics = map[string]func(s *client.MCPRunSummary) float64{
 	"throughputRecPerSec": func(s *client.MCPRunSummary) float64 { return s.AvgThroughputRecPerSec },
 	"avgLatencyMs":        func(s *client.MCPRunSummary) float64 { return s.AvgLatencyMs },
@@ -1069,8 +1069,8 @@ type mcpAssessReads struct {
 // mcpAssessPartsShare is the part of the time left in the call that
 // assess_run's reads may use. Every report the backend has not cached makes
 // it describe the cluster, with 30-second timeouts (ReportGenerator.java:
-// 185-195, ClusterHealthService.java:36,194-231), and the compare call
-// builds one per run, one after another (ReportResource.java:273-285). A
+// 232-242, ClusterHealthService.java:36,194-231), and the compare call
+// builds one per run, one after another (ReportResource.java:290-302). A
 // slow cluster must cost the parts that wait on it, not the whole call.
 const mcpAssessPartsShare = 0.75
 
@@ -1284,7 +1284,7 @@ func mcpScanBand(ctx context.Context, call *mcpCall, run *client.MCPRun, key str
 	}
 	// One compare call gives every summary. The previous run goes first and
 	// this run last, so the backend's deltas run from the one to the other
-	// (ReportResource.java:287-293).
+	// (ReportResource.java:304-310).
 	ids := append(append([]string(nil), scan.matches...), run.ID)
 	scan.comparison, scan.compareErr = call.Client().MCPRunsCompare(ctx, ids)
 	return scan
@@ -1884,7 +1884,7 @@ func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, 
 // ---- kates://runs/{id}/report.md --------------------------------------------
 
 // mcpRunReport reads a run's Markdown report. Its caveats come from the
-// report's own metadata table (ReportGenerator.java:142-154,298-305).
+// report's own metadata table (ReportGenerator.java:187-199,346-353).
 func mcpRunReport(ctx context.Context, call *mcpCall, vars map[string]string) (string, error) {
 	md, err := call.Client().MCPRunReportMarkdown(ctx, vars["id"])
 	if err != nil {
@@ -1899,7 +1899,7 @@ func mcpRunReport(ctx context.Context, call *mcpCall, vars map[string]string) (s
 // mcpRunReportMetadata reads the run's type, status and scenario from the
 // metadata table the backend writes first: runId, testType, backend, status,
 // then scenarioName for a scenario run, then the labels as "label.<key>" rows
-// (ReportGenerator.java:142-154). Only rows of that table and before the
+// (ReportGenerator.java:187-199). Only rows of that table and before the
 // first label count, so neither a label nor a later section (a phase may be
 // named anything) can pose as one of them.
 func mcpRunReportMetadata(md string) *client.MCPRun {
@@ -2005,7 +2005,7 @@ func mcpRunSpecHash(key string) string {
 
 // mcpRunReportErr maps the report endpoints' answer for a missing run. They
 // throw IllegalArgumentException("Test run not found: …"), which the
-// backend's exception mapper turns into a 400 (ReportResource.java:137-138;
+// backend's exception mapper turns into a 400 (ReportResource.java:138-139;
 // GlobalExceptionMapper.java:31-33), so a missing run would otherwise read
 // as a bad argument.
 func mcpRunReportErr(err error) error {
@@ -2085,8 +2085,8 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"divided by the records sent, not a share of failed records. The backend always sends p99.9 and " +
 			"duration as 0.",
 		Refs: []string{
-			mcpJava + "util/MetricUtils.java:52-142",
-			mcpJava + "report/ReportGenerator.java:156-166",
+			mcpJava + "util/MetricUtils.java:52-151",
+			mcpJava + "report/ReportGenerator.java:201-213",
 		},
 	},
 	{
@@ -2099,8 +2099,8 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "persistence/TestResultEntity.java:20-75",
 			mcpJava + "persistence/EntityMapper.java:171-206",
 			mcpJava + "engine/TestOrchestrator.java:1484-1485",
-			mcpJava + "report/ReportGenerator.java:62-86,390-395",
-			mcpJava + "engine/SlaEvaluator.java:91-102",
+			mcpJava + "report/ReportGenerator.java:105-131,441-446",
+			mcpJava + "engine/SlaEvaluator.java:92-103",
 		},
 	},
 	{
@@ -2140,7 +2140,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"placement when the report was built, not load during the run; a run whose spec names no topic, or " +
 			"whose topic could not be described, has no per-broker figures.",
 		Refs: []string{
-			mcpJava + "report/ReportGenerator.java:94-126,185-195,215-291",
+			mcpJava + "report/ReportGenerator.java:139-171,232-242,263-339",
 			mcpJava + "service/ClusterHealthService.java:194-231",
 		},
 	},

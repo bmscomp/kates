@@ -171,7 +171,7 @@ graph LR
 
 ### Performance Gates
 
-These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated. Each gate is checked against every task of the run, not against the report summary, so every task must meet it. A consumer records no latency on the native backend, so there a LOAD run's latency gates judge its producer, while `minThroughputRecPerSec` judges the producer and the consumer alike.
+These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated. Each gate is checked against every task of the run, not against the report summary, so every task must meet it. A consumer records no latency on the native backend, so there a LOAD run's latency gates judge its producer, while `minThroughputRecPerSec` judges the producer and the consumer alike. A latency gate needs at least one task that measured latency. When none did, as with a producer that failed before its first acknowledgment or a ROUND_TRIP run on the Trogdor backend, the gate fails as `p99 not measured` or `avg not measured`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -358,7 +358,7 @@ kates test apply -f regression-suite.yaml --wait
 
 A CI job has no terminal, so `--wait` shows no spinner there: it prints a plain line to stderr each time a run's status changes, and the summary table to stdout. With `-o json` stdout carries only the summary as JSON, with each scenario's `runId`, `status` and, for a scenario with gates, its `sla` violations. A scenario that failed to submit has no `runId`, so a script reads the run IDs with `jq -r '.scenarios[] | select(.runId) | .runId'`. The exit code is the same either way.
 
-A failed run fails the pipeline whether or not its scenario has gates. A scenario that fails to submit or finishes `FAILED` shows as `FAILED` in the summary, one the CLI loses track of while waiting shows as `ERROR`, and any of them makes the command exit 1, just as a violated gate does. Interrupting the command, with Ctrl-C or by cancelling the job, which sends SIGTERM, cancels the run it is waiting for, starts no further scenario, and exits 130. A scenario that finishes `DONE` passes unless one of its gates is violated, so a regression fails the pipeline only in a scenario that carries a `validate` block; without one, a run that completes but regresses exits 0.
+A failed run fails the pipeline whether or not its scenario has gates. A scenario that fails to submit or finishes `FAILED` shows as `FAILED` in the summary, one the CLI loses track of while waiting shows as `ERROR`, and any of them makes the command exit 1, just as a violated gate does. A run that finishes `FAILED` meets none of its gates: its first violation is `run FAILED`, with the first task error or `before any task ran`. Interrupting the command, with Ctrl-C or by cancelling the job, which sends SIGTERM, cancels the run it is waiting for, starts no further scenario, and exits 130. A scenario that finishes `DONE` passes unless one of its gates is violated, so a regression fails the pipeline only in a scenario that carries a `validate` block; without one, a run that completes but regresses exits 0.
 
 For JUnit-compatible output, export each test report individually after the suite completes — see [Observability & Monitoring](09-observability.md) for export formats.
 

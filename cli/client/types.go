@@ -290,6 +290,10 @@ type SlaVerdict struct {
 	PassedChecks int            `json:"passedChecks"`
 }
 
+// SlaViolation is one broken threshold. Reason is set, by a run's report,
+// when a number cannot say what broke: "not measured" for a gate on a
+// latency the run did not measure, or the failure of a FAILED run, whose
+// Metric is "status". The value Reason stands in for is then -1.
 type SlaViolation struct {
 	Metric     string  `json:"metric"`
 	MetricName string  `json:"metricName"`
@@ -297,6 +301,7 @@ type SlaViolation struct {
 	Threshold  float64 `json:"threshold"`
 	Actual     float64 `json:"actual"`
 	Severity   string  `json:"severity"`
+	Reason     string  `json:"reason,omitempty"`
 }
 
 // TrendResponse from GET /api/trends

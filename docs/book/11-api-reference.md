@@ -315,7 +315,14 @@ Get the full test report: the summary, the cluster snapshot, per-broker figures 
 }
 ```
 
-When an SLA is violated, `overallSlaVerdict.violations` contains entries of the form `{ "metric": "p99LatencyMs", "threshold": 500.0, "actual": 612.4, "severity": "CRITICAL" }`.
+When an SLA is violated, `overallSlaVerdict.violations` contains entries of the form `{ "metric": "p99LatencyMs", "threshold": 500.0, "actual": 612.4, "severity": "CRITICAL" }`. Two kinds of entry carry a `reason` instead of a number, and -1 where the number would be:
+
+| Entry | When | `reason` |
+|-------|------|----------|
+| A latency gate: `p99LatencyMs`, `p999LatencyMs` or `avgLatencyMs` | No task measured that latency | `not measured` |
+| `status`, always the first entry | The run is `FAILED`, with or without an SLA | `FAILED:` followed by the first task error, or `FAILED before any task ran` |
+
+A run that is not yet `DONE` or `FAILED` carries a passing verdict, since figures that are still climbing are not judged.
 
 The summary is computed from the run's task rows, and the example is a LOAD run of 100,000 records: one producer row and one consumer row. The table shows how each summary field combines the rows.
 
@@ -332,6 +339,8 @@ The summary is computed from the run's task rows, and the example is a LOAD run 
 
 Latency leaves consumers out because they don't measure it: a consumer's row carries no latency on the native backend and only poll times on Trogdor. A LOAD or ENDURANCE run's P99 is therefore its producer's send-to-acknowledgement P99. A task keeps its percentiles but not its latency histogram, so the percentiles of several producers cannot be merged. The highest of them is an upper bound on the run's percentile, so it never understates the tail. `kates report show`, `report diff`, `report compare`, the regression check, `kates trend` and the resilience comparison all read this summary.
 
+When no task measured latency, every latency field reads 0, which means not measured, and the verdict fails a latency gate instead of comparing it with that 0. A task keeps no P99.9, so an SLA's `maxP999LatencyMs` fails as not measured on every finished run.
+
 #### GET /api/tests/{id}/report/csv
 
 Export report as CSV. **Response:** `200 OK` with `Content-Type: text/csv`
@@ -346,13 +355,24 @@ A `# Summary` block with aggregate metrics is appended after the per-result rows
 
 #### GET /api/tests/{id}/report/junit
 
-Export report as JUnit XML for CI/CD integration. Each test result maps to a `<testcase>`; SLA violations are appended as extra `<testcase>` entries with `<failure>` elements. **Response:** `200 OK` with `Content-Type: application/xml`
+Export report as JUnit XML for CI/CD integration. Each test result maps to a `<testcase>`, with a `<failure>` when its task ended with an error. Each `overallSlaVerdict` violation follows as a `<testcase>` named `SLA-<metric>` with a `<failure>`, so a `FAILED` run always has `SLA-status`. The `tests` and `failures` attributes count every test case and every failure, and a run with no task and no violation is itself the one test case. **Response:** `200 OK` with `Content-Type: application/xml`, or `409 Conflict` with a JSON error until the run is `DONE` or `FAILED`: before then its verdict passes, so an early export would read as green.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <testsuite name="LOAD" tests="2" failures="0" errors="0">
   <testcase name="ramp-up" classname="kates.LOAD" time="15.000"/>
   <testcase name="steady-state" classname="kates.LOAD" time="110.000"/>
+</testsuite>
+```
+
+A run that failed before any task ran, such as one whose topic could not be created, exports one failing test case:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="LOAD" tests="1" failures="1" errors="0">
+  <testcase name="SLA-status" classname="kates.sla">
+    <failure message="status FAILED before any task ran" type="SlaViolation"/>
+  </testcase>
 </testsuite>
 ```
 
