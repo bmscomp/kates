@@ -75,6 +75,13 @@ public class TestRunEntity {
     @Column(name = "cdc_phases_json", columnDefinition = "jsonb")
     private String cdcPhasesJson;
 
+    /**
+     * How long the run is set to last (TestOrchestrator.plannedDurationMs);
+     * null when no duration bounds it, and on rows older than V24.
+     */
+    @Column(name = "planned_duration_ms")
+    private Long plannedDurationMs;
+
     @OneToMany(mappedBy = "testRun", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("id ASC")
     private List<TestResultEntity> results = new ArrayList<>();
@@ -172,6 +179,14 @@ public class TestRunEntity {
 
     public void setCdcPhasesJson(String cdcPhasesJson) {
         this.cdcPhasesJson = cdcPhasesJson;
+    }
+
+    public Long getPlannedDurationMs() {
+        return plannedDurationMs;
+    }
+
+    public void setPlannedDurationMs(Long plannedDurationMs) {
+        this.plannedDurationMs = plannedDurationMs;
     }
 
     public List<TestResultEntity> getResults() {

@@ -698,7 +698,7 @@ In this book, one service sharing a Kafka cluster: one `KafkaUser` and one topic
 
 ### Test Run {#gl-test-run}
 
-One execution of a test spec, with its own ID; its status is PENDING, RUNNING, STOPPING, DONE or FAILED. The Kates API runs at most three at once by default (`kates.engine.max-concurrent-tests`) and answers another with 429, and it fails a run still RUNNING 30 minutes after it was created (`kates.engine.max-duration-ms`). See [REST API Reference](11-api-reference.md#test-management).
+One execution of a test spec, with its own ID; its status is PENDING, RUNNING, STOPPING, DONE or FAILED. The Kates API runs at most three at once by default (`kates.engine.max-concurrent-tests`) and answers another with 429. It refuses a run set to last longer than two hours by default (`kates.engine.max-duration-ms`), and fails a run still RUNNING five minutes after its duration is up. See [REST API Reference](11-api-reference.md#test-management).
 
 ### Test Spec {#gl-test-spec}
 
