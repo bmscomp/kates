@@ -249,6 +249,17 @@ The `kates kafka connect test` command runs a full end-to-end CDC integration te
 
 The connectivity test pod curls the Connect REST API on port 8083 (the root endpoint and `/connector-plugins`) — first by exec-ing into a worker pod, then falling back to the chart's REST API Service.
 
+Because the hook resources are removed the moment the suite succeeds, nothing persists after `helm test` returns. To keep the example topic and connectors running — as the working-examples tutorial does — render the same templates and apply them directly:
+
+```bash
+helm template connect-cluster charts/connect-cluster -n connect \
+  --set kafka.namespace=kafka \
+  -s templates/tests/test-topics.yaml | kubectl apply -f -
+
+helm template connect-cluster charts/connect-cluster -n connect \
+  -s templates/tests/test-connectors.yaml | kubectl apply -f -
+```
+
 ## Network Policies
 
 The chart ships a default-deny posture: a deny-all Ingress+Egress policy for the Connect pods (`networkPolicy.defaultDeny.enabled`, on by default) with every allowed flow — Kafka, DNS, the Kubernetes API, monitoring scrapes, the REST API, and databases — expressed as an explicit, individually configurable allow rule. For cross-namespace database connections it generates egress rules like these:
