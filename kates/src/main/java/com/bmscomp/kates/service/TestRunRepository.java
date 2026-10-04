@@ -232,6 +232,12 @@ public class TestRunRepository {
                 .getSingleResult();
     }
 
+    /**
+     * The runs in this status, read without their task results (see
+     * {@link EntityMapper#toDomainSummary}). A caller that changes a run and
+     * saves it reads it whole with {@link #findById} first, so that its task
+     * results are written back with it.
+     */
     public List<TestRun> findByStatus(com.bmscomp.kates.domain.TestResult.TaskStatus status) {
         return em
                 .createQuery(
