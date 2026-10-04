@@ -450,6 +450,11 @@ testConnectors:
       topic.prefix: "kates-jdbc-source-"
       poll.interval.ms: "30000"
 
+# ── Test Topics ─────────────────────────────────────────────────────────────
+# Topics required by the test connectors. Created in the Kafka cluster's
+# namespace (kafka.namespace) with the strimzi.io/cluster=<kafka.clusterName>
+# label so the Strimzi Topic Operator reconciles them. Like testConnectors,
+# they only exist while `helm test` runs and are deleted when it succeeds.
 testTopics:
   - name: cdc-public-demo-orders
     topicName: cdc.public.demo_orders

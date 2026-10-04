@@ -36,9 +36,17 @@ kubectl exec -n database postgresql-0 -- /bin/bash -lc \
 
 ## 3. Apply Demo Resources
 
+Run from the repository root. The demo manifests are packaged as Helm test hooks, and `helm test` deletes them again as soon as the suite succeeds — render and apply them instead so they persist:
+
 ```bash
-# Deploy CDC topic and connectors via helm test
-helm test connect-cluster -n connect
+# Create the CDC topic on the Kafka cluster
+helm template connect-cluster charts/connect-cluster -n connect \
+  --set kafka.namespace=kafka \
+  -s templates/tests/test-topics.yaml | kubectl apply -f -
+
+# Deploy the connectors persistently
+helm template connect-cluster charts/connect-cluster -n connect \
+  -s templates/tests/test-connectors.yaml | kubectl apply -f -
 ```
 
 ## 4. Wait for Connectors to be Ready

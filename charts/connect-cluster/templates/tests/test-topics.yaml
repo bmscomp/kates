@@ -5,11 +5,14 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: {{ .name }}
-  namespace: {{ include "connect-cluster.namespace" $ }}
+  # The Topic Operator only reconciles KafkaTopics that carry the Kafka
+  # cluster's strimzi.io/cluster label and live in the Kafka namespace —
+  # not the Connect cluster's.
+  namespace: {{ include "connect-cluster.kafkaNamespace" $ }}
   labels:
     {{- include "connect-cluster.labels" $ | nindent 4 }}
     app.kubernetes.io/component: test-topic
-    strimzi.io/cluster: {{ include "connect-cluster.fullname" $ }}
+    strimzi.io/cluster: {{ $.Values.kafka.clusterName | default "krafter" }}
     {{- with .labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
