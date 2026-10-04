@@ -89,7 +89,7 @@ final class NodePoolScaleDown {
         List<Change> changes = new ArrayList<>();
         try {
             for (Pool pool : pools) {
-                changes.add(lower(namespace, pool, current.get(pool)));
+                lower(namespace, pool, current.get(pool), changes);
             }
             if (spec.chaosDurationSec() <= 0) {
                 LOG.info(
@@ -155,36 +155,46 @@ final class NodePoolScaleDown {
         return current;
     }
 
-    /** Takes one replica off the pool, recording the original count on it unless an earlier step did. */
-    private Change lower(String namespace, Pool pool, GenericKubernetesResource before) {
+    /**
+     * Takes one replica off the pool, to the count {@link #check} read, and
+     * records the original count on it unless an earlier step did. The change
+     * goes on {@code changes} for a failure to undo, even when the patch fails:
+     * the API server may have carried it out and only its answer been lost.
+     * Putting back a pool the patch did not change leaves it as it is.
+     */
+    private void lower(String namespace, Pool pool, GenericKubernetesResource before, List<Change> changes) {
         int replicas = replicas(before);
         Map<String, String> annotations = before.getMetadata().getAnnotations();
         boolean snapshot =
                 annotations == null || !annotations.containsKey(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION);
         String scaledDownAt = String.valueOf(System.currentTimeMillis());
 
-        GenericKubernetesResource after = nodePools(namespace)
-                .withName(pool.name())
-                .edit(p -> {
-                    if (replicas(p) != replicas) {
-                        throw new IllegalStateException(
-                                "KafkaNodePool " + pool.name() + " changed size while SCALE_DOWN was lowering it");
-                    }
-                    if (snapshot) {
-                        Map<String, String> a = new HashMap<>(
-                                p.getMetadata().getAnnotations() != null
-                                        ? p.getMetadata().getAnnotations()
-                                        : Map.of());
-                        a.put(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(replicas));
-                        a.put(KubernetesChaosProvider.SCALED_DOWN_AT_ANNOTATION, scaledDownAt);
-                        p.getMetadata().setAnnotations(a);
-                    }
-                    spec(p).put("replicas", replicas - 1);
-                    return p;
-                });
+        GenericKubernetesResource after;
+        try {
+            after = nodePools(namespace).withName(pool.name()).edit(p -> {
+                if (replicas(p) != replicas) {
+                    throw new IllegalStateException(
+                            "KafkaNodePool " + pool.name() + " changed size while SCALE_DOWN was lowering it");
+                }
+                if (snapshot) {
+                    Map<String, String> a = new HashMap<>(
+                            p.getMetadata().getAnnotations() != null
+                                    ? p.getMetadata().getAnnotations()
+                                    : Map.of());
+                    a.put(KubernetesChaosProvider.ORIGINAL_REPLICAS_ANNOTATION, String.valueOf(replicas));
+                    a.put(KubernetesChaosProvider.SCALED_DOWN_AT_ANNOTATION, scaledDownAt);
+                    p.getMetadata().setAnnotations(a);
+                }
+                spec(p).put("replicas", replicas - 1);
+                return p;
+            });
+        } catch (KubernetesClientException e) {
+            changes.add(new Change(pool, replicas, nodeIds(before), generation(before), snapshot));
+            throw e;
+        }
 
         LOG.info("SCALE_DOWN: KafkaNodePool " + pool.name() + " from " + replicas + " → " + (replicas - 1));
-        return new Change(pool, replicas, nodeIds(before), generation(after), snapshot);
+        changes.add(new Change(pool, replicas, nodeIds(before), generation(after), snapshot));
     }
 
     private void await(FaultSpec spec, List<Change> changes) throws InterruptedException {
