@@ -14,8 +14,8 @@ class ChaosOutcomeTest {
         Instant start = Instant.now().minusSeconds(30);
         Instant end = Instant.now();
 
-        ChaosOutcome outcome = ChaosOutcome.success(
-                "engine-1", "pod-delete", start, end, System.nanoTime(), "100%", null, "Complete");
+        ChaosOutcome outcome =
+                ChaosOutcome.success("engine-1", "pod-delete", start, end, System.nanoTime(), "100%", null, "Complete");
 
         assertTrue(outcome.isPass());
         assertEquals("Pass", outcome.verdict());
@@ -30,8 +30,7 @@ class ChaosOutcomeTest {
         Instant now = Instant.now();
 
         ChaosOutcome outcome = ChaosOutcome.failure(
-                "engine-2", "cpu-hog", now, now, System.nanoTime(),
-                "Timeout", "50%", "ChaosRevert", "Aborted");
+                "engine-2", "cpu-hog", now, now, System.nanoTime(), "Timeout", "50%", "ChaosRevert", "Aborted");
 
         assertFalse(outcome.isPass());
         assertEquals("Fail", outcome.verdict());
@@ -52,16 +51,14 @@ class ChaosOutcomeTest {
     @Test
     void isPassIsCaseInsensitive() {
         Instant now = Instant.now();
-        ChaosOutcome outcome = new ChaosOutcome(
-                "e", "x", now, now, 0, Duration.ZERO, "PASS", null, null, null, null);
+        ChaosOutcome outcome = new ChaosOutcome("e", "x", now, now, 0, Duration.ZERO, "PASS", null, null, null, null);
         assertTrue(outcome.isPass());
     }
 
     @Test
     void nonPassVerdictReturnsFalse() {
         Instant now = Instant.now();
-        ChaosOutcome outcome = new ChaosOutcome(
-                "e", "x", now, now, 0, Duration.ZERO, "Error", null, null, null, null);
+        ChaosOutcome outcome = new ChaosOutcome("e", "x", now, now, 0, Duration.ZERO, "Error", null, null, null, null);
         assertFalse(outcome.isPass());
     }
 }

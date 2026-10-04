@@ -34,12 +34,17 @@ public class LitmusChaosProvider implements ChaosProvider {
             Map.entry(DisruptionType.NETWORK_LATENCY, "pod-network-latency"),
             Map.entry(DisruptionType.NODE_DRAIN, "node-drain"),
             // Leader election is triggered by deleting the current partition leader pod
-            Map.entry(DisruptionType.LEADER_ELECTION, "pod-delete"),
-            Map.entry(DisruptionType.SCALE_DOWN, "pod-delete"),
-            Map.entry(DisruptionType.ROLLING_RESTART, "pod-delete"));
+            Map.entry(DisruptionType.LEADER_ELECTION, "pod-delete"));
 
     @Inject
     KubernetesClient client;
+
+    @Inject
+    com.bmscomp.kates.engine.KatesExecutor executor;
+
+    @Inject
+    @Named("kubernetes")
+    KubernetesChaosProvider kubernetes;
 
     @Override
     public String name() {
@@ -48,6 +53,15 @@ public class LitmusChaosProvider implements ChaosProvider {
 
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
+        // No Litmus experiment does a rolling restart (pod-delete kills pods
+        // without waiting for them to come back) or removes a broker (its
+        // StrimziPodSet recreates a deleted pod at once). Both go through the
+        // Strimzi Cluster Operator on the Kubernetes API whichever backend runs.
+        if (spec.disruptionType() == DisruptionType.ROLLING_RESTART
+                || spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+            return kubernetes.triggerFault(spec);
+        }
+
         Instant start = Instant.now();
         long startNanos = System.nanoTime();
         String engineName = "kates-" + spec.experimentName() + "-" + System.currentTimeMillis();
@@ -74,61 +88,85 @@ public class LitmusChaosProvider implements ChaosProvider {
             int pollIntervalMs = 5_000;
             int maxPolls = (timeoutSec * 1000) / pollIntervalMs;
 
-            CompletableFuture.runAsync(() -> {
-                for (int i = 0; i < maxPolls && !future.isDone(); i++) {
-                    try {
-                        Thread.sleep(pollIntervalMs);
-                        if (future.isDone()) break;
+            // Runs on the shared bounded executor, NOT the common ForkJoinPool.
+            // This loop sleeps 5s per iteration for up to (chaosDuration + 120)s;
+            // on the common pool (parallelism = cores - 1, shared with every
+            // parallel stream in the JVM) a couple of concurrent experiments
+            // could occupy it entirely while doing nothing but sleeping.
+            CompletableFuture.runAsync(
+                    () -> {
+                        for (int i = 0; i < maxPolls && !future.isDone(); i++) {
+                            try {
+                                Thread.sleep(pollIntervalMs);
+                                if (future.isDone()) break;
 
-                        var existing = client.resources(ChaosResult.class)
-                                .inNamespace(spec.targetNamespace())
-                                .withName(resultName)
-                                .get();
+                                var existing = client.resources(ChaosResult.class)
+                                        .inNamespace(spec.targetNamespace())
+                                        .withName(resultName)
+                                        .get();
 
-                        if (existing == null) {
-                            LOG.debugf("Poll %d: ChaosResult '%s' not found yet", i + 1, resultName);
-                            continue;
-                        }
+                                if (existing == null) {
+                                    LOG.debugf("Poll %d: ChaosResult '%s' not found yet", i + 1, resultName);
+                                    continue;
+                                }
 
-                        if (existing.getStatus() == null
-                                || existing.getStatus().experimentStatus == null) {
-                            LOG.debugf("Poll %d: ChaosResult exists but no status yet", i + 1);
-                            continue;
-                        }
+                                if (existing.getStatus() == null || existing.getStatus().experimentStatus == null) {
+                                    LOG.debugf("Poll %d: ChaosResult exists but no status yet", i + 1);
+                                    continue;
+                                }
 
-                        String v = existing.getStatus().experimentStatus.verdict;
-                        LOG.infof("Poll %d: ChaosResult verdict=%s", i + 1, v);
+                                String v = existing.getStatus().experimentStatus.verdict;
+                                LOG.infof("Poll %d: ChaosResult verdict=%s", i + 1, v);
 
-                        if (v != null && !v.equalsIgnoreCase("Awaited")) {
-                            var s = existing.getStatus().experimentStatus;
-                            if ("Pass".equalsIgnoreCase(v)) {
-                                future.complete(ChaosOutcome.success(
-                                        engineName, experimentName, start, Instant.now(),
-                                        startNanos, s.probeSuccessPercentage, s.failStep, s.phase));
-                            } else {
-                                future.complete(ChaosOutcome.failure(
-                                        engineName, experimentName, start, Instant.now(),
-                                        startNanos, "ChaosResult verdict: " + v,
-                                        s.probeSuccessPercentage, s.failStep, s.phase));
+                                if (v != null && !v.equalsIgnoreCase("Awaited")) {
+                                    var s = existing.getStatus().experimentStatus;
+                                    if ("Pass".equalsIgnoreCase(v)) {
+                                        future.complete(ChaosOutcome.success(
+                                                engineName,
+                                                experimentName,
+                                                start,
+                                                Instant.now(),
+                                                startNanos,
+                                                s.probeSuccessPercentage,
+                                                s.failStep,
+                                                s.phase));
+                                    } else {
+                                        future.complete(ChaosOutcome.failure(
+                                                engineName,
+                                                experimentName,
+                                                start,
+                                                Instant.now(),
+                                                startNanos,
+                                                "ChaosResult verdict: " + v,
+                                                s.probeSuccessPercentage,
+                                                s.failStep,
+                                                s.phase));
+                                    }
+                                    return;
+                                }
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            } catch (Exception e) {
+                                LOG.warnf("Poll error: %s", e.getMessage());
                             }
-                            return;
                         }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    } catch (Exception e) {
-                        LOG.warnf("Poll error: %s", e.getMessage());
-                    }
-                }
 
-                // Timeout — no result received
-                if (!future.isDone()) {
-                    future.complete(ChaosOutcome.failure(
-                            engineName, experimentName, start, Instant.now(),
-                            startNanos, "Timeout polling for ChaosResult after " + timeoutSec + "s",
-                            null, null, null));
-                }
-            });
+                        // Timeout — no result received
+                        if (!future.isDone()) {
+                            future.complete(ChaosOutcome.failure(
+                                    engineName,
+                                    experimentName,
+                                    start,
+                                    Instant.now(),
+                                    startNanos,
+                                    "Timeout polling for ChaosResult after " + timeoutSec + "s",
+                                    null,
+                                    null,
+                                    null));
+                        }
+                    },
+                    executor.get());
 
         } catch (Exception e) {
             LOG.error("Litmus fault injection failed", e);
@@ -176,7 +214,7 @@ public class LitmusChaosProvider implements ChaosProvider {
         return spec.experimentName();
     }
 
-    private ChaosEngine buildChaosEngine(FaultSpec spec, String engineName, String experimentName) {
+    ChaosEngine buildChaosEngine(FaultSpec spec, String engineName, String experimentName) {
         ChaosEngine engine = new ChaosEngine();
         engine.getMetadata().setName(engineName);
         engine.getMetadata().setNamespace(spec.targetNamespace());
@@ -199,22 +237,12 @@ public class LitmusChaosProvider implements ChaosProvider {
         List<ChaosEngineSpec.EnvVar> envVars = new ArrayList<>();
         envVars.add(new ChaosEngineSpec.EnvVar("TOTAL_CHAOS_DURATION", String.valueOf(spec.chaosDurationSec())));
 
-        if (spec.targetPod() != null && !spec.targetPod().isEmpty()) {
-            envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", spec.targetPod()));
-        } else if (spec.targetLabel() != null && !spec.targetLabel().isEmpty()) {
-            String[] parts = spec.targetLabel().split("=", 2);
-            if (parts.length == 2) {
-                var pods = client.pods()
-                        .inNamespace(spec.targetNamespace())
-                        .withLabel(parts[0], parts[1])
-                        .list()
-                        .getItems();
-                if (!pods.isEmpty()) {
-                    int index = (int) (Math.random() * pods.size());
-                    String podName = pods.get(index).getMetadata().getName();
-                    envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", podName));
-                }
-            }
+        // Resolved here, not by Litmus, so targetBrokerId and targetAll mean the
+        // same thing as on the kubernetes backend. node-drain takes TARGET_NODE.
+        boolean hasTarget = (spec.targetPod() != null && !spec.targetPod().isEmpty())
+                || (spec.targetLabel() != null && !spec.targetLabel().isBlank());
+        if (hasTarget && spec.disruptionType() != DisruptionType.NODE_DRAIN) {
+            envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", String.join(",", PodTargets.resolve(client, spec))));
         }
 
         if (spec.envOverrides() != null) {
@@ -232,17 +260,19 @@ public class LitmusChaosProvider implements ChaosProvider {
                 // Setting FORCE=true performs an immediate delete (skip graceful termination)
                 // and SEQUENCE=serial avoids the parallel-mode workload-based pod status check
                 // that triggers the StrimziPodSet lookup failure.
-                case POD_KILL, POD_DELETE, LEADER_ELECTION, SCALE_DOWN, ROLLING_RESTART -> {
+                case POD_KILL, POD_DELETE, LEADER_ELECTION -> {
                     envVars.add(new ChaosEngineSpec.EnvVar("FORCE", "true"));
                     envVars.add(new ChaosEngineSpec.EnvVar("SEQUENCE", "serial"));
                 }
-                case CPU_STRESS -> envVars.add(new ChaosEngineSpec.EnvVar("CPU_CORES", String.valueOf(spec.cpuCores())));
+                case CPU_STRESS ->
+                    envVars.add(new ChaosEngineSpec.EnvVar("CPU_CORES", String.valueOf(spec.cpuCores())));
                 case MEMORY_STRESS -> {
                     envVars.add(new ChaosEngineSpec.EnvVar("MEMORY_CONSUMPTION", String.valueOf(spec.memoryMb())));
                     envVars.add(new ChaosEngineSpec.EnvVar("NUMBER_OF_WORKERS", "1"));
                 }
                 case IO_STRESS -> {
-                    envVars.add(new ChaosEngineSpec.EnvVar("FILESYSTEM_UTILIZATION_PERCENTAGE", String.valueOf(spec.fillPercentage())));
+                    envVars.add(new ChaosEngineSpec.EnvVar(
+                            "FILESYSTEM_UTILIZATION_PERCENTAGE", String.valueOf(spec.fillPercentage())));
                     envVars.add(new ChaosEngineSpec.EnvVar("NUMBER_OF_WORKERS", String.valueOf(spec.ioWorkers())));
                 }
                 case DNS_ERROR -> {
@@ -250,9 +280,11 @@ public class LitmusChaosProvider implements ChaosProvider {
                         envVars.add(new ChaosEngineSpec.EnvVar("TARGET_HOSTNAMES", spec.targetTopic()));
                     }
                 }
-                case NETWORK_LATENCY -> envVars.add(new ChaosEngineSpec.EnvVar("NETWORK_LATENCY", String.valueOf(spec.networkLatencyMs())));
-                case DISK_FILL -> envVars.add(new ChaosEngineSpec.EnvVar("FILL_PERCENTAGE", String.valueOf(spec.fillPercentage())));
-                default -> { }
+                case NETWORK_LATENCY ->
+                    envVars.add(new ChaosEngineSpec.EnvVar("NETWORK_LATENCY", String.valueOf(spec.networkLatencyMs())));
+                case DISK_FILL ->
+                    envVars.add(new ChaosEngineSpec.EnvVar("FILL_PERCENTAGE", String.valueOf(spec.fillPercentage())));
+                default -> {}
             }
         }
 

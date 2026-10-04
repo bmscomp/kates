@@ -1,0 +1,77 @@
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $testUser := include "kafka-cluster.testUser" . -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-kraft-quorum"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: kraft-quorum
+      image: {{ include "kafka-cluster.kubectlImage" $ }}
+      {{- include "kafka-common.imagePullPolicy" .Values.testImages.pullPolicy | nindent 6 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
+          echo "=== Tier 4: KRaft Controller Quorum ==="
+
+          echo "Checking controller node pool CRs..."
+          {{- $totalControllers := 0 }}
+          {{- range $r.pools }}{{- if has "controller" .roles }}
+          {{- $totalControllers = add $totalControllers .replicas }}
+          POOL_READY_REPLICAS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.status.replicas}')
+          POOL_SPEC_REPLICAS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.spec.replicas}')
+          if [ "$POOL_READY_REPLICAS" = "$POOL_SPEC_REPLICAS" ] || [ "$POOL_READY_REPLICAS" = "{{ .replicas }}" ]; then
+            echo "  ✓ KafkaNodePool '{{ .name }}' Replicas match ($POOL_READY_REPLICAS)"
+          else
+            echo "  ✗ KafkaNodePool '{{ .name }}' not ready: expected $POOL_SPEC_REPLICAS, got $POOL_READY_REPLICAS" && exit 1
+          fi
+          {{- end }}{{- end }}
+
+          echo ""
+          echo "Checking controller pods..."
+          EXPECTED={{ $totalControllers }}
+          RUNNING=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER,strimzi.io/controller-role=true \
+            --no-headers | grep "Running" | wc -l | tr -d ' ')
+          echo "  Controller pods running: $RUNNING/$EXPECTED"
+          if [ "$RUNNING" -lt "$EXPECTED" ]; then
+            echo "  ✗ Expected $EXPECTED controllers, only $RUNNING running" && exit 1
+          fi
+          echo "  ✓ All $EXPECTED controller pods running"
+
+          echo ""
+          echo "Verifying the metadata state..."
+          STATE=$(kubectl get kafka $CLUSTER -n $NAMESPACE -o jsonpath='{.status.kafkaMetadataState}')
+          if [ "$STATE" = "KRaft" ]; then
+            echo "  ✓ Metadata state: KRaft"
+          else
+            echo "  ⚠ Metadata state: ${STATE:-<none>}"
+          fi
+
+          echo "✓ Tier 4 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

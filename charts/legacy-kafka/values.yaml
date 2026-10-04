@@ -1,0 +1,178 @@
+# legacy-kafka values.yaml
+#
+# A migration SOURCE. Strimzi 1.1.0 runs Kafka 4.x and validates `spec.version`
+# against its supported set, so a 2.x or 3.x cluster cannot be a `Kafka` CR in
+# this repo at all. This chart deploys one as plain StatefulSets instead, for
+# exactly one purpose: to have something old that MirrorMaker 2 can replicate
+# FROM while the version compatibility is what is under test.
+#
+# NOT PRODUCTION. Single broker, RF1, emptyDir, no rack awareness, no PDB.
+# Read charts/legacy-kafka/README.md before you are tempted otherwise.
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+# -- Override the release namespace
+namespaceOverride: ""
+# -- Extra labels added to every resource
+extraLabels: {}
+# -- Kubernetes cluster domain (advertised-listener FQDNs)
+clusterDomain: cluster.local
+
+# ── Which era of Kafka ──────────────────────────────────────────────────────
+# zookeeper → Kafka 2.x/3.x with a ZooKeeper ensemble (2.x has no other option)
+# kraft     → Kafka 3.3+ in combined broker+controller mode, no ZooKeeper
+# ""        → DERIVED from kafka.version: zookeeper below 3.3.0, kraft from
+#             3.3.0 up. The rule the CLI's legacy provider relies on, so that
+#             `--version 3.5.2` needs no overlay. An explicit value still wins
+#             (values-kafka-2x.yaml / values-kafka-3x.yaml set it, as
+#             documented examples of the two shapes).
+mode: ""
+
+# -- Registry of the image Dockerfile.legacy-kafka builds for Kafka lines with
+# no official container image (below 3.7.0). Only the derived image reads it;
+# an explicit kafka.image ignores it.
+legacyImageRegistry: ghcr.io/bmscomp
+
+kafka:
+  # -- Kafka version this deployment claims to be — and, when mode and image
+  # are left empty, the ONE input everything else derives from. Consumed by
+  # the topics Job, the NOTES, and — when you copy it into the mirror-maker2
+  # chart's `mirrors[].source.kafkaVersion` — the KIP-896 compatibility gate.
+  version: "3.9.1"
+  # -- Broker image. "" DERIVES it from the version: the official multi-arch
+  # apache/kafka:<version> from 3.7.0 (KIP-975), and below that the image
+  # Dockerfile.legacy-kafka builds, <legacyImageRegistry>/kates-legacy-kafka:
+  # <version> — no such image exists upstream, so build and load it first:
+  #   scripts/build-legacy-kafka-image.sh --version <version> --load
+  # An explicit reference here wins.
+  image: ""
+  imagePullPolicy: IfNotPresent
+  # -- Broker count. 1 is the point: this is a source, not a cluster you keep.
+  replicas: 1
+  # -- Replication factor for the internal topics. Must not exceed replicas.
+  replicationFactor: 1
+  # -- Where Kafka writes its logs inside the container
+  logDir: /var/lib/kafka/data
+  # -- Extra server.properties lines, appended verbatim (key: value)
+  config: {}
+  #   log.retention.hours: 168
+  #   auto.create.topics.enable: "true"
+  heapOpts: "-Xms512m -Xmx512m"
+  resources:
+    requests: { memory: 1Gi, cpu: 250m }
+    limits: { memory: 1536Mi, cpu: 1000m }
+  # -- KRaft cluster ID (mode: kraft only). Fixed so a restart re-formats to the
+  # same identity; regenerate with `kafka-storage.sh random-uuid` if you want a
+  # distinct one per environment.
+  clusterId: "PyqcHntNToqfFixdjgp7MQ"
+
+zookeeper:
+  # -- Only rendered when mode=zookeeper. Runs from the SAME image as the
+  # broker: the Kafka tarball ships ZooKeeper, so there is no second image to
+  # pin, and no chance of a ZK/Kafka version mismatch.
+  replicas: 1
+  dataDir: /var/lib/zookeeper/data
+  heapOpts: "-Xms256m -Xmx256m"
+  resources:
+    requests: { memory: 512Mi, cpu: 100m }
+    limits: { memory: 1Gi, cpu: 500m }
+
+# ── Listeners ───────────────────────────────────────────────────────────────
+# PLAINTEXT is the default deliberately: this chart varies ONE thing, the Kafka
+# version. Turning on auth as well would entangle two variables in a test whose
+# whole purpose is to isolate the first.
+listeners:
+  plaintext:
+    enabled: true
+    port: 9092
+  # SASL/PLAIN over plaintext. Chosen over SCRAM because it configures
+  # identically on 2.x (ZooKeeper) and 3.x (KRaft) — SCRAM credentials would
+  # need zookeeper-shell on one and a storage-format flag on the other.
+  sasl:
+    enabled: false
+    port: 9094
+    # -- Users the broker accepts. The first entry is also the inter-broker
+    # user. Rendered into a JAAS Secret; passwords are NOT auto-generated, so
+    # what you put here is what you get.
+    # Keep usernames alphanumeric: they become `user_<name>=` keys inside a
+    # JAAS config string, which is tokenized, not parsed as a properties file.
+    users:
+      - username: mm2reader
+        password: mm2reader-secret
+
+# ── Storage ─────────────────────────────────────────────────────────────────
+persistence:
+  # -- false = emptyDir. A migration source should start empty on every run;
+  # leftover state from a previous test is a false pass waiting to happen.
+  # Decide before the first install: volumeClaimTemplates are immutable on a
+  # StatefulSet, so flipping this on an existing release fails the upgrade —
+  # uninstall and reinstall instead.
+  enabled: false
+  size: 5Gi
+  storageClass: ""
+
+# ── Topics to pre-create ────────────────────────────────────────────────────
+# A post-install/post-upgrade Job runs kafka-topics.sh --create --if-not-exists
+# for each entry, using the cluster's OWN (era-appropriate) client. Gives a
+# mirror something to find before any producer runs.
+topics:
+  - name: kates.orders
+    partitions: 3
+    replicationFactor: 1
+    config: {}
+  - name: kates.payments
+    partitions: 3
+    replicationFactor: 1
+    config: {}
+
+topicsJob:
+  enabled: true
+  # -- Job deadline. The script inside waits up to 300s for the broker before
+  # creating anything, so this has to be comfortably larger: a deadline equal
+  # to the wait budget killed the Job at the exact moment a slow broker became
+  # reachable, and DeadlineExceeded is terminal — backoffLimit never retries it.
+  timeoutSeconds: 600
+  backoffLimit: 3
+
+# ── Scheduling & security ───────────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  # Kafka writes its generated config under /tmp (an emptyDir), so the image
+  # filesystem itself stays read-only.
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+
+# ── NetworkPolicy ───────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+  # -- Namespaces allowed to reach the client listeners. Empty = every
+  # namespace (the lab default — MirrorMaker 2 usually lives in `kafka`).
+  allowFromNamespaces: []
+  # -- Extra rules appended verbatim
+  extraIngress: []
+  extraEgress: []
+
+# -- Image used by the Helm test pod. Defaults to the broker image, which is the
+# only client guaranteed to speak to a 2.x broker.
+testImage: ""

@@ -1,0 +1,15 @@
+{
+  "totalRecords": 20000,
+  "avgThroughputRecPerSec": 996.9,
+  "peakThroughputRecPerSec": 998.5,
+  "avgThroughputMBPerSec": 0.974,
+  "avgLatencyMs": 3.79,
+  "p50LatencyMs": 2.55,
+  "p95LatencyMs": 7.3,
+  "p99LatencyMs": 12.9,
+  "p999LatencyMs": 0.0,
+  "maxLatencyMs": 55.0,
+  "totalErrors": 0,
+  "errorRate": 0.0,
+  "durationMs": 0
+}

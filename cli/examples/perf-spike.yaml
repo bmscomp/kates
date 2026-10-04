@@ -16,7 +16,6 @@ scenarios:
       throughput: 500
       numProducers: 2
       numConsumers: 2
-      consumerGroup: spike-cg
       acks: "all"
       enableIdempotence: true
       batchSize: 65536
@@ -38,7 +37,6 @@ scenarios:
       throughput: -1            # maximum burst
       numProducers: 4
       numConsumers: 2
-      consumerGroup: spike-cg
       acks: "all"
       enableIdempotence: true
       batchSize: 65536
@@ -61,7 +59,6 @@ scenarios:
       throughput: 3000
       numProducers: 2
       numConsumers: 2
-      consumerGroup: spike-cg
       acks: "all"
       enableIdempotence: true
       batchSize: 65536

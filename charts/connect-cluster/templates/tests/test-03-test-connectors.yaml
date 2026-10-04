@@ -1,0 +1,55 @@
+{{- /* The test connectors reach RUNNING with every task running. */}}
+{{- $r := include "connect-cluster.resolve" . | fromJson }}
+{{- with $r.testConnectors }}
+{{- $name := include "connect-cluster.fullname" $ }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $name }}-test-connectors
+  namespace: {{ include "connect-cluster.namespace" $ }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" $ "component" "test") | nindent 4 }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "6"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "connect-cluster.serviceAccountName" $ }}
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: connectors
+      image: {{ $.Values.testImages.kubectl }}
+      {{- include "connect-cluster.imagePullPolicy" $ | nindent 6 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          NS={{ include "connect-cluster.namespace" $ | quote }}
+          FAIL=0
+          for C in {{ range . }}{{ .name | quote }} {{ end }}; do
+            i=0; STATE=""; BAD=1
+            # The operator creates the connector, then its tasks start: up to 3 minutes.
+            while [ $i -lt 36 ]; do
+              STATE=$(kubectl get kafkaconnector "$C" -n "$NS" -o jsonpath='{.status.connectorStatus.connector.state}' 2>/dev/null)
+              TASKS=$(kubectl get kafkaconnector "$C" -n "$NS" -o jsonpath='{range .status.connectorStatus.tasks[*]}{.state}{"\n"}{end}' 2>/dev/null)
+              BAD=$(echo "$TASKS" | grep -c . ); RUN=$(echo "$TASKS" | grep -c '^RUNNING$')
+              [ "$STATE" = "RUNNING" ] && [ "$BAD" -gt 0 ] && [ "$BAD" -eq "$RUN" ] && break
+              i=$((i+1)); sleep 5
+            done
+            if [ "$STATE" = "RUNNING" ] && [ "$BAD" -gt 0 ] && [ "$BAD" -eq "$RUN" ]; then
+              echo "  ✓ $C RUNNING, $RUN task(s) running"
+            else
+              FAIL=$((FAIL+1))
+              echo "  ✗ $C state=${STATE:-<none>}, tasks: $(echo $TASKS)"
+              kubectl get kafkaconnector "$C" -n "$NS" -o jsonpath='{.status.connectorStatus.tasks[*].trace}' 2>/dev/null | head -5
+            fi
+          done
+          [ "$FAIL" -eq 0 ]
+      securityContext:
+        {{- include "connect-cluster.containerSecurityContext" $ | nindent 8 }}
+{{- end }}

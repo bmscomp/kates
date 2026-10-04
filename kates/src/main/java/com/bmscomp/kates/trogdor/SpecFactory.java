@@ -62,8 +62,8 @@ public class SpecFactory {
 
         String group = consumerGroupName(spec, "load-group-" + runId);
         for (int i = 0; i < spec.getNumConsumers(); i++) {
-            ConsumeBenchSpec consume = ConsumeBenchSpec.create(
-                    bootstrapServers, topic, spec.getPartitions(), perProducerRecords, spec.getDurationMs(), group);
+            ConsumeBenchSpec consume =
+                    ConsumeBenchSpec.create(bootstrapServers, topic, perProducerRecords, spec.getDurationMs(), group);
             applyConsumerConf(consume, spec);
             specs.add(consume);
         }
@@ -137,8 +137,7 @@ public class SpecFactory {
         specs.add(produce);
 
         String group = consumerGroupName(spec, "endurance-group-" + runId);
-        ConsumeBenchSpec consume =
-                ConsumeBenchSpec.create(bootstrapServers, topic, spec.getPartitions(), maxMessages, duration, group);
+        ConsumeBenchSpec consume = ConsumeBenchSpec.create(bootstrapServers, topic, maxMessages, duration, group);
         applyConsumerConf(consume, spec);
         specs.add(consume);
 

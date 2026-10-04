@@ -10,19 +10,19 @@
     <name>Kates - Kafka Advanced Testing &amp; Engineering Suite</name>
 
     <properties>
-        <compiler-plugin.version>3.15.0</compiler-plugin.version>
+        <compiler-plugin.version>3.16.0</compiler-plugin.version>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.15.7</quarkus.platform.version>
-        <surefire-plugin.version>3.5.4</surefire-plugin.version>
-        <kafka.version>3.9.0</kafka.version>
-        <lz4.version>1.8.0</lz4.version>
+        <quarkus.platform.version>3.20.6</quarkus.platform.version>
+        <surefire-plugin.version>3.6.0</surefire-plugin.version>
+        <kafka.version>3.9.2</kafka.version>
+        <lz4.version>1.12.0</lz4.version>
         <snappy.version>1.1.10.8</snappy.version>
-        <zstd.version>1.5.7-7</zstd.version>
-        <netty.version>4.1.132.Final</netty.version>
-        <spotless.version>3.2.1</spotless.version>
+        <zstd.version>1.5.7-20</zstd.version>
+        <netty.version>4.1.138.Final</netty.version>
+        <spotless.version>3.10.3</spotless.version>
         <palantir-format.version>2.89.0</palantir-format.version>
     </properties>
 
@@ -35,13 +35,24 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Override Quarkus-managed kafka-clients to fix CVE-2026-33557 (CRITICAL) + CVE-2026-35554 -->
+            <!-- Override Quarkus-managed kafka-clients to fix CVE-2026-33557 (CRITICAL) + CVE-2026-35554,
+                 GHSA-5qcv-4rpc-jp93, GHSA-wf66-mphr-4c4r (fixed in 3.9.2) -->
             <dependency>
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
                 <version>${kafka.version}</version>
             </dependency>
-            <!-- Override Quarkus-managed Netty to fix CVE-2026-33871 + CVE-2026-33870 -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>2.0.5</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Override Quarkus-managed Netty to fix CVE-2026-33871 + CVE-2026-33870 and the
+                 4.1.135-4.1.137 codec-http/http2 advisories (SPDY, HTTP/2, CORS). Only the two
+                 codec modules move: netty-handler and friends stay on the platform's version
+                 because moving them breaks the native image (see .trivyignore.yaml). -->
             <dependency>
                 <groupId>io.netty</groupId>
                 <artifactId>netty-codec-http</artifactId>
@@ -51,6 +62,15 @@
                 <groupId>io.netty</groupId>
                 <artifactId>netty-codec-http2</artifactId>
                 <version>${netty.version}</version>
+            </dependency>
+            <!-- org.lz4:lz4-java is abandoned (1.8.1 is a relocation stub); the maintained fork
+                 keeps the net.jpountz packages. Managed here so the copy quarkus-messaging-kafka
+                 pulls in resolves to the patched release too (GHSA-cmp6-m4wj-q63q,
+                 GHSA-xx22-p4ch-683r, GHSA-vqf4-7m7x-wgfc). -->
+            <dependency>
+                <groupId>at.yawk.lz4</groupId>
+                <artifactId>lz4-java</artifactId>
+                <version>${lz4.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -101,10 +121,11 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-opentelemetry</artifactId>
         </dependency>
-        <!-- Reactive Messaging -->
+        <!-- Reactive Messaging (renamed from quarkus-smallrye-reactive-messaging-kafka
+             in Quarkus 3.20; same extension + MicroProfile Reactive Messaging APIs) -->
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-smallrye-reactive-messaging-kafka</artifactId>
+            <artifactId>quarkus-messaging-kafka</artifactId>
         </dependency>
 
 
@@ -132,9 +153,8 @@
             <artifactId>quarkus-kafka-client</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.lz4</groupId>
+            <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>${lz4.version}</version>
         </dependency>
         <dependency>
             <groupId>org.xerial.snappy</groupId>
@@ -149,7 +169,7 @@
         <dependency>
             <groupId>org.jspecify</groupId>
             <artifactId>jspecify</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
         </dependency>
 
         <!-- Persistence: Hibernate ORM + PostgreSQL + Flyway -->
@@ -164,6 +184,16 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-flyway</artifactId>
+        </dependency>
+        <!-- Flyway's PostgreSQL support. It already arrived transitively via
+             quarkus-flyway, but FlywayPostgresLockConfig compiles against
+             PostgreSQLConfigurationExtension from it, and a compile-time
+             dependency on a transitive artifact breaks silently the day the
+             extension reorganises its dependencies. Version comes from the
+             Quarkus BOM. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -214,7 +244,37 @@
         <dependency>
             <groupId>net.jqwik</groupId>
             <artifactId>jqwik</artifactId>
-            <version>1.9.0</version>
+            <version>1.10.1</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Coverage for @QuarkusTest (bytecode-transformed classes need the
+             Quarkus-aware agent; a plain jacoco agent under-reports). Produces
+             target/jacoco-quarkus.exec + target/jacoco-report. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jacoco</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- In-memory Reactive Messaging connector for tests: lets the app
+             boot without a Kafka broker by wiring the test-events channels to
+             an in-memory sink/source (the smallrye-kafka connector otherwise
+             fails emitter injection at boot when no broker is present). -->
+        <dependency>
+            <groupId>io.smallrye.reactive</groupId>
+            <artifactId>smallrye-reactive-messaging-in-memory</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Integration tests (*IT under failsafe) run against real Postgres
+             and Kafka containers — the only place Flyway migrations and the
+             jsonb query path are actually exercised. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -247,6 +307,20 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
+                    <!--
+                        Surefire's default includes are Test*.java, *Test.java,
+                        *Tests.java and *TestCase.java. The FIRST of those also
+                        matches integration tests whose name starts with "Test"
+                        (TestApiIT, TestOrchestratorIT, ...), which drags them
+                        into the unit-test phase where no Docker daemon is
+                        expected — they fail to boot, and the cascade takes the
+                        next @QuarkusTest class down with it. Failsafe owns
+                        *IT.java; make surefire's half of the split explicit so
+                        the naming of a new IT can never re-open this.
+                    -->
+                    <excludes>
+                        <exclude>**/*IT.java</exclude>
+                    </excludes>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
@@ -270,6 +344,63 @@
                         <endWithNewline/>
                     </java>
                 </configuration>
+                <executions>
+                    <execution>
+                        <!-- Bound to verify: CI fails on formatting drift.
+                             Fix locally with: ./mvnw spotless:apply -->
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${surefire-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.15</version>
+                <executions>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-quarkus.exec</dataFile>
+                            <!-- Floor, not a target: starts low so the gate can
+                                 land green, ratchet upward as coverage grows. -->
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>INSTRUCTION</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.10</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

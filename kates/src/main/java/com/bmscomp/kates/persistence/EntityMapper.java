@@ -1,7 +1,12 @@
 package com.bmscomp.kates.persistence;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -34,9 +39,11 @@ public final class EntityMapper {
         entity.setBackend(run.getBackend());
         entity.setScenarioName(run.getScenarioName());
         entity.setSpecJson(toJson(run.getSpec()));
+        entity.setRequestedSpecJson(toJson(run.getRequestedSpec()));
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
+        entity.setPlannedDurationMs(run.getPlannedDurationMs());
 
         if (run.getResults() != null) {
             for (TestResult result : run.getResults()) {
@@ -49,16 +56,20 @@ public final class EntityMapper {
 
     public static TestRun toDomain(TestRunEntity entity) {
         TestRun run = new TestRun()
-            .withId(entity.getId())
-            .withTestType(entity.getTestType())
-            .withStatus(entity.getStatus())
-            .withCreatedAt(entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
-            .withBackend(entity.getBackend())
-            .withScenarioName(entity.getScenarioName())
-            .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
-            .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
-            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
-            .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
+                .withId(entity.getId())
+                .withTestType(entity.getTestType())
+                .withStatus(entity.getStatus())
+                .withCreatedAt(
+                        entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
+                .withBackend(entity.getBackend())
+                .withScenarioName(entity.getScenarioName())
+                .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
+                .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
+                .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
+                .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
+                .withRequestedSpec(
+                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}))
+                .withPlannedDurationMs(entity.getPlannedDurationMs());
 
         if (entity.getResults() != null) {
             run = run.withResults(entity.getResults().stream()
@@ -71,42 +82,108 @@ public final class EntityMapper {
 
     /**
      * Lightweight mapper for list endpoints — skips the lazy-loaded results collection
-     * to avoid N+1 queries. Use {@link #toDomain} when results are needed (detail view).
+     * to avoid N+1 queries. Use {@link #toDomain} when results are needed (detail view),
+     * and before writing a run back.
      */
     public static TestRun toDomainSummary(TestRunEntity entity) {
         return new TestRun()
-            .withId(entity.getId())
-            .withTestType(entity.getTestType())
-            .withStatus(entity.getStatus())
-            .withCreatedAt(entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
-            .withBackend(entity.getBackend())
-            .withScenarioName(entity.getScenarioName())
-            .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
-            .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
-            .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
-            .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}));
+                .withId(entity.getId())
+                .withTestType(entity.getTestType())
+                .withStatus(entity.getStatus())
+                .withCreatedAt(
+                        entity.getCreatedAt() != null ? entity.getCreatedAt().toString() : null)
+                .withBackend(entity.getBackend())
+                .withScenarioName(entity.getScenarioName())
+                .withSpec(fromJson(entity.getSpecJson(), TestSpec.class))
+                .withSla(fromJson(entity.getSlaJson(), SlaDefinition.class))
+                .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
+                .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
+                .withRequestedSpec(
+                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}))
+                .withPlannedDurationMs(entity.getPlannedDurationMs());
     }
 
+    /**
+     * Applies a domain run onto a MANAGED entity, mutating in place so Hibernate
+     * can dirty-check it.
+     *
+     * <p>Child results are diffed by task id rather than cleared and rebuilt.
+     * With {@code cascade=ALL, orphanRemoval=true}, clearing the collection
+     * issues a DELETE for every result row followed by an INSERT for every one
+     * again — on every status poll of a running multi-task run. Diffing turns
+     * that into a handful of UPDATEs (usually none, since Hibernate skips
+     * unchanged rows) and keeps the child primary keys stable.
+     *
+     * <p>A run that carries no results leaves the stored ones as they are: see
+     * {@link #mergeResults}.
+     */
     public static void updateEntity(TestRunEntity entity, TestRun run) {
         entity.setTestType(run.getTestType());
         entity.setStatus(run.getStatus());
         entity.setBackend(run.getBackend());
         entity.setScenarioName(run.getScenarioName());
         entity.setSpecJson(toJson(run.getSpec()));
+        // A request does not change after the run is created, so an update from
+        // a copy that never carried it (one built by hand rather than read back)
+        // must not erase the stored one.
+        if (run.getRequestedSpec() != null) {
+            entity.setRequestedSpecJson(toJson(run.getRequestedSpec()));
+        }
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
+        // Fixed when the run is created, like the request, so a copy that never
+        // carried it must not erase the stored one either.
+        if (run.getPlannedDurationMs() != null) {
+            entity.setPlannedDurationMs(run.getPlannedDurationMs());
+        }
 
-        entity.getResults().clear();
-        if (run.getResults() != null) {
-            for (TestResult result : run.getResults()) {
-                entity.addResult(toResultEntity(result));
+        mergeResults(entity, run.getResults());
+    }
+
+    private static void mergeResults(TestRunEntity entity, List<TestResult> incoming) {
+        List<TestResultEntity> existing = entity.getResults();
+
+        // No results says nothing about the stored ones: a run read without
+        // them (toDomainSummary) carries none. Clearing here, under
+        // orphanRemoval, deleted every task row of each run the timeout reaper
+        // or orphan recovery failed, and its report, JUnit and trends with them.
+        if (incoming == null || incoming.isEmpty()) {
+            return;
+        }
+
+        Map<String, TestResultEntity> byTaskId = new HashMap<>();
+        for (TestResultEntity child : existing) {
+            if (child.getTaskId() != null) {
+                byTaskId.put(child.getTaskId(), child);
             }
         }
+
+        Set<String> seen = new HashSet<>();
+        for (TestResult result : incoming) {
+            String taskId = result.getTaskId();
+            TestResultEntity target = taskId != null ? byTaskId.get(taskId) : null;
+            if (target == null) {
+                entity.addResult(toResultEntity(result));
+            } else {
+                applyResult(target, result);
+            }
+            if (taskId != null) {
+                seen.add(taskId);
+            }
+        }
+
+        // Drop children the run no longer carries (orphanRemoval deletes them).
+        existing.removeIf(child -> child.getTaskId() == null || !seen.contains(child.getTaskId()));
     }
 
     private static TestResultEntity toResultEntity(TestResult result) {
         TestResultEntity entity = new TestResultEntity();
+        applyResult(entity, result);
+        return entity;
+    }
+
+    private static void applyResult(TestResultEntity entity, TestResult result) {
         entity.setTaskId(result.getTaskId());
         entity.setTestType(result.getTestType());
         entity.setStatus(result.getStatus());
@@ -122,26 +199,25 @@ public final class EntityMapper {
         entity.setEndTime(result.getEndTime());
         entity.setError(result.getError());
         entity.setPhaseName(result.getPhaseName());
-        return entity;
     }
 
     private static TestResult toResultDomain(TestResultEntity entity) {
         return new TestResult()
-            .withTaskId(entity.getTaskId())
-            .withTestType(entity.getTestType())
-            .withStatus(entity.getStatus())
-            .withRecordsSent(entity.getRecordsSent())
-            .withThroughputRecordsPerSec(entity.getThroughputRecordsPerSec())
-            .withThroughputMBPerSec(entity.getThroughputMBPerSec())
-            .withAvgLatencyMs(entity.getAvgLatencyMs())
-            .withP50LatencyMs(entity.getP50LatencyMs())
-            .withP95LatencyMs(entity.getP95LatencyMs())
-            .withP99LatencyMs(entity.getP99LatencyMs())
-            .withMaxLatencyMs(entity.getMaxLatencyMs())
-            .withStartTime(entity.getStartTime())
-            .withEndTime(entity.getEndTime())
-            .withError(entity.getError())
-            .withPhaseName(entity.getPhaseName());
+                .withTaskId(entity.getTaskId())
+                .withTestType(entity.getTestType())
+                .withStatus(entity.getStatus())
+                .withRecordsSent(entity.getRecordsSent())
+                .withThroughputRecordsPerSec(entity.getThroughputRecordsPerSec())
+                .withThroughputMBPerSec(entity.getThroughputMBPerSec())
+                .withAvgLatencyMs(entity.getAvgLatencyMs())
+                .withP50LatencyMs(entity.getP50LatencyMs())
+                .withP95LatencyMs(entity.getP95LatencyMs())
+                .withP99LatencyMs(entity.getP99LatencyMs())
+                .withMaxLatencyMs(entity.getMaxLatencyMs())
+                .withStartTime(entity.getStartTime())
+                .withEndTime(entity.getEndTime())
+                .withError(entity.getError())
+                .withPhaseName(entity.getPhaseName());
     }
 
     private static String toJson(Object obj) {

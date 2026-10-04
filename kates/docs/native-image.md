@@ -1,0 +1,208 @@
+# Native Image Runbook
+
+How to build, verify and debug the ahead-of-time compiled Kates backend.
+
+Read this before changing anything that Jackson serializes, anything loaded from
+the classpath at runtime, or anything that touches a JNI library. Those three
+categories are where native builds break, and they break in a way the JVM test
+suite cannot see.
+
+## Why native needs its own attention
+
+The JVM resolves everything at runtime: reflection finds getters, the
+classloader finds resources, JNI libraries load on demand. GraalVM decides all
+of it at build time, from static analysis. Whatever the analysis cannot see is
+not in the binary.
+
+That gives three failure modes, none of which fail the JVM tests:
+
+| What broke | How it looks in native | How it looks on the JVM |
+|---|---|---|
+| A DTO is not registered for reflection | Endpoint returns `{}`, or throws `InvalidDefinitionException: No serializer found` | Correct JSON |
+| A classpath resource is not in the image | The feature is silently empty — the playbook catalog returns `[]` | Works |
+| A JNI library is missing or initialized too early | `UnsatisfiedLinkError` the first time compression is used, minutes into a benchmark | Works |
+
+The last one is the nastiest: it surfaces during a long test run, not at
+startup, so it looks like a Kafka problem rather than a packaging one.
+
+## The whole loop, in one command
+
+```bash
+make cluster      # once, if you do not already have a Kind cluster
+make native-e2e
+```
+
+`native-e2e` builds the CLI and the native image from your working tree, loads
+the image onto the node, deploys Kafka if none is running, installs the chart
+pinned to that image, and then proves it works rather than merely starts:
+
+| Step | What it catches |
+|---|---|
+| `pullPolicy: Never` + image assertion | the kubelet substituting the published image, so you test bytes that are not yours |
+| Chart tests | probes, service wiring, API key handling |
+| Playbook catalog non-empty | classpath YAML dropped from the image — the endpoint returns `200` with `[]` |
+| A 404 body with fields | an unregistered DTO serialising as `{}`, native-only |
+| A real 10k-record LOAD test through the CLI | reflection, the JNI compression libraries and the Kafka client, together |
+
+Useful flags: `--skip-build` reuses an existing image, `--skip-kafka` assumes a
+cluster is already up, `--keep` leaves the release installed. Pass them through
+make with `NATIVE_E2E_ARGS="--skip-build --keep"`.
+
+Budget 15–25 minutes for a cold run; almost all of it is the compiler.
+
+## Building
+
+```bash
+# From the working tree, through the same Dockerfile the release uses
+make kates-image-native-local
+
+# Deploy it, pinned so the kubelet cannot reach for the registry
+make kates-native-local
+
+# Or build directly
+docker build -f kates/Dockerfile.native -t kates:native-local .
+```
+
+Two chart overlays exist for the native image, and picking the wrong one is the
+easiest way to waste a build:
+
+| File | Image | Use |
+|---|---|---|
+| `values-native.yaml` | `ghcr.io/bmscomp/kates:<appVersion>-native` | Real deployments |
+| `values-native-local.yaml` | `kates:native-local`, `pullPolicy: Never` | Validating a local build |
+
+The compiler needs roughly **8 GB of memory** and 15–25 minutes on four cores.
+On Docker Desktop, raise the VM memory limit first — below about 6 GB the build
+dies with an opaque OOM kill that reads like a compiler crash.
+
+Two build settings are load-bearing and set in `Dockerfile.native`:
+
+- `-Dquarkus.native.native-image-xmx=8g` — memory for the compiler. It must go
+  through this property, **not** `additional-build-args`: that key already
+  carries the `--initialize-at-run-time` list from `application.properties`, and
+  passing it on the command line replaces the whole value rather than appending
+  to it.
+- `-Dquarkus.native.march=compatibility` — without it the compiler targets the
+  build machine's CPU, and the binary dies with `SIGILL` on older hardware.
+
+## Verifying
+
+```bash
+make kates-native-smoke                       # against kates:native-local
+IMAGE=kates:native-ci make kates-native-smoke  # or any other tag
+```
+
+`scripts/native-smoke-test.sh` boots the binary against a throwaway Postgres and
+calls the paths where AOT breakage shows up: liveness, readiness (which proves
+Flyway ran, including the non-transactional V20), OpenAPI, the playbook catalog
+(classpath YAML), and a domain payload (reflection). CI runs the same script on
+every PR that touches `kates/**`, plus nightly — see
+`.github/workflows/native.yml`.
+
+## Keeping reflection registration honest
+
+`NativeReflectionConfig` and `NativePayloadReflectionConfig` list the types that
+cross the wire. `NativeReflectionRegistryTest` walks the compiled payload
+packages and fails the build when a class is missing from them, so you find out
+in the unit suite instead of in production.
+
+When it fails, add the class to `NativePayloadReflectionConfig`. If the class
+genuinely never leaves the process, add it to that test's `NOT_SERIALIZED` set
+with a one-line reason instead.
+
+Registration is needed because almost every endpoint here returns
+`Response.ok(...)`. Quarkus registers types it can see in a resource method's
+signature; an opaque `Response` tells it nothing.
+
+## Adding a classpath resource
+
+Anything read with `getResourceAsStream` at runtime must be matched by
+`quarkus.native.resources.includes` in `application.properties`, or it will not
+be in the image. Current entries and why:
+
+| Pattern | Why |
+|---|---|
+| `linux/**/*.so`, `darwin/**/*.dylib`, `org/xerial/snappy/native/**`, `net/jpountz/**`, `com/github/luben/zstd/**` | Compression JNI libraries, extracted at runtime |
+| `db/migration/*.conf` | Flyway script config sidecars — V20 must run outside a transaction |
+| `playbooks/*.yaml` | The disruption playbook catalog |
+
+A missing pattern is not an error at build time. The feature just comes up
+empty, which is why the smoke test asserts on the playbook catalog specifically.
+
+## Debugging a failure
+
+**The build fails with "Classes that should be initialized at run time got
+initialized during image building"** — a class ran its static initializer during
+the build, usually because it loads a native library or seeds a `SecureRandom`.
+Add it to the `--initialize-at-run-time` list in
+`quarkus.native.additional-build-args`. The error names the offending class and
+the chain that reached it; read the chain, since the root cause is often the
+class that *touched* it, not the one named.
+
+**An endpoint returns `{}` or 500 with "No serializer found"** — the response
+type is not registered. Add it to `NativePayloadReflectionConfig`;
+`NativeReflectionRegistryTest` should have caught it, so also check whether the
+class lives outside the packages that test scans.
+
+**`UnsatisfiedLinkError` during a benchmark** — a compression library was not
+extracted into `/app/lib`. The Dockerfile's extraction step has a guard that
+fails the build when zstd, lz4 or snappy is missing; if it passed and the error
+still happens, check `LD_LIBRARY_PATH` in the runtime stage.
+
+**`ClassNotFoundException: net.jpountz.lz4.LZ4JavaSafeCompressor`, wrapped in an
+`AssertionError`, from the producer** — the compression codec, not the native
+library. lz4-java never names its implementations in code: `LZ4Factory` builds
+`"net.jpountz.lz4.LZ4" + impl + "Compressor"` for impl in `JNI`, `JavaSafe`,
+`JavaUnsafe`, calls `Class.forName` on it and reads the static `INSTANCE` field.
+`XXHashFactory` does the same for the checksums in Kafka's LZ4 framing.
+
+Two things must therefore be true of the registration:
+
+1. **All three impls registered, not just JNI.** The factory falls back
+   JNI → JavaUnsafe → JavaSafe, so registering only the JNI variants leaves the
+   fallback path missing from the image.
+2. **Field access on each.** The class being present is not enough —
+   `getField("INSTANCE")` needs it, and without it even the JNI path fails,
+   which is what silently pushes it into the fallback.
+
+**Register these in `CompressionReflectionConfig`, not in
+`reflect-config.json`.** The first attempt at this fix went into
+`META-INF/native-image/reflect-config.json` and did not take: the rebuilt image
+threw the same `ClassNotFoundException` from all three implementations, which is
+what a registration that was never read looks like. Quarkus's
+`@RegisterForReflection` is applied by a build step rather than found by
+scanning, and the SASL classes registered that way in `KafkaSecurityConfig` have
+always survived into the image. Treat the JSON files here as covering only what
+the extensions already handle.
+
+`CompressionReflectionConfigTest` asserts the list is complete, that
+`fields = true`, and that every registered name exists on the classpath. It runs
+in the normal unit suite, so a missing codec fails the build rather than a
+benchmark twenty minutes into a native run.
+
+The same class resolves both factories on `StartupEvent` and logs the winner:
+
+```
+INFO  [com.bms.kat.con.CompressionReflectionConfig] lz4 available: JNI
+INFO  [com.bms.kat.con.CompressionReflectionConfig] xxhash available: JNI
+```
+
+If a codec is missing, that becomes an ERROR at boot naming it. Check for those
+two lines first when a native benchmark fails on its first record — one
+`kubectl logs | grep available` settles it in a second.
+
+**The container is killed shortly after start** — the native image ignores
+`JAVA_TOOL_OPTIONS`, so the chart's `jvm.options` does nothing here. Heap is
+governed by the image's `CMD` (`-XX:MaximumHeapSizePercent=75`), overridable
+with `args:` on the container. Use `charts/kates/values-native.yaml`, which
+empties `jvm.options` and sizes resources for a native binary.
+
+## Running it
+
+```bash
+helm upgrade --install kates charts/kates -n kates \
+  -f charts/kates/values-native.yaml
+```
+
+Images are published as `<appVersion>-native` alongside the JVM tag by
+`.github/workflows/publish-docker.yml` on a `v*` tag.

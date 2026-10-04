@@ -2,10 +2,14 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
+        "productionMode": {
+            "type": "boolean",
+            "description": "Enable production guard rails: rendering fails if insecure defaults would reach the cluster"
+        },
         "replicaCount": {
             "type": "integer",
-            "minimum": 1,
-            "description": "Number of Kates replicas"
+            "const": 1,
+            "description": "Number of Kates API pods. Must be 1: the Kates API keeps runs, the concurrent-run limit, the disruption lease and event streams in its own memory, and a starting pod marks every RUNNING run FAILED, so a second pod fails the first one's runs"
         },
         "image": {
             "type": "object",
@@ -56,6 +60,16 @@
             "type": "object",
             "properties": {
                 "create": { "type": "boolean" },
+                "directChaos": { "type": "boolean" },
+                "cdcSecretNamespaces": {
+                    "type": "array",
+                    "description": "Namespaces where the INTEGRATION_CDC test may get the Secret postgresql, its database's password; one Role each",
+                    "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+                        "maxLength": 63
+                    }
+                },
                 "extraRules": { "type": "array" }
             }
         },
@@ -216,24 +230,23 @@
         },
         "strategy": {
             "type": "object",
+            "description": "Must be Recreate, with no rollingUpdate block: a RollingUpdate starts the new pod while the old one still runs, and two Kates API pods fail each other's runs (see replicaCount)",
             "properties": {
                 "type": {
                     "type": "string",
-                    "enum": [ "RollingUpdate", "Recreate" ]
-                },
-                "rollingUpdate": {
-                    "type": "object",
-                    "properties": {
-                        "maxSurge": { "type": "integer", "minimum": 0 },
-                        "maxUnavailable": { "type": "integer", "minimum": 0 }
-                    }
+                    "const": "Recreate"
                 }
-            }
+            },
+            "additionalProperties": false
         },
         "autoscaling": {
             "type": "object",
             "properties": {
-                "enabled": { "type": "boolean" },
+                "enabled": {
+                    "type": "boolean",
+                    "const": false,
+                    "description": "Must be false: Kates runs one replica (see replicaCount), and the CPU a native benchmark burns would make an autoscaler add a pod mid-run"
+                },
                 "minReplicas": { "type": "integer", "minimum": 1 },
                 "maxReplicas": { "type": "integer", "minimum": 1 },
                 "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1, "maximum": 100 },
@@ -246,7 +259,10 @@
             "type": "object",
             "properties": {
                 "enabled": { "type": "boolean" },
-                "minAvailable": {},
+                "minAvailable": {
+                    "enum": [ "", 0 ],
+                    "description": "Must stay empty: with one Kates API pod, any minimum leaves it unevictable and a node drain never ends. Set maxUnavailable instead"
+                },
                 "maxUnavailable": {},
                 "unhealthyPodEvictionPolicy": {
                     "type": "string",
@@ -385,7 +401,21 @@
         "trogdor": {
             "type": "object",
             "properties": {
-                "coordinatorUrl": { "type": "string" }
+                "coordinatorUrl": { "type": "string" },
+                "agentNodes": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Trogdor agent node names tasks run on, comma-separated (KATES_TROGDOR_AGENT_NODES)"
+                }
+            }
+        },
+        "prometheus": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Prometheus base URL the backend queries for disruption metrics (KATES_PROMETHEUS_URL); empty leaves the backend's own default"
+                }
             }
         },
         "engine": {
@@ -472,7 +502,15 @@
                     "type": "object",
                     "properties": {
                         "enabled": { "type": "boolean" },
-                        "labels": { "type": "object" }
+                        "namespace": { "type": "string" },
+                        "label": { "type": "string" },
+                        "labelValue": { "type": "string" },
+                        "folder": { "type": "string" },
+                        "labels": {
+                            "type": "object",
+                            "description": "Extra labels, merged with (not replacing) label/labelValue",
+                            "additionalProperties": { "type": "string" }
+                        }
                     }
                 }
             }
@@ -481,7 +519,6 @@
             "type": "object",
             "properties": {
                 "enabled": { "type": "boolean" },
-                "useSubchart": { "type": "boolean" },
                 "image": {
                     "type": "object",
                     "properties": {
@@ -529,22 +566,6 @@
                 "password": { "type": "string" },
                 "existingSecret": { "type": "string" },
                 "passwordKey": { "type": "string" }
-            }
-        },
-        "postgresqlHA": {
-            "type": "object",
-            "properties": {
-                "auth": {
-                    "type": "object",
-                    "properties": {
-                        "database": { "type": "string" },
-                        "username": { "type": "string" },
-                        "password": { "type": "string" }
-                    }
-                },
-                "architecture": { "type": "string", "enum": [ "standalone", "replication" ] },
-                "primary": { "type": "object" },
-                "readReplicas": { "type": "object" }
             }
         },
         "defaults": {

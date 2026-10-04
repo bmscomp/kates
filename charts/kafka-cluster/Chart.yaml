@@ -1,9 +1,12 @@
 apiVersion: v2
 name: kafka-cluster
-description: Strimzi-based Kafka cluster deployment with KRaft, zone-aware broker pools, and full observability
+description: A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability
 type: application
-version: 0.1.1
-appVersion: "4.2.0"
+# Patch: the Helm-test images move to kates-tester 1.24.0, the tag the
+# v1.24.0 release publishes; every Strimzi chart pins the same one.
+# Templates and defaults are otherwise unchanged.
+version: 1.0.5
+appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
 keywords:
@@ -17,8 +20,68 @@ maintainers:
 sources:
   - https://github.com/strimzi/strimzi-kafka-operator
 dependencies:
-
+  - name: kafka-common
+    version: 0.1.0
+    repository: file://../kafka-common
   - name: seaweedfs
     version: "3.68.0"
     repository: "https://seaweedfs.github.io/seaweedfs/helm"
     condition: seaweedfs.enabled
+annotations:
+  # The oldest Kafka this chart's PRIMARY configuration can run. values.yaml
+  # turns on share groups (kafka.config `group.share.enable: true`), which need
+  # Kafka >= 4.2 and a metadata version >= 4.2; the chart therefore renders the
+  # share-group keys only for kafkaVersion >= this floor, and an additional
+  # cluster below it starts without them. The CLI reads this annotation to
+  # decide which operators can host the primary (window ∩ >= floor must be
+  # non-empty); scripts/check-versions.sh asserts the default kafkaVersion is
+  # at or above it. Raise it when the platform's configuration needs something
+  # newer; never lower it without removing the feature that set it.
+  kates.io/kafka-floor: "4.2.0"
+  artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kafka and testImages.kubectl move to kates-tester 1.24.0, the tag the v1.24.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image changes this time: its Kafka CLI moves from 3.7.0 on debian:bookworm-slim to 4.3.1 on debian:trixie-slim, the Kafka the charts deploy, without the 3.7 line's kafka-clients, ZooKeeper and Jetty 9.4 CVEs (#184). A 4.x CLI talks to brokers 2.1 and newer"
+    - kind: fixed
+      description: "The platform profile's cdc-schema-history topic was compacted. Debezium writes its schema history without record keys, and a compacted topic refuses keyless records, so a connector that keeps a schema history — the Connect image's MySQL and SQL Server connectors — failed on its first schema write. The topic is cleanup.policy=delete with retention.ms=-1 and retention.bytes=-1 — the settings Debezium checks for — so no history is ever deleted; the broker's 10 GiB log.retention.bytes no longer applies to it"
+    - kind: changed
+      description: "The platform profile's kates-dlq topic moves from compact to delete, keeping its unlimited retention.ms. Compaction kept only the latest failure per key and refused keyless records. On upgrade the Topic Operator applies the new policy to the existing topic and deletes no record by age; the brokers' log.retention.bytes (10 GiB per partition) is now the only bound. Set retention.ms under topics.items.kates-dlq.config to age failures out"
+    - kind: fixed
+      description: "Helm test 02 (produce/consume) passed --broker-list to kafka-console-producer.sh, which Kafka 4.0 removed, so on a 4.x CLI — kates-tester from the next release, or the Strimzi image the tests fall back to when testImages.kafka is empty — the producer exited 1 and the test always failed. It passes --bootstrap-server, which the 3.x CLI accepts too"
+    - kind: fixed
+      description: "Helm test 11 (tiered storage) proved it had read offset 0 back from object storage by counting stdout bytes. The Kafka 4.x console consumer prints an option-deprecation notice on stdout, so the count was never 0 and the check could not fail. It now reads the consumer's own 'Processed a total of N messages' line from stderr, on the 3.x and 4.x CLI alike"
+    - kind: changed
+      description: "testImages.kafka and testImages.kubectl move to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
+    - kind: fixed
+      description: values-kind.yaml held monitoring.podMonitor.enabled and alerts.enabled at false, so a kind install never created its PodMonitors or its PrometheusRule and every Kafka board stayed empty. The overlay leaves both at the chart defaults; the templates already render nothing where the monitoring.coreos.com API is absent
+    - kind: added
+      description: nodePools — one model for every pool (defaults, roleDefaults, pools) with working defaults of three controllers and three brokers, per-pool storage/resources/scheduling, dual-role pools and namespaced sysctls. The 0.4 pool keys are translated
+    - kind: added
+      description: profile — profiles/platform.yaml carries the kates platform's topics, users, super user and client grants; values-platform.yaml selects it. The base values are generic
+    - kind: added
+      description: tieredStorage renders spec.kafka.tieredStorage with the plugin image, class, config and credentials; the backup leaves broker-only volumes out only while it is active. Helm test test-tiered-storage proves offload and remote reads
+    - kind: added
+      description: KafkaRebalance templates referenced by cruiseControl.autoRebalance; an opt-in full rebalance (rebalance.full)
+    - kind: added
+      description: kafka.quotas, kafka.image, logging, jmxOptions, probes, maintenanceTimeWindows, cruiseControl.apiUsers/template, entityOperator.template, kafka.externalAccess presets
+    - kind: added
+      description: networkPolicy.clients — who may reach which listeners, ports derived from kafka.listeners; tiered-storage egress; the test pods may reach the API server
+    - kind: added
+      description: Strimzi's own JMX exporter rules (vendored, checked against upstream), a Cruise Control rule set of its own, PodMonitors per component with the Strimzi relabelings, alerts scoped to the cluster with runbook links (docs/kafka-cluster-runbook.md), recording rules and an optional availability SLO
+    - kind: added
+      description: Rails for the metadata version, pools, replication factors against the broker count, min.insync.replicas, tiered storage, sysctls, listener names, Cruise Control and productionMode
+    - kind: changed
+      description: Every namespaced resource is named <clusterName>-… so clusters can share a namespace; compatibility.legacyResourceNames keeps the 0.4 names (the metrics ConfigMap rename rolls brokers)
+    - kind: changed
+      description: The base values expose no NodePort listener and grant no super user; alerts and PodMonitors render only where the monitoring.coreos.com API exists
+    - kind: changed
+      description: Alerts renamed or replaced — KafkaRaftLeaderElectionRate is KafkaRaftLeaderElections, KafkaRaftUncommittedRecords is KafkaRaftUnknownVoters; new KafkaUnderMinIsrPartitions, KafkaOfflineLogDirectory, KafkaUncleanLeaderElection, KafkaNodesMissing, KafkaFencedBrokers, KafkaBrokerMetadataLag, KafkaRequestQueueSaturated, CruiseControlNoLoadModel, KafkaTieredStorageCopyErrors
+    - kind: changed
+      description: podSecurityPolicy is kyvernoPolicy, with a per-cluster ClusterPolicy name and optional PolicyExceptions
+    - kind: removed
+      description: The CRD hook, the drain cleaner, StrimziOperatorDown and the certificate alerts belong to strimzi-operator 0.3; drainCleaner.enabled=true fails with a pointer
+    - kind: removed
+      description: The chart's Kafka, KRaft, Cruise Control and Connect dashboards read 36 series no rule produced; the operator's dashboards (strimzi-operator) replace them
+    - kind: removed
+      description: The kafka-connect, kafka-mirror-maker, kafka-ui, strimzi-drain-cleaner and operator NetworkPolicies, which select other releases' pods
+    - kind: fixed
+      description: Controller pools honour their own resources and JVM options; the anti-affinity of controllers is scoped to the cluster

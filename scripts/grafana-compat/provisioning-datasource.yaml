@@ -1,0 +1,11 @@
+# The boards ship asking for the datasource named `default`, which resolves to
+# the org default — so this one is the default, and the compat run proves that
+# resolution still happens on every version tested.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://kates-compat-prom:9090
+    isDefault: true
+    uid: kates-compat-prom

@@ -1,24 +1,42 @@
-name: CI — Kafka Connect Image
+name: CI · Connect
 
 on:
   push:
     branches: [main]
-    paths:
-      - "Dockerfile.connect"
-      - ".github/workflows/ci-connect.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "Dockerfile.connect"
-      - ".github/workflows/ci-connect.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            image:
+              - 'Dockerfile.connect'
+              - 'scripts/connect-smoke-test.sh'
+              - '.github/workflows/ci-connect.yml'
+
   build-validation:
     name: Build Connect (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -30,10 +48,10 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Extract Debezium version
         id: version
@@ -43,7 +61,7 @@ jobs:
           echo "tag=${DBZ%.Final}" >> "$GITHUB_OUTPUT"
 
       - name: Build image (no push)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile.connect
@@ -53,20 +71,40 @@ jobs:
           cache-from: type=gha,scope=connect-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=connect-${{ matrix.arch }}
 
-      - name: Verify plugins are present
+      # Counting jars proved nothing. A plugin directory can hold forty jars that
+      # cannot resolve their own imports: Connect logs a LinkageError during the
+      # scan, starts without the plugin, and this step still printed a green
+      # tick. Both the Apicurio converters and the Debezium scripting SMTs
+      # shipped broken that way. Boot the image instead and move a record
+      # through it.
+      - name: Integration test (boot the image and use it)
         if: matrix.arch == 'amd64'
         run: |
           docker buildx build --load \
             -t connect:verify \
             -f Dockerfile.connect .
+          # Exit 75 is the suite saying it could not RUN — a fixture image that
+          # would not pull. That is a registry having a bad day (quay.io served
+          # 504s through one of these runs), not a defect in the image, so give
+          # it one more go before calling the build red. Every other non-zero
+          # exit is a finding and fails the job immediately.
+          rc=0
+          scripts/connect-smoke-test.sh connect:verify || rc=$?
+          if [ "$rc" -eq 75 ]; then
+            echo "::warning::fixture images were unavailable; retrying the smoke test once"
+            scripts/connect-smoke-test.sh connect:verify
+          else
+            exit "$rc"
+          fi
 
-          echo "=== Connector Plugins ==="
-          docker run --rm --entrypoint sh connect:verify -c \
-            'for d in /opt/kafka/plugins/*/; do
-               echo "✅ $(basename $d) ($(ls $d/*.jar 2>/dev/null | wc -l) JARs)"
-             done'
-
-          echo ""
-          echo "=== Debezium Version Check ==="
-          docker run --rm --entrypoint sh connect:verify -c \
-            'ls /opt/kafka/plugins/debezium-postgres/debezium-connector-postgres-*.jar'
+  gate:
+    name: Gate · Connect
+    if: always()
+    needs: [changes, build-validation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

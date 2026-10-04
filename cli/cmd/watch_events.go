@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -16,21 +17,21 @@ var (
 	watchFollow bool
 
 	watchInfoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#06B6D4"))
+			Foreground(theme.Info)
 
 	watchWarnStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F59E0B")).
+			Foreground(theme.Warning).
 			Bold(true)
 
 	watchErrStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EF4444")).
+			Foreground(theme.Error).
 			Bold(true)
 
 	watchOkStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#22C55E"))
+			Foreground(theme.Success)
 
 	watchTimeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(theme.Muted)
 )
 
 var watchEventsCmd = &cobra.Command{
@@ -44,7 +45,7 @@ Like 'kubectl get events --watch' but for Kafka testing.`,
   kates watch --type test
   kates watch --id abc123`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("  Kates Event Stream"))
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(theme.Primary).Render("  Kates Event Stream"))
 		fmt.Println(watchTimeStyle.Render("  Watching for events… (Ctrl+C to stop)"))
 		fmt.Println()
 

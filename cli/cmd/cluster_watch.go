@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +58,7 @@ var clusterWatchCmd = &cobra.Command{
 
 			hist.record(report)
 
-			fmt.Print("\033[2J\033[H")
+			output.ClearFrame(IsInteractive())
 
 			statusLabel := output.SuccessStyle.Render("● HEALTHY")
 			if report.Status == "WARNING" {

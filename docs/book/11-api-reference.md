@@ -1,12 +1,16 @@
+---
+toc-depth: 4
+---
+
 # REST API Reference
 
 ## Introduction
 
-The Kates backend exposes a RESTful API that the CLI and other clients use to manage tests, reports, and disruptions. Every action available in the `kates` CLI maps directly to a REST call — the CLI is a thin wrapper around this API. This means that anything you can do interactively from the command line can be automated via HTTP requests, making the REST API the foundation for scripting, CI/CD integration, and custom dashboards.
+The Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)), serves this RESTful API, which the CLI and other clients use to manage tests, reports, and disruptions. Most CLI commands call it, so a script can do over HTTP what they do. The commands that install and reach the stack run `kubectl` and `helm` instead, and a few only read local files, as the [Commands](10-cli-reference.md#commands) table in CLI Reference shows. The REST API is what scripts, CI/CD integration and custom dashboards build on.
 
 **When should you choose the REST API over the CLI or gRPC?** Use the REST API when you need to integrate Kates into shell scripts, automation pipelines, or monitoring systems that work best with JSON over HTTP. It is ideal for `curl`-based workflows, webhook integrations, and any tool that speaks HTTP natively. The API is human-readable and easy to debug — every request and response is plain JSON, so you can inspect traffic with standard tools like `curl`, `httpie`, or browser dev-tools.
 
-If you need strongly typed clients, streaming results, or high-throughput programmatic access from Go, Java, or Python services, consider the [gRPC API](16-grpc-api.md) instead. If you prefer an interactive experience with formatted output, the [CLI](10-cli-reference.md) is the best choice. All three interfaces share the same backend service layer, so results are identical regardless of which you choose.
+If you need strongly typed clients or high-throughput programmatic access from Go, Java, or Python services, consider the [gRPC API](16-grpc-api.md) instead; it covers test runs, cluster inspection, and health. If you prefer an interactive experience with formatted output, the [CLI](10-cli-reference.md) is the best choice. All three interfaces reach the same Kates API, so a test run is the same run whichever one started it; [gRPC API Reference](16-grpc-api.md) lists the places where gRPC responses carry less than REST.
 
 After this chapter, you can:
 
@@ -19,7 +23,15 @@ After this chapter, you can:
 
 ## Authentication
 
-Kates enforces API-key authentication **by default**: `kates.api.security-enabled=true` in `application.properties` (the `%dev` and `%test` profiles disable it). The expected key comes from the `kates.api.key` property, which reads the `KATES_API_KEY` environment variable; the Helm chart provisions it as a Kubernetes Secret via the `apiKey` values (see [Security & Compliance](17-security.md)).
+Kates enforces API-key authentication **by default**: `kates.api.security-enabled=true` in `application.properties` (the `%dev` and `%test` profiles disable it). The expected key comes from the `kates.api.key` property, which reads the `KATES_API_KEY` environment variable; the Helm chart provisions it as a Kubernetes Secret via the `apiKey` values in `charts/kates/values.yaml`: `enabled`, `value` (a random 32-character key when empty, kept across upgrades), and `existingSecret` with `secretKey` to use a Secret you manage.
+
+On a default install the chart generates a random key into the `kates-api-key` Secret in the `kates` namespace. Read it into a shell variable once; every example in this chapter uses it:
+
+```bash
+export KATES_API_KEY="$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)"
+```
+
+The CLI reads the same variable, ahead of the key stored in its context.
 
 Include the key in every request, using either header form:
 
@@ -34,7 +46,7 @@ Requests without a key receive `401 Unauthorized`; requests with a wrong key rec
 
 | Header | Value | Required | Description |
 |--------|-------|:---:|-------------|
-| `Content-Type` | `application/json` | ✅ (POST/PUT) | Request body format |
+| `Content-Type` | `application/json` | Yes (POST/PUT) | Request body format |
 | `Accept` | `application/json` | | Response format (default) |
 | `Authorization` | `Bearer <api-key>` | When security enabled | API key (alternative: `X-API-Key`) |
 | `X-API-Key` | `<api-key>` | When security enabled | API key (alternative to `Authorization`) |
@@ -51,19 +63,21 @@ In Quarkus dev mode and in tests, security is switched off (`%dev.kates.api.secu
 http://localhost:30083
 ```
 
-Port `30083` is the NodePort defined by the kind overlay (`charts/kates/values-kind.yaml`) — it is not a universal default. On other clusters, port-forward the service (`kubectl port-forward svc/kates 8080:8080`) and target `http://localhost:8080`. When running in-cluster, use the Kubernetes service DNS name: `http://kates.kates.svc.cluster.local:8080`
+`localhost:30083` is the local end of the port-forward that `make ports` (`scripts/port-forward.sh`) starts to port 8080 of the `kates` Service; nothing answers there until it runs. The number matches the NodePort the Kind overlay assigns (`charts/kates/values-kind.yaml`), but the Kind cluster does not publish NodePorts on the host, so the forward is what makes the API reachable. Without the repository's scripts, forward the Service yourself with `kubectl port-forward svc/kates -n kates 30083:8080`, or run `kates ports`, which forwards it to `localhost:8080` instead. When running in-cluster, use the Kubernetes service DNS name: `http://kates.kates.svc.cluster.local:8080`
 
 ---
 
 ## Endpoints
 
-This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The backend exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates/schedules/playbooks, resilience scenarios, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi` (Swagger UI is available at `/q/swagger-ui` in dev mode).
+This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The Kates API exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates and schedules, resilience scenarios, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi` (Swagger UI is available at `/q/swagger-ui` in dev mode).
 
 ### Health & System
 
+Call this endpoint first to learn whether the Kates API is up and can reach Kafka; `kates health` shows the same answer.
+
 #### GET /api/health
 
-System health check including Kafka connectivity and engine status. This endpoint is public — no API key required.
+System health check including Kafka connectivity and the benchmark backends: `engine.activeBackend` is the one a test uses when it names none. This endpoint is public — no API key required.
 
 **Response:** `200 OK`
 
@@ -73,7 +87,7 @@ System health check including Kafka connectivity and engine status. This endpoin
   "engine": { "activeBackend": "native", "availableBackends": ["native", "trogdor"] },
   "kafka": {
     "status": "UP",
-    "bootstrapServers": "krafter-kafka-bootstrap.kafka.svc:9092",
+    "bootstrapServers": "krafter-kafka-bootstrap.kafka.svc.cluster.local:9092",
     "message": "Kafka cluster is reachable"
   }
 }
@@ -84,6 +98,8 @@ The response also contains a `tests` object with the resolved default configurat
 ---
 
 ### Test Management
+
+These endpoints start performance test runs, then find, follow and delete them. A run executes in the background, so you create it and then poll it; `kates test` wraps these calls, and [Test Types Deep Dive](05-test-types.md) explains what each type measures.
 
 #### POST /api/tests
 
@@ -98,27 +114,62 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
   "spec": {
     "numRecords": 100000,
     "recordSize": 1024,
-    "numProducers": 4,
-    "numConsumers": 2,
     "acks": "all",
     "topic": "perf-test",
     "partitions": 3,
     "replicationFactor": 3,
     "minInsyncReplicas": 2,
     "durationMs": 120000,
-    "throughput": -1,
-    "consumerGroup": "perf-cg",
-    "fetchMinBytes": 1,
-    "fetchMaxWaitMs": 500
+    "throughput": -1
   }
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
-| `type` | String | ✅ | Test type — any value returned by `GET /api/tests/types` (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY, the TUNE_* family, INTEGRATION_CDC) |
-| `backend` | String | | Backend engine (default: "native") |
+| `type` | String | Yes | Test type — any value returned by `GET /api/tests/types` (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY, the TUNE_* family, INTEGRATION_CDC) |
+| `backend` | String | | Benchmark backend: `native` or `trogdor` (default: `native`) |
 | `spec` | Object | | Test specification overrides |
+
+::: {.callout-important}
+The Kates API merges `spec` with the defaults of the test type: a field the request sets wins, and the type's default fills each one it leaves out. What the fields do:
+
+- `throughput` is the rate each producer honours, in records per second, and -1 is unlimited. `targetThroughput` is another name for it, the one `kates test create --throughput` and scenario files send. When both are set, `throughput` wins; when only `targetThroughput` is, it sets the rate in place of the type's default. In the merged `spec`, `throughput` is the rate the run used.
+- `consumerGroup` names the consumer's group, and must not be empty or blank. A group that already has committed offsets on the topic resumes from them, and a LOAD or ENDURANCE consumer commits offsets as it reads, so a group an application uses would rebalance and lose its place: give a test a group of its own. An INTEGRITY run's consumer joins the name with `-integrity` appended; without one it is `integrity-cg-integrity`, and a LOAD or ENDURANCE consumer gets a group named after its task.
+- `fetchMinBytes` and `fetchMaxWaitMs` become the consumer's `fetch.min.bytes` and `fetch.max.wait.ms`.
+- `enableIdempotence` sets the producer's `enable.idempotence`, `false` included. Left out, the Kafka client decides, and it turns idempotence on whenever `acks` is `all`.
+- `enableTransactions` makes every producer of the run transactional, committing every 100 records or every 10 seconds, whichever comes first, so a slow producer stays inside the client's 60-second transaction timeout; a LOAD or ENDURANCE consumer then reads with `read_committed`, as the INTEGRITY consumer does.
+- `enableCrc` turns an INTEGRITY run's CRC check of each record on or off.
+- `numProducers` sets the number of producers for STRESS and CAPACITY only, and no test type reads `numConsumers`, so a LOAD run has one producer and one consumer whatever the spec says.
+
+The merged `spec` holds every field the type has a default for. `targetThroughput`, `consumerGroup`, the fetch settings and the three `enable` options have none, and appear in it only when the request set them, so an `enableIdempotence: false` there is always the request's.
+
+On the `trogdor` benchmark backend, the producer settings (`acks`, `batchSize`, `lingerMs`, `compressionType`, `enableIdempotence`) and the fetch settings go into the Trogdor spec's `producerConf` and `consumerConf`. A Trogdor run stored before the Kates API kept the request, one without `requestedSpec`, ran with the Kafka client's defaults whatever those settings said, so its results do not compare with a later Trogdor run of the same spec.
+:::
+
+A field the run could not honour is refused rather than ignored: the answer is `400` with `error` `Validation Failed`, a `message` that names each field, and `fieldErrors`, one entry per field with the reason. A value that asks for nothing passes, because the run honours it anyway, such as `throughput: -1` for SPIKE, `enableCrc: false` for LOAD or `enableIdempotence: false` for INTEGRATION_CDC. So the `spec` of a run that has a `requestedSpec` is valid input again, and can be sent back as a request; an older run's `spec` holds fields the Kates API then ignored (see `GET /api/tests/{id}` below), which is why `kates replay` leaves them out.
+
+| Field | Refused when |
+|-------|--------------|
+| `throughput`, `targetThroughput` | Any value but -1 for SPIKE and CAPACITY, which run their producers unthrottled, and for INTEGRATION_CDC, which runs no Kates producer |
+| `consumerGroup`, `fetchMinBytes`, `fetchMaxWaitMs` | Every type but LOAD, ENDURANCE and INTEGRITY: ROUND_TRIP's consumer uses no group and the client's fetch defaults, and the rest start none |
+| `enableCrc` | `true` for any type but INTEGRITY, the only one that checks CRCs |
+| `enableIdempotence` | `true` when the run's `acks`, the request's or the type's default (SPIKE's is `1`), is not `all`, or for INTEGRATION_CDC |
+| `enableTransactions` | `true` when `acks` is not `all`, when the request sets `enableIdempotence: false`, on the `trogdor` benchmark backend, or for INTEGRATION_CDC |
+| `durationMs` | The run would last longer than `kates.engine.max-duration-ms`, two hours by default: its `durationMs`, or the type's default without one, twice that for INTEGRITY, which reads its records back for as long again |
+
+A request with a `scenario` and its `phases` is checked the same way. Each phase starts producers only, so `consumerGroup`, the fetch settings and `enableCrc: true` are refused in its `baseSpec` or in a phase's `spec`, with `fieldErrors` keyed by their path in the scenario, such as `baseSpec.consumerGroup` or `phases[0].spec.fetchMinBytes`. The producer options reach every phase, checked against the `acks` each phase runs with, and a phase's rate follows the rule above: its `throughput`, or its `targetThroughput` without one. A scenario whose phases' durations add up to more than `kates.engine.max-duration-ms` is refused with `fieldErrors` keyed `phases`.
+
+```json
+{
+  "status": 400,
+  "error": "Validation Failed",
+  "message": "spec.consumerGroup: STRESS starts no consumer; only LOAD, ENDURANCE and INTEGRITY do",
+  "fieldErrors": {
+    "consumerGroup": "STRESS starts no consumer; only LOAD, ENDURANCE and INTEGRITY do"
+  }
+}
+```
 
 **Response:** `202 Accepted`
 
@@ -129,15 +180,24 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
   "status": "PENDING",
   "backend": "native",
   "spec": {
-    "numRecords": 100000, "recordSize": 1024, "numProducers": 4, "numConsumers": 2,
-    "acks": "all", "topic": "perf-test", "partitions": 3, "replicationFactor": 3,
-    "minInsyncReplicas": 2, "durationMs": 120000, "throughput": -1
+    "topic": "perf-test", "numRecords": 100000, "recordSize": 1024, "throughput": -1,
+    "acks": "all", "batchSize": 65536, "lingerMs": 5, "compressionType": "lz4",
+    "numProducers": 1, "numConsumers": 1, "durationMs": 120000,
+    "replicationFactor": 3, "partitions": 3, "minInsyncReplicas": 2
+  },
+  "requestedSpec": {
+    "numRecords": 100000, "recordSize": 1024, "acks": "all", "topic": "perf-test", "partitions": 3,
+    "replicationFactor": 3, "minInsyncReplicas": 2, "durationMs": 120000, "throughput": -1
   },
   "createdAt": "2026-02-15T20:00:00Z"
 }
 ```
 
-Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`.
+The `spec` in the response is the merged one: the request's values, and the LOAD defaults for everything it leaves out that LOAD has a default for. `requestedSpec` is the request's own `spec`, only the fields it set, so the two tell a requested value from a default; a request without a `spec` gets an empty one. The Kates API stores both, and `kates replay` sends `requestedSpec` back to start the run again.
+
+Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
+
+A run still `RUNNING` five minutes (`kates.engine.reaper-grace-ms`) after the time it was set to last, counted from its creation, is stopped and stored as `FAILED` too. That time is its `durationMs`, twice that for INTEGRITY, or a scenario's phases added up; INTEGRATION_CDC, which has no duration of its own, gets `kates.engine.max-duration-ms`. Each task that had not finished carries an error that starts `Timeout:`, and the tasks that had keep their results.
 
 #### GET /api/tests
 
@@ -180,7 +240,7 @@ List test runs with pagination and filtering.
 
 Get full details of a test run, refreshing its status. The run carries one result entry per task/phase; for INTEGRITY tests each result also includes an `integrity` object (lost/duplicate records, RTO/RPO).
 
-**Response:** `200 OK`
+**Response:** `200 OK` (`spec` and `requestedSpec` cut down to four fields; they are the merged spec and the request's own fields shown under [POST /api/tests](#post-apitests)). A run stored before the Kates API kept the request has no `requestedSpec`, and its `spec` shows `targetThroughput`, `consumerGroup`, the fetch settings and the three `enable` options at their Java defaults whatever the request said: the Kates API dropped them then, and the run went without them.
 
 ```json
 {
@@ -188,24 +248,27 @@ Get full details of a test run, refreshing its status. The run carries one resul
   "testType": "LOAD",
   "status": "DONE",
   "backend": "native",
-  "spec": { "numRecords": 100000, "recordSize": 1024, "numProducers": 4, "numConsumers": 2, "acks": "all", "topic": "perf-test" },
+  "spec": { "topic": "perf-test", "numRecords": 100000, "recordSize": 1024, "acks": "all" },
+  "requestedSpec": { "topic": "perf-test", "numRecords": 100000, "recordSize": 1024, "acks": "all" },
   "results": [
     {
-      "taskId": "producer-1", "phaseName": "ramp-up", "status": "DONE", "recordsSent": 10000,
-      "throughputRecordsPerSec": 5234.1, "throughputMBPerSec": 5.1,
-      "avgLatencyMs": 4.8, "p50LatencyMs": 3.2, "p95LatencyMs": 9.6, "p99LatencyMs": 18.4, "maxLatencyMs": 45.2,
-      "startTime": "2026-02-15T20:00:01Z", "endTime": "2026-02-15T20:00:16Z"
+      "taskId": "a1b2c3d4-produce-0", "testType": "LOAD", "phaseName": "produce", "status": "DONE", "recordsSent": 100000,
+      "throughputRecordsPerSec": 8412.7, "throughputMBPerSec": 8.2,
+      "avgLatencyMs": 2.4, "p50LatencyMs": 1.9, "p95LatencyMs": 6.8, "p99LatencyMs": 12.3, "maxLatencyMs": 41.6,
+      "startTime": "2026-02-15T20:00:01.108342Z", "endTime": "2026-02-15T20:00:13.527115Z"
     },
     {
-      "taskId": "producer-2", "phaseName": "steady-state", "status": "DONE", "recordsSent": 90000,
-      "throughputRecordsPerSec": 8412.7, "throughputMBPerSec": 8.2,
-      "avgLatencyMs": 2.4, "p50LatencyMs": 1.8, "p95LatencyMs": 5.6, "p99LatencyMs": 12.3, "maxLatencyMs": 34.1,
-      "startTime": "2026-02-15T20:00:16Z", "endTime": "2026-02-15T20:02:05Z"
+      "taskId": "a1b2c3d4-consume-0", "testType": "LOAD", "phaseName": "consume", "status": "DONE", "recordsSent": 100000,
+      "throughputRecordsPerSec": 8391.2, "throughputMBPerSec": 8.2,
+      "avgLatencyMs": 0.0, "p50LatencyMs": 0.0, "p95LatencyMs": 0.0, "p99LatencyMs": 0.0, "maxLatencyMs": 0.0,
+      "startTime": "2026-02-15T20:00:01.109020Z", "endTime": "2026-02-15T20:00:13.640388Z"
     }
   ],
-  "createdAt": "2026-02-15T20:00:00Z"
+  "createdAt": "2026-02-15T20:00:00.412587Z"
 }
 ```
+
+A LOAD run has exactly two tasks, `<id>-produce-0` in phase `produce` and `<id>-consume-0` in phase `consume`, however many producers and consumers the spec asks for. On the consumer, `recordsSent` counts the records it consumed; it measures no latency, so its latency fields are always `0.0`, and the run's latency lives on the producer.
 
 #### DELETE /api/tests/{id}
 
@@ -217,32 +280,35 @@ Stop and delete a test run. If the test is currently running, it is cancelled be
 
 ### Reports
 
+These endpoints return a run's results as one JSON report, or export them as CSV, JUnit XML or latency heatmap data; `kates report show` and `kates report export` read them.
+
 #### GET /api/tests/{id}/report
 
-Get the full test report with cluster snapshot, broker metrics, and SLA verdict.
+Get the full test report: the summary, the cluster snapshot, per-broker figures and `overallSlaVerdict`, which says whether the run met its SLA thresholds. The per-broker figures split the run's throughput by each broker's share of the topic's partition leaders when the report was built, not during the run. The Kates API builds a finished run's report the first time something asks for it and keeps it in memory, among the 200 reports it has used most recently. Once the report drops out of those, or the Kates API restarts, the next request builds it again with a new cluster snapshot.
 
 ```json
 {
   "run": { "id": "a1b2c3d4", "testType": "LOAD", "status": "DONE" },
   "summary": {
-    "totalRecords": 100000,
-    "avgThroughputRecPerSec": 8412.7, "peakThroughputRecPerSec": 9120.4, "avgThroughputMBPerSec": 8.2,
+    "totalRecords": 200000,
+    "avgThroughputRecPerSec": 8405.4, "peakThroughputRecPerSec": 8412.7, "avgThroughputMBPerSec": 8.2,
     "avgLatencyMs": 2.4, "p50LatencyMs": 1.8, "p95LatencyMs": 5.6, "p99LatencyMs": 12.3,
-    "p999LatencyMs": 21.7, "maxLatencyMs": 34.1,
-    "totalErrors": 0, "errorRate": 0.0, "durationMs": 125000
+    "p999LatencyMs": 0.0, "maxLatencyMs": 34.1,
+    "totalErrors": 0, "errorRate": 0.0, "durationMs": 0
   },
   "phases": [
-    { "phaseName": "steady-state", "metrics": { "avgThroughputRecPerSec": 8412.7, "p99LatencyMs": 12.3 } }
+    { "phaseName": "produce", "metrics": { "p99LatencyMs": 12.3 } },
+    { "phaseName": "consume", "metrics": { "p99LatencyMs": 0.0 } }
   ],
   "clusterSnapshot": {
-    "clusterId": "abc123",
+    "clusterId": "4L6g3nShT-eMCtK--X86sw",
     "brokerCount": 3,
     "controllerId": 0,
-    "brokers": [ { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092, "rack": "zone-a" } ]
+    "brokers": [ { "id": 0, "host": "krafter-brokers-alpha-0.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "alpha" } ]
   },
   "brokerMetrics": [
     {
-      "brokerId": 0, "host": "krafter-kafka-0.kafka.svc", "isController": true,
+      "brokerId": 0, "host": "krafter-brokers-alpha-0.krafter-kafka-brokers.kafka.svc", "isController": true,
       "leaderPartitions": 12, "replicaPartitions": 36, "underReplicatedPartitions": 0,
       "leaderSharePercent": 33.3, "skewed": false
     }
@@ -253,6 +319,21 @@ Get the full test report with cluster snapshot, broker metrics, and SLA verdict.
 ```
 
 When an SLA is violated, `overallSlaVerdict.violations` contains entries of the form `{ "metric": "p99LatencyMs", "threshold": 500.0, "actual": 612.4, "severity": "CRITICAL" }`.
+
+The summary is computed from the run's task rows, and the example is a LOAD run of 100,000 records: one producer row and one consumer row. The table shows how each summary field combines the rows.
+
+| Field | How the task rows combine |
+|-------|---------------------------|
+| `totalRecords` | Summed over every task, producer and consumer alike |
+| `avgThroughputRecPerSec`, `avgThroughputMBPerSec` | The mean of the tasks' rates, not their sum |
+| `peakThroughputRecPerSec` | The fastest task's rate |
+| `p50LatencyMs`, `p95LatencyMs`, `p99LatencyMs` | The producer's; with several producers, the highest of theirs |
+| `avgLatencyMs` | The producers' mean latency, weighted by their records |
+| `maxLatencyMs` | The slowest producer's |
+| `totalErrors`, `errorRate` | Tasks that ended with an error, and that count divided by `totalRecords` |
+| `p999LatencyMs`, `durationMs` | Always 0 |
+
+Latency leaves consumers out because they don't measure it: a consumer's row carries no latency on the native backend and only poll times on Trogdor. A LOAD or ENDURANCE run's P99 is therefore its producer's send-to-acknowledgement P99. A task keeps its percentiles but not its latency histogram, so the percentiles of several producers cannot be merged. The highest of them is an upper bound on the run's percentile, so it never understates the tail. `kates report show`, `report diff`, `report compare`, the regression check, `kates trend` and the resilience comparison all read this summary.
 
 #### GET /api/tests/{id}/report/csv
 
@@ -280,7 +361,7 @@ Export report as JUnit XML for CI/CD integration. Each test result maps to a `<t
 
 #### GET /api/tests/{id}/report/heatmap
 
-Export latency heatmap data. Returns `404` with a plain-text message when no heatmap data was recorded for the run.
+Export latency heatmap data. Returns `404` with a plain-text message when the Kates API holds no heatmap for the run: a `trogdor` run, a native run older than its 50 most recent, or a run from before the pod last started.
 
 **Query Parameters:**
 
@@ -303,11 +384,15 @@ Export latency heatmap data. Returns `404` with a plain-text message when no hea
 }
 ```
 
-*(Arrays truncated for readability — the real heatmap uses 25 latency buckets spanning 0 ms to 10 s. Each row is a 1-second sampling window.)*
+*(Arrays truncated for readability — the real heatmap uses 25 latency buckets spanning 0 ms to 10 s.)*
+
+The Kates API adds a row each time it polls a running native-backend test, every 5 s by default and on each read of the run, and the row counts everything recorded so far in the 25 buckets. A run with several tasks gets one row per running task at each poll, each counting that task's records, and `phase` is the task's scenario phase or, outside a scenario, its workload, such as `produce` or `consume`. [Latency Heatmaps](09-observability.md#latency-heatmaps) in Observability & Monitoring explains how to read one.
 
 ---
 
 ### Cluster Inspection
+
+These endpoints describe the Kafka cluster the Kates API is connected to — its brokers, topics, consumer groups and broker configuration — and change nothing; `kates cluster` shows the same data.
 
 #### GET /api/cluster/info
 
@@ -315,16 +400,18 @@ Kafka cluster metadata: cluster ID, controller, and brokers.
 
 ```json
 {
-  "clusterId": "abc123",
-  "controller": { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092 },
+  "clusterId": "4L6g3nShT-eMCtK--X86sw",
+  "controller": { "id": 1, "host": "krafter-brokers-gamma-1.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "gamma" },
   "brokerCount": 3,
   "brokers": [
-    { "id": 0, "host": "krafter-kafka-0.kafka.svc", "port": 9092, "rack": "zone-a" },
-    { "id": 1, "host": "krafter-kafka-1.kafka.svc", "port": 9092, "rack": "zone-b" },
-    { "id": 2, "host": "krafter-kafka-2.kafka.svc", "port": 9092, "rack": "zone-c" }
+    { "id": 0, "host": "krafter-brokers-alpha-0.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "alpha" },
+    { "id": 1, "host": "krafter-brokers-gamma-1.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "gamma" },
+    { "id": 2, "host": "krafter-brokers-sigma-2.krafter-kafka-brokers.kafka.svc", "port": 9092, "rack": "sigma" }
   ]
 }
 ```
+
+Hosts and racks are what the brokers advertise: here the `krafter` cluster that `kates deploy` creates on the Kind cluster, with one broker pool per zone. `controller` is whatever Kafka's `DescribeCluster` answer names, and a KRaft broker answers with an arbitrary live broker rather than the active controller, so it can change between calls. The KRaft quorum leader is `kraftQuorum.leaderId` in the `GET /api/cluster/check` response.
 
 #### GET /api/cluster/topics
 
@@ -336,7 +423,7 @@ List topic names, paginated (`page`, `size` query parameters; `size` defaults to
 
 #### GET /api/cluster/topics/{name}
 
-Topic detail with partition assignments, ISR, and key configuration entries.
+Topic detail with partition assignments, ISR, and eight configuration keys: `cleanup.policy`, `retention.ms`, `retention.bytes`, `min.insync.replicas`, `compression.type`, `segment.bytes`, `max.message.bytes` and `message.timestamp.type`. `configs` holds the value in force of each, wherever it is set, and `configSources` says what set it, as Kafka names the source: `DYNAMIC_TOPIC_CONFIG` for the topic, `STATIC_BROKER_CONFIG` or `DYNAMIC_BROKER_CONFIG` for a broker, `DYNAMIC_DEFAULT_BROKER_CONFIG` for the cluster-wide default, `DEFAULT_CONFIG` for Kafka's default. On the `krafter` cluster, `min.insync.replicas` comes from the brokers. `GET /api/kafka/topics/{name}` answers the same.
 
 ```json
 {
@@ -348,7 +435,8 @@ Topic detail with partition assignments, ISR, and key configuration entries.
     { "partition": 0, "leader": 0, "replicas": [0, 1, 2], "isr": [0, 1, 2], "underReplicated": false },
     { "partition": 1, "leader": 1, "replicas": [1, 2, 0], "isr": [1, 2, 0], "underReplicated": false }
   ],
-  "configs": { "retention.ms": "604800000", "min.insync.replicas": "2", "cleanup.policy": "delete" }
+  "configs": { "retention.ms": "604800000", "min.insync.replicas": "2", "cleanup.policy": "delete" },
+  "configSources": { "retention.ms": "DYNAMIC_TOPIC_CONFIG", "min.insync.replicas": "STATIC_BROKER_CONFIG", "cleanup.policy": "STATIC_BROKER_CONFIG" }
 }
 ```
 
@@ -392,9 +480,11 @@ Non-default configuration entries for a specific broker.
 
 ### Disruption Testing
 
+A disruption plan injects faults into the Kafka cluster step by step, measures how the cluster recovers and, when the plan's `sla` block sets a threshold, grades the result against it; a playbook is a ready-made plan with no `sla` block, so it gets no grade. `kates disruption` wraps these endpoints, and [Chaos Engineering in Practice](07-chaos-practice.md) explains plans, the safety guard and the grades.
+
 #### POST /api/disruptions
 
-Execute a disruption plan. Execution is **synchronous** — the call blocks until every step has run (including observation windows) and returns the finished report. Add the `dryRun=true` query parameter to validate the plan without injecting any faults.
+Execute a disruption plan. Execution is **asynchronous** — the plan is validated, accepted, and run in the background, so the call returns immediately with a report id. A plan runs for minutes (steady state + chaos duration + observation window + recovery timeout per step), which is longer than most proxies and load balancers will hold a connection open; poll `GET /api/disruptions/{id}` for progress and the final report. Add the `dryRun=true` query parameter to validate the plan without injecting any faults.
 
 **Request Body:**
 
@@ -407,39 +497,51 @@ Execute a disruption plan. Execution is **synchronous** — the call blocks unti
     "name": "kill-broker-0",
     "faultSpec": {
       "experimentName": "broker-kill", "disruptionType": "POD_KILL",
-      "targetNamespace": "kafka", "targetLabel": "strimzi.io/cluster=krafter",
-      "chaosDurationSec": 30, "gracePeriodSec": 0
+      "targetNamespace": "kafka",
+      "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
+      "targetBrokerId": 0, "chaosDurationSec": 30, "gracePeriodSec": 0
     },
     "steadyStateSec": 15, "observationWindowSec": 60, "requireRecovery": true
   }]
 }
 ```
 
-**Response:** `200 OK`
+The selector matches broker pods only, and `targetBrokerId` picks the broker whose pod name ends in `-0`. A broader selector such as `strimzi.io/cluster=krafter` also matches the KRaft controllers, the Entity Operator and the Kafka exporter, and without `targetBrokerId` the step kills one matching pod at random.
+
+**Response:** `202 Accepted`
 
 ```json
 {
   "id": "7f8e9d0c",
-  "report": {
-    "planName": "broker-kill-test",
-    "status": "COMPLETED",
-    "stepReports": [{
-      "stepName": "kill-broker-0",
-      "disruptionType": "POD_KILL",
-      "timeToFirstReady": "PT27S",
-      "timeToAllReady": "PT41S",
-      "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
-      "rolledBack": false
-    }],
-    "summary": {
-      "totalSteps": 1, "passedSteps": 1, "worstRecovery": "PT41S",
-      "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
-    }
+  "status": "RUNNING",
+  "planName": "broker-kill-test"
+}
+```
+
+Then poll `GET /api/disruptions/{id}` until the status is terminal:
+
+```json
+{
+  "planName": "broker-kill-test",
+  "status": "COMPLETED",
+  "stepReports": [{
+    "stepName": "kill-broker-0",
+    "disruptionType": "POD_KILL",
+    "timeToFirstReady": 27.000000000,
+    "timeToAllReady": 41.000000000,
+    "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
+    "rolledBack": false
+  }],
+  "summary": {
+    "totalSteps": 1, "passedSteps": 1, "worstRecovery": 41.000000000,
+    "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
   }
 }
 ```
 
-Disruption IDs are 8-character UUID prefixes. `report.status` is one of `COMPLETED`, `PARTIAL` (some steps failed), or `FAILED`. Plans that violate the safety guard are not executed and return `422 Unprocessable Entity` with status `REJECTED` (see [Error Responses](#error-responses)).
+Disruption IDs are 8-character UUID prefixes. `status` is `RUNNING` while the plan executes, then one of `COMPLETED`, `PARTIAL` (some steps failed), `FAILED`, or `INTERRUPTED` (the process running the plan died; see below). Plans that violate the safety guard are rejected up front and return `422 Unprocessable Entity` with status `REJECTED` (see [Error Responses](#error-responses)). Only one plan may run against a cluster at a time: a `POST` while another plan is in flight returns `409 Conflict`. Concurrent plans would race the rollback state stored on the target and could leave a node pool or StatefulSet under-scaled. [Safety Guardrails](07-chaos-practice.md#safety-guardrails) in Chaos Engineering in Practice lists every reason the safety guard refuses a plan.
+
+> **Orphan recovery.** If the Kates API pod is killed mid-plan, the injected faults would otherwise persist with nothing left to undo them. On startup Kates removes abandoned `managed-by=kates` NetworkPolicies in the Kafka namespace (`kates.chaos.kafka.namespace`), restores the KafkaNodePools and StatefulSets there that still carry a scale-down snapshot, and marks stranded `RUNNING` reports as `INTERRUPTED`. It runs once, at startup, and touches only faults older than `kates.chaos.orphan-recovery.min-age-sec` (default 900), so a fault younger than that when Kates restarts stays until you remove it or Kates restarts again.
 
 **Dry run** — `POST /api/disruptions?dryRun=true` with the same request body returns `200 OK`:
 
@@ -450,9 +552,9 @@ Disruption IDs are 8-character UUID prefixes. `report.status` is one of `COMPLET
   "steps": [{
     "name": "kill-broker-0",
     "disruptionType": "POD_KILL",
-    "targetPod": "krafter-kafka-0",
+    "targetPod": "krafter-brokers-alpha-0",
     "resolvedLeaderId": null,
-    "affectedPods": ["krafter-kafka-0"],
+    "affectedPods": ["krafter-brokers-alpha-0"],
     "warnings": []
   }],
   "warnings": [],
@@ -481,7 +583,7 @@ List recent disruption reports. Supports `planName`, `page`, and `size` (default
 
 #### GET /api/disruptions/{id}
 
-Get the full disruption report: per-step recovery timings, pod event timeline, pre/post metrics with impact deltas, ISR and consumer-lag tracking, and the SLA verdict (letter grade A/B/C/F).
+Get the full disruption report: per-step recovery timings, pod event timeline, pre/post metrics with impact deltas, ISR and consumer-lag tracking, and the SLA grade when the plan has an `sla` block. The grade, in `slaVerdict.grade`, is A, B, C, D or F, or `-` when no constraint could be evaluated.
 
 ```json
 {
@@ -491,15 +593,15 @@ Get the full disruption report: per-step recovery timings, pod event timeline, p
     "stepName": "kill-broker-0",
     "disruptionType": "POD_KILL",
     "podTimeline": [
-      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-kafka-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
+      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-brokers-alpha-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
     ],
-    "timeToFirstReady": "PT27S",
-    "timeToAllReady": "PT41S",
+    "timeToFirstReady": 27.000000000,
+    "timeToAllReady": 41.000000000,
     "impactDeltas": { "throughputRecPerSec": -15.6, "p99LatencyMs": 596.7 },
     "rolledBack": false
   }],
   "summary": {
-    "totalSteps": 1, "passedSteps": 1, "worstRecovery": "PT41S",
+    "totalSteps": 1, "passedSteps": 1, "worstRecovery": 41.000000000,
     "avgThroughputDegradation": 15.6, "maxP99LatencySpike": 596.7, "slaViolated": false
   },
   "slaVerdict": { "grade": "A", "violated": false, "violations": [], "totalChecks": 3, "passedChecks": 3 }
@@ -516,7 +618,7 @@ Get pod-level events and recovery times per step.
     "step": "kill-broker-0",
     "type": "POD_KILL",
     "events": [
-      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-kafka-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
+      { "timestamp": "2026-02-15T21:00:15Z", "podName": "krafter-brokers-alpha-0", "eventType": "DELETED", "phase": "Running", "reason": "Killing", "message": "Pod deleted" }
     ],
     "timeToFirstReady": "27000ms",
     "timeToAllReady": "41000ms"
@@ -526,7 +628,7 @@ Get pod-level events and recovery times per step.
 
 #### GET /api/disruptions/types
 
-List available disruption types with descriptions. Returns an array of `{ "name": ..., "description": ... }` objects covering: `POD_KILL`, `POD_DELETE`, `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL`, `ROLLING_RESTART`, `LEADER_ELECTION`, `SCALE_DOWN`, `NODE_DRAIN`.
+List available disruption types with descriptions. Returns an array of `{ "name": ..., "description": ... }` objects covering: `POD_KILL`, `POD_DELETE`, `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL`, `ROLLING_RESTART`, `LEADER_ELECTION`, `SCALE_DOWN`, `NODE_DRAIN`. The list is the same whatever the chaos provider; [Chaos Engineering in Practice](07-chaos-practice.md) says which types each provider runs.
 
 #### GET /api/disruptions/{id}/kafka-metrics
 
@@ -543,44 +645,113 @@ Get Kafka intelligence data captured during the disruption — ISR recovery and 
 ]
 ```
 
+#### GET /api/disruptions/playbooks
+
+List the built-in playbooks. Each entry carries the playbook's `name`, `description`, `category`, and `steps`, the number of steps it has.
+
+```json
+[
+  { "name": "rolling-restart", "description": "Restart every Kafka pod one at a time through the Strimzi Cluster Operator", "category": "operations", "steps": 1 }
+]
+```
+
+#### GET /api/disruptions/playbooks/{name}
+
+Get the disruption plan a playbook runs, resolved from its YAML the same way `POST /api/disruptions/playbooks/{name}` resolves it. The plan is named `playbook:<name>`, and each fault carries every field, with the default the playbook runs with wherever the YAML sets none. An unknown name returns `404 Not Found`.
+
+```json
+{
+  "name": "playbook:rolling-restart",
+  "description": "Restart every Kafka pod one at a time through the Strimzi Cluster Operator",
+  "steps": [{
+    "name": "rolling-restart-brokers",
+    "faultSpec": {
+      "experimentName": "rolling-restart-sts", "disruptionType": "ROLLING_RESTART",
+      "targetNamespace": "kafka", "targetLabel": "strimzi.io/component-type=kafka",
+      "targetPod": "", "targetAll": false, "targetBrokerId": -1, "targetTopic": "", "targetPartition": 0,
+      "chaosDurationSec": 600, "delayBeforeSec": 0, "gracePeriodSec": 30,
+      "networkLatencyMs": 100, "fillPercentage": 80, "cpuCores": 1, "memoryMb": 500, "ioWorkers": 2,
+      "envOverrides": {}, "probes": []
+    },
+    "steadyStateSec": 30, "observationWindowSec": 180, "requireRecovery": true
+  }],
+  "maxAffectedBrokers": 1, "autoRollback": false,
+  "isrTrackingTopic": null, "lagTrackingGroupId": null, "sla": null, "testType": null,
+  "baselineDurationSec": 60, "isrPollIntervalMs": 2000, "lagPollIntervalMs": 2000
+}
+```
+
+The response is a complete disruption plan, the body `POST /api/disruptions` takes. Posted unchanged to `POST /api/disruptions?dryRun=true`, it previews the playbook without injecting a fault:
+
+```bash
+BASE="http://localhost:30083"
+AUTH="X-API-Key: $KATES_API_KEY"
+curl -s -H "$AUTH" "$BASE/api/disruptions/playbooks/leader-cascade" \
+  | curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "$AUTH" -H "Content-Type: application/json" -d @- \
+  | jq .
+```
+
+#### POST /api/disruptions/playbooks/{name}
+
+Run a playbook. It takes no body and goes through the launcher `POST /api/disruptions` uses: `202 Accepted` with the report id, status `RUNNING`, and the plan name `playbook:<name>`; `422 Unprocessable Entity` with status `REJECTED` when the safety guard refuses the plan; `409 Conflict` while another plan runs against the cluster; `404 Not Found` for an unknown name. This endpoint has no dry run. Preview a playbook through `GET /api/disruptions/playbooks/{name}` and the plan dry run instead.
+
 ---
 
 ### Resilience Testing
 
+A resilience run starts a test run, injects one fault while it runs, and compares a snapshot of the run taken before the fault with a summary of the whole run taken after the recovery wait; `kates resilience run` sends this request. A disruption plan starts no test run and measures the cluster itself; [Chaos Engineering in Practice](07-chaos-practice.md) explains both. A resilience run doesn't go through the safety guard: nothing counts the brokers its fault hits, and nothing rolls it back.
+
 #### POST /api/resilience
 
-Run a combined performance + chaos test. The call is long-running: whitespace is streamed as a keep-alive while the test executes, and the JSON report is written when it completes.
+Start a test run and inject one fault while it runs. The call is long-running: whitespace is streamed as a keep-alive while the fault runs and recovery is measured, and the JSON report is written after that, usually before the test run itself has finished.
 
 **Request Body:**
 
 ```json
 {
-  "testRequest": { "type": "LOAD", "spec": { "numRecords": 100000, "numProducers": 4 } },
-  "chaosSpec": { "experimentName": "kafka-pod-kill", "targetNamespace": "kafka" },
+  "testRequest": {
+    "type": "LOAD",
+    "spec": { "numRecords": 180000, "throughput": 500, "recordSize": 1024, "acks": "all" }
+  },
+  "chaosSpec": {
+    "experimentName": "kafka-pod-kill",
+    "disruptionType": "POD_KILL",
+    "targetNamespace": "kafka",
+    "targetLabel": "strimzi.io/component-type=kafka,strimzi.io/broker-role=true",
+    "chaosDurationSec": 30
+  },
   "steadyStateSec": 30
 }
 ```
 
 Optional fields: `probes` (steady-state probe definitions) and `maxRecoveryWaitSec` (default 120).
 
-**Response:**
+The workload has to be running when the fault lands. At 500 records per second the 180,000 records take 360 s, while the fault is triggered after `steadyStateSec` (30 s), lasts `chaosDurationSec` (30 s), and the run then waits up to `maxRecoveryWaitSec` for recovery. Without `throughput` the producer runs unthrottled and can finish before the fault is triggered, and both summaries then describe a run the fault never touched. `testRequest` is the body of [POST /api/tests](#post-apitests), so the same fields apply: `throughput` is the rate limit, and LOAD runs one producer and one consumer, so the spec sets no producer count. `disruptionType` picks the fault: on the default `litmus-crd` chaos provider `POD_KILL` runs the LitmusChaos `pod-delete` experiment, and the outcome reports that name, while `experimentName` only names the ChaosEngine. Without `disruptionType`, Litmus runs the experiment that `experimentName` names, and the `kates-chaos` chart installs none called `kafka-pod-kill`. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and the random pick could then kill a controller instead of a broker.
+
+The call returns once the probes pass after the fault, or once `maxRecoveryWaitSec` runs out, so with this example the response usually arrives while the LOAD run is still producing. `postChaosSummary` and `impactDeltas` cover the run up to that moment. The run keeps producing, and keeps its place among the `kates.engine.max-concurrent-tests` running tests, until it reaches `DONE`; its final numbers are then at `GET /api/tests/{id}`, with the id from `performanceReport.run.id`.
+
+**Response** (cut down, with illustrative numbers):
 
 ```json
 {
   "status": "COMPLETED",
-  "chaosOutcome": { "experimentName": "kafka-pod-kill", "verdict": "Pass", "chaosDuration": "PT30S" },
-  "impactDeltas": { "throughputRecPerSec": -15.6, "avgLatencyMs": 42.1, "p99LatencyMs": 596.7, "maxLatencyMs": 310.4, "errorRate": 0.3 },
-  "preChaosSummary": { "avgThroughputRecPerSec": 8412.7, "p99LatencyMs": 12.3, "errorRate": 0.0 },
-  "postChaosSummary": { "avgThroughputRecPerSec": 7097.1, "p99LatencyMs": 609.0, "errorRate": 0.3 },
-  "recoveryTime": "PT41S"
+  "chaosOutcome": { "experimentName": "pod-delete", "verdict": "Pass", "chaosDuration": 68.214530000 },
+  "impactDeltas": { "throughputRecPerSec": -2.7, "avgLatencyMs": 216.1, "p99LatencyMs": 4891.9, "maxLatencyMs": 8909.6, "errorRate": 0.0 },
+  "preChaosSummary": { "avgThroughputRecPerSec": 499.6, "avgLatencyMs": 3.1, "p99LatencyMs": 6.2, "maxLatencyMs": 20.8, "errorRate": 0.0 },
+  "postChaosSummary": { "avgThroughputRecPerSec": 486.3, "avgLatencyMs": 9.8, "p99LatencyMs": 309.5, "maxLatencyMs": 1874.0, "errorRate": 0.0 },
+  "recoveryTime": 41.027310000
 }
 ```
 
-`status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`. Impact deltas are percentage changes between the pre- and post-chaos summaries.
+A `testRequest` that `POST /api/tests` would refuse for a field its type or benchmark backend cannot apply is refused here too, with the same `400` and `fieldErrors`, before the stream starts and before any fault is injected.
+
+`status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`; with `ERROR`, `error` says why, for example that the benchmark did not start. Impact deltas are percentage changes between the pre- and post-chaos summaries. Durations are in seconds: `chaosDuration` runs from the moment Kates creates the fault to the chaos outcome's `verdict`, so on Litmus it includes the experiment's start-up. `recoveryTime` runs from that `verdict` until every probe passes, or until `maxRecoveryWaitSec` runs out.
 
 ---
 
 ### Trend Analysis
+
+A trend follows one metric across a test type's `DONE` runs over a number of days, compares each run with a baseline averaged over the most recent of them, and flags regressions; `kates trend` charts the same data. A `FAILED` run is left out, because its numbers stop wherever it failed, and so is a run still in flight.
 
 #### GET /api/trends
 
@@ -611,6 +782,8 @@ Historical test trends with baseline comparison and regression detection.
 
 ### Scheduling
 
+A schedule stores a test request with a cron expression, and while the schedule is enabled the Kates API submits that request as a new run each time the expression fires; `kates schedule` calls every one of these endpoints except `PUT`.
+
 #### POST /api/schedules
 
 Create a recurring test schedule. Cron expressions use the 5-field Unix format (`minute hour day-of-month month day-of-week`, evaluated in UTC).
@@ -622,7 +795,7 @@ Create a recurring test schedule. Cron expressions use the 5-field Unix format (
   "name": "Nightly Load Regression",
   "cronExpression": "0 2 * * *",
   "enabled": true,
-  "testRequest": { "type": "LOAD", "spec": { "numRecords": 100000, "numProducers": 4, "acks": "all" } }
+  "testRequest": { "type": "LOAD", "spec": { "numRecords": 100000, "acks": "all" } }
 }
 ```
 
@@ -640,6 +813,10 @@ Create a recurring test schedule. Cron expressions use the 5-field Unix format (
 ```
 
 Schedule IDs, like run IDs, are 8-character UUID prefixes.
+
+A schedule stores `testRequest` with only the fields it sets. Each firing is a `POST /api/tests` of it, merged with the test type's defaults of that day, and the run's `requestedSpec` holds the same fields. A firing the Kates API refuses, for a field the type cannot apply, starts no run, and the reason is in the server log only.
+
+A schedule created before the Kates API kept the request stored every spec field, those it did not set at their Java defaults. When the Kates API upgrades, its database migration removes the defaults stored for `targetThroughput`, the fetch settings and the three `enable` options, which runs then ignored, so such a schedule runs as it did. A value the schedule did set for one of them now reaches the run, or is refused at each firing if the type cannot apply it. Its other fields keep the stored values, the Java defaults rather than the type's; `PUT` the schedule's `testRequest` again to have the type's defaults fill them in.
 
 #### GET /api/schedules
 
@@ -688,8 +865,8 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 | 401 | Unauthorized | Missing API key | Security enabled and no `Authorization`/`X-API-Key` header sent |
 | 403 | Forbidden | Invalid API key | Key does not match `kates.api.key` |
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
-| 409 | Conflict | Conflicts with current state | Cancelling a test that is not running |
-| 422 | Unprocessable Entity | Rejected by safety guards | `maxAffectedBrokers` exceeded, plan would affect all brokers |
+| 409 | Conflict | Conflicts with current state | Cancelling a test that is not running; starting a disruption while one is already running |
+| 422 | Unprocessable Entity | Rejected by the safety guard | No broker pods in the Kafka namespace, a `targetLabel` that doesn't parse, `maxAffectedBrokers` exceeded, every broker hit |
 | 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable |
 | 503 | Service Unavailable | Dependent system unavailable | Kubernetes API not reachable |
 
@@ -718,7 +895,7 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 
 ## API Workflows
 
-The following `curl`-based workflows demonstrate common multi-step operations. All examples assume the API is available at `localhost:30083` (the kind NodePort). When API security is enabled — the production default — add `-H "X-API-Key: $KATES_API_KEY"` to every `curl` call.
+The following `curl`-based workflows demonstrate common multi-step operations. All examples assume the API is forwarded to `localhost:30083` (see [Base URL](#base-url)) and `KATES_API_KEY` holds the key (see [Authentication](#authentication)); with `set -u`, a script stops at its `AUTH=` line if the variable is unset.
 
 ### Workflow 1: Create a Test, Poll for Completion, Get the Report
 
@@ -726,48 +903,57 @@ The following `curl`-based workflows demonstrate common multi-step operations. A
 #!/usr/bin/env bash
 set -euo pipefail
 BASE="http://localhost:30083"
+AUTH="X-API-Key: $KATES_API_KEY"
 
 # Create a load test
-TEST_ID=$(curl -s -X POST "$BASE/api/tests" \
+TEST_ID=$(curl -s -X POST "$BASE/api/tests" -H "$AUTH" \
   -H "Content-Type: application/json" \
-  -d '{"type":"LOAD","spec":{"numRecords":100000,"numProducers":4,"numConsumers":2,"acks":"all","topic":"perf-test","partitions":3,"replicationFactor":3}}' \
+  -d '{"type":"LOAD","spec":{"numRecords":100000,"acks":"all","topic":"perf-test","partitions":3,"replicationFactor":3}}' \
   | jq -r '.id')
 echo "Created test: $TEST_ID"
 
 # Poll until complete
 while true; do
-  STATUS=$(curl -s "$BASE/api/tests/$TEST_ID" | jq -r '.status')
+  STATUS=$(curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID" | jq -r '.status')
   echo "Status: $STATUS"
   [[ "$STATUS" == "DONE" || "$STATUS" == "FAILED" ]] && break
   sleep 5
 done
 
 # Fetch report and export as JUnit XML
-curl -s "$BASE/api/tests/$TEST_ID/report" | jq .
-curl -s "$BASE/api/tests/$TEST_ID/report/junit" -o report.xml
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report" | jq .
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/junit" -o report.xml
 ```
 
 ### Workflow 2: Validate and Execute a Disruption
 
-Disruption execution is synchronous — there is nothing to poll. The `POST` returns only when every step (including observation windows) has finished, so set generous client timeouts for long plans.
+Disruption execution is asynchronous. The `POST` validates the plan, returns `202 Accepted` with a report id, and runs the steps in the background — poll `GET /api/disruptions/{id}` until the status is terminal. Only one plan runs against a cluster at a time; a second `POST` while one is in flight is refused with `409 Conflict`.
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 BASE="http://localhost:30083"
-PLAN='{"name":"broker-kill-test","maxAffectedBrokers":1,"autoRollback":true,"steps":[{"name":"kill-broker-0","faultSpec":{"experimentName":"broker-kill","disruptionType":"POD_KILL","targetNamespace":"kafka","targetLabel":"strimzi.io/cluster=krafter","chaosDurationSec":30},"steadyStateSec":15,"observationWindowSec":60,"requireRecovery":true}]}'
+AUTH="X-API-Key: $KATES_API_KEY"
+PLAN='{"name":"broker-kill-test","maxAffectedBrokers":1,"autoRollback":true,"steps":[{"name":"kill-broker-0","faultSpec":{"experimentName":"broker-kill","disruptionType":"POD_KILL","targetNamespace":"kafka","targetLabel":"strimzi.io/component-type=kafka,strimzi.io/broker-role=true","targetBrokerId":0,"chaosDurationSec":30},"steadyStateSec":15,"observationWindowSec":60,"requireRecovery":true}]}'
 
 # Dry-run to validate (no faults injected)
-curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "Content-Type: application/json" -d "$PLAN" | jq .
+curl -s -X POST "$BASE/api/disruptions?dryRun=true" -H "$AUTH" -H "Content-Type: application/json" -d "$PLAN" | jq .
 
-# Execute — blocks until the plan completes, then returns the report
-RESULT=$(curl -s --max-time 600 -X POST "$BASE/api/disruptions" -H "Content-Type: application/json" -d "$PLAN")
-DISRUPT_ID=$(jq -r '.id' <<<"$RESULT")
-echo "Disruption finished: $DISRUPT_ID (status: $(jq -r '.report.status' <<<"$RESULT"))"
+# Execute — returns 202 immediately with the report id
+DISRUPT_ID=$(curl -s -X POST "$BASE/api/disruptions" -H "$AUTH" -H "Content-Type: application/json" -d "$PLAN" | jq -r '.id')
+echo "Disruption started: $DISRUPT_ID"
+
+# Poll until the report reaches a terminal status
+while true; do
+  STATUS=$(curl -s -H "$AUTH" "$BASE/api/disruptions/$DISRUPT_ID" | jq -r '.status')
+  echo "Status: $STATUS"
+  case "$STATUS" in COMPLETED|PARTIAL|FAILED|REJECTED|INTERRUPTED) break ;; esac
+  sleep 10
+done
 
 # Inspect recovery timings and Kafka impact
-curl -s "$BASE/api/disruptions/$DISRUPT_ID/timeline" | jq '.[] | {step, timeToFirstReady, timeToAllReady}'
-curl -s "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.[] | {step, isr, lag}'
+curl -s -H "$AUTH" "$BASE/api/disruptions/$DISRUPT_ID/timeline" | jq '.[] | {step, timeToFirstReady, timeToAllReady}'
+curl -s -H "$AUTH" "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.[] | {step, isr, lag}'
 ```
 
 ### Workflow 3: Export Results in Different Formats
@@ -776,13 +962,14 @@ curl -s "$BASE/api/disruptions/$DISRUPT_ID/kafka-metrics" | jq '.[] | {step, isr
 #!/usr/bin/env bash
 set -euo pipefail
 BASE="http://localhost:30083"
-TEST_ID="a1b2c3d4"
+AUTH="X-API-Key: $KATES_API_KEY"
+TEST_ID="${1:?usage: $0 <test-id>}"   # an ID from kates test list or GET /api/tests
 
-curl -s "$BASE/api/tests/$TEST_ID/report"                   -o report.json
-curl -s "$BASE/api/tests/$TEST_ID/report/csv"                -o report.csv
-curl -s "$BASE/api/tests/$TEST_ID/report/junit"              -o report.xml
-curl -s "$BASE/api/tests/$TEST_ID/report/heatmap?format=json" -o heatmap.json
-curl -s "$BASE/api/tests/$TEST_ID/report/heatmap?format=csv"  -o heatmap.csv
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report"                   -o report.json
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/csv"                -o report.csv
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/junit"              -o report.xml
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/heatmap?format=json" -o heatmap.json
+curl -s -H "$AUTH" "$BASE/api/tests/$TEST_ID/report/heatmap?format=csv"  -o heatmap.csv
 
 echo "Exported: report.json, report.csv, report.xml, heatmap.json, heatmap.csv"
 jq '{type:.run.testType, throughput:.summary.avgThroughputRecPerSec, p99:.summary.p99LatencyMs, sla:.overallSlaVerdict.passed}' report.json
@@ -791,10 +978,11 @@ jq '{type:.run.testType, throughput:.summary.avgThroughputRecPerSec, p99:.summar
 ::: {.callout-tip}
 **Try it**
 
-Walk the core loop against a running backend — no CLI involved:
+Walk the core loop against a running Kates API — no CLI involved. With `make ports` running:
 
 ```bash
 BASE="http://localhost:30083"
+export KATES_API_KEY="$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)"
 
 # Public endpoint — answers without any key
 curl -s "$BASE/api/health" | jq '{status, kafka: .kafka.status}'
@@ -822,10 +1010,10 @@ The health check works with no key, the create call returns `202 Accepted` with 
 
 ## Summary
 
-- Every CLI action maps to a REST endpoint — anything you do interactively can be scripted with `curl` and `jq` against the same backend service layer
+- Most CLI commands call this API, so `curl` and `jq` can script them; those that install and reach the stack run `kubectl` and `helm` instead
 - Authentication is on by default: pass the key as `Authorization: Bearer` or `X-API-Key`, expect `401` without one and `403` with a wrong one; only `/api/health`, `/openapi`, and everything under `/q/` stay public
-- Test execution is asynchronous — `POST /api/tests` returns `202 Accepted` and you poll `GET /api/tests/{id}` — while disruption execution is synchronous and blocks until the report is ready
-- One report feeds many consumers: JSON for dashboards, CSV for spreadsheets, JUnit XML for CI gates, and heatmap data for latency visualization
+- Test execution and disruption execution are both asynchronous — the `POST` returns `202 Accepted` with an id and you poll `GET /api/tests/{id}` or `GET /api/disruptions/{id}` until the status is terminal
+- One report feeds many consumers: JSON for dashboards, CSV for spreadsheets, JUnit XML for CI jobs, and heatmap data for latency visualization
 - This chapter covers the core endpoint families only; the complete, always-current spec lives at `/q/openapi`
 
-When shell scripts hit their limits — typed clients, streaming results, service-to-service calls — the same operations are available over protocol buffers in [gRPC API Reference](16-grpc-api.md).
+When shell scripts hit their limits — typed clients, service-to-service calls — the same operations are available over protocol buffers in [gRPC API Reference](16-grpc-api.md).

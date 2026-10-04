@@ -21,8 +21,13 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 			Check:    "Strimzi CRDs installed",
 			Severity: "critical",
 			Summary:  "Strimzi Custom Resource Definitions are not installed",
+			// Must match the release name and namespace the deploy paths use.
+			// The operator is a cluster singleton — its RBAC and lease names are
+			// hardcoded upstream — so a differently-named release does not
+			// install a second operator, it collides with the first.
 			Commands: []string{
-				"helm install strimzi oci://quay.io/strimzi-helm/strimzi-kafka-operator --namespace kafka --create-namespace",
+				"helm dependency build charts/strimzi-operator",
+				"helm upgrade --install strimzi-operator charts/strimzi-operator --namespace strimzi-operator --create-namespace",
 			},
 			DocURL: "https://strimzi.io/docs/operators/latest/deploying",
 		})

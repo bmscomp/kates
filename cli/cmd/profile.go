@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -36,20 +37,20 @@ var (
 
 	profTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#7C3AED")).
+			Foreground(theme.OnDark).
+			Background(theme.Accent).
 			Padding(0, 1)
 
 	profUpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#22C55E")).
+			Foreground(theme.Success).
 			Bold(true)
 
 	profDownStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EF4444")).
+			Foreground(theme.Error).
 			Bold(true)
 
 	profDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+			Foreground(theme.Muted)
 )
 
 var profileCmd = &cobra.Command{
@@ -83,18 +84,11 @@ var profileSaveCmd = &cobra.Command{
 		if len(run.Results) > 0 {
 			for _, r := range run.Results {
 				profile.Throughput += r.ThroughputRecordsPerSec
-				profile.P50Ms += r.P50LatencyMs
-				profile.P95Ms += r.P95LatencyMs
-				profile.P99Ms += r.P99LatencyMs
-				profile.AvgMs += r.AvgLatencyMs
 				profile.Records += r.RecordsSent
 			}
-			n := float64(len(run.Results))
-			profile.Throughput /= n
-			profile.P50Ms /= n
-			profile.P95Ms /= n
-			profile.P99Ms /= n
-			profile.AvgMs /= n
+			profile.Throughput /= float64(len(run.Results))
+			lat := latencyOf(run.Results)
+			profile.P50Ms, profile.P95Ms, profile.P99Ms, profile.AvgMs = lat.P50Ms, lat.P95Ms, lat.P99Ms, lat.AvgMs
 		}
 
 		if err := saveProfile(profile); err != nil {
@@ -138,10 +132,10 @@ var profileListCmd = &cobra.Command{
 				savedDate = t.Format("Jan 02")
 			}
 			fmt.Printf("  %-22s %-10s %-12s %-10s %-10s %s\n",
-				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#06B6D4")).Render(p.Name),
+				lipgloss.NewStyle().Bold(true).Foreground(theme.Info).Render(p.Name),
 				p.TestType,
 				profUpStyle.Render(fmtAdvisorNum(p.Throughput)+" rec/s"),
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(fmt.Sprintf("%.0fms", p.P99Ms)),
+				lipgloss.NewStyle().Foreground(theme.Warning).Render(fmt.Sprintf("%.0fms", p.P99Ms)),
 				profDimStyle.Render(savedDate),
 				profDimStyle.Render(p.RunID[:minLen(len(p.RunID), 8)]),
 			)
@@ -207,15 +201,14 @@ if throughput regression exceeds the threshold.`,
 			return err
 		}
 
-		var throughput, p99 float64
+		var throughput float64
 		if len(run.Results) > 0 {
 			for _, r := range run.Results {
 				throughput += r.ThroughputRecordsPerSec
-				p99 += r.P99LatencyMs
 			}
 			throughput /= float64(len(run.Results))
-			p99 /= float64(len(run.Results))
 		}
+		p99 := latencyOf(run.Results).P99Ms
 
 		throughputDelta := ((throughput - profile.Throughput) / profile.Throughput) * 100
 		p99Delta := ((p99 - profile.P99Ms) / profile.P99Ms) * 100

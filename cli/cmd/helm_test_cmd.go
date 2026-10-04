@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/go-pdf/fpdf"
-	"github.com/klster/kates-cli/internal/helm"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/internal/helm"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -155,7 +155,7 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 		releases = filterByComponent(releases, component)
 		// If filtering for 'connect' and no releases found, try auto-detecting the connect namespace
 		if len(releases) == 0 && component == "connect" {
-			detectedNS := detectConnectNamespace()
+			detectedNS := detectConnectNamespace(cmd.Context())
 			if detectedNS != ns {
 				connectReleases := discoverHelmReleases(detectedNS)
 				connectReleases = filterByComponent(connectReleases, component)

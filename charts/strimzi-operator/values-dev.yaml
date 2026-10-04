@@ -1,0 +1,15 @@
+# Strimzi Operator — Development Overlay
+# Usage: helm dependency build charts/strimzi-operator && helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator -f charts/strimzi-operator/values-dev.yaml
+
+strimzi-kafka-operator:
+  # Verbose reconciliation logs for debugging operand behavior.
+  logLevel: DEBUG
+  resources:
+    requests:
+      memory: 384Mi
+
+  # NOTE: leaderElection is deliberately NOT disabled here. The retired CLI call
+  # site passed a misspelled `leaderElection.enabled=false` that Helm silently
+  # ignored, so leader election has never actually been off on any cluster —
+  # setting it false would be a NEW behavior change needing its own
+  # justification, not a dev convenience. With replicas=1 it is nearly free.

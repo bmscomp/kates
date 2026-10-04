@@ -328,8 +328,7 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 			},
 		},
 		Kafka:         g.buildKafka(topologyKey),
-		Dashboards:    g.buildDashboards(),
-		PodMonitors:   g.buildPodMonitors(),
+		Monitoring:    g.buildMonitoring(),
 		Alerts:        g.buildAlerts(),
 		NetPolicies:   g.buildNetworkPolicies(),
 		Topics:        GenFeature{Enabled: true},
@@ -726,25 +725,22 @@ func (g *ValuesGenerator) buildExternalListener() *GenListener {
 }
 
 // ── Monitoring ───────────────────────────────────────────────────────────────
+//
+// Scrape and rules follow the CRDs the cluster has at detection time: a
+// PodMonitor on a cluster without prometheus-operator is a Helm install that
+// fails, and a Kafka without one on a cluster that has it is a set of boards
+// with nothing to show. Both were hard-coded false for a while, to keep a
+// `kates auto` cluster light — the weight is Cruise Control and the Kafka
+// Exporter (still off here), not a scrape config. `kates deploy` runs
+// detection before it installs monitoring, so it does not rely on this and
+// says what it wants with --set.
 
-func (g *ValuesGenerator) buildDashboards() GenDashboards {
-	return GenDashboards{Enabled: false, Namespace: "monitoring"}
-}
-
-func (g *ValuesGenerator) buildPodMonitors() GenPodMonitors {
-	pm := GenPodMonitors{Enabled: false}
-	if pm.Enabled && g.Report.Monitoring.ReleaseLabel != "" {
-		pm.Labels = map[string]string{"release": g.Report.Monitoring.ReleaseLabel}
-	}
-	return pm
+func (g *ValuesGenerator) buildMonitoring() GenMonitoring {
+	return GenMonitoring{PodMonitor: GenPodMonitor{Enabled: g.Report.Monitoring.PodMonitorCRD}}
 }
 
 func (g *ValuesGenerator) buildAlerts() GenAlerts {
-	a := GenAlerts{Enabled: false}
-	if a.Enabled && g.Report.Monitoring.ReleaseLabel != "" {
-		a.Labels = map[string]string{"release": g.Report.Monitoring.ReleaseLabel}
-	}
-	return a
+	return GenAlerts{Enabled: g.Report.Monitoring.PodMonitorCRD && g.Report.Monitoring.PrometheusRuleCRD}
 }
 
 // ── Network Policies ─────────────────────────────────────────────────────────

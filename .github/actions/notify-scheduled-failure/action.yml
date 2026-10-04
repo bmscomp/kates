@@ -1,0 +1,29 @@
+name: Open an issue for a failed scheduled run
+description: >-
+  A red nightly is only seen by whoever opens the Actions tab. This opens one
+  issue per workflow (labelled ci-failure), comments on it while it stays open,
+  and does nothing on pull requests or pushes — those already notify their
+  author. Call it from a step guarded with
+  `if: failure() && github.event_name == 'schedule'`.
+inputs:
+  github-token:
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        TITLE: "Scheduled run failed: ${{ github.workflow }}"
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        gh label create ci-failure --description "A scheduled CI run failed" --color B60205 --force >/dev/null
+        body="The scheduled run of **${{ github.workflow }}** failed: ${RUN_URL}"
+        existing=$(gh issue list --label ci-failure --state open --search "\"${TITLE}\" in:title" --json number --jq '.[0].number // empty')
+        if [ -n "${existing}" ]; then
+          gh issue comment "${existing}" --body "${body}"
+          echo "commented on #${existing}"
+        else
+          gh issue create --title "${TITLE}" --label ci-failure --body "${body}"$'\n\n'"Closes automatically when someone closes it; a later failure reopens the conversation here rather than filing a duplicate."
+        fi

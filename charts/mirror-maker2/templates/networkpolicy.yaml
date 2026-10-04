@@ -1,0 +1,93 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mirror-maker2.fullname" . }}
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mirror-maker2.podSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- $selector := include "mirror-maker2.podSelectorLabels" . | fromYaml }}
+    {{- if $np.workerToWorker }}
+    # Worker-to-worker Connect REST (leader forwarding) on 8083
+    {{- include "kafka-common.netpol.workers" (dict "direction" "from" "selector" $selector) | nindent 4 }}
+    {{- end }}
+    {{- if include "kafka-common.enabled" (list ($np.operator | default dict).enabled true) }}
+    # The Strimzi Cluster Operator creates, polls and restarts the mirror
+    # connectors over the Connect REST API.
+    {{- include "kafka-common.netpol.operatorIngress" (dict "namespace" ($np.strimziOperatorNamespace | default "strimzi-operator")) | nindent 4 }}
+    {{- end }}
+    {{- if $np.monitoring }}
+    # Metrics scrape
+    {{- include "kafka-common.netpol.monitoringIngress" (dict "namespace" $np.monitoring.namespace "port" $np.monitoring.port) | nindent 4 }}
+    {{- end }}
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    # DNS
+    {{- include "kafka-common.netpol.dnsEgress" $np.dns | nindent 4 }}
+    {{- if $np.kafka.perSource }}
+    {{- /* One rule per destination instead of 0.0.0.0/0. An in-cluster source
+           or target is reachable by its namespace, so the policy names the
+           namespace rather than the internet; an external one contributes the
+           CIDR its entry declares. A source with neither is a render-time
+           failure, because silently falling back to "anywhere" would defeat
+           the point of turning this on. */}}
+    # Target cluster
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.target.namespace | default (include "mirror-maker2.namespace" $) }}
+      ports:
+        {{- range $np.kafka.ports }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- range $.Values.mirrors }}
+    {{- $alias := .source.alias | default "source" }}
+    # Source: {{ $alias }}
+    - to:
+        {{- if and .source.clusterName .source.namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .source.namespace }}
+        {{- else if (.source.egressCIDR) }}
+        - ipBlock:
+            cidr: {{ .source.egressCIDR }}
+        {{- else }}
+        {{- fail (printf "mirror-maker2: networkPolicy.kafka.perSource is on, but source %q is neither in-cluster (clusterName + namespace) nor given an egressCIDR. Per-source egress cannot be derived for it — add source.egressCIDR, or turn perSource off to allow 0.0.0.0/0." $alias) }}
+        {{- end }}
+      ports:
+        {{- range $np.kafka.ports }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- else }}
+    # Kafka brokers — source AND target, arbitrary IPs
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        {{- range $np.kafka.ports }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- if $np.workerToWorker }}
+    # Worker-to-worker egress (8083)
+    {{- include "kafka-common.netpol.workers" (dict "direction" "to" "selector" $selector) | nindent 4 }}
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

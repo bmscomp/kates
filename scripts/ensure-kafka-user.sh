@@ -40,7 +40,7 @@ EOF
 
 info "Waiting for Strimzi to generate the secret ${USER_NAME}..."
 # Wait up to 30 seconds for the secret to be created
-for i in {1..15}; do
+for _ in {1..15}; do
     if kubectl get secret "${USER_NAME}" -n "${KAFKA_NS}" &>/dev/null; then
         info "KafkaUser secret generated successfully!"
         exit 0

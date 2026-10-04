@@ -1,17 +1,13 @@
-# Generic cluster overlay for connect-cluster
-# Disables components that require extra operators (like Prometheus CRDs)
-
-alerts:
-  enabled: false
-
-podMonitors:
-  enabled: false
-
-dashboards:
-  enabled: false
-
-networkPolicy:
-  enabled: true
+# Generic cluster overlay for connect-cluster, used by `kates deploy` on
+# clusters other than kind. Monitoring stays on; the chart renders the
+# PodMonitor and alerts only where the monitoring.coreos.com/v1 API exists.
 
 tracing:
   enabled: false
+
+# The kates CLI applies its own CDC connectors next to this release; their
+# configs read these Secrets through the config provider.
+rbac:
+  secretNames:
+    - connect-pg-credentials
+    - kates-connect

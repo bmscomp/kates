@@ -147,6 +147,40 @@ func TestParsePodListHealth(t *testing.T) {
 	}
 }
 
+// The bug this guards: the health check named the Strimzi kinds it knew
+// ("kafkas...", "kafkaconnects..."), MirrorMaker 2 was added to the component
+// table with a kind that was not on the list, and it reported a blank
+// "Unknown" in every status output. Nothing failed, because nothing checked
+// that the table and the health check agreed.
+func TestEveryStatusComponentCanBeChecked(t *testing.T) {
+	for _, c := range statusComponents("kafka", "connect", "kates", "litmus", "monitoring", "database", "kafka") {
+		if !healthCheckKinds(c.Kind) {
+			t.Errorf("%s is listed with kind %q, which no health check handles — it would report a blank Unknown", c.Name, c.Kind)
+		}
+	}
+}
+
+// Strimzi CRs are recognised by their API group, not by a list of names that
+// has to be maintained alongside the component table.
+func TestStrimziCRRecognisesTheWholeGroup(t *testing.T) {
+	for _, kind := range []string{
+		"kafkas.kafka.strimzi.io",
+		"kafkaconnects.kafka.strimzi.io",
+		"kafkamirrormaker2s.kafka.strimzi.io",
+		"kafkatopics.kafka.strimzi.io",
+		"kafkanodepools.kafka.strimzi.io",
+	} {
+		if !strimziCR(kind) {
+			t.Errorf("%q should be recognised as a Strimzi custom resource", kind)
+		}
+	}
+	for _, kind := range []string{"pod", "statefulset", "deployment", "", "kafkas.example.com"} {
+		if strimziCR(kind) {
+			t.Errorf("%q is not a Strimzi custom resource", kind)
+		}
+	}
+}
+
 func TestParseKafkaHealth(t *testing.T) {
 	tests := []struct {
 		name           string

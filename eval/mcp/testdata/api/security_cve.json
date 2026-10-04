@@ -1,0 +1,76 @@
+{
+  "kafkaVersion": "unknown",
+  "vulnerabilities": [],
+  "patched": [
+    {
+      "id": "CVE-2024-31141",
+      "title": "Apache Kafka Client JNDI Injection",
+      "severity": "CRITICAL",
+      "affectedFrom": "0.0.0",
+      "affectedUpTo": "3.7.0",
+      "description": "Clients can be tricked into JNDI lookups via SASL/OAUTHBEARER",
+      "status": "PATCHED"
+    },
+    {
+      "id": "CVE-2024-27309",
+      "title": "ACL Bypass during migration",
+      "severity": "HIGH",
+      "affectedFrom": "3.5.0",
+      "affectedUpTo": "3.6.2",
+      "description": "ACL authorizer may not apply during ZK-to-KRaft migration",
+      "status": "PATCHED"
+    },
+    {
+      "id": "CVE-2023-44981",
+      "title": "Zookeeper SASL quorum bypass",
+      "severity": "CRITICAL",
+      "affectedFrom": "0.0.0",
+      "affectedUpTo": "3.5.2",
+      "description": "ZK-based clusters may have SASL quorum peer bypass",
+      "status": "PATCHED"
+    },
+    {
+      "id": "CVE-2023-34455",
+      "title": "Snappy DoS decompression",
+      "severity": "HIGH",
+      "affectedFrom": "0.0.0",
+      "affectedUpTo": "3.4.1",
+      "description": "Snappy decompression can cause OutOfMemoryError",
+      "status": "PATCHED"
+    },
+    {
+      "id": "CVE-2023-25194",
+      "title": "JNDI Injection via SASL JAAS config",
+      "severity": "HIGH",
+      "affectedFrom": "2.3.0",
+      "affectedUpTo": "3.3.2",
+      "description": "JNDI injection possible through SASL JAAS configuration",
+      "status": "PATCHED"
+    },
+    {
+      "id": "CVE-2022-34917",
+      "title": "Unauthenticated memory exhaustion",
+      "severity": "HIGH",
+      "affectedFrom": "2.8.0",
+      "affectedUpTo": "3.2.3",
+      "description": "Memory exhaustion via allocating large buffers on unauthenticated connections",
+      "status": "PATCHED"
+    },
+    {
+      "id": "CVE-2021-38153",
+      "title": "Timing attack on SASL/SCRAM",
+      "severity": "MEDIUM",
+      "affectedFrom": "2.0.0",
+      "affectedUpTo": "3.0.0",
+      "description": "Timing side-channel leak in SCRAM authentication",
+      "status": "PATCHED"
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "vulnerable": 0,
+    "patched": 7
+  },
+  "grade": "PASS",
+  "timestamp": "2026-09-26T09:13:42.310587Z"
+}

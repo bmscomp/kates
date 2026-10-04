@@ -3,7 +3,6 @@ package com.bmscomp.kates.disruption;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;

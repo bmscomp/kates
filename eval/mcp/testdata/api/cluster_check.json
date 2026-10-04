@@ -1,0 +1,20 @@
+{
+  "clusterId": "Xy3kQ9vTR2uD4mP1aBcDeF",
+  "brokers": 3,
+  "controllerId": 1,
+  "topics": 17,
+  "partitions": 118,
+  "partitionHealth": {
+    "underReplicated": 0,
+    "offline": 0,
+    "problems": []
+  },
+  "consumerGroups": 12,
+  "kraftQuorum": {
+    "leaderId": 1,
+    "voters": 3,
+    "observers": 3,
+    "hasLeader": true
+  },
+  "status": "HEALTHY"
+}

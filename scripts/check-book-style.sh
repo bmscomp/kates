@@ -8,14 +8,21 @@ fail=0
 
 note() { echo "STYLE: $1" >&2; fail=1; }
 
+# The book's pages: docs/book/*.md and index.qmd, less the pages about the book
+# rather than in it (the same set scripts/book_metrics.py measures).
+pages=()
+for f in docs/book/*.md; do
+  case "${f##*/}" in STYLE.md|README.md|CONCEPTS.md) continue ;; esac
+  pages+=("$f")
+done
+pages+=(docs/book/index.qmd)
+
 # 1. Unlabeled code fences (openers with no language tag)
 while IFS= read -r hit; do
   note "unlabeled code fence -> tag it (text for output/ASCII UI): $hit"
-done < <(python3 - <<'PY'
-import glob, re
-for f in sorted(glob.glob('docs/book/*.md') + ['docs/book/index.qmd']):
-    if f.endswith('STYLE.md'):
-        continue
+done < <(python3 - "${pages[@]}" <<'PY'
+import re, sys
+for f in sys.argv[1:]:
     fence = False
     for i, l in enumerate(open(f, encoding='utf-8'), 1):
         s = l.strip()
@@ -27,24 +34,22 @@ PY
 )
 
 # 2. Bold-blockquote admonitions
-if grep -rn '^> \*\*\(Note\|Tip\|Warning\|Important\|Caution\):\*\*' docs/book/*.md >&2; then
+if grep -n '^> \*\*\(Note\|Tip\|Warning\|Important\|Caution\):\*\*' "${pages[@]}" >&2; then
   note "bold-blockquote admonition -> use ::: callout-*"
 fi
 
 # 3. Chapter-number cross references (numbers drift; use titles)
-if grep -rnE '\[(Chapter|Ch\.?) [0-9]' docs/book/*.md docs/book/index.qmd >&2; then
+if grep -nE '\[(Chapter|Ch\.?) [0-9]' "${pages[@]}" >&2; then
   note "'Chapter N' in link text -> use the target's H1 title"
 fi
 
 # 4. Banned terminology (prose only — fenced code and inline code spans are
 #    exempt, since command/resource names are what they are)
-if python3 - >&2 <<'PY'
-import glob, re, sys
+if python3 - "${pages[@]}" >&2 <<'PY'
+import re, sys
 BANNED = [r'GameDay', r'\bpreflight\b', r'\bKATES\b']
 bad = False
-for f in sorted(glob.glob('docs/book/*.md') + ['docs/book/index.qmd']):
-    if f.endswith('STYLE.md'):
-        continue
+for f in sys.argv[1:]:
     fence = False
     for i, l in enumerate(open(f, encoding='utf-8'), 1):
         if l.strip().startswith('```'):
@@ -64,10 +69,10 @@ then
 fi
 
 # 5. Double blank line after callout close
-if python3 - <<'PY'
-import glob, re, sys
+if python3 - "${pages[@]}" <<'PY'
+import re, sys
 bad = False
-for f in sorted(glob.glob('docs/book/*.md') + ['docs/book/index.qmd']):
+for f in sys.argv[1:]:
     txt = open(f, encoding='utf-8').read()
     for m in re.finditer(r':::\n\n\n+', txt):
         print(f"{f}: double blank line after callout at offset {m.start()}", file=sys.stderr)
@@ -76,6 +81,49 @@ sys.exit(0 if bad else 1)
 PY
 then
   note "normalize to exactly one blank line after ':::'"
+fi
+
+# 6. Citations and references.bib agree: every [@key] names an entry, and every
+#    entry is cited somewhere (references.md lists them all, so an uncited one
+#    would appear there with nothing pointing at it). Code is exempt.
+if python3 - docs/book/references.bib "${pages[@]}" <<'PY'
+import re, sys
+bib_path, pages = sys.argv[1], sys.argv[2:]
+bib = set(re.findall(r'^@\w+\{([^,\s]+),', open(bib_path, encoding='utf-8').read(), re.M))
+cited, bad = set(), False
+for f in pages:
+    fence = False
+    for i, l in enumerate(open(f, encoding='utf-8'), 1):
+        if l.strip().startswith('```'):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        for group in re.findall(r'\[(-?@[^\]]+)\]', re.sub(r'`[^`]*`', '', l)):
+            for key in re.findall(r'@([\w:.-]+)', group):
+                cited.add(key)
+                if key not in bib:
+                    print(f"{f}:{i}: cites @{key}, which references.bib doesn't have", file=sys.stderr)
+                    bad = True
+for key in sorted(bib - cited):
+    print(f"{bib_path}: @{key} is never cited", file=sys.stderr)
+    bad = True
+sys.exit(0 if bad else 1)
+PY
+then
+  note "citations and docs/book/references.bib disagree (see STYLE.md, Citations)"
+fi
+
+# 7. Structure ratchet (scripts/book_metrics.py, tested first): per-page counts
+#    of bare headings, tables without a lead-in, hand-numbered headings, broken
+#    handoffs, long fenced lines and the rest may fall but never rise above
+#    scripts/book-metrics-baseline.json; a new page starts at zero, and '[TODO'
+#    is zero everywhere.
+if ! tests=$(python3 -m unittest discover -s scripts -p 'test_book_metrics.py' -q 2>&1); then
+  echo "$tests" >&2
+  note "scripts/test_book_metrics.py fails -> fix scripts/book_metrics.py first"
+elif ! python3 scripts/book_metrics.py --check scripts/book-metrics-baseline.json; then
+  note "book structure ratchet (see above)"
 fi
 
 if [[ $fail -ne 0 ]]; then

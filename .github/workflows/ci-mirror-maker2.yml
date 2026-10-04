@@ -1,0 +1,1525 @@
+name: CI · MirrorMaker 2
+
+# Two jobs with very different costs.
+#
+# `chart` is cheap and runs on every PR that touches the charts: render, schema,
+# CRD conformance, and — the part that is easy to skip and shouldn't be — proof
+# that the safety rails actually reject something. A guard that has never been
+# observed to fail is indistinguishable from no guard.
+#
+# `migration-e2e` stands up a kind cluster, a real Kafka 2.8.2 or 3.9.1 broker,
+# and a real mirror, then asserts on real records. It is minutes, not seconds,
+# so it runs on demand and on the `test-migration` label rather than on every
+# push. The whole point of the chart is this job; the whole point of not running
+# it every time is that nobody waits ten minutes for a typo fix.
+#
+# `metrics-live` is the same tier and the same cluster shape, with a different
+# question: what does a worker actually expose? `chart` proves every series the
+# rules and the dashboard read is one the exporter rules can produce, against
+# a hand-written catalogue of MBeans; this job scrapes a real worker and diffs
+# the catalogue against it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # `labeled` is here for migration-e2e, and without it that job is
+    # unreachable. The default types are [opened, synchronize, reopened], so
+    # applying the `test-migration` label fires nothing — and re-running an
+    # earlier run replays the original event payload, which has no label. The
+    # gate below would have read as "on demand" while never being satisfiable
+    # on a pull request at all.
+    types: [opened, synchronize, reopened, labeled]
+  # metrics-live: weekly, and on demand (migration-e2e stays on the label).
+  schedule:
+    - cron: "30 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      source_version:
+        description: "Legacy source Kafka version"
+        type: choice
+        options: ["both", "2.8.2", "3.9.1"]
+        default: "both"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # Scheduled and manual runs have no diff to filter on: everything runs.
+      chart: ${{ steps.filter.outputs.chart || 'true' }}
+      live: ${{ steps.filter.outputs.live || 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            chart:
+              - 'charts/mirror-maker2/**'
+              - 'charts/kafka-common/**'
+              - 'charts/legacy-kafka/**'
+              - 'charts/kafka-cluster/**'
+              - 'Dockerfile.legacy-kafka'
+              - 'scripts/test-mm2-migration.sh'
+              - 'scripts/build-legacy-kafka-image.sh'
+              - 'scripts/check-metric-contract.sh'
+              - 'scripts/metric-contract/**'
+              - 'cli/cmd/migrate*.go'
+              - 'cli/pkg/migrate/**'
+              - 'cli/internal/podrun/**'
+              # The chart job asserts that every runbook_url anchor the alerts point at
+              # is a heading in this file, so a heading rename has to run the job.
+              - 'docs/mirror-maker2-runbook.md'
+              - '.github/workflows/ci-mirror-maker2.yml'
+              - '.github/actions/**'
+            # What metrics-live stands up, scrapes and checks the scrape against.
+            live:
+              - 'charts/mirror-maker2/**'
+              - 'charts/kafka-common/**'
+              - 'charts/kafka-cluster/**'
+              - 'charts/strimzi-operator/**'
+              - 'scripts/deploy-kafka-generic.sh'
+              - 'scripts/check-metric-contract.sh'
+              - 'scripts/metric-contract/**'
+              - 'cli/cmd/migrate*.go'
+              - 'cli/pkg/migrate/**'
+              - 'config/cluster.yaml'
+              - 'config/storage/**'
+              - 'images.env'
+              - 'versions.env'
+              - '.github/workflows/ci-mirror-maker2.yml'
+
+  chart:
+    name: Chart validation
+    needs: changes
+    if: needs.changes.outputs.chart == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # fetch-depth: 0 for the render-diff step at the end of this job: it has
+      # to resolve the commit that last carried a DIFFERENT chart version, and
+      # a shallow clone has no history to walk.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # mirror-maker2 is built on the kafka-common library (file://).
+      - name: Build the chart's kafka-common dependency
+        run: scripts/retry.sh 5 helm dependency build charts/mirror-maker2/
+
+      - name: Lint
+        run: |
+          helm lint charts/mirror-maker2/
+          helm lint charts/legacy-kafka/
+
+      - name: Render every overlay
+        run: |
+          set -e
+          echo "── mirror-maker2"
+          helm template mm2 charts/mirror-maker2 -n kafka > /dev/null
+          # values-failback is rendered with a source cluster named on the
+          # command line on purpose: the overlay ships an EMPTY source so the
+          # chart refuses a bare render rather than silently mirroring the
+          # target into itself. Anything else here renders as shipped.
+          for o in kind dev prod generic mtls migrate-2x migrate-3x migrate-4x \
+                   readonly-source fan-in failover scale; do
+            echo "   values-${o}.yaml"
+            helm template mm2 charts/mirror-maker2 -n kafka \
+              -f "charts/mirror-maker2/values-${o}.yaml" > /dev/null
+          done
+          echo "   values-failback.yaml (+ an explicit source)"
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            -f charts/mirror-maker2/values-failback.yaml \
+            --set mirrors[0].source.clusterName=failover-cluster > /dev/null
+
+          # The overlays that are LAYERS, in the combinations they are documented
+          # in. Order matters and is the point: Helm merges maps but REPLACES
+          # lists, so an overlay carrying `mirrors:` has to come last or it is
+          # the one that gets discarded.
+          echo "   layered combinations"
+          for pair in "migrate-2x cutover" \
+                      "kind readonly-source" \
+                      "kind fan-in" \
+                      "prod failover" \
+                      "prod scale"; do
+            # Word splitting is the mechanism here, not an accident.
+            # shellcheck disable=SC2086
+            set -- $pair
+            echo "     values-$1.yaml + values-$2.yaml"
+            helm template mm2 charts/mirror-maker2 -n kafka \
+              -f "charts/mirror-maker2/values-$1.yaml" \
+              -f "charts/mirror-maker2/values-$2.yaml" > /dev/null
+          done
+          echo "     values-prod.yaml + values-failback.yaml (+ an explicit source)"
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            -f charts/mirror-maker2/values-prod.yaml \
+            -f charts/mirror-maker2/values-failback.yaml \
+            --set mirrors[0].source.clusterName=failover-cluster > /dev/null
+
+          echo "── legacy-kafka"
+          helm template lk charts/legacy-kafka -n kafka-legacy > /dev/null
+          for o in kafka-2x kafka-3x; do
+            echo "   values-${o}.yaml (+kind, +sasl)"
+            helm template lk charts/legacy-kafka -n kafka-legacy \
+              -f "charts/legacy-kafka/values-${o}.yaml" > /dev/null
+            helm template lk charts/legacy-kafka -n kafka-legacy \
+              -f "charts/legacy-kafka/values-${o}.yaml" \
+              -f charts/legacy-kafka/values-kind.yaml > /dev/null
+            helm template lk charts/legacy-kafka -n kafka-legacy \
+              -f "charts/legacy-kafka/values-${o}.yaml" \
+              -f charts/legacy-kafka/values-sasl.yaml > /dev/null
+          done
+
+      # The rails are the feature. If they stop biting, the chart has silently
+      # become the thing it replaced.
+      #
+      # Every case asserts the MESSAGE, not merely a non-zero exit. A render
+      # that fails for the wrong reason — a typo in the fixture, a schema
+      # rejection, an unrelated guard firing first — is indistinguishable from
+      # a working rail if all you check is the exit code, and it is exactly how
+      # a rail rots without anyone noticing.
+      - name: Safety rails must reject bad input
+        run: |
+          set -e
+          fail_expected() {   # <description> <expected message fragment> <helm args...>
+            local desc="$1" want="$2"; shift 2
+            local out rc=0
+            out=$(helm template mm2 charts/mirror-maker2 -n kafka "$@" 2>&1) || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "::error::${desc} — the chart accepted it, so the guard is not working"
+              exit 1
+            fi
+            case "$out" in
+              *"$want"*) echo "OK (rejected): ${desc}" ;;
+              *)
+                echo "::error::${desc} — rejected, but for the WRONG REASON."
+                echo "::error::expected to contain: ${want}"
+                printf '%s\n' "$out" | sed 's/^/    /'
+                exit 1 ;;
+            esac
+          }
+
+          cat > /tmp/below-floor.yaml <<'YAML'
+          mirrors:
+            - source: { alias: ancient, bootstrapServers: "old:9092", kafkaVersion: "2.0.1" }
+          YAML
+          fail_expected "a Kafka 2.0.1 source (below the KIP-896 floor)" \
+            'declares Kafka 2.0.1, below the 2.1.0 floor' -f /tmp/below-floor.yaml
+
+          # A floating tag defeats every version rail above it: what runs
+          # becomes a function of when a pod last restarted.
+          fail_expected "a :latest worker image" \
+            'resolves to a floating tag' --set image=quay.io/strimzi/kafka:latest
+          fail_expected "a worker image with no tag at all" \
+            'resolves to a floating tag' --set image=quay.io/strimzi/kafka
+          fail_expected "a :latest helper image" \
+            'testImages.kubectl is' --set testImages.kubectl=busybox:latest
+
+          # ...while a registry port, an explicit tag and a digest all render.
+          for ref in \
+            'registry.internal:5000/kafka:1.1.0-kafka-4.3.0' \
+            'quay.io/strimzi/kafka:1.2.0-kafka-4.3.1' \
+            'quay.io/strimzi/kafka@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+          do
+            if helm template mm2 charts/mirror-maker2 -n kafka --set "image=$ref" >/dev/null 2>&1; then
+              echo "OK (accepted): $ref"
+            else
+              echo "::error::pinned image rejected, but it is not a floating tag: $ref"
+              exit 1
+            fi
+          done
+
+          cat > /tmp/rf-too-high.yaml <<'YAML'
+          target: { brokerCount: 1 }
+          mirrors:
+            - source: { alias: s, bootstrapServers: "x:9092", kafkaVersion: "3.9.1" }
+              sourceConnector: { config: { replication.factor: 3 } }
+          YAML
+          fail_expected "RF3 against a single-broker target" \
+            'is 3 but target.brokerCount is 1' -f /tmp/rf-too-high.yaml
+
+          cat > /tmp/undeclared.yaml <<'YAML'
+          compatibility: { requireDeclaredVersion: true }
+          mirrors:
+            - source: { alias: s, bootstrapServers: "x:9092" }
+          YAML
+          fail_expected "a source with no declared kafkaVersion" \
+            'kafkaVersion is not declared' -f /tmp/undeclared.yaml
+
+          fail_expected "alerts without metrics" \
+            'alerts.enabled requires metrics.enabled=true' \
+            --set alerts.enabled=true --set metrics.enabled=false
+          fail_expected "podMonitors without metrics" \
+            'podMonitors.enabled requires metrics.enabled=true' \
+            --set podMonitors.enabled=true --set metrics.enabled=false
+          fail_expected "an auto-ACL KafkaUser under identity policy with no topicGrants" \
+            'needs kafkaUser.topicGrants' \
+            --set kafkaUser.create=true --set replicationPolicy.mode=identity
+
+          # ── 0.4.0's rails ────────────────────────────────────────────────
+          # One per row of §4 of docs/mirror-maker2-chart-enhancement-plan.md.
+
+          cat > /tmp/dup-alias.yaml <<'YAML'
+          mirrors:
+            - source: { alias: dup, bootstrapServers: "a:9092", kafkaVersion: "3.9.1" }
+            - source: { alias: dup, bootstrapServers: "b:9092", kafkaVersion: "3.9.1" }
+          YAML
+          fail_expected "two mirrors sharing a source alias" \
+            'two mirrors both use the source alias "dup"' -f /tmp/dup-alias.yaml
+
+          # A loopback (source bootstrap == target bootstrap) is the SHIPPED
+          # default and is safe under the default policy, where the replicated
+          # topic is renamed. Under identity it is a connector re-reading its
+          # own output forever, so only the identity case is refused.
+          fail_expected "a loopback under an identity policy" \
+            'which is also the target' --set replicationPolicy.mode=identity
+
+          cat > /tmp/unset-source.yaml <<'YAML'
+          mirrors:
+            - source: { alias: nowhere, kafkaVersion: "3.9.1" }
+          YAML
+          # An unset source silently defaults to krafter/kafka — the target —
+          # which is how values-failback.yaml could have shipped a self-mirror.
+          fail_expected "a source naming neither a cluster nor a bootstrap" \
+            'declares neither source.clusterName nor source.bootstrapServers' \
+            -f /tmp/unset-source.yaml
+
+          cat > /tmp/identity-same-pattern.yaml <<'YAML'
+          replicationPolicy: { mode: identity }
+          mirrors:
+            - source: { alias: east, bootstrapServers: "a:9092", kafkaVersion: "3.9.1" }
+              topicsPattern: "orders.*"
+            - source: { alias: west, bootstrapServers: "b:9092", kafkaVersion: "3.9.1" }
+              topicsPattern: "orders.*"
+          YAML
+          fail_expected "identity policy + two sources selecting the same topics" \
+            'select the same topics (orders.*) under an identity policy' \
+            -f /tmp/identity-same-pattern.yaml
+
+          cat > /tmp/identity-catch-all.yaml <<'YAML'
+          replicationPolicy: { mode: identity }
+          mirrors:
+            - source: { alias: east, bootstrapServers: "a:9092", kafkaVersion: "3.9.1" }
+              topicsPattern: ".*"
+            - source: { alias: west, bootstrapServers: "b:9092", kafkaVersion: "3.9.1" }
+              topicsPattern: "payments.*"
+          YAML
+          fail_expected "identity policy + a .* pattern with two sources" \
+            'matches every topic (topicsPattern .*) and the replication policy is identity' \
+            -f /tmp/identity-catch-all.yaml
+
+          cat > /tmp/idle-workers.yaml <<'YAML'
+          autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 9 }
+          mirrors:
+            - source: { alias: s, bootstrapServers: "x:9092", kafkaVersion: "3.9.1" }
+              sourceConnector: { tasksMax: 3 }
+              checkpointConnector: { tasksMax: 1 }
+          YAML
+          fail_expected "autoscaling.maxReplicas above sum(tasksMax)" \
+            'autoscaling.maxReplicas is 9 but this release has only 4 connector tasks' \
+            -f /tmp/idle-workers.yaml
+
+          cat > /tmp/offset-syncs-mismatch.yaml <<'YAML'
+          mirrors:
+            - source: { alias: s, bootstrapServers: "x:9092", kafkaVersion: "3.9.1" }
+              readOnlySource: true
+              checkpointConnector:
+                config:
+                  offset-syncs.topic.location: source
+          YAML
+          fail_expected "a hand-set offset-syncs location disagreeing with the mirror's" \
+            'but the mirror resolves to "target"' -f /tmp/offset-syncs-mismatch.yaml
+
+          cat > /tmp/eos-incoherent.yaml <<'YAML'
+          target: { exactlyOnce: { enabled: true } }
+          mirrors:
+            - source:
+                alias: s
+                bootstrapServers: "x:9092"
+                kafkaVersion: "3.9.1"
+                config:
+                  consumer.isolation.level: read_uncommitted
+          YAML
+          fail_expected "exactly-once with a contradicting isolation level" \
+            'Exactly-once requires the source consumer to read only committed records' \
+            -f /tmp/eos-incoherent.yaml
+
+          cat > /tmp/per-source-egress.yaml <<'YAML'
+          networkPolicy: { kafka: { perSource: true } }
+          mirrors:
+            - source:
+                alias: ext
+                clusterName: ""
+                namespace: ""
+                bootstrapServers: "kafka.example.com:9094"
+                kafkaVersion: "3.9.1"
+          YAML
+          fail_expected "per-source egress with an external source and no egressCIDR" \
+            'is neither in-cluster (clusterName + namespace) nor given an egressCIDR' \
+            -f /tmp/per-source-egress.yaml
+
+          fail_expected "alerts against the Strimzi Metrics Reporter's metric names" \
+            'the rules below are written against the JMX exporter'"'"'s metric names' \
+            --set metrics.enabled=true --set metrics.type=strimziMetricsReporter \
+            --set alerts.enabled=true
+
+          # …and the positive control for that last one: with the operator's
+          # native metrics path AND the acknowledgement, it must render.
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            --set metrics.enabled=true --set metrics.type=strimziMetricsReporter \
+            --set alerts.enabled=true --set alerts.allowReporterMetrics=true > /dev/null
+          echo "OK (accepted): strimziMetricsReporter with allowReporterMetrics"
+
+          # legacy-kafka's own guards
+          if helm template lk charts/legacy-kafka -n x --set mode=kraft \
+               --set kafka.version=2.8.2 --set kafka.image=x > /dev/null 2>&1; then
+            echo "::error::legacy-kafka accepted mode=kraft with Kafka 2.8.2"
+            exit 1
+          fi
+          echo "OK (rejected): KRaft mode on Kafka 2.8.2"
+
+      # And the positive case: identity mode must actually emit the exclusions,
+      # or the mirror will happily replicate its own heartbeats topic forever.
+      - name: Identity policy emits internal-topic exclusions
+        run: |
+          set -e
+          OUT=$(helm template mm2 charts/mirror-maker2 -n kafka \
+                  -f charts/mirror-maker2/values-migrate-2x.yaml)
+          echo "$OUT" | grep -q 'IdentityReplicationPolicy' \
+            || { echo "::error::identity mode did not set replication.policy.class"; exit 1; }
+          echo "$OUT" | grep -q 'topicsExcludePattern.*heartbeats' \
+            || { echo "::error::identity mode did not exclude MM2 internal topics"; exit 1; }
+          echo "$OUT" | grep -q 'topicsExcludePattern.*mirror-maker2-migrate-2x-' \
+            || { echo "::error::identity mode did not exclude the Connect internal topics"; exit 1; }
+          echo "OK: identity policy and its exclusions are in the rendered CR"
+
+          # The default policy must NOT set an identity class — but it MUST
+          # still exclude topics already carrying the source prefix, or the
+          # shipped loopback re-mirrors source.orders as source.source.orders
+          # every refresh interval.
+          DEF=$(helm template mm2 charts/mirror-maker2 -n kafka)
+          echo "$DEF" | grep -q 'IdentityReplicationPolicy' \
+            && { echo "::error::default mode set an identity policy"; exit 1; }
+          echo "$DEF" | grep -q 'topicsExcludePattern.*source\\\\\.\.\*' \
+            || { echo "::error::default mode did not exclude <alias>.* (loopback would loop)"; exit 1; }
+          echo "OK: default policy leaves topic renaming in place and excludes the alias prefix"
+
+      - name: Install kubeconform
+        uses: ./.github/actions/install-tools
+        with:
+          kubeconform: "true"
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Validate against the Strimzi CRD schemas
+        run: |
+          rc=0
+          for overlay in "" migrate-2x migrate-3x migrate-4x prod mtls \
+                         readonly-source fan-in failover failback scale; do
+            args=""
+            [ -n "$overlay" ] && args="-f charts/mirror-maker2/values-${overlay}.yaml"
+            echo "==> mirror-maker2 ${overlay:-base}"
+            # shellcheck disable=SC2086
+            helm template mm2 charts/mirror-maker2 -n kafka $args \
+              | kubeconform -strict -summary -ignore-missing-schemas \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              || rc=1
+          done
+          for overlay in kafka-2x kafka-3x; do
+            echo "==> legacy-kafka ${overlay}"
+            helm template lk charts/legacy-kafka -n kafka-legacy \
+              -f "charts/legacy-kafka/values-${overlay}.yaml" \
+              | kubeconform -strict -summary -ignore-missing-schemas \
+                  -schema-location default \
+              || rc=1
+          done
+          exit $rc
+
+      # A Grafana dashboard is shipped as a JSON string inside a ConfigMap, so
+      # nothing upstream of Grafana parses it: a stray comma makes the panel
+      # list vanish at load time, in a UI nobody opens until an incident.
+      #
+      # Layout is checked for the same reason. The panels' grid positions are
+      # computed from a cursor rather than written down, so that a section can
+      # be inserted without renumbering the ones below it — and the failure
+      # that arithmetic can produce is two panels on the same cell, which
+      # Grafana resolves by shoving one somewhere arbitrary rather than by
+      # complaining. Every panel is also required to carry a description and a
+      # query: a panel with neither is a panel nobody can read during an
+      # incident, and one whose query was lost in an edit renders "No data"
+      # exactly as an idle cluster does.
+      #
+      # One shape since 0.11.0: the chart renders no boards and there are no
+      # variants — charts/monitoring delivers the canonical files, so those
+      # are what is checked, wrapped in a ConfigMap the same way any render
+      # would carry them.
+      - name: Dashboard JSON parses, and its layout holds
+        run: |
+          set -e
+          cat > /tmp/dash.py <<'PY'
+          import json, sys, yaml
+
+
+          def rects(panels):
+              out = []
+              for p in panels:
+                  g = p.get("gridPos") or {}
+                  out.append((p.get("title", "?"), g.get("x"), g.get("y"), g.get("w"), g.get("h"), p))
+              return out
+
+
+          def overlaps(a, b):
+              _, ax, ay, aw, ah, _ = a
+              _, bx, by, bw, bh, _ = b
+              return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+
+
+          def check_container(panels, where, rc):
+              rs = rects(panels)
+              for t, x, y, w, h, p in rs:
+                  if None in (x, y, w, h):
+                      print("::error::%s: panel %r has an incomplete gridPos" % (where, t)); rc[0] = 1
+                  elif x + w > 24:
+                      print("::error::%s: panel %r runs past column 24 (x=%d w=%d)" % (where, t, x, w)); rc[0] = 1
+              for i in range(len(rs)):
+                  for j in range(i + 1, len(rs)):
+                      if overlaps(rs[i], rs[j]):
+                          print("::error::%s: %r and %r overlap (%s vs %s)"
+                                % (where, rs[i][0], rs[j][0], rs[i][1:5], rs[j][1:5])); rc[0] = 1
+              for t, x, y, w, h, p in rs:
+                  if p.get("type") == "row":
+                      continue
+                  if not p.get("description"):
+                      print("::error::%s: panel %r has no description" % (where, t)); rc[0] = 1
+                  targets = p.get("targets") or []
+                  if not targets:
+                      print("::error::%s: panel %r has no query" % (where, t)); rc[0] = 1
+                  for q in targets:
+                      if not (q.get("expr") or "").strip():
+                          print("::error::%s: panel %r has a target with no expr" % (where, t)); rc[0] = 1
+
+
+          rc, found = [0], 0
+          for doc in yaml.safe_load_all(sys.stdin):
+              if not doc or doc.get("kind") != "ConfigMap":
+                  continue
+              for name, body in (doc.get("data") or {}).items():
+                  if not name.endswith(".json"):
+                      continue
+                  try:
+                      dash = json.loads(body)
+                  except json.JSONDecodeError as exc:
+                      sys.exit("::error::%s is not valid JSON: %s" % (name, exc))
+                  panels = dash.get("panels") or []
+                  if not panels:
+                      sys.exit("::error::%s parsed but has no panels" % name)
+                  check_container(panels, name, rc)
+                  rows, nested, last_y = [], 0, -1
+                  for p in panels:
+                      if p.get("type") != "row":
+                          continue
+                      g = p["gridPos"]
+                      rows.append((p["title"], g["y"]))
+                      if g["y"] <= last_y:
+                          print("::error::%s: row %r at y=%d is not below the row before it"
+                                % (name, p["title"], g["y"])); rc[0] = 1
+                      last_y = g["y"]
+                      if (g.get("h"), g.get("w"), g.get("x")) != (1, 24, 0):
+                          print("::error::%s: row %r is not a full-width 1-high header"
+                                % (name, p["title"])); rc[0] = 1
+                      if p.get("panels"):
+                          nested += len(p["panels"])
+                          check_container(p["panels"], "%s row %r" % (name, p["title"]), rc)
+                  print("  %s: %d panels (%d nested), %d rows"
+                        % (name, len(panels) + nested, nested, len(rows)))
+                  for t, y in rows:
+                      print("      y=%-3d %s" % (y, t))
+                  found += 1
+          if not found:
+              sys.exit("::error::no dashboard ConfigMap in this render")
+          sys.exit(rc[0])
+          PY
+          python3 - <<'WRAP' | python3 /tmp/dash.py
+          import yaml
+          data = {}
+          for b in ("mirror-maker2", "mirror-maker2-migration"):
+              data[b + ".json"] = open("dashboards/%s/dashboard.json" % b).read()
+          print(yaml.safe_dump({"kind": "ConfigMap",
+                                "metadata": {"name": "canonical"},
+                                "data": data}))
+          WRAP
+
+      # The step above proves the dashboard parses and the one below proves
+      # the rules parse. Neither proves that the series they READ exist: an
+      # alert on a name no exporter rule produces installs fine and never
+      # fires, and a panel on one renders "No data" exactly as an idle cluster
+      # would. scripts/metric-contract/mirror-maker2.yaml catalogues the MBeans
+      # a worker registers; the check simulates the exporter over it and fails
+      # on any reference outside what comes out. Static, seconds, and it is
+      # the gate the Kafka chart's three dead alerts would have failed.
+      - name: Every series the rules and the dashboard read is one the exporter produces
+        run: scripts/check-metric-contract.sh mirror-maker2
+
+      # Prometheus itself is the only thing that can say an expr parses; a
+      # rule with a typo installs fine and simply never fires. This used to
+      # skip with a notice when promtool was absent, which on GitHub's runners
+      # is always — so the check had never run. promtool now comes from the
+      # Prometheus release the monitoring stack pins in images.env, so the
+      # parser here is the one the rules will meet.
+      - name: Install promtool (the pinned Prometheus release)
+        run: |
+          set -euo pipefail
+          PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
+          [ -n "$PROM" ] || { echo "::error::no prometheus pin in images.env"; exit 1; }
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
+          sudo mv /tmp/promtool /usr/local/bin/
+          promtool --version
+
+      - name: Alert and recording rules are valid PromQL
+        run: |
+          set -e
+          cat > /tmp/rules.py <<'PY'
+          import sys, yaml
+          out = [d["spec"] for d in yaml.safe_load_all(sys.stdin)
+                 if d and d.get("kind") == "PrometheusRule"]
+          if len(out) != 1:
+              sys.exit("::error::expected one PrometheusRule, found %d" % len(out))
+          yaml.safe_dump(out[0], sys.stdout, default_flow_style=False)
+          PY
+          for overlay in "" fan-in migrate-2x; do
+            args=""
+            [ -n "$overlay" ] && args="-f charts/mirror-maker2/values-${overlay}.yaml"
+            echo "==> ${overlay:-base}"
+            # shellcheck disable=SC2086
+            helm template mm2 charts/mirror-maker2 -n kafka $args \
+              --set metrics.enabled=true --set alerts.enabled=true \
+              --api-versions monitoring.coreos.com/v1 \
+              | python3 /tmp/rules.py > /tmp/rules.yaml
+            promtool check rules /tmp/rules.yaml
+          done
+
+      # Parsing is not behaving. The SLI recording rules and the burn-rate
+      # alert are arithmetic over windows, and the cases that matter — a NaN
+      # partition beside a live one, a wholly idle mirror, the two windows
+      # crossing at different times — are promtool unit tests against the
+      # base render. rule_files in a test file resolve relative to the test
+      # file, hence the copy beside the render.
+      - name: SLI and SLO rules behave (promtool unit tests)
+        run: |
+          set -e
+          d=$(mktemp -d)
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            --set metrics.enabled=true --set alerts.enabled=true \
+            --api-versions monitoring.coreos.com/v1 \
+            | python3 /tmp/rules.py > "$d/rendered-rules.yaml"
+          cp scripts/metric-contract/tests/mirror-maker2.rules-test.yaml "$d/"
+          promtool test rules "$d/mirror-maker2.rules-test.yaml"
+
+      # promtool checks the ALERTS. Nothing checked the dashboards, and a
+      # panel's PromQL is no less able to be wrong — a stray bracket or a
+      # `bool` in the wrong place renders as an empty panel, which is what an
+      # idle cluster renders as too. Every query from every board is wrapped as
+      # a recording rule and handed to the same parser the alerts get.
+      - name: Every dashboard query is valid PromQL
+        run: |
+          set -e
+          cat > /tmp/dashql.py <<'PY'
+          import json, sys, yaml
+
+          def panels(ps):
+              for p in ps:
+                  yield p
+                  for q in panels(p.get("panels") or []):
+                      yield q
+
+          rules, n = [], 0
+          for doc in yaml.safe_load_all(sys.stdin):
+              if not doc or doc.get("kind") != "ConfigMap":
+                  continue
+              for name, body in (doc.get("data") or {}).items():
+                  if not name.endswith(".json"):
+                      continue
+                  for p in panels(json.loads(body).get("panels") or []):
+                      for t in p.get("targets") or []:
+                          expr = (t.get("expr") or "").strip()
+                          if not expr:
+                              continue
+                          n += 1
+                          rules.append({"record": "dashboard:q%d" % n, "expr": expr,
+                                        "labels": {"panel": p.get("title", "?"), "board": name}})
+          if not rules:
+              sys.exit("::error::no dashboard queries found to check")
+          yaml.safe_dump({"groups": [{"name": "dashboard-queries", "rules": rules}]},
+                         sys.stdout, default_flow_style=False)
+          print("  %d queries" % n, file=sys.stderr)
+          PY
+          python3 - <<'WRAP' | python3 /tmp/dashql.py > /tmp/dashql.yaml
+          import yaml
+          data = {}
+          for b in ("mirror-maker2", "mirror-maker2-migration"):
+              data[b + ".json"] = open("dashboards/%s/dashboard.json" % b).read()
+          print(yaml.safe_dump({"kind": "ConfigMap",
+                                "metadata": {"name": "canonical"},
+                                "data": data}))
+          WRAP
+          promtool check rules /tmp/dashql.yaml
+
+      # The one panel on either board that a person ACTS on, and the action it
+      # invites is the least reversible step of a migration. Its query is four
+      # `bool` factors multiplied together — the kind of expression that looks
+      # right and is not — so it is extracted from the board and put
+      # through promtool with real series: drained, still behind, still in
+      # flight, a failed task, and a release reporting nothing at all.
+      #
+      # The board's expressions select on namespace="$namespace",
+      # strimzi_io_cluster="$cluster", because the JSON is generated once in
+      # dashboards/ and carries no release name at all — since 0.11.0 the
+      # chart renders no copy and preselects nothing, so this step reads the
+      # canonical dashboards/mirror-maker2-migration/dashboard.json and
+      # substitutes the two query variables with the values the test's own
+      # input_series carry (a `constant` variable still supplies its own
+      # `query`). promtool has to see what GRAFANA sees, so an expression
+      # that still carries a variable after substitution is refused: a value
+      # this step cannot resolve is one the cases below would silently stop
+      # matching.
+      # The catch-up ETA and the window row's panels ride along. The ETA's
+      # arithmetic once divided seconds by a thousand and drew a ten-hour
+      # drain as thirty-five; the window row pivots a week of traffic into an
+      # hour-of-day profile with twenty-four `hour()` subqueries, which is the
+      # kind of expression that has to be run to be believed —
+      # mirror-maker2.migration-window-test.yaml holds a slow drain and a
+      # synthetic day with one quiet hour.
+      - name: The migration board's go/no-go and window panels behave
+        run: |
+          set -e
+          d=$(mktemp -d)
+          cat > /tmp/gate.py <<'PY'
+          import json, re, sys, yaml
+
+          # Panel title on the board -> the recording rule the cases read.
+          WANT = {
+              "Safe to cut over?": "dashboard:safe_to_cut_over",
+              "Catch-up ETA": "dashboard:catch_up_eta",
+              "Quietest hour (UTC)": "dashboard:quietest_hour",
+              "Busiest hour (UTC)": "dashboard:busiest_hour",
+              "Now, against the quietest hour": "dashboard:now_vs_quietest",
+          }
+
+
+          def panels(ps):
+              """Every panel, including those folded inside a collapsed row."""
+              for p in ps:
+                  yield p
+                  for q in panels(p.get("panels") or []):
+                      yield q
+
+          # The values the promtool cases' input_series carry — renaming one
+          # here means renaming it in mirror-maker2.cutover-gate-test.yaml,
+          # and the "$ survived" check below is what stops a mismatch from
+          # passing quietly.
+          VALUES = {"namespace": "kafka", "cluster": "mm2-mirror-maker2"}
+
+
+          def value_of(var):
+              """What Grafana would put in an expression for this variable."""
+              if var["name"] in VALUES:
+                  return VALUES[var["name"]]
+              if var.get("type") == "constant":
+                  # A `constant` carries its value in `query`.
+                  return str(var.get("query"))
+              return None
+
+
+          def interpolate(expr, dash):
+              for var in (dash.get("templating") or {}).get("list") or []:
+                  if var.get("type") == "datasource":
+                      continue             # never appears inside an expression
+                  value = value_of(var)
+                  if value is None:
+                      continue
+                  expr = re.sub(r"\$\{%s\}|\$%s\b" % (var["name"], var["name"]),
+                                lambda _m: value, expr)
+              return expr
+
+
+          dash = json.load(open(sys.argv[1]))
+          rules, found = [], set()
+          for p in panels(dash.get("panels") or []):
+              record = WANT.get(p.get("title"))
+              if not record:
+                  continue
+              expr = interpolate(p["targets"][0]["expr"], dash)
+              if "$" in expr:
+                  sys.exit("::error::%s still reads a template variable after "
+                           "substituting the board's variables, so the cases "
+                           "below would match nothing: %s" % (p["title"], expr))
+              rules.append({"record": record, "expr": expr})
+              found.add(p["title"])
+          missing = sorted(set(WANT) - found)
+          if missing:
+              sys.exit("::error::no panel titled %s on the board — the tests "
+                       "below would silently check nothing" % ", ".join(map(repr, missing)))
+          yaml.safe_dump({"groups": [{"name": "cutover-gate", "rules": rules}]},
+                         sys.stdout, default_flow_style=False)
+          print("  extracted %d panels from %s" % (len(rules), sys.argv[1]), file=sys.stderr)
+          PY
+          python3 /tmp/gate.py dashboards/mirror-maker2-migration/dashboard.json \
+            > "$d/cutover-gate.yaml"
+          cp scripts/metric-contract/tests/mirror-maker2.cutover-gate-test.yaml \
+             scripts/metric-contract/tests/mirror-maker2.migration-window-test.yaml "$d/"
+          promtool test rules "$d/mirror-maker2.cutover-gate-test.yaml"
+          promtool test rules "$d/mirror-maker2.migration-window-test.yaml"
+
+      # An alert whose runbook_url 404s is an alert that wakes someone at 3am
+      # and then tells them nothing. The anchors are GitHub's heading slugs, so
+      # renaming a runbook heading silently breaks them — which is why this job
+      # also triggers on docs/mirror-maker2-runbook.md.
+      - name: Every alert's runbook anchor resolves
+        run: |
+          set -e
+          cat > /tmp/anchors.py <<'PY'
+          import re, sys, yaml
+
+          rendered, runbook = sys.argv[1], sys.argv[2]
+
+          have, fenced = set(), False
+          for line in open(runbook):
+              if line.startswith("```"):
+                  fenced = not fenced
+              if fenced or not line.startswith("#"):
+                  continue
+              title = line.lstrip("#").strip()
+              have.add(re.sub(r"[^\w\- ]", "", title.lower()).replace(" ", "-"))
+
+          want = {}
+          for doc in yaml.safe_load_all(open(rendered)):
+              if not doc or doc.get("kind") != "PrometheusRule":
+                  continue
+              for group in doc["spec"]["groups"]:
+                  for rule in group["rules"]:
+                      if "record" in rule:
+                          continue  # a recording rule wakes nobody
+                      url = (rule.get("annotations") or {}).get("runbook_url")
+                      if not url:
+                          sys.exit("::error::rule %s carries no runbook_url" % rule["alert"])
+                      if "#" not in url:
+                          sys.exit("::error::rule %s has a runbook_url with no anchor: %s"
+                                   % (rule["alert"], url))
+                      want.setdefault(url.split("#", 1)[1], set()).add(rule["alert"])
+
+          rc = 0
+          for anchor in sorted(want):
+              alerts = ", ".join(sorted(want[anchor]))
+              if anchor in have:
+                  print("  OK  #%s  <- %s" % (anchor, alerts))
+              else:
+                  print("::error::docs/mirror-maker2-runbook.md has no heading for "
+                        "#%s (pointed at by %s)" % (anchor, alerts))
+                  rc = 1
+          sys.exit(rc)
+          PY
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            -f charts/mirror-maker2/values-fan-in.yaml \
+            --set metrics.enabled=true --set alerts.enabled=true \
+            --api-versions monitoring.coreos.com/v1 > /tmp/alerts.yaml
+          python3 /tmp/anchors.py /tmp/alerts.yaml docs/mirror-maker2-runbook.md
+
+      # The chart ships several hundred lines of shell inside container
+      # `command:` payloads — the preflight probe, the secret sync, and five
+      # Helm tests. Nothing else parses them: a syntax error there is found by
+      # the container, at runtime, as a pod that exits non-zero with a message
+      # nobody reads. `dash` is the strictest of the shells these images might
+      # run (busybox ash, dash, bash-as-sh), so parsing under it is the
+      # conservative check.
+      - name: Every embedded pod script parses under dash
+        run: |
+          set -e
+          sudo apt-get update -qq && sudo apt-get install -y -qq dash
+          cat > /tmp/podscripts.py <<'PY'
+          import os, re, sys, yaml
+
+          out = sys.argv[1]
+          os.makedirs(out, exist_ok=True)
+          SHELLS = ("sh", "bash", "dash", "ash")
+          # -c, -ec, -euc … `c` must come last in a bundle: it consumes the
+          # next word, which is the script.
+          FLAG = re.compile(r"^-[a-zA-Z]*c$")
+
+          found = 0
+          for doc in yaml.safe_load_all(sys.stdin):
+              if not doc or doc.get("kind") not in ("Pod", "Job", "CronJob"):
+                  continue
+              kind, name, spec = doc["kind"], doc["metadata"]["name"], doc["spec"]
+              if kind == "CronJob":
+                  spec = spec["jobTemplate"]["spec"]
+              if kind in ("Job", "CronJob"):
+                  spec = spec["template"]["spec"]
+              for group in ("initContainers", "containers"):
+                  for container in spec.get(group) or []:
+                      argv = [str(a) for a in (container.get("command") or [])] \
+                           + [str(a) for a in (container.get("args") or [])]
+                      if not argv or os.path.basename(argv[0]) not in SHELLS:
+                          continue
+                      idx = next((i for i, a in enumerate(argv) if FLAG.match(a)), None)
+                      if idx is None or idx + 1 >= len(argv):
+                          continue
+                      found += 1
+                      path = os.path.join(
+                          out, "%s-%s-%s-%d.sh" % (kind, name, container["name"], found))
+                      with open(path, "w") as fh:
+                          fh.write(argv[idx + 1])
+                      print(path)
+          if found == 0:
+              sys.exit("::error::no embedded shell scripts found — the extractor is "
+                       "looking in the wrong place, which is worse than a failing script")
+          PY
+          rm -rf /tmp/podscripts && mkdir -p /tmp/podscripts
+          # Everything that renders a pod, in one manifest: the preflight hook,
+          # the credential sync Job AND its rotation CronJob, and all five tests.
+          helm template mm2 charts/mirror-maker2 -n kafka \
+            -f charts/mirror-maker2/values-kind.yaml \
+            --set preflight.enabled=true \
+            --set secretSync.enabled=true --set secretSync.watch=true \
+            --set 'secretSync.secrets[0].name=kates-mm2' \
+            --set 'secretSync.secrets[0].fromNamespace=kafka-legacy' \
+            --set tests.replication.enabled=true \
+            --set tests.offsetTranslation.enabled=true \
+            --set tests.failover.enabled=true \
+            | python3 /tmp/podscripts.py /tmp/podscripts
+          rc=0
+          for f in /tmp/podscripts/*.sh; do
+            if dash -n "$f"; then
+              echo "  OK  $(basename "$f")"
+            else
+              echo "::error::$(basename "$f") is not valid POSIX shell"
+              rc=1
+            fi
+          done
+          exit $rc
+
+      # Phase 1's acceptance criterion: the 0.4.0 fixes are ADDITIVE. Every
+      # overlay that existed at the previous chart version is rendered by both
+      # charts and compared; anything that DISAPPEARED is a regression, because
+      # a values file someone is running today must keep producing the resources
+      # it produces today.
+      #
+      # THE TWO EXCEPTIONS, and they are the whole point of the release:
+      #   • the `mm2-offset-syncs.` target ACL, which 0.3.0 granted
+      #     unconditionally. MirrorMaker writes that topic to the SOURCE under
+      #     Kafka's default `offset-syncs.topic.location`, so on the target the
+      #     grant named a topic that is not on that cluster — inert, and
+      #     misleading to anyone auditing the least-privilege set. 0.4.0 emits
+      #     it only when a mirror actually keeps the topic here.
+      #   • the `heartbeats` ACL. The Strimzi v1 API removed
+      #     heartbeatConnector, so nothing in this chart creates that topic.
+      # Both are ACL entries on the KafkaUser, which is why that one resource is
+      # compared entry-by-entry and everything else line-by-line.
+      #
+      # Helm test pods are excluded: they are hooks, not the deployment
+      # contract, and they were deliberately rewritten to loop over `mirrors[]`.
+      - name: 0.4.0 renders the previous version's overlays additively
+        run: |
+          set -e
+          cat > /tmp/renderdiff.py <<'PY'
+          import json, re, sys, yaml
+
+          ALLOWED_ACL_REMOVALS = ("mm2-offset-syncs.", "heartbeats")
+
+          # Deliberate render changes, each with the decision behind it.
+          #
+          # This list is not the kind that goes stale: it is a record of breaks
+          # someone chose and justified, not a prediction about the world.
+          # Anything NOT on it is a regression by definition, which is the
+          # whole point of this job.
+          ALLOWED_LINE_REMOVALS = (
+              # 0.1.0 defaulted the SOURCE credential to kates-mm2-source — a
+              # user that exists on no cluster this chart creates. The default
+              # topology is a loopback (source == target == krafter), so there
+              # is one cluster and one user. 0.4.0 points both ends at
+              # kates-mm2, which is what makes the shipped default installable
+              # and smoke-testable without inventing a Secret first.
+              "source.authentication.passwordSecret.secretName = kates-mm2-source",
+              "source.authentication.username = kates-mm2-source",
+              # 0.4.0 rewrote the JMX exporter rules from four catch-all
+              # patterns to twelve specific ones, so per-source and checkpoint
+              # metrics carry the source/target labels the alerts group by.
+              # The old generic patterns are gone by design — a dashboard built
+              # on them needs re-pointing, which the chart README says.
+              "ConfigMap/mm2-mirror-maker2-metrics.data.metrics-config.yml",
+              # 0.8.0 stops defaulting the workers to system-cluster-critical,
+              # a class meant for components the cluster itself cannot run
+              # without (docs/kafka-charts-refactor-plan.md, C9).
+              # values-prod.yaml keeps it explicitly, and renders additively.
+              "spec.template.pod.priorityClassName = system-cluster-critical",
+              # 0.8.0 moves every helper pod to the kates-tester pin the
+              # connect-cluster tests already run on (plan, M4).
+              "image = ghcr.io/bmscomp/kates-tester:1.21.0",
+          )
+
+
+          def load(path):
+              keep = []
+              for doc in yaml.safe_load_all(open(path)):
+                  if not doc:
+                      continue
+                  ann = (doc.get("metadata") or {}).get("annotations") or {}
+                  if "test" in str(ann.get("helm.sh/hook", "")):
+                      continue
+                  keep.append(doc)
+              return keep
+
+
+          # The versions the chart DECLARES about itself: its own version
+          # (helm.sh/chart) and the Kafka line it tracks, which appVersion
+          # stamps onto every resource as app.kubernetes.io/version and
+          # .Values.version renders into spec.version. Their VALUES move every
+          # time the chart is cut or the Kafka pin advances — 4.3.0 -> 4.3.1 is
+          # a release, not a dropped key, and dropped keys are what this job
+          # exists to catch. The KEY itself is still compared: blank the value
+          # and a label that disappeared still reads as REMOVED.
+          #
+          # Nothing else named "version" is blanked. A per-connector
+          # spec.mirrors[].sourceConnector.version is a user's pin, not the
+          # chart's, so it is compared as written.
+          DECLARED_VERSION_KEYS = {"helm.sh/chart": "CHART-VERSION",
+                                   "app.kubernetes.io/version": "KAFKA-VERSION"}
+
+          # The third declared version is an image tag. The helper pods run
+          # the kates-tester pin, which scripts/check-versions.sh holds to the
+          # kates chart's appVersion, so it moves with every Kates release the
+          # way helm.sh/chart moves with every chart cut — a release, not a
+          # dropped key. The TAG is blanked and the repository kept: a helper
+          # pod that switches to some other image still reads as REMOVED.
+          # (Through 0.11.0 each move needed its own ALLOWED_LINE_REMOVALS
+          # entry, and the 1.22.0 -> 1.23.0 pin move failed here for want of
+          # one.)
+          TESTER_IMAGE = re.compile(r"^(ghcr\.io/bmscomp/kates-tester):\S+$")
+
+
+          def scrub(node):
+              """Declared versions change by definition; nothing else may."""
+              if isinstance(node, dict):
+                  return {k: (DECLARED_VERSION_KEYS[k]
+                              if k in DECLARED_VERSION_KEYS else scrub(v))
+                          for k, v in node.items()}
+              if isinstance(node, list):
+                  return [scrub(v) for v in node]
+              if isinstance(node, str):
+                  return TESTER_IMAGE.sub(r"\1:TESTER-VERSION", node)
+              return node
+
+
+          def normalise(doc):
+              """scrub(), plus the one declared version that is a spec field
+              rather than a label."""
+              doc = scrub(doc)
+              spec = doc.get("spec")
+              if isinstance(spec, dict) and "version" in spec:
+                  spec["version"] = "KAFKA-VERSION"
+              return doc
+
+
+          def flatten(node, path, out):
+              """`path = value` lines. Lists lose their index and multi-line
+              strings are split, so reordering and re-wrapping are invisible and
+              a deleted key or value is not."""
+              if isinstance(node, dict):
+                  for k in sorted(node):
+                      flatten(node[k], "%s.%s" % (path, k), out)
+              elif isinstance(node, list):
+                  for v in node:
+                      flatten(v, path + "[]", out)
+              else:
+                  for line in str(node).split("\n"):
+                      out.append("%s = %s" % (path, line))
+
+
+          def ident(doc):
+              return "%s/%s" % (doc.get("kind"), (doc.get("metadata") or {}).get("name"))
+
+
+          def acl_key(a):
+              """What an ACL applies to — host and resource, without the
+              operations."""
+              r = a.get("resource") or {}
+              return (a.get("host"), r.get("type"), r.get("name"),
+                      r.get("patternType"))
+
+
+          def acl_map(doc):
+              """ACLs keyed by target, with operations as a set.
+
+              This used to compare the serialised ACL as one blob, which made
+              ADDING an operation indistinguishable from deleting the grant:
+              0.4.0 added AlterConfigs to the replicated-topics ACL (which is
+              what sync.topic.configs.enabled needs) and this job called it a
+              removal. Comparing per target lets a grant get stronger while
+              still failing when it gets weaker.
+              """
+              authz = ((doc.get("spec") or {}).get("authorization") or {})
+              return {acl_key(a): set(a.get("operations") or [])
+                      for a in (authz.get("acls") or [])}
+
+
+          def acl_label(key):
+              host, rtype, name, pattern = key
+              return json.dumps({"host": host, "resource": {
+                  "type": rtype, "name": name, "patternType": pattern}},
+                  sort_keys=True)
+
+
+          def missing(old_lines, new_lines):
+              rest = list(old_lines)
+              for line in new_lines:
+                  if line in rest:
+                      rest.remove(line)
+              return rest
+
+
+          old, new, label = load(sys.argv[1]), load(sys.argv[2]), sys.argv[3]
+          rc = 0
+
+          def lines(docs):
+              out = []
+              for doc in docs:
+                  if doc.get("kind") == "KafkaUser":
+                      continue
+                  flatten(normalise(doc), ident(doc), out)
+              return sorted(out)
+
+          for line in missing(lines(old), lines(new)):
+              if any(t in line for t in ALLOWED_LINE_REMOVALS):
+                  print("  deliberate: %s" % line)
+                  continue
+              print("  REMOVED  %s" % line)
+              rc = 1
+
+          old_users = {ident(d): d for d in old if d.get("kind") == "KafkaUser"}
+          new_users = {ident(d): d for d in new if d.get("kind") == "KafkaUser"}
+          for name, doc in old_users.items():
+              if name not in new_users:
+                  print("  REMOVED  %s (the whole KafkaUser)" % name)
+                  rc = 1
+                  continue
+              old_acls, new_acls = acl_map(doc), acl_map(new_users[name])
+              for key, ops in old_acls.items():
+                  # Not `label` — that name holds the overlay this run is
+                  # reporting on, and shadowing it makes the summary line
+                  # print an ACL where the filename should be.
+                  what = acl_label(key)
+                  if key not in new_acls:
+                      if any(t in str(key) for t in ALLOWED_ACL_REMOVALS):
+                          print("  deliberate: %s dropped %s" % (name, what))
+                      else:
+                          print("  REMOVED ACL  %s %s" % (name, what))
+                          rc = 1
+                      continue
+                  lost = ops - new_acls[key]
+                  if lost:
+                      print("  WEAKENED ACL  %s %s lost %s"
+                            % (name, what, ", ".join(sorted(lost))))
+                      rc = 1
+
+              def without_acls(d):
+                  d = normalise(json.loads(json.dumps(d)))
+                  ((d.get("spec") or {}).get("authorization") or {}).pop("acls", None)
+                  return d
+
+              lo, ln = [], []
+              flatten(without_acls(doc), name, lo)
+              flatten(without_acls(new_users[name]), name, ln)
+              for line in missing(sorted(lo), sorted(ln)):
+                  print("  REMOVED  %s" % line)
+                  rc = 1
+
+          print("  %s: %s" % (label, "additive" if rc == 0 else "NOT ADDITIVE"))
+          sys.exit(rc)
+          PY
+
+          CUR=$(awk '/^version:/ {print $2; exit}' charts/mirror-maker2/Chart.yaml)
+          echo "working tree is mirror-maker2 ${CUR}"
+
+          # The previous chart VERSION, not the previous commit: on a
+          # pull_request the checkout's HEAD is the merge result, so `HEAD`
+          # would be this same chart and the diff would trivially pass.
+          BASE=""
+          for sha in $(git log --format=%H -- charts/mirror-maker2/Chart.yaml); do
+            v=$(git show "${sha}:charts/mirror-maker2/Chart.yaml" | awk '/^version:/ {print $2; exit}')
+            if [ "$v" != "$CUR" ]; then BASE="$sha"; PREV="$v"; break; fi
+          done
+          if [ -z "$BASE" ]; then
+            echo "::notice::no earlier chart version in this history — nothing to diff against"
+            exit 0
+          fi
+          echo "baseline is mirror-maker2 ${PREV} at ${BASE}"
+
+          rm -rf /tmp/baseline && mkdir -p /tmp/baseline
+          # kafka-common comes too, and the baseline's OWN copy of it: the
+          # chart has declared it a file://../kafka-common dependency since
+          # 0.8.0, charts/*/charts/ is generated and gitignored, and
+          # `git archive` writes the tracked tree — so the extracted baseline
+          # arrives with a dependency declared and absent, and every helm
+          # command below failed with "found in Chart.yaml, but missing in
+          # charts/ directory: kafka-common". That is the same fresh-checkout
+          # break this repository has now hit four times; the difference here
+          # is that the tree is extracted rather than checked out, so nothing
+          # else in the job builds it.
+          #
+          # Building it from the baseline's kafka-common rather than the
+          # working tree's is the point. Resolving file://../kafka-common
+          # against today's library would compare the old chart's templates
+          # with the new library's helpers, and a helper change would then read
+          # as a mirror-maker2 regression.
+          git archive "$BASE" charts/mirror-maker2 charts/kafka-common \
+            | tar -x -C /tmp/baseline
+          BASE_DIR=/tmp/baseline/charts/mirror-maker2
+          if grep -q '^dependencies:' "$BASE_DIR/Chart.yaml"; then
+            scripts/retry.sh 5 helm dependency build "$BASE_DIR" > /dev/null
+          fi
+
+          rc=0
+          # The base render, then every overlay the baseline shipped. New
+          # overlays are not in this loop by construction — they had nothing to
+          # be identical to.
+          helm template mm2 "$BASE_DIR"           -n kafka > /tmp/old.yaml
+          helm template mm2 charts/mirror-maker2  -n kafka > /tmp/new.yaml
+          python3 /tmp/renderdiff.py /tmp/old.yaml /tmp/new.yaml "base" || rc=1
+          for f in "$BASE_DIR"/values-*.yaml; do
+            o=$(basename "$f")
+            # values-failback.yaml ships an EMPTY source on purpose, so that the
+            # chart refuses a bare render rather than silently mirroring the
+            # target into itself. Both sides therefore need the same explicit
+            # source, exactly as the "Render every overlay" step gives it.
+            # Without this the loop aborts on the first baseline that contains
+            # the overlay — which is every baseline from 0.4.0 on, the version
+            # that introduced it.
+            extra=""
+            [ "$o" = "values-failback.yaml" ] && \
+              extra="--set mirrors[0].source.clusterName=failover-cluster"
+            # shellcheck disable=SC2086
+            helm template mm2 "$BASE_DIR"          -n kafka -f "$f" $extra > /tmp/old.yaml
+            # shellcheck disable=SC2086
+            helm template mm2 charts/mirror-maker2 -n kafka \
+              -f "charts/mirror-maker2/${o}" $extra > /tmp/new.yaml
+            python3 /tmp/renderdiff.py /tmp/old.yaml /tmp/new.yaml "$o" || rc=1
+          done
+          exit $rc
+
+      # The migration scripts are shellchecked by CI · Lint with every other
+      # script in scripts/.
+
+  migration-e2e:
+    name: Migration e2e (Kafka ${{ matrix.source }} → 4.x)
+    # Minutes, not seconds. On demand, or on a PR explicitly labelled for it.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'test-migration')
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ github.event.inputs.source_version == '2.8.2' && fromJSON('["2.8.2"]') || github.event.inputs.source_version == '3.9.1' && fromJSON('["3.9.1"]') || fromJSON('["2.8.2","3.9.1"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Same shape as ci-apicurio.yml on purpose: the kind version and kubectl
+      # come from versions.env, the node image from config/cluster.yaml, and
+      # the Kafka cluster from the script `make all` runs locally — so this job
+      # exercises the operator chart and the kafka-cluster chart the repo
+      # actually ships, not a hand-rolled approximation of them.
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # mirror-maker2 is built on the kafka-common library (file://).
+      - name: Build the chart's kafka-common dependency
+        run: scripts/retry.sh 5 helm dependency build charts/mirror-maker2/
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      # kubectl_version is passed explicitly: the action's own default is a
+      # newer kubectl that it prepends to PATH, which would silently shadow the
+      # pinned one — the exact skew scripts/check-versions.sh exists to catch.
+      - name: Create kind cluster (3-zone topology)
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: panda
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=180s
+
+      - name: Apply storage classes
+        run: kubectl apply -f config/storage/storage-classes.yaml
+
+      # Also the migration lab's driver: `kates migrate run` below replaces
+      # scripts/test-mm2-migration.sh.
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
+
+      - name: Build and load the 2.x image
+        if: matrix.source == '2.8.2'
+        run: |
+          # No official Apache image exists below 3.7.0, so this line has to be
+          # built. It is also the only step in this job that needs the network
+          # for anything but image pulls.
+          scripts/build-legacy-kafka-image.sh --version 2.8.2 --load
+
+      # Installs the Strimzi operator (charts/strimzi-operator), deploys the
+      # krafter Kafka cluster with the kind overlay, and provisions the
+      # kates-mm2 KafkaUser + ACLs the mirror needs on the target. Waits for
+      # Kafka to be Ready. values-ci.yaml pins a single controller + single
+      # broker (RF1) so the cluster fits the runner; the 3-zone default leaves
+      # pods Pending, and its RF3 internal topics would never form.
+      - name: Deploy Strimzi + Kafka (krafter)
+        run: ./scripts/deploy-kafka-generic.sh --yes --skip-tests -f charts/kafka-cluster/values-ci.yaml
+
+      # The CLI replaces scripts/test-mm2-migration.sh: up → verify → cutover
+      # → down, one report, exit 1 on any failed row. The lab is named
+      # m<from>-<to> (m282-430, m391-430) and lives in kafka-<lab>-src beside
+      # the primary; --skip-build because the 2.x image was built and loaded
+      # above; --yes because there is no terminal to confirm on.
+      - name: Run the migration lab
+        run: |
+          build/kates migrate run \
+            --from "${{ matrix.source }}" \
+            --skip-build \
+            --timeout 600 \
+            --yes
+
+      # Also exercise the default (renaming) policy on the 3.x leg only —
+      # enough to prove both policies work without doubling the whole matrix.
+      - name: Run the default-policy variant
+        if: matrix.source == '3.9.1'
+        run: |
+          build/kates migrate run \
+            --from 3.9.1 --policy default --name m391-430-default \
+            --skip-build \
+            --timeout 600 \
+            --yes
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p /tmp/diag
+          kubectl get all -A > /tmp/diag/all.txt 2>&1 || true
+          kubectl -n kafka get kafkamirrormaker2 -o yaml > /tmp/diag/mm2.yaml 2>&1 || true
+          kubectl -n kafka describe kafkamirrormaker2 > /tmp/diag/mm2-describe.txt 2>&1 || true
+          for ns in kafka strimzi-operator kafka-m282-430-src kafka-m391-430-src kafka-m391-430-default-src kafka-legacy-2x kafka-legacy-3x kafka-legacy-3x-default; do
+            kubectl get namespace "$ns" >/dev/null 2>&1 || continue
+            kubectl -n "$ns" get events --sort-by=.lastTimestamp > "/tmp/diag/events-$ns.txt" 2>&1 || true
+            for p in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
+              kubectl -n "$ns" logs "$p" --all-containers --tail=300 \
+                > "/tmp/diag/$ns-$(basename "$p").log" 2>&1 || true
+            done
+          done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: migration-diagnostics-${{ matrix.source }}
+          path: /tmp/diag/
+          retention-days: 7
+
+  # The contract check above proves the rules and the dashboard read names the
+  # exporter rules can produce — from a catalogue of MBeans written by hand.
+  # This job is what keeps the catalogue honest: a real worker, a real mirror
+  # with records and translated offsets on it, one /metrics capture, and the
+  # same check run against the capture. Every referenced series has to be in
+  # it (that is the failure), and the catalogue is diffed against it in both
+  # directions (those are notes, and the artifact is how they get acted on).
+  # A Kafka upgrade that renames an attribute shows up here first.
+  #
+  # Same tier as migration-e2e: minutes and a kind cluster, so on demand or on
+  # the label rather than on every push.
+  metrics-live:
+    name: Metric contract (live scrape)
+    needs: changes
+    # Weekly, on demand, on a pull request that changes what it stands up or
+    # checks, and on any pull request labelled test-migration. It ran only on
+    # the first three, and a chart change it would have caught at once (the
+    # dashboard block, removed while this job's values still set it) failed
+    # every weekly run instead.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      contains(github.event.pull_request.labels.*.name, 'test-migration') ||
+      (github.event_name == 'pull_request' && needs.changes.outputs.live == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      issues: write # notify-scheduled-failure
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # mirror-maker2 is built on the kafka-common library (file://).
+      - name: Build the chart's kafka-common dependency
+        run: scripts/retry.sh 5 helm dependency build charts/mirror-maker2/
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Create kind cluster (3-zone topology)
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: panda
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=180s
+
+      - name: Apply storage classes
+        run: kubectl apply -f config/storage/storage-classes.yaml
+
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Deploy Strimzi + Kafka (krafter)
+        run: ./scripts/deploy-kafka-generic.sh --yes --skip-tests -f charts/kafka-cluster/values-ci.yaml
+
+      # The 3.9.1 leg only: its image is the official one, so nothing to
+      # build, and one source is enough — the catalogue describes MBean
+      # SHAPES, and a second mirror adds instances of the same shapes.
+      # The values file turns the exporter on, which the kind overlay leaves
+      # off; it is layered last, so it wins.
+      - name: Stand up a 3.9.1 → 4.x mirror with the exporter on
+        run: |
+          build/kates migrate up \
+            --from 3.9.1 \
+            --skip-build \
+            --values-mirror scripts/metric-contract/live/mirror-maker2.yaml \
+            --timeout 600 \
+            --yes
+
+      # Seeds the corpus, commits a consumer group on the source, proves the
+      # records and the translated offsets arrived. Until this has run, the
+      # per-partition source series and the checkpoint series do not exist —
+      # a fresh mirror exposes only the worker-level beans.
+      - name: Prove records and offsets cross (populates every mirror series)
+        # No --yes: verify has none, and asks nothing, since it seeds and
+        # reads only the lab's own topics and group.
+        run: build/kates migrate verify --timeout 600
+
+      # One worker is enough: the exporter config is the same on every pod.
+      # The checkpoint series is the last to appear (checkpoints are emitted
+      # on an interval, after the first translation), so the capture is
+      # retried until it carries one.
+      - name: Capture /metrics from one worker
+        run: |
+          set -euo pipefail
+          pod=$(kubectl -n kafka get pods -l strimzi.io/kind=KafkaMirrorMaker2 \
+            -o jsonpath='{.items[0].metadata.name}')
+          [ -n "$pod" ] || { echo "::error::no MirrorMaker 2 worker pod in kafka"; exit 1; }
+          echo "scraping $pod"
+          kubectl -n kafka port-forward "pod/$pod" 9404:9404 > /tmp/port-forward.log 2>&1 &
+          sleep 3
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:9404/metrics > /tmp/mm2-metrics.txt || true
+            if grep -q '^kafka_connect_mirror_checkpoint_connector_checkpoint_latency_ms_max' /tmp/mm2-metrics.txt; then
+              break
+            fi
+            sleep 10
+          done
+          echo "$(grep -c '^[a-z]' /tmp/mm2-metrics.txt) samples, $(grep -c '^# TYPE' /tmp/mm2-metrics.txt) families"
+
+      - name: Every referenced series is in the scrape; diff the catalogue against it
+        run: scripts/check-metric-contract.sh mirror-maker2 --scrape /tmp/mm2-metrics.txt
+
+      # The capture outlives the job so a NOTE about an uncatalogued series
+      # can be turned into a catalogue entry without re-running the cluster.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mm2-metrics-scrape
+          path: /tmp/mm2-metrics.txt
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p /tmp/diag
+          cat /tmp/port-forward.log > /tmp/diag/port-forward.log 2>&1 || true
+          kubectl get all -A > /tmp/diag/all.txt 2>&1 || true
+          kubectl -n kafka get kafkamirrormaker2 -o yaml > /tmp/diag/mm2.yaml 2>&1 || true
+          kubectl -n kafka describe kafkamirrormaker2 > /tmp/diag/mm2-describe.txt 2>&1 || true
+          for ns in kafka strimzi-operator kafka-m391-430-src kafka-m391-431-src; do
+            kubectl get namespace "$ns" >/dev/null 2>&1 || continue
+            kubectl -n "$ns" get events --sort-by=.lastTimestamp > "/tmp/diag/events-$ns.txt" 2>&1 || true
+            for p in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
+              kubectl -n "$ns" logs "$p" --all-containers --tail=300 \
+                > "/tmp/diag/$ns-$(basename "$p").log" 2>&1 || true
+            done
+          done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: metrics-live-diagnostics
+          path: /tmp/diag/
+          retention-days: 7
+
+      - name: Open an issue for a failed weekly run
+        if: failure() && github.event_name == 'schedule'
+        uses: ./.github/actions/notify-scheduled-failure
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  gate:
+    name: Gate · MirrorMaker 2
+    if: always()
+    needs: [changes, chart, metrics-live]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}

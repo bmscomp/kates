@@ -1,0 +1,30 @@
+# Kafka 3.9.1 — the 3.x migration source.
+#
+# 3.9 is the last 3.x line and the natural staging post before 4.x: it runs
+# KRaft, so there is no ZooKeeper to decommission, and it is far above the
+# KIP-896 floor, so no protocol risk at all. The interesting differences from
+# the 2.x path are therefore operational, not protocol: no ZooKeeper, and a
+# source that already speaks the modern group and offset APIs.
+#
+# Uses the official multi-arch Apache image — nothing to build.
+mode: kraft
+
+kafka:
+  version: "3.9.1"
+  image: "apache/kafka:3.9.1"
+  replicas: 1
+  replicationFactor: 1
+  heapOpts: "-Xms512m -Xmx512m"
+  config:
+    log.retention.hours: 168
+
+topics:
+  - name: kates.orders
+    partitions: 3
+    replicationFactor: 1
+  - name: kates.payments
+    partitions: 3
+    replicationFactor: 1
+  - name: kates.audit
+    partitions: 1
+    replicationFactor: 1

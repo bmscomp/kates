@@ -1,0 +1,117 @@
+name: CI · Apicurio (manual)
+
+# Stands up a real Strimzi + Kafka (krafter) cluster on kind and deploys the
+# apicurio-registry chart against it, then round-trips a schema through the v3
+# REST API. This is the only gate that actually proves the KafkaSQL wiring:
+# management-port probes, the quay.io 3.x image, SCRAM auth from the Strimzi
+# Secret, the provisioned journal/snapshots topics, and the consumer-group ACL
+# alignment. Heavier than the other jobs, so it is scoped to changes that can
+# affect it and can be run on demand.
+#
+# Manual-only: this heavy job does NOT run automatically on pull requests. It
+# stands up a full Strimzi + Kafka cluster on a 2-CPU/7-GB hosted runner, which
+# is resource-tight, so it is gated behind workflow_dispatch. Trigger it
+# deliberately from the Actions tab (or `gh workflow run ci-apicurio.yml`) once
+# the workflow is on the default branch. To re-enable automatic PR runs, add a
+# `pull_request:` trigger with the relevant `paths:` filter back here.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Pins come from versions.env, loaded below — see the note in integration.yml,
+# which carried a duplicate of the block that used to be here.
+
+jobs:
+  apicurio-e2e:
+    name: KafkaSQL round-trip on kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      # See the note in integration.yml: the action replaces two hand-rolled
+      # curls, and node_image stays out of it so config/cluster.yaml remains the
+      # only place the image is named.
+      - name: Create kind cluster (3-zone topology)
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: apicurio-e2e
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=180s
+
+      - name: Apply storage classes
+        run: kubectl apply -f config/storage/storage-classes.yaml
+
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
+
+      # Reuses the same script `make all` runs locally: installs the Strimzi
+      # operator (charts/strimzi-operator), deploys the krafter Kafka cluster
+      # with the kind overlay, and provisions the apicurio-registry KafkaUser,
+      # ACLs and journal-topic-owning user. Waits for Kafka to be Ready.
+      # values-ci.yaml pins a single controller + single broker (RF1) so the
+      # cluster fits the runner; the 3-zone default leaves pods Pending.
+      - name: Deploy Strimzi + Kafka (krafter)
+        run: ./scripts/deploy-kafka-generic.sh --yes --skip-tests -f charts/kafka-cluster/values-ci.yaml
+
+      # Matching overlay pins the registry's KafkaTopics to RF1 (a single
+      # broker cannot create the default RF3 journal/snapshots topics).
+      - name: Deploy Apicurio Registry
+        run: ./scripts/deploy-apicurio.sh --values config/apicurio/apicurio-values-ci.yaml
+
+      # Reaching Ready is itself the core assertion: the readiness probe hits
+      # /health/ready on the management port, which only passes once the
+      # registry has authenticated to Kafka (SCRAM) and replayed its journal.
+      - name: Wait for the registry to be Ready
+        run: kubectl rollout status deployment/apicurio-registry -n kafka --timeout=300s
+
+      - name: Round-trip a schema through the v3 API
+        run: |
+          set -euo pipefail
+          SVC="apicurio-registry.kafka.svc:8080"
+          run() { kubectl run apicurio-curl-$RANDOM -n kafka --rm -i --restart=Never \
+            --image=curlimages/curl:8.9.1 --quiet -- "$@"; }
+
+          echo "System info (proves the API + storage are up):"
+          run curl -sf "http://${SVC}/apis/registry/v3/system/info"
+
+          echo "Registering a schema (proves a Kafka journal write):"
+          run curl -sf -X POST "http://${SVC}/apis/ccompat/v7/subjects/kates-e2e/versions" \
+            -H 'Content-Type: application/json' \
+            -d '{"schema":"{\"type\":\"string\"}","schemaType":"AVRO"}'
+
+          echo "Reading it back (proves the write is queryable):"
+          run curl -sf "http://${SVC}/apis/ccompat/v7/subjects/kates-e2e/versions/latest" \
+            | grep -q '"schema"'
+          echo "✅ Schema round-trip succeeded"
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "== registry pods =="; kubectl get pods -n kafka -l app.kubernetes.io/name=apicurio-registry -o wide || true
+          echo "== registry describe =="; kubectl describe deploy/apicurio-registry -n kafka || true
+          echo "== registry logs =="; kubectl logs -n kafka -l app.kubernetes.io/name=apicurio-registry --tail=100 || true
+          echo "== kafka topics =="; kubectl get kafkatopics -n kafka || true
+          echo "== kafka users =="; kubectl get kafkausers -n kafka || true
+
+      # Teardown is helm/kind-action's post step — see integration.yml.

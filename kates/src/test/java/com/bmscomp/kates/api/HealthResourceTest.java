@@ -6,7 +6,7 @@ import static org.mockito.Mockito.*;
 
 import java.util.List;
 
-import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
@@ -16,16 +16,31 @@ import com.bmscomp.kates.service.ClusterHealthService;
 @QuarkusTest
 class HealthResourceTest {
 
-    @InjectMock
-    ClusterHealthService clusterHealthService;
-
-    @InjectMock
-    TestOrchestrator orchestrator;
+    /**
+     * Stubs the mocks first and installs them after, rather than stubbing
+     * {@code @InjectMock} fields that are already live.
+     *
+     * TestOrchestrator carries a {@code @Scheduled} reconciler that fires every
+     * five seconds, and while a mock replaces the bean the scheduler calls that
+     * void method on the mock. Mockito records the last call on a mock for
+     * {@code when(...)} across threads, so a tick landing between
+     * {@code orchestrator.availableBackends()} and {@code thenReturn} made the
+     * stub fail with CannotStubVoidMethodWithReturnValue. The test passed on
+     * its own and failed now and then in the full suite. A mock the scheduler
+     * cannot reach until it is fully stubbed has no such window.
+     */
+    private static void installMocks(boolean kafkaReachable, List<String> backends) {
+        ClusterHealthService clusterHealthService = mock(ClusterHealthService.class);
+        when(clusterHealthService.isReachable()).thenReturn(kafkaReachable);
+        TestOrchestrator orchestrator = mock(TestOrchestrator.class);
+        when(orchestrator.availableBackends()).thenReturn(backends);
+        QuarkusMock.installMockForType(clusterHealthService, ClusterHealthService.class);
+        QuarkusMock.installMockForType(orchestrator, TestOrchestrator.class);
+    }
 
     @Test
     void healthReturnsUpWithEngineAndPerTypeConfig() {
-        when(clusterHealthService.isReachable()).thenReturn(true);
-        when(orchestrator.availableBackends()).thenReturn(List.of("native", "trogdor"));
+        installMocks(true, List.of("native", "trogdor"));
 
         given().when()
                 .get("/api/health")
@@ -54,8 +69,7 @@ class HealthResourceTest {
 
     @Test
     void healthReturnsDegradedWhenKafkaUnreachable() {
-        when(clusterHealthService.isReachable()).thenReturn(false);
-        when(orchestrator.availableBackends()).thenReturn(List.of("native"));
+        installMocks(false, List.of("native"));
 
         given().when()
                 .get("/api/health")

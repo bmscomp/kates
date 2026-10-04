@@ -11,11 +11,7 @@ class DisruptionResourceTest {
 
     @Test
     void listTypesReturnsAllDisruptionTypes() {
-        given().when()
-                .get("/api/disruptions/types")
-                .then()
-                .statusCode(200)
-                .body("$.size()", is(13));
+        given().when().get("/api/disruptions/types").then().statusCode(200).body("$.size()", is(13));
     }
 
     @Test

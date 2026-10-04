@@ -1,0 +1,48 @@
+apiVersion: v2
+name: strimzi-operator
+# Patch: the CRD-hook and Helm-test image moves to kates-tester 1.24.0, the
+# tag the v1.24.0 release publishes; every Strimzi chart pins the same one.
+# Templates and defaults are otherwise unchanged.
+version: 0.3.2
+# Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
+# (and the dependency version) in a generated copy when another version is
+# selected; the repository copy is the pin.
+appVersion: "1.2.0"
+description: The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
+keywords:
+  - kafka
+  - strimzi
+  - operator
+  - kraft
+  - kates
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
+dependencies:
+  - name: strimzi-kafka-operator
+    version: 1.2.0
+    repository: oci://quay.io/strimzi-helm
+annotations:
+  artifacthub.io/category: streaming-messaging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.24.0, the tag the v1.24.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image changes this time: its Kafka CLI moves from 3.7.0 on debian:bookworm-slim to 4.3.1 on debian:trixie-slim, the Kafka the charts deploy, without the 3.7 line's kafka-clients, ZooKeeper and Jetty 9.4 CVEs (#184). A 4.x CLI talks to brokers 2.1 and newer"
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
+    - kind: added
+      description: drainCleaner — the Strimzi Drain Cleaner webhook, moved from kafka-cluster 0.4, with cert-manager certificates, a PDB above one replica, a NetworkPolicy, and the operator's watch scope as its namespace selector. values-prod.yaml runs two replicas
+    - kind: added
+      description: monitoring.podMonitor and alerts — the operator's PodMonitor, StrimziOperatorDown, StrimziReconciliationsFailing and the certificate-expiry alerts on strimzi_certificate_expiration_timestamp_ms (kafka-cluster 0.4's versions selected nothing and read a series the operator does not publish)
+    - kind: added
+      description: productionMode refuses a single drain-cleaner replica
+    - kind: changed
+      description: operatorPolicy is on by default; while a kafka-cluster 0.4 release still owns the NetworkPolicy it is skipped and NOTES say so. Its egress admits the Kafka agent (8443) and no longer ZooKeeper (2181)
+    - kind: changed
+      description: The operator's Grafana dashboards are on (strimzi-kafka-operator.dashboards.enabled); kafka-cluster 1.0 ships none. values-namespace-scope.yaml turns them off
+    - kind: changed
+      description: The Helm-test image is kates-tester 1.22.0, as in the other Kafka charts

@@ -17,23 +17,25 @@ configuration:
   - name: default
     provider: aws
     bucket: velero
+    # The SeaweedFS of config/velero/seaweedfs.yaml, in the namespace
+    # deploy-velero.sh installs both into.
     config:
-      region: minio
+      region: us-east-1
       s3ForcePathStyle: "true"
-      s3Url: http://minio.velero.svc:9000
+      s3Url: http://velero-seaweedfs.kafka.svc:8333
   volumeSnapshotLocation:
   - name: default
     provider: aws
     config:
-      region: minio
+      region: us-east-1
 
 credentials:
   useSecret: true
   secretContents:
     cloud: |
       [default]
-      aws_access_key_id = minio
-      aws_secret_access_key = minio123
+      aws_access_key_id = velero
+      aws_secret_access_key = velero123
 
 snapshotsEnabled: false
 

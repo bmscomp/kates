@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: testprops
+data:
+  props: |
+    {{- include "kafka-common.test.clientProps" (dict "c" .Values.cluster "env" "PW" "file" "/tmp/c.properties") | nindent 4 }}
+  unsupported: {{ include "kafka-common.test.authUnsupported" (dict "c" .Values.cluster) | quote }}

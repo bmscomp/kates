@@ -1,0 +1,109 @@
+{{- /*
+Scrape and alerts for the Cluster Operator itself, and for what only the
+operator reports: the certificate lifetimes of every cluster it manages.
+kafka-cluster 0.4 carried these, with a PodMonitor in the Kafka namespace
+(where the operator does not run) and an expr on a series the operator does
+not publish, so none of it ever worked.
+
+Rendered only where the monitoring.coreos.com API exists.
+*/ -}}
+{{- $mon := .Values.monitoring | default dict -}}
+{{- $alerts := .Values.alerts | default dict -}}
+{{- $hasApi := .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" -}}
+{{- $pm := $mon.podMonitor | default dict -}}
+{{- $pmOn := ne (toString $pm.enabled) "false" -}}
+{{- $name := printf "%s-operator" (include "strimzi-operator.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- $ns := .Release.Namespace -}}
+{{- if and $hasApi $pmOn }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+    {{- with $pm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/kind: cluster-operator
+  namespaceSelector:
+    matchNames:
+      - {{ $ns }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      {{- with $pm.interval }}
+      interval: {{ . }}
+      {{- end }}
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: kubernetes_pod_name
+{{- end }}
+{{- if and $hasApi $pmOn (ne (toString $alerts.enabled) "false") }}
+{{- $job := printf "%s/%s" $ns $name -}}
+{{- $sel := printf "job=%q" $job -}}
+{{- $th := $alerts.thresholds | default dict -}}
+{{- $rb := $alerts.runbookBaseUrl | default "https://github.com/bmscomp/kates/blob/main/docs/kafka-cluster-runbook.md" -}}
+{{- $v2 := "{{" -}}{{- $v3 := "}}" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ printf "%s-alerts" $name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+    {{- with $alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: strimzi-operator.{{ $ns }}
+      rules:
+        - alert: StrimziOperatorDown
+          expr: absent(up{ {{- $sel -}} } == 1)
+          for: 5m
+          labels:
+            severity: critical
+            namespace: {{ $ns }}
+          annotations:
+            summary: "The Strimzi Cluster Operator in {{ $ns }} is down"
+            description: "No operator pod has been scraped for 5 minutes. Nothing reconciles Kafka, Connect or MirrorMaker 2 resources: no rolls, no certificate renewal, no user or topic changes."
+            runbook_url: "{{ $rb }}#strimzioperatordown"
+
+        - alert: StrimziReconciliationsFailing
+          expr: sum by (kind) (increase(strimzi_reconciliations_failed_total{ {{- $sel -}} }[15m])) > 0
+          for: 30m
+          labels:
+            severity: warning
+            namespace: {{ $ns }}
+          annotations:
+            summary: "Strimzi keeps failing to reconcile {{ $v2 }} $labels.kind {{ $v3 }} resources"
+            description: "{{ $v2 }} $value | humanize {{ $v3 }} failed reconciliations in 15 minutes, for 30 minutes. The resource's status conditions say why."
+            runbook_url: "{{ $rb }}#strimzireconciliationsfailing"
+
+        - alert: KafkaCertificateExpiringSoon
+          # The operator renews certificates in maintenance windows, renewalDays
+          # before expiry; one this close to expiring was not renewed.
+          expr: (strimzi_certificate_expiration_timestamp_ms{ {{- $sel -}} } / 1000 - time()) / 86400 < {{ $th.certificateWarningDays | default 30 }}
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "A Strimzi certificate expires within {{ $th.certificateWarningDays | default 30 }} days"
+            description: "The {{ $v2 }} $labels.type {{ $v3 }} certificate of cluster {{ $v2 }} $labels.cluster {{ $v3 }} expires in {{ $v2 }} $value | humanize {{ $v3 }} days."
+            runbook_url: "{{ $rb }}#kafkacertificateexpiringsoon"
+
+        - alert: KafkaCertificateExpiryCritical
+          expr: (strimzi_certificate_expiration_timestamp_ms{ {{- $sel -}} } / 1000 - time()) / 86400 < {{ $th.certificateCriticalDays | default 7 }}
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A Strimzi certificate expires within {{ $th.certificateCriticalDays | default 7 }} days"
+            description: "The {{ $v2 }} $labels.type {{ $v3 }} certificate of cluster {{ $v2 }} $labels.cluster {{ $v3 }} expires in {{ $v2 }} $value | humanize {{ $v3 }} days. Clients and brokers stop trusting each other when it does."
+            runbook_url: "{{ $rb }}#kafkacertificateexpirycritical"
+{{- end }}

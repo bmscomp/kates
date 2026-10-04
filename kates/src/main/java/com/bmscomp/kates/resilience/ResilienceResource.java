@@ -1,19 +1,18 @@
 package com.bmscomp.kates.resilience;
 
 import java.util.Map;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.bmscomp.kates.api.ApiError;
 
 /**
@@ -31,13 +30,20 @@ public class ResilienceResource {
     ResilienceOrchestrator orchestrator;
 
     @Inject
+    com.bmscomp.kates.engine.TestOrchestrator testOrchestrator;
+
+    @Inject
     ObjectMapper objectMapper;
+
+    @Inject
+    com.bmscomp.kates.engine.KatesExecutor executor;
 
     private StreamingOutput executeWithKeepAlive(ResilienceTestRequest request, String scenarioId) {
         return os -> {
-            java.util.concurrent.CompletableFuture<ResilienceReport> future = 
-                java.util.concurrent.CompletableFuture.supplyAsync(() -> orchestrator.execute(request));
-            
+            java.util.concurrent.CompletableFuture<ResilienceReport> future =
+                    java.util.concurrent.CompletableFuture.supplyAsync(
+                            () -> orchestrator.execute(request), executor.get());
+
             while (!future.isDone()) {
                 try {
                     os.write(" ".getBytes());
@@ -48,7 +54,7 @@ public class ResilienceResource {
                     return;
                 }
             }
-            
+
             try {
                 ResilienceReport report = future.get();
                 Object payload = scenarioId != null ? Map.of("scenario", scenarioId, "report", report) : report;
@@ -65,6 +71,10 @@ public class ResilienceResource {
             summary = "Execute a resilience test",
             description = "Runs a combined performance + chaos test with probe evaluation and returns impact analysis")
     @APIResponse(responseCode = "200", description = "Resilience test report with probe results and RTO")
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid request, including a testRequest spec field the test type or backend cannot"
+                    + " apply; fieldErrors names each field")
     public Response executeResilienceTest(ResilienceTestRequest request) {
         if (request.getTestRequest() == null) {
             return Response.status(400)
@@ -77,6 +87,17 @@ public class ResilienceResource {
                     .build();
         }
 
+        // Checked here because the answer is a stream: once the keep-alive
+        // bytes have gone out the status is 200, and a test request the
+        // orchestrator refuses could only end the report as ERROR.
+        var refused = testOrchestrator.refusal(request.getTestRequest());
+        if (refused.isPresent()) {
+            return Response.status(400)
+                    .entity(ApiError.validationFailed(
+                            refused.get().getMessage(), refused.get().getFieldErrors()))
+                    .build();
+        }
+
         StreamingOutput stream = executeWithKeepAlive(request, null);
         return Response.ok(stream).build();
     }
@@ -85,7 +106,8 @@ public class ResilienceResource {
     @Path("/scenarios")
     @Operation(
             summary = "List resilience scenarios",
-            description = "Returns pre-built resilience test scenarios with appropriate probes for common Kafka failure modes")
+            description =
+                    "Returns pre-built resilience test scenarios with appropriate probes for common Kafka failure modes")
     public Response listScenarios() {
         return Response.ok(ResilienceScenarios.listAll()).build();
     }
@@ -94,12 +116,12 @@ public class ResilienceResource {
     @Path("/scenarios/{id}")
     @Operation(
             summary = "Run a resilience scenario",
-            description = "Executes a pre-built scenario with optional parameter overrides (targetPod, chaosDurationSec)")
+            description =
+                    "Executes a pre-built scenario with optional parameter overrides (targetPod, chaosDurationSec)")
     @APIResponse(responseCode = "200", description = "Resilience test report")
     @APIResponse(responseCode = "404", description = "Scenario not found")
     public Response runScenario(
-            @Parameter(description = "Scenario ID") @PathParam("id") String id,
-            Map<String, Object> overrides) {
+            @Parameter(description = "Scenario ID") @PathParam("id") String id, Map<String, Object> overrides) {
 
         var scenario = ResilienceScenarios.findById(id);
         if (scenario == null) {
@@ -123,7 +145,9 @@ public class ResilienceResource {
 
         if (request.getTestRequest() == null) {
             return Response.status(400)
-                    .entity(ApiError.of(400, "Bad Request",
+                    .entity(ApiError.of(
+                            400,
+                            "Bad Request",
                             "A 'testRequest' override is required when running a scenario. "
                                     + "Include it in the request body to run a combined benchmark + chaos test."))
                     .build();

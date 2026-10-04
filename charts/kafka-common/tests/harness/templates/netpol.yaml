@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: harness
+spec:
+  podSelector:
+    matchLabels:
+      app: harness
+  policyTypes: [Ingress, Egress]
+  ingress:
+    {{- include "kafka-common.netpol.workers" (dict "direction" "from" "selector" (dict "app" "harness")) | nindent 4 }}
+    {{- include "kafka-common.netpol.operatorIngress" (dict "namespace" "strimzi-operator") | nindent 4 }}
+    {{- include "kafka-common.netpol.monitoringIngress" (dict "namespace" "monitoring") | nindent 4 }}
+  egress:
+    {{- include "kafka-common.netpol.dnsEgress" .Values.netpol.dns | nindent 4 }}
+    {{- include "kafka-common.netpol.apiServerEgress" (dict "ipBlock" (dict "cidr" "10.0.0.1/32")) | nindent 4 }}

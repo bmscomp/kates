@@ -162,7 +162,7 @@ test(backend): add webhook delivery unit tests
 
 ## Pull Request Process
 
-1. **Ensure CI passes** — all tests, lints, and builds must be green.
+1. **Ensure CI passes** — all tests, lints, and builds must be green. `make check` runs the cheap gates (formatters, linters, version pins) locally in under a minute; see [Continuous integration](#continuous-integration) for what runs on a PR.
 2. **Fill out the PR template** with a clear description of what and why.
 3. **Keep PRs focused** — one feature or fix per PR. Large changes should be broken into a series of smaller PRs.
 4. **Respond to review feedback** promptly and push fixes as additional commits (we squash on merge).
@@ -172,6 +172,7 @@ test(backend): add webhook delivery unit tests
 
 - [ ] Code compiles without warnings
 - [ ] Tests pass (`go test ./...` and `./mvnw verify`)
+- [ ] `make check` passes
 - [ ] New features have documentation in `kates/docs/`
 - [ ] CLI help text is updated if commands changed
 - [ ] Commit messages follow conventional commit format
@@ -201,6 +202,30 @@ test(backend): add webhook delivery unit tests
 - No commented-out code in commits.
 - No placeholder implementations — if a feature is not ready, do not merge it.
 - Prefer small, focused functions over large methods.
+
+## Continuous integration
+
+Every PR runs the `CI ·` workflows in `.github/workflows/`. Each one path-filters its own jobs (a docs-only change skips the Java build) and ends in a `Gate ·` job, which is the only check branch protection requires: it passes when every job it depends on succeeded or was skipped.
+
+| Workflow | What it gates |
+|----------|---------------|
+| CI · Lint | actionlint + shellcheck over the workflows, shellcheck over `scripts/`, hadolint, yamllint, `go vet` + golangci-lint (new issues only), `spotless:check`, `make check-help` |
+| CI · Backend | `./mvnw verify`, Trivy/govulncheck dependency scans, Helm lint + kubeconform for every chart, Kyverno policies, config YAML, Go tests |
+| CI · Kafka charts, CI · MirrorMaker 2 | The Strimzi charts rendered across every overlay and checked against the pinned CRDs, metric contracts, dashboards |
+| CI · Docker, CI · Connect | The images build (and the Connect image boots and moves a record) |
+| CI · Integration | A kind cluster with the repo's topology, `kates detect` |
+| CI · Docs | README chart table, book version matrix, mermaid diagrams, links |
+
+Not on the gate, because they take minutes and a cluster: **CI · Native image** (nightly and on backend changes), **Security · CodeQL**, and the weekly `metrics-live` jobs. Two more run only on request:
+
+- `migration-e2e` in CI · MirrorMaker 2 runs when a PR carries the **`test-migration`** label (or from *Run workflow*).
+- **CI · Apicurio (manual)** runs from *Run workflow* only.
+
+A scheduled run that fails opens an issue labelled `ci-failure` rather than going unnoticed in the Actions tab.
+
+Tool versions CI uses (Helm, kubeconform, the linters, Java, Node) are pinned in `versions.env`; Go's is `cli/go.mod`. A workflow that hardcodes one fails `scripts/check-versions.sh --workflows`.
+
+Releases are one workflow: pushing a `v*` tag runs **Release**, which builds the CLI, publishes and signs the three images, creates the GitHub Release, updates the Homebrew tap and `brew install`s the result on macOS.
 
 ## Testing
 

@@ -61,8 +61,8 @@ class ResilienceScenariosTest {
         var scenario = ResilienceScenarios.findById("broker-crash");
         assertNotNull(scenario);
 
-        FaultSpec spec = ResilienceScenarios.buildFaultSpec(scenario,
-                Map.of("targetPod", "broker-42", "chaosDurationSec", 120));
+        FaultSpec spec =
+                ResilienceScenarios.buildFaultSpec(scenario, Map.of("targetPod", "broker-42", "chaosDurationSec", 120));
         assertEquals("broker-42", spec.targetPod());
         assertEquals(120, spec.chaosDurationSec());
     }

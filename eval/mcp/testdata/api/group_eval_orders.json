@@ -1,0 +1,29 @@
+{
+  "groupId": "eval-orders-abc123-app",
+  "state": "Empty",
+  "members": 0,
+  "offsets": [
+    {
+      "topic": "eval-orders-abc123",
+      "partition": 0,
+      "currentOffset": 1002,
+      "endOffset": 2671,
+      "lag": 1669
+    },
+    {
+      "topic": "eval-orders-abc123",
+      "partition": 1,
+      "currentOffset": 997,
+      "endOffset": 2662,
+      "lag": 1665
+    },
+    {
+      "topic": "eval-orders-abc123",
+      "partition": 2,
+      "currentOffset": 1001,
+      "endOffset": 2667,
+      "lag": 1666
+    }
+  ],
+  "totalLag": 5000
+}

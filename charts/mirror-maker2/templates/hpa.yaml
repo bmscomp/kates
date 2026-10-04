@@ -1,0 +1,15 @@
+{{- /*
+Optional HPA. KafkaMirrorMaker2 exposes the scale subresource, so the HPA can
+target the CR directly. spec.replicas is still emitted on the CR (the v1 CRD
+requires it) seeded from minReplicas; the HPA then owns the live count.
+*/ -}}
+{{- if .Values.autoscaling.enabled }}
+{{- include "kafka-common.hpa" (dict
+      "name" (include "mirror-maker2.fullname" .)
+      "namespace" (include "mirror-maker2.namespace" .)
+      "kind" "KafkaMirrorMaker2"
+      "labels" (include "mirror-maker2.labels" .)
+      "autoscaling" .Values.autoscaling
+      "minDefault" 2
+      "maxDefault" 6) }}
+{{- end }}

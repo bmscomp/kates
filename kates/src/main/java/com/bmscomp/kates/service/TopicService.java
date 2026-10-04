@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -47,10 +46,10 @@ public class TopicService {
         cachedTopics = null;
     }
 
-    @Retry(maxRetries = 3, delay = 1000, abortOn = {
-            org.apache.kafka.common.errors.TopicExistsException.class,
-            IllegalArgumentException.class
-    })
+    @Retry(
+            maxRetries = 3,
+            delay = 1000,
+            abortOn = {org.apache.kafka.common.errors.TopicExistsException.class, IllegalArgumentException.class})
     @Timeout(35_000)
     public void createTopic(String name, int partitions, int replicationFactor, Map<String, String> configs) {
         AdminClient client = adminService.getClient();
@@ -89,9 +88,7 @@ public class TopicService {
         try {
             ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, name);
             List<AlterConfigOp> ops = configs.entrySet().stream()
-                    .map(e -> new AlterConfigOp(
-                            new ConfigEntry(e.getKey(), e.getValue()),
-                            AlterConfigOp.OpType.SET))
+                    .map(e -> new AlterConfigOp(new ConfigEntry(e.getKey(), e.getValue()), AlterConfigOp.OpType.SET))
                     .toList();
             client.incrementalAlterConfigs(Map.of(resource, ops)).all().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             LOG.info("Altered config for topic: " + name);
@@ -170,23 +167,35 @@ public class TopicService {
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
                     .get(resource);
 
+            // Each entry of a topic's config is the value in force, whatever
+            // set it: the topic, a broker (static or dynamic), the cluster-wide
+            // dynamic default, or Kafka's own default. Only topic and Kafka
+            // default entries used to be kept, so a key set at broker level,
+            // where the kafka-cluster chart sets min.insync.replicas, retention
+            // and cleanup, was missing, and a missing min.insync.replicas read
+            // as 1. The list of keys keeps the broker's other settings out.
             Map<String, String> topicConfigs = new LinkedHashMap<>();
+            Map<String, String> configSources = new LinkedHashMap<>();
             for (ConfigEntry entry : config.entries()) {
-                if (entry.source() == ConfigEntry.ConfigSource.DYNAMIC_TOPIC_CONFIG
-                        || entry.source() == ConfigEntry.ConfigSource.DEFAULT_CONFIG) {
-                    switch (entry.name()) {
-                        case "cleanup.policy",
-                                "retention.ms",
-                                "retention.bytes",
-                                "min.insync.replicas",
-                                "compression.type",
-                                "segment.bytes",
-                                "max.message.bytes",
-                                "message.timestamp.type" -> topicConfigs.put(entry.name(), entry.value());
+                if (entry.value() == null) {
+                    continue;
+                }
+                switch (entry.name()) {
+                    case "cleanup.policy",
+                            "retention.ms",
+                            "retention.bytes",
+                            "min.insync.replicas",
+                            "compression.type",
+                            "segment.bytes",
+                            "max.message.bytes",
+                            "message.timestamp.type" -> {
+                        topicConfigs.put(entry.name(), entry.value());
+                        configSources.put(entry.name(), String.valueOf(entry.source()));
                     }
                 }
             }
             result.put("configs", topicConfigs);
+            result.put("configSources", configSources);
             return result;
 
         } catch (Exception e) {

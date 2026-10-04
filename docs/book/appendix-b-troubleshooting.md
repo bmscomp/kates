@@ -4,6 +4,8 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 
 ## Kafka Cluster
 
+The cluster exists but isn't healthy: the Strimzi operator, the brokers, the controller quorum or Cruise Control crash, stall, report an error or raise an alert.
+
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Strimzi operator `CrashLoopBackOff` with `UnsupportedVersionException` | Local chart has mismatched Kafka image map | [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-crashloopbackoff) |
@@ -12,19 +14,23 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | `KafkaActiveControllerCount != 1` alert | Controller quorum lost or election in progress | [Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) |
 | Under-replicated partitions for extended period | Broker disk I/O saturated, network issues, or follower falling behind | [The Cluster Under Test](03-cluster.md#failure-tolerance-matrix) |
 | Cruise Control `unsupported goals` error | Goals list doesn't match Strimzi's default goals | [Kafka Deployment Engineering](15-kafka-deployment.md#cruise-control-goal-mismatch) |
-| Kafka CR stuck on `NotReady` (often with `UnforceableProblem`) | Strimzi CRDs missing, insufficient resources, or operator egress blocked by `generateNetworkPolicy` / isolated topology NetworkPolicy missing DNS/API server egress — can't reach controllers | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#kafka-cr-stuck-on-notready), [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
+| Kafka CR stuck on `NotReady` (often with `UnforceableProblem`) | Strimzi CRDs missing, insufficient resources, or operator egress blocked by `operatorNetworkPolicy` / isolated topology NetworkPolicy missing DNS/API server egress — can't reach controllers | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#kafka-cr-stuck-on-notready), [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 
 ## Kafka Connectivity
+
+A client — Kates, Kafka UI or your own — can't reach the cluster or authenticate to it, or its credentials never arrive.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Kafka UI `CreateContainerConfigError` — secret not found | `KafkaUser` not applied before UI deployment | [Kafka Deployment Engineering](15-kafka-deployment.md#kafka-ui-createcontainerconfigerror) |
 | Kates can't connect to Kafka | Wrong bootstrap address or NetworkPolicy blocking | [Deployment Guide](12-deployment.md#kates-cant-connect-to-kafka) |
 | SCRAM authentication failure | Password rotated or KafkaUser not reconciled | [Security & Compliance](17-security.md#scram-sha-512) |
-| Connection timeout from new namespace | Missing NetworkPolicy entry for the new namespace | [Security & Compliance](17-security.md#testing-network-policies) |
+| Connection timeout from new namespace | The client namespace's own egress policy, such as Kyverno's generated default-deny; after the listeners carry `networkPolicyPeers`, a missing `networkPolicy.clients` entry | [Security & Compliance](17-security.md) |
 | `KafkaUser` secrets never created | Entity Operator (User Operator) only starts after the Kafka CR reaches `Ready` | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md#user-secrets-not-appearing) |
 
 ## Kafka Connect
+
+A Kafka Connect release misbehaves: its workers restart or keep rebalancing, a connector fails or is refused at render time, or the PostgreSQL database a Debezium connector reads grows on disk.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
@@ -32,20 +38,25 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | Connect cluster stuck in `REBALANCING` — `KafkaConnectRebalanceTooLong` alert fires | Workers crashing mid-rebalance, NetworkPolicy blocking inter-worker traffic on port 8083, or OOM kills during task assignment | [Operating Kafka Connect](operating-kafka-connect.md#rebalancing-takes-too-long) |
 | Connect worker pods restart with `OOMKilled` | Container memory limit under 2× the JVM heap — off-heap memory pushes usage over the limit | [Operating Kafka Connect](operating-kafka-connect.md#connect-workers-oomkilled) |
 | PostgreSQL disk usage grows while a connector is down or paused | Replication slot retains WAL segments until the connector drains them | [Operating Kafka Connect](operating-kafka-connect.md#replication-slot-wal-retention-growing) |
-| `helm upgrade` of the Connect chart hangs or fails with `validation FAILED` | Pre-install hook found missing required fields in a connector config | [Operating Kafka Connect](operating-kafka-connect.md#validation-hook-blocks-deployment) |
+| `helm upgrade` of the Connect chart fails with `connect-cluster: connectors.<name> …` | A connector in the values misses a class, a required config key or `topics`, or breaks a production rule — checked at render time | [Operating Kafka Connect](operating-kafka-connect.md#connector-validation-blocks-deployment) |
+| `KafkaConnector` `FAILED` with `Forbidden` or `secrets "…" is forbidden` | Chart 2.0 grants the workers `get` on only the Secrets its own connector configs reference — a connector applied outside the chart needs its Secret in `rbac.secretNames` | [Operating Kafka Connect](operating-kafka-connect.md#connector-fails-with-forbidden-reading-a-secret) |
 
 ## Performance Issues
+
+Tests complete but the numbers look wrong — latency that regresses, splits in two or looks too good, results that vary between identical runs — or a broker raises a request-handler or log-flush alert.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | P99 latency regression between test runs | Partition hotspot, GC pauses, or ISR changes | [Recipes & Patterns — Recipe 4](14-recipes.md#recipe-4-investigate-a-latency-regression) |
 | Bimodal latency distribution in heatmap | Some requests hitting page cache, others going to disk | [Performance Theory](04-performance-theory.md#heatmaps-seeing-the-full-picture) |
 | Artificially low latency measurements | Coordinated omission — tool slows down with the system | [Performance Theory](04-performance-theory.md#coordinated-omission) |
-| Stress test results vary wildly between identical runs | JVM warmup (JIT), GC pauses, small sample size — increase records to 500K+, use ZGC, discard first 2–3 warmup iterations | [Performance Theory](04-performance-theory.md#the-long-tail-problem), [Deployment Guide](12-deployment.md#jvm-tuning) |
+| Stress test results vary wildly between identical runs | JVM warm-up (JIT), GC pauses, small sample size — increase records to 500K+, use ZGC, discard first 2–3 warm-up iterations | [Performance Theory](04-performance-theory.md#the-long-tail-problem), [Deployment Guide](12-deployment.md#jvm-tuning) |
 | `KafkaRequestHandlerSaturated` alert | Request handlers over 70% busy — add threads or brokers | [Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) |
 | `KafkaLogFlushLatencyHigh` alert | Disk I/O saturated — check storage class and disk utilization | [Kafka Deployment Engineering](15-kafka-deployment.md#prometheus-alerts) |
 
 ## Deployment Issues
+
+Pods, images or Helm releases fail while you install the stack or roll it out.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
@@ -55,29 +66,39 @@ A consolidated index of troubleshooting procedures from across the book. Jump to
 | PDB blocks rolling restart | Only 1 pod can be unavailable — intentional safety behavior | [Upgrade Playbook](18-upgrade-playbook.md#common-upgrade-issues) |
 | Entity Operator never starts | Kafka CR hasn't reached `Ready` — check operator logs for `UnforceableProblem` | [Kafka Deployment Engineering](15-kafka-deployment.md#strimzi-operator-cannot-determine-active-controller) |
 | PostgreSQL pod `CrashLoopBackOff` with `could not create lock file` | `readOnlyRootFilesystem: true` mutated by Kyverno — mount `emptyDir` at `/var/run/postgresql` and `/tmp` | [Deployment Guide](12-deployment.md#read-only-filesystem-compliance) |
-| Pod admission rejected with Kyverno policy violation | Pod doesn't meet PSS standards — run `kates kyverno violations` to identify failing rules, then fix the manifest or add a `PolicyException` | [Security & Compliance](17-security.md#kyverno-policy-integration--admission-control) |
+| Pod admission rejected with Kyverno policy violation | Pod doesn't meet PSS standards — run `kates kyverno violations` to identify failing rules, then fix the manifest or add a `PolicyException` | [Security & Compliance](17-security.md#cluster-policies) |
 
 ## CLI Issues
+
+The `kates` CLI itself fails, or can't reach or authenticate to the Kates API.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | `kates health` killed immediately (exit 137) on macOS | macOS blocks unsigned binary — `com.apple.provenance` xattr | [Deployment Guide](12-deployment.md#cli-binary-killed-on-macos) |
-| CLI connection timeout / connection refused | Backend not running or port-forward died | [Deployment Guide](12-deployment.md#kates-cant-connect-to-kafka) |
+| CLI connection timeout / connection refused | Kates API not running or port-forward died | [Deployment Guide](12-deployment.md#kates-cant-connect-to-kafka) |
+| `[401] Missing API key` or `[403] Invalid API key`, while `kates health` works | The CLI context carries no API key or a stale one, or a stale `KATES_API_KEY` is exported, which the CLI prefers to the context's key — only `/api/health` is public | [Deployment Guide](12-deployment.md#cli-configuration) |
 
 ## Chaos Engineering
+
+A LitmusChaos experiment or a Kates disruption fails to start, has no effect or leaves a cluster that doesn't recover, or the **Kates — Chaos** board shows no data.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | Litmus experiments fail to start | Chaos operator pod not running or RBAC insufficient | [Deployment Guide](12-deployment.md#litmus-experiments-fail) |
 | Disruption doesn't take effect | Target pod selector doesn't match, or NetworkPolicy blocks | [Chaos Engineering in Practice](07-chaos-practice.md) |
+| Every step's `Verdict` in `kates disruption status` is `Skipped` | The Kates API fell back to the `noop` chaos provider, which injects nothing | [Chaos Engineering in Practice](07-chaos-practice.md) |
+| A `DISK_FILL` or `NETWORK_LATENCY` step fails | The `kates-chaos` chart installs no `disk-fill` or `pod-network-latency` experiment for the default `litmus-crd` chaos provider | [Chaos Engineering in Practice](07-chaos-practice.md) |
 | Cluster doesn't recover after chaos | ISR too small, `min.insync.replicas` violated | [Chaos Engineering Theory](06-chaos-theory.md) |
+| **Kates — Chaos** board: `$namespace` picker empty, *Chaos engines running* reads *No data* | No `ChaosEngine` has been created yet, or kube-state-metrics lacks the custom-resource configuration for it (`charts/monitoring` before 1.6.0, or another stack) | [Observability & Monitoring](09-observability.md#kates-specific-dashboards) |
 
 ## Upgrades
+
+Something that worked before an operator or Kafka upgrade fails or slows down after it.
 
 | Symptom | Likely Cause | Chapter |
 |---------|-------------|---------|
 | `UnsupportedVersionException` after operator upgrade | Kafka version not supported by new operator version | [Upgrade Playbook](18-upgrade-playbook.md#version-compatibility-matrix) |
-| Topics not reconciling after CRD API change | CRDs still using deprecated `v1beta2` | [Upgrade Playbook](18-upgrade-playbook.md#post-upgrade--api-migration) |
+| Topics not reconciling after CRD API change | CRDs still using deprecated `v1beta2` | [Upgrade Playbook](18-upgrade-playbook.md#strimzi-operator-upgrade) |
 | Performance regression after Kafka upgrade | New version defaults changed — compare baseline tests | [Upgrade Playbook](18-upgrade-playbook.md#procedure) |
 
 ## Connectivity Debugging Flowchart
@@ -114,7 +135,7 @@ Not every problem is a Kates problem. Use this guide to determine where to focus
 | Symptom Pattern | Likely Layer | What to Check |
 |-----------------|-------------|---------------|
 | `kates health` shows all components UP, but tests fail | **Kafka** | Check broker logs, partition health, ISR state |
-| CLI commands return "connection refused" or timeout | **Kates backend** | Check Kates pod status, port-forward, service endpoints |
+| CLI commands return "connection refused" or timeout | **Kates API** | Check the Kates API pod's status, port-forward, service endpoints |
 | Pods stuck in `Pending`, `CrashLoopBackOff`, or `ImagePullBackOff` | **Kubernetes** | Check node resources, StorageClass, image registry access |
 | Kyverno rejecting pod creation | **Kyverno policies** | Run `kates kyverno violations` to identify which rule is failing |
 | Latency numbers are unreasonably high for all tests | **Infrastructure** | Check node CPU/memory pressure, disk I/O, network bandwidth |
@@ -126,13 +147,17 @@ When filing an issue, include the output of `kates doctor` — it runs a battery
 
 ## Common Issues (Additional)
 
+The stack is up and the Kates API answers, but a command or a test result isn't what you expect.
+
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs" | Missing `ClusterRoleBinding` for the Kates service account — the backend can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
-| Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check Kates backend logs for consumer errors |
-| `kates trend` shows no data even after running tests | Tests completed but trend queries require at least 2 data points of the same test type | Run the same test type at least twice. Trend analysis needs historical data to draw a line |
+| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs" | Missing `ClusterRoleBinding` for the Kates service account — the Kates API can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
+| Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check the Kates API's logs for consumer errors |
+| `kates trend` shows no data even after running tests | A trend reads only the type's `DONE` runs created within `--days`; `FAILED` runs and runs still in flight are left out | Check the runs' status with `kates test list --type <TYPE>`, and widen `--days` for older runs |
 
 ## Quick Diagnostic Commands
+
+Run these for a first snapshot: the Strimzi resources and pods, the operator and broker logs, the Kafka conditions, partition health through the Kates API, and Kyverno's policies and violations.
 
 ```bash
 # Cluster overview
@@ -141,8 +166,9 @@ kubectl get kafka,kafkanodepool,kafkatopic,kafkauser -n kafka
 # Pod health
 kubectl get pods -n kafka -o wide
 
-# Strimzi operator logs (last 50 lines)
-kubectl logs deployment/strimzi-cluster-operator -n kafka --tail=50
+# Strimzi operator logs (last 50 lines) — the operator is its own release,
+# in its own namespace
+kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=50
 
 # Broker logs (last crash)
 kubectl logs <broker-pod> -n kafka --previous --tail=30
@@ -150,11 +176,8 @@ kubectl logs <broker-pod> -n kafka --previous --tail=30
 # Kafka status conditions
 kubectl get kafka krafter -n kafka -o jsonpath='{range .status.conditions[*]}{.type}: {.status} - {.message}{"\n"}{end}'
 
-# Under-replicated partitions
-kubectl exec <broker-pod> -n kafka -- bin/kafka-topics.sh --describe --under-replicated-partitions --bootstrap-server localhost:9092
-
-# Consumer lag
-kubectl exec <broker-pod> -n kafka -- bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --all-groups --describe
+# Under-replicated and offline partitions, through the Kates API
+kates cluster check
 
 # Kyverno policy status
 kates kyverno status
@@ -165,4 +188,40 @@ kates kyverno violations
 # Kyverno violations (specific namespace)
 kates kyverno violations --namespace kafka
 ```
+
+### Kafka Tools Inside a Broker Pod
+
+The tools under `/opt/kafka/bin` need credentials. Both internal listeners authenticate — SCRAM-SHA-512 on 9092, mutual TLS on 9093 — and the brokers enforce ACLs. Without credentials `kafka-topics.sh` retries until it times out, prints an `Error while executing topic command` line to standard output and exits 1, so a filter after it shows nothing and a broken command reads like a healthy cluster. Build one client configuration from the `kates-backend` KafkaUser's Secret — the platform profile makes that user a super user, so it can describe every topic, its configuration and every consumer group — and pass it to each tool with `--command-config`:
+
+```bash
+BROKER=$(kubectl get pods -n kafka -l strimzi.io/cluster=krafter,strimzi.io/broker-role=true -o name | head -1)
+JAAS=$(kubectl get secret kates-backend -n kafka -o jsonpath='{.data.sasl\.jaas\.config}' | base64 -d)
+
+# Written to the pod's memory-backed /tmp, so it is gone when the pod restarts
+kubectl exec -i -n kafka "${BROKER}" -- sh -c 'cat > /tmp/client.properties' <<EOF
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=${JAAS}
+EOF
+
+# Prove the credentials work: this lists the topics, __consumer_offsets included
+kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --command-config /tmp/client.properties --list
+```
+
+Then every tool takes the same two flags:
+
+```bash
+# Under-replicated partitions — no output means none, once --list above succeeded
+kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+  --describe --under-replicated-partitions
+
+# Consumer lag
+kubectl exec -n kafka "${BROKER}" -- /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --command-config /tmp/client.properties \
+  --all-groups --describe
+```
+
+`kates kafka groups` and `kates kafka group <group-name>` answer the lag question through the Kates API without a broker pod. The client configuration carries a super user's password: it stays in the broker pod, and `kubectl exec -n kafka "${BROKER}" -- rm /tmp/client.properties` removes it when you are done.
 

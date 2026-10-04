@@ -1,0 +1,97 @@
+name: Publish · Helm charts
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Packages every chart in charts/ and pushes it to the OCI registry:
+#   oci://ghcr.io/bmscomp/charts/<name>:<Chart.yaml version>
+# Each pushed chart is signed with cosign (keyless, GitHub OIDC) — matching
+# the image publishing pipeline in publish-connect.yml.
+#
+# Trigger: push a tag like `charts-v1.0.0`, or run manually via
+# workflow_dispatch.
+#
+# THE TAG IS A MARKER, NOT A VERSION. Nothing in this workflow reads it: every
+# chart is published at its OWN Chart.yaml version, which is what `helm pull`
+# asks for and what the README table and the book's matrix already track. The
+# tag exists so the commit a chart set went out from is findable in git, so it
+# is a plain incrementing number for the set — charts-v1.0.0, charts-v1.1.0 —
+# bumped by hand at each publish. Not a date: a date says when someone ran a
+# workflow, which git already records, and it sorts and diffs worse than a
+# version does.
+#
+# Re-publishing an unchanged chart version overwrites the same OCI tag
+# (idempotent).
+#
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    tags:
+      - "charts-v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # cosign keyless signing
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CHART_REGISTRY: oci://ghcr.io/bmscomp/charts
+
+jobs:
+  publish:
+    name: Package, Push & Sign Charts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # helm package refuses a chart whose declared dependencies are not
+      # built. Order matters: the kafka-common consumers before the umbrella,
+      # which packages its file:// subcharts as they are on disk.
+      - name: Build chart dependencies
+        uses: ./.github/actions/helm-deps
+        with:
+          charts: strimzi-operator kafka-cluster kates-chaos monitoring mirror-maker2 kates-platform
+
+      - name: Package charts
+        run: |
+          mkdir -p .build
+          for chart in charts/*/; do
+            helm package "${chart}" --destination .build/
+          done
+          ls -1 .build/
+
+      - name: Push and sign charts
+        run: |
+          rc=0
+          for tgz in .build/*.tgz; do
+            echo "==> ${tgz}"
+            out=$(helm push "${tgz}" "${CHART_REGISTRY}" 2>&1) || { echo "${out}"; rc=1; continue; }
+            echo "${out}"
+            ref=$(echo "${out}"    | awk '/^Pushed:/ {print $2}')
+            digest=$(echo "${out}" | awk '/^Digest:/ {print $2}')
+            if [ -n "${ref}" ] && [ -n "${digest}" ]; then
+              cosign sign --yes "${ref%:*}@${digest}"
+            else
+              echo "::warning::could not parse push output for ${tgz}; skipping signature"
+            fi
+          done
+          exit ${rc}

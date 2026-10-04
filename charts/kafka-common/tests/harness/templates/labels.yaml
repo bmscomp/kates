@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: labels
+  labels:
+    {{- include "kafka-common.labels" (dict "ctx" . "component" "connect" "partOf" "kates" "extra" (dict "strimzi.io/cluster" "krafter")) | nindent 4 }}
+data:
+  fullname: {{ include "kafka-common.fullname" . | quote }}
+  selector: |
+    {{- include "kafka-common.selectorLabels" . | nindent 4 }}
+  semver: {{ include "kafka-common.semver" "4.2-IV1" | quote }}
+  semverShort: {{ include "kafka-common.semver" "2.8" | quote }}
+  domain: {{ include "kafka-common.clusterDomain" . | quote }}
+  {{- range $k, $v := .Values.toggles }}
+  toggle-{{ $k }}: {{ include "kafka-common.enabled" (list $v.value $v.default) | quote }}
+  {{- end }}

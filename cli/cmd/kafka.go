@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
-	"github.com/klster/kates-cli/tui"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -161,11 +161,23 @@ var kafkaTopicCmd = &cobra.Command{
 
 		if configs, ok := detail["configs"].(map[string]interface{}); ok && len(configs) > 0 {
 			output.SubHeader("Configuration")
+			// As in `kates cluster topics describe`: values in force, with
+			// where each comes from when the backend says.
+			sources, _ := detail["configSources"].(map[string]interface{})
+			headers := []string{"Config", "Value"}
+			if len(sources) > 0 {
+				headers = append(headers, "Source")
+			}
 			configRows := make([][]string, 0, len(configs))
 			for k, v := range configs {
-				configRows = append(configRows, []string{k, fmt.Sprintf("%v", v)})
+				row := []string{k, fmt.Sprintf("%v", v)}
+				if len(sources) > 0 {
+					src, _ := sources[k].(string)
+					row = append(row, src)
+				}
+				configRows = append(configRows, row)
 			}
-			output.Table([]string{"Config", "Value"}, configRows)
+			output.Table(headers, configRows)
 		}
 
 		if piRaw, ok := detail["partitionInfo"].([]interface{}); ok && len(piRaw) > 0 {
@@ -516,15 +528,15 @@ var kafkaDeleteTopicCmd = &cobra.Command{
 		name := args[0]
 
 		if !deleteTopicYes {
-			fmt.Printf("%s Delete topic %s? This cannot be undone. [y/N] ",
-				errorBadge("⚠"), output.WarningStyle.Render(name))
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-				if answer != "y" && answer != "yes" {
-					output.Hint("Cancelled.")
-					return nil
-				}
+			ok, err := confirm(fmt.Sprintf("%s Delete topic %s? This cannot be undone.",
+				errorBadge("⚠"), output.WarningStyle.Render(name)))
+			if err != nil {
+				return cmdErr("aborted: " + err.Error())
+			}
+			if !ok {
+				// A declined destructive action exits non-zero so scripts that
+				// forgot --yes fail loudly instead of reporting success.
+				return cmdErr("aborted: topic not deleted")
 			}
 		}
 
@@ -547,6 +559,10 @@ var kafkaTuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Launch interactive Kafka explorer (full-screen TUI)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !IsInteractive() {
+			return cmdErr("kates kafka tui is a full-screen TUI and needs a terminal.\n" +
+				"  For scripted access use: kates kafka topics / brokers / groups")
+		}
 		return tui.Run(apiClient)
 	},
 }

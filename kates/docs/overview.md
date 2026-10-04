@@ -128,7 +128,7 @@ Kates ships with a catalog of pre-built disruption playbooks loaded from YAML re
 
 | Playbook | Category | Description |
 |----------|----------|-------------|
-| `az-failure` | Infrastructure | Simulates an availability zone failure by draining a node |
+| `az-failure` | Infrastructure | Simulates an availability zone failure by killing every Kafka pod in one zone |
 | `split-brain` | Network | Creates a network partition between broker pods |
 | `storage-pressure` | Storage | Fills disk on a broker to trigger segment rotation and log cleanup |
 | `rolling-restart` | Operations | Performs a rolling restart of all broker pods |
@@ -185,6 +185,7 @@ Kates uses MicroProfile Config for all configuration, which means every property
 |----------|---------|-------------|
 | `kates.kafka.bootstrap-servers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap servers. This is the address Kates uses to connect to the Kafka cluster for AdminClient operations and native backend test execution. |
 | `kates.trogdor.coordinator-url` | `http://trogdor-coordinator:8889` | Trogdor Coordinator REST endpoint. Only needed when using the `trogdor` backend. |
+| `kates.trogdor.agent-nodes` | `node0` | Trogdor agents that run tasks, by their node names in the coordinator's platform config, comma-separated; a run's tasks take them in turn. Only needed when using the `trogdor` backend. |
 | `kates.engine.default-backend` | `native` | Default execution backend for performance tests. Can be `native` or `trogdor`. Individual test requests can override this. |
 | `kates.chaos.provider` | `hybrid` | Default chaos engineering provider. Can be `litmus-crd`, `kubernetes`, `noop`, or `hybrid`. |
 

@@ -1,0 +1,26 @@
+name: CI gate
+description: >-
+  The one job a branch ruleset requires. Path-filtered jobs skip themselves
+  when nothing they cover changed, and a skipped required check blocks a merge
+  forever; this job always runs, passes when every job it needs succeeded or
+  was skipped, and fails on any failure or cancellation. Add new jobs to the
+  gate's `needs:` list, never to the ruleset.
+inputs:
+  needs:
+    description: The calling job's `toJSON(needs)`
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        NEEDS: ${{ inputs.needs }}
+      run: |
+        set -euo pipefail
+        echo "${NEEDS}" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+        bad=$(echo "${NEEDS}" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key')
+        if [ -n "${bad}" ]; then
+          echo "::error::gate failed — jobs not green: $(echo "${bad}" | tr '\n' ' ')"
+          exit 1
+        fi
+        echo "gate: every job succeeded or was skipped"

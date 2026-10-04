@@ -1,0 +1,41 @@
+# Layered LAST on the CI cluster by the `metrics-live` job in
+# ci-kafka-charts.yml, in the same install as values-ci.yaml
+# (`deploy-kafka-generic.sh -f charts/kafka-cluster/values-ci.yaml -f <this file>`).
+#
+# The live job scrapes what the brokers, the controllers, Cruise Control and
+# the Kafka Exporter actually expose, and diffs it against the contract's
+# catalogue. It needs the exporter agent and its port, and nothing else: no
+# PodMonitor and no PrometheusRule (the CI cluster has no Prometheus operator
+# CRDs), and no dashboards. The references come from a render, which the
+# contract does itself.
+metrics:
+  enabled: true
+monitoring:
+  podMonitor:
+    enabled: false
+alerts:
+  enabled: false
+dashboards:
+  enabled: false
+# Two brokers: Strimzi refuses Cruise Control on a cluster with one ("Cruise
+# Control cannot be deployed with a Kafka cluster which has only one broker"),
+# and values-ci.yaml, which this is layered on, runs one. The Kafka resource
+# then sat NotReady and the rest of this file never applied. Set here rather
+# than by a later upgrade, so the cluster starts with both: growing it from one
+# rolls the first broker and starts Cruise Control's add-brokers rebalance.
+nodePools:
+  roleDefaults:
+    broker:
+      replicas: 2
+# Cruise Control's sample store at RF 1, like every internal topic values-ci
+# sets.
+cruiseControl:
+  enabled: true
+  config:
+    default.goals: >-
+      com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal,com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskCapacityGoal
+    hard.goals: >-
+      com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal,com.linkedin.kafka.cruisecontrol.analyzer.goals.DiskCapacityGoal
+    sample.store.topic.replication.factor: 1
+kafkaExporter:
+  enabled: true

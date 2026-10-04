@@ -1,0 +1,104 @@
+suite: node pools
+templates:
+  - templates/nodepools.yaml
+tests:
+  - it: renders three controllers and three brokers by default
+    asserts:
+      - hasDocuments: {count: 2}
+      - equal: {path: metadata.name, value: controllers}
+        documentIndex: 0
+      - equal: {path: spec.replicas, value: 3}
+        documentIndex: 0
+      - equal: {path: 'spec.storage.volumes[0].size', value: 10Gi}
+        documentIndex: 0
+      - equal: {path: 'spec.storage.volumes[0].size', value: 100Gi}
+        documentIndex: 1
+      - equal: {path: 'metadata.annotations["helm.sh/resource-policy"]', value: keep}
+
+  - it: translates the 0.4 pool keys and keeps their names
+    set:
+      controllerPools:
+        - {name: controllers-a, zone: a, replicas: 1, storageSize: 1Gi, storageClass: std-a}
+      brokerPools:
+        - {name: brokers-a, zone: a, replicas: 3, storageSize: 5Gi, storageClass: std-a, resources: {requests: {cpu: 7m}}}
+      brokerDefaults:
+        deleteClaim: true
+        jvmOptions: {-Xms: 1g, -Xmx: 1g}
+        topologySpreadConstraints: {enabled: true, maxSkew: 2, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: DoNotSchedule}
+        podAntiAffinity: {enabled: false}
+        tolerations: [{key: dedicated, operator: Exists}]
+        priorityClassName: kafka
+    asserts:
+      - hasDocuments: {count: 2}
+      - equal: {path: metadata.name, value: controllers-a}
+        documentIndex: 0
+      - equal: {path: spec.roles, value: [controller]}
+        documentIndex: 0
+      - equal: {path: 'spec.storage.volumes[0]', value: {id: 0, size: 1Gi, class: std-a, type: persistent-claim, deleteClaim: false}}
+        documentIndex: 0
+      - equal: {path: metadata.name, value: brokers-a}
+        documentIndex: 1
+      - equal: {path: spec.replicas, value: 3}
+        documentIndex: 1
+      - equal: {path: 'spec.storage.volumes[0].deleteClaim', value: true}
+        documentIndex: 1
+      - equal: {path: spec.jvmOptions, value: {-Xms: 1g, -Xmx: 1g, gcLoggingEnabled: true}}
+        documentIndex: 1
+      - equal: {path: spec.resources.requests.cpu, value: 7m}
+        documentIndex: 1
+      - equal: {path: 'spec.template.pod.topologySpreadConstraints[0]', value: {maxSkew: 2, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: DoNotSchedule, labelSelector: {matchLabels: {strimzi.io/pool-name: brokers-a}}}}
+        documentIndex: 1
+      - equal: {path: 'spec.template.pod.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0]', value: {key: topology.kubernetes.io/zone, operator: In, values: [a]}}
+        documentIndex: 1
+      - notExists: {path: spec.template.pod.affinity.podAntiAffinity}
+        documentIndex: 1
+      - equal: {path: spec.template.pod.priorityClassName, value: kafka}
+        documentIndex: 1
+      - equal: {path: spec.template.pod.metadata.labels.zone, value: a}
+        documentIndex: 1
+
+  - it: controllers keep their own resources (K12)
+    set:
+      controllerPools:
+        - {name: c, replicas: 1, storageSize: 1Gi, resources: {limits: {memory: 3Gi}}}
+      brokerPools:
+        - {name: b, replicas: 3, storageSize: 1Gi}
+    asserts:
+      - equal: {path: spec.resources.limits.memory, value: 3Gi}
+        documentIndex: 0
+
+  - it: lets a 1.0 overlay clear the detected pools
+    set:
+      controllerPools: []
+      brokerPools: []
+      controllerDefaults: {resources: {requests: {cpu: 1m}}}
+      nodePools:
+        pools:
+          - {name: only, roles: [controller, broker], replicas: 3}
+    asserts:
+      - hasDocuments: {count: 1}
+      - equal: {path: spec.roles, value: [controller, broker]}
+      - notEqual: {path: spec.resources.requests.cpu, value: 1m}
+
+  - it: merges false over a true default
+    set:
+      nodePools:
+        defaults:
+          scheduling:
+            spread: {enabled: false}
+    asserts:
+      - notExists: {path: spec.template.pod.topologySpreadConstraints}
+
+  - it: adds tiered-storage credentials to the broker pods
+    set:
+      tieredStorage:
+        enabled: true
+        image: r.example.com/kafka:1
+        remoteStorageManager: {className: a.B, classPath: /p}
+        credentials: {existingSecret: creds}
+    asserts:
+      - equal: {path: 'spec.template.kafkaContainer.env[0]', value: {name: AWS_ACCESS_KEY_ID, valueFrom: {secretKeyRef: {name: creds, key: AWS_ACCESS_KEY_ID}}}}
+        documentIndex: 1
+# The rails (refusals) are exercised by scripts/chart-matrix/kafka-cluster.yaml:
+# every template resolves the values, so a refusal is reported by whichever
+# template Helm renders first, which a per-template assertion cannot pin.

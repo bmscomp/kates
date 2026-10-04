@@ -1,0 +1,63 @@
+{
+  "id": "5e6f7081",
+  "testType": "LOAD",
+  "spec": {
+    "topic": "eval-load-abc123",
+    "numRecords": 10000,
+    "recordSize": 1024,
+    "throughput": 1000,
+    "acks": "all",
+    "batchSize": 65536,
+    "lingerMs": 5,
+    "compressionType": "lz4",
+    "numProducers": 1,
+    "numConsumers": 1,
+    "durationMs": 600000,
+    "replicationFactor": 3,
+    "partitions": 3,
+    "minInsyncReplicas": 2,
+    "targetThroughput": 1000
+  },
+  "status": "DONE",
+  "results": [
+    {
+      "taskId": "5e6f7081-produce-0",
+      "testType": "LOAD",
+      "status": "DONE",
+      "recordsSent": 10000,
+      "throughputRecordsPerSec": 996.9,
+      "throughputMBPerSec": 0.974,
+      "avgLatencyMs": 2.52,
+      "p50LatencyMs": 2.1,
+      "p95LatencyMs": 6.4,
+      "p99LatencyMs": 11.8,
+      "maxLatencyMs": 41.0,
+      "startTime": "2026-09-26T09:32:00.118340Z",
+      "endTime": "2026-09-26T09:32:00.118340Z"
+    },
+    {
+      "taskId": "5e6f7081-consume-0",
+      "testType": "LOAD",
+      "status": "DONE",
+      "recordsSent": 10000,
+      "throughputRecordsPerSec": 995.3,
+      "throughputMBPerSec": 0.972,
+      "avgLatencyMs": 3.6,
+      "p50LatencyMs": 3.0,
+      "p95LatencyMs": 8.2,
+      "p99LatencyMs": 13.4,
+      "maxLatencyMs": 55.0,
+      "startTime": "2026-09-26T09:32:00.118340Z",
+      "endTime": "2026-09-26T09:32:00.118340Z"
+    }
+  ],
+  "createdAt": "2026-09-26T09:32:00.118340Z",
+  "backend": "native",
+  "labels": {},
+  "requestedSpec": {
+    "topic": "eval-load-abc123",
+    "numRecords": 10000,
+    "recordSize": 1024,
+    "targetThroughput": 1000
+  }
+}

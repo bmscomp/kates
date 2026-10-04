@@ -1,0 +1,71 @@
+# Local overrides — run the image you just built, and nothing else.
+#
+# Use with `make kates-local`, or directly:
+#   helm upgrade --install kates charts/kates -n kates \
+#     -f charts/kates/values-local.yaml
+#
+# The point of this file is pullPolicy: Never. Without it the kubelet is free to
+# reach for ghcr.io/bmscomp/kates on any restart, and a source fix you built
+# locally silently never runs — you debug the published image while reading your
+# own diff. `Never` makes that impossible: the image must already be in the
+# node's store (`kind load docker-image kates:local`), or the pod fails loudly
+# with ErrImageNeverPull instead of quietly testing the wrong build.
+
+replicaCount: 1
+
+image:
+  # Bare repository name, no registry — this tag only ever exists on the node.
+  repository: kates
+  tag: local
+  pullPolicy: Never
+
+# Laptop-sized. The chart defaults (2Gi/500m request) are sized for a real
+# node and will sit Pending on a single-node kind cluster that is also running
+# Kafka, Postgres, Prometheus and the operators.
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "200m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+
+jvm:
+  # Same collector as the default values, generational included: a local run
+  # that quietly used legacy ZGC would exercise a different GC than production,
+  # which is exactly the kind of difference you do not want to discover later.
+  options: "-Xms256m -Xmx512m -XX:+UseZGC -XX:+ZGenerational"
+
+probes:
+  startup:
+    # A cold JVM on a contended kind node is slow: 90 x 2s = 180s. Too small a
+    # budget here is indistinguishable from a crash — the kubelet kills the
+    # container mid-boot and the restart loop looks like a broken image.
+    failureThreshold: 90
+    periodSeconds: 2
+
+postgresql:
+  enabled: true
+  # Storage size is deliberately NOT overridden here. It renders into the
+  # StatefulSet's volumeClaimTemplates, which Kubernetes forbids changing after
+  # creation — so any value other than the chart default turns every subsequent
+  # `helm upgrade` into "updates to statefulset spec ... are forbidden" until
+  # someone deletes the StatefulSet. Shrinking a 1Gi dev volume buys nothing
+  # worth that.
+
+# Single-broker local Kafka: replication factor 3 would leave every topic
+# under-replicated and every produce with acks=all hanging.
+defaults:
+  replicationFactor: "1"
+  partitions: "1"
+  minInsyncReplicas: "1"
+
+monitoring:
+  enabled: false
+
+# Local databases outlive the migrations that built them. Editing an unreleased
+# migration then redeploying fails the boot with a checksum mismatch, which is
+# correct behaviour and useless feedback when the "drift" is a comment you added
+# five minutes ago. Repair on start, here only.
+flyway:
+  repairAtStart: true

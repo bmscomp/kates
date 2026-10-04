@@ -42,16 +42,21 @@ graph TB
 ```
 
 Each tenant gets:
+
 - **Prefix-scoped topics** — all topics start with the service name
 - **Dedicated KafkaUser** — own credentials, own ACLs
 - **Resource quotas** — produce/consume rate limits + CPU share
-- **NetworkPolicy entries** — explicit ingress to broker ports
+- **NetworkPolicy entries** — explicit ingress to broker ports, which become the allow list once the listeners carry `networkPolicyPeers`
 
 ## Topic Naming Convention
+
+The service name at the front of every topic is what the rest of this chapter keys on: Step 2's ACLs grant topics and consumer groups by that prefix, and the monitoring queries select a tenant's topics and groups by it. A service's topic names follow this shape:
 
 ```text
 <service-name>-<domain>[-<qualifier>]
 ```
+
+The patterns below cover the usual kinds of topic:
 
 | Pattern | Example | Purpose |
 |---------|---------|---------|
@@ -62,123 +67,150 @@ Each tenant gets:
 | `__<svc>-<x>` | `__apicurio-global-id` | Framework-internal topics |
 
 **Rules:**
+
 - Lowercase, hyphen-separated
 - Always prefix with the service name
 - Use `__` prefix for framework/infrastructure topics
-- Dead letter queues use `-dlq` suffix with `compact` cleanup
+- Dead letter queues use the `-dlq` suffix, `delete` cleanup and a bounded retention — never `compact`, which keeps only the latest failure per key and refuses records without one
 
 ## Onboarding a New Service
 
+Topics, users and network access are all `kafka-cluster` chart values, so one tenant is one block of values and one `helm upgrade`. The examples below go in a `tenants.yaml` that holds every tenant, layered after the values the release already runs with.
+
 ### Step 1 — Define Topics
 
-Tenant topics are declared alongside the platform topics in `config/kafka/kafka-topics.yaml`:
+`topics.items` is keyed by topic name, and `topics.defaults` fills in what you leave out — `replicas` defaults to the rendered broker count capped at 3, and `min.insync.replicas` to `replicas - 1` bounded to 1–2, so neither needs restating per topic:
 
 ```yaml
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaTopic
-metadata:
-  name: my-service-events
-  namespace: kafka
-  labels:
-    strimzi.io/cluster: krafter
-    app.kubernetes.io/part-of: my-service
-spec:
-  partitions: 6
-  replicas: 3
-  config:
-    retention.ms: "604800000"       # 7 days
-    min.insync.replicas: "2"
-    cleanup.policy: delete
-    compression.type: lz4
----
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaTopic
-metadata:
-  name: my-service-dlq
-  namespace: kafka
-  labels:
-    strimzi.io/cluster: krafter
-    app.kubernetes.io/part-of: my-service
-spec:
-  partitions: 3
-  replicas: 3
-  config:
-    retention.ms: "-1"
-    min.insync.replicas: "2"
-    cleanup.policy: compact
+topics:
+  items:
+    my-service-events:
+      partitions: 6
+      config:
+        retention.ms: "604800000"       # 7 days
+        cleanup.policy: delete
+        compression.type: lz4
+    my-service-dlq:
+      partitions: 3
+      config:
+        retention.ms: "604800000"       # 7 days to inspect and replay
+        cleanup.policy: delete
 ```
 
 ### Step 2 — Create User with Scoped ACLs
 
-Add the user to `config/kafka/kafka-users.yaml`:
+`users.items` is keyed by principal name; each entry is the `KafkaUser` spec:
 
 ```yaml
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaUser
-metadata:
-  name: my-service
-  namespace: kafka
-  labels:
-    strimzi.io/cluster: krafter
-spec:
-  authentication:
-    type: scram-sha-512
-  quotas:
-    producerByteRate: 10485760      # 10MB/s
-    consumerByteRate: 20971520      # 20MB/s
-    requestPercentage: 15           # max 15% of broker request handler
-  authorization:
-    type: simple
-    acls:
-      - resource:
-          type: topic
-          name: "my-service"
-          patternType: prefix
-        operations: ["Read", "Write", "Create", "Describe"]
-        host: "*"
-      - resource:
-          type: group
-          name: "my-service"
-          patternType: prefix
-        operations: ["Read", "Describe"]
-        host: "*"
+users:
+  items:
+    my-service:
+      authentication:
+        type: scram-sha-512
+      quotas:
+        producerByteRate: 10485760      # 10MB/s
+        consumerByteRate: 20971520      # 20MB/s
+        requestPercentage: 15           # max 15% of broker request handler
+      authorization:
+        type: simple
+        acls:
+          - resource:
+              type: topic
+              name: "my-service"
+              patternType: prefix
+            operations: ["Read", "Write", "Create", "Describe"]
+            host: "*"
+          - resource:
+              type: group
+              name: "my-service"
+              patternType: prefix
+            operations: ["Read", "Describe"]
+            host: "*"
 ```
 
 ### Step 3 — Allow Network Access
 
-Add the service's namespace to the broker NetworkPolicy:
+`networkPolicy.clients` grants the tenant's pods ingress to the brokers in the chart's `krafter-kafka` policy, which `values-kind.yaml`, `values-dev.yaml` and a `kates deploy` on a cluster whose CNI it cannot identify (EKS, GKE and AKS excepted) do not render. The entry admits the tenant's pods but keeps no one else out until the listeners carry `networkPolicyPeers` ([Security & Compliance](17-security.md#how-the-policies-combine)). Add it anyway: it becomes the allow list the day they do. Name the listeners the tenant may reach and the chart derives their ports from `kafka.listeners`.
+
+`clients` is a list, and a list in a later values file replaces the earlier one rather than merging with it. `tenants.yaml` therefore carries every entry the release already has — `helm get values krafter -n kafka` lists them (`kafka-cluster` in place of `krafter` for a release `make kafka` installed); a `kates deploy` install has at least the `connect` entry — with the tenant's added. An entry left out is dropped at the next upgrade:
 
 ```yaml
-# In config/kafka/kafka-networkpolicies.yaml, under kafka-brokers ingress
-- from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: my-service-namespace
-  ports:
-    - port: 9092
-      protocol: TCP
+networkPolicy:
+  clients:
+    # ...every entry the release already lists, unchanged
+    - name: my-service
+      namespace: my-service-namespace
+      podSelector: { app.kubernetes.io/name: my-service }
+      listeners: [plain]
 ```
+
+::: {.callout-important}
+A pod selector is required — there is no namespace-wide grant. `networkPolicies.allowedClientNamespaces`, the 0.4 spelling, never generated a rule and is now answered with a deprecation notice. So a tenant carried over from a 0.4 values file has no grant of its own until it appears here, and loses the brokers once the listeners carry `networkPolicyPeers`.
+:::
 
 ### Step 4 — Configure the Service
 
-Mount the auto-generated secret in the service's deployment:
+Strimzi writes the tenant's Secret, `my-service`, only into the Kafka cluster's namespace, `kafka` (see [Security & Compliance](17-security.md#cross-namespace-credential-synchronization)). A pod can read a Secret only from its own namespace, so a service that runs in `my-service-namespace` needs a copy there. The Secret holds the password under `password`, and a ready-made `sasl.jaas.config` line beside it. It exists once the upgrade in Step 5 has created the user, so make the copy after that step:
+
+```bash
+# Copy the tenant's password into the namespace its pods run in
+PASSWORD=$(kubectl get secret my-service -n kafka \
+  -o jsonpath='{.data.password}' | base64 -d)
+test -n "$PASSWORD" && kubectl create secret generic my-service \
+  -n my-service-namespace --from-literal=password="$PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Nothing keeps the copy in step. When the tenant's password changes, copy it again and restart the service's pods, which read it only when they start; the Password Rotation section of [Security & Compliance](17-security.md#password-rotation) walks through the same sequence for Kates.
+
+The service's deployment then reads the copy. Step 3 granted the `plain` listener, which takes SCRAM over a connection without TLS, so the client needs `security.protocol` set to `SASL_PLAINTEXT` as well as the SCRAM mechanism. The variable names below are an example; your application has to read them and hand them to its Kafka client:
 
 ```yaml
 env:
   - name: KAFKA_BOOTSTRAP_SERVERS
     value: krafter-kafka-bootstrap.kafka:9092
+  - name: KAFKA_SECURITY_PROTOCOL
+    value: SASL_PLAINTEXT
   - name: KAFKA_SASL_USERNAME
     value: my-service
   - name: KAFKA_SASL_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: my-service       # Strimzi-generated secret
+        name: my-service       # the copy in my-service-namespace
         key: password
   - name: KAFKA_SASL_MECHANISM
     value: SCRAM-SHA-512
 ```
 
-### Step 5 — Verify
+Step 2 grants consumer groups by prefix too, so every consumer's `group.id` must start with `my-service`, as in `my-service-billing`. The brokers refuse a consumer whose group falls outside the prefix.
+
+### Step 5 — Apply and Verify
+
+Start from the values the release runs with — every file and `--set` flag it was installed with — then render to see exactly what the tenant block adds, and upgrade. The release is `krafter` when `kates deploy` installed it and `kafka-cluster` when `make kafka` did — `helm list -n kafka` shows which — while the Kafka cluster is `krafter` either way:
+
+```bash
+# Once per machine: the build downloads the SeaweedFS subchart, and once
+# Chart.lock exists it accepts only a repository Helm has configured
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+helm dependency build charts/kafka-cluster
+
+# The Helm release: krafter from kates deploy, kafka-cluster from make kafka
+RELEASE=krafter
+
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
+
+helm template "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  -f tenants.yaml | grep -E 'kind: (KafkaTopic|KafkaUser|NetworkPolicy)' -A2 | grep 'name:'
+
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  -f tenants.yaml
+```
+
+::: {.callout-caution}
+Do not rebuild the chain from the repository's files (`values-platform.yaml`, then an environment overlay). A release that `kates deploy` or `scripts/deploy-kafka-generic.sh` installed takes its node pools from `.build/values-detected.yaml`, which such a chain leaves out, so the pools it renders carry other names. A pool's name is its identity: each renamed pool is a new pool with new, empty volumes, and the old pools drop out of the release but keep running with the data.
+:::
 
 ```bash
 # Check user was created
@@ -187,9 +219,12 @@ kubectl get kafkauser my-service -n kafka
 # Check secret was generated
 kubectl get secret my-service -n kafka
 
-# Check topics exist
-kubectl get kafkatopic -n kafka -l app.kubernetes.io/part-of=my-service
+# Check topics exist — the chart labels every topic for the cluster, not the
+# tenant, so select by the cluster and read the name prefix
+kubectl get kafkatopic -n kafka -l strimzi.io/cluster=krafter
 ```
+
+Once `kubectl get secret` finds `my-service`, go back to Step 4 and copy it into `my-service-namespace`. The service's pods can't start until the copy is there.
 
 ## Quota Strategy
 
@@ -207,6 +242,9 @@ kubectl get kafkatopic -n kafka -l app.kubernetes.io/part-of=my-service
 Quotas are enforced by Kafka at the broker level:
 
 ```mermaid
+%%| label: fig-mt-quota-throttle
+%%| fig-cap: "A producer over its quota is slowed down, not refused."
+%%| fig-alt: "Sequence diagram. A producer sends 15 MB/s to a broker whose quota for it is 10 MB/s. The broker answers with a throttle response, the client pauses, then resumes at 10 MB/s and the broker answers OK."
 sequenceDiagram
     participant Producer
     participant Broker
@@ -219,7 +257,7 @@ sequenceDiagram
     Broker-->>Producer: OK
 ```
 
-When a client exceeds its quota, the broker delays its response by a calculated time. The client SDK handles this transparently — no errors, just increased latency.
+When a client exceeds its quota, the broker delays its response by a calculated time [@kip13]. The client SDK handles this transparently — no errors, just increased latency.
 
 ## Partition Planning
 
@@ -248,7 +286,7 @@ When a client exceeds its quota, the broker delays its response by a calculated 
 | **Data** | Prefix-scoped ACLs | Kafka ACL evaluator |
 | **Bandwidth** | Per-user produce/consume quotas | Broker throttling |
 | **CPU** | `requestPercentage` quota | Broker request handler pool |
-| **Network** | Kubernetes NetworkPolicies | CNI plugin |
+| **Network** | Kubernetes NetworkPolicies, once the listeners carry `networkPolicyPeers` | CNI plugin |
 | **Storage** | Topic-level retention policies | Log cleaner |
 | **Credentials** | Per-user SCRAM secrets | Strimzi User Operator |
 
@@ -276,7 +314,7 @@ flowchart TD
     B --> C["3. Configure Quotas\n(produce/consume/CPU)"]
     C --> D["4. Create Topics\n(with naming convention)"]
     D --> E["5. Sync Credentials\n(mount Strimzi secret)"]
-    E --> F["6. Add NetworkPolicy\n(allow namespace)"]
+    E --> F["6. Add networkPolicy.clients entry\n(pod selector)"]
     F --> G["7. Verify Access\n(produce/consume test)"]
     G --> H{"Verification\nPassed?"}
     H -->|Yes| I["Tenant Ready ✅"]
@@ -286,25 +324,32 @@ flowchart TD
 
 ### Quick-Start Script
 
-There is no dedicated CLI command for tenant onboarding — the workflow is declarative. Append the tenant's `KafkaTopic`, `KafkaUser`, and NetworkPolicy entries to the files in `config/kafka/`, then apply and verify:
+There is no dedicated CLI command for tenant onboarding — the workflow is declarative, and all three pieces are chart values. Add the tenant's `topics.items`, `users.items` and `networkPolicy.clients` entries to `tenants.yaml`, then upgrade the release from its current values and verify:
 
 ```bash
-# Apply the tenant's declarative resources
-kubectl apply -f config/kafka/kafka-topics.yaml
-kubectl apply -f config/kafka/kafka-users.yaml
-kubectl apply -f config/kafka/kafka-networkpolicies.yaml
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+helm dependency build charts/kafka-cluster
+
+# The Helm release: krafter from kates deploy, kafka-cluster from make kafka
+RELEASE=krafter
+
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
+
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  -f tenants.yaml
 
 # Wait for the User Operator to reconcile the credentials
 kubectl wait kafkauser/my-service --for=condition=Ready -n kafka --timeout=60s
 
 # Confirm the generated secret and topics
 kubectl get secret my-service -n kafka
-kubectl get kafkatopic -n kafka -l app.kubernetes.io/part-of=my-service
+kubectl get kafkatopic -n kafka -l strimzi.io/cluster=krafter
 ```
 
 ## Quota Monitoring
 
-Kafka's per-user quota and throttle-time MBeans are not mapped by the JMX exporter rules in `config/kafka/kafka-metrics.yaml`, so there are no per-user Prometheus metrics in this setup. Tenant usage is tracked indirectly — by topic prefix and consumer group.
+Kafka's per-user quota and throttle-time MBeans are not mapped by the JMX exporter rules the chart vendors (`charts/kafka-cluster/files/metrics/kafka-metrics.yaml`, Strimzi's own rule set), so there are no per-user Prometheus metrics in this setup. Tenant usage is tracked indirectly — by topic prefix and consumer group.
 
 ### Per-Tenant Bandwidth Monitoring
 
@@ -323,9 +368,15 @@ sum(rate(kafka_server_brokertopicmetrics_bytesin_total{topic=~"my-service.*"}[5m
 
 The `requestPercentage` quota is enforced per user inside the broker, but only the pool-wide utilization is exported:
 
+The vendored rules expose the meter's count of idle nanoseconds rather than a ready-made percentage, which is why the chart's own alert divides by `1e9`:
+
 ```promql
-# Broker request handler idle percentage (shared across all tenants)
-kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent
+# Broker request handler idle fraction (shared across all tenants)
+avg by (namespace, strimzi_io_cluster, kubernetes_pod_name) (
+  rate(kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_count_total{
+    namespace="kafka", strimzi_io_cluster="krafter", strimzi_io_name="krafter-kafka"
+  }[5m])
+) / 1e9
 ```
 
 ### Throttling Detection
@@ -334,40 +385,68 @@ Broker-side throttle-time metrics are not exported by the current JMX rules. Quo
 
 ### Alert Rules
 
-The cluster's alerts are defined as a `PrometheusRule` in `config/kafka/kafka-alerts.yaml`. Two of them catch tenant-level problems:
+The `kafka-cluster` chart renders the cluster's alerts as a `PrometheusRule` named `<cluster>-alerts`, scoped to that cluster by namespace and `strimzi_io_cluster` so two clusters in one namespace never alert on each other's series. Two of them catch tenant-level problems, as they render for `krafter`:
 
 ```yaml
-# From config/kafka/kafka-alerts.yaml
 - alert: KafkaConsumerGroupLag
-  expr: kafka_consumergroup_lag_sum > 1000000
+  expr: sum by (namespace, strimzi_io_cluster, consumergroup) (kafka_consumergroup_lag{namespace="kafka", strimzi_io_cluster="krafter"}) > 1000000
   for: 15m
   labels:
     severity: warning
   annotations:
-    summary: "Consumer group lag exceeds threshold"
-    description: "Consumer group {{ $labels.consumergroup }} has {{ $value }} messages lag."
+    summary: "A consumer group on Kafka krafter is behind"
+    description: "{{ $labels.consumergroup }} is {{ $value }} messages behind."
+    runbook_url: "https://github.com/bmscomp/kates/blob/main/docs/kafka-cluster-runbook.md#kafkaconsumergrouplag"
 
 - alert: KafkaRequestHandlerSaturated
-  expr: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent < 0.3
+  expr: avg by (namespace, strimzi_io_cluster, kubernetes_pod_name) (rate(kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent_count_total{namespace="kafka", strimzi_io_cluster="krafter", strimzi_io_name="krafter-kafka"}[5m])) / 1e9 < 0.3
   for: 10m
   labels:
     severity: warning
   annotations:
-    summary: "Kafka request handlers over 70% busy"
-    description: "Broker {{ $labels.kubernetes_pod_name }} handler idle is {{ $value | humanizePercentage }} — consider adding threads or brokers."
+    summary: "Kafka krafter request handlers are saturated"
+    description: "{{ $labels.kubernetes_pod_name }} handlers are idle {{ $value | humanizePercentage }} of the time."
+    runbook_url: "https://github.com/bmscomp/kates/blob/main/docs/kafka-cluster-runbook.md#kafkarequesthandlersaturated"
 ```
+
+`KafkaConsumerGroupLagCritical` fires on the same series at ten times the threshold after five minutes. `kubectl get prometheusrule krafter-alerts -n kafka -o yaml` shows what the live cluster actually carries; `kates cluster alerts --group kafka-cluster.krafter.consumers` lists only the critical rule, because the command shows a fixed set of alert names and `KafkaConsumerGroupLag` is not among them.
 
 ## Decommissioning a Tenant
 
+Decommissioning is two moves, not one. Turning the tenant's entries off and upgrading stops the chart managing those objects, but `keepOnDelete` is on by default and the chart annotates every `KafkaTopic` and `KafkaUser` with `helm.sh/resource-policy: keep` — so Helm leaves them behind on purpose, and the credentials stay valid until you delete them yourself.
+
+Deleting the tenant's block from `tenants.yaml` is not enough: `krafter-current.yaml` still carries it from the upgrade that added it, and Helm merges the two. Set `enabled: false` on each entry instead:
+
+```yaml
+topics:
+  items:
+    my-service-events: { enabled: false }
+    my-service-dlq: { enabled: false }
+users:
+  items:
+    my-service: { enabled: false }
+networkPolicy:
+  clients:
+    # ...every other client, unchanged
+    - name: my-service
+      enabled: false
+```
+
 ```bash
-# 1. Delete the user (revokes credentials + ACLs)
+# 1. Upgrade from the current values with the tenant turned off
+# (the Helm release: krafter from kates deploy, kafka-cluster from make kafka)
+RELEASE=krafter
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
+
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  -f tenants.yaml
+
+# 2. Delete the user (revokes credentials + ACLs)
 kubectl delete kafkauser my-service -n kafka
 
-# 2. Delete the topics (data loss — ensure retention has passed)
-kubectl delete kafkatopic -n kafka -l app.kubernetes.io/part-of=my-service
-
-# 3. Remove NetworkPolicy entry for the namespace
-# Edit config/kafka/kafka-networkpolicies.yaml and re-apply
+# 3. Delete the topics (data loss — ensure retention has passed)
+kubectl delete kafkatopic my-service-events my-service-dlq -n kafka
 
 # 4. Verify cleanup
 kubectl get kafkauser,kafkatopic -n kafka | grep my-service
@@ -412,9 +491,9 @@ Within the wait window the User Operator flips the user Ready and generates the 
 ## Summary
 
 - Tenancy on the krafter cluster is namespace-level within one Kafka cluster: prefix-scoped topics, a dedicated `KafkaUser` per service, per-user quotas, and NetworkPolicy entries.
-- Onboarding is declarative — append the tenant's `KafkaTopic`, `KafkaUser`, and NetworkPolicy entries to the files in `config/kafka/`, apply, and let the User Operator reconcile credentials and ACLs.
+- Onboarding is declarative and lives in the `kafka-cluster` chart's values — `topics.items`, `users.items` and `networkPolicy.clients` — so one `helm upgrade` carries the whole tenant and the User Operator reconciles credentials and ACLs.
 - Quotas throttle at the broker: an over-quota client sees delayed responses, not errors, so watch tenant latency rather than error rates.
 - Per-user quota metrics aren't exported by the JMX rules, so tenant usage is tracked indirectly — by topic prefix and consumer group in PromQL.
-- Decommissioning reverses onboarding: delete the `KafkaUser` first to revoke access, then the topics — the `app.kubernetes.io/part-of` label finds everything a tenant owns.
+- Decommissioning takes two moves: turn the tenant's entries off (`enabled: false`) and upgrade from the current values, then delete the `KafkaUser` and its topics by hand — `keepOnDelete` and `helm.sh/resource-policy: keep` mean Helm will not remove them for you.
 
 With tenants isolated from each other, the remaining risk is change itself — [Upgrade Playbook](18-upgrade-playbook.md) gives you step-by-step procedures for upgrading every component of the stack without breaking them.

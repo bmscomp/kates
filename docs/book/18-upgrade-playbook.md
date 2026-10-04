@@ -2,7 +2,7 @@
 
 This chapter provides step-by-step procedures for upgrading every component in the Kates stack. Each procedure includes pre-flight checks, rollback plans, and validation steps. It's written for the engineer who owns the upgrade window — the one who must answer "can we still roll back?" before anything moves. After this chapter, you can:
 
-- Upgrade Kafka, the Strimzi operator, Kyverno, and the Kates application in the correct order, with a Velero backup and a recorded baseline taken first
+- Upgrade Kafka, the Strimzi operator, Kyverno, and the Kates API in the correct order, with a Velero backup and a recorded baseline taken first
 - Validate an upgrade quantitatively by comparing post-upgrade runs against the pre-upgrade baseline with `kates report compare`
 - Pick the right rollback path per component — and recognize the KRaft `metadataVersion` point of no return before crossing it
 - Run the pre- and post-upgrade checklists as a repeatable drill rather than a one-off scramble
@@ -25,20 +25,23 @@ Each Strimzi release supports only a narrow window of Kafka versions, and that w
 
 | Component | Pinned version | Source |
 |-----------|----------------|--------|
-| Strimzi operator | 1.0.0 | `STRIMZI_VERSION` in `versions.env` |
-| Kafka image | `quay.io/strimzi/kafka:1.0.0-kafka-4.2.0` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
-| Chart default (`kafkaVersion`) | 4.2.0 | `charts/kafka-cluster/values.yaml` |
+| Strimzi operator | 1.2.0 | `STRIMZI_VERSION` in `versions.env` |
+| Kafka image | `quay.io/strimzi/kafka:1.2.0-kafka-4.3.1` | `STRIMZI_KAFKA_VERSION` in `versions.env` |
+| Chart default (`kafkaVersion`) | 4.3.1 | `charts/kafka-cluster/values.yaml` |
+
+The generated [Version & Compatibility Matrix](appendix-d-versions.md) is the authority when this table and it disagree.
 
 ### Procedure
 
 **Step 1 — Backup:**
 
-```bash
-# Ensure the Velero backup schedule exists
-# (config/kafka/kafka-backup.yaml defines the kafka-daily-backup Schedule)
-kubectl apply -f config/kafka/kafka-backup.yaml
+The `kafka-cluster` chart owns the backup objects. Setting `backup.enabled=true` renders a daily Velero `Schedule` named `<cluster>-daily-backup` and, with `backup.preUpgrade` (on by default), a one-shot `Backup` named `<cluster>-pre-upgrade-r<revision>` as a `pre-upgrade` Helm hook — so a chart-driven upgrade snapshots itself.
 
-# Take an ad-hoc pre-upgrade backup
+```bash
+# Confirm the schedule exists (it comes from backup.enabled in the values)
+kubectl get schedule krafter-daily-backup -n velero
+
+# Take an ad-hoc pre-upgrade backup as well
 velero backup create kafka-pre-upgrade --include-namespaces kafka --wait
 
 # Confirm completion
@@ -62,18 +65,43 @@ kates test create --type INTEGRITY --records 50000 --wait
 
 **Step 3 — Upgrade:**
 
-```yaml
-# In config/kafka/kafka.yaml — change the version
-spec:
-  kafka:
-    version: 4.1.1  # → new version
-```
+The Kafka version is a chart value, not a hand-edited CR: `kafkaVersion` renders `spec.kafka.version`, and `kafka.metadataVersion` renders `spec.kafka.metadataVersion`. Start from the values the release runs with, change the version, and pin the metadata version the cluster runs now. The release is `krafter` when `kates deploy` installed it and `kafka-cluster` when `make kafka` did — `helm list -n kafka` shows which — while the Kafka cluster is `krafter` either way:
 
 ```bash
-kubectl apply -f config/kafka/kafka.yaml
+# Once per machine: the build downloads the SeaweedFS subchart, and once
+# Chart.lock exists it accepts only a repository Helm has configured
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+helm dependency build charts/kafka-cluster
+
+# The Helm release: krafter from kates deploy, kafka-cluster from make kafka
+RELEASE=krafter
+
+# Every value the release was installed with — its files and its --set flags
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
+
+# The metadata version the cluster runs now
+kubectl get kafka krafter -n kafka -o jsonpath='{.status.kafkaMetadataVersion}{"\n"}'
+
+# The running operator's Kafka window, which must contain <new-version>
+kates versions
+
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  --set-string kafkaVersion=<new-version> \
+  --set-string kafka.metadataVersion=<current-metadata-version>
 ```
 
-Strimzi will perform a rolling restart, one broker at a time, with PDB constraints honored.
+`kafka.metadataVersion` stays at the version the cluster runs, which is what keeps a rollback possible (see [Kafka Version Rollback](#kafka-version-rollback)). `krafter-current.yaml` carries it only when the install set it — `kates deploy` and the Kind overlay do. Otherwise the default of the chart checkout you upgrade from applies, and that can raise it in the same step.
+
+::: {.callout-caution}
+Do not rebuild the values chain from the repository's files. `kates deploy` and `scripts/deploy-kafka-generic.sh` install the release with `.build/values-detected.yaml` first — the node pools, their zones and storage classes come from it — and `kates deploy` adds `--set` flags no file records, the metadata version among them. A chain without them renders other pool names: a pool's name is its identity, so each renamed pool is a new pool with new, empty volumes, while the old pools drop out of the release but keep running with the data (the chart marks them `helm.sh/resource-policy: keep`). It also takes `kafka.metadataVersion` from the files, which can raise it in the same step. If you do keep the values in files, re-run the exact chain the install used, generated file included, and set the new version last.
+:::
+
+::: {.callout-important}
+`kates deploy --kafka-version` does not upgrade a running cluster. `kates deploy` installs the Kafka release only when it is not deployed yet; otherwise it prints `Kafka Cluster already deployed. Skipping.` and changes nothing, whatever version you pass. The version, and the `kafka.metadataVersion` the CLI derives from it (the newest minor line below it that the operator supports, or its own line when there is none), apply at first install only.
+:::
+
+Strimzi performs a rolling restart, one broker at a time, with PDB constraints honored.
 
 **Step 4 — Monitor the rolling restart:**
 
@@ -103,7 +131,7 @@ make gameday
 
 ### Rollback
 
-Revert `spec.kafka.version` in `config/kafka/kafka.yaml` and re-apply — Strimzi rolls the brokers back one at a time. See [Kafka Version Rollback](#kafka-version-rollback) under Rollback Procedures for the full procedure and the KRaft metadata caveat.
+Run the same `helm upgrade` with the previous `kafkaVersion` — Strimzi rolls the brokers back one at a time. See [Kafka Version Rollback](#kafka-version-rollback) under Rollback Procedures for the full procedure and the KRaft metadata caveat.
 
 ## Strimzi Operator Upgrade
 
@@ -111,14 +139,20 @@ Revert `spec.kafka.version` in `config/kafka/kafka.yaml` and re-apply — Strimz
 
 **Step 1 — Check release notes** for breaking changes at [Strimzi releases](https://github.com/strimzi/strimzi-kafka-operator/releases).
 
-**Step 2 — Upgrade via Helm.** The operator is installed from the OCI chart as the `strimzi-operator` release in its own `strimzi-operator` namespace (see `scripts/deploy-kafka.sh`):
+**Step 2 — Upgrade the operator.** The operator is the `strimzi-operator` release of the wrapper chart (`charts/strimzi-operator`) in its own `strimzi-operator` namespace. Upgrade a production operator with the pause-and-verify procedure in [Deploying the Strimzi Operator](deploying-strimzi-operator.md#upgrading-the-operator), not with the CLI:
+
+::: {.callout-warning}
+The CLI checks the version window but pauses nothing: once you confirm, the new operator reconciles everything it watches as soon as it starts, so every Kafka cluster rolls at once, and so does every Kafka Connect and MirrorMaker 2 cluster on the operator's default image. And every `kates deploy` run, with `--strimzi-version` or without it, upgrades the operator release with `--reset-values` and the Kind or generic overlay, so an operator installed with `values-prod.yaml` loses the drain cleaner, upstream's operator NetworkPolicy and both PodDisruptionBudgets. On a production cluster, run `kates deploy --with-strimzi=false`, which leaves the operator release alone.
+:::
+
+On a development or test cluster, the CLI drives the upgrade so the wrapper's values, schema and CRD hook apply, and so the checks run first:
 
 ```bash
-helm upgrade strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version <new-version> \
-  --namespace strimzi-operator \
-  --reuse-values
+kates deploy --strimzi-version <new-version> --dry-run   # what would change, and whether it is allowed
+kates deploy --strimzi-version <new-version>             # fetches and reads the chart, then upgrades
 ```
+
+Before anything is installed the CLI refuses a downgrade, refuses a version whose Kafka window does not contain every cluster the operator runs (it names the cluster and suggests an operator whose window has both), refuses to cross Strimzi 1.0 while any CRD still stores `v1beta2`, and otherwise asks once, listing the clusters that will roll. `kates versions strimzi` lists the versions that exist (`--resolve` pulls each chart to show its Kafka window), and `kates versions kafka --strimzi-version <v>` prints one version's window. Upgrading around the CLI with a raw `helm upgrade` of the upstream chart bypasses the wrapper and its CRD hook — the CRDs then freeze at the version first installed.
 
 **Step 3 — Verify:**
 
@@ -129,7 +163,7 @@ kubectl logs deployment/strimzi-cluster-operator -n strimzi-operator --tail=20
 
 ### Post-Upgrade — API Migration
 
-Strimzi periodically deprecates API versions. The manifests in this repository already use `kafka.strimzi.io/v1` (see `config/kafka/kafka.yaml`). When a future Strimzi release drops an API version your manifests still use, migrate them in bulk — this is the pattern used for the `v1beta2` → `v1` migration:
+Strimzi periodically deprecates API versions. Everything in this repository already uses `kafka.strimzi.io/v1` — the `kafka-cluster` chart templates render it, and the raw manifests under `config/kafka/` carry it too. When a future Strimzi release drops an API version your own manifests still use, migrate them in bulk — this is the pattern used for the `v1beta2` → `v1` migration:
 
 ```bash
 # GNU sed; on macOS use `sed -i ''` instead of `sed -i`
@@ -144,50 +178,89 @@ kubectl apply -f config/kafka/
 
 ## Drain Cleaner Upgrade
 
-Drain Cleaner is not a standalone Helm release in this repository — it is deployed by the `kafka-cluster` chart (`charts/kafka-cluster/templates/drain-cleaner.yaml`) when `drainCleaner.enabled` is true (the prod values enable it), with the image pinned by the `drainCleaner.image` value (default `quay.io/strimzi/drain-cleaner:1.0.0`). To upgrade it, bump the image tag and re-deploy the chart:
+Drain Cleaner is part of the `strimzi-operator` release (`charts/strimzi-operator/templates/drain-cleaner.yaml`) when `drainCleaner.enabled` is true (its prod values enable it), with the image pinned by the `drainCleaner.image` value (default `quay.io/strimzi/drain-cleaner:1.6.1`). kafka-cluster 0.4 used to deploy it; see `docs/kafka-cluster-1.0-upgrade.md` for the move. To upgrade it, bump the image tag and re-deploy the operator chart from the values the release runs with — they carry the overlay it was installed with and the DNS domain the deploy scripts inject:
 
 ```bash
-# Update drainCleaner.image in charts/kafka-cluster/values.yaml, then:
-make kafka-upgrade
+helm dependency build charts/strimzi-operator
+
+helm get values strimzi-operator -n strimzi-operator -o yaml > operator-current.yaml
+
+helm upgrade strimzi-operator charts/strimzi-operator -n strimzi-operator \
+  -f operator-current.yaml \
+  --set drainCleaner.image=quay.io/strimzi/drain-cleaner:<version>
 
 # Verify
-kubectl get pods -n kafka -l app=strimzi-drain-cleaner
+kubectl get pods -n strimzi-operator -l app=strimzi-drain-cleaner
 ```
 
-## Kates Application Upgrade
+If `operator-current.yaml` sets `strimziVersion`, the release runs an operator other than the repository's pin, and upgrading it from `charts/strimzi-operator` would change the operator as well — stop and upgrade the operator first.
 
-### JVM Mode
+## Kates API Upgrade
+
+The `kates` chart installs the Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)). The chart pins its image: `values.yaml` sets `image.tag` to the release's version (the chart's `appVersion`), and the generic, corporate and production overlays pin a tag of their own. Building or pulling a newer image changes nothing the Deployment runs, and `kubectl rollout restart` only restarts the pinned tag. An upgrade is a `helm upgrade` of the `kates` release that sets the new tag, from the values the release runs with and from a checkout of the version you are moving to, so the chart's templates and the image agree:
 
 ```bash
-# Build new image
-make kates-build
+# Every value the release was installed with — its files and its --set flags
+helm get values kates -n kates -o yaml > kates-current.yaml
 
-# Rolling restart
-kubectl rollout restart deployment/kates -n kates
+helm upgrade kates charts/kates -n kates \
+  -f kates-current.yaml \
+  --set-string image.tag=<new-version> \
+  --timeout 8m --wait
+```
+
+The native image is published as `<new-version>-native`, the tag `values-native.yaml` pins; set that instead on a release that runs it.
+
+This procedure, and the Helm rollback below, apply to a Kates API that `kates deploy` or the chart installed. `make kates-deploy` applies the raw manifests in `kates/k8s/` and creates no release, so `helm get values kates` fails with `release: not found`. There, set the new image in `kates/k8s/deployment.yaml`, apply it again with `kubectl apply -f kates/k8s/deployment.yaml`, and verify as below.
+
+Verify that the new pods rolled out, run the new image, and answer. No `kates` command reports the Kates API's version — `kates version` reports the CLI's — so the Deployment's image is the evidence:
+
+```bash
 kubectl rollout status deployment/kates -n kates --timeout=300s
+kubectl get deployment kates -n kates -o jsonpath='{.spec.template.spec.containers[0].image}'
+kates health
 ```
 
-### Native Image Mode
+On a Kind cluster, `kates deploy` runs a local native image pinned with `pullPolicy: Never` instead of a published tag: `kates:native-local`, built from your working tree, or else the `kates:native` that `make kates-native` pulled from the registry or built. Neither tag changes from one build to the next. There, check out the new version, build `kates:native-local` from it, and roll the Deployment onto that tag — a release that ran `kates:native` moves to it — with an annotation that carries the image ID. Without the annotation the rendered Deployment is identical and nothing restarts:
 
 ```bash
-# Build native image (3–8 minutes)
-make kates-native
+make kates-image-native-local
 
-# Verify startup
-kubectl logs deployment/kates -n kates | head -1
-# Expected: started in 0.0XXs
+helm upgrade kates charts/kates -n kates \
+  -f kates-current.yaml \
+  --set-string image.tag=native-local \
+  --set-string podAnnotations.kates-image-id="$(docker image inspect --format '{{.Id}}' kates:native-local)" \
+  --timeout 8m --wait
+```
+
+`make kates-image-native-local` builds the image and loads it onto the Kind node but deploys nothing; the `helm upgrade` rolls it out. The Deployment's image reads `kates:native-local` whichever build it runs, so the image ID is the evidence here: once the rollout finishes, the annotation on the Deployment's pod template matches the image you built.
+
+```bash
+kubectl rollout status deployment/kates -n kates --timeout=300s
+
+# The two IDs match
+kubectl get deployment kates -n kates -o jsonpath='{.spec.template.metadata.annotations.kates-image-id}{"\n"}'
+docker image inspect --format '{{.Id}}' kates:native-local
+
+kates health
 ```
 
 ## Monitoring Stack Upgrade
 
-The `monitoring` release is installed into the `kafka` namespace (see the `monitoring` target in the Makefile):
+The `monitoring` release lives in the `kafka` namespace when `make monitoring` installed it, and in `monitoring` (the `--monitoring-ns` default) when `kates deploy` did. Upgrade it from the values it runs with, rather than with `--reuse-values`, which applies the release's values over the *old* chart's defaults and so ignores every default the new chart changes:
 
 ```bash
+MON_NS=kafka   # or monitoring, for a release kates deploy installed
+
+# Once per machine, for the kube-prometheus-stack subchart
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm dependency build charts/monitoring
 
+helm get values monitoring -n "${MON_NS}" -o yaml > monitoring-current.yaml
+
 helm upgrade monitoring charts/monitoring \
-  --namespace kafka \
-  --reuse-values
+  --namespace "${MON_NS}" \
+  -f monitoring-current.yaml
 ```
 
 ## Kyverno Upgrade
@@ -218,10 +291,17 @@ Always upgrade CRDs before the controller. If the new controller version expects
 
 ```bash
 helm repo update kyverno
+
+# The release's own values, applied over the new chart's defaults
+helm get values kyverno -n kyverno -o yaml > kyverno-current.yaml
+
 helm upgrade kyverno kyverno/kyverno \
   -n kyverno \
-  --reuse-values
+  --version <chart-version> \
+  -f kyverno-current.yaml
 ```
+
+Pin `--version` to the chart release that ships `${KYVERNO_TAG}`, the tag whose CRDs you applied in Step 2; without it Helm takes the newest chart in the repository.
 
 **Step 4 — Verify the upgrade:**
 
@@ -314,9 +394,11 @@ The backup phase reads `Completed` and both tests pass; note the LOAD test ID �
 
 ## Common Upgrade Issues
 
+Find the error or the behavior you see in the Issue column. The first row is what you get when you ask for a Kafka version the running operator can't run, which is why the operator goes first:
+
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| `UnsupportedVersionException` | Local Strimzi chart has mismatched Kafka images | Use the remote Helm chart |
+| `UnsupportedVersionException` | The requested Kafka version is outside the running operator's window | Upgrade the operator first, as in [Strimzi Operator Upgrade](#strimzi-operator-upgrade) — by hand in production; `kates versions` prints the running operator's window |
 | `ConfigException: Invalid value` | Kafka tightened config validation | Check release notes for deprecated configs |
 | Brokers stuck in CrashLoop | Config incompatible with new version | Check `kubectl logs`, fix config, re-apply |
 | Topics not reconciling | Topic Operator API version mismatch | Migrate CRDs to `v1` |
@@ -328,18 +410,23 @@ Rollback is a critical part of any upgrade plan. Each component has different ro
 
 ### Kafka Version Rollback
 
-**Step 1 — Revert the Kafka version in the CR:**
-
-```yaml
-# Revert kafka.yaml to the previous version
-spec:
-  kafka:
-    version: <previous-version>  # e.g., 3.9.0
-```
+**Step 1 — Revert the Kafka version, keeping every other value:**
 
 ```bash
-kubectl apply -f config/kafka/kafka.yaml
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+helm dependency build charts/kafka-cluster
+
+# The Helm release: krafter from kates deploy, kafka-cluster from make kafka
+RELEASE=krafter
+
+helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
+
+helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml \
+  --set-string kafkaVersion=<previous-version>
 ```
+
+The previous version must still be inside the running operator's Kafka window — `kates versions` prints it — and must support the `kafka.metadataVersion` in `krafter-current.yaml`, which the upgrade pinned.
 
 **Step 2 — Monitor the rolling restart:**
 
@@ -351,9 +438,9 @@ watch kubectl get kafka krafter -n kafka -o jsonpath='{.status.conditions[0].typ
 **Step 3 — Post-rollback validation:**
 
 ```bash
-# Verify broker version
-kubectl exec krafter-brokers-alpha-0 -n kafka -- /opt/kafka/bin/kafka-broker-api-versions.sh \
-  --bootstrap-server localhost:9092 | head -1
+# The Kafka version and metadata version the cluster runs, as Strimzi reports them
+kubectl get kafka krafter -n kafka \
+  -o jsonpath='{.status.kafkaVersion} {.status.kafkaMetadataVersion}{"\n"}'
 
 # Run integrity test
 kates test create --type INTEGRITY --records 50000 --wait
@@ -362,8 +449,8 @@ kates test create --type INTEGRITY --records 50000 --wait
 kates test get <id>
 ```
 
-::: {.callout-warning}
-Kafka version rollback is **NOT possible** once the KRaft metadata version has been raised. Strimzi controls this through `spec.kafka.metadataVersion` in the Kafka CR (exposed as `kafka.metadataVersion` in the `kafka-cluster` chart values): upgrade the broker `version` first while leaving `metadataVersion` at the previous level — in that state a rollback is still possible. Once you raise `metadataVersion`, the brokers can no longer read the older metadata format and downgrade is irreversible. Only bump `metadataVersion` after the new version has passed validation.
+::: {.callout-warning title="Raising the metadata version can be one-way"}
+A rollback needs an older Kafka that supports the cluster's metadata version, so hold `kafka.metadataVersion` at the level the cluster runs until the new version passes validation. Lowering it again is a safe downgrade, which Kafka allows only when no level in between changed the metadata format; Strimzi attempts it and reports a warning in the `Kafka` resource's status when Kafka refuses. KIP-778 [@kip778] also describes an unsafe downgrade that drops metadata, but Kafka doesn't implement it and Strimzi never attempts it, so a raise across a metadata change is one-way.
 :::
 
 ### Strimzi Operator Rollback
@@ -399,16 +486,15 @@ kates test create --type LOAD --records 10000 --wait
 If the new Strimzi version migrated CRDs to a new API version (e.g., `v1beta2` → `v1`), rolling back the operator will **not** revert the CRDs. You must manually restore the CRDs from backup or re-apply the old CRD definitions.
 :::
 
-### Kates Application Rollback
+### Kates API Rollback
 
-**Step 1 — Rollback the deployment:**
+**Step 1 — Roll the release back:**
+
+The upgrade was a Helm revision, so the rollback is one too. `kubectl rollout undo` would revert the pods while the release still records the new tag, and the next `helm upgrade` from `helm get values` would bring it straight back.
 
 ```bash
-# Use Kubernetes rollout undo
-kubectl rollout undo deployment/kates -n kates
-
-# Or rollback to a specific revision
-kubectl rollout undo deployment/kates -n kates --to-revision=<N>
+helm history kates -n kates
+helm rollback kates <previous-revision> -n kates --wait
 ```
 
 **Step 2 — Verify the rollback:**
@@ -421,7 +507,7 @@ kubectl get pods -n kates
 kubectl get deployment kates -n kates -o jsonpath='{.spec.template.spec.containers[0].image}'
 
 # Run a health check
-kates cluster check
+kates health
 ```
 
 **Step 3 — Post-rollback validation:**
@@ -438,21 +524,23 @@ kates test create --type LOAD --records 50000 --wait
 
 | Component | Rollback Method | Time Estimate | Risk Level |
 |-----------|----------------|:-------------:|:----------:|
-| Kafka version | CR version revert + rolling restart | 10–30 min | Medium |
-| KRaft metadata format | **Not reversible** | N/A | ⛔ Critical |
+| Kafka version | `kafkaVersion` revert with `helm upgrade` + rolling restart | 10–30 min | Medium |
+| KRaft metadata format | Safe downgrade only; **not reversible** across a metadata change | N/A | ⛔ Critical |
 | Strimzi operator | Helm rollback | 2–5 min | Low |
 | Strimzi CRD migration | Manual CRD restore from backup | 5–15 min | High |
-| Kates application | `kubectl rollout undo` | 1–2 min | Low |
+| Kates API | Helm rollback | 1–2 min | Low |
 | Monitoring stack | Helm rollback | 2–5 min | Low |
 | Kyverno | Helm rollback + CRD restore | 5–10 min | Medium |
 
 ## Summary
 
 - Always upgrade the Strimzi operator before Kafka, take a Velero backup and record LOAD and INTEGRITY baselines before either, and run `make gameday` after any upgrade.
-- A Kafka version bump is a one-line change to `spec.kafka.version` in `config/kafka/kafka.yaml`; Strimzi rolls the brokers one at a time with PDB constraints honored.
-- Hold `spec.kafka.metadataVersion` at the previous level until the new brokers pass validation — raising it makes downgrade irreversible.
+- A Kafka version bump is a `helm upgrade` that starts from the release's current values (`helm get values`), sets `kafkaVersion` and pins `kafka.metadataVersion` to what the cluster runs; a chain rebuilt from the repository's files without `.build/values-detected.yaml` renames the node pools. `kates deploy --kafka-version` does not upgrade a running cluster. Strimzi rolls the brokers one at a time with PDB constraints honored.
+- Upgrade a production Strimzi operator with the pause-and-verify procedure in [Deploying the Strimzi Operator](deploying-strimzi-operator.md#upgrading-the-operator): the CLI pauses nothing, and every `kates deploy` re-applies the operator release with the Kind or generic overlay, dropping what `values-prod.yaml` added.
+- The Kates API upgrades through Helm too: the chart pins the image, so set the new `image.tag` on the `kates` release — a rebuild and a `kubectl rollout restart` run the old tag again.
+- Hold `spec.kafka.metadataVersion` at the previous level until the new brokers pass validation — raising it can make downgrade irreversible.
 - Kyverno upgrades go CRDs first, controller second; afterwards verify with `kates kyverno status` and confirm `PolicyException` resources still use a served API version.
 - A Helm rollback of the Strimzi operator does not revert migrated CRDs — those need a manual restore from backup.
-- Post-upgrade validation is quantitative: performance within 10% of the recorded baseline, an integrity test with zero data loss, and a green Game Day run.
+- Post-upgrade validation is quantitative: performance within 10% of the recorded baseline, an integrity test with zero data loss, and a green `make gameday` run.
 
 With every component upgrade rehearsed and reversible, the remaining moving piece is the integration layer itself: [Kafka Connect & CDC Pipelines](21-kafka-connect.md) covers deploying and operating Kafka Connect with Debezium CDC.

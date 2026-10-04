@@ -3,9 +3,14 @@ package com.bmscomp.kates.engine;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import java.util.List;
-
 import java.lang.reflect.Field;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import jakarta.enterprise.event.Event;
+import jakarta.enterprise.inject.Instance;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -13,14 +18,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import jakarta.enterprise.event.Event;
-import jakarta.enterprise.inject.Instance;
-
 import com.bmscomp.kates.config.TestTypeDefaults;
+import com.bmscomp.kates.domain.CreateTestRequest;
+import com.bmscomp.kates.domain.ScenarioPhase;
+import com.bmscomp.kates.domain.TestRun;
+import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
-import com.bmscomp.kates.service.TopicService;
 import com.bmscomp.kates.service.TestRunRepository;
+import com.bmscomp.kates.service.TopicService;
 
 class TestOrchestratorTest {
 
@@ -39,10 +45,14 @@ class TestOrchestratorTest {
                 typeDefaults,
                 mock(BenchmarkMetrics.class),
                 mock(KatesMetrics.class),
+                // Real, not mocked: it is stateless and a mock would return a
+                // null verdict, which the poll path dereferences.
+                new SlaEvaluator(),
                 mock(Event.class),
                 "native",
                 "localhost:9092",
-                3);
+                3,
+                7_200_000L);
     }
 
     /**
@@ -59,11 +69,23 @@ class TestOrchestratorTest {
         setDefaults(td, "roundTrip", 3, 3, 2, "all", 16384, 0, "none", 1024, 500000L, 10000, 600000L, 1, 1);
     }
 
-    private void setDefaults(TestTypeDefaults td, String prefix,
-            int rf, int partitions, int isr, String acks,
-            int batchSize, int lingerMs, String compression,
-            int recordSize, long numRecords, int throughput,
-            long durationMs, int numProducers, int numConsumers) throws Exception {
+    private void setDefaults(
+            TestTypeDefaults td,
+            String prefix,
+            int rf,
+            int partitions,
+            int isr,
+            String acks,
+            int batchSize,
+            int lingerMs,
+            String compression,
+            int recordSize,
+            long numRecords,
+            int throughput,
+            long durationMs,
+            int numProducers,
+            int numConsumers)
+            throws Exception {
         setField(td, prefix + "ReplicationFactor", rf);
         setField(td, prefix + "Partitions", partitions);
         setField(td, prefix + "MinInsyncReplicas", isr);
@@ -213,7 +235,8 @@ class TestOrchestratorTest {
             TestSpec spec = specWith(1000, 3);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, spec, "run-1");
 
-            long uniqueIds = tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
+            long uniqueIds =
+                    tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
             assertEquals(3, uniqueIds, "Each stress producer must have a unique task ID");
         }
 
@@ -223,15 +246,14 @@ class TestOrchestratorTest {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, spec, "run-1");
 
             for (BenchmarkTask task : tasks) {
-                assertEquals(500000, task.getMaxMessages(),
-                        "Each STRESS producer gets the full record count from spec");
+                assertEquals(
+                        500000, task.getMaxMessages(), "Each STRESS producer gets the full record count from spec");
             }
         }
 
         @Test
         void topicNameIsStressTest() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.STRESS, specWith(1000, 2), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, specWith(1000, 2), "run-1");
 
             for (BenchmarkTask task : tasks) {
                 assertEquals("stress-test", task.getTopic());
@@ -244,8 +266,7 @@ class TestOrchestratorTest {
 
         @Test
         void createsSingleBurstProducer() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.SPIKE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.SPIKE, specWith(1000, 1), "run-1");
 
             assertEquals(1, tasks.size());
             assertEquals(BenchmarkTask.WorkloadType.PRODUCE, tasks.get(0).getWorkloadType());
@@ -253,17 +274,17 @@ class TestOrchestratorTest {
 
         @Test
         void unlimitedThroughput() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.SPIKE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.SPIKE, specWith(1000, 1), "run-1");
 
-            assertEquals(-1, tasks.get(0).getTargetMessagesPerSec(),
+            assertEquals(
+                    -1,
+                    tasks.get(0).getTargetMessagesPerSec(),
                     "SPIKE burst producer should have unlimited throughput");
         }
 
         @Test
         void topicNameIsSpikeTest() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.SPIKE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.SPIKE, specWith(1000, 1), "run-1");
 
             assertEquals("spike-test", tasks.get(0).getTopic());
         }
@@ -274,8 +295,7 @@ class TestOrchestratorTest {
 
         @Test
         void createsProducerAndConsumer() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.ENDURANCE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.ENDURANCE, specWith(1000, 1), "run-1");
 
             assertEquals(2, tasks.size(), "ENDURANCE should create produce + consume");
             assertEquals(BenchmarkTask.WorkloadType.PRODUCE, tasks.get(0).getWorkloadType());
@@ -284,8 +304,7 @@ class TestOrchestratorTest {
 
         @Test
         void topicNameIsEnduranceTest() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.ENDURANCE, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.ENDURANCE, specWith(1000, 1), "run-1");
 
             assertEquals("endurance-test", tasks.get(0).getTopic());
         }
@@ -296,8 +315,7 @@ class TestOrchestratorTest {
 
         @Test
         void createsSingleProducer() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.VOLUME, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.VOLUME, specWith(1000, 1), "run-1");
 
             assertEquals(1, tasks.size());
             assertEquals(BenchmarkTask.WorkloadType.PRODUCE, tasks.get(0).getWorkloadType());
@@ -324,8 +342,7 @@ class TestOrchestratorTest {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.CAPACITY, spec, "run-1");
 
             for (BenchmarkTask task : tasks) {
-                assertEquals(-1, task.getTargetMessagesPerSec(),
-                        "CAPACITY producers should have unlimited throughput");
+                assertEquals(-1, task.getTargetMessagesPerSec(), "CAPACITY producers should have unlimited throughput");
             }
         }
     }
@@ -335,8 +352,7 @@ class TestOrchestratorTest {
 
         @Test
         void createsSingleRoundTripTask() {
-            List<BenchmarkTask> tasks = orchestrator.buildTasks(
-                    TestType.ROUND_TRIP, specWith(1000, 1), "run-1");
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.ROUND_TRIP, specWith(1000, 1), "run-1");
 
             assertEquals(1, tasks.size());
             assertEquals(BenchmarkTask.WorkloadType.ROUND_TRIP, tasks.get(0).getWorkloadType());
@@ -401,9 +417,9 @@ class TestOrchestratorTest {
     class BuildTasksTune {
 
         @ParameterizedTest
-        @EnumSource(value = TestType.class, names = {
-                "TUNE_REPLICATION", "TUNE_ACKS", "TUNE_BATCHING", "TUNE_COMPRESSION", "TUNE_PARTITIONS"
-        })
+        @EnumSource(
+                value = TestType.class,
+                names = {"TUNE_REPLICATION", "TUNE_ACKS", "TUNE_BATCHING", "TUNE_COMPRESSION", "TUNE_PARTITIONS"})
         void tuneTypesCreateSingleProducer(TestType tuneType) {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(tuneType, specWith(1000, 1), "run-1");
 
@@ -430,7 +446,8 @@ class TestOrchestratorTest {
                 assertNotNull(task.getTaskId(), type + ": task ID must not be null");
                 assertNotNull(task.getWorkloadType(), type + ": workload type must not be null");
                 assertNotNull(task.getTopic(), type + ": topic must not be null");
-                assertTrue(task.getMaxMessages() > 0 || task.getDurationMs() > 0,
+                assertTrue(
+                        task.getMaxMessages() > 0 || task.getDurationMs() > 0,
                         type + ": task must have records or duration");
             }
         }
@@ -578,10 +595,8 @@ class TestOrchestratorTest {
 
             assertEquals(4, tasks.size());
             for (BenchmarkTask task : tasks) {
-                assertEquals(300000, task.getDurationMs(),
-                        "All STRESS producers must have the same duration");
-                assertEquals(500000, task.getMaxMessages(),
-                        "STRESS gives each producer the full record count");
+                assertEquals(300000, task.getDurationMs(), "All STRESS producers must have the same duration");
+                assertEquals(500000, task.getMaxMessages(), "STRESS gives each producer the full record count");
             }
         }
 
@@ -600,8 +615,7 @@ class TestOrchestratorTest {
             TestSpec merged = orchestrator.applyTypeDefaults(TestType.ENDURANCE, null);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.ENDURANCE, merged, "run-1");
 
-            assertEquals(3600000, tasks.get(0).getDurationMs(),
-                    "ENDURANCE default duration should be 1 hour");
+            assertEquals(3600000, tasks.get(0).getDurationMs(), "ENDURANCE default duration should be 1 hour");
         }
     }
 
@@ -631,8 +645,7 @@ class TestOrchestratorTest {
             TestSpec spec = specWith(1000, 0);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, spec, "run-1");
 
-            assertTrue(tasks.isEmpty(),
-                    "STRESS with 0 producers should create an empty task list");
+            assertTrue(tasks.isEmpty(), "STRESS with 0 producers should create an empty task list");
         }
 
         @Test
@@ -640,8 +653,7 @@ class TestOrchestratorTest {
             TestSpec spec = specWith(1000, 0);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.CAPACITY, spec, "run-1");
 
-            assertTrue(tasks.isEmpty(),
-                    "CAPACITY with 0 producers should create an empty task list");
+            assertTrue(tasks.isEmpty(), "CAPACITY with 0 producers should create an empty task list");
         }
 
         @Test
@@ -659,10 +671,8 @@ class TestOrchestratorTest {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.INTEGRITY, spec, "run-1");
             BenchmarkTask task = tasks.get(0);
 
-            assertFalse(task.isEnableIdempotence(),
-                    "Idempotence should default to false when not explicitly set");
-            assertFalse(task.isEnableTransactions(),
-                    "Transactions should default to false when not explicitly set");
+            assertFalse(task.isEnableIdempotence(), "Idempotence should default to false when not explicitly set");
+            assertFalse(task.isEnableTransactions(), "Transactions should default to false when not explicitly set");
         }
 
         @Test
@@ -671,8 +681,890 @@ class TestOrchestratorTest {
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.STRESS, spec, "run-1");
 
             assertEquals(16, tasks.size(), "Should handle large producer counts");
-            long uniqueIds = tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
+            long uniqueIds =
+                    tasks.stream().map(BenchmarkTask::getTaskId).distinct().count();
             assertEquals(16, uniqueIds, "All 16 task IDs must be unique");
+        }
+    }
+
+    /**
+     * Every field a request may set reaches the merged spec and the tasks built
+     * from it. applyTypeDefaults used to copy fourteen fields and drop the other
+     * seven, so a requested rate, consumer group, fetch setting or integrity
+     * option was accepted, echoed at its default and never used.
+     */
+    @Nested
+    class RequestedFieldsReachTheRun {
+
+        private TestSpec requested() {
+            return new TestSpec();
+        }
+
+        @Test
+        void targetThroughputFillsTheRateWhenThroughputIsUnset() {
+            TestSpec req = requested();
+            req.setTargetThroughput(2000);
+
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.LOAD, req);
+
+            assertEquals(2000, merged.getThroughput(), "the producer honours throughput, so the alias must fill it");
+            assertEquals(2000, merged.getTargetThroughput(), "the requested alias is kept as it was sent");
+            assertEquals(
+                    2000,
+                    orchestrator
+                            .buildTasks(TestType.LOAD, merged, "run-1")
+                            .get(0)
+                            .getTargetMessagesPerSec());
+        }
+
+        @Test
+        void targetThroughputReplacesTheTypeDefaultRate() {
+            TestSpec req = requested();
+            req.setTargetThroughput(1000);
+
+            assertEquals(
+                    1000,
+                    orchestrator.applyTypeDefaults(TestType.ENDURANCE, req).getThroughput());
+        }
+
+        @Test
+        void throughputWinsWhenBothAreSet() {
+            TestSpec req = requested();
+            req.setThroughput(300);
+            req.setTargetThroughput(2000);
+
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.LOAD, req);
+
+            assertEquals(300, merged.getThroughput());
+            assertEquals(2000, merged.getTargetThroughput());
+        }
+
+        @Test
+        void consumerGroupAndFetchSettingsAreCarried() {
+            TestSpec req = requested();
+            req.setConsumerGroup("perf-cg");
+            req.setFetchMinBytes(1_048_576);
+            req.setFetchMaxWaitMs(250);
+
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.LOAD, req);
+
+            assertEquals("perf-cg", merged.getConsumerGroup());
+            assertEquals(1_048_576, merged.getFetchMinBytes());
+            assertEquals(250, merged.getFetchMaxWaitMs());
+        }
+
+        @Test
+        void integrityOptionsAreCarried() {
+            TestSpec req = requested();
+            req.setEnableIdempotence(true);
+            req.setEnableTransactions(true);
+            req.setEnableCrc(false);
+
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.INTEGRITY, req);
+
+            assertTrue(merged.isEnableIdempotence());
+            assertTrue(merged.isEnableTransactions());
+            assertFalse(merged.isEnableCrc());
+            BenchmarkTask task =
+                    orchestrator.buildTasks(TestType.INTEGRITY, merged, "run-1").get(0);
+            assertTrue(task.isEnableIdempotence());
+            assertTrue(task.isEnableTransactions());
+            assertFalse(task.isEnableCrc());
+        }
+
+        @Test
+        void loadConsumerUsesTheRequestedGroupAndFetchSettings() {
+            TestSpec req = requested();
+            req.setConsumerGroup("perf-cg");
+            req.setFetchMinBytes(65_536);
+            req.setFetchMaxWaitMs(100);
+
+            BenchmarkTask consumer = orchestrator
+                    .buildTasks(TestType.LOAD, orchestrator.applyTypeDefaults(TestType.LOAD, req), "run-1")
+                    .get(1);
+
+            assertEquals("perf-cg", consumer.getConsumerGroup());
+            assertEquals("65536", consumer.getConsumerConfig().get("fetch.min.bytes"));
+            assertEquals("100", consumer.getConsumerConfig().get("fetch.max.wait.ms"));
+        }
+
+        @Test
+        void integrityConsumerGetsTheFetchSettings() {
+            TestSpec req = requested();
+            req.setFetchMinBytes(2048);
+
+            BenchmarkTask task = orchestrator
+                    .buildTasks(TestType.INTEGRITY, orchestrator.applyTypeDefaults(TestType.INTEGRITY, req), "run-1")
+                    .get(0);
+
+            assertEquals("2048", task.getConsumerConfig().get("fetch.min.bytes"));
+        }
+
+        @Test
+        void loadProducerUsesTheRequestedIdempotence() {
+            TestSpec req = requested();
+            req.setEnableIdempotence(true);
+
+            BenchmarkTask producer = orchestrator
+                    .buildTasks(TestType.LOAD, orchestrator.applyTypeDefaults(TestType.LOAD, req), "run-1")
+                    .get(0);
+
+            assertTrue(producer.isEnableIdempotence());
+            assertEquals("true", producer.getProducerConfig().get("enable.idempotence"));
+        }
+
+        @Test
+        void anExplicitFalseTurnsTheClientsIdempotenceOff() {
+            TestSpec req = requested();
+            req.setEnableIdempotence(false);
+
+            BenchmarkTask producer = orchestrator
+                    .buildTasks(TestType.LOAD, orchestrator.applyTypeDefaults(TestType.LOAD, req), "run-1")
+                    .get(0);
+
+            assertFalse(producer.isEnableIdempotence());
+            assertEquals(
+                    "false",
+                    producer.getProducerConfig().get("enable.idempotence"),
+                    "left out, the client would turn idempotence on by itself with acks=all");
+        }
+
+        @Test
+        void unrequestedSettingsLeaveTheClientDefaults() {
+            TestSpec merged = orchestrator.applyTypeDefaults(TestType.LOAD, requested());
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.LOAD, merged, "run-1");
+
+            assertFalse(tasks.get(0).getProducerConfig().containsKey("enable.idempotence"));
+            assertTrue(tasks.get(1).getConsumerConfig().isEmpty());
+            assertEquals("run-1-consume-0-group", tasks.get(1).getConsumerGroup());
+            assertFalse(merged.hasConsumerGroup());
+            assertFalse(merged.hasEnableIdempotence());
+            assertFalse(merged.hasEnableTransactions());
+            assertFalse(merged.hasEnableCrc());
+        }
+
+        @Test
+        void transactionsReachTheProducerAndTheConsumerReadsCommitted() {
+            TestSpec req = requested();
+            req.setEnableTransactions(true);
+
+            List<BenchmarkTask> tasks = orchestrator.buildTasks(
+                    TestType.ENDURANCE, orchestrator.applyTypeDefaults(TestType.ENDURANCE, req), "run-1");
+
+            assertTrue(tasks.get(0).isEnableTransactions());
+            assertEquals("read_committed", tasks.get(1).getConsumerConfig().get("isolation.level"));
+        }
+
+        @Test
+        void aTransactionalRoundTripsConsumerReadsCommitted() {
+            // Its consumer times each record's delivery, and a record in an
+            // open transaction has not been delivered to a read_committed reader.
+            TestSpec req = requested();
+            req.setAcks("all");
+            req.setEnableTransactions(true);
+
+            BenchmarkTask task = orchestrator
+                    .buildTasks(TestType.ROUND_TRIP, orchestrator.applyTypeDefaults(TestType.ROUND_TRIP, req), "run-1")
+                    .get(0);
+
+            assertEquals(Map.of("isolation.level", "read_committed"), task.getConsumerConfig());
+        }
+
+        @ParameterizedTest
+        @EnumSource(
+                value = TestType.class,
+                names = {
+                    "STRESS",
+                    "SPIKE",
+                    "VOLUME",
+                    "CAPACITY",
+                    "ROUND_TRIP",
+                    "TUNE_REPLICATION",
+                    "TUNE_ACKS",
+                    "TUNE_BATCHING",
+                    "TUNE_COMPRESSION",
+                    "TUNE_PARTITIONS"
+                })
+        void everyProducerCarriesTheProducerOptions(TestType type) {
+            TestSpec req = requested();
+            req.setAcks("all");
+            req.setEnableIdempotence(true);
+            req.setEnableTransactions(true);
+
+            List<BenchmarkTask> tasks =
+                    orchestrator.buildTasks(type, orchestrator.applyTypeDefaults(type, req), "run-1");
+
+            assertFalse(tasks.isEmpty());
+            for (BenchmarkTask task : tasks) {
+                assertTrue(task.isEnableIdempotence(), type + " " + task.getTaskId());
+                assertTrue(task.isEnableTransactions(), type + " " + task.getTaskId());
+                assertEquals("true", task.getProducerConfig().get("enable.idempotence"));
+            }
+        }
+
+        @Test
+        void integrityConsumerGroupKeepsItsDefaultWhenUnset() {
+            BenchmarkTask task = orchestrator
+                    .buildTasks(
+                            TestType.INTEGRITY,
+                            orchestrator.applyTypeDefaults(TestType.INTEGRITY, requested()),
+                            "run-1")
+                    .get(0);
+
+            assertEquals("integrity-cg", task.getConsumerGroup(), "the backend appends -integrity to it");
+            assertTrue(task.isEnableCrc(), "CRC checks stay on unless a request turns them off");
+        }
+    }
+
+    /**
+     * A field a run could not honour is refused, by name, instead of being
+     * accepted and ignored.
+     */
+    @Nested
+    class InapplicableFields {
+
+        private Map<String, String> check(TestType type, String backend, TestSpec requested) {
+            return orchestrator.inapplicableFields(
+                    type, backend, requested, orchestrator.applyTypeDefaults(type, requested));
+        }
+
+        private TestSpec everyField() {
+            TestSpec req = new TestSpec();
+            req.setAcks("all");
+            req.setTargetThroughput(1000);
+            req.setConsumerGroup("perf-cg");
+            req.setFetchMinBytes(1024);
+            req.setFetchMaxWaitMs(100);
+            req.setEnableIdempotence(true);
+            req.setEnableTransactions(true);
+            return req;
+        }
+
+        @ParameterizedTest
+        @EnumSource(
+                value = TestType.class,
+                names = {"LOAD", "ENDURANCE"})
+        void aTypeWithAProducerAndAConsumerTakesThemAll(TestType type) {
+            assertEquals(Map.of(), check(type, "native", everyField()));
+        }
+
+        @Test
+        void integrityTakesThemAllAndTheCrcOption() {
+            TestSpec req = everyField();
+            req.setEnableCrc(false);
+
+            assertEquals(Map.of(), check(TestType.INTEGRITY, "native", req));
+        }
+
+        @Test
+        void noSpecAndAnEmptySpecAreFine() {
+            assertEquals(Map.of(), check(TestType.SPIKE, "native", null));
+            assertEquals(Map.of(), check(TestType.INTEGRATION_CDC, "native", new TestSpec()));
+        }
+
+        @ParameterizedTest
+        @EnumSource(
+                value = TestType.class,
+                names = {"STRESS", "SPIKE", "VOLUME", "CAPACITY", "ROUND_TRIP", "TUNE_ACKS", "INTEGRATION_CDC"})
+        void consumerSettingsNeedAConsumer(TestType type) {
+            TestSpec req = new TestSpec();
+            req.setConsumerGroup("perf-cg");
+            req.setFetchMinBytes(1024);
+            req.setFetchMaxWaitMs(100);
+
+            Map<String, String> errors = check(type, "native", req);
+
+            assertEquals(Set.of("consumerGroup", "fetchMinBytes", "fetchMaxWaitMs"), errors.keySet());
+            assertTrue(
+                    errors.get("consumerGroup")
+                            .contains(
+                                    type == TestType.ROUND_TRIP
+                                            ? "ROUND_TRIP's consumer reads every partition without a group"
+                                            : "starts no consumer"),
+                    errors.toString());
+        }
+
+        @ParameterizedTest
+        @EnumSource(
+                value = TestType.class,
+                names = {"SPIKE", "CAPACITY"})
+        void anUnthrottledTypeRefusesARate(TestType type) {
+            TestSpec req = new TestSpec();
+            req.setThroughput(500);
+            req.setTargetThroughput(500);
+
+            Map<String, String> errors = check(type, "native", req);
+
+            assertEquals(Set.of("throughput", "targetThroughput"), errors.keySet());
+            assertTrue(errors.get("targetThroughput").contains("unthrottled"));
+        }
+
+        @Test
+        void anUnthrottledTypeTakesTheUnlimitedRateItRunsAt() {
+            TestSpec req = new TestSpec();
+            req.setTargetThroughput(-1);
+
+            assertEquals(Map.of(), check(TestType.CAPACITY, "native", req));
+        }
+
+        @Test
+        void cdcRefusesEveryProducerOptionThatAsksForSomething() {
+            TestSpec req = new TestSpec();
+            req.setThroughput(500);
+            req.setTargetThroughput(500);
+            req.setEnableIdempotence(true);
+            req.setEnableTransactions(true);
+
+            assertEquals(
+                    Set.of("throughput", "targetThroughput", "enableIdempotence", "enableTransactions"),
+                    check(TestType.INTEGRATION_CDC, "native", req).keySet());
+        }
+
+        /**
+         * The cases kates mcp's draft_scenario runs through its own copy of
+         * these rules (TestMCPDraftScenarioRulesMatchTheBackend reads the same
+         * file), so that a rule changed here and not there fails a test.
+         */
+        @org.junit.jupiter.api.TestFactory
+        java.util.stream.Stream<org.junit.jupiter.api.DynamicTest> theCasesDraftScenarioSharesHoldHere()
+                throws Exception {
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            var root = json.readTree(getClass().getResourceAsStream("/spec-applicability.json"));
+            return java.util.stream.StreamSupport.stream(root.get("cases").spliterator(), false)
+                    .map(c -> org.junit.jupiter.api.DynamicTest.dynamicTest(
+                            c.get("name").asText(), () -> {
+                                TestType type = TestType.valueOf(c.get("type").asText());
+                                String backend =
+                                        c.has("backend") ? c.get("backend").asText() : "native";
+                                TestSpec spec = json.treeToValue(c.get("spec"), TestSpec.class);
+                                Set<String> refused = new java.util.HashSet<>();
+                                c.get("refused").forEach(n -> refused.add(n.asText()));
+
+                                assertEquals(refused, check(type, backend, spec).keySet());
+                            }));
+        }
+
+        @Test
+        void cdcTakesTheValuesThatAskForNothing() {
+            // No producer runs, so an unlimited rate and an option turned off
+            // are what the run does anyway; the merged spec a CDC run shows
+            // holds its type's rate, -1, and must be valid input again.
+            TestSpec req = new TestSpec();
+            req.setThroughput(-1);
+            req.setTargetThroughput(-1);
+            req.setEnableIdempotence(false);
+            req.setEnableTransactions(false);
+            req.setEnableCrc(false);
+
+            assertEquals(Map.of(), check(TestType.INTEGRATION_CDC, "native", req));
+        }
+
+        @Test
+        void crcChecksNeedAnIntegrityRun() {
+            TestSpec on = new TestSpec();
+            on.setEnableCrc(true);
+            TestSpec off = new TestSpec();
+            off.setEnableCrc(false);
+
+            assertEquals(
+                    Set.of("enableCrc"),
+                    check(TestType.ROUND_TRIP, "native", on).keySet());
+            assertEquals(Map.of(), check(TestType.ROUND_TRIP, "native", off), "no CRC check is what a LOAD run does");
+        }
+
+        @Test
+        void idempotenceNeedsAcksAllAndSaysWhenTheAcksIsTheTypeDefault() {
+            TestSpec req = new TestSpec();
+            req.setEnableIdempotence(true);
+
+            Map<String, String> errors = check(TestType.SPIKE, "native", req);
+
+            assertEquals(Set.of("enableIdempotence"), errors.keySet());
+            assertTrue(errors.get("enableIdempotence").contains("acks is 1 (the type's default)"), errors.toString());
+
+            req.setAcks("all");
+            assertEquals(Map.of(), check(TestType.SPIKE, "native", req));
+        }
+
+        @Test
+        void transactionsNeedAcksAllAndIdempotence() {
+            TestSpec acksOne = new TestSpec();
+            acksOne.setAcks("1");
+            acksOne.setEnableTransactions(true);
+            TestSpec notIdempotent = new TestSpec();
+            notIdempotent.setEnableTransactions(true);
+            notIdempotent.setEnableIdempotence(false);
+
+            assertTrue(check(TestType.LOAD, "native", acksOne)
+                    .get("enableTransactions")
+                    .contains("acks=all"));
+            assertTrue(check(TestType.LOAD, "native", notIdempotent)
+                    .get("enableTransactions")
+                    .contains("always idempotent"));
+        }
+
+        @Test
+        void trogdorCannotRunTransactionsButTakesTheRest() {
+            TestSpec req = everyField();
+
+            assertEquals(
+                    Set.of("enableTransactions"),
+                    check(TestType.LOAD, "trogdor", req).keySet());
+            req.setEnableTransactions(false);
+            assertEquals(Map.of(), check(TestType.LOAD, "trogdor", req));
+        }
+
+        @Test
+        void executeTestRefusesBeforeTakingAPermit() {
+            CreateTestRequest request = new CreateTestRequest();
+            request.setType(TestType.STRESS);
+            TestSpec req = new TestSpec();
+            req.setConsumerGroup("perf-cg");
+            request.setSpec(req);
+
+            // More refusals than there are permits: none of them may take one.
+            for (int i = 0; i < 5; i++) {
+                Exception failure =
+                        orchestrator.executeTest(request).asFailure().orElseThrow();
+                InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+                assertEquals(Set.of("consumerGroup"), invalid.getFieldErrors().keySet());
+                assertTrue(invalid.getMessage().startsWith("spec.consumerGroup: "), invalid.getMessage());
+            }
+        }
+    }
+
+    /**
+     * A spec the API serves or stores is valid input again. TestSpec used to
+     * serialize through its getters, which answer a default for every field
+     * nobody set, so a GET's spec and a schedule's stored request carried all
+     * of them: enableCrc true, the fetch settings, enableIdempotence false.
+     * Sent back (a replay, a schedule firing), those read as requested, and
+     * the checks refused every type but INTEGRITY, whose producer they turned
+     * non-idempotent.
+     */
+    @Nested
+    class ServedAndStoredSpecsAreValidInput {
+
+        private final com.fasterxml.jackson.databind.ObjectMapper json =
+                new com.fasterxml.jackson.databind.ObjectMapper();
+
+        @ParameterizedTest
+        @EnumSource(TestType.class)
+        void aScheduleRunsTheRequestItStored(TestType type) throws Exception {
+            // As ScheduleResource stores the request and TestScheduler reads it.
+            CreateTestRequest posted = json.readValue(
+                    "{\"type\":\"" + type + "\",\"spec\":{\"numRecords\":1000}}", CreateTestRequest.class);
+            CreateTestRequest fired = json.readValue(json.writeValueAsString(posted), CreateTestRequest.class);
+
+            TestSpec spec = fired.getSpec();
+            assertEquals(
+                    Map.of(),
+                    orchestrator.inapplicableFields(type, "native", spec, orchestrator.applyTypeDefaults(type, spec)));
+            assertEquals(Map.of("numRecords", 1000), spec.explicitFields(), "only what the request set");
+        }
+
+        @ParameterizedTest
+        @EnumSource(TestType.class)
+        void theSpecARunShowsCanBeSentAgain(TestType type) throws Exception {
+            TestSpec requested = new TestSpec();
+            requested.setNumRecords(1000);
+            String served = json.writeValueAsString(orchestrator.applyTypeDefaults(type, requested));
+
+            TestSpec again = json.readValue(served, TestSpec.class);
+
+            assertEquals(
+                    Map.of(),
+                    orchestrator.inapplicableFields(type, "native", again, orchestrator.applyTypeDefaults(type, again)),
+                    served);
+        }
+
+        @Test
+        void replayingAnIntegrityRunLeavesIdempotenceToTheClient() throws Exception {
+            TestSpec requested = new TestSpec();
+            requested.setNumRecords(1000);
+            String served = json.writeValueAsString(orchestrator.applyTypeDefaults(TestType.INTEGRITY, requested));
+
+            TestSpec again = json.readValue(served, TestSpec.class);
+            BenchmarkTask task = orchestrator
+                    .buildTasks(TestType.INTEGRITY, orchestrator.applyTypeDefaults(TestType.INTEGRITY, again), "r")
+                    .get(0);
+
+            assertFalse(task.getProducerConfig().containsKey("enable.idempotence"), served);
+        }
+    }
+
+    /**
+     * A scenario's base and phase specs are checked like a plain request's, and
+     * what they set reaches the phases. The phases start only producers, so the
+     * consumer settings and CRC checks were stored as the run's spec and never
+     * used; the rate a scenario set with targetThroughput was stored as the
+     * run's throughput while every phase ran at the base spec's throughput.
+     */
+    @Nested
+    class ScenarioRequests {
+
+        private final List<BenchmarkTask> submitted = new java.util.ArrayList<>();
+
+        @SuppressWarnings("unchecked")
+        private TestOrchestrator withBackend(String name) {
+            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            when(backend.name()).thenReturn(name);
+            when(backend.submit(any())).thenAnswer(invocation -> {
+                BenchmarkTask task = invocation.getArgument(0);
+                submitted.add(task);
+                return new BenchmarkHandle(name, task.getTaskId());
+            });
+            Instance<BenchmarkBackend> backends = mock(Instance.class);
+            when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
+            return new TestOrchestrator(
+                    mock(TopicService.class),
+                    mock(TestRunRepository.class),
+                    backends,
+                    typeDefaults,
+                    mock(BenchmarkMetrics.class),
+                    mock(KatesMetrics.class),
+                    new SlaEvaluator(),
+                    mock(Event.class),
+                    name,
+                    "localhost:9092",
+                    3,
+                    7_200_000L);
+        }
+
+        private CreateTestRequest scenario(TestSpec base, com.bmscomp.kates.domain.ScenarioPhase... phases) {
+            com.bmscomp.kates.domain.TestScenario scenario = new com.bmscomp.kates.domain.TestScenario();
+            scenario.setName("s");
+            scenario.setType(TestType.LOAD);
+            scenario.setBaseSpec(base);
+            scenario.setPhases(List.of(phases));
+            CreateTestRequest request = new CreateTestRequest();
+            request.setType(TestType.LOAD);
+            request.setScenario(scenario);
+            return request;
+        }
+
+        private com.bmscomp.kates.domain.ScenarioPhase phase(
+                String name, com.bmscomp.kates.domain.ScenarioPhase.PhaseType type) {
+            return new com.bmscomp.kates.domain.ScenarioPhase(name, type, 0, -1);
+        }
+
+        @Test
+        void consumerSettingsAndCrcChecksAreRefusedByName() {
+            TestSpec base = new TestSpec();
+            base.setConsumerGroup("perf-cg");
+            base.setFetchMinBytes(1024);
+            base.setEnableCrc(true);
+            com.bmscomp.kates.domain.ScenarioPhase steady =
+                    phase("steady", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY);
+            TestSpec phaseSpec = new TestSpec();
+            phaseSpec.setFetchMaxWaitMs(100);
+            steady.setSpec(phaseSpec);
+
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(base, steady))
+                    .asFailure()
+                    .orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(
+                    Set.of(
+                            "baseSpec.consumerGroup",
+                            "baseSpec.fetchMinBytes",
+                            "baseSpec.enableCrc",
+                            "phases[0].spec.fetchMaxWaitMs"),
+                    invalid.getFieldErrors().keySet());
+            assertTrue(invalid.getMessage().contains("scenario.baseSpec.consumerGroup: "), invalid.getMessage());
+            assertTrue(invalid.getFieldErrors().get("baseSpec.consumerGroup").contains("start no consumer"));
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void targetThroughputSetsThePhaseRate() {
+            TestSpec base = new TestSpec();
+            base.setTargetThroughput(5000);
+            com.bmscomp.kates.domain.ScenarioPhase slow =
+                    phase("slow", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY);
+            TestSpec slowSpec = new TestSpec();
+            slowSpec.setTargetThroughput(700);
+            slow.setSpec(slowSpec);
+
+            assertTrue(withBackend("native")
+                    .executeTest(scenario(
+                            base, phase("steady", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY), slow))
+                    .isSuccess());
+
+            assertEquals(2, submitted.size());
+            assertEquals(5000, submitted.get(0).getTargetMessagesPerSec());
+            assertEquals(700, submitted.get(1).getTargetMessagesPerSec());
+        }
+
+        @Test
+        void theProducerOptionsReachEveryPhase() {
+            TestSpec base = new TestSpec();
+            base.setAcks("all");
+            base.setThroughput(1000);
+            base.setEnableIdempotence(true);
+            base.setEnableTransactions(true);
+            com.bmscomp.kates.domain.ScenarioPhase ramp =
+                    phase("ramp", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.RAMP);
+            ramp.setRampSteps(2);
+
+            assertTrue(withBackend("native")
+                    .executeTest(scenario(
+                            base,
+                            phase("steady", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY),
+                            ramp,
+                            phase("burst", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.SPIKE)))
+                    .isSuccess());
+
+            assertEquals(4, submitted.size());
+            for (BenchmarkTask task : submitted) {
+                assertTrue(task.isEnableIdempotence(), task.getTaskId());
+                assertTrue(task.isEnableTransactions(), task.getTaskId());
+                assertEquals("true", task.getProducerConfig().get("enable.idempotence"), task.getTaskId());
+            }
+        }
+
+        @Test
+        void transactionsOnTrogdorAreRefused() {
+            TestSpec base = new TestSpec();
+            base.setEnableTransactions(true);
+
+            Exception failure = withBackend("trogdor")
+                    .executeTest(
+                            scenario(base, phase("steady", com.bmscomp.kates.domain.ScenarioPhase.PhaseType.STEADY)))
+                    .asFailure()
+                    .orElseThrow();
+
+            assertEquals(
+                    Set.of("baseSpec.enableTransactions"),
+                    assertInstanceOf(InvalidTestSpecException.class, failure)
+                            .getFieldErrors()
+                            .keySet());
+        }
+    }
+
+    private static final long CAP_MS = 7_200_000;
+
+    private static CreateTestRequest request(TestType type, TestSpec spec) {
+        CreateTestRequest request = new CreateTestRequest();
+        request.setType(type);
+        request.setSpec(spec);
+        return request;
+    }
+
+    private static TestSpec lasting(long durationMs) {
+        TestSpec spec = new TestSpec();
+        spec.setDurationMs(durationMs);
+        return spec;
+    }
+
+    /** A LOAD scenario of three phases: the base spec's duration, and two of their own. */
+    private static CreateTestRequest scenarioOf(long baseMs, long steadyMs, long cooldownMs) {
+        TestScenario scenario = new TestScenario();
+        scenario.setName("staircase");
+        scenario.setType(TestType.LOAD);
+        scenario.setBaseSpec(lasting(baseMs));
+        scenario.setPhases(List.of(
+                // No duration of its own: the base spec's.
+                new ScenarioPhase("warmup", ScenarioPhase.PhaseType.WARMUP, 0, -1),
+                new ScenarioPhase("steady", ScenarioPhase.PhaseType.STEADY, steadyMs, -1),
+                new ScenarioPhase("cooldown", ScenarioPhase.PhaseType.COOLDOWN, cooldownMs, -1)));
+        CreateTestRequest request = new CreateTestRequest();
+        request.setType(TestType.LOAD);
+        request.setScenario(scenario);
+        return request;
+    }
+
+    /**
+     * How long the timeout reaper lets each run go on. It used to fail every
+     * run 30 minutes after its creation, whatever the run was set to last, so
+     * a default ENDURANCE run, an hour long, always ended FAILED. Now the
+     * orchestrator stores how long a run is set to last when it creates it,
+     * and the reaper allows that and a grace, counted from the run's creation.
+     */
+    @Nested
+    class RunDeadlines {
+
+        private static final long GRACE_MS = 300_000;
+
+        private final TestTimeoutReaper reaper = new TestTimeoutReaper();
+
+        @BeforeEach
+        void reaperSettings() {
+            reaper.maxDurationMs = CAP_MS;
+            reaper.graceMs = GRACE_MS;
+        }
+
+        /** The run executeTest creates for this request, on a backend that takes every task. */
+        @SuppressWarnings("unchecked")
+        private TestRun started(CreateTestRequest request) {
+            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            when(backend.name()).thenReturn("native");
+            when(backend.submit(any()))
+                    .thenAnswer(invocation -> new BenchmarkHandle(
+                            "native", invocation.<BenchmarkTask>getArgument(0).getTaskId()));
+            Instance<BenchmarkBackend> backends = mock(Instance.class);
+            when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
+            TestOrchestrator withBackend = new TestOrchestrator(
+                    mock(TopicService.class),
+                    mock(TestRunRepository.class),
+                    backends,
+                    typeDefaults,
+                    mock(BenchmarkMetrics.class),
+                    mock(KatesMetrics.class),
+                    new SlaEvaluator(),
+                    mock(Event.class),
+                    "native",
+                    "localhost:9092",
+                    3,
+                    CAP_MS);
+            return withBackend.executeTest(request).asSuccess().orElseThrow();
+        }
+
+        /** Whether the reaper fails the run, still RUNNING this long after its creation. */
+        private boolean reapedAfter(TestRun run, Duration sinceCreation) {
+            Instant now = Instant.parse(run.getCreatedAt()).plus(sinceCreation);
+            return now.isAfter(reaper.deadlineOf(run));
+        }
+
+        @Test
+        void aDefaultEnduranceRunOutlivesThirtyOneMinutes() {
+            TestRun run = started(request(TestType.ENDURANCE, null));
+
+            assertEquals(3_600_000L, run.getPlannedDurationMs());
+            assertFalse(reapedAfter(run, Duration.ofMinutes(31)), "past the old 30-minute limit");
+            assertFalse(reapedAfter(run, Duration.ofMinutes(64)));
+            assertTrue(reapedAfter(run, Duration.ofMinutes(66)), "its hour and the grace are over");
+        }
+
+        @Test
+        void aTenMinuteLoadRunIsReapedOnceTenMinutesAndTheGraceHavePassed() {
+            TestRun run = started(request(TestType.LOAD, lasting(600_000)));
+
+            assertEquals(600_000L, run.getPlannedDurationMs());
+            assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(600_000 + GRACE_MS), reaper.deadlineOf(run));
+            assertFalse(reapedAfter(run, Duration.ofMinutes(15).minusSeconds(1)));
+            assertTrue(reapedAfter(run, Duration.ofMinutes(15).plusSeconds(1)));
+        }
+
+        @Test
+        void anIntegrityRunIsAllowedTwiceItsDuration() {
+            TestRun run = started(request(TestType.INTEGRITY, lasting(600_000)));
+
+            assertEquals(1_200_000L, run.getPlannedDurationMs(), "it produces, then reads back for as long again");
+            assertFalse(reapedAfter(run, Duration.ofMinutes(24)));
+            assertTrue(reapedAfter(run, Duration.ofMinutes(26)));
+        }
+
+        @Test
+        void aScenarioIsAllowedItsPhasesAddedUp() {
+            TestRun run = started(scenarioOf(300_000, 600_000, 300_000));
+
+            assertEquals(1_200_000L, run.getPlannedDurationMs());
+            assertFalse(reapedAfter(run, Duration.ofMinutes(24)));
+            assertTrue(reapedAfter(run, Duration.ofMinutes(26)));
+        }
+
+        @Test
+        void aRunNoDurationBoundsIsAllowedTheCap() {
+            TestRun run = started(request(TestType.INTEGRATION_CDC, null));
+
+            assertNull(run.getPlannedDurationMs(), "the CDC service ends it on timeouts of its own");
+            assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(CAP_MS + GRACE_MS), reaper.deadlineOf(run));
+        }
+
+        @Test
+        void aStoredDurationPastTheCapIsHeldToIt() {
+            // As a run created before the cap was lowered would have it.
+            TestRun run = new TestRun(TestType.LOAD, new TestSpec()).withPlannedDurationMs(3 * CAP_MS);
+
+            assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(CAP_MS + GRACE_MS), reaper.deadlineOf(run));
+        }
+    }
+
+    /**
+     * A request set to last longer than kates.engine.max-duration-ms is
+     * refused, by the field that sets its length, before it takes a permit.
+     * It used to be accepted, and then failed by the reaper part-way through.
+     */
+    @Nested
+    class RunsLongerThanTheCap {
+
+        @Test
+        void aDurationPastTheCapIsRefusedBeforeTakingAPermit() {
+            CreateTestRequest request = request(TestType.LOAD, lasting(CAP_MS + 1));
+
+            for (int i = 0; i < 5; i++) {
+                Exception failure =
+                        orchestrator.executeTest(request).asFailure().orElseThrow();
+                InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+                assertEquals(Set.of("durationMs"), invalid.getFieldErrors().keySet());
+                assertEquals(
+                        "spec.durationMs: the run is set to last 7200001 ms; the Kates API allows a run at most"
+                                + " 7200000 ms (kates.engine.max-duration-ms)",
+                        invalid.getMessage());
+            }
+            assertEquals(0, orchestrator.activeTestCount());
+        }
+
+        @Test
+        void aDurationAtTheCapIsAccepted() {
+            assertTrue(orchestrator
+                    .refusal(request(TestType.LOAD, lasting(CAP_MS)))
+                    .isEmpty());
+        }
+
+        @Test
+        void anIntegrityRunCountsItsDurationTwice() {
+            assertTrue(orchestrator
+                    .refusal(request(TestType.INTEGRITY, lasting(CAP_MS / 2)))
+                    .isEmpty());
+
+            String why = orchestrator
+                    .refusal(request(TestType.INTEGRITY, lasting(CAP_MS / 2 + 1)))
+                    .orElseThrow()
+                    .getFieldErrors()
+                    .get("durationMs");
+            assertTrue(
+                    why.startsWith("an INTEGRITY run produces for durationMs, 3600001 ms, then reads its records"
+                            + " back for up to as long again, 7200002 ms in all;"),
+                    why);
+        }
+
+        @Test
+        void aTypeDefaultPastTheCapIsRefusedAsTheDefault() throws Exception {
+            setField(typeDefaults, "enduranceDurationMs", 3 * CAP_MS);
+
+            String why = orchestrator
+                    .refusal(request(TestType.ENDURANCE, null))
+                    .orElseThrow()
+                    .getFieldErrors()
+                    .get("durationMs");
+            assertTrue(why.startsWith("the run is set to last 21600000 ms (the type's default);"), why);
+        }
+
+        @ParameterizedTest
+        @EnumSource(TestType.class)
+        void everyTypeDefaultFitsUnderTheDefaultCap(TestType type) {
+            assertTrue(orchestrator.refusal(request(type, null)).isEmpty());
+        }
+
+        @Test
+        void aScenarioWhosePhasesAddUpPastTheCapIsRefused() {
+            Exception failure = orchestrator
+                    .executeTest(scenarioOf(2_700_000, 2_700_000, 2_700_000))
+                    .asFailure()
+                    .orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(Set.of("phases"), invalid.getFieldErrors().keySet());
+            assertTrue(
+                    invalid.getMessage().startsWith("scenario.phases: the phases are set to last 8100000 ms in all;"),
+                    invalid.getMessage());
+            assertTrue(orchestrator
+                    .refusal(scenarioOf(2_400_000, 2_400_000, 2_400_000))
+                    .isEmpty());
         }
     }
 }

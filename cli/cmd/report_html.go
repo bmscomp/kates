@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/klster/kates-cli/client"
+	"github.com/bmscomp/kates/cli/client"
 )
 
 func renderHTMLReport(id string, r *client.Report) string {

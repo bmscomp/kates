@@ -1,0 +1,248 @@
+% PDF-only preamble for the Kates book, pulled in by format.pdf's
+% include-in-header in _quarto.yml. The web theme never sees it; the colours
+% are the web palette's (kates-light.scss), so both editions read as one book.
+
+% ── Colours ─────────────────────────────────────────────────────────────────
+\definecolor{katesblue}{HTML}{1D63C7}
+\definecolor{katesnavy}{HTML}{131D42}
+\definecolor{katesmuted}{HTML}{5B6683}
+\definecolor{katesoutputbg}{HTML}{F6F8FC}
+\definecolor{katesoutputfg}{HTML}{26324D}
+\definecolor{katesoutputrule}{HTML}{9FB3D6}
+
+% ── Fonts ───────────────────────────────────────────────────────────────────
+% The web's type: EB Garamond for text and headings, JetBrains Mono for code,
+% and Inter for the few labels set in sans, such as the output panels' tab.
+% Each face is used only when it is installed, so a render on a machine
+% without them still works, in the next font on the list (Latin Modern if none
+% is). Characters a face lacks (check marks, triangles, warning signs, the
+% Lab mockup's emoji) come from a fallback list instead of vanishing. The pdf
+% job in .github/workflows/book.yml installs EB Garamond (TeX Live's
+% ebgaramond), Inter, JetBrains Mono, the Noto symbol fonts and Symbola, and
+% fails on any "Missing character" in the log.
+\ifLuaTeX
+\makeatletter
+\newcommand*\kates@pick[2]{% #1: macro to set, #2: candidate faces, in order
+  \let#1\relax
+  \@for\kates@face:=#2\do{%
+    \ifx#1\relax\IfFontExistsTF{\kates@face}{\let#1\kates@face}{}\fi}}
+\kates@pick\kates@text{EB Garamond,EB Garamond 12,TeX Gyre Pagella,Palatino,Georgia}
+\kates@pick\kates@sans{Inter,Helvetica Neue,Arial,DejaVu Sans}
+\kates@pick\kates@code{JetBrains Mono,DejaVu Sans Mono,Menlo}
+% Symbols, then emoji drawn in black and white. The last two are macOS system
+% fonts, so a local render loses fewer characters.
+\def\kates@fallbacks{}
+\@for\kates@face:={Noto Sans Symbols 2,Noto Sans Symbols,Noto Sans Math,%
+    Symbola,Apple Symbols,Arial Unicode MS}\do{%
+  \IfFontExistsTF{\kates@face}{%
+    \edef\kates@fallbacks{\kates@fallbacks"\kates@face:",}}{}}
+\ifx\kates@fallbacks\@empty
+  \def\kates@features{}
+\else
+  \directlua{luaotfload.add_fallback("katesfallback", {\kates@fallbacks})}
+  \def\kates@features{RawFeature={fallback=katesfallback}}
+\fi
+% Lining figures, as on the web: versions, ports and counts read level with
+% the capitals. Bold is EB Garamond's semibold, as the web's headings and
+% strong text are, where the family has one (TeX Live's has; the older
+% "EB Garamond 12" has a bold only).
+\def\kates@textfeatures{,Numbers=Lining}
+\IfFontExistsTF{EB Garamond SemiBold}{%
+  \def\kates@garamond{EB Garamond}%
+  \ifx\kates@text\kates@garamond
+    \def\kates@textfeatures{,Numbers=Lining,BoldFont={EB Garamond SemiBold},BoldItalicFont={EB Garamond SemiBold Italic}}%
+  \fi}{}
+% Inter's alternates that tell l, I and 1 apart in resource names and flags,
+% as the web sets them (kates.scss). Only Inter has them under these names.
+\def\kates@inter{Inter}
+\ifx\kates@sans\kates@inter
+  \def\kates@sansfeatures{,RawFeature={+cv05;+cv08}}
+\else
+  \def\kates@sansfeatures{}
+\fi
+\ifx\kates@text\relax\else
+  \expandafter\setmainfont\expandafter{\kates@text}[\kates@features\kates@textfeatures]
+\fi
+\ifx\kates@sans\relax\else
+  \expandafter\setsansfont\expandafter{\kates@sans}[\kates@features\kates@sansfeatures]
+\fi
+\ifx\kates@code\relax\else
+  \expandafter\setmonofont\expandafter{\kates@code}[\kates@features]
+\fi
+% Callout icons: under lualatex, Font Awesome's glyphs carry their names
+% ("LIGHTBULB", "INFO") as the text a PDF reader copies, searches and reads
+% aloud, so a Tip read "LIGHTBULB Tip". Drop that text from its icons, which
+% are private use characters, as the earlier xelatex build did; the callout's
+% title says the rest.
+\directlua{
+  luatexbase.add_to_callback("luaotfload.patch_font", function(tfmdata)
+    local name = tfmdata.psname or tfmdata.fullname or tfmdata.name or ""
+    if name:find("FontAwesome", 1, true) then
+      for code, char in pairs(tfmdata.characters) do
+        if code >= 0xE000 and code <= 0xF8FF then
+          char.tounicode = nil
+        end
+      end
+    end
+  end, "kates.icon-text")
+}
+\makeatother
+\fi
+
+% ── Page ────────────────────────────────────────────────────────────────────
+% Let a page end short rather than stretch the space between paragraphs to
+% fill it: with scrbook's default \flushbottom, a diagram that moves to the
+% next page leaves its paragraphs pulled far apart.
+\raggedbottom
+
+% Paragraphs are set apart by space, as before, but without KOMA's rule that
+% a paragraph's last line keep 1em free: a diagram at full line width is a
+% paragraph of one line, and the rule pushed each one 1em into the margin.
+\KOMAoptions{parskip=half-}
+
+% Section and figure numbers without a trailing period ("2.1", "Figure 2.1:"),
+% as on the web.
+\KOMAoptions{numbers=noendperiod}
+
+% Let figures share a page with text rather than sit alone on a float page
+% with a gap above and below.
+\renewcommand{\topfraction}{0.85}
+\renewcommand{\bottomfraction}{0.7}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.75}
+
+% Headings, the title and links in the brand blue, in EB Garamond as on the
+% web (KOMA sets them in sans by default); running heads and page numbers
+% recede.
+\setkomafont{disposition}{\normalcolor\rmfamily\bfseries}
+\addtokomafont{disposition}{\color{katesblue}}
+\addtokomafont{title}{\color{katesblue}}
+\addtokomafont{subtitle}{\color{katesnavy}}
+\addtokomafont{pagehead}{\normalfont\small\color{katesmuted}}
+\addtokomafont{pagenumber}{\normalfont\small\color{katesmuted}}
+
+% Part titles already say "Part I — Foundations", so drop KOMA's own
+% "Part I." label above them, and its "I" in the table of contents.
+\renewcommand*{\partformat}{}
+\renewcommand*{\addparttocentry}[2]{\addtocentrydefault{part}{}{#2}}
+
+% Part and chapter entries in the table of contents take the headings' font,
+% blue included; the link colour turns their titles navy, but not their page
+% numbers. Make the whole entry navy.
+\addtokomafont{partentry}{\color{katesnavy}}
+\addtokomafont{chapterentry}{\color{katesnavy}}
+
+% Room in the table of contents for three-digit page numbers and for section
+% numbers such as 26.10, which the defaults do not allow for.
+\makeatletter
+\renewcommand*{\@pnumwidth}{2.2em}
+\makeatother
+\RedeclareSectionCommand[tocnumwidth=2.9em]{section}
+
+% ── Graphics ────────────────────────────────────────────────────────────────
+% Mermaid diagrams arrive at their natural size, often wider than the page.
+% Shrink any graphic to the line width and to 80% of the text height, keeping
+% its proportions; smaller ones stay as they are. adjustbox applies its max
+% keys after the width and height Pandoc writes, whatever their order. Then
+% centre it on the line, as the web centres its diagrams.
+% \kates@includegraphics is the unclamped original, for the cover.
+\usepackage[export]{adjustbox}
+\makeatletter
+\NewCommandCopy\kates@includegraphics\includegraphics
+\RenewDocumentCommand\includegraphics{s O{} m}{%
+  \IfBooleanTF{#1}%
+    {\kates@includegraphics*[#2,max width=\linewidth,max totalheight=0.8\textheight,center]{#3}}%
+    {\kates@includegraphics[#2,max width=\linewidth,max totalheight=0.8\textheight,center]{#3}}}
+\makeatother
+
+% ── Tables ──────────────────────────────────────────────────────────────────
+% Tables one step smaller than the text, so their columns, and the code in
+% them, get more room.
+\AddToHook{env/longtable/begin}{\small}
+
+% ── Code and output ─────────────────────────────────────────────────────────
+% Commands and files on a light tint with a brand-blue rule. Pandoc defines
+% Shaded before this header is read; this replaces it. The code is two steps
+% smaller than the text, so about 76 characters of JetBrains Mono fit on a
+% line.
+\usepackage{fancyvrb}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\definecolor{katescodebg}{HTML}{EEF2F9}
+\makeatletter
+\@ifundefined{Shaded}{}{%
+  \renewenvironment{Shaded}{%
+    \begin{tcolorbox}[enhanced, breakable, sharp corners, frame hidden,
+      boxrule=0pt, colback=katescodebg,
+      borderline west={2.5pt}{0pt}{katesblue},
+      boxsep=0pt, left=8pt, right=6pt, top=5pt, bottom=5pt,
+      before skip=10pt, after skip=10pt]}%
+    {\end{tcolorbox}}}
+\@ifundefined{Highlighting}{}{%
+  \RecustomVerbatimEnvironment{Highlighting}{Verbatim}%
+    {commandchars=\\\{\},fontsize=\footnotesize}}
+% Inline code at 0.78 of the text around it, as on the web ($code-font-size in
+% kates.scss): JetBrains Mono's x-height is about a third larger than EB
+% Garamond's, so at 0.78 its lowercase stands level with the text's. Pandoc
+% writes inline code as \texttt; code blocks and output panels set their own
+% size.
+\DeclareTextFontCommand{\texttt}{%
+  \ttfamily\fontsize{\fpeval{0.78*\f@size}}{\f@baselineskip}\selectfont}
+\makeatother
+
+% `text` fences (terminal output and ASCII screens), as theme/pdf-output.lua
+% sets them: a lighter panel with a thin grey-blue rule, the web's output
+% colours, so what you type and what you see never look alike. The filter
+% adds [output label=Output] when the fence is output; the label sits in the
+% panel's top margin. Lines sit exactly a baseline apart, however tall their
+% glyphs, so the box-drawing lines of a mockup meet instead of breaking.
+\tcbset{output label/.style={top=18pt,
+  overlay unbroken and first={\node[anchor=north west, inner sep=0pt,
+    font=\sffamily\scriptsize\bfseries, text=katesmuted]
+    at ([xshift=8pt, yshift=-5pt]frame.north west) {\MakeUppercase{#1}};}}}
+\newtcolorbox{katesoutput}[1][]{%
+  enhanced, breakable, sharp corners, frame hidden,
+  boxrule=0pt, colback=katesoutputbg, coltext=katesoutputfg,
+  borderline west={1.5pt}{0pt}{katesoutputrule},
+  boxsep=0pt, left=8pt, right=6pt, top=5pt, bottom=5pt,
+  before skip=10pt, after skip=10pt,
+  fontupper=\footnotesize,
+  before upper={\lineskiplimit=-\maxdimen},
+  #1}
+
+% ── Callouts ────────────────────────────────────────────────────────────────
+% One colour per callout type, for its frame and its icon: note in the brand
+% blue, tip green, warning amber, important indigo, and caution red, the only
+% red. Each clears 4.5:1 on white and on the title's tint. Quarto defines its
+% own colours after this header, so these replace them when the document
+% begins.
+\AtBeginDocument{%
+  \definecolor{quarto-callout-note-color}{HTML}{1D63C7}%
+  \definecolor{quarto-callout-tip-color}{HTML}{15803D}%
+  \definecolor{quarto-callout-important-color}{HTML}{4F46E5}%
+  \definecolor{quarto-callout-warning-color}{HTML}{B45309}%
+  \definecolor{quarto-callout-caution-color}{HTML}{C62828}%
+  \colorlet{quarto-callout-note-color-frame}{quarto-callout-note-color}%
+  \colorlet{quarto-callout-tip-color-frame}{quarto-callout-tip-color}%
+  \colorlet{quarto-callout-important-color-frame}{quarto-callout-important-color}%
+  \colorlet{quarto-callout-warning-color-frame}{quarto-callout-warning-color}%
+  \colorlet{quarto-callout-caution-color-frame}{quarto-callout-caution-color}}
+
+% ── Title page ──────────────────────────────────────────────────────────────
+% When theme/pdf-cover.lua has drawn assets/cover.svg into a PDF, the book
+% opens on it, full bleed, before the usual title page.
+\makeatletter
+\let\kates@maketitle\maketitle
+\renewcommand{\maketitle}{%
+  \ifdefined\katescoverfile
+    \begingroup
+    \thispagestyle{empty}%
+    \AddToHookNext{shipout/background}{%
+      \put(0,-\paperheight){%
+        \kates@includegraphics[width=\paperwidth,height=\paperheight]{\katescoverfile}}}%
+    \null\clearpage
+    \endgroup
+    \cleardoublepage
+  \fi
+  \kates@maketitle}
+\makeatother

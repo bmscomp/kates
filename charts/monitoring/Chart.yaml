@@ -1,6 +1,10 @@
 apiVersion: v2
 name: kates-monitoring
-version: 1.0.0
+# Minor: kube-state-metrics now publishes the ChaosEngine's status as a
+# state set, with the read access that takes — a series the chaos board's
+# namespace picker and four of this chart's own alerts were built on and
+# nothing produced. Defaults change (a CRD is watched); nothing else moves.
+version: 1.6.0
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
 home: https://github.com/bmscomp/kates
@@ -15,3 +19,31 @@ dependencies:
     version: "82.4.3"
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: kube-prometheus-stack.enabled
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: fixed
+      description: "kube-state-metrics publishes kube_customresource_chaosengine_status_engine_status (status.engineStatus as a state set: one series per engine and state, initialized, completed, stopped) and may list and watch chaosengines.litmuschaos.io. The chaos board's namespace picker, its 'experiment in progress' tile and this chart's four chaos alerts all read that series, and nothing produced it: the picker resolved to nothing and KafkaChaosExperimentActive could not fire. Both work from the first ChaosEngine on. The three alerts guarded by 'and on() count(... == 1) == 0' still cannot fire, series or no series — count() over nothing is empty, not zero — and that guard is a separate fix. kube-state-metrics keeps running when the CRD is absent and discovers it when the chaos plane arrives, so installing this chart first is fine"
+    - kind: fixed
+      description: "The KRaft board's 'Quorum peer request latency' panel read kafka_server_raftchannelmetrics_request_latency_avg and _max_total, which the raft channel never registers (they are producer and consumer client sensors), so it drew nothing on every cluster. Replaced by the channel's request and response rates per node, read as a pair: requests pulling ahead of responses is a peer that stopped answering"
+    - kind: changed
+      description: "The application board's GC pause panel says why it is empty on the native image (GraalVM exposes no GC notification beans, so Micrometer registers no pause meters) rather than reading as a fault"
+    - kind: added
+      description: "The MirrorMaker 2 migration board has a Migration window row, collapsed under the go/no-go: when the traffic says the migration can be done. The last seven days of records crossing the mirror, profiled by hour of day (UTC), its quietest and busiest hours, what is crossing now as a multiple of the quietest, and the week as it happened"
+    - kind: fixed
+      description: "The migration board's catch-up ETA was a thousand times too small: record age in milliseconds over a per-second slope of milliseconds is already seconds, and the panel divided by a thousand on top, drawing a ten-hour drain as thirty-five seconds. promtool cases over the extracted panel now pin it"
+    - kind: fixed
+      description: "Prometheus now selects every PodMonitor, ServiceMonitor and PrometheusRule in the watched namespaces. It selected only those labelled with this release name, which no chart in this repository sets — so no broker, Connect or MirrorMaker series was scraped and not one alert was loaded."
+    - kind: added
+      description: "kube-prometheus-stack.grafana.sidecar.dashboards.searchNamespace is now set here, to ALL, instead of being inherited from the subchart. connect-cluster, mirror-maker2 and kates-chaos put their dashboard ConfigMap in the WORKLOAD's namespace, not Grafana's, so a sidecar watching only its own namespace picks up none of them — generated, synced, labelled and invisible, with nothing reporting a problem. kube-prometheus-stack has defaulted it to ALL since 46.x so the behaviour is unchanged on the pinned 82.4.3; pinning it here stops a version bump or a partial override taking it away. The trade-off, and the namespace-list alternative, are documented on the value"
+    - kind: added
+      description: "dashboards.namespace, dashboards.label, dashboards.labelValue and dashboards.folder. The ConfigMap's namespace, the label the sidecar watches and the Grafana folder were all unsettable; dashboards.labels was the only knob and it could only add labels. label/labelValue are now always applied and dashboards.labels is merged on top of them, so no value can leave the ConfigMap without the label that makes it discoverable. Defaults are unchanged: grafana_dashboard=1, the release namespace, and no folder annotation"
+    - kind: removed
+      description: The nine deprecated Kafka and Strimzi boards and the legacyKafkaDashboards.enabled switch that gated them. Eight were subsets of the Strimzi operator's own dashboards or of each other; seven of kafka-perf-global's metric names could not be produced by any exporter rule, and those seven were its only unique panels
+    - kind: added
+      description: "Kafka — KRaft Operations (dashboards/kafka-kraft): quorum health, metadata propagation and errors, fenced brokers, ISR dynamics, per-error-code request failures, storage and the security counters. Every panel of the four KRaft alerts that previously fired into a board showing none of their inputs"
+    - kind: added
+      description: "Kafka — Performance & Load Testing (dashboards/kafka-performance): kafka-perf-global rebuilt on corrected names, with per-topic templating and per-partition offsets, absorbing the topic panels of kafka-perf-test, kafka-performance and kafka-working"
+    - kind: changed
+      description: Both Kafka boards are generated from dashboards/<board>/board.py by scripts/gen-dashboards.py; every series they read is checked against the exporter rules by scripts/check-metric-contract.sh kafka-cluster

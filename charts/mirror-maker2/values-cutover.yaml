@@ -1,0 +1,54 @@
+# Cutover overlay — the LAST step of a migration, layered on top of whichever
+# migration preset you have been running:
+#
+#   helm upgrade mm2 charts/mirror-maker2 -n kafka \
+#     -f charts/mirror-maker2/values-migrate-2x.yaml \
+#     -f charts/mirror-maker2/values-cutover.yaml
+#
+# It sets connector state through the chart-level `cutover` block rather than
+# per-mirror. That is deliberate and load-bearing: Helm merges MAPS deeply but
+# REPLACES LISTS wholesale, so an overlay that reached into `mirrors[0]` would
+# silently discard the preset's bootstrapServers, credentials and connector
+# config — producing a mirror pointed at nothing, in a values file whose whole
+# job is to be applied under time pressure.
+#
+# WHAT IT DOES, AND WHY, IN ORDER:
+#
+#   sourceConnectorState: stopped
+#     Data replication ends here. `stopped` — not `paused` — also releases the
+#     connector's tasks, so a worker restart cannot quietly resume the mirror
+#     after producers have moved to the target, writing records BEHIND the ones
+#     your new producers are already appending.
+#
+#   checkpointConnectorState: running
+#     Offset translation KEEPS GOING. Consumers migrate one at a time, and every
+#     one that has not moved yet still needs its committed position translated.
+#     Stopping both connectors together is the classic cutover mistake: all the
+#     data is on the target, and no consumer knows where to start reading it.
+#
+# BEFORE APPLYING, in order:
+#   1. Replication lag is zero — the target's end offsets have caught up with
+#      the source's, for every mirrored topic.
+#   2. Producers have stopped writing to the source, and the source's end
+#      offsets are confirmed static.
+#   3. MM2 has had one full refresh interval to drain what was in flight.
+#
+# AFTER every consumer has moved, remove the mirror entirely:
+#   helm uninstall mm2 -n kafka
+#   kubectl -n kafka delete kafkamirrormaker2 mm2   # keepOnDelete leaves the CR
+#
+# ROLLBACK: re-apply without this overlay. stopped → running resumes from the
+# committed offsets, so nothing is re-read from the start — but anything
+# produced to the TARGET in the meantime is not replicated backwards. A rollback
+# after producers have moved is a data merge, not a switch. See
+# docs/mirror-maker2-runbook.md.
+
+cutover:
+  enabled: true
+  sourceConnectorState: stopped
+  checkpointConnectorState: running
+
+# The mirror is winding down. Nothing here should be restarted automatically —
+# a restart during a cutover is a resumption you did not ask for.
+autoRestart:
+  enabled: false

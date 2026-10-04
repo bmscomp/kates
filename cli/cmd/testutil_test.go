@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 // setupTest creates an httptest.Server that returns the given statusCode and body.
@@ -59,4 +60,23 @@ func stripAnsi(s string) string {
 		result = append(result, s[i])
 	}
 	return string(result)
+}
+
+// tableHasRow reports whether one line of table holds every cell, in order.
+func tableHasRow(table string, cells []string) bool {
+	for _, line := range strings.Split(table, "\n") {
+		rest, ok := line, true
+		for _, c := range cells {
+			i := strings.Index(rest, c)
+			if i < 0 {
+				ok = false
+				break
+			}
+			rest = rest[i+len(c):]
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
 }

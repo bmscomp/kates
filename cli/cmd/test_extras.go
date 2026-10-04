@@ -6,8 +6,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -172,10 +172,12 @@ var testSummaryCmd = &cobra.Command{
 						worstThroughput = r.ThroughputRecordsPerSec
 					}
 				}
-				if r.P99LatencyMs > 0 {
-					sumP99 += r.P99LatencyMs
-					p99Count++
-				}
+			}
+			// One P99 per run, the report's: a run of N producers counted N
+			// times, and a Trogdor consumer's poll time counted as latency.
+			if p99 := latencyOf(run.Results).P99Ms; p99 > 0 {
+				sumP99 += p99
+				p99Count++
 			}
 		}
 

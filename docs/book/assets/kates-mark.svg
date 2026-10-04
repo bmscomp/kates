@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Kates">
+  <!-- The cover's helm (assets/cover.svg; docs/assets/kates-logo.svg) in its own navy #102a66 and blue
+       #3092f8 on a rounded tile shaded from white to #e8f3ff with a #bfe0ff hairline,
+       as on the light top of the first EB Garamond cover; the tile carries it on dark sidebars and tabs.
+       Simplified from kates-logo.svg for 16px and 44px: the thin blue inner ring, the two rim
+       dashes between the streams and the navy-and-blue fragment beside the C-arrowhead
+       are dropped (sub-pixel there, they speckled the streams and joined the arrowhead
+       to the upper stream); the seven handles are 15% wider; the gear's centre hole is
+       r38, not r31.5, so it still shows at 16px. -->
+  <defs>
+    <linearGradient id="kates-mark-tile" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e8f3ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="url(#kates-mark-tile)" stroke="#bfe0ff" stroke-width="1"/>
+  <g transform="translate(32 32) scale(0.077) translate(-513 -512)">
+    <g fill="#102a66">
+      <!-- rim: outer ring, open on the right where the streams leave -->
+      <path d="M769.7 627A282.2 282.2 0 1 1 769.7 397L705.9 397A225.4 225.4 0 1 0 705.9 627Z"/>
+      <!-- seven handles at 45-degree steps: spoke stub, collar and knob -->
+      <path transform="rotate(45 512 512)" d="M699.6 487.7H745.4V536.3H699.6ZM780 483.25H794.5A11 12.65 0 0 1 805.5 495.9V528.1A11 12.65 0 0 1 794.5 540.75H780ZM800 495.2L870 486.7A22 25.3 0 0 1 870 537.3L800 528.8Z"/>
+      <path transform="rotate(90 512 512)" d="M699.6 487.7H745.4V536.3H699.6ZM780 483.25H794.5A11 12.65 0 0 1 805.5 495.9V528.1A11 12.65 0 0 1 794.5 540.75H780ZM800 495.2L870 486.7A22 25.3 0 0 1 870 537.3L800 528.8Z"/>
+      <path transform="rotate(135 512 512)" d="M699.6 487.7H745.4V536.3H699.6ZM780 483.25H794.5A11 12.65 0 0 1 805.5 495.9V528.1A11 12.65 0 0 1 794.5 540.75H780ZM800 495.2L870 486.7A22 25.3 0 0 1 870 537.3L800 528.8Z"/>
+      <path transform="rotate(180 512 512)" d="M699.6 487.7H745.4V536.3H699.6ZM780 483.25H794.5A11 12.65 0 0 1 805.5 495.9V528.1A11 12.65 0 0 1 794.5 540.75H780ZM800 495.2L870 486.7A22 25.3 0 0 1 870 537.3L800 528.8Z"/>
+      <path transform="rotate(225 512 512)" d="M699.6 487.7H745.4V536.3H699.6ZM780 483.25H794.5A11 12.65 0 0 1 805.5 495.9V528.1A11 12.65 0 0 1 794.5 540.75H780ZM800 495.2L870 486.7A22 25.3 0 0 1 870 537.3L800 528.8Z"/>
+      <path transform="rotate(270 512 512)" d="M699.6 487.7H745.4V536.3H699.6ZM780 483.25H794.5A11 12.65 0 0 1 805.5 495.9V528.1A11 12.65 0 0 1 794.5 540.75H780ZM800 495.2L870 486.7A22 25.3 0 0 1 870 537.3L800 528.8Z"/>
+      <path transform="rotate(315 512 512)" d="M699.6 487.7H745.4V536.3H699.6ZM780 483.25H794.5A11 12.65 0 0 1 805.5 495.9V528.1A11 12.65 0 0 1 794.5 540.75H780ZM800 495.2L870 486.7A22 25.3 0 0 1 870 537.3L800 528.8Z"/>
+      <!-- gear: seven teeth with the centre hole -->
+      <path fill-rule="evenodd" d="M577.8 545.2A3 3 0 0 0 578.4 548.7L590.5 560.8A92.4 92.4 0 0 1 560.8 590.5L548.7 578.4A3 3 0 0 0 545.2 577.8A73.7 73.7 0 0 1 535.1 582A3 3 0 0 0 533 584.8L533 635A4 4 0 0 1 529 639L495 639A4 4 0 0 1 491 635L491 584.8A3 3 0 0 0 488.9 582A73.7 73.7 0 0 1 478.8 577.8A3 3 0 0 0 475.3 578.4L439.9 613.8A4 4 0 0 1 434.2 613.8L410.2 589.8A4 4 0 0 1 410.2 584.1L445.6 548.7A3 3 0 0 0 446.2 545.2A73.7 73.7 0 0 1 442 535.1A3 3 0 0 0 439.2 533L389 533A4 4 0 0 1 385 529L385 495A4 4 0 0 1 389 491L439.2 491A3 3 0 0 0 442 488.9A73.7 73.7 0 0 1 446.2 478.8A3 3 0 0 0 445.6 475.3L410.2 439.9A4 4 0 0 1 410.2 434.2L434.2 410.2A4 4 0 0 1 439.9 410.2L475.3 445.6A3 3 0 0 0 478.8 446.2A73.7 73.7 0 0 1 488.9 442A3 3 0 0 0 491 439.2L491 389A4 4 0 0 1 495 385L529 385A4 4 0 0 1 533 389L533 439.2A3 3 0 0 0 535.1 442A73.7 73.7 0 0 1 545.2 446.2A3 3 0 0 0 548.7 445.6L584.1 410.2A4 4 0 0 1 589.8 410.2L613.8 434.2A4 4 0 0 1 613.8 439.9L578.4 475.3A3 3 0 0 0 577.8 478.8A73.7 73.7 0 0 1 577.8 545.2ZM474 512a38 38 0 1 0 76 0a38 38 0 1 0 -76 0Z"/>
+      <!-- rim showing between the upper and middle streams -->
+      <path d="M652.6 527.1L699.5 479.6A36.3 36.3 0 0 0 726.4 492.1C729 492.1 731.5 492.5 734.6 493.1L742 496L742 531.5L684 531.5L671.3 535.3Z"/>
+    </g>
+    <g fill="#3092f8">
+      <!-- C arrow around the gear, ending in the lower stream -->
+      <path d="M553 342.9L553 320L607 357.5L553 395L553 377.6A140.5 140.5 0 1 0 618.7 603.4A70 70 0 0 1 671.8 579L796.5 579L796.5 557.5L850.9 595.7L796.5 633.5L796.5 612.7L669.1 612.7A28 28 0 0 0 649.3 620.9L548.5 721.7L572.7 675.1A174 174 0 1 1 553 342.9Z"/>
+      <!-- upper stream -->
+      <path d="M582.4 491.8L602.7 491.8A35 35 0 0 0 627.5 481.5L680.1 428.9A61 61 0 0 1 723.3 411L796.6 411L796.6 390.3L850.8 428.1L796.6 465.9L796.6 444.7L728.3 444.7A31 31 0 0 0 706.4 453.8L646.3 513.9A62 62 0 0 1 602.4 532.1L582.4 532.1A73.2 73.2 0 0 0 582.4 491.8Z"/>
+      <!-- middle stream -->
+      <path d="M683.5 531.5L705.1 509A55 55 0 0 1 744.8 492.1L835.7 492.1L835.7 468.8L893.9 511.8L835.7 555L835.7 531.5Z"/>
+      <!-- tail over the lower-right tooth, with the leaf -->
+      <path d="M564 628C582 608.4 580.9 609.7 559.6 589.3A90.8 90.8 0 0 0 589.3 559.6C598.7 569 608.3 579.5 620.1 565.1C634 548 633 538.6 654.3 525L671.5 535C656.9 544 647.3 550.4 638.2 565.6C654.6 553.3 664 551 682.6 546L678 565.6C661.9 566.1 651.4 565.1 635.8 573.4C614.2 584.7 608.8 597 591.1 611.1C579.6 620.3 576 621.2 564 628Z"/>
+    </g>
+  </g>
+</svg>

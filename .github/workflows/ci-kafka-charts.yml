@@ -1,0 +1,807 @@
+name: CI · Kafka charts
+
+# The Strimzi charts (strimzi-operator, kafka-cluster, connect-cluster,
+# mirror-maker2, and the kafka-common library they share) checked the way
+# ci-mirror-maker2.yml checks mirror-maker2 — rendered across every overlay
+# and toggle, not only defaults.
+#
+# `metrics-live` asks what a render cannot: what does a real worker expose? It
+# stands up a kind cluster, runs Kafka (and Connect), scrapes the pods, and
+# checks every series the rules and dashboards read against the capture — and
+# the catalogue against the capture both ways, so an attribute a Kafka upgrade
+# renames shows up here before it shows up as an empty panel. Minutes and a
+# cluster, so not on every push: weekly, on demand, and on a pull request that
+# changes what it deploys or checks (the `live` filter). Weekly alone was not
+# enough: a refactor renamed the release it upgrades, and every weekly run
+# failed until someone read one.
+#
+# `matrix` renders each chart through scripts/chart-matrix/<chart>.yaml and
+# checks every render against the Strimzi CRDs the repository pins
+# (scripts/check-strimzi-crs.py: pruned fields, missing required fields, enum
+# violations, duplicate keys), kubeconform for built-in kinds, and the render's
+# own assertions. A render marked `known: <ID>` is a documented defect
+# (docs/kafka-charts-refactor-plan.md §2.3) that must still reproduce; the job
+# fails when it stops reproducing, so a marker cannot outlive its fix. The same
+# job proves the rails refuse what they claim to refuse, that every series an
+# alert or panel reads is one the exporter rules produce, and that every rule
+# is PromQL the pinned Prometheus accepts.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  # metrics-live: weekly, and on demand.
+  schedule:
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # Scheduled and manual runs have no diff to filter on: everything runs.
+      charts: ${{ steps.filter.outputs.charts || 'true' }}
+      live: ${{ steps.filter.outputs.live || 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            charts:
+              - 'charts/kafka-cluster/**'
+              - 'charts/connect-cluster/**'
+              - 'charts/mirror-maker2/**'
+              - 'charts/kafka-common/**'
+              - 'charts/strimzi-operator/**'
+              # Delivers the Kafka and Kates boards; the dashboards job renders it.
+              - 'charts/monitoring/**'
+              # Delivers kates-overview and kyverno-security; likewise.
+              - 'charts/kates/**'
+              # Delivers kates-chaos-infra; likewise.
+              - 'charts/kates-chaos/**'
+              - 'scripts/check-strimzi-crs.py'
+              - 'scripts/check-strimzi-metrics.sh'
+              - 'scripts/check-chart-matrix.py'
+              - 'scripts/chart-matrix/**'
+              - 'scripts/check-metric-contract.sh'
+              - 'scripts/metric-contract/**'
+              - 'dashboards/**'
+              - 'scripts/gen-dashboards.py'
+              - 'scripts/check-dashboards.py'
+              - 'images.env'
+              - 'versions.env'
+              - '.github/workflows/ci-kafka-charts.yml'
+              - '.github/actions/**'
+            # What metrics-live deploys, scrapes and checks the scrape against.
+            live:
+              - 'charts/kafka-cluster/**'
+              - 'charts/connect-cluster/**'
+              - 'charts/kafka-common/**'
+              - 'charts/strimzi-operator/**'
+              - 'scripts/deploy-kafka-generic.sh'
+              - 'scripts/check-metric-contract.sh'
+              - 'scripts/metric-contract/**'
+              - 'scripts/check-dashboards-live.py'
+              - 'dashboards/**'
+              - 'config/cluster.yaml'
+              - 'config/storage/**'
+              - 'images.env'
+              - 'versions.env'
+              - '.github/workflows/ci-kafka-charts.yml'
+
+  # Every board in dashboards/ is generated, and every chart copy of one is
+  # generated from the same source. This job proves both, holds every board to
+  # the layout and documentation rules, and puts every query on every board
+  # through promtool. ci-mirror-maker2.yml keeps its own PromQL gate as well:
+  # that one runs over the RENDERED MirrorMaker 2 boards across all three
+  # overlays, so it covers the identity and no-SLO variants that never appear
+  # as a dashboards/ copy.
+  dashboards:
+    name: Dashboards
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      # Prometheus itself is the only thing that can say an expr parses, and
+      # the parser here has to be the one the queries will meet: promtool from
+      # the Prometheus release the monitoring stack pins in images.env. Same
+      # install as the `matrix` job's.
+      - name: Install promtool (the pinned Prometheus release)
+        run: |
+          set -euo pipefail
+          PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
+          [ -n "$PROM" ] || { echo "::error::no prometheus pin in images.env"; exit 1; }
+          # --fail and retries: a release-asset hiccup once saved an HTML error page
+          # in place of the archive, which tar rejected as "not in gzip format".
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
+          sudo mv /tmp/promtool /usr/local/bin/
+          promtool --version
+
+      # dashboards/<board>/dashboard.json and every chart copy are generated
+      # from that board's board.py. A board edited without regenerating, or a
+      # chart copy edited by hand, fails here rather than shipping a board that
+      # disagrees with its source.
+      - name: Every board and chart copy is in sync
+        run: ./scripts/gen-dashboards.py --check
+
+      # The mirror-maker2 layout gate, generalised. It rejects overlapping
+      # panels, a panel with no description, a lost query, a datasource named
+      # by string, and two boards sharing a uid — the failures the boards this
+      # directory replaced all had.
+      - name: Layout, documentation and uids hold
+        run: ./scripts/check-dashboards.py
+
+      # ci-mirror-maker2.yml has run this over the rendered MirrorMaker 2
+      # boards since that chart's refactor; nine of the twelve boards had
+      # nothing like it. A panel's PromQL is no less able to be wrong than an
+      # alert's — a stray bracket or a `bool` in the wrong place renders as an
+      # empty panel, which is exactly what an idle cluster renders as, so the
+      # mistake is invisible until someone needs the number. Every query from
+      # every board is wrapped as a recording rule and handed to the same
+      # parser the alerts get.
+      #
+      # Grafana variables are the wrinkle. `namespace="$namespace"` is a
+      # string literal to PromQL and parses with or without substitution; a
+      # `$` ANYWHERE ELSE does not parse at all. So the extractor substitutes
+      # a placeholder for declared variables inside label values only, and
+      # then FAILS on any `$` that survives — which is what catches a future
+      # panel that puts a variable in a duration, a range or an operand
+      # instead of quietly skipping that query and reporting success.
+      - name: Every dashboard query is valid PromQL
+        run: |
+          set -euo pipefail
+          cat > /tmp/dashql.py <<'PY'
+          import json, re, sys, yaml
+          from pathlib import Path
+
+          # A value that parses wherever a Grafana variable legally sits
+          # inside a label matcher, and that nothing downstream can mistake
+          # for a metric name.
+          PLACEHOLDER = "grafana_template_variable"
+          STRING = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+          VARIABLE = re.compile(r"\$\{(\w+)(?::[^}]*)?\}|\$(\w+)")
+
+
+          def panels(ps):
+              for p in ps:
+                  yield p
+                  for q in panels(p.get("panels") or []):
+                      yield q
+
+
+          def substitute(expr, declared):
+              """Replace declared variables that sit INSIDE a label value."""
+              def one(m):
+                  def repl(v):
+                      name = v.group(1) or v.group(2)
+                      return PLACEHOLDER if name in declared else v.group(0)
+                  return VARIABLE.sub(repl, m.group(0))
+              return STRING.sub(one, expr)
+
+
+          rules, n, boards = [], 0, 0
+          for path in sorted(Path("dashboards").glob("*/dashboard.json")):
+              board = json.loads(path.read_text())
+              declared = {v["name"]
+                          for v in (board.get("templating") or {}).get("list") or []}
+              boards += 1
+              for p in panels(board.get("panels") or []):
+                  for t in p.get("targets") or []:
+                      expr = (t.get("expr") or "").strip()
+                      if not expr:
+                          continue
+                      n += 1
+                      parsed = substitute(expr, declared)
+                      if "$" in parsed:
+                          sys.exit(
+                              "::error::%s, panel %r: a template variable survives "
+                              "substitution, so this query is not PromQL anywhere "
+                              "but inside Grafana. A variable parses inside a label "
+                              "value and nowhere else — not in a duration, a range "
+                              "or an operand. Expression: %s"
+                              % (path, p.get("title", "?"), expr))
+                      rules.append({"record": "dashboard:q%d" % n, "expr": parsed,
+                                    "labels": {"panel": p.get("title", "?"),
+                                               "board": path.parent.name}})
+          if not rules:
+              sys.exit("::error::no dashboard queries found to check — "
+                       "dashboards/*/dashboard.json matched nothing")
+          yaml.safe_dump({"groups": [{"name": "dashboard-queries", "rules": rules}]},
+                         sys.stdout, default_flow_style=False)
+          print("  %d queries from %d boards" % (n, boards), file=sys.stderr)
+          PY
+          python3 /tmp/dashql.py > /tmp/dashql.yaml
+          promtool check rules /tmp/dashql.yaml
+
+      # Since monitoring 1.5.0 the workload charts render no boards; the
+      # monitoring chart renders all twelve. Both directions are asserted,
+      # because each is a regression the other cannot see: a board quietly
+      # back in a workload chart splits delivery again, and a board missing
+      # from monitoring's glob is a board nothing installs.
+      - name: The monitoring chart renders every board, and the others none
+        run: |
+          set -euo pipefail
+          for c in connect-cluster mirror-maker2; do
+            scripts/retry.sh 5 helm dependency build "charts/$c" >/dev/null
+            if helm template x "charts/$c" -n x \
+                --api-versions monitoring.coreos.com/v1 \
+                | grep -q "grafana_dashboard"; then
+              echo "::error::charts/$c renders a dashboard ConfigMap again — delivery is charts/monitoring's alone"
+              exit 1
+            fi
+          done
+          # The repo add is load-bearing: helm resolves this chart's
+          # kube-prometheus-stack dependency against the repo LIST, not the
+          # URL in Chart.lock, on at least one path of `dependency build` —
+          # the strimzi and kafka-cluster jobs below learned the same lesson.
+          helm repo add prometheus-community \
+            https://prometheus-community.github.io/helm-charts \
+            --force-update >/dev/null
+          scripts/retry.sh 5 helm dependency build charts/monitoring >/dev/null
+          helm template mon charts/monitoring -n monitoring \
+            --show-only templates/grafana-dashboards.yaml \
+            | python3 -c '
+          import sys, yaml
+          for doc in yaml.safe_load_all(sys.stdin):
+              if not doc or doc.get("kind") != "ConfigMap":
+                  continue
+              got = sorted(k for k in (doc.get("data") or {}) if k.endswith(".json"))
+              import pathlib
+              want = sorted(p.parent.name + ".json"
+                            for p in pathlib.Path("dashboards").glob("*/dashboard.json"))
+              if got != want:
+                  sys.exit("::error::monitoring renders %d boards, dashboards/ holds %d: missing %s, extra %s"
+                           % (len(got), len(want),
+                              sorted(set(want) - set(got)), sorted(set(got) - set(want))))
+              print("OK: charts/monitoring renders all %d boards" % len(got))
+              sys.exit(0)
+          sys.exit("::error::no dashboards ConfigMap in the monitoring render")
+          '
+
+      # The two chartless install routes (dashboards/README.md, "Installing
+      # these anywhere"). gen-dashboards.py --check above already proves the
+      # bundles match the boards byte for byte; this proves the SHAPE is one
+      # Kubernetes and Grafana accept, which no diff can tell you. The
+      # ConfigMap bundle goes through the same layout gate as the boards
+      # themselves, because --render reads exactly this: dashboard ConfigMaps.
+      # Route B of the four in dashboards/README.md: install.py against any
+      # Grafana's HTTP API. The bundles below are checked by shape, the charts
+      # by render, and the boards by the layout gate — this route had nothing,
+      # which made it the only one whose failures a person would find by
+      # running it. The suite answers from a real http.server rather than a
+      # mock, so the base64 in a basic-auth header and the overwrite:true that
+      # makes a reinstall idempotent are actually exercised.
+      - name: install.py behaves against a fake Grafana
+        run: python3 -m unittest discover -s dashboards -p 'test_*.py' -q
+
+      # Every check above treats a board as JSON. This one starts real
+      # Grafanas and drives a headless browser over all twelve, because a
+      # panel type a given Grafana does not have renders "Panel plugin not
+      # found" while the API stays perfectly happy — and because a schema
+      # migration that drops a datasource variable's `current` is exactly the
+      # bug that made every board pick its datasource by name-sort.
+      #
+      # The oldest version here is the floor this repository claims, not a
+      # version it recommends: charts/monitoring installs 12.3.1. It is tested
+      # because the boards are documented as installable into "any Grafana"
+      # by four routes, and somebody's cluster is on 9.
+      - name: The boards load and render on every supported Grafana
+        run: |
+          npm install --no-audit --no-fund --silent playwright@1
+          npx playwright install --with-deps chromium
+          ./scripts/check-grafana-compat.sh 9.5.21 10.4.19 11.6.6 12.3.1
+
+      - name: The install bundles are valid
+        run: |
+          set -euo pipefail
+          ./scripts/check-dashboards.py --render < dashboards/bundle/configmaps.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          from pathlib import Path
+
+          docs = [d for d in yaml.safe_load_all(
+              Path("dashboards/bundle/configmaps.yaml").read_text()) if d]
+          boards = len(list(Path("dashboards").glob("*/dashboard.json")))
+          problems = []
+          if len(docs) != boards:
+              problems.append("configmaps.yaml has %d ConfigMap(s) for %d board(s)"
+                              % (len(docs), boards))
+          for d in docs:
+              m = d.get("metadata", {})
+              name = m.get("name", "?")
+              if d.get("kind") != "ConfigMap":
+                  problems.append("%s is a %s, not a ConfigMap" % (name, d.get("kind")))
+              # A namespace in the file makes `kubectl apply -n` an error
+              # rather than the override the bundle documents.
+              if m.get("namespace"):
+                  problems.append("%s pins a namespace" % name)
+              if (m.get("labels") or {}).get("grafana_dashboard") != "1":
+                  problems.append("%s has no grafana_dashboard=1 label, so no "
+                                  "sidecar will ever pick it up" % name)
+              if len(name) > 63:
+                  problems.append("%s is longer than 63 characters" % name)
+
+          provider = yaml.safe_load(
+              Path("dashboards/bundle/provisioning/dashboards.yaml").read_text())
+          path = provider["providers"][0]["options"]["path"]
+          # The provider names an absolute path inside the container; the JSON
+          # has to be in the directory that lands there.
+          served = Path("dashboards/bundle/provisioning") / Path(path).name
+          if sorted(p.stem for p in served.glob("*.json")) != sorted(
+                  p.parent.name for p in Path("dashboards").glob("*/dashboard.json")):
+              problems.append("%s does not hold one JSON per board" % served)
+
+          for line in problems:
+              print("::error::%s" % line, file=sys.stderr)
+          sys.exit(1 if problems else 0)
+          PY
+          echo "OK: both install bundles are well formed"
+          # charts/monitoring delivers every board since 1.5.0 — the one
+          # render covers all twelve. --show-only is load-bearing: a full
+          # render of this chart also carries kube-prometheus-stack's own
+          # three dozen bundled dashboards, which name their datasources by
+          # string and will never pass this gate. Only the ConfigMap this
+          # chart builds is ours to hold to it. The repo add is load-bearing
+          # too: helm resolves the dependency against the repo LIST on at
+          # least one path of `dependency build`, and this step cannot assume
+          # an earlier one already added it.
+          helm repo add prometheus-community \
+            https://prometheus-community.github.io/helm-charts \
+            --force-update >/dev/null
+          scripts/retry.sh 5 helm dependency build charts/monitoring >/dev/null
+          helm template mon charts/monitoring -n monitoring \
+            --show-only templates/grafana-dashboards.yaml \
+            | ./scripts/check-dashboards.py --render
+
+  # The kafka-common library cannot be rendered on its own. Its harness chart
+  # (charts/kafka-common/tests/harness) calls every template, and helm-unittest
+  # asserts on the output — including the refusals.
+  library:
+    name: kafka-common
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install helm-unittest (the pinned version)
+        run: |
+          set -euo pipefail
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "${HELM_UNITTEST_VERSION}"
+
+      - name: Lint and unit-test the library
+        run: |
+          helm lint charts/kafka-common
+          scripts/retry.sh 5 helm dependency build charts/kafka-common/tests/harness
+          helm unittest charts/kafka-common/tests/harness
+
+      - name: The packaged library carries no test harness
+        run: |
+          helm package charts/kafka-common --destination /tmp/pkg
+          if tar tzf /tmp/pkg/kafka-common-*.tgz | grep -q '/tests/'; then
+            echo "::error::charts/kafka-common/.helmignore must exclude tests/"
+            exit 1
+          fi
+
+  matrix:
+    name: ${{ matrix.chart }}
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # monitoring joined the matrix when its one PrometheusRule turned
+        # out to be unrenderable PromQL that nothing had ever rendered: it
+        # lives behind chaosAlerts.enabled=false, and a toggle nothing
+        # renders is a toggle nothing checks.
+        chart: [strimzi-operator, kafka-cluster, connect-cluster, mirror-maker2, monitoring]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kubeconform
+        uses: ./.github/actions/install-tools
+        with:
+          kubeconform: "true"
+
+      - name: Install promtool and PyYAML
+        run: |
+          set -euo pipefail
+          PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prom.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/promtool"
+          sudo mv /tmp/promtool /usr/local/bin/
+          pip install --quiet pyyaml
+
+      # The CRD schemas every render is checked against come from the operator
+      # chart this repository pins — not from a community catalogue that may
+      # not carry the v1 Strimzi schemas at all.
+      - name: Fetch the pinned Strimzi CRDs and chart dependencies
+        run: |
+          set -euo pipefail
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          scripts/retry.sh 5 helm dependency build charts/strimzi-operator/
+          chart="charts/${{ matrix.chart }}"
+          if [ "${{ matrix.chart }}" != strimzi-operator ] && grep -q '^dependencies:' "$chart/Chart.yaml"; then
+            # Library dependencies are local (file://) and need no repository;
+            # monitoring's kube-prometheus-stack is the one that is not.
+            scripts/retry.sh 5 helm dependency build "$chart/"
+          fi
+
+      - name: Render matrix (CRD schemas, kubeconform, assertions, rails)
+        run: scripts/check-chart-matrix.py "${{ matrix.chart }}"
+
+      - name: Every series the rules and dashboards read is one the exporter produces
+        run: |
+          if [ -f "scripts/metric-contract/${{ matrix.chart }}.yaml" ]; then
+            scripts/check-metric-contract.sh "${{ matrix.chart }}"
+          else
+            echo "no metric contract for ${{ matrix.chart }}"
+          fi
+
+      - name: Alert and recording rules are valid PromQL
+        run: scripts/check-chart-matrix.py "${{ matrix.chart }}" --promtool
+
+      # kafka-cluster vendors Strimzi's exporter rules unchanged, because the
+      # operator's dashboards read exactly what they produce.
+      - name: Vendored Strimzi metrics rules match upstream
+        if: matrix.chart == 'kafka-cluster'
+        run: scripts/check-strimzi-metrics.sh
+
+      - name: Unit tests
+        if: hashFiles(format('charts/{0}/tests/*_test.yaml', matrix.chart)) != ''
+        run: |
+          set -euo pipefail
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version "${HELM_UNITTEST_VERSION}"
+          helm unittest "charts/${{ matrix.chart }}"
+
+      - name: The packaged chart carries no unit tests
+        if: matrix.chart == 'kafka-cluster' || matrix.chart == 'connect-cluster'
+        run: |
+          c="${{ matrix.chart }}"
+          helm package "charts/$c" --destination /tmp/pkg
+          tar tzf /tmp/pkg/"$c"-*.tgz > /tmp/pkg/files
+          if grep -q "^$c/tests/" /tmp/pkg/files; then
+            echo "::error::charts/$c/.helmignore must exclude /tests/"; exit 1
+          fi
+          grep -q "^$c/templates/tests/" /tmp/pkg/files || { echo "::error::the Helm test pods are missing from the package"; exit 1; }
+          if [ "$c" = kafka-cluster ]; then
+            grep -q '^kafka-cluster/profiles/platform.yaml' /tmp/pkg/files || { echo "::error::the platform profile is missing from the package"; exit 1; }
+          fi
+
+  # ── Live scrape ───────────────────────────────────────────────────────────
+  metrics-live:
+    name: Metric contract (live scrape, ${{ matrix.chart }})
+    needs: changes
+    # Never on a push: the pull request ran it, and the weekly run covers main.
+    if: github.event_name != 'push' && needs.changes.outputs.live == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: [kafka-cluster, connect-cluster]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+        with:
+          keys: HELM_VERSION KIND_VERSION KUBECTL_VERSION STRIMZI_KAFKA_VERSION
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Create kind cluster (3-zone topology)
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: panda
+          config: config/cluster.yaml
+          wait: 120s
+
+      - name: Wait for every node
+        run: kubectl wait --for=condition=Ready nodes --all --timeout=180s
+
+      - name: Apply storage classes
+        run: kubectl apply -f config/storage/storage-classes.yaml
+
+      - name: Build kates CLI
+        working-directory: cli
+        run: go build -o ../build/kates .
+
+      # values-ci.yaml is the one-broker shape the other E2E jobs use; the live
+      # overlay adds the exporter agent and leaves the Prometheus-operator
+      # kinds off, since this cluster has no such CRDs.
+      - name: Deploy Strimzi and Kafka with the exporter on
+        run: |
+          set -euo pipefail
+          helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+          scripts/retry.sh 5 helm dependency build charts/kafka-cluster/
+          # One install with both files, and the script waits for Kafka. The
+          # live file used to go on in a second upgrade that scaled the brokers
+          # from values-ci's one to its two: the first broker rolled, and
+          # Cruise Control's add-brokers rebalance was still running when
+          # Connect's leg installed Connect. In one run, Connect's pod then
+          # came up ten minutes late.
+          ./scripts/deploy-kafka-generic.sh --yes --skip-tests \
+            -f charts/kafka-cluster/values-ci.yaml \
+            -f scripts/metric-contract/live/kafka-cluster.yaml
+          # The script carries on when every pod runs but Kafka is not Ready;
+          # this job must not.
+          kubectl -n kafka wait kafka/krafter --for=condition=Ready --timeout=300s
+
+      # Traffic, so the per-topic, request and consumer-group beans exist at
+      # all: a cluster nobody has written to registers a fraction of them.
+      - name: Produce and consume, as the platform's own principal
+        run: |
+          set -euo pipefail
+          kubectl -n kafka get secret kates-backend -o jsonpath='{.data.password}' | base64 -d > /tmp/pw
+          kubectl -n kafka create secret generic live-client --from-file=password=/tmp/pw \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n kafka delete pod live-traffic --ignore-not-found
+          cat > /tmp/traffic.yaml <<YAML
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: live-traffic
+            namespace: kafka
+            labels:
+              kates.io/test-pod: "true"
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: traffic
+                image: quay.io/strimzi/kafka:${STRIMZI_KAFKA_VERSION}
+                command: ["/bin/sh", "-c", "/opt/scripts/traffic.sh"]
+                volumeMounts:
+                  - { name: creds, mountPath: /etc/creds, readOnly: true }
+                  - { name: scripts, mountPath: /opt/scripts }
+            volumes:
+              - name: creds
+                secret: { secretName: live-client }
+              - name: scripts
+                configMap: { name: live-traffic, defaultMode: 0755 }
+          YAML
+          cat > /tmp/traffic.sh <<'SH'
+          set -e
+          BS=krafter-kafka-bootstrap.kafka.svc:9092
+          PW=$(cat /etc/creds/password)
+          {
+            echo 'security.protocol=SASL_PLAINTEXT'
+            echo 'sasl.mechanism=SCRAM-SHA-512'
+            printf '%s\n' "sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username=\"kates-backend\" password=\"$PW\";"
+          } > /tmp/c.properties
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BS --command-config /tmp/c.properties \
+            --create --if-not-exists --topic live-in --partitions 3 --replication-factor 1
+          /opt/kafka/bin/kafka-producer-perf-test.sh --topic live-in --num-records 20000 --record-size 512 \
+            --throughput 2000 --producer.config /tmp/c.properties --producer-props bootstrap.servers=$BS acks=all
+          timeout 90 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server $BS \
+            --consumer.config /tmp/c.properties --topic live-in --group live-consumers \
+            --from-beginning --max-messages 20000 > /dev/null || true
+          echo "traffic done"
+          SH
+          kubectl -n kafka create configmap live-traffic --from-file=traffic.sh=/tmp/traffic.sh \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n kafka apply -f /tmp/traffic.yaml
+          # The pod runs to completion, so it is Succeeded that is waited for;
+          # `condition=Ready` is never true again once the container exits.
+          kubectl -n kafka wait --for=jsonpath='{.status.phase}'=Succeeded pod/live-traffic --timeout=420s \
+            || { kubectl -n kafka describe pod live-traffic; kubectl -n kafka logs live-traffic | tail -50; exit 1; }
+          kubectl -n kafka logs live-traffic | tail -20
+
+      - name: Deploy Connect with the exporter on
+        if: matrix.chart == 'connect-cluster'
+        run: |
+          set -euo pipefail
+          scripts/retry.sh 5 helm dependency build charts/connect-cluster/
+          helm upgrade --install connect-cluster charts/connect-cluster -n kafka \
+            -f charts/connect-cluster/values-dev.yaml \
+            -f scripts/metric-contract/live/connect-cluster.yaml
+          kubectl -n kafka wait kafkaconnect/connect-cluster --for=condition=Ready --timeout=600s
+          # The connectors register the task and client beans; give the
+          # heartbeat and the mirror a moment to actually run.
+          for _ in $(seq 1 30); do
+            states=$(kubectl -n kafka get kafkaconnectors \
+              -o jsonpath='{range .items[*]}{.status.connectorStatus.connector.state}{"\n"}{end}' || true)
+            echo "connector states: $(echo "$states" | tr '\n' ' ')"
+            if [ "$(echo "$states" | grep -c RUNNING || true)" -ge 2 ]; then break; fi
+            sleep 10
+          done
+          kubectl -n kafka get kafkaconnectors
+
+      # One capture per exporter: the contract checks every reference against
+      # their union, and diffs the catalogue against them both ways.
+      - name: Capture /metrics from each exporter
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/scrape
+          capture() {   # name, label selector, series to wait for
+            pod=$(kubectl -n kafka get pods -l "$2" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -z "$pod" ]; then echo "::warning::no pod matches $2"; return 0; fi
+            echo "scraping $1 from $pod"
+            kubectl -n kafka port-forward "pod/$pod" 9404:9404 > "/tmp/scrape/$1-port-forward.log" 2>&1 &
+            pf=$!
+            sleep 3
+            for _ in $(seq 1 20); do
+              curl -sf http://localhost:9404/metrics > "/tmp/scrape/$1.txt" || true
+              if [ -s "/tmp/scrape/$1.txt" ] && grep -q "$3" "/tmp/scrape/$1.txt"; then break; fi
+              sleep 10
+            done
+            kill "$pf" 2>/dev/null || true
+            echo "$1: $(grep -c '^[a-z]' "/tmp/scrape/$1.txt" || true) samples"
+          }
+          if [ "${{ matrix.chart }}" = kafka-cluster ]; then
+            capture broker "strimzi.io/name=krafter-kafka,strimzi.io/pool-name=brokers-ci" kafka_server_replicamanager
+            capture controller "strimzi.io/name=krafter-kafka,strimzi.io/pool-name=controllers-ci" kafka_server_raftmetrics
+            capture cruise-control "strimzi.io/name=krafter-cruise-control" kafka_cruisecontrol
+            capture kafka-exporter "strimzi.io/name=krafter-kafka-exporter" kafka_consumergroup
+          else
+            capture connect "strimzi.io/name=connect-cluster-connect" kafka_connect_worker_metrics
+          fi
+          ls -l /tmp/scrape
+
+      - name: Every referenced series is in the scrape; diff the catalogue against it
+        run: |
+          set -euo pipefail
+          args=""
+          for f in /tmp/scrape/*.txt; do
+            [ -s "$f" ] && args="$args --scrape $f"
+          done
+          [ -n "$args" ] || { echo "::error::no capture was taken"; exit 1; }
+          # shellcheck disable=SC2086
+          scripts/check-metric-contract.sh "${{ matrix.chart }}" $args
+
+      # NAMES are what the step above checks. This one runs the boards'
+      # SELECTORS against a Prometheus holding the same capture, because a
+      # correct name in a query that selects on a label the series does not
+      # carry draws an empty panel — and an empty panel is indistinguishable
+      # from a healthy idle cluster. That is the shape of every dashboard bug
+      # this branch repaired: {{zone}} rendering as () because the relabeling
+      # did not set zone, and `topic=""` against a bean registered twice.
+      #
+      # It evaluates selectors rather than whole expressions on purpose: a
+      # static capture makes rate() zero and histogram_quantile() NaN, so
+      # judging a full query here would report a dozen failures on healthy
+      # boards. The script's own docstring sets out the rule.
+      - name: The boards can see the series this cluster publishes
+        # A hang here showed only as the whole job cancelled at its 45-minute
+        # limit; a step timeout fails this step instead, and sooner.
+        timeout-minutes: 10
+        # Advisory until the throwaway Prometheus attaches the labels a
+        # PodMonitor adds at scrape time. The captures are raw exporter output,
+        # so namespace, pod and the strimzi_io_* labels every board scopes by
+        # are never on them: each board's namespace and cluster variables come
+        # out empty, and every panel scoped by them fails (131 selectors on the
+        # kafka-cluster leg and 34 on connect-cluster, the first time this step
+        # ran). Its report still prints and still annotates the run.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          args=""
+          for f in /tmp/scrape/*.txt; do
+            [ -s "$f" ] && args="$args --scrape $f"
+          done
+          [ -n "$args" ] || { echo "::error::no capture was taken"; exit 1; }
+          PROM=$(grep -oE 'quay.io/prometheus/prometheus:v[0-9.]+' images.env | head -1 | sed 's#.*:v##')
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/prom-full.tgz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM}/prometheus-${PROM}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prom-full.tgz -C /tmp --strip-components=1 "prometheus-${PROM}.linux-amd64/prometheus"
+          sudo mv /tmp/prometheus /usr/local/bin/
+          # shellcheck disable=SC2086
+          scripts/check-dashboards-live.py $args
+
+      # The captures outlive the job, so a NOTE about an uncatalogued series
+      # can be turned into a catalogue entry without re-running the cluster.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: ${{ matrix.chart }}-metrics-scrape
+          path: /tmp/scrape/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p /tmp/diag
+          kubectl get all -A > /tmp/diag/all.txt 2>&1 || true
+          kubectl -n kafka get kafka,kafkanodepools,kafkaconnects,kafkaconnectors,kafkausers,kafkarebalances,strimzipodsets -o yaml > /tmp/diag/crs.yaml 2>&1 || true
+          # The operator's log too: a resource that never gets a status (the
+          # KafkaConnect that waited ten minutes for its pod) is explained
+          # only there.
+          for ns in kafka strimzi-operator; do
+            kubectl -n "$ns" get events --sort-by=.lastTimestamp > "/tmp/diag/events-$ns.txt" 2>&1 || true
+            for p in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
+              kubectl -n "$ns" logs "$p" --all-containers --tail=2000 \
+                > "/tmp/diag/$ns-$(basename "$p").log" 2>&1 || true
+            done
+          done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: ${{ matrix.chart }}-metrics-live-diagnostics
+          path: /tmp/diag/
+          retention-days: 7
+
+  gate:
+    name: Gate · Kafka charts
+    if: always()
+    needs: [changes, dashboards, library, matrix, metrics-live]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-gate
+        with:
+          needs: ${{ toJSON(needs) }}
+
+  # One issue per failed weekly run, whichever job failed. It was a step in
+  # each metrics-live leg, so a run where both legs failed filed two issues:
+  # each searched for an open one before the other had created it.
+  notify:
+    name: Open an issue for a failed weekly run
+    needs: gate
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/notify-scheduled-failure
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

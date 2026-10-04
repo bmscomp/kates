@@ -5,7 +5,7 @@ metadata:
   namespace: kafka
   labels:
     app.kubernetes.io/managed-by: kates
-    kates.klster.com/component: chaos-integration
+    kates.bmscomp.github.io/component: chaos-integration
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 86400
@@ -18,7 +18,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: chaos-runner
-          image: bitnami/kubectl:latest
+          image: ghcr.io/bmscomp/kates-tester:1.24.0
           imagePullPolicy: IfNotPresent
           env:
             - name: KATES_API_URL

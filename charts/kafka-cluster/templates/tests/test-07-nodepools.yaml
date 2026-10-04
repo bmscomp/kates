@@ -1,0 +1,85 @@
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $testUser := include "kafka-cluster.testUser" . -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-nodepools"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "7"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: nodepool-check
+      image: {{ include "kafka-cluster.kubectlImage" $ }}
+      {{- include "kafka-common.imagePullPolicy" .Values.testImages.pullPolicy | nindent 6 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
+          echo "=== Tier 7: Node Pool Topology ==="
+
+          FAIL=0
+          TOTAL_EXPECTED=0
+          {{- range $r.pools }}{{- if has "broker" .roles }}
+          echo "Checking broker pool '{{ .name }}'..."
+          POOL_READY_REPLICAS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.status.replicas}')
+          POOL_SPEC_REPLICAS=$(kubectl get kafkanodepool {{ .name }} -n {{ include "kafka-cluster.namespace" $ }} -o jsonpath='{.spec.replicas}')
+          if [ "$POOL_READY_REPLICAS" = "$POOL_SPEC_REPLICAS" ] || [ "$POOL_READY_REPLICAS" = "{{ .replicas }}" ]; then
+            echo "  ✓ KafkaNodePool '{{ .name }}' Replicas match ($POOL_READY_REPLICAS)"
+          else
+            echo "  ✗ KafkaNodePool '{{ .name }}' not ready: expected $POOL_SPEC_REPLICAS, got $POOL_READY_REPLICAS"
+            FAIL=1
+          fi
+          TOTAL_EXPECTED=$((TOTAL_EXPECTED + {{ .replicas }}))
+          {{- end }}{{- end }}
+
+          echo ""
+          echo "Checking total broker pods..."
+          RUNNING=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER,strimzi.io/name=${CLUSTER}-kafka \
+            --no-headers | grep "Running" | wc -l | tr -d ' ')
+          echo "  Total broker pods running: $RUNNING (expected >= $TOTAL_EXPECTED)"
+          if [ "$RUNNING" -lt "$TOTAL_EXPECTED" ]; then
+            echo "  ✗ Insufficient broker pods" && FAIL=1
+          else
+            echo "  ✓ Broker pod count meets expectations"
+          fi
+
+          echo ""
+          echo "Checking node distribution..."
+          NODES=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/cluster=$CLUSTER,strimzi.io/name=${CLUSTER}-kafka \
+            -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort -u | wc -l | tr -d ' ')
+          echo "  Broker pods spread across $NODES unique node(s)"
+          if [ "$NODES" -ge 2 ]; then
+            echo "  ✓ Pods distributed across multiple nodes"
+          elif [ "$NODES" -eq 1 ]; then
+            echo "  ⚠ All pods on a single node (acceptable for dev/Kind)"
+          fi
+
+          if [ "$FAIL" -eq 1 ]; then
+            echo "✗ Node pool validation failed" && exit 1
+          fi
+          echo "✓ Tier 7 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

@@ -1,0 +1,34 @@
+apiVersion: v2
+name: legacy-kafka
+description: A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to migrate FROM — the replication source that Strimzi 1.1.0 cannot deploy
+type: application
+# Minor bump: mode and image derive from kafka.version when left empty, so any
+# version from 2.1 up deploys with no overlay.
+version: 0.2.0
+# Tracks the default kafka.version — the newest 3.x line, whose official image
+# needs no build. Any other version is `--set kafka.version=<v>`; the mode and
+# the image follow (2.x is ZooKeeper on the built image, see values-kafka-2x.yaml).
+appVersion: "3.9.1"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
+keywords:
+  - kafka
+  - legacy
+  - migration
+  - mirrormaker2
+  - zookeeper
+  - kraft
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
+annotations:
+  artifacthub.io/category: streaming-messaging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: changed
+      description: mode defaults from kafka.version (zookeeper below 3.3.0, kraft from 3.3.0) and kafka.image from the version too (apache/kafka:<v> from 3.7.0, <legacyImageRegistry>/kates-legacy-kafka:<v> below), so `--set kafka.version=3.5.2` needs no overlay; explicit values still win
+    - kind: added
+      description: legacyImageRegistry (ghcr.io/bmscomp) for the built image; every template reads the mode and image through the legacy-kafka.mode / legacy-kafka.image helpers

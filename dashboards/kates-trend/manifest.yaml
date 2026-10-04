@@ -1,0 +1,21 @@
+# Kates — Trend & Regression. Delivered by charts/monitoring, whose ConfigMap
+# template globs `dashboards/*.json` inside the chart.
+uid: kates-trend-analysis
+title: Kates — Trend & Regression
+description: >-
+  Benchmark results across runs: peak throughput and tail latency per run, the
+  volume each run actually moved, and the platform counters that outlive any
+  single run.
+tags:
+  - kates
+  - kafka
+  - benchmark
+  - trend
+refresh: 1m
+# Six hours, because the unit of analysis is a run and runs are minutes apart.
+# A one-hour window usually holds one run, which is not a trend.
+time_from: now-6h
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kates-trend.json

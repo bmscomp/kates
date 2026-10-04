@@ -1,0 +1,119 @@
+suite: connectors
+templates:
+  - connectors.yaml
+release:
+  name: cc
+  namespace: connect
+tests:
+  - it: renders a connectors map, sorted, with the defaults merged under each
+    set:
+      connectorDefaults:
+        autoRestart: { enabled: true, maxRestarts: 3 }
+        config: { errors.log.enable: "true", tolerance.hint: default }
+      connectors:
+        zeta:
+          class: com.example.ZetaSource
+          config: { tolerance.hint: own }
+        alpha:
+          class: com.example.AlphaSource
+          tasksMax: 4
+          autoRestart: { maxRestarts: 9 }
+    asserts:
+      - hasDocuments: { count: 2 }
+      - documentIndex: 0
+        equal: { path: metadata.name, value: alpha }
+      - documentIndex: 0
+        equal: { path: spec.tasksMax, value: 4 }
+      - documentIndex: 0
+        equal: { path: spec.autoRestart.maxRestarts, value: 9 }
+      - documentIndex: 1
+        equal: { path: 'spec.config["tolerance.hint"]', value: own }
+      - documentIndex: 1
+        equal: { path: 'spec.config["errors.log.enable"]', value: "true" }
+      - documentIndex: 1
+        equal: { path: 'metadata.labels["strimzi.io/cluster"]', value: cc-connect-cluster }
+
+  - it: drops a connector with enabled false, so an overlay can remove one
+    set:
+      connectors:
+        a: { class: com.example.X }
+        b: { enabled: false, class: com.example.Y }
+    asserts:
+      - hasDocuments: { count: 1 }
+
+  - it: still renders a 1.x list
+    set:
+      connectors:
+        - name: listed
+          class: com.example.X
+          state: stopped
+    asserts:
+      - equal: { path: metadata.name, value: listed }
+      - equal: { path: spec.state, value: stopped }
+
+  - it: turns a dead letter queue into error handling and a KafkaTopic in the Kafka namespace
+    set:
+      kafka: { namespace: kafka }
+      config: { replicationFactor: 2 }
+      connectors:
+        sink:
+          class: io.debezium.connector.jdbc.JdbcSinkConnector
+          deadLetterQueue: { enabled: true, contextHeaders: false }
+          config: { topics: t, connection.url: jdbc:x }
+    asserts:
+      - hasDocuments: { count: 2 }
+      - documentIndex: 0
+        equal: { path: 'spec.config["errors.tolerance"]', value: all }
+      - documentIndex: 0
+        equal: { path: 'spec.config["errors.deadletterqueue.topic.replication.factor"]', value: "2" }
+      - documentIndex: 0
+        equal: { path: 'spec.config["errors.deadletterqueue.context.headers.enable"]', value: "false" }
+      - documentIndex: 1
+        isKind: { of: KafkaTopic }
+      - documentIndex: 1
+        equal: { path: metadata.namespace, value: kafka }
+      - documentIndex: 1
+        equal: { path: spec.topicName, value: kates-connect-cluster-dlq-sink }
+      - documentIndex: 1
+        equal: { path: 'metadata.labels["strimzi.io/cluster"]', value: krafter }
+
+  - it: leaves the topic to someone else with createTopic false
+    set:
+      connectors:
+        sink:
+          class: com.example.SomeSinkConnector
+          deadLetterQueue: { enabled: true, createTopic: false, topic: shared-dlq }
+          config: { topics: t }
+    asserts:
+      - hasDocuments: { count: 1 }
+      - equal: { path: 'spec.config["errors.deadletterqueue.topic.name"]', value: shared-dlq }
+
+  - it: refuses a dead letter queue on a source connector
+    set:
+      connectors:
+        src:
+          class: com.example.SomeSourceConnector
+          deadLetterQueue: { enabled: true }
+    asserts:
+      - failedTemplate:
+          errorPattern: "deadLetterQueue is for sink connectors"
+
+  - it: honours an explicit type over the class name
+    set:
+      connectors:
+        odd:
+          class: com.example.Writer
+          type: sink
+          deadLetterQueue: { enabled: true }
+          config: { topics.regex: "t.*" }
+    asserts:
+      - documentIndex: 0
+        equal: { path: 'spec.config["errors.tolerance"]', value: all }
+
+  - it: omits maxRestarts when autoRestart is off (false is false)
+    set:
+      connectors:
+        a: { class: com.example.X, autoRestart: { enabled: false } }
+    asserts:
+      - equal: { path: spec.autoRestart.enabled, value: false }
+      - notExists: { path: spec.autoRestart.maxRestarts }

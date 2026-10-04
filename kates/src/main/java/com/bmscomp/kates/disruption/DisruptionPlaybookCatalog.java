@@ -66,6 +66,9 @@ public class DisruptionPlaybookCatalog {
     public DisruptionPlan toPlan(PlaybookEntry entry) {
         DisruptionPlan plan = new DisruptionPlan();
         plan.setName("playbook:" + entry.name);
+        // Nothing that runs a plan reads it; GET /api/disruptions/playbooks/{name}
+        // returns it, so a reader of the plan sees what the playbook is for.
+        plan.setDescription(entry.description);
         plan.setMaxAffectedBrokers(entry.maxAffectedBrokers);
         plan.setAutoRollback(entry.autoRollback);
 
@@ -92,6 +95,9 @@ public class DisruptionPlaybookCatalog {
                     }
                     if (ps.faultSpec.gracePeriodSec != null) {
                         fb.gracePeriodSec(ps.faultSpec.gracePeriodSec);
+                    }
+                    if (ps.faultSpec.targetAll != null) {
+                        fb.targetAll(ps.faultSpec.targetAll);
                     }
                     if (ps.faultSpec.targetBrokerId != null) {
                         fb.targetBrokerId(ps.faultSpec.targetBrokerId);
@@ -139,6 +145,7 @@ public class DisruptionPlaybookCatalog {
         public String disruptionType;
         public String targetLabel;
         public String targetNamespace;
+        public Boolean targetAll;
         public Integer targetBrokerId;
         public String targetTopic;
         public Integer targetPartition;

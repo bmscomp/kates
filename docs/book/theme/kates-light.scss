@@ -1,0 +1,107 @@
+/*-- scss:defaults --*/
+
+// Light palette: the blues of the book cover (assets/cover.svg) on white,
+// with deep navy for headings. Every text colour here clears WCAG AA (4.5:1)
+// against the surface it sits on; code blocks keep the navy slab in both
+// colour schemes. scripts/check-book-contrast.py checks every pair in CI.
+
+// Brand and text
+$kates-heading: #131d42;
+$kates-link: #1d63c7;
+$kates-accent: #5fa9ee;
+$kates-number: #5775a8;
+$kates-strong: #111827;
+$kates-muted: #5b6683;
+$kates-sidebar-fg: #374260;
+
+// Surfaces and lines
+$kates-border: #e3e8f0;
+$kates-border-strong: #cbd4e2;
+$kates-surface: #f6f8fc;
+$kates-active-bg: rgba(29, 99, 199, 0.08);
+$kates-row-hover: #f8fafd;
+
+// The panels beside the text (the navigation, the contents and the glossary
+// in the margin): chrome muted until the reader reaches for it, so the eye
+// stays on the text, and hairlines a step lighter than the borders. The
+// panels' notes, set at 16px in italic, take a darker step of their own.
+$kates-chrome: #66708c;
+$kates-chrome-note: #5b6580;
+$kates-chrome-strong: #2b3553;
+$kates-rule: #e8ecf3;
+$kates-rail: #dfe5ee;
+// A glossary entry whose term is under the pointer in the text
+$kates-gloss-hot: rgba($kates-link, 0.09);
+// The mark beside the book's title: its pale tile sits well on white
+$kates-sidebar-logo-opacity: 1;
+
+// Bootstrap
+$body-bg: #ffffff;
+$body-color: #1f2937;
+$primary: $kates-link;
+$secondary: #5b6683;
+$link-color: $kates-link;
+$headings-color: $kates-heading;
+$text-muted: $kates-muted;
+$border-color: $kates-border;
+
+// Inline code: a faint tint with no border, so it sits inside the sentence
+$code-bg: #f1f4fa;
+$code-color: #1b2b58;
+
+// Code blocks
+$code-block-bg: #111a33;
+$kates-code-block-border: #111a33;
+$kates-code-block-fg: #e3e9f5;
+$kates-code-file-bg: #1c2649;
+$kates-code-file-fg: #c3cde2;
+$btn-code-copy-color: #9fb0cf;
+$btn-code-copy-color-active: $kates-accent;
+$kates-code-scroll-shadow: rgba(159, 176, 207, 0.35);
+
+// Command output (`text` fences)
+$kates-output-bg: #f6f8fc;
+$kates-output-fg: #26324d;
+$kates-output-rule: #9fb3d6;
+
+// Callouts: caution is the only red; important is indigo, warning amber
+$callout-color-note: #1d63c7;
+$callout-color-tip: #15803d;
+$callout-color-important: #4f46e5;
+$callout-color-warning: #b45309;
+$callout-color-caution: #c62828;
+$kates-callout-tint: 0.035;
+$kates-callout-header-tint: 0.09;
+
+// Diagrams
+$kates-diagram-bg: #fbfcfe;
+$kates-scroll-shadow: rgba(19, 29, 66, 0.2);
+$kates-diagram-note-bg: #fff8db;
+$kates-diagram-note-border: #e3cb72;
+
+// Nodes are white cards on the plate, lifted by a soft shadow; their border
+// keeps 3:1 against the plate and the group tint around them.
+$mermaid-bg-color: $kates-diagram-bg;
+$mermaid-node-bg-color: #ffffff;
+$mermaid-node-fg-color: #7089b8;
+$mermaid-fg-color: $body-color;
+$mermaid-fg-color--lighter: #b9c6dc;
+$mermaid-fg-color--lightest: #f1f5fb;
+$mermaid-label-bg-color: $kates-diagram-bg;
+$mermaid-label-fg-color: #16213f;
+$mermaid-edge-color: #52607d;
+
+// Group titles, sequence frame tags (loop, opt, alt), the header of an ER
+// table and its alternate rows, and the shadow under each card
+$kates-diagram-group-fg: #4d6a9e;
+$kates-diagram-tint: #e8f0fb;
+$kates-diagram-row-alt: #f6f9fd;
+$kates-diagram-shadow: rgba(19, 29, 66, 0.1);
+
+// Cover
+$kates-cover-shadow: rgba(19, 29, 66, 0.45);
+
+// Keyboard focus: a ring that clears 3:1 against the page, and a lighter
+// one for controls that sit on the navy code blocks
+$kates-focus-ring: $kates-link;
+$kates-focus-ring-on-code: $kates-accent;

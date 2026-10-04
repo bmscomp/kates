@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -177,6 +177,7 @@ func renderDocsIndex(width int) string {
 		"Core", "Cluster", "Kafka", "Test", "Report",
 		"Analysis", "Disruption", "Scheduling", "Resilience",
 		"Config", "Observability", "Toolbox",
+		"Versions", "Migration",
 	}
 
 	for _, cat := range categories {

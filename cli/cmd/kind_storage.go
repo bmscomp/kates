@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -14,12 +13,12 @@ import (
 // detect introspects storage — ensuring matchStorageClass() returns the right
 // class names in values-detected.yaml.
 func quickDetectKind() bool {
-	out, err := exec.Command(
+	out, err := runExecOutputFn(context.Background(),
 		"kubectl", "get", "daemonset", "kindnet",
 		"-n", "kube-system",
 		"--ignore-not-found",
 		"--no-headers",
-	).Output()
+	)
 	if err != nil {
 		return false
 	}
@@ -40,10 +39,10 @@ func setupKindStorageClasses(ctx context.Context) error {
 	fmt.Println("    - Ensuring zone StorageClasses exist for Kind cluster...")
 
 	// ── 1. Collect topology zones from actual node labels ─────────────────────
-	out, err := exec.CommandContext(ctx,
+	out, err := runExecOutputFn(ctx,
 		"kubectl", "get", "nodes",
 		"-o", `jsonpath={range .items[*]}{.metadata.labels.topology\.kubernetes\.io/zone}{"\n"}{end}`,
-	).Output()
+	)
 	if err != nil {
 		return fmt.Errorf("failed to list node zones: %w", err)
 	}

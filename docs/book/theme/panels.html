@@ -1,0 +1,31 @@
+<script>
+// The side panels of the Kates book (theme/kates.scss, "Side panels"): the
+// contents folded at the top of a chapter below 1200px. theme/reader.html
+// runs after this and builds the rest of the panels.
+(() => {
+  "use strict";
+
+  // ── The contents, folded ──────────────────────────────────────────────────
+  // Quarto prints a second copy of the contents at the top of the chapter
+  // (toc-location: right-body), open and titled like the margin's. Below
+  // 1200px it is the only copy on screen. Fold it into a <details>, so a
+  // reader on a phone opens it when they want it. Give it the margin's "Edit
+  // this page" and "Report an issue", which go with the margin. The copy
+  // repeats the margin's ids (toc-title, and toc-<section> on each entry), so
+  // drop them: an id names one element.
+  const copy = document.getElementById("TOC-body");
+  if (copy && !copy.querySelector(".kates-toc-fold")) {
+    const fold = document.createElement("details");
+    fold.className = "kates-toc-fold";
+    const summary = document.createElement("summary");
+    summary.textContent = "On this page";
+    copy.querySelector("#toc-title")?.remove();
+    for (const el of copy.querySelectorAll("[id]")) el.removeAttribute("id");
+    fold.append(summary, ...copy.childNodes);
+    const actions = document.querySelector("#TOC .toc-actions");
+    if (actions) fold.append(actions.cloneNode(true));
+    copy.append(fold);
+    copy.setAttribute("aria-label", "On this page");
+  }
+})();
+</script>

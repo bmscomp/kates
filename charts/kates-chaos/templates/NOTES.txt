@@ -1,28 +1,52 @@
-Kates Chaos Engineering v{{ .Chart.Version }}
+Kates Chaos Engineering v{{ .Chart.Version }} (LitmusChaos {{ .Chart.AppVersion }})
 
-Release: {{ .Release.Name }}
+Release:   {{ .Release.Name }}
 Namespace: {{ .Release.Namespace }}
 
-LitmusChaos Portal:
-  UI:      kubectl port-forward svc/{{ .Release.Name }}-litmus-frontend-service -n {{ .Release.Namespace }} 9091:9091
-  Login:   admin / litmus
+This chart deploys the LitmusChaos EXECUTION PLANE (chaos operator, exporter,
+and CRDs). There is no web portal — drive chaos declaratively via the
+`engines:` values or by applying ChaosEngine resources.
+
+Check the operator is up:
+  kubectl rollout status deployment -l app.kubernetes.io/name=litmus -n {{ .Release.Namespace }}
 
 {{- if .Values.rbac.enabled }}
-RBAC:
-  ✓ kafka namespace ({{ .Values.rbac.kafkaNamespace }}) → litmus-admin service account
-  ✓ kates namespace ({{ .Values.rbac.katesNamespace }}) → chaos coordinator role
+
+RBAC (service account: {{ include "kates-chaos.serviceAccountName" . }}):
+{{- range (include "kates-chaos.targetNamespaces" . | fromYamlArray) }}
+  ✓ {{ .name }} namespace → {{ .role | default "target" }}
+{{- end }}
+{{- if .Values.rbac.nodeChaos.enabled }}
+  ✓ cluster-scoped node-chaos RBAC
+{{- end }}
 {{- end }}
 
 {{- if .Values.experiments.enabled }}
+
 Experiments:
   ✓ {{ len .Values.experiments.definitions }} ChaosExperiment definitions (post-install hook)
-  Run: kubectl get chaosexperiments -n {{ .Values.rbac.kafkaNamespace | default "kafka" }}
+  List: kubectl get chaosexperiments -n {{ include "kates-chaos.kafkaNamespace" . }}
+{{- end }}
+
+{{- $engineCount := 0 }}
+{{- range $name, $e := .Values.engines }}{{- if $e.enabled }}{{- $engineCount = add $engineCount 1 }}{{- end }}{{- end }}
+{{- if gt $engineCount 0 }}
+
+Engines:
+  ✓ {{ $engineCount }} ChaosEngine(s) rendered
+  Watch: kubectl get chaosengine,chaosresult -n {{ include "kates-chaos.kafkaNamespace" . }}
 {{- end }}
 
 {{- if .Values.monitoring.serviceMonitor.enabled }}
+
 Monitoring:
-  ✓ ServiceMonitor for chaos-exporter
+  ✓ ServiceMonitor for the chaos exporter
 {{- end }}
 
-Verify:
+Verify the install:
   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if not .Values.gameday.enabled }}
+
+Run a deeper GameDay validation:
+  helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} --reuse-values --set gameday.enabled=true
+{{- end }}

@@ -2,8 +2,18 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-version: 0.4.4
-appVersion: "1.20.0"
+# Patch: one Kates API pod everywhere, and no Secret read beyond the one the
+# backend needs. Every overlay runs one replica with no autoscaler, the
+# Deployment rolls with Recreate, and the schema refuses what would run a
+# second pod. The ClusterRole grants nothing on Secrets, and
+# rbac.cdcSecretNamespaces grants the CDC test's database password through a
+# Role in its namespace. appVersion is unchanged.
+version: 0.10.8
+# The non-blocking health endpoints this chart's probes now point at come from
+# a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
+# exist in the image built from this branch. Keep appVersion and
+# image.tag in values.yaml pinned to that release.
+appVersion: "1.24.0"
 keywords:
   - kafka
   - testing
@@ -16,13 +26,61 @@ sources:
   - https://github.com/bmscomp/kates
 maintainers:
   - name: bmscomp
+    email: bmscomp@gmail.com
 icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
 annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
-dependencies:
-  - name: postgresql
-    version: "16.x.x"
-    repository: https://charts.bitnami.com/bitnami
-    condition: postgresql.useSubchart
-    alias: postgresqlHA
+  artifacthub.io/changes: |
+    - kind: fixed
+      description: "ACTION REQUIRED for INTEGRATION_CDC on a plain Helm install — the ClusterRole granted get, list and watch on every Secret in the cluster, so the backend's service account could read every SCRAM password, CA key and token there. The backend reads one Secret through the API: the INTEGRATION_CDC test's database password, the Secret postgresql in that database's namespace. The ClusterRole grants nothing on Secrets now, and rbac.cdcSecretNamespaces (default empty) creates a Role with get on that one Secret, bound to the backend's ServiceAccount, in each namespace it lists. `kates deploy` sets it to --db-ns when it installs the CDC database or finds one. A release installed with Helm directly that runs INTEGRATION_CDC needs it set, or the run fails at DB_SETUP with Forbidden; each namespace listed must exist before the install"
+    - kind: fixed
+      description: "ACTION REQUIRED for copied values files — Kates runs one pod. values-prod.yaml ran an autoscaler of 2 to 8 pods on 70% CPU, values-staging.yaml two replicas, and every rollout surged a second pod (RollingUpdate, maxSurge 1). The Kates API keeps each run's workers, the concurrent-run limit, the disruption lease and the event streams in its own memory, and a pod that starts marks every RUNNING run FAILED, so a scale-up or a rollout failed the runs on the other pod, and two pods could each run a disruption plan against one cluster. A native benchmark's CPU is what triggered the autoscaler. Every overlay now runs one replica with no autoscaler; the Deployment rolls with Recreate, so an upgrade leaves the API unreachable until the new pod is Ready; and values-prod.yaml's budget is maxUnavailable: 1, where its minAvailable: 50% would block every node drain with one pod. values.schema.json refuses replicaCount above 1, autoscaling.enabled, a RollingUpdate strategy and podDisruptionBudget.minAvailable, so a values file copied from 0.10.7 or earlier is refused until those keys go"
+    - kind: changed
+      description: "appVersion 1.24.0, the first image with the backend fixes since 1.23.0: every requested spec field honoured and the request kept (#204); a cancelled run frees its concurrency slot (#203); a launched disruption plan stores its outcome (#207); run latency percentiles no longer averaged across tasks (#230); native ROUND_TRIP timed from send to the consumer's receipt (#234); lifecycle events reach webhooks, across restarts too (#231, #233); the direct Kubernetes chaos backend's ephemeral containers and the Strimzi-native SCALE_DOWN and ROLLING_RESTART (#174, #177, #181); and a Trogdor backend that can run a task on a real coordinator (#232, #236), which trogdor.agentNodes needs. The entries below that say they take an image newer than 1.23.0 are met by this one"
+    - kind: added
+      description: "trogdor.agentNodes (KATES_TROGDOR_AGENT_NODES, default node0, the name in the trogdor.conf Kafka ships) names the Trogdor agents the Trogdor backend's tasks run on, comma-separated and taken in turn. A Trogdor spec names the agent that runs it, and the backend named none, so the coordinator ended every task at once with \"Unable to find nodes for task\". Set it to the node names in your coordinator's platform config. It takes an image newer than 1.23.0, whose Trogdor backend could not run a task at all"
+    - kind: fixed
+      description: "The backend read Prometheus at http://prometheus.monitoring.svc:9090, its built-in default, and no chart creates that Service: charts/monitoring installs kube-prometheus-stack, whose Service is monitoring-kube-prometheus-prometheus. Every disruption on a default install captured no Kafka metrics, and its SLA verdict left latency and throughput unevaluated. prometheus.url (KATES_PROMETHEUS_URL) now defaults to http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090, the Service `kates deploy` installs, and `kates deploy` sets it for the namespace it installs monitoring into"
+    - kind: fixed
+      description: "The NetworkPolicy's egress to Prometheus always named namespace monitoring, whatever networkPolicy.prometheus.namespace said (and values.yaml said kafka). It now reads the value, which defaults to monitoring, so the rendered policy is unchanged when a values file leaves it out; set it with prometheus.url when Prometheus runs elsewhere, as after `make monitoring` (namespace kafka). Upgrading: a values file copied from 0.10.4 or earlier (helm show values) carries the old, ignored networkPolicy.prometheus.namespace: kafka, which now takes effect and moves the egress to namespace kafka while prometheus.url points into monitoring, so Prometheus becomes unreachable with the NetworkPolicy on. Remove that line, or set it to the namespace your Prometheus runs in"
+    - kind: fixed
+      description: "values-prod.yaml set a 1Gi memory limit and inherited -Xmx2560m from values.yaml, and values-staging.yaml a 512Mi limit under the same heap, so either pod is OOMKilled once its heap grows past the limit. values-prod.yaml now runs 2Gi/4Gi, the chart defaults, with the heap set beside it (62.5% of the limit); values-staging.yaml runs 512Mi/1Gi with -Xmx512m, as values-dev.yaml does"
+    - kind: changed
+      description: "values-generic.yaml, the overlay `kates deploy` applies on every cluster that is not kind, adds -XX:+ZGenerational, so ZGC runs its generational mode on the JDK 21 image there as it does under values.yaml and values-prod.yaml; -XX:+UseZGC alone selects the single-generation mode on JDK 21"
+    - kind: fixed
+      description: "values-prod.yaml, values-generic.yaml and values-corporate.yaml pinned image.tag 1.17.0, older than the 1.22.0 the probe defaults need, and `kates deploy` applies values-generic.yaml on every cluster that is not kind. They set no tag now, so the one in values.yaml applies"
+    - kind: changed
+      description: "The default ClusterRole grants patch on kafkanodepools. SCALE_DOWN now removes a broker by lowering spec.replicas of its KafkaNodePool, and rollback and orphan recovery put the count back; it used to scale StatefulSets, which Strimzi does not create, so it removed nothing and its rollback restored nothing. It runs on the Kubernetes API with the Kates service account on both chaos backends (Litmus pod-delete only kills a pod its StrimziPodSet recreates), so the rule is not behind rbac.directChaos"
+    - kind: fixed
+      description: "The default ClusterRole grants patch on statefulsets, which only rbac.directChaos granted before. ROLLING_RESTART on a StatefulSet that Strimzi does not manage (charts/legacy-kafka runs Kafka and ZooKeeper that way) restarts the StatefulSet with the Kates service account on both chaos backends, like the pod annotation below, so on a default install that restart was refused. rbac.directChaos no longer carries the rule; SCALE_DOWN, which also patches the StatefulSet, is covered by the default one"
+    - kind: changed
+      description: "The default ClusterRole grants patch on pods. ROLLING_RESTART now annotates each Kafka pod it restarts with strimzi.io/manual-rolling-update and lets the Strimzi Cluster Operator roll them; it used to restart StatefulSets, which Strimzi does not create, so it restarted nothing. It runs on the Kubernetes API with the Kates service account on both chaos backends (Litmus has no rolling restart experiment), so the rule is not behind rbac.directChaos"
+    - kind: added
+      description: "rbac.directChaos (default false) grants the writes the direct Kubernetes chaos backend (kates.chaos.provider=kubernetes, or hybrid without Litmus) makes itself: create, delete and deletecollection on networkpolicies; patch on statefulsets; get and update on statefulsets/scale; update on pods/ephemeralcontainers. The ClusterRole granted only get and list on NetworkPolicies and StatefulSets, and nothing on ephemeral containers, so every NETWORK_PARTITION, SCALE_DOWN, ROLLING_RESTART, CPU_STRESS and IO_STRESS on that backend was refused, along with its cleanup, rollback and startup orphan recovery. Litmus runs its experiments as litmus-admin and needs none of this, so the default ClusterRole is unchanged"
+    - kind: fixed
+      description: "CPU_STRESS and IO_STRESS on the direct backend replaced the whole pod to add their ephemeral container, which the API server rejects; they now write through the pods/ephemeralcontainers subresource. That takes an image newer than 1.23.0: on 1.23.0 the two faults fail even with rbac.directChaos=true"
+    - kind: changed
+      description: "appVersion 1.23.0. The image publishes the Agroal pool meters (quarkus.datasource.metrics.enabled) and the HTTP latency histogram buckets (HttpLatencyHistogram) that Kates — Application Health and KATES — Overview read, and counts a task's failure on the poll that sees it, so kates_benchmark_errors_total moves during a run. A 1.22.0 image publishes none of that, and the pool row and the latency percentiles are empty on it"
+    - kind: fixed
+      description: "The ServiceMonitor matched on the pod selector labels (app: kates), which the Service does not carry, so with metrics.serviceMonitor.enabled=true Prometheus discovered the backend's endpoints and dropped every one of them — silently, and every Kates board stayed empty. It now selects on app.kubernetes.io/name and app.kubernetes.io/instance, which the Service has"
+    - kind: fixed
+      description: "The ServiceMonitor and PrometheusRule templates render only where the monitoring.coreos.com/v1 API exists, like every other chart in the repository; before, either flag on a cluster without prometheus-operator failed the release at apply time"
+    - kind: removed
+      description: "ACTION REQUIRED — metrics.grafanaDashboard.*, kyvernoPolicy.grafanaDashboard and kyvernoPolicy.grafanaDashboardNamespace are GONE, and a release that still sets any of them is refused with the replacement named. Both boards are delivered by charts/monitoring (dashboards.enabled there) with every other board; the overview board's $job variable already lets one copy serve every release, and there is one Kyverno per cluster. The chart's <fullname>-grafana-dashboard and <fullname>-kyverno-dashboard ConfigMaps are no longer rendered"
+    - kind: changed
+      description: "Both boards move to dashboards/kates-overview and dashboards/kyverno-security and are built from board.py by scripts/gen-dashboards.py, instead of being written inline in this chart's templates"
+    - kind: changed
+      description: "The uid of each board is unchanged (kates-overview, kyverno-security-overview), so Grafana replaces them in place and existing links, playlists and annotations keep resolving. The overview board's title changes from KATES — Kafka Testing Suite to KATES — Overview"
+    - kind: fixed
+      description: "Five metric names on the overview board that no meter has ever published, renamed in place: agroal_pool_{active,available,max_used}_count (Quarkus publishes agroal_*, with no pool segment), kates_active_runs and kates_benchmark_throughput_records_per_sec. The monitoring chart's boards spelled these the other way, so the repository shipped three spellings of the same metric; they now agree with each other and with the code"
+    - kind: fixed
+      description: "Two label names on the Kyverno board that Kyverno does not emit. Policy Violations Over Time grouped on `policy` and Violations by Rule on `rule`; kyverno_policy_results_total carries policy_name and rule_name, and a group on a label that does not exist collapsed both panels to one unlabelled series"
+    - kind: removed
+      description: "Three overview panels no rename could fix — Benchmark P99 Latency (ms), which read kates_benchmark_p99_latency_ms (there has never been such a meter; the percentiles are one series with a quantile label, and the per-run series that does publish them belongs on the benchmark boards, not on this one), Kafka Admin Connections (Micrometer binds only clients the Kafka extension creates, and this application builds its own AdminClient), and Vert.x Event Loop Latency (Vert.x metrics options are not enabled). The CPU and JVM panels survived on corrected series: process_cpu_usage and system_cpu_usage in place of process_cpu_seconds_total, and jvm_memory_used_bytes{area=nonheap} in place of process_resident_memory_bytes, both of which are Prometheus simpleclient default exports a Quarkus Micrometer registry never publishes. Two legends also read a task_id tag no meter carries"
+    - kind: added
+      description: "A $job template variable on the overview board, so one copy serves every Kates release a Grafana can see; the release name is no longer interpolated into 16 of its 21 expressions as a literal job= selector. Descriptions on all nine Kyverno panels, which had none — the layout gate in ci-kafka-charts.yml now covers this chart and will not accept a panel without one"
+# No subchart dependencies: the bundled database is a self-contained
+# StatefulSet on the official `postgres` image (templates/postgresql.yaml).
+# For production HA, set postgresql.enabled=false and point externalDatabase
+# at a managed cluster — CloudNativePG is the recommended non-Bitnami option.

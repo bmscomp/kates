@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/klster/kates-cli/client"
+	"github.com/bmscomp/kates/cli/client"
 )
 
 type junitTestSuites struct {

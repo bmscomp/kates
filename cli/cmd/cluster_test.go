@@ -104,6 +104,10 @@ func TestClusterTopicDescribeCmd(t *testing.T) {
 			"retention.ms": "86400000",
 			"cleanup.policy": "delete"
 		},
+		"configSources": {
+			"retention.ms": "DYNAMIC_TOPIC_CONFIG",
+			"cleanup.policy": "STATIC_BROKER_CONFIG"
+		},
 		"partitionInfo": [
 			{"partition": 0, "leader": 1, "replicas": [1, 2], "isrs": [1, 2], "underReplicated": false},
 			{"partition": 1, "leader": 2, "replicas": [2, 3], "isrs": [2], "underReplicated": true}
@@ -123,6 +127,9 @@ func TestClusterTopicDescribeCmd(t *testing.T) {
 	}
 	if !strings.Contains(out, "retention.ms") {
 		t.Errorf("missing config keys: %s", out)
+	}
+	if !strings.Contains(out, "Source") || !strings.Contains(out, "STATIC_BROKER_CONFIG") {
+		t.Errorf("missing where each config value comes from: %s", out)
 	}
 	if !strings.Contains(out, "YES") {
 		t.Errorf("missing under-replicated warning: %s", out)

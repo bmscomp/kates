@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kafka-ui.fullname" . }}-test-connection
+  namespace: {{ include "kafka-ui.namespace" . }}
+  labels:
+    {{- include "kafka-ui.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Probing Kafka UI health endpoint..."
+          for i in $(seq 1 15); do
+            if wget -q -O- --timeout=5 \
+              "http://{{ include "kafka-ui.fullname" . }}.{{ include "kafka-ui.namespace" . }}.svc.{{ .Values.kafka.clusterDomain | default "cluster.local" }}:{{ .Values.service.port }}/actuator/health" \
+              2>/dev/null | grep -q '"status":"UP"'; then
+              echo "✅ Kafka UI is UP"
+              exit 0
+            fi
+            echo "Attempt $i/15..."
+            sleep 4
+          done
+          echo "❌ Kafka UI did not report UP"
+          exit 1

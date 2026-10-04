@@ -1,0 +1,131 @@
+# Render matrix for charts/strimzi-operator — read by scripts/check-chart-matrix.py.
+#
+# The operator chart's own resources since 0.3: the drain cleaner, the
+# operator's NetworkPolicy, scrape and alerts, and the upstream dashboards.
+chart: charts/strimzi-operator
+namespace: strimzi-operator
+release: strimzi-operator
+apiVersions: [monitoring.coreos.com/v1]
+
+# Every alert links a runbook section that exists.
+checks: [runbook-anchors]
+
+renders:
+  - name: base
+    assert:
+      - why: "the operator's NetworkPolicy is on by default, under the name kafka-cluster 0.4 used"
+        kind: NetworkPolicy
+        name: strimzi-operator
+        count: 1
+      - why: "the operator reaches the Kafka agent, not ZooKeeper"
+        kind: NetworkPolicy
+        name: strimzi-operator
+        path: spec/egress/2/ports/*/port
+        equals: 8443
+      - kind: NetworkPolicy
+        name: strimzi-operator
+        path: spec/egress/2/ports/*/port
+        notEquals: 2181
+      - why: "the operator is scraped where it runs (K5)"
+        kind: PodMonitor
+        path: spec/namespaceSelector/matchNames/0
+        equals: strimzi-operator
+      - why: "the certificate alert reads the series the operator publishes (K4)"
+        kind: PrometheusRule
+        path: spec/groups/0/rules/*/expr
+        matches: strimzi_certificate_expiration_timestamp_ms
+      - kind: PrometheusRule
+        path: spec/groups/0/rules/*/alert
+        equals: StrimziOperatorDown
+      - why: "the operator's dashboards replace kafka-cluster's"
+        kind: ConfigMap
+        name: strimzi-kafka
+        path: metadata/labels/grafana_dashboard
+        equals: "1"
+      - kind: ValidatingWebhookConfiguration
+        count: 0
+  - name: prod (drain cleaner)
+    values: [values-prod.yaml]
+    assert:
+      - kind: Deployment
+        name: strimzi-drain-cleaner
+        path: spec/replicas
+        equals: 2
+      - kind: PodDisruptionBudget
+        name: strimzi-drain-cleaner
+        count: 1
+      - why: "cert-manager injects the CA the API server verifies the webhook with (K8)"
+        kind: ValidatingWebhookConfiguration
+        path: metadata/annotations/cert-manager.io~1inject-ca-from
+        equals: strimzi-operator/strimzi-drain-cleaner
+      - why: "the operator watches every namespace, so every eviction is inspected"
+        kind: ValidatingWebhookConfiguration
+        path: webhooks/0/namespaceSelector
+        exists: false
+      - kind: ValidatingWebhookConfiguration
+        path: webhooks/0/failurePolicy
+        equals: Ignore
+      - kind: Certificate
+        path: spec/dnsNames/*
+        equals: strimzi-drain-cleaner.strimzi-operator.svc
+      - why: "no ZooKeeper drain setting (K8)"
+        kind: Deployment
+        name: strimzi-drain-cleaner
+        path: spec/template/spec/containers/0/env/*/name
+        notEquals: STRIMZI_DRAIN_ZOOKEEPER
+  - name: drain cleaner with an existing secret, scoped
+    set: [drainCleaner.enabled=true, drainCleaner.tls.secretName=dc, drainCleaner.tls.caBundle=Zm9v, "drainCleaner.namespaces={kafka}"]
+    assert:
+      - kind: ValidatingWebhookConfiguration
+        path: webhooks/0/namespaceSelector/matchExpressions/0/values/0
+        equals: kafka
+      - kind: ValidatingWebhookConfiguration
+        path: webhooks/0/clientConfig/caBundle
+        equals: Zm9v
+      - why: "no PDB for one replica"
+        kind: PodDisruptionBudget
+        count: 0
+  - name: namespace-scoped additional operator
+    values: [values-namespace-scope.yaml]
+    namespace: kafka-2
+    assert:
+      - kind: ConfigMap
+        name: strimzi-kafka
+        count: 0
+      - kind: ValidatingWebhookConfiguration
+        count: 0
+      - kind: NetworkPolicy
+        path: metadata/annotations/kates.io~1watch-scope
+        equals: kafka-2
+  - name: kind
+    values: [values-kind.yaml]
+  - name: dev
+    values: [values-dev.yaml]
+  - name: generic
+    values: [values-generic.yaml]
+  - name: monitoring API absent
+    matrixApiVersions: false
+    assert:
+      - kind: PodMonitor
+        count: 0
+      - kind: PrometheusRule
+        count: 0
+
+rails:
+  - name: drain cleaner without a certificate (K8)
+    want: "drainCleaner.enabled needs a serving certificate"
+    set: [drainCleaner.enabled=true]
+  - name: drain cleaner certificate without a CA (K8)
+    want: "has no CA to verify it with"
+    set: [drainCleaner.enabled=true, drainCleaner.tls.secretName=dc]
+  - name: one drain-cleaner replica in production
+    want: "drainCleaner.replicas must be 2 or more in production"
+    set: [productionMode=true, drainCleaner.enabled=true, drainCleaner.tls.certManager.enabled=true]
+  - name: a floating drain-cleaner image
+    want: "a floating tag"
+    set: [drainCleaner.enabled=true, drainCleaner.tls.certManager.enabled=true, drainCleaner.image=quay.io/strimzi/drain-cleaner:latest]
+  - name: a misspelled key
+    want: "Additional property replica is not allowed"
+    set: [drainCleaner.replica=2]
+
+rules: {}

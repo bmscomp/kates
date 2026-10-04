@@ -1,0 +1,136 @@
+suite: hpa, podMonitor, kafkaUser, secretSync, netpol, test helpers
+tests:
+  - it: targets the CR's scale subresource
+    template: hpa.yaml
+    set:
+      hpa: {enabled: true, autoscaling: {targetCPUUtilizationPercentage: 70}}
+    asserts:
+      - equal: {path: spec.scaleTargetRef.kind, value: KafkaConnect}
+      - equal: {path: spec.minReplicas, value: 2}
+      - equal: {path: spec.maxReplicas, value: 6}
+      - equal:
+          path: 'spec.metrics[0].resource.target.averageUtilization'
+          value: 70
+  - it: carries the Strimzi relabelings
+    template: monitoring.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: 'spec.podMetricsEndpoints[0].port'
+          value: tcp-prometheus
+      - equal:
+          path: 'spec.podMetricsEndpoints[0].interval'
+          value: 30s
+      - equal:
+          path: 'spec.podMetricsEndpoints[0].relabelings[0].action'
+          value: labelmap
+      - equal:
+          path: 'spec.namespaceSelector.matchNames[0]'
+          value: ns
+  - it: scrapes every endpoint it is given
+    template: monitoring.yaml
+    documentIndex: 3
+    asserts:
+      - lengthEqual: {path: spec.podMetricsEndpoints, count: 2}
+      - equal:
+          path: 'spec.podMetricsEndpoints[1].port'
+          value: healthcheck-uo
+      - equal:
+          path: 'spec.podMetricsEndpoints[1].path'
+          value: /m
+      - notExists: {path: spec.namespaceSelector}
+  - it: scopes PromQL to the release
+    template: monitoring.yaml
+    documentIndex: 1
+    asserts:
+      - equal: {path: data.selector, value: 'namespace="connect", pod=~"x-connect-[0-9]+"'}
+  - it: renders a dashboard ConfigMap
+    template: monitoring.yaml
+    documentIndex: 2
+    asserts:
+      - equal: {path: metadata.labels.grafana_dashboard, value: "1"}
+      - equal: {path: metadata.annotations.grafana_folder, value: Kafka}
+  - it: renders a KafkaUser with its ACLs
+    template: kafkauser.yaml
+    set:
+      kafkaUser: {enabled: true}
+    asserts:
+      - equal:
+          path: 'metadata.labels["strimzi.io/cluster"]'
+          value: krafter
+      - equal:
+          path: 'metadata.annotations["helm.sh/resource-policy"]'
+          value: keep
+      - equal:
+          path: 'spec.authorization.acls[0].resource.type'
+          value: cluster
+  - it: omits authorization when it is turned off (false is false)
+    template: kafkauser.yaml
+    set:
+      kafkaUser: {enabled: true, authorization: {enabled: false}}
+    asserts:
+      - notExists: {path: spec.authorization}
+  - it: refuses a KafkaUser type Strimzi cannot issue
+    template: kafkauser.yaml
+    set:
+      kafkaUser: {enabled: true, authType: plain}
+    asserts:
+      - failedTemplate: {errorPattern: "is not one a Strimzi KafkaUser can have"}
+  - it: renders nothing without secrets to copy
+    template: secretsync.yaml
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: skips a secret that is already in place
+    template: secretsync.yaml
+    set:
+      secretSync: {secrets: [{name: a, fromNamespace: dst}]}
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: scopes read grants per source namespace and adds the rotation CronJob on request
+    template: secretsync.yaml
+    set:
+      secretSync:
+        watch: true
+        secrets: [{name: a, fromNamespace: src}, {name: b, fromNamespace: src, as: b2}, {name: c, fromNamespace: other}]
+    asserts:
+      - hasDocuments: {count: 9}
+      - equal:
+          path: 'rules[0].resourceNames'
+          value: [a, b]
+        documentIndex: 1
+      - equal: {path: metadata.namespace, value: other}
+        documentIndex: 3
+      - equal:
+          path: 'spec.template.spec.containers[0].env[1].value'
+          value: "src/a/a src/b/b2 other/c/c"
+        documentIndex: 7
+      - isKind: {of: CronJob}
+        documentIndex: 8
+  - it: renders the NetworkPolicy fragments as valid rules
+    template: netpol.yaml
+    set:
+      netpol.dns: {namespaceSelector: {kubernetes.io/metadata.name: kube-system}, podSelector: {k8s-app: kube-dns}}
+    asserts:
+      - lengthEqual: {path: spec.ingress, count: 3}
+      - equal:
+          path: 'spec.egress[0].to[0].podSelector.matchLabels.k8s-app'
+          value: kube-dns
+      - equal:
+          path: 'spec.egress[1].to[0].ipBlock.cidr'
+          value: 10.0.0.1/32
+      - equal:
+          path: 'spec.egress[1].ports[1].port'
+          value: 6443
+  - it: writes SCRAM client properties with printf
+    template: tests-props.yaml
+    set:
+      cluster: {authentication: {type: scram-sha-512, username: u}}
+    asserts:
+      - matchRegex: {path: data.props, pattern: "sasl.mechanism=SCRAM-SHA-512"}
+      - equal: {path: data.unsupported, value: ""}
+  - it: flags custom authentication as unsupported by the test pods
+    template: tests-props.yaml
+    set:
+      cluster: {authentication: {type: custom, custom: {sasl: true, config: {sasl.mechanism: OAUTHBEARER}}}}
+    asserts:
+      - equal: {path: data.unsupported, value: "true"}
