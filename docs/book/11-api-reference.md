@@ -195,7 +195,7 @@ A request with a `scenario` and its `phases` is checked the same way. Each phase
 
 The `spec` in the response is the merged one: the request's values, and the LOAD defaults for everything it leaves out that LOAD has a default for. `requestedSpec` is the request's own `spec`, only the fields it set, so the two tell a requested value from a default; a request without a `spec` gets an empty one. The Kates API stores both, and `kates replay` sends `requestedSpec` back to start the run again.
 
-Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
+Run IDs are 8-character UUID prefixes. `status` moves through `PENDING` and `RUNNING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
 
 A run still `RUNNING` five minutes (`kates.engine.reaper-grace-ms`) after the time it was set to last, counted from its creation, is stopped and stored as `FAILED` too. That time is its `durationMs`, twice that for INTEGRITY, or a scenario's phases added up; INTEGRATION_CDC, which has no duration of its own, gets `kates.engine.max-duration-ms`. Each task that had not finished carries an error that starts `Timeout:`, and the tasks that had keep their results.
 
@@ -272,7 +272,7 @@ A LOAD run has exactly two tasks, `<id>-produce-0` in phase `produce` and `<id>-
 
 #### DELETE /api/tests/{id}
 
-Stop and delete a test run. If the test is currently running, it is cancelled before deletion.
+Stop and delete a test run with its results. A run that is still `PENDING` or `RUNNING` is stopped first: its tasks stop, and it gives back its place among the `kates.engine.max-concurrent-tests` running tests. Its end is then announced as a failure, as a cancelled run's is: webhooks get its `test.completed` event with status `FAILED`, and `GET /api/events/stream` sends a `failed` event whose detail is `deleted`. Deleting a run that has already ended announces nothing. To stop a run and keep it, cancel it with `POST /api/tests/{id}/cancel` instead.
 
 **Response:** `204 No Content` on success. Returns `404 Not Found` if the test ID does not exist.
 
