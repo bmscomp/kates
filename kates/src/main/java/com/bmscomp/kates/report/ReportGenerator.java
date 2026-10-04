@@ -22,7 +22,8 @@ import com.bmscomp.kates.util.MetricUtils;
 /**
  * Builds structured {@link TestReport} instances from completed {@link TestRun}s.
  * Computes aggregate metrics and overall SLA verdicts.
- * Reports for terminal runs (DONE/FAILED) are cached to avoid redundant recomputation.
+ * Reports for terminal runs (DONE/FAILED) that carry their results are cached
+ * to avoid redundant recomputation.
  */
 @ApplicationScoped
 public class ReportGenerator {
@@ -109,7 +110,8 @@ public class ReportGenerator {
     }
 
     public TestReport generate(TestRun run) {
-        if (run.getId() != null && isTerminal(run.getStatus())) {
+        boolean cacheable = isCacheable(run);
+        if (cacheable) {
             TestReport cached = reportCache.get(run.getId());
             if (cached != null) {
                 return cached;
@@ -118,11 +120,28 @@ public class ReportGenerator {
 
         TestReport report = doGenerate(run);
 
-        if (run.getId() != null && isTerminal(run.getStatus())) {
+        if (cacheable) {
             reportCache.put(run.getId(), report);
         }
 
         return report;
+    }
+
+    /**
+     * Only a finished run that carries its results has its report cached.
+     *
+     * <p>A run read by a list query has no results, and its report is all
+     * zeros. Cached under the run's id, that report answered for the run until
+     * it was evicted — the report, its JUnit export (tests="0" failures="0"),
+     * compare and the regression check — and a trend did this to every run in
+     * its window. A run without results is cheap to report again: its report
+     * stops before the cluster snapshot.
+     */
+    private boolean isCacheable(TestRun run) {
+        return run.getId() != null
+                && isTerminal(run.getStatus())
+                && run.getResults() != null
+                && !run.getResults().isEmpty();
     }
 
     private boolean isTerminal(TestResult.TaskStatus status) {
@@ -165,18 +184,15 @@ public class ReportGenerator {
 
         report.setSummary(MetricUtils.computeSummary(results));
 
-        Map<String, List<TestResult>> byPhase = results.stream()
-                .filter(r -> r.getPhaseName() != null)
-                .collect(Collectors.groupingBy(TestResult::getPhaseName, LinkedHashMap::new, Collectors.toList()));
+        Map<String, ReportSummary> byPhase = phaseSummaries(results);
 
         if (!byPhase.isEmpty()) {
             List<PhaseReport> phases = new ArrayList<>();
-            for (Map.Entry<String, List<TestResult>> entry : byPhase.entrySet()) {
+            for (Map.Entry<String, ReportSummary> entry : byPhase.entrySet()) {
                 PhaseReport pr = new PhaseReport();
                 pr.setPhaseName(entry.getKey());
-                ReportSummary phaseMetrics = MetricUtils.computeSummary(entry.getValue());
-                pr.setMetrics(phaseMetrics);
-                pr.setSlaVerdict(evaluateSla(run, phaseMetrics));
+                pr.setMetrics(entry.getValue());
+                pr.setSlaVerdict(evaluateSla(run, entry.getValue()));
                 phases.add(pr);
             }
             report.setPhases(phases);
@@ -205,6 +221,21 @@ public class ReportGenerator {
         katesMetrics.recordSlaEvaluation(typeName, report.getOverallSlaVerdict().passed());
 
         return report;
+    }
+
+    /**
+     * Each phase's summary, by phase name in the order the phases first appear
+     * among the results; a result without a phase belongs to none. Reports and
+     * trends both read phases through this, so a trend's phase point is the
+     * phase summary of its run's report.
+     */
+    public static Map<String, ReportSummary> phaseSummaries(List<TestResult> results) {
+        Map<String, ReportSummary> summaries = new LinkedHashMap<>();
+        results.stream()
+                .filter(r -> r.getPhaseName() != null)
+                .collect(Collectors.groupingBy(TestResult::getPhaseName, LinkedHashMap::new, Collectors.toList()))
+                .forEach((phase, phaseResults) -> summaries.put(phase, MetricUtils.computeSummary(phaseResults)));
+        return summaries;
     }
 
     /**
