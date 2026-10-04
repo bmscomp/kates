@@ -175,7 +175,7 @@ and
 [`charts/kates/values.yaml`](https://github.com/bmscomp/kates/blob/main/charts/kates/values.yaml).
 
 Two limits worth knowing: at most **3 concurrent test runs** (further requests get
-`429` with `Retry-After`), and a **30-minute** ceiling per run. CORS is deliberately
+`429` with `Retry-After`), and a **two-hour** ceiling per run (a longer one gets `400`). CORS is deliberately
 not enabled.
 
 ## Security posture

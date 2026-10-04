@@ -30,6 +30,10 @@ import com.bmscomp.kates.service.TestRunRepository;
  * run's whole set of results and, under orphanRemoval, deleted every task row,
  * so the run ended FAILED with nothing it had measured: its report, its JUnit
  * file and its trend point had nothing left to read.
+ *
+ * <p>The reaper reads each run's deadline from what is stored with it, so a
+ * run still inside its own is left alone. TestOrchestratorTest.RunDeadlines
+ * covers the deadline each kind of run gets.
  */
 @QuarkusTest
 class TestTimeoutReaperTest {
@@ -59,8 +63,9 @@ class TestTimeoutReaperTest {
 
     @Test
     void theReaperKeepsEveryTaskRowOfARunItFails() {
-        // Older than the reaper's limit on any run.
-        TestRun run = storeRunning(Instant.now().minus(Duration.ofHours(3)));
+        // Ten minutes long, and still RUNNING twenty minutes after it began:
+        // past its ten minutes and the five-minute grace.
+        TestRun run = storeRunning(Instant.now().minus(Duration.ofMinutes(20)));
 
         reaper.reapStuckTests();
 
@@ -77,10 +82,27 @@ class TestTimeoutReaperTest {
         for (String suffix : List.of("-consume-0", "-verify-0")) {
             TestResult unfinished = task(stored, suffix);
             assertEquals(TaskStatus.FAILED, unfinished.getStatus(), suffix);
-            assertTrue(unfinished.getError().startsWith("Timeout: "), unfinished.getError());
+            assertEquals(
+                    "Timeout: still running 900000ms after it was created, its planned 600000ms plus a 300000ms grace",
+                    unfinished.getError(),
+                    suffix);
             assertNotNull(unfinished.getEndTime(), suffix);
         }
         assertEquals(42_000, task(stored, "-consume-0").getRecordsSent(), "what the task measured is kept");
+    }
+
+    @Test
+    void theReaperLeavesARunInsideItsDeadlineRunning() {
+        // Fourteen minutes into a ten-minute run: inside the grace.
+        TestRun run = storeRunning(Instant.now().minus(Duration.ofMinutes(14)));
+
+        reaper.reapStuckTests();
+
+        TestRun stored = reread(run);
+        assertEquals(TaskStatus.RUNNING, stored.getStatus());
+        assertEquals(600_000L, stored.getPlannedDurationMs());
+        assertEquals(TaskStatus.RUNNING, task(stored, "-consume-0").getStatus());
+        assertNull(task(stored, "-consume-0").getError());
     }
 
     @Test
@@ -107,9 +129,9 @@ class TestTimeoutReaperTest {
     }
 
     /**
-     * A RUNNING LOAD run as the orchestrator stores it once its tasks are
-     * under way: a producer that has finished, a consumer still reading, and a
-     * task that has not started.
+     * A ten-minute RUNNING LOAD run as the orchestrator stores it once its
+     * tasks are under way: a producer that has finished, a consumer still
+     * reading, and a task that has not started.
      */
     private TestRun storeRunning(Instant createdAt) {
         TestSpec spec = new TestSpec();
@@ -117,6 +139,7 @@ class TestTimeoutReaperTest {
         TestRun run = new TestRun(TestType.LOAD, spec)
                 .withBackend("native")
                 .withCreatedAt(createdAt.toString())
+                .withPlannedDurationMs(600_000L)
                 .withStatus(TaskStatus.RUNNING);
         String started = createdAt.plusSeconds(2).toString();
         run = run.withResults(List.of(

@@ -72,7 +72,8 @@ class ChaosStartPlumbingTest {
                 mock(Event.class),
                 "native",
                 "localhost:9092",
-                3);
+                3,
+                7_200_000L);
 
         TestSpec spec = new TestSpec();
         spec.setNumRecords(1000);

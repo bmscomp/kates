@@ -494,7 +494,7 @@ extraEnv:
     value: krafter
   - name: KATES_CHAOS_KAFKA_LABEL             # the safety guard counts exactly the node-pool pods, controllers included
     value: "strimzi.io/cluster=krafter,strimzi.io/pool-name"
-  - name: KATES_ENGINE_MAX_DURATION_MS        # the engine fails any test still running after 30 minutes by default
+  - name: KATES_ENGINE_MAX_DURATION_MS        # the default, 2 h: the 1-hour INTEGRITY run below counts twice, as it reads back after producing
     value: "7200000"
 ```
 

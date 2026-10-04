@@ -89,7 +89,8 @@ class TestOrchestratorLiveMetricsTest {
                 mock(Event.class),
                 "native",
                 "localhost:9092",
-                3);
+                3,
+                7_200_000L);
     }
 
     @Test

@@ -57,6 +57,13 @@ public class TestOrchestrator {
     private final String defaultBackend;
     private final String bootstrapServers;
     private final int maxConcurrentTests;
+    /**
+     * The longest a run may be set to last (see {@link #plannedDurationMs}),
+     * and the most the timeout reaper allows any run before its grace. A
+     * request planned for longer is refused rather than started and cut short.
+     */
+    private final long maxDurationMs;
+
     private final Semaphore concurrencyGuard;
     private final Map<String, List<BenchmarkHandle>> activeHandles = new ConcurrentHashMap<>();
 
@@ -94,7 +101,8 @@ public class TestOrchestrator {
             Event<TestLifecycleEvent> lifecycleEvents,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
-            @ConfigProperty(name = "kates.engine.max-concurrent-tests", defaultValue = "3") int maxConcurrentTests) {
+            @ConfigProperty(name = "kates.engine.max-concurrent-tests", defaultValue = "3") int maxConcurrentTests,
+            @ConfigProperty(name = "kates.engine.max-duration-ms", defaultValue = "7200000") long maxDurationMs) {
         this.topicService = topicService;
         this.repository = repository;
         this.backends = backends;
@@ -106,6 +114,7 @@ public class TestOrchestrator {
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
         this.maxConcurrentTests = maxConcurrentTests;
+        this.maxDurationMs = maxDurationMs;
         this.concurrencyGuard = new Semaphore(maxConcurrentTests);
     }
 
@@ -168,8 +177,10 @@ public class TestOrchestrator {
         }
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
-        TestRun run =
-                new TestRun(type, spec).withBackend(backendName).withRequestedSpec(explicitFieldsOf(request.getSpec()));
+        TestRun run = new TestRun(type, spec)
+                .withBackend(backendName)
+                .withRequestedSpec(explicitFieldsOf(request.getSpec()))
+                .withPlannedDurationMs(plannedDurationMs(type, spec));
         // Register BEFORE the first thing that can throw. A transient failure in
         // save/fireEvent used to strand the permit forever (the semaphore drained
         // one permit per failure until restart), because nothing had recorded
@@ -331,6 +342,7 @@ public class TestOrchestrator {
                 .withScenarioName(scenario.getName())
                 .withLabels(scenario.getLabels())
                 .withSla(scenario.getSla())
+                .withPlannedDurationMs(plannedDurationMs(scenario))
                 .withStatus(TestResult.TaskStatus.RUNNING);
         // Same ordering rule as executeTest: hold the permit before anything
         // that can throw, so a failed save cannot strand it.
@@ -940,15 +952,22 @@ public class TestOrchestrator {
 
     /**
      * Why a run could not honour this request as written, or empty when it
-     * could: the spec fields its type and backend cannot apply, for a plain
-     * request or a scenario. executeTest fails with this exception before it
-     * takes a concurrency permit. A caller that starts the run later, as a
-     * resilience run does after it has begun streaming its answer, asks first
-     * so that it can still answer the client with a 400.
+     * could, for a plain request or a scenario: the spec fields its type and
+     * backend cannot apply, and a length past
+     * {@code kates.engine.max-duration-ms}, the most the timeout reaper allows
+     * a run. executeTest fails with this exception before it takes a
+     * concurrency permit. A caller that starts the run later, as a resilience
+     * run does after it has begun streaming its answer, asks first so that it
+     * can still answer the client with a 400.
      */
     public java.util.Optional<InvalidTestSpecException> refusal(CreateTestRequest request) {
         if (request.isScenario()) {
-            Map<String, String> errors = scenarioInapplicableFields(request.getScenario(), scenarioBackend(request));
+            TestScenario scenario = request.getScenario();
+            Map<String, String> errors = scenarioInapplicableFields(scenario, scenarioBackend(request));
+            long planned = plannedDurationMs(scenario);
+            if (planned > maxDurationMs) {
+                errors.put("phases", "the phases are set to last " + planned + " ms in all" + longerThanAllowed());
+            }
             return errors.isEmpty()
                     ? java.util.Optional.empty()
                     : java.util.Optional.of(new InvalidTestSpecException("scenario.", errors));
@@ -958,11 +977,70 @@ public class TestOrchestrator {
             return java.util.Optional.empty();
         }
         String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
-        Map<String, String> errors =
-                inapplicableFields(type, backendName, request.getSpec(), applyTypeDefaults(type, request.getSpec()));
+        TestSpec merged = applyTypeDefaults(type, request.getSpec());
+        Map<String, String> errors = inapplicableFields(type, backendName, request.getSpec(), merged);
+        Long planned = plannedDurationMs(type, merged);
+        if (planned != null && planned > maxDurationMs) {
+            // The duration may be the type's default rather than the request's,
+            // so say which; an INTEGRITY run's length is twice it.
+            String source =
+                    request.getSpec() != null && request.getSpec().hasDurationMs() ? "" : " (the type's default)";
+            String length = type == TestType.INTEGRITY
+                    ? "an INTEGRITY run produces for durationMs, " + merged.getDurationMs() + " ms" + source
+                            + ", then reads its records back for up to as long again, " + planned + " ms in all"
+                    : "the run is set to last " + planned + " ms" + source;
+            errors.put("durationMs", length + longerThanAllowed());
+        }
         return errors.isEmpty()
                 ? java.util.Optional.empty()
                 : java.util.Optional.of(new InvalidTestSpecException(errors));
+    }
+
+    private String longerThanAllowed() {
+        return "; the Kates API allows a run at most " + maxDurationMs + " ms (kates.engine.max-duration-ms)";
+    }
+
+    /**
+     * How long a run of this type is set to last with this merged spec, or
+     * null when no duration bounds it. Stored with the run: the timeout reaper
+     * fails the run once this and a grace have passed since its creation.
+     *
+     * <p>Every task stops at its spec's durationMs, if its record count has not
+     * stopped it first. An INTEGRITY task then reads its records back, for up
+     * to durationMs again (NativeKafkaBackend.runIntegrity), so it can last
+     * twice as long. An INTEGRATION_CDC task takes no duration: the CDC service
+     * ends it on timeouts of its own.
+     */
+    static Long plannedDurationMs(TestType type, TestSpec spec) {
+        if (type == null || spec == null || type == TestType.INTEGRATION_CDC) {
+            return null;
+        }
+        long duration = Math.max(0, spec.getDurationMs());
+        return type == TestType.INTEGRITY ? saturatedSum(duration, duration) : duration;
+    }
+
+    /**
+     * How long a scenario is set to last: its phases' durations added up.
+     * executeScenario submits the phases together, so they overlap and this is
+     * an upper bound; it stays the right one if they come to run in sequence.
+     */
+    static long plannedDurationMs(TestScenario scenario) {
+        long total = 0;
+        for (ScenarioPhase phase : scenario.getPhases()) {
+            total = saturatedSum(
+                    total, Math.max(0, scenario.resolveSpecForPhase(phase).getDurationMs()));
+        }
+        return total;
+    }
+
+    /**
+     * The sum of two longs that are not negative, held at Long.MAX_VALUE: a
+     * scenario's spec is not validated, so its durations can be anything, and
+     * a sum that wrapped negative would pass for a short run.
+     */
+    private static long saturatedSum(long a, long b) {
+        long sum = a + b;
+        return sum < 0 ? Long.MAX_VALUE : sum;
     }
 
     /**

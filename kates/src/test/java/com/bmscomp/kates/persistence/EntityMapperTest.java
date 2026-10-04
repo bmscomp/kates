@@ -249,6 +249,28 @@ class EntityMapperTest {
     }
 
     @Test
+    void thePlannedDurationIsStoredAndKept() {
+        TestRun run = buildFullRun().withPlannedDurationMs(3_600_000L);
+
+        TestRunEntity entity = EntityMapper.toEntity(run);
+        assertEquals(3_600_000L, entity.getPlannedDurationMs());
+        assertEquals(3_600_000L, EntityMapper.toDomain(entity).getPlannedDurationMs());
+        assertEquals(3_600_000L, EntityMapper.toDomainSummary(entity).getPlannedDurationMs());
+
+        // A copy built without it, by hand rather than read back, leaves it.
+        EntityMapper.updateEntity(entity, buildFullRun().withStatus(TestResult.TaskStatus.DONE));
+        assertEquals(3_600_000L, entity.getPlannedDurationMs());
+    }
+
+    @Test
+    void aRunNoDurationBoundsHasNoPlannedDuration() {
+        TestRunEntity entity = EntityMapper.toEntity(buildFullRun());
+
+        assertNull(entity.getPlannedDurationMs());
+        assertNull(EntityMapper.toDomain(entity).getPlannedDurationMs());
+    }
+
+    @Test
     void updateEntityLinksNewChildrenBackToTheParent() {
         TestRun initial = new TestRun(TestType.LOAD, new TestSpec()).withResults(java.util.List.of());
         TestRunEntity entity = EntityMapper.toEntity(initial);

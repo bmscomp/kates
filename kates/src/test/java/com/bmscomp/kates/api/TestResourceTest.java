@@ -283,6 +283,25 @@ class TestResourceTest {
         awaitStatus(again, "FAILED");
     }
 
+    /**
+     * The timeout reaper fails a run that outlives its duration, and a run
+     * set to last longer than kates.engine.max-duration-ms would outlive the
+     * reaper's ceiling: it is refused rather than started and cut short.
+     */
+    @Test
+    void aRunSetToLastLongerThanTheLimitIsRefused() {
+        given().contentType("application/json")
+                .body("{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"spec\": {\"durationMs\": 7200001}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors.durationMs", containsString("kates.engine.max-duration-ms"))
+                .body("message", containsString("spec.durationMs: the run is set to last 7200001 ms"));
+        verifyNoInteractions(trogdorClient);
+    }
+
     @Test
     void anEmptyConsumerGroupIsRefused() {
         given().contentType("application/json")
