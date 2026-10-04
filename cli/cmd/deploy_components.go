@@ -1007,6 +1007,7 @@ data:
 			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring))
 		katesArgs = append(katesArgs, dc.scrapeArgs("charts/kates")...)
 		katesArgs = append(katesArgs, dc.prometheusArgs()...)
+		katesArgs = append(katesArgs, dc.cdcSecretArgs()...)
 		katesArgs = append(katesArgs, "--timeout", "8m")
 
 		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
@@ -1281,6 +1282,20 @@ func printDeployKeySync(w io.Writer, s deployKeySync, appNS string) {
 		fmt.Fprintf(w, "    %s Context %q does not exist, so the API key from %s was not stored\n", warnMark, s.Context, secret)
 	}
 	fmt.Fprintln(w)
+}
+
+// cdcSecretArgs lets the backend read the password of the PostgreSQL that
+// the INTEGRATION_CDC test (`kates kafka connect test`) connects to: the
+// Secret postgresql in --db-ns, where --with-kafka-connect installs it. The
+// chart grants no Secret otherwise, and this one only through a Role in each
+// namespace it is given. A database an earlier run installed counts too, so
+// a later deploy without the flag keeps the grant. Without either nothing is
+// passed: a Role in a namespace that does not exist fails the install.
+func (dc *deployContext) cdcSecretArgs() []string {
+	if !deployWithKafkaConnect && !isHelmReleaseDeployedFn(dc.ctx, "postgresql", deployDbNS) {
+		return nil
+	}
+	return []string{"--set", "rbac.cdcSecretNamespaces={" + deployDbNS + "}"}
 }
 
 func (dc *deployContext) resolveClusterDomain() string {

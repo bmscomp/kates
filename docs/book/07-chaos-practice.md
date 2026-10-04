@@ -625,7 +625,7 @@ The guard counts brokers and reads pod readiness, and nothing more. Each of thes
 - A `NODE_DRAIN` step counts the pods its selector picks, not the brokers on the node it drains.
 - A resilience run (`kates resilience run`) doesn't go through the guard at all: no broker count, no one-plan rule, no check before the fault and no rollback.
 - `make gameday` doesn't go through it either: it deletes a broker pod with `kubectl`.
-- The one-plan rule lives in the Kates API process, so it holds while the Kates API runs one replica, which is the `kates` chart's default.
+- The one-plan rule lives in the Kates API process, so it holds only while one Kates API pod runs. The `kates` chart refuses a second replica and rolls with `Recreate`, so it never runs two.
 - Orphan recovery covers the Kafka namespace only. A NetworkPolicy that a Kates API left in another namespace when it died stays until you run `kubectl delete networkpolicy -n <namespace> -l managed-by=kates`.
 - The dry run's RBAC check (see [Previewing a Playbook](#previewing-a-playbook)) asks about the Kates API's own service account, and a missing permission is a warning, not a refusal.
 

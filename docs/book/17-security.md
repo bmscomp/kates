@@ -108,6 +108,8 @@ kubectl get secret kafka-ui -n kafka -o jsonpath='{.data.password}' | base64 -d
 Kubernetes Secrets are base64-encoded, **not encrypted**. Anyone with RBAC permission to read Secrets in the `kafka` namespace can extract every SCRAM password, and the copy of the `kates-backend` password in the `kates` namespace is just as exposed. RBAC on Secrets in both namespaces is the wall around these credentials. A NetworkPolicy does not help here: Secrets are read from the Kubernetes API, not from the brokers.
 :::
 
+The Kates API's own service account can't read these Secrets, and doesn't need to: the kubelet hands the Kates API pod its `kates-backend` password. The `kates` chart grants the account `get` on one Secret, `postgresql`, the password of the INTEGRATION_CDC test's database, and only in the namespaces its `rbac.cdcSecretNamespaces` lists.
+
 ### Cross-Namespace Credential Synchronization
 
 Strimzi writes a `KafkaUser`'s Secret only into the Kafka cluster's namespace (`kafka`). Kates runs in `kates`, so it needs a copy of the `kates-backend` Secret there. `kates deploy` makes that copy each time it installs or reconciles the Kates API, and so do `make kates-secret` and `scripts/deploy-kates.sh`. Nothing keeps the copy in step between those runs: no controller or policy that ships with Kates watches the source Secret.

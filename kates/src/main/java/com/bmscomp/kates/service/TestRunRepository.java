@@ -56,6 +56,28 @@ public class TestRunRepository {
         return true;
     }
 
+    /**
+     * Saves a run only if its row still exists: an update, never an insert.
+     *
+     * <p>A plain {@link #save} inserts a run it cannot find, so a write that
+     * read the run before a delete and landed after it brought the deleted run
+     * back. The reconciler's poll and the submission's RUNNING write both could.
+     * The row lock makes the check and the write one step against
+     * {@link #delete}, which takes the same lock.
+     *
+     * @return true if the run was saved, false if its row is gone
+     */
+    @Transactional
+    public boolean saveIfPresent(TestRun run) {
+        TestRunEntity existing =
+                em.find(TestRunEntity.class, run.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        if (existing == null) {
+            return false;
+        }
+        save(run);
+        return true;
+    }
+
     @Transactional
     public void save(TestRun run) {
         TestRunEntity existing = em.find(TestRunEntity.class, run.getId());
@@ -78,19 +100,19 @@ public class TestRunRepository {
         if (previousStatus == run.getStatus()) {
             return;
         }
+        enqueueLifecycleEvent(run.getId(), run.getTestType(), run.getStatus(), "");
+    }
 
+    /** Queues a test.lifecycle event in the current transaction, for the outbox poller to publish. */
+    private void enqueueLifecycleEvent(
+            String runId, TestType type, com.bmscomp.kates.domain.TestResult.TaskStatus status, String message) {
         try {
             com.bmscomp.kates.domain.events.TestEvent testEvent = new com.bmscomp.kates.domain.events.TestEvent(
-                    run.getId(),
-                    run.getTestType() != null ? run.getTestType().name() : "UNKNOWN",
-                    run.getStatus(),
-                    "",
-                    System.currentTimeMillis());
+                    runId, type != null ? type.name() : "UNKNOWN", status, message, System.currentTimeMillis());
             String payload = OUTBOX_MAPPER.writeValueAsString(testEvent);
 
             com.bmscomp.kates.persistence.OutboxEventEntity outboxEvent =
-                    new com.bmscomp.kates.persistence.OutboxEventEntity(
-                            run.getId(), "TestRun", "test.lifecycle", payload);
+                    new com.bmscomp.kates.persistence.OutboxEventEntity(runId, "TestRun", "test.lifecycle", payload);
             em.persist(outboxEvent);
         } catch (Exception e) {
             throw new RuntimeException("Failed to persist outbox event", e);
@@ -123,12 +145,41 @@ public class TestRunRepository {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Deletes a run and its results.
+     *
+     * <p>A run deleted before it ended gets the ending no status write will
+     * give it: a FAILED test.lifecycle event with the message "deleted",
+     * queued in the delete's own transaction, so the webhooks hear the run is
+     * over exactly when its row goes. A delete used to queue nothing, so a
+     * webhook never heard that a deleted run had ended.
+     *
+     * <p>The run's row is locked first, as {@link #saveIfPresent} and
+     * {@link #saveIfStatus} lock it, so a concurrent write either lands before
+     * the delete or finds the row gone. Without the lock a delete could
+     * deadlock with a write that holds the run's row and wants its results, or
+     * fail on a version that write had just moved. Reading the status under
+     * the lock also means a run that ended on its own just before the delete
+     * keeps the ending it announced, and gets no second one.
+     *
+     * @return the run as it was when deleted, or empty when there was none
+     *     with this id
+     */
     @Transactional
-    public void delete(String id) {
-        var entity = em.find(TestRunEntity.class, id);
-        if (entity != null) {
-            em.remove(entity);
+    public Optional<TestRun> delete(String id) {
+        var entity = em.find(TestRunEntity.class, id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        if (entity == null) {
+            return Optional.empty();
         }
+        TestRun deleted = EntityMapper.toDomainSummary(entity);
+        com.bmscomp.kates.domain.TestResult.TaskStatus status = deleted.getStatus();
+        if (status != com.bmscomp.kates.domain.TestResult.TaskStatus.DONE
+                && status != com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED) {
+            enqueueLifecycleEvent(
+                    id, deleted.getTestType(), com.bmscomp.kates.domain.TestResult.TaskStatus.FAILED, "deleted");
+        }
+        em.remove(entity);
+        return Optional.of(deleted);
     }
 
     public List<TestRun> findByLabel(String key, String value) {
@@ -250,17 +301,38 @@ public class TestRunRepository {
                 .collect(Collectors.toList());
     }
 
-    public List<TestRun> findByTypeAndDateRange(TestType type, java.time.Instant from, java.time.Instant to) {
+    /**
+     * The runs of one type and status created in a window, oldest first, each
+     * read with its task results, which most list queries here leave out.
+     *
+     * <p>For callers that measure the runs: a report built from a run without
+     * its results is all zeros, which is what trends showed while they read
+     * their runs through a date-range query that left them out. The fetch join
+     * reads every run's results in this one query, not one query per run.
+     * Hibernate returns each run once, however many result rows the join gave
+     * it, keeps the ORDER BY, and appends the collection's {@code @OrderBy}, so
+     * the results come in the order {@link #findById} reads them. The join is
+     * inner: a run without results measured nothing and is left out.
+     */
+    public List<TestRun> findWithResults(
+            TestType type,
+            com.bmscomp.kates.domain.TestResult.TaskStatus status,
+            java.time.Instant from,
+            java.time.Instant to) {
         return em
                 .createQuery(
-                        "SELECT r FROM TestRunEntity r WHERE r.testType = :type AND r.createdAt >= :from AND r.createdAt <= :to ORDER BY r.createdAt ASC",
+                        "SELECT r FROM TestRunEntity r JOIN FETCH r.results"
+                                + " WHERE r.testType = :type AND r.status = :status"
+                                + " AND r.createdAt >= :from AND r.createdAt <= :to"
+                                + " ORDER BY r.createdAt ASC, r.id ASC",
                         TestRunEntity.class)
                 .setParameter("type", type)
+                .setParameter("status", status)
                 .setParameter("from", from)
                 .setParameter("to", to)
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomainSummary)
+                .map(EntityMapper::toDomain)
                 .collect(Collectors.toList());
     }
 }

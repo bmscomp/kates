@@ -87,12 +87,64 @@ class JunitXmlExporterTest {
     }
 
     @Test
-    void emptyReportProducesValidXml() {
+    void emptyReportStillHoldsATestCase() {
+        // An empty suite reads as a pass to CI whatever the run did, so the
+        // run itself is the test case when it has no row and no violation.
         TestReport report = emptyReport();
         String xml = exporter.export(report);
         assertTrue(xml.contains("<testsuite"));
         assertTrue(xml.contains("</testsuite>"));
-        assertTrue(xml.contains("tests=\"0\""));
+        assertTrue(xml.contains("tests=\"1\" failures=\"0\""), xml);
+        assertEquals(1, testcases(xml));
+        assertTrue(xml.contains("<testcase name=\"" + report.getRun().getId() + "\""), xml);
+    }
+
+    @Test
+    void failedRunWithNoRowsHasOneFailingTestCase() {
+        // A run that failed creating its topic: no task row, and the status
+        // violation the report's verdict carries for a FAILED run.
+        TestReport report = emptyReport();
+        report.setRun(new TestRun().withStatus(TestResult.TaskStatus.FAILED));
+        report.setOverallSlaVerdict(SlaVerdict.fail(List.of(SlaViolation.runFailed("FAILED before any task ran"))));
+
+        String xml = exporter.export(report);
+
+        assertTrue(xml.contains("tests=\"1\" failures=\"1\""), xml);
+        assertEquals(1, testcases(xml));
+        assertTrue(xml.contains("<failure message=\"status FAILED before any task ran\""), xml);
+    }
+
+    @Test
+    void countsEveryTestCaseAndEveryFailure() {
+        TestRun run = new TestRun()
+                .withAddedResult(new TestResult().withTaskId("produce-1").withError("NOT_ENOUGH_REPLICAS"))
+                .withAddedResult(new TestResult().withTaskId("consume-1"));
+        TestReport report = new TestReport();
+        report.setRun(run);
+        report.setMetadata(Map.of("testType", "LOAD"));
+        report.setOverallSlaVerdict(SlaVerdict.fail(List.of(SlaViolation.critical("p99LatencyMs", 50.0, 100.0))));
+
+        String xml = exporter.export(report);
+
+        // Two rows and one violation; the row's error is a failure too.
+        assertTrue(xml.contains("tests=\"3\" failures=\"2\""), xml);
+        assertEquals(3, testcases(xml));
+    }
+
+    @Test
+    void notMeasuredGateSaysSoInsteadOfAnActualValue() {
+        TestReport report = emptyReport();
+        report.setOverallSlaVerdict(SlaVerdict.fail(
+                List.of(SlaViolation.notMeasured("p99LatencyMs", 50.0, SlaViolation.Severity.CRITICAL))));
+
+        String xml = exporter.export(report);
+
+        assertTrue(xml.contains("message=\"p99LatencyMs not measured (threshold=50.00)\""), xml);
+        assertFalse(xml.contains("actual="), xml);
+    }
+
+    private static long testcases(String xml) {
+        return xml.lines().filter(l -> l.trim().startsWith("<testcase ")).count();
     }
 
     private TestReport emptyReport() {

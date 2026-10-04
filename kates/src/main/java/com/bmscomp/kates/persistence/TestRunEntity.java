@@ -30,7 +30,7 @@ public class TestRunEntity {
     private String id;
 
     /**
-     * Optimistic lock. refreshStatus, stopTest, the timeout reaper and orphan
+     * Optimistic lock. refreshStatus, a cancel, the timeout reaper and orphan
      * recovery all read-modify-write the same row, and without this the last
      * writer silently won — the reaper could overwrite a completion that landed
      * while it was deciding the run had timed out. A conflicting write now

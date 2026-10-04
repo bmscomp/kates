@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"html"
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
@@ -190,13 +191,14 @@ func renderHTMLReport(id string, r *client.Report) string {
     <tbody>
 `)
 				for _, viol := range v.Violations {
+					threshold, actual := violationCells(viol)
 					b.WriteString(fmt.Sprintf(`    <tr>
       <td>%s</td>
-      <td class="metric-value">%.2f</td>
-      <td class="metric-value" style="color:var(--red)">%.2f</td>
+      <td class="metric-value">%s</td>
+      <td class="metric-value" style="color:var(--red)">%s</td>
       <td><span class="badge badge-fail">FAIL</span></td>
     </tr>
-`, viol.Metric, viol.Threshold, viol.Actual))
+`, html.EscapeString(viol.Metric), threshold, html.EscapeString(actual)))
 				}
 				b.WriteString(`    </tbody>
   </table>

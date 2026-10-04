@@ -2,10 +2,13 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.24.0 — the release whose
-# backend the entries below since 0.9.2 were written for. Templates and
-# defaults are otherwise unchanged.
-version: 0.10.7
+# Patch: one Kates API pod everywhere, and no Secret read beyond the one the
+# backend needs. Every overlay runs one replica with no autoscaler, the
+# Deployment rolls with Recreate, and the schema refuses what would run a
+# second pod. The ClusterRole grants nothing on Secrets, and
+# rbac.cdcSecretNamespaces grants the CDC test's database password through a
+# Role in its namespace. appVersion is unchanged.
+version: 0.10.8
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -29,6 +32,10 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "ACTION REQUIRED for INTEGRATION_CDC on a plain Helm install — the ClusterRole granted get, list and watch on every Secret in the cluster, so the backend's service account could read every SCRAM password, CA key and token there. The backend reads one Secret through the API: the INTEGRATION_CDC test's database password, the Secret postgresql in that database's namespace. The ClusterRole grants nothing on Secrets now, and rbac.cdcSecretNamespaces (default empty) creates a Role with get on that one Secret, bound to the backend's ServiceAccount, in each namespace it lists. `kates deploy` sets it to --db-ns when it installs the CDC database or finds one. A release installed with Helm directly that runs INTEGRATION_CDC needs it set, or the run fails at DB_SETUP with Forbidden; each namespace listed must exist before the install"
+    - kind: fixed
+      description: "ACTION REQUIRED for copied values files — Kates runs one pod. values-prod.yaml ran an autoscaler of 2 to 8 pods on 70% CPU, values-staging.yaml two replicas, and every rollout surged a second pod (RollingUpdate, maxSurge 1). The Kates API keeps each run's workers, the concurrent-run limit, the disruption lease and the event streams in its own memory, and a pod that starts marks every RUNNING run FAILED, so a scale-up or a rollout failed the runs on the other pod, and two pods could each run a disruption plan against one cluster. A native benchmark's CPU is what triggered the autoscaler. Every overlay now runs one replica with no autoscaler; the Deployment rolls with Recreate, so an upgrade leaves the API unreachable until the new pod is Ready; and values-prod.yaml's budget is maxUnavailable: 1, where its minAvailable: 50% would block every node drain with one pod. values.schema.json refuses replicaCount above 1, autoscaling.enabled, a RollingUpdate strategy and podDisruptionBudget.minAvailable, so a values file copied from 0.10.7 or earlier is refused until those keys go"
     - kind: changed
       description: "appVersion 1.24.0, the first image with the backend fixes since 1.23.0: every requested spec field honoured and the request kept (#204); a cancelled run frees its concurrency slot (#203); a launched disruption plan stores its outcome (#207); run latency percentiles no longer averaged across tasks (#230); native ROUND_TRIP timed from send to the consumer's receipt (#234); lifecycle events reach webhooks, across restarts too (#231, #233); the direct Kubernetes chaos backend's ephemeral containers and the Strimzi-native SCALE_DOWN and ROLLING_RESTART (#174, #177, #181); and a Trogdor backend that can run a task on a real coordinator (#232, #236), which trogdor.agentNodes needs. The entries below that say they take an image newer than 1.23.0 are met by this one"
     - kind: added

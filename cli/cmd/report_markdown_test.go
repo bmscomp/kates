@@ -64,6 +64,33 @@ func TestRenderMarkdownReport_WithSLA(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdownReport_ViolationWithAReason(t *testing.T) {
+	// What the backend sends for a FAILED run and for a gate it could not
+	// judge: -1 where there is no number, and the reason instead.
+	report := &client.Report{
+		OverallSlaVerdict: &client.SlaVerdict{
+			Violations: []client.SlaViolation{
+				{Metric: "status", Threshold: -1, Actual: -1, Severity: "CRITICAL", Reason: "FAILED: a|b"},
+				{Metric: "p99LatencyMs", Threshold: 50, Actual: -1, Severity: "CRITICAL", Reason: "not measured"},
+			},
+		},
+	}
+
+	md := renderMarkdownReport("reason-test", report)
+
+	for _, row := range []string{
+		`| status | — | FAILED: a\|b | ❌ FAIL |`,
+		"| p99LatencyMs | 50.00 | not measured | ❌ FAIL |",
+	} {
+		if !strings.Contains(md, row) {
+			t.Errorf("markdown report lacks %q:\n%s", row, md)
+		}
+	}
+	if strings.Contains(md, "-1.00") {
+		t.Errorf("a missing number is printed as -1:\n%s", md)
+	}
+}
+
 func TestRenderMarkdownReport_SLAPassed(t *testing.T) {
 	report := &client.Report{
 		Summary: &client.ReportSummary{TotalRecords: 1000},

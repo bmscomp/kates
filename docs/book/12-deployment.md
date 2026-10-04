@@ -113,7 +113,7 @@ graph TB
         PN5["Node 5: Monitoring"]
         PN6["Node 6: Chaos + Overflow"]
         PN1 --- PB["3 Brokers + 3 Controllers<br/>dedicated nodes, anti-affinity"]
-        PN4 --- PK["Kates API replicas + external PostgreSQL"]
+        PN4 --- PK["Kates API (one pod) + external PostgreSQL"]
         PN5 --- PM["Prometheus + Grafana<br/>persistent storage"]
         PN6 --- PL["LitmusChaos + spare capacity"]
     end
@@ -628,6 +628,10 @@ make kates-deploy    # Apply K8s manifests
 # Load a native (GraalVM) image into Kind — deploys nothing
 make kates-native
 ```
+
+The Kates API runs as one pod, whichever way you deploy it. It keeps each run's workers, the concurrent-run limit, the one-plan rule for disruptions and the live event streams in its own memory. A pod that starts marks every `RUNNING` run in the database `FAILED`, so a second pod fails the runs the first one is executing. The `kates` chart therefore refuses a second replica and an autoscaler, and `kates/k8s/deployment.yaml` sets one replica.
+
+Both roll the Deployment with `Recreate`, which stops the old pod before the new one starts. An upgrade leaves the Kates API unreachable until the new pod is Ready, and a run still going when the old pod stops ends `FAILED`, so upgrade between runs.
 
 ### Kates API Configuration
 

@@ -73,6 +73,10 @@ class TestOrchestratorLiveMetricsTest {
                 .save(any());
         when(repository.findById(anyString()))
                 .thenAnswer(invocation -> Optional.ofNullable(rows.get(invocation.<String>getArgument(0))));
+        when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
+            TestRun run = invocation.getArgument(0);
+            return rows.computeIfPresent(run.getId(), (id, stored) -> run) != null;
+        });
 
         Instance<BenchmarkBackend> backends = mock(Instance.class);
         // A fresh stream per call: resolveBackend runs on every poll.
@@ -100,6 +104,7 @@ class TestOrchestratorLiveMetricsTest {
         TestRun run = new TestRun(TestType.ENDURANCE, spec).withBackend("native");
         String id = run.getId();
 
+        rows.put(id, run); // as executeTest stores it before it submits
         orchestrator.executeAsync(run, TestType.ENDURANCE, spec, "native", backend);
 
         // The persisted results carry the task ids the handles were registered
@@ -172,6 +177,7 @@ class TestOrchestratorLiveMetricsTest {
         String id = run.getId();
         String runId = "run_id=\"" + id + "\"";
 
+        rows.put(id, run); // as executeTest stores it before it submits
         orchestrator.executeAsync(run, TestType.ENDURANCE, spec, "native", backend);
         backend.progress(id + "-endurance-produce", 500, 5, 6);
         backend.progress(id + "-endurance-consume", 480);
@@ -216,6 +222,7 @@ class TestOrchestratorLiveMetricsTest {
         String id = run.getId();
         String runId = "run_id=\"" + id + "\"";
 
+        rows.put(id, run); // as executeTest stores it before it submits
         orchestrator.executeAsync(run, TestType.ENDURANCE, spec, "native", backend);
         backend.progress(id + "-endurance-produce", 100, 5, 6, 7);
         backend.progress(id + "-endurance-consume", 90);

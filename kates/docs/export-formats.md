@@ -82,6 +82,11 @@ The `JunitXmlExporter` translates Kates concepts to JUnit concepts:
 | Error message | `<failure>` on testcase | Error details if the phase failed |
 | Each SLA violation | Separate `<testcase>` | Named `SLA-{metricName}` |
 | Threshold vs actual | `<failure>` on SLA testcase | Shows expected vs observed value |
+| A gate on a latency no task measured | `<failure>` on SLA testcase | `p99LatencyMs not measured (threshold=100.00)`: the gate fails instead of passing against a latency of 0 |
+| A `FAILED` run | `SLA-status` testcase with `<failure>` | `status FAILED:` followed by the first task error, or `status FAILED before any task ran`, with or without an SLA |
+| A run with no task and no violation | One `<testcase>` named after the run | The suite is never empty, which CI would read as a pass |
+
+The suite's `tests` and `failures` attributes count every testcase and every `<failure>`, task errors included. The export exists only for a finished run: until the run is `DONE` or `FAILED`, `GET /api/tests/{id}/report/junit` answers `409 Conflict`, because the report's SLA verdict passes until the run ends and an early export would read as green.
 
 ### Sample Output
 

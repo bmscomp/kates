@@ -109,7 +109,7 @@ Use `TestService` to start performance test runs from your own code and follow t
 | `GetTest` | `GetTestRequest` | `TestRun` | Retrieve a test by ID |
 | `ListTests` | `ListTestsRequest` | `ListTestsResponse` | Paginated test listing |
 | `CancelTest` | `CancelTestRequest` | `TestRun` | Cancel a pending or running test; it is stored and returned as `FAILED` |
-| `DeleteTest` | `DeleteTestRequest` | `Empty` | Delete a test and its results |
+| `DeleteTest` | `DeleteTestRequest` | `Empty` | Delete a test and its results, stopping it first if it is pending or running |
 
 #### CreateTest
 
@@ -207,7 +207,9 @@ grpcurl "${GRPC[@]}" -d '{"id": "a1b2c3d4"}' localhost:30083 kates.TestService/D
 # Response: {} (empty)
 ```
 
-`TestStatus` declares `CANCELLED`, but no run is ever reported in it: there is no cancelled status to store, so a cancelled run reads as `FAILED` from then on. `STOPPING`, which a run passes through while a REST delete stops its tasks, reads as `RUNNING`. A client polling `GetTest` for the end of a run stops at `COMPLETED` or `FAILED`. `CancelTest` accepts only a run that is `PENDING` or `RUNNING` in the store, and answers any other, a stopping run included, with `FAILED_PRECONDITION`.
+`TestStatus` declares `CANCELLED`, but no run is ever reported in it: there is no cancelled status to store, so a cancelled run reads as `FAILED` from then on. A client polling `GetTest` for the end of a run stops at `COMPLETED` or `FAILED`. `CancelTest` accepts only a run that is `PENDING` or `RUNNING` in the store, and answers any other with `FAILED_PRECONDITION`.
+
+`DeleteTest` deletes a run and its results as `DELETE /api/tests/{id}` does. A run that is still `PENDING` or `RUNNING` is stopped first: its tasks stop, and it gives back its place among the runs the Kates API allows at once. Webhooks then hear that the run ended `FAILED`, as they do for a cancelled run.
 
 ---
 

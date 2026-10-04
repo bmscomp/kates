@@ -20,6 +20,7 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.engine.LatencyHistogram;
 import com.bmscomp.kates.engine.TestOrchestrator;
@@ -170,10 +171,26 @@ public class ReportResource {
     @Produces("application/xml")
     @Operation(
             summary = "Export report as JUnit XML",
-            description = "Returns test results in JUnit XML format for CI integration")
+            description = "Returns a finished run's results in JUnit XML format for CI integration")
+    @APIResponse(responseCode = "200", description = "The run's JUnit XML suite")
+    @APIResponse(responseCode = "409", description = "The run has not finished: it is neither DONE nor FAILED")
     public Response getJunitReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
         TestRun run =
                 repository.findById(id).orElseThrow(() -> new IllegalArgumentException("Test run not found: " + id));
+        // A run in flight has a passing verdict until it finishes (the report
+        // grades only finished runs), so its suite would tell a CI job that
+        // exported too early that the run passed.
+        TestResult.TaskStatus status = run.getStatus();
+        if (status != TestResult.TaskStatus.DONE && status != TestResult.TaskStatus.FAILED) {
+            return Response.status(Response.Status.CONFLICT)
+                    .type(MediaType.APPLICATION_JSON_TYPE)
+                    .entity(com.bmscomp.kates.api.ApiError.of(
+                            409,
+                            "Conflict",
+                            "Test run " + id + " is " + status
+                                    + "; its JUnit report is available once the run is DONE or FAILED"))
+                    .build();
+        }
         TestReport report = generator.generate(run);
         String xml = junitXmlExporter.export(report);
         return Response.ok(xml)

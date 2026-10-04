@@ -42,8 +42,9 @@ func renderMarkdownReport(id string, r *client.Report) string {
 			if len(v.Violations) > 0 {
 				b.WriteString("| Metric | Threshold | Actual | Status |\n|---|---|---|---|\n")
 				for _, viol := range v.Violations {
-					b.WriteString(fmt.Sprintf("| %s | %.2f | %.2f | ❌ FAIL |\n",
-						viol.Metric, viol.Threshold, viol.Actual))
+					threshold, actual := violationCells(viol)
+					fmt.Fprintf(&b, "| %s | %s | %s | ❌ FAIL |\n",
+						viol.Metric, threshold, strings.ReplaceAll(actual, "|", `\|`))
 				}
 			}
 		}

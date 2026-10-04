@@ -133,6 +133,8 @@ metadata:
     app: kates
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kates
@@ -187,6 +189,7 @@ spec:
 
 Key things to note:
 
+- **One replica, rolled with `Recreate`** — Kates keeps each run's workers, the concurrent-run limit (`TestOrchestrator`), the disruption lease (`DisruptionConcurrencyGuard`) and the SSE subscribers in the pod's memory, and a pod that starts marks every `RUNNING` run in the database `FAILED` (`TestOrchestrator.recoverOrphans`). A second pod fails the runs the first one is executing, and the two can each run a disruption plan against the same cluster, so do not scale the Deployment or put an autoscaler on it. Without a `strategy`, Kubernetes rolls a Deployment with a `RollingUpdate` that starts the new pod before stopping the old one; `Recreate` stops the old pod first, at the cost of a gap until the new pod is Ready. The Helm chart enforces both.
 - **serviceAccountName** — Kates needs a service account with permissions to interact with the Kafka cluster (for AdminClient operations) and the Kubernetes API (for pod watching, deployment scaling, and RBAC checks during disruption tests). See the RBAC section below.
 - **envFrom** — loads all ConfigMap entries as environment variables
 - **Database credentials** — stored in a Kubernetes Secret, not the ConfigMap
@@ -279,6 +282,40 @@ The permissions break down as follows:
 | `events/get,list,watch` | `DisruptionEventBus` | Watch Kubernetes events for disruption correlation |
 
 If you are only using performance testing (not disruption testing), you do not need these RBAC permissions. A minimal service account with no cluster-level permissions is sufficient.
+
+### Secret Access for the CDC Test
+
+None of the roles above grants anything on Secrets, and Kates needs no such grant: the kubelet hands the pod its own credentials (the `secretKeyRef` entries in the Deployment above). The one Secret Kates reads through the API is the password of the `INTEGRATION_CDC` test's source database (`CdcIntegrationService`): the Secret `postgresql`, key `postgres-password`, in the namespace of the first Service labelled `app.kubernetes.io/name=postgresql`, or `database` when there is none. Grant `get` on that Secret alone, in that namespace:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kates-cdc-secret-reader
+  namespace: database
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["postgresql"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kates-cdc-secret-reader
+  namespace: database
+subjects:
+  - kind: ServiceAccount
+    name: kates-sa
+    namespace: kates
+roleRef:
+  kind: Role
+  name: kates-cdc-secret-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+The Helm chart renders the same pair for each namespace in `rbac.cdcSecretNamespaces`, which `kates deploy --with-kafka-connect` sets to the database's namespace. Without it, an `INTEGRATION_CDC` run fails at `DB_SETUP` with a `Forbidden` error.
 
 ### Trogdor Coordinator Deployment
 

@@ -195,7 +195,9 @@ A request with a `scenario` and its `phases` is checked the same way. Each phase
 
 The `spec` in the response is the merged one: the request's values, and the LOAD defaults for everything it leaves out that LOAD has a default for. `requestedSpec` is the request's own `spec`, only the fields it set, so the two tell a requested value from a default; a request without a `spec` gets an empty one. The Kates API stores both, and `kates replay` sends `requestedSpec` back to start the run again.
 
-Run IDs are 8-character UUID prefixes. `status` moves through `PENDING`, `RUNNING`, `STOPPING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
+Run IDs are 8-character UUID prefixes. `status` moves through `PENDING` and `RUNNING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
+
+A run still `RUNNING` five minutes (`kates.engine.reaper-grace-ms`) after the time it was set to last, counted from its creation, is stopped and stored as `FAILED` too. That time is its `durationMs`, twice that for INTEGRITY, or a scenario's phases added up; INTEGRATION_CDC, which has no duration of its own, gets `kates.engine.max-duration-ms`. Each task that had not finished carries an error that starts `Timeout:`, and the tasks that had keep their results.
 
 A run still `RUNNING` five minutes (`kates.engine.reaper-grace-ms`) after the time it was set to last, counted from its creation, is stopped and stored as `FAILED` too. That time is its `durationMs`, twice that for INTEGRITY, or a scenario's phases added up; INTEGRATION_CDC, which has no duration of its own, gets `kates.engine.max-duration-ms`. Each task that had not finished carries an error that starts `Timeout:`, and the tasks that had keep their results.
 
@@ -272,7 +274,7 @@ A LOAD run has exactly two tasks, `<id>-produce-0` in phase `produce` and `<id>-
 
 #### DELETE /api/tests/{id}
 
-Stop and delete a test run. If the test is currently running, it is cancelled before deletion.
+Stop and delete a test run with its results. A run that is still `PENDING` or `RUNNING` is stopped first: its tasks stop, and it gives back its place among the `kates.engine.max-concurrent-tests` running tests. Its end is then announced as a failure, as a cancelled run's is: webhooks get its `test.completed` event with status `FAILED`, and `GET /api/events/stream` sends a `failed` event whose detail is `deleted`. Deleting a run that has already ended announces nothing. To stop a run and keep it, cancel it with `POST /api/tests/{id}/cancel` instead.
 
 **Response:** `204 No Content` on success. Returns `404 Not Found` if the test ID does not exist.
 
@@ -318,7 +320,14 @@ Get the full test report: the summary, the cluster snapshot, per-broker figures 
 }
 ```
 
-When an SLA is violated, `overallSlaVerdict.violations` contains entries of the form `{ "metric": "p99LatencyMs", "threshold": 500.0, "actual": 612.4, "severity": "CRITICAL" }`.
+When an SLA is violated, `overallSlaVerdict.violations` contains entries of the form `{ "metric": "p99LatencyMs", "threshold": 500.0, "actual": 612.4, "severity": "CRITICAL" }`. Two kinds of entry carry a `reason` instead of a number, and -1 where the number would be:
+
+| Entry | When | `reason` |
+|-------|------|----------|
+| A latency gate: `p99LatencyMs`, `p999LatencyMs` or `avgLatencyMs` | No task measured that latency | `not measured` |
+| `status`, always the first entry | The run is `FAILED`, with or without an SLA | `FAILED:` followed by the first task error, or `FAILED before any task ran` |
+
+A run that is not yet `DONE` or `FAILED` carries a passing verdict, since figures that are still climbing are not judged.
 
 The summary is computed from the run's task rows, and the example is a LOAD run of 100,000 records: one producer row and one consumer row. The table shows how each summary field combines the rows.
 
@@ -335,6 +344,8 @@ The summary is computed from the run's task rows, and the example is a LOAD run 
 
 Latency leaves consumers out because they don't measure it: a consumer's row carries no latency on the native backend and only poll times on Trogdor. A LOAD or ENDURANCE run's P99 is therefore its producer's send-to-acknowledgement P99. A task keeps its percentiles but not its latency histogram, so the percentiles of several producers cannot be merged. The highest of them is an upper bound on the run's percentile, so it never understates the tail. `kates report show`, `report diff`, `report compare`, the regression check, `kates trend` and the resilience comparison all read this summary.
 
+When no task measured latency, every latency field reads 0, which means not measured, and the verdict fails a latency gate instead of comparing it with that 0. A task keeps no P99.9, so an SLA's `maxP999LatencyMs` fails as not measured on every finished run.
+
 #### GET /api/tests/{id}/report/csv
 
 Export report as CSV. **Response:** `200 OK` with `Content-Type: text/csv`
@@ -349,13 +360,24 @@ A `# Summary` block with aggregate metrics is appended after the per-result rows
 
 #### GET /api/tests/{id}/report/junit
 
-Export report as JUnit XML for CI/CD integration. Each test result maps to a `<testcase>`; SLA violations are appended as extra `<testcase>` entries with `<failure>` elements. **Response:** `200 OK` with `Content-Type: application/xml`
+Export report as JUnit XML for CI/CD integration. Each test result maps to a `<testcase>`, with a `<failure>` when its task ended with an error. Each `overallSlaVerdict` violation follows as a `<testcase>` named `SLA-<metric>` with a `<failure>`, so a `FAILED` run always has `SLA-status`. The `tests` and `failures` attributes count every test case and every failure, and a run with no task and no violation is itself the one test case. **Response:** `200 OK` with `Content-Type: application/xml`, or `409 Conflict` with a JSON error until the run is `DONE` or `FAILED`: before then its verdict passes, so an early export would read as green.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <testsuite name="LOAD" tests="2" failures="0" errors="0">
   <testcase name="ramp-up" classname="kates.LOAD" time="15.000"/>
   <testcase name="steady-state" classname="kates.LOAD" time="110.000"/>
+</testsuite>
+```
+
+A run that failed before any task ran, such as one whose topic could not be created, exports one failing test case:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="LOAD" tests="1" failures="1" errors="0">
+  <testcase name="SLA-status" classname="kates.sla">
+    <failure message="status FAILED before any task ran" type="SlaViolation"/>
+  </testcase>
 </testsuite>
 ```
 
@@ -751,7 +773,7 @@ A `testRequest` that `POST /api/tests` would refuse for a field its type or benc
 
 ### Trend Analysis
 
-A trend follows one metric across a test type's stored runs over a number of days, compares each run with a baseline averaged over the most recent runs, and flags regressions; `kates trend` charts the same data.
+A trend follows one metric across a test type's `DONE` runs over a number of days, compares each run with a baseline averaged over the most recent of them, and flags regressions; `kates trend` charts the same data. A `FAILED` run is left out, because its numbers stop wherever it failed, and so is a run still in flight.
 
 #### GET /api/trends
 
