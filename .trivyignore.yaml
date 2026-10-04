@@ -36,11 +36,13 @@ vulnerabilities:
     # and speaks plaintext HTTP inside the cluster, and its gRPC server runs
     # without transport security. That is a reason to time-box, not to dismiss.
     #
-    # TODO(bmscomp): open a tracking issue and link it here before this expires.
+    # Tracked in #284: the move to Quarkus 3.40 LTS, whose BOM ships Netty
+    # 4.1.138, deletes this entry. The expiry is that upgrade's target date; it
+    # was 2026-10-10.
     statement: >-
       Fixed only in netty 4.1.137+, which the Quarkus 3.20.6 platform cannot
       take without breaking the GraalVM native image (four documented layers of
       unresolved/uninitialisable OpenSSL classes). Needs a coordinated Quarkus
-      platform upgrade, tracked separately. Time-boxed so it cannot be
+      platform upgrade, tracked in #284. Time-boxed so it cannot be
       forgotten.
-    expired_at: 2026-10-10
+    expired_at: 2026-10-30
