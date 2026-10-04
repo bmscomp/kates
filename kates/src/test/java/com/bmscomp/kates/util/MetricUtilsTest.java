@@ -230,6 +230,23 @@ class MetricUtilsTest {
     }
 
     @Test
+    void latencyIsMeasuredOnlyWhenARowReportsSome() {
+        assertTrue(MetricUtils.measuredLatency(
+                List.of(producer(10_000, 12.0, 8.0, 25.0, 40.0, 95.0), nativeConsumer(10_000))));
+
+        // A native consumer alone, a producer rejected before its first
+        // acknowledgement, no row at all: the summary's 0s are not latencies.
+        TestResult rejected = new TestResult()
+                .withPhaseName("produce")
+                .withRecordsSent(10_000)
+                .withError("NOT_ENOUGH_REPLICAS");
+        assertFalse(MetricUtils.measuredLatency(List.of(nativeConsumer(10_000))));
+        assertFalse(MetricUtils.measuredLatency(List.of(rejected, nativeConsumer(10_000))));
+        assertFalse(MetricUtils.measuredLatency(List.of()));
+        assertFalse(MetricUtils.measuredLatency(null));
+    }
+
+    @Test
     void throughputStillAveragesEveryRow() {
         TestResult produce = producer(10_000, 12.0, 8.0, 25.0, 40.0, 95.0).withThroughputRecordsPerSec(1_000.0);
         TestResult consume = nativeConsumer(10_000).withThroughputRecordsPerSec(900.0);

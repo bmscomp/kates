@@ -204,7 +204,7 @@ The `results` array shows in-progress metrics for each task:
 DELETE /api/tests/{id}
 ```
 
-Stops all running backend tasks for this test run and removes it from the repository. For the Trogdor backend, this sends stop commands to the Trogdor Coordinator for each task. For the native backend, this interrupts the virtual threads.
+Removes the test run with its results. A run that is still pending or running is stopped first: its backend tasks stop, and it gives back its place among the `kates.engine.max-concurrent-tests` running tests. For the Trogdor backend, this sends stop commands to the Trogdor Coordinator for each task. For the native backend, it signals each worker thread to stop. The run's end is then announced as a failure: webhooks get a `test.completed` event with status `FAILED`, and `/api/events/stream` a `failed` event with the detail `deleted`. Deleting a run that has already ended announces nothing. `DELETE /api/tests/bulk` and the gRPC `DeleteTest` delete the same way.
 
 **Response: `204 No Content`**
 

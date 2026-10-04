@@ -191,12 +191,58 @@ func TestValidateSLAs_ZeroThresholds(t *testing.T) {
 	}
 }
 
-func TestValidateSLAs_EmptyResults(t *testing.T) {
-	run := &client.TestRun{}
-	v := &ValidationSpec{MaxP99Latency: 50}
-	violations := validateSLAs(run, v)
-	if len(violations) != 0 {
-		t.Errorf("empty results should produce no violations, got %v", violations)
+func TestValidateSLAs_EmptyResultsFailLatencyGates(t *testing.T) {
+	// No row timed anything, so the gate cannot be judged. It fails, as the
+	// backend's report verdict does, instead of passing against nothing.
+	run := &client.TestRun{Status: "DONE"}
+	want := []string{"p99 not measured"}
+	if violations := validateSLAs(run, &ValidationSpec{MaxP99Latency: 50}); !reflect.DeepEqual(violations, want) {
+		t.Errorf("violations = %v, want %v", violations, want)
+	}
+	if violations := validateSLAs(run, &ValidationSpec{}); len(violations) != 0 {
+		t.Errorf("without a latency gate nothing is violated, got %v", violations)
+	}
+}
+
+func TestValidateSLAs_UnmeasuredLatencyFailsLatencyGates(t *testing.T) {
+	// A Trogdor ROUND_TRIP: records received, every latency field 0.
+	run := &client.TestRun{Status: "DONE", Results: []client.PhaseResult{
+		{PhaseName: "round-trip", RecordsSent: 10000, ThroughputRecordsPerSec: 1000},
+	}}
+	v := &ValidationSpec{MaxP99Latency: 25, MaxAvgLatency: 10, MinThroughput: 500}
+
+	want := []string{"p99 not measured", "avg not measured"}
+	if violations := validateSLAs(run, v); !reflect.DeepEqual(violations, want) {
+		t.Errorf("violations = %v, want %v", violations, want)
+	}
+}
+
+func TestValidateSLAs_ConsumerWithoutLatencyDoesNotHideTheProducers(t *testing.T) {
+	// A LOAD run's native consumer reads 0 everywhere; its producer measured.
+	run := &client.TestRun{Status: "DONE", Results: []client.PhaseResult{
+		{PhaseName: "produce", P99LatencyMs: 20, AvgLatencyMs: 5},
+		{PhaseName: "consume"},
+	}}
+	if violations := validateSLAs(run, &ValidationSpec{MaxP99Latency: 50, MaxAvgLatency: 10}); len(violations) != 0 {
+		t.Errorf("expected no violations, got %v", violations)
+	}
+}
+
+func TestValidateSLAs_FailedRunFailsItsGates(t *testing.T) {
+	// The row's latency meets the gate, and the run still failed.
+	run := &client.TestRun{Status: "FAILED", Results: []client.PhaseResult{
+		{PhaseName: "produce", P99LatencyMs: 20, Error: "NOT_ENOUGH_REPLICAS"},
+	}}
+	want := []string{"run FAILED: NOT_ENOUGH_REPLICAS"}
+	if violations := validateSLAs(run, &ValidationSpec{MaxP99Latency: 50}); !reflect.DeepEqual(violations, want) {
+		t.Errorf("violations = %v, want %v", violations, want)
+	}
+
+	// A run that failed creating its topic has no row at all.
+	noRows := &client.TestRun{Status: "FAILED"}
+	want = []string{"run FAILED before any task ran", "p99 not measured"}
+	if violations := validateSLAs(noRows, &ValidationSpec{MaxP99Latency: 50}); !reflect.DeepEqual(violations, want) {
+		t.Errorf("violations = %v, want %v", violations, want)
 	}
 }
 

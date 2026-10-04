@@ -7,18 +7,26 @@ import java.util.function.Function;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
-import com.bmscomp.kates.report.PhaseReport;
 import com.bmscomp.kates.report.ReportGenerator;
 import com.bmscomp.kates.report.ReportSummary;
 import com.bmscomp.kates.report.TestReport;
 import com.bmscomp.kates.service.TestRunRepository;
+import com.bmscomp.kates.util.MetricUtils;
 
 /**
  * Computes historical metric trends from completed test runs.
  * Supports rolling baselines, automatic regression detection,
  * and per-phase metric extraction for multi-phase test types.
+ *
+ * <p>A point is its run's report summary, or a phase's, computed from the
+ * stored results as {@link ReportGenerator} computes it but without building
+ * the report. A trend reads every run in its window, and a report not yet
+ * cached describes the cluster for its broker figures, with 30-second
+ * timeouts, and counts an SLA evaluation. Only the broker trend, which plots
+ * those figures, builds reports.
  */
 @ApplicationScoped
 public class TrendService {
@@ -39,7 +47,7 @@ public class TrendService {
     /**
      * Compute trend for a specific metric, optionally scoped to a single phase.
      * When {@code phase} is non-null, the metric is extracted from the matching
-     * {@link PhaseReport} instead of the overall {@link ReportSummary}.
+     * phase's summary instead of the overall {@link ReportSummary}.
      * Runs that do not contain the requested phase are silently skipped.
      */
     public TrendResponse computeTrend(TestType type, String metric, int days, int baselineWindow, String phase) {
@@ -54,8 +62,8 @@ public class TrendService {
 
         List<TrendResponse.DataPoint> dataPoints = new ArrayList<>();
         for (TestRun run : runs) {
-            TestReport report = reportGenerator.generate(run);
-            ReportSummary summary = phase != null ? findPhaseSummary(report, phase) : report.getSummary();
+            ReportSummary summary =
+                    phase != null ? findPhaseSummary(run, phase) : MetricUtils.computeSummary(run.getResults());
 
             if (summary != null) {
                 double value = extractor.apply(summary);
@@ -85,14 +93,10 @@ public class TrendService {
         Map<String, List<TrendResponse.DataPoint>> byPhase = new LinkedHashMap<>();
 
         for (TestRun run : runs) {
-            TestReport report = reportGenerator.generate(run);
-            List<PhaseReport> phases = report.getPhases();
-            if (phases == null) continue;
-
-            for (PhaseReport pr : phases) {
-                if (pr.getMetrics() == null) continue;
-                double value = extractor.apply(pr.getMetrics());
-                byPhase.computeIfAbsent(pr.getPhaseName(), k -> new ArrayList<>())
+            for (Map.Entry<String, ReportSummary> phase :
+                    ReportGenerator.phaseSummaries(run.getResults()).entrySet()) {
+                double value = extractor.apply(phase.getValue());
+                byPhase.computeIfAbsent(phase.getKey(), k -> new ArrayList<>())
                         .add(new TrendResponse.DataPoint(run.getCreatedAt(), run.getId(), value));
             }
         }
@@ -115,12 +119,7 @@ public class TrendService {
         Set<String> phases = new LinkedHashSet<>();
 
         for (TestRun run : runs) {
-            TestReport report = reportGenerator.generate(run);
-            if (report.getPhases() != null) {
-                for (PhaseReport pr : report.getPhases()) {
-                    phases.add(pr.getPhaseName());
-                }
-            }
+            phases.addAll(ReportGenerator.phaseSummaries(run.getResults()).keySet());
         }
         return new ArrayList<>(phases);
     }
@@ -147,6 +146,9 @@ public class TrendService {
 
         List<TrendResponse.DataPoint> dataPoints = new ArrayList<>();
         for (TestRun run : runs) {
+            // Broker figures exist only in a report: they split the run's
+            // summary by its topic's partition leaders, read when the report
+            // is built.
             TestReport report = reportGenerator.generate(run);
             if (report.getBrokerMetrics() == null) continue;
 
@@ -172,17 +174,24 @@ public class TrendService {
         return resp;
     }
 
+    /**
+     * The runs a trend reads: the type's DONE runs created in the last
+     * {@code days} days, oldest first, with their results.
+     *
+     * <p>DONE only. A FAILED run's numbers stop wherever it failed: beside
+     * complete runs it reads as a regression, and in the baseline it can hide
+     * a real one. A run still in flight has no final numbers yet.
+     */
     private List<TestRun> findRuns(TestType type, int days) {
-        Instant from = Instant.now().minus(days, ChronoUnit.DAYS);
         Instant to = Instant.now();
-        return repository.findByTypeAndDateRange(type, from, to);
+        Instant from = to.minus(days, ChronoUnit.DAYS);
+        return repository.findWithResults(type, TestResult.TaskStatus.DONE, from, to);
     }
 
-    private ReportSummary findPhaseSummary(TestReport report, String phase) {
-        if (report.getPhases() == null) return null;
-        return report.getPhases().stream()
-                .filter(p -> phase.equalsIgnoreCase(p.getPhaseName()))
-                .map(PhaseReport::getMetrics)
+    private ReportSummary findPhaseSummary(TestRun run, String phase) {
+        return ReportGenerator.phaseSummaries(run.getResults()).entrySet().stream()
+                .filter(e -> phase.equalsIgnoreCase(e.getKey()))
+                .map(Map.Entry::getValue)
                 .findFirst()
                 .orElse(null);
     }

@@ -68,6 +68,31 @@ func TestLatencyOf(t *testing.T) {
 			if got := latencyOf(tt.results); got != tt.want {
 				t.Errorf("latencyOf = %+v, want %+v", got, tt.want)
 			}
+			// Latency is measured exactly when latencyOf has some to report.
+			if got, want := measuredLatency(tt.results), tt.want != (runLatency{}); got != want {
+				t.Errorf("measuredLatency = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestSummaryMeasuredLatency(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary client.ReportSummary
+		want    bool
+	}{
+		{"a producer's", client.ReportSummary{AvgThroughputRecPerSec: 1000, AvgLatencyMs: 4, P99LatencyMs: 12}, true},
+		// Trogdor's percentiles are whole milliseconds: a fast run's P99 can
+		// read 0 while its average does not.
+		{"sub-millisecond P99", client.ReportSummary{AvgLatencyMs: 0.4}, true},
+		{"none", client.ReportSummary{AvgThroughputRecPerSec: 1000, TotalRecords: 10000}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := summaryMeasuredLatency(&tt.summary); got != tt.want {
+				t.Errorf("summaryMeasuredLatency = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }

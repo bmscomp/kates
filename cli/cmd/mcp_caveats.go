@@ -142,11 +142,12 @@ var mcpCaveatsCore = []mcpCaveat{
 	},
 	{
 		ID: mcpCaveatTrendsMixSpecs,
-		Text: "GET /api/trends selects runs by test type and date only, so a trend mixes every run of that type " +
-			"whatever its spec (partitions, record size, throughput).",
+		Text: "GET /api/trends selects runs by test type, date and status only: a trend takes every DONE run of " +
+			"that type in its window, whatever its spec (partitions, record size, throughput).",
 		Refs: []string{
-			mcpJava + "trend/TrendResource.java:28-55",
-			mcpJava + "trend/TrendService.java:45-46,175-179",
+			mcpJava + "trend/TrendResource.java:28-57",
+			mcpJava + "trend/TrendService.java:53-54,185-189",
+			mcpJava + "service/TestRunRepository.java:260-280",
 		},
 	},
 	{

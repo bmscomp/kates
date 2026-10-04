@@ -1,5 +1,7 @@
 package com.bmscomp.kates.report;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Optional;
@@ -7,9 +9,11 @@ import java.util.Optional;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.TestRunRepository;
@@ -100,6 +104,39 @@ class ReportResourceTest {
                 .statusCode();
 
         assertTrue(status >= 400);
+    }
+
+    @Test
+    void junitAnswers409WhileTheRunIsInFlight() {
+        // Its verdict passes until it finishes, so a suite exported now would
+        // tell a CI job that ran too early that the run passed.
+        TestRun run = new TestRun(TestType.LOAD, null).withId("r2").withStatus(TestResult.TaskStatus.RUNNING);
+        Mockito.when(repository.findById("r2")).thenReturn(Optional.of(run));
+
+        RestAssured.given()
+                .when()
+                .get("/api/tests/r2/report/junit")
+                .then()
+                .statusCode(409)
+                .contentType(ContentType.JSON)
+                .body("status", equalTo(409))
+                .body("message", containsString("RUNNING"));
+
+        Mockito.verify(generator, Mockito.never()).generate(Mockito.any());
+    }
+
+    @Test
+    void junitExportsAFinishedRun() {
+        TestRun run = new TestRun(TestType.LOAD, null).withId("r3").withStatus(TestResult.TaskStatus.FAILED);
+        Mockito.when(repository.findById("r3")).thenReturn(Optional.of(run));
+        Mockito.when(generator.generate(run)).thenReturn(new TestReport());
+
+        RestAssured.given()
+                .when()
+                .get("/api/tests/r3/report/junit")
+                .then()
+                .statusCode(200)
+                .body(containsString("<testsuite"));
     }
 
     @Test

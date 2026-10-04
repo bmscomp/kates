@@ -667,6 +667,8 @@ kates test delete <id>
 kates test rm <id>
 ```
 
+Delete a run and its results. A run that is still `PENDING` or `RUNNING` is stopped first: its tasks stop, it gives back its place among the runs the Kates API allows at once, and webhooks hear that it ended `FAILED`. To stop a run and keep it, use `kates test cancel`.
+
 #### test cancel
 
 ```bash
@@ -781,7 +783,7 @@ Expected output:
   Export: kates report export a1b2c3 --format csv
 ```
 
-If SLA thresholds are violated, the SLA Verdict section instead lists each violation in a Metric / Threshold / Actual / Status table.
+If SLA thresholds are violated, the SLA Verdict section instead lists each violation in a Metric / Threshold / Actual / Status table. A gate on a latency the run didn't measure shows `not measured` as its actual value, and a `FAILED` run's first row is `status`, with the failure as its actual value.
 
 #### report summary
 
@@ -810,7 +812,7 @@ kates report export <id> --format heatmap-csv > heatmap.csv
 | `heatmap` | Latency heatmap as JSON |
 | `heatmap-csv` | Latency heatmap as CSV |
 
-When run in a terminal, the export is written to an auto-named file (e.g. `kates-report-<id>.csv`); when piped or redirected, it goes to stdout. For the full report as JSON, use the global output flag instead: `kates report show <id> -o json`.
+When run in a terminal, the export is written to an auto-named file (e.g. `kates-report-<id>.csv`); when piped or redirected, it goes to stdout. For the full report as JSON, use the global output flag instead: `kates report show <id> -o json`. The `junit` format needs a finished run: until the run is `DONE` or `FAILED` the Kates API answers `409 Conflict`, and the command fails rather than write a suite that reads as passed.
 
 #### report diff
 
@@ -842,7 +844,7 @@ Per-broker metrics for a test run.
 
 ### Trend Analysis
 
-Trend analysis is how you move from "this test looks fine" to "performance has been stable for weeks." The trend command queries historical test results and renders sparkline charts showing how a metric has changed over time. It's essential for catching slow regressions that no single test run would reveal — a P99 that creeps from 15ms to 25ms over a month is invisible in individual reports but obvious in a trend chart.
+Trend analysis is how you move from "this test looks fine" to "performance has been stable for weeks." The trend command reads the `DONE` runs of one test type and renders sparkline charts showing how a metric has changed over time; `FAILED` runs and runs still in flight are left out. It's essential for catching slow regressions that no single test run would reveal — a P99 that creeps from 15ms to 25ms over a month is invisible in individual reports but obvious in a trend chart.
 
 #### trend
 
@@ -1938,7 +1940,7 @@ kates gate --min-grade A --timeout 300
 kates gate --min-grade B -o json
 ```
 
-With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. When `kates gate` ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — it prints the same object with an `error`, and with `null` for the throughput and P99 it never read. The exit code is the same as with the table.
+With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. When `kates gate` ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — it prints the same object with an `error`, and with `null` for the throughput and P99 it never read. A run that measured no latency gets no grade either, because its P99 reads 0, which would grade as the lowest latency possible. The gate fails, its `error` says the P99 was not measured, and the P99 is `null`. The exit code is the same as with the table.
 
 | Flag | Default | Description |
 |------|---------|-------------|

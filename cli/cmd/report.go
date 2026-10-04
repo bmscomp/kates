@@ -129,12 +129,8 @@ var reportShowCmd = &cobra.Command{
 				if len(v.Violations) > 0 {
 					rows := make([][]string, 0, len(v.Violations))
 					for _, viol := range v.Violations {
-						rows = append(rows, []string{
-							viol.Metric,
-							fmtFloat(viol.Threshold, 2),
-							fmtFloat(viol.Actual, 2),
-							"FAIL",
-						})
+						threshold, actual := violationCells(viol)
+						rows = append(rows, []string{viol.Metric, threshold, actual, "FAIL"})
 					}
 					output.Table([]string{"Metric", "Threshold", "Actual", "Status"}, rows)
 				}
@@ -306,6 +302,22 @@ var reportExportCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// violationCells gives a report violation's threshold and actual value as the
+// report tables print them. A reason stands in for an actual value the run
+// did not measure, or that a FAILED run's status cannot have, and a status has
+// no threshold either: the backend sends -1 for each missing number. A reason
+// can quote a task's error, so it is made printable.
+func violationCells(v client.SlaViolation) (threshold, actual string) {
+	threshold, actual = "—", output.Printable(v.Reason)
+	if v.Threshold >= 0 {
+		threshold = fmtFloat(v.Threshold, 2)
+	}
+	if v.Reason == "" {
+		actual = fmtFloat(v.Actual, 2)
+	}
+	return threshold, actual
 }
 
 func isTerminal() bool {

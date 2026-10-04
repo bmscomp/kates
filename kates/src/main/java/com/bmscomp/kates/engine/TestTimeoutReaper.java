@@ -90,7 +90,7 @@ public class TestTimeoutReaper {
                 // Safe to do before the CAS below: if the run turns out to
                 // have finished already, its workers are finished too and
                 // this is a no-op.
-                orchestrator.abortWorkers(run);
+                orchestrator.settle(run.getId());
 
                 // Compare-and-set on the status. A run can complete between
                 // the query above and this write, and an unconditional save

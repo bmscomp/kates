@@ -373,7 +373,7 @@ The pinned versions above are a snapshot for orientation; the [Version & Compati
 
 ## Where Results Live
 
-A run's results live in PostgreSQL, not in Kafka, and the rest of what you see about a run lives somewhere with a shorter life. Knowing which is which explains why a Grafana board goes quiet after a run while `kates trend` can still reach every run the Kates API has kept, and why a run's heatmap can be missing.
+A run's results live in PostgreSQL, not in Kafka, and the rest of what you see about a run lives somewhere with a shorter life. Knowing which is which explains why a Grafana board goes quiet after a run while `kates trend` can still reach every `DONE` run the Kates API has kept, and why a run's heatmap can be missing.
 
 The table lists what Kates keeps about a run, where each piece lives and how long it lasts:
 

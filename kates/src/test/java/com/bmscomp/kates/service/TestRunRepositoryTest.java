@@ -7,6 +7,8 @@ import java.util.Optional;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,9 +17,13 @@ import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
+import com.bmscomp.kates.domain.events.TestEvent;
+import com.bmscomp.kates.persistence.OutboxEventEntity;
 
 @QuarkusTest
 class TestRunRepositoryTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Inject
     TestRunRepository repository;
@@ -79,6 +85,103 @@ class TestRunRepositoryTest {
         repository.delete(run.getId());
 
         assertTrue(repository.findById(run.getId()).isEmpty());
+        assertEquals(0, repository.findAll().size());
+    }
+
+    @Test
+    void deleteReturnsTheRunItRemoved() {
+        TestRun run = new TestRun(TestType.LOAD, new TestSpec()).withStatus(TestResult.TaskStatus.DONE);
+        repository.save(run);
+
+        TestRun deleted = repository.delete(run.getId()).orElseThrow();
+
+        assertEquals(run.getId(), deleted.getId());
+        assertEquals(TestResult.TaskStatus.DONE, deleted.getStatus());
+        assertTrue(repository.delete(run.getId()).isEmpty());
+    }
+
+    /**
+     * A run deleted before it ended gets its FAILED ending queued with the
+     * delete, for the webhooks. Read inside the delete's transaction: once it
+     * commits, the outbox poller may publish the event and remove it.
+     */
+    @Test
+    void deletingARunThatHadNotEndedQueuesItsEnding() {
+        TestRun run = new TestRun(TestType.LOAD, new TestSpec()).withStatus(TestResult.TaskStatus.RUNNING);
+        repository.save(run);
+
+        List<TestEvent> endings = QuarkusTransaction.requiringNew().call(() -> {
+            assertEquals(
+                    TestResult.TaskStatus.RUNNING,
+                    repository.delete(run.getId()).orElseThrow().getStatus());
+            return failuresQueuedFor(run.getId());
+        });
+
+        assertEquals(1, endings.size());
+        assertEquals("deleted", endings.get(0).getMessage());
+        assertEquals("LOAD", endings.get(0).getTestType());
+    }
+
+    @Test
+    void deletingARunThatHadEndedQueuesNothing() {
+        TestRun run = new TestRun(TestType.LOAD, new TestSpec()).withStatus(TestResult.TaskStatus.DONE);
+        repository.save(run);
+
+        List<TestEvent> endings = QuarkusTransaction.requiringNew().call(() -> {
+            repository.delete(run.getId()).orElseThrow();
+            return failuresQueuedFor(run.getId());
+        });
+
+        assertTrue(endings.isEmpty(), "a run that ended DONE gets no FAILED ending: " + endings);
+    }
+
+    /** The FAILED test.lifecycle events queued for a run and not yet published. */
+    private List<TestEvent> failuresQueuedFor(String runId) {
+        return em
+                .createQuery("SELECT e FROM OutboxEventEntity e WHERE e.aggregateId = :id", OutboxEventEntity.class)
+                .setParameter("id", runId)
+                .getResultList()
+                .stream()
+                .map(e -> {
+                    try {
+                        return MAPPER.readValue(e.getPayload(), TestEvent.class);
+                    } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+                        throw new IllegalStateException(ex);
+                    }
+                })
+                .filter(event -> event.getStatus() == TestResult.TaskStatus.FAILED)
+                .toList();
+    }
+
+    @Test
+    void saveIfPresentUpdatesAStoredRun() {
+        TestRun run = new TestRun(TestType.LOAD, new TestSpec());
+        repository.save(run);
+
+        assertTrue(repository.saveIfPresent(run.withStatus(TestResult.TaskStatus.RUNNING)));
+
+        assertEquals(
+                TestResult.TaskStatus.RUNNING,
+                repository.findById(run.getId()).orElseThrow().getStatus());
+    }
+
+    /**
+     * A run's own writes go through saveIfPresent, so a write that read the
+     * run before a delete and lands after it cannot insert the deleted run
+     * again, as a plain save would. Nothing reads the run before the delete
+     * here: the test's session would keep that copy and answer later reads
+     * with it.
+     */
+    @Test
+    void saveIfPresentNeverInsertsARun() {
+        TestRun run = new TestRun(TestType.LOAD, new TestSpec());
+        repository.save(run);
+        repository.delete(run.getId());
+
+        assertFalse(repository.saveIfPresent(run.withStatus(TestResult.TaskStatus.RUNNING)));
+        assertFalse(repository.saveIfPresent(new TestRun(TestType.LOAD, new TestSpec())), "nor one never stored");
+
+        assertTrue(repository.findById(run.getId()).isEmpty(), "the deleted run stays deleted");
         assertEquals(0, repository.findAll().size());
     }
 

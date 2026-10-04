@@ -103,24 +103,22 @@ jobs:
           RESULT=$(curl -sf -X POST http://kates.staging:8080/api/tests \
             -H 'Content-Type: application/json' \
             -d @ci/perf-test.json)
-          RUN_ID=$(echo "$RESULT" | jq -r '.runId')
+          RUN_ID=$(echo "$RESULT" | jq -r '.id')
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
 
-          # Poll until complete
+          # Poll until the run finishes. A FAILED run is exported too: its
+          # JUnit XML carries the failure as a failed SLA-status test case.
           for i in $(seq 1 60); do
             STATUS=$(curl -sf http://kates.staging:8080/api/tests/$RUN_ID | jq -r '.status')
-            if [ "$STATUS" = "DONE" ]; then break; fi
-            if [ "$STATUS" = "ERROR" ]; then
-              echo "::error::Performance test failed"
-              exit 1
-            fi
+            if [ "$STATUS" = "DONE" ] || [ "$STATUS" = "FAILED" ]; then break; fi
             sleep 5
           done
 
       - name: Export JUnit XML
         run: |
           mkdir -p test-results
-          curl -sf "http://kates.staging:8080/api/tests/${{ steps.perf.outputs.run_id }}/export?format=junit-xml" \
+          # Answers 409, which fails this step, if the run has not finished
+          curl -sf "http://kates.staging:8080/api/tests/${{ steps.perf.outputs.run_id }}/report/junit" \
             > test-results/kafka-perf.xml
 
       - name: Run disruption test
@@ -176,7 +174,7 @@ The workflow does four things:
 
 1. **Submits a LOAD test** to measure baseline performance against the staging cluster. The test creates its own topic, runs the benchmark, and produces a `TestReport`.
 
-2. **Exports JUnit XML** so that the performance results appear in the GitHub Actions test report. SLA violations show up as test failures with the metric name, threshold, and actual value.
+2. **Exports JUnit XML** so that the performance results appear in the GitHub Actions test report. SLA violations show up as test failures with the metric name, threshold, and actual value. A `FAILED` run shows up as a failed `SLA-status` test case, and a run that has not finished cannot be exported at all.
 
 3. **Runs a disruption test** that kills the leader for partition 0 and watches the cluster for 90 seconds. The disruption report includes the SLA grade.
 

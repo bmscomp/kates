@@ -8,6 +8,7 @@ import com.bmscomp.kates.domain.SlaDefinition;
 import com.bmscomp.kates.domain.SlaMetrics;
 import com.bmscomp.kates.domain.SlaVerdict;
 import com.bmscomp.kates.domain.SlaViolation;
+import com.bmscomp.kates.domain.SlaViolation.Severity;
 
 /**
  * Evaluates a {@link SlaDefinition} against observed metrics and produces a
@@ -52,17 +53,15 @@ public class SlaEvaluator {
 
         List<SlaViolation> violations = new ArrayList<>();
 
-        if (sla.getMaxP99LatencyMs() != null && metrics.p99LatencyMs() > sla.getMaxP99LatencyMs()) {
-            violations.add(SlaViolation.critical("p99LatencyMs", sla.getMaxP99LatencyMs(), metrics.p99LatencyMs()));
-        }
-
-        if (sla.getMaxP999LatencyMs() != null && metrics.p999LatencyMs() > sla.getMaxP999LatencyMs()) {
-            violations.add(SlaViolation.critical("p999LatencyMs", sla.getMaxP999LatencyMs(), metrics.p999LatencyMs()));
-        }
-
-        if (sla.getMaxAvgLatencyMs() != null && metrics.avgLatencyMs() > sla.getMaxAvgLatencyMs()) {
-            violations.add(SlaViolation.warning("avgLatencyMs", sla.getMaxAvgLatencyMs(), metrics.avgLatencyMs()));
-        }
+        // A latency the run did not measure is negative: a producer that
+        // failed before its first acknowledgement records none, and neither
+        // does a Trogdor ROUND_TRIP. Its gate fails as "not measured" instead
+        // of passing against the 0 the report summary shows. The live path
+        // passes a task's latency as it stands, 0 before the first sample, so
+        // only a finished run's report can read as unmeasured.
+        maxLatency(violations, "p99LatencyMs", sla.getMaxP99LatencyMs(), metrics.p99LatencyMs(), Severity.CRITICAL);
+        maxLatency(violations, "p999LatencyMs", sla.getMaxP999LatencyMs(), metrics.p999LatencyMs(), Severity.CRITICAL);
+        maxLatency(violations, "avgLatencyMs", sla.getMaxAvgLatencyMs(), metrics.avgLatencyMs(), Severity.WARNING);
 
         if (sla.getMinThroughputRecPerSec() != null
                 && metrics.throughputRecPerSec() < sla.getMinThroughputRecPerSec()) {
@@ -86,7 +85,9 @@ public class SlaEvaluator {
         // RPO limit passed by construction — the same green-by-default bug the
         // error-rate check above fixed. Negative observations mean the run
         // carried no integrity check, in which case the constraint is skipped
-        // rather than passed.
+        // rather than passed. Unlike an unmeasured latency it does not fail:
+        // integrity results are not stored with a run, so a run a report reads
+        // back from the database never carries one.
         if (sla.getMaxDataLossPercent() != null
                 && metrics.dataLossPercent() >= 0
                 && metrics.dataLossPercent() > sla.getMaxDataLossPercent()) {
@@ -106,5 +107,17 @@ public class SlaEvaluator {
             return SlaVerdict.pass();
         }
         return SlaVerdict.fail(violations);
+    }
+
+    private static void maxLatency(
+            List<SlaViolation> violations, String metric, Double limit, double observed, Severity severity) {
+        if (limit == null) {
+            return;
+        }
+        if (observed < 0) {
+            violations.add(SlaViolation.notMeasured(metric, limit, severity));
+        } else if (observed > limit) {
+            violations.add(new SlaViolation(metric, limit, observed, severity));
+        }
     }
 }

@@ -126,6 +126,21 @@ class TestResourceTest {
     }
 
     @Test
+    void deleteRemovesTheRunWithItsResults() {
+        var result = new TestResult().withTaskId("t-done").withStatus(TestResult.TaskStatus.DONE);
+        var run = new TestRun(TestType.LOAD, null)
+                .withStatus(TestResult.TaskStatus.DONE)
+                .withBackend("native")
+                .withResults(List.of(result));
+        repository.save(run);
+
+        given().when().delete("/api/tests/" + run.getId()).then().statusCode(204);
+
+        given().when().get("/api/tests/" + run.getId()).then().statusCode(404);
+        given().when().delete("/api/tests/" + run.getId()).then().statusCode(404);
+    }
+
+    @Test
     void createTestReturns202Accepted() {
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         when(trogdorClient.createTask(any())).thenReturn(mapper.createObjectNode());
