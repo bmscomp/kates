@@ -40,6 +40,19 @@ type mcpCaveat struct {
 
 const mcpJava = "kates/src/main/java/com/bmscomp/kates/"
 
+// mcpRefAnchors holds the anchors of the refs made with mcpAnchoredRef.
+var mcpRefAnchors = map[string][]string{}
+
+// mcpAnchoredRef returns ref, path:lines, and records its anchors: text the
+// cited lines hold, at least one in each range. Line numbers alone go stale
+// without failing anything when the code above them moves, and then point at
+// other code; TestMCPCaveatRefAnchors fails as soon as an anchor is no longer
+// in the lines its ref cites. kates://caveats shows the ref alone.
+func mcpAnchoredRef(ref string, anchors ...string) string {
+	mcpRefAnchors[ref] = append(mcpRefAnchors[ref], anchors...)
+	return ref
+}
+
 // mcpCaveatsCore holds the caveats more than one tool group uses. Every entry
 // was checked against the code, not
 // copied from the plan: where the code said more than the plan (the CVE check
@@ -50,7 +63,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		ID: mcpCaveatLoadSingleProducer,
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
-		Refs: []string{mcpJava + "engine/TestOrchestrator.java:1147-1156"},
+		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1291-1300", "case LOAD ->", "case STRESS ->")},
 	},
 	{
 		ID: mcpCaveatReaper30Minutes,
@@ -76,9 +89,11 @@ var mcpCaveatsCore = []mcpCaveat{
 			"integrity-cg-integrity, without transactions.",
 		Refs: []string{
 			mcpJava + "domain/TestSpec.java:14-32,111-113",
-			mcpJava + "engine/TestOrchestrator.java:141,163-164,205",
-			mcpJava + "engine/TestOrchestrator.java:871-916",
-			mcpJava + "engine/TestOrchestrator.java:1125-1130,1216-1219",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:158,180-182,224",
+				"applyTypeDefaults(type, request.getSpec())", ".withRequestedSpec(", "buildTasks(type, spec, run.getId())"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:946-991", "TestSpec applyTypeDefaults(", "return merged;"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1269-1274,1364-1367",
+				"Only when asked", `"integrity-cg")`),
 			mcpJava + "engine/NativeKafkaBackend.java:494",
 			mcpJava + "persistence/EntityMapper.java:42,69-70,122-124",
 			"kates/src/main/resources/db/migration/V23__requested_spec_fields.sql:1-6",
@@ -118,7 +133,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration. The tuning report copies " +
 			"that one summary into every step, so all steps show the same numbers and the best step is always step 0.",
 		Refs: []string{
-			mcpJava + "engine/TestOrchestrator.java:1226-1227",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1374-1375", "case TUNE_REPLICATION,", "-tune-0"),
 			mcpJava + "trogdor/SpecFactory.java:38-39",
 			mcpJava + "engine/TuningTestRunner.java:101-139",
 		},

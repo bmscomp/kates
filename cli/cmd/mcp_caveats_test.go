@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -76,32 +77,122 @@ func TestMCPCaveatCatalogue(t *testing.T) {
 // point at nothing.
 func TestMCPCaveatRefsExist(t *testing.T) {
 	root := filepath.Join("..", "..")
-	refRE := regexp.MustCompile(`^([^:]+):([0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)$`)
 	for _, c := range mcpCaveats {
 		for _, ref := range c.Refs {
-			m := refRE.FindStringSubmatch(ref)
-			if m == nil {
+			path, ranges, ok := mcpParseRef(ref)
+			if !ok {
 				t.Errorf("%s: ref %q is not path:lines", c.ID, ref)
 				continue
 			}
-			lines, err := mcpCountLines(filepath.Join(root, filepath.FromSlash(m[1])))
+			lines, err := mcpCountLines(filepath.Join(root, filepath.FromSlash(path)))
 			if err != nil {
 				t.Errorf("%s: ref %q: %v", c.ID, ref, err)
 				continue
 			}
-			for _, part := range strings.Split(m[2], ",") {
-				bounds := strings.SplitN(part, "-", 2)
-				lo, _ := strconv.Atoi(bounds[0])
-				hi := lo
-				if len(bounds) == 2 {
-					hi, _ = strconv.Atoi(bounds[1])
-				}
-				if lo < 1 || hi < lo || hi > lines {
-					t.Errorf("%s: ref %q cites lines %s, the file has %d", c.ID, ref, part, lines)
+			for _, r := range ranges {
+				if r.lo < 1 || r.hi < r.lo || r.hi > lines {
+					t.Errorf("%s: ref %q cites lines %s, the file has %d", c.ID, ref, r.part, lines)
 				}
 			}
 		}
 	}
+}
+
+// TestMCPCaveatRefAnchors checks each ref made with mcpAnchoredRef against
+// the code it cites: every anchor is in the cited lines, and every range
+// holds one. TestMCPCaveatRefsExist passes a ref whose lines still exist
+// even when the code it meant has moved and other code sits there, as
+// happened to the TestOrchestrator.java refs; here the ref fails instead. To
+// fix it, find the code the caveat means and re-point the ref.
+func TestMCPCaveatRefAnchors(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files := map[string][]string{}
+	anchored := 0
+	for _, c := range mcpCaveats {
+		for _, ref := range c.Refs {
+			anchors, ok := mcpRefAnchors[ref]
+			if !ok {
+				continue
+			}
+			anchored++
+			// Every caveat citing these lines recorded its anchors; check each once.
+			anchors = slices.Compact(slices.Sorted(slices.Values(anchors)))
+			path, ranges, ok := mcpParseRef(ref)
+			if !ok || len(anchors) == 0 || slices.Contains(anchors, "") {
+				t.Errorf("%s: anchored ref %q needs the form path:lines and anchors that are not empty", c.ID, ref)
+				continue
+			}
+			lines, ok := files[path]
+			if !ok {
+				b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+				if err != nil {
+					t.Errorf("%s: ref %q: %v", c.ID, ref, err)
+					continue
+				}
+				lines = strings.Split(string(b), "\n")
+				files[path] = lines
+			}
+			mcpCheckAnchors(t, c.ID, ref, lines, ranges, anchors)
+		}
+	}
+	if anchored == 0 {
+		t.Error("no caveat ref has anchors")
+	}
+}
+
+// mcpCheckAnchors reports each anchor missing from the lines ref cites, and
+// each range that holds none of them.
+func mcpCheckAnchors(t *testing.T, id mcpCaveatID, ref string, lines []string, ranges []mcpRefRange, anchors []string) {
+	t.Helper()
+	found := make([]bool, len(anchors))
+	for _, r := range ranges {
+		if r.lo < 1 || r.hi < r.lo || r.hi > len(lines) {
+			continue // TestMCPCaveatRefsExist reports it
+		}
+		cited := strings.Join(lines[r.lo-1:r.hi], "\n")
+		held := false
+		for i, a := range anchors {
+			if strings.Contains(cited, a) {
+				found[i], held = true, true
+			}
+		}
+		if !held {
+			t.Errorf("%s: ref %q: lines %s hold none of its anchors %q", id, ref, r.part, anchors)
+		}
+	}
+	for i, a := range anchors {
+		if !found[i] {
+			t.Errorf("%s: ref %q: %q is not in the lines it cites", id, ref, a)
+		}
+	}
+}
+
+// mcpRefRange is one part of a ref's lines, a line or a range: as written,
+// and as its first and last line.
+type mcpRefRange struct {
+	part   string
+	lo, hi int
+}
+
+var mcpRefRE = regexp.MustCompile(`^([^:]+):([0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)$`)
+
+// mcpParseRef splits a source ref into its path and the parts of its lines;
+// ok is false when the ref is not path:lines.
+func mcpParseRef(ref string) (path string, ranges []mcpRefRange, ok bool) {
+	m := mcpRefRE.FindStringSubmatch(ref)
+	if m == nil {
+		return "", nil, false
+	}
+	for _, part := range strings.Split(m[2], ",") {
+		bounds := strings.SplitN(part, "-", 2)
+		lo, _ := strconv.Atoi(bounds[0])
+		hi := lo
+		if len(bounds) == 2 {
+			hi, _ = strconv.Atoi(bounds[1])
+		}
+		ranges = append(ranges, mcpRefRange{part, lo, hi})
+	}
+	return m[1], ranges, true
 }
 
 func mcpCountLines(path string) (int, error) {
