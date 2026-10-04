@@ -102,7 +102,14 @@ it passed. The exit code is the same.`,
 		}
 
 		throughput, p99 := report.AvgThroughputRecPerSec, report.P99LatencyMs
-		res.AvgThroughputRecPerSec, res.P99LatencyMs = &throughput, &p99
+		res.AvgThroughputRecPerSec = &throughput
+		// A run that measured no latency reads a P99 of 0, which grades as the
+		// lowest latency there is. The backend's report fails a latency gate
+		// it cannot judge, and so does this one.
+		if !summaryMeasuredLatency(report) {
+			return fail("P99 latency not measured: the run recorded no latency, so it cannot be graded")
+		}
+		res.P99LatencyMs = &p99
 		res.Grade = computeGateGrade(report)
 		res.Passed = gradeOrdinal(res.Grade) >= minOrdinal
 
@@ -133,8 +140,10 @@ it passed. The exit code is the same.`,
 
 // gateResult is the outcome of kates gate, which -o json prints. Grade,
 // Passed and the two metrics are set only once the run finished DONE and its
-// report summary was read; Error says why a gate ended before that. The
-// metrics are null until then, not 0, which would read as a measurement.
+// report summary was read; Error says why a gate ended before that, or why a
+// run that measured no latency got no grade. A metric is null until it is
+// read, and P99 stays null when the run measured none: 0 would read as a
+// measurement.
 type gateResult struct {
 	RunID                  string   `json:"runId"`
 	TestType               string   `json:"testType"`

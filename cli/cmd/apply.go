@@ -466,6 +466,24 @@ func scenarioSpecProblems(s TestScenario) []string {
 func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 	var violations []string
 
+	// A FAILED run meets no gate, as in the backend's report verdict. Checked
+	// row by row only, a run that failed before any row could break a gate
+	// showed "✓ SLA Pass" beside its FAILED status.
+	if isFailedStatus(strings.ToUpper(run.Status)) {
+		violations = append(violations, runFailure(run))
+	}
+	// Neither does a latency gate on a run that measured no latency (a
+	// producer that failed before its first acknowledgement, a Trogdor
+	// ROUND_TRIP): its rows read 0, which no maximum can fail.
+	if !measuredLatency(run.Results) {
+		if v.MaxP99Latency > 0 {
+			violations = append(violations, "p99 not measured")
+		}
+		if v.MaxAvgLatency > 0 {
+			violations = append(violations, "avg not measured")
+		}
+	}
+
 	for _, r := range run.Results {
 		if v.MaxP99Latency > 0 && r.P99LatencyMs > v.MaxP99Latency {
 			violations = append(violations, fmt.Sprintf("p99=%.0fms > %.0fms", r.P99LatencyMs, v.MaxP99Latency))
@@ -500,6 +518,21 @@ func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 	}
 
 	return violations
+}
+
+// runFailure names a failed run's failure as the backend's status violation
+// does: its first task error, made printable for the summary table, or that
+// no task ran.
+func runFailure(run *client.TestRun) string {
+	if len(run.Results) == 0 {
+		return "run " + run.Status + " before any task ran"
+	}
+	for _, r := range run.Results {
+		if r.Error != "" {
+			return "run " + run.Status + ": " + output.Printable(r.Error)
+		}
+	}
+	return "run " + run.Status
 }
 
 // unevaluableSLAs names the declared RTO/RPO gates the run produced no

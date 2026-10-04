@@ -258,6 +258,57 @@ class SlaEvaluatorTest {
         assertTrue(evaluator.evaluate(sla, SlaMetrics.of(1, 1, 1, 1, 1, 0.001)).passed());
     }
 
+    // ── Latency the run did not measure ──────────────────────────────────────
+
+    @Test
+    void unmeasuredLatencyFailsItsGateAsNotMeasured() {
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxP99LatencyMs(50.0);
+        sla.setMaxP999LatencyMs(100.0);
+        sla.setMaxAvgLatencyMs(10.0);
+
+        // What the report path passes when no task row measured latency. The
+        // summary shows 0 there, which passed all three gates.
+        SlaVerdict verdict = evaluator.evaluate(sla, SlaMetrics.of(-1, -1, -1, 1_000, 1_000, 0));
+
+        assertFalse(verdict.passed());
+        assertEquals(3, verdict.violations().size());
+        for (SlaViolation v : verdict.violations()) {
+            assertEquals("not measured", v.reason(), v.metric());
+            assertEquals(-1.0, v.actual(), v.metric());
+        }
+        SlaViolation p99 = verdict.violations().get(0);
+        assertEquals("p99LatencyMs", p99.metric());
+        assertEquals(50.0, p99.threshold());
+        assertEquals(SlaViolation.Severity.CRITICAL, p99.severity());
+        assertEquals("p999LatencyMs", verdict.violations().get(1).metric());
+        // Not measured fails at the gate's own severity.
+        assertEquals("avgLatencyMs", verdict.violations().get(2).metric());
+        assertEquals(SlaViolation.Severity.WARNING, verdict.violations().get(2).severity());
+    }
+
+    @Test
+    void unmeasuredLatencyWithoutALatencyGatePasses() {
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMinThroughputRecPerSec(500.0);
+
+        assertTrue(evaluator
+                .evaluate(sla, SlaMetrics.of(-1, -1, -1, 1_000, 1_000, 0))
+                .passed());
+    }
+
+    @Test
+    void liveTaskBeforeItsFirstSampleIsNotUnmeasured() {
+        SlaDefinition sla = new SlaDefinition();
+        sla.setMaxP99LatencyMs(50.0);
+
+        // Polled before its first acknowledgement, a task reports 0. Its run is
+        // still going, so the live path raises nothing for it.
+        BenchmarkStatus status = BenchmarkStatus.builder(TaskStatus.RUNNING).build();
+
+        assertTrue(evaluator.evaluate(sla, status).passed());
+    }
+
     @Test
     void unknownErrorRateSkipsTheConstraint() {
         SlaDefinition sla = new SlaDefinition();

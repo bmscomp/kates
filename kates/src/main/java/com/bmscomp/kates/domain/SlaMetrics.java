@@ -8,6 +8,11 @@ package com.bmscomp.kates.domain;
  * {@code BenchmarkStatus}, the report layer evaluates an aggregated
  * {@code ReportSummary}. Passing this neutral carrier keeps the evaluator in
  * {@code engine} free of a dependency back on {@code report}.
+ *
+ * <p>A latency is negative when the run measured none. The evaluator then fails
+ * a gate on it as "not measured", where the 0 a report summary shows would pass
+ * any maximum. An unknown error rate or resilience value, below, skips its
+ * constraint instead.
  */
 public record SlaMetrics(
         double p99LatencyMs,

@@ -37,29 +37,73 @@ public class ReportGenerator {
     com.bmscomp.kates.engine.SlaEvaluator slaEvaluator;
 
     /**
-     * Evaluates the run's SLA, but only once the run is terminal.
+     * Evaluates the run's SLA against {@code rows} — the whole run or one
+     * phase — summarized as {@code summary}, but only once the run is terminal.
      *
      * <p>A report can be generated while a run is still in flight, and partial
      * metrics routinely sit below their target mid-ramp — grading those would
      * report a breach the finished run does not have. In-flight runs therefore
-     * carry a passing verdict until there is a complete result to judge.
+     * carry a passing verdict until there is a complete result to judge, and
+     * their JUnit export is refused (ReportResource) rather than read as green.
      */
-    private SlaVerdict evaluateSla(TestRun run, ReportSummary summary) {
+    private SlaVerdict evaluateSla(TestRun run, List<TestResult> rows, ReportSummary summary) {
         if (!isTerminal(run.getStatus())) {
             return SlaVerdict.pass();
         }
-        return slaEvaluator.evaluate(run.getSla(), toSlaMetrics(run, summary));
+        return slaEvaluator.evaluate(run.getSla(), toSlaMetrics(run, rows, summary));
+    }
+
+    /**
+     * The run's own verdict: its status, then its SLA. A FAILED run fails
+     * whether or not it declared an SLA, with a first violation naming the
+     * failure. A run that failed creating its topic has no rows to breach
+     * anything, and a latency-only SLA never looks at how the run ended, so
+     * both used to pass, and the JUnit suites exported from them with them.
+     * Phases are judged on their SLA alone: the status belongs to the run.
+     */
+    private SlaVerdict overallVerdict(TestRun run, List<TestResult> rows, ReportSummary summary) {
+        SlaVerdict verdict = evaluateSla(run, rows, summary);
+        if (run.getStatus() != TestResult.TaskStatus.FAILED) {
+            return verdict;
+        }
+        List<SlaViolation> violations = new ArrayList<>();
+        violations.add(SlaViolation.runFailed(failureOf(run)));
+        violations.addAll(verdict.violations());
+        return SlaVerdict.fail(violations);
+    }
+
+    /**
+     * What a FAILED run's status violation says: the first task error, or that
+     * no task ran. A run that failed before submitting its tasks, creating its
+     * topic for instance, stores no row and no reason; only the log has it.
+     */
+    private static String failureOf(TestRun run) {
+        List<TestResult> results = run.getResults();
+        if (results == null || results.isEmpty()) {
+            return "FAILED before any task ran";
+        }
+        return results.stream()
+                .map(TestResult::getError)
+                .filter(error -> error != null && !error.isBlank())
+                .findFirst()
+                .map(error -> "FAILED: " + error)
+                .orElse("FAILED");
     }
 
     /**
      * Maps an aggregated summary onto the values an SLA is evaluated against.
+     *
+     * <p>A latency is -1 when no row measured one, so its gate fails as not
+     * measured instead of passing against the summary's 0. P99.9 always is:
+     * a task row keeps no P99.9, so the summary's is always 0.
      *
      * <p>Resilience values come from the run's integrity results rather than the
      * summary, which does not carry them; the worst value across tasks is used,
      * and -1 means the run had no integrity check so the corresponding
      * constraint is skipped instead of silently passing.
      */
-    private static com.bmscomp.kates.domain.SlaMetrics toSlaMetrics(TestRun run, ReportSummary summary) {
+    private static com.bmscomp.kates.domain.SlaMetrics toSlaMetrics(
+            TestRun run, List<TestResult> rows, ReportSummary summary) {
         double dataLossPercent = -1;
         double maxRtoMs = -1;
         double rpoMs = -1;
@@ -74,10 +118,11 @@ public class ReportGenerator {
             rpoMs = Math.max(rpoMs, integrity.rpoMs());
         }
 
+        boolean latencyMeasured = MetricUtils.measuredLatency(rows);
         return new com.bmscomp.kates.domain.SlaMetrics(
-                summary.p99LatencyMs(),
-                summary.p999LatencyMs(),
-                summary.avgLatencyMs(),
+                latencyMeasured ? summary.p99LatencyMs() : -1,
+                -1,
+                latencyMeasured ? summary.avgLatencyMs() : -1,
                 summary.avgThroughputRecPerSec(),
                 summary.totalRecords(),
                 summary.errorRate(),
@@ -158,8 +203,10 @@ public class ReportGenerator {
             ReportSummary empty = MetricUtils.computeSummary(List.of());
             report.setSummary(empty);
             // A terminal run that produced nothing still fails a
-            // minRecordsProcessed / minThroughput SLA — that IS the breach.
-            report.setOverallSlaVerdict(evaluateSla(run, empty));
+            // minRecordsProcessed / minThroughput SLA — that IS the breach —
+            // and a latency gate, which nothing measured. A FAILED one, such as
+            // a run whose topic could not be created, fails without an SLA.
+            report.setOverallSlaVerdict(overallVerdict(run, List.of(), empty));
             return report;
         }
 
@@ -176,7 +223,7 @@ public class ReportGenerator {
                 pr.setPhaseName(entry.getKey());
                 ReportSummary phaseMetrics = MetricUtils.computeSummary(entry.getValue());
                 pr.setMetrics(phaseMetrics);
-                pr.setSlaVerdict(evaluateSla(run, phaseMetrics));
+                pr.setSlaVerdict(evaluateSla(run, entry.getValue(), phaseMetrics));
                 phases.add(pr);
             }
             report.setPhases(phases);
@@ -198,8 +245,9 @@ public class ReportGenerator {
         // declared SLA was stored, rendered and exported as PASSED no matter what
         // the run did — every gate built on it (report verdict, JUnit export,
         // --fail-on-sla-breach) was green by construction. Runs without an SLA
-        // still pass: SlaEvaluator returns pass() for a null/empty definition.
-        report.setOverallSlaVerdict(evaluateSla(run, report.getSummary()));
+        // still pass, unless they FAILED: SlaEvaluator returns pass() for a
+        // null/empty definition.
+        report.setOverallSlaVerdict(overallVerdict(run, results, report.getSummary()));
 
         String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
         katesMetrics.recordSlaEvaluation(typeName, report.getOverallSlaVerdict().passed());
@@ -374,12 +422,15 @@ public class ReportGenerator {
             if (!verdict.violations().isEmpty()) {
                 sb.append("| Metric | Threshold | Actual | Severity |\n|---|---|---|---|\n");
                 for (SlaViolation v : verdict.violations()) {
+                    // -1 is no value: a FAILED run's status has no threshold,
+                    // and the reason stands in for an actual value the run did
+                    // not measure or that a status cannot have.
                     sb.append("| ")
                             .append(v.metric())
                             .append(" | ")
-                            .append(String.format("%.2f", v.threshold()))
+                            .append(v.threshold() >= 0 ? String.format("%.2f", v.threshold()) : "—")
                             .append(" | ")
-                            .append(String.format("%.2f", v.actual()))
+                            .append(v.reason() != null ? tableCell(v.reason()) : String.format("%.2f", v.actual()))
                             .append(" | ")
                             .append(v.severity())
                             .append(" |\n");
@@ -451,5 +502,10 @@ public class ReportGenerator {
         }
 
         return sb.toString();
+    }
+
+    /** A task error as one Markdown table cell: a pipe or a line break would end the row. */
+    private static String tableCell(String text) {
+        return text.replace("|", "\\|").replace('\n', ' ').replace('\r', ' ');
     }
 }
