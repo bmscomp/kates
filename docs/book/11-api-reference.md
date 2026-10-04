@@ -768,7 +768,7 @@ A `testRequest` that `POST /api/tests` would refuse for a field its type or benc
 
 ### Trend Analysis
 
-A trend follows one metric across a test type's stored runs over a number of days, compares each run with a baseline averaged over the most recent runs, and flags regressions; `kates trend` charts the same data.
+A trend follows one metric across a test type's `DONE` runs over a number of days, compares each run with a baseline averaged over the most recent of them, and flags regressions; `kates trend` charts the same data. A `FAILED` run is left out, because its numbers stop wherever it failed, and so is a run still in flight.
 
 #### GET /api/trends
 
