@@ -72,7 +72,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			"kates/src/main/resources/application.properties:317-331",
 			mcpJava + "engine/TestTimeoutReaper.java:39-47,50-136",
-			mcpJava + "engine/TestOrchestrator.java:127-149,180-183,345,963-1034",
+			mcpJava + "engine/TestOrchestrator.java:127-149,180-183,355,1018-1089",
 			mcpJava + "persistence/EntityMapper.java:144-153",
 			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
 			mcpJava + "domain/TestRun.java:478-481",
