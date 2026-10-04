@@ -13,7 +13,12 @@ global:
 # cluster. Enabled in values-prod.yaml; leave false for dev/kind.
 productionMode: false
 
-# -- Number of KATES replicas
+# -- Number of Kates API pods. Must be 1; values.schema.json refuses more.
+# The Kates API keeps each run's workers, the concurrent-run limit, the
+# disruption lease and the live event streams in its own memory, and a pod
+# that starts marks every RUNNING run in the database FAILED. A second pod
+# fails the runs the first is executing, and the two can each run a
+# disruption plan against the same cluster.
 replicaCount: 1
 
 # -- Container image configuration
@@ -178,16 +183,21 @@ containerSecurityContext:
 # -- Grace period for pod termination (seconds)
 terminationGracePeriodSeconds: 60
 
-# -- Deployment update strategy
+# -- Deployment update strategy. Must be Recreate; values.schema.json refuses
+# RollingUpdate, which starts the new pod while the old one still runs (see
+# replicaCount). Recreate stops the old pod first, so every upgrade has a gap:
+# the API is unreachable until the new pod is Ready, a minute or two on the
+# JVM image, and a run still going when the old pod stops ends FAILED, as on
+# any restart. Upgrade between runs.
 strategy:
-  type: RollingUpdate
-  rollingUpdate:
-    maxSurge: 1
-    maxUnavailable: 0
+  type: Recreate
 
-# -- Horizontal Pod Autoscaler configuration
+# -- Horizontal Pod Autoscaler configuration. enabled must stay false;
+# values.schema.json refuses true. Kates runs one replica (see replicaCount),
+# and the CPU a native benchmark burns is what would make an autoscaler add a
+# second pod in the middle of a run.
 autoscaling:
-  # -- Enable HPA
+  # -- Enable HPA (must be false)
   enabled: false
   # -- Minimum replicas
   minReplicas: 1
@@ -214,11 +224,14 @@ autoscaling:
           value: 2
           periodSeconds: 60
 
-# -- Pod Disruption Budget configuration
+# -- Pod Disruption Budget configuration. With one pod, a budget either allows
+# its eviction or blocks every node drain: set maxUnavailable, and leave
+# minAvailable empty.
 podDisruptionBudget:
   # -- Enable PDB
   enabled: false
-  # -- Minimum available pods (overrides maxUnavailable)
+  # -- Minimum available pods. Must stay empty; values.schema.json refuses a
+  # value: any minimum leaves the one pod unevictable, and a drain never ends
   minAvailable: ""
   # -- Maximum unavailable pods
   maxUnavailable: 1

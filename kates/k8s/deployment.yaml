@@ -8,7 +8,15 @@ metadata:
     app.kubernetes.io/name: kates
     app.kubernetes.io/part-of: kates
 spec:
+  # One pod, and Recreate so an update never runs two. The Kates API keeps its
+  # runs, the concurrent-run limit, the disruption lease and event streams in
+  # memory, and a pod that starts marks every RUNNING run FAILED, so a second
+  # pod — another replica, or a rolling update's surge pod — fails the runs
+  # the first is executing. The cost is a gap during an update, until the new
+  # pod is Ready. The Helm chart's schema refuses more than one replica.
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kates
