@@ -258,12 +258,22 @@ public class TestOrchestrator {
         // it — a lost update, or an optimistic-lock failure thrown into the
         // virtual thread. The finally matters: workers are already running by
         // now, so a failed save must not leave them with no handle to stop them.
+        //
+        // An update only: the client has the run's id from executeTest's
+        // answer, so a delete can land while the tasks are being submitted, and
+        // a plain save would insert the deleted run again, RUNNING.
+        boolean stored = false;
         try {
-            repository.save(run);
+            stored = repository.saveIfPresent(run);
         } finally {
             registerHandles(run, submitted);
         }
-        if (run.getStatus() == TestResult.TaskStatus.FAILED) {
+        if (!stored) {
+            // Deleted while its tasks were being submitted. The delete settled
+            // the run before these workers had handles to stop, so stop them now.
+            LOG.infof("Run %s was deleted while its tasks were being submitted; stopping them", run.getId());
+            settle(run.getId());
+        } else if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
             releasePermit(run.getId());
@@ -398,13 +408,18 @@ public class TestOrchestrator {
         // Same ordering rule as executeAsync: publish handles only once the row
         // they belong to is persisted, so the reconciler cannot race this write
         // — but publish them even if that write fails, so running workers stay
-        // stoppable.
+        // stoppable. An update only, as there: the row is listed from the
+        // first save, so a delete can come before this one.
+        boolean stored = false;
         try {
-            repository.save(run);
+            stored = repository.saveIfPresent(run);
         } finally {
             registerHandles(run, submitted);
         }
-        if (run.getStatus() == TestResult.TaskStatus.FAILED) {
+        if (!stored) {
+            LOG.infof("Run %s was deleted while its phases were being submitted; stopping them", run.getId());
+            settle(run.getId());
+        } else if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
             releasePermit(run.getId());
@@ -417,9 +432,17 @@ public class TestOrchestrator {
     }
 
     public TestRun refreshStatus(String runId) {
-        TestRun run = repository
-                .findById(runId)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
+        java.util.Optional<TestRun> found = repository.findById(runId);
+        if (found.isEmpty()) {
+            // Gone from the store while this process may still be running it:
+            // its submission registered workers after a delete had settled it,
+            // or its row was deleted outside the API. The reconciler used to
+            // meet it here every tick and leave its workers running and its
+            // permit taken until a restart, and nothing else would settle it.
+            settle(runId);
+            throw new IllegalArgumentException("Test run not found: " + runId);
+        }
+        TestRun run = found.get();
 
         // Snapshot the status BEFORE this poll so the terminal transition (and
         // its one-shot events + metrics) fires exactly once. Without this,
@@ -593,7 +616,11 @@ public class TestOrchestrator {
 
         if (!pollSignature(run).equals(signatureBefore)) {
             try {
-                repository.save(run);
+                // An update only. A delete that lands while this poll is under
+                // way must stay a delete: a plain save inserts the run again.
+                if (!repository.saveIfPresent(run)) {
+                    settle(runId);
+                }
             } catch (jakarta.persistence.OptimisticLockException e) {
                 // Another writer (the reconciler, the reaper, a concurrent GET)
                 // moved the row first. Their write is as valid as this one, so
@@ -720,34 +747,88 @@ public class TestOrchestrator {
     }
 
     /**
-     * Stops any live backend workers for a run and drops its handles WITHOUT
-     * changing the persisted status. Used by the timeout reaper and by cancel,
-     * which own the FAILED transition — the previous reaper updated the DB row
-     * but left the producer/consumer virtual threads running, so a "failed" run
+     * Ends what a run holds in this process: stops its backend workers, ends
+     * its per-run meters, drops its handles and gives back its concurrency
+     * permit, WITHOUT touching the stored row. Whoever settles the run owns
+     * what happens to the row: cancel and the timeout reaper store it FAILED,
+     * a delete removes it, and the reconciler settles a run whose row is gone.
+     *
+     * <p>Idempotent, so every path can call it, for a run already settled or
+     * one this process never tracked. The previous reaper updated the row but
+     * left the producer/consumer virtual threads running, so a "failed" run
      * kept hammering Kafka and skewing concurrent runs.
+     *
+     * <p>Each handle is stopped through the backend that issued it, which is
+     * the run's own: the row that names the run's backend may be gone already.
      */
-    public void abortWorkers(TestRun run) {
-        List<BenchmarkHandle> handles = activeHandles.remove(run.getId());
+    public void settle(String runId) {
+        List<BenchmarkHandle> handles = activeHandles.remove(runId);
         // The run is ending either way, so its meters and concurrency slot must
-        // be reclaimed even when there is nothing left to stop.
-        benchmarkMetrics.endRun(run.getId());
-        releasePermit(run.getId());
-        if (handles == null || handles.isEmpty()) {
+        // be reclaimed even when there is nothing left to stop, and before a
+        // backend that fails to stop can get in the way.
+        benchmarkMetrics.endRun(runId);
+        releasePermit(runId);
+        if (handles == null) {
             return;
         }
-        String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
-        com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
-        if (backendResult.isFailure()) {
-            return;
-        }
-        BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
         for (BenchmarkHandle handle : handles) {
+            java.util.Optional<BenchmarkBackend> backend =
+                    resolveBackend(handle.backendName()).asSuccess();
+            if (backend.isEmpty()) {
+                LOG.warnf(
+                        "Cannot stop task %s of ended run %s: no backend %s",
+                        handle.taskId(), runId, handle.backendName());
+                continue;
+            }
             try {
-                backend.stop(handle);
+                backend.get().stop(handle);
             } catch (Exception e) {
                 LOG.warnf("Failed to stop task %s of ended run: %s", handle.taskId(), e.getMessage());
             }
         }
+    }
+
+    /**
+     * Deletes a run and its results, first settling it if it is still going:
+     * its tasks stop and its concurrency permit comes back. Every delete path
+     * used to remove the row without settling the run, and the reconciler,
+     * which then found the run gone every tick, never settled it either. Its
+     * workers could keep producing, and enough such deletes made every new run
+     * answer 429 until a restart.
+     *
+     * <p>Settled first, so the reconciler stops tracking the run before its
+     * row goes. A write already under way cannot bring the row back, because
+     * the run's own writes only update a row (see
+     * {@link TestRunRepository#saveIfPresent}). Workers a submission still
+     * under way registers after the settle are stopped by whichever finds the
+     * row gone first: that submission's write, or the reconciler.
+     *
+     * <p>A run deleted before it ended is announced as ending FAILED, as a
+     * cancelled run is, with the detail "deleted": the delete queues the
+     * webhooks' event with the row's removal, and the event stream and the
+     * completion metric hear of it here, once the row is gone. Whether the run
+     * had ended is what the delete read under the row's lock, not a status
+     * read before it, so a run that ended on its own in between is not
+     * announced twice. An ended run's delete announces nothing.
+     *
+     * @return false when no run has that id
+     */
+    public boolean deleteTest(String runId) {
+        settle(runId);
+        java.util.Optional<TestRun> deleted = repository.delete(runId);
+        if (deleted.isEmpty()) {
+            return false;
+        }
+        TestResult.TaskStatus status = deleted.get().getStatus();
+        if (status != TestResult.TaskStatus.DONE && status != TestResult.TaskStatus.FAILED) {
+            String typeName = deleted.get().getTestType() != null
+                    ? deleted.get().getTestType().name()
+                    : "UNKNOWN";
+            lifecycleEvents.fireAsync(
+                    new TestLifecycleEvent(runId, typeName, TestLifecycleEvent.EventKind.FAILED, "deleted"));
+            katesMetrics.recordTestCompleted(typeName, "failed");
+        }
+        return true;
     }
 
     @PreDestroy
@@ -795,32 +876,6 @@ public class TestOrchestrator {
         activeHandles.clear();
         heatmapRows.clear();
         heatmapOrder.clear();
-    }
-
-    public void stopTest(String runId) {
-        TestRun run = repository
-                .findById(runId)
-                .orElseThrow(() -> new IllegalArgumentException("Test run not found: " + runId));
-
-        String backendName = run.getBackend() != null ? run.getBackend() : defaultBackend;
-        com.bmscomp.kates.util.Result<BenchmarkBackend, Exception> backendResult = resolveBackend(backendName);
-        if (backendResult.isFailure()) {
-            return; // Cannot cancel what has no backend.
-        }
-        BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
-
-        List<BenchmarkHandle> handles = activeHandles.getOrDefault(runId, List.of());
-        for (BenchmarkHandle handle : handles) {
-            try {
-                backend.stop(handle);
-            } catch (Exception e) {
-                LOG.warn("Failed to stop task: " + handle.taskId(), e);
-            }
-        }
-
-        run = run.withStatus(TestResult.TaskStatus.STOPPING);
-        repository.save(run);
-        fireEvent(run, TestLifecycleEvent.EventKind.STOPPING);
     }
 
     /**
@@ -1514,7 +1569,7 @@ public class TestOrchestrator {
      *
      * <p>It ends the run the way the timeout reaper does, because nothing
      * settles a FAILED run afterwards: {@link #refreshStatus} returns early for
-     * it and the reaper only scans RUNNING. So {@link #abortWorkers} hands back
+     * it and the reaper only scans RUNNING. So {@link #settle} hands back
      * the concurrency slot and the per-run meters here, before FAILED is
      * written, since once the row reads FAILED the reconciler drops the run's
      * handles and nothing could stop its workers. The write is a compare-and-set
@@ -1541,7 +1596,7 @@ public class TestOrchestrator {
                 throw new RunNotCancellableException(status);
             }
             TestRun cancelled = withCancelledTasks(run.withStatus(TestResult.TaskStatus.FAILED));
-            abortWorkers(cancelled);
+            settle(runId);
             if (repository.saveIfStatus(cancelled, status)) {
                 String typeName = cancelled.getTestType() != null
                         ? cancelled.getTestType().name()

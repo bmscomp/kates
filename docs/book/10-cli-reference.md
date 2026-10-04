@@ -667,6 +667,8 @@ kates test delete <id>
 kates test rm <id>
 ```
 
+Delete a run and its results. A run that is still `PENDING` or `RUNNING` is stopped first: its tasks stop, it gives back its place among the runs the Kates API allows at once, and webhooks hear that it ended `FAILED`. To stop a run and keep it, use `kates test cancel`.
+
 #### test cancel
 
 ```bash

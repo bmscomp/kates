@@ -66,6 +66,10 @@ class TestOrchestratorCancelTest {
                 .save(any());
         when(repository.findById(anyString()))
                 .thenAnswer(invocation -> Optional.ofNullable(rows.get(invocation.<String>getArgument(0))));
+        when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
+            TestRun run = invocation.getArgument(0);
+            return rows.computeIfPresent(run.getId(), (id, stored) -> run) != null;
+        });
         when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
             beforeConditionalWrite.run();
             TestRun run = invocation.getArgument(0);
@@ -117,6 +121,8 @@ class TestOrchestratorCancelTest {
         TestSpec spec = spec();
         TestRun run = new TestRun(TestType.LOAD, spec).withBackend("fake");
         String id = run.getId();
+        // Stored first, as executeTest stores it before it submits.
+        rows.put(id, run);
         orchestrator.executeAsync(run, TestType.LOAD, spec, "fake", backend);
         assertEquals(TaskStatus.RUNNING, rows.get(id).getStatus());
 
