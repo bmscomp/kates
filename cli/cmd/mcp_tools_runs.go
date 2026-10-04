@@ -636,10 +636,10 @@ func mcpRunDecodeSpec(raw json.RawMessage, w *mcpRunSpecWire) (bool, error) {
 }
 
 // mcpRunSpecFrom reads the stored spec. A run without a topic used one named
-// after its type (TestOrchestrator.java:1117,1412-1413). The topic, acks and
+// after its type (TestOrchestrator.java:1261,1560-1561). The topic, acks and
 // compressionType are shown as identifiers only when they hold values Kafka
 // accepts: a scenario's base spec reaches the store unvalidated
-// (TestOrchestrator.java:319-331), so another value is third-party text and
+// (TestOrchestrator.java:348-361), so another value is third-party text and
 // goes, fenced, into invalid. The seven fields a backend without
 // requestedSpec never carried are shown only for a run that has one. call may
 // be nil when only the topic's kind is needed.
@@ -761,7 +761,7 @@ func mcpRunRequestedFrom(call *mcpCall, run *client.MCPRun) (*mcpRunRequestedSpe
 func mcpRunTaskFrom(call *mcpCall, t client.MCPRunTask) mcpRunTaskOut {
 	return mcpRunTaskOut{
 		// A scenario run's task ids are the run id and the phase name
-		// (TestOrchestrator.java:1251), which nothing validates.
+		// (TestOrchestrator.java:1399), which nothing validates.
 		TaskID:              call.FenceN(t.TaskID, 128),
 		Phase:               call.FenceN(t.PhaseName, 64),
 		Status:              mcpSanitizeLine(t.Status, 16),
@@ -2098,7 +2098,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 		Refs: []string{
 			mcpJava + "persistence/TestResultEntity.java:20-75",
 			mcpJava + "persistence/EntityMapper.java:171-206",
-			mcpJava + "engine/TestOrchestrator.java:1484-1485",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1632-1633", "getIntegrityResult() != null", "withIntegrity("),
 			mcpJava + "report/ReportGenerator.java:106-132,479-484",
 			mcpJava + "engine/SlaEvaluator.java:92-103",
 		},
@@ -2111,7 +2111,8 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
 			"audit row.",
 		Refs: []string{
-			mcpJava + "engine/TestOrchestrator.java:1498-1571",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1646-1719",
+				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
 			mcpJava + "api/TestResource.java:261-306",
 			mcpJava + "domain/TestResult.java:25-31",
 		},
@@ -2124,9 +2125,11 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"refuses a scenario that sets consumerGroup, a fetch setting or enableCrc: true, and the producer " +
 			"options and the rate (throughput, or targetThroughput without it) reach every phase.",
 		Refs: []string{
-			mcpJava + "engine/TestOrchestrator.java:319-326,349-352",
-			mcpJava + "engine/TestOrchestrator.java:1048-1104",
-			mcpJava + "engine/TestOrchestrator.java:1237-1254",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:348-356,379-382",
+				"applyTypeDefaults(type, scenario.getBaseSpec())", ".withRequestedSpec(", "scenario.resolveSpecForPhase(phase)"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1192-1248",
+				"scenarioInapplicableFields(TestScenario scenario", "check no record CRCs"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1385-1437", "List<BenchmarkTask> buildPhaseTask(", `taskId + "-spike"`),
 			mcpJava + "domain/TestScenario.java:107-182",
 			mcpJava + "domain/ScenarioPhase.java:21-26",
 		},
