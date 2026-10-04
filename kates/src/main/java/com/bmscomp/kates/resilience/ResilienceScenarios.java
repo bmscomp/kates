@@ -117,7 +117,9 @@ public final class ResilienceScenarios {
     }
 
     /**
-     * Build a FaultSpec from a scenario with optional target overrides.
+     * Build a FaultSpec from a scenario with optional target overrides. The
+     * duration is not clamped to the chaos limits: a spec past them is
+     * refused, not shortened behind the caller's back.
      */
     public static FaultSpec buildFaultSpec(Scenario scenario, Map<String, Object> overrides) {
         String targetPod = overrides != null && overrides.containsKey("targetPod")
@@ -125,7 +127,7 @@ public final class ResilienceScenarios {
                 : "";
 
         int durationSec = overrides != null && overrides.containsKey("chaosDurationSec")
-                ? ((Number) overrides.get("chaosDurationSec")).intValue()
+                ? seconds(overrides.get("chaosDurationSec"))
                 : scenario.chaosDurationSec();
 
         return FaultSpec.builder(scenario.id())
@@ -134,5 +136,17 @@ public final class ResilienceScenarios {
                 .targetPod(targetPod)
                 .probes(scenario.probes())
                 .build();
+    }
+
+    /**
+     * A number of seconds from JSON. One past the int range saturates, so the
+     * limits refuse it: {@code intValue()} wrapped it, and 4294967356 seconds
+     * came out as 60.
+     */
+    private static int seconds(Object value) {
+        if (value instanceof Number n) {
+            return (int) n.doubleValue();
+        }
+        throw new IllegalArgumentException("chaosDurationSec must be a number of seconds, not " + value);
     }
 }

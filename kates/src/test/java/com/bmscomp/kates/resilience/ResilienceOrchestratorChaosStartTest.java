@@ -11,6 +11,7 @@ import static org.mockito.Mockito.*;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,15 +58,40 @@ class ResilienceOrchestratorChaosStartTest {
     }
 
     private ResilienceReport execute() {
+        return execute(FaultSpec.builder("pod-kill")
+                .targetNamespace("kafka")
+                .chaosDurationSec(1)
+                .build());
+    }
+
+    private ResilienceReport execute(FaultSpec chaosSpec) {
         ResilienceTestRequest request = new ResilienceTestRequest();
         request.setSteadyStateSec(0);
         request.setMaxRecoveryWaitSec(5);
         request.setProbes(List.of(ProbeSpec.builder("up").build()));
-        request.setChaosSpec(FaultSpec.builder("pod-kill")
+        request.setChaosSpec(chaosSpec);
+        return orchestrator.execute(request);
+    }
+
+    /**
+     * The kubernetes provider waits out the delay before it injects. A run that
+     * waited chaosDurationSec plus two minutes gave up first, and measured a
+     * recovery from a fault that had not gone in yet.
+     */
+    @Test
+    void theWaitForTheFaultCoversItsDelay() throws Exception {
+        Instant now = Instant.now();
+        CompletableFuture<ChaosOutcome> fault = spy(CompletableFuture.completedFuture(
+                ChaosOutcome.success("engine", "pod-kill", now, now, System.nanoTime(), null, null, null)));
+        when(orchestrator.chaosCoordinator.triggerFault(any())).thenReturn(fault);
+
+        execute(FaultSpec.builder("pod-kill")
                 .targetNamespace("kafka")
+                .delayBeforeSec(300)
                 .chaosDurationSec(1)
                 .build());
-        return orchestrator.execute(request);
+
+        verify(fault).get(300 + 1 + 120, TimeUnit.SECONDS);
     }
 
     @Test

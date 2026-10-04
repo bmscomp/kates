@@ -136,8 +136,11 @@ public class KubernetesChaosProvider implements ChaosProvider {
                         "DisruptionType " + spec.disruptionType() + " not supported by kubernetes provider");
         }
 
-        if (spec.chaosDurationSec() > 0 && spec.disruptionType() == DisruptionType.NETWORK_PARTITION) {
-            Thread.sleep(spec.chaosDurationSec() * 1000L);
+        // Removed whatever the duration: one of 0 used to leave the partition in
+        // place until rollback, or for good. The chaos limits refuse such a
+        // duration, so here it can only be a blip.
+        if (spec.disruptionType() == DisruptionType.NETWORK_PARTITION) {
+            Thread.sleep(Math.max(0, spec.chaosDurationSec()) * 1000L);
             cleanup(engineName);
         }
     }
