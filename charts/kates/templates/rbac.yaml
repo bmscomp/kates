@@ -19,9 +19,8 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log", "nodes", "namespaces", "persistentvolumeclaims", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
+  # No secrets: the one Secret the Kates API reads is granted by a Role in that
+  # Secret's namespace (rbac.cdcSecretNamespaces).
   - apiGroups: ["apps"]
     resources: ["statefulsets", "deployments"]
     verbs: ["get", "list"]
@@ -91,5 +90,46 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kates.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- /*
+  The INTEGRATION_CDC test reads its database's password from the Secret
+  `postgresql` (key postgres-password) in the namespace of the first Service
+  labelled app.kubernetes.io/name=postgresql, `database` when there is none
+  (CdcIntegrationService). It is the only Secret the Kates API reads, so each
+  namespace listed gets a Role with `get` on that one name. The release
+  namespace ends the name, so a release of the same name in another
+  namespace (`kates deploy` switching topology) does not collide with it.
+*/}}
+{{- range $ns := .Values.rbac.cdcSecretNamespaces | default list | uniq }}
+{{- $name := printf "%s-cdc-secret-reader-%s" (include "kates.fullname" $) $.Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["postgresql"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kates.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
 {{- end }}
 {{- end }}

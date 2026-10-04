@@ -35,7 +35,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `image.repository` | `ghcr.io/bmscomp/kates` | Container image name |
 | `image.tag` | `1.24.0` | Container image tag, pinned in `values.yaml` to match the chart's `appVersion`. Keep it at 1.22.0 or newer: the probes use health endpoints older images lack |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy |
-| `replicaCount` | `1` | Number of Kates pods |
+| `replicaCount` | `1` | Number of Kates API pods. Must be 1; see [One replica](#one-replica) |
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address |
 | `kafka.topicNamespace` | `""` | Namespace for CDC test `KafkaTopic` CRs (`""` = auto-detect) |
 | `engine.defaultBackend` | `native` | Benchmark engine (`native` or `trogdor`) |
@@ -76,9 +76,24 @@ the namespace your Prometheus runs in.
 | `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
 | `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
-| `rbac.create` | `true` | Create the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads) |
+| `rbac.create` | `true` | Create the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads; no Secrets) |
 | `rbac.directChaos` | `false` | Grant the writes the direct Kubernetes chaos backend makes; see [Chaos permissions](#chaos-permissions) |
+| `rbac.cdcSecretNamespaces` | `[]` | Namespaces where the `INTEGRATION_CDC` test may read its database's password; see [Secret access](#secret-access) |
 | `rbac.extraRules` | `[]` | Additional RBAC rules to append |
+
+### Secret access
+
+The ClusterRole grants nothing on Secrets. The backend gets its own credentials from the kubelet, as environment variables and volumes, and reads one Secret through the API: the `INTEGRATION_CDC` test takes its database's password from the Secret `postgresql` (key `postgres-password`). It connects to the PostgreSQL behind the first Service labelled `app.kubernetes.io/name=postgresql`, in any namespace, or in `database` when there is none. For each namespace in `rbac.cdcSecretNamespaces` the chart creates a Role with `get` on that one Secret and binds it to the backend's ServiceAccount:
+
+```yaml
+rbac:
+  cdcSecretNamespaces:
+    - database   # where `kates deploy --with-kafka-connect` installs the CDC database
+```
+
+The list is empty by default, since a Role in a namespace that does not exist fails the install. `kates deploy` sets it to `--db-ns` when it installs the CDC database, or finds one an earlier run installed. With the list empty, an `INTEGRATION_CDC` run fails at `DB_SETUP` with a `Forbidden` error naming the Secret.
+
+Upgrading from 0.10.7 or earlier: the ClusterRole there granted `get`, `list` and `watch` on every Secret in the cluster. A release that runs `INTEGRATION_CDC` and is installed with Helm directly needs `rbac.cdcSecretNamespaces` set.
 
 ### Chaos permissions
 
@@ -123,16 +138,21 @@ rbac:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `autoscaling.enabled` | `false` | Enable HPA |
-| `autoscaling.behavior.scaleDown.stabilizationWindowSeconds` | `300` | Scale-down cooldown |
-| `autoscaling.customMetrics` | `[]` | Custom HPA metrics (e.g., `kates_active_runs`) |
+| `autoscaling.enabled` | `false` | Must stay `false`; see [One replica](#one-replica) |
 | `podDisruptionBudget.enabled` | `false` | Enable PDB |
+| `podDisruptionBudget.maxUnavailable` | `1` | Keep it at 1: with one pod, a budget that allows no eviction blocks every node drain. `minAvailable` must stay empty for the same reason |
 | `podDisruptionBudget.unhealthyPodEvictionPolicy` | `IfHealthy` | Eviction policy (K8s 1.27+) |
-| `strategy.type` | `RollingUpdate` | Deployment strategy |
-| `strategy.rollingUpdate.maxSurge` | `1` | Max pods over desired during update |
-| `strategy.rollingUpdate.maxUnavailable` | `0` | Zero-downtime updates |
+| `strategy.type` | `Recreate` | Must be `Recreate`: an upgrade stops the old pod before the new one starts |
 | `terminationGracePeriodSeconds` | `60` | Graceful shutdown window |
 | `topologySpreadConstraints` | `[]` | Pod spread across zones/nodes |
+
+### One replica
+
+Kates runs one pod, and `values.schema.json` refuses anything that would run two: `replicaCount` above 1, `autoscaling.enabled=true` and a `RollingUpdate` strategy. It also refuses `podDisruptionBudget.minAvailable`, which with one pod blocks every node drain. The Kates API keeps each run's workers, the concurrent-run limit, the disruption lease and the live event streams in its own memory, and a pod that starts marks every `RUNNING` run in the database `FAILED`. A second pod — from a replica count, an autoscaler or a rolling update's surge — fails the runs the first one is executing, and the two can each run a disruption plan against the same cluster. A native benchmark drives the pod's CPU up, which is exactly what makes a CPU autoscaler add that second pod.
+
+`Recreate` stops the old pod before the new one starts, so every upgrade leaves the API unreachable until the new pod is Ready, a minute or two on the JVM image. A run still going when the old pod stops ends `FAILED`, as on any restart: upgrade between runs.
+
+Upgrading from 0.10.7 or earlier: `values-prod.yaml` there ran an autoscaler of 2 to 8 pods with a `minAvailable: 50%` budget, `values-staging.yaml` ran 2 replicas, and `values.yaml` rolled with a `RollingUpdate` surge. A values file copied from any of them is refused until those keys go.
 
 ### Database
 
@@ -219,7 +239,6 @@ helm install kates ./charts/kates \
   --set ingress.certManager.issuerName=letsencrypt-prod \
   --set ingress.hosts[0].host=kates.example.com \
   --set ingress.hosts[0].paths[0].path=/ \
-  --set autoscaling.enabled=true \
   --set podDisruptionBudget.enabled=true \
   --set networkPolicy.enabled=true \
   --set metrics.serviceMonitor.enabled=true \
