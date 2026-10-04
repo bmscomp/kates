@@ -283,6 +283,12 @@ public class TestRunRepository {
                 .getSingleResult();
     }
 
+    /**
+     * The runs in this status, read without their task results (see
+     * {@link EntityMapper#toDomainSummary}). A caller that changes a run and
+     * saves it reads it whole with {@link #findById} first, so that its task
+     * results are written back with it.
+     */
     public List<TestRun> findByStatus(com.bmscomp.kates.domain.TestResult.TaskStatus status) {
         return em
                 .createQuery(
@@ -295,17 +301,38 @@ public class TestRunRepository {
                 .collect(Collectors.toList());
     }
 
-    public List<TestRun> findByTypeAndDateRange(TestType type, java.time.Instant from, java.time.Instant to) {
+    /**
+     * The runs of one type and status created in a window, oldest first, each
+     * read with its task results, which most list queries here leave out.
+     *
+     * <p>For callers that measure the runs: a report built from a run without
+     * its results is all zeros, which is what trends showed while they read
+     * their runs through a date-range query that left them out. The fetch join
+     * reads every run's results in this one query, not one query per run.
+     * Hibernate returns each run once, however many result rows the join gave
+     * it, keeps the ORDER BY, and appends the collection's {@code @OrderBy}, so
+     * the results come in the order {@link #findById} reads them. The join is
+     * inner: a run without results measured nothing and is left out.
+     */
+    public List<TestRun> findWithResults(
+            TestType type,
+            com.bmscomp.kates.domain.TestResult.TaskStatus status,
+            java.time.Instant from,
+            java.time.Instant to) {
         return em
                 .createQuery(
-                        "SELECT r FROM TestRunEntity r WHERE r.testType = :type AND r.createdAt >= :from AND r.createdAt <= :to ORDER BY r.createdAt ASC",
+                        "SELECT r FROM TestRunEntity r JOIN FETCH r.results"
+                                + " WHERE r.testType = :type AND r.status = :status"
+                                + " AND r.createdAt >= :from AND r.createdAt <= :to"
+                                + " ORDER BY r.createdAt ASC, r.id ASC",
                         TestRunEntity.class)
                 .setParameter("type", type)
+                .setParameter("status", status)
                 .setParameter("from", from)
                 .setParameter("to", to)
                 .getResultList()
                 .stream()
-                .map(EntityMapper::toDomainSummary)
+                .map(EntityMapper::toDomain)
                 .collect(Collectors.toList());
     }
 }

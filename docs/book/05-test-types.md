@@ -217,13 +217,13 @@ Each row is a moment around the burst and what to note there. Only the middle ro
 
 ### Methodology
 
-An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended period** — up to 30 minutes on a default install, hours once you raise the Kates API's run limit — to detect slow resource leaks and gradual degradation.
+An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended period** — up to two hours on a default install, longer once you raise the Kates API's run limit — to detect slow resource leaks and gradual degradation.
 
 ```mermaid
 graph LR
     subgraph Endurance["Load Profile"]
         direction LR
-        E1["Sustained rate-limited load<br/>5,000 msg/s default<br/>30 min run limit by default — raise it for leak hunting"]
+        E1["Sustained rate-limited load<br/>5,000 msg/s default<br/>2 h run limit by default — raise it for leak hunting"]
     end
 ```
 
@@ -243,15 +243,15 @@ Each row is a slow failure and the symptom it leaves over a long run: drift that
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `durationSeconds` | 3600 (1h) | Upper bound on the run; a longer soak also needs more `records` and a raised Kates API run limit (see the callout below) |
+| `durationSeconds` | 3600 (1h) | Upper bound on the run; a longer soak also needs more `records`, and one past two hours a raised Kates API run limit (see the callout below) |
 | `parallelProducers` | 1 | Ignored: ENDURANCE runs one producer and one consumer |
 | `targetThroughput` | 5,000 msg/s | Rate limit that keeps the load sustainable; the 5,000 is the ENDURANCE default, and this key replaces it |
 | `records` | 10,000,000 | Enough for the full duration |
 
 ::: {.callout-important}
-**No run lasts longer than 30 minutes by default**
+**No run lasts longer than two hours by default**
 
-The Kates API fails any run that is still `RUNNING` 30 minutes after it was created: it stops the run's producer and consumer and marks the run `FAILED`. The limit is the Kates API setting `kates.engine.max-duration-ms`, 1,800,000 ms by default, and the `kates` chart has no value for it. The default ENDURANCE run sends 10,000,000 records at 5,000 records/s, which takes about 33 minutes, so on a default install it fails unless `records` is 8,500,000 or fewer or `durationSeconds` is 1,700 or less. To allow longer runs, save the release's values with `helm get values kates -n kates -o yaml`, add the environment variable `KATES_ENGINE_MAX_DURATION_MS`, in milliseconds, to their `extraEnv`, and `helm upgrade` the release with that file. `kates deploy` upgrades the release from its own [values files](appendix-a-glossary.md#gl-values-overlay), which drops the entry, so repeat the upgrade after it.
+The Kates API refuses, with `400`, a run set to last longer than two hours, and fails a run still `RUNNING` five minutes after its own `durationSeconds` is up, counted from the run's creation. The two hours are the Kates API setting `kates.engine.max-duration-ms`, 7,200,000 ms by default, and the `kates` chart has no value for it. To allow longer soaks, save the release's values with `helm get values kates -n kates -o yaml`, add the environment variable `KATES_ENGINE_MAX_DURATION_MS`, in milliseconds, to their `extraEnv`, and `helm upgrade` the release with that file. `kates deploy` upgrades the release from its own [values files](appendix-a-glossary.md#gl-values-overlay), which drops the entry, so repeat the upgrade after it.
 :::
 
 ---

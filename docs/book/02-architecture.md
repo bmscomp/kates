@@ -373,7 +373,7 @@ The pinned versions above are a snapshot for orientation; the [Version & Compati
 
 ## Where Results Live
 
-A run's results live in PostgreSQL, not in Kafka, and the rest of what you see about a run lives somewhere with a shorter life. Knowing which is which explains why a Grafana board goes quiet after a run while `kates trend` can still reach every run the Kates API has kept, and why a run's heatmap can be missing.
+A run's results live in PostgreSQL, not in Kafka, and the rest of what you see about a run lives somewhere with a shorter life. Knowing which is which explains why a Grafana board goes quiet after a run while `kates trend` can still reach every `DONE` run the Kates API has kept, and why a run's heatmap can be missing.
 
 The table lists what Kates keeps about a run, where each piece lives and how long it lasts:
 
@@ -397,7 +397,7 @@ The events go to `kates-test-events`, a topic the Kates API creates for itself o
 
 Every replica of the Kates API reads `kates-test-events` in one [consumer group](appendix-a-glossary.md#gl-consumer-group), `kates-webhooks`, so one replica handles each event, and a replica that starts resumes from the group's [committed offset](appendix-a-glossary.md#gl-committed-offset). A group with no committed offset, as on its first start, reads from the oldest event the topic holds. The `processed_events` table remembers the events handled in the last 7 days (`kates.outbox.processed-events-retention-days`), so an event read twice fires its webhooks once, and the Kates API skips any event older than that.
 
-What lives in the Kates API's memory goes with its pod. When the Kates API shuts down, it stops the runs in flight and stores them as `FAILED` with the error `Server shutdown`. When the pod dies without shutting down, those runs stay `RUNNING` until the Kates API, back up, marks them `FAILED` once they are older than `kates.engine.max-duration-ms`, 30 minutes by default. Either way, every heatmap and every built report is gone. `kates clean` goes further: it deletes the namespace that holds the bundled PostgreSQL, and every stored run with it.
+What lives in the Kates API's memory goes with its pod. When the Kates API shuts down, it stops the runs in flight and stores them as `FAILED` with the error `Server shutdown`. When the pod dies without shutting down, those runs stay `RUNNING` until the Kates API starts again, and it marks them `FAILED` as it starts, each task that had not finished with the error `Recovered: test was orphaned after server restart`. Either way, each task keeps the figures it last recorded, and every heatmap and every built report is gone. `kates clean` goes further: it deletes the namespace that holds the bundled PostgreSQL, and every stored run with it.
 
 ## Data Model
 
@@ -495,7 +495,7 @@ Distributed systems fail in partial ways [@waldo1997note]. Kates is designed to 
 | **Kafka unreachable** | Running tests fail with a connection error. The CLI reports `Kafka: ❌ Disconnected` in health checks. No new tests can be created until Kafka is reachable. Existing test results in PostgreSQL remain accessible. | The Kates API reconnects automatically when Kafka becomes available. No manual intervention required. |
 | **PostgreSQL down** | Runs and their results live only in PostgreSQL, so every command that creates or reads a run fails. No Kafka topic holds a copy. | Bring PostgreSQL back. |
 | **You cancel a run** | The Kates API stops the run's tasks and stores it as `FAILED`, each unfinished task with the error `Cancelled by user`. | Run it again; the cancelled run stays in history for comparison. |
-| **The Kates API pod restarts during a test** | A clean shutdown stores runs in flight as `FAILED` (`Server shutdown`). After a crash they stay `RUNNING` until they are 30 minutes old, then fail. | Kubernetes restarts the pod; rerun the test. Its heatmap is lost either way. |
+| **The Kates API pod restarts during a test** | A clean shutdown stores runs in flight as `FAILED` (`Server shutdown`). After a crash they stay `RUNNING` until the Kates API is back, which fails them as it starts. Their tasks keep the figures recorded so far. | Kubernetes restarts the pod; rerun the test. Its heatmap is lost either way. |
 
 [Where Results Live](#where-results-live) says what survives a restart.
 

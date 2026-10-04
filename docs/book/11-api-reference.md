@@ -156,8 +156,9 @@ A field the run could not honour is refused rather than ignored: the answer is `
 | `enableCrc` | `true` for any type but INTEGRITY, the only one that checks CRCs |
 | `enableIdempotence` | `true` when the run's `acks`, the request's or the type's default (SPIKE's is `1`), is not `all`, or for INTEGRATION_CDC |
 | `enableTransactions` | `true` when `acks` is not `all`, when the request sets `enableIdempotence: false`, on the `trogdor` benchmark backend, or for INTEGRATION_CDC |
+| `durationMs` | The run would last longer than `kates.engine.max-duration-ms`, two hours by default: its `durationMs`, or the type's default without one, twice that for INTEGRITY, which reads its records back for as long again |
 
-A request with a `scenario` and its `phases` is checked the same way. Each phase starts producers only, so `consumerGroup`, the fetch settings and `enableCrc: true` are refused in its `baseSpec` or in a phase's `spec`, with `fieldErrors` keyed by their path in the scenario, such as `baseSpec.consumerGroup` or `phases[0].spec.fetchMinBytes`. The producer options reach every phase, checked against the `acks` each phase runs with, and a phase's rate follows the rule above: its `throughput`, or its `targetThroughput` without one.
+A request with a `scenario` and its `phases` is checked the same way. Each phase starts producers only, so `consumerGroup`, the fetch settings and `enableCrc: true` are refused in its `baseSpec` or in a phase's `spec`, with `fieldErrors` keyed by their path in the scenario, such as `baseSpec.consumerGroup` or `phases[0].spec.fetchMinBytes`. The producer options reach every phase, checked against the `acks` each phase runs with, and a phase's rate follows the rule above: its `throughput`, or its `targetThroughput` without one. A scenario whose phases' durations add up to more than `kates.engine.max-duration-ms` is refused with `fieldErrors` keyed `phases`.
 
 ```json
 {
@@ -195,6 +196,8 @@ A request with a `scenario` and its `phases` is checked the same way. Each phase
 The `spec` in the response is the merged one: the request's values, and the LOAD defaults for everything it leaves out that LOAD has a default for. `requestedSpec` is the request's own `spec`, only the fields it set, so the two tell a requested value from a default; a request without a `spec` gets an empty one. The Kates API stores both, and `kates replay` sends `requestedSpec` back to start the run again.
 
 Run IDs are 8-character UUID prefixes. `status` moves through `PENDING` and `RUNNING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
+
+A run still `RUNNING` five minutes (`kates.engine.reaper-grace-ms`) after the time it was set to last, counted from its creation, is stopped and stored as `FAILED` too. That time is its `durationMs`, twice that for INTEGRITY, or a scenario's phases added up; INTEGRATION_CDC, which has no duration of its own, gets `kates.engine.max-duration-ms`. Each task that had not finished carries an error that starts `Timeout:`, and the tasks that had keep their results.
 
 #### GET /api/tests
 
@@ -748,7 +751,7 @@ A `testRequest` that `POST /api/tests` would refuse for a field its type or benc
 
 ### Trend Analysis
 
-A trend follows one metric across a test type's stored runs over a number of days, compares each run with a baseline averaged over the most recent runs, and flags regressions; `kates trend` charts the same data.
+A trend follows one metric across a test type's `DONE` runs over a number of days, compares each run with a baseline averaged over the most recent of them, and flags regressions; `kates trend` charts the same data. A `FAILED` run is left out, because its numbers stop wherever it failed, and so is a run still in flight.
 
 #### GET /api/trends
 

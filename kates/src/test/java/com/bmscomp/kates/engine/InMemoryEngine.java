@@ -113,7 +113,8 @@ public final class InMemoryEngine {
                 lifecycleEvents,
                 BACKEND,
                 "localhost:9092",
-                MAX_CONCURRENT);
+                MAX_CONCURRENT,
+                7_200_000L);
     }
 
     /** The events fired for {@code runId} that announced it ended {@code FAILED}. */

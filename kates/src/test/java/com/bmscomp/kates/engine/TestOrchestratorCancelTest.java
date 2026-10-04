@@ -96,7 +96,8 @@ class TestOrchestratorCancelTest {
                 events,
                 "fake",
                 "localhost:9092",
-                MAX_CONCURRENT);
+                MAX_CONCURRENT,
+                7_200_000L);
     }
 
     @Test

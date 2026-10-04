@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import java.lang.reflect.Field;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -18,6 +20,9 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.CreateTestRequest;
+import com.bmscomp.kates.domain.ScenarioPhase;
+import com.bmscomp.kates.domain.TestRun;
+import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.TestRunRepository;
@@ -46,7 +51,8 @@ class TestOrchestratorTest {
                 mock(Event.class),
                 "native",
                 "localhost:9092",
-                3);
+                3,
+                7_200_000L);
     }
 
     /**
@@ -1221,7 +1227,8 @@ class TestOrchestratorTest {
                     mock(Event.class),
                     name,
                     "localhost:9092",
-                    3);
+                    3,
+                    7_200_000L);
         }
 
         private CreateTestRequest scenario(TestSpec base, com.bmscomp.kates.domain.ScenarioPhase... phases) {
@@ -1334,6 +1341,230 @@ class TestOrchestratorTest {
                     assertInstanceOf(InvalidTestSpecException.class, failure)
                             .getFieldErrors()
                             .keySet());
+        }
+    }
+
+    private static final long CAP_MS = 7_200_000;
+
+    private static CreateTestRequest request(TestType type, TestSpec spec) {
+        CreateTestRequest request = new CreateTestRequest();
+        request.setType(type);
+        request.setSpec(spec);
+        return request;
+    }
+
+    private static TestSpec lasting(long durationMs) {
+        TestSpec spec = new TestSpec();
+        spec.setDurationMs(durationMs);
+        return spec;
+    }
+
+    /** A LOAD scenario of three phases: the base spec's duration, and two of their own. */
+    private static CreateTestRequest scenarioOf(long baseMs, long steadyMs, long cooldownMs) {
+        TestScenario scenario = new TestScenario();
+        scenario.setName("staircase");
+        scenario.setType(TestType.LOAD);
+        scenario.setBaseSpec(lasting(baseMs));
+        scenario.setPhases(List.of(
+                // No duration of its own: the base spec's.
+                new ScenarioPhase("warmup", ScenarioPhase.PhaseType.WARMUP, 0, -1),
+                new ScenarioPhase("steady", ScenarioPhase.PhaseType.STEADY, steadyMs, -1),
+                new ScenarioPhase("cooldown", ScenarioPhase.PhaseType.COOLDOWN, cooldownMs, -1)));
+        CreateTestRequest request = new CreateTestRequest();
+        request.setType(TestType.LOAD);
+        request.setScenario(scenario);
+        return request;
+    }
+
+    /**
+     * How long the timeout reaper lets each run go on. It used to fail every
+     * run 30 minutes after its creation, whatever the run was set to last, so
+     * a default ENDURANCE run, an hour long, always ended FAILED. Now the
+     * orchestrator stores how long a run is set to last when it creates it,
+     * and the reaper allows that and a grace, counted from the run's creation.
+     */
+    @Nested
+    class RunDeadlines {
+
+        private static final long GRACE_MS = 300_000;
+
+        private final TestTimeoutReaper reaper = new TestTimeoutReaper();
+
+        @BeforeEach
+        void reaperSettings() {
+            reaper.maxDurationMs = CAP_MS;
+            reaper.graceMs = GRACE_MS;
+        }
+
+        /** The run executeTest creates for this request, on a backend that takes every task. */
+        @SuppressWarnings("unchecked")
+        private TestRun started(CreateTestRequest request) {
+            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            when(backend.name()).thenReturn("native");
+            when(backend.submit(any()))
+                    .thenAnswer(invocation -> new BenchmarkHandle(
+                            "native", invocation.<BenchmarkTask>getArgument(0).getTaskId()));
+            Instance<BenchmarkBackend> backends = mock(Instance.class);
+            when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
+            TestOrchestrator withBackend = new TestOrchestrator(
+                    mock(TopicService.class),
+                    mock(TestRunRepository.class),
+                    backends,
+                    typeDefaults,
+                    mock(BenchmarkMetrics.class),
+                    mock(KatesMetrics.class),
+                    new SlaEvaluator(),
+                    mock(Event.class),
+                    "native",
+                    "localhost:9092",
+                    3,
+                    CAP_MS);
+            return withBackend.executeTest(request).asSuccess().orElseThrow();
+        }
+
+        /** Whether the reaper fails the run, still RUNNING this long after its creation. */
+        private boolean reapedAfter(TestRun run, Duration sinceCreation) {
+            Instant now = Instant.parse(run.getCreatedAt()).plus(sinceCreation);
+            return now.isAfter(reaper.deadlineOf(run));
+        }
+
+        @Test
+        void aDefaultEnduranceRunOutlivesThirtyOneMinutes() {
+            TestRun run = started(request(TestType.ENDURANCE, null));
+
+            assertEquals(3_600_000L, run.getPlannedDurationMs());
+            assertFalse(reapedAfter(run, Duration.ofMinutes(31)), "past the old 30-minute limit");
+            assertFalse(reapedAfter(run, Duration.ofMinutes(64)));
+            assertTrue(reapedAfter(run, Duration.ofMinutes(66)), "its hour and the grace are over");
+        }
+
+        @Test
+        void aTenMinuteLoadRunIsReapedOnceTenMinutesAndTheGraceHavePassed() {
+            TestRun run = started(request(TestType.LOAD, lasting(600_000)));
+
+            assertEquals(600_000L, run.getPlannedDurationMs());
+            assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(600_000 + GRACE_MS), reaper.deadlineOf(run));
+            assertFalse(reapedAfter(run, Duration.ofMinutes(15).minusSeconds(1)));
+            assertTrue(reapedAfter(run, Duration.ofMinutes(15).plusSeconds(1)));
+        }
+
+        @Test
+        void anIntegrityRunIsAllowedTwiceItsDuration() {
+            TestRun run = started(request(TestType.INTEGRITY, lasting(600_000)));
+
+            assertEquals(1_200_000L, run.getPlannedDurationMs(), "it produces, then reads back for as long again");
+            assertFalse(reapedAfter(run, Duration.ofMinutes(24)));
+            assertTrue(reapedAfter(run, Duration.ofMinutes(26)));
+        }
+
+        @Test
+        void aScenarioIsAllowedItsPhasesAddedUp() {
+            TestRun run = started(scenarioOf(300_000, 600_000, 300_000));
+
+            assertEquals(1_200_000L, run.getPlannedDurationMs());
+            assertFalse(reapedAfter(run, Duration.ofMinutes(24)));
+            assertTrue(reapedAfter(run, Duration.ofMinutes(26)));
+        }
+
+        @Test
+        void aRunNoDurationBoundsIsAllowedTheCap() {
+            TestRun run = started(request(TestType.INTEGRATION_CDC, null));
+
+            assertNull(run.getPlannedDurationMs(), "the CDC service ends it on timeouts of its own");
+            assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(CAP_MS + GRACE_MS), reaper.deadlineOf(run));
+        }
+
+        @Test
+        void aStoredDurationPastTheCapIsHeldToIt() {
+            // As a run created before the cap was lowered would have it.
+            TestRun run = new TestRun(TestType.LOAD, new TestSpec()).withPlannedDurationMs(3 * CAP_MS);
+
+            assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(CAP_MS + GRACE_MS), reaper.deadlineOf(run));
+        }
+    }
+
+    /**
+     * A request set to last longer than kates.engine.max-duration-ms is
+     * refused, by the field that sets its length, before it takes a permit.
+     * It used to be accepted, and then failed by the reaper part-way through.
+     */
+    @Nested
+    class RunsLongerThanTheCap {
+
+        @Test
+        void aDurationPastTheCapIsRefusedBeforeTakingAPermit() {
+            CreateTestRequest request = request(TestType.LOAD, lasting(CAP_MS + 1));
+
+            for (int i = 0; i < 5; i++) {
+                Exception failure =
+                        orchestrator.executeTest(request).asFailure().orElseThrow();
+                InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+                assertEquals(Set.of("durationMs"), invalid.getFieldErrors().keySet());
+                assertEquals(
+                        "spec.durationMs: the run is set to last 7200001 ms; the Kates API allows a run at most"
+                                + " 7200000 ms (kates.engine.max-duration-ms)",
+                        invalid.getMessage());
+            }
+            assertEquals(0, orchestrator.activeTestCount());
+        }
+
+        @Test
+        void aDurationAtTheCapIsAccepted() {
+            assertTrue(orchestrator
+                    .refusal(request(TestType.LOAD, lasting(CAP_MS)))
+                    .isEmpty());
+        }
+
+        @Test
+        void anIntegrityRunCountsItsDurationTwice() {
+            assertTrue(orchestrator
+                    .refusal(request(TestType.INTEGRITY, lasting(CAP_MS / 2)))
+                    .isEmpty());
+
+            String why = orchestrator
+                    .refusal(request(TestType.INTEGRITY, lasting(CAP_MS / 2 + 1)))
+                    .orElseThrow()
+                    .getFieldErrors()
+                    .get("durationMs");
+            assertTrue(
+                    why.startsWith("an INTEGRITY run produces for durationMs, 3600001 ms, then reads its records"
+                            + " back for up to as long again, 7200002 ms in all;"),
+                    why);
+        }
+
+        @Test
+        void aTypeDefaultPastTheCapIsRefusedAsTheDefault() throws Exception {
+            setField(typeDefaults, "enduranceDurationMs", 3 * CAP_MS);
+
+            String why = orchestrator
+                    .refusal(request(TestType.ENDURANCE, null))
+                    .orElseThrow()
+                    .getFieldErrors()
+                    .get("durationMs");
+            assertTrue(why.startsWith("the run is set to last 21600000 ms (the type's default);"), why);
+        }
+
+        @ParameterizedTest
+        @EnumSource(TestType.class)
+        void everyTypeDefaultFitsUnderTheDefaultCap(TestType type) {
+            assertTrue(orchestrator.refusal(request(type, null)).isEmpty());
+        }
+
+        @Test
+        void aScenarioWhosePhasesAddUpPastTheCapIsRefused() {
+            Exception failure = orchestrator
+                    .executeTest(scenarioOf(2_700_000, 2_700_000, 2_700_000))
+                    .asFailure()
+                    .orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(Set.of("phases"), invalid.getFieldErrors().keySet());
+            assertTrue(
+                    invalid.getMessage().startsWith("scenario.phases: the phases are set to last 8100000 ms in all;"),
+                    invalid.getMessage());
+            assertTrue(orchestrator
+                    .refusal(scenarioOf(2_400_000, 2_400_000, 2_400_000))
+                    .isEmpty());
         }
     }
 }

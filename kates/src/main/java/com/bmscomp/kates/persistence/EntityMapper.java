@@ -43,6 +43,7 @@ public final class EntityMapper {
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
+        entity.setPlannedDurationMs(run.getPlannedDurationMs());
 
         if (run.getResults() != null) {
             for (TestResult result : run.getResults()) {
@@ -67,7 +68,8 @@ public final class EntityMapper {
                 .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
                 .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
                 .withRequestedSpec(
-                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}));
+                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}))
+                .withPlannedDurationMs(entity.getPlannedDurationMs());
 
         if (entity.getResults() != null) {
             run = run.withResults(entity.getResults().stream()
@@ -80,7 +82,8 @@ public final class EntityMapper {
 
     /**
      * Lightweight mapper for list endpoints — skips the lazy-loaded results collection
-     * to avoid N+1 queries. Use {@link #toDomain} when results are needed (detail view).
+     * to avoid N+1 queries. Use {@link #toDomain} when results are needed (detail view),
+     * and before writing a run back.
      */
     public static TestRun toDomainSummary(TestRunEntity entity) {
         return new TestRun()
@@ -96,7 +99,8 @@ public final class EntityMapper {
                 .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
                 .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
                 .withRequestedSpec(
-                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}));
+                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}))
+                .withPlannedDurationMs(entity.getPlannedDurationMs());
     }
 
     /**
@@ -109,6 +113,9 @@ public final class EntityMapper {
      * again — on every status poll of a running multi-task run. Diffing turns
      * that into a handful of UPDATEs (usually none, since Hibernate skips
      * unchanged rows) and keeps the child primary keys stable.
+     *
+     * <p>A run that carries no results leaves the stored ones as they are: see
+     * {@link #mergeResults}.
      */
     public static void updateEntity(TestRunEntity entity, TestRun run) {
         entity.setTestType(run.getTestType());
@@ -125,6 +132,11 @@ public final class EntityMapper {
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
+        // Fixed when the run is created, like the request, so a copy that never
+        // carried it must not erase the stored one either.
+        if (run.getPlannedDurationMs() != null) {
+            entity.setPlannedDurationMs(run.getPlannedDurationMs());
+        }
 
         mergeResults(entity, run.getResults());
     }
@@ -132,8 +144,11 @@ public final class EntityMapper {
     private static void mergeResults(TestRunEntity entity, List<TestResult> incoming) {
         List<TestResultEntity> existing = entity.getResults();
 
+        // No results says nothing about the stored ones: a run read without
+        // them (toDomainSummary) carries none. Clearing here, under
+        // orphanRemoval, deleted every task row of each run the timeout reaper
+        // or orphan recovery failed, and its report, JUnit and trends with them.
         if (incoming == null || incoming.isEmpty()) {
-            existing.clear();
             return;
         }
 
