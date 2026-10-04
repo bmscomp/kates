@@ -1,7 +1,14 @@
-{{- if .Values.users.enabled }}
-{{- range .Values.users.items }}
-{{- if not (and (eq .name "kafka-ui") (not $.Values.kafkaUI.managedUser)) }}
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $keep := include "kafka-common.enabled" (list .Values.keepOnDelete true) -}}
+{{- range $r.users }}
 ---
+{{- /*
+  Recreating a KafkaUser makes the User Operator issue a new password, which
+  breaks every client holding the old one — hence `keep`, and hence a user
+  that moves to another chart is adopted, never recreated
+  (docs/kafka-cluster-1.0-upgrade.md).
+*/}}
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
@@ -9,21 +16,55 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" $ }}
   labels:
     {{- include "kafka-cluster.labels" $ | nindent 4 }}
+  {{- if $keep }}
   annotations:
     helm.sh/resource-policy: keep
+  {{- end }}
 spec:
   authentication:
-    {{- toYaml .authentication | nindent 4 }}
+    {{- toYaml (.authentication | default (dict "type" "scram-sha-512")) | nindent 4 }}
   {{- with .quotas }}
   quotas:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   {{- with .authorization }}
   authorization:
-    type: {{ .type }}
+    type: {{ .type | default "simple" }}
     acls:
-      {{- toYaml .acls | nindent 6 }}
+      {{- toYaml (.acls | default list) | nindent 6 }}
+  {{- end }}
+  {{- with .template }}
+  template:
+    {{- toYaml . | nindent 4 }}
   {{- end }}
 {{- end }}
-{{- end }}
+{{- if and (include "kafka-common.enabled" (list .Values.tests.user.create true)) (include "kafka-common.enabled" (list .Values.users.enabled true)) }}
+---
+{{- /*
+  The Helm tests' own principal: helm-test-* topics and groups only, so a
+  test run can never touch real data. Not a hook: the User Operator needs
+  time to issue its password before `helm test` runs.
+*/}}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ include "kafka-cluster.testUser" . }}
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- include "kafka-cluster.componentLabels" (dict "ctx" . "component" "helm-test") | nindent 4 }}
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: helm-test-, patternType: prefix }
+        operations: ["Create", "Delete", "Describe", "Read", "Write"]
+        host: "*"
+      - resource: { type: group, name: helm-test-, patternType: prefix }
+        operations: ["Describe", "Read"]
+        host: "*"
+      - resource: { type: cluster }
+        operations: ["Describe"]
+        host: "*"
 {{- end }}

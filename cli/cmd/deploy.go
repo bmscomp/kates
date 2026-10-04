@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/detect"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/klster/kates-cli/output"
-	"github.com/klster/kates-cli/pkg/detect"
 	"github.com/spf13/cobra"
 )
 
@@ -33,7 +33,13 @@ Examples:
   kates deploy --topology isolated --kafka-ns kafka-system --app-ns kates-app --chaos-ns litmus-system
 
   # Deploy with Apicurio Schema Registry
-  kates deploy --with-schema-registry apicurio`,
+  kates deploy --with-schema-registry apicurio
+
+  # Choose the operator and Kafka versions (validated before anything is installed)
+  kates deploy --strimzi-version 1.0.1 --kafka-version 4.2.0
+
+  # One operator per Kafka namespace, so older lines can run beside the primary
+  kates deploy --operator-scope namespace`,
 	RunE: runDeploy,
 }
 
@@ -61,6 +67,16 @@ var (
 	deployPortForward        bool
 	deployDryRun             bool
 	deployWithKafkaUI        bool
+	deployWithMirrorMaker2   bool
+	deployMM2NS              string
+	deployYes                bool
+
+	// Versions and scope (multi-version plan §3.1–3.3).
+	deployOperatorScope  string
+	deployStrimziVersion string
+	deployStrimziChart   string
+	deployKafkaVersion   string
+	deployKafkaName      string
 )
 
 func init() {
@@ -85,67 +101,78 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithStrimzi, "with-strimzi", true, "Deploy Strimzi Operator")
 	deployCmd.Flags().BoolVar(&deployWithKafkaConnect, "with-kafka-connect", false, "Deploy Kafka Connect with PostgreSQL CDC (Debezium)")
 	deployCmd.Flags().BoolVar(&deployWithKafkaUI, "with-kafka-ui", true, "Deploy Kafka UI for browser-based cluster monitoring")
+	deployCmd.Flags().BoolVar(&deployWithMirrorMaker2, "with-mirror-maker2", false, "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)")
+	deployCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
-	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, start port-forwards for all services and keep running until Ctrl+C")
+	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, run kates ports: forward every service in the background and make the ports context current")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
+	deployCmd.Flags().BoolVarP(&deployYes, "yes", "y", false, "Assume yes and never prompt (fails instead of asking)")
+	deployCmd.Flags().StringVar(&deployOperatorScope, "operator-scope", "cluster", "Strimzi operator scope: 'cluster' (one operator watching every namespace) or 'namespace' (one per Kafka namespace)")
+	deployCmd.Flags().StringVar(&deployStrimziVersion, "strimzi-version", "", "Strimzi operator version to install (default: the repository pin; 'latest' for the newest published)")
+	deployCmd.Flags().StringVar(&deployStrimziChart, "strimzi-chart", "", "Local strimzi-kafka-operator chart tarball to install from (air-gapped mirrors)")
+	deployCmd.Flags().StringVar(&deployKafkaVersion, "kafka-version", "", "Kafka version for the primary cluster (default: the newest the operator supports; 'latest' spells the default)")
+	deployCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
 
 	rootCmd.AddCommand(deployCmd)
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
 	deployStartTime := time.Now()
-	PrintDeployBanner()
+	resetDeployPhases()
 
 	dl = &DashboardController{}
 
+	// ── Target cluster ───────────────────────────────────────────────────
+	// This runs FIRST, before the banner and the wizard. There is no point
+	// asking eight questions about a deployment and only then discovering
+	// there is nowhere to deploy it. When nothing is reachable this offers to
+	// build the local 3-zone kind cluster; when several are reachable it asks
+	// rather than guessing.
+	target, err := resolveClusterFn()
+	if err != nil {
+		return err
+	}
+	// The chosen cluster becomes kubectl's current context, for the commands
+	// the user runs next. The deploy's own kubectl and helm calls name it
+	// instead of reading the current context, so a context switched elsewhere
+	// mid-deploy cannot split the stack across two clusters
+	// (deploy_kubecontext.go).
+	if err := useTargetContext(target); err != nil {
+		return err
+	}
+	defer pinKubeContext(target)()
+	PrintDeployBanner(target)
+
 	// ── Interactive Forms ────────────────────────────────────────────────
-	if deployInteractive || cmd.Flags().NFlag() == 0 {
+	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
+	// terminal they fail with "could not open a new TTY" rather than falling
+	// back to the flag defaults. Piped or scripted runs should just use the
+	// defaults.
+	if (deployInteractive || cmd.Flags().NFlag() == 0) && IsInteractive() {
 		if err := runInteractiveForms(); err != nil {
 			return err
 		}
 	}
 
-	// 1. Resolve Topology
+	// Resolve Topology
 	printTopologyResolution()
 
-	// 2. Component Selection
+	// Component Selection
 	printComponentSelection()
 
-	// 3. Cluster Detection
-	PrintPhaseHeader(3, "Running Cluster Introspection (Pre-flight)")
 	executor := defaultExecutor
+	PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")
 	collector := detect.NewCollector(executor)
-
+	// Introspection is not read-only on its own: it creates a namespace and a
+	// Secret to audit Secret creation, prober pods to measure inter-AZ
+	// latency, and a dns-detect pod when no running pod can be read. The
+	// preview uses none of that, so a dry run collects without it.
+	collector.ReadOnly = deployDryRun
+	collector.KubeContext = target
 	if err := collector.Preflight(); err != nil {
-		fmt.Println("⚠️  Kubernetes cluster is unreachable.")
-
-		// Check if docker is running
-		if dockerCheck := exec.Command("docker", "info"); dockerCheck.Run() == nil {
-			fmt.Print("🐳 Docker is running. Would you like to automatically create a local Kind cluster? [y/N]: ")
-			var response string
-			fmt.Scanln(&response)
-			if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
-				fmt.Println("📦 Creating Kind cluster via 'make cluster'...")
-				cmd := exec.Command("make", "cluster")
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				if err := cmd.Run(); err != nil {
-					return fmt.Errorf("failed to create Kind cluster: %w", err)
-				}
-				fmt.Println("✅ Kind cluster created successfully! Retrying preflight...")
-
-				// Re-run preflight
-				if err := collector.Preflight(); err != nil {
-					return fmt.Errorf("preflight failed even after cluster creation: %w", err)
-				}
-			} else {
-				return fmt.Errorf("cluster is unreachable and user opted out of auto-creation")
-			}
-		} else {
-			output.Error(fmt.Sprintf("Preflight failed: %v", err))
-			return err
-		}
+		output.Error(fmt.Sprintf("Preflight failed: %v", err))
+		return err
 	}
 
 	// ── Kind storage bootstrap ────────────────────────────────────────────────
@@ -153,7 +180,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// collector.Collect() runs. This ensures detect's matchStorageClass() finds
 	// them and writes the correct storageClass names into values-detected.yaml,
 	// so no hardcoded pool overrides are needed in values-kind.yaml.
-	if quickDetectKind() {
+	// A dry run must not write StorageClasses into the cluster, so it skips
+	// this, as it skips the introspection probes that create things.
+	if quickDetectKind() && !deployDryRun {
 		PrintPhaseItem("Kind cluster detected — bootstrapping zone StorageClasses...")
 		if err := setupKindStorageClasses(context.Background()); err != nil {
 			output.Warn(fmt.Sprintf("StorageClass bootstrap warning: %v", err))
@@ -165,6 +194,20 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		output.Error(fmt.Sprintf("Introspection failed: %v", err))
 		return err
 	}
+
+	// ── Versions and scope ───────────────────────────────────────────────
+	// Resolved before any Helm call: the operator version, its chart, the
+	// Kafka window it supports, the Kafka version (asked for or the newest),
+	// the metadata version, and what the installed operator allows. A
+	// refusal here costs seconds; the same refusal from Strimzi would come
+	// after a ten-minute Helm timeout.
+	PrintPhaseHeader(nextDeployPhase(), "Resolving Versions")
+	vp, err := resolveVersionPlanFn(context.Background(), defaultRunner, deployVersionOptions())
+	if err != nil {
+		return err
+	}
+	vp.describe(PrintPhaseItem)
+	primary := primaryCluster{Name: deployKafkaName, Namespace: resolveNamespaces().kafka, Version: vp.kafka}
 
 	analyzer := detect.NewAnalyzer(executor)
 	analyzer.Analyze(report, detect.ParsedReqs{})
@@ -179,7 +222,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	defer f.Close()
 
-	detect.RenderValuesWithReserve(report, "krafter", 0.30, f)
+	detect.RenderValuesWithReserve(report, primary.Name, 0.30, f)
 
 	// Detect cluster type once — used by every Helm call below to pick the
 	// right values overlay (values-kind.yaml vs values-generic.yaml).
@@ -211,8 +254,26 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return runDeployDryRun(sharedEntries)
 	}
 
+	// An operator upgrade or a scope change rolls things; say so and ask.
+	if deployWithStrimzi {
+		if err := vp.confirmOperatorChange(); err != nil {
+			return err
+		}
+	}
+
+	// Record each component's outcome BEFORE the pipeline runs, from the same
+	// predicate the skip logic uses: a release that already exists gets skipped
+	// ("already present"), one that does not gets deployed. Status was never
+	// recorded at all before this — the summary's table read the empty string
+	// as "Skipped" while its footer counted the same empty string as
+	// "deployed", producing eight Skipped rows above "8 components deployed
+	// successfully!".
+	markEntryStatuses(sharedEntries, func(release, namespace string) bool {
+		return isHelmReleaseDeployedFn(context.Background(), release, namespace)
+	})
+
 	// 4. Execution Plan (Helm)
-	PrintPhaseHeader(4, "Executing Deployment Pipeline")
+	PrintPhaseHeader(nextDeployPhase(), "Executing Deployment Pipeline")
 
 	totalSteps := countDeploySteps()
 
@@ -226,13 +287,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	dashboard := NewDeployDashboard(ctx, totalSteps)
 	registerDashboardComponents(&dashboard, ns)
 
-	var pOptions []tea.ProgramOption
+	// Only build a bubbletea program where one can actually render. With p=nil
+	// the DashboardController falls back to plain fmt printing — that fallback
+	// existed all along; the wiring just never used it. Previously a piped or
+	// headless deploy launched an alt-screen program into the pipe, dumping
+	// escape sequences into logs.
+	var p *tea.Program
 	if isTesting {
-		pOptions = append(pOptions, tea.WithoutRenderer(), tea.WithInput(nil))
-	} else {
-		pOptions = append(pOptions, tea.WithAltScreen())
+		p = tea.NewProgram(dashboard, tea.WithoutRenderer(), tea.WithInput(nil))
+	} else if IsInteractive() {
+		p = tea.NewProgram(dashboard, tea.WithAltScreen())
 	}
-	p := tea.NewProgram(dashboard, pOptions...)
 	dl = &DashboardController{p: p}
 
 	var step int32
@@ -250,6 +315,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		chartOverlay: chartOverlay,
 		fileExists:   fileExists,
 		advanceStep:  advanceStep,
+		versions:     vp,
+		primary:      primary,
 	}
 
 	var deployErr error
@@ -258,7 +325,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	doneCh := make(chan struct{})
 	go func() {
 		defer close(doneCh)
-		defer p.Quit()
+		defer func() {
+			if p != nil {
+				p.Quit()
+			}
+		}()
 
 		deployErr = func() error {
 			if err := deployGroupA(dc); err != nil {
@@ -280,8 +351,18 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}()
 	}()
 
-	if _, err := p.Run(); err != nil {
-		return err
+	if p != nil {
+		if _, err := p.Run(); err != nil {
+			// The dashboard is cosmetic; the deploy goroutine is real work.
+			// Returning here used to orphan it mid-helm — the process exited
+			// while installs were in flight, leaving releases half-applied.
+			// Wait it out, then report the more consequential error.
+			<-doneCh
+			if deployErr != nil {
+				return deployErr
+			}
+			return err
+		}
 	}
 
 	<-doneCh // Wait for deployment goroutine to fully exit
@@ -293,11 +374,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if deployErr == nil && len(finalEntries) > 0 {
 		RenderDeployDashboard(ctx, finalEntries, deployElapsed)
 
-		// Automatically sync API key from deployed cluster to active context
+		// Store the key from Secret kates-api-key in the active context,
+		// unless that context holds a key kates did not put there.
 		updateActiveContextAPIKey(ctx, ns.app)
 
 		if deployPortForward {
-			RunPortForwards(ctx, ns.kafka, ns.app, ns.jaeger)
+			RunPortForwards(ctx, target, ns.kafka, ns.app, ns.jaeger)
 		}
 	}
 
@@ -307,9 +389,20 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 // Helpers
 
 var (
-	runExecFn                                      = runExecDefault
-	runExecStdinFn                                 = runExecStdinDefault
-	runHelmFn                                      = runHelmDefault
+	runExecFn      = runExecDefault
+	runExecStdinFn = runExecStdinDefault
+	runHelmFn      = runHelmDefault
+	// resolveVersionPlanFn reads charts and the cluster to decide versions
+	// and scope (deploy_versions.go); tests hand deploy a canned plan.
+	resolveVersionPlanFn = resolveVersionPlan
+	// Reads a command's output. Every command that INSPECTS the cluster used to
+	// call exec.CommandContext directly, which meant the deploy tests really
+	// shelled out to kubectl: with no cluster they fell into the readiness wait
+	// loops and each test sat there for the full two-minute deadline. Routing
+	// reads through an injectable function makes those paths testable in the
+	// same way the write paths already were.
+	runExecOutputFn                                = runExecOutputDefault
+	runExecCombinedFn                              = runExecCombinedDefault
 	isHelmReleaseDeployedFn                        = isHelmReleaseDeployedDefault
 	defaultExecutor         detect.CommandExecutor = detect.NewOSExecutor()
 )
@@ -325,7 +418,7 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 
 	if deployVerbose {
 		// Show the command being run
-		dl.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		dl.Printf("    %s\n", output.DimStyle.Render("$ "+name+" "+strings.Join(args, " ")))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -342,12 +435,23 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 			errMsg = strings.TrimSpace(outBuf.String())
 		}
 		if errMsg != "" {
-			dl.Printf("    \033[31m%s\033[0m\n", errMsg)
+			dl.Printf("    %s\n", output.ErrorStyle.Render(errMsg))
 			return fmt.Errorf("%w: %s", err, errMsg)
 		}
 		return err
 	}
 	return nil
+}
+
+// runExecOutputDefault captures stdout, like exec.Cmd.Output().
+func runExecOutputDefault(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+// runExecCombinedDefault captures stdout and stderr, like exec.Cmd.CombinedOutput().
+// Used where the caller inspects error text (e.g. "not found") rather than data.
+func runExecCombinedDefault(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 func runExecStdinDefault(ctx context.Context, name string, args []string, stdinData string) error {
@@ -367,7 +471,7 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 	defer execMutex.Unlock()
 
 	if deployVerbose {
-		dl.Printf("    \033[2m$ %s %s\033[0m\n", name, strings.Join(args, " "))
+		dl.Printf("    %s\n", output.DimStyle.Render("$ "+name+" "+strings.Join(args, " ")))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -382,7 +486,7 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 			errMsg = strings.TrimSpace(outBuf.String())
 		}
 		if errMsg != "" {
-			dl.Printf("    \033[31m%s\033[0m\n", errMsg)
+			dl.Printf("    %s\n", output.ErrorStyle.Render(errMsg))
 			return fmt.Errorf("%w: %s", runErr, errMsg)
 		}
 		return runErr
@@ -400,7 +504,7 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 	// the actual status to avoid skipping re-installation of broken releases.
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace, "-o", "json").Output()
+	out, err := runExecOutputFn(checkCtx, "helm", "status", release, "-n", namespace, "-o", "json")
 	if err != nil {
 		return false
 	}
@@ -416,8 +520,7 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS string) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, name, "-o", "jsonpath={.metadata.annotations.meta\\.helm\\.sh/release-namespace}")
-	out, err := cmd.Output()
+	out, err := runExecOutputFn(checkCtx, "kubectl", "get", kind, name, "-o", "jsonpath={.metadata.annotations.meta\\.helm\\.sh/release-namespace}")
 	if err != nil {
 		return // resource doesn't exist, nothing to clean
 	}
@@ -426,7 +529,7 @@ func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS str
 		dl.Printf("    - Cleaning stale %s/%s (owned by namespace %q, deploying to %q)\n", kind, name, existingNS, expectedNS)
 		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
 		defer delCancel()
-		exec.CommandContext(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found").Run()
+		_, _ = runExecCombinedFn(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found")
 	}
 }
 

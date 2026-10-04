@@ -8,7 +8,6 @@ scenarios:
       acks: "all"
       enableIdempotence: true
       enableTransactions: true
-      enableCrc: true
       replicationFactor: 3
       minInsyncReplicas: 2
       numConsumers: 2

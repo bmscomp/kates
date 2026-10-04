@@ -1,0 +1,13 @@
+# VENDORED — do not edit. Strimzi 1.2.0 packaging/examples/metrics/kafka-cruise-control-metrics.yaml
+# (the `metrics-config.yml` key of its `cruise-control-metrics` ConfigMap), byte for byte below this header.
+# scripts/check-strimzi-metrics.sh compares it with the upstream file for the
+# STRIMZI_VERSION in versions.env; refresh it with --update when that moves.
+# The operator's Grafana dashboards (strimzi-operator chart) read the series
+# these rules produce, and scripts/metric-contract/kafka-cluster.yaml proves
+# every series the chart's alerts read is among them.
+# See https://github.com/prometheus/jmx_exporter for more info about JMX Prometheus Exporter metrics
+lowercaseOutputName: true
+rules:
+- pattern: kafka.cruisecontrol<name=(.+)><>(\w+)
+  name: kafka_cruisecontrol_$1_$2
+  type: GAUGE

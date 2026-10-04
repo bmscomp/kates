@@ -2,14 +2,17 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -21,129 +24,38 @@ var testWatchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
-		tick := 0
-		var throughputHistory []float64
 
-		for {
-			result, err := apiClient.GetTest(context.Background(), id)
-			if err != nil {
-				return cmdErr("Failed to fetch test: " + err.Error())
-			}
-
-			status := strings.ToUpper(result.Status)
-
-			var currentThroughput float64
-			for _, r := range result.Results {
-				if r.ThroughputRecordsPerSec > currentThroughput {
-					currentThroughput = r.ThroughputRecordsPerSec
-				}
-			}
-			throughputHistory = append(throughputHistory, currentThroughput)
-
-			fmt.Print("\033[2J\033[H")
-
-			output.Banner("Test Watch", fmt.Sprintf("%s · %s", result.TestType, truncID(id)))
-
-			output.SubHeader("Status")
-			output.KeyValue("Test ID", id)
-			output.KeyValue("Type", result.TestType)
-			output.KeyValue("Backend", result.Backend)
-			output.KeyValue("Status", output.StatusBadge(status))
-			output.KeyValue("Created", formatTime(result.CreatedAt))
-
-			if len(result.Results) > 0 {
-				output.SubHeader(fmt.Sprintf("Results (%d phases)", len(result.Results)))
-				rows := make([][]string, 0, len(result.Results))
-				for _, r := range result.Results {
-					phase := r.PhaseName
-					if phase == "" {
-						phase = "main"
-					}
-					rows = append(rows, []string{
-						phase,
-						r.Status,
-						fmtNum(r.RecordsSent),
-						fmtFloat(r.ThroughputRecordsPerSec, 1),
-						fmtFloat(r.AvgLatencyMs, 2),
-						fmtFloat(r.P99LatencyMs, 2),
-					})
-				}
-				output.Table(
-					[]string{"Phase", "Status", "Records", "Throughput", "Avg Lat.", "P99 Lat."},
-					rows,
-				)
-			}
-
-			if len(throughputHistory) > 1 {
-				fmt.Println()
-				sparkline := output.Sparkline(throughputHistory)
-				output.KeyValue("Throughput Trend", sparkline+" "+fmtNum(currentThroughput)+" rec/s")
-			}
-
-			switch status {
-			case "DONE", "COMPLETED":
-				output.Success("Test completed successfully")
-				output.Hint(fmt.Sprintf("View report: kates report show %s", id))
-				return nil
-			case "FAILED", "ERROR":
-				return cmdErr("Test failed")
-			default:
-				fmt.Println()
-				fmt.Printf("  %s Refreshing every %ds... (Ctrl+C to stop)\n",
-					spinnerFrame(tick),
-					watchInterval,
-				)
-			}
-
-			tick++
-			time.Sleep(time.Duration(watchInterval) * time.Second)
+		// One follower for the whole test family. `watch` used to be its own
+		// clear-screen loop — a second implementation with its own rendering,
+		// its own polling, and (until wave 1) DIFFERENT exit semantics from
+		// `create --wait`. pollUntilDone gives the rich TUI on a terminal and
+		// the append-only line format everywhere else.
+		if watchInterval > 0 {
+			origInterval := pollInterval
+			pollInterval = time.Duration(watchInterval) * time.Second
+			defer func() { pollInterval = origInterval }()
 		}
-	},
-}
 
-var testListWatchCmd = &cobra.Command{
-	Use:   "watch",
-	Short: "Auto-refreshing test list",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		tick := 0
-
-		for {
-			paged, err := apiClient.ListTests(context.Background(), testTypeFlag, testStatusFlag, testPageFlag, testSizeFlag)
-			if err != nil {
-				output.Error("Failed to list tests: " + err.Error())
-				time.Sleep(time.Duration(watchInterval) * time.Second)
-				tick++
-				continue
+		status, err := pollUntilDone(commandContext(cmd), id)
+		if errors.Is(err, errStoppedWaiting) {
+			// Watching someone's run and stopping is not a failure: the
+			// test carries on, and this says so.
+			state := "running"
+			if status != "" {
+				state = strings.ToLower(status)
 			}
-
-			fmt.Print("\033[2J\033[H")
-			output.Header("Test Runs (live)")
-
-			if len(paged.Content) == 0 {
-				output.Hint("No test runs found.")
-			} else {
-				rows := make([][]string, 0, len(paged.Content))
-				for _, run := range paged.Content {
-					rows = append(rows, []string{
-						truncID(run.ID),
-						run.TestType,
-						run.Status,
-						run.Backend,
-						formatTime(run.CreatedAt),
-					})
-				}
-				output.Table([]string{"ID", "Type", "Status", "Backend", "Created"}, rows)
-				output.Hint(fmt.Sprintf("%d items total", paged.TotalItems))
-			}
-
-			fmt.Printf("\n  %s Refreshing every %ds... (Ctrl+C to stop)\n",
-				spinnerFrame(tick),
-				watchInterval,
-			)
-
-			tick++
-			time.Sleep(time.Duration(watchInterval) * time.Second)
+			output.Hint(fmt.Sprintf("Stopped watching; test %s is still %s. Resume: kates test watch %s",
+				truncID(id), state, id))
+			return nil
 		}
+		if err != nil {
+			return cmdErr("Lost track of test " + truncID(id) + ": " + err.Error())
+		}
+		if isFailedStatus(status) {
+			return cmdErr("Test failed — details: kates test get " + id)
+		}
+		output.Hint(fmt.Sprintf("View report: kates report show %s", id))
+		return nil
 	},
 }
 
@@ -164,6 +76,7 @@ const maxStaleRetries = 5
 const maxConnRetries = 10
 
 type pollModel struct {
+	ctx            context.Context
 	id             string
 	progress       progress.Model
 	elapsed        time.Duration
@@ -183,12 +96,13 @@ type pollModel struct {
 	err            error
 }
 
-func newPollModel(id string) pollModel {
+func newPollModel(ctx context.Context, id string) pollModel {
 	p := progress.New(
 		progress.WithDefaultGradient(),
 		progress.WithWidth(40),
 	)
 	return pollModel{
+		ctx:       ctx,
 		id:        id,
 		progress:  p,
 		startTime: time.Now(),
@@ -210,14 +124,14 @@ func (m pollModel) tickCmd() tea.Cmd {
 
 func (m pollModel) fetchTest() tea.Cmd {
 	return func() tea.Msg {
-		result, err := apiClient.GetTest(context.Background(), m.id)
+		result, err := apiClient.GetTest(m.ctx, m.id)
 		return pollResultMsg{test: result, err: err}
 	}
 }
 
 func (m pollModel) fetchSummary() tea.Cmd {
 	return func() tea.Msg {
-		summary, _ := apiClient.ReportSummary(context.Background(), m.id)
+		summary, _ := apiClient.ReportSummary(m.ctx, m.id)
 		return pollDoneMsg{summary: summary}
 	}
 }
@@ -358,6 +272,8 @@ func (m pollModel) View() string {
 				phaseStatus = output.SuccessStyle.Render("✓ " + r.Status)
 			} else if strings.EqualFold(r.Status, "RUNNING") {
 				phaseStatus = output.AccentStyle.Render("● " + r.Status)
+			} else if strings.EqualFold(r.Status, "FAILED") {
+				phaseStatus = output.ErrorStyle.Render("✖ " + r.Status)
 			}
 			b.WriteString(fmt.Sprintf("  %-12s %s  %s rec/s  p99=%sms\n",
 				phase,
@@ -365,6 +281,12 @@ func (m pollModel) View() string {
 				fmtFloat(r.ThroughputRecordsPerSec, 1),
 				fmtFloat(r.P99LatencyMs, 2),
 			))
+			// The API sends the reason with the status. Printing only "FAILED"
+			// left you watching a red word for the rest of the run and reaching
+			// for kubectl to find out what it meant.
+			if r.Error != "" {
+				b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("   └ "+truncate(r.Error, 100))))
+			}
 		}
 	}
 
@@ -459,11 +381,127 @@ func isStaleResult(results []client.PhaseResult) bool {
 	return true
 }
 
-func pollUntilDone(id string) {
-	m := newPollModel(id)
-	p := tea.NewProgram(m)
-	if _, err := p.Run(); err != nil {
-		output.Error("Watch error: " + err.Error())
+// Seams for tests: the plain poll loop must be drivable without a server or a
+// real clock.
+var (
+	pollGetTestFn = func(ctx context.Context, id string) (*client.TestRun, error) {
+		return apiClient.GetTest(ctx, id)
+	}
+	pollInterval = 2 * time.Second
+)
+
+// isFailedStatus reports whether a terminal test status means failure.
+func isFailedStatus(status string) bool {
+	return status == "FAILED" || status == "ERROR"
+}
+
+// pollUntilDone follows a test until it reaches a terminal state and returns
+// the final status ("COMPLETED", "FAILED", …). A non-nil error means we lost
+// the ability to follow (connection lost, UI failure) — the test's real
+// outcome is unknown, which callers must NOT report as success.
+//
+// The previous version returned nothing: the TUI rendered "Test failed" and
+// the command exited 0 anyway, so CI stayed green on failed load tests.
+//
+// Without a terminal this skips bubbletea entirely — tea cannot open /dev/tty
+// there, so the old path turned "no TTY" into a crash before any status was
+// ever polled — and runs a plain append-only loop instead.
+//
+// A follow stopped before the test finished, by q or Ctrl-C in the terminal
+// UI or by ctx, returns the last status seen and errStoppedWaiting. That used
+// to be a nil error, so `create --wait` exited 0 on Ctrl-C with its test
+// still running; each caller now decides what stopping means for it.
+func pollUntilDone(ctx context.Context, id string) (string, error) {
+	if !IsInteractive() {
+		return pollUntilDonePlain(ctx, id, os.Stdout)
+	}
+	m := newPollModel(ctx, id)
+	final, err := tea.NewProgram(m, tea.WithContext(ctx)).Run()
+	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, tea.ErrInterrupted) || errors.Is(err, tea.ErrProgramKilled) {
+			return lastPolledStatus(final), errStoppedWaiting
+		}
+		return "", fmt.Errorf("watch UI error: %w", err)
+	}
+	fm := final.(pollModel)
+	if fm.err != nil {
+		return "", fm.err
+	}
+	// The UI quits by itself once the test ends. Quitting before that was
+	// the user (q, Ctrl-C), or Bubble Tea on SIGTERM.
+	if !fm.done && !fm.failed {
+		return fm.lastStatus, errStoppedWaiting
+	}
+	return fm.lastStatus, nil
+}
+
+func lastPolledStatus(m tea.Model) string {
+	if pm, ok := m.(pollModel); ok {
+		return pm.lastStatus
+	}
+	return ""
+}
+
+// pollUntilDonePlain is the non-interactive follower: one line per status
+// change, append-only, no escape codes — the format CI logs can rely on.
+func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, error) {
+	lastStatus := ""
+	retries := 0
+	for {
+		test, err := pollGetTestFn(ctx, id)
+		if err != nil {
+			// A poll cut off by the stop is not a lost connection. One that
+			// answered is still reported: a run that finished as the stop
+			// came has nothing left to stop.
+			if ctx.Err() != nil {
+				return lastStatus, errStoppedWaiting
+			}
+			retries++
+			if retries > maxConnRetries {
+				return "", fmt.Errorf("connection lost after %d retries: %w", maxConnRetries, err)
+			}
+			if !sleepCtx(ctx, pollInterval) {
+				return lastStatus, errStoppedWaiting
+			}
+			continue
+		}
+		retries = 0
+
+		status := strings.ToUpper(test.Status)
+		if status != lastStatus {
+			var sent float64
+			var throughput float64
+			for _, r := range test.Results {
+				sent += float64(r.RecordsSent)
+				if r.ThroughputRecordsPerSec > throughput {
+					throughput = r.ThroughputRecordsPerSec
+				}
+			}
+			fmt.Fprintf(w, "%s  test=%s  status=%s  records=%.0f  throughput=%.0f rec/s\n",
+				time.Now().Format(time.RFC3339), truncID(id), status, sent, throughput)
+			lastStatus = status
+		}
+
+		switch status {
+		case "DONE", "COMPLETED", "FAILED", "ERROR":
+			return status, nil
+		}
+		if !sleepCtx(ctx, pollInterval) {
+			return lastStatus, errStoppedWaiting
+		}
+	}
+}
+
+// sleepCtx sleeps for d, or until ctx is done; it reports whether it slept
+// the whole time.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 

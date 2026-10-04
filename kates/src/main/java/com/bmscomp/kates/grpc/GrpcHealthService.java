@@ -1,16 +1,15 @@
 package com.bmscomp.kates.grpc;
 
+import jakarta.inject.Inject;
+
 import io.quarkus.grpc.GrpcService;
 import io.smallrye.common.annotation.Blocking;
 import io.smallrye.mutiny.Uni;
-import jakarta.inject.Inject;
-
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.bmscomp.kates.engine.TestOrchestrator;
-import com.bmscomp.kates.service.ClusterHealthService;
-
 import com.bmscomp.kates.grpc.proto.*;
+import com.bmscomp.kates.service.ClusterHealthService;
 
 /**
  * gRPC implementation of the HealthService — reports engine and Kafka status.
@@ -45,9 +44,7 @@ public class GrpcHealthService extends MutinyHealthServiceGrpc.HealthServiceImpl
                     .setKafka(KafkaHealth.newBuilder()
                             .setStatus(reachable ? "UP" : "DOWN")
                             .setBootstrapServers(bootstrapServers)
-                            .setMessage(reachable
-                                    ? "Kafka cluster is reachable"
-                                    : "Cannot connect to Kafka cluster")
+                            .setMessage(reachable ? "Kafka cluster is reachable" : "Cannot connect to Kafka cluster")
                             .build())
                     .build();
         });

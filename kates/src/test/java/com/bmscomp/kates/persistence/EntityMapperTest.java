@@ -62,8 +62,7 @@ class EntityMapperTest {
 
     @Test
     void nullSpecHandled() {
-        TestRun run = new TestRun(TestType.LOAD, null)
-            .withStatus(TestResult.TaskStatus.PENDING);
+        TestRun run = new TestRun(TestType.LOAD, null).withStatus(TestResult.TaskStatus.PENDING);
 
         TestRunEntity entity = EntityMapper.toEntity(run);
         assertNull(entity.getSpecJson());
@@ -78,12 +77,8 @@ class EntityMapperTest {
         TestRunEntity entity = EntityMapper.toEntity(run);
         assertEquals(1, entity.getResults().size());
 
-        TestResult r2 = new TestResult()
-            .withTaskId("task-2")
-            .withRecordsSent(2000);
-        TestResult r3 = new TestResult()
-            .withTaskId("task-3")
-            .withRecordsSent(3000);
+        TestResult r2 = new TestResult().withTaskId("task-2").withRecordsSent(2000);
+        TestResult r3 = new TestResult().withTaskId("task-3").withRecordsSent(3000);
         run = run.withResults(java.util.List.of(r2, r3));
 
         EntityMapper.updateEntity(entity, run);
@@ -91,6 +86,52 @@ class EntityMapperTest {
         assertEquals(2, entity.getResults().size());
         assertEquals("task-2", entity.getResults().get(0).getTaskId());
         assertEquals("task-3", entity.getResults().get(1).getTaskId());
+    }
+
+    @Test
+    void theRequestedSpecIsStoredBesideTheMergedOne() {
+        TestSpec requested = new TestSpec();
+        requested.setTargetThroughput(2000);
+        requested.setEnableCrc(false);
+        TestRun run = buildFullRun().withRequestedSpec(requested.explicitFields());
+
+        TestRunEntity entity = EntityMapper.toEntity(run);
+        TestRun restored = EntityMapper.toDomain(entity);
+
+        assertEquals("{\"targetThroughput\":2000,\"enableCrc\":false}", entity.getRequestedSpecJson());
+        assertEquals(Map.of("targetThroughput", 2000, "enableCrc", false), restored.getRequestedSpec());
+        assertEquals(
+                restored.getRequestedSpec(),
+                EntityMapper.toDomainSummary(entity).getRequestedSpec());
+        assertEquals("my-topic", restored.getSpec().getTopic(), "the merged spec is kept as before");
+    }
+
+    @Test
+    void aRowFromBeforeTheColumnHasNoRequestedSpec() {
+        TestRunEntity entity = EntityMapper.toEntity(buildFullRun());
+        assertNull(entity.getRequestedSpecJson());
+
+        assertNull(EntityMapper.toDomain(entity).getRequestedSpec());
+        assertNull(EntityMapper.toDomainSummary(entity).getRequestedSpec());
+    }
+
+    @Test
+    void anEmptyRequestIsStoredAsEmptyNotAsMissing() {
+        TestRunEntity entity = EntityMapper.toEntity(buildFullRun().withRequestedSpec(Map.of()));
+
+        assertEquals("{}", entity.getRequestedSpecJson());
+        assertEquals(Map.of(), EntityMapper.toDomain(entity).getRequestedSpec());
+    }
+
+    @Test
+    void updateEntityKeepsTheStoredRequest() {
+        TestRunEntity entity =
+                EntityMapper.toEntity(buildFullRun().withRequestedSpec(Map.of("consumerGroup", "perf-cg")));
+
+        EntityMapper.updateEntity(entity, buildFullRun().withStatus(TestResult.TaskStatus.DONE));
+
+        assertEquals("{\"consumerGroup\":\"perf-cg\"}", entity.getRequestedSpecJson());
+        assertEquals(TestResult.TaskStatus.DONE, entity.getStatus());
     }
 
     private TestRun buildFullRun() {
@@ -103,24 +144,144 @@ class EntityMapperTest {
         sla.setMaxP99LatencyMs(50.0);
 
         TestResult result = new TestResult()
-            .withTaskId("task-1")
-            .withRecordsSent(1000)
-            .withThroughputRecordsPerSec(500.0)
-            .withAvgLatencyMs(5.0)
-            .withP50LatencyMs(3.0)
-            .withP95LatencyMs(10.0)
-            .withP99LatencyMs(20.0)
-            .withMaxLatencyMs(50.0)
-            .withStatus(TestResult.TaskStatus.DONE);
+                .withTaskId("task-1")
+                .withRecordsSent(1000)
+                .withThroughputRecordsPerSec(500.0)
+                .withAvgLatencyMs(5.0)
+                .withP50LatencyMs(3.0)
+                .withP95LatencyMs(10.0)
+                .withP99LatencyMs(20.0)
+                .withMaxLatencyMs(50.0)
+                .withStatus(TestResult.TaskStatus.DONE);
 
         TestRun run = new TestRun(TestType.LOAD, spec)
-            .withStatus(TestResult.TaskStatus.RUNNING)
-            .withBackend("native")
-            .withScenarioName("basic-load")
-            .withSla(sla)
-            .withLabels(new LinkedHashMap<>(Map.of("env", "test")))
-            .withAddedResult(result);
+                .withStatus(TestResult.TaskStatus.RUNNING)
+                .withBackend("native")
+                .withScenarioName("basic-load")
+                .withSla(sla)
+                .withLabels(new LinkedHashMap<>(Map.of("env", "test")))
+                .withAddedResult(result);
 
         return run;
+    }
+
+    // ── updateEntity child diffing (P3-2) ────────────────────────────────────
+    //
+    // updateEntity used to clear() and rebuild the results collection, which
+    // under cascade=ALL + orphanRemoval issued a DELETE for every row followed
+    // by an INSERT for every row — on every status poll of a running test.
+    // These pin the diffing behaviour that replaced it.
+
+    private static TestResult result(String taskId, TestResult.TaskStatus status, long recordsSent) {
+        return new TestResult().withTaskId(taskId).withStatus(status).withRecordsSent(recordsSent);
+    }
+
+    @Test
+    void updateEntityReusesChildRowsForTheSameTaskId() {
+        TestRun initial = new TestRun(TestType.LOAD, new TestSpec())
+                .withResults(java.util.List.of(
+                        result("task-1", TestResult.TaskStatus.RUNNING, 10),
+                        result("task-2", TestResult.TaskStatus.RUNNING, 20)));
+        TestRunEntity entity = EntityMapper.toEntity(initial);
+
+        TestResultEntity firstBefore = entity.getResults().get(0);
+        TestResultEntity secondBefore = entity.getResults().get(1);
+
+        // A later poll reports progress on the same two tasks.
+        TestRun updated = initial.withResults(java.util.List.of(
+                result("task-1", TestResult.TaskStatus.DONE, 500),
+                result("task-2", TestResult.TaskStatus.RUNNING, 60)));
+        EntityMapper.updateEntity(entity, updated);
+
+        assertEquals(2, entity.getResults().size());
+        assertSame(firstBefore, entity.getResults().get(0), "same child instance is mutated, not replaced");
+        assertSame(secondBefore, entity.getResults().get(1));
+        assertEquals(TestResult.TaskStatus.DONE, firstBefore.getStatus(), "child was updated in place");
+        assertEquals(500, firstBefore.getRecordsSent());
+        assertEquals(60, secondBefore.getRecordsSent());
+    }
+
+    @Test
+    void updateEntityAddsNewTasksAndDropsRemovedOnes() {
+        TestRun initial = new TestRun(TestType.LOAD, new TestSpec())
+                .withResults(java.util.List.of(
+                        result("task-1", TestResult.TaskStatus.RUNNING, 1),
+                        result("task-2", TestResult.TaskStatus.RUNNING, 2)));
+        TestRunEntity entity = EntityMapper.toEntity(initial);
+        TestResultEntity keptBefore = entity.getResults().get(0);
+
+        TestRun updated = initial.withResults(java.util.List.of(
+                result("task-1", TestResult.TaskStatus.RUNNING, 5),
+                result("task-3", TestResult.TaskStatus.PENDING, 0)));
+        EntityMapper.updateEntity(entity, updated);
+
+        java.util.Set<String> taskIds = entity.getResults().stream()
+                .map(TestResultEntity::getTaskId)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(java.util.Set.of("task-1", "task-3"), taskIds);
+        assertTrue(entity.getResults().contains(keptBefore), "the surviving child keeps its identity");
+    }
+
+    /**
+     * A run read without its results, as toDomainSummary reads one, carries
+     * none. Saving it used to clear the collection, and orphanRemoval then
+     * deleted every task row: what the timeout reaper and orphan recovery did
+     * to each run they failed.
+     */
+    @Test
+    void updateEntityWithNoResultsKeepsTheStoredOnes() {
+        TestRun initial = new TestRun(TestType.LOAD, new TestSpec())
+                .withResults(java.util.List.of(
+                        result("task-1", TestResult.TaskStatus.DONE, 500),
+                        result("task-2", TestResult.TaskStatus.RUNNING, 60)));
+        TestRunEntity entity = EntityMapper.toEntity(initial);
+        TestResultEntity firstBefore = entity.getResults().get(0);
+
+        TestRun summary = EntityMapper.toDomainSummary(entity).withStatus(TestResult.TaskStatus.FAILED);
+        assertTrue(summary.getResults().isEmpty());
+        EntityMapper.updateEntity(entity, summary);
+
+        assertEquals(TestResult.TaskStatus.FAILED, entity.getStatus());
+        assertEquals(2, entity.getResults().size(), "no result row is dropped");
+        assertSame(firstBefore, entity.getResults().get(0));
+        assertEquals(500, firstBefore.getRecordsSent());
+        assertEquals(TestResult.TaskStatus.RUNNING, entity.getResults().get(1).getStatus());
+    }
+
+    @Test
+    void thePlannedDurationIsStoredAndKept() {
+        TestRun run = buildFullRun().withPlannedDurationMs(3_600_000L);
+
+        TestRunEntity entity = EntityMapper.toEntity(run);
+        assertEquals(3_600_000L, entity.getPlannedDurationMs());
+        assertEquals(3_600_000L, EntityMapper.toDomain(entity).getPlannedDurationMs());
+        assertEquals(3_600_000L, EntityMapper.toDomainSummary(entity).getPlannedDurationMs());
+
+        // A copy built without it, by hand rather than read back, leaves it.
+        EntityMapper.updateEntity(entity, buildFullRun().withStatus(TestResult.TaskStatus.DONE));
+        assertEquals(3_600_000L, entity.getPlannedDurationMs());
+    }
+
+    @Test
+    void aRunNoDurationBoundsHasNoPlannedDuration() {
+        TestRunEntity entity = EntityMapper.toEntity(buildFullRun());
+
+        assertNull(entity.getPlannedDurationMs());
+        assertNull(EntityMapper.toDomain(entity).getPlannedDurationMs());
+    }
+
+    @Test
+    void updateEntityLinksNewChildrenBackToTheParent() {
+        TestRun initial = new TestRun(TestType.LOAD, new TestSpec()).withResults(java.util.List.of());
+        TestRunEntity entity = EntityMapper.toEntity(initial);
+
+        EntityMapper.updateEntity(
+                entity, initial.withResults(java.util.List.of(result("task-9", TestResult.TaskStatus.RUNNING, 3))));
+
+        assertEquals(1, entity.getResults().size());
+        assertSame(
+                entity,
+                entity.getResults().get(0).getTestRun(),
+                "a child added through the diff must still own its back-reference");
     }
 }

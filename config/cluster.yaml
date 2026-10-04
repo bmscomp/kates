@@ -1,54 +1,74 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-# Use a stable Kubernetes version (v1.31.4) to avoid cgroup v2 issues
-# v1.33+ has known kubelet health check issues with cgroup v2 on arm64
-featureGates:
-  "KubeletCgroupDriverFromCRI": true
+# Three zones, because the Kafka pools spread across them. The node NAMES are the
+# zone names (alpha/sigma/gamma) and the labels below are what the pool
+# affinities select on — see charts/kafka-cluster.
+#
+# The node image is pinned in versions.env as KINDEST_NODE_VERSION and repeated
+# literally here, because kind reads this file as-is and cannot expand a
+# variable. scripts/check-versions.sh fails if the two disagree, or if the three
+# nodes below ever end up on different tags.
+#
+# THE PATCHES BELOW ARE kubeadm v1beta3, AND THAT IS DECIDED BY THE NODE IMAGE,
+# NOT BY THE KIND VERSION. kind picks the template from the Kubernetes version:
+#
+#   templateSource := ConfigTemplateBetaV4
+#   if ver.LessThan("v1.23.0")        { templateSource = ConfigTemplateBetaV2 }
+#   else if ver.LessThan("v1.36.0")   { templateSource = ConfigTemplateBetaV3 }
+#       — kind/pkg/cluster/internal/kubeadm/config.go
+#
+# So anything below Kubernetes 1.36 gets v1beta3, on any kind release. When
+# KINDEST_NODE_VERSION crosses 1.36, these patches MUST be rewritten to v1beta4:
+# kubeletExtraArgs becomes a list of name/value pairs instead of a map, and
+# apiServer.timeoutForControlPlane moves to
+# InitConfiguration.timeouts.controlPlaneComponentHealthCheck. Getting that
+# backwards fails at `kubeadm init`, not at config load:
+#   cannot unmarshal array into Go struct field ... of type map[string]string
 kubeadmConfigPatches:
 - |
   kind: ClusterConfiguration
   apiServer:
+    # Generous on purpose: three nodes coming up together on a laptop, or on a
+    # 2-core runner, regularly needs more than the default.
     timeoutForControlPlane: 8m0s
 nodes:
 - role: control-plane
-  # Use Kubernetes v1.31.4 — v1.33+ fails with cgroup v2 on arm64
-  image: kindest/node:v1.31.4
+  image: kindest/node:v1.34.11
   kubeadmConfigPatches:
   - |
     kind: InitConfiguration
     nodeRegistration:
       name: alpha
+      # No cgroup-driver here. KubeletCgroupDriverFromCRI went GA in Kubernetes
+      # v1.34, so the kubelet asks containerd which driver to use and pinning it
+      # by hand is redundant. The cluster-level featureGates block that used to
+      # force that behaviour is gone for the same reason — as is the comment
+      # that kept this file on v1.31.4 "because v1.33+ fails with cgroup v2 on
+      # arm64", which was describing the bug that graduation fixes.
       kubeletExtraArgs:
-        cgroup-driver: systemd
         runtime-request-timeout: 15m
   labels:
     topology.kubernetes.io/zone: alpha
     node.kubernetes.io/instance-type: custom-3vcpu-6gb
     node.kubernetes.io/local-storage: 30gb
 - role: worker
-  # Use Kubernetes v1.31.4 — v1.33+ fails with cgroup v2 on arm64
-  image: kindest/node:v1.31.4
+  image: kindest/node:v1.34.11
   kubeadmConfigPatches:
   - |
     kind: JoinConfiguration
     nodeRegistration:
       name: sigma
-      kubeletExtraArgs:
-        cgroup-driver: systemd
   labels:
     topology.kubernetes.io/zone: sigma
     node.kubernetes.io/instance-type: custom-3vcpu-6gb
     node.kubernetes.io/local-storage: 30gb
 - role: worker
-  # Use Kubernetes v1.31.4 — v1.33+ fails with cgroup v2 on arm64
-  image: kindest/node:v1.31.4
+  image: kindest/node:v1.34.11
   kubeadmConfigPatches:
   - |
     kind: JoinConfiguration
     nodeRegistration:
       name: gamma
-      kubeletExtraArgs:
-        cgroup-driver: systemd
   labels:
     topology.kubernetes.io/zone: gamma
     node.kubernetes.io/instance-type: custom-3vcpu-6gb

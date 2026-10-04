@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 	"time"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -29,6 +34,13 @@ type Context struct {
 	APIKey   string `yaml:"api-key,omitempty"`
 	ProxyURL string `yaml:"proxy-url,omitempty"`
 	Insecure bool   `yaml:"insecure,omitempty"`
+	// KeySource records that kates copied APIKey from Secret kates-api-key,
+	// and which key it copied (see secretKeySource). kates ports and kates
+	// deploy replace a key only while this still matches it. Every other key
+	// counts as the user's and stays: one set with kates ctx set or brought in
+	// with kates ctx import, one changed in the file by hand, and every key in
+	// a config written before this field existed.
+	KeySource string `yaml:"key-source,omitempty"`
 }
 
 type Config struct {
@@ -46,39 +58,256 @@ func configPath() string {
 }
 
 func loadConfig() Config {
-	cfg := Config{
-		CurrentContext: "default",
-		Contexts:       map[string]Context{"default": {URL: "http://localhost:8080", Output: "table"}},
-	}
-	data, err := os.ReadFile(configPath())
-	if err == nil {
-		if yamlErr := yaml.Unmarshal(data, &cfg); yamlErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to parse config %s: %v\n", configPath(), yamlErr)
-		}
-	}
-	if cfg.Contexts == nil {
-		cfg.Contexts = map[string]Context{}
+	cfg, err := readConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not load config %s: %v\n", configPath(), err)
 	}
 	return cfg
 }
 
+// readConfig returns the config on disk, or the built-in default context when
+// there is no file. It reports a file it cannot read or parse, which
+// loadConfig only warns about but updateConfig refuses to write over: saving
+// the defaults in its place would lose every context in it for good.
+func readConfig() (Config, error) {
+	data, err := os.ReadFile(configPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return Config{
+			CurrentContext: "default",
+			Contexts:       map[string]Context{"default": {URL: "http://localhost:8080", Output: "table"}},
+		}, nil
+	}
+	// A file's contexts are its own. Unmarshalling into the defaults merged
+	// them in, so every save (kates ctx set, kates ports) added a "default"
+	// context pointing at localhost to a file that had none.
+	var cfg Config
+	if err == nil {
+		err = yaml.Unmarshal(data, &cfg)
+	}
+	if cfg.Contexts == nil {
+		cfg.Contexts = map[string]Context{}
+	}
+	return cfg, err
+}
+
+// configFileMode keeps ~/.kates.yaml, which holds API keys, readable by its
+// owner only. It used to be written 0644, so every local account could read
+// the keys. 0600 keeps out other users, not other processes of the same one.
+const configFileMode os.FileMode = 0o600
+
+// saveConfig replaces the whole config with cfg. A command that changes part
+// of the config calls updateConfig instead, which reads it under the same lock.
 func saveConfig(cfg Config) error {
+	unlock, err := lockConfig()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return writeConfigFile(cfg)
+}
+
+// updateConfig applies change to the config as it is on disk and saves the
+// result, holding the config lock from the read to the write.
+//
+// Commands used to load the config, do their work and then save all of it, so
+// a change another kates process saved in the meantime was put back. kates
+// ports made that window long: it reads a Secret and checks keys against the
+// API before it saves, and a key set with kates ctx set in another terminal
+// during those seconds was quietly restored. change runs on a copy read just
+// before the write; slow work belongs before the call.
+func updateConfig(change func(cfg *Config) error) error {
+	unlock, err := lockConfig()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg, err := readConfig()
+	if err != nil {
+		return fmt.Errorf("not saving over %s, which cannot be loaded: %w", configPath(), err)
+	}
+	if err := change(&cfg); err != nil {
+		if errors.Is(err, errConfigUnchanged) {
+			return nil
+		}
+		return err
+	}
+	return writeConfigFile(cfg)
+}
+
+// errConfigUnchanged, returned by an updateConfig change, ends the update
+// without writing the file.
+var errConfigUnchanged = errors.New("config unchanged")
+
+// configLockWait bounds how long a save waits for another kates process to
+// finish its own. Holders keep the lock for one read and one write.
+var configLockWait = 5 * time.Second
+
+// lockConfig takes an exclusive advisory lock on ~/.kates.yaml.lock and
+// returns the function that releases it. The lock lives in a file of its own
+// because writeConfigFile replaces the config file, and a lock on the old file
+// would not bind the new one. The kernel releases it when the process exits,
+// so a kates that crashed never leaves it held.
+//
+// Only another kates holding the lock past configLockWait is an error. A lock
+// file that cannot be opened (one root created) or locked (a filesystem
+// without flock) leaves the save unlocked, as every save was before.
+func lockConfig() (unlock func(), err error) {
+	path := configPath() + ".lock"
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, configFileMode)
+	if err != nil {
+		return func() {}, nil
+	}
+	fd := int(f.Fd())
+	deadline := time.Now().Add(configLockWait)
+	for {
+		err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case err == nil:
+			return func() {
+				_ = syscall.Flock(fd, syscall.LOCK_UN)
+				f.Close()
+			}, nil
+		case !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR):
+			f.Close()
+			return func() {}, nil
+		case time.Now().After(deadline):
+			f.Close()
+			return nil, fmt.Errorf("another kates process has held %s for %s; try again once it finishes", path, configLockWait)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// writeConfigFile replaces the config file with cfg in one step.
+//
+// It writes a new file beside the config and renames it over the old one, so
+// a reader sees the old contents or the new, never a half-written file, and a
+// write that fails leaves the old file whole. kates used to rewrite the file
+// in place, emptying it first: a failure after that left an empty config,
+// which loads as no contexts, and the next save made the loss permanent. A
+// symlinked config (a dotfiles checkout) is followed first, so the rename
+// replaces the file it points to and the link stays a link.
+func writeConfigFile(cfg Config) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configPath(), data, 0644)
+	target, err := followSymlinks(configPath())
+	if err != nil {
+		return err
+	}
+	// The rename needs write access to the directory, not the file, so check
+	// the file as the in-place write did: a config made read-only to keep
+	// kates from changing it stays unchanged. Opening without O_TRUNC leaves
+	// it intact.
+	if f, err := os.OpenFile(target, os.O_WRONLY, 0); err == nil {
+		f.Close()
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+
+	name := filepath.Base(target)
+	if !strings.HasPrefix(name, ".") {
+		name = "." + name
+	}
+	f, err := os.CreateTemp(filepath.Dir(target), name+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer func() {
+		if tmp != "" {
+			os.Remove(tmp)
+		}
+	}()
+	// CreateTemp already uses 0600, less whatever the umask removes; set it
+	// exactly, so an unusual umask cannot leave the owner without write access.
+	if err := f.Chmod(configFileMode); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		return err
+	}
+	tmp = ""
+	return nil
 }
 
-func activeContext(cfg Config) Context {
-	name := cfg.CurrentContext
+// followSymlinks returns the file path names once every symlink on it is
+// followed, including a link whose target does not exist yet, which the
+// first save then creates. filepath.EvalSymlinks fails on such a link.
+func followSymlinks(path string) (string, error) {
+	for range 40 {
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(path), link)
+		}
+		path = link
+	}
+	return "", fmt.Errorf("%s: too many levels of symbolic links", path)
+}
+
+// contextFromEnv records that contextFlag came from KATES_CONTEXT, so an error
+// about it can say where the name came from.
+var contextFromEnv bool
+
+// resolveContext returns the context commands talk to, by name: the one
+// --context or KATES_CONTEXT names, or else the config's current context.
+//
+// A name the config does not have used to fall back to http://localhost:8080
+// without a word, so `--context prdo` sent its requests to whatever answered
+// on this machine, without the context's API key. It is an error now. No name
+// at all, and "default", still mean the built-in localhost context, as they
+// do with no config file.
+func resolveContext(cfg Config) (string, Context, error) {
+	name, from := cfg.CurrentContext, "the current context in "+configPath()
 	if contextFlag != "" {
-		name = contextFlag
+		name, from = contextFlag, "--context"
+		if contextFromEnv {
+			from = "KATES_CONTEXT"
+		}
 	}
 	if ctx, ok := cfg.Contexts[name]; ok {
-		return ctx
+		return name, ctx, nil
 	}
-	return Context{URL: "http://localhost:8080", Output: "table"}
+	if name == "" || name == "default" {
+		return "default", Context{URL: "http://localhost:8080", Output: "table"}, nil
+	}
+	known := make([]string, 0, len(cfg.Contexts))
+	for n := range cfg.Contexts {
+		known = append(known, n)
+	}
+	sort.Strings(known)
+	have := "it has none"
+	if len(known) > 0 {
+		have = "it has " + strings.Join(known, ", ")
+	}
+	return name, Context{}, fmt.Errorf("context %q, from %s, is not in %s (%s). Create it with: kates ctx set %s --url <url>",
+		name, from, configPath(), have, name)
 }
 
 const helpTemplate = `
@@ -216,17 +445,28 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if contextFlag == "" {
 			if envCtx := os.Getenv("KATES_CONTEXT"); envCtx != "" {
-				contextFlag = envCtx
+				contextFlag, contextFromEnv = envCtx, true
 			}
 		}
 		cfg := loadConfig()
-		ctx := activeContext(cfg)
+		_, ctx, ctxErr := resolveContext(cfg)
+		urlOverridden := apiURL != ""
 		if apiURL == "" {
 			if envURL := os.Getenv("KATES_URL"); envURL != "" {
-				apiURL = envURL
+				apiURL, urlOverridden = envURL, true
 			} else {
 				apiURL = ctx.URL
 			}
+		}
+		// The context's API key, proxy and TLS setting belong to its server.
+		// They used to go with whatever URL --url or KATES_URL gave, so the
+		// key was sent to that host too.
+		if urlOverridden && !contextServes(apiURL, ctx.URL) {
+			if ctx.APIKey != "" && apiKeyFlag == "" && os.Getenv("KATES_API_KEY") == "" {
+				fmt.Fprintf(output.Err, "  ! Not sending the context's API key to %s, which is not the context's server (%s). Pass --api-key or set KATES_API_KEY for it.\n",
+					mcpRedactURL(apiURL), mcpRedactURL(ctx.URL))
+			}
+			ctx = Context{Output: ctx.Output}
 		}
 
 		// Apply dynamic local port fallback if using localhost/127.0.0.1
@@ -264,6 +504,11 @@ var rootCmd = &cobra.Command{
 			Insecure: ctx.Insecure,
 		}
 		apiClient = client.NewWithOptions(opts)
+		if ctxErr != nil {
+			// Commands that never call the API, kates ctx set among them,
+			// still run; every API call reports the missing context.
+			apiClient = client.Failing(ctxErr)
+		}
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -278,27 +523,72 @@ func isPortReachable(addr string) bool {
 	return true
 }
 
-func resolveFallbackURL(url string, checkPort func(string) bool) string {
-	if strings.Contains(url, "localhost:8080") || strings.Contains(url, "127.0.0.1:8080") {
-		if !checkPort("127.0.0.1:8080") {
-			if checkPort("127.0.0.1:30083") {
-				return strings.Replace(url, "8080", "30083", 1)
-			}
-		}
-	} else if strings.Contains(url, "localhost:30083") || strings.Contains(url, "127.0.0.1:30083") {
-		if !checkPort("127.0.0.1:30083") {
-			if checkPort("127.0.0.1:8080") {
-				return strings.Replace(url, "30083", "8080", 1)
-			}
-		}
+// resolveFallbackURL moves a local API URL between the two ports the Kates
+// API is reached on locally, 8080 (kates ports) and 30083 (a Kind NodePort),
+// when its own port does not answer and the other does.
+//
+// It used to match "localhost:8080" anywhere in the URL and replace the first
+// "8080" in it, so a host such as my-localhost:8080, or a query string
+// holding the text, was rewritten too. It now looks at the host and port.
+func resolveFallbackURL(rawURL string, checkPort func(string) bool) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || !isLoopbackHost(u.Hostname()) {
+		return rawURL
 	}
-	return url
+	other := map[string]string{"8080": "30083", "30083": "8080"}[u.Port()]
+	if other == "" || checkPort("127.0.0.1:"+u.Port()) || !checkPort("127.0.0.1:"+other) {
+		return rawURL
+	}
+	u.Host = net.JoinHostPort(u.Hostname(), other)
+	return u.String()
+}
+
+// contextServes reports whether target is the server of the context whose URL
+// is contextURL, so that the context's API key, proxy and TLS setting may go
+// with it: the same host, localhost and the loopback addresses counting as
+// one, and not plain HTTP where the context uses HTTPS. The port may differ:
+// the API is reached on 8080 through kates ports and on 30083 on Kind.
+func contextServes(target, contextURL string) bool {
+	t, err := url.Parse(target)
+	if err != nil {
+		return false
+	}
+	c, err := url.Parse(contextURL)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(c.Scheme, "https") && !strings.EqualFold(t.Scheme, "https") {
+		return false
+	}
+	th, ch := t.Hostname(), c.Hostname()
+	if th == "" || ch == "" {
+		return false
+	}
+	return strings.EqualFold(th, ch) || (isLoopbackHost(th) && isLoopbackHost(ch))
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback address.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := interruptContext(os.Args[1:])
+	defer stop()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		if errors.Is(err, errInterrupted) {
+			os.Exit(interruptedExitCode)
+		}
+		// silentErr was already printed (styled) by cmdErr. Everything else
+		// goes through the same styled channel, so a plain fmt.Errorf from a
+		// RunE reads like every other kates error instead of a bare line —
+		// one error voice for the whole CLI.
 		if _, ok := err.(*silentErr); !ok {
-			fmt.Fprintln(os.Stderr, err)
+			output.Error(err.Error())
 		}
 		os.Exit(1)
 	}

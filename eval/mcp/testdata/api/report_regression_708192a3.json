@@ -1,0 +1,47 @@
+{
+  "runId": "708192a3",
+  "baselineId": "1a2b3c4d",
+  "testType": "LOAD",
+  "deltas": {
+    "avgThroughputRecPerSec": {
+      "baseline": 997.3,
+      "current": 997.9,
+      "delta": 0.1
+    },
+    "peakThroughputRecPerSec": {
+      "baseline": 998.9,
+      "current": 999.5,
+      "delta": 0.1
+    },
+    "avgLatencyMs": {
+      "baseline": 3.0,
+      "current": 2.38,
+      "delta": -20.7
+    },
+    "p50LatencyMs": {
+      "baseline": 2.55,
+      "current": 2.55,
+      "delta": 0.0
+    },
+    "p95LatencyMs": {
+      "baseline": 7.3,
+      "current": 7.3,
+      "delta": 0.0
+    },
+    "p99LatencyMs": {
+      "baseline": 10.2,
+      "current": 8.1,
+      "delta": -20.6
+    },
+    "maxLatencyMs": {
+      "baseline": 55.0,
+      "current": 55.0,
+      "delta": 0.0
+    },
+    "errorRate": {
+      "baseline": 0.0,
+      "current": 0.0
+    }
+  },
+  "regressionDetected": false
+}

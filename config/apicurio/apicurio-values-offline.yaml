@@ -1,37 +1,23 @@
-# Apicurio Registry Helm Values Configuration
-# Fully offline configuration using local registry (localhost:5001)
+# Apicurio Registry — fully offline deploy values (image pulled from the local
+# registry mirror). KafkaSQL against the Strimzi krafter cluster; credentials
+# read by the chart from the Strimzi-managed Secret (no password injected).
 
-# Image Configuration
-image:
-  repository: apicurio/apicurio-registry-kafkasql
-  tag: "2.2.5.Final"
-  pullPolicy: Never
-
-# Reploca Configuration
 replicaCount: 1
 
-# Disable internal Kafka dependency
-kafka:
-  enabled: false
+image:
+  # Local registry mirror of quay.io/apicurio/apicurio-registry:3.3.0
+  registry: "localhost:5001"
+  repository: apicurio/apicurio-registry
+  pullPolicy: Never
 
-# Configure external Kafka connection (Strimzi)
 global:
   kafka:
     bootstrapServers:
       - "krafter-kafka-bootstrap.kafka.svc:9092"
-    properties:
-      security.protocol: SASL_PLAINTEXT
-      sasl.mechanism: SCRAM-SHA-512
-      sasl.jaas.config: >-
-        org.apache.kafka.common.security.scram.ScramLoginModule required
-        username="apicurio-registry"
-        password="${APICURIO_KAFKA_PASSWORD}";
+    securityProtocol: "SASL_PLAINTEXT"
+    saslMechanism: "SCRAM-SHA-512"
+    saslJaasConfigSecretName: "apicurio-registry"
 
-# Service Configuration
 service:
   type: NodePort
-  port: 8080
-  nodePort: 30082  # Exposed port for access
-
-# Environment Variables (Optional explicit overrides)
-# KAFKA_BOOTSTRAP_SERVERS is set automatically by the chart based on global values
+  nodePort: 30082

@@ -223,7 +223,10 @@ metadata:
     strimzi.io/kraft: enabled
 spec:
   kafka:
-    version: 4.1.1
+    version: 4.3.0
+    # Pinned one step behind version so the 4.3.0 rollout stays reversible;
+    # raise to 4.3-IV0 in a follow-up once the cluster is proven healthy.
+    metadataVersion: 4.2-IV1
     listeners:
       - name: plain
         port: 9092

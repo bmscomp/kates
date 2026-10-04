@@ -6,7 +6,7 @@ metadata:
   labels:
     app: kates
     app.kubernetes.io/name: kates
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -15,7 +15,7 @@ metadata:
   labels:
     app: kates
     app.kubernetes.io/name: kates
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
 rules:
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosengines", "chaosexperiments", "chaosresults"]
@@ -46,7 +46,7 @@ metadata:
   labels:
     app: kates
     app.kubernetes.io/name: kates
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

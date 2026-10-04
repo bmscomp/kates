@@ -10,18 +10,26 @@ rules:
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosengines", "chaosexperiments", "chaosresults"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # patch: ROLLING_RESTART annotates Kafka pods with
+  # strimzi.io/manual-rolling-update for the Strimzi Cluster Operator to roll.
+  # It does so on both chaos backends, so it is not behind rbac.directChaos.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch", "delete"]
+    verbs: ["get", "list", "watch", "delete", "patch"]
   - apiGroups: [""]
     resources: ["pods/log", "nodes", "namespaces", "persistentvolumeclaims", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
+  # No secrets: the one Secret the Kates API reads is granted by a Role in that
+  # Secret's namespace (rbac.cdcSecretNamespaces).
   - apiGroups: ["apps"]
     resources: ["statefulsets", "deployments"]
     verbs: ["get", "list"]
+  # patch: ROLLING_RESTART restarts a StatefulSet that Strimzi does not manage
+  # (charts/legacy-kafka runs Kafka that way). Like the pod annotation above,
+  # it runs on both chaos backends, so it is not behind rbac.directChaos.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["patch"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list"]
@@ -31,12 +39,39 @@ rules:
   - apiGroups: ["kafka.strimzi.io"]
     resources: ["kafkaconnectors", "kafkatopics"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # patch: SCALE_DOWN lowers a KafkaNodePool's spec.replicas and records the
+  # original count on it; rollback and orphan recovery put it back. It does so
+  # on both chaos backends, so it is not behind rbac.directChaos.
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkanodepools"]
+    verbs: ["patch"]
   - apiGroups: ["monitoring.coreos.com"]
     resources: ["podmonitors", "prometheusrules"]
     verbs: ["get", "list"]
   - apiGroups: ["core.strimzi.io"]
     resources: ["strimzipodsets"]
     verbs: ["get", "list"]
+  {{- if .Values.rbac.directChaos }}
+  {{- /*
+    The direct Kubernetes chaos backend (kates.chaos.provider=kubernetes, or
+    hybrid on a cluster without Litmus) makes these writes itself. Litmus runs
+    every experiment as its own litmus-admin service account, so a Litmus
+    install needs none of them. Cleanup and rollback delete NetworkPolicies by
+    label, which is deletecollection; on a Kafka that Strimzi does not manage,
+    SCALE_DOWN sets replicas through the StatefulSet's scale subresource (its
+    PATCH on the StatefulSet is granted above, for ROLLING_RESTART); CPU_STRESS
+    and IO_STRESS add a container through pods/ephemeralcontainers.
+  */}}
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete", "deletecollection"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets/scale"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["pods/ephemeralcontainers"]
+    verbs: ["update"]
+  {{- end }}
   {{- with .Values.rbac.extraRules }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
@@ -55,5 +90,46 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kates.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- /*
+  The INTEGRATION_CDC test reads its database's password from the Secret
+  `postgresql` (key postgres-password) in the namespace of the first Service
+  labelled app.kubernetes.io/name=postgresql, `database` when there is none
+  (CdcIntegrationService). It is the only Secret the Kates API reads, so each
+  namespace listed gets a Role with `get` on that one name. The release
+  namespace ends the name, so a release of the same name in another
+  namespace (`kates deploy` switching topology) does not collide with it.
+*/}}
+{{- range $ns := .Values.rbac.cdcSecretNamespaces | default list | uniq }}
+{{- $name := printf "%s-cdc-secret-reader-%s" (include "kates.fullname" $) $.Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["postgresql"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kates.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kates.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
 {{- end }}
 {{- end }}

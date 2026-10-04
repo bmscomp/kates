@@ -6,7 +6,9 @@ metadata:
   labels:
     {{- include "kafka-ui.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "kafka-ui.selectorLabels" . | nindent 6 }}
@@ -20,6 +22,8 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      serviceAccountName: {{ include "kafka-ui.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -48,12 +52,26 @@ spec:
                 secretKeyRef:
                   name: {{ include "kafka-ui.secretName" . }}
                   key: password
-            {{- if and .Values.auth.enabled (eq .Values.auth.type "LOGIN_FORM") .Values.auth.passwordSecret }}
+            {{- if and .Values.auth.enabled (eq .Values.auth.type "LOGIN_FORM") }}
             - name: KAFKA_UI_WEB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.auth.passwordSecret }}
+                  name: {{ .Values.auth.existingSecret | default .Values.auth.passwordSecret }}
                   key: password
+            {{- end }}
+            {{- if and .Values.schemaRegistry.enabled .Values.schemaRegistry.auth.enabled }}
+            - name: SCHEMA_REGISTRY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.schemaRegistry.auth.existingSecret | default (printf "%s-schema-registry" (include "kafka-ui.fullname" .)) }}
+                  key: {{ .Values.schemaRegistry.auth.passwordKey | default "password" }}
+            {{- end }}
+            {{- if and .Values.kafkaConnect.enabled .Values.kafkaConnect.auth.enabled }}
+            - name: KAFKA_CONNECT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafkaConnect.auth.existingSecret | default (printf "%s-kafka-connect" (include "kafka-ui.fullname" .)) }}
+                  key: {{ .Values.kafkaConnect.auth.passwordKey | default "password" }}
             {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
@@ -61,6 +79,16 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/kafkaui
+            {{- if .Values.kafka.tls.enabled }}
+            - name: kafka-certs
+              mountPath: /etc/kafka-ui/certs
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -99,12 +127,26 @@ spec:
         - name: config
           configMap:
             name: {{ include "kafka-ui.fullname" . }}-config
+        {{- if .Values.kafka.tls.enabled }}
+        - name: kafka-certs
+          secret:
+            secretName: {{ required "kafka.tls.trustedCertificateSecret is required when kafka.tls.enabled" .Values.kafka.tls.trustedCertificateSecret }}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.affinity }}
       affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}

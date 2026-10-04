@@ -1,0 +1,10 @@
+# Generic overlay — for unknown clusters (EKS/GKE/AKS/on-prem). Disables
+# components that need extra operators (Prometheus CRDs). Set the source
+# bootstrap + credentials and RF to match your target cluster's broker count.
+podMonitors:
+  enabled: false
+metrics:
+  enabled: false
+
+networkPolicy:
+  enabled: true

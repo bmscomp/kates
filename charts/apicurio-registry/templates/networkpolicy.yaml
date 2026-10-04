@@ -1,4 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -13,28 +14,35 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # REST API access from Connect pods and Kates
+    # REST API access: same namespace + declared client namespaces
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: connect
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Release.Namespace }}
+        {{- range $np.clientNamespaces }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kates
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+        {{- if $.Values.ingress.enabled }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.ingressNamespace }}
+        {{- end }}
       ports:
         - port: 8080
           protocol: TCP
-    # Metrics scraping from monitoring namespace
+    # Metrics + health scraping on the management port
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: monitoring
+              kubernetes.io/metadata.name: {{ $np.monitoringNamespace }}
       ports:
-        - port: 8080
+        - port: 9000
           protocol: TCP
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   egress:
     # DNS resolution
     - to:
@@ -44,19 +52,17 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Kafka brokers
+    # Kafka brokers (KafkaSQL journal)
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kafka
+              kubernetes.io/metadata.name: {{ $np.kafkaNamespace }}
       ports:
-        - port: 9092
+        {{- range $np.kafkaEgressPorts }}
+        - port: {{ . }}
           protocol: TCP
-    # Kubernetes API server
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
-        - port: 443
-          protocol: TCP
+        {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}

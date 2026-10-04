@@ -65,6 +65,7 @@ metadata:
 data:
   KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.kafka.svc:9092"
   KATES_TROGDOR_COORDINATOR_URL: "http://trogdor-coordinator.kates.svc:8889"
+  KATES_TROGDOR_AGENT_NODES: "trogdor-agent-0,trogdor-agent-1,trogdor-agent-2"
   KATES_ENGINE_DEFAULT_BACKEND: "native"
   KATES_CHAOS_PROVIDER: "hybrid"
 
@@ -132,6 +133,8 @@ metadata:
     app: kates
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kates
@@ -186,6 +189,7 @@ spec:
 
 Key things to note:
 
+- **One replica, rolled with `Recreate`** — Kates keeps each run's workers, the concurrent-run limit (`TestOrchestrator`), the disruption lease (`DisruptionConcurrencyGuard`) and the SSE subscribers in the pod's memory, and a pod that starts marks every `RUNNING` run in the database `FAILED` (`TestOrchestrator.recoverOrphans`). A second pod fails the runs the first one is executing, and the two can each run a disruption plan against the same cluster, so do not scale the Deployment or put an autoscaler on it. Without a `strategy`, Kubernetes rolls a Deployment with a `RollingUpdate` that starts the new pod before stopping the old one; `Recreate` stops the old pod first, at the cost of a gap until the new pod is Ready. The Helm chart enforces both.
 - **serviceAccountName** — Kates needs a service account with permissions to interact with the Kafka cluster (for AdminClient operations) and the Kubernetes API (for pod watching, deployment scaling, and RBAC checks during disruption tests). See the RBAC section below.
 - **envFrom** — loads all ConfigMap entries as environment variables
 - **Database credentials** — stored in a Kubernetes Secret, not the ConfigMap
@@ -229,7 +233,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch", "delete"]
+    verbs: ["get", "list", "watch", "delete", "patch"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
@@ -239,6 +243,9 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments/scale", "statefulsets/scale"]
     verbs: ["get", "patch"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkanodepools"]
+    verbs: ["get", "list", "patch"]
   - apiGroups: ["litmuschaos.io"]
     resources: ["chaosengines", "chaosresults", "chaosexperiments"]
     verbs: ["get", "list", "create", "delete", "watch"]
@@ -266,17 +273,53 @@ The permissions break down as follows:
 | Permission | Used By | Purpose |
 |-----------|---------|---------|
 | `pods/get,list,watch,delete` | `K8sPodWatcher`, `KubernetesChaosProvider` | Watch pod events during disruptions, kill pods for `POD_KILL`/`POD_DELETE` |
+| `pods/patch` | `KubernetesChaosProvider` | Annotate Kafka pods with `strimzi.io/manual-rolling-update` for `ROLLING_RESTART` |
 | `pods/log` | `DisruptionOrchestrator` | Capture pod logs for post-mortem analysis |
-| `deployments,statefulsets/get,list,patch` | `KubernetesChaosProvider` | Scale deployments for `SCALE_DOWN`, restart for `ROLLING_RESTART` |
+| `kafkanodepools/get,list,patch` | `KubernetesChaosProvider`, `DisruptionSafetyGuard` | Lower a node pool's replicas for `SCALE_DOWN` on Strimzi; rollback and orphan recovery put them back |
+| `deployments,statefulsets/get,list,patch` | `KubernetesChaosProvider` | Scale a non-Strimzi StatefulSet for `SCALE_DOWN`, restart a non-Strimzi StatefulSet for `ROLLING_RESTART` |
 | `deployments/scale,statefulsets/scale` | `DisruptionSafetyGuard` | Read current replica count for auto-rollback |
 | `chaosengines,chaosresults,chaosexperiments` | `LitmusChaosProvider` | Create and manage Litmus chaos experiments |
 | `events/get,list,watch` | `DisruptionEventBus` | Watch Kubernetes events for disruption correlation |
 
 If you are only using performance testing (not disruption testing), you do not need these RBAC permissions. A minimal service account with no cluster-level permissions is sufficient.
 
+### Secret Access for the CDC Test
+
+None of the roles above grants anything on Secrets, and Kates needs no such grant: the kubelet hands the pod its own credentials (the `secretKeyRef` entries in the Deployment above). The one Secret Kates reads through the API is the password of the `INTEGRATION_CDC` test's source database (`CdcIntegrationService`): the Secret `postgresql`, key `postgres-password`, in the namespace of the first Service labelled `app.kubernetes.io/name=postgresql`, or `database` when there is none. Grant `get` on that Secret alone, in that namespace:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kates-cdc-secret-reader
+  namespace: database
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["postgresql"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kates-cdc-secret-reader
+  namespace: database
+subjects:
+  - kind: ServiceAccount
+    name: kates-sa
+    namespace: kates
+roleRef:
+  kind: Role
+  name: kates-cdc-secret-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+The Helm chart renders the same pair for each namespace in `rbac.cdcSecretNamespaces`, which `kates deploy --with-kafka-connect` sets to the database's namespace. Without it, an `INTEGRATION_CDC` run fails at `DB_SETUP` with a `Forbidden` error.
+
 ### Trogdor Coordinator Deployment
 
-The Trogdor backend requires a running Trogdor Coordinator and at least one Trogdor Agent. These are components of the Apache Kafka project that run as separate JVM processes.
+The Trogdor backend requires a running Trogdor Coordinator and at least one Trogdor Agent. These are components of the Apache Kafka project that run as separate JVM processes. Every process reads the same platform config, `trogdor.conf` (below), and is started with `--node-name`, the name of its entry there. Kates names the agent each task runs on, so `KATES_TROGDOR_AGENT_NODES` (the chart's `trogdor.agentNodes`) must list agent node names from that file; a name the coordinator does not know fails the task with "Unknown node names".
 
 ```yaml
 apiVersion: apps/v1
@@ -298,7 +341,7 @@ spec:
         - name: coordinator
           image: apache/kafka:4.2.0
           command: ["/opt/kafka/bin/trogdor.sh", "coordinator"]
-          args: ["--node.name", "coordinator", "--config", "/etc/trogdor/trogdor.conf"]
+          args: ["--coordinator.config", "/etc/trogdor/trogdor.conf", "--node-name", "coordinator"]
           ports:
             - containerPort: 8889
           volumeMounts:
@@ -325,15 +368,30 @@ spec:
 
 ### Trogdor Agent Deployment
 
-Trogdor Agents are the workers that execute the actual Kafka workloads. You need at least one agent, but for distributed load generation, deploy multiple agents:
+Trogdor Agents are the workers that execute the actual Kafka workloads. Each task runs on one agent, and Kates hands a run's tasks to the agents in `KATES_TROGDOR_AGENT_NODES` in turn, so several agents spread the load. The coordinator calls each agent at the hostname its entry in `trogdor.conf` gives, so the agents need stable names: run them as a StatefulSet behind a headless Service, and start each one with its pod name as its node name.
 
 ```yaml
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: v1
+kind: Service
 metadata:
   name: trogdor-agent
   namespace: kates
 spec:
+  clusterIP: None
+  selector:
+    app: trogdor-agent
+  ports:
+    - port: 8888
+      targetPort: 8888
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: trogdor-agent
+  namespace: kates
+spec:
+  serviceName: trogdor-agent
   replicas: 3
   selector:
     matchLabels:
@@ -347,7 +405,13 @@ spec:
         - name: agent
           image: apache/kafka:4.2.0
           command: ["/opt/kafka/bin/trogdor.sh", "agent"]
-          args: ["--node.name", "agent", "--config", "/etc/trogdor/trogdor.conf"]
+          # trogdor-agent-0, trogdor-agent-1, ...: the node names in trogdor.conf
+          args: ["--agent.config", "/etc/trogdor/trogdor.conf", "--node-name", "$(POD_NAME)"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
             - containerPort: 8888
           volumeMounts:
@@ -361,7 +425,7 @@ spec:
 
 ### Trogdor Configuration
 
-The `trogdor.conf` file configures the coordinator and agents:
+The `trogdor.conf` file configures the coordinator and agents. Each entry under `nodes` is a node name; `trogdor.coordinator.port` and `trogdor.agent.port` are the ports the coordinator and an agent listen on (8889 and 8888 by default). Store it in the `trogdor-config` ConfigMap both workloads mount:
 
 ```json
 {
@@ -369,26 +433,28 @@ The `trogdor.conf` file configures the coordinator and agents:
   "nodes": {
     "coordinator": {
       "hostname": "trogdor-coordinator.kates.svc",
-      "tpiPort": 8889,
-      "agentPort": 8888
+      "trogdor.coordinator.port": 8889
     },
-    "agent0": {
-      "hostname": "trogdor-agent-0.kates.svc",
-      "tpiPort": 8889,
-      "agentPort": 8888
+    "trogdor-agent-0": {
+      "hostname": "trogdor-agent-0.trogdor-agent.kates.svc",
+      "trogdor.agent.port": 8888
     },
-    "agent1": {
-      "hostname": "trogdor-agent-1.kates.svc",
-      "tpiPort": 8889,
-      "agentPort": 8888
+    "trogdor-agent-1": {
+      "hostname": "trogdor-agent-1.trogdor-agent.kates.svc",
+      "trogdor.agent.port": 8888
     },
-    "agent2": {
-      "hostname": "trogdor-agent-2.kates.svc",
-      "tpiPort": 8889,
-      "agentPort": 8888
+    "trogdor-agent-2": {
+      "hostname": "trogdor-agent-2.trogdor-agent.kates.svc",
+      "trogdor.agent.port": 8888
     }
   }
 }
+```
+
+Kates then runs tasks on all three agents with:
+
+```yaml
+KATES_TROGDOR_AGENT_NODES: "trogdor-agent-0,trogdor-agent-1,trogdor-agent-2"
 ```
 
 ### PostgreSQL

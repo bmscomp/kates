@@ -1,0 +1,79 @@
+# promtool unit tests for the migration board's catch-up ETA and its
+# migration-window row.
+#
+# Like the go/no-go panel, the rules under test are EXTRACTED FROM THE BOARD
+# at check time by the Chart validation job in ci-mirror-maker2.yml —
+# `dashboard:catch_up_eta`, `dashboard:quietest_hour`,
+# `dashboard:busiest_hour` and `dashboard:now_vs_quietest` in
+# cutover-gate.yaml beside this file — so the cases cannot pass against an
+# expression the board no longer draws.
+#
+# Case 1 is the one that earned this file. The ETA is record age (ms) over
+# the per-second slope of record age (ms/s), which is already seconds, and the
+# panel divided by a thousand on top: a mirror ten minutes behind and draining
+# at a thousand milliseconds a minute — a ten-hour job — read as thirty-five
+# seconds.
+#
+# Case 2 is the window row's premise: twenty-four `hour()` subqueries pivot a
+# week of crossing rate into an hour-of-day profile. The input is one
+# synthetic day at half-hour resolution, hour h crossing 100-4h records a
+# second except hour 3, which crosses 1 — so the quietest hour is 03, the
+# busiest is 00, and at 23:30 "now" is eight times the quietest. promtool's
+# clock starts at the Unix epoch, which is midnight UTC, so sample t is hour
+# t; hour() is UTC, and so are the panels.
+#
+# The label values are the ones the extraction step substitutes for
+# `$namespace` and `$cluster`: namespace="kafka",
+# strimzi_io_cluster="mm2-mirror-maker2".
+
+rule_files:
+  - cutover-gate.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: the catch-up ETA is in seconds — ten minutes of age falling 1000ms a minute is 35400s, not 35
+    interval: 1m
+    input_series:
+      - series: 'kafka_connect_mirror_source_connector_record_age_ms_max{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",topic="source.orders",partition="0"}'
+        values: '600000-1000x60'
+    promql_expr_test:
+      - expr: dashboard:catch_up_eta
+        eval_time: 10m
+        exp_samples:
+          - labels: 'dashboard:catch_up_eta'
+            value: 35400
+
+  - name: one synthetic day — the profile finds the quiet hour and the busy one, and says how "now" compares
+    interval: 30m
+    input_series:
+      - series: 'kafka_connect_mirror_source_connector_record_rate{namespace="kafka",strimzi_io_cluster="mm2-mirror-maker2",topic="source.orders",partition="0"}'
+        values: '100 100 96 96 92 92 1 1 84 84 80 80 76 76 72 72 68 68 64 64 60 60 56 56 52 52 48 48 44 44 40 40 36 36 32 32 28 28 24 24 20 20 16 16 12 12 8 8'
+    promql_expr_test:
+      - expr: dashboard:quietest_hour
+        eval_time: 23h30m
+        exp_samples:
+          - labels: 'dashboard:quietest_hour{hour="03"}'
+            value: 1
+      - expr: dashboard:busiest_hour
+        eval_time: 23h30m
+        exp_samples:
+          - labels: 'dashboard:busiest_hour{hour="00"}'
+            value: 100
+      # 23:30 crosses 8 a second (hour 23 is 100 - 4×23); over the quietest hour's 1 that is 8.
+      - expr: dashboard:now_vs_quietest
+        eval_time: 23h30m
+        exp_samples:
+          - labels: 'dashboard:now_vs_quietest'
+            value: 8
+
+  - name: a mirror with no samples reads No data, not a quiet hour
+    interval: 30m
+    input_series: []
+    promql_expr_test:
+      - expr: dashboard:quietest_hour
+        eval_time: 1h
+        exp_samples: []
+      - expr: dashboard:now_vs_quietest
+        eval_time: 1h
+        exp_samples: []

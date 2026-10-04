@@ -1,17 +1,26 @@
-name: Publish Kates Tester Image
+name: Publish · Tester image
+
+# Called by release.yml on every `v*` tag, or run by hand for a dev build.
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
+  id-token: write # build provenance
+
+# A literal name, not github.workflow: called from release.yml, github.workflow
+# is the caller's ("Release"), so the three publish workflows shared one group.
+# A group holds one running and one pending job, so on the v1.24.0 tag the
+# third workflow to queue cancelled the second (the kates image), and the
+# Release, which needs every image, was skipped.
+concurrency:
+  group: publish-tester-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  GHCR_REGISTRY: ghcr.io
   DOCKERHUB_REPO: bmscomp/kates-tester
   GHCR_REPO: ghcr.io/bmscomp/kates-tester
 
@@ -19,9 +28,10 @@ jobs:
   build-and-push:
     name: Build and Push Tester
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Determine version
         id: version
@@ -29,31 +39,30 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=dev-$(echo ${GITHUB_SHA} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+            echo "version=dev-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - uses: ./.github/actions/registry-login
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute Docker metadata
         id: docker-meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          # GHCR reads a multi-arch image's description from the INDEX's
+          # annotations, not from the per-platform config labels. This image
+          # already published correct labels and its package page was still
+          # blank — that is the proof there is no fallback between the two.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index,manifest
         with:
           images: |
             ${{ env.DOCKERHUB_REPO }}
@@ -62,9 +71,26 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          # Without an explicit block, metadata-action derives title and
+          # description from the GITHUB REPOSITORY — so this image would
+          # describe itself as "kates". It is a different thing entirely.
+          #
+          # The two blocks below are deliberately duplicated rather than shared
+          # via a YAML anchor: GitHub Actions' workflow parser does not support
+          # anchors and aliases. Keep them in step when editing.
+          labels: |
+            org.opencontainers.image.title=kates-tester
+            org.opencontainers.image.description=Toolbox image for the Kates Helm charts — the container behind chart test hooks, CRD hook Jobs and in-cluster diagnostics. Ships kubectl, the Apache Kafka CLI scripts, kcat, jq, netcat and dig. It generates no load and runs no tests by itself.
+            org.opencontainers.image.vendor=bmscomp
+            org.opencontainers.image.licenses=Apache-2.0
+          annotations: |
+            org.opencontainers.image.title=kates-tester
+            org.opencontainers.image.description=Toolbox image for the Kates Helm charts — the container behind chart test hooks, CRD hook Jobs and in-cluster diagnostics. Ships kubectl, the Apache Kafka CLI scripts, kcat, jq, netcat and dig. It generates no load and runs no tests by itself.
+            org.opencontainers.image.vendor=bmscomp
+            org.opencontainers.image.licenses=Apache-2.0
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: tester
           file: tester/Dockerfile
@@ -72,5 +98,22 @@ jobs:
           push: true
           tags: ${{ steps.docker-meta.outputs.tags }}
           labels: ${{ steps.docker-meta.outputs.labels }}
+          # This is the line that makes the description visible on GHCR.
+          annotations: ${{ steps.docker-meta.outputs.annotations }}
           cache-from: type=gha,scope=tester
           cache-to: type=gha,mode=max,scope=tester
+          provenance: mode=max
+          sbom: true
+
+      - name: Scan the published image (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          # metadata-action’s `version` is the first tag it produced: the semver
+          # on a release tag, `sha-…` on a manual dev build.
+          image-ref: ${{ env.GHCR_REPO }}:${{ steps.docker-meta.outputs.version }}
+          scanners: vuln
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml

@@ -1,0 +1,188 @@
+{{- include "mirror-maker2.validate" . }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaMirrorMaker2
+metadata:
+  name: {{ include "mirror-maker2.fullname" . }}
+  namespace: {{ include "mirror-maker2.namespace" . }}
+  labels:
+    {{- include "mirror-maker2.labels" . | nindent 4 }}
+  annotations:
+    {{- if not (eq (toString .Values.keepOnDelete) "false") }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+    strimzi.io/use-connector-resources: "false"
+spec:
+  {{- include "kafka-common.connectWorker.spec" (dict "ctx" . "w" (include "mirror-maker2.worker" . | fromYaml)) | nindent 2 }}
+  {{- $t := .Values.target }}
+  {{- $gid := $t.groupId | default "mirror-maker2" }}
+  target:
+    alias: {{ $t.alias | default "target" | quote }}
+    bootstrapServers: {{ include "mirror-maker2.bootstrap" (dict "c" $t "ctx" $) | quote }}
+    groupId: {{ $gid | quote }}
+    configStorageTopic: {{ $t.configStorageTopic | default (printf "%s-configs" $gid) | quote }}
+    offsetStorageTopic: {{ $t.offsetStorageTopic | default (printf "%s-offsets" $gid) | quote }}
+    statusStorageTopic: {{ $t.statusStorageTopic | default (printf "%s-status" $gid) | quote }}
+    {{- with include "mirror-maker2.clusterTlsAuth" (dict "c" $t "field" "target") | trim }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    {{- /* exactly.once.source.support is a WORKER property and belongs here,
+           not on a connector; the source consumer's read_committed half is
+           set on each mirror's source cluster config. */}}
+    {{- with include "mirror-maker2.targetConfig" $ }}
+    config:
+      {{- . | nindent 6 }}
+    {{- end }}
+  mirrors:
+    {{- range .Values.mirrors }}
+    {{- $mirror := . }}
+    - source:
+        alias: {{ .source.alias | default "source" | quote }}
+        bootstrapServers: {{ include "mirror-maker2.bootstrap" (dict "c" .source "ctx" $) | quote }}
+        {{- /* `with` rather than a bare include: an unauthenticated source
+               renders nothing here, and a bare nindent would leave a stray
+               blank line in the middle of the CR. */}}
+        {{- with include "mirror-maker2.clusterTlsAuth" (dict "c" .source "field" (printf "mirrors[%s].source" (.source.alias | default "source"))) | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with include "mirror-maker2.sourceConfig" (dict "m" $mirror "ctx" $) }}
+        config:
+          {{- . | nindent 10 }}
+        {{- end }}
+      topicsPattern: {{ include "mirror-maker2.pattern" (dict "list" .topics "pattern" .topicsPattern "default" ".*") | quote }}
+      {{- /* Computed, not passed through: under an identity policy the mirror
+             can match its own output, and the stock MM2 exclusions do not
+             cover that. See mirror-maker2.topicsExcludePattern. */}}
+      {{- with include "mirror-maker2.topicsExcludePattern" (dict "m" . "ctx" $) }}
+      topicsExcludePattern: {{ . | quote }}
+      {{- end }}
+      groupsPattern: {{ include "mirror-maker2.pattern" (dict "list" .groups "pattern" .groupsPattern "default" ".*") | quote }}
+      {{- with .groupsExcludePattern }}
+      groupsExcludePattern: {{ . | quote }}
+      {{- end }}
+      {{- $autoRestart := $.Values.autoRestart }}
+      {{- $cutover := $.Values.cutover | default dict }}
+      {{- with .sourceConnector }}
+      sourceConnector:
+        {{- with .version }}
+        version: {{ . | quote }}
+        {{- end }}
+        {{- with .tasksMax }}
+        tasksMax: {{ . }}
+        {{- end }}
+        {{- /* running | paused | stopped — the cutover primitive. `stopped`
+               also releases the connector's tasks, which is what you want when
+               producers have moved and the mirror must not resume. The
+               chart-level cutover block wins, because it is what a values
+               overlay can reach (Helm replaces lists, but merges maps). */}}
+        {{- with (ternary $cutover.sourceConnectorState .state $cutover.enabled) }}
+        state: {{ . }}
+        {{- end }}
+        {{- with (.autoRestart | default $autoRestart) }}
+        {{- if .enabled }}
+        autoRestart:
+          enabled: true
+          {{- with .maxRestarts }}
+          maxRestarts: {{ . }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- with .listOffsets }}
+        listOffsets:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .alterOffsets }}
+        alterOffsets:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with include "mirror-maker2.connectorConfig" (dict "cfg" .config "ctx" $ "m" $mirror) }}
+        config:
+          {{- . | nindent 10 }}
+        {{- end }}
+      {{- end }}
+      {{- with .checkpointConnector }}
+      checkpointConnector:
+        {{- with .version }}
+        version: {{ . | quote }}
+        {{- end }}
+        {{- with .tasksMax }}
+        tasksMax: {{ . }}
+        {{- end }}
+        {{- /* Kept RUNNING through a cutover on purpose: consumers migrate one
+               at a time, and each one that has not moved still needs its
+               committed offset translated onto the target. */}}
+        {{- with (ternary $cutover.checkpointConnectorState .state $cutover.enabled) }}
+        state: {{ . }}
+        {{- end }}
+        {{- with (.autoRestart | default $autoRestart) }}
+        {{- if .enabled }}
+        autoRestart:
+          enabled: true
+          {{- with .maxRestarts }}
+          maxRestarts: {{ . }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- with .listOffsets }}
+        listOffsets:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .alterOffsets }}
+        alterOffsets:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with include "mirror-maker2.connectorConfig" (dict "cfg" .config "ctx" $ "m" $mirror) }}
+        config:
+          {{- . | nindent 10 }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+
+{{- /*
+The Connect-worker part of the spec, as the map kafka-common's
+connectWorker.spec reads. Everything a KafkaMirrorMaker2 shares with a
+KafkaConnect lives there: replicas (lookup-preserved under the HPA), JVM,
+probes, logging, tracing, rack, JMX, metrics and spec.template — the last
+built as one map and merged with templateExtra, never written beside it.
+*/}}
+{{- define "mirror-maker2.worker" -}}
+{{- $fullname := include "mirror-maker2.fullname" . -}}
+{{- $w := dict
+      "kind" "KafkaMirrorMaker2"
+      "name" $fullname
+      "namespace" (include "mirror-maker2.namespace" .)
+      "version" .Values.version
+      "image" .Values.image
+      "replicas" .Values.replicas
+      "minReplicasDefault" 2
+      "autoscaling" .Values.autoscaling
+      "resources" .Values.resources
+      "jvmOptions" .Values.jvmOptions
+      "livenessProbe" .Values.livenessProbe
+      "readinessProbe" .Values.readinessProbe
+      "jmxOptions" .Values.jmxOptions
+      "logging" .Values.logging
+      "loggingConfigMap" (printf "%s-logging" $fullname)
+      "tracing" .Values.tracing
+      "rack" .Values.rack
+      "metrics" (dict
+          "enabled" (.Values.metrics.enabled | default false)
+          "type" .Values.metrics.type
+          "allowList" .Values.metrics.allowList
+          "configMapName" (printf "%s-metrics" $fullname)
+          "configMapKey" "metrics-config.yml")
+      "podSelector" (include "mirror-maker2.podSelectorLabels" . | fromYaml)
+      "template" (dict
+          "pdb" .Values.podDisruptionBudget
+          "podSecurityContext" .Values.podSecurityContext
+          "imagePullSecrets" .Values.imagePullSecrets
+          "priorityClassName" .Values.priorityClassName
+          "terminationGracePeriodSeconds" (.Values.terminationGracePeriodSeconds | default 30)
+          "tolerations" .Values.tolerations
+          "nodeSelector" .Values.nodeSelector
+          "nodeAffinity" .Values.nodeAffinity
+          "podAntiAffinity" .Values.podAntiAffinity
+          "topologySpread" .Values.topologySpreadConstraints
+          "container" (dict "harden" true "extra" .Values.connectContainer)
+          "extra" .Values.templateExtra) -}}
+{{- toYaml $w -}}
+{{- end }}

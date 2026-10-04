@@ -3,15 +3,17 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -48,8 +50,21 @@ var (
 var testApplyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Run tests from a YAML/JSON scenario file",
+	Long: `Submit each scenario in a YAML or JSON file as a test run. With --wait it
+waits for each run to finish before the next and checks the SLA gates in its
+validate block.
+
+In a terminal --wait shows a spinner. Without one (a pipe, a CI job, an agent's
+shell), or with --plain, it prints a plain line to stderr each time a run's
+status changes instead. With -o json it prints nothing but the summary, as
+JSON on stdout. The exit code is the same in every mode.
+
+Ctrl-C (or q in the spinner) while it waits stops the apply: the run it is
+waiting for is cancelled, the scenarios after it are not started, and kates
+exits 130 after the summary.`,
 	Example: `  kates test apply -f load-test.yaml
   kates test apply -f scenarios.yaml --wait
+  kates test apply -f scenarios.yaml --wait -o json
 
   # Example scenario file (load-test.yaml):
   scenarios:
@@ -89,84 +104,230 @@ var testApplyCmd = &cobra.Command{
 		if len(sf.Scenarios) == 0 {
 			return cmdErr("No scenarios found in file")
 		}
+		// Checked before the first test starts, so a file with a mistake
+		// runs none of its tests rather than the ones above it.
+		var problems []string
+		for i, scenario := range sf.Scenarios {
+			for _, p := range scenarioSpecProblems(scenario) {
+				problems = append(problems, fmt.Sprintf("scenario %d (%s): %s", i+1, scenario.Name, p))
+			}
+		}
+		if len(problems) > 0 {
+			return cmdErr("Invalid scenario file: " + strings.Join(problems, "; "))
+		}
 
-		output.Header(fmt.Sprintf("Applying %d scenario(s) from %s", len(sf.Scenarios), applyFile))
-		fmt.Println()
+		jsonOut := outputMode == "json"
+		// The spinner needs a terminal on stdin and stdout. Without one,
+		// Bubble Tea fails to open /dev/tty and every --wait scenario ended
+		// as ERROR although its run went on; and under -o json its frames
+		// would land in the JSON.
+		useTUI := IsInteractive() && !jsonOut
+		var progress io.Writer
+		if !jsonOut {
+			progress = output.Err
+			output.Header(fmt.Sprintf("Applying %d scenario(s) from %s", len(sf.Scenarios), applyFile))
+			fmt.Println()
+		}
 
-		results := make([]scenarioResult, 0)
+		res := applyResult{File: applyFile, Waited: applyWait, Scenarios: make([]applyScenarioResult, 0, len(sf.Scenarios))}
+		ctx := commandContext(cmd)
 
 		for i, scenario := range sf.Scenarios {
+			if ctx.Err() != nil {
+				res.Interrupted = true
+				break
+			}
 			name := scenario.Name
 			if name == "" {
 				name = fmt.Sprintf("Scenario %d", i+1)
 			}
 
-			fmt.Printf("  %s %s (%s)...\n",
-				output.AccentStyle.Render("▸"),
-				output.LightStyle.Render(name),
-				scenario.Type,
-			)
+			if !jsonOut {
+				fmt.Printf("  %s %s (%s)...\n",
+					output.AccentStyle.Render("▸"),
+					output.LightStyle.Render(name),
+					scenario.Type,
+				)
+			}
 
+			sr := applyScenarioResult{Name: name, Type: strings.ToUpper(scenario.Type)}
 			req := scenarioToRequest(scenario)
-			result, err := apiClient.CreateTest(context.Background(), req)
+			result, err := apiClient.CreateTest(ctx, req)
 			if err != nil {
-				output.Error("  Failed: " + err.Error())
-				results = append(results, scenarioResult{name: name, status: "FAILED", err: err.Error()})
+				if ctx.Err() != nil {
+					// Interrupted mid-request: whether the run was created
+					// is unknown, and there is no id to cancel it by.
+					sr.Status, sr.Error = "INTERRUPTED", "interrupted while creating the run; check kates test list"
+					res.Scenarios = append(res.Scenarios, sr)
+					res.Interrupted = true
+					break
+				}
+				if !jsonOut {
+					output.Error("  Failed: " + err.Error())
+				}
+				sr.Status, sr.Error = "FAILED", err.Error()
+				res.Scenarios = append(res.Scenarios, sr)
+				continue
+			}
+			sr.RunID = result.ID
+
+			if !jsonOut {
+				output.Success(fmt.Sprintf("  Created: %s", truncID(result.ID)))
+			}
+
+			if !applyWait {
+				sr.Status = "SUBMITTED"
+				res.Scenarios = append(res.Scenarios, sr)
 				continue
 			}
 
-			output.Success(fmt.Sprintf("  Created: %s", truncID(result.ID)))
-
-			if applyWait {
-				finalResult, err := waitForTest(result.ID, name)
-				if err != nil {
-					results = append(results, scenarioResult{name: name, id: result.ID, status: "ERROR", err: err.Error()})
-				} else {
-					results = append(results, scenarioResult{name: name, id: result.ID, status: finalResult.Status, validate: scenario.Validate, testRun: finalResult})
-				}
+			var finalResult *client.TestRun
+			if useTUI {
+				finalResult, err = waitForTestTUI(ctx, result.ID, name)
 			} else {
-				results = append(results, scenarioResult{name: name, id: result.ID, status: "SUBMITTED"})
+				finalResult, err = waitForTestPlain(ctx, result.ID, name, progress)
 			}
-		}
-
-		fmt.Println()
-		output.SubHeader("Summary")
-		rows := make([][]string, 0, len(results))
-		hasViolation := false
-		for _, r := range results {
-			extra := ""
-			if r.err != "" {
-				extra = r.err
-			} else if r.validate != nil && r.testRun != nil {
-				violations := validateSLAs(r.testRun, r.validate)
-				if len(violations) > 0 {
-					extra = strings.Join(violations, "; ")
-					hasViolation = true
-				} else {
-					extra = "✓ SLA Pass"
+			if err != nil && stoppedWaiting(ctx, err) {
+				// Ctrl-C used to end only this scenario's wait: it became an
+				// ERROR row, the run went on, and the next scenario started.
+				var note string
+				sr.Status, note = cancelStartedRun(result.ID)
+				sr.Error = "interrupted; " + note
+				res.Scenarios = append(res.Scenarios, sr)
+				res.Interrupted = true
+				break
+			}
+			if err != nil {
+				sr.Status, sr.Error = "ERROR", err.Error()
+			} else {
+				sr.Status = finalResult.Status
+				if scenario.Validate != nil {
+					sr.SLA = &applySLAResult{
+						Violations:   nonNil(validateSLAs(finalResult, scenario.Validate)),
+						NotEvaluable: unevaluableSLAs(finalResult, scenario.Validate),
+					}
 				}
 			}
-			rows = append(rows, []string{r.name, truncID(r.id), r.status, extra})
+			res.Scenarios = append(res.Scenarios, sr)
 		}
-		output.Table([]string{"Scenario", "ID", "Status", "Note"}, rows)
 
+		hasViolation := false
+		hasUnevaluable := false
+		hasFailure := false
+		for _, r := range res.Scenarios {
+			if r.SLA != nil && len(r.SLA.Violations) > 0 {
+				hasViolation = true
+			}
+			if r.SLA != nil && len(r.SLA.NotEvaluable) > 0 {
+				hasUnevaluable = true
+			}
+			if r.Error != "" || isFailedStatus(strings.ToUpper(r.Status)) {
+				hasFailure = true
+			}
+		}
+
+		if jsonOut {
+			output.JSON(res)
+		} else {
+			renderApplySummary(res, hasUnevaluable)
+		}
+
+		if res.Interrupted {
+			if notRun := len(sf.Scenarios) - len(res.Scenarios); notRun > 0 {
+				interruptNote(fmt.Sprintf("Interrupted: the %d scenario(s) after it were not started.", notRun))
+			} else {
+				interruptNote("Interrupted.")
+			}
+			return errInterrupted
+		}
 		if hasViolation {
-			fmt.Println()
-			output.Error("One or more SLA gates violated")
-			os.Exit(1)
+			// A silentErr instead of os.Exit(1): the same exit code, and a
+			// test can run the command without it ending the test binary.
+			if !jsonOut {
+				fmt.Println()
+			}
+			return cmdErr("One or more SLA gates violated")
+		}
+		// A FAILED scenario is a failed run even without SLA gates. Only SLA
+		// violations used to set the exit code, so a batch whose tests crashed
+		// outright still exited 0.
+		if hasFailure {
+			return cmdErr("one or more scenarios failed")
 		}
 
 		return nil
 	},
 }
 
-type scenarioResult struct {
-	name     string
-	id       string
-	status   string
-	err      string
-	validate *ValidationSpec
-	testRun  *client.TestRun
+// applyResult is what kates test apply did with a scenario file: the summary
+// table shows it and -o json prints it as is.
+type applyResult struct {
+	File      string                `json:"file"`
+	Waited    bool                  `json:"waited"`
+	Scenarios []applyScenarioResult `json:"scenarios"`
+	// Interrupted is set when Ctrl-C stopped the apply. Scenarios then holds
+	// the ones it reached; the rest were not started.
+	Interrupted bool `json:"interrupted,omitempty"`
+}
+
+// applyScenarioResult is one scenario's row. Status is SUBMITTED without
+// --wait, the run's final status with it, FAILED (no RunID) when the run
+// could not be created and ERROR when waiting failed; Error then says why.
+// When Ctrl-C stopped the wait it is CANCELLED once the run is cancelled, or
+// INTERRUPTED when that is unknown or failed.
+type applyScenarioResult struct {
+	Name   string          `json:"name"`
+	Type   string          `json:"type"`
+	RunID  string          `json:"runId,omitempty"`
+	Status string          `json:"status"`
+	Error  string          `json:"error,omitempty"`
+	SLA    *applySLAResult `json:"sla,omitempty"`
+}
+
+// applySLAResult grades a finished run against its scenario's validate
+// block. NotEvaluable names gates the run produced no measurement for: they
+// neither pass nor fail, and do not change the exit code.
+type applySLAResult struct {
+	Violations   []string `json:"violations"`
+	NotEvaluable []string `json:"notEvaluable,omitempty"`
+}
+
+func renderApplySummary(res applyResult, hasUnevaluable bool) {
+	fmt.Println()
+	output.SubHeader("Summary")
+	rows := make([][]string, 0, len(res.Scenarios))
+	for _, r := range res.Scenarios {
+		extra := ""
+		if r.Error != "" {
+			extra = r.Error
+		} else if r.SLA != nil {
+			notes := append([]string{}, r.SLA.Violations...)
+			if len(r.SLA.NotEvaluable) > 0 {
+				notes = append(notes, "not evaluable: "+strings.Join(r.SLA.NotEvaluable, ", "))
+			}
+			if len(notes) > 0 {
+				extra = strings.Join(notes, "; ")
+			} else {
+				extra = "✓ SLA Pass"
+			}
+		}
+		rows = append(rows, []string{r.Name, truncID(r.RunID), r.Status, extra})
+	}
+	output.Table([]string{"Scenario", "ID", "Status", "Note"}, rows)
+
+	if hasUnevaluable {
+		fmt.Println()
+		output.Warn("Some SLA gates were not evaluated: the run did not measure what they check")
+	}
+}
+
+// nonNil keeps an empty list a list in JSON, so "no violations" reads as []
+// rather than null.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
@@ -186,7 +347,10 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.RecordSizeBytes = toInt(v)
 		}
 		if v, ok := s.Spec["durationSeconds"]; ok {
-			spec.DurationSeconds = toInt(v)
+			// Scenario files declare SECONDS; the wire field is milliseconds.
+			// Without the conversion a 300-second scenario ran for 300ms —
+			// every "passing" scenario test finished 1000x early.
+			spec.DurationMs = toInt(v) * 1000
 		}
 		if v, ok := s.Spec["topic"]; ok {
 			spec.Topic = fmt.Sprintf("%v", v)
@@ -228,13 +392,13 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.FetchMaxWaitMs = toInt(v)
 		}
 		if v, ok := s.Spec["enableIdempotence"]; ok {
-			spec.EnableIdempotence = toBool(v)
+			spec.EnableIdempotence = toBoolPtr(v)
 		}
 		if v, ok := s.Spec["enableTransactions"]; ok {
-			spec.EnableTransactions = toBool(v)
+			spec.EnableTransactions = toBoolPtr(v)
 		}
 		if v, ok := s.Spec["enableCrc"]; ok {
-			spec.EnableCrc = toBool(v)
+			spec.EnableCrc = toBoolPtr(v)
 		}
 		req.Spec = spec
 	}
@@ -266,6 +430,39 @@ func toBool(v interface{}) bool {
 	}
 }
 
+// toBoolPtr reads a key the file sets as true or false, so that false is sent
+// too. Anything else is nil and sends nothing: yes, on, or a bare key used to
+// become an explicit false, which turned CRC checks or the producer's
+// idempotence off. scenarioSpecProblems refuses such a file before anything
+// is sent.
+func toBoolPtr(v interface{}) *bool {
+	switch b := v.(type) {
+	case bool:
+		return &b
+	case string:
+		if b == "true" || b == "false" {
+			t := b == "true"
+			return &t
+		}
+	}
+	return nil
+}
+
+// scenarioBoolKeys are the spec keys scenarioToRequest sends as true or false.
+var scenarioBoolKeys = []string{"enableIdempotence", "enableTransactions", "enableCrc"}
+
+// scenarioSpecProblems names the spec keys of a scenario that
+// scenarioToRequest cannot send as written.
+func scenarioSpecProblems(s TestScenario) []string {
+	var problems []string
+	for _, key := range scenarioBoolKeys {
+		if v, ok := s.Spec[key]; ok && toBoolPtr(v) == nil {
+			problems = append(problems, fmt.Sprintf("spec.%s is %v; write true or false", key, v))
+		}
+	}
+	return problems
+}
+
 func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 	var violations []string
 
@@ -285,11 +482,13 @@ func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 			if v.MaxDataLoss >= 0 && ir.DataLossPercent > v.MaxDataLoss {
 				violations = append(violations, fmt.Sprintf("dataLoss=%.4f%% > %.4f%%", ir.DataLossPercent, v.MaxDataLoss))
 			}
-			if v.MaxRtoMs > 0 && ir.MaxRtoMs > v.MaxRtoMs {
-				violations = append(violations, fmt.Sprintf("rto=%.0fms > %.0fms", ir.MaxRtoMs, v.MaxRtoMs))
+			// An unmeasured RTO/RPO is skipped here, not passed: unevaluableSLAs
+			// reports the gate so the summary never shows it as green.
+			if rto, ok := ir.MeasuredMaxRtoMs(); ok && v.MaxRtoMs > 0 && rto > v.MaxRtoMs {
+				violations = append(violations, fmt.Sprintf("rto=%.0fms > %.0fms", rto, v.MaxRtoMs))
 			}
-			if v.MaxRpoMs > 0 && ir.RpoMs > v.MaxRpoMs {
-				violations = append(violations, fmt.Sprintf("rpo=%.0fms > %.0fms", ir.RpoMs, v.MaxRpoMs))
+			if rpo, ok := ir.MeasuredRpoMs(); ok && v.MaxRpoMs > 0 && rpo > v.MaxRpoMs {
+				violations = append(violations, fmt.Sprintf("rpo=%.0fms > %.0fms", rpo, v.MaxRpoMs))
 			}
 			if v.MaxOutOfOrder >= 0 && ir.OutOfOrderCount > v.MaxOutOfOrder {
 				violations = append(violations, fmt.Sprintf("outOfOrder=%d > %d", ir.OutOfOrderCount, v.MaxOutOfOrder))
@@ -303,7 +502,35 @@ func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {
 	return violations
 }
 
+// unevaluableSLAs names the declared RTO/RPO gates the run produced no
+// measurement for. Those gates cannot fail, so reporting them as passed would
+// claim a check that never happened.
+func unevaluableSLAs(run *client.TestRun, v *ValidationSpec) []string {
+	rtoMeasured, rpoMeasured := false, false
+	for _, r := range run.Results {
+		if r.Integrity == nil {
+			continue
+		}
+		if _, ok := r.Integrity.MeasuredMaxRtoMs(); ok {
+			rtoMeasured = true
+		}
+		if _, ok := r.Integrity.MeasuredRpoMs(); ok {
+			rpoMeasured = true
+		}
+	}
+
+	var gates []string
+	if v.MaxRtoMs > 0 && !rtoMeasured {
+		gates = append(gates, "maxRtoMs (RTO not measured)")
+	}
+	if v.MaxRpoMs > 0 && !rpoMeasured {
+		gates = append(gates, "maxRpoMs (RPO not measured)")
+	}
+	return gates
+}
+
 type waitModel struct {
+	ctx    context.Context
 	id     string
 	name   string
 	spin   spinner.Model
@@ -321,10 +548,14 @@ func (m waitModel) Init() tea.Cmd {
 	return tea.Batch(m.spin.Tick, m.fetchTest())
 }
 
+// applyPollInterval is how often test apply --wait asks for a run's status.
+// Tests shorten it.
+var applyPollInterval = 2 * time.Second
+
 func (m waitModel) fetchTest() tea.Cmd {
 	return func() tea.Msg {
-		time.Sleep(2 * time.Second)
-		res, err := apiClient.GetTest(context.Background(), m.id)
+		time.Sleep(applyPollInterval)
+		res, err := apiClient.GetTest(m.ctx, m.id)
 		return waitResultMsg{test: res, err: err}
 	}
 }
@@ -333,7 +564,7 @@ func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
-			m.err = fmt.Errorf("aborted")
+			m.err = errStoppedWaiting
 			return m, tea.Quit
 		}
 	case waitResultMsg:
@@ -367,21 +598,29 @@ func (m waitModel) View() string {
 	return fmt.Sprintf("  %s %s [%s]", m.spin.View(), output.DimStyle.Render(m.name), output.AccentStyle.Render(m.status))
 }
 
-func waitForTest(id, name string) (*client.TestRun, error) {
+// waitForTestTUI is the seam tests use to see which way apply waits without
+// starting a Bubble Tea program. It holds waitForTest by default.
+var waitForTestTUI = waitForTest
+
+func waitForTest(ctx context.Context, id, name string) (*client.TestRun, error) {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = output.AccentStyle
 
 	m := waitModel{
+		ctx:    ctx,
 		id:     id,
 		name:   name,
 		spin:   s,
 		status: "WAITING",
 	}
 
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithContext(ctx))
 	finalModel, err := p.Run()
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, tea.ErrInterrupted) || errors.Is(err, tea.ErrProgramKilled) {
+			return nil, errStoppedWaiting
+		}
 		return nil, err
 	}
 
@@ -389,11 +628,45 @@ func waitForTest(id, name string) (*client.TestRun, error) {
 	if wm.err != nil {
 		return nil, wm.err
 	}
+	if wm.result == nil {
+		// Bubble Tea quits by itself on SIGTERM, with no result and no
+		// error; apply then read the status of a nil run and panicked.
+		return nil, errStoppedWaiting
+	}
 	return wm.result, nil
+}
+
+// waitForTestPlain is waitForTest without a terminal. It polls as the spinner
+// does, ends on the same statuses, and writes a plain line to progress each
+// time the status changes; progress is nil under -o json, where stdout carries
+// the result and nothing else.
+func waitForTestPlain(ctx context.Context, id, name string, progress io.Writer) (*client.TestRun, error) {
+	last := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(applyPollInterval):
+		}
+		run, err := apiClient.GetTest(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		status := strings.ToUpper(run.Status)
+		if progress != nil && status != last {
+			fmt.Fprintf(progress, "  %s (%s): %s\n", name, id, status)
+			last = status
+		}
+		switch status {
+		case "DONE", "COMPLETED", "FAILED", "ERROR":
+			return run, nil
+		}
+	}
 }
 
 func init() {
 	testApplyCmd.Flags().StringVarP(&applyFile, "file", "f", "", "Path to scenario YAML/JSON file (required)")
-	testApplyCmd.Flags().BoolVar(&applyWait, "wait", false, "Wait for each test to complete before starting next")
+	testApplyCmd.Flags().BoolVar(&applyWait, "wait", false, "Wait for each test to complete before starting the next; Ctrl-C cancels the running one and stops")
+	interruptible(testApplyCmd)
 	testCmd.AddCommand(testApplyCmd)
 }

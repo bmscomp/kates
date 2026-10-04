@@ -3,4 +3,4 @@ kind: Namespace
 metadata:
   name: kates
   labels:
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates

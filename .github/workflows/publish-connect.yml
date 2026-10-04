@@ -1,4 +1,4 @@
-name: Publish Kafka Connect Image
+name: Publish · Connect image
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Builds and publishes the enterprise Kafka Connect image to:
@@ -6,21 +6,32 @@ name: Publish Kafka Connect Image
 #   - bmscomp/connect:<version>
 #
 # Tags follow the convention: <debezium-version> (e.g., 3.0.2)
-# The image includes: Debezium CDC, Apicurio converters, Aiven JDBC.
+# The image includes: Debezium CDC, Apicurio converters, Aiven JDBC and S3.
+#
+# Called by release.yml on every `v*` tag (one run page for the whole
+# release), or run by hand. It no longer triggers on the tag itself.
 # ──────────────────────────────────────────────────────────────────────────────
 
 on:
-  push:
-    tags:
-      - "v*"
-    paths:
-      - "Dockerfile.connect"
+  workflow_call:
+    inputs:
+      debezium_version:
+        description: "Debezium version override (blank = use Dockerfile.connect)"
+        type: string
+        default: ""
+      platforms:
+        description: "Target platforms"
+        type: string
+        default: linux/amd64,linux/arm64
   workflow_dispatch:
     inputs:
       debezium_version:
-        description: "Debezium version to build"
+        # Empty = read the version from Dockerfile.connect (the source of
+        # truth). A hardcoded default here silently overrode the Dockerfile on
+        # manual dispatches and produced wrongly-versioned image tags.
+        description: "Debezium version override (blank = use Dockerfile.connect)"
         type: string
-        default: "3.0.2.Final"
+        default: ""
       platforms:
         description: "Target platforms"
         type: choice
@@ -31,11 +42,20 @@ on:
         default: linux/amd64,linux/arm64
 
 permissions:
-  contents: write
+  contents: write # update-charts commits the image pin
   packages: write
+  id-token: write # cosign keyless signing, build provenance
+
+# A literal name, not github.workflow: called from release.yml, github.workflow
+# is the caller's ("Release"), so the three publish workflows shared one group.
+# A group holds one running and one pending job, so on the v1.24.0 tag the
+# third workflow to queue cancelled the second (the kates image), and the
+# Release, which needs every image, was skipped.
+concurrency:
+  group: publish-connect-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  GHCR_REGISTRY: ghcr.io
   DOCKERHUB_REPO: bmscomp/connect
   GHCR_REPO: ghcr.io/bmscomp/connect
 
@@ -43,32 +63,51 @@ jobs:
   meta:
     name: Compute Build Matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
       debezium_version: ${{ steps.version.outputs.debezium_version }}
       platforms: ${{ steps.set.outputs.platforms }}
       platform_matrix: ${{ steps.set.outputs.platform_matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Determine version
         id: version
+        env:
+          DBZ_OVERRIDE: ${{ inputs.debezium_version || '' }}
         run: |
           # Extract Debezium version from Dockerfile ARG
-          DBZ_VERSION="${{ inputs.debezium_version || '' }}"
+          DBZ_VERSION="${DBZ_OVERRIDE}"
           if [[ -z "${DBZ_VERSION}" ]]; then
             DBZ_VERSION=$(grep '^ARG DEBEZIUM_VERSION=' Dockerfile.connect | head -n 1 | cut -d= -f2)
           fi
           echo "debezium_version=${DBZ_VERSION}" >> "$GITHUB_OUTPUT"
 
-          # Image version = Debezium version without .Final suffix
-          VERSION="${DBZ_VERSION%.Final}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # Clean Debezium version (drop .Final): appVersion + moving alias tag.
+          DBZ_CLEAN="${DBZ_VERSION%.Final}"
+          echo "version=${DBZ_CLEAN}" >> "$GITHUB_OUTPUT"
+
+          # The image's identity is (Debezium, Kafka base). Tagging by Debezium
+          # ALONE meant a base bump (e.g. #74's Kafka 4.2.0 -> 4.3.0) did not
+          # move the tag, so connect:<debezium> silently changed content under a
+          # fixed name. Fold the Kafka base version into the tag.
+          KAFKA_VERSION=$(grep -m1 '^FROM quay.io/strimzi/kafka:' Dockerfile.connect \
+            | sed -E 's/.*-kafka-([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          if [[ -z "${KAFKA_VERSION}" || "${KAFKA_VERSION}" == *FROM* ]]; then
+            echo "::error::could not parse Kafka version from the base FROM line"
+            exit 1
+          fi
+          IMAGE_TAG="${DBZ_CLEAN}-kafka-${KAFKA_VERSION}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "connect image tag: ${IMAGE_TAG} (Debezium ${DBZ_CLEAN} on Kafka ${KAFKA_VERSION})"
 
       - name: Set build matrix
         id: set
+        env:
+          PLATFORMS: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
         run: |
-          PLATFORMS="${{ inputs.platforms || 'linux/amd64,linux/arm64' }}"
           echo "platforms=${PLATFORMS}" >> "$GITHUB_OUTPUT"
 
           MATRIX="["
@@ -90,32 +129,26 @@ jobs:
     name: Build Connect (${{ matrix.platform.arch }})
     needs: meta
     runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         platform: ${{ fromJson(needs.meta.outputs.platform_matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - uses: ./.github/actions/registry-login
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push (single arch)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile.connect
@@ -128,124 +161,167 @@ jobs:
             ${{ env.GHCR_REPO }}:sha-${{ github.sha }}-${{ matrix.platform.arch }}
           cache-from: type=gha,scope=connect-${{ matrix.platform.arch }}
           cache-to: type=gha,mode=max,scope=connect-${{ matrix.platform.arch }}
-          provenance: false
-
-      - name: Export digest
-        run: echo "${{ steps.build.outputs.digest }}" > /tmp/digest-${{ matrix.platform.arch }}.txt
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: connect-digest-${{ matrix.platform.arch }}
-          path: /tmp/digest-*.txt
-          retention-days: 1
+          # SLSA provenance and an SPDX SBOM ride along as attestation
+          # manifests; imagetools create folds them into the merged index and
+          # `verify` asserts every platform survived (see publish-docker.yml).
+          provenance: mode=max
+          sbom: true
 
   merge-manifests:
     name: Merge Multi-Arch Manifests
     needs: [meta, build-per-platform]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: ./.github/actions/registry-login
         with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        # Required by `docker buildx imagetools create` below.
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Compute Docker metadata
         id: docker-meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          # GHCR reads a multi-arch image's description from the INDEX's
+          # annotations. Dockerfile.connect already carries a complete LABEL
+          # block, but labels live in the per-platform image config and an
+          # index has no labels — nothing propagates, which is why this page
+          # has been blank despite the labels being correct all along.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: |
             ${{ env.DOCKERHUB_REPO }}
             ${{ env.GHCR_REPO }}
           tags: |
+            type=raw,value=${{ needs.meta.outputs.image_tag }}
             type=raw,value=${{ needs.meta.outputs.version }}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=,format=short
-          labels: |
+          # `annotations`, not `labels`: this job merges manifests rather than
+          # building images, so a `labels:` block here was never consumed.
+          # Kept in sync with the LABEL block in Dockerfile.connect.
+          annotations: |
             org.opencontainers.image.title=connect
-            org.opencontainers.image.description=Enterprise Kafka Connect — Debezium CDC, Apicurio Registry, Aiven JDBC
+            org.opencontainers.image.description=Kafka Connect — fully open-source Debezium CDC for PostgreSQL, MySQL, MongoDB and SQL Server; Apicurio Registry converters for Avro, JSON Schema and Protobuf; Debezium JDBC sink, Aiven JDBC source/sink and Aiven S3 sink/source. Built on Strimzi Kafka 4.3.1.
             org.opencontainers.image.vendor=bmscomp
+            org.opencontainers.image.licenses=Apache-2.0 AND MIT AND BSD-2-Clause AND BSD-3-Clause AND LGPL-2.1-or-later AND CDDL-1.0 AND CDDL-1.1 AND EPL-2.0 AND (GPL-2.0-only WITH Universal-FOSS-exception-1.0)
             org.opencontainers.image.version=${{ needs.meta.outputs.version }}
             io.debezium.version=${{ needs.meta.outputs.debezium_version }}
 
       - name: Create and push multi-arch manifests
+        env:
+          ANNOTATIONS: ${{ steps.docker-meta.outputs.annotations }}
+          TAGS: ${{ steps.docker-meta.outputs.tags }}
+          PLATFORMS: ${{ needs.meta.outputs.platforms }}
         run: |
-          PLATFORMS="${{ needs.meta.outputs.platforms }}"
-          TAGS=$(echo '${{ steps.docker-meta.outputs.tags }}')
+          set -euo pipefail
+
+          # metadata-action emits one "index:key=value" per line; imagetools
+          # wants each as its own --annotation flag.
+          ANNOTATION_ARGS=()
+          while IFS= read -r a; do
+            [ -n "${a}" ] && ANNOTATION_ARGS+=(--annotation "${a}")
+          done <<< "${ANNOTATIONS}"
+          echo "Applying ${#ANNOTATION_ARGS[@]} index annotations"
 
           IFS=',' read -ra PLATS <<< "${PLATFORMS}"
-          for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
-            SOURCES=""
+          for REPO in "${DOCKERHUB_REPO}" "${GHCR_REPO}"; do
+            SOURCES=()
             for p in "${PLATS[@]}"; do
               p="$(echo "$p" | xargs)"
               ARCH="${p#*/}"
-              TAG="sha-${{ github.sha }}-${ARCH}"
-              SOURCES="${SOURCES} ${REPO}:${TAG}"
+              SOURCES+=("${REPO}:sha-${GITHUB_SHA}-${ARCH}")
             done
 
             while IFS= read -r TAG; do
               if [[ "${TAG}" == "${REPO}:"* ]]; then
                 echo "Creating manifest: ${TAG}"
-                docker manifest create "${TAG}" ${SOURCES}
-                docker manifest push "${TAG}"
+                # `docker manifest create` cannot write annotations — only
+                # --amend and --insecure. imagetools can, and pushes in the
+                # same command.
+                docker buildx imagetools create \
+                  "${ANNOTATION_ARGS[@]}" \
+                  -t "${TAG}" "${SOURCES[@]}"
               fi
             done <<< "${TAGS}"
           done
 
   sign:
     name: Sign Images
-    needs: [meta, merge-manifests]
+    needs: [meta, verify]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - uses: ./.github/actions/registry-login
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Sign images
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
-          for REPO in "${{ env.DOCKERHUB_REPO }}" "${{ env.GHCR_REPO }}"; do
+          set -euo pipefail
+          # imagetools prints the INDEX digest. The previous `docker manifest
+          # inspect -v | jq .digest` returned an array for a multi-arch image,
+          # jq failed, and every connect image was "skipped" with a warning in
+          # a green job. See publish-docker.yml.
+          for REPO in "${DOCKERHUB_REPO}" "${GHCR_REPO}"; do
             IMAGE="${REPO}:${VERSION}"
-            DIGEST=$(docker manifest inspect "${IMAGE}" -v 2>/dev/null | jq -r '.digest // empty' || true)
-            if [[ -n "${DIGEST}" ]]; then
-              cosign sign --yes "${REPO}@${DIGEST}"
-            else
-              echo "⚠️ Could not resolve digest for ${IMAGE}, skipping sign"
+            DIGEST=$(docker buildx imagetools inspect "${IMAGE}" --format '{{.Manifest.Digest}}')
+            if [[ -z "${DIGEST}" ]]; then
+              echo "::error::could not resolve the digest of ${IMAGE}"
+              exit 1
             fi
+            echo "signing ${REPO}@${DIGEST} (${IMAGE})"
+            cosign sign --yes "${REPO}@${DIGEST}"
           done
 
   verify:
     name: Verify Published Images
     needs: [meta, merge-manifests]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Every platform is in the index
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          PLATFORMS: ${{ needs.meta.outputs.platforms }}
+        run: |
+          set -euo pipefail
+          for REPO in "${DOCKERHUB_REPO}" "${GHCR_REPO}"; do
+            IMAGE="${REPO}:${VERSION}"
+            echo "==> ${IMAGE}"
+            docker buildx imagetools inspect "${IMAGE}" | tee /tmp/inspect.txt
+            IFS=',' read -ra PLATS <<< "${PLATFORMS}"
+            for p in "${PLATS[@]}"; do
+              p="$(echo "$p" | xargs)"
+              grep -qE "^\s*Platform:\s+${p}$" /tmp/inspect.txt \
+                || { echo "::error::${IMAGE} is missing platform ${p}"; exit 1; }
+            done
+          done
+
       - name: Pull and verify plugins
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
-          IMAGE="${{ env.GHCR_REPO }}:${VERSION}"
+          IMAGE="${GHCR_REPO}:${VERSION}"
           echo "Pulling ${IMAGE}..."
           docker pull "${IMAGE}"
 
@@ -256,33 +332,50 @@ jobs:
           echo ""
           echo "=== Connector Plugins ==="
           docker run --rm --entrypoint sh "${IMAGE}" -c \
-            'for d in /opt/kafka/plugins/*/; do echo "✅ $(basename $d) ($(ls $d/*.jar 2>/dev/null | wc -l) JARs)"; done'
+            'for d in /opt/kafka/plugins/*/; do echo "✅ $(basename "$d") ($(ls "$d"/*.jar 2>/dev/null | wc -l) JARs)"; done'
 
           echo ""
           echo "=== Image Size ==="
           docker images "${IMAGE}" --format "{{.Size}}"
+
+      - name: Scan the published image (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.GHCR_REPO }}:${{ needs.meta.outputs.version }}
+          scanners: vuln
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+
   update-charts:
     name: Update Helm Charts
-    needs: [meta, verify]
+    needs: [meta, verify, sign]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Update Chart versions
         env:
-          VERSION: ${{ needs.meta.outputs.version }}
+          # connect-cluster 2.0: appVersion is the Kafka line (like
+          # mirror-maker2's) and stays with the Kafka pin; the image pin and
+          # the kates.io/connect-image annotation carry the build identity.
+          IMAGE_TAG: ${{ needs.meta.outputs.image_tag }}
         run: |
-          # Remove leading 'v' if present
-          CLEAN_VERSION=${VERSION#v}
-          
-          # Update connect-cluster chart
-          sed -i "s/appVersion: .*/appVersion: \"${CLEAN_VERSION}\"/" charts/connect-cluster/Chart.yaml
-          sed -i "s/image: .*/image: \"ghcr.io\/bmscomp\/connect:${CLEAN_VERSION}\"/" charts/connect-cluster/values.yaml
-          
+          # Anchored to ^ (and the annotation's indent) so comments are left alone.
+          sed -i "s|^image: .*|image: \"ghcr.io/bmscomp/connect:${IMAGE_TAG}\"|" charts/connect-cluster/values.yaml
+          sed -i "s|^  kates.io/connect-image: .*|  kates.io/connect-image: \"ghcr.io/bmscomp/connect:${IMAGE_TAG}\"|" charts/connect-cluster/Chart.yaml
+
       - name: Commit and Push
+        env:
+          # Was only set on the step above, so the commit message read
+          # "connect: [skip ci]" with no tag in it.
+          IMAGE_TAG: ${{ needs.meta.outputs.image_tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -290,6 +383,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: bump connect-cluster appVersion to ${VERSION} [skip ci]"
+            git commit -m "chore: pin connect-cluster to connect:${IMAGE_TAG} [skip ci]"
             git push
           fi

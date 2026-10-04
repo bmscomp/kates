@@ -33,10 +33,13 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: monitoring
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
       ports:
         - port: 8080
           protocol: TCP
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   egress:
     # DNS resolution
     - to: []
@@ -59,28 +62,35 @@ spec:
         - port: 9093
           protocol: TCP
     {{- if .Values.schemaRegistry.enabled }}
-    # To Schema Registry (Apicurio)
+    # To Schema Registry (port derived from schemaRegistry.url)
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ include "kafka-ui.kafkaNamespace" . }}
       ports:
-        - port: 8080
+        - port: {{ include "kafka-ui.schemaRegistryPort" . }}
           protocol: TCP
     {{- end }}
     {{- if .Values.kafkaConnect.enabled }}
-    # To Kafka Connect REST API
+    # To Kafka Connect REST API (port derived from kafkaConnect.url)
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ include "kafka-ui.kafkaNamespace" . }}
       ports:
-        - port: 8083
+        - port: {{ include "kafka-ui.kafkaConnectPort" . }}
           protocol: TCP
     {{- end }}
-    # Kubernetes API server (for Secret reads and health checks)
+    {{- if .Values.networkPolicy.apiServerEgress }}
+    # Kubernetes API server (only if explicitly enabled)
     - to: []
       ports:
         - port: 443
           protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}

@@ -1,0 +1,12 @@
+{{- include "kafka-common.podMonitor" (dict "name" "harness" "namespace" "ns" "labels" (include "kafka-common.selectorLabels" .) "selector" (dict "strimzi.io/kind" "KafkaConnect") "namespaces" (list "ns") "endpoint" (dict "interval" "30s" "relabelings" (include "kafka-common.strimziRelabelings" . | fromYamlArray))) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promselector
+data:
+  selector: {{ include "kafka-common.promSelector" (dict "namespace" "connect" "pod" "x-connect-[0-9]+") | quote }}
+---
+{{ include "kafka-common.dashboardConfigMap" (dict "name" "dash" "namespace" "ns" "labels" (include "kafka-common.selectorLabels" .) "folder" "Kafka" "file" "d.json" "json" "{\"panels\": []}") }}
+---
+{{ include "kafka-common.podMonitor" (dict "name" "multi" "namespace" "ns" "labels" (include "kafka-common.selectorLabels" .) "selector" (dict "strimzi.io/name" "c-entity-operator") "endpoints" (list (dict "port" "healthcheck-to") (dict "port" "healthcheck-uo" "path" "/m"))) }}

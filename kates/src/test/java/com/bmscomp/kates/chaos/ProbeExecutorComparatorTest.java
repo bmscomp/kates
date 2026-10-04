@@ -15,36 +15,42 @@ class ProbeExecutorComparatorTest {
 
     @ParameterizedTest
     @CsvSource({
-            "hello world, world, contains, true",
-            "hello world, xyz, contains, false",
-            "exact match, exact match, equal, true",
-            "exact match, different, equal, false",
-            "hello world, xyz, notContains, true",
-            "hello world, world, notContains, false"
+        "hello world, world, contains, true",
+        "hello world, xyz, contains, false",
+        "exact match, exact match, equal, true",
+        "exact match, different, equal, false",
+        "hello world, xyz, notContains, true",
+        "hello world, world, notContains, false"
     })
     void stringComparators(String actual, String expected, String comparator, boolean shouldPass) {
         boolean result = checkComparator(actual, expected, comparator);
-        assertEquals(shouldPass, result, String.format(
-                "checkComparator('%s', '%s', '%s') should be %s", actual, expected, comparator, shouldPass));
+        assertEquals(
+                shouldPass,
+                result,
+                String.format(
+                        "checkComparator('%s', '%s', '%s') should be %s", actual, expected, comparator, shouldPass));
     }
 
     @ParameterizedTest
     @CsvSource({
-            "50, 100, <=, true",
-            "100, 100, <=, true",
-            "101, 100, <=, false",
-            "50, 100, >=, false",
-            "100, 100, >=, true",
-            "150, 100, >=, true",
-            "50, 100, <, true",
-            "100, 100, <, false",
-            "50, 100, >, false",
-            "101, 100, >, true"
+        "50, 100, <=, true",
+        "100, 100, <=, true",
+        "101, 100, <=, false",
+        "50, 100, >=, false",
+        "100, 100, >=, true",
+        "150, 100, >=, true",
+        "50, 100, <, true",
+        "100, 100, <, false",
+        "50, 100, >, false",
+        "101, 100, >, true"
     })
     void numericComparators(String actual, String expected, String comparator, boolean shouldPass) {
         boolean result = checkComparator(actual, expected, comparator);
-        assertEquals(shouldPass, result, String.format(
-                "checkComparator('%s', '%s', '%s') should be %s", actual, expected, comparator, shouldPass));
+        assertEquals(
+                shouldPass,
+                result,
+                String.format(
+                        "checkComparator('%s', '%s', '%s') should be %s", actual, expected, comparator, shouldPass));
     }
 
     @Test

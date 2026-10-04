@@ -1,5 +1,71 @@
-{{- if .Values.gameday.enabled | default false }}
-{{- $kafkaNamespace := .Values.rbac.kafkaNamespace | default "kafka" }}
+{{- if .Values.gameday.enabled }}
+{{- $ns := .Release.Namespace }}
+{{- $kafkaNamespace := include "kates-chaos.kafkaNamespace" . }}
+{{- $image := .Values.gameday.image | default (include "kates-chaos.kubectlImage" .) }}
+{{- $pullPolicy := .Values.global.imagePullPolicy | default "IfNotPresent" }}
+{{- $checks := .Values.gameday.checks }}
+{{- if not $checks }}
+{{- $checks = list
+      (dict "name" "CRDs installed" "command" "kubectl get crd chaosengines.litmuschaos.io")
+      (dict "name" "Chaos operator running" "command" (printf "kubectl get pods -n %s -l app.kubernetes.io/name=litmus --no-headers | grep Running" $ns))
+      (dict "name" "Experiments installed" "command" (printf "[ $(kubectl get chaosexperiments -n %s --no-headers 2>/dev/null | wc -l) -gt 0 ]" $kafkaNamespace))
+      (dict "name" "Target namespace accessible" "command" (printf "kubectl get namespace %s" $kafkaNamespace)) }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-gameday
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "15"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-gameday
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "15"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: ["litmuschaos.io"]
+    resources: ["chaosexperiments", "chaosengines", "chaosresults"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kates-chaos.fullname" . }}-gameday
+  labels:
+    {{- include "kates-chaos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "15"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kates-chaos.fullname" . }}-gameday
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kates-chaos.fullname" . }}-gameday
+    namespace: {{ .Release.Namespace }}
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -12,19 +78,24 @@ metadata:
     "helm.sh/hook-weight": "20"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 1
-  ttlSecondsAfterFinished: 600
+  backoffLimit: {{ .Values.gameday.backoffLimit | default 1 }}
+  ttlSecondsAfterFinished: {{ .Values.gameday.ttlSecondsAfterFinished | default 600 }}
   template:
     metadata:
       labels:
         app: gameday-runner
+        {{- include "kates-chaos.selectorLabels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
+      serviceAccountName: {{ include "kates-chaos.fullname" . }}-gameday
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: gameday
-          image: {{ .Values.gameday.image | default "bitnami/kubectl:1.33" }}
-          imagePullPolicy: IfNotPresent
+          image: {{ $image }}
+          imagePullPolicy: {{ $pullPolicy }}
           command: ["/bin/sh"]
           args:
             - -c
@@ -48,23 +119,9 @@ spec:
                 fi
               }
 
-              run_check "CRDs installed" \
-                "kubectl get crd chaosengines.litmuschaos.io"
-
-              run_check "Chaos operator running" \
-                "kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=chaos-operator --no-headers | grep Running"
-
-              run_check "MongoDB responsive" \
-                "kubectl exec {{ .Release.Name }}-mongodb-0 -n {{ .Release.Namespace }} -- mongosh --quiet --eval 'db.adminCommand(\"ping\")' | grep ok"
-
-              run_check "Experiments installed" \
-                "[ $(kubectl get chaosexperiments -n {{ $kafkaNamespace }} --no-headers 2>/dev/null | wc -l) -gt 0 ]"
-
-              run_check "Subscriber connected" \
-                "kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=subscriber --no-headers | grep Running"
-
-              run_check "Kafka namespace accessible" \
-                "kubectl get namespace {{ $kafkaNamespace }}"
+              {{ range $checks }}
+              run_check {{ .name | quote }} {{ .command | quote }}
+              {{ end }}
 
               echo ""
               echo "================================"

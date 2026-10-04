@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 func TestKyvernoDetectRecommendations(t *testing.T) {

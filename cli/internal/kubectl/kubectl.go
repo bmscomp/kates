@@ -7,7 +7,23 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// waitDelay is how long a kubectl command's output may stay open once the
+// command's context has ended or kubectl has exited. The context kills
+// kubectl, but Wait also waits for kubectl's output pipes to close, and a
+// process it started, or the process behind a kubectl wrapper script, can
+// hold them open: a lookup given ten seconds then took as long as that
+// process ran.
+var waitDelay = 2 * time.Second
+
+// command is kubectl with args, ended by ctx.
+func command(ctx context.Context, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.WaitDelay = waitDelay
+	return cmd
+}
 
 // Client wraps kubectl command execution with consistent error handling.
 type Client struct {
@@ -40,7 +56,7 @@ func (c *Client) Run(ctx context.Context, args ...string) (string, error) {
 	if c.Verbose {
 		fmt.Printf("  → kubectl %s\n", strings.Join(fullArgs, " "))
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", fullArgs...)
+	cmd := command(ctx, fullArgs)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -57,7 +73,7 @@ func (c *Client) Output(ctx context.Context, args ...string) ([]byte, error) {
 	if c.Verbose {
 		fmt.Printf("  → kubectl %s\n", strings.Join(fullArgs, " "))
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", fullArgs...)
+	cmd := command(ctx, fullArgs)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -74,7 +90,7 @@ func (c *Client) JSON(ctx context.Context, result interface{}, args ...string) e
 	if c.Verbose {
 		fmt.Printf("  → kubectl %s\n", strings.Join(fullArgs, " "))
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", fullArgs...)
+	cmd := command(ctx, fullArgs)
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("kubectl %s: %w", strings.Join(args[:min(len(args), 3)], " "), err)
@@ -101,7 +117,7 @@ func (c *Client) Apply(ctx context.Context, yaml string, namespace string) error
 		args = append(args, "-n", namespace)
 	}
 	fullArgs := c.buildArgs(args)
-	cmd := exec.CommandContext(ctx, "kubectl", fullArgs...)
+	cmd := command(ctx, fullArgs)
 	cmd.Stdin = strings.NewReader(yaml)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

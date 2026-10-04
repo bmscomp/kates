@@ -1,0 +1,13 @@
+# The Kyverno board. One Kyverno per cluster and one board for it, so neither
+# the uid nor the title is per release and charts/monitoring delivers this
+# file unmodified.
+uid: kyverno-security-overview
+title: Kyverno Security Policies
+tags: [kyverno, security, policy, kates]
+refresh: 30s
+time_from: now-6h
+
+targets:
+  - chart: charts/monitoring
+    file: dashboards/kyverno-security.json
+    variant: default

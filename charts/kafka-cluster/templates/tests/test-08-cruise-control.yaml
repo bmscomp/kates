@@ -1,0 +1,77 @@
+{{- $r := dict -}}
+{{- $_ := include "kafka-cluster.resolve" (dict "ctx" . "out" $r) -}}
+{{- $testUser := include "kafka-cluster.testUser" . -}}
+{{- if include "kafka-common.enabled" (list .Values.cruiseControl.enabled true) }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kafka-cluster.clusterName" . }}-test-cruise-control"
+  namespace: {{ include "kafka-cluster.namespace" . }}
+  labels:
+    {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+    kates.io/test-pod: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "8"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: {{ include "kafka-cluster.clusterName" . }}-admin
+  restartPolicy: Never
+  securityContext:
+    {{- include "kafka-cluster.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: cruise-control-check
+      image: {{ include "kafka-cluster.kubectlImage" $ }}
+      {{- include "kafka-common.imagePullPolicy" .Values.testImages.pullPolicy | nindent 6 }}
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          CLUSTER="{{ include "kafka-cluster.clusterName" . }}"
+          NAMESPACE="{{ include "kafka-cluster.namespace" . }}"
+
+          echo "=== Tier 8: CruiseControl Readiness ==="
+
+          echo "Checking CruiseControl pod..."
+          CC_PODS=$(kubectl get pods -n $NAMESPACE \
+            -l strimzi.io/name=${CLUSTER}-cruise-control \
+            --no-headers 2>/dev/null)
+          if [ -z "$CC_PODS" ]; then
+            echo "  ✗ No CruiseControl pod found" && exit 1
+          fi
+
+          CC_RUNNING=$(echo "$CC_PODS" | grep "Running" | wc -l | tr -d ' ')
+          if [ "$CC_RUNNING" -ge 1 ]; then
+            echo "  ✓ CruiseControl pod is Running"
+          else
+            echo "  ✗ CruiseControl pod not in Running state" && exit 1
+          fi
+
+          echo ""
+          echo "Checking KafkaRebalance CRD availability..."
+          if kubectl api-resources --api-group=kafka.strimzi.io 2>/dev/null | grep -q kafkarebalances; then
+            echo "  ✓ KafkaRebalance CRD is registered"
+          else
+            echo "  ⚠ KafkaRebalance CRD not found (Strimzi may not include it)"
+          fi
+
+          echo ""
+          echo "Checking CruiseControl configuration in Kafka CR..."
+          CC_SPEC=$(kubectl get kafka $CLUSTER -n $NAMESPACE \
+            -o jsonpath='{.spec.cruiseControl}')
+          if [ -n "$CC_SPEC" ]; then
+            echo "  ✓ CruiseControl section present in Kafka CR"
+          else
+            echo "  ✗ CruiseControl not configured in Kafka CR" && exit 1
+          fi
+          echo "✓ Tier 8 complete"
+      securityContext:
+        {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end }}

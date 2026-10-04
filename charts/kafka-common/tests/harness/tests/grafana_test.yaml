@@ -1,0 +1,30 @@
+suite: grafana grid layout
+templates:
+  - grafana.yaml
+tests:
+  - it: flows panels left to right and wraps a band at column 24
+    asserts:
+      - matchRegex:
+          path: data.panels
+          pattern: '"gridPos":\{"h":6,"w":12,"x":12,"y":0\},"id":3'
+      - matchRegex:
+          path: data.panels
+          pattern: '"gridPos":\{"h":8,"w":8,"x":0,"y":6\},"id":4'
+  - it: places a row header below the tallest panel of the band above
+    asserts:
+      - matchRegex:
+          path: data.panels
+          pattern: '"gridPos":\{"h":1,"w":24,"x":0,"y":14\},"id":5,"panels":\[\],"title":"Open","type":"row"'
+  - it: nests a collapsed row's panels and gives the row one unit
+    asserts:
+      - matchRegex:
+          path: data.panels
+          pattern: '"collapsed":true,"gridPos":\{"h":1,"w":24,"x":0,"y":18\},"id":7,"panels":\[\{"gridPos":\{"h":8,"w":12,"x":0,"y":19\},"id":8'
+      - matchRegex:
+          path: data.panels
+          pattern: '"gridPos":\{"h":1,"w":24,"x":0,"y":19\},"id":10,"panels":\[\],"title":"After"'
+  - it: drops the layout keys
+    asserts:
+      - notMatchRegex:
+          path: data.panels
+          pattern: '"[wh]":\d+,"title"'

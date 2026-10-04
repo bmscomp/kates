@@ -1,0 +1,17 @@
+-- How long a run is set to last, counted from its creation: its durationMs,
+-- twice that for INTEGRITY, which reads its records back for up to as long again
+-- once it has produced them, and for a scenario the sum of its phases'
+-- durations. NULL for a run that no duration bounds, which is INTEGRATION_CDC
+-- (the CDC service ends it on timeouts of its own), and on rows written before
+-- this column.
+--
+-- The timeout reaper reads it. The reaper used to fail every run 30 minutes
+-- after its creation, whatever the run was set to last, so a default ENDURANCE
+-- run, an hour long, always ended FAILED. It now fails a run this long after its
+-- creation plus kates.engine.reaper-grace-ms, and a run with NULL here
+-- kates.engine.max-duration-ms after it plus the grace. A scenario's phases are
+-- not stored anywhere else the reaper could add them up from.
+--
+-- Nullable and without a default, so adding it rewrites no rows, and a replica
+-- still on the previous release, which writes no value, leaves it NULL.
+ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS planned_duration_ms BIGINT;

@@ -1,7 +1,6 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.*;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -42,11 +41,16 @@ public class DisruptionResource {
     @Inject
     ObjectMapper objectMapper;
 
+    @Inject
+    DisruptionLauncher launcher;
+
     @POST
     @Operation(
             summary = "Execute a disruption",
-            description = "Runs a disruption plan against the Kafka cluster with safety guardrails")
-    @APIResponse(responseCode = "200", description = "Disruption report")
+            description =
+                    "Validates a disruption plan and starts it asynchronously. Returns 202 with a report id; poll GET /api/disruptions/{id} for progress and the final report.")
+    @APIResponse(responseCode = "202", description = "Disruption accepted for execution")
+    @APIResponse(responseCode = "409", description = "Another disruption is already running against this cluster")
     @APIResponse(responseCode = "422", description = "Disruption rejected by safety guard")
     public Response executeDisruption(
             DisruptionPlan plan,
@@ -67,23 +71,32 @@ public class DisruptionResource {
             return Response.ok(result).build();
         }
 
-        String id = UUID.randomUUID().toString().substring(0, 8);
-        LOG.info("Starting disruption plan '" + plan.getName() + "' with ID: " + id);
+        // A plan is minutes long (steadyState + chaosDuration + observationWindow
+        // + recoveryTimeout per step). Running it inline held a request thread and
+        // the client connection well past any load-balancer read timeout, so the
+        // caller saw a gateway timeout while the chaos kept running. The launcher
+        // owns validation, the concurrency lease, the RUNNING placeholder and the
+        // background execution — shared with the playbook endpoint so the two
+        // cannot drift apart.
+        return toResponse(launcher.launch(plan), plan.getName());
+    }
 
-        DisruptionReport report = orchestrator.execute(plan);
-        DisruptionPersistence.persistReport(id, report, repository, objectMapper);
-
-        if ("REJECTED".equals(report.getStatus())) {
-            return Response.status(422)
-                    .entity(Map.of(
-                            "id", id,
-                            "status", "REJECTED",
-                            "validationWarnings",
-                            report.getValidationWarnings() != null ? report.getValidationWarnings() : List.of()))
-                    .build();
-        }
-
-        return Response.ok(Map.of("id", id, "report", report)).build();
+    /** Maps a launch outcome onto its HTTP result. Shared with the playbook endpoint. */
+    static Response toResponse(DisruptionLauncher.LaunchResult result, String planName) {
+        return switch (result.status()) {
+            case ACCEPTED ->
+                Response.accepted(Map.of("id", result.id(), "status", "RUNNING", "planName", planName))
+                        .build();
+            case REJECTED ->
+                Response.status(422)
+                        .entity(Map.of(
+                                "id", result.id(), "status", "REJECTED", "validationWarnings", result.messages()))
+                        .build();
+            case CONFLICT ->
+                Response.status(409)
+                        .entity(ApiError.of(409, "Conflict", String.join(" ", result.messages())))
+                        .build();
+        };
     }
 
     @GET
@@ -189,8 +202,11 @@ public class DisruptionResource {
                 .map(step -> {
                     Map<String, Object> entry = new LinkedHashMap<>();
                     entry.put("step", step.stepName());
-                    entry.put("disruptionType",
-                            step.disruptionType() != null ? step.disruptionType().name() : "unknown");
+                    entry.put(
+                            "disruptionType",
+                            step.disruptionType() != null
+                                    ? step.disruptionType().name()
+                                    : "unknown");
 
                     if (step.targetedLeaderBrokerId() != null) {
                         entry.put("targetedLeaderBrokerId", step.targetedLeaderBrokerId());
@@ -198,9 +214,11 @@ public class DisruptionResource {
 
                     if (step.isrMetrics() != null) {
                         Map<String, Object> isr = new LinkedHashMap<>();
-                        isr.put("timeToFullIsr",
+                        isr.put(
+                                "timeToFullIsr",
                                 step.isrMetrics().timeToFullIsr() != null
-                                        ? step.isrMetrics().timeToFullIsr().toMillis() + "ms" : "N/A");
+                                        ? step.isrMetrics().timeToFullIsr().toMillis() + "ms"
+                                        : "N/A");
                         isr.put("minIsrDepth", step.isrMetrics().minIsrDepth());
                         isr.put("underReplicatedPeakCount", step.isrMetrics().underReplicatedPeakCount());
                         isr.put("totalPartitions", step.isrMetrics().totalPartitions());
@@ -212,9 +230,11 @@ public class DisruptionResource {
                         lag.put("baselineLag", step.lagMetrics().baselineLag());
                         lag.put("peakLag", step.lagMetrics().peakLag());
                         lag.put("lagSpike", step.lagMetrics().lagSpike());
-                        lag.put("timeToLagRecovery",
+                        lag.put(
+                                "timeToLagRecovery",
                                 step.lagMetrics().timeToLagRecovery() != null
-                                        ? step.lagMetrics().timeToLagRecovery().toMillis() + "ms" : "N/A");
+                                        ? step.lagMetrics().timeToLagRecovery().toMillis() + "ms"
+                                        : "N/A");
                         entry.put("lag", lag);
                     }
 
@@ -268,24 +288,45 @@ public class DisruptionResource {
 
         if (current.getSummary() != null && baseline.getSummary() != null) {
             Map<String, Object> deltas = new LinkedHashMap<>();
-            deltas.put("recoveryDeltaMs",
-                    durationDeltaMs(current.getSummary().worstRecovery(), baseline.getSummary().worstRecovery()));
-            deltas.put("throughputDeltaPercent",
+            deltas.put(
+                    "recoveryDeltaMs",
+                    durationDeltaMs(
+                            current.getSummary().worstRecovery(),
+                            baseline.getSummary().worstRecovery()));
+            deltas.put(
+                    "throughputDeltaPercent",
                     current.getSummary().avgThroughputDegradation()
                             - baseline.getSummary().avgThroughputDegradation());
-            deltas.put("p99DeltaPercent",
+            deltas.put(
+                    "p99DeltaPercent",
                     current.getSummary().maxP99LatencySpike()
                             - baseline.getSummary().maxP99LatencySpike());
             comparison.put("deltas", deltas);
 
-            comparison.put("current", Map.of(
-                    "status", current.getStatus(),
-                    "slaGrade", current.getSlaVerdict() != null ? current.getSlaVerdict().grade() : "-",
-                    "passedSteps", current.getSummary().passedSteps() + "/" + current.getSummary().totalSteps()));
-            comparison.put("baseline", Map.of(
-                    "status", baseline.getStatus(),
-                    "slaGrade", baseline.getSlaVerdict() != null ? baseline.getSlaVerdict().grade() : "-",
-                    "passedSteps", baseline.getSummary().passedSteps() + "/" + baseline.getSummary().totalSteps()));
+            comparison.put(
+                    "current",
+                    Map.of(
+                            "status",
+                            current.getStatus(),
+                            "slaGrade",
+                            current.getSlaVerdict() != null
+                                    ? current.getSlaVerdict().grade()
+                                    : "-",
+                            "passedSteps",
+                            current.getSummary().passedSteps() + "/"
+                                    + current.getSummary().totalSteps()));
+            comparison.put(
+                    "baseline",
+                    Map.of(
+                            "status",
+                            baseline.getStatus(),
+                            "slaGrade",
+                            baseline.getSlaVerdict() != null
+                                    ? baseline.getSlaVerdict().grade()
+                                    : "-",
+                            "passedSteps",
+                            baseline.getSummary().passedSteps() + "/"
+                                    + baseline.getSummary().totalSteps()));
         }
 
         return Response.ok(comparison).build();
@@ -320,9 +361,9 @@ public class DisruptionResource {
             case IO_STRESS -> "Inject disk I/O pressure on broker storage";
             case DNS_ERROR -> "Inject DNS resolution failures on broker pods";
             case DISK_FILL -> "Fill broker log directory to simulate storage pressure";
-            case ROLLING_RESTART -> "Trigger StatefulSet rolling restart";
+            case ROLLING_RESTART -> "Restart brokers one at a time through the Strimzi Cluster Operator";
             case LEADER_ELECTION -> "Kill the controller broker to force leader election";
-            case SCALE_DOWN -> "Reduce StatefulSet replica count";
+            case SCALE_DOWN -> "Remove one broker from each selected KafkaNodePool (or StatefulSet)";
             case NODE_DRAIN -> "Drain the Kubernetes node hosting a broker";
         };
     }

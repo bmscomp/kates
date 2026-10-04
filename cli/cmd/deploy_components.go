@@ -3,16 +3,19 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 	"golang.org/x/sync/errgroup"
 )
+
+// kyvernoChartVersion pins the Kyverno chart: the last stable patch of the
+// 3.6 minor series. Chart versions: https://kyverno.github.io/kyverno/
+const kyvernoChartVersion = "3.6.4"
 
 // deployGroupA deploys Group A components (Operators & CRDs) in parallel:
 // Strimzi, Cert-Manager, and Kyverno.
@@ -22,10 +25,12 @@ func deployGroupA(dc *deployContext) error {
 	// ---------------------------------------------------------
 	// GROUP A: Operators & CRDs (Parallel)
 	// ---------------------------------------------------------
-	deployStrimzi := false
-	if deployWithStrimzi {
-		deployStrimzi = !isHelmReleaseDeployedFn(ctx, "strimzi-operator", "strimzi-operator")
-	}
+	// Strimzi is reconciled unconditionally. `helm upgrade --install` converges,
+	// and charts/strimzi-operator's pre-upgrade hook is what keeps the CRDs
+	// current — skipping when the release already exists means the hook never
+	// fires on an existing cluster and the CRDs silently freeze at whatever
+	// version first installed them.
+	deployStrimzi := deployWithStrimzi
 	deployCertMgr := false
 	if deployWithCertManager {
 		deployCertMgr = !isHelmReleaseDeployedFn(ctx, "cert-manager", "cert-manager")
@@ -34,6 +39,7 @@ func deployGroupA(dc *deployContext) error {
 	if deployWithKyverno {
 		deployKyvernoFlag = !isHelmReleaseDeployedFn(ctx, "kyverno", "kyverno")
 	}
+	dc.kyvernoInstalled = deployKyvernoFlag
 
 	g, gCtx := errgroup.WithContext(ctx)
 
@@ -41,7 +47,7 @@ func deployGroupA(dc *deployContext) error {
 	if deployWithStrimzi {
 		g.Go(func() error {
 			if !deployStrimzi {
-				dl.Println("⏭️  Strimzi Operator already deployed. Skipping.")
+				dl.Println(output.Glyphs().Skip + "  Strimzi Operator already deployed. Skipping.")
 				dl.FinishComponent("strimzi", true)
 				dc.advanceStep()
 				return nil
@@ -53,16 +59,41 @@ kind: Namespace
 metadata:
   name: strimzi-operator`)
 			clusterDomain := dc.resolveClusterDomain()
-			err := runHelmFn(gCtx, "upgrade", "--install", "strimzi-operator", "oci://quay.io/strimzi-helm/strimzi-kafka-operator", "--version", "1.0.0", "-n", "strimzi-operator",
-				"--set", "watchAnyNamespace=true",
-				"--set", "kubernetesServiceDnsDomain="+clusterDomain,
-				"--set", "replicas=1",
-				"--set", "resources.limits.memory=768Mi",
-				"--set", "resources.requests.memory=768Mi",
-				"--set", "leaderElection.enabled=false",
-				"--set", "operationTimeoutMs=900000",
-				"--timeout", "5m")
-			if err != nil {
+			// The wrapper chart does not render until its subchart is fetched.
+			// `build` (not `update`) resolves from Chart.lock, so the pinned
+			// Strimzi version cannot drift. A non-pinned version installs
+			// from the generated wrapper under the cache, whose charts/
+			// already holds the pulled tarball (deploy_versions.go).
+			chartDir := "charts/strimzi-operator"
+			var versionArgs []string
+			if dc.versions != nil {
+				if !dc.versions.Pinned {
+					chartDir = dc.versions.ChartDir
+				}
+				versionArgs = dc.versions.operatorHelmArgs()
+			}
+			if dc.versions == nil || dc.versions.Pinned {
+				if err := runHelmFn(gCtx, "dependency", "build", "charts/strimzi-operator"); err != nil {
+					return err
+				}
+			}
+			// Everything this call site used to --set is now pinned in the
+			// chart's values.yaml; only the cluster domain is environment-
+			// specific. The old leaderElection.enabled=false is gone on
+			// purpose: `enabled` was a typo for the upstream key `enable`, so
+			// Helm silently ignored it and leader election has always been on.
+			// Dropping it preserves that behavior; turning it off is a separate
+			// decision, not a side effect of this refactor.
+			//
+			// --reset-values: pre-chart releases stored flat upstream keys that
+			// now live under the subchart key, and the schema rejects them.
+			opArgs := []string{"upgrade", "--install", "strimzi-operator", chartDir, "-n", "strimzi-operator",
+				"--reset-values",
+				"-f", dc.chartOverlay("charts/strimzi-operator"),
+				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain=" + clusterDomain}
+			opArgs = append(opArgs, versionArgs...)
+			opArgs = append(opArgs, "--timeout", "10m")
+			if err := runHelmFn(gCtx, opArgs...); err != nil {
 				return err
 			}
 			return nil
@@ -73,7 +104,7 @@ metadata:
 	if deployWithCertManager {
 		g.Go(func() error {
 			if !deployCertMgr {
-				dl.Println("⏭️  Cert-Manager already deployed. Skipping.")
+				dl.Println(output.Glyphs().Skip + "  Cert-Manager already deployed. Skipping.")
 				dl.FinishComponent("cert-manager", true)
 				dc.advanceStep()
 				return nil
@@ -111,20 +142,42 @@ metadata:
 			runExecFn(gCtx, "kubectl", "rollout", "status",
 				"deployment/cert-manager-cainjector", "-n", "cert-manager", "--timeout=90s")
 
-			// The definitive readiness signal: poll the MutatingWebhookConfiguration
-			// until caBundle is non-empty. Only then can the API server verify the
-			// webhook TLS certificate without x509: certificate signed by unknown authority.
+			// The webhook pod must be serving before the API server can call it.
+			// The Group A readiness wait for cert-manager only runs after this
+			// goroutine returns, so without this gate the ClusterIssuer apply
+			// below races the webhook Deployment and dies with
+			// "Internal error occurred: failed calling webhook".
+			dl.Println("    - Waiting for Cert-Manager webhook rollout...")
+			runExecFn(gCtx, "kubectl", "rollout", "status",
+				"deployment/cert-manager-webhook", "-n", "cert-manager", "--timeout=180s")
+
+			// The definitive readiness signal: poll until caBundle is non-empty —
+			// on BOTH webhook configurations. A ClusterIssuer CREATE goes through
+			// the validating webhook as well, and cainjector injects the two
+			// configs independently, so a ready mutating config says nothing
+			// about the validating one; checking only it leaves a window where
+			// the apply still fails with x509: certificate signed by unknown
+			// authority (surfaced by the API server as "Internal error occurred").
 			dl.Println("    - Polling for Cert-Manager CA bundle injection...")
 			const caTimeout = 180 * time.Second
 			const caPoll = 3 * time.Second
 			caDeadline := time.Now().Add(caTimeout)
+			certMgrWebhookConfigs := []string{
+				"mutatingwebhookconfiguration",
+				"validatingwebhookconfiguration",
+			}
 			for {
-				out, err := exec.CommandContext(gCtx,
-					"kubectl", "get",
-					"mutatingwebhookconfiguration", "cert-manager-webhook",
-					"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
-				).Output()
-				if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+				injected := 0
+				for _, kind := range certMgrWebhookConfigs {
+					out, err := runExecOutputFn(gCtx,
+						"kubectl", "get", kind, "cert-manager-webhook",
+						"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}",
+					)
+					if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+						injected++
+					}
+				}
+				if injected == len(certMgrWebhookConfigs) {
 					dl.Println("    - CA bundle injected. Applying ClusterIssuer...")
 					break
 				}
@@ -146,34 +199,49 @@ metadata:
 spec:
   selfSigned: {}`
 
-			// Try applying normally first (3 quick attempts).
+			// Try applying normally first. Early attempts can land in the short
+			// window where the CA bundle is injected but the API server's webhook
+			// client hasn't seen ready endpoints yet — give it a real window
+			// before reaching for the failurePolicy bypass.
 			var lastErr error
-			for attempt := 1; attempt <= 3; attempt++ {
+			const applyAttempts = 5
+			for attempt := 1; attempt <= applyAttempts; attempt++ {
 				if lastErr = runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer); lastErr == nil {
 					return nil
 				}
-				if attempt < 3 {
-					time.Sleep(3 * time.Second)
+				if attempt < applyAttempts {
+					select {
+					case <-gCtx.Done():
+						return gCtx.Err()
+					case <-time.After(5 * time.Second):
+					}
 				}
 			}
 
 			// Hard fallback: temporarily set failurePolicy: Ignore so the API server
 			// allows the resource creation call through even if webhook TLS is still
-			// not verifiable. cert-manager will reconcile the webhook config shortly.
+			// not verifiable. BOTH configs must be bypassed — the validating webhook
+			// blocks the CREATE exactly like the mutating one, so patching only the
+			// mutating config leaves the failure in place. cert-manager reconciles
+			// the webhook configs back to its desired state shortly after.
 			dl.Println("    ⚠ Webhook TLS not verifiable — temporarily setting failurePolicy: Ignore")
-			runExecFn(gCtx, "kubectl", "patch",
-				"mutatingwebhookconfiguration", "cert-manager-webhook",
-				"--type=json", "-p",
-				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
+			for _, kind := range certMgrWebhookConfigs {
+				runExecFn(gCtx, "kubectl", "patch",
+					kind, "cert-manager-webhook",
+					"--type=json", "-p",
+					`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
+			}
 			time.Sleep(2 * time.Second) // let the API server pick up the patch
 
 			applyErr := runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
 
 			// Always restore failurePolicy: Fail regardless of outcome.
-			runExecFn(gCtx, "kubectl", "patch",
-				"mutatingwebhookconfiguration", "cert-manager-webhook",
-				"--type=json", "-p",
-				`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
+			for _, kind := range certMgrWebhookConfigs {
+				runExecFn(gCtx, "kubectl", "patch",
+					kind, "cert-manager-webhook",
+					"--type=json", "-p",
+					`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
+			}
 
 			if applyErr != nil {
 				return fmt.Errorf("failed to apply cert-manager ClusterIssuer: %w", applyErr)
@@ -187,7 +255,7 @@ spec:
 	if deployWithKyverno {
 		g.Go(func() error {
 			if !deployKyvernoFlag {
-				dl.Println("⏭️  Kyverno already deployed. Skipping.")
+				dl.Println(output.Glyphs().Skip + "  Kyverno already deployed. Skipping.")
 				dl.FinishComponent("kyverno", true)
 				dc.advanceStep()
 				return nil
@@ -197,13 +265,11 @@ spec:
 			runHelmFn(gCtx, "repo", "update", "kyverno")
 
 			// Kyverno v3.x splits into 4 controllers; replicaCount=1 is a v2.x flag.
-			// Pinned to 3.6.4 — the last stable patch of the 3.6 minor series.
-			// Chart versions: https://kyverno.github.io/kyverno/
 			// global.clusterDomain ensures Kyverno webhook certificates use the
 			// correct cluster DNS domain — same value detected for all other components.
 			kyvernoDomain := dc.resolveClusterDomain()
 			err := runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
-				"--version", "3.6.4",
+				"--version", kyvernoChartVersion,
 				"-n", "kyverno", "--create-namespace",
 				"--set", "admissionController.replicas=1",
 				"--set", "backgroundController.replicas=1",
@@ -227,10 +293,10 @@ spec:
 			deadline := time.Now().Add(180 * time.Second)
 			for _, crd := range kyvernoCRDs {
 				for {
-					out, checkErr := exec.CommandContext(gCtx,
+					out, checkErr := runExecOutputFn(gCtx,
 						"kubectl", "get", "crd", crd,
 						"-o", "jsonpath={.status.conditions[?(@.type==\"Established\")].status}",
-					).Output()
+					)
 					if checkErr == nil && strings.Contains(string(out), "True") {
 						break
 					}
@@ -307,7 +373,7 @@ func deployGroupB(dc *deployContext) error {
 	// GROUP B: Core Infrastructure (Parallel)
 	// ---------------------------------------------------------
 
-	deployKafka := !isHelmReleaseDeployedFn(ctx, "krafter", kafkaNS)
+	deployKafka := !isHelmReleaseDeployedFn(ctx, dc.primary.Name, kafkaNS)
 	deployMon := false
 	if deployWithMonitoring {
 		deployMon = !isHelmReleaseDeployedFn(ctx, "monitoring", jaegerNS)
@@ -320,7 +386,7 @@ func deployGroupB(dc *deployContext) error {
 	if deployKafka {
 		dl.Printf("\n📦 Deploying Kafka Cluster (Namespace: %s)...\n", kafkaNS)
 	} else {
-		dl.Println("⏭️  Kafka Cluster already deployed. Skipping.")
+		dl.Println(output.Glyphs().Skip + "  Kafka Cluster already deployed. Skipping.")
 		dl.FinishComponent("kafka", true)
 		dc.advanceStep()
 		dl.FinishComponent("kafka-users", true)
@@ -331,7 +397,7 @@ func deployGroupB(dc *deployContext) error {
 		if deployMon {
 			dl.Printf("\n📦 Deploying Monitoring (Prometheus + Grafana) (Namespace: %s)...\n", jaegerNS)
 		} else {
-			dl.Println("⏭️  Monitoring stack already deployed. Skipping.")
+			dl.Println(output.Glyphs().Skip + "  Monitoring stack already deployed. Skipping.")
 			dl.FinishComponent("monitoring", true)
 			dc.advanceStep()
 		}
@@ -341,28 +407,39 @@ func deployGroupB(dc *deployContext) error {
 		if deployPG {
 			dl.Printf("\n📦 Deploying PostgreSQL CDC Database (Namespace: %s)...\n", deployDbNS)
 		} else {
-			dl.Println("⏭️  PostgreSQL already deployed. Skipping.")
+			dl.Println(output.Glyphs().Skip + "  PostgreSQL already deployed. Skipping.")
 			dl.FinishComponent("postgres", true)
 			dc.advanceStep()
 		}
 	}
 
-	g2, g2Ctx := errgroup.WithContext(ctx)
-
-	// Deploy Monitoring (Prometheus + Grafana via charts/monitoring)
+	// Monitoring first, on its own. kube-prometheus-stack carries the
+	// monitoring.coreos.com CRDs, and every chart below renders its
+	// PodMonitor and PrometheusRule only if that API exists when Helm
+	// renders it — a release is never revisited when a CRD turns up later.
+	// Installed in parallel with Kafka, the CRDs landed seconds after Kafka
+	// had rendered without them (see deploy_monitoring.go). Without --wait
+	// this costs the time the chart takes to apply, not the minutes its pods
+	// take to start; the readiness wait further down is unchanged.
+	//
+	// chaosAlerts is the monitoring chart's own set of rules: the
+	// kafka:chaos:* recording series the chaos board is drawn from.
 	if deployWithMonitoring && deployMon {
-		g2.Go(func() error {
-			// Update chart dependencies (kube-prometheus-stack subchart).
-			runHelmFn(g2Ctx, "dependency", "update", "charts/monitoring")
+		// Update chart dependencies (kube-prometheus-stack subchart).
+		runHelmFn(ctx, "dependency", "update", "charts/monitoring")
 
-			return runHelmFn(g2Ctx, "upgrade", "--install", "monitoring",
-				"charts/monitoring",
-				"-n", jaegerNS, "--create-namespace",
-				"-f", dc.chartOverlay("charts/monitoring"),
-				"--set", "kube-prometheus-stack.global.clusterDomain="+dc.report.Network.ClusterDomain,
-				"--timeout", "10m")
-		})
+		if err := runHelmFn(ctx, "upgrade", "--install", "monitoring",
+			"charts/monitoring",
+			"-n", jaegerNS, "--create-namespace",
+			"-f", dc.chartOverlay("charts/monitoring"),
+			"--set", "kube-prometheus-stack.global.clusterDomain="+dc.report.Network.ClusterDomain,
+			"--set", fmt.Sprintf("chaosAlerts.enabled=%t", deployWithChaos),
+			"--timeout", "10m"); err != nil {
+			return fmt.Errorf("failed during Group B (Core Infra) deployments: %w", err)
+		}
 	}
+
+	g2, g2Ctx := errgroup.WithContext(ctx)
 
 	if deployWithKafkaConnect && deployPG {
 		g2.Go(func() error {
@@ -400,16 +477,29 @@ metadata:
 			// operator drives reconciliation asynchronously. waitKafkaReady()
 			// below is the real readiness gate.
 			clusterDomain := dc.resolveClusterDomain()
-			kafkaArgs := []string{"upgrade", "--install", "krafter", "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
+			kafkaArgs := []string{"upgrade", "--install", dc.primary.Name, "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
 
+			// values-platform.yaml selects the chart's platform profile: the
+			// kates topics, users (kates-backend, kafka-ui, kates-connect,
+			// kates-mm2, …) and client NetworkPolicy grants the rest of this
+			// deploy relies on. kafka-cluster 1.0 no longer carries them in its
+			// defaults.
 			kafkaArgs = append(kafkaArgs,
 				"-f", dc.valuesFile,
+				"-f", "charts/kafka-cluster/values-platform.yaml",
 				"--set", "global.clusterDomain="+clusterDomain,
-				"--set", "networkPolicies.connectNamespace="+connectNS,
+				"--set", "networkPolicy.clients[0].name=connect",
+				"--set", "networkPolicy.clients[0].namespace="+connectNS,
 				"--timeout", "10m",
 			)
 			if dc.isKind {
 				kafkaArgs = append(kafkaArgs, "-f", "charts/kafka-cluster/values-kind.yaml")
+			}
+			// The resolved versions and the cluster name go last so they win
+			// over every values file above (§3.3: derived settings travel
+			// with the version).
+			if dc.versions != nil {
+				kafkaArgs = append(kafkaArgs, dc.versions.kafkaHelmArgs(dc.primary)...)
 			}
 
 			if deployHA {
@@ -430,6 +520,8 @@ metadata:
 
 			// (Values files are already appended above so these overrides take precedence)
 
+			kafkaArgs = append(kafkaArgs, dc.scrapeArgs("charts/kafka-cluster")...)
+
 			if err := runHelmFn(g2Ctx, kafkaArgs...); err != nil {
 				return err
 			}
@@ -447,7 +539,7 @@ metadata:
 	// ---------------------------------------------------------
 	// 1. Kafka Cluster
 	if deployKafka {
-		if err := dc.deployComponent("kafka", kafkaNS, "strimzi.io/cluster=krafter", 15*time.Minute, ""); err != nil {
+		if err := dc.deployComponent("kafka", kafkaNS, dc.primary.ReadySelector(), 15*time.Minute, ""); err != nil {
 			return fmt.Errorf("kafka readiness failed: %w", err)
 		}
 	}
@@ -457,6 +549,9 @@ metadata:
 		if err := dc.deployComponent("monitoring", jaegerNS, "release=monitoring", 10*time.Minute, ""); err != nil {
 			return fmt.Errorf("monitoring readiness failed: %w", err)
 		}
+	}
+	if err := wireKyvernoScrape(dc); err != nil {
+		return err
 	}
 
 	// 2. PostgreSQL
@@ -468,9 +563,9 @@ metadata:
 			} else if !isTesting {
 				// Grant superuser and replication to debezium after DB is ready
 				for i := 0; i < 5; i++ {
-					err := exec.CommandContext(ctx, "kubectl", "exec", "-n", deployDbNS, "postgresql-0", "--",
+					_, err := runExecCombinedFn(ctx, "kubectl", "exec", "-n", deployDbNS, "postgresql-0", "--",
 						"env", "PGPASSWORD=postgres", "psql", "-U", "postgres", "-c",
-						"ALTER ROLE debezium SUPERUSER REPLICATION;").Run()
+						"ALTER ROLE debezium SUPERUSER REPLICATION;")
 					if err == nil {
 						break
 					}
@@ -490,12 +585,12 @@ metadata:
 		dl.Println("    - Waiting for Entity Operator to start...")
 		eoDeadline := time.Now().Add(5 * time.Minute)
 		for time.Now().Before(eoDeadline) {
-			eoOut, _ := exec.CommandContext(ctx,
+			eoOut, _ := runExecOutputFn(ctx,
 				"kubectl", "get", "pods", "-n", kafkaNS,
 				"-l", "app.kubernetes.io/name=entity-operator",
 				"--no-headers",
 				"-o", "custom-columns=PHASE:.status.phase",
-			).Output()
+			)
 			if strings.Contains(string(eoOut), "Running") {
 				dl.Printf("    %s Entity Operator running\n", output.AccentStyle.Render("✔"))
 				break
@@ -540,43 +635,25 @@ metadata:
 	runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectNsYaml)
 
 	connectDomain := dc.resolveClusterDomain()
-	bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, connectDomain)
+	bootstrap := dc.primary.Bootstrap(connectDomain)
 
-	// Copy kates-connect secret and kafka-metrics ConfigMap from kafka namespace to connect namespace (cross-namespace)
+	// Copy the kates-connect credentials from the kafka namespace to the connect
+	// namespace (cross-namespace). The worker's exporter rules used to be copied
+	// here too, from kafka-cluster's metrics ConfigMap; connect-cluster 2.0 renders
+	// its own in its own namespace and points metricsConfig at that, so there is
+	// nothing left to copy.
 	if connectNS != kafkaNS {
-		// Copy kafka-metrics ConfigMap (required by KafkaConnect metricsConfig)
-		dl.Println("    - Copying kafka-metrics ConfigMap to connect namespace...")
-		metricsData, metricsErr := exec.CommandContext(ctx, "kubectl", "get", "configmap", "kafka-metrics",
-			"-n", kafkaNS, "-o", "jsonpath={.data.kafka-metrics-config\\.yml}").Output()
-		if metricsErr == nil && len(metricsData) > 0 {
-			// Build a clean ConfigMap without Helm ownership annotations
-			// to avoid field-manager conflicts on kubectl apply.
-			var indented strings.Builder
-			for _, line := range strings.Split(string(metricsData), "\n") {
-				indented.WriteString("    " + line + "\n")
-			}
-			metricsYaml := fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kafka-metrics\n  namespace: %s\ndata:\n  kafka-metrics-config.yml: |\n%s", connectNS, indented.String())
-			if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, metricsYaml); err != nil {
-				// Fallback: force ownership with server-side apply (handles leftover
-				// field-manager conflicts from prior broken deploys)
-				dl.Println("    - Retrying with server-side apply (--force-conflicts)...")
-				runExecStdinFn(ctx, "kubectl", []string{"apply", "--server-side", "--force-conflicts", "-f", "-"}, metricsYaml)
-			}
-		} else {
-			dl.Printf("    ⚠️  ConfigMap 'kafka-metrics' not found in namespace %s\n", kafkaNS)
-		}
-
 		dl.Println("    - Copying kates-connect credentials to connect namespace...")
 		var pwBytes []byte
 		var jaasBytes []byte
 		secretDeadline := time.Now().Add(2 * time.Minute)
 		for {
-			pwOut, pwErr := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
-				"-n", kafkaNS, "-o", "jsonpath={.data.password}").Output()
+			pwOut, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-connect",
+				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
 			if pwErr == nil && len(strings.TrimSpace(string(pwOut))) > 0 {
 				pwBytes = bytes.TrimSpace(pwOut)
-				jaasOut, jaasErr := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-connect",
-					"-n", kafkaNS, "-o", "jsonpath={.data.sasl\\.jaas\\.config}").Output()
+				jaasOut, jaasErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-connect",
+					"-n", kafkaNS, "-o", "jsonpath={.data.sasl\\.jaas\\.config}")
 				if jaasErr == nil {
 					jaasBytes = bytes.TrimSpace(jaasOut)
 				}
@@ -609,7 +686,7 @@ data:
 %s`, connectNS, dataLines.String())
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectSecretYaml)
 		} else {
-			dl.Printf("    ⚠️  Secret 'kates-connect' not found in namespace %s after waiting — KafkaUser may not be ready\n", kafkaNS)
+			dl.Printf("    ⚠  Secret 'kates-connect' not found in namespace %s after waiting — KafkaUser may not be ready\n", kafkaNS)
 		}
 	}
 
@@ -630,22 +707,29 @@ stringData:
 		// Helm says deployed, but verify pods actually exist.
 		// A previous deploy may have installed the chart but the
 		// workload never started (e.g. missing ConfigMap).
-		podCheck, _ := exec.CommandContext(ctx, "kubectl", "get", "pods",
+		podCheck, _ := runExecOutputFn(ctx, "kubectl", "get", "pods",
 			"-n", connectNS, "-l", "strimzi.io/kind=KafkaConnect",
-			"-o", "jsonpath={.items}").Output()
+			"-o", "jsonpath={.items}")
 		if string(podCheck) == "[]" || len(strings.TrimSpace(string(podCheck))) == 0 {
-			dl.Println("    ⚠️  Kafka Connect release exists but no pods found — upgrading...")
+			dl.Println("    ⚠  Kafka Connect release exists but no pods found — upgrading...")
 			connectDeployed = false
 		}
 	}
 	if !connectDeployed {
 		dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", connectNS)
 
+		// connect-cluster 2.0 is built on the kafka-common library, a file://
+		// dependency Helm refuses to render until it is built.
+		if err := runHelmFn(ctx, "dependency", "build", "charts/connect-cluster"); err != nil {
+			dl.Printf("    ✗ helm dependency build charts/connect-cluster: %v\n", err)
+			return err
+		}
+
 		registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
 			kafkaNS, connectDomain)
 
 		// Use the same FQDN pattern as the kates backend for bootstrap servers
-		bootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, connectDomain)
+		bootstrap := dc.primary.Bootstrap(connectDomain)
 
 		connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
 			"-n", connectNS, "--create-namespace",
@@ -655,10 +739,15 @@ stringData:
 			"--set", "kafka.bootstrapServers=" + bootstrap,
 			"--set", "schemaRegistry.enabled=true",
 			"--set", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
-			"--set", "databaseEgress[0].namespace=" + deployDbNS,
-			"--set", "databaseEgress[0].port=5432",
-			"--set", "databaseEgress[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
+			"--set", "networkPolicy.egress.databases[0].namespace=" + deployDbNS,
+			"--set", "networkPolicy.egress.databases[0].port=5432",
+			"--set", "networkPolicy.egress.databases[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
 			"--timeout", "10m",
+		}
+		// Connect's spec.version must be inside the operator's window, so it
+		// follows the primary's Kafka version rather than the chart's pin.
+		if dc.versions != nil {
+			connectArgs = append(connectArgs, dc.versions.connectHelmArgs()...)
 		}
 
 		// Enable NetworkPolicy on non-Kind clusters (same as kates backend)
@@ -683,29 +772,16 @@ stringData:
 			connectArgs = append(connectArgs, "--set", "replicas=1")
 		}
 
-		monitoringEnabled := deployWithMonitoring
-		if monitoringEnabled {
-			// Cleverly detect if CRDs are actually present before enabling monitoring on Connect
-			out, err := exec.CommandContext(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com", "--ignore-not-found").CombinedOutput()
-			if err != nil || len(bytes.TrimSpace(out)) == 0 {
-				monitoringEnabled = false
-				dl.Printf("    ⚠️  Monitoring CRDs not found. Disabling monitoring for Kafka Connect.\n")
-			}
-		}
-
-		if !monitoringEnabled {
-			connectArgs = append(connectArgs,
-				"--set", "alerts.enabled=false",
-				"--set", "podMonitors.enabled=false",
-				"--set", "dashboards.enabled=false",
-			)
-		}
+		// Monitoring is installed and ready by now (Group B), so the CRDs its
+		// PodMonitor needs exist; without --with-monitoring the chart's own
+		// API check keeps a bare cluster installable.
+		connectArgs = append(connectArgs, dc.scrapeArgs("charts/connect-cluster")...)
 
 		if err := runHelmFn(ctx, connectArgs...); err != nil {
 			return err
 		}
 	} else {
-		dl.Println("⏭️  Kafka Connect already deployed. Skipping.")
+		dl.Println(output.Glyphs().Skip + "  Kafka Connect already deployed. Skipping.")
 		dl.FinishComponent("kafka-connect", true)
 		dc.advanceStep()
 	}
@@ -715,7 +791,7 @@ stringData:
 	}
 
 	// Deploy Debezium connector
-	checkOut, checkErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", connectNS, "--no-headers").CombinedOutput()
+	checkOut, checkErr := runExecCombinedFn(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", connectNS, "--no-headers")
 	if checkErr != nil || strings.Contains(string(checkOut), "not found") {
 		dl.Println("    - Deploying Debezium PostgreSQL CDC connector...")
 		connectorYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -742,6 +818,11 @@ spec:
     plugin.name: pgoutput
     slot.name: debezium_kates
     heartbeat.interval.ms: "10000"
+    # Default heartbeat topic is __debezium-heartbeat.<prefix>, which falls
+    # OUTSIDE the kates-connect user's cdc* topic grant. The denial poisons the
+    # transactional producer and the connector reports the misleading
+    # "Cannot execute transactional method because we are in an error state".
+    topic.heartbeat.prefix: cdc-heartbeat
     snapshot.mode: initial
     decimal.handling.mode: double
     tombstones.on.delete: "true"
@@ -761,7 +842,7 @@ spec:
 	}
 
 	// Deploy JDBC Sink connector
-	sinkCheckOut, sinkCheckErr := exec.CommandContext(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", connectNS, "--no-headers").CombinedOutput()
+	sinkCheckOut, sinkCheckErr := runExecCombinedFn(ctx, "kubectl", "get", "kafkaconnector", "jdbc-sink-connector", "-n", connectNS, "--no-headers")
 	if sinkCheckErr != nil || strings.Contains(string(sinkCheckOut), "not found") {
 		dl.Println("    - Deploying JDBC Sink connector...")
 		sinkYaml := fmt.Sprintf(`apiVersion: kafka.strimzi.io/v1
@@ -778,7 +859,10 @@ spec:
     enabled: true
     maxRestarts: 10
   config:
-    topics: "test-sink-topic"
+    # The topic debezium actually produces (and the ACLs actually grant).
+    # "test-sink-topic" was a placeholder: unauthorized AND fed by nothing, so
+    # the sink failed on ACLs and would have sat idle even without them.
+    topics: "cdc.public.demo_orders"
     connection.url: "jdbc:postgresql://postgresql.%s.svc:5432/orders"
     connection.username: "${secrets:%s/connect-pg-credentials:username}"
     connection.password: "${secrets:%s/connect-pg-credentials:password}"
@@ -831,15 +915,33 @@ func deployGroupC(dc *deployContext) error {
 			dl.FinishComponent("apicurio", true)
 			dc.advanceStep()
 		} else {
-			dl.Println("⏭️  Apicurio already deployed.")
+			dl.Println(output.Glyphs().Skip + "  Apicurio already deployed.")
 			dl.FinishComponent("apicurio", true)
 			dc.advanceStep()
 		}
 	}
 
-	// Deploy Kates
-	if !isHelmReleaseDeployedFn(ctx, "kates", appNS) {
-		dl.Printf("\n📦 Deploying Kates Backend (Namespace: %s)...\n", appNS)
+	// Deploy Kates.
+	//
+	// Reconciled unconditionally, for the same reason as the Strimzi operator
+	// in Group A. This used to skip when a Helm release named "kates" existed,
+	// which reads "already deployed" off a release record — a record that says
+	// a helm install once succeeded, not that anything is running. A release
+	// stuck in ImagePullBackOff satisfied it, so `kates deploy` reported the
+	// backend as done and left it broken, and no amount of re-running could
+	// repair the one component the platform is named after. It also meant a
+	// change in the values a release should get (the kind image overlay
+	// below, say) never reached an existing install.
+	//
+	// `helm upgrade --install` converges: same values, no-op; different
+	// values, a rollout.
+	katesInstalled := isHelmReleaseDeployedFn(ctx, "kates", appNS)
+	{
+		verb := "Deploying"
+		if katesInstalled {
+			verb = "Reconciling"
+		}
+		dl.Printf("\n📦 %s Kates Backend (Namespace: %s)...\n", verb, appNS)
 		// Auto-cleanup stale ClusterRole ownership from previous topology switches
 		cleanupStaleClusterResource(ctx, "clusterrole", "kates", appNS)
 		cleanupStaleClusterResource(ctx, "clusterrolebinding", "kates", appNS)
@@ -854,9 +956,8 @@ spec: {}`, appNS)
 			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
 
 			// The KafkaUser was already waited on in Group B — just read the Secret.
-			pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-backend",
+			pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-backend",
 				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-			pwBytes, pwErr := pwCmd.Output()
 
 			if pwErr == nil && len(pwBytes) > 0 {
 				dl.Println("    - Copying Kafka SASL credentials to app namespace...")
@@ -870,36 +971,59 @@ data:
   password: %s`, appNS, string(pwBytes))
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
 			} else {
-				dl.Printf("    ⚠️  Secret 'kates-backend' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+				dl.Printf("    ⚠  Secret 'kates-backend' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
 			}
 		}
 
-		katesBootstrap := fmt.Sprintf("krafter-kafka-bootstrap.%s.svc.%s:9092", kafkaNS, dc.report.Network.ClusterDomain)
-		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
-		if err := runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates",
-			"-n", appNS, "--create-namespace",
-			"-f", dc.valuesFile,
-			"-f", dc.chartOverlay("charts/kates"),
+		katesBootstrap := dc.primary.Bootstrap(dc.report.Network.ClusterDomain)
+
+		// On kind the backend runs the native image built from the working
+		// tree (deploy_localimage.go). Checked before the Helm call, because
+		// the overlay pins pullPolicy: Never: a missing image would otherwise
+		// be an ErrImageNeverPull discovered eight minutes later, at the
+		// timeout, instead of now with the command that fixes it.
+		var localImage string
+		if dc.isKind {
+			img, err := ensureLocalNativeImage(ctx, dc.report.Context)
+			if err != nil {
+				return err
+			}
+			localImage = img
+		} else {
+			dl.Println("    - Backend image: the chart's published image (not a kind cluster)")
+		}
+
+		katesArgs := []string{"upgrade", "--install", "kates", "charts/kates",
+			"-n", appNS, "--create-namespace"}
+		katesArgs = append(katesArgs, dc.katesChartValues()...)
+		if localImage != "" {
+			// After the values files, so the tag that actually exists wins
+			// over the one the overlay names.
+			katesArgs = append(katesArgs, localImageArgs(localImage)...)
+		}
+		katesArgs = append(katesArgs,
 			"--set", "kafka.bootstrapServers="+katesBootstrap,
 			"--set", "kafka.topicNamespace="+kafkaNS,
-			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring),
-			"--timeout", "8m"); err != nil {
+			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring))
+		katesArgs = append(katesArgs, dc.scrapeArgs("charts/kates")...)
+		katesArgs = append(katesArgs, dc.prometheusArgs()...)
+		katesArgs = append(katesArgs, dc.cdcSecretArgs()...)
+		katesArgs = append(katesArgs, "--timeout", "8m")
+
+		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
+		if err := runHelmFn(ctx, katesArgs...); err != nil {
 			return err
 		}
 
 		if err := dc.deployComponent("kates", appNS, "app.kubernetes.io/instance=kates", 8*time.Minute, ""); err != nil {
 			return err
 		}
-	} else {
-		dl.Println("⏭️  Kates Backend already deployed.")
-		dl.FinishComponent("kates", true)
-		dc.advanceStep()
 	}
 
 	// Deploy Kafka UI
 	if deployWithKafkaUI {
 		if !isHelmReleaseDeployedFn(ctx, "kafka-ui", kafkaUINS) {
-			dl.Printf("\n🖥️  Deploying Kafka UI (Namespace: %s)...\n", kafkaUINS)
+			dl.Printf("\n💻 Deploying Kafka UI (Namespace: %s)...\n", kafkaUINS)
 			dl.StartComponent("kafka-ui", 5*time.Minute)
 
 			// Cross-namespace secret copy (KafkaUser secret lives in Kafka NS)
@@ -912,9 +1036,8 @@ spec: {}`, kafkaUINS)
 				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
 
 				dl.Println("    - Copying kafka-ui SASL credentials to UI namespace...")
-				pwCmd := exec.CommandContext(ctx, "kubectl", "get", "secret", "kafka-ui",
+				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kafka-ui",
 					"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-				pwBytes, pwErr := pwCmd.Output()
 				if pwErr == nil && len(pwBytes) > 0 {
 					secretYaml := fmt.Sprintf(`apiVersion: v1
 kind: Secret
@@ -926,14 +1049,17 @@ data:
   password: %s`, kafkaUINS, string(pwBytes))
 					runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
 				} else {
-					dl.Printf("    ⚠️  Secret 'kafka-ui' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+					dl.Printf("    ⚠  Secret 'kafka-ui' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
 				}
 			}
 
 			helmArgs := []string{
 				"upgrade", "--install", "kafka-ui", "charts/kafka-ui",
 				"-n", kafkaUINS, "--create-namespace",
-				"--set", "kafka.clusterName=" + clusterName,
+				// The primary's name, as for MirrorMaker 2 below. This read
+				// clusterName, the --cluster-name flag of kates detect, so
+				// --kafka-name left kafka-ui on a cluster named krafter.
+				"--set", "kafka.clusterName=" + dc.primary.Name,
 				"--set", "kafka.namespace=" + kafkaNS,
 				"--timeout", "5m",
 			}
@@ -947,8 +1073,89 @@ data:
 			dl.FinishComponent("kafka-ui", true)
 			dc.advanceStep()
 		} else {
-			dl.Println("⏭️  Kafka UI already deployed.")
+			dl.Println(output.Glyphs().Skip + "  Kafka UI already deployed.")
 			dl.FinishComponent("kafka-ui", true)
+			dc.advanceStep()
+		}
+	}
+
+	// Deploy MirrorMaker 2 — the chart's loopback: the primary mirrored into
+	// itself under a renamed topic set, which is enough to exercise every
+	// MM2 mechanism (connectors, offset syncs, checkpoints, the ACLs of the
+	// kates-mm2 user) without a second cluster. Real sources are `kates
+	// migrate up --from …`.
+	if deployWithMirrorMaker2 {
+		mm2NS := dc.ns.mm2
+		if !isHelmReleaseDeployedFn(ctx, "mm2", mm2NS) {
+			dl.Printf("\n🔁 Deploying MirrorMaker 2 (Namespace: %s)...\n", mm2NS)
+			dl.StartComponent("mirror-maker2", 10*time.Minute)
+
+			// The kates-mm2 credential is a KafkaUser of the primary, so its
+			// Secret lives in the Kafka namespace; MM2 reads it from its own.
+			if mm2NS != kafkaNS {
+				nsYaml := fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+spec: {}`, mm2NS)
+				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
+				dl.Println("    - Copying kates-mm2 SASL credentials to the MirrorMaker 2 namespace...")
+				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-mm2",
+					"-n", kafkaNS, "-o", "jsonpath={.data.password}")
+				if pwErr == nil && len(pwBytes) > 0 {
+					secretYaml := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: kates-mm2
+  namespace: %s
+type: Opaque
+data:
+  password: %s`, mm2NS, string(pwBytes))
+					runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
+				} else {
+					dl.Printf("    ⚠  Secret 'kates-mm2' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
+				}
+			}
+
+			// The chart depends on the kafka-common library (file://), which a
+			// checkout does not carry built.
+			if err := runHelmFn(ctx, "dependency", "build", "charts/mirror-maker2"); err != nil {
+				dl.Printf("    ✗ helm dependency build charts/mirror-maker2: %v\n", err)
+				dl.FinishComponent("mirror-maker2", false)
+				return err
+			}
+			helmArgs := []string{
+				"upgrade", "--install", "mm2", "charts/mirror-maker2",
+				"-n", mm2NS, "--create-namespace",
+			}
+			if overlay := dc.chartOverlay("charts/mirror-maker2"); dc.fileExists(overlay) {
+				helmArgs = append(helmArgs, "-f", overlay)
+			}
+			// Both ends are the primary; the versions follow the resolved
+			// pair so the worker image exists in the operator's window.
+			helmArgs = append(helmArgs,
+				"--set", "target.clusterName="+dc.primary.Name,
+				"--set", "target.namespace="+kafkaNS,
+				"--set", "mirrors[0].source.clusterName="+dc.primary.Name,
+				"--set", "mirrors[0].source.namespace="+kafkaNS,
+			)
+			if dc.versions != nil {
+				helmArgs = append(helmArgs,
+					"--set-string", "version="+dc.versions.KafkaVersion,
+					"--set-string", "strimziVersion="+dc.versions.StrimziVersion,
+				)
+			}
+			helmArgs = append(helmArgs, dc.scrapeArgs("charts/mirror-maker2")...)
+			helmArgs = append(helmArgs, "--timeout", "10m")
+			if err := runHelmFn(ctx, helmArgs...); err != nil {
+				dl.FinishComponent("mirror-maker2", false)
+				return err
+			}
+			dl.FinishComponent("mirror-maker2", true)
+			dc.advanceStep()
+		} else {
+			dl.Println(output.Glyphs().Skip + "  MirrorMaker 2 already deployed.")
+			dl.FinishComponent("mirror-maker2", true)
 			dc.advanceStep()
 		}
 	}
@@ -961,12 +1168,14 @@ data:
 			cleanupStaleClusterResource(ctx, "clusterrolebinding", "litmus", chaosNS)
 			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
 			dl.Println("    - Waiting for Litmus Chaos pods to become ready (this may take a few minutes)...")
-			if err := runHelmFn(ctx, "upgrade", "--install", "chaos", "charts/kates-chaos",
+			chaosArgs := []string{"upgrade", "--install", "chaos", "charts/kates-chaos",
 				"-n", chaosNS, "--create-namespace",
 				"-f", dc.valuesFile,
 				"-f", dc.chartOverlay("charts/kates-chaos"),
-				"--set", "rbac.kafkaNamespace="+kafkaNS,
-				"--timeout", "5m"); err != nil {
+				"--set", "rbac.kafkaNamespace=" + kafkaNS}
+			chaosArgs = append(chaosArgs, dc.scrapeArgs("charts/kates-chaos")...)
+			chaosArgs = append(chaosArgs, "--timeout", "5m")
+			if err := runHelmFn(ctx, chaosArgs...); err != nil {
 				return err
 			}
 
@@ -974,7 +1183,7 @@ data:
 				return err
 			}
 		} else {
-			dl.Println("⏭️  Litmus Chaos already deployed.")
+			dl.Println(output.Glyphs().Skip + "  Litmus Chaos already deployed.")
 			dl.FinishComponent("chaos", true)
 			dc.advanceStep()
 		}
@@ -983,33 +1192,110 @@ data:
 	return nil
 }
 
-// updateActiveContextAPIKey syncs the API key from the deployed cluster
-// secret into the active CLI context configuration.
+// updateActiveContextAPIKey stores the key from Secret kates-api-key in the
+// active CLI context after a deploy, so the commands that follow work without
+// a kates ctx set, and reports what it did.
 func updateActiveContextAPIKey(ctx context.Context, appNS string) {
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "secret", "kates-api-key", "-n", appNS, "-o", "jsonpath={.data.api-key}").Output()
+	printDeployKeySync(os.Stdout, syncActiveContextKey(ctx, appNS), appNS)
+}
+
+// deployKeyOutcome is what kates deploy did with the key of the active context.
+type deployKeyOutcome int
+
+const (
+	deployKeyStored       deployKeyOutcome = iota // the Secret's key was stored
+	deployKeyPresent                              // the context already held the Secret's key
+	deployKeyKept                                 // the context holds a key kates did not store, which stays
+	deployKeyNoContext                            // --context or KATES_CONTEXT names a context that does not exist
+	deployKeySecretUnread                         // the Secret could not be read
+)
+
+// deployKeySync is what syncActiveContextKey did, for printDeployKeySync.
+type deployKeySync struct {
+	Context   string
+	Key       deployKeyOutcome
+	SecretErr error // why the Secret could not be read (deployKeySecretUnread)
+	SaveErr   error
+}
+
+// syncActiveContextKey puts the key from Secret kates-api-key into the active
+// context (the current one, or the one --context or KATES_CONTEXT names) by
+// the rule kates ports goes by, keyReplaceable: only into a context without a
+// key, or in place of the key kates stored there itself.
+//
+// It used to overwrite whatever key the context held, so a context holding a
+// narrower key for another tool (an MCP server, a CI job) was handed the
+// shared admin key whenever a deploy finished while it was current. It also
+// printed the key's first four characters.
+func syncActiveContextKey(ctx context.Context, appNS string) deployKeySync {
+	secretKey, err := fetchKatesAPIKey(ctx, appNS)
 	if err != nil {
-		return
+		return deployKeySync{Key: deployKeySecretUnread, SecretErr: err}
 	}
-	encoded := strings.TrimSpace(string(out))
-	if encoded == "" {
-		return
-	}
-	if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
-		apiKey := strings.TrimSpace(string(decoded))
-		if apiKey != "" {
-			cfg := loadConfig()
-			ctxName := cfg.CurrentContext
-			if contextFlag != "" {
-				ctxName = contextFlag
-			}
-			if active, ok := cfg.Contexts[ctxName]; ok {
-				active.APIKey = apiKey
-				cfg.Contexts[ctxName] = active
-				_ = saveConfig(cfg)
-				dl.Printf("    ✓ Automatically synced API Key to context %q: %s****\n\n", ctxName, apiKey[:4])
-			}
+
+	var result deployKeySync
+	result.SaveErr = updateConfig(func(cfg *Config) error {
+		result.Context = cfg.CurrentContext
+		if contextFlag != "" {
+			result.Context = contextFlag
 		}
+		c, ok := cfg.Contexts[result.Context]
+		switch {
+		case !ok:
+			result.Key = deployKeyNoContext
+			return errConfigUnchanged
+		case c.APIKey == secretKey:
+			result.Key = deployKeyPresent
+			return errConfigUnchanged
+		case !keyReplaceable(c):
+			result.Key = deployKeyKept
+			return errConfigUnchanged
+		}
+		storeSecretKey(&c, secretKey)
+		cfg.Contexts[result.Context] = c
+		result.Key = deployKeyStored
+		return nil
+	})
+	return result
+}
+
+// printDeployKeySync reports what syncActiveContextKey did.
+func printDeployKeySync(w io.Writer, s deployKeySync, appNS string) {
+	okMark := output.SuccessStyle.Render("✓")
+	warnMark := output.WarningStyle.Render("⚠")
+	secret := fmt.Sprintf("Secret %s (namespace %s)", apiKeySecretName, appNS)
+
+	switch {
+	case s.Key == deployKeySecretUnread:
+		fmt.Fprintf(w, "    %s No API key from %s: %v\n", warnMark, secret, s.SecretErr)
+	case s.SaveErr != nil:
+		fmt.Fprintf(w, "    %s Could not store the API key from %s: %v\n", warnMark, secret, s.SaveErr)
+	case s.Key == deployKeyStored:
+		fmt.Fprintf(w, "    %s API key from %s stored in context %q\n", okMark, secret, s.Context)
+	case s.Key == deployKeyPresent:
+		fmt.Fprintf(w, "    %s Context %q already holds the API key from %s\n", okMark, s.Context, secret)
+	case s.Key == deployKeyKept:
+		fmt.Fprintf(w, "    %s Context %q keeps the API key it holds: kates replaces only a key it copied from the Secret itself\n", warnMark, s.Context)
+		fmt.Fprintf(w, "      %s\n", output.DimStyle.Render(fmt.Sprintf(
+			"To use the Secret's key there: kates ctx set %s --url <url> --api-key <key>. kates ports keeps it in context %q instead.", s.Context, portsContextName)))
+	case s.Key == deployKeyNoContext:
+		fmt.Fprintf(w, "    %s Context %q does not exist, so the API key from %s was not stored\n", warnMark, s.Context, secret)
 	}
+	fmt.Fprintln(w)
+}
+
+// cdcSecretArgs lets the backend read the password of the PostgreSQL that
+// the INTEGRATION_CDC test (`kates kafka connect test`) connects to: the
+// Secret postgresql in --db-ns, where --with-kafka-connect installs it. The
+// chart grants no Secret otherwise, and this one only through a Role in each
+// namespace it is given. A database an earlier run installed counts too, so
+// a later deploy without the flag keeps the grant. Without either nothing is
+// passed: a Role in a namespace that does not exist fails the install.
+func (dc *deployContext) cdcSecretArgs() []string {
+	if !deployWithKafkaConnect && !isHelmReleaseDeployedFn(dc.ctx, "postgresql", deployDbNS) {
+		return nil
+	}
+	return []string{"--set", "rbac.cdcSecretNamespaces={" + deployDbNS + "}"}
 }
 
 func (dc *deployContext) resolveClusterDomain() string {
@@ -1034,4 +1320,35 @@ func (dc *deployContext) deployComponent(id, namespace, selector string, timeout
 	dl.FinishComponent(id, true)
 	dc.advanceStep()
 	return nil
+}
+
+// printConnectorDiagnostics surfaces WHY connectors are not ready: the
+// NotReady condition message and the first line of each failed task's trace.
+// Without this, a readiness timeout reported nothing and the real cause
+// (an ACL denial, a bad topic) had to be dug out of the CRs by hand.
+func printConnectorDiagnostics(ctx context.Context, namespace string) {
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "kafkaconnector", "-n", namespace,
+		"-o", `jsonpath={range .items[*]}{.metadata.name}{"\t"}{.status.conditions[0].type}{"\t"}{.status.conditions[0].message}{"\t"}{.status.connectorStatus.tasks[0].trace}{"\n"}{end}`)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) < 3 || parts[1] == "Ready" {
+			continue
+		}
+		dl.Printf("    %s %s: %s — %s\n", output.ErrorStyle.Render("✖"), parts[0], parts[1], parts[2])
+		if len(parts) == 4 && parts[3] != "" {
+			// The root cause is usually the LAST "Caused by" in the trace.
+			trace := parts[3]
+			cause := trace
+			if i := strings.LastIndex(trace, "Caused by: "); i >= 0 {
+				cause = trace[i+len("Caused by: "):]
+			}
+			if nl := strings.IndexByte(cause, '\n'); nl >= 0 {
+				cause = cause[:nl]
+			}
+			dl.Printf("      %s\n", output.DimStyle.Render(cause))
+		}
+	}
 }

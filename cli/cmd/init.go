@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -13,9 +15,13 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize a new Kates workspace with config, scenarios, and CI gate",
 	Long: `Sets up a complete Kates project in the current directory:
-  1. Creates ~/.kates.yaml with a named context
+  1. Adds a named context to ~/.kates.yaml and makes it current
   2. Exports built-in scenario templates (from the embedded library)
-  3. Generates a CI gate script (kates-ci.sh) for pipeline integration`,
+  3. Generates a CI gate script (kates-ci.sh) for pipeline integration
+
+The other contexts in ~/.kates.yaml are kept. A context of that name that
+already exists is kept as it is; init refuses to point it at a different
+--url, which kates ctx set does.`,
 	Example: `  kates init
   kates init --url http://kates.internal:8080 --name production
   kates init --no-scenarios --no-ci`,
@@ -39,17 +45,24 @@ var initCmd = &cobra.Command{
 		output.Banner("kates init", "Project scaffolder")
 		fmt.Println()
 
-		cfg := Config{
-			CurrentContext: name,
-			Contexts: map[string]Context{
-				name: {URL: url, Output: "table"},
-			},
+		res, err := initContext(name, url, cmd.Flags().Changed("url"))
+		if err != nil {
+			return cmdErr(err.Error())
 		}
-
-		if err := saveConfig(cfg); err != nil {
-			return cmdErr("Failed to write config: " + err.Error())
+		// The CI script reaches the server the context does, which is the
+		// stored URL when the context was already there.
+		url = res.URL
+		switch {
+		case res.Created:
+			output.Success(fmt.Sprintf("Created ~/.kates.yaml with context '%s' → %s", name, url))
+		case res.Kept:
+			output.Success(fmt.Sprintf("Kept context '%s' → %s in ~/.kates.yaml", name, url))
+		default:
+			output.Success(fmt.Sprintf("Added context '%s' → %s to ~/.kates.yaml", name, url))
 		}
-		output.Success(fmt.Sprintf("Created ~/.kates.yaml with context '%s' → %s", name, url))
+		if res.Previous != "" && res.Previous != name {
+			output.Hint(fmt.Sprintf("  It is now the current context; it was '%s' (kates ctx use %s to switch back).", res.Previous, res.Previous))
+		}
 
 		if !noScenarios {
 			scenariosDir := filepath.Join(dir, "scenarios")
@@ -148,7 +161,7 @@ echo ""
 
 if ! command -v kates &>/dev/null; then
   echo "ERROR: kates CLI not found in PATH"
-  echo "Install: go install github.com/klster/kates-cli@latest"
+  echo "Install: go install github.com/bmscomp/kates/cli@latest"
   exit 1
 fi
 
@@ -188,4 +201,47 @@ func init() {
 	initCmd.Flags().Bool("no-scenarios", false, "Skip scenario template export")
 	initCmd.Flags().Bool("no-ci", false, "Skip CI gate script generation")
 	rootCmd.AddCommand(initCmd)
+}
+
+// initResult says what initContext did to the config.
+type initResult struct {
+	URL      string // the context's URL, as stored
+	Created  bool   // there was no config file, and init wrote one
+	Kept     bool   // the context was there already and was left as it was
+	Previous string // the current context before init
+}
+
+// initContext adds the context name, for url, to the config and makes it
+// current, keeping every other context.
+//
+// kates init used to write a config holding that one context, so running it
+// in a second project deleted every other context and its API key. A context
+// of the same name is kept as it is, API key included. When the caller asked
+// for a different URL (urlGiven), init refuses rather than send that key to
+// another server.
+func initContext(name, url string, urlGiven bool) (initResult, error) {
+	var res initResult
+	err := updateConfig(func(cfg *Config) error {
+		if _, err := os.Stat(configPath()); errors.Is(err, fs.ErrNotExist) {
+			// A new file holds the context init makes, not the built-in
+			// default as well.
+			*cfg = Config{Contexts: map[string]Context{}}
+			res.Created = true
+		}
+		res.Previous = cfg.CurrentContext
+		if existing, ok := cfg.Contexts[name]; ok {
+			if urlGiven && existing.URL != url {
+				return fmt.Errorf("context '%s' already points at %s, not %s.\n"+
+					"  Use another --name, or change it with: kates ctx set %s --url %s",
+					name, existing.URL, url, name, url)
+			}
+			res.URL, res.Kept = existing.URL, true
+		} else {
+			cfg.Contexts[name] = Context{URL: url, Output: "table"}
+			res.URL = url
+		}
+		cfg.CurrentContext = name
+		return nil
+	})
+	return res, err
 }

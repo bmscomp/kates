@@ -1,0 +1,29 @@
+{
+  "groupId": "eval-pay-abc123-app",
+  "state": "Empty",
+  "members": 0,
+  "offsets": [
+    {
+      "topic": "eval-pay-abc123",
+      "partition": 0,
+      "currentOffset": 1004,
+      "endOffset": 1004,
+      "lag": 0
+    },
+    {
+      "topic": "eval-pay-abc123",
+      "partition": 1,
+      "currentOffset": 995,
+      "endOffset": 1020,
+      "lag": 25
+    },
+    {
+      "topic": "eval-pay-abc123",
+      "partition": 2,
+      "currentOffset": 1001,
+      "endOffset": 1001,
+      "lag": 0
+    }
+  ],
+  "totalLag": 25
+}

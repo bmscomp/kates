@@ -1,0 +1,55 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        "kube-prometheus-stack": {
+            "type": "object",
+            "description": "Pass-through values for the kube-prometheus-stack subchart (validated by the subchart itself)",
+            "properties": {
+                "enabled": { "type": "boolean" }
+            }
+        },
+        "chaosAlerts": {
+            "type": "object",
+            "properties": {
+                "enabled": { "type": "boolean" }
+            }
+        },
+        "kafkaNamespace": { "type": "string" },
+        "networkPolicy": {
+            "type": "object",
+            "properties": {
+                "prometheusKafkaEgress": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": { "type": "boolean" },
+                        "kafkaNamespace": { "type": "string" },
+                        "ports": { "type": "array", "items": { "type": "integer" } }
+                    }
+                }
+            }
+        },
+        "dashboards": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": { "type": "boolean" },
+                "namespace": { "type": "string" },
+                "label": { "type": "string" },
+                "labelValue": { "type": "string" },
+                "folder": { "type": "string" },
+                "labels": {
+                    "type": "object",
+                    "description": "Extra labels, merged with (not replacing) label/labelValue",
+                    "additionalProperties": { "type": "string" }
+                }
+            }
+        },
+        "test": {
+            "type": "object",
+            "properties": {
+                "image": { "type": "string" }
+            }
+        }
+    }
+}

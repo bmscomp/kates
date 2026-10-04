@@ -44,6 +44,9 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/component: dashboard
 app.kubernetes.io/part-of: kates
+{{- with .Values.extraLabels }}
+{{ toYaml . }}
+{{- end }}
 {{- end }}
 
 {{/*
@@ -132,6 +135,40 @@ KafkaUser secret name — the Strimzi-generated SCRAM credential.
 */}}
 {{- define "kafka-ui.secretName" -}}
 {{- .Values.kafkaUser.name | default "kafka-ui" -}}
+{{- end -}}
+
+{{/*
+ServiceAccount name to use.
+*/}}
+{{- define "kafka-ui.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- .Values.serviceAccount.name | default (include "kafka-ui.fullname" .) -}}
+{{- else -}}
+{{- .Values.serviceAccount.name | default "default" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+TCP port of the Schema Registry endpoint, derived from its URL
+(explicit :port wins; else 443 for https, 80 for http).
+*/}}
+{{- define "kafka-ui.schemaRegistryPort" -}}
+{{- $url := include "kafka-ui.schemaRegistryUrl" . -}}
+{{- $host := (urlParse $url).host -}}
+{{- if contains ":" $host -}}
+{{- $host | splitList ":" | last -}}
+{{- else if hasPrefix "https" $url -}}443{{- else -}}80{{- end -}}
+{{- end -}}
+
+{{/*
+TCP port of the Kafka Connect endpoint, derived from its URL.
+*/}}
+{{- define "kafka-ui.kafkaConnectPort" -}}
+{{- $url := include "kafka-ui.kafkaConnectUrl" . -}}
+{{- $host := (urlParse $url).host -}}
+{{- if contains ":" $host -}}
+{{- $host | splitList ":" | last -}}
+{{- else if hasPrefix "https" $url -}}443{{- else -}}80{{- end -}}
 {{- end -}}
 
 {{/*

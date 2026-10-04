@@ -1,4 +1,9 @@
-{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- /*
+The API check matches every other chart in this repository: without it, the
+flag on a cluster that has no prometheus-operator fails the whole release at
+apply time with "no matches for kind ServiceMonitor".
+*/ -}}
+{{- if and .Values.metrics.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -30,7 +35,12 @@ spec:
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}
+  # A ServiceMonitor matches the Service's labels, which are kates.labels —
+  # not the pod selector, whose `app:` the Service does not carry. Selecting
+  # on kates.selectorLabels matched nothing, silently: Prometheus discovered
+  # the endpoints and dropped every one of them.
   selector:
     matchLabels:
-      {{- include "kates.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/name: {{ include "kates.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}

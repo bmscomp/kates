@@ -38,7 +38,11 @@ print_table() {
   local dir name
   for dir in charts/*/; do
     name=$(basename "$dir")
-    echo "| \`$name\` chart | $(chart_field "$name" version) (app $(chart_field "$name" appVersion)) | \`charts/$name/Chart.yaml\` |"
+    local app detail
+    app=$(chart_field "$name" appVersion || true)
+    # A library chart (kafka-common) ships templates, not an application.
+    if [[ -n "$app" ]]; then detail="app $app"; else detail="library"; fi
+    echo "| \`$name\` chart | $(chart_field "$name" version) ($detail) | \`charts/$name/Chart.yaml\` |"
   done
 }
 

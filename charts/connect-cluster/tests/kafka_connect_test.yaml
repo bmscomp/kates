@@ -1,0 +1,64 @@
+suite: KafkaConnect
+templates:
+  - kafka-connect.yaml
+release:
+  name: cc
+  namespace: connect
+tests:
+  - it: reads the bootstrap, credentials and internal topics
+    asserts:
+      - isKind: { of: KafkaConnect }
+      - equal: { path: spec.bootstrapServers, value: krafter-kafka-bootstrap.connect.svc.cluster.local:9092 }
+      - equal: { path: spec.authentication.passwordSecret.secretName, value: kates-connect }
+      - equal: { path: spec.offsetStorageTopic, value: kates-connect-cluster-offsets }
+      - notExists: { path: spec.tls }
+
+  - it: names the internal topics after a prefix (C7)
+    set:
+      internalTopics: { prefix: team-a, statusName: explicit-status }
+    asserts:
+      - equal: { path: spec.configStorageTopic, value: team-a-configs }
+      - equal: { path: spec.statusStorageTopic, value: explicit-status }
+
+  - it: uses the TLS listener and the User Operator's certificate Secret for tls authentication
+    set:
+      kafka:
+        namespace: kafka
+        tls: { enabled: true }
+        authentication: { type: tls }
+      kafkaUser: { create: true, name: team-a-connect }
+    asserts:
+      - equal: { path: spec.bootstrapServers, value: krafter-kafka-bootstrap.kafka.svc.cluster.local:9093 }
+      - equal: { path: spec.authentication.certificateAndKey.secretName, value: team-a-connect }
+      - equal: { path: 'spec.tls.trustedCertificates[0].secretName', value: krafter-cluster-ca-cert }
+
+  - it: seeds replicas from minReplicas under the HPA (C1)
+    set:
+      autoscaling: { enabled: true, minReplicas: 2 }
+    asserts:
+      - equal: { path: spec.replicas, value: 2 }
+
+  - it: merges templateExtra into the chart's pod template instead of replacing it
+    set:
+      templateExtra:
+        pod:
+          metadata: { labels: { team: a } }
+    asserts:
+      - equal: { path: spec.template.pod.metadata.labels.team, value: a }
+      - exists: { path: 'spec.template.pod.metadata.annotations["checksum/metrics"]' }
+      - exists: { path: spec.template.pod.affinity.podAntiAffinity }
+
+  - it: renders the tracing environment only with an endpoint
+    set:
+      tracing: { endpoint: "http://otel:4317", serviceName: cc }
+      env: [{ name: EXTRA, value: "1" }]
+    asserts:
+      - equal: { path: 'spec.template.connectContainer.env[0].value', value: cc }
+      - equal: { path: 'spec.template.connectContainer.env[3].name', value: EXTRA }
+
+  - it: turns exactly-once off
+    set:
+      exactlyOnce: { enabled: false }
+    asserts:
+      - equal: { path: 'spec.config["exactly.once.source.support"]', value: disabled }
+

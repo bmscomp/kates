@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/klster/kates-cli/client"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -674,11 +674,22 @@ var clusterTopicDescribeCmd = &cobra.Command{
 
 		if len(detail.Configs) > 0 {
 			output.SubHeader("Configuration")
+			// The values are the ones in force, so one set on the brokers
+			// shows here too; Source says it is not the topic's own. An older
+			// backend reports no sources, and left broker values out.
+			headers := []string{"Config", "Value"}
+			if len(detail.ConfigSources) > 0 {
+				headers = append(headers, "Source")
+			}
 			configRows := make([][]string, 0, len(detail.Configs))
 			for k, v := range detail.Configs {
-				configRows = append(configRows, []string{k, v})
+				row := []string{k, v}
+				if len(detail.ConfigSources) > 0 {
+					row = append(row, detail.ConfigSources[k])
+				}
+				configRows = append(configRows, row)
 			}
-			output.Table([]string{"Config", "Value"}, configRows)
+			output.Table(headers, configRows)
 		}
 
 		if len(detail.PartitionInfo) > 0 {

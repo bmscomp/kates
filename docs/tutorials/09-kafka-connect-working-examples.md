@@ -6,11 +6,11 @@ This tutorial walks through deploying production-ready Kafka Connect connectors 
 
 ## What You Will Deploy
 
-The working examples are defined as `testConnectors` and `testTopics` in [`charts/connect-cluster/values.yaml`](../../charts/connect-cluster/values.yaml) and packaged as Helm test hooks. Running `helm test connect-cluster` exercises them transiently — Helm deletes the hook resources as soon as the suite succeeds, so nothing is left to inspect afterwards. This tutorial therefore renders the same templates with `helm template` and applies them with `kubectl`, so the pipeline stays running while you work through it:
+The working examples are defined as `testConnectors` (and the CDC topic as `testTopics`) in [`charts/connect-cluster/values.yaml`](../../charts/connect-cluster/values.yaml). `helm test connect-cluster` creates them, waits for each connector to reach RUNNING with all its tasks, and deletes them again when the suite passes; this tutorial renders the same manifests and applies them so they keep running:
 
 | Connector | Purpose |
 |---|---|
-| CDC topic (`cdc.public.demo_orders`) | Created for the Debezium change stream |
+| CDC topic (`cdc.public.demo_orders`) | Created in the Kafka namespace for the Debezium change stream |
 | `debezium-postgres-source-working-example` | Debezium source: PostgreSQL `public.demo_orders` -> Kafka |
 | `jdbc-sink-from-cdc-working-example` | JDBC sink: `cdc.public.demo_orders` -> PostgreSQL `demo_orders_replica` |
 | `jdbc-sink-working-example` | Generic JDBC sink from `kates-results` |
@@ -39,16 +39,23 @@ Required secrets in `CONNECT_NS`:
 - `connect-pg-credentials` with keys `username`, `password`
 - `kates-connect` with key `password`
 
+The chart grants the Connect workers `get` on these two Secrets because the example connectors' configs reference them. The Debezium example reads `kates-connect` for its SCRAM schema-history client, so the examples expect the default SCRAM connection on port 9092 (`values-prod.yaml` turns them off).
+
+The chart depends on the `kafka-common` library; `kates deploy` builds it, otherwise run this once before any `helm template` or `helm test` below:
+
+```bash
+helm dependency build charts/connect-cluster
+```
+
 ## Namespace and Cluster Name Customization
 
-The rendered manifests default to:
-- Connect namespace: `connect` (the `-n` flag on `helm template`)
-- Kafka namespace: `kafka` (the `kafka.namespace` value)
-- Connect cluster label on the connectors: `strimzi.io/cluster: connect-cluster` (the release name)
-- Kafka cluster label on the topic: `strimzi.io/cluster: krafter` (the `kafka.clusterName` value)
-- Secret references: `${secrets:connect/...}`
+The example connectors and topic are values templates, rendered with the release:
+- Connectors: the release namespace (`connect`), labelled `strimzi.io/cluster: <release>` (`connect-cluster`)
+- Secret references: `${secrets:<release namespace>/...}`
+- CDC topic: `kafka.namespace` (`kafka`), labelled `strimzi.io/cluster: <kafka.clusterName>` (`krafter`)
+- Debezium schema-history bootstrap: the chart's computed bootstrap address
 
-If your environment differs, adjust the flags on the `helm template` commands below (`-n`, `--set kafka.namespace=...`, `--set kafka.clusterName=...`). The connector configs in `values.yaml` hardcode the secret references (`${secrets:connect/...}`) and the schema-history bootstrap address (`krafter-kafka-bootstrap.kafka.svc`); when your Connect or Kafka namespace differs, override `testConnectors` with your own values file as well.
+If your environment differs, set `kafka.namespace` and `kafka.clusterName` (or `kafka.bootstrapServers`) on the release rather than editing manifests. `kafka.namespace` defaults to the release namespace, so pass it whenever Connect and Kafka live in different namespaces — `kates deploy` does.
 
 ## Part A: CDC Pipeline (Topic + Debezium Source + JDBC Sink)
 
@@ -70,21 +77,21 @@ kubectl exec -n "${DB_NS}" postgresql-0 -- /bin/bash -lc \
 
 ### 2) Apply CDC Topic and Connectors
 
-Run these from the repository root:
-
 ```bash
-# Create the CDC topic on the Kafka cluster
-helm template connect-cluster charts/connect-cluster -n "${CONNECT_NS}" \
-  --set kafka.namespace="${KAFKA_NS}" \
-  -s templates/tests/test-topics.yaml | kubectl apply -f -
+# Optional: validate the release. The suite creates the examples, checks that
+# each connector reaches RUNNING, and deletes them again when it passes.
+helm test connect-cluster -n "${CONNECT_NS}" --logs
 
-# Deploy all working-example connectors persistently
-helm template connect-cluster charts/connect-cluster -n "${CONNECT_NS}" \
-  -s templates/tests/test-connectors.yaml | kubectl apply -f -
+# Deploy the CDC topic and all working example connectors persistently
+helm template "${CONNECT_CLUSTER}" charts/connect-cluster -n "${CONNECT_NS}" \
+  --set kafka.namespace="${KAFKA_NS}" \
+  --set kafka.clusterName="${KAFKA_CLUSTER}" \
+  -s templates/tests/test-02-topics.yaml \
+  -s templates/tests/test-02-connectors.yaml | kubectl apply -f -
 ```
 
 > [!TIP]
-> The same manifests are packaged as Helm test hooks: `helm test connect-cluster -n "${CONNECT_NS}"` creates them, runs the suite, and deletes them again as soon as it succeeds, so nothing would survive for the steps below. Rendering the templates with `helm template` and applying them with `kubectl` keeps the resources running. A later `helm test` run deletes and recreates the hook resources (`before-hook-creation`) and removes them again on success — re-apply them afterwards if you still need the pipeline.
+> The manifests are packaged as Helm test hooks (`templates/tests/test-02-topics.yaml` and `test-02-connectors.yaml`), which `helm test` deletes once it passes. Rendering them with `helm template -s` and applying them with `kubectl apply` keeps them running. They keep their hook annotations, so a later `helm test` replaces them and removes them again.
 
 ### 3) Wait Until Ready
 
@@ -115,7 +122,7 @@ Expected result: one row for `id=1001` in `demo_orders_replica`.
 
 ## Part B: Generic JDBC Sink Example
 
-The standalone sink was applied together with the other working examples in Part A step 2. Check it:
+Step 2 of Part A already applied the standalone sink example:
 
 ```bash
 kubectl wait -n "${CONNECT_NS}" --for=condition=Ready kafkaconnector/jdbc-sink-working-example --timeout=300s
@@ -128,7 +135,7 @@ Notes:
 
 ## Part C: Generic JDBC Source Example
 
-The source template was also applied in Part A step 2. Check it:
+Step 2 of Part A already applied the source template:
 
 ```bash
 kubectl wait -n "${CONNECT_NS}" --for=condition=Ready kafkaconnector/jdbc-source-working-example --timeout=300s
@@ -136,8 +143,8 @@ kubectl describe kafkaconnector -n "${CONNECT_NS}" jdbc-source-working-example
 ```
 
 Important:
-- This requires plugin class `io.aiven.connect.jdbc.JdbcSourceConnector` in your Connect image.
-- If the plugin is missing, connector status will show class-not-found or failed state.
+- This uses plugin class `io.aiven.connect.jdbc.JdbcSourceConnector`, which the bundled `ghcr.io/bmscomp/connect` image ships (Aiven JDBC connector).
+- If you run a custom Connect image without that plugin, connector status will show class-not-found or failed state.
 
 ## Troubleshooting
 
@@ -151,9 +158,10 @@ kubectl logs -n "${CONNECT_NS}" -l strimzi.io/name="${CONNECT_CLUSTER}-connect" 
 ```
 
 Most common issues:
-- Wrong namespace or cluster label in manifest metadata
-- Secret references still pointing to `connect` after namespace change
+- `kafka.namespace` or `kafka.clusterName` not matching your Kafka cluster — the CDC topic is created in the wrong place, and the Debezium schema-history client dials the wrong bootstrap
+- A connector `FAILED` with `Forbidden` reading a Secret — the chart grants only the Secrets its connector configs reference; list any others in `rbac.secretNames`
 - Missing JDBC source plugin class for the `jdbc-source-working-example` connector
+- `helm test` failing in its last pod (`<release>-test-connectors`): `--logs` prints each connector's state and the first lines of any task trace
 
 ## Cleanup
 

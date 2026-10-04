@@ -35,7 +35,7 @@ print_table() {
     printf '| [`%s`](charts/%s/) | %s | %s | %s |\n' \
       "$name" "$name" \
       "$(chart_field "$name" version)" \
-      "$(chart_field "$name" appVersion)" \
+      "$(chart_field "$name" appVersion || true)" \
       "$(chart_field "$name" description)"
   done
 }
@@ -57,7 +57,7 @@ check_table() {
       continue
     fi
     v=$(chart_field "$name" version)
-    av=$(chart_field "$name" appVersion)
+    av=$(chart_field "$name" appVersion || true)
     row_v=$(awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $3); print $3}' <<<"$row")
     row_av=$(awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $4); print $4}' <<<"$row")
     if [[ "$row_v" != "$v" ]]; then

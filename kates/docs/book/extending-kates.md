@@ -8,9 +8,9 @@ This chapter explains the three extension points, the contracts each SPI defines
 
 | SPI | Package | Purpose | Existing Implementations |
 |-----|---------|---------|--------------------------|
-| `BenchmarkBackend` | `com.klster.kates.engine` | Executes performance benchmarks | `NativeBenchmarkBackend`, `TrogdorBenchmarkBackend` |
-| `ChaosProvider` | `com.klster.kates.chaos` | Injects and cleans up faults | `KubernetesChaosProvider`, `LitmusChaosProvider`, `HybridChaosProvider`, `NoOpChaosProvider` |
-| `ExportStrategy` | `com.klster.kates.export` | Transforms results into output formats | `CsvExporter`, `JunitXmlExporter`, `HeatmapExporter` |
+| `BenchmarkBackend` | `com.bmscomp.kates.engine` | Executes performance benchmarks | `NativeBenchmarkBackend`, `TrogdorBenchmarkBackend` |
+| `ChaosProvider` | `com.bmscomp.kates.chaos` | Injects and cleans up faults | `KubernetesChaosProvider`, `LitmusChaosProvider`, `HybridChaosProvider`, `NoOpChaosProvider` |
+| `ExportStrategy` | `com.bmscomp.kates.export` | Transforms results into output formats | `CsvExporter`, `JunitXmlExporter`, `HeatmapExporter` |
 
 Each SPI is a Java interface with CDI qualifiers. Implementations are discovered automatically by Quarkus's CDI container at startup. Adding a new implementation is as simple as creating a class that implements the interface and annotating it with the appropriate CDI qualifier.
 

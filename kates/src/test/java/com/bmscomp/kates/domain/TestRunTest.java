@@ -2,6 +2,8 @@ package com.bmscomp.kates.domain;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.Map;
+
 import org.junit.jupiter.api.Test;
 
 class TestRunTest {
@@ -64,5 +66,18 @@ class TestRunTest {
     void idHasExpectedLength() {
         TestRun run = new TestRun();
         assertEquals(8, run.getId().length());
+    }
+
+    @Test
+    void theRequestedSpecSurvivesEveryUpdate() {
+        TestRun run = new TestRun(TestType.LOAD, new TestSpec())
+                .withRequestedSpec(Map.of("targetThroughput", 2000))
+                .withStatus(TestResult.TaskStatus.RUNNING)
+                .withAddedResult(new TestResult().withTaskId("task-1"))
+                .withBackend("native")
+                .withSpec(new TestSpec());
+
+        assertEquals(Map.of("targetThroughput", 2000), run.getRequestedSpec());
+        assertNull(new TestRun().getRequestedSpec(), "a run read back from before it was kept has none");
     }
 }

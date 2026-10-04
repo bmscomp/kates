@@ -53,19 +53,57 @@ public class DisruptionOrchestrator {
     @Inject
     KatesMetrics katesMetrics;
 
+    @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
+
     @ConfigProperty(name = "kates.chaos.kafka.namespace", defaultValue = "kafka")
     String kafkaNamespace;
 
     @ConfigProperty(name = "kates.chaos.kafka.cluster", defaultValue = "krafter")
     String kafkaCluster;
 
+    /**
+     * The pods watched for recovery, KRaft controllers included: a fault that
+     * takes a controller down has to be seen coming back. The blast radius and
+     * {@code targetBrokerId} count and pick brokers only ({@link PodTargets#isBroker}).
+     */
     @ConfigProperty(name = "kates.chaos.kafka.label", defaultValue = "strimzi.io/component-type=kafka")
     String kafkaLabel;
 
     @ConfigProperty(name = "kates.chaos.recovery.timeout-sec", defaultValue = "300")
     int recoveryTimeoutSec;
 
+    /**
+     * Executes a plan, refusing to start while another plan is running against
+     * the same cluster. Every entry point (API, playbook, scheduler) funnels
+     * through here, so the guard cannot be bypassed by adding a caller.
+     */
     public DisruptionReport execute(DisruptionPlan plan) {
+        String target = concurrencyGuard.currentTarget();
+        String token = plan.getName() + "#" + UUID.randomUUID();
+
+        if (!concurrencyGuard.tryAcquire(target, token)) {
+            String holder = concurrencyGuard.activeToken(target).orElse("unknown");
+            LOG.warnf(
+                    "Plan '%s' rejected: another disruption (%s) is already running against %s",
+                    plan.getName(), holder, target);
+            DisruptionReport rejected = new DisruptionReport();
+            rejected.setPlanName(plan.getName());
+            rejected.setStatus("REJECTED");
+            rejected.setValidationWarnings(List.of("ERROR: another disruption plan is already running against "
+                    + target + " (" + holder + "). Concurrent plans race the rollback"
+                    + " state stored on the target, which can leave the cluster under-scaled."));
+            return rejected;
+        }
+
+        try {
+            return executePlan(plan);
+        } finally {
+            concurrencyGuard.release(target, token);
+        }
+    }
+
+    private DisruptionReport executePlan(DisruptionPlan plan) {
         long startMs = System.currentTimeMillis();
         String disruptionId = plan.getName();
         DisruptionReport report = new DisruptionReport();
@@ -219,22 +257,7 @@ public class DisruptionOrchestrator {
                     targetedLeader = leaderId;
                     LOG.info("  Auto-targeting leader broker " + leaderId + " for " + spec.targetTopic() + "-"
                             + spec.targetPartition());
-                    spec = FaultSpec.builder(spec.experimentName())
-                            .targetNamespace(spec.targetNamespace())
-                            .targetLabel(spec.targetLabel())
-                            .targetPod(spec.targetPod())
-                            .chaosDurationSec(spec.chaosDurationSec())
-                            .delayBeforeSec(spec.delayBeforeSec())
-                            .envOverrides(spec.envOverrides())
-                            .disruptionType(spec.disruptionType())
-                            .targetBrokerId(leaderId)
-                            .networkLatencyMs(spec.networkLatencyMs())
-                            .fillPercentage(spec.fillPercentage())
-                            .cpuCores(spec.cpuCores())
-                            .gracePeriodSec(spec.gracePeriodSec())
-                            .targetTopic(spec.targetTopic())
-                            .targetPartition(spec.targetPartition())
-                            .build();
+                    spec = spec.toBuilder().targetBrokerId(leaderId).build();
                 }
             }
 
@@ -291,12 +314,14 @@ public class DisruptionOrchestrator {
             }
 
             ReportSummary postMetrics = null;
+            List<String> unmeasured = null;
             Map<String, Double> deltas = new LinkedHashMap<>();
             if (prometheusAvailable && step.observationWindowSec() > 0) {
                 PrometheusMetricsCapture.MetricsSnapshot impact =
                         prometheusCapture.capture(Duration.ofSeconds(step.observationWindowSec()));
                 postMetrics =
                         prometheusCapture.toReportSummary(impact, Duration.ofSeconds(step.observationWindowSec()));
+                unmeasured = prometheusCapture.unmeasured(impact);
                 if (baseline != null) {
                     deltas = prometheusCapture.computeDeltas(baseline, impact);
                 }
@@ -310,6 +335,7 @@ public class DisruptionOrchestrator {
 
             Duration tfr = null;
             Duration tar = null;
+            Duration unrecoveredAfter = null;
             if (step.requireRecovery()) {
                 LOG.info("  Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
                 eventBus.emit(
@@ -317,7 +343,7 @@ public class DisruptionOrchestrator {
                         DisruptionEventBus.EventType.RECOVERY_WAITING,
                         step.name(),
                         "Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
-                boolean recovered = session.awaitFirstReady(recoveryTimeoutSec, TimeUnit.SECONDS);
+                boolean recovered = session.awaitRecovery(recoveryTimeoutSec, TimeUnit.SECONDS);
 
                 if (recovered) {
                     LOG.info("  Verifying full cluster state recovery...");
@@ -334,12 +360,17 @@ public class DisruptionOrchestrator {
                             "Auto-rollback triggered for " + step.name());
                     rolledBack = true;
                     rollbackReason = "Recovery timeout exceeded " + recoveryTimeoutSec + "s";
-                    session.awaitFirstReady(60, TimeUnit.SECONDS);
+                    session.awaitRecovery(60, TimeUnit.SECONDS);
                 }
 
                 K8sPodWatcher.RecoveryMetrics recovery = session.computeRecovery();
                 tfr = recovery.timeToFirstReady();
                 tar = recovery.timeToAllReady();
+                if (tar == null && recovery.podWentDown()) {
+                    // A pod the fault took down never came back while Kates
+                    // watched: its recovery time is at least this long.
+                    unrecoveredAfter = Duration.between(disruptionStart, Instant.now());
+                }
             }
 
             Duration strimziRecovery = strimziTracker.measureRecoveryTime(
@@ -363,7 +394,9 @@ public class DisruptionOrchestrator {
                     isrMetrics,
                     lagMetrics,
                     rolledBack,
-                    rollbackReason);
+                    rollbackReason,
+                    unmeasured,
+                    unrecoveredAfter);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -417,6 +450,8 @@ public class DisruptionOrchestrator {
                 null,
                 null,
                 rolledBack,
-                rollbackReason);
+                rollbackReason,
+                null,
+                null);
     }
 }

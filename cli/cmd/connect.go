@@ -9,9 +9,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/klster/kates-cli/internal/kubectl"
-	"github.com/klster/kates-cli/output"
+	"github.com/bmscomp/kates/cli/internal/kubectl"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +22,20 @@ var connectFollow bool
 var kafkaConnectCmd = &cobra.Command{
 	Use:   "connect",
 	Short: "Manage Kafka Connect (via Strimzi CRDs)",
+	// The namespace is found when a connect command runs. It used to be found
+	// in init(), which cost every kates invocation, --help and shell
+	// completion included, a kubectl call with no time limit: with an
+	// unreachable cluster in the kubeconfig, `kates version` waited minutes.
+	// Cobra runs only the nearest PersistentPreRun, so this one runs the
+	// root's first, which sets up the output mode and the API client.
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if rootPreRun := cmd.Root().PersistentPreRun; rootPreRun != nil {
+			rootPreRun(cmd, args)
+		}
+		if !cmd.Flags().Changed("namespace") {
+			connectNamespace = detectConnectNamespace(cmd.Context())
+		}
+	},
 }
 
 var connectStatusCmd = &cobra.Command{
@@ -345,8 +360,8 @@ var connectScaleCmd = &cobra.Command{
 }
 
 func init() {
-	defaultNS := detectConnectNamespace()
-	kafkaConnectCmd.PersistentFlags().StringVarP(&connectNamespace, "namespace", "n", defaultNS, "Namespace where Kafka Connect is deployed")
+	kafkaConnectCmd.PersistentFlags().StringVarP(&connectNamespace, "namespace", "n", "",
+		"Namespace where Kafka Connect is deployed (default: $KATES_CONNECT_NS, else the namespace of the cluster's KafkaConnect, else $KATES_KAFKA_NS, else kafka)")
 
 	kafkaConnectCmd.AddCommand(connectStatusCmd)
 	kafkaConnectCmd.AddCommand(connectConnectorsCmd)
@@ -364,16 +379,23 @@ func init() {
 	kafkaConnectCmd.AddCommand(connectScaleCmd)
 }
 
+// connectNamespaceLookupTimeout bounds the search for a KafkaConnect's
+// namespace, so a cluster that doesn't answer costs a connect command this
+// much before it falls back, rather than whatever kubectl would wait.
+const connectNamespaceLookupTimeout = 10 * time.Second
+
 // detectConnectNamespace resolves the namespace where Kafka Connect is deployed.
 // Priority: KATES_CONNECT_NS env → live cluster auto-detect → KATES_KAFKA_NS env → "kafka".
-func detectConnectNamespace() string {
+func detectConnectNamespace(ctx context.Context) string {
 	if envNS := os.Getenv("KATES_CONNECT_NS"); envNS != "" {
 		return envNS
 	}
 
 	// Auto-detect from cluster: find the namespace of any KafkaConnect CR
+	lookup, cancel := context.WithTimeout(ctx, connectNamespaceLookupTimeout)
+	defer cancel()
 	kc := kubectl.New("")
-	out, err := kc.Output(context.Background(), "get", "kafkaconnect", "-A",
+	out, err := kc.Output(lookup, "get", "kafkaconnect", "-A",
 		"-o", "jsonpath={.items[0].metadata.namespace}")
 	if err == nil {
 		ns := strings.TrimSpace(string(out))

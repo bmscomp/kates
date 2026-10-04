@@ -1,4 +1,7 @@
 {{- if and .Values.kyvernoPolicy.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+{{- $kp := .Values.kyvernoPolicy }}
+{{- $namespaces := $kp.namespaces | default (list .Release.Namespace) }}
+{{- $excludeSelector := $kp.excludeSelector | default (dict "matchExpressions" (list (dict "key" "chaosUID" "operator" "Exists"))) }}
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -11,30 +14,29 @@ metadata:
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
       Enforces and auto-patches restricted pod security standards for all
-      LitmusChaos and MongoDB pods: non-root containers, dropped capabilities,
-      seccomp profiles, and no privilege escalation. Chaos-runner and experiment
-      pods are excluded because they require elevated privileges for fault injection.
+      chaos-infra pods: non-root containers, dropped capabilities, seccomp
+      profiles, and no privilege escalation. Chaos experiment/runner pods
+      (matched by excludeSelector) are skipped because they require elevated
+      privileges for fault injection.
 spec:
-  validationFailureAction: {{ .Values.kyvernoPolicy.action | default "Audit" }}
+  validationFailureAction: {{ $kp.action | default "Audit" }}
   background: true
   rules:
-    {{- if .Values.kyvernoPolicy.mutate }}
+    {{- if $kp.mutate }}
     # ── Mutate: auto-inject pod-level security context ────────────────────────
     - name: mutate-run-as-non-root
       match:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
       exclude:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
               selector:
-                matchExpressions:
-                  - key: chaosUID
-                    operator: Exists
+                {{- toYaml $excludeSelector | nindent 16 }}
       mutate:
         patchStrategicMerge:
           spec:
@@ -43,22 +45,19 @@ spec:
               +(runAsUser): 1001
               +(fsGroup): 1001
 
-    # ── Mutate: auto-inject container-level security context ──────────────────
     - name: mutate-drop-capabilities
       match:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
       exclude:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
               selector:
-                matchExpressions:
-                  - key: chaosUID
-                    operator: Exists
+                {{- toYaml $excludeSelector | nindent 16 }}
       mutate:
         patchStrategicMerge:
           spec:
@@ -74,16 +73,14 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
       exclude:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
               selector:
-                matchExpressions:
-                  - key: chaosUID
-                    operator: Exists
+                {{- toYaml $excludeSelector | nindent 16 }}
       mutate:
         patchStrategicMerge:
           spec:
@@ -96,16 +93,14 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
       exclude:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
               selector:
-                matchExpressions:
-                  - key: chaosUID
-                    operator: Exists
+                {{- toYaml $excludeSelector | nindent 16 }}
       mutate:
         patchStrategicMerge:
           spec:
@@ -116,23 +111,19 @@ spec:
     {{- end }}
 
     # ── Validate: enforce standards ───────────────────────────────────────────
-    # Chaos experiment pods (labeled with chaosUID) are excluded from validation
-    # because they inherently need elevated privileges for fault injection.
     - name: validate-non-root
       match:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
       exclude:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
               selector:
-                matchExpressions:
-                  - key: chaosUID
-                    operator: Exists
+                {{- toYaml $excludeSelector | nindent 16 }}
       validate:
         message: "Chaos pods must run as non-root (spec.securityContext.runAsNonRoot: true)."
         pattern:
@@ -145,16 +136,14 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
       exclude:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
               selector:
-                matchExpressions:
-                  - key: chaosUID
-                    operator: Exists
+                {{- toYaml $excludeSelector | nindent 16 }}
       validate:
         message: "Containers must drop ALL capabilities."
         pattern:
@@ -169,16 +158,14 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
       exclude:
         any:
           - resources:
               kinds: ["Pod"]
-              namespaces: [{{ .Release.Namespace | quote }}]
+              namespaces: {{ toYaml $namespaces | nindent 16 }}
               selector:
-                matchExpressions:
-                  - key: chaosUID
-                    operator: Exists
+                {{- toYaml $excludeSelector | nindent 16 }}
       validate:
         message: "Containers must not allow privilege escalation."
         pattern:

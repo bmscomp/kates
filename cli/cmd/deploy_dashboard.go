@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"github.com/charmbracelet/x/ansi"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/output"
-	"github.com/klster/kates-cli/pkg/theme"
 )
 
 // ── Controller Interface for deploy.go ─────────────────────────────────────
@@ -26,8 +26,13 @@ type DashboardController struct {
 	p *tea.Program
 }
 
+// Every method tolerates a nil receiver. dl is a package-level pointer set
+// when the dashboard starts, so any path that runs without one — a unit test,
+// a step that moved earlier than the dashboard's construction — would
+// otherwise panic mid-deploy on a log line. Logging is never worth a crash.
+
 func (c *DashboardController) Printf(format string, a ...any) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(logMsg{text: fmt.Sprintf(format, a...)})
 	} else {
 		fmt.Printf(format, a...)
@@ -35,7 +40,7 @@ func (c *DashboardController) Printf(format string, a ...any) {
 }
 
 func (c *DashboardController) Println(a ...any) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(logMsg{text: fmt.Sprint(a...)})
 	} else {
 		fmt.Println(a...)
@@ -43,19 +48,19 @@ func (c *DashboardController) Println(a ...any) {
 }
 
 func (c *DashboardController) StartComponent(id string, timeout time.Duration) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(compStatusMsg{id: id, active: true, timeout: timeout})
 	}
 }
 
 func (c *DashboardController) FinishComponent(id string, success bool) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(compStatusMsg{id: id, active: false, done: true, success: success})
 	}
 }
 
 func (c *DashboardController) UpdateProgress(current, total int) {
-	if c.p != nil {
+	if c != nil && c.p != nil {
 		c.p.Send(progressMsg{current: current, total: total})
 	}
 }
@@ -125,6 +130,12 @@ type deployDashboardModel struct {
 
 	focusedPane int // 0: components, 1: logs
 	helmVersion string
+
+	// read runs the poller's kubectl queries. It is the seam as it stood when
+	// the dashboard was built: the poller runs on Bubble Tea's goroutines,
+	// some of which outlive the deploy, and runDeploy restores the seams when
+	// it returns (pinKubeContext).
+	read func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
 func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardModel {
@@ -149,9 +160,10 @@ func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardMode
 		componentsViewport: compVp,
 		totalSteps:         totalSteps,
 		compWidth:          60,
+		read:               runExecOutputFn,
 	}
 
-	out, err := exec.CommandContext(ctx, "helm", "version", "--short").Output()
+	out, err := m.read(ctx, "helm", "version", "--short")
 	if err == nil {
 		m.helmVersion = strings.TrimSpace(string(out))
 	} else {
@@ -174,7 +186,7 @@ func (m *deployDashboardModel) RegisterComponent(id, name, group string, targets
 	m.compMap[id] = c
 }
 
-func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd {
+func pollAllWorkloads(ctx context.Context, components []*componentStat, read func(ctx context.Context, name string, args ...string) ([]byte, error)) tea.Cmd {
 	return func() tea.Msg {
 		results := make(map[string][]workloadStat)
 
@@ -190,10 +202,10 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 					continue
 				}
 
-				out, err := exec.CommandContext(ctx, "kubectl", "get", "deploy,sts,ds,strimzipodsets",
+				out, err := read(ctx, "kubectl", "get", "deploy,sts,ds,strimzipodsets",
 					"-n", target.Namespace,
 					"-l", target.Selector,
-					"-o", "json").Output()
+					"-o", "json")
 
 				if err != nil || len(out) == 0 {
 					continue
@@ -254,7 +266,7 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 						}
 					}
 					// Poll pods for this workload to get phase
-					podOut, _ := exec.CommandContext(ctx, "kubectl", "get", "pods", "-n", target.Namespace, "-l", target.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}").Output()
+					podOut, _ := read(ctx, "kubectl", "get", "pods", "-n", target.Namespace, "-l", target.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}")
 					phases := strings.Split(strings.TrimSpace(string(podOut)), ",")
 					if len(phases) > 0 && phases[0] != "" {
 						stat.phase = phases[0] // Simplify by just taking the first pod's phase for the workload
@@ -270,6 +282,31 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat) tea.Cmd 
 
 		return allWorkloadsMsg{workloads: results}
 	}
+}
+
+// sanitizeLogLine strips variation selector-16 (U+FE0F). The padding stack
+// (viewport/lipgloss via go-runewidth) counts emoji+VS16 sequences as ONE
+// cell while terminals render TWO — so every "⏭️ …" line pushed the pane's
+// right border out by a column, producing the ragged edge. Without VS16 the
+// base rune renders text-style at the width runewidth already computes.
+func sanitizeLogLine(s string) string {
+	return strings.ReplaceAll(s, "\ufe0f", "")
+}
+
+// buildLogContent joins the log ring with every line truncated to the pane
+// width. Lines were previously passed through untouched, so one over-long
+// helm message stretched the box past the terminal edge and the border
+// wrapped into fragments.
+func (m deployDashboardModel) buildLogContent() string {
+	w := m.logsViewport.Width
+	if w <= 0 {
+		return strings.Join(m.logs, "\n")
+	}
+	out := make([]string, 0, len(m.logs))
+	for _, l := range m.logs {
+		out = append(out, ansi.Truncate(l, w, "…"))
+	}
+	return strings.Join(out, "\n")
 }
 
 func (m deployDashboardModel) Init() tea.Cmd {
@@ -302,7 +339,13 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			compWidth = 50
 		}
 		m.compWidth = compWidth - 2
-		logsWidth := msg.Width - compWidth - 4 // 4 for spacing/margins
+
+		// One row width for the whole dashboard: header and panes must end at
+		// the same column. The header renders at msg.Width-2 total (content
+		// width + its border), while the old pane math produced msg.Width-4 —
+		// so the panes row sat 2-4 columns short of the header's right edge.
+		rowWidth := msg.Width - 2
+		logsWidth := rowWidth - compWidth // rendered log pane incl. its border
 		if logsWidth < 20 {
 			logsWidth = 20
 		}
@@ -312,6 +355,8 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.logsViewport.Width = logsWidth - 2
 		m.logsViewport.Height = viewHeight - 2
+		// Stored lines were truncated for the old width; rebuild for the new.
+		m.logsViewport.SetContent(m.buildLogContent())
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -335,13 +380,13 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		lines := strings.Split(strings.TrimSpace(msg.text), "\n")
 		for _, l := range lines {
 			if l != "" {
-				m.logs = append(m.logs, l)
+				m.logs = append(m.logs, sanitizeLogLine(l))
 			}
 		}
 		if len(m.logs) > 100 {
 			m.logs = m.logs[len(m.logs)-100:]
 		}
-		m.logsViewport.SetContent(strings.Join(m.logs, "\n"))
+		m.logsViewport.SetContent(m.buildLogContent())
 		if m.logsViewport.AtBottom() || len(m.logs) < m.logsViewport.Height {
 			m.logsViewport.GotoBottom()
 		}
@@ -387,7 +432,7 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		cmds = append(cmds,
-			pollAllWorkloads(m.ctx, m.components),
+			pollAllWorkloads(m.ctx, m.components, m.read),
 			tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 		)
 	}
@@ -560,7 +605,9 @@ func (m deployDashboardModel) View() string {
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder(), true).
 		BorderForeground(theme.Accent).
-		Width(m.width - 2)
+		// Content width; +2 border columns renders the header at m.width-2 —
+		// the same rowWidth the panes fill, so the right edges align.
+		Width(m.width - 4)
 
 	headerContent := fmt.Sprintf("📦 Kates Cluster Deployment: %s %.0f%% (%d/%d Steps) │ Helm: %s", bar, pct*100, m.currentStep, m.totalSteps, m.helmVersion)
 	out.WriteString(headerStyle.Render(headerContent) + "\n")

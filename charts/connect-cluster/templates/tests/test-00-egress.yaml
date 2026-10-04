@@ -1,0 +1,30 @@
+{{- /* Egress for the chart's test pods (kates.io/test-pod=true), for
+       namespaces with a default-deny of their own: DNS, the API server
+       (kubectl), and the workers' REST port. */}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $api := .Values.networkPolicy.apiServer | default dict }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "connect-cluster.fullname" . }}-test-egress
+  namespace: {{ include "connect-cluster.namespace" . }}
+  labels:
+    {{- include "connect-cluster.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      kates.io/test-pod: "true"
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "connect-cluster.podSelectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8083
+          protocol: TCP
+    {{- include "kafka-common.netpol.dnsEgress" (dict) | nindent 4 }}
+    {{- include "kafka-common.netpol.apiServerEgress" (dict "ports" $api.ports "ipBlock" $api.ipBlock) | nindent 4 }}
+{{- end }}

@@ -84,7 +84,7 @@ spec:
   config:
     retention.ms: "-1"
     min.insync.replicas: "2"
-    cleanup.policy: compact
+    cleanup.policy: delete
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic

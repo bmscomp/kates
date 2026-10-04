@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/klster/kates-cli/internal/kubectl"
+	"github.com/bmscomp/kates/cli/internal/kubectl"
 	"github.com/spf13/cobra"
 )
 

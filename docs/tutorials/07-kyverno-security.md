@@ -37,18 +37,32 @@ Expected output:
   ┌────────────────────────────────────────┬─────────┬───────┬──────────┬────────┐
   │ Policy                                 │ Mode    │ Ready │ Validate │ Mutate │
   ├────────────────────────────────────────┼─────────┼───────┼──────────┼────────┤
+  │ kafka-pod-security-kafka-krafter       │ Audit   │ ✓     │ 5        │ 0      │
   │ kates-pod-security-standards           │ Audit   │ ✓     │ 6        │ 5      │
-  │ kates-workload-standards               │ Audit   │ ✓     │ 3        │ 0      │
-  │ kates-image-verification               │ Audit   │ ✓     │ 1        │ 1      │
+  │ kates-workload-standards               │ Audit   │ ✓     │ 4        │ 0      │
+  │ kates-image-verification               │ Audit   │ ✓     │ 0        │ 0      │
   │ kates-generate-network-policies        │ Audit   │ ✓     │ 0        │ 0      │
   └────────────────────────────────────────┴─────────┴───────┴──────────┴────────┘
 
-  ✓ 4 policies active — 10 validate rules, 6 mutate rules
+  ✓ 5 policies active — 15 validate rules, 5 mutate rules
 
   ✓ No policy violations detected
 ```
 
 The table shows each `ClusterPolicy` with its current mode (Audit or Enforce), readiness state, and the number of validation and mutation rules.
+
+`ClusterPolicy` is cluster-scoped, so the list spans every chart that ships one:
+`kates-*` come from `charts/kates`, and `kafka-pod-security-<namespace>-<cluster>`
+from `charts/kafka-cluster`. That last name is per-cluster since kafka-cluster
+1.0 — 0.4 used the single fixed name `kafka-pod-security-standards`, which meant
+a second Kafka cluster could not enable the policy at all.
+
+Two of the `kates-*` rows are off by default and appear only once their feature
+is turned on: `kates-image-verification` needs `kyvernoPolicy.cosign.enabled`
+with a `publicKey`, and `kates-generate-network-policies` needs
+`kyvernoPolicy.networkPolicyGeneration.enabled`. Both carry rules the CLI counts
+as neither validate nor mutate — a `verifyImages` rule and three `generate`
+rules respectively — which is why their columns read 0.
 
 > **Note:** All policies default to **Audit** mode — violations are logged but pods are not blocked.
 

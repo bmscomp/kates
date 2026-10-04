@@ -2,7 +2,6 @@ package com.bmscomp.kates.service;
 
 import java.util.Properties;
 import java.util.concurrent.locks.ReentrantLock;
-
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -86,6 +85,16 @@ public class KafkaAdminService {
         } finally {
             clientLock.unlock();
         }
+    }
+
+    /**
+     * The shared, lifecycle-managed AdminClient for collaborators in other
+     * packages. Callers MUST NOT close it — its lifecycle is owned here
+     * (@PostConstruct / @PreDestroy). Reusing this avoids re-bootstrapping a
+     * broker connection on every call.
+     */
+    public AdminClient sharedAdminClient() {
+        return getClient();
     }
 
     public String getBootstrapServers() {

@@ -1,7 +1,6 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.Map;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -29,13 +28,7 @@ public class DisruptionPlaybookResource {
     DisruptionPlaybookCatalog playbookCatalog;
 
     @Inject
-    DisruptionOrchestrator orchestrator;
-
-    @Inject
-    DisruptionReportRepository repository;
-
-    @Inject
-    com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    DisruptionLauncher launcher;
 
     @GET
     @Operation(summary = "List disruption playbooks", description = "Returns pre-defined disruption scenarios")
@@ -50,20 +43,48 @@ public class DisruptionPlaybookResource {
         return Response.ok(entries).build();
     }
 
+    @GET
+    @Path("/{name}")
+    @Operation(
+            summary = "Get a playbook's plan",
+            description = "Returns the disruption plan a playbook runs, resolved from its YAML the way"
+                    + " POST /api/disruptions/playbooks/{name} resolves it. The body is accepted as is by"
+                    + " POST /api/disruptions?dryRun=true, which previews the playbook without injecting faults.")
+    @APIResponse(responseCode = "200", description = "The playbook's disruption plan")
+    @APIResponse(responseCode = "404", description = "Playbook not found")
+    public Response getPlaybookPlan(@Parameter(description = "Playbook name") @PathParam("name") String name) {
+        // The list returns only a step count, and the YAML sits inside the
+        // backend jar, so this is the only way for a client to read what a
+        // playbook would do, or to preview it, before running it.
+        return playbookCatalog
+                .findByName(name)
+                .map(entry -> Response.ok(playbookCatalog.toPlan(entry)).build())
+                .orElseGet(() -> Response.status(404)
+                        .entity(ApiError.of(404, "Not Found", "Playbook not found: " + name))
+                        .build());
+    }
+
     @POST
     @Path("/{name}")
-    @Operation(summary = "Run a playbook", description = "Executes a pre-defined disruption playbook by name")
-    @APIResponse(responseCode = "200", description = "Disruption report from playbook execution")
+    @Operation(
+            summary = "Run a playbook",
+            description = "Validates a pre-defined disruption playbook and starts it asynchronously."
+                    + " Returns 202 with a report id; poll GET /api/disruptions/{id} for progress"
+                    + " and the final report.")
+    @APIResponse(responseCode = "202", description = "Playbook accepted for execution")
     @APIResponse(responseCode = "404", description = "Playbook not found")
+    @APIResponse(responseCode = "409", description = "Another disruption is already running against this cluster")
+    @APIResponse(responseCode = "422", description = "Playbook rejected by safety guard")
     public Response runPlaybook(@Parameter(description = "Playbook name") @PathParam("name") String name) {
         return playbookCatalog
                 .findByName(name)
                 .map(entry -> {
                     DisruptionPlan plan = playbookCatalog.toPlan(entry);
-                    String id = java.util.UUID.randomUUID().toString().substring(0, 8);
-                    DisruptionReport report = orchestrator.execute(plan);
-                    DisruptionPersistence.persistReport(id, report, repository, objectMapper);
-                    return Response.ok(Map.of("id", id, "report", report)).build();
+                    // Goes through the same launcher as POST /api/disruptions.
+                    // This path used to call the orchestrator directly: no safety
+                    // validation at all, and a synchronous call that held the
+                    // request open for the whole plan.
+                    return DisruptionResource.toResponse(launcher.launch(plan), plan.getName());
                 })
                 .orElseGet(() -> Response.status(404)
                         .entity(ApiError.of(404, "Not Found", "Playbook not found: " + name))

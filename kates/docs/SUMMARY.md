@@ -9,6 +9,7 @@ Welcome to the Kates (Kafka Advanced Testing & Engineering Suite) documentation.
 | [Overview](overview.md) | What Kates is, the problems it solves, and the high-level architecture |
 | [Architecture](architecture.md) | Design philosophy, package structure, class responsibilities, and the execution lifecycle with Mermaid diagrams |
 | [Deployment](deployment.md) | Dev mode, JVM/native builds, Kubernetes manifests, and the complete ConfigMap reference |
+| [Native Image Runbook](native-image.md) | Building, smoke-testing and debugging the ahead-of-time compiled backend — reflection registration, classpath resources, and JNI libraries |
 
 ## Performance Testing
 

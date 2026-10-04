@@ -25,34 +25,73 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "apicurio-registry.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "apicurio-registry.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
               containerPort: 8080
               protocol: TCP
+            # Quarkus management interface: health + metrics (Registry 3.x)
+            - name: management
+              containerPort: 9000
+              protocol: TCP
           livenessProbe:
             httpGet:
-              path: /
-              port: http
+              path: /health/live
+              port: management
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
           readinessProbe:
             httpGet:
-              path: /
-              port: http
+              path: /health/ready
+              port: management
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+          {{- if .Values.startupProbe.enabled }}
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            initialDelaySeconds: {{ .Values.startupProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
+          {{- end }}
           env:
             - name: APICURIO_STORAGE_KIND
               value: "kafkasql"
+            {{- if .Values.kafkaSql.topicVerificationOverride }}
             - name: APICURIO_KAFKASQL_TOPIC_CONFIGURATION_VERIFICATION_OVERRIDE_ENABLED
               value: "true"
+            {{- end }}
+            {{- with .Values.kafkaSql.consumerGroupPrefix }}
+            # Keeps the generated consumer group within the KafkaUser's
+            # group-prefix ACL (see kafka-cluster values). Prefix only — the
+            # per-replica group ID stays unique so the journal is replayed.
+            - name: APICURIO_KAFKASQL_CONSUMER_GROUP_PREFIX
+              value: {{ . | quote }}
+            {{- end }}
             - name: APICURIO_KAFKASQL_BOOTSTRAP_SERVERS
               value: {{ include "apicurio-registry.kafkaBootstrapServers" . }}
-            {{- if .Values.global.kafka.securityProtocol }}
+            {{- if .Values.tls.enabled }}
+            - name: APICURIO_KAFKA_COMMON_SECURITY_PROTOCOL
+              value: "SASL_SSL"
+            - name: APICURIO_KAFKA_COMMON_SSL_TRUSTSTORE_LOCATION
+              value: "/etc/kafka/tls/{{ .Values.tls.truststoreSecretKey }}"
+            - name: APICURIO_KAFKA_COMMON_SSL_TRUSTSTORE_TYPE
+              value: "PEM"
+            {{- else if .Values.global.kafka.securityProtocol }}
             - name: APICURIO_KAFKA_COMMON_SECURITY_PROTOCOL
               value: {{ .Values.global.kafka.securityProtocol | quote }}
             {{- end }}
@@ -72,6 +111,24 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # Writable scratch space: Vert.x cache and the embedded H2 store
+            # the KafkaSQL journal is replayed into (rootfs is read-only).
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.tls.enabled }}
+            - name: kafka-tls
+              mountPath: /etc/kafka/tls
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.tls.enabled }}
+        - name: kafka-tls
+          secret:
+            secretName: {{ .Values.tls.truststoreSecretName }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -82,5 +139,9 @@ spec:
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}

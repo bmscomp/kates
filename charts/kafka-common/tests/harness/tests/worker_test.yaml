@@ -1,0 +1,152 @@
+suite: connectWorker.spec
+templates:
+  - worker.yaml
+tests:
+  - it: renders the shared worker fields
+    set:
+      worker.image: quay.io/strimzi/kafka:1.2.0-kafka-4.3.1
+      worker.resources: {requests: {cpu: 1}}
+      worker.jvmOptions: {-Xmx: 1g}
+      worker.jmxOptions: {authentication: {type: password}}
+      worker.tracing: {type: opentelemetry}
+      worker.rack: {enabled: true, clientRackInitImage: "r/i:1"}
+    asserts:
+      - equal: {path: spec.version, value: "4.3.1"}
+      - equal: {path: spec.image, value: "quay.io/strimzi/kafka:1.2.0-kafka-4.3.1"}
+      - equal: {path: spec.replicas, value: 3}
+      - equal: {path: spec.resources.requests.cpu, value: 1}
+      - equal: {path: spec.jvmOptions.-Xmx, value: 1g}
+      - equal: {path: spec.jmxOptions.authentication.type, value: password}
+      - equal: {path: spec.tracing.type, value: opentelemetry}
+      - equal: {path: spec.rack.topologyKey, value: topology.kubernetes.io/zone}
+      - equal: {path: spec.clientRackInitImage, value: "r/i:1"}
+      - equal: {path: spec.metricsConfig.type, value: jmxPrometheusExporter}
+      - equal: {path: spec.metricsConfig.valueFrom.configMapKeyRef.name, value: harness-metrics}
+
+  - it: seeds replicas from minReplicas under an HPA (v1 requires the field)
+    set:
+      worker.autoscaling: {enabled: true, minReplicas: 4}
+    asserts:
+      - equal: {path: spec.replicas, value: 4}
+      - equal: {path: spec.template.podDisruptionBudget.maxUnavailable, value: 1}
+
+  - it: reads the live replica count back under an HPA
+    set:
+      worker.autoscaling: {enabled: true, minReplicas: 2}
+    kubernetesProvider:
+      scheme:
+        "kafka.strimzi.io/v1/KafkaConnect":
+          gvr: {group: kafka.strimzi.io, version: v1, resource: kafkaconnects}
+          namespaced: true
+      objects:
+        - apiVersion: kafka.strimzi.io/v1
+          kind: KafkaConnect
+          metadata: {name: harness, namespace: NAMESPACE}
+          spec: {replicas: 7.0}
+    release:
+      namespace: NAMESPACE
+    asserts:
+      - equal: {path: spec.replicas, value: 7}
+
+  - it: leaves the PDB out for a single worker
+    set:
+      worker.replicas: 1
+    asserts:
+      - notExists: {path: spec.template.podDisruptionBudget}
+
+  - it: keeps maxUnavailable 0 when asked
+    set:
+      worker.template.pdb: {maxUnavailable: 0}
+    asserts:
+      - equal: {path: spec.template.podDisruptionBudget.maxUnavailable, value: 0}
+
+  - it: can turn the PDB off
+    set:
+      worker.template.pdb: {enabled: false}
+    asserts:
+      - notExists: {path: spec.template.podDisruptionBudget}
+
+  - it: renders nodeSelector as required node affinity, ANDed into nodeAffinity
+    set:
+      worker.template.nodeSelector: {pool: connect}
+      worker.template.nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions: [{key: disk, operator: In, values: [ssd]}]
+    asserts:
+      - notExists: {path: spec.template.pod.nodeSelector}
+      - lengthEqual:
+          path: 'spec.template.pod.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions'
+          count: 2
+      - equal:
+          path: 'spec.template.pod.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[1].key'
+          value: pool
+
+  - it: adds anti-affinity and spread on the worker selector
+    set:
+      worker.template.podAntiAffinity: {enabled: true}
+      worker.template.topologySpread: {enabled: true, additional: [{maxSkew: 2, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: DoNotSchedule, labelSelector: {matchLabels: {a: b}}}]}
+    asserts:
+      - equal:
+          path: 'spec.template.pod.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchLabels["strimzi.io/name"]'
+          value: harness-connect
+      - lengthEqual: {path: spec.template.pod.topologySpreadConstraints, count: 2}
+      - equal:
+          path: 'spec.template.pod.topologySpreadConstraints[0].whenUnsatisfiable'
+          value: ScheduleAnyway
+
+  - it: hardens the container and lets the pass-through override field by field
+    set:
+      worker.template.container:
+        harden: true
+        env: [{name: A, value: b}]
+        securityContext: {readOnlyRootFilesystem: false}
+        extra: {env: [{name: X, value: y}]}
+    asserts:
+      - equal: {path: spec.template.connectContainer.securityContext.readOnlyRootFilesystem, value: false}
+      - equal: {path: spec.template.connectContainer.securityContext.allowPrivilegeEscalation, value: false}
+      - equal:
+          path: 'spec.template.connectContainer.env[0].name'
+          value: X
+
+  - it: merges templateExtra into the pod template instead of replacing it (the MM2 0.7 duplicate-key bug)
+    set:
+      worker.template.podSecurityContext: {runAsNonRoot: true}
+      worker.template.extra: {pod: {hostUsers: false}, apiService: {metadata: {labels: {t: x}}}}
+    asserts:
+      - equal: {path: spec.template.pod.securityContext.runAsNonRoot, value: true}
+      - equal: {path: spec.template.pod.hostUsers, value: false}
+      - equal: {path: spec.template.apiService.metadata.labels.t, value: x}
+
+  - it: keeps hostUsers false
+    set:
+      worker.template.hostUsers: false
+    asserts:
+      - equal: {path: spec.template.pod.hostUsers, value: false}
+
+  - it: points external logging at the chart's ConfigMap
+    set:
+      worker.logging: {type: external}
+      worker.loggingConfigMap: harness-logging
+    asserts:
+      - equal: {path: spec.logging.valueFrom.configMapKeyRef.name, value: harness-logging}
+      - equal: {path: spec.logging.valueFrom.configMapKeyRef.key, value: log4j2.properties}
+
+  - it: passes inline loggers without chart-only keys
+    set:
+      worker.logging: {type: inline, loggers: {rootLogger.level: WARN}, mirrorLevel: INFO}
+    asserts:
+      - equal: {path: spec.logging, value: {type: inline, loggers: {rootLogger.level: WARN}}}
+
+  - it: renders the Strimzi metrics reporter with a default allow-list
+    set:
+      worker.metrics: {enabled: true, type: strimziMetricsReporter}
+    asserts:
+      - equal: {path: spec.metricsConfig.type, value: strimziMetricsReporter}
+      - contains: {path: spec.metricsConfig.values.allowList, content: "kafka_connect.*"}
+
+  - it: omits metricsConfig when metrics are off
+    set:
+      worker.metrics: {enabled: false}
+    asserts:
+      - notExists: {path: spec.metricsConfig}

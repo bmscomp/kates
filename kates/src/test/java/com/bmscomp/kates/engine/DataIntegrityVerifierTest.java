@@ -2,6 +2,11 @@ package com.bmscomp.kates.engine;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.domain.IntegrityResult;
@@ -116,5 +121,82 @@ class DataIntegrityVerifierTest {
         assertEquals(3, result.totalSent());
         assertEquals(3, result.totalConsumed());
         assertEquals(0, result.lostRecords());
+    }
+
+    // ── RPO ─────────────────────────────────────────────────────────────
+
+    private static final long MS = 1_000_000L;
+
+    /** Record {@code seq} is sent at 1s + seq ms, as the producer loop would stamp it. */
+    private static long sentAt(long seq) {
+        return 1_000 * MS + seq * MS;
+    }
+
+    /**
+     * 400 records sent 1 ms apart and every one acknowledged, including the
+     * 199 sent after a fault at record 200: the producer recovered.
+     */
+    private static IntegrityResult verifyWithLost(long chaosStartNanos, int... lost) {
+        AckTracker tracker = new AckTracker(400);
+        for (int seq = 0; seq < 400; seq++) {
+            tracker.recordSent(seq, sentAt(seq));
+            tracker.recordAcked(seq, sentAt(seq));
+        }
+        DataIntegrityVerifier verifier = new DataIntegrityVerifier(tracker);
+        Set<Integer> missing = Arrays.stream(lost).boxed().collect(Collectors.toSet());
+        for (int seq = 0; seq < 400; seq++) {
+            if (!missing.contains(seq)) {
+                verifier.recordConsumed(seq, true, 0);
+            }
+        }
+        return verifier.verify(chaosStartNanos, true, true, false, false);
+    }
+
+    @Test
+    void rpoReachesBackToTheOldestLostWriteAfterTheProducerRecovered() {
+        // The old formula subtracted the newest acknowledged send of the run
+        // (record 399, after the fault) and clamped the negative to zero, so
+        // this loss of 72 ms of acknowledged writes read as RPO 0.
+        IntegrityResult result = verifyWithLost(sentAt(200), 128, 129, 130);
+
+        assertEquals(Duration.ofMillis(72), result.rpo());
+        assertEquals(72.0, result.rpoMs(), 0.001);
+    }
+
+    @Test
+    void rpoIsRoundedUpToTheSampleBelowTheOldestLoss() {
+        // Record 150's own send was 50 ms before the fault; the tracker keeps
+        // one timestamp per 64 sends, so it reads record 128's.
+        IntegrityResult result = verifyWithLost(sentAt(200), 150);
+
+        assertTrue(result.rpoMs() >= 50.0, "never understated: " + result.rpoMs());
+        assertTrue(result.rpoMs() < 50.0 + AckTracker.SEND_TIME_STRIDE, "overstated by under one stride");
+    }
+
+    @Test
+    void rpoIsZeroWhenTheFaultLostNothing() {
+        IntegrityResult result = verifyWithLost(sentAt(200));
+
+        assertEquals(Duration.ZERO, result.rpo());
+        assertEquals("PASS", result.verdict());
+    }
+
+    @Test
+    void lossThatBeganAfterTheFaultIsDataLossNotRpo() {
+        IntegrityResult result = verifyWithLost(sentAt(200), 320, 321);
+
+        assertEquals(Duration.ZERO, result.rpo());
+        assertEquals("DATA_LOSS", result.verdict());
+    }
+
+    @Test
+    void rpoIsNotMeasuredWithoutAFault() {
+        // No fault time means nothing to measure back from. This used to read
+        // 0 ms, which a maxRpoMs gate took as a pass.
+        IntegrityResult result = verifyWithLost(-1, 128);
+
+        assertNull(result.rpo());
+        assertEquals(-1.0, result.rpoMs(), 0.001);
+        assertEquals("DATA_LOSS", result.verdict());
     }
 }

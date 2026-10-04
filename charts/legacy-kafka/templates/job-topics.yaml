@@ -1,0 +1,73 @@
+{{- if and .Values.topicsJob.enabled (gt (len .Values.topics) 0) }}
+{{- $fullname := include "legacy-kafka.fullname" . }}
+{{- $saslOnly := and .Values.listeners.sasl.enabled (not .Values.listeners.plaintext.enabled) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-topics
+  namespace: {{ include "legacy-kafka.namespace" . }}
+  labels:
+    {{- include "legacy-kafka.labels" . | nindent 4 }}
+    app.kubernetes.io/component: topics
+  annotations:
+    # post-install, not pre-install: the brokers have to exist first. Hook
+    # weight 5 keeps it after anything else that might be added later.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.topicsJob.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.topicsJob.timeoutSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "legacy-kafka.labels" . | nindent 8 }}
+        app.kubernetes.io/component: topics
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "legacy-kafka.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: create-topics
+          image: {{ include "legacy-kafka.image" . | quote }}
+          imagePullPolicy: {{ .Values.kafka.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["/bin/sh", "/opt/kates/bin/create-topics.sh"]
+          env:
+            - name: LOG_DIR
+              value: /tmp
+          resources:
+            requests: { memory: 256Mi, cpu: 100m }
+            limits: { memory: 768Mi, cpu: 1000m }
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/kates/bin
+            - name: tmp
+              mountPath: /tmp
+            {{- if $saslOnly }}
+            - name: client-config
+              mountPath: /etc/kafka-client
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ $fullname }}-scripts
+            defaultMode: 0755
+        - name: tmp
+          emptyDir: {}
+        {{- if $saslOnly }}
+        - name: client-config
+          secret:
+            secretName: {{ $fullname }}-jaas
+            items:
+              - key: client.properties
+                path: client.properties
+        {{- end }}
+{{- end }}

@@ -97,6 +97,12 @@ public class TestScenario {
     /**
      * Resolves the effective spec for a given phase by merging
      * phase-level overrides onto the scenario base spec.
+     *
+     * <p>A spec's rate is its {@code throughput}, or its {@code targetThroughput}
+     * when it sets no throughput, the rule a plain request follows
+     * (TestOrchestrator.applyTypeDefaults); a phase's own targetThroughput
+     * overrides both. The producer options carry through as set, so that an
+     * option nobody set stays unset and the Kafka client decides.
      */
     public TestSpec resolveSpecForPhase(ScenarioPhase phase) {
         TestSpec base = baseSpec != null ? baseSpec : new TestSpec();
@@ -123,14 +129,20 @@ public class TestScenario {
         if (!"lz4".equals(phaseSpec.getCompressionType())) merged.setCompressionType(phaseSpec.getCompressionType());
         if (phaseSpec.getRecordSize() != 1024) merged.setRecordSize(phaseSpec.getRecordSize());
         if (phaseSpec.getNumRecords() != 1_000_000) merged.setNumRecords(phaseSpec.getNumRecords());
-        if (phaseSpec.getThroughput() != -1) merged.setThroughput(phaseSpec.getThroughput());
+        if (phaseSpec.hasThroughput()) merged.setThroughput(phaseSpec.getThroughput());
         if (phaseSpec.getDurationMs() != 600_000) merged.setDurationMs(phaseSpec.getDurationMs());
         if (phaseSpec.getNumProducers() != 1) merged.setNumProducers(phaseSpec.getNumProducers());
         if (phaseSpec.getNumConsumers() != 1) merged.setNumConsumers(phaseSpec.getNumConsumers());
-        if (phaseSpec.getConsumerGroup() != null) merged.setConsumerGroup(phaseSpec.getConsumerGroup());
-        if (phaseSpec.getTargetThroughput() != -1) merged.setTargetThroughput(phaseSpec.getTargetThroughput());
-        if (phaseSpec.getFetchMinBytes() != 1) merged.setFetchMinBytes(phaseSpec.getFetchMinBytes());
-        if (phaseSpec.getFetchMaxWaitMs() != 500) merged.setFetchMaxWaitMs(phaseSpec.getFetchMaxWaitMs());
+        if (phaseSpec.hasConsumerGroup()) merged.setConsumerGroup(phaseSpec.getConsumerGroup());
+        if (phaseSpec.hasTargetThroughput()) {
+            merged.setTargetThroughput(phaseSpec.getTargetThroughput());
+            if (!phaseSpec.hasThroughput()) merged.setThroughput(phaseSpec.getTargetThroughput());
+        }
+        if (phaseSpec.hasFetchMinBytes()) merged.setFetchMinBytes(phaseSpec.getFetchMinBytes());
+        if (phaseSpec.hasFetchMaxWaitMs()) merged.setFetchMaxWaitMs(phaseSpec.getFetchMaxWaitMs());
+        if (phaseSpec.hasEnableIdempotence()) merged.setEnableIdempotence(phaseSpec.isEnableIdempotence());
+        if (phaseSpec.hasEnableTransactions()) merged.setEnableTransactions(phaseSpec.isEnableTransactions());
+        if (phaseSpec.hasEnableCrc()) merged.setEnableCrc(phaseSpec.isEnableCrc());
 
         if (phase.getTargetThroughput() != -1) {
             merged.setThroughput(phase.getTargetThroughput());
@@ -154,14 +166,18 @@ public class TestScenario {
         copy.setCompressionType(src.getCompressionType());
         copy.setRecordSize(src.getRecordSize());
         copy.setNumRecords(src.getNumRecords());
-        copy.setThroughput(src.getThroughput());
+        copy.setThroughput(
+                src.hasThroughput() || !src.hasTargetThroughput() ? src.getThroughput() : src.getTargetThroughput());
         copy.setDurationMs(src.getDurationMs());
         copy.setNumProducers(src.getNumProducers());
         copy.setNumConsumers(src.getNumConsumers());
         copy.setConsumerGroup(src.getConsumerGroup());
-        copy.setTargetThroughput(src.getTargetThroughput());
-        copy.setFetchMinBytes(src.getFetchMinBytes());
-        copy.setFetchMaxWaitMs(src.getFetchMaxWaitMs());
+        if (src.hasTargetThroughput()) copy.setTargetThroughput(src.getTargetThroughput());
+        if (src.hasFetchMinBytes()) copy.setFetchMinBytes(src.getFetchMinBytes());
+        if (src.hasFetchMaxWaitMs()) copy.setFetchMaxWaitMs(src.getFetchMaxWaitMs());
+        if (src.hasEnableIdempotence()) copy.setEnableIdempotence(src.isEnableIdempotence());
+        if (src.hasEnableTransactions()) copy.setEnableTransactions(src.isEnableTransactions());
+        if (src.hasEnableCrc()) copy.setEnableCrc(src.isEnableCrc());
         return copy;
     }
 }

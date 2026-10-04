@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -23,7 +22,8 @@ import com.bmscomp.kates.util.MetricUtils;
 /**
  * Builds structured {@link TestReport} instances from completed {@link TestRun}s.
  * Computes aggregate metrics and overall SLA verdicts.
- * Reports for terminal runs (DONE/FAILED) are cached to avoid redundant recomputation.
+ * Reports for terminal runs (DONE/FAILED) that carry their results are cached
+ * to avoid redundant recomputation.
  */
 @ApplicationScoped
 public class ReportGenerator {
@@ -34,7 +34,73 @@ public class ReportGenerator {
     @Inject
     KatesMetrics katesMetrics;
 
-    private final ConcurrentHashMap<String, TestReport> reportCache = new ConcurrentHashMap<>();
+    @Inject
+    com.bmscomp.kates.engine.SlaEvaluator slaEvaluator;
+
+    /**
+     * Evaluates the run's SLA, but only once the run is terminal.
+     *
+     * <p>A report can be generated while a run is still in flight, and partial
+     * metrics routinely sit below their target mid-ramp — grading those would
+     * report a breach the finished run does not have. In-flight runs therefore
+     * carry a passing verdict until there is a complete result to judge.
+     */
+    private SlaVerdict evaluateSla(TestRun run, ReportSummary summary) {
+        if (!isTerminal(run.getStatus())) {
+            return SlaVerdict.pass();
+        }
+        return slaEvaluator.evaluate(run.getSla(), toSlaMetrics(run, summary));
+    }
+
+    /**
+     * Maps an aggregated summary onto the values an SLA is evaluated against.
+     *
+     * <p>Resilience values come from the run's integrity results rather than the
+     * summary, which does not carry them; the worst value across tasks is used,
+     * and -1 means the run had no integrity check so the corresponding
+     * constraint is skipped instead of silently passing.
+     */
+    private static com.bmscomp.kates.domain.SlaMetrics toSlaMetrics(TestRun run, ReportSummary summary) {
+        double dataLossPercent = -1;
+        double maxRtoMs = -1;
+        double rpoMs = -1;
+
+        for (TestResult result : run.getResults()) {
+            com.bmscomp.kates.domain.IntegrityResult integrity = result.getIntegrity();
+            if (integrity == null) {
+                continue;
+            }
+            dataLossPercent = Math.max(dataLossPercent, integrity.dataLossPercent());
+            maxRtoMs = Math.max(maxRtoMs, integrity.maxRtoMs());
+            rpoMs = Math.max(rpoMs, integrity.rpoMs());
+        }
+
+        return new com.bmscomp.kates.domain.SlaMetrics(
+                summary.p99LatencyMs(),
+                summary.p999LatencyMs(),
+                summary.avgLatencyMs(),
+                summary.avgThroughputRecPerSec(),
+                summary.totalRecords(),
+                summary.errorRate(),
+                dataLossPercent,
+                maxRtoMs,
+                rpoMs);
+    }
+
+    /**
+     * Reports embed histograms and timelines; an uncapped cache grows without
+     * bound in a long-running service. LRU-evict beyond MAX_CACHED_REPORTS —
+     * evicted reports are simply regenerated on next access.
+     */
+    private static final int MAX_CACHED_REPORTS = 200;
+
+    private final Map<String, TestReport> reportCache =
+            java.util.Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, TestReport> eldest) {
+                    return size() > MAX_CACHED_REPORTS;
+                }
+            });
 
     /**
      * Evict a cached report, forcing regeneration on the next call.
@@ -44,7 +110,8 @@ public class ReportGenerator {
     }
 
     public TestReport generate(TestRun run) {
-        if (run.getId() != null && isTerminal(run.getStatus())) {
+        boolean cacheable = isCacheable(run);
+        if (cacheable) {
             TestReport cached = reportCache.get(run.getId());
             if (cached != null) {
                 return cached;
@@ -53,11 +120,28 @@ public class ReportGenerator {
 
         TestReport report = doGenerate(run);
 
-        if (run.getId() != null && isTerminal(run.getStatus())) {
+        if (cacheable) {
             reportCache.put(run.getId(), report);
         }
 
         return report;
+    }
+
+    /**
+     * Only a finished run that carries its results has its report cached.
+     *
+     * <p>A run read by a list query has no results, and its report is all
+     * zeros. Cached under the run's id, that report answered for the run until
+     * it was evicted — the report, its JUnit export (tests="0" failures="0"),
+     * compare and the regression check — and a trend did this to every run in
+     * its window. A run without results is cheap to report again: its report
+     * stops before the cluster snapshot.
+     */
+    private boolean isCacheable(TestRun run) {
+        return run.getId() != null
+                && isTerminal(run.getStatus())
+                && run.getResults() != null
+                && !run.getResults().isEmpty();
     }
 
     private boolean isTerminal(TestResult.TaskStatus status) {
@@ -70,6 +154,13 @@ public class ReportGenerator {
         report.setGeneratedAt(Instant.now().toString());
 
         Map<String, String> metadata = new LinkedHashMap<>();
+        // First, and not optional: the exported formats carry no other copy of
+        // the run id. A markdown or CSV report saved to a file said which type
+        // of test it was and how it did, but not WHICH run produced it — so two
+        // reports from the same suite were indistinguishable once downloaded.
+        if (run.getId() != null) {
+            metadata.put("runId", run.getId());
+        }
         metadata.put("testType", run.getTestType() != null ? run.getTestType().name() : "UNKNOWN");
         metadata.put("backend", run.getBackend());
         metadata.put("status", run.getStatus() != null ? run.getStatus().name() : "UNKNOWN");
@@ -83,23 +174,25 @@ public class ReportGenerator {
 
         List<TestResult> results = run.getResults();
         if (results == null || results.isEmpty()) {
-            report.setSummary(MetricUtils.computeSummary(List.of()));
-            report.setOverallSlaVerdict(SlaVerdict.pass());
+            ReportSummary empty = MetricUtils.computeSummary(List.of());
+            report.setSummary(empty);
+            // A terminal run that produced nothing still fails a
+            // minRecordsProcessed / minThroughput SLA — that IS the breach.
+            report.setOverallSlaVerdict(evaluateSla(run, empty));
             return report;
         }
 
         report.setSummary(MetricUtils.computeSummary(results));
 
-        Map<String, List<TestResult>> byPhase = results.stream()
-                .filter(r -> r.getPhaseName() != null)
-                .collect(Collectors.groupingBy(TestResult::getPhaseName, LinkedHashMap::new, Collectors.toList()));
+        Map<String, ReportSummary> byPhase = phaseSummaries(results);
 
         if (!byPhase.isEmpty()) {
             List<PhaseReport> phases = new ArrayList<>();
-            for (Map.Entry<String, List<TestResult>> entry : byPhase.entrySet()) {
+            for (Map.Entry<String, ReportSummary> entry : byPhase.entrySet()) {
                 PhaseReport pr = new PhaseReport();
                 pr.setPhaseName(entry.getKey());
-                pr.setMetrics(MetricUtils.computeSummary(entry.getValue()));
+                pr.setMetrics(entry.getValue());
+                pr.setSlaVerdict(evaluateSla(run, entry.getValue()));
                 phases.add(pr);
             }
             report.setPhases(phases);
@@ -117,12 +210,32 @@ public class ReportGenerator {
             }
         }
 
-        report.setOverallSlaVerdict(SlaVerdict.pass());
+        // Actually evaluate the run's SLA. This was hardcoded to pass(), so a
+        // declared SLA was stored, rendered and exported as PASSED no matter what
+        // the run did — every gate built on it (report verdict, JUnit export,
+        // --fail-on-sla-breach) was green by construction. Runs without an SLA
+        // still pass: SlaEvaluator returns pass() for a null/empty definition.
+        report.setOverallSlaVerdict(evaluateSla(run, report.getSummary()));
 
         String typeName = run.getTestType() != null ? run.getTestType().name() : "UNKNOWN";
         katesMetrics.recordSlaEvaluation(typeName, report.getOverallSlaVerdict().passed());
 
         return report;
+    }
+
+    /**
+     * Each phase's summary, by phase name in the order the phases first appear
+     * among the results; a result without a phase belongs to none. Reports and
+     * trends both read phases through this, so a trend's phase point is the
+     * phase summary of its run's report.
+     */
+    public static Map<String, ReportSummary> phaseSummaries(List<TestResult> results) {
+        Map<String, ReportSummary> summaries = new LinkedHashMap<>();
+        results.stream()
+                .filter(r -> r.getPhaseName() != null)
+                .collect(Collectors.groupingBy(TestResult::getPhaseName, LinkedHashMap::new, Collectors.toList()))
+                .forEach((phase, phaseResults) -> summaries.put(phase, MetricUtils.computeSummary(phaseResults)));
+        return summaries;
     }
 
     /**
@@ -331,7 +444,7 @@ public class ReportGenerator {
                                 .append(String.format("%.0f", ir.consumerRtoMs()))
                                 .append(" |\n");
                         sb.append("| RPO (ms) | ")
-                                .append(String.format("%.0f", ir.rpoMs()))
+                                .append(ir.rpo() != null ? String.format("%.0f", ir.rpoMs()) : "not measured")
                                 .append(" |\n");
                         sb.append("| CRC Verified | ").append(ir.crcVerified()).append(" |\n");
                         sb.append("| CRC Failures | ").append(ir.crcFailures()).append(" |\n");

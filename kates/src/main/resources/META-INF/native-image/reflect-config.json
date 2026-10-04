@@ -37,20 +37,150 @@
   {
     "name": "net.jpountz.lz4.LZ4JNICompressor",
     "allPublicMethods": true,
-    "allDeclaredConstructors": true
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true
   },
   {
     "name": "net.jpountz.lz4.LZ4JNIFastDecompressor",
     "allPublicMethods": true,
-    "allDeclaredConstructors": true
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true
   },
   {
     "name": "net.jpountz.lz4.LZ4JNISafeDecompressor",
     "allPublicMethods": true,
-    "allDeclaredConstructors": true
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true
   },
   {
     "name": "net.jpountz.lz4.LZ4HCJNICompressor",
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "net.jpountz.xxhash.XXHash32JNI",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.XXHash64JNI",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.StreamingXXHash32JNI$Factory",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.StreamingXXHash64JNI$Factory",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JavaSafeCompressor",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4HCJavaSafeCompressor",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JavaSafeFastDecompressor",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JavaSafeSafeDecompressor",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.XXHash32JavaSafe",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.XXHash64JavaSafe",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.StreamingXXHash32JavaSafe$Factory",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.StreamingXXHash64JavaSafe$Factory",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JavaUnsafeCompressor",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4HCJavaUnsafeCompressor",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JavaUnsafeFastDecompressor",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.lz4.LZ4JavaUnsafeSafeDecompressor",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.XXHash32JavaUnsafe",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.XXHash64JavaUnsafe",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.StreamingXXHash32JavaUnsafe$Factory",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.StreamingXXHash64JavaUnsafe$Factory",
+    "allDeclaredFields": true,
+    "allPublicMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "net.jpountz.xxhash.XXHashFactory",
+    "allDeclaredFields": true,
     "allPublicMethods": true,
     "allDeclaredConstructors": true
   }

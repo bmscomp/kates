@@ -36,3 +36,17 @@ Or via Ingress:
 Kafka cluster: {{ .Values.kafka.clusterName }}
 Bootstrap:     {{ include "kafka-ui.bootstrapServers" . }}
 KafkaUser:     {{ .Values.kafkaUser.name }}
+
+{{- if and .Values.auth.enabled (eq .Values.auth.type "LOGIN_FORM") }}
+
+Web login: {{ .Values.auth.username }}
+{{- if .Values.auth.existingSecret }}
+  Password: from your Secret "{{ .Values.auth.existingSecret }}" (key: password)
+{{- else }}
+  Retrieve the generated password:
+    kubectl get secret {{ .Values.auth.passwordSecret }} -n {{ include "kafka-ui.namespace" . }} -o jsonpath='{.data.password}' | base64 -d
+{{- end }}
+{{- end }}
+
+Verify the deployment:
+  helm test {{ .Release.Name }} -n {{ include "kafka-ui.namespace" . }}

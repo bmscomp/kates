@@ -2,6 +2,7 @@ package detect
 
 import (
 	"bytes"
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -19,11 +20,18 @@ func NewOSExecutor() *OSExecutor {
 	return &OSExecutor{}
 }
 
+// Exec runs name with args and returns its trimmed stdout. When the command
+// fails, the error carries what it wrote to stderr: that is where kubectl says
+// why, an admission webhook's denial included.
 func (e *OSExecutor) Exec(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
-	var out bytes.Buffer
+	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 	err := cmd.Run()
+	if msg := strings.TrimSpace(stderr.String()); err != nil && msg != "" {
+		err = fmt.Errorf("%w: %s", err, msg)
+	}
 	return strings.TrimSpace(out.String()), err
 }
 

@@ -1,0 +1,73 @@
+# mTLS overlay — MM2 over the kafka-cluster mTLS (9093) listener using Strimzi's
+# built-in Clients CA. NO external PKI.
+#
+# What this does:
+#   - provisions a `type: tls` KafkaUser (kates-mm2-tls) whose user.crt/user.key
+#     are issued + rotated by the cluster's Clients CA (kafkaUser.create=true)
+#   - connects target AND source over TLS on 9093, trusting the Cluster CA via
+#     the Strimzi-managed krafter-cluster-ca-cert Secret
+#   - narrows Kafka egress to 9093
+#
+# Assumes MM2 is installed in the SAME namespace as the krafter cluster (kafka),
+# so the user.crt/key + CA Secrets are already local. If MM2 runs elsewhere, ALSO
+# enable secretSync to copy them into the release namespace:
+#   secretSync:
+#     enabled: true
+#     secrets:
+#       - { name: kates-mm2-tls, fromNamespace: kafka }
+#       - { name: krafter-cluster-ca-cert, fromNamespace: kafka }
+#
+# NOTE: the default source is a LOOPBACK on krafter and reuses kates-mm2-tls. A
+# real external source needs its OWN tls KafkaUser on that cluster (issued by ITS
+# Clients CA) and its Cluster CA cert trusted here — see the README checklist.
+
+kafkaUser:
+  create: true
+  clusterName: krafter
+  namespace: kafka
+
+target:
+  alias: target
+  clusterName: krafter
+  namespace: kafka
+  tls:
+    enabled: true
+    trustedCertificateSecret: krafter-cluster-ca-cert
+    certificateKey: ca.crt
+  authentication:
+    type: tls
+    username: kates-mm2-tls
+    secretName: kates-mm2-tls
+
+mirrors:
+  - source:
+      alias: source
+      clusterName: krafter
+      namespace: kafka
+      tls:
+        enabled: true
+        trustedCertificateSecret: krafter-cluster-ca-cert
+        certificateKey: ca.crt
+      authentication:
+        type: tls
+        username: kates-mm2-tls
+        secretName: kates-mm2-tls
+    topicsPattern: ".*"
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 3
+      config:
+        replication.factor: 3
+        offset-syncs.topic.replication.factor: 3
+        sync.topic.acls.enabled: "false"
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 3
+        sync.group.offsets.enabled: "true"
+
+# TLS listener only — bootstrap computes :9093 because tls.enabled is set.
+networkPolicy:
+  enabled: true
+  kafka:
+    ports: [9093]

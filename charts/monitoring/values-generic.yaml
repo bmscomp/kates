@@ -101,7 +101,7 @@ kube-prometheus-stack:
   kubelet:
     enabled: true
 
+# The sidecar label, its value, the folder annotation and the ConfigMap
+# namespace all come from values.yaml, which this overlay is merged onto.
 dashboards:
   enabled: true
-  labels:
-    grafana_dashboard: "1"

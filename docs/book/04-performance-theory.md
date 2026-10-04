@@ -4,9 +4,9 @@ This chapter covers the fundamentals of measuring distributed system performance
 
 After this chapter, you can:
 
-- Explain the throughput/latency trade-off and locate the saturation point where latency inflects
-- Read P50/P95/P99 percentiles and say why the mean understates tail latency
-- Spot coordinated omission in a measurement and know where the Kates mitigation stops
+- Explain the [throughput](appendix-a-glossary.md#gl-throughput)/latency trade-off and locate the [saturation point](appendix-a-glossary.md#gl-saturation-point) where latency inflects
+- Read P50/P95/P99 [percentiles](appendix-a-glossary.md#gl-percentile) and say why the mean understates tail latency
+- Spot [coordinated omission](appendix-a-glossary.md#gl-coordinated-omission) in a measurement and know where the Kates mitigation stops
 - Judge whether two runs differ by more than run-to-run noise before calling a regression
 
 ## The Two Pillars: Throughput and Latency
@@ -16,7 +16,7 @@ Every performance measurement reduces to two fundamental questions:
 1. **How much work can the system do?** → Throughput
 2. **How long does each unit of work take?** → Latency
 
-These two metrics have a **complex, non-linear relationship**. Increasing throughput eventually causes latency to rise, and that inflection point is exactly what performance testing is designed to find.
+These two metrics have a **complex, non-linear relationship**. Increasing throughput eventually causes latency to rise, and that inflection point is exactly what performance testing is designed to find [@jain1991art].
 
 ```mermaid
 graph LR
@@ -53,7 +53,7 @@ Kates measures:
 
 ### Latency
 
-Latency is the time between sending a message and receiving an acknowledgment. For Kafka producers with `acks=all`, this includes:
+Latency is the time between sending a message and receiving an acknowledgment. For Kafka producers with [`acks=all`](appendix-a-glossary.md#gl-acks), this includes:
 
 ```mermaid
 sequenceDiagram
@@ -71,12 +71,12 @@ sequenceDiagram
     Note over Producer,Follower: Total latency = sum of all steps
 ```
 
-Each step adds latency. The durations below were measured on a local Kind cluster and are illustrative — absolute numbers vary with host hardware:
+Each step adds latency. The durations below were measured on a local [Kind](appendix-a-glossary.md#gl-kind) cluster and are illustrative — absolute numbers vary with host hardware:
 
 | Step | Typical Duration | Variable? |
 |------|-----------------|-----------|
-| Network: producer → leader | \< 1ms (Kind) | Low |
-| Leader write to page cache | \< 0.1ms | Low |
+| Network: producer → [leader](appendix-a-glossary.md#gl-partition-leader) | \< 1ms (Kind) | Low |
+| Leader write to [page cache](appendix-a-glossary.md#gl-page-cache) | \< 0.1ms | Low |
 | Network: leader → follower | \< 1ms (Kind) | Low |
 | Follower write to page cache | \< 0.1ms | Low |
 | Network: follower → leader (ACK) | \< 1ms (Kind) | Low |
@@ -89,10 +89,11 @@ Under normal conditions, end-to-end latency on a local Kind cluster typically la
 **Never use average latency as your primary metric.** Here's why:
 
 Consider two systems over 100 requests:
+
 - **System A**: 99 requests at 5ms, 1 request at 500ms → Average = 9.95ms
 - **System B**: 100 requests at 10ms → Average = 10ms
 
-System A has a better average, but 1% of its users experience 50x worse performance. In production, that 1% often represents your most important customers (large payloads, complex transactions).
+System A has a better average, but 1% of its users experience 50x worse performance. In production, that 1% often represents your most important customers (large payloads, complex transactions). The tail also weighs more as a system grows: an operation that waits on several servers is as slow as the slowest of them [@dean2013tail].
 
 ### The Percentile Solution
 
@@ -106,9 +107,11 @@ Percentiles tell you about the **distribution** of latency, not just the center:
 | **P99.9** | 99.9% of requests are faster than this | Your "everything except rare outliers" |
 | **Max** | Worst single observation | Your "worst case" |
 
-Kates reports the mean plus P50, P95, P99, P99.9, and Max for every test run.
+Kates reports the mean plus P50, P95, P99, P99.9, and Max for every [test run](appendix-a-glossary.md#gl-test-run).
 
 ### The Long Tail Problem
+
+A run's percentiles can sit far apart. In the illustrative distribution below, P50 is 5 ms while the slowest request takes 2 s, and the list after it names what causes that tail in Kafka.
 
 ```mermaid
 graph LR
@@ -125,21 +128,26 @@ In Kafka, tail latency is caused by:
 
 - **GC pauses** — the JVM stops all threads to collect garbage
 - **Page cache eviction** — under memory pressure, reads hit disk instead of cache
-- **ISR shrink/expand** — when followers fall behind, write latency changes
-- **Log roll** — the broker creates a new log segment, causing I/O spikes
-- **Controller elections** — KRaft metadata operations can cause brief pauses
+- **[ISR shrink](appendix-a-glossary.md#gl-isr-shrink)/expand** — when followers fall behind, write latency changes
+- **Log roll** — the [broker](appendix-a-glossary.md#gl-broker) creates a new log segment, causing I/O spikes
+- **[Controller](appendix-a-glossary.md#gl-controller) elections** — [KRaft](appendix-a-glossary.md#gl-kraft) metadata operations can cause brief pauses
 
 ::: {.callout-tip}
-GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size. Kates deploys with generational ZGC by default (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default) — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
+GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size [@jep439]. Kates's JVM image runs generational ZGC (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default [@jep474]), both under the chart's defaults and under the [values overlay](appendix-a-glossary.md#gl-values-overlay) `kates deploy` applies on any cluster other than Kind. On Kind, `kates deploy` runs the [native image](appendix-a-glossary.md#gl-graalvm-native-image) instead, which runs the Serial GC, so the tail latencies of a local run include its pauses — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
 :::
 
 ## Coordinated Omission
 
-One of the most insidious measurement errors in load testing is **coordinated omission**. It occurs when your measurement tool slows down along with the system, causing it to miss the worst-case latencies.
+One of the most insidious measurement errors in load testing is **coordinated omission**. It occurs when your measurement tool slows down along with the system, causing it to miss the worst-case latencies [@tene2013how].
 
 ### How It Happens
 
+Follow a tool that sends one request every 10 ms but waits for each response before it sends the next. Watch what happens to the requests it should have sent while Kafka stalls for 200 ms.
+
 ```mermaid
+%%| label: fig-perf-coordinated-omission
+%%| fig-cap: "Coordinated omission: a tool that waits for each response stops sending during a stall, so it records one slow request and never measures the ones it should have sent."
+%%| fig-alt: "Sequence diagram between a load test tool and Kafka. Requests 1 and 2 go out 10 ms apart and return in 5 ms. Request 3 goes out at 20 ms, Kafka pauses 200 ms for garbage collection, and the response arrives at 220 ms. Request 4 is sent only at 220 ms instead of 30 ms and returns at 225 ms, so the tool records 5 ms for it, while a user who expected a response at 35 ms waited 195 ms."
 sequenceDiagram
     participant Tool as Load Test Tool
     participant System as Kafka
@@ -166,13 +174,13 @@ During the stall, the tool should have sent 19 more requests (at t=30, 40, 50...
 
 ### How Kates Handles It
 
-Kates mitigates the classic closed-loop form of coordinated omission by sending asynchronously: the producer loop never waits for an acknowledgment before dispatching the next record, and when a target rate is configured it keeps pacing sends at that rate regardless of response times. A slow response therefore does not hold back subsequent sends.
+Kates's native [benchmark backend](appendix-a-glossary.md#gl-benchmark-backend) mitigates the classic [closed-loop](appendix-a-glossary.md#gl-open-loop-load) [@schroeder2006open] form of coordinated omission by sending asynchronously. Its producer loop never waits for an acknowledgment before dispatching the next record, and when a target rate is configured it keeps pacing sends at that rate regardless of response times. A slow response therefore does not hold back subsequent sends.
 
-Know the limits, though: Kates does not apply coordinated-omission correction. The `LatencyHistogram` records only the observations that actually occurred — there is no gap detection and no back-filling of latencies for send slots missed during a stall. If the producer itself blocks (for example, its internal buffer fills while a broker pauses), the percentiles for that window understate what a steady stream of clients would have experienced. For stall-heavy workloads, cross-check the percentiles against the latency heatmap, which makes those windows visible.
+Know the limits, though: Kates does not apply coordinated-omission correction. The `LatencyHistogram` records only the observations that actually occurred — there is no gap detection and no back-filling of latencies for send slots missed during a stall. If the producer itself blocks (for example, its internal buffer fills while a broker pauses), the percentiles for that window understate what a steady stream of clients would have experienced. For stall-heavy workloads, cross-check the percentiles against the latency [heatmap](appendix-a-glossary.md#gl-heatmap), which makes those windows visible.
 
 ## Heatmaps: Seeing the Full Picture
 
-Percentiles compress the latency distribution into a few numbers. Heatmaps preserve the **full distribution over time**, revealing patterns invisible in aggregate metrics.
+Percentiles compress the latency distribution into a few numbers. Heatmaps preserve the **full distribution over time**, revealing patterns invisible in aggregate metrics [@gregg2010visualizing].
 
 ```mermaid
 graph TD
@@ -195,14 +203,14 @@ A heatmap answers questions that percentiles cannot:
 
 Kates exports heatmap data in two formats:
 
-- **JSON** — structured data for Grafana visualization
+- **JSON** — structured data for [Grafana](appendix-a-glossary.md#gl-grafana) visualization
 - **CSV** — tabular data for spreadsheet analysis
 
 Each heatmap row contains counts across logarithmic latency buckets, snapshotted each time the running test's status is polled. For full details on heatmap export commands, bucket boundaries, and reading patterns, see [Observability & Monitoring](09-observability.md#latency-heatmaps).
 
 ## Statistical Significance
 
-Running a test once and drawing conclusions is dangerous. Performance measurements are inherently noisy due to:
+Running a test once and drawing conclusions is dangerous [@georges2007statistically]. Performance measurements are inherently noisy due to:
 
 - JVM warm-up (JIT compilation, class loading)
 - OS-level scheduling jitter
@@ -219,17 +227,21 @@ Always discard the first few seconds of data. Multi-phase Kates scenarios suppor
 For critical decisions, run the same test 3–5 times and compare. Kates provides:
 
 ```bash
-# Run the same test multiple times
-kates test create --type LOAD --records 100000
-kates test create --type LOAD --records 100000
-kates test create --type LOAD --records 100000
+# Run the same test three times, one after another, collecting the run IDs
+IDS=""
+for i in 1 2 3; do
+  ID=$(kates test create --type LOAD --records 100000 --wait -o json | jq -r .id)
+  IDS="${IDS:+$IDS,}$ID"
+done
 
 # Compare results
-kates report compare id1,id2,id3
+kates report compare "$IDS"
 
 # View trends over time
 kates trend --type LOAD --metric p99LatencyMs --days 7
 ```
+
+With `-o json`, `--wait` prints the finished run as JSON, and `jq` picks out its `id`. Run the repetitions sequentially like this: without `--wait`, `kates test create` returns as soon as the [Kates API](appendix-a-glossary.md#gl-kates-api), the service in the cluster that runs your tests, accepts the run. Back-to-back creates then run at the same time — on the same `load-test` [topic](appendix-a-glossary.md#gl-topic), since a [LOAD](appendix-a-glossary.md#gl-test-type) test without `--topic` uses it — and each run measures the load of the others. The Kates API also runs at most three tests at once (`kates.engine.max-concurrent-tests`) and refuses a fourth with `429 Too Many Requests`.
 
 ### What "Good" Looks Like
 
@@ -242,7 +254,7 @@ There is no universal "good" latency or throughput. It depends entirely on your 
 | Batch data pipeline | \< 1s | 1M+ rec/s |
 | Financial transactions | \< 5ms | 1K–10K rec/s |
 
-Kates lets you define SLA thresholds per test scenario, so "good" is whatever you define it to be.
+Kates lets you set [SLA](appendix-a-glossary.md#gl-sla) thresholds per test scenario, targets you choose in the style of an SLO [@beyer2016site] rather than a contract, so "good" is whatever you define it to be.
 
 ::: {.callout-tip}
 **Try it**
@@ -256,13 +268,13 @@ kates test list --type LOAD
 kates report diff id1 id2
 ```
 
-Each run prints its ID (`kates test list --type LOAD` recovers them if you lose track). Expect P50 to agree closely while P99 and Max drift — that gap is your run-to-run noise floor, and any "regression" smaller than it is indistinguishable from chance.
+Each run prints its ID (`kates test list --type LOAD` recovers them if you lose track). Expect P50 to agree closely while P99 and Max drift — that gap is your run-to-run [noise floor](appendix-a-glossary.md#gl-noise-floor), and any "regression" smaller than it is indistinguishable from chance.
 :::
 
 ## Summary
 
 - Throughput and latency are coupled: past the saturation point, throughput plateaus while latency climbs — finding that knee is what a performance test is for.
-- Averages hide the tail. Kates reports the mean plus P50, P95, P99, P99.9, and Max, and the tail is where GC pauses, ISR churn, and log rolls live.
+- Averages hide the tail. Kates reports the mean plus P50, P95, P99, P99.9, and Max, and the tail is where GC pauses, [ISR](appendix-a-glossary.md#gl-isr) churn, and log rolls live.
 - Kates avoids closed-loop coordinated omission by sending asynchronously at a paced rate, but it does not back-fill missed send slots — cross-check stall-heavy runs against the latency heatmap.
 - Heatmaps preserve the full latency distribution over time, exposing bimodal populations and regime changes that percentiles compress away.
 - One run proves nothing: keep warm-up out of steady-state numbers, repeat the test 3–5 times, and compare runs before trusting a difference.

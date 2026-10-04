@@ -1,0 +1,51 @@
+# Read-only source — the shape a real migration usually arrives in.
+#
+# You are given credentials that may READ the old cluster and nothing more.
+# MirrorMaker's default breaks that: it writes its offset-syncs topic to the
+# SOURCE, so the connector dies inside topic creation with a
+# TopicAuthorizationException while the CR still says Ready.
+#
+#   helm upgrade --install mm2 charts/mirror-maker2 \
+#     -f charts/mirror-maker2/values-kind.yaml \
+#     -f charts/mirror-maker2/values-readonly-source.yaml
+#
+# What changes: every MirrorMaker write lands on the target. The source
+# principal then needs exactly what a read-only contract implies —
+# READ + DESCRIBE on the mirrored topics and groups — and the target
+# principal picks up the mm2-offset-syncs grant, which kafkaUser auto-mode
+# adds for you.
+#
+# Cost, stated plainly: flipping this on a RUNNING mirror restarts offset
+# translation from an empty topic, so checkpoints regress until it catches up.
+# Decide it before the first install.
+offsetSyncs:
+  location: target
+
+mirrors:
+  - source:
+      alias: source
+      clusterName: "krafter"
+      namespace: "kafka"
+      kafkaVersion: ""
+      authentication:
+        type: scram-sha-512
+        username: "kates-mm2"
+        secretName: "kates-mm2"
+        secretKey: "password"
+    readOnlySource: true
+    topicsPattern: "kates\\..*"
+    groupsPattern: ".*"
+    sourceConnector:
+      tasksMax: 1
+      config:
+        replication.factor: 1
+        offset-syncs.topic.replication.factor: 1
+        # Nothing may be written to the source, and both of these write to the
+        # TARGET — they stay on. It is offset-syncs that had to move.
+        sync.topic.configs.enabled: "true"
+        sync.topic.acls.enabled: "false"
+    checkpointConnector:
+      tasksMax: 1
+      config:
+        checkpoints.topic.replication.factor: 1
+        sync.group.offsets.enabled: "true"

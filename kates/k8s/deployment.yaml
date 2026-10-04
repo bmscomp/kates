@@ -6,9 +6,17 @@ metadata:
   labels:
     app: kates
     app.kubernetes.io/name: kates
-    app.kubernetes.io/part-of: klster
+    app.kubernetes.io/part-of: kates
 spec:
+  # One pod, and Recreate so an update never runs two. The Kates API keeps its
+  # runs, the concurrent-run limit, the disruption lease and event streams in
+  # memory, and a pod that starts marks every RUNNING run FAILED, so a second
+  # pod — another replica, or a rolling update's surge pod — fails the runs
+  # the first is executing. The cost is a gap during an update, until the new
+  # pod is Ready. The Helm chart's schema refuses more than one replica.
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kates
@@ -18,10 +26,20 @@ spec:
         app: kates
     spec:
       serviceAccountName: kates
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: kates
-        image: ghcr.io/bmscomp/kates:1.11.0
+        image: ghcr.io/bmscomp/kates:1.24.0
         imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
         ports:
         - containerPort: 8080
           name: http
@@ -29,6 +47,9 @@ spec:
         envFrom:
         - configMapRef:
             name: kates-config
+        # API key + DB credentials — create from secret.yaml.example first.
+        - secretRef:
+            name: kates-secrets
         env:
         - name: KATES_KAFKA_SASL_PASSWORD
           valueFrom:
@@ -37,6 +58,11 @@ spec:
               key: password
         - name: JAVA_TOOL_OPTIONS
           value: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
+        # Writable scratch space — required with readOnlyRootFilesystem
+        # (JVM tmpdir, Vert.x cache, compression JNI extraction).
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         resources:
           requests:
             memory: "2Gi"
@@ -44,16 +70,32 @@ spec:
           limits:
             memory: "4Gi"
             cpu: "2"
+        # Same probe rules as the Helm chart, which these manifests drifted from.
+        # /api/health is a Kafka reachability report: it makes a blocking
+        # AdminClient round-trip per request, so a cluster whose brokers are
+        # still coming up — or deliberately down, which is normal for a chaos
+        # tool — never goes Ready. /q/health/ready reads a cached value instead.
+        startupProbe:
+          httpGet:
+            path: /q/health/started
+            port: 8080
+          failureThreshold: 60
+          periodSeconds: 2
+          timeoutSeconds: 3
         readinessProbe:
           httpGet:
-            path: /api/health
+            path: /q/health/ready
             port: 8080
           initialDelaySeconds: 5
-          timeoutSeconds: 10
+          timeoutSeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
             path: /q/health/live
             port: 8080
           initialDelaySeconds: 10
+          timeoutSeconds: 5
           periodSeconds: 30
+      volumes:
+      - name: tmp
+        emptyDir: {}

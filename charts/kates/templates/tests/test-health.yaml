@@ -33,14 +33,26 @@ spec:
       - sh
       - -c
       - |
-        echo "Testing KATES health endpoint..."
-        STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/health)
+        # Asserts on the READINESS endpoint, the same one the kubelet probes.
+        # `/api/health` is a Kafka reachability report, not an app health check:
+        # it returns non-200 whenever the brokers are down, which is a normal
+        # state for a chaos-testing tool and used to fail `helm test` on any
+        # cluster without a live Kafka. Its body is still printed below as
+        # diagnostics, but it does not decide the result.
+        BASE=http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}
+        READY_PATH={{ .Values.probes.readiness.path | default "/q/health/ready" | quote }}
+        echo "Testing KATES readiness endpoint ($READY_PATH)..."
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE$READY_PATH")
         if [ "$STATUS" = "200" ]; then
-          echo "Health check passed (HTTP $STATUS)"
-          BODY=$(curl -s http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/health)
-          echo "$BODY"
+          echo "Readiness check passed (HTTP $STATUS)"
+          curl -s "$BASE$READY_PATH"
+          echo ""
+          echo "Kafka reachability (informational, non-200 is not a failure):"
+          curl -s -o /dev/null -w "  /api/health -> %{http_code}\n" "$BASE/api/health"
+          curl -s "$BASE/api/health"
           exit 0
         else
-          echo "Health check failed (HTTP $STATUS)"
+          echo "Readiness check failed (HTTP $STATUS)"
+          curl -s "$BASE$READY_PATH"
           exit 1
         fi

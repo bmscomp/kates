@@ -24,19 +24,25 @@ data:
               password="${KAFKA_UI_PASSWORD}";
             {{- if .Values.kafka.tls.enabled }}
             ssl.truststore.type: PEM
+            ssl.truststore.location: /etc/kafka-ui/certs/{{ .Values.kafka.tls.certificateKey | default "ca.crt" }}
             {{- end }}
           {{- if .Values.schemaRegistry.enabled }}
           schemaRegistry: {{ include "kafka-ui.schemaRegistryUrl" . }}
           {{- if .Values.schemaRegistry.auth.enabled }}
           schemaRegistryAuth:
             username: {{ .Values.schemaRegistry.auth.username }}
-            password: {{ .Values.schemaRegistry.auth.password }}
+            # Password is injected from a Secret via the env var below.
+            password: ${SCHEMA_REGISTRY_PASSWORD}
           {{- end }}
           {{- end }}
           {{- if .Values.kafkaConnect.enabled }}
           kafkaConnect:
             - name: {{ .Values.kafkaConnect.name | default "connect-cluster" }}
               address: {{ include "kafka-ui.kafkaConnectUrl" . }}
+              {{- if .Values.kafkaConnect.auth.enabled }}
+              username: {{ .Values.kafkaConnect.auth.username }}
+              password: ${KAFKA_CONNECT_PASSWORD}
+              {{- end }}
           {{- end }}
 
     auth:

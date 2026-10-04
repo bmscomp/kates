@@ -2,8 +2,13 @@ apiVersion: v2
 name: connect-cluster
 description: A Helm chart for deploying Strimzi Kafka Connect clusters
 type: application
-version: 1.2.1
-appVersion: "4.2.0"
+# Patch: the Helm-test image moves to kates-tester 1.24.0, the tag the
+# v1.24.0 release publishes; every Strimzi chart pins the same one.
+# Templates and defaults are otherwise unchanged.
+version: 2.1.4
+# Tracks the Kafka line the workers run, as mirror-maker2's does. The plugin
+# set is in the image; its pin is the kates.io/connect-image annotation.
+appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
 sources:
@@ -17,4 +22,27 @@ keywords:
   - cdc
   - debezium
   - strimzi
-icon: ""
+icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
+dependencies:
+  - name: kafka-common
+    version: 0.1.0
+    repository: file://../kafka-common
+annotations:
+  kates.io/connect-image: "ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1"
+  artifacthub.io/category: streaming-messaging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.24.0, the tag the v1.24.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image changes this time: its Kafka CLI moves from 3.7.0 on debian:bookworm-slim to 4.3.1 on debian:trixie-slim, the Kafka the charts deploy, without the 3.7 line's kafka-clients, ZooKeeper and Jetty 9.4 CVEs (#184). A 4.x CLI talks to brokers 2.1 and newer"
+    - kind: fixed
+      description: "schemaRegistry.enabled rendered a worker-level schema.registry.url on Apicurio's Confluent-compatible path. Connect hands a converter only the worker properties under its own key.converter. or value.converter. prefix, and Apicurio's converters read apicurio.registry.url, so no converter ever received it and an Apicurio converter failed to configure ('Missing registry base url'). With schemaRegistry.enabled, each Apicurio converter in config.keyConverter / config.valueConverter now gets <key|value>.converter.apicurio.registry.url; an extraConfig entry of the same name wins. The worker-level schema.registry.url is no longer rendered"
+    - kind: changed
+      description: "schemaRegistry.path defaults to /apis/registry/v3, Apicurio Registry 3's core API, which the Apicurio converters call; /apis/ccompat/v7 is the Confluent-compatible API they do not speak. A release that set path explicitly keeps its value; if that value is a /apis/ccompat/ path and config names an Apicurio converter, the render is refused with the fix named — set path to /apis/registry/v3 or remove it"
+    - kind: fixed
+      description: "The Schema Registry egress rule admitted only schemaRegistry.port, the Service's port (80). NetworkPolicy matches the destination pod's port after the Service translates it, so Connect could not reach Apicurio's pods on 8080 wherever policies are enforced. The rule admits the new schemaRegistry.targetPort (default 8080) as well as port"
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.23.0, the tag the v1.23.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.22.0 — nothing under tester/ moved — so this is the pin, not the tooling"
+    - kind: fixed
+      description: "values-kind.yaml held monitoring.podMonitor.enabled and alerts.enabled at false, so a kind install was never scraped and the Kafka Connect board stayed empty. The overlay now follows values-generic.yaml: monitoring stays on, and the chart renders it only where the monitoring.coreos.com API exists"
+    - kind: removed
+      description: "ACTION REQUIRED — the dashboards block is GONE, and a release that still sets any dashboards.* key is refused with the replacement named. The Kafka Connect board is delivered by charts/monitoring (dashboards.enabled there) for every Connect group in the cluster; its $namespace/$cluster variables select a release, so the per-release copy and uid rewrite this chart carried are gone with the block, and the <fullname>-dashboard ConfigMap is no longer rendered. The board installs once, under the stable uid kates-connect — delete the old per-release boards from Grafana and repoint any link that names one"

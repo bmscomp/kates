@@ -7,6 +7,7 @@
 #   ./scripts/deploy-kafka-generic.sh               # interactive (prompts before deploy)
 #   ./scripts/deploy-kafka-generic.sh --yes          # non-interactive (auto-approve)
 #   ./scripts/deploy-kafka-generic.sh -f extra.yaml  # merge additional values overlay
+#                                                    # (repeatable; later files win)
 #   ./scripts/deploy-kafka-generic.sh --skip-tests   # skip Helm test after deploy
 
 set -euo pipefail
@@ -23,23 +24,24 @@ AUTO_OVERLAY=""
 
 # Parse arguments
 AUTO_APPROVE=false
-EXTRA_VALUES=""
+EXTRA_VALUES=()
 SKIP_TESTS=false
 RUN_TESTS=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes|-y)       AUTO_APPROVE=true; shift ;;
-        --values|-f)    EXTRA_VALUES="$2"; shift 2 ;;
+        --values|-f)    EXTRA_VALUES+=("$2"); shift 2 ;;
         --skip-tests)   SKIP_TESTS=true; shift ;;
         --run-tests)    RUN_TESTS=true; SKIP_TESTS=false; shift ;;
         -h|--help)
-            echo "Usage: $0 [--yes] [--values extra.yaml] [--skip-tests] [--run-tests]"
+            echo "Usage: $0 [--yes] [--values extra.yaml]... [--skip-tests] [--run-tests]"
             echo ""
             echo "Deploy Kafka to any Kubernetes cluster using auto-detected configuration."
             echo ""
             echo "Options:"
             echo "  -y, --yes          Skip review prompt (non-interactive)"
             echo "  -f, --values FILE  Merge additional values overlay on top of detected values"
+            echo "                     (repeatable; a later file wins over an earlier one)"
             echo "  --skip-tests       Skip Helm test after deployment"
             echo "  --run-tests        Force Helm tests even when auto-skip would apply (e.g. Kind)"
             echo "  -h, --help         Show this help"
@@ -59,6 +61,10 @@ bold "════════════════════════�
 echo ""
 
 info "Step 1/6: Detecting cluster configuration..."
+# The detect step writes the generated values here; ensure the directory
+# exists on a clean checkout (make targets create .build/ earlier, but running
+# this script standalone — e.g. in CI — does not).
+mkdir -p "$(dirname "${DETECTED_VALUES}")"
 if command -v kates &> /dev/null; then
     info "  Using kates CLI for cluster detection"
     kates detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
@@ -80,14 +86,16 @@ echo "────────────────────────�
 cat "${DETECTED_VALUES}"
 echo "─────────────────────────────────────────────"
 
-if [ -n "${EXTRA_VALUES}" ]; then
-    if [ -f "${EXTRA_VALUES}" ]; then
-        info "Additional overlay: ${EXTRA_VALUES}"
+# ${EXTRA_VALUES[@]+...}: bash 3.2, macOS's /bin/bash, calls an empty array
+# unbound under set -u.
+for extra in ${EXTRA_VALUES[@]+"${EXTRA_VALUES[@]}"}; do
+    if [ -f "${extra}" ]; then
+        info "Additional overlay: ${extra}"
     else
-        error "Extra values file not found: ${EXTRA_VALUES}"
+        error "Extra values file not found: ${extra}"
         exit 1
     fi
-fi
+done
 
 # Resolve environment/provider overlay automatically.
 # Priority: explicit ENV (from Makefile) -> detected provider.
@@ -129,7 +137,9 @@ fi
 # ── Step 3: Dependencies ─────────────────────────────────────────────────────
 echo ""
 info "Step 3/6: Building Helm chart dependencies..."
-helm dependency build "${CHART_DIR}" 2>/dev/null || true
+# `update` when `build` refuses: a Chart.lock from kafka-cluster 0.4 does not
+# list the kafka-common library 1.0 depends on.
+helm dependency build "${CHART_DIR}" >/dev/null 2>&1 || helm dependency update "${CHART_DIR}"
 
 # Extract cluster domain from the Kubernetes environment
 CLUSTER_DOMAIN=$(get_cluster_domain "$AUTO_APPROVE")
@@ -142,40 +152,33 @@ info "Step 4/6: Deploying Kafka cluster..."
 # Ensure namespace exists
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
 
-# Install Strimzi Operator if not present (separate release required to avoid CRD chicken-and-egg)
-# Skip if the detect output already confirmed Strimzi is running
+# Reconcile the Strimzi Operator (a separate release from kafka-cluster, to
+# avoid the CRD chicken-and-egg). The only opt-out is an explicit
+# strimziOperator.enabled=false from `kates detect`, meaning the pipeline
+# manages the operator itself.
 if grep -A1 'strimziOperator:' "${DETECTED_VALUES}" 2>/dev/null | grep -q 'enabled: false'; then
     info "  Strimzi Operator already managed by pipeline — skipping"
 else
-    # Check if Strimzi CRD is missing OR if the operator deployment is missing
-    operator_exists=false
-    if kubectl get deployment -A -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
-        operator_exists=true
-    elif kubectl get deployment -n kafka -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
-        operator_exists=true
-    elif kubectl get deployment -n strimzi-operator -o custom-columns=NAME:.metadata.name 2>/dev/null | grep -q "strimzi-cluster-operator"; then
-        operator_exists=true
-    fi
+    # Unconditional by design. `helm upgrade --install` is idempotent and
+    # converges, and the chart's pre-upgrade hook is what keeps the CRDs current
+    # — so gating this on "is the operator already there?" would mean the hook
+    # never fires on an existing cluster and the CRDs silently freeze at
+    # whatever version first installed them.
+    info "  Reconciling Strimzi Kafka Operator (charts/strimzi-operator)..."
+    ensure_namespace "strimzi-operator"
 
-    if ! kubectl get crd kafkas.kafka.strimzi.io &>/dev/null || [ "$operator_exists" = false ]; then
-        if [ "$operator_exists" = false ] && kubectl get crd kafkas.kafka.strimzi.io &>/dev/null; then
-            warn "  Strimzi CRDs are present, but Strimzi Operator deployment is not running!"
-            info "  Installing Strimzi Kafka Operator to manage existing CRDs..."
-        else
-            info "  Strimzi CRDs not found. Installing Strimzi Kafka Operator in strimzi-operator namespace..."
-        fi
-        kubectl create namespace "strimzi-operator" --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
-        helm upgrade --install strimzi-operator oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-            --version 1.0.0 \
-            --namespace "strimzi-operator" \
-            --set watchAnyNamespace=true \
-            --set replicas=1 \
-            --set kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}" \
-            --timeout 5m --wait
-        kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
-    else
-        info "  Strimzi CRDs and Operator deployment already present"
-    fi
+    # The wrapper chart does not render until its subchart is fetched.
+    helm dependency build "${ROOT_DIR}/charts/strimzi-operator"
+
+    # --reset-values: the pre-chart releases stored flat upstream keys
+    # (watchAnyNamespace, replicas, ...) which now live under the subchart key.
+    # A bare upgrade reuses them and the values schema rejects them.
+    helm upgrade --install strimzi-operator "${ROOT_DIR}/charts/strimzi-operator" \
+        --namespace "strimzi-operator" \
+        --reset-values \
+        --set "strimzi-kafka-operator.kubernetesServiceDnsDomain=${CLUSTER_DOMAIN}" \
+        --timeout 10m --wait
+    kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
 fi
 
 # Adopt pre-existing Kafka resources into Helm release
@@ -192,10 +195,14 @@ for kind in kafkatopics kafkausers; do
     done
 done
 
-# Build values chain
-VALUES_ARGS=(-f "${DETECTED_VALUES}")
+# Build values chain. values-platform.yaml selects the kates platform profile
+# (its topics, users and client NetworkPolicy grants); it goes right after the
+# detected values so the overlays can still change any of it.
+VALUES_ARGS=(-f "${DETECTED_VALUES}" -f "${CHART_DIR}/values-platform.yaml")
 [ -n "${AUTO_OVERLAY}" ] && VALUES_ARGS+=(-f "${AUTO_OVERLAY}")
-[ -n "${EXTRA_VALUES}" ] && VALUES_ARGS+=(-f "${EXTRA_VALUES}")
+for extra in ${EXTRA_VALUES[@]+"${EXTRA_VALUES[@]}"}; do
+    VALUES_ARGS+=(-f "${extra}")
+done
 
 info "  Release:    ${RELEASE_NAME}"
 info "  Namespace:  ${NAMESPACE}"

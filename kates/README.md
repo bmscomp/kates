@@ -15,7 +15,7 @@ Quarkus-based REST API that orchestrates Kafka performance tests, chaos engineer
 ## Package Structure
 
 ```
-src/main/java/com/klster/kates/
+src/main/java/com/bmscomp/kates/
 ├── api/            REST endpoints (JAX-RS resources)
 ├── chaos/          Chaos provider implementations (Litmus, K8s, NoOp)
 ├── config/         Application configuration beans
