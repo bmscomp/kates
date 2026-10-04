@@ -26,7 +26,9 @@ public class TrendResource {
     TrendService trendService;
 
     @GET
-    @Operation(summary = "Get performance trend", description = "Returns time-series metrics with baseline comparison")
+    @Operation(
+            summary = "Get performance trend",
+            description = "Returns one point per DONE run of the type in the window, with baseline comparison")
     public Response getTrend(
             @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
             @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec")
@@ -56,7 +58,9 @@ public class TrendResource {
 
     @GET
     @Path("/phases")
-    @Operation(summary = "Discover test phases", description = "Lists distinct phase names observed in recent runs")
+    @Operation(
+            summary = "Discover test phases",
+            description = "Lists distinct phase names observed in the type's DONE runs in the window")
     public Response getPhases(
             @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
             @Parameter(description = "Lookback window in days") @QueryParam("days") @DefaultValue("30") int days) {
@@ -78,7 +82,9 @@ public class TrendResource {
 
     @GET
     @Path("/breakdown")
-    @Operation(summary = "Phase-level trend breakdown", description = "Returns per-phase metric trends")
+    @Operation(
+            summary = "Phase-level trend breakdown",
+            description = "Returns per-phase metric trends over the type's DONE runs in the window")
     public Response getBreakdown(
             @Parameter(description = "Test type (required)", required = true) @QueryParam("type") String typeStr,
             @Parameter(description = "Metric name") @QueryParam("metric") @DefaultValue("avgThroughputRecPerSec")

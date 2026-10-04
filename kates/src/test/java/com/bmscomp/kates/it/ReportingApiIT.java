@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
@@ -22,6 +23,7 @@ import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.TestRunRepository;
@@ -173,10 +175,12 @@ class ReportingApiIT {
     void trendsAreDerivedFromTheRunsInTheWindow() {
         save(ItSupport.finishedRun(TestType.LOAD, null, 90_000, 5.5, 45.0));
         save(ItSupport.finishedRun(TestType.LOAD, null, 80_000, 6.0, 50.0));
+        // A FAILED run's numbers stop where it failed, so no trend plots it.
+        save(ItSupport.finishedRun(TestType.LOAD, null, 1_000, 50.0, 900.0).withStatus(TestResult.TaskStatus.FAILED));
 
-        // Three LOAD runs exist inside the 30-day window; the trend must find
-        // all of them, which is only true if the date-range query and the
-        // summary projection agree.
+        // Three DONE LOAD runs exist inside the 30-day window; the trend must
+        // find all of them with the values of their stored results, which is
+        // only true if the date-range query reads each run with its results.
         given().when()
                 .get("/api/trends?type=LOAD&days=30")
                 .then()
@@ -184,7 +188,8 @@ class ReportingApiIT {
                 .body("testType", equalTo("LOAD"))
                 .body("metric", equalTo("avgThroughputRecPerSec"))
                 .body("dataPoints", hasSize(3))
-                .body("dataPoints.runId", hasItem(runId));
+                .body("dataPoints.runId", hasItem(runId))
+                .body("dataPoints.value", hasItems(10_000.0f, 9_000.0f, 8_000.0f));
 
         given().when()
                 .get("/api/trends?type=LOAD&days=30&metric=p99LatencyMs")
@@ -192,6 +197,14 @@ class ReportingApiIT {
                 .statusCode(200)
                 .body("metric", equalTo("p99LatencyMs"))
                 .body("dataPoints", hasSize(3));
+
+        // The trend leaves the run's report whole: reading runs without their
+        // results used to leave an all-zero report cached for each of them.
+        given().when()
+                .get("/api/tests/" + runId + "/report/summary")
+                .then()
+                .statusCode(200)
+                .body("totalRecords", is(100_000));
 
         // A type with no history is an empty trend, not an error.
         given().when()
