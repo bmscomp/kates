@@ -842,7 +842,7 @@ Per-broker metrics for a test run.
 
 ### Trend Analysis
 
-Trend analysis is how you move from "this test looks fine" to "performance has been stable for weeks." The trend command queries historical test results and renders sparkline charts showing how a metric has changed over time. It's essential for catching slow regressions that no single test run would reveal — a P99 that creeps from 15ms to 25ms over a month is invisible in individual reports but obvious in a trend chart.
+Trend analysis is how you move from "this test looks fine" to "performance has been stable for weeks." The trend command reads the `DONE` runs of one test type and renders sparkline charts showing how a metric has changed over time; `FAILED` runs and runs still in flight are left out. It's essential for catching slow regressions that no single test run would reveal — a P99 that creeps from 15ms to 25ms over a month is invisible in individual reports but obvious in a trend chart.
 
 #### trend
 
