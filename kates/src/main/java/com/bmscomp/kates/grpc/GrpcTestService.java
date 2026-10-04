@@ -130,12 +130,14 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
     @Override
     public Uni<com.google.protobuf.Empty> deleteTest(DeleteTestRequest request) {
         return Uni.createFrom().item(() -> {
-            repository
-                    .findById(request.getId())
-                    .orElseThrow(() -> Status.NOT_FOUND
-                            .withDescription("Test not found: " + request.getId())
-                            .asRuntimeException());
-            repository.delete(request.getId());
+            // The same delete as DELETE /api/tests/{id}. Removing only the row
+            // left a running run's workers producing and its concurrency slot
+            // taken, so new runs answered 429 until a restart.
+            if (!orchestrator.deleteTest(request.getId())) {
+                throw Status.NOT_FOUND
+                        .withDescription("Test not found: " + request.getId())
+                        .asRuntimeException();
+            }
             return com.google.protobuf.Empty.getDefaultInstance();
         });
     }

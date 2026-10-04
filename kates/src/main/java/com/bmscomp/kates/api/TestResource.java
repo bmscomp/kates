@@ -145,7 +145,10 @@ public class TestResource {
 
     @DELETE
     @Path("/bulk")
-    @Operation(summary = "Delete multiple tests", description = "Deletes test runs by a list of IDs")
+    @Operation(
+            summary = "Delete multiple tests",
+            description = "Deletes test runs by a list of IDs, stopping each one that is still running first,"
+                    + " as DELETE /api/tests/{id} does")
     public Response bulkDelete(com.bmscomp.kates.domain.BulkDeleteRequest request) {
         List<String> ids = request != null ? request.ids() : null;
         if (ids == null || ids.isEmpty()) {
@@ -155,9 +158,9 @@ public class TestResource {
         }
         int deleted = 0, notFound = 0;
         for (String id : ids) {
-            var run = repository.findById(id);
-            if (run.isPresent()) {
-                repository.delete(id);
+            // The same delete as the single one. Removing only the row left a
+            // running run's workers producing and its concurrency slot taken.
+            if (orchestrator.deleteTest(id)) {
                 auditService.record("DELETE", "test", id, "bulk delete");
                 deleted++;
             } else {
@@ -241,21 +244,25 @@ public class TestResource {
 
     @DELETE
     @Path("/{id}")
-    @Operation(summary = "Delete a test run", description = "Stops the test if running and removes it")
+    @Operation(
+            summary = "Delete a test run",
+            description = "Stops the test if running and removes it with its results. A running test's tasks"
+                    + " stop, it gives back its place among the kates.engine.max-concurrent-tests running"
+                    + " tests, and its end is announced as FAILED, with the detail \"deleted\" on the event"
+                    + " stream.")
     @APIResponse(responseCode = "204", description = "Test run deleted")
     @APIResponse(responseCode = "404", description = "Test run not found")
     public Response deleteTest(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        return repository
-                .findById(id)
-                .map(run -> {
-                    orchestrator.stopTest(id);
-                    repository.delete(id);
-                    auditService.record("DELETE", "test", id, "Test deleted");
-                    return Response.noContent().build();
-                })
-                .orElse(Response.status(Response.Status.NOT_FOUND)
-                        .entity(new ApiError(404, "Not Found", "Test run not found: " + id))
-                        .build());
+        // A running run used to be stopped through the backend but kept its
+        // concurrency permit, so deleting max-concurrent-tests running runs
+        // made every new run answer 429 until a restart.
+        if (!orchestrator.deleteTest(id)) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(new ApiError(404, "Not Found", "Test run not found: " + id))
+                    .build();
+        }
+        auditService.record("DELETE", "test", id, "Test deleted");
+        return Response.noContent().build();
     }
 
     @POST
