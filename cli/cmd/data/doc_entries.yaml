@@ -583,8 +583,8 @@
   short: "Delete orphaned tests stuck in RUNNING state"
   description: |
     Deletes runs still RUNNING more than --older-than after their planned
-    end (their start plus the duration in their spec). Lists them and asks
-    first; without a terminal, pass --yes.
+    end (their start plus the duration in their spec, twice that for
+    INTEGRITY). Lists them and asks first; without a terminal, pass --yes.
   flags:
     - name: "--dry-run"
       type: bool

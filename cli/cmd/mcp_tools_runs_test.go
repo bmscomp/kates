@@ -221,7 +221,7 @@ func TestMCPListRuns(t *testing.T) {
 		t.Error("nothing was cut")
 	}
 	// A FAILED row may be a reaped or a cancelled run.
-	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatReaper30Minutes, mcpCaveatCancelStoredAsFailed)
+	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed)
 	assertReadOnly(t, fb.Requests())
 }
 
@@ -248,7 +248,7 @@ func TestMCPListRunsOneFilter(t *testing.T) {
 	if got.Total != 2 || got.HasMore || len(got.Runs) != 1 || got.Runs[0].ID != "0000000d" {
 		t.Errorf("status page = %+v", got)
 	}
-	mcpNoCaveat(t, env, mcpCaveatReaper30Minutes)
+	mcpNoCaveat(t, env, mcpCaveatReaperDeadline)
 	assertReadOnly(t, fb.Requests())
 }
 
@@ -474,7 +474,7 @@ func TestMCPGetRun(t *testing.T) {
 		t.Error("nothing was cut")
 	}
 	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks, mcpCaveatLoadSingleProducer)
-	mcpNoCaveat(t, env, mcpCaveatReaper30Minutes, mcpCaveatIntegrityNotStored, mcpCaveatScenarioBaseSpecOnly)
+	mcpNoCaveat(t, env, mcpCaveatReaperDeadline, mcpCaveatIntegrityNotStored, mcpCaveatScenarioBaseSpecOnly)
 
 	// list_runs shows the same digest for the same run.
 	list := mcpData[mcpListRunsOut](t, h.callOK("list_runs", nil))
@@ -573,7 +573,7 @@ func TestMCPGetRunFailedScenarioRun(t *testing.T) {
 	if len(got.Run.Labels) != 2 || !mcpFenced(h, got.Run.Labels[0]) || !strings.Contains(string(got.Run.Labels[1]), "team=payments") {
 		t.Errorf("labels = %q", got.Run.Labels)
 	}
-	mcpWantCaveats(t, env, mcpCaveatReaper30Minutes, mcpCaveatCancelStoredAsFailed, mcpCaveatIntegrityNotStored, mcpCaveatScenarioBaseSpecOnly)
+	mcpWantCaveats(t, env, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed, mcpCaveatIntegrityNotStored, mcpCaveatScenarioBaseSpecOnly)
 	mcpNoCaveat(t, env, mcpCaveatLoadSingleProducer)
 	assertReadOnly(t, fb.Requests())
 }
@@ -756,8 +756,9 @@ func TestMCPGetRunUnvalidatedScenarioText(t *testing.T) {
 	assertReadOnly(t, fb.Requests())
 }
 
-// A run still active whose stored duration reaches the reaper's 30 minutes
-// will be failed at 30 minutes, whatever it says.
+// A run still active that is set to last 30 minutes or more, an INTEGRITY
+// run's read-back included, is failed at 30 minutes by an older Kates API,
+// whatever it says, and the tools cannot tell an older API from a current one.
 func TestMCPGetRunActiveRunOutlastsReaper(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -767,6 +768,9 @@ func TestMCPGetRunActiveRunOutlastsReaper(t *testing.T) {
 		{"endurance at its default", mcpFakeRun{Type: "ENDURANCE", Status: "RUNNING", Spec: mcpLoadSpec(map[string]any{"durationMs": 3600000})}, true},
 		{"pending at the limit", mcpFakeRun{Type: "LOAD", Status: "PENDING", Spec: mcpLoadSpec(map[string]any{"durationMs": 1800000})}, true},
 		{"endurance without a duration", mcpFakeRun{Type: "ENDURANCE", Status: "RUNNING"}, true},
+		{"integrity reading back at the limit", mcpFakeRun{Type: "INTEGRITY", Status: "RUNNING", Spec: mcpLoadSpec(map[string]any{"durationMs": 900000})}, true},
+		{"short integrity", mcpFakeRun{Type: "INTEGRITY", Status: "RUNNING", Spec: mcpLoadSpec(map[string]any{"durationMs": 840000})}, false},
+		{"cdc, which no duration bounds", mcpFakeRun{Type: "INTEGRATION_CDC", Status: "RUNNING", Spec: mcpLoadSpec(map[string]any{"durationMs": 3600000})}, false},
 		{"short endurance", mcpFakeRun{Type: "ENDURANCE", Status: "RUNNING", Spec: mcpLoadSpec(map[string]any{"durationMs": 60000})}, false},
 		{"load at its default", mcpFakeRun{Type: "LOAD", Status: "RUNNING", Spec: mcpLoadSpec(nil)}, false},
 		{"stopping", mcpFakeRun{Type: "ENDURANCE", Status: "STOPPING", Spec: mcpLoadSpec(map[string]any{"durationMs": 3600000})}, false},
@@ -786,9 +790,9 @@ func TestMCPGetRunActiveRunOutlastsReaper(t *testing.T) {
 				}
 				env := h.callOK(tool, args)
 				if tt.reaped {
-					mcpWantCaveats(t, env, mcpCaveatReaper30Minutes)
+					mcpWantCaveats(t, env, mcpCaveatReaperDeadline)
 				} else if tt.run.Status != "DONE" {
-					mcpNoCaveat(t, env, mcpCaveatReaper30Minutes)
+					mcpNoCaveat(t, env, mcpCaveatReaperDeadline)
 				}
 			}
 			assertReadOnly(t, fb.Requests())
@@ -943,7 +947,7 @@ func TestMCPAssessRun(t *testing.T) {
 
 	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks, mcpCaveatRegressionOneBaseline,
 		mcpCaveatBrokerSkewProjected, mcpCaveatAdvisorRulesOfThumb, mcpCaveatLoadSingleProducer)
-	mcpNoCaveat(t, env, mcpCaveatTrendsMixSpecs, mcpCaveatReaper30Minutes)
+	mcpNoCaveat(t, env, mcpCaveatTrendsMixSpecs, mcpCaveatReaperDeadline)
 	if env.Truncated {
 		t.Error("nothing was cut")
 	}
@@ -1362,7 +1366,7 @@ func TestMCPAssessRunScenarioAndTuning(t *testing.T) {
 	mcpWantCaveats(t, env, mcpCaveatScenarioBaseSpecOnly)
 
 	env = h.callOK("assess_run", map[string]any{"run_id": "0000f00d"})
-	mcpWantCaveats(t, env, mcpCaveatTuningOneMeasurement, mcpCaveatReaper30Minutes, mcpCaveatCancelStoredAsFailed)
+	mcpWantCaveats(t, env, mcpCaveatTuningOneMeasurement, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed)
 	for _, p := range mcpPaths(fb.Requests()) {
 		if strings.Contains(p, "/report/tuning") {
 			t.Errorf("assess_run read the tuning ranking: %s", p)
@@ -1516,7 +1520,7 @@ func TestMCPKatesActivity(t *testing.T) {
 	}
 	mcpCheckActivityDisruptions(t, h, got.Disruptions)
 	mcpCheckActivityAudit(t, h, got.Audit)
-	mcpWantCaveats(t, env, mcpCaveatAuditNoActor, mcpCaveatActivityDisruptionRows, mcpCaveatReaper30Minutes, mcpCaveatCancelStoredAsFailed)
+	mcpWantCaveats(t, env, mcpCaveatAuditNoActor, mcpCaveatActivityDisruptionRows, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed)
 	if env.Truncated {
 		t.Error("nothing was cut")
 	}
@@ -1672,7 +1676,7 @@ func TestMCPKatesActivityEmpty(t *testing.T) {
 	if !got.RunningTests.Complete || !got.TestsSince.Complete || !got.Disruptions.Complete || got.Audit.Total != 0 || env.Truncated {
 		t.Errorf("empty = %+v truncated=%v", got, env.Truncated)
 	}
-	mcpNoCaveat(t, env, mcpCaveatReaper30Minutes)
+	mcpNoCaveat(t, env, mcpCaveatReaperDeadline)
 	assertReadOnly(t, fb.Requests())
 }
 
@@ -1807,7 +1811,7 @@ func TestMCPRunReportResource(t *testing.T) {
 	if !ok || !strings.Contains(body, "| testType | LOAD |") || strings.ContainsAny(body, "\x1b\u202e\u200b") {
 		t.Fatalf("report not fenced and cleaned:\n%s", text)
 	}
-	for _, id := range []mcpCaveatID{mcpCaveatSummaryAveragesTasks, mcpCaveatLoadSingleProducer, mcpCaveatReaper30Minutes, mcpCaveatCancelStoredAsFailed} {
+	for _, id := range []mcpCaveatID{mcpCaveatSummaryAveragesTasks, mcpCaveatLoadSingleProducer, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed} {
 		if !strings.Contains(head, "- "+string(id)+": ") {
 			t.Errorf("the header lacks caveat %s:\n%s", id, head)
 		}

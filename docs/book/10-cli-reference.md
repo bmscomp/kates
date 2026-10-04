@@ -688,7 +688,7 @@ kates test cleanup
 kates test cleanup --older-than 2h --yes
 ```
 
-Delete runs that are still `RUNNING` long after they should have ended. A run counts as orphaned when it is more than `--older-than` (default `30m`) past its planned end, which is its start plus the `durationMs` in its spec. The command lists those runs and asks before deleting them; without a terminal it refuses unless `--yes` is given. `--dry-run` only lists them. Deleting a run stops it and removes it with its results, as `kates test delete` does. To stop a run and keep it, use `kates test cancel`. The CLI exits 1 when a delete fails or when you decline.
+Delete runs that are still `RUNNING` long after they should have ended. A run counts as orphaned when it is more than `--older-than` (default `30m`) past its planned end, which is its start plus the `durationMs` in its spec, twice that for an INTEGRITY run, which reads its records back for up to as long again. The command lists those runs and asks before deleting them; without a terminal it refuses unless `--yes` is given. `--dry-run` only lists them. Deleting a run stops it and removes it with its results, as `kates test delete` does. To stop a run and keep it, use `kates test cancel`. The CLI exits 1 when a delete fails or when you decline.
 
 The Kates API already marks a run `FAILED` once it is still `RUNNING` five minutes past its planned end (see the callout under `test create`), so a run this command finds is one that check did not catch.
 

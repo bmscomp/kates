@@ -17,6 +17,7 @@ func TestFindOrphanedRuns(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	ago := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339Nano) }
 	tenMinutes := &client.TestSpec{DurationMs: 600_000}
+	fortyMinutes := &client.TestSpec{DurationMs: 2_400_000}
 
 	runs := []client.TestRun{
 		// The old rule, 5 minutes from the start, deleted this one while it
@@ -24,6 +25,11 @@ func TestFindOrphanedRuns(t *testing.T) {
 		{ID: "midway", CreatedAt: ago(5*time.Minute + time.Second), Spec: tenMinutes},
 		{ID: "just-inside", CreatedAt: ago(39 * time.Minute), Spec: tenMinutes},
 		{ID: "overdue", CreatedAt: ago(41 * time.Minute), Spec: tenMinutes},
+		// An INTEGRITY run reads its records back for up to its duration
+		// again: 75 minutes in, this one may still be reading, and the Kates
+		// API allows it 85.
+		{ID: "integrity-reading", TestType: "INTEGRITY", CreatedAt: ago(75 * time.Minute), Spec: fortyMinutes},
+		{ID: "integrity-overdue", TestType: "INTEGRITY", CreatedAt: ago(111 * time.Minute), Spec: fortyMinutes},
 		{ID: "no-duration", CreatedAt: ago(31 * time.Minute)},
 		{ID: "no-duration-young", CreatedAt: ago(29 * time.Minute), Spec: &client.TestSpec{}},
 		{ID: "no-zone", CreatedAt: now.Add(-3 * time.Hour).Format("2006-01-02T15:04:05")},
@@ -37,13 +43,16 @@ func TestFindOrphanedRuns(t *testing.T) {
 	for _, o := range orphans {
 		got = append(got, o.Run.ID)
 	}
-	if want := []string{"overdue", "no-duration", "no-zone"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("orphans = %v, want %v", got, want)
+	if want := []string{"overdue", "integrity-overdue", "no-duration", "no-zone"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("orphans = %v, want %v", got, want)
 	}
 	if o := orphans[0]; o.Planned != 10*time.Minute || o.Overdue != 31*time.Minute {
 		t.Errorf("overdue run: planned %s, overdue %s; want 10m0s and 31m0s", o.Planned, o.Overdue)
 	}
-	if o := orphans[2]; o.Overdue != 3*time.Hour {
+	if o := orphans[1]; o.Planned != 80*time.Minute || o.Overdue != 31*time.Minute {
+		t.Errorf("overdue INTEGRITY run: planned %s, overdue %s; want 1h20m0s and 31m0s", o.Planned, o.Overdue)
+	}
+	if o := orphans[3]; o.Overdue != 3*time.Hour {
 		t.Errorf("a createdAt without a zone is UTC: overdue %s, want 3h0m0s", o.Overdue)
 	}
 	var skipped []string

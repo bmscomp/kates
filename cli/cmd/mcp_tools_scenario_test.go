@@ -288,6 +288,54 @@ func TestMCPDraftScenarioRefusesWhatApplyAndTheBackendRefuse(t *testing.T) {
 	mcpScnOnlyPinCheck(t, fb)
 }
 
+// TestMCPDraftScenarioRunLength holds a run to both reapers, an INTEGRITY
+// run's read-back included: from 30 minutes an older Kates API fails it before
+// it ends (the caveat), and past the two hours Kates ships as
+// kates.engine.max-duration-ms a current one refuses it with 400 (invalid).
+// INTEGRATION_CDC takes no duration, so neither applies to it.
+func TestMCPDraftScenarioRunLength(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	const older = "; a current Kates API refuses a run set to last more than 7200 s " +
+		"(kates.engine.max-duration-ms as Kates ships it), and an older one fails it 1800 s after its creation"
+	for _, tt := range []struct {
+		typ     string
+		seconds int
+		caveat  bool
+		refused string // the invalid finding on spec.durationSeconds; "" for none
+	}{
+		{"LOAD", 1799, false, ""},
+		{"LOAD", 1800, true, ""},
+		{"INTEGRITY", 899, false, ""},
+		{"INTEGRITY", 900, true, ""},
+		{"ENDURANCE", 7200, true, ""},
+		{"ENDURANCE", 7201, true, "the run is set to last 7201 s" + older},
+		{"INTEGRITY", 3601, true, "an INTEGRITY run produces for up to 3601 s, then reads its records back for up to as long " +
+			"again, 7202 s in all" + older},
+		{"INTEGRATION_CDC", 9000, false, ""},
+	} {
+		yamlText := fmt.Sprintf("scenarios:\n  - name: x\n    type: %s\n    spec: {topic: kates-mcp-x, durationSeconds: %d}\n", tt.typ, tt.seconds)
+		env, out := mcpDraft(t, h, map[string]any{"yaml": yamlText})
+		var refusals []string
+		for _, f := range mcpScnFindingsOn(out, 0, "spec.durationSeconds") {
+			if f.Level == mcpScnInvalid {
+				refusals = append(refusals, f.Message)
+			}
+		}
+		var want []string
+		if tt.refused != "" {
+			want = []string{tt.refused}
+		}
+		if !slices.Equal(refusals, want) {
+			t.Errorf("%s %d s: invalid findings %q, want %q", tt.typ, tt.seconds, refusals, want)
+		}
+		if got := slices.Contains(mcpSecCaveatIDs(env), string(mcpCaveatReaperDeadline)); got != tt.caveat {
+			t.Errorf("%s %d s: caveat %s %v, want %v", tt.typ, tt.seconds, mcpCaveatReaperDeadline, got, tt.caveat)
+		}
+	}
+	mcpScnOnlyPinCheck(t, fb)
+}
+
 // TestMCPDraftScenarioRulesMatchTheBackend runs the cases the backend's
 // TestOrchestratorTest runs through TestOrchestrator.inapplicableFields
 // through draft_scenario's copy of those rules: the two must refuse the same
@@ -402,7 +450,7 @@ validate:
 	if e := sc.Effective; e.ProducerTasks != 8 || e.NumRecords != 5_000_000 || e.DurationMs != 1_800_000 {
 		t.Errorf("effective = %+v", e)
 	}
-	mcpSecHasCaveats(t, env, mcpCaveatReaper30Minutes)
+	mcpSecHasCaveats(t, env, mcpCaveatReaperDeadline)
 	mcpScnOnlyPinCheck(t, fb)
 }
 

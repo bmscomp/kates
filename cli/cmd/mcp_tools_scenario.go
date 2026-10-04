@@ -79,8 +79,6 @@ const (
 	mcpScnEnvMaxDurationMs      = 20 * 60 * 1000
 	mcpScnEnvMaxPartitions      = 50
 	mcpScnEnvTopicPrefix        = "kates-mcp-"
-	// mcpScnReaperMs is kates.engine.max-duration-ms (application.properties:282).
-	mcpScnReaperMs = 30 * 60 * 1000
 )
 
 var mcpScnEnvTypes = []string{"LOAD", "ROUND_TRIP", "ENDURANCE", "INTEGRITY", "VOLUME", "STRESS"}
@@ -772,7 +770,8 @@ func mcpScnCheckScenario(call *mcpCall, i int, sc TestScenario, raw map[string]a
 	}
 	mcpScnCheckApplies(i, req, fs)
 	out.Effective = mcpScnEffectiveOf(req)
-	mcpScnCheckEnvelope(call, i, out.Effective, fs)
+	mcpScnCheckLength(call, i, out.Effective, fs)
+	mcpScnCheckEnvelope(i, out.Effective, fs)
 	mcpScnCheckValidate(i, req, raw, fs)
 	return out
 }
@@ -1080,8 +1079,33 @@ func mcpScnEffectiveOf(req *client.CreateTestRequest) *mcpDraftEffective {
 	return e
 }
 
+// mcpScnCheckLength holds the run's length to the reaper (caveat
+// reaper-deadline), counting an INTEGRITY run's read-back: a current Kates API
+// refuses with 400 a request set to last longer than
+// kates.engine.max-duration-ms (TestOrchestrator.refusal), and an older one
+// starts it and fails it 30 minutes after its creation. This tool cannot tell
+// which the scenario will be sent to, so it holds the run to both.
+func mcpScnCheckLength(call *mcpCall, i int, e *mcpDraftEffective, fs *mcpScnFindings) {
+	planned, ok := mcpPlannedDurationMs(e.Type, e.DurationMs)
+	if !ok || planned < mcpReaperOlderLimitMs {
+		return
+	}
+	call.Caveat(mcpCaveatReaperDeadline)
+	if planned <= mcpReaperMaxDurationMs {
+		return
+	}
+	length := fmt.Sprintf("the run is set to last %d s", planned/1000)
+	if e.Type == "INTEGRITY" {
+		length = fmt.Sprintf("an INTEGRITY run produces for up to %d s, then reads its records back for up to as long "+
+			"again, %d s in all", e.DurationMs/1000, planned/1000)
+	}
+	fs.add(i, mcpScnInvalid, "spec.durationSeconds", fmt.Sprintf("%s; a current Kates API refuses a run set to last "+
+		"more than %d s (kates.engine.max-duration-ms as Kates ships it), and an older one fails it %d s after its "+
+		"creation", length, mcpReaperMaxDurationMs/1000, mcpReaperOlderLimitMs/1000))
+}
+
 // mcpScnCheckEnvelope checks the effective spec against the agent envelope.
-func mcpScnCheckEnvelope(call *mcpCall, i int, e *mcpDraftEffective, fs *mcpScnFindings) {
+func mcpScnCheckEnvelope(i int, e *mcpDraftEffective, fs *mcpScnFindings) {
 	t := e.Type
 	allowed := false
 	for _, a := range mcpScnEnvTypes {
@@ -1108,9 +1132,6 @@ func mcpScnCheckEnvelope(call *mcpCall, i int, e *mcpDraftEffective, fs *mcpScnF
 	if e.DurationMs > mcpScnEnvMaxDurationMs {
 		fs.add(i, mcpScnOutside, "spec.durationSeconds", fmt.Sprintf("the run may last up to %d s; the envelope allows %d s",
 			e.DurationMs/1000, mcpScnEnvMaxDurationMs/1000))
-	}
-	if e.DurationMs >= mcpScnReaperMs {
-		call.Caveat(mcpCaveatReaper30Minutes)
 	}
 	if e.Partitions > mcpScnEnvMaxPartitions {
 		fs.add(i, mcpScnOutside, "spec.partitions", fmt.Sprintf("%d partitions; the envelope allows %d", e.Partitions, mcpScnEnvMaxPartitions))
