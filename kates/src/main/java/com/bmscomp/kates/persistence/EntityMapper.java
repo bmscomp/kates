@@ -43,6 +43,7 @@ public final class EntityMapper {
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
+        entity.setPlannedDurationMs(run.getPlannedDurationMs());
 
         if (run.getResults() != null) {
             for (TestResult result : run.getResults()) {
@@ -67,7 +68,8 @@ public final class EntityMapper {
                 .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
                 .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
                 .withRequestedSpec(
-                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}));
+                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}))
+                .withPlannedDurationMs(entity.getPlannedDurationMs());
 
         if (entity.getResults() != null) {
             run = run.withResults(entity.getResults().stream()
@@ -97,7 +99,8 @@ public final class EntityMapper {
                 .withLabels(fromJson(entity.getLabelsJson(), new TypeReference<LinkedHashMap<String, String>>() {}))
                 .withCdcPhases(fromJson(entity.getCdcPhasesJson(), new TypeReference<LinkedHashMap<String, Long>>() {}))
                 .withRequestedSpec(
-                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}));
+                        fromJson(entity.getRequestedSpecJson(), new TypeReference<LinkedHashMap<String, Object>>() {}))
+                .withPlannedDurationMs(entity.getPlannedDurationMs());
     }
 
     /**
@@ -129,6 +132,11 @@ public final class EntityMapper {
         entity.setSlaJson(toJson(run.getSla()));
         entity.setLabelsJson(toJson(run.getLabels()));
         entity.setCdcPhasesJson(toJson(run.getCdcPhases()));
+        // Fixed when the run is created, like the request, so a copy that never
+        // carried it must not erase the stored one either.
+        if (run.getPlannedDurationMs() != null) {
+            entity.setPlannedDurationMs(run.getPlannedDurationMs());
+        }
 
         mergeResults(entity, run.getResults());
     }

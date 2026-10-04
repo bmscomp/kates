@@ -113,7 +113,7 @@ kates doctor
 # 3. Verify the broker/controller layout and zone distribution
 kates cluster topology
 
-# 4. Run a 25-minute endurance test, inside the 30-minute limit on any run (see test create)
+# 4. Run a 25-minute endurance test
 kates test create --type ENDURANCE --duration 1500 --wait
 
 # 5. Check the endurance results against historical baselines
@@ -606,7 +606,7 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 | `--partitions` | Topic partition count |
 | `--replication-factor` | Topic replication factor |
 | `--min-isr` | Minimum in-sync replicas |
-| `--duration` | Test duration in seconds; the Kates API fails any run still going after 30 minutes (see below) |
+| `--duration` | Test duration in seconds, two hours at most on a default install; the Kates API fails a run still going five minutes after its duration (see below) |
 | `--throughput` | Producer rate in rec/s, for each producer; sent as `targetThroughput` (see the callout below) |
 | `--fetch-min-bytes` | Consumer `fetch.min.bytes`, for LOAD, ENDURANCE and INTEGRITY |
 | `--fetch-max-wait-ms` | Consumer `fetch.max.wait.ms`, for LOAD, ENDURANCE and INTEGRITY |
@@ -620,11 +620,11 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 :::
 
 ::: {.callout-important}
-**No run lasts longer than 30 minutes**
+**No run lasts longer than two hours by default**
 
-The Kates API fails any run that is still `RUNNING` 30 minutes after it was created: it stops the run's producers and consumers and marks the run `FAILED` with the error `Timeout: exceeded max duration of 1800000ms`, and `--wait` then exits 1. It checks once a minute, so the run fails between 30 and 31 minutes after creation. The clock starts before the Kates API creates the topic and starts the run's tasks, while `--duration` counts from the task start, so a run with a `--duration` of 1,800 s is still going when the limit passes and can fail just before it ends; keep `--duration` to 1,700 s or less. A run that ends on its record count is cut off the same way. The default ENDURANCE run sends 10M records at 5,000 records per second, which takes about 33 minutes, so on a default install it fails unless `--records 8500000` or fewer, or `--duration 1700` or less, brings it under the limit.
+The Kates API gives each run its duration, `--duration` or the type's default, and five minutes more, counted from the run's creation. An INTEGRITY run is set to last twice its duration, since it reads its records back for up to as long again, and gets that and the five minutes. A run still `RUNNING` after that is failed: the Kates API stops its producers and consumers and marks the run `FAILED`, each unfinished task with an error that starts `Timeout:`, and `--wait` then exits 1. It checks once a minute. An INTEGRATION_CDC run has no duration of its own and gets two hours and five minutes. A run set to last longer than two hours is refused: the command fails with `[400] Validation Failed:` and a message naming `durationMs`, and no run starts.
 
-The limit is the Kates API setting `kates.engine.max-duration-ms`, 1,800,000 ms by default, and the `kates` chart has no value for it. To allow longer runs, set the environment variable `KATES_ENGINE_MAX_DURATION_MS` through the chart's `extraEnv`. Start from the values the release runs with, and upgrade from a checkout of the version it runs, so the upgrade changes nothing else:
+The two hours are the Kates API setting `kates.engine.max-duration-ms`, 7,200,000 ms by default, and the five minutes `kates.engine.reaper-grace-ms`; the `kates` chart has a value for neither. To allow longer runs, set the environment variable `KATES_ENGINE_MAX_DURATION_MS` through the chart's `extraEnv`. Start from the values the release runs with, and upgrade from a checkout of the version it runs, so the upgrade changes nothing else:
 
 ```bash
 # Every value the release was installed with — its files and its --set flags
@@ -636,7 +636,7 @@ Add the variable to `extraEnv` in `kates-current.yaml`, next to any entries alre
 ```yaml
 extraEnv:
   - name: KATES_ENGINE_MAX_DURATION_MS
-    value: "7200000"   # two hours, in milliseconds
+    value: "14400000"   # four hours, in milliseconds
 ```
 
 ```bash
@@ -688,7 +688,7 @@ kates test cleanup --older-than 2h --yes
 
 Delete runs that are still `RUNNING` long after they should have ended. A run counts as orphaned when it is more than `--older-than` (default `30m`) past its planned end, which is its start plus the `durationMs` in its spec. The command lists those runs and asks before deleting them; without a terminal it refuses unless `--yes` is given. `--dry-run` only lists them. Deleting a run stops it and removes it with its results, as `kates test delete` does. To stop a run and keep it, use `kates test cancel`. The CLI exits 1 when a delete fails or when you decline.
 
-The Kates API already marks a run `FAILED` once it has been `RUNNING` longer than `kates.engine.max-duration-ms`, 30 minutes by default, so a run this command finds is one that limit did not catch.
+The Kates API already marks a run `FAILED` once it is still `RUNNING` five minutes past its planned end (see the callout under `test create`), so a run this command finds is one that check did not catch.
 
 #### test watch
 
@@ -730,13 +730,13 @@ kates test scaffold export --all           # export every template
 | `quick-load` | LOAD | 50k records of 1 KiB through one producer and one consumer; gates on P99 ≤ 100 ms and at least 5,000 rec/s |
 | `production-load` | LOAD | Up to 1M records of 2 KiB with `acks=all`, lz4 and 12 partitions for at most 300 s, through one producer and one consumer; gates on P99 ≤ 50 ms, average ≤ 10 ms and at least 50,000 rec/s |
 | `stress-test` | STRESS | 16 producers, each sending up to 5M records of 512 B with `acks=1` and snappy to 24 partitions; gates each producer on P99 ≤ 200 ms and at least 100,000 rec/s |
-| `endurance-soak` | ENDURANCE | 10M records of 1 KiB at 5,000 rec/s through one producer and one consumer; gates on P99 ≤ 100 ms and average ≤ 20 ms. The records take about 33 minutes, past the 30-minute limit on any run (see the callout under `test create`), so on a default install the run fails and `kates test apply --wait` exits 1. Set `records` to 8,500,000 or fewer in the exported file to run it |
+| `endurance-soak` | ENDURANCE | 10M records of 1 KiB at 5,000 rec/s through one producer and one consumer; gates on P99 ≤ 100 ms and average ≤ 20 ms. The records take about 33 minutes, so the run ends on its record count, well inside its `durationSeconds` of 3,600 |
 | `exactly-once` | ROUND_TRIP | 100k records of 256 B with `acks=all` through one idempotent, transactional producer at 10,000 rec/s; gates on P99 ≤ 200 ms. A ROUND_TRIP run makes no integrity check, so its loss, ordering and CRC gates have nothing to check |
 | `integrity-tx` | INTEGRITY | 200k records of 512 B with `acks=all` and zstd through one producer and one consumer — CRC-checked, idempotent and transactional, read with `read_committed`; gates on zero loss, zero out-of-order, zero CRC failures and P99 ≤ 150 ms |
 | `spike-test` | SPIKE | One unthrottled producer sending up to 500k records of 1 KiB with `acks=1` for at most 60 s; gates on P99 ≤ 500 ms |
 | `ci-gate` | LOAD | 10k records of 512 B with `acks=all` through one producer and one consumer; gates on P99 ≤ 100 ms and at least 1,000 rec/s |
 
-`kates test scaffold` prints the CLI's own one-line descriptions, which promise more than the runs deliver: multiple producers for `quick-load`, `production-load`, `integrity-tx` and `spike-test`, a one-hour soak that the 30-minute run limit rules out, and a zero-error gate for `ci-gate`. The table above says what the Kates API runs. The Kates API keeps a file's producer count only for STRESS and CAPACITY and reads `numConsumers` for no type; `targetThroughput` and the integrity options `enableIdempotence`, `enableTransactions` and `enableCrc` reach the run. The files also declare gates that `kates test apply` does not check: `maxErrorRate` in `production-load`, `endurance-soak`, `spike-test` and `ci-gate`, `maxDuplicatePercent` in `integrity-tx`, and `maxDataLossPercent` in `ci-gate`, whose LOAD run reports no integrity result — see [Scenario Files & SLA Gates](13-scenario-files.md).
+`kates test scaffold` prints the CLI's own one-line descriptions, which promise more than the runs deliver: multiple producers for `quick-load`, `production-load`, `integrity-tx` and `spike-test`, a one-hour soak whose records run out after about 33 minutes, and a zero-error gate for `ci-gate`. The table above says what the Kates API runs. The Kates API keeps a file's producer count only for STRESS and CAPACITY and reads `numConsumers` for no type; `targetThroughput` and the integrity options `enableIdempotence`, `enableTransactions` and `enableCrc` reach the run. The files also declare gates that `kates test apply` does not check: `maxErrorRate` in `production-load`, `endurance-soak`, `spike-test` and `ci-gate`, `maxDuplicatePercent` in `integrity-tx`, and `maxDataLossPercent` in `ci-gate`, whose LOAD run reports no integrity result — see [Scenario Files & SLA Gates](13-scenario-files.md).
 
 **See also:** [Test Types Deep Dive](05-test-types.md) for the theory behind each test type, [Scenario Files & SLA Gates](13-scenario-files.md) for YAML scenario syntax.
 
