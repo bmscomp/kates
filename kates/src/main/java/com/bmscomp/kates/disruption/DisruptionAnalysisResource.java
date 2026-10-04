@@ -106,6 +106,11 @@ public class DisruptionAnalysisResource {
     @Operation(
             summary = "Execute compound chaos",
             description = "Runs multiple faults concurrently across different chaos providers")
+    @APIResponse(responseCode = "200", description = "Each fault's outcome")
+    @APIResponse(
+            responseCode = "400",
+            description = "No fault, or a fault without a faultSpec or with a parameter outside the chaos limits;"
+                    + " no fault is triggered")
     public Response executeCompound(DisruptionDtos.CompoundChaosRequest request) {
         if (request.faults == null || request.faults.isEmpty()) {
             return Response.status(400)

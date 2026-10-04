@@ -696,7 +696,7 @@ Run a playbook. It takes no body and goes through the launcher `POST /api/disrup
 
 ### Resilience Testing
 
-A resilience run starts a test run, injects one fault while it runs, and compares a snapshot of the run taken before the fault with a summary of the whole run taken after the recovery wait; `kates resilience run` sends this request. A disruption plan starts no test run and measures the cluster itself; [Chaos Engineering in Practice](07-chaos-practice.md) explains both. A resilience run doesn't go through the safety guard: nothing counts the brokers its fault hits, and nothing rolls it back.
+A resilience run starts a test run, injects one fault while it runs, and compares a snapshot of the run taken before the fault with a summary of the whole run taken after the recovery wait; `kates resilience run` sends this request. A disruption plan starts no test run and measures the cluster itself; [Chaos Engineering in Practice](07-chaos-practice.md) explains both. A resilience run doesn't go through the safety guard: nothing counts the brokers its fault hits, and nothing rolls it back. Its fault is held to the same [Fault Parameter Limits](07-chaos-practice.md#fault-parameter-limits) as a plan's, though.
 
 #### POST /api/resilience
 
@@ -740,7 +740,7 @@ The call returns once the probes pass after the fault, or once `maxRecoveryWaitS
 }
 ```
 
-A `testRequest` that `POST /api/tests` would refuse for a field its type or benchmark backend cannot apply is refused here too, with the same `400` and `fieldErrors`, before the stream starts and before any fault is injected.
+A `testRequest` that `POST /api/tests` would refuse for a field its type or benchmark backend cannot apply is refused here too, with the same `400` and `fieldErrors`, before the stream starts and before any fault is injected. So is a `chaosSpec` with a parameter outside the fault parameter limits: `fieldErrors` names each parameter, and `message` prefixes it with `chaosSpec.`.
 
 `status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`; with `ERROR`, `error` says why, for example that the benchmark did not start. Impact deltas are percentage changes between the pre- and post-chaos summaries. Durations are in seconds: `chaosDuration` runs from the moment Kates creates the fault to the chaos outcome's `verdict`, so on Litmus it includes the experiment's start-up. `recoveryTime` runs from that `verdict` until every probe passes, or until `maxRecoveryWaitSec` runs out.
 
@@ -858,12 +858,12 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 
 | Status | Error | Description | Common Causes |
 |:---:|-------|-------------|---------------|
-| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON |
+| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON, a resilience `chaosSpec` parameter outside the fault parameter limits |
 | 401 | Unauthorized | Missing API key | Security enabled and no `Authorization`/`X-API-Key` header sent |
 | 403 | Forbidden | Invalid API key | Key does not match `kates.api.key` |
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
 | 409 | Conflict | Conflicts with current state | Cancelling a test that is not running; starting a disruption while one is already running |
-| 422 | Unprocessable Entity | Rejected by the safety guard | No broker pods in the Kafka namespace, a `targetLabel` that doesn't parse, `maxAffectedBrokers` exceeded, every broker hit |
+| 422 | Unprocessable Entity | Rejected by the safety guard | No broker pods in the Kafka namespace, a `targetLabel` that doesn't parse, a fault parameter outside its limit, `maxAffectedBrokers` exceeded, every broker hit |
 | 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable |
 | 503 | Service Unavailable | Dependent system unavailable | Kubernetes API not reachable |
 

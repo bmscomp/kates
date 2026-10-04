@@ -111,8 +111,11 @@ public class ResilienceOrchestrator {
             }
             CompletableFuture<ChaosOutcome> chaosFuture = chaosCoordinator.triggerFault(request.getChaosSpec());
 
-            // 5. Wait for chaos to complete
-            ChaosOutcome outcome = chaosFuture.get(request.getChaosSpec().chaosDurationSec() + 120, TimeUnit.SECONDS);
+            // 5. Wait for chaos to complete, its delay included: the kubernetes
+            // provider waits that out before it injects.
+            FaultSpec chaosSpec = request.getChaosSpec();
+            ChaosOutcome outcome =
+                    chaosFuture.get(chaosSpec.delayBeforeSec() + chaosSpec.chaosDurationSec() + 120, TimeUnit.SECONDS);
             chaosActive.set(false);
             report.setChaosOutcome(outcome);
             report.setDuringChaosProbes(List.copyOf(duringChaosResults));

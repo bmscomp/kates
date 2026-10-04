@@ -12,6 +12,7 @@ import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.DisruptionType;
+import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.ParsedLabelSelector;
 import com.bmscomp.kates.chaos.PodTargets;
@@ -32,6 +33,9 @@ public class DisruptionSafetyGuard {
 
     @Inject
     KafkaIntelligenceService intelligence;
+
+    @Inject
+    FaultLimits limits;
 
     @ConfigProperty(name = "kates.chaos.kafka.namespace", defaultValue = "kafka")
     String kafkaNamespace;
@@ -111,7 +115,9 @@ public class DisruptionSafetyGuard {
     }
 
     /**
-     * Validates a disruption plan against safety constraints before execution.
+     * Validates a disruption plan against safety constraints before execution,
+     * each step's fault parameters against the chaos limits ({@link FaultLimits})
+     * among them.
      */
     public ValidationResult validatePlan(DisruptionPlan plan) {
         return validatePlan(plan, targeted(plan));
@@ -125,6 +131,14 @@ public class DisruptionSafetyGuard {
         // which is when a gate that can never fire is worth pointing out.
         SlaGrader.unevaluableConstraints(plan.getSla())
                 .forEach(c -> warnings.add("SLA " + c + ". It will be reported as not evaluated, not as passed."));
+
+        // Whatever the cluster holds. A NETWORK_PARTITION without a duration
+        // used to be only a warning here, and the kubernetes provider then
+        // never removed it.
+        for (TargetedStep t : targeted) {
+            limits.violations(t.spec())
+                    .forEach((field, why) -> errors.add("Step '" + t.step().name() + "': " + field + " " + why));
+        }
 
         List<Pod> kafkaPods = listKafkaPods();
         int totalBrokers = brokerCount(kafkaPods);
@@ -156,11 +170,6 @@ public class DisruptionSafetyGuard {
                 warnings.add("Step '" + step.name() + "': SCALE_DOWN removes a broker from each KafkaNodePool or"
                         + " StatefulSet it selects and leaves it removed — autoRollback recommended, which restores"
                         + " it when the step fails its recovery check");
-            }
-
-            if (spec.disruptionType() == DisruptionType.NETWORK_PARTITION && spec.chaosDurationSec() <= 0) {
-                warnings.add("Step '" + step.name()
-                        + "': NETWORK_PARTITION without duration — NetworkPolicy will persist until cleanup");
             }
         }
 

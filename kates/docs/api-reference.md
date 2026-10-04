@@ -386,7 +386,7 @@ When `dryRun=true`, returns a preview showing what would happen without actually
 
 | Status | Condition |
 |--------|-----------|
-| `422 Unprocessable Entity` | Safety guard rejected the plan (blast radius exceeded, RBAC insufficient) |
+| `422 Unprocessable Entity` | Safety guard rejected the plan (blast radius exceeded, RBAC insufficient, a fault parameter outside the chaos limits) |
 | `500 Internal Server Error` | Chaos provider failure or Kafka AdminClient error |
 
 ---
@@ -653,5 +653,5 @@ Content-Type: application/json
 
 | Status | Condition |
 |--------|-----------|
-| `400 Bad Request` | Missing `testRequest` or `chaosSpec` field |
+| `400 Bad Request` | Missing `testRequest` or `chaosSpec` field, or a `chaosSpec` parameter outside the chaos limits (`fieldErrors` names each) |
 

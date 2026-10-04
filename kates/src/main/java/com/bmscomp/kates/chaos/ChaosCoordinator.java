@@ -28,11 +28,15 @@ public class ChaosCoordinator {
 
     private final ChaosProvider activeProvider;
 
+    private final FaultLimits limits;
+
     @Inject
     public ChaosCoordinator(
             Instance<ChaosProvider> providers,
-            @ConfigProperty(name = "kates.chaos.provider", defaultValue = NOOP) String providerName) {
+            @ConfigProperty(name = "kates.chaos.provider", defaultValue = NOOP) String providerName,
+            FaultLimits limits) {
 
+        this.limits = limits;
         ChaosProvider selected = null;
         ChaosProvider fallback = null;
         List<String> known = new ArrayList<>();
@@ -70,9 +74,16 @@ public class ChaosCoordinator {
     }
 
     /**
-     * Triggers a fault injection using the active provider.
+     * Triggers a fault injection using the active provider, once every
+     * parameter of the fault is within the chaos limits. The safety guard has
+     * refused a plan with one outside them already; this is the check every
+     * plan step and resilience run passes, whatever brought it here.
+     *
+     * @throws IllegalArgumentException when a parameter is outside its limit;
+     *         the provider never sees the fault
      */
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
+        limits.check(spec);
         return activeProvider.triggerFault(spec);
     }
 

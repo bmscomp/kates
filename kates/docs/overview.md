@@ -189,6 +189,21 @@ Kates uses MicroProfile Config for all configuration, which means every property
 | `kates.engine.default-backend` | `native` | Default execution backend for performance tests. Can be `native` or `trogdor`. Individual test requests can override this. |
 | `kates.chaos.provider` | `hybrid` | Default chaos engineering provider. Can be `litmus-crd`, `kubernetes`, `noop`, or `hybrid`. |
 
+### Chaos Limits
+
+Every fault Kates injects, from a disruption plan, a playbook, a template, a schedule, a compound run or a resilience run, has its parameters checked against these ceilings before anything is injected. A fault with a parameter above its ceiling, or below its floor (1 for the sizes, 0 for the times), is refused. The ceilings are generous on purpose: they stop a typo or a runaway value, not a fault you mean to run.
+
+| Property | Default | Bounds |
+|----------|---------|--------|
+| `kates.chaos.limits.max-duration-sec` | `3600` | `chaosDurationSec`. A partition, latency, stress, DNS error, disk fill or node drain also needs at least 1, since the end of its duration is what undoes it. |
+| `kates.chaos.limits.max-delay-sec` | `600` | `delayBeforeSec` |
+| `kates.chaos.limits.max-network-latency-ms` | `30000` | `networkLatencyMs` |
+| `kates.chaos.limits.max-fill-percentage` | `100` | `fillPercentage` |
+| `kates.chaos.limits.max-cpu-cores` | `64` | `cpuCores` |
+| `kates.chaos.limits.max-memory-mb` | `32768` | `memoryMb` |
+| `kates.chaos.limits.max-io-workers` | `64` | `ioWorkers` |
+| `kates.chaos.limits.max-grace-period-sec` | `300` | `gracePeriodSec` |
+
 ### Per-Test-Type Defaults
 
 Each of the seven test types has its own set of configurable defaults. These are set via properties using the pattern `kates.tests.{type}.{param}` or via ConfigMap environment variables using the pattern `KATES_TESTS_{TYPE}_{PARAM}`.

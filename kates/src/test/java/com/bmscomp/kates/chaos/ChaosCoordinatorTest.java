@@ -40,7 +40,8 @@ class ChaosCoordinatorTest {
     void hybridIsSelectedByTheNameTheDocsTellYouToConfigure() {
         // The real class, not a stub: its name() is "hybrid(<delegate>)", which
         // is exactly what made the old name() comparison unable to match.
-        ChaosCoordinator coordinator = new ChaosCoordinator(providers(new NoOpChaosProvider(), hybrid()), "hybrid");
+        ChaosCoordinator coordinator =
+                new ChaosCoordinator(providers(new NoOpChaosProvider(), hybrid()), "hybrid", new FaultLimits());
 
         assertEquals("hybrid(kubernetes)", coordinator.activeProviderName());
         assertTrue(coordinator.injectsFaults());
@@ -50,14 +51,17 @@ class ChaosCoordinatorTest {
     @Test
     void providersWithoutAnIdOverrideAreStillSelectedByName() {
         ChaosCoordinator coordinator = new ChaosCoordinator(
-                providers(new NoOpChaosProvider(), new StubProvider("kubernetes", true)), "kubernetes");
+                providers(new NoOpChaosProvider(), new StubProvider("kubernetes", true)),
+                "kubernetes",
+                new FaultLimits());
 
         assertEquals("kubernetes", coordinator.activeProviderName());
     }
 
     @Test
     void unknownProviderFallsBackToNoopAndSaysSoAtError() {
-        ChaosCoordinator coordinator = new ChaosCoordinator(providers(new NoOpChaosProvider(), hybrid()), "hybird");
+        ChaosCoordinator coordinator =
+                new ChaosCoordinator(providers(new NoOpChaosProvider(), hybrid()), "hybird", new FaultLimits());
 
         assertEquals("noop", coordinator.activeProviderName());
         assertFalse(coordinator.injectsFaults(), "a fallback injects nothing");
@@ -71,7 +75,9 @@ class ChaosCoordinatorTest {
     @Test
     void unavailableProviderFallsBackToNoopAndSaysSoAtError() {
         ChaosCoordinator coordinator = new ChaosCoordinator(
-                providers(new NoOpChaosProvider(), new StubProvider("litmus-crd", false)), "litmus-crd");
+                providers(new NoOpChaosProvider(), new StubProvider("litmus-crd", false)),
+                "litmus-crd",
+                new FaultLimits());
 
         assertEquals("noop", coordinator.activeProviderName());
         List<String> errors = errors();
@@ -82,10 +88,39 @@ class ChaosCoordinatorTest {
 
     @Test
     void configuredNoopIsNotAnError() {
-        ChaosCoordinator coordinator = new ChaosCoordinator(providers(new NoOpChaosProvider(), hybrid()), "noop");
+        ChaosCoordinator coordinator =
+                new ChaosCoordinator(providers(new NoOpChaosProvider(), hybrid()), "noop", new FaultLimits());
 
         assertEquals("noop", coordinator.activeProviderName());
         assertTrue(errors().isEmpty(), "noop was asked for: " + errors());
+    }
+
+    /**
+     * The check every plan step and resilience run passes. A resilience run
+     * never went through the safety guard, and a NETWORK_PARTITION of 0
+     * seconds was never removed by the kubernetes provider.
+     */
+    @Test
+    void aFaultOutsideTheLimitsNeverReachesTheProvider() {
+        ChaosProvider kubernetes = mock(ChaosProvider.class);
+        when(kubernetes.id()).thenReturn("kubernetes");
+        when(kubernetes.name()).thenReturn("kubernetes");
+        when(kubernetes.isAvailable()).thenReturn(true);
+        ChaosCoordinator coordinator =
+                new ChaosCoordinator(providers(new NoOpChaosProvider(), kubernetes), "kubernetes", new FaultLimits());
+        FaultSpec forever = FaultSpec.builder("split")
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(0)
+                .build();
+
+        IllegalArgumentException refused =
+                assertThrows(IllegalArgumentException.class, () -> coordinator.triggerFault(forever));
+
+        assertEquals(
+                "Fault 'split' is outside the chaos limits: chaosDurationSec 0 is below 1, and a NETWORK_PARTITION"
+                        + " is undone only when its duration ends",
+                refused.getMessage());
+        verify(kubernetes, never()).triggerFault(any());
     }
 
     private static HybridChaosProvider hybrid() {

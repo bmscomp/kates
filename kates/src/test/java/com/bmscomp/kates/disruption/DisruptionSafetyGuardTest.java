@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.chaos.DisruptionType;
+import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.KubernetesChaosProvider;
 import com.bmscomp.kates.chaos.StrimziTestCluster;
@@ -48,6 +49,7 @@ class DisruptionSafetyGuardTest {
     void setup() {
         guard = new DisruptionSafetyGuard();
         guard.kubeClient = client;
+        guard.limits = new FaultLimits();
         guard.kafkaNamespace = "kafka";
         guard.kafkaLabel = "strimzi.io/component-type=kafka";
     }
@@ -209,6 +211,47 @@ class DisruptionSafetyGuardTest {
         assertTrue(
                 result.errors().getFirst().startsWith("Step 'step-0': Invalid label selector"),
                 result.errors().toString());
+    }
+
+    // ── Chaos limits ────────────────────────────────────────────────────────
+
+    @Test
+    void aPartitionWithoutADurationIsRefusedNotWarnedAbout() {
+        createZonedBrokers();
+
+        // Only a warning before, and the kubernetes provider then never removed it.
+        FaultSpec forever = FaultSpec.builder("split")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(0)
+                .build();
+        var result = guard.validatePlan(plan(1, forever));
+
+        assertFalse(result.safe());
+        assertEquals(
+                List.of("Step 'step-0': chaosDurationSec 0 is below 1, and a NETWORK_PARTITION is undone only when"
+                        + " its duration ends"),
+                result.errors());
+        assertTrue(result.warnings().isEmpty(), result.warnings().toString());
+    }
+
+    @Test
+    void aFaultPastALimitIsRefusedNamingItsStepAndTheSetting() {
+        createZonedBrokers();
+
+        FaultSpec stress = FaultSpec.builder("stress")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.CPU_STRESS)
+                .cpuCores(4)
+                .chaosDurationSec(86_400)
+                .build();
+        var result = guard.validatePlan(plan(2, kill(0), stress));
+
+        assertEquals(
+                List.of("Step 'step-1': chaosDurationSec 86400 is above the limit of 3600"
+                        + " (kates.chaos.limits.max-duration-sec)"),
+                result.errors());
+        assertFalse(guard.dryRun(plan(2, kill(0), stress)).wouldSucceed(), "the dry run says so too");
     }
 
     @Test

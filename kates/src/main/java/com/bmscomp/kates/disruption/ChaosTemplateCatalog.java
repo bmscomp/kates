@@ -281,9 +281,15 @@ public class ChaosTemplateCatalog {
         return plan;
     }
 
+    /**
+     * An override as an int. The overrides are not clamped to the chaos limits:
+     * the safety guard refuses a plan past them. So a number past the int range
+     * saturates, for the guard to see it for what it is; {@code intValue()}
+     * wrapped it, and a duration of 4294967356 seconds came out as 60.
+     */
     private static int intOr(Map<String, Object> ov, String key, int def) {
         Object v = ov.get(key);
-        if (v instanceof Number n) return n.intValue();
+        if (v instanceof Number n) return (int) n.doubleValue();
         if (v instanceof String s) {
             try {
                 return Integer.parseInt(s);

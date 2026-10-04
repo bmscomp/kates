@@ -1,6 +1,8 @@
 package com.bmscomp.kates.resilience;
 
 import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -14,6 +16,8 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.chaos.FaultLimits;
+import com.bmscomp.kates.chaos.FaultSpec;
 
 /**
  * REST endpoint for combined resilience testing (performance + chaos + probes).
@@ -37,6 +41,28 @@ public class ResilienceResource {
 
     @Inject
     com.bmscomp.kates.engine.KatesExecutor executor;
+
+    @Inject
+    FaultLimits faultLimits;
+
+    /**
+     * A 400 naming each parameter of the chaos spec outside the chaos limits,
+     * or empty when all are within them. Asked before the stream starts: the
+     * coordinator refuses such a fault too, but only after the benchmark has
+     * run for steadyStateSec, and as a report with status ERROR.
+     */
+    private Optional<Response> outsideLimits(FaultSpec chaosSpec) {
+        Map<String, String> found = faultLimits.violations(chaosSpec);
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        String message = found.entrySet().stream()
+                .map(e -> "chaosSpec." + e.getKey() + ": " + e.getValue())
+                .collect(Collectors.joining("; "));
+        return Optional.of(Response.status(400)
+                .entity(ApiError.validationFailed(message, found))
+                .build());
+    }
 
     private StreamingOutput executeWithKeepAlive(ResilienceTestRequest request, String scenarioId) {
         return os -> {
@@ -74,7 +100,7 @@ public class ResilienceResource {
     @APIResponse(
             responseCode = "400",
             description = "Invalid request, including a testRequest spec field the test type or backend cannot"
-                    + " apply; fieldErrors names each field")
+                    + " apply, or a chaosSpec parameter outside the chaos limits; fieldErrors names each field")
     public Response executeResilienceTest(ResilienceTestRequest request) {
         if (request.getTestRequest() == null) {
             return Response.status(400)
@@ -96,6 +122,10 @@ public class ResilienceResource {
                     .entity(ApiError.validationFailed(
                             refused.get().getMessage(), refused.get().getFieldErrors()))
                     .build();
+        }
+        Optional<Response> outsideLimits = outsideLimits(request.getChaosSpec());
+        if (outsideLimits.isPresent()) {
+            return outsideLimits.get();
         }
 
         StreamingOutput stream = executeWithKeepAlive(request, null);
@@ -132,6 +162,10 @@ public class ResilienceResource {
 
         ResilienceTestRequest request = new ResilienceTestRequest();
         request.setChaosSpec(ResilienceScenarios.buildFaultSpec(scenario, overrides));
+        Optional<Response> outsideLimits = outsideLimits(request.getChaosSpec());
+        if (outsideLimits.isPresent()) {
+            return outsideLimits.get();
+        }
         request.setProbes(scenario.probes());
         request.setSteadyStateSec(scenario.steadyStateSec());
         request.setMaxRecoveryWaitSec(scenario.maxRecoveryWaitSec());
