@@ -93,6 +93,27 @@ func TestRenderHTMLReport_SLAFailed(t *testing.T) {
 	}
 }
 
+func TestRenderHTMLReport_ViolationWithAReason(t *testing.T) {
+	report := &client.Report{
+		OverallSlaVerdict: &client.SlaVerdict{
+			Violations: []client.SlaViolation{
+				{Metric: "status", Threshold: -1, Actual: -1, Reason: "FAILED: <script>alert(1)</script>"},
+				{Metric: "p99LatencyMs", Threshold: 50, Actual: -1, Reason: "not measured"},
+			},
+		},
+	}
+
+	html := renderHTMLReport("reason-test", report)
+
+	// A task's error is the backend's text, not markup.
+	if strings.Contains(html, "<script>") || !strings.Contains(html, "FAILED: &lt;script&gt;") {
+		t.Errorf("the reason is not escaped:\n%s", html)
+	}
+	if !strings.Contains(html, "not measured") || strings.Contains(html, "-1.00") {
+		t.Errorf("the reason does not stand in for the missing value:\n%s", html)
+	}
+}
+
 func TestRenderHTMLReport_WithPhases(t *testing.T) {
 	report := &client.Report{
 		Summary: &client.ReportSummary{TotalRecords: 1},

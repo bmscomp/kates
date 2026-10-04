@@ -399,6 +399,16 @@ func TestGate_JSON(t *testing.T) {
 			want:     gateResult{RunID: "run-1", TestType: "LOAD", Records: 50000, Status: "FAILED", MinGrade: "C", Error: "Test FAILED"},
 			wantFail: true,
 		},
+		{
+			// A P99 of 0 here is no latency at all, not the fastest run there
+			// is: it used to grade A.
+			name: "latency not measured", args: nil,
+			final: done, summary: `{"avgThroughputRecPerSec":60000,"totalRecords":50000}`,
+			want: gateResult{RunID: "run-1", TestType: "LOAD", Records: 50000, Status: "DONE",
+				AvgThroughputRecPerSec: gateF(60000), MinGrade: "C",
+				Error: "P99 latency not measured: the run recorded no latency, so it cannot be graded"},
+			wantFail: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -428,9 +438,14 @@ func TestGate_JSON(t *testing.T) {
 				wantJSON, _ := json.Marshal(tt.want)
 				t.Errorf("gate -o json =\n %s\nwant\n %s", gotJSON, wantJSON)
 			}
-			// A gate that ends without a grade measured nothing: null, not 0.
-			if tt.want.Grade == "" && !strings.Contains(compactJSON(t, stdout), `"avgThroughputRecPerSec":null,"p99LatencyMs":null`) {
-				t.Errorf("an ungraded gate reports metrics:\n%s", stdout)
+			// A metric the gate did not read, or the run did not measure, is
+			// null, not 0.
+			compact := compactJSON(t, stdout)
+			if tt.want.AvgThroughputRecPerSec == nil && !strings.Contains(compact, `"avgThroughputRecPerSec":null`) {
+				t.Errorf("a gate that read no throughput reports one:\n%s", stdout)
+			}
+			if tt.want.P99LatencyMs == nil && !strings.Contains(compact, `"p99LatencyMs":null`) {
+				t.Errorf("a gate without a P99 reports one:\n%s", stdout)
 			}
 		})
 	}
