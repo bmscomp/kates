@@ -707,8 +707,8 @@ func mcpOutsideFences(h *mcpHarness, raw []byte) string {
 }
 
 // A scenario run's text reaches the store unvalidated: its phase names
-// become task ids (TestOrchestrator.java:1493), and its base spec's topic,
-// acks and compression are stored as sent (TestOrchestrator.java:348-361).
+// become task ids (TestOrchestrator.java:1519), and its base spec's topic,
+// acks and compression are stored as sent (TestOrchestrator.java:347-360).
 // None of it may reach the model outside a fence.
 func TestMCPGetRunUnvalidatedScenarioText(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
