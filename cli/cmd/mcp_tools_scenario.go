@@ -1285,8 +1285,8 @@ var mcpCaveatsScenario = []mcpCaveat{
 				"switch (task.getWorkloadType())", "case INTEGRITY -> runIntegrity(task, state);",
 				"void runIntegrity(BenchmarkTask task, WorkerState state)", "state.chaosStartNanos.get()"),
 			mcpJava + "engine/TrogdorBackend.java:150-151",
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceOrchestrator.java:141",
-				"testOrchestrator.markChaosStart(run.getId(), System.nanoTime());"),
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceOrchestrator.java:143-144",
+				"chaosCoordinator.triggerFault(", "testOrchestrator.markChaosStart(runId, injectedAt)"),
 		},
 	},
 }
