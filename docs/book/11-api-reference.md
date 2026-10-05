@@ -344,13 +344,15 @@ The summary is computed from the run's task rows, and the example is a LOAD run 
 | Field | How the task rows combine |
 |-------|---------------------------|
 | `totalRecords` | Summed over every task, producer and consumer alike |
-| `avgThroughputRecPerSec`, `avgThroughputMBPerSec` | The mean of the tasks' rates, not their sum |
+| `avgThroughputRecPerSec`, `avgThroughputMBPerSec` | The mean of the rates of the tasks that have started, not their sum |
 | `peakThroughputRecPerSec` | The fastest task's rate |
 | `p50LatencyMs`, `p95LatencyMs`, `p99LatencyMs` | The producer's; with several producers, the highest of theirs |
 | `avgLatencyMs` | The producers' mean latency, weighted by their records |
 | `maxLatencyMs` | The slowest producer's |
 | `totalErrors`, `errorRate` | Tasks that ended with an error, and that count divided by `totalRecords` |
 | `p999LatencyMs`, `durationMs` | Always 0 |
+
+A task that has not started is `PENDING` with no records, as a scenario's later phase is until its turn, and the means leave it out. So while a scenario runs, its throughput is that of the phases under way or done, and a phase that has not started reads 0 in `phases`. A task that a cancel or a failure ends before its turn is stored `FAILED`, and counts as a rate of 0.
 
 Latency leaves consumers out because they don't measure it: a consumer's row carries no latency on the native backend and only poll times on Trogdor. A LOAD or ENDURANCE run's P99 is therefore its producer's send-to-acknowledgement P99. A task keeps its percentiles but not its latency histogram, so the percentiles of several producers cannot be merged. The highest of them is an upper bound on the run's percentile, so it never understates the tail. `kates report show`, `report diff`, `report compare`, the regression check, `kates trend` and the resilience comparison all read this summary.
 
@@ -760,7 +762,7 @@ Optional fields: `probes` (steady-state probe definitions) and `maxRecoveryWaitS
 
 The workload has to be running when the fault lands. At 500 records per second the 180,000 records take 360 s, while the fault is triggered after `steadyStateSec` (30 s), lasts `chaosDurationSec` (30 s), and the run then waits up to `maxRecoveryWaitSec` for recovery. Without `throughput` the producer runs unthrottled and can finish before the fault is triggered, and both summaries then describe a run the fault never touched. `testRequest` is the body of [POST /api/tests](#post-apitests), so the same fields apply: `throughput` is the rate limit, and LOAD runs one producer and one consumer, so the spec sets no producer count. `disruptionType` picks the fault: on the default `litmus-crd` chaos provider `POD_KILL` runs the LitmusChaos `pod-delete` experiment, and the outcome reports that name, while `experimentName` only names the ChaosEngine. Without `disruptionType`, Litmus runs the experiment that `experimentName` names, and the `kates-chaos` chart installs none called `kafka-pod-kill`. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and the random pick could then kill a controller instead of a broker.
 
-The call returns once the probes pass after the fault, or once `maxRecoveryWaitSec` runs out, so with this example the response usually arrives while the LOAD run is still producing. `postChaosSummary` and `impactDeltas` cover the run up to that moment. The run keeps producing, and keeps its place among the `kates.engine.max-concurrent-tests` running tests, until it reaches `DONE`; its final numbers are then at `GET /api/tests/{id}`, with the id from `performanceReport.run.id`.
+The call returns once the probes pass after the fault, or once `maxRecoveryWaitSec` runs out, so with this example the response usually arrives while the LOAD run is still producing. `postChaosSummary` and `impactDeltas` cover the run up to that moment. When `testRequest` is a scenario, a phase still waiting for its turn is left out of the throughput of both summaries. The run keeps producing, and keeps its place among the `kates.engine.max-concurrent-tests` running tests, until it reaches `DONE`; its final numbers are then at `GET /api/tests/{id}`, with the id from `performanceReport.run.id`.
 
 **Response** (cut down, with illustrative numbers):
 
