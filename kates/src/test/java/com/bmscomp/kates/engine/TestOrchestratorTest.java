@@ -1198,7 +1198,9 @@ class TestOrchestratorTest {
      * what they set reaches the phases. The phases start only producers, so the
      * consumer settings and CRC checks were stored as the run's spec and never
      * used; the rate a scenario set with targetThroughput was stored as the
-     * run's throughput while every phase ran at the base spec's throughput.
+     * run's throughput while every phase ran at the base spec's throughput. A
+     * RAMP phase without a rate ran its steps at 1, 2, ... records a second,
+     * and a SPIKE phase ran unthrottled whatever rate it set.
      */
     @Nested
     class ScenarioRequests {
@@ -1341,6 +1343,134 @@ class TestOrchestratorTest {
                     assertInstanceOf(InvalidTestSpecException.class, failure)
                             .getFieldErrors()
                             .keySet());
+        }
+
+        @Test
+        void aRampPhaseWithoutARateIsRefusedByName() {
+            // ENDURANCE's default rate is 5000 records a second, but a phase
+            // resolves its spec without the type's defaults: with no rate set,
+            // this ramp's four steps ran at 1, 2, 3 and 4 records a second. A
+            // rate of 0 is no rate either. The STEADY phase runs unthrottled.
+            ScenarioPhase ramp = phase("ramp-up", ScenarioPhase.PhaseType.RAMP);
+            ramp.setRampSteps(4);
+            ScenarioPhase zero = phase("zero", ScenarioPhase.PhaseType.RAMP);
+            zero.setTargetThroughput(0);
+            CreateTestRequest request =
+                    scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY), ramp, zero);
+            request.setType(TestType.ENDURANCE);
+            request.getScenario().setType(TestType.ENDURANCE);
+
+            Exception failure =
+                    withBackend("native").executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            Map<String, String> errors = invalid.getFieldErrors();
+            assertEquals(Set.of("phases[1].targetThroughput", "phases[2].targetThroughput"), errors.keySet());
+            assertTrue(
+                    errors.get("phases[1].targetThroughput").contains("phase ramp-up has none (-1, unlimited)"),
+                    errors.toString());
+            assertTrue(
+                    errors.get("phases[2].targetThroughput").contains("phase zero has none (0, "), errors.toString());
+            assertTrue(invalid.getMessage().contains("scenario.phases[1].targetThroughput: "), invalid.getMessage());
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void aRampPhaseNeedsARecordASecondPerStepAndAtMostAHundredSteps() {
+            TestSpec base = new TestSpec();
+            base.setThroughput(3);
+            // Its steps would run at 1 to 5 records a second, past the 3 asked for.
+            ScenarioPhase fine = phase("fine", ScenarioPhase.PhaseType.RAMP);
+            fine.setRampSteps(5);
+            ScenarioPhase wide = phase("wide", ScenarioPhase.PhaseType.RAMP);
+            wide.setRampSteps(TestOrchestrator.MAX_RAMP_STEPS + 1);
+            wide.setTargetThroughput(1_000_000);
+
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(base, fine, wide))
+                    .asFailure()
+                    .orElseThrow();
+
+            Map<String, String> errors =
+                    assertInstanceOf(InvalidTestSpecException.class, failure).getFieldErrors();
+            assertEquals(Set.of("phases[0].rampSteps", "phases[1].rampSteps"), errors.keySet());
+            assertTrue(
+                    errors.get("phases[0].rampSteps")
+                            .contains("phase fine has 5 steps for 3 records a second; use at most 3 steps"),
+                    errors.toString());
+            assertTrue(
+                    errors.get("phases[1].rampSteps").contains("phase wide has 101 steps; it may have at most 100"),
+                    errors.toString());
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void aRampPhaseSplitsItsRateIntoSteps() {
+            TestSpec base = new TestSpec();
+            base.setThroughput(1000);
+            ScenarioPhase ramp = phase("ramp", ScenarioPhase.PhaseType.RAMP);
+            ramp.setRampSteps(4);
+            // As many steps as there may be, and records a second as steps.
+            ScenarioPhase widest = phase("widest", ScenarioPhase.PhaseType.RAMP);
+            widest.setRampSteps(TestOrchestrator.MAX_RAMP_STEPS);
+            widest.setTargetThroughput(TestOrchestrator.MAX_RAMP_STEPS);
+
+            assertTrue(withBackend("native")
+                    .executeTest(scenario(base, ramp, widest))
+                    .isSuccess());
+
+            List<Integer> rates = submitted.stream()
+                    .map(BenchmarkTask::getTargetMessagesPerSec)
+                    .toList();
+            assertEquals(List.of(250, 500, 750, 1000), rates.subList(0, 4));
+            assertEquals(
+                    java.util.stream.IntStream.rangeClosed(1, TestOrchestrator.MAX_RAMP_STEPS)
+                            .boxed()
+                            .toList(),
+                    rates.subList(4, rates.size()));
+        }
+
+        @Test
+        void aSpikePhaseRefusesARateOfItsOwn() {
+            // The base spec's rate is there for the other phases: a SPIKE phase
+            // that inherits it, or sets -1, passes.
+            TestSpec base = new TestSpec();
+            base.setThroughput(1000);
+            ScenarioPhase own = phase("burst", ScenarioPhase.PhaseType.SPIKE);
+            own.setTargetThroughput(5000);
+            ScenarioPhase ownSpec = phase("burst-spec", ScenarioPhase.PhaseType.SPIKE);
+            TestSpec rate = new TestSpec();
+            rate.setThroughput(2000);
+            rate.setTargetThroughput(3000);
+            ownSpec.setSpec(rate);
+            ScenarioPhase unlimited = phase("burst-unlimited", ScenarioPhase.PhaseType.SPIKE);
+            TestSpec none = new TestSpec();
+            none.setThroughput(-1);
+            unlimited.setSpec(none);
+
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(
+                            base,
+                            phase("steady", ScenarioPhase.PhaseType.STEADY),
+                            phase("inherits", ScenarioPhase.PhaseType.SPIKE),
+                            own,
+                            ownSpec,
+                            unlimited))
+                    .asFailure()
+                    .orElseThrow();
+
+            Map<String, String> errors =
+                    assertInstanceOf(InvalidTestSpecException.class, failure).getFieldErrors();
+            assertEquals(
+                    Set.of(
+                            "phases[2].targetThroughput",
+                            "phases[3].spec.throughput",
+                            "phases[3].spec.targetThroughput"),
+                    errors.keySet());
+            assertTrue(
+                    errors.get("phases[2].targetThroughput").contains("phase burst is a SPIKE phase"),
+                    errors.toString());
+            assertTrue(submitted.isEmpty());
         }
     }
 

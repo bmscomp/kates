@@ -160,6 +160,14 @@ A field the run could not honour is refused rather than ignored: the answer is `
 
 A request with a `scenario` and its `phases` is checked the same way. Each phase starts producers only, so `consumerGroup`, the fetch settings and `enableCrc: true` are refused in its `baseSpec` or in a phase's `spec`, with `fieldErrors` keyed by their path in the scenario, such as `baseSpec.consumerGroup` or `phases[0].spec.fetchMinBytes`. The producer options reach every phase, checked against the `acks` each phase runs with, and a phase's rate follows the rule above: its `throughput`, or its `targetThroughput` without one. A scenario whose phases' durations add up to more than `kates.engine.max-duration-ms` is refused with `fieldErrors` keyed `phases`.
 
+The phases all start together. A phase's spec is the `baseSpec` as sent with the phase's own fields over it, and none of the type's defaults, so a WARMUP, STEADY or COOLDOWN phase that no rate reaches runs unthrottled. A SPIKE phase runs unthrottled whatever its rate. A RAMP phase starts `rampSteps` producers together, the first at its rate divided by `rampSteps`, the next at twice that, and so on up to the rate, each for the phase's duration divided by `rampSteps`. A SPIKE or RAMP phase is refused for settings it couldn't honour, keyed by the field to change:
+
+| Field | Refused when |
+|-------|--------------|
+| `phases[i].targetThroughput`, `phases[i].spec.throughput`, `phases[i].spec.targetThroughput` | Any value but -1 in a SPIKE phase; a rate it takes from the `baseSpec` passes |
+| `phases[i].targetThroughput` | A RAMP phase has no rate, or one below 1 |
+| `phases[i].rampSteps` | A RAMP phase has more than 100 steps, or more steps than its rate in rec/s, since each step needs at least 1 rec/s |
+
 ```json
 {
   "status": 400,
