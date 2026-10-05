@@ -1243,7 +1243,8 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"plans/mcp-server.md:387-405",
 			mcpJava + "api/TestResource.java:69-104",
 			mcpJava + "domain/TestSpec.java:34-113",
-			mcpJava + "engine/TestOrchestrator.java:973-1035",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1114-1179",
+				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
 			"cli/cmd/apply.go:129-186",
 		},
 	},
@@ -1256,7 +1257,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"listed as defaulted may differ on the cluster that runs the scenario.",
 		Refs: []string{
 			mcpJava + "config/TestTypeDefaults.java:22-64,323-464",
-			mcpJava + "engine/TestOrchestrator.java:871-916",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:946-991", "TestSpec applyTypeDefaults(", "return merged;"),
 			"kates/src/main/resources/application.properties:37-78",
 			"charts/kates/values.yaml:551-618",
 			"charts/kates/templates/configmap.yaml:75-170",
