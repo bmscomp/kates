@@ -1131,6 +1131,27 @@ class TestOrchestratorTest {
                 assertTrue(invalid.getMessage().startsWith("spec.consumerGroup: "), invalid.getMessage());
             }
         }
+
+        @Test
+        void aRequestWithNoTypeIsRefusedByName() {
+            // POST /api/tests requires a type, but POST /api/resilience and a
+            // schedule run no bean validation, and applyTypeDefaults threw on
+            // a request without one.
+            CreateTestRequest request = new CreateTestRequest();
+            request.setSpec(new TestSpec());
+
+            Exception failure = orchestrator.executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(Set.of("type"), invalid.getFieldErrors().keySet());
+            String why = invalid.getFieldErrors().get("type");
+            assertTrue(why.startsWith("the request has no type; set it to one of LOAD, STRESS, "), why);
+            assertTrue(why.endsWith(", TUNE_PARTITIONS or INTEGRATION_CDC"), why);
+            for (TestType type : TestType.values()) {
+                assertTrue(why.contains(type.name()), why);
+            }
+            assertEquals("type: " + why, invalid.getMessage());
+        }
     }
 
     /**
@@ -1248,6 +1269,75 @@ class TestOrchestratorTest {
         private com.bmscomp.kates.domain.ScenarioPhase phase(
                 String name, com.bmscomp.kates.domain.ScenarioPhase.PhaseType type) {
             return new com.bmscomp.kates.domain.ScenarioPhase(name, type, 0, -1);
+        }
+
+        @Test
+        void aScenarioWithNoTypeIsRefusedBeforeTakingAPermit() {
+            // POST /api/resilience and a schedule run no bean validation, so a
+            // scenario could come with no type, its own or the request's. It
+            // threw in applyTypeDefaults after taking a permit that nothing
+            // gave back: after three of them, every later request got a 429.
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest request = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY));
+            request.setType(null);
+            request.getScenario().setType(null);
+
+            for (int i = 0; i < 5; i++) {
+                Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+                InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+                assertEquals(Set.of("type"), invalid.getFieldErrors().keySet());
+                assertTrue(
+                        invalid.getMessage()
+                                .startsWith("type: neither the request nor its scenario has a type; set the"
+                                        + " request's type, or the scenario's, to one of LOAD, "),
+                        invalid.getMessage());
+            }
+            assertTrue(submitted.isEmpty());
+
+            // The scenario's own type is enough, and a permit is free for it.
+            request.getScenario().setType(TestType.LOAD);
+            assertTrue(engine.executeTest(request).isSuccess());
+        }
+
+        @Test
+        void aNullPhaseIsRefusedByItsIndex() {
+            // Every check of the phases reads each one, so "phases": [null]
+            // threw there, and the client got a 500.
+            CreateTestRequest request = scenario(new TestSpec());
+            request.getScenario()
+                    .setPhases(java.util.Arrays.asList(null, phase("steady", ScenarioPhase.PhaseType.STEADY), null));
+
+            Exception failure =
+                    withBackend("native").executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(
+                    Set.of("phases[0]", "phases[2]"), invalid.getFieldErrors().keySet());
+            assertTrue(
+                    invalid.getMessage().startsWith("scenario.phases[0]: null is not a phase; remove it, or put"),
+                    invalid.getMessage());
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void aScenarioWhoseRunCannotBeBuiltTakesNoPermit() {
+            // The run is built before the permit is taken, so whatever throws
+            // while it's built, as the missing type did, costs no permit. A
+            // lookup of the type's defaults that throws stands in for it;
+            // withBackend builds its orchestrator over this.typeDefaults.
+            typeDefaults = spy(typeDefaults);
+            doThrow(new IllegalStateException("no defaults")).when(typeDefaults).forType(TestType.VOLUME);
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest volume = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY));
+            volume.setType(TestType.VOLUME);
+            volume.getScenario().setType(TestType.VOLUME);
+
+            for (int i = 0; i < 5; i++) {
+                assertThrows(IllegalStateException.class, () -> engine.executeTest(volume));
+            }
+
+            assertTrue(engine.executeTest(scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY)))
+                    .isSuccess());
         }
 
         @Test

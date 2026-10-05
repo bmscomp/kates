@@ -32,6 +32,55 @@ class ResilienceResourceTest {
     }
 
     /**
+     * A test request with no type is refused before the stream starts. This
+     * endpoint runs no bean validation, so the type POST /api/tests requires
+     * went unchecked: the run threw as it started, and a scenario's run threw
+     * after it had taken a concurrency permit, which it never gave back.
+     */
+    @Test
+    void aTestRequestWithNoTypeIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"spec\":{\"numRecords\":1000}},\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors.type", startsWith("the request has no type; set it to one of LOAD, "))
+                .body("message", startsWith("type: the request has no type"));
+
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"scenario\":{\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\"}]}},"
+                        + "\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors.type", startsWith("neither the request nor its scenario has a type;"))
+                .body("message", startsWith("type: neither the request nor its scenario has a type;"));
+    }
+
+    /**
+     * A null where a scenario phase should be is refused by its index. The
+     * checks of the phases read every one, so they threw on it, and the
+     * answer was a 500.
+     */
+    @Test
+    void aNullScenarioPhaseIsRefusedByItsIndex() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\",\"scenario\":{\"phases\":[null]}},"
+                        + "\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("phases[0]"))
+                .body("message", startsWith("scenario.phases[0]: null is not a phase;"));
+    }
+
+    /**
      * A test request the backend would refuse is refused before the stream
      * starts, naming the field. It used to go into the resilience run, which
      * ended ERROR with the reason only in the server log.

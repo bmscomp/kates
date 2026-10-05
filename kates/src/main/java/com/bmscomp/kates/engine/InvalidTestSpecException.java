@@ -27,7 +27,9 @@ public class InvalidTestSpecException extends BenchmarkException {
      * Fields under {@code prefix} in the request, keyed by their path below it:
      * {@code spec.} and a field name for a plain request, {@code scenario.} and
      * {@code baseSpec.}-, {@code phases[i].spec.}- or {@code phases[i].}-prefixed
-     * names for a scenario. The message spells out each full path.
+     * names, or {@code phases[i]} itself, for a scenario. A request with no type
+     * has no prefix and the key {@code type}. The message spells out each full
+     * path.
      */
     public InvalidTestSpecException(String prefix, Map<String, String> fieldErrors) {
         super(fieldErrors.entrySet().stream()
