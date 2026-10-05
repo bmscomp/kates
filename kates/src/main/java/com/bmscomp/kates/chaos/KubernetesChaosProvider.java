@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.LongConsumer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -115,7 +116,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
      * error that said nothing about it, and a few faults per plan are no load
      * to shed from the API server.
      */
-    private void applyDisruption(FaultSpec spec, String engineName) throws Exception {
+    private void applyDisruption(FaultSpec spec, String engineName, LongConsumer onInject) throws Exception {
         if (spec.disruptionType() == null) {
             throw new IllegalArgumentException("No disruptionType set — use the builder");
         }
@@ -123,6 +124,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
         if (spec.delayBeforeSec() > 0) {
             Thread.sleep(spec.delayBeforeSec() * 1000L);
         }
+        // The fault goes in from here, once its delay is over.
+        onInject.accept(System.nanoTime());
 
         switch (spec.disruptionType()) {
             case POD_KILL -> executePodKill(spec);
@@ -141,6 +144,11 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
+        return triggerFault(spec, injectedAt -> {});
+    }
+
+    @Override
+    public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec, LongConsumer onInject) {
         return CompletableFuture.supplyAsync(
                 () -> {
                     Instant start = Instant.now();
@@ -148,7 +156,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     String engineName = spec.experimentName() + "-" + System.currentTimeMillis();
 
                     try {
-                        applyDisruption(spec, engineName);
+                        applyDisruption(spec, engineName, onInject);
                         return ChaosOutcome.success(
                                 engineName, spec.experimentName(), start, Instant.now(), startNanos, null, null, null);
 
