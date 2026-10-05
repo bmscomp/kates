@@ -422,6 +422,25 @@ class TestResourceTest {
         verifyNoInteractions(trogdorClient);
     }
 
+    /**
+     * A null where a scenario phase should be is refused by its index. The
+     * checks of the phases read every one, so they threw on it, and the
+     * answer was a 500.
+     */
+    @Test
+    void aNullScenarioPhaseIsRefusedByItsIndex() {
+        given().contentType("application/json")
+                .body("{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"scenario\": {\"phases\": [null]}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("phases[0]"))
+                .body("message", containsString("scenario.phases[0]: null is not a phase;"));
+        verifyNoInteractions(trogdorClient);
+    }
+
     private static void awaitStatus(String id, String status) {
         long deadline = System.currentTimeMillis() + 10_000;
         while (System.currentTimeMillis() < deadline) {
