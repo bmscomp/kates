@@ -10,6 +10,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import jakarta.inject.Inject;
 
@@ -18,6 +22,9 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
+import org.jboss.logmanager.ExtLogRecord;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -45,6 +52,39 @@ class ScheduleResourceTest {
 
     @Inject
     TestScheduler scheduler;
+
+    /** Held so the logger, and the handler on it, outlive the test's own references. */
+    private final java.util.logging.Logger schedulerLog =
+            java.util.logging.Logger.getLogger(TestScheduler.class.getName());
+
+    /** What the scheduler logged at ERROR during the test. */
+    private final List<String> schedulerErrors = new CopyOnWriteArrayList<>();
+
+    private final Handler captureErrors = new Handler() {
+        @Override
+        public void publish(LogRecord record) {
+            if (record.getLevel().intValue() >= Level.SEVERE.intValue()) {
+                schedulerErrors.add(
+                        record instanceof ExtLogRecord ext ? ext.getFormattedMessage() : record.getMessage());
+            }
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() {}
+    };
+
+    @BeforeEach
+    void captureSchedulerErrors() {
+        schedulerLog.addHandler(captureErrors);
+    }
+
+    @AfterEach
+    void releaseSchedulerLog() {
+        schedulerLog.removeHandler(captureErrors);
+    }
 
     @Test
     void listSchedulesReturnsAll() {
@@ -303,6 +343,79 @@ class ScheduleResourceTest {
             }
         }
         throw new AssertionError("run " + id + " never finished");
+    }
+
+    /**
+     * A firing holds the request's spec to the limits POST /api/tests holds
+     * it to, whether the run reads that spec or not, and starts no run for a
+     * value outside them: it logs each one, as it logs any refused firing.
+     * The run used to go ahead: a numProducers of 1000, which a PUT saved
+     * unchecked, started 1000 Trogdor tasks at each firing.
+     */
+    @ParameterizedTest(name = "{1}")
+    @MethodSource("specsOutsideTheLimits")
+    void aStoredSpecOutsideItsLimitsStartsNoRun(String requestJson, String field) {
+        // A run the check let through would fail here, at submission.
+        Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+
+        scheduler.executeSchedule(storedSchedule(requestJson));
+
+        Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
+        Mockito.verifyNoInteractions(trogdorClient);
+        assertTrue(
+                schedulerErrors.stream()
+                        .anyMatch(e ->
+                                e.startsWith("Failed to execute schedule 'nightly': ") && e.contains(field + ": ")),
+                schedulerErrors.toString());
+    }
+
+    static Stream<Arguments> specsOutsideTheLimits() {
+        return Stream.of(
+                Arguments.of(
+                        "{\"type\":\"STRESS\",\"backend\":\"trogdor\",\"spec\":{\"numProducers\":1000}}",
+                        "spec.numProducers"),
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"spec\":{\"topic\":\"no spaces\"}}", "spec.topic"),
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"spec\":{\"numRecords\":0},\"scenario\":{\"phases\":"
+                                + "[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]}}",
+                        "spec.numRecords"));
+    }
+
+    /**
+     * Only the request's spec is held to the limits, so a request within them
+     * still fires. A schedule stored before the Kates API kept only the fields
+     * a request sets holds every spec field at its old Java default, all within
+     * the limits; the first case is its spec as migration V23 leaves it. A
+     * scenario with a type of its own, and none in the request, runs as the
+     * scenario's type, though bean validation of the whole request would
+     * refuse it for the missing type.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("requestsWithinTheLimits")
+    void aStoredRequestWithinTheLimitsStillRuns(String name, String requestJson) {
+        Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+
+        scheduler.executeSchedule(storedSchedule(requestJson));
+
+        ArgumentCaptor<String> runId = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(repository).updateLastRun(eq("s1"), runId.capture());
+        awaitFinished(runId.getValue());
+    }
+
+    static Stream<Arguments> requestsWithinTheLimits() {
+        return Stream.of(
+                Arguments.of(
+                        "old Java defaults",
+                        "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"spec\":{\"numRecords\":1000000,\"recordSize\":1024,"
+                                + "\"throughput\":-1,\"acks\":\"all\",\"batchSize\":65536,\"lingerMs\":5,"
+                                + "\"compressionType\":\"lz4\",\"numProducers\":1,\"numConsumers\":1,"
+                                + "\"durationMs\":600000,\"replicationFactor\":3,\"partitions\":3,"
+                                + "\"minInsyncReplicas\":2}}"),
+                Arguments.of(
+                        "a scenario's own type",
+                        "{\"backend\":\"trogdor\",\"scenario\":{\"type\":\"LOAD\",\"phases\":"
+                                + "[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]}}"));
     }
 
     @Test
