@@ -635,10 +635,10 @@ func mcpRunDecodeSpec(raw json.RawMessage, w *mcpRunSpecWire) (bool, error) {
 }
 
 // mcpRunSpecFrom reads the stored spec. A run without a topic used one named
-// after its type (TestOrchestrator.java:1355,1656-1657). The topic, acks and
+// after its type (TestOrchestrator.java:1381,1682-1683). The topic, acks and
 // compressionType are shown as identifiers only when they hold values Kafka
 // accepts: a scenario's base spec reaches the store unvalidated
-// (TestOrchestrator.java:348-361), so another value is third-party text and
+// (TestOrchestrator.java:347-360), so another value is third-party text and
 // goes, fenced, into invalid. The seven fields a backend without
 // requestedSpec never carried are shown only for a run that has one. call may
 // be nil when only the topic's kind is needed.
@@ -760,7 +760,7 @@ func mcpRunRequestedFrom(call *mcpCall, run *client.MCPRun) (*mcpRunRequestedSpe
 func mcpRunTaskFrom(call *mcpCall, t client.MCPRunTask) mcpRunTaskOut {
 	return mcpRunTaskOut{
 		// A scenario run's task ids are the run id and the phase name
-		// (TestOrchestrator.java:1493), which nothing validates.
+		// (TestOrchestrator.java:1519), which nothing validates.
 		TaskID:              call.FenceN(t.TaskID, 128),
 		Phase:               call.FenceN(t.PhaseName, 64),
 		Status:              mcpSanitizeLine(t.Status, 16),
@@ -2098,7 +2098,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "persistence/TestResultEntity.java:20-75",
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:186-221",
 				"static void applyResult(TestResultEntity entity, TestResult result)", ".withPhaseName(entity.getPhaseName());"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1728-1729", "getIntegrityResult() != null", "withIntegrity("),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1754-1755", "getIntegrityResult() != null", "withIntegrity("),
 			mcpJava + "report/ReportGenerator.java:106-132,479-484",
 			mcpJava + "engine/SlaEvaluator.java:92-103",
 		},
@@ -2111,7 +2111,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
 			"audit row.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1742-1815",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1768-1842",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
 			mcpAnchoredRef(mcpJava+"api/TestResource.java:268-313",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
@@ -2135,13 +2135,13 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"phase without a rate at k records a second, so that phase sent almost nothing. Neither /api/health " +
 			"nor a run says which of the two the API is.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:348-356,379-388",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:347-355,377-386",
 				"applyTypeDefaults(type, scenario.getBaseSpec())", ".withRequestedSpec(",
 				"scenario.resolveSpecForPhase(phase)", "backend.submit(task)"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1186-1342",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1212-1368",
 				"MAX_RAMP_STEPS = 100", "scenarioInapplicableFields(TestScenario scenario", "is a SPIKE phase",
 				"has none (", "check no record CRCs"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1479-1533", "List<BenchmarkTask> buildPhaseTask(",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1505-1559", "List<BenchmarkTask> buildPhaseTask(",
 				"int baseTarget = Math.max(1, spec.getThroughput() / steps);", `taskId + "-spike"`),
 			mcpAnchoredRef(mcpJava+"domain/TestScenario.java:107-182",
 				"TestSpec base = baseSpec != null ? baseSpec : new TestSpec();", "private TestSpec copySpec("),
