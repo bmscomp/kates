@@ -26,7 +26,7 @@ var mcpCaveatIDsRuns = []mcpCaveatID{
 	mcpCaveatSummaryAveragesTasks,
 	mcpCaveatIntegrityNotStored,
 	mcpCaveatCancelStoredAsFailed,
-	mcpCaveatScenarioBaseSpecOnly,
+	mcpCaveatScenarioPhaseSpecs,
 	mcpCaveatBrokerSkewProjected,
 	mcpCaveatRegressionOneBaseline,
 	mcpCaveatAdvisorRulesOfThumb,
@@ -474,7 +474,7 @@ func TestMCPGetRun(t *testing.T) {
 		t.Error("nothing was cut")
 	}
 	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks, mcpCaveatLoadSingleProducer)
-	mcpNoCaveat(t, env, mcpCaveatReaperDeadline, mcpCaveatIntegrityNotStored, mcpCaveatScenarioBaseSpecOnly)
+	mcpNoCaveat(t, env, mcpCaveatReaperDeadline, mcpCaveatIntegrityNotStored, mcpCaveatScenarioPhaseSpecs)
 
 	// list_runs shows the same digest for the same run.
 	list := mcpData[mcpListRunsOut](t, h.callOK("list_runs", nil))
@@ -573,7 +573,7 @@ func TestMCPGetRunFailedScenarioRun(t *testing.T) {
 	if len(got.Run.Labels) != 2 || !mcpFenced(h, got.Run.Labels[0]) || !strings.Contains(string(got.Run.Labels[1]), "team=payments") {
 		t.Errorf("labels = %q", got.Run.Labels)
 	}
-	mcpWantCaveats(t, env, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed, mcpCaveatIntegrityNotStored, mcpCaveatScenarioBaseSpecOnly)
+	mcpWantCaveats(t, env, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed, mcpCaveatIntegrityNotStored, mcpCaveatScenarioPhaseSpecs)
 	mcpNoCaveat(t, env, mcpCaveatLoadSingleProducer)
 	assertReadOnly(t, fb.Requests())
 }
@@ -707,7 +707,7 @@ func mcpOutsideFences(h *mcpHarness, raw []byte) string {
 }
 
 // A scenario run's text reaches the store unvalidated: its phase names
-// become task ids (TestOrchestrator.java:1399), and its base spec's topic,
+// become task ids (TestOrchestrator.java:1466), and its base spec's topic,
 // acks and compression are stored as sent (TestOrchestrator.java:348-361).
 // None of it may reach the model outside a fence.
 func TestMCPGetRunUnvalidatedScenarioText(t *testing.T) {
@@ -1363,7 +1363,7 @@ func TestMCPAssessRunScenarioAndTuning(t *testing.T) {
 	if got.NoiseBand.Computed || !strings.Contains(got.NoiseBand.Reason, "scenario") || !got.Run.Scenario || got.Comparison.Available {
 		t.Errorf("scenario run: band %+v comparison %+v", got.NoiseBand, got.Comparison)
 	}
-	mcpWantCaveats(t, env, mcpCaveatScenarioBaseSpecOnly)
+	mcpWantCaveats(t, env, mcpCaveatScenarioPhaseSpecs)
 
 	env = h.callOK("assess_run", map[string]any{"run_id": "0000f00d"})
 	mcpWantCaveats(t, env, mcpCaveatTuningOneMeasurement, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed)
@@ -1872,8 +1872,8 @@ func TestMCPRunReportMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	head, _, _ := strings.Cut(res.Contents[0].Text, mcpFenceOpenPrefix)
-	if !strings.Contains(head, "- "+string(mcpCaveatScenarioBaseSpecOnly)+": ") {
-		t.Errorf("a scenario run's report lacks %s:\n%s", mcpCaveatScenarioBaseSpecOnly, head)
+	if !strings.Contains(head, "- "+string(mcpCaveatScenarioPhaseSpecs)+": ") {
+		t.Errorf("a scenario run's report lacks %s:\n%s", mcpCaveatScenarioPhaseSpecs, head)
 	}
 	assertReadOnly(t, fb.Requests())
 }

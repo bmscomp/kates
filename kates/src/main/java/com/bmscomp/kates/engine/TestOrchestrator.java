@@ -1179,15 +1179,23 @@ public class TestOrchestrator {
     }
 
     /**
-     * The scenario's spec fields its phases could not honour, keyed by their
-     * path in the scenario ({@code baseSpec.x}, {@code phases[i].spec.x});
-     * empty when there are none.
+     * The most steps a RAMP phase may have. buildPhaseTask starts a producer
+     * for each step, all at once, so this bounds the producers of one phase as
+     * {@code numProducers} (at most 100) bounds those of a plain request.
+     */
+    static final int MAX_RAMP_STEPS = 100;
+
+    /**
+     * The scenario's fields its phases could not honour, keyed by their path
+     * in the scenario ({@code baseSpec.x}, {@code phases[i].spec.x},
+     * {@code phases[i].x}); empty when there are none.
      *
      * <p>Every phase is a set of producers (buildPhaseTask), whatever the
      * scenario's type, so the consumer settings and CRC checks have nothing to
      * apply to; they were stored as the run's spec and never used. The two
      * producer options reach every phase, and are checked against the acks
      * each phase resolves, since the Kafka client refuses them with any other.
+     * The rate is checked against each phase's type (refuseInapplicableRate).
      */
     Map<String, String> scenarioInapplicableFields(TestScenario scenario, String backendName) {
         Map<String, String> errors = new java.util.LinkedHashMap<>();
@@ -1227,8 +1235,67 @@ public class TestOrchestrator {
                     errors.putIfAbsent(transactions, "the trogdor backend cannot run a transactional producer");
                 }
             }
+            refuseInapplicableRate("phases[" + i + "].", name, phase, resolved, errors);
         }
         return errors;
+    }
+
+    /**
+     * Refuses the rate settings a phase of its type could not honour.
+     *
+     * <p>A SPIKE phase runs its producer unthrottled whatever the rate says, so
+     * a rate the phase sets itself is refused, as for a plain SPIKE request; a
+     * rate it inherits from the base spec is there for the other phases.
+     *
+     * <p>A RAMP phase divides its rate into rampSteps steps: step k runs at k
+     * times the rate divided by rampSteps, and at least k records a second. A
+     * phase resolves its rate from the base spec as sent, without the type's
+     * defaults, so one that no rate reached resolved -1, and its steps ran at
+     * 1, 2, ... records a second, sending almost nothing while it looked like
+     * a ramp; with fewer records a second than steps, the last steps ran past
+     * the rate. So the rate has to come to at least one record a second per
+     * step. The steps are producers started together, at most MAX_RAMP_STEPS.
+     */
+    private static void refuseInapplicableRate(
+            String path, String name, ScenarioPhase phase, TestSpec resolved, Map<String, String> errors) {
+        if (phase.getPhaseType() == ScenarioPhase.PhaseType.SPIKE) {
+            String why = "phase " + name + " is a SPIKE phase, which runs its producer unthrottled whatever the"
+                    + " rate says; only -1 (unlimited) applies";
+            TestSpec own = phase.getSpec();
+            if (phase.getTargetThroughput() != -1) {
+                errors.put(path + "targetThroughput", why);
+            }
+            if (own != null && own.hasThroughput() && own.getThroughput() != -1) {
+                errors.put(path + "spec.throughput", why);
+            }
+            if (own != null && own.hasTargetThroughput() && own.getTargetThroughput() != -1) {
+                errors.put(path + "spec.targetThroughput", why);
+            }
+            return;
+        }
+        if (phase.getPhaseType() != ScenarioPhase.PhaseType.RAMP) {
+            return;
+        }
+        int steps = Math.max(1, phase.getRampSteps());
+        int rate = resolved.getThroughput();
+        String perStep = "a RAMP phase needs a rate of at least one record a second per step, and phase " + name;
+        if (steps > MAX_RAMP_STEPS) {
+            errors.put(
+                    path + "rampSteps",
+                    "a RAMP phase starts a producer for each step, all at once, and phase " + name + " has " + steps
+                            + " steps; it may have at most " + MAX_RAMP_STEPS);
+        }
+        if (rate < 1) {
+            errors.put(
+                    path + "targetThroughput",
+                    perStep + " has none (" + rate + ", unlimited); set the phase's targetThroughput, or a"
+                            + " throughput in its spec or the base spec");
+        } else if (rate < steps) {
+            errors.putIfAbsent(
+                    path + "rampSteps",
+                    perStep + " has " + steps + " steps for " + rate + " records a second; use at most " + rate
+                            + " steps, or a higher rate");
+        }
     }
 
     private static void refuseConsumerAndCrc(String path, TestSpec spec, Map<String, String> errors) {
@@ -1402,6 +1469,8 @@ public class TestOrchestrator {
             case WARMUP, STEADY, COOLDOWN ->
                 List.of(produceTask(taskId + "-produce", runId, topic, spec, producerConfig));
             case RAMP -> {
+                // refuseInapplicableRate has made sure of a rate of at least a
+                // record a second per step, so no step runs past it.
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 int steps = Math.max(1, phase.getRampSteps());
                 int baseTarget = Math.max(1, spec.getThroughput() / steps);
