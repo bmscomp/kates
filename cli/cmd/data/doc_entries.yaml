@@ -992,13 +992,25 @@
 
 - name: scenario-diff
   category: Analysis
-  synopsis: "kates scenario-diff <id> [flags]"
-  short: "Compare a scenario YAML against actual test results"
+  synopsis: "kates scenario-diff <scenario.yaml> <test-id> [flags]"
+  short: "Compare a scenario file against a test run to detect config drift"
   description: |
-    Loads a YAML scenario and compares its expected SLA thresholds
-    against the actual results of a completed test run.
+    Reads a scenario file as kates test apply does, builds the request
+    apply would send for one of its scenarios, and compares its type,
+    backend and spec fields with the spec the run reports. The spec keys
+    are the file's (records, durationSeconds, ...), and durationSeconds
+    is compared as the durationMs it is sent as. A field the run's spec
+    does not report, and a spec key apply does not read or leaves out of
+    the request, is listed as not compared rather than counted as drift.
+    The validate block is not compared: kates test apply --wait grades it.
+  flags:
+    - name: "--scenario"
+      type: string
+      desc: "Scenario to compare, by name or number (from 1); required when the file holds more than one"
   examples:
-    - "kates scenario-diff abc123 -f scenario.yaml"
+    - "kates scenario-diff scenario.yaml 69acdf31"
+    - "kates scenario-diff cli/examples/load-test.yaml 69acdf31 --scenario \"Endurance Soak\""
+    - "kates scenario-diff cli/examples/perf-stress.yaml 69acdf31 --scenario 2 -o json"
   see_also:
     - test apply
     - diff

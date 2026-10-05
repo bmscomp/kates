@@ -42,6 +42,38 @@ type ScenarioFile struct {
 	Scenarios []TestScenario `yaml:"scenarios" json:"scenarios"`
 }
 
+// parseScenarioFile reads the scenarios in a file's contents as kates test
+// apply runs them: a scenarios list, with encoding/json when the file is named
+// .json and yaml.v3 otherwise, or, when that list cannot be read, one scenario
+// with a type, read as YAML. kates scenario-diff reads a file through it too,
+// so that it compares the scenarios apply would run.
+func parseScenarioFile(name string, data []byte) (ScenarioFile, error) {
+	var sf ScenarioFile
+	var err error
+	if strings.HasSuffix(name, ".json") {
+		err = json.Unmarshal(data, &sf)
+	} else {
+		err = yaml.Unmarshal(data, &sf)
+	}
+	if err != nil {
+		var single TestScenario
+		if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
+			return ScenarioFile{Scenarios: []TestScenario{single}}, nil
+		}
+		return ScenarioFile{}, err
+	}
+	return sf, nil
+}
+
+// scenarioName is the name kates test apply shows for the scenario at index i
+// of its file: its own, or its number for one without.
+func scenarioName(s TestScenario, i int) string {
+	if s.Name != "" {
+		return s.Name
+	}
+	return fmt.Sprintf("Scenario %d", i+1)
+}
+
 var (
 	applyFile string
 	applyWait bool
@@ -86,19 +118,9 @@ exits 130 after the summary.`,
 			return cmdErr("Failed to read file: " + err.Error())
 		}
 
-		var sf ScenarioFile
-		if strings.HasSuffix(applyFile, ".json") {
-			err = json.Unmarshal(data, &sf)
-		} else {
-			err = yaml.Unmarshal(data, &sf)
-		}
+		sf, err := parseScenarioFile(applyFile, data)
 		if err != nil {
-			var single TestScenario
-			if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
-				sf.Scenarios = []TestScenario{single}
-			} else {
-				return cmdErr("Invalid scenario file: " + err.Error())
-			}
+			return cmdErr("Invalid scenario file: " + err.Error())
 		}
 
 		if len(sf.Scenarios) == 0 {
@@ -137,10 +159,7 @@ exits 130 after the summary.`,
 				res.Interrupted = true
 				break
 			}
-			name := scenario.Name
-			if name == "" {
-				name = fmt.Sprintf("Scenario %d", i+1)
-			}
+			name := scenarioName(scenario, i)
 
 			if !jsonOut {
 				fmt.Printf("  %s %s (%s)...\n",

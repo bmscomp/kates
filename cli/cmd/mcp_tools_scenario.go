@@ -19,9 +19,9 @@ import (
 
 // draft_scenario and the kates://scenarios/{name} resources (plan §4.1,
 // §4.2). The tool is local compute: it parses a scenario file the way
-// kates test apply does (apply.go:89-106), a JSON one both as a .json and as a
-// YAML file, converts each scenario with
-// scenarioToRequest (apply.go:333), and checks the result against the agent
+// kates test apply does (apply.go:50-66,121-128), a JSON one both as a .json
+// and as a YAML file, converts each scenario with
+// scenarioToRequest (apply.go:352), and checks the result against the agent
 // envelope of plan §5.4-§5.5. It saves nothing and sends the scenario
 // nowhere; like every tool it runs behind the guard, whose pin check is the
 // only request it causes.
@@ -537,7 +537,7 @@ func mcpScnNotAScenarioFile(err error) error {
 }
 
 // mcpScnParseFile reads a scenario file as kates test apply reads a YAML
-// one (apply.go:89-106): a scenarios list, or failing that one scenario with a
+// one (apply.go:50-66): a scenarios list, or failing that one scenario with a
 // type. yaml.v3 ignores keys the structs do not name.
 func mcpScnParseFile(data []byte) ([]TestScenario, error) {
 	var sf ScenarioFile
@@ -559,7 +559,7 @@ func mcpScnLooksJSON(text string) bool {
 }
 
 // mcpScnParseJSONFile reads a scenario file as kates test apply reads a .json
-// one (apply.go:89-106): with encoding/json, which matches a key to a field in
+// one (apply.go:50-66): with encoding/json, which matches a key to a field in
 // any case and lets a later key replace an earlier one, and failing that as
 // one scenario in YAML.
 func mcpScnParseJSONFile(data []byte) ([]TestScenario, error) {
@@ -818,7 +818,7 @@ func mcpScnCheckTypeAndBackend(i int, req *client.CreateTestRequest, fs *mcpScnF
 	return known
 }
 
-// mcpScnSpecKey describes one spec key scenarioToRequest reads (apply.go:338-402)
+// mcpScnSpecKey describes one spec key scenarioToRequest reads (apply.go:357-421)
 // and the range the backend accepts for the field it becomes
 // (domain/TestSpec.java:34-113).
 type mcpScnSpecKey struct {
@@ -1251,7 +1251,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			mcpJava + "domain/TestSpec.java:34-113",
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1176-1241",
 				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
-			mcpAnchoredRef("cli/cmd/apply.go:135-212",
+			mcpAnchoredRef("cli/cmd/apply.go:157-231",
 				"for i, scenario := range sf.Scenarios {", "apiClient.CreateTest(ctx, req)",
 				"unevaluableSLAs(finalResult, scenario.Validate)"),
 		},
@@ -1281,7 +1281,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"produce, and RPO is measured only when a resilience run marks a fault, so a scenario run never has one. " +
 			"Keys ValidationSpec does not name, such as maxDuplicatePercent, are dropped when the file is read.",
 		Refs: []string{
-			mcpAnchoredRef("cli/cmd/apply.go:29-39,178-211,300-312,486-541,558-583",
+			mcpAnchoredRef("cli/cmd/apply.go:29-39,197-230,319-331,505-560,577-602",
 				"type ValidationSpec struct {", `yaml:"maxCrcFailures,omitempty"`,
 				"if !applyWait {", "nonNil(validateSLAs(finalResult, scenario.Validate))",
 				"} else if r.SLA != nil {", `"✓ SLA Pass"`,
