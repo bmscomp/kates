@@ -220,14 +220,13 @@ public class TestOrchestrator {
         org.jboss.logging.MDC.put("backend", backendName);
         runStartNanos.put(run.getId(), System.nanoTime());
         List<BenchmarkHandle> submitted = List.of();
+        var handles = new java.util.ArrayList<BenchmarkHandle>();
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
             run = run.withStatus(TestResult.TaskStatus.RUNNING);
             fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
             benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
-
-            var handles = new java.util.ArrayList<BenchmarkHandle>();
 
             for (BenchmarkTask task : tasks) {
                 try {
@@ -269,7 +268,7 @@ public class TestOrchestrator {
 
         } catch (Exception e) {
             LOG.error("Test execution failed for run: " + run.getId(), e);
-            run = run.withStatus(TestResult.TaskStatus.FAILED);
+            run = failSubmission(run, handles, e);
         }
 
         // Registered only AFTER the row carrying these tasks is persisted.
@@ -374,12 +373,11 @@ public class TestOrchestrator {
         }
         runStartNanos.put(run.getId(), System.nanoTime());
         List<BenchmarkHandle> submitted = List.of();
+        var allHandles = new java.util.ArrayList<BenchmarkHandle>();
 
         try {
             createTestTopic(baseSpec, type);
             benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
-
-            var allHandles = new java.util.ArrayList<BenchmarkHandle>();
 
             for (int phaseIdx = 0; phaseIdx < scenario.getPhases().size(); phaseIdx++) {
                 ScenarioPhase phase = scenario.getPhases().get(phaseIdx);
@@ -427,7 +425,7 @@ public class TestOrchestrator {
 
         } catch (Exception e) {
             LOG.error("Scenario execution failed for run: " + run.getId(), e);
-            run = run.withStatus(TestResult.TaskStatus.FAILED);
+            run = failSubmission(run, allHandles, e);
         }
 
         // Same ordering rule as executeAsync: publish handles only once the row
@@ -676,13 +674,33 @@ public class TestOrchestrator {
     }
 
     /**
+     * The run, FAILED, for a submission that threw part-way: each task it had
+     * already started is stopped, and failed with the reason.
+     *
+     * <p>Their handles are registered only once every task is submitted, so
+     * such a submission left them none: a delete found nothing to stop, and a
+     * FAILED run cannot be cancelled. Registering them would not have done it
+     * either, since the reconciler drops a FAILED run's handles without
+     * stopping them. A scenario whose later phase failed to build used to leave
+     * the phases before it producing for their whole duration, 600 s by
+     * default, with their tasks RUNNING in the FAILED run.
+     */
+    private TestRun failSubmission(TestRun run, List<BenchmarkHandle> started, Exception cause) {
+        stopTasks(run.getId(), started);
+        return withUnfinishedTasksFailed(
+                run.withStatus(TestResult.TaskStatus.FAILED),
+                "Stopped: the run failed while its tasks were being submitted: " + cause);
+    }
+
+    /**
      * Publishes a run's backend handles so the reconciler, the reaper and
      * shutdown can poll and stop its workers.
      *
-     * <p>Registered even when the run already looks terminal: a partial
-     * submission can leave workers running behind a FAILED status, and without a
-     * handle nothing can stop them. The terminal path in
-     * {@link #refreshStatus(String)} drops the entry once the run is settled.
+     * <p>Registered even when the run already looks terminal, though that keeps
+     * its workers stoppable only until the reconciler's next tick: the terminal
+     * path in {@link #refreshStatus(String)} drops the entry without stopping
+     * them. So a submission that throws part-way stops the tasks it started
+     * itself ({@link #failSubmission}).
      */
     private void registerHandles(TestRun run, List<BenchmarkHandle> handles) {
         if (!handles.isEmpty()) {
@@ -796,6 +814,14 @@ public class TestOrchestrator {
         if (handles == null) {
             return;
         }
+        stopTasks(runId, handles);
+    }
+
+    /**
+     * Stops each task through the backend that issued it. A task that cannot
+     * be stopped is logged, and the others are still stopped.
+     */
+    private void stopTasks(String runId, List<BenchmarkHandle> handles) {
         for (BenchmarkHandle handle : handles) {
             java.util.Optional<BenchmarkBackend> backend =
                     resolveBackend(handle.backendName()).asSuccess();
@@ -1813,7 +1839,8 @@ public class TestOrchestrator {
             if (status != TestResult.TaskStatus.RUNNING && status != TestResult.TaskStatus.PENDING) {
                 throw new RunNotCancellableException(status);
             }
-            TestRun cancelled = withCancelledTasks(run.withStatus(TestResult.TaskStatus.FAILED));
+            TestRun cancelled =
+                    withUnfinishedTasksFailed(run.withStatus(TestResult.TaskStatus.FAILED), CANCELLED_TASK_ERROR);
             settle(runId);
             if (repository.saveIfStatus(cancelled, status)) {
                 String typeName = cancelled.getTestType() != null
@@ -1832,8 +1859,8 @@ public class TestOrchestrator {
         throw new RunNotCancellableException(stored);
     }
 
-    /** The run with each task that had not finished marked as cancelled. */
-    private static TestRun withCancelledTasks(TestRun run) {
+    /** The run with each task that had not finished marked FAILED with this error. */
+    private static TestRun withUnfinishedTasksFailed(TestRun run, String error) {
         if (run.getResults() == null) {
             return run;
         }
@@ -1842,7 +1869,7 @@ public class TestOrchestrator {
             if (result.getStatus() == TestResult.TaskStatus.RUNNING
                     || result.getStatus() == TestResult.TaskStatus.PENDING) {
                 result = result.withStatus(TestResult.TaskStatus.FAILED)
-                        .withError(CANCELLED_TASK_ERROR)
+                        .withError(error)
                         .withEndTime(Instant.now().toString());
             }
             updatedResults.add(result);

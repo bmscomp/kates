@@ -21,6 +21,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.ScenarioPhase;
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
@@ -1227,10 +1228,12 @@ class TestOrchestratorTest {
     class ScenarioRequests {
 
         private final List<BenchmarkTask> submitted = new java.util.ArrayList<>();
+        private final TestRunRepository repository = mock(TestRunRepository.class);
+        private BenchmarkBackend backend;
 
         @SuppressWarnings("unchecked")
         private TestOrchestrator withBackend(String name) {
-            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            backend = mock(BenchmarkBackend.class);
             when(backend.name()).thenReturn(name);
             when(backend.submit(any())).thenAnswer(invocation -> {
                 BenchmarkTask task = invocation.getArgument(0);
@@ -1241,7 +1244,7 @@ class TestOrchestratorTest {
             when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
             return new TestOrchestrator(
                     mock(TopicService.class),
-                    mock(TestRunRepository.class),
+                    repository,
                     backends,
                     typeDefaults,
                     mock(BenchmarkMetrics.class),
@@ -1627,6 +1630,130 @@ class TestOrchestratorTest {
                     errors.get("phases[3].rampSteps").contains("phase flat has 0 steps; it needs at least 1"),
                     errors.toString());
             assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void aPhaseThatThrowsStopsThePhasesSubmittedBeforeIt() {
+            TestSpec base = new TestSpec();
+            base.setThroughput(1000);
+            ScenarioPhase ramp = phase("ramp", ScenarioPhase.PhaseType.RAMP);
+            ramp.setRampSteps(2);
+            ScenarioPhase steady = phase("steady", ScenarioPhase.PhaseType.STEADY);
+            CreateTestRequest request = scenario(
+                    base,
+                    phase("warmup", ScenarioPhase.PhaseType.WARMUP),
+                    ramp,
+                    steady,
+                    phase("cooldown", ScenarioPhase.PhaseType.COOLDOWN));
+            // The steady phase throws once tasks are running, past the checks
+            // made before the run starts, as resolveSpecForPhase or
+            // buildPhaseTask could for any phase after the first; a phase
+            // without a phaseType did, before it was refused. The phases
+            // before it ran on, 600 s by default, with their tasks RUNNING in
+            // the FAILED run.
+            TestScenario scenario = spy(request.getScenario());
+            doAnswer(invocation -> {
+                        if (invocation.getArgument(0) == steady && !submitted.isEmpty()) {
+                            throw new IllegalStateException("phase steady cannot be resolved");
+                        }
+                        return invocation.callRealMethod();
+                    })
+                    .when(scenario)
+                    .resolveSpecForPhase(any());
+            request.setScenario(scenario);
+            TestOrchestrator orchestrator = withBackend("native");
+            when(repository.saveIfPresent(any())).thenReturn(true);
+
+            TestRun run = orchestrator.executeTest(request).asSuccess().orElseThrow();
+
+            String id = run.getId();
+            List<String> started = List.of(id + "-warmup-produce", id + "-ramp-ramp-0", id + "-ramp-ramp-1");
+            assertEquals(
+                    started,
+                    submitted.stream().map(BenchmarkTask::getTaskId).toList(),
+                    "nothing is submitted past the phase that threw");
+            for (String taskId : started) {
+                verify(backend).stop(new BenchmarkHandle("native", taskId));
+            }
+            assertEquals(TestResult.TaskStatus.FAILED, run.getStatus());
+            verify(repository).saveIfPresent(run);
+            assertEquals(
+                    started,
+                    run.getResults().stream().map(TestResult::getTaskId).toList());
+            for (TestResult result : run.getResults()) {
+                assertEquals(TestResult.TaskStatus.FAILED, result.getStatus(), result.getTaskId());
+                assertEquals(
+                        "Stopped: the run failed while its tasks were being submitted:"
+                                + " java.lang.IllegalStateException: phase steady cannot be resolved",
+                        result.getError());
+                assertNotNull(result.getEndTime(), result.getTaskId());
+            }
+            assertEquals(0, orchestrator.activeTestCount(), "the run's permit is back");
+        }
+    }
+
+    /**
+     * A plain run whose submission throws part-way ends as a scenario's does:
+     * the tasks it started are stopped and failed with the reason. Once a task
+     * is submitted, only recording another task's failure to submit can throw.
+     */
+    @Nested
+    class PlainRunSubmission {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void aRunWhoseSubmissionThrowsStopsTheTasksItStarted() {
+            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            when(backend.name()).thenReturn("native");
+            when(backend.submit(any())).thenAnswer(invocation -> {
+                BenchmarkTask task = invocation.getArgument(0);
+                if (task.getWorkloadType() == BenchmarkTask.WorkloadType.CONSUME) {
+                    throw new BenchmarkException("the consumer was refused");
+                }
+                return new BenchmarkHandle("native", task.getTaskId());
+            });
+            Instance<BenchmarkBackend> backends = mock(Instance.class);
+            when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
+            TestRunRepository repository = mock(TestRunRepository.class);
+            when(repository.saveIfPresent(any())).thenReturn(true);
+            BenchmarkMetrics metrics = mock(BenchmarkMetrics.class);
+            doThrow(new IllegalStateException("the error counter is gone"))
+                    .when(metrics)
+                    .recordTaskStatus(anyString(), anyString(), anyString(), any());
+            TestOrchestrator withBackend = new TestOrchestrator(
+                    mock(TopicService.class),
+                    repository,
+                    backends,
+                    typeDefaults,
+                    metrics,
+                    mock(KatesMetrics.class),
+                    new SlaEvaluator(),
+                    mock(Event.class),
+                    "native",
+                    "localhost:9092",
+                    3,
+                    7_200_000L);
+            TestSpec spec = withBackend.applyTypeDefaults(TestType.LOAD, null);
+            TestRun run = new TestRun(TestType.LOAD, spec).withBackend("native");
+
+            withBackend.executeAsync(run, TestType.LOAD, spec, "native", backend);
+
+            String producer = run.getId() + "-produce-0";
+            verify(backend).stop(new BenchmarkHandle("native", producer));
+            org.mockito.ArgumentCaptor<TestRun> stored = org.mockito.ArgumentCaptor.forClass(TestRun.class);
+            verify(repository).saveIfPresent(stored.capture());
+            assertEquals(TestResult.TaskStatus.FAILED, stored.getValue().getStatus());
+            Map<String, TestResult> results = stored.getValue().getResults().stream()
+                    .collect(java.util.stream.Collectors.toMap(TestResult::getTaskId, r -> r));
+            assertEquals(TestResult.TaskStatus.FAILED, results.get(producer).getStatus());
+            assertEquals(
+                    "Stopped: the run failed while its tasks were being submitted:"
+                            + " java.lang.IllegalStateException: the error counter is gone",
+                    results.get(producer).getError());
+            assertEquals(
+                    "the consumer was refused",
+                    results.get(run.getId() + "-consume-0").getError(),
+                    "the task that failed to submit keeps its own error");
         }
     }
 
