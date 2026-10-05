@@ -26,29 +26,44 @@ kates resilience run -f cli/examples/resilience-test.yaml --dry-run
 
 Schema: `scenarios: []` with `spec:` (flat map) and `validate:` block.
 
+`kates test apply` sends the `spec` keys below and drops any other without a
+word, so the run takes its type's default instead. `numRecords`, `recordSize`,
+`throughput` and `numProducers` are the Kates API's names, which a resilience
+file's `testRequest` uses; a scenario file names them `records`,
+`recordSizeBytes`, `targetThroughput` and `parallelProducers`, and gives the
+duration in seconds as `durationSeconds`. A STRESS or CAPACITY run starts
+`parallelProducers` producers, and every other type starts one. `records` and
+`targetThroughput` hold for each producer, and no type reads `numConsumers`.
+With `--wait`, each `validate` gate is checked against every task of the run:
+each producer of a STRESS or CAPACITY run, a LOAD run's producer and its
+consumer. `TestShippedScenariosSetOnlyWhatTheirRunsRead` (`cli/cmd`) fails an
+example that sets a key `kates test apply` doesn't read, or a count its type
+doesn't read.
+
 | File | `type` | What it tests | Key `spec` settings |
 |---|---|---|---|
-| `perf-load.yaml` | `LOAD` | Baseline at 10k msg/s | 3P/2C, lz4, acks=all |
-| `perf-stress.yaml` | `STRESS` | Saturation curve in 4 steps | 5k → 15k → 30k → unlimited |
-| `perf-spike.yaml` | `SPIKE` | Burst after idle | idle → unlimited → recovery |
-| `perf-endurance.yaml` | `ENDURANCE` | 10-min soak at 6k msg/s | 3P/3C, duration=600 |
+| `perf-load.yaml` | `LOAD` | Baseline at 10k msg/s | 1 producer, 1 consumer, lz4, acks=all |
+| `perf-stress.yaml` | `STRESS` | Saturation curve in 4 steps | 5k → 15k → 30k msg/s → unlimited, 3 to 6 producers |
+| `perf-spike.yaml` | `LOAD`, `SPIKE`, `LOAD` | Burst after idle | 500 msg/s → unthrottled → 3k msg/s |
+| `perf-endurance.yaml` | `ENDURANCE` | 10-min soak at 6k msg/s | 1 producer, 1 consumer, durationSeconds=600 |
 | `perf-volume.yaml` | `VOLUME` | 64 KB payloads | 1 MB batch, snappy |
-| `perf-capacity.yaml` | `CAPACITY` | Max throughput discovery | 6P, 12 partitions, 3 steps |
+| `perf-capacity.yaml` | `STRESS`, `CAPACITY`, `STRESS` | Max throughput discovery | 6 producers, 12 partitions: 10k msg/s → unthrottled → 20k msg/s |
 | `perf-round-trip.yaml` | `ROUND_TRIP` | E2E latency, p99 < 50ms | linger=0, no compression |
 | `perf-integrity.yaml` | `INTEGRITY` | Exactly-once + CRC | transactions=true, enableCrc=true |
+| `load-test.yaml` | `LOAD`, `ENDURANCE` | Quick load, then a short soak | 50k records; 200k records within 120 s |
 
 ### `spec` field reference
 
 | YAML key | Type | Notes |
 |---|---|---|
 | `topic` | string | Must exist or be auto-created by the test |
-| `numRecords` | int | Total records to produce |
-| `recordSize` | int | Bytes per record |
-| `throughput` | int | Max msg/s; `-1` = unlimited |
-| `numProducers` | int | Parallel producer threads |
-| `numConsumers` | int | Parallel consumer threads |
+| `records` | int | Records to produce, for each producer |
+| `recordSizeBytes` | int | Bytes per record |
+| `targetThroughput` | int | Max msg/s, for each producer; `-1` = unlimited. `SPIKE` and `CAPACITY` run unthrottled, and the backend refuses any other rate for them |
+| `parallelProducers` | int | Producers, for `STRESS` and `CAPACITY`; every other type starts one |
+| `numConsumers` | int | Read by no test type: a run starts one consumer at most |
 | `consumerGroup` | string | Consumer group name; `LOAD`, `ENDURANCE` and `INTEGRITY` only, the backend refuses it for any other type |
-| `duration` | int | Duration in **seconds** (ENDURANCE) |
+| `durationSeconds` | int | Time cap in **seconds**, sent as `durationMs`; the run stops at `records` or at the deadline, whichever comes first |
 | `acks` | string | `"0"`, `"1"`, or `"all"` |
 | `batchSize` | int | Producer batch size (bytes) |
 | `lingerMs` | int | Producer linger (ms) |
@@ -130,7 +145,7 @@ kates test types
 kates resilience run -f cli/examples/resilience-cpu-stress.yaml --dry-run
 
 # Run with output format
-kates test apply -f cli/examples/perf-load.yaml --wait -o json | jq '.runId'
+kates test apply -f cli/examples/perf-load.yaml --wait -o json | jq -r '.scenarios[].runId'
 
 # Watch a running test
 kates test watch <run-id>
