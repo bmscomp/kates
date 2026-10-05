@@ -2096,7 +2096,8 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"data-loss, RTO or RPO limit as met, because a missing value is skipped rather than failed.",
 		Refs: []string{
 			mcpJava + "persistence/TestResultEntity.java:20-75",
-			mcpJava + "persistence/EntityMapper.java:171-206",
+			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:186-221",
+				"static void applyResult(TestResultEntity entity, TestResult result)", ".withPhaseName(entity.getPhaseName());"),
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1701-1702", "getIntegrityResult() != null", "withIntegrity("),
 			mcpJava + "report/ReportGenerator.java:106-132,479-484",
 			mcpJava + "engine/SlaEvaluator.java:92-103",
@@ -2112,7 +2113,8 @@ var mcpCaveatsRuns = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1715-1788",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpJava + "api/TestResource.java:261-306",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:268-313",
+				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},
 	},
@@ -2188,7 +2190,8 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"newest matching rows.",
 		Refs: []string{
 			mcpJava + "persistence/AuditEventEntity.java:15-32",
-			mcpJava + "api/TestResource.java:102,134,161,253,289",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:102,134,164,264,296",
+				`auditService.record("CREATE"`, `auditService.record("DELETE"`, `auditService.record("CANCEL"`),
 			mcpJava + "service/AuditService.java:52-78",
 			mcpJava + "api/AuditResource.java:43-47",
 		},
@@ -2211,8 +2214,11 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionTemplateResource.java:57-59",
 			mcpJava + "disruption/DisruptionScheduler.java:92-104",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
-			mcpJava + "disruption/DisruptionAnalysisResource.java:104-130",
-			mcpJava + "resilience/ResilienceResource.java:41-67",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:104-135",
+				`@Path("/compound")`, `"results", outcome.results()`),
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:67-93",
+				"StreamingOutput executeWithKeepAlive(", "objectMapper.writeValue(os, payload);",
+				`"Failed to execute resilience test"`),
 		},
 	},
 }
