@@ -178,8 +178,9 @@ const (
 // 61-63). The backend does not always apply it: a scenario's base spec is
 // validated only in a resilience run (ResilienceResource.java:88-116), not
 // by bean validation (CreateTestRequest.java:14-18, TestScenario.java:26), and
-// gRPC sets compressionType unchecked (GrpcTestService.java:52), so a stored
-// value outside these is third-party text.
+// a Kates API without the check of a gRPC request's fields
+// (GrpcTestService.java:104-109) stored a compressionType sent over gRPC
+// unchecked, so a stored value outside these is third-party text.
 var (
 	mcpRunTopicRE       = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,249}$`)
 	mcpRunAcksRE        = regexp.MustCompile(`^(all|-1|0|1)$`)
@@ -444,7 +445,7 @@ type mcpRunSpec struct {
 	EnableIdempotence  *bool          `json:"enableIdempotence,omitempty" jsonschema:"what the request set: false turned the producers' idempotence off. Absent when it set none, and then the Kafka client decided: it turns idempotence on whenever acks is all"`
 	EnableTransactions *bool          `json:"enableTransactions,omitempty" jsonschema:"true when the run's producers were transactional, and then a LOAD or ENDURANCE consumer read with read_committed; absent when the request did not set it"`
 	EnableCrc          *bool          `json:"enableCrc,omitempty" jsonschema:"whether an INTEGRITY run checked each record's CRC; absent when the request did not set it, and then an INTEGRITY run did. No other type checks one"`
-	Invalid            []mcpUntrusted `json:"invalid,omitempty" jsonschema:"stored topic, acks or compressionType values that are not legal Kafka values, as field=value; the backend does not validate a scenario's base spec, nor compressionType sent over gRPC"`
+	Invalid            []mcpUntrusted `json:"invalid,omitempty" jsonschema:"stored topic, acks or compressionType values that are not legal Kafka values, as field=value; the backend does not validate a scenario's base spec, and an older one did not validate compressionType sent over gRPC"`
 }
 
 // mcpRunRequestedSpec is the request's own spec fields, as the backend kept

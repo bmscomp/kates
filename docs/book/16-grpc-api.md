@@ -143,6 +143,33 @@ grpcurl "${GRPC[@]}" -d '{
 
 A test run ID is eight hex characters — the first block of a random UUID — so pass it exactly as returned; the same IDs appear in `kates test list` and the REST API. The response comes back as soon as the run is registered, before it starts, so `status` is always `PENDING` and `results` is empty.
 
+The Kates API holds each field the request sets to the same limits as a `spec` sent to [POST /api/tests](11-api-reference.md#post-apitests), and refuses a request outside them with `INVALID_ARGUMENT` before it starts anything. The description names each field by its name in `kates.proto`, with the reason, and separates the fields with `; `. These are the values each field takes:
+
+| Field | Accepted values |
+|-------|-----------------|
+| `num_records` | 1 to 1,000,000,000 |
+| `record_size` | 1 to 104,857,600 bytes (100 MiB) |
+| `partitions` | 1 to 10,000 |
+| `replication_factor` | 1 to 10 |
+| `compression_type` | `none`, `gzip`, `snappy`, `lz4` or `zstd` |
+
+A field at its zero value, `0` or an empty string, counts as unset, because proto3 can't tell the two apart, and takes the type's default. A negative number is refused. A request for 20,000 partitions, for example:
+
+```bash
+grpcurl "${GRPC[@]}" -d '{"type": "LOAD", "partitions": 20000}' \
+  localhost:30083 kates.TestService/CreateTest
+```
+
+Output:
+
+```text
+ERROR:
+  Code: InvalidArgument
+  Message: partitions: must be less than or equal to 10000
+```
+
+A request that `POST /api/tests` refuses for a run the Kates API couldn't honour, such as one longer than `kates.engine.max-duration-ms` allows, gets `INVALID_ARGUMENT` too, naming each field the same way. The RPC takes no duration, so a run is that long only through its type's default duration, and the description names `duration_ms`.
+
 #### GetTest
 
 ```bash
@@ -380,10 +407,10 @@ All list RPCs use `page` (zero-based) and `size` (default 50, max 200) request f
 | gRPC Status | HTTP Equiv. | When | Example |
 |-------------|:---:|------|---------|
 | `UNAUTHENTICATED` | 401/403 | Missing or wrong API key | `Missing or invalid API key. Provide it via 'authorization: Bearer <key>' or 'x-api-key: <key>' metadata.` |
-| `INVALID_ARGUMENT` | 400 | Missing/invalid fields | `Test type is required`, `Invalid test type: BENCHMARK` |
+| `INVALID_ARGUMENT` | 400 | Missing/invalid fields | `Test type is required`, `Invalid test type: BENCHMARK`, `partitions: must be less than or equal to 10000` |
 | `NOT_FOUND` | 404 | Resource doesn't exist | `Test not found: 0badc0de` |
 | `FAILED_PRECONDITION` | 409 | `CancelTest` on a run that is neither pending nor running | `Test is not running (status: DONE)` |
-| `INTERNAL` | 500 or 429 | `CreateTest` could not start the run | Surfaces the underlying exception message verbatim — including `Concurrency limit reached: 3 tests already running`, which REST reports as `429` |
+| `INTERNAL` | 500 or 429 | `CreateTest` could not start the run, for a reason other than its fields | Surfaces the underlying exception message verbatim — including `Concurrency limit reached: 3 tests already running`, which REST reports as `429` |
 
 Any other exception inside an RPC — Kafka unreachable during `GetClusterInfo`, no Kubernetes API for `GetClusterTopology` — reaches the client as `UNKNOWN`, with the Java exception class and message as the description. Transport-level codes such as `UNAVAILABLE` come from the gRPC runtime itself (e.g. when the server cannot be reached), not from Kates.
 
@@ -453,7 +480,7 @@ Generated clients carry no credentials of their own: attach the API key as `x-ap
 - gRPC and REST are served by the same Kates API, but gRPC covers fewer operations and some of its responses carry less, as the points below list — gRPC is served over the unified Quarkus HTTP port 8080, which `make ports` forwards to `localhost:30083`, not the separate port 9000 the Helm chart still declares
 - Every RPC, `HealthService/Check` included, needs the API key as `authorization: Bearer <key>` or `x-api-key: <key>` metadata
 - Server reflection is enabled only in the dev profile; against a deployed Kates API, pass `-import-path kates/src/main/proto -proto kates.proto` to `grpcurl`
-- `CreateTestRequest` exposes only a subset of `TestSpec`; unset fields fall back to per-test-type defaults, and the request's `labels` map is ignored by the current server
+- `CreateTestRequest` exposes only a subset of `TestSpec`, held to the limits REST sets; unset fields fall back to per-test-type defaults, and the request's `labels` map is ignored by the current server
 - proto3 JSON output omits zero-valued fields — a missing `id` or `page` in a response means zero, not an error — and some declared fields (`controller_id`, most of `ClusterTopology`, the counts on `ListTopics` items) are never populated at all
 - Kates raises five application status codes — `UNAUTHENTICATED`, `INVALID_ARGUMENT`, `NOT_FOUND`, `FAILED_PRECONDITION` and `INTERNAL`; any other exception surfaces as `UNKNOWN`, and transport-level codes like `UNAVAILABLE` come from the gRPC runtime itself
 - Typed clients for Go, Java, and Python are generated with `protoc` from the bundled `kates/src/main/proto/kates.proto`; Go needs an `M` mapping because the file declares no `go_package`
