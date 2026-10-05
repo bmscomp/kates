@@ -101,7 +101,7 @@ The table compares the four values. Check the Default column first: a stock inst
 
 | Provider | Default | Needs | Fault types it runs | `kates` chart RBAC |
 |----------|---------|-------|---------------------|--------------------|
-| `litmus-crd` | Yes | LitmusChaos, with each type's experiment installed | Every type through a Litmus experiment, except `ROLLING_RESTART` and `SCALE_DOWN`, which use the Kubernetes API | The default role |
+| `litmus-crd` | Yes | LitmusChaos, with each type's experiment installed | Every type through a Litmus experiment, except `POD_DELETE`, `ROLLING_RESTART` and `SCALE_DOWN`, which use the Kubernetes API | The default role |
 | `kubernetes` | No | Nothing beyond Kates | `POD_KILL`, `POD_DELETE`, `LEADER_ELECTION`, `NETWORK_PARTITION`, `CPU_STRESS`, `IO_STRESS`, `ROLLING_RESTART`, `SCALE_DOWN` | `rbac.directChaos=true` for `NETWORK_PARTITION`, `CPU_STRESS` and `IO_STRESS` |
 | `hybrid` | No | Nothing: it uses LitmusChaos when the Litmus [CRDs](appendix-a-glossary.md#gl-crd) exist | Those of the provider it picks | As for the provider it picks |
 | `noop` | No | Nothing | None: every fault comes back `Skipped` | None |
@@ -149,7 +149,7 @@ The provider injects each fault once, and doesn't try it again when a call fails
 
 ### LitmusChaos Integration
 
-On the default `litmus-crd` provider, Kates maps every disruption type but two to a Litmus experiment (for example, `POD_KILL` and `POD_DELETE` both map to `pod-delete`). The exceptions are `ROLLING_RESTART`, because no Litmus experiment does a rolling restart, and `SCALE_DOWN`, because `pod-delete` kills a broker that its [StrimziPodSet](appendix-a-glossary.md#gl-strimzipodset) brings straight back. The `litmus-crd` provider hands both to the `kubernetes` provider, so they run the same way on both. Five types are only available through Litmus:
+On the default `litmus-crd` provider, Kates maps every disruption type but three to a Litmus experiment (for example, `POD_KILL` and `LEADER_ELECTION` both map to `pod-delete`). The exceptions are `ROLLING_RESTART`, because no Litmus experiment does a rolling restart, `SCALE_DOWN`, because `pod-delete` kills a broker that its [StrimziPodSet](appendix-a-glossary.md#gl-strimzipodset) brings straight back, and `POD_DELETE`, because `pod-delete` never deletes a pod with `gracePeriodSec`. It deletes the pod at once with the `FORCE=true` that pods of a StrimziPodSet need, and with the pod's own grace period otherwise. The `litmus-crd` provider hands all three to the `kubernetes` provider, so they run the same way on both. Five types are only available through Litmus:
 
 | Type | Litmus Experiment | Effect |
 |------|-------------------|--------|
@@ -159,7 +159,7 @@ On the default `litmus-crd` provider, Kates maps every disruption type but two t
 | `DISK_FILL` | `disk-fill` | Litmus `disk-fill` at `fillPercentage`; the `kates-chaos` chart doesn't install the experiment |
 | `NODE_DRAIN` | `node-drain` | Drains a node, as in a node or [zone](appendix-a-glossary.md#gl-zone) failure; Kates sets no `TARGET_NODE`, so name the node in `envOverrides` |
 
-The two providers don't treat every field alike. On `litmus-crd`, `POD_DELETE` is as forced as `POD_KILL`: both run `pod-delete` with `FORCE=true`, so `gracePeriodSec` has no effect, and neither has `delayBeforeSec`. `chaosDurationSec` becomes the experiment's `TOTAL_CHAOS_DURATION`, and Kates waits up to two minutes past it for the ChaosResult. On `kubernetes`, `POD_KILL`, `POD_DELETE` and `LEADER_ELECTION` delete each target once, and `chaosDurationSec` doesn't lengthen them.
+The two providers don't treat every field alike. Both wait `delayBeforeSec` before they pick the pods and inject the fault, so on `litmus-crd` the ChaosEngine appears only after the delay. On `litmus-crd`, `chaosDurationSec` becomes the experiment's `TOTAL_CHAOS_DURATION`, and Kates waits up to two minutes past it for the ChaosResult. `POD_KILL` and `LEADER_ELECTION` run `pod-delete` there with `FORCE=true`, which deletes the pod at once. On `kubernetes`, `POD_KILL`, `POD_DELETE` and `LEADER_ELECTION` delete each target once, and `chaosDurationSec` doesn't lengthen them. A `POD_DELETE` runs that way on both providers, with `gracePeriodSec` as the pod's grace period, and leaves no ChaosEngine.
 
 ### The Hybrid Provider
 
@@ -168,7 +168,7 @@ The diagram shows the one decision the hybrid provider makes, and when it makes 
 ```mermaid
 %%| label: fig-practice-hybrid-provider
 %%| fig-cap: "With `kates.chaos.provider=hybrid`, Kates looks for the LitmusChaos CRDs once, and sends every fault to the provider it picked."
-%%| fig-alt: "Flowchart. A fault from the Kates API goes to the hybrid provider, which asks once whether the Litmus CRDs are installed. If Litmus is detected, it uses the litmus-crd provider, which runs Litmus experiments through the LitmusChaos CRDs and hands ROLLING_RESTART and SCALE_DOWN to the kubernetes provider. If Litmus is not found, it uses the kubernetes provider, which calls the Kubernetes API directly for the eight types it implements."
+%%| fig-alt: "Flowchart. A fault from the Kates API goes to the hybrid provider, which asks once whether the Litmus CRDs are installed. If Litmus is detected, it uses the litmus-crd provider, which runs Litmus experiments through the LitmusChaos CRDs and hands POD_DELETE, ROLLING_RESTART and SCALE_DOWN to the kubernetes provider. If Litmus is not found, it uses the kubernetes provider, which calls the Kubernetes API directly for the eight types it implements."
 graph TD
     DO[Kates API<br/>a fault to inject] --> HCP[hybrid<br/>once: are Litmus CRDs installed?]
     
@@ -176,7 +176,7 @@ graph TD
     HCP -->|Litmus not found| KCP[kubernetes<br/>eight types, directly]
     
     LCP --> LIT[LitmusChaos CRDs]
-    LCP -->|ROLLING_RESTART, SCALE_DOWN| KCP
+    LCP -->|POD_DELETE,<br/>ROLLING_RESTART,<br/>SCALE_DOWN| KCP
     KCP --> K8S[Kubernetes API]
 ```
 
@@ -200,7 +200,7 @@ A pod-level fault hits one pod unless told otherwise. The first of these that ap
 Both chaos providers resolve the pods the same way: `kubernetes` applies the fault to each of them, and `litmus-crd` passes them to the experiment as a comma-separated `TARGET_PODS` list. A selector that matches no pod fails the step with `No pods found matching label selector` instead of doing nothing.
 
 ::: {.callout-warning title="Litmus Deletes Several Targets One at a Time"}
-Kates runs Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With several targets, Litmus therefore deletes them one at a time; the `kubernetes` provider deletes them all at once.
+Kates runs `POD_KILL` and `LEADER_ELECTION` as Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With several targets, Litmus therefore deletes them one at a time; the `kubernetes` provider deletes them all at once.
 :::
 
 ### Scaling Down a Node Pool
@@ -513,7 +513,7 @@ The dry run answers UNSAFE when the guard would refuse to run the playbook, and 
 kates disruption playbook run leader-cascade --dry-run && kates disruption playbook run leader-cascade
 ```
 
-For `POD_KILL`, `POD_DELETE`, `LEADER_ELECTION`, `NETWORK_PARTITION`, `NETWORK_LATENCY`, `ROLLING_RESTART` and `SCALE_DOWN` steps, the dry run also asks the Kubernetes API whether the Kates service account may make the step's change. It asks for `delete` on pods for the three pod kills, `create` on NetworkPolicies for the two network types, `patch` on pods for `ROLLING_RESTART`, and the node pool or StatefulSet writes a `SCALE_DOWN` makes. A missing permission is a step warning, which doesn't make the dry run UNSAFE. Other disruption types get no RBAC check, and a check that cannot run counts as permitted. On `litmus-crd`, Litmus injects every type except `ROLLING_RESTART` and `SCALE_DOWN` as its own service account, so a missing permission for those types says nothing about whether the step can run.
+For `POD_KILL`, `POD_DELETE`, `LEADER_ELECTION`, `NETWORK_PARTITION`, `NETWORK_LATENCY`, `ROLLING_RESTART` and `SCALE_DOWN` steps, the dry run also asks the Kubernetes API whether the Kates service account may make the step's change. It asks for `delete` on pods for the three pod kills, `create` on NetworkPolicies for the two network types, `patch` on pods for `ROLLING_RESTART`, and the node pool or StatefulSet writes a `SCALE_DOWN` makes. A missing permission is a step warning, which doesn't make the dry run UNSAFE. Other disruption types get no RBAC check, and a check that cannot run counts as permitted. On `litmus-crd`, Litmus injects every type except `POD_DELETE`, `ROLLING_RESTART` and `SCALE_DOWN` as its own service account, so a missing permission for those types says nothing about whether the step can run.
 
 The preview describes the cluster at that moment. A leader can move before its step starts, and the step kills whichever broker leads the partition when it starts.
 
