@@ -179,7 +179,7 @@ const (
 // validated only in a resilience run (ResilienceResource.java:88-116), not
 // by bean validation (CreateTestRequest.java:14-18, TestScenario.java:26), and
 // a Kates API without the check of a gRPC request's fields
-// (GrpcTestService.java:104-109) stored a compressionType sent over gRPC
+// (GrpcTestService.java:116-121) stored a compressionType sent over gRPC
 // unchecked, so a stored value outside these is third-party text.
 var (
 	mcpRunTopicRE       = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,249}$`)
