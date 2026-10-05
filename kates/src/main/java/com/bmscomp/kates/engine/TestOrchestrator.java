@@ -1196,6 +1196,13 @@ public class TestOrchestrator {
      * producer options reach every phase, and are checked against the acks
      * each phase resolves, since the Kafka client refuses them with any other.
      * The rate is checked against each phase's type (refuseInapplicableRate).
+     *
+     * <p>A phase's type decides the producers it starts, and nothing else
+     * checks that it has one: buildPhaseTask threw on a phase without one
+     * after the run was stored, so the run ended FAILED, and the phases
+     * submitted before it ran on with no handle to stop them. Only a RAMP
+     * phase reads rampSteps; any other starts one producer, so there a
+     * rampSteps other than its default of 1 is refused rather than ignored.
      */
     Map<String, String> scenarioInapplicableFields(TestScenario scenario, String backendName) {
         Map<String, String> errors = new java.util.LinkedHashMap<>();
@@ -1210,6 +1217,18 @@ public class TestOrchestrator {
             TestSpec own = phase.getSpec();
             TestSpec resolved = scenario.resolveSpecForPhase(phase);
             String name = phase.getName() != null ? phase.getName() : "phase-" + i;
+            ScenarioPhase.PhaseType type = phase.getPhaseType();
+            if (type == null) {
+                errors.put(
+                        "phases[" + i + "].phaseType",
+                        "phase " + name + " has no phaseType, which decides the producers it starts; set WARMUP,"
+                                + " RAMP, STEADY, SPIKE or COOLDOWN");
+            } else if (type != ScenarioPhase.PhaseType.RAMP && phase.getRampSteps() != 1) {
+                errors.put(
+                        "phases[" + i + "].rampSteps",
+                        "phase " + name + " is a " + type + " phase, which starts one producer whatever rampSteps"
+                                + " says; only a RAMP phase has steps, so only 1 applies");
+            }
             // Named where it was set: the phase's own spec, or the base one.
             String idempotence = own != null && own.hasEnableIdempotence()
                     ? "phases[" + i + "].spec.enableIdempotence"
@@ -1255,6 +1274,8 @@ public class TestOrchestrator {
      * a ramp; with fewer records a second than steps, the last steps ran past
      * the rate. So the rate has to come to at least one record a second per
      * step. The steps are producers started together, at most MAX_RAMP_STEPS.
+     * A rampSteps below 1 ran as one step, the whole rate from the start, so
+     * it is refused too.
      */
     private static void refuseInapplicableRate(
             String path, String name, ScenarioPhase phase, TestSpec resolved, Map<String, String> errors) {
@@ -1279,6 +1300,12 @@ public class TestOrchestrator {
         int steps = Math.max(1, phase.getRampSteps());
         int rate = resolved.getThroughput();
         String perStep = "a RAMP phase needs a rate of at least one record a second per step, and phase " + name;
+        if (phase.getRampSteps() < 1) {
+            errors.put(
+                    path + "rampSteps",
+                    "a RAMP phase starts a producer for each step, and phase " + name + " has " + phase.getRampSteps()
+                            + " steps; it needs at least 1");
+        }
         if (steps > MAX_RAMP_STEPS) {
             errors.put(
                     path + "rampSteps",

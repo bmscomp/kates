@@ -1472,6 +1472,72 @@ class TestOrchestratorTest {
                     errors.toString());
             assertTrue(submitted.isEmpty());
         }
+
+        @Test
+        void aPhaseWithoutAPhaseTypeIsRefusedByName() {
+            // buildPhaseTask switches on the type, so a phase without one threw
+            // after the run was stored and announced: the run ended FAILED, and
+            // the warmup phase's producer, already submitted, ran on with no
+            // handle to stop it.
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(
+                            new TestSpec(),
+                            phase("warmup", ScenarioPhase.PhaseType.WARMUP),
+                            phase("steady", null),
+                            phase(null, null)))
+                    .asFailure()
+                    .orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            Map<String, String> errors = invalid.getFieldErrors();
+            assertEquals(Set.of("phases[1].phaseType", "phases[2].phaseType"), errors.keySet());
+            assertTrue(errors.get("phases[1].phaseType").contains("phase steady has no phaseType"), errors.toString());
+            assertTrue(errors.get("phases[2].phaseType").contains("phase phase-2 has no phaseType"), errors.toString());
+            for (ScenarioPhase.PhaseType type : ScenarioPhase.PhaseType.values()) {
+                assertTrue(errors.get("phases[1].phaseType").contains(type.name()), errors.toString());
+            }
+            assertTrue(invalid.getMessage().contains("scenario.phases[1].phaseType: "), invalid.getMessage());
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void rampStepsIsRefusedWhereItCannotApply() {
+            // Only a RAMP phase reads rampSteps: any other starts one producer,
+            // so only the default of 1 applies there. A RAMP phase ran a value
+            // below 1 as one step, at its whole rate from the start. A phase
+            // without a type is told to set one; its steps are checked then.
+            TestSpec base = new TestSpec();
+            base.setThroughput(1000);
+            ScenarioPhase steady = phase("steady", ScenarioPhase.PhaseType.STEADY);
+            steady.setRampSteps(4);
+            ScenarioPhase burst = phase("burst", ScenarioPhase.PhaseType.SPIKE);
+            burst.setRampSteps(0);
+            ScenarioPhase flat = phase("flat", ScenarioPhase.PhaseType.RAMP);
+            flat.setRampSteps(0);
+            ScenarioPhase untyped = phase("untyped", null);
+            untyped.setRampSteps(4);
+
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(
+                            base, phase("warmup", ScenarioPhase.PhaseType.WARMUP), steady, burst, flat, untyped))
+                    .asFailure()
+                    .orElseThrow();
+
+            Map<String, String> errors =
+                    assertInstanceOf(InvalidTestSpecException.class, failure).getFieldErrors();
+            assertEquals(
+                    Set.of("phases[1].rampSteps", "phases[2].rampSteps", "phases[3].rampSteps", "phases[4].phaseType"),
+                    errors.keySet());
+            assertTrue(
+                    errors.get("phases[1].rampSteps")
+                            .contains("phase steady is a STEADY phase, which starts one producer whatever rampSteps"),
+                    errors.toString());
+            assertTrue(errors.get("phases[2].rampSteps").contains("phase burst is a SPIKE phase"), errors.toString());
+            assertTrue(
+                    errors.get("phases[3].rampSteps").contains("phase flat has 0 steps; it needs at least 1"),
+                    errors.toString());
+            assertTrue(submitted.isEmpty());
+        }
     }
 
     private static final long CAP_MS = 7_200_000;
