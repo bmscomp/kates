@@ -19,6 +19,7 @@ import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
+import com.bmscomp.kates.engine.ConcurrencyLimitException;
 import com.bmscomp.kates.engine.InvalidTestSpecException;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.grpc.proto.*;
@@ -57,18 +58,29 @@ public class GrpcTestService extends MutinyTestServiceGrpc.TestServiceImplBase {
             domainReq.setType(type);
             domainReq.setSpec(specWithinLimits(request));
 
-            // A request the run could not honour as written is the caller's
-            // to change, as POST /api/tests answers it with a 400. It came
-            // back INTERNAL.
             Result<TestRun, Exception> result = orchestrator.executeTest(domainReq);
-            TestRun run = result.orElseThrow(e -> e instanceof InvalidTestSpecException refused
-                    ? invalidArgument(refused.getFieldErrors())
-                    : Status.INTERNAL
-                            .withDescription(e.getMessage())
-                            .withCause(e)
-                            .asRuntimeException());
+            TestRun run = result.orElseThrow(GrpcTestService::notStarted);
             return ProtoMapper.toProto(run);
         });
+    }
+
+    /**
+     * The status for a run the orchestrator did not start. A request the run
+     * could not honour as written is INVALID_ARGUMENT, the caller's to change,
+     * as POST /api/tests answers it with a 400. A full engine is
+     * RESOURCE_EXHAUSTED: a temporary condition, so the caller can send the
+     * same request again later, as POST /api/tests answers it with a 429.
+     * Any other failure is a fault in the Kates API, INTERNAL. The first two
+     * came back INTERNAL as well, so a client couldn't tell them from a fault.
+     */
+    private static StatusRuntimeException notStarted(Exception e) {
+        if (e instanceof InvalidTestSpecException refused) {
+            return invalidArgument(refused.getFieldErrors());
+        }
+        if (e instanceof ConcurrencyLimitException) {
+            return Status.RESOURCE_EXHAUSTED.withDescription(e.getMessage()).asRuntimeException();
+        }
+        return Status.INTERNAL.withDescription(e.getMessage()).withCause(e).asRuntimeException();
     }
 
     /**
