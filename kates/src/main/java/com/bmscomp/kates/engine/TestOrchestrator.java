@@ -154,16 +154,17 @@ public class TestOrchestrator {
             return executeScenario(request);
         }
 
-        TestType type = request.getType();
-        TestSpec spec = applyTypeDefaults(type, request.getSpec());
-        String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
-
         // Before the permit: a request that cannot run as written is the
         // caller's to fix, and must not cost a slot another run could use.
+        // Before applyTypeDefaults too, which throws on a request with no type.
         java.util.Optional<InvalidTestSpecException> refused = refusal(request);
         if (refused.isPresent()) {
             return com.bmscomp.kates.util.Result.failure(refused.get());
         }
+
+        TestType type = request.getType();
+        TestSpec spec = applyTypeDefaults(type, request.getSpec());
+        String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
 
         if (!concurrencyGuard.tryAcquire()) {
             return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
@@ -329,6 +330,19 @@ public class TestOrchestrator {
             return com.bmscomp.kates.util.Result.failure(refused.get());
         }
 
+        // Built before the permit too: a throw between taking the permit and
+        // recording the run as its holder stranded the permit until a restart,
+        // as a scenario with no type did here, in applyTypeDefaults.
+        TestSpec baseSpec = applyTypeDefaults(type, scenario.getBaseSpec());
+        TestRun run = new TestRun(type, baseSpec)
+                .withRequestedSpec(explicitFieldsOf(scenario.getBaseSpec()))
+                .withBackend(backendName)
+                .withScenarioName(scenario.getName())
+                .withLabels(scenario.getLabels())
+                .withSla(scenario.getSla())
+                .withPlannedDurationMs(plannedDurationMs(scenario))
+                .withStatus(TestResult.TaskStatus.RUNNING);
+
         // Scenarios previously bypassed the concurrency cap entirely — executeTest
         // delegates here BEFORE its tryAcquire, so any number of multi-phase runs
         // could start at once. They consume the same brokers as plain runs, so
@@ -345,15 +359,6 @@ public class TestOrchestrator {
         }
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
-        TestSpec baseSpec = applyTypeDefaults(type, scenario.getBaseSpec());
-        TestRun run = new TestRun(type, baseSpec)
-                .withRequestedSpec(explicitFieldsOf(scenario.getBaseSpec()))
-                .withBackend(backendName)
-                .withScenarioName(scenario.getName())
-                .withLabels(scenario.getLabels())
-                .withSla(scenario.getSla())
-                .withPlannedDurationMs(plannedDurationMs(scenario))
-                .withStatus(TestResult.TaskStatus.RUNNING);
         // Same ordering rule as executeTest: hold the permit before anything
         // that can throw, so a failed save cannot strand it.
         permitHolders.add(run.getId());
@@ -1007,17 +1012,45 @@ public class TestOrchestrator {
 
     /**
      * Why a run could not honour this request as written, or empty when it
-     * could, for a plain request or a scenario: the spec fields its type and
-     * backend cannot apply, and a length past
-     * {@code kates.engine.max-duration-ms}, the most the timeout reaper allows
-     * a run. executeTest fails with this exception before it takes a
-     * concurrency permit. A caller that starts the run later, as a resilience
-     * run does after it has begun streaming its answer, asks first so that it
-     * can still answer the client with a 400.
+     * could, for a plain request or a scenario: no type to run as, a null
+     * where a scenario phase should be, the spec fields its type and backend
+     * cannot apply, and a length past {@code kates.engine.max-duration-ms},
+     * the most the timeout reaper allows a run. executeTest fails with this
+     * exception before it takes a concurrency permit. A caller that starts the
+     * run later, as a resilience run does after it has begun streaming its
+     * answer, asks first so that it can still answer the client with a 400.
+     *
+     * <p>POST /api/tests requires a type through bean validation, but POST
+     * /api/resilience runs none, and neither does a schedule as it fires, so
+     * the type is checked here too. It is keyed {@code type}, with no prefix:
+     * the request's own field, which a scenario's type overrides.
      */
     public java.util.Optional<InvalidTestSpecException> refusal(CreateTestRequest request) {
+        // The type the run would have: the scenario's, or else the request's.
+        TestType type = request.isScenario() && request.getScenario().getType() != null
+                ? request.getScenario().getType()
+                : request.getType();
+        if (type == null) {
+            String why = request.isScenario()
+                    ? "neither the request nor its scenario has a type; set the request's type, or the scenario's,"
+                    : "the request has no type; set it";
+            return java.util.Optional.of(
+                    new InvalidTestSpecException("", Map.of("type", why + " to one of " + typeNames())));
+        }
         if (request.isScenario()) {
             TestScenario scenario = request.getScenario();
+            // The checks below read every phase, so a null one threw there.
+            Map<String, String> nulls = new java.util.LinkedHashMap<>();
+            for (int i = 0; i < scenario.getPhases().size(); i++) {
+                if (scenario.getPhases().get(i) == null) {
+                    nulls.put(
+                            "phases[" + i + "]",
+                            "null is not a phase; remove it, or put a phase with a phaseType in its place");
+                }
+            }
+            if (!nulls.isEmpty()) {
+                return java.util.Optional.of(new InvalidTestSpecException("scenario.", nulls));
+            }
             Map<String, String> errors = scenarioInapplicableFields(scenario, scenarioBackend(request));
             long planned = plannedDurationMs(scenario);
             if (planned > maxDurationMs) {
@@ -1026,10 +1059,6 @@ public class TestOrchestrator {
             return errors.isEmpty()
                     ? java.util.Optional.empty()
                     : java.util.Optional.of(new InvalidTestSpecException("scenario.", errors));
-        }
-        TestType type = request.getType();
-        if (type == null) {
-            return java.util.Optional.empty();
         }
         String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
         TestSpec merged = applyTypeDefaults(type, request.getSpec());
@@ -1053,6 +1082,13 @@ public class TestOrchestrator {
 
     private String longerThanAllowed() {
         return "; the Kates API allows a run at most " + maxDurationMs + " ms (kates.engine.max-duration-ms)";
+    }
+
+    /** Every test type a request can name: "LOAD, STRESS, ... or INTEGRATION_CDC". */
+    private static String typeNames() {
+        List<String> names =
+                java.util.Arrays.stream(TestType.values()).map(TestType::name).toList();
+        return String.join(", ", names.subList(0, names.size() - 1)) + " or " + names.getLast();
     }
 
     /**
