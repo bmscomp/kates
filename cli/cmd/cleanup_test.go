@@ -30,6 +30,11 @@ func TestFindOrphanedRuns(t *testing.T) {
 		// API allows it 85.
 		{ID: "integrity-reading", TestType: "INTEGRITY", CreatedAt: ago(75 * time.Minute), Spec: fortyMinutes},
 		{ID: "integrity-overdue", TestType: "INTEGRITY", CreatedAt: ago(111 * time.Minute), Spec: fortyMinutes},
+		// A scenario's phases run one after another, and its spec shows
+		// none of them: 90 minutes in, its base spec's ten are long over,
+		// but its phases may add up to the two hours the Kates API allows.
+		{ID: "scenario-running", ScenarioName: "ramp", CreatedAt: ago(90 * time.Minute), Spec: tenMinutes},
+		{ID: "scenario-overdue", ScenarioName: "ramp", CreatedAt: ago(151 * time.Minute), Spec: tenMinutes},
 		{ID: "no-duration", CreatedAt: ago(31 * time.Minute)},
 		{ID: "no-duration-young", CreatedAt: ago(29 * time.Minute), Spec: &client.TestSpec{}},
 		{ID: "no-zone", CreatedAt: now.Add(-3 * time.Hour).Format("2006-01-02T15:04:05")},
@@ -43,7 +48,7 @@ func TestFindOrphanedRuns(t *testing.T) {
 	for _, o := range orphans {
 		got = append(got, o.Run.ID)
 	}
-	if want := []string{"overdue", "integrity-overdue", "no-duration", "no-zone"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"overdue", "integrity-overdue", "scenario-overdue", "no-duration", "no-zone"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("orphans = %v, want %v", got, want)
 	}
 	if o := orphans[0]; o.Planned != 10*time.Minute || o.Overdue != 31*time.Minute {
@@ -52,7 +57,10 @@ func TestFindOrphanedRuns(t *testing.T) {
 	if o := orphans[1]; o.Planned != 80*time.Minute || o.Overdue != 31*time.Minute {
 		t.Errorf("overdue INTEGRITY run: planned %s, overdue %s; want 1h20m0s and 31m0s", o.Planned, o.Overdue)
 	}
-	if o := orphans[3]; o.Overdue != 3*time.Hour {
+	if o := orphans[2]; o.Planned != 2*time.Hour || o.Overdue != 31*time.Minute {
+		t.Errorf("overdue scenario: planned %s, overdue %s; want 2h0m0s and 31m0s", o.Planned, o.Overdue)
+	}
+	if o := orphans[4]; o.Overdue != 3*time.Hour {
 		t.Errorf("a createdAt without a zone is UTC: overdue %s, want 3h0m0s", o.Overdue)
 	}
 	var skipped []string
