@@ -51,6 +51,27 @@ class ResilienceResourceTest {
     }
 
     /**
+     * A scenario phase without a phaseType is refused before the stream
+     * starts, naming the phase; the fields it sends that a phase does not have
+     * are ignored. Its run used to fail as it started, and the resilience run
+     * went on to inject its fault against no load.
+     */
+    @Test
+    void aScenarioPhaseWithoutAPhaseTypeIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\",\"scenario\":{\"phases\":[{\"name\":\"events-load\","
+                        + "\"topic\":\"kates-events\",\"throughput\":2000}]}},"
+                        + "\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("phases[0].phaseType"))
+                .body("message", startsWith("scenario.phases[0].phaseType: phase events-load has no phaseType"));
+    }
+
+    /**
      * A resilience run never went through the safety guard, so its fault went
      * in with any parameter. The coordinator refuses it now, but only after
      * the benchmark has run, so it is refused here, before the stream starts.
