@@ -136,7 +136,10 @@ public class ResilienceResource {
                 try {
                     os.write(" ".getBytes());
                     os.flush();
-                    Thread.sleep(10000);
+                    // Up to 10 s until the next space, so the report goes out as soon as the run ends.
+                    future.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (java.util.concurrent.TimeoutException | java.util.concurrent.ExecutionException e) {
+                    // Still running, or failed: the get() below logs a failure.
                 } catch (Exception e) {
                     future.cancel(true);
                     return;
@@ -146,8 +149,9 @@ public class ResilienceResource {
             try {
                 ResilienceReport report = future.get();
                 Object payload = scenarioId != null ? Map.of("scenario", scenarioId, "report", report) : report;
+                // writeValue flushes and closes the stream, which ends the
+                // answer; a flush after it would throw "Stream is closed".
                 objectMapper.writeValue(os, payload);
-                os.flush();
             } catch (Exception e) {
                 LOG.error("Failed to execute resilience test", e);
             }
