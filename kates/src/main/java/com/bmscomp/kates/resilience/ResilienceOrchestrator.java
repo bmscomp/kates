@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
@@ -14,6 +15,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.*;
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.report.ReportGenerator;
@@ -25,7 +27,7 @@ import com.bmscomp.kates.util.MetricUtils;
  * Orchestrates a combined performance + chaos resilience test with probe evaluation.
  *
  * Flow:
- * 1. Start benchmark
+ * 1. Start benchmark, and wait for its tasks to be submitted
  * 2. Wait for steady-state period
  * 3. Evaluate baseline probes
  * 4. Inject fault via ChaosCoordinator
@@ -33,6 +35,11 @@ import com.bmscomp.kates.util.MetricUtils;
  * 6. Wait for fault to complete
  * 7. Measure recovery time (RTO) via probe polling
  * 8. Collect results and compute pre/post impact analysis
+ *
+ * <p>The fault goes in only while the benchmark is RUNNING. One that ended
+ * before it, or never started, ends the test ERROR after step 1 or 2: the
+ * fault would hit a cluster with no load on it, and nothing after it would
+ * measure anything.
  */
 @ApplicationScoped
 public class ResilienceOrchestrator {
@@ -50,6 +57,16 @@ public class ResilienceOrchestrator {
 
     @Inject
     ProbeExecutor probeExecutor;
+
+    /**
+     * How long to wait for a run's tasks to be submitted. Creating its topic
+     * can take about two minutes to fail (four attempts of up to 30 s), and a
+     * run still PENDING after this ends the test ERROR.
+     */
+    long submissionWaitMs = 300_000;
+
+    /** How often a run whose tasks are being submitted is read again. */
+    long submissionPollIntervalMs = 1_000;
 
     @ActivateRequestContext
     public ResilienceReport execute(ResilienceTestRequest request) {
@@ -70,14 +87,28 @@ public class ResilienceOrchestrator {
             }
             TestRun run = result.asSuccess().orElseThrow();
 
+            // A scenario's tasks are submitted before executeTest answers, a
+            // plain test's on a thread of their own: its run reads PENDING
+            // until they are, and FAILED if submitting them failed.
+            run = awaitSubmission(run);
+            Optional<String> notRunning = whyNotRunning(run);
+            if (notRunning.isPresent()) {
+                return refuse(report, notRunning.get());
+            }
+
             // 2. Wait for steady state
             LOG.info("Resilience test: waiting " + request.getSteadyStateSec() + "s for steady state");
             CompletableFuture.runAsync(
                             () -> {}, CompletableFuture.delayedExecutor(request.getSteadyStateSec(), TimeUnit.SECONDS))
                     .join();
 
-            // 3. Snapshot pre-chaos results + evaluate baseline probes
+            // 3. Snapshot pre-chaos results + evaluate baseline probes, unless
+            // the run failed or finished during the wait.
             run = testOrchestrator.refreshStatus(run.getId());
+            notRunning = whyNotRunning(run);
+            if (notRunning.isPresent()) {
+                return refuse(report, notRunning.get());
+            }
             ReportSummary preChaos = MetricUtils.computeSummary(run.getResults());
             report.setPreChaosSummary(preChaos);
 
@@ -193,6 +224,53 @@ public class ResilienceOrchestrator {
             return ProbeRegistry.resolve(request.getChaosSpec());
         }
         return List.of();
+    }
+
+    /** The run once its tasks are submitted, or once {@link #submissionWaitMs} has passed. */
+    private TestRun awaitSubmission(TestRun run) throws InterruptedException {
+        long deadline = System.nanoTime() + submissionWaitMs * 1_000_000L;
+        while (run.getStatus() == TestResult.TaskStatus.PENDING && System.nanoTime() < deadline) {
+            Thread.sleep(submissionPollIntervalMs);
+            run = testOrchestrator.refreshStatus(run.getId());
+        }
+        return run;
+    }
+
+    /** Why the fault must not go in, or empty while the benchmark runs. */
+    private Optional<String> whyNotRunning(TestRun run) {
+        return switch (run.getStatus()) {
+            case RUNNING -> Optional.empty();
+            case PENDING ->
+                Optional.of("The benchmark had not started " + submissionWaitMs / 1000 + " s after it was created: run "
+                        + run.getId() + " is still PENDING, so no fault was injected");
+            default ->
+                Optional.of("The benchmark ended before the fault: run " + run.getId() + " is " + run.getStatus()
+                        + ", so no fault was injected" + taskErrors(run));
+        };
+    }
+
+    /** The run's task errors as a sentence to append, or "" when its tasks report none. */
+    private static String taskErrors(TestRun run) {
+        String errors = run.getResults().stream()
+                .filter(r -> r.getError() != null && !r.getError().isBlank())
+                .map(r -> r.getTaskId() + ": " + r.getError())
+                .collect(Collectors.joining("; "));
+        return errors.isEmpty() ? "" : ". Task errors: " + errors;
+    }
+
+    /**
+     * The report, ERROR with {@code why}, for a benchmark the fault must not go
+     * into. The baseline probes are not run either: they are what the probes
+     * during and after the fault are compared with, and there will be none.
+     * Run one after another, a command probe waiting up to its timeoutSec
+     * (30 s by default) in a broker pod, they would only hold up the answer;
+     * the task errors in {@code why} say why the benchmark ended.
+     */
+    private static ResilienceReport refuse(ResilienceReport report, String why) {
+        report.setStatus("ERROR");
+        report.setError(why);
+        LOG.error("Resilience test: " + why);
+        return report;
     }
 
     private void startContinuousProbes(
