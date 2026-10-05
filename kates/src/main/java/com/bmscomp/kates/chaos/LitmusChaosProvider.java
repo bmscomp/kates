@@ -3,6 +3,9 @@ package com.bmscomp.kates.chaos;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -24,7 +27,6 @@ public class LitmusChaosProvider implements ChaosProvider {
 
     private static final Map<DisruptionType, String> EXPERIMENT_MAP = Map.ofEntries(
             Map.entry(DisruptionType.POD_KILL, "pod-delete"),
-            Map.entry(DisruptionType.POD_DELETE, "pod-delete"),
             Map.entry(DisruptionType.CPU_STRESS, "pod-cpu-hog"),
             Map.entry(DisruptionType.MEMORY_STRESS, "pod-memory-hog"),
             Map.entry(DisruptionType.IO_STRESS, "pod-io-stress"),
@@ -35,6 +37,23 @@ public class LitmusChaosProvider implements ChaosProvider {
             Map.entry(DisruptionType.NODE_DRAIN, "node-drain"),
             // Leader election is triggered by deleting the current partition leader pod
             Map.entry(DisruptionType.LEADER_ELECTION, "pod-delete"));
+
+    /**
+     * Faults the kubernetes provider injects whichever backend runs, because
+     * pod-delete, the nearest Litmus experiment, does something else. It kills
+     * pods without waiting for them to come back, so it does no rolling
+     * restart, and it removes no broker: the StrimziPodSet recreates a deleted
+     * pod at once. Both go through the Strimzi Cluster Operator instead. Nor
+     * does it take a grace period: it deletes with none under FORCE=true,
+     * which pods of a StrimziPodSet need (see buildChaosEngine), and with the
+     * pod's own otherwise. A POD_DELETE is deleted with gracePeriodSec, so the
+     * broker gets the controlled shutdown the fault is meant to test.
+     */
+    private static final Set<DisruptionType> ON_KUBERNETES_API =
+            EnumSet.of(DisruptionType.ROLLING_RESTART, DisruptionType.SCALE_DOWN, DisruptionType.POD_DELETE);
+
+    /** How often the ChaosResult is read until it has a verdict. */
+    int resultPollIntervalMs = 5_000;
 
     @Inject
     KubernetesClient client;
@@ -53,15 +72,25 @@ public class LitmusChaosProvider implements ChaosProvider {
 
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
-        // No Litmus experiment does a rolling restart (pod-delete kills pods
-        // without waiting for them to come back) or removes a broker (its
-        // StrimziPodSet recreates a deleted pod at once). Both go through the
-        // Strimzi Cluster Operator on the Kubernetes API whichever backend runs.
-        if (spec.disruptionType() == DisruptionType.ROLLING_RESTART
-                || spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+        if (ON_KUBERNETES_API.contains(spec.disruptionType())) {
             return kubernetes.triggerFault(spec);
         }
+        if (spec.delayBeforeSec() <= 0) {
+            return inject(spec);
+        }
+        // Waited out before the pods are picked and the ChaosEngine exists, as
+        // the kubernetes provider waits it. Litmus's own RAMP_TIME would wait
+        // after the fault as well, past the time Kates waits for the result.
+        Executor afterDelay =
+                CompletableFuture.delayedExecutor(spec.delayBeforeSec(), TimeUnit.SECONDS, executor.get());
+        return CompletableFuture.supplyAsync(() -> inject(spec), afterDelay).thenCompose(Function.identity());
+    }
 
+    /**
+     * Creates the ChaosEngine and polls its ChaosResult. The start is taken
+     * here, after any delay, so the outcome times the fault, not the wait.
+     */
+    private CompletableFuture<ChaosOutcome> inject(FaultSpec spec) {
         Instant start = Instant.now();
         long startNanos = System.nanoTime();
         String engineName = "kates-" + spec.experimentName() + "-" + System.currentTimeMillis();
@@ -85,7 +114,7 @@ public class LitmusChaosProvider implements ChaosProvider {
 
             // Simple polling loop — more reliable than Fabric8 watchers on CRDs
             int timeoutSec = spec.chaosDurationSec() + 120;
-            int pollIntervalMs = 5_000;
+            int pollIntervalMs = resultPollIntervalMs;
             int maxPolls = (timeoutSec * 1000) / pollIntervalMs;
 
             // Runs on the shared bounded executor, NOT the common ForkJoinPool.
@@ -259,8 +288,9 @@ public class LitmusChaosProvider implements ChaosProvider {
                 //   "TARGET_SELECTION_ERROR: no pod found for specified target {kind: strimzipodset}"
                 // Setting FORCE=true performs an immediate delete (skip graceful termination)
                 // and SEQUENCE=serial avoids the parallel-mode workload-based pod status check
-                // that triggers the StrimziPodSet lookup failure.
-                case POD_KILL, POD_DELETE, LEADER_ELECTION -> {
+                // that triggers the StrimziPodSet lookup failure. A POD_DELETE, which must not
+                // be forced, goes to the kubernetes provider instead (ON_KUBERNETES_API).
+                case POD_KILL, LEADER_ELECTION -> {
                     envVars.add(new ChaosEngineSpec.EnvVar("FORCE", "true"));
                     envVars.add(new ChaosEngineSpec.EnvVar("SEQUENCE", "serial"));
                 }
