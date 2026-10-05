@@ -427,7 +427,7 @@ func mcpFitDisruptionReport(call *mcpCall, out *mcpDisruptionReportOut) {
 // strimziRecoveryTime: the orchestrator starts polling the Kafka resource only
 // after the step's observation window and recovery wait, and returns the
 // elapsed time on a timeout too (StrimziStateTracker.java:45-75,
-// DisruptionOrchestrator.java:376-377), so the figure is not a recovery time.
+// DisruptionOrchestrator.java:380-381), so the figure is not a recovery time.
 func mcpDisruptionReportStepFrom(call *mcpCall, s client.DisruptionStepDetail) mcpDisruptionReportStep {
 	step := mcpDisruptionReportStep{
 		Name:                   call.FenceN(s.StepName, 200),
