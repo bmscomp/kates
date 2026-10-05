@@ -77,6 +77,16 @@ class TestOrchestratorLiveMetricsTest {
             TestRun run = invocation.getArgument(0);
             return rows.computeIfPresent(run.getId(), (id, stored) -> run) != null;
         });
+        // The submission's write: only over the row executeTest stored, PENDING.
+        when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
+            TestRun run = invocation.getArgument(0);
+            TestRun stored = rows.get(run.getId());
+            if (stored == null || stored.getStatus() != invocation.getArgument(1)) {
+                return false;
+            }
+            rows.put(run.getId(), run);
+            return true;
+        });
 
         Instance<BenchmarkBackend> backends = mock(Instance.class);
         // A fresh stream per call: resolveBackend runs on every poll.
