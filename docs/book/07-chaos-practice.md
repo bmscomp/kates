@@ -157,7 +157,7 @@ On the default `litmus-crd` provider, Kates maps every disruption type but three
 | `MEMORY_STRESS` | `pod-memory-hog` | Consumes memory on the broker pod |
 | `DNS_ERROR` | `pod-dns-error` | Injects DNS resolution failures on broker pods |
 | `DISK_FILL` | `disk-fill` | Litmus `disk-fill` at `fillPercentage`; the `kates-chaos` chart doesn't install the experiment |
-| `NODE_DRAIN` | `node-drain` | Drains a node, as in a node or [zone](appendix-a-glossary.md#gl-zone) failure; Kates sets no `TARGET_NODE`, so name the node in `envOverrides` |
+| `NODE_DRAIN` | `node-drain` | Drains the node that runs the pod Kates picks, as in a node or [zone](appendix-a-glossary.md#gl-zone) failure: see [Targeting Pods](#targeting-pods) |
 
 The two providers don't treat every field alike. Both wait `delayBeforeSec` before they pick the pods and inject the fault, so on `litmus-crd` the ChaosEngine appears only after the delay. On `litmus-crd`, `chaosDurationSec` becomes the experiment's `TOTAL_CHAOS_DURATION`, and Kates waits up to two minutes past it for the ChaosResult. `POD_KILL` and `LEADER_ELECTION` run `pod-delete` there with `FORCE=true`, which deletes the pod at once. On `kubernetes`, `POD_KILL`, `POD_DELETE` and `LEADER_ELECTION` delete each target once, and `chaosDurationSec` doesn't lengthen them. A `POD_DELETE` runs that way on both providers, with `gracePeriodSec` as the pod's grace period, and leaves no ChaosEngine.
 
@@ -198,6 +198,10 @@ A pod-level fault hits one pod unless told otherwise. The first of these that ap
 `SCALE_DOWN` picks workloads, not pods, so only the first rule and the selector apply to it: see [Scaling Down a Node Pool](#scaling-down-a-node-pool).
 
 Both chaos providers resolve the pods the same way: `kubernetes` applies the fault to each of them, and `litmus-crd` passes them to the experiment as a comma-separated `TARGET_PODS` list. A selector that matches no pod fails the step with `No pods found matching label selector` instead of doing nothing.
+
+A `NODE_DRAIN` drains the node that runs the pod these rules pick. On `litmus-crd`, Kates passes that node to the `node-drain` experiment as `TARGET_NODE`, with no `TARGET_PODS`; the `kubernetes` provider doesn't run `NODE_DRAIN`. The experiment drains one node, so with `targetAll` every pod the selector matches has to run on the same node. On the [`panda`](appendix-a-glossary.md#gl-panda) Kind cluster, a zone's broker pods all run on the node named after the zone. The step fails without draining anything when the pods run on several nodes, when the pod is gone, or when it isn't on a node yet.
+
+To drain a node you choose, name it in `envOverrides.TARGET_NODE`, or give `envOverrides.NODE_LABEL` for Litmus to pick a node with that label. Kates then picks no node. The drain evicts every pod on the node, not only the one picked: other Kafka pods, Litmus's own pods and the Kates API pod, when they run there.
 
 ::: {.callout-warning title="Litmus Deletes Several Targets One at a Time"}
 Kates runs `POD_KILL` and `LEADER_ELECTION` as Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With several targets, Litmus therefore deletes them one at a time; the `kubernetes` provider deletes them all at once.
@@ -560,7 +564,7 @@ The count covers the whole plan, not one step at a time: Kates adds up the disti
 
 The label matches the KRaft controllers as well, so Kates counts as brokers only the pods Strimzi labels `strimzi.io/broker-role=true`: a node with both roles is a broker, and a dedicated controller is not. On the default cluster, with brokers 0–2 and controllers 3–5, a plan that takes down all three brokers is refused. A pod without the role label, such as Kafka not run by Strimzi, counts as a broker.
 
-A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step whose selector looks in a namespace other than the brokers' counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts the pods its selector picks, not the brokers on the node it drains. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker.
+A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step whose selector looks in a namespace other than the brokers' counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts the pods its selector picks, not the other brokers on the node it drains. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker.
 
 Kates runs the plan anyway, with a warning in `validationWarnings`, in three cases:
 
@@ -645,7 +649,8 @@ The guard counts brokers and reads pod readiness, and nothing more. Each of thes
 - It doesn't read the ISR or `min.insync.replicas`, so a plan that leaves one broker runs with only a warning. Yet on a topic that keeps the `kafka-cluster` chart's `min.insync.replicas: 2`, writes with [`acks=all`](appendix-a-glossary.md#gl-acks) then fail.
 - A step whose selector looks in another namespace, such as the consumers `consumer-isolation` isolates in `kates`, counts no broker, whatever it hits.
 - Steps that pick one pod at random from the same selector count as one broker between them, although each can hit a different broker.
-- A `NODE_DRAIN` step counts the pods its selector picks, not the brokers on the node it drains.
+- A `NODE_DRAIN` step counts the pods its selector picks, not the other brokers on the node it drains.
+- A `NODE_DRAIN` step with `targetAll` passes even when its pods run on several nodes. The step then fails without draining, because a drain takes one node.
 - A resilience run (`kates resilience run`) doesn't go through the guard at all: no broker count, no one-plan rule, no check before the fault and no rollback. Only the [fault parameter limits](#fault-parameter-limits) apply to it.
 - `make gameday` doesn't go through it either: it deletes a broker pod with `kubectl`.
 - The one-plan rule lives in the Kates API process, so it holds only while one Kates API pod runs. The `kates` chart refuses a second replica and rolls with `Recreate`, so it never runs two.
