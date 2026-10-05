@@ -50,7 +50,7 @@ const (
 	mcpDefaultFaultLabel     = "strimzi.io/component-type=kafka"
 
 	// mcpRandomSelectionSuffix marks the pod a dry run shows for a step that
-	// picks one at random (DisruptionSafetyGuard.java:413).
+	// picks one at random (DisruptionSafetyGuard.java:422).
 	mcpRandomSelectionSuffix = " (random selection)"
 
 	mcpPreviewMaxPods     = 50
@@ -85,7 +85,7 @@ var mcpAdHocBounds = map[string]mcpAdHocBound{
 // number its type never reads. The providers read them differently, and the
 // field descriptions say so: the kubernetes provider honours gracePeriodSec
 // for POD_DELETE and sizes IO_STRESS by ioWorkers alone
-// (KubernetesChaosProvider.java:198-206,472-485), while litmus-crd
+// (KubernetesChaosProvider.java:195-203,515-528), while litmus-crd
 // force-deletes on POD_DELETE, never reading gracePeriodSec, and sizes
 // IO_STRESS by fillPercentage as well as ioWorkers (LitmusChaosProvider.java:
 // 263-285). fillPercentage stays out of ad-hoc plans with DISK_FILL, the one
@@ -564,7 +564,7 @@ func mcpRunPreview(ctx context.Context, call *mcpCall, in mcpPreviewIn, adHoc []
 
 // mcpPreviewSteps describes each step the dry run returned, joined by
 // position with the plan's own steps (the dry run walks them in order,
-// DisruptionSafetyGuard.java:207-263), and gathers the controllers they hit.
+// DisruptionSafetyGuard.java:216-272), and gathers the controllers they hit.
 func mcpPreviewSteps(call *mcpCall, dry []client.StepPreview, view *mcpPlanView, ctrl *mcpKRaftControllerIndex) ([]mcpPreviewStep, mcpPreviewControllers) {
 	summary := ctrl.summary()
 	touched := map[string]bool{}
@@ -593,7 +593,7 @@ func mcpPreviewSteps(call *mcpCall, dry []client.StepPreview, view *mcpPlanView,
 }
 
 // mcpDryRunNamespaceRE finds the namespace the dry run names when a step hits
-// nothing there (DisruptionSafetyGuard.java:221-225): the one it reads Kafka
+// nothing there (DisruptionSafetyGuard.java:230-234): the one it reads Kafka
 // pods from, kates.chaos.kafka.namespace. The warning ends with it, after the
 // step's label, so the last match is the one.
 var mcpDryRunNamespaceRE = regexp.MustCompile(`no broker(?: pod)? in namespace '([^']*)'`)
@@ -603,7 +603,7 @@ var mcpDryRunNamespaceRE = regexp.MustCompile(`no broker(?: pod)? in namespace '
 // that it hits nothing there but acts in its own namespace when it runs. A
 // step that leaves targetNamespace out is in kafka, the FaultSpec default. A
 // named pod is previewed whatever its namespace (DisruptionSafetyGuard.java:
-// 389-395). The dry run names its namespace in its warning; when that text
+// 398-404). The dry run names its namespace in its warning; when that text
 // cannot be read, the topology's namespace (kates.topology.kafka-namespace,
 // set apart from the dry run's but "kafka" by default for both) stands in.
 func mcpInOtherNamespace(ds client.StepPreview, fs *mcpFaultSpecView, ctrl *mcpKRaftControllerIndex) bool {
@@ -691,7 +691,7 @@ func mcpPreviewStepFrom(call *mcpCall, ds client.StepPreview, fs *mcpFaultSpecVi
 	}
 	// The dry run marks a random pick only when some pod matches; a step
 	// whose leader lookup failed and that names no broker falls back to one
-	// too (DisruptionSafetyGuard.java:92-111).
+	// too (DisruptionSafetyGuard.java:96-115).
 	noBroker := fs == nil || fs.TargetBrokerID == nil || *fs.TargetBrokerID < 0
 	if step.Targeting == "random" || (step.Targeting == "partition-leader" && ds.ResolvedLeaderId == nil && noBroker) {
 		step.RandomPick = true
@@ -712,7 +712,7 @@ func mcpPreviewStepFrom(call *mcpCall, ds client.StepPreview, fs *mcpFaultSpecVi
 		// A random pick is uniform over every pod the label matches,
 		// controllers included (PodTargets.java:101-104), while the dry run
 		// shows the first matching broker (DisruptionSafetyGuard.java:
-		// 406-415). When some pod matched, assume the worst: it hits one
+		// 415-424). When some pod matched, assume the worst: it hits one
 		// controller.
 		hit := len(controllers)
 		if step.RandomPick && ctrl.voters > 0 && len(pods) > 0 {
@@ -733,7 +733,7 @@ func mcpPreviewStepFrom(call *mcpCall, ds client.StepPreview, fs *mcpFaultSpecVi
 // PodTargets.mode applies (chaos/PodTargets.java:40-51) after the orchestrator
 // has turned a targetTopic into the partition leader's broker id
 // (DisruptionOrchestrator.java:253-261). SCALE_DOWN picks node pools instead
-// (DisruptionSafetyGuard.java:381-387).
+// (DisruptionSafetyGuard.java:390-396).
 func mcpTargetingOf(fs *mcpFaultSpecView) string {
 	switch {
 	case fs == nil:

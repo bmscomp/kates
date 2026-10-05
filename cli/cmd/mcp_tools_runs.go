@@ -30,7 +30,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:230-236, TestOrchestrator.refreshStatus); both
+// (TestResource.java:233-239, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -151,7 +151,7 @@ const (
 	mcpRunsMaxPageSize     = 25
 	mcpRunsMaxPage         = 10_000
 	// With both filters the backend applies only the type (TestResource.java:
-	// 185-197), so the status is filtered here over the newest runs of the
+	// 188-200), so the status is filtered here over the newest runs of the
 	// type, read in the backend's largest pages (size is capped at 200).
 	mcpRunsScanPageSize = 200
 	mcpRunsMaxScan      = 1000
@@ -1153,7 +1153,7 @@ func mcpRunHasRequested(r *client.MCPRun) bool {
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:352-380 checks only that it exists),
+// any type or status (TestResource.java:359-387 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -1339,7 +1339,7 @@ func mcpAssessBandFrom(call *mcpCall, scan mcpBandScan) (mcpAssessBand, mcpAsses
 	for _, k := range names {
 		change := mcpRunChange{Metric: mcpSanitizeLine(k, 64)}
 		// The backend's pctChange calls a change from 0 a 100% change
-		// (MetricUtils.java:21-23); the regression deltas leave it out, and
+		// (MetricUtils.java:22-24); the regression deltas leave it out, and
 		// so does this.
 		if get, known := mcpCompareMetrics[k]; !known || previous == nil || get(previous) != 0 {
 			v := mcpRunFinite(scan.comparison.Deltas[k])
