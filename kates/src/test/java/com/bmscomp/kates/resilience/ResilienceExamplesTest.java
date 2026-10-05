@@ -105,8 +105,7 @@ class ResilienceExamplesTest {
     /**
      * Read as the resource reads it, the example passes the checks
      * executeResilienceTest makes before its stream starts, and the
-     * constraints POST /api/tests puts on a test request, which
-     * POST /api/resilience doesn't check.
+     * constraints POST /api/tests puts on a test request.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("examples")
