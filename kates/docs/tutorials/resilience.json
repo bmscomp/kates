@@ -502,31 +502,34 @@
 
     {
       "_name": "10 — Full Game Day (Multi-Phase Scenario)",
-      "_description": "Three sequential chaos phases with recovery windows: broker crash → CPU saturation → network partition. Sustained multi-topic load throughout. Models a realistic cascading incident.",
-      "_hypothesis": "Cluster survives 3 sequential faults without producer errors. Each phase's fault resolves before the next begins. Final consumer lag = 0.",
+      "_description": "Three sequential chaos steps with recovery windows: broker crash → CPU saturation → network partition. Two STEADY scenario phases, which start together, keep 2000 rec/s on each of two topics for 7 minutes, past this step's recovery window. Models a realistic cascading incident.",
+      "_hypothesis": "Cluster survives 3 sequential faults without producer errors. Each step's fault resolves before the next begins.",
       "testRequest": {
         "type": "LOAD",
         "scenario": {
+          "name": "gameday-full",
+          "baseSpec": {
+            "topic": "kates-events",
+            "numRecords": 1000000,
+            "recordSize": 1024,
+            "acks": "all",
+            "enableIdempotence": true
+          },
           "phases": [
             {
               "name": "events-load",
-              "topic": "kates-events",
-              "numRecords": 1000000,
-              "recordSize": 1024,
-              "throughput": 2000,
-              "producers": 3,
-              "acks": "all",
-              "enableIdempotence": true
+              "phaseType": "STEADY",
+              "durationMs": 420000,
+              "targetThroughput": 2000
             },
             {
               "name": "results-load",
-              "topic": "kates-results",
-              "numRecords": 500000,
-              "recordSize": 1024,
-              "throughput": 2000,
-              "producers": 2,
-              "acks": "all",
-              "enableIdempotence": true
+              "phaseType": "STEADY",
+              "durationMs": 420000,
+              "targetThroughput": 2000,
+              "spec": {
+                "topic": "kates-results"
+              }
             }
           ]
         }
@@ -539,7 +542,7 @@
         "chaosDurationSec": 60,
         "delayBeforeSec": 30,
         "gracePeriodSec": 0,
-        "_note": "Phase 1 only — submit phases 2/3 as separate requests after phase 1 ChaosResult=Pass"
+        "_note": "Step 1 only — submit steps 2/3 as separate requests after step 1 ChaosResult=Pass"
       },
       "steadyStateSec": 30,
       "maxRecoveryWaitSec": 180,

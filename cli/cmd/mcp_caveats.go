@@ -67,7 +67,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		ID: mcpCaveatLoadSingleProducer,
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
-		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1358-1367", "case LOAD ->", "case STRESS ->")},
+		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1385-1394", "case LOAD ->", "case STRESS ->")},
 	},
 	{
 		ID: mcpCaveatReaperDeadline,
@@ -109,7 +109,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:158,180-182,224",
 				"applyTypeDefaults(type, request.getSpec())", ".withRequestedSpec(", "buildTasks(type, spec, run.getId())"),
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:946-991", "TestSpec applyTypeDefaults(", "return merged;"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1336-1341,1431-1434",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1363-1368,1458-1461",
 				"Only when asked", `"integrity-cg")`),
 			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:759", `task.getConsumerGroup() + "-integrity"`),
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:42,70-71,129-131",
@@ -152,7 +152,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration. The tuning report copies " +
 			"that one summary into every step, so all steps show the same numbers and the best step is always step 0.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1441-1442", "case TUNE_REPLICATION,", "-tune-0"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1468-1469", "case TUNE_REPLICATION,", "-tune-0"),
 			mcpJava + "trogdor/SpecFactory.java:38-39",
 			mcpJava + "engine/TuningTestRunner.java:101-139",
 		},
