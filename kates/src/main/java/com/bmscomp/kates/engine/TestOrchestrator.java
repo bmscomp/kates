@@ -154,16 +154,17 @@ public class TestOrchestrator {
             return executeScenario(request);
         }
 
-        TestType type = request.getType();
-        TestSpec spec = applyTypeDefaults(type, request.getSpec());
-        String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
-
         // Before the permit: a request that cannot run as written is the
         // caller's to fix, and must not cost a slot another run could use.
+        // Before applyTypeDefaults too, which throws on a request with no type.
         java.util.Optional<InvalidTestSpecException> refused = refusal(request);
         if (refused.isPresent()) {
             return com.bmscomp.kates.util.Result.failure(refused.get());
         }
+
+        TestType type = request.getType();
+        TestSpec spec = applyTypeDefaults(type, request.getSpec());
+        String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
 
         if (!concurrencyGuard.tryAcquire()) {
             return com.bmscomp.kates.util.Result.failure(new ConcurrencyLimitException(maxConcurrentTests));
@@ -219,14 +220,13 @@ public class TestOrchestrator {
         org.jboss.logging.MDC.put("backend", backendName);
         runStartNanos.put(run.getId(), System.nanoTime());
         List<BenchmarkHandle> submitted = List.of();
+        var handles = new java.util.ArrayList<BenchmarkHandle>();
         try {
             createTestTopic(spec, type);
             List<BenchmarkTask> tasks = buildTasks(type, spec, run.getId());
             run = run.withStatus(TestResult.TaskStatus.RUNNING);
             fireEvent(run, TestLifecycleEvent.EventKind.RUNNING);
             benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
-
-            var handles = new java.util.ArrayList<BenchmarkHandle>();
 
             for (BenchmarkTask task : tasks) {
                 try {
@@ -268,7 +268,7 @@ public class TestOrchestrator {
 
         } catch (Exception e) {
             LOG.error("Test execution failed for run: " + run.getId(), e);
-            run = run.withStatus(TestResult.TaskStatus.FAILED);
+            run = failSubmission(run, handles, e);
         }
 
         // Registered only AFTER the row carrying these tasks is persisted.
@@ -329,6 +329,19 @@ public class TestOrchestrator {
             return com.bmscomp.kates.util.Result.failure(refused.get());
         }
 
+        // Built before the permit too: a throw between taking the permit and
+        // recording the run as its holder stranded the permit until a restart,
+        // as a scenario with no type did here, in applyTypeDefaults.
+        TestSpec baseSpec = applyTypeDefaults(type, scenario.getBaseSpec());
+        TestRun run = new TestRun(type, baseSpec)
+                .withRequestedSpec(explicitFieldsOf(scenario.getBaseSpec()))
+                .withBackend(backendName)
+                .withScenarioName(scenario.getName())
+                .withLabels(scenario.getLabels())
+                .withSla(scenario.getSla())
+                .withPlannedDurationMs(plannedDurationMs(scenario))
+                .withStatus(TestResult.TaskStatus.RUNNING);
+
         // Scenarios previously bypassed the concurrency cap entirely — executeTest
         // delegates here BEFORE its tryAcquire, so any number of multi-phase runs
         // could start at once. They consume the same brokers as plain runs, so
@@ -345,15 +358,6 @@ public class TestOrchestrator {
         }
         BenchmarkBackend backend = backendResult.asSuccess().orElseThrow();
 
-        TestSpec baseSpec = applyTypeDefaults(type, scenario.getBaseSpec());
-        TestRun run = new TestRun(type, baseSpec)
-                .withRequestedSpec(explicitFieldsOf(scenario.getBaseSpec()))
-                .withBackend(backendName)
-                .withScenarioName(scenario.getName())
-                .withLabels(scenario.getLabels())
-                .withSla(scenario.getSla())
-                .withPlannedDurationMs(plannedDurationMs(scenario))
-                .withStatus(TestResult.TaskStatus.RUNNING);
         // Same ordering rule as executeTest: hold the permit before anything
         // that can throw, so a failed save cannot strand it.
         permitHolders.add(run.getId());
@@ -369,12 +373,11 @@ public class TestOrchestrator {
         }
         runStartNanos.put(run.getId(), System.nanoTime());
         List<BenchmarkHandle> submitted = List.of();
+        var allHandles = new java.util.ArrayList<BenchmarkHandle>();
 
         try {
             createTestTopic(baseSpec, type);
             benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
-
-            var allHandles = new java.util.ArrayList<BenchmarkHandle>();
 
             for (int phaseIdx = 0; phaseIdx < scenario.getPhases().size(); phaseIdx++) {
                 ScenarioPhase phase = scenario.getPhases().get(phaseIdx);
@@ -422,7 +425,7 @@ public class TestOrchestrator {
 
         } catch (Exception e) {
             LOG.error("Scenario execution failed for run: " + run.getId(), e);
-            run = run.withStatus(TestResult.TaskStatus.FAILED);
+            run = failSubmission(run, allHandles, e);
         }
 
         // Same ordering rule as executeAsync: publish handles only once the row
@@ -671,13 +674,33 @@ public class TestOrchestrator {
     }
 
     /**
+     * The run, FAILED, for a submission that threw part-way: each task it had
+     * already started is stopped, and failed with the reason.
+     *
+     * <p>Their handles are registered only once every task is submitted, so
+     * such a submission left them none: a delete found nothing to stop, and a
+     * FAILED run cannot be cancelled. Registering them would not have done it
+     * either, since the reconciler drops a FAILED run's handles without
+     * stopping them. A scenario whose later phase failed to build used to leave
+     * the phases before it producing for their whole duration, 600 s by
+     * default, with their tasks RUNNING in the FAILED run.
+     */
+    private TestRun failSubmission(TestRun run, List<BenchmarkHandle> started, Exception cause) {
+        stopTasks(run.getId(), started);
+        return withUnfinishedTasksFailed(
+                run.withStatus(TestResult.TaskStatus.FAILED),
+                "Stopped: the run failed while its tasks were being submitted: " + cause);
+    }
+
+    /**
      * Publishes a run's backend handles so the reconciler, the reaper and
      * shutdown can poll and stop its workers.
      *
-     * <p>Registered even when the run already looks terminal: a partial
-     * submission can leave workers running behind a FAILED status, and without a
-     * handle nothing can stop them. The terminal path in
-     * {@link #refreshStatus(String)} drops the entry once the run is settled.
+     * <p>Registered even when the run already looks terminal, though that keeps
+     * its workers stoppable only until the reconciler's next tick: the terminal
+     * path in {@link #refreshStatus(String)} drops the entry without stopping
+     * them. So a submission that throws part-way stops the tasks it started
+     * itself ({@link #failSubmission}).
      */
     private void registerHandles(TestRun run, List<BenchmarkHandle> handles) {
         if (!handles.isEmpty()) {
@@ -791,6 +814,14 @@ public class TestOrchestrator {
         if (handles == null) {
             return;
         }
+        stopTasks(runId, handles);
+    }
+
+    /**
+     * Stops each task through the backend that issued it. A task that cannot
+     * be stopped is logged, and the others are still stopped.
+     */
+    private void stopTasks(String runId, List<BenchmarkHandle> handles) {
         for (BenchmarkHandle handle : handles) {
             java.util.Optional<BenchmarkBackend> backend =
                     resolveBackend(handle.backendName()).asSuccess();
@@ -1007,17 +1038,45 @@ public class TestOrchestrator {
 
     /**
      * Why a run could not honour this request as written, or empty when it
-     * could, for a plain request or a scenario: the spec fields its type and
-     * backend cannot apply, and a length past
-     * {@code kates.engine.max-duration-ms}, the most the timeout reaper allows
-     * a run. executeTest fails with this exception before it takes a
-     * concurrency permit. A caller that starts the run later, as a resilience
-     * run does after it has begun streaming its answer, asks first so that it
-     * can still answer the client with a 400.
+     * could, for a plain request or a scenario: no type to run as, a null
+     * where a scenario phase should be, the spec fields its type and backend
+     * cannot apply, and a length past {@code kates.engine.max-duration-ms},
+     * the most the timeout reaper allows a run. executeTest fails with this
+     * exception before it takes a concurrency permit. A caller that starts the
+     * run later, as a resilience run does after it has begun streaming its
+     * answer, asks first so that it can still answer the client with a 400.
+     *
+     * <p>POST /api/tests requires a type through bean validation, but POST
+     * /api/resilience runs none, and neither does a schedule as it fires, so
+     * the type is checked here too. It is keyed {@code type}, with no prefix:
+     * the request's own field, which a scenario's type overrides.
      */
     public java.util.Optional<InvalidTestSpecException> refusal(CreateTestRequest request) {
+        // The type the run would have: the scenario's, or else the request's.
+        TestType type = request.isScenario() && request.getScenario().getType() != null
+                ? request.getScenario().getType()
+                : request.getType();
+        if (type == null) {
+            String why = request.isScenario()
+                    ? "neither the request nor its scenario has a type; set the request's type, or the scenario's,"
+                    : "the request has no type; set it";
+            return java.util.Optional.of(
+                    new InvalidTestSpecException("", Map.of("type", why + " to one of " + typeNames())));
+        }
         if (request.isScenario()) {
             TestScenario scenario = request.getScenario();
+            // The checks below read every phase, so a null one threw there.
+            Map<String, String> nulls = new java.util.LinkedHashMap<>();
+            for (int i = 0; i < scenario.getPhases().size(); i++) {
+                if (scenario.getPhases().get(i) == null) {
+                    nulls.put(
+                            "phases[" + i + "]",
+                            "null is not a phase; remove it, or put a phase with a phaseType in its place");
+                }
+            }
+            if (!nulls.isEmpty()) {
+                return java.util.Optional.of(new InvalidTestSpecException("scenario.", nulls));
+            }
             Map<String, String> errors = scenarioInapplicableFields(scenario, scenarioBackend(request));
             long planned = plannedDurationMs(scenario);
             if (planned > maxDurationMs) {
@@ -1026,10 +1085,6 @@ public class TestOrchestrator {
             return errors.isEmpty()
                     ? java.util.Optional.empty()
                     : java.util.Optional.of(new InvalidTestSpecException("scenario.", errors));
-        }
-        TestType type = request.getType();
-        if (type == null) {
-            return java.util.Optional.empty();
         }
         String backendName = request.getBackend() != null ? request.getBackend() : defaultBackend;
         TestSpec merged = applyTypeDefaults(type, request.getSpec());
@@ -1053,6 +1108,13 @@ public class TestOrchestrator {
 
     private String longerThanAllowed() {
         return "; the Kates API allows a run at most " + maxDurationMs + " ms (kates.engine.max-duration-ms)";
+    }
+
+    /** Every test type a request can name: "LOAD, STRESS, ... or INTEGRATION_CDC". */
+    private static String typeNames() {
+        List<String> names =
+                java.util.Arrays.stream(TestType.values()).map(TestType::name).toList();
+        return String.join(", ", names.subList(0, names.size() - 1)) + " or " + names.getLast();
     }
 
     /**
@@ -1777,7 +1839,8 @@ public class TestOrchestrator {
             if (status != TestResult.TaskStatus.RUNNING && status != TestResult.TaskStatus.PENDING) {
                 throw new RunNotCancellableException(status);
             }
-            TestRun cancelled = withCancelledTasks(run.withStatus(TestResult.TaskStatus.FAILED));
+            TestRun cancelled =
+                    withUnfinishedTasksFailed(run.withStatus(TestResult.TaskStatus.FAILED), CANCELLED_TASK_ERROR);
             settle(runId);
             if (repository.saveIfStatus(cancelled, status)) {
                 String typeName = cancelled.getTestType() != null
@@ -1796,8 +1859,8 @@ public class TestOrchestrator {
         throw new RunNotCancellableException(stored);
     }
 
-    /** The run with each task that had not finished marked as cancelled. */
-    private static TestRun withCancelledTasks(TestRun run) {
+    /** The run with each task that had not finished marked FAILED with this error. */
+    private static TestRun withUnfinishedTasksFailed(TestRun run, String error) {
         if (run.getResults() == null) {
             return run;
         }
@@ -1806,7 +1869,7 @@ public class TestOrchestrator {
             if (result.getStatus() == TestResult.TaskStatus.RUNNING
                     || result.getStatus() == TestResult.TaskStatus.PENDING) {
                 result = result.withStatus(TestResult.TaskStatus.FAILED)
-                        .withError(CANCELLED_TASK_ERROR)
+                        .withError(error)
                         .withEndTime(Instant.now().toString());
             }
             updatedResults.add(result);

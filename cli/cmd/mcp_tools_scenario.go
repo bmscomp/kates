@@ -1243,7 +1243,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"plans/mcp-server.md:387-405",
 			mcpJava + "api/TestResource.java:69-104",
 			mcpJava + "domain/TestSpec.java:34-113",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1114-1179",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1176-1241",
 				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
 			mcpAnchoredRef("cli/cmd/apply.go:135-212",
 				"for i, scenario := range sf.Scenarios {", "apiClient.CreateTest(ctx, req)",
@@ -1259,7 +1259,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"listed as defaulted may differ on the cluster that runs the scenario.",
 		Refs: []string{
 			mcpJava + "config/TestTypeDefaults.java:22-64,323-464",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:946-991", "TestSpec applyTypeDefaults(", "return merged;"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:977-1022", "TestSpec applyTypeDefaults(", "return merged;"),
 			mcpAnchoredRef("kates/src/main/resources/application.properties:73-114",
 				"# Per-type overrides: STRESS", "kates.tests.roundtrip.throughput=10000"),
 			mcpAnchoredRef("charts/kates/values.yaml:591-658", "defaults:", "tests:", `throughput: "10000"`),
