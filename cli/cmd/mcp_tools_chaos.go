@@ -109,7 +109,12 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"wouldSucceed true. preview_disruption tells controllers from brokers by the KafkaNodePools in the " +
 			"cluster topology; when the topology cannot be read, it cannot say which pods are controllers.",
 		Refs: []string{
-			mcpJava + "disruption/DisruptionSafetyGuard.java:84-90,138-150,167-177,219-228,366-422",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:88-94,152-164,176-186,228-237,375-431",
+				"record Impact(List<String> pods, List<String> brokers)",
+				"Set<String> affectedBrokers = new HashSet<>();", "hit.subList(0, 1)",
+				"plan.getMaxAffectedBrokers() > 0", "Only 1 broker would remain after disruption",
+				"impact(spec, kafkaPods).pods()", "affected.addAll(hit);",
+				"What a step's fault would hit", "pods.stream().filter(brokers::contains)"),
 			mcpJava + "chaos/PodTargets.java:108-119",
 			mcpJava + "service/ClusterTopologyService.java:523-595",
 			"charts/kafka-cluster/values.yaml:281-282",
@@ -124,9 +129,12 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"injects every fault except ROLLING_RESTART and SCALE_DOWN as its own litmus-admin service account, so " +
 			"for those the check does not show whether the fault can run.",
 		Refs: []string{
-			mcpJava + "disruption/DisruptionSafetyGuard.java:251-254,490-559",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:260-263,499-568",
+				"boolean canExecute = checkRbacPermissions(spec);", `"Insufficient RBAC permissions for "`,
+				"boolean checkRbacPermissions(FaultSpec spec)", `"RBAC check failed, assuming permitted"`),
 			mcpJava + "chaos/LitmusChaosProvider.java:56-63,225",
-			"kates/src/main/resources/application.properties:219-220",
+			mcpAnchoredRef("kates/src/main/resources/application.properties:255-256",
+				"# Chaos coordination (noop | kubernetes | litmus-crd | hybrid)", "kates.chaos.provider=litmus-crd"),
 		},
 	},
 	{
@@ -138,7 +146,10 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"selection), so which pod the step hits, and whether it is a controller, is not known before it runs.",
 		Refs: []string{
 			mcpJava + "chaos/PodTargets.java:40-51,101-104",
-			mcpJava + "disruption/DisruptionSafetyGuard.java:39-45,92-111,406-415",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:43-49,96-115,415-424",
+				"Selects the cluster's Kafka pods", `defaultValue = "strimzi.io/component-type=kafka"`,
+				"private List<TargetedStep> targeted(DisruptionPlan plan)", "return targeted;",
+				"if (mode == PodTargets.Mode.ONE_RANDOM)", `" (random selection)"`),
 			mcpJava + "chaos/FaultSpec.java:84",
 		},
 	},
@@ -150,7 +161,10 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"namespace: on the pod its targetBrokerId names, on every pod its targetLabel matches with targetAll, " +
 			"or else on one of them picked at random. A step that leaves targetNamespace out is in namespace kafka.",
 		Refs: []string{
-			mcpJava + "disruption/DisruptionSafetyGuard.java:36-37,219-228,378-398",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:40-41,228-237,387-407",
+				`name = "kates.chaos.kafka.namespace", defaultValue = "kafka"`,
+				"impact(spec, kafkaPods).pods()", "this step disrupts no broker",
+				"Impact impact(FaultSpec spec, List<Pod> kafkaPods)", "return new Impact(List.of(spec.targetPod())"),
 			mcpJava + "chaos/PodTargets.java:40-51,58-77,83-105",
 			mcpJava + "chaos/FaultSpec.java:83",
 			"kates/src/main/resources/playbooks/consumer-isolation.yaml:10-12",
@@ -163,10 +177,13 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"unknown or was unavailable when the backend started, the backend falls back to noop, which injects " +
 			"nothing and marks every step Skipped, and says so only in its log.",
 		Refs: []string{
-			mcpJava + "chaos/CompoundChaosOrchestrator.java:132-151",
-			mcpJava + "chaos/ChaosCoordinator.java:30-68",
+			mcpAnchoredRef(mcpJava+"chaos/CompoundChaosOrchestrator.java:143-162",
+				"List<String> availableProviders()", `" (available)" : " (unavailable)"`, "return names;"),
+			mcpAnchoredRef(mcpJava+"chaos/ChaosCoordinator.java:33-74",
+				`name = "kates.chaos.provider"`, "matches no chaos provider"),
 			mcpJava + "chaos/NoOpChaosProvider.java:25-30",
-			"kates/src/main/resources/application.properties:219-220",
+			mcpAnchoredRef("kates/src/main/resources/application.properties:255-256",
+				"# Chaos coordination (noop | kubernetes | litmus-crd | hybrid)", "kates.chaos.provider=litmus-crd"),
 		},
 	},
 	{
@@ -176,7 +193,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"Its recovery times and metrics describe an undisturbed cluster, and it counts as a failed step in " +
 			"passedSteps, in the PARTIAL status and in the impact score.",
 		Refs: []string{
-			mcpJava + "chaos/ChaosCoordinator.java:49-68",
+			mcpAnchoredRef(mcpJava+"chaos/ChaosCoordinator.java:54-73",
+				"if (selected != null && selected.isAvailable())", "new NoOpChaosProvider()", "matches no chaos provider"),
 			mcpJava + "chaos/NoOpChaosProvider.java:25-30",
 			mcpJava + "chaos/ChaosOutcome.java:77-81",
 			mcpJava + "disruption/DisruptionOrchestrator.java:155-158,219",
@@ -205,7 +223,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"include however long Litmus took to start the experiment. Time to first ready is the first Ready event " +
 			"from any watched Kafka pod after that moment, which need not be a pod the fault hit.",
 		Refs: []string{
-			mcpJava + "disruption/DisruptionOrchestrator.java:297-309",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionOrchestrator.java:297-313",
+				"session.markDisruptionStart();", "Instant disruptionStart = Instant.now();", ".triggerFault(spec)"),
 			mcpJava + "chaos/K8sPodWatcher.java:74-79,99-105,123-130,184-199",
 			mcpJava + "disruption/KafkaIntelligenceService.java:124-126,196-213,235-237,303-315",
 			mcpJava + "chaos/LitmusChaosProvider.java:65-81",
@@ -221,7 +240,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		Refs: []string{
 			mcpJava + "disruption/KafkaIntelligenceService.java:128-153,164-167",
 			mcpJava + "disruption/DisruptionImpactScorer.java:42-45,132-157",
-			mcpJava + "disruption/DisruptionOrchestrator.java:264-267,379",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionOrchestrator.java:264-267,383",
+				"intelligence.startIsrTracking(", "isrTracker.stop()"),
 		},
 	},
 	{

@@ -1245,7 +1245,9 @@ var mcpCaveatsScenario = []mcpCaveat{
 			mcpJava + "domain/TestSpec.java:34-113",
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1114-1179",
 				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
-			"cli/cmd/apply.go:129-186",
+			mcpAnchoredRef("cli/cmd/apply.go:135-212",
+				"for i, scenario := range sf.Scenarios {", "apiClient.CreateTest(ctx, req)",
+				"unevaluableSLAs(finalResult, scenario.Validate)"),
 		},
 	},
 	{
@@ -1258,9 +1260,11 @@ var mcpCaveatsScenario = []mcpCaveat{
 		Refs: []string{
 			mcpJava + "config/TestTypeDefaults.java:22-64,323-464",
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:946-991", "TestSpec applyTypeDefaults(", "return merged;"),
-			"kates/src/main/resources/application.properties:37-78",
-			"charts/kates/values.yaml:551-618",
-			"charts/kates/templates/configmap.yaml:75-170",
+			mcpAnchoredRef("kates/src/main/resources/application.properties:73-114",
+				"# Per-type overrides: STRESS", "kates.tests.roundtrip.throughput=10000"),
+			mcpAnchoredRef("charts/kates/values.yaml:591-658", "defaults:", "tests:", `throughput: "10000"`),
+			mcpAnchoredRef("charts/kates/templates/configmap.yaml:79-175",
+				"KATES_TESTS_LOAD_REPLICATION_FACTOR:", "KATES_TESTS_ROUNDTRIP_NUM_CONSUMERS:"),
 		},
 	},
 	{
@@ -1271,8 +1275,15 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"produce, and RPO is measured only when a resilience run marks a fault, so a scenario run never has one. " +
 			"Keys ValidationSpec does not name, such as maxDuplicatePercent, are dropped when the file is read.",
 		Refs: []string{
-			"cli/cmd/apply.go:28-38,160-183,259-271,425-489",
-			mcpJava + "engine/NativeKafkaBackend.java:154-159,299-318",
+			mcpAnchoredRef("cli/cmd/apply.go:29-39,178-211,300-312,466-521,538-563",
+				"type ValidationSpec struct {", `yaml:"maxCrcFailures,omitempty"`,
+				"if !applyWait {", "nonNil(validateSLAs(finalResult, scenario.Validate))",
+				"} else if r.SLA != nil {", `"✓ SLA Pass"`,
+				"func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"crcFail=%d > %d"`,
+				"func unevaluableSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"maxRpoMs (RPO not measured)"`),
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:191-196,379-398",
+				"switch (task.getWorkloadType())", "case INTEGRITY -> runIntegrity(task, state);",
+				"void runIntegrity(BenchmarkTask task, WorkerState state)", "state.chaosStartNanos.get()"),
 			mcpJava + "engine/TrogdorBackend.java:150-151",
 			mcpJava + "resilience/ResilienceOrchestrator.java:110",
 		},
