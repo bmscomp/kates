@@ -214,7 +214,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef("kates/src/main/resources/application.properties:255-256",
 				"# Chaos coordination (noop | kubernetes | litmus-crd | hybrid)", "kates.chaos.provider=litmus-crd"),
-			mcpJava + "chaos/LitmusChaosProvider.java:65,88",
+			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:56,94",
+				"int resultPollIntervalMs = 5_000;", "Instant start = Instant.now();"),
 		},
 	},
 	{
