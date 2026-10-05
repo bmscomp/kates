@@ -395,7 +395,9 @@ func TestCreateTest_SendsAZeroWhereItIsASetting(t *testing.T) {
 			t.Error(err)
 		}
 		specs = append(specs, body.Spec)
-		json.NewEncoder(w).Encode(TestRun{ID: "new-run", TestType: "LOAD", Status: "PENDING"})
+		if err := json.NewEncoder(w).Encode(TestRun{ID: "new-run", TestType: "LOAD", Status: "PENDING"}); err != nil {
+			t.Error(err)
+		}
 	})
 	zero := 0
 	for _, spec := range []*TestSpec{
