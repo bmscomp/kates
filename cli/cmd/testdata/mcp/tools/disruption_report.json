@@ -376,7 +376,7 @@
                 },
                 "isr": {
                   "additionalProperties": false,
-                  "description": "absent when the plan tracked no topic's ISR (isrTrackingTopic), or the step failed before it measured",
+                  "description": "absent when the plan tracked no topic's ISR (isrTrackingTopic), the step's fault never went in, or the step failed before it measured",
                   "properties": {
                     "measured": {
                       "description": "false when the tracker took no sample of the topic (it does not exist, or every poll failed); the figures are then absent, and the caveats say how the impact score misreads such a step",
@@ -390,7 +390,7 @@
                       ]
                     },
                     "timeToFullIsrMs": {
-                      "description": "from the fault request until the tracked topic's ISR was full again; 0 when no sample after the fault request found it short, absent when it was not full again while tracked",
+                      "description": "from when the fault went in until the tracked topic's ISR was full again; 0 when no sample after that found it short, absent when it was not full again while tracked",
                       "type": [
                         "null",
                         "integer"
@@ -420,10 +420,10 @@
                 },
                 "lag": {
                   "additionalProperties": false,
-                  "description": "absent when the plan tracked no consumer group (lagTrackingGroupId), or the step failed before it measured",
+                  "description": "absent when the plan tracked no consumer group (lagTrackingGroupId), the step's fault never went in, or the step failed before it measured",
                   "properties": {
                     "baselineLag": {
-                      "description": "the lag in the last sample before the fault request, or in the first sample when none came before",
+                      "description": "the lag in the last sample before the fault went in, or in the first sample when none came before",
                       "type": [
                         "null",
                         "integer"
@@ -448,7 +448,7 @@
                       ]
                     },
                     "timeToLagRecoveryMs": {
-                      "description": "from the fault request until the lag came back within 10% of its baseline; 0 when it never rose more than 10% above the baseline after the fault; absent when it rose and had not come back within 10% while tracked",
+                      "description": "from when the fault went in until the lag came back within 10% of its baseline; 0 when it never rose more than 10% above the baseline after the fault; absent when it rose and had not come back within 10% while tracked",
                       "type": [
                         "null",
                         "integer"
@@ -488,14 +488,14 @@
                   ]
                 },
                 "timeToAllReadyMs": {
-                  "description": "from the fault request until every watched Kafka pod was ready again, after one went down",
+                  "description": "from when the fault went in until every watched Kafka pod was ready again, after one went down",
                   "type": [
                     "null",
                     "integer"
                   ]
                 },
                 "timeToFirstReadyMs": {
-                  "description": "from the fault request until the first Ready event from any watched Kafka pod",
+                  "description": "from when the fault went in until the first Ready event from any watched Kafka pod",
                   "type": [
                     "null",
                     "integer"
@@ -587,7 +587,7 @@
                 ]
               },
               "worstRecoveryMs": {
-                "description": "the longest timeToAllReadyMs of any step. A step without one is not counted: one that never recovered (see unrecoveredSteps), one that did not wait for recovery, and one that failed first. 0 when no step measured one",
+                "description": "the longest timeToAllReadyMs of any step. A step without one is not counted: one that never recovered (see unrecoveredSteps), one that did not wait for recovery, one whose fault never went in, and one that failed first. 0 when no step measured one",
                 "type": [
                   "null",
                   "integer"

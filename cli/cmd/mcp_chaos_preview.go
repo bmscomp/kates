@@ -118,7 +118,7 @@ type mcpPreviewIn struct {
 type mcpAdHocPlan struct {
 	Name string `json:"name,omitempty" jsonschema:"the plan's name, lowercase letters, digits and dashes; mcp-adhoc-plan when left out"`
 	// The two trackers only read (KafkaIntelligenceService.java:105-107,
-	// 128-153,242-276), and plan §5.2 does not restrict them.
+	// 129-154,248-282), and plan §5.2 does not restrict them.
 	ISRTrackingTopic   string         `json:"isrTrackingTopic,omitempty" jsonschema:"a topic whose partitions' ISR Kates samples during every step, for the isr figures disruption_report shows; without it no ISR is measured"`
 	LagTrackingGroupID string         `json:"lagTrackingGroupId,omitempty" jsonschema:"a consumer group whose lag Kates samples during every step, for the lag figures disruption_report shows; letters, digits, '.', '_' and '-'. Without it no lag is measured"`
 	Steps              []mcpAdHocStep `json:"steps" jsonschema:"the steps, run one after another"`

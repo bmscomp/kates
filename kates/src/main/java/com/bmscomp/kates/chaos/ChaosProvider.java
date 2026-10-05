@@ -49,7 +49,8 @@ public interface ChaosProvider {
      * before then, such as one interrupted during its delay.
      *
      * <p>This default never calls it, because it cannot tell when the provider
-     * injects; a resilience run on such a provider measures no RPO.
+     * injects; a resilience run on such a provider measures no RPO, and a plan
+     * step no recovery time.
      */
     default CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec, LongConsumer onInject) {
         return triggerFault(spec);
