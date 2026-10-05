@@ -1662,7 +1662,7 @@ class TestOrchestratorTest {
                     .resolveSpecForPhase(any());
             request.setScenario(scenario);
             TestOrchestrator orchestrator = withBackend("native");
-            when(repository.saveIfPresent(any())).thenReturn(true);
+            when(repository.saveIfStatus(any(), any())).thenReturn(true);
 
             TestRun run = orchestrator.executeTest(request).asSuccess().orElseThrow();
 
@@ -1676,7 +1676,7 @@ class TestOrchestratorTest {
                 verify(backend).stop(new BenchmarkHandle("native", taskId));
             }
             assertEquals(TestResult.TaskStatus.FAILED, run.getStatus());
-            verify(repository).saveIfPresent(run);
+            verify(repository).saveIfStatus(run, TestResult.TaskStatus.RUNNING);
             assertEquals(
                     started,
                     run.getResults().stream().map(TestResult::getTaskId).toList());
@@ -1715,7 +1715,7 @@ class TestOrchestratorTest {
             Instance<BenchmarkBackend> backends = mock(Instance.class);
             when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
             TestRunRepository repository = mock(TestRunRepository.class);
-            when(repository.saveIfPresent(any())).thenReturn(true);
+            when(repository.saveIfStatus(any(), any())).thenReturn(true);
             BenchmarkMetrics metrics = mock(BenchmarkMetrics.class);
             doThrow(new IllegalStateException("the error counter is gone"))
                     .when(metrics)
@@ -1741,7 +1741,7 @@ class TestOrchestratorTest {
             String producer = run.getId() + "-produce-0";
             verify(backend).stop(new BenchmarkHandle("native", producer));
             org.mockito.ArgumentCaptor<TestRun> stored = org.mockito.ArgumentCaptor.forClass(TestRun.class);
-            verify(repository).saveIfPresent(stored.capture());
+            verify(repository).saveIfStatus(stored.capture(), eq(TestResult.TaskStatus.PENDING));
             assertEquals(TestResult.TaskStatus.FAILED, stored.getValue().getStatus());
             Map<String, TestResult> results = stored.getValue().getResults().stream()
                     .collect(java.util.stream.Collectors.toMap(TestResult::getTaskId, r -> r));

@@ -8,8 +8,14 @@ import static org.mockito.Mockito.*;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
@@ -21,20 +27,24 @@ import org.mockito.ArgumentCaptor;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.CreateTestRequest;
+import com.bmscomp.kates.domain.ScenarioPhase;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestResult.TaskStatus;
 import com.bmscomp.kates.domain.TestRun;
+import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.TestRunRepository;
 import com.bmscomp.kates.service.TopicService;
 
 /**
- * What a cancel leaves behind. The run is stored FAILED, and nothing settles a
- * FAILED run afterwards: the reconciler's poll returns early for it and the
- * timeout reaper only scans RUNNING. So the cancel itself has to hand back
+ * What a cancel leaves behind. The run is stored FAILED, and nothing polls or
+ * reaps a FAILED run afterwards: the reconciler's poll returns early for it and
+ * the timeout reaper only scans RUNNING. So the cancel itself has to hand back
  * everything the run held, its concurrency slot, its per-run meters and its
- * backend workers, and say that the run ended.
+ * backend workers, and say that the run ended. A cancel that lands while the
+ * run's tasks are being submitted finds no workers to stop yet, and the
+ * submission must not write over it.
  */
 class TestOrchestratorCancelTest {
 
@@ -49,6 +59,9 @@ class TestOrchestratorCancelTest {
 
     /** Runs between the cancel's read and its write, as another writer would. */
     private Runnable beforeConditionalWrite = () -> {};
+
+    /** Runs once a conditional write has landed, with the run it stored. */
+    private Consumer<TestRun> afterConditionalWrite = run -> {};
 
     private Event<TestLifecycleEvent> events;
     private TestOrchestrator orchestrator;
@@ -78,6 +91,7 @@ class TestOrchestratorCancelTest {
                 return false;
             }
             rows.put(run.getId(), run);
+            afterConditionalWrite.accept(run);
             return true;
         });
 
@@ -183,6 +197,106 @@ class TestOrchestratorCancelTest {
         assertTrue(orchestrator.cancelTest("no-such-run").isEmpty());
     }
 
+    @Test
+    @DisplayName("a cancel that lands while a run's tasks are being submitted stays a cancel, and stops them")
+    void aCancelDuringSubmissionSticks() throws InterruptedException {
+        // executeTest answers with the run, PENDING, before its tasks are
+        // submitted, so a client can cancel it by id while they are. The
+        // submission's write then landed on the cancel's, RUNNING over FAILED,
+        // and the run produced without the slot the cancel had given back.
+        CountDownLatch submitting = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        backend.onSubmit = task -> {
+            submitting.countDown();
+            awaitRelease(release);
+        };
+        String id =
+                orchestrator.executeTest(request()).asSuccess().orElseThrow().getId();
+        assertTrue(submitting.await(5, TimeUnit.SECONDS), "the submission never reached the backend");
+
+        TestRun cancelled = orchestrator.cancelTest(id).orElseThrow();
+        release.countDown();
+
+        // The submission finds the run cancelled when it writes, and stops what it started.
+        InMemoryEngine.await(() -> backend.stopped.size() == 2, "the tasks of cancelled run " + id + " run on");
+        assertEquals(backend.submitted, backend.stopped, "every task the submission started is stopped");
+        assertEquals(TaskStatus.FAILED, cancelled.getStatus());
+        assertSame(cancelled, rows.get(id), "the row is the run as the cancel stored it");
+        orchestrator.reconcileActiveRuns();
+        assertSame(cancelled, rows.get(id), "and later ticks leave it so");
+        assertEquals(List.of("cancelled"), endingsOf(id), "the run's end is announced once, by the cancel");
+        verify(katesMetrics).recordTestCompleted("LOAD", "failed");
+        verify(benchmarkMetrics, atLeastOnce()).endRun(id);
+        assertEverySlotFree();
+    }
+
+    @Test
+    @DisplayName("a cancel that lands as the submission writes still stops the run's tasks")
+    void aCancelRightAfterTheSubmissionsWriteStopsItsTasks() {
+        // The cancel reads the row the submission has just written, RUNNING
+        // with its tasks, and settles the run before the submission publishes
+        // their handles, so it finds none to stop. The handles come after the
+        // run ended, and the reconciler dropped such a run's handles without
+        // stopping them.
+        AtomicBoolean armed = new AtomicBoolean(true);
+        afterConditionalWrite = stored -> {
+            if (stored.getStatus() == TaskStatus.RUNNING && armed.getAndSet(false)) {
+                orchestrator.cancelTest(stored.getId()).orElseThrow();
+            }
+        };
+
+        String id =
+                orchestrator.executeTest(request()).asSuccess().orElseThrow().getId();
+
+        InMemoryEngine.await(
+                () -> {
+                    orchestrator.reconcileActiveRuns();
+                    return backend.stopped.size() == 2;
+                },
+                "the tasks of cancelled run " + id + " run on");
+        assertFalse(armed.get(), "the cancel came right after the submission's write");
+        assertEquals(backend.submitted, backend.stopped, "every task the submission started is stopped");
+        TestRun stored = rows.get(id);
+        assertEquals(TaskStatus.FAILED, stored.getStatus());
+        assertEquals(2, stored.getResults().size(), "the cancel read the run with its tasks");
+        for (TestResult r : stored.getResults()) {
+            assertEquals(TaskStatus.FAILED, r.getStatus());
+            assertEquals("Cancelled by user", r.getError());
+        }
+        assertEquals(List.of("cancelled"), endingsOf(id));
+        assertEverySlotFree();
+    }
+
+    @Test
+    @DisplayName("a scenario cancelled while its phases are being submitted stays cancelled, and its tasks stop")
+    void aScenarioCancelledDuringSubmissionStaysCancelled() throws Exception {
+        // A scenario's tasks are submitted before executeTest answers, but its
+        // run is stored, RUNNING, before they are, so a client that lists the
+        // runs can cancel it by id in between.
+        CountDownLatch submitting = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<String> runId = new AtomicReference<>();
+        backend.onSubmit = task -> {
+            runId.compareAndSet(null, task.getRunId());
+            submitting.countDown();
+            awaitRelease(release);
+        };
+        CompletableFuture<TestRun> answer = CompletableFuture.supplyAsync(
+                () -> orchestrator.executeTest(scenarioRequest()).asSuccess().orElseThrow());
+        assertTrue(submitting.await(5, TimeUnit.SECONDS), "the submission never reached the backend");
+        String id = runId.get();
+
+        TestRun cancelled = orchestrator.cancelTest(id).orElseThrow();
+        release.countDown();
+
+        assertSame(cancelled, answer.get(5, TimeUnit.SECONDS), "executeTest answers with the run as cancelled");
+        assertSame(cancelled, rows.get(id), "the row is the run as the cancel stored it");
+        assertEquals(List.of(id + "-warmup-produce", id + "-steady-produce"), backend.submitted);
+        assertEquals(backend.submitted, backend.stopped, "every task the submission started is stopped");
+        assertEquals(List.of("cancelled"), endingsOf(id));
+        assertEverySlotFree();
+    }
+
     private String startAndAwaitRunning() {
         TestRun run = orchestrator.executeTest(request()).asSuccess().orElseThrow();
         // Submission runs on a virtual thread; wait for the row it writes.
@@ -194,10 +308,62 @@ class TestOrchestratorCancelTest {
         return run.getId();
     }
 
+    /**
+     * Every slot is free, and each came back once: max-concurrent-tests new
+     * runs start, and the one after them is refused.
+     */
+    private void assertEverySlotFree() {
+        assertEquals(0, orchestrator.activeTestCount(), "no ended run holds a slot");
+        for (int i = 1; i <= MAX_CONCURRENT; i++) {
+            assertTrue(
+                    orchestrator.executeTest(request()).isSuccess(),
+                    "new run " + i + " of " + MAX_CONCURRENT + " starts");
+        }
+        assertFalse(orchestrator.executeTest(request()).isSuccess(), "the cap still holds");
+    }
+
+    /** The detail of each event that announced the run ended, in the order they were fired. */
+    private List<String> endingsOf(String runId) {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<TestLifecycleEvent> fired = ArgumentCaptor.forClass(TestLifecycleEvent.class);
+        verify(events, atLeastOnce()).fireAsync(fired.capture());
+        return fired.getAllValues().stream()
+                .filter(e -> e.getRunId().equals(runId))
+                .filter(e -> e.getKind() == TestLifecycleEvent.EventKind.FAILED
+                        || e.getKind() == TestLifecycleEvent.EventKind.DONE)
+                .map(TestLifecycleEvent::getDetail)
+                .toList();
+    }
+
+    /** Holds a backend's submit until the test releases it. */
+    private static void awaitRelease(CountDownLatch release) {
+        try {
+            assertTrue(release.await(5, TimeUnit.SECONDS), "the held submit was never released");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static CreateTestRequest request() {
         CreateTestRequest request = new CreateTestRequest();
         request.setType(TestType.LOAD);
         request.setSpec(spec());
+        return request;
+    }
+
+    /** A LOAD scenario of two phases, one producer each, on the spec the plain runs use. */
+    private static CreateTestRequest scenarioRequest() {
+        TestScenario scenario = new TestScenario();
+        scenario.setName("cancelled-while-submitted");
+        scenario.setType(TestType.LOAD);
+        scenario.setBaseSpec(spec());
+        scenario.setPhases(List.of(
+                new ScenarioPhase("warmup", ScenarioPhase.PhaseType.WARMUP, 0, -1),
+                new ScenarioPhase("steady", ScenarioPhase.PhaseType.STEADY, 0, -1)));
+        CreateTestRequest request = new CreateTestRequest();
+        request.setType(TestType.LOAD);
+        request.setScenario(scenario);
         return request;
     }
 
@@ -226,6 +392,9 @@ class TestOrchestratorCancelTest {
         final List<String> submitted = new CopyOnWriteArrayList<>();
         final List<String> stopped = new CopyOnWriteArrayList<>();
 
+        /** Runs inside each submit before the task starts, as a slow backend's would. */
+        volatile Consumer<BenchmarkTask> onSubmit = task -> {};
+
         @Override
         public String name() {
             return "fake";
@@ -233,6 +402,7 @@ class TestOrchestratorCancelTest {
 
         @Override
         public BenchmarkHandle submit(BenchmarkTask task) {
+            onSubmit.accept(task);
             submitted.add(task.getTaskId());
             return new BenchmarkHandle(name(), task.getTaskId());
         }
