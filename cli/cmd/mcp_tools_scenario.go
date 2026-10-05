@@ -1241,7 +1241,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"and kates test apply sends a scenario with whatever key it holds.",
 		Refs: []string{
 			"plans/mcp-server.md:387-405",
-			mcpJava + "api/TestResource.java:69-104",
+			mcpJava + "api/TestResource.java:76-103",
 			mcpJava + "domain/TestSpec.java:34-113",
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1176-1241",
 				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
