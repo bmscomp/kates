@@ -161,9 +161,9 @@ public class ResilienceResource {
     @APIResponse(responseCode = "200", description = "Resilience test report with probe results and RTO")
     @APIResponse(
             responseCode = "400",
-            description = "Invalid request, including a testRequest spec value outside its limits, a testRequest"
-                    + " spec field the test type or backend cannot apply, or a chaosSpec parameter outside the"
-                    + " chaos limits; fieldErrors names each field")
+            description = "Invalid request, including a testRequest with no type, a testRequest spec value outside"
+                    + " its limits, a testRequest spec field the test type or backend cannot apply, or a chaosSpec"
+                    + " parameter outside the chaos limits; fieldErrors names each field")
     public Response executeResilienceTest(ResilienceTestRequest request) {
         if (request.getTestRequest() == null) {
             return Response.status(400)

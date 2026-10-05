@@ -4,14 +4,19 @@
     "POST http://localhost:8080/api/resilience",
     "",
     "Each entry is a ResilienceTestRequest combining:",
-    "  - testRequest : performance benchmark (load / stress / endurance)",
+    "  - testRequest : performance benchmark, the body of POST /api/tests (load / stress / endurance)",
     "  - chaosSpec   : fault injection (DisruptionType + FaultSpec parameters)",
     "  - steadyStateSec    : warmup window before chaos is injected",
     "  - maxRecoveryWaitSec: max time to wait for cluster to return to steady state",
     "  - probes      : assertions evaluated at baseline, during chaos, and post-recovery",
     "",
+    "Keys that start with _ are notes for the reader, and the Kates API ignores them.",
+    "It ignores any other field it doesn't have too, so a misspelled field runs on its default.",
+    "ResilienceTutorialTest (kates/src/test) fails on such a field, and on an example the API would refuse.",
+    "A LOAD or ENDURANCE run starts one producer and one consumer; only STRESS and CAPACITY read numProducers.",
+    "",
     "All examples target the 'krafter' cluster in namespace 'kafka'.",
-    "Run kates port-forward first: make kates-ui  (http://localhost:8080)"
+    "Forward the Kates API to http://localhost:8080 and export KATES_API_KEY first: see _usage."
   ],
 
   "examples": [
@@ -27,13 +32,10 @@
           "numRecords": 500000,
           "recordSize": 1024,
           "throughput": 5000,
-          "producers": 3,
           "acks": "all",
-          "linger": 5,
+          "lingerMs": 5,
           "compressionType": "lz4",
-          "enableIdempotence": true,
-          "maxRetries": 2147483647,
-          "deliveryTimeoutMs": 120000
+          "enableIdempotence": true
         }
       },
       "chaosSpec": {
@@ -42,8 +44,7 @@
         "targetNamespace": "kafka",
         "targetLabel": "strimzi.io/pool-name=brokers-alpha",
         "chaosDurationSec": 30,
-        "delayBeforeSec": 0,
-        "gracePeriodSec": 0
+        "delayBeforeSec": 0
       },
       "steadyStateSec": 30,
       "maxRecoveryWaitSec": 120,
@@ -82,11 +83,8 @@
           "numRecords": 600000,
           "recordSize": 1024,
           "throughput": 2000,
-          "producers": 3,
           "acks": "all",
-          "enableIdempotence": true,
-          "maxRetries": 2147483647,
-          "deliveryTimeoutMs": 120000
+          "enableIdempotence": true
         }
       },
       "chaosSpec": {
@@ -126,7 +124,7 @@
 
     {
       "_name": "03 — CPU Exhaustion (CPU_STRESS)",
-      "_description": "Exhaust 1 CPU core at 90% on the gamma broker while 6 parallel producers write 8 KB records. Observes ISR shrink/expand cycle.",
+      "_description": "Exhaust 1 CPU core on the gamma broker while a producer writes 8 KB records at 1000 rec/s. Observes ISR shrink/expand cycle.",
       "_hypothesis": "CPU-starved follower falls behind replication. If lag > replica.lag.time.max.ms (30s), it is evicted from ISR. ISR recovers fully within 90s of chaos ending.",
       "testRequest": {
         "type": "LOAD",
@@ -135,12 +133,9 @@
           "numRecords": 300000,
           "recordSize": 8192,
           "throughput": 1000,
-          "producers": 6,
           "acks": "all",
           "compressionType": "snappy",
-          "enableIdempotence": true,
-          "maxRetries": 2147483647,
-          "deliveryTimeoutMs": 120000
+          "enableIdempotence": true
         }
       },
       "chaosSpec": {
@@ -180,7 +175,7 @@
 
     {
       "_name": "04 — Memory Pressure (MEMORY_STRESS)",
-      "_description": "Consume 500 MB on a broker pod to simulate a GC-heavy workload or memory leak. Validates that the JVM does not OOM-kill the broker.",
+      "_description": "Consume 500 MB on a broker pod to simulate a GC-heavy workload or memory leak, while three STRESS producers write 5000 rec/s each. Validates that the JVM does not OOM-kill the broker.",
       "_hypothesis": "Memory pressure forces more GC cycles and slows request handling. Producer p99 latency rises but the broker does not crash. ISR stays intact.",
       "testRequest": {
         "type": "STRESS",
@@ -188,8 +183,8 @@
           "topic": "kates-events",
           "numRecords": 1000000,
           "recordSize": 1024,
-          "throughputSteps": [5000, 10000, 20000],
-          "producers": 3,
+          "throughput": 5000,
+          "numProducers": 3,
           "acks": "all",
           "enableIdempotence": true
         }
@@ -240,11 +235,9 @@
           "numRecords": 200000,
           "recordSize": 16384,
           "throughput": 500,
-          "producers": 4,
           "acks": "all",
           "compressionType": "none",
-          "enableIdempotence": true,
-          "deliveryTimeoutMs": 120000
+          "enableIdempotence": true
         }
       },
       "chaosSpec": {
@@ -285,7 +278,7 @@
 
     {
       "_name": "06 — DNS Failure (DNS_ERROR)",
-      "_description": "Inject DNS resolution failures on broker pods. Validates that broker-to-broker and client-to-broker connections survive transient DNS outages.",
+      "_description": "Inject DNS resolution failures on a broker pod. Validates that broker-to-broker and client-to-broker connections survive transient DNS outages.",
       "_hypothesis": "Kafka connections use cached DNS results. Short DNS outages (<30s) should not disconnect established broker connections. Consumer group coordinators may reassign.",
       "testRequest": {
         "type": "LOAD",
@@ -294,8 +287,6 @@
           "numRecords": 400000,
           "recordSize": 512,
           "throughput": 3000,
-          "producers": 2,
-          "consumers": 2,
           "consumerGroup": "dns-failure-cg",
           "acks": "all",
           "enableIdempotence": true
@@ -305,7 +296,7 @@
         "experimentName": "dns-failure",
         "disruptionType": "DNS_ERROR",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/cluster=krafter,strimzi.io/broker-role=true",
         "chaosDurationSec": 30,
         "delayBeforeSec": 0
       },
@@ -346,14 +337,9 @@
           "numRecords": 400000,
           "recordSize": 512,
           "throughput": 3000,
-          "producers": 3,
-          "consumers": 2,
           "consumerGroup": "net-split-cg",
           "acks": "all",
-          "enableIdempotence": true,
-          "maxRetries": 2147483647,
-          "deliveryTimeoutMs": 120000,
-          "requestTimeoutMs": 30000
+          "enableIdempotence": true
         }
       },
       "chaosSpec": {
@@ -392,8 +378,9 @@
 
     {
       "_name": "08 — Node Drain (NODE_DRAIN)",
-      "_description": "Drain the Kubernetes node hosting a broker pod. Validates that the Strimzi Drain Cleaner transfers leadership before eviction and the pod reschedules cleanly.",
+      "_description": "Drain gamma, the Kubernetes node hosting the gamma broker pod, during a 5-minute ENDURANCE run. Validates that the Strimzi Drain Cleaner transfers leadership before eviction and the pod reschedules cleanly.",
       "_hypothesis": "Drain Cleaner intercepts the eviction, triggers Kafka controlled shutdown, and transfers all partition leaders off the node before the pod is evicted. Zero downtime expected.",
+      "_note": "Kates sets no TARGET_NODE for Litmus node-drain, so envOverrides names the node: gamma, which runs brokers-gamma on the Kind lab (config/cluster.yaml). On another cluster, name the node that runs it.",
       "testRequest": {
         "type": "ENDURANCE",
         "spec": {
@@ -401,9 +388,7 @@
           "numRecords": 1000000,
           "recordSize": 1024,
           "throughput": 3000,
-          "durationSec": 300,
-          "producers": 3,
-          "consumers": 3,
+          "durationMs": 300000,
           "consumerGroup": "drain-test-cg",
           "acks": "all",
           "enableIdempotence": true
@@ -416,7 +401,9 @@
         "targetLabel": "strimzi.io/pool-name=brokers-gamma",
         "chaosDurationSec": 60,
         "delayBeforeSec": 0,
-        "gracePeriodSec": 30
+        "envOverrides": {
+          "TARGET_NODE": "gamma"
+        }
       },
       "steadyStateSec": 30,
       "maxRecoveryWaitSec": 180,
@@ -446,7 +433,7 @@
 
     {
       "_name": "09 — Rolling Restart (ROLLING_RESTART)",
-      "_description": "Restart all brokers one at a time with a configurable delay between restarts. Simulates a rolling upgrade or routine maintenance window.",
+      "_description": "Restart all brokers one at a time through the Strimzi Cluster Operator, which waits for each broker to be ready before it restarts the next. Simulates a rolling upgrade or routine maintenance window.",
       "_hypothesis": "Strimzi's rolling update mechanism ensures controlled shutdown between broker restarts. Producers with acks=all experience <5s latency per restart. No data loss.",
       "testRequest": {
         "type": "LOAD",
@@ -455,24 +442,17 @@
           "numRecords": 900000,
           "recordSize": 512,
           "throughput": 3000,
-          "producers": 3,
           "acks": "all",
-          "enableIdempotence": true,
-          "maxRetries": 2147483647,
-          "deliveryTimeoutMs": 120000
+          "enableIdempotence": true
         }
       },
       "chaosSpec": {
         "experimentName": "rolling-restart",
         "disruptionType": "ROLLING_RESTART",
         "targetNamespace": "kafka",
-        "targetLabel": "strimzi.io/cluster=krafter",
+        "targetLabel": "strimzi.io/cluster=krafter,strimzi.io/broker-role=true",
         "chaosDurationSec": 180,
-        "delayBeforeSec": 0,
-        "gracePeriodSec": 30,
-        "envOverrides": {
-          "RESTART_INTERVAL_SEC": "30"
-        }
+        "delayBeforeSec": 0
       },
       "steadyStateSec": 30,
       "maxRecoveryWaitSec": 120,
@@ -504,6 +484,7 @@
       "_name": "10 — Full Game Day (Multi-Phase Scenario)",
       "_description": "Three sequential chaos steps with recovery windows: broker crash → CPU saturation → network partition. Two STEADY scenario phases, which start together, keep 2000 rec/s on each of two topics for 7 minutes, past this step's recovery window. Models a realistic cascading incident.",
       "_hypothesis": "Cluster survives 3 sequential faults without producer errors. Each step's fault resolves before the next begins.",
+      "_note": "Step 1 only — submit steps 2/3 as separate requests after step 1 ChaosResult=Pass",
       "testRequest": {
         "type": "LOAD",
         "scenario": {
@@ -541,8 +522,7 @@
         "targetLabel": "strimzi.io/pool-name=brokers-alpha",
         "chaosDurationSec": 60,
         "delayBeforeSec": 30,
-        "gracePeriodSec": 0,
-        "_note": "Step 1 only — submit steps 2/3 as separate requests after step 1 ChaosResult=Pass"
+        "gracePeriodSec": 0
       },
       "steadyStateSec": 30,
       "maxRecoveryWaitSec": 180,
@@ -582,11 +562,16 @@
   ],
 
   "_usage": {
-    "submit_single": "curl -X POST http://localhost:8080/api/resilience -H 'Content-Type: application/json' -d @resilience.json | jq '.runId'",
-    "submit_by_scenario": "curl -X POST 'http://localhost:8080/api/resilience/scenarios/broker-crash/run?topic=kates-events&numRecords=500000' | jq",
-    "list_scenarios": "curl http://localhost:8080/api/resilience/scenarios | jq",
-    "get_report": "curl http://localhost:8080/api/resilience/{runId}/report | jq",
-    "port_forward": "make kates-ui",
+    "port_forward": "kates ports",
+    "api_key": "export KATES_API_KEY=\"$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)\"",
+    "submit_single": "jq '.examples[0]' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{status, error, runId: .performanceReport.run.id, impactDeltas, recoveryTime}'",
+    "get_report": "curl -sS -H \"X-API-Key: $KATES_API_KEY\" http://localhost:8080/api/tests/{runId}/report | jq",
+    "list_scenarios": "curl -sS -H \"X-API-Key: $KATES_API_KEY\" http://localhost:8080/api/resilience/scenarios | jq",
+    "notes": [
+      "kates ports forwards the Kates API to http://localhost:8080. Every /api endpoint but /api/health needs the key, whose Secret is in kates-stack instead with the single-namespace topology.",
+      "submit_single sends examples[0], example 01; change the index to send another. It answers with one JSON report once the probes pass after the fault, or maxRecoveryWaitSec runs out.",
+      "get_report takes the runId submit_single prints. The test run goes on after that answer, and its report is final once the run is DONE."
+    ],
     "script_alternatives": {
       "broker_delete": "./scripts/test-chaos-broker-delete.sh",
       "cpu_hog":       "./scripts/test-chaos-broker-cpu-hog.sh",

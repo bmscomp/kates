@@ -21,6 +21,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.ScenarioPhase;
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
@@ -1131,6 +1132,27 @@ class TestOrchestratorTest {
                 assertTrue(invalid.getMessage().startsWith("spec.consumerGroup: "), invalid.getMessage());
             }
         }
+
+        @Test
+        void aRequestWithNoTypeIsRefusedByName() {
+            // POST /api/tests requires a type, but POST /api/resilience and a
+            // schedule run no bean validation, and applyTypeDefaults threw on
+            // a request without one.
+            CreateTestRequest request = new CreateTestRequest();
+            request.setSpec(new TestSpec());
+
+            Exception failure = orchestrator.executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(Set.of("type"), invalid.getFieldErrors().keySet());
+            String why = invalid.getFieldErrors().get("type");
+            assertTrue(why.startsWith("the request has no type; set it to one of LOAD, STRESS, "), why);
+            assertTrue(why.endsWith(", TUNE_PARTITIONS or INTEGRATION_CDC"), why);
+            for (TestType type : TestType.values()) {
+                assertTrue(why.contains(type.name()), why);
+            }
+            assertEquals("type: " + why, invalid.getMessage());
+        }
     }
 
     /**
@@ -1206,10 +1228,12 @@ class TestOrchestratorTest {
     class ScenarioRequests {
 
         private final List<BenchmarkTask> submitted = new java.util.ArrayList<>();
+        private final TestRunRepository repository = mock(TestRunRepository.class);
+        private BenchmarkBackend backend;
 
         @SuppressWarnings("unchecked")
         private TestOrchestrator withBackend(String name) {
-            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            backend = mock(BenchmarkBackend.class);
             when(backend.name()).thenReturn(name);
             when(backend.submit(any())).thenAnswer(invocation -> {
                 BenchmarkTask task = invocation.getArgument(0);
@@ -1220,7 +1244,7 @@ class TestOrchestratorTest {
             when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
             return new TestOrchestrator(
                     mock(TopicService.class),
-                    mock(TestRunRepository.class),
+                    repository,
                     backends,
                     typeDefaults,
                     mock(BenchmarkMetrics.class),
@@ -1248,6 +1272,75 @@ class TestOrchestratorTest {
         private com.bmscomp.kates.domain.ScenarioPhase phase(
                 String name, com.bmscomp.kates.domain.ScenarioPhase.PhaseType type) {
             return new com.bmscomp.kates.domain.ScenarioPhase(name, type, 0, -1);
+        }
+
+        @Test
+        void aScenarioWithNoTypeIsRefusedBeforeTakingAPermit() {
+            // POST /api/resilience and a schedule run no bean validation, so a
+            // scenario could come with no type, its own or the request's. It
+            // threw in applyTypeDefaults after taking a permit that nothing
+            // gave back: after three of them, every later request got a 429.
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest request = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY));
+            request.setType(null);
+            request.getScenario().setType(null);
+
+            for (int i = 0; i < 5; i++) {
+                Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+                InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+                assertEquals(Set.of("type"), invalid.getFieldErrors().keySet());
+                assertTrue(
+                        invalid.getMessage()
+                                .startsWith("type: neither the request nor its scenario has a type; set the"
+                                        + " request's type, or the scenario's, to one of LOAD, "),
+                        invalid.getMessage());
+            }
+            assertTrue(submitted.isEmpty());
+
+            // The scenario's own type is enough, and a permit is free for it.
+            request.getScenario().setType(TestType.LOAD);
+            assertTrue(engine.executeTest(request).isSuccess());
+        }
+
+        @Test
+        void aNullPhaseIsRefusedByItsIndex() {
+            // Every check of the phases reads each one, so "phases": [null]
+            // threw there, and the client got a 500.
+            CreateTestRequest request = scenario(new TestSpec());
+            request.getScenario()
+                    .setPhases(java.util.Arrays.asList(null, phase("steady", ScenarioPhase.PhaseType.STEADY), null));
+
+            Exception failure =
+                    withBackend("native").executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(
+                    Set.of("phases[0]", "phases[2]"), invalid.getFieldErrors().keySet());
+            assertTrue(
+                    invalid.getMessage().startsWith("scenario.phases[0]: null is not a phase; remove it, or put"),
+                    invalid.getMessage());
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void aScenarioWhoseRunCannotBeBuiltTakesNoPermit() {
+            // The run is built before the permit is taken, so whatever throws
+            // while it's built, as the missing type did, costs no permit. A
+            // lookup of the type's defaults that throws stands in for it;
+            // withBackend builds its orchestrator over this.typeDefaults.
+            typeDefaults = spy(typeDefaults);
+            doThrow(new IllegalStateException("no defaults")).when(typeDefaults).forType(TestType.VOLUME);
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest volume = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY));
+            volume.setType(TestType.VOLUME);
+            volume.getScenario().setType(TestType.VOLUME);
+
+            for (int i = 0; i < 5; i++) {
+                assertThrows(IllegalStateException.class, () -> engine.executeTest(volume));
+            }
+
+            assertTrue(engine.executeTest(scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY)))
+                    .isSuccess());
         }
 
         @Test
@@ -1537,6 +1630,130 @@ class TestOrchestratorTest {
                     errors.get("phases[3].rampSteps").contains("phase flat has 0 steps; it needs at least 1"),
                     errors.toString());
             assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void aPhaseThatThrowsStopsThePhasesSubmittedBeforeIt() {
+            TestSpec base = new TestSpec();
+            base.setThroughput(1000);
+            ScenarioPhase ramp = phase("ramp", ScenarioPhase.PhaseType.RAMP);
+            ramp.setRampSteps(2);
+            ScenarioPhase steady = phase("steady", ScenarioPhase.PhaseType.STEADY);
+            CreateTestRequest request = scenario(
+                    base,
+                    phase("warmup", ScenarioPhase.PhaseType.WARMUP),
+                    ramp,
+                    steady,
+                    phase("cooldown", ScenarioPhase.PhaseType.COOLDOWN));
+            // The steady phase throws once tasks are running, past the checks
+            // made before the run starts, as resolveSpecForPhase or
+            // buildPhaseTask could for any phase after the first; a phase
+            // without a phaseType did, before it was refused. The phases
+            // before it ran on, 600 s by default, with their tasks RUNNING in
+            // the FAILED run.
+            TestScenario scenario = spy(request.getScenario());
+            doAnswer(invocation -> {
+                        if (invocation.getArgument(0) == steady && !submitted.isEmpty()) {
+                            throw new IllegalStateException("phase steady cannot be resolved");
+                        }
+                        return invocation.callRealMethod();
+                    })
+                    .when(scenario)
+                    .resolveSpecForPhase(any());
+            request.setScenario(scenario);
+            TestOrchestrator orchestrator = withBackend("native");
+            when(repository.saveIfPresent(any())).thenReturn(true);
+
+            TestRun run = orchestrator.executeTest(request).asSuccess().orElseThrow();
+
+            String id = run.getId();
+            List<String> started = List.of(id + "-warmup-produce", id + "-ramp-ramp-0", id + "-ramp-ramp-1");
+            assertEquals(
+                    started,
+                    submitted.stream().map(BenchmarkTask::getTaskId).toList(),
+                    "nothing is submitted past the phase that threw");
+            for (String taskId : started) {
+                verify(backend).stop(new BenchmarkHandle("native", taskId));
+            }
+            assertEquals(TestResult.TaskStatus.FAILED, run.getStatus());
+            verify(repository).saveIfPresent(run);
+            assertEquals(
+                    started,
+                    run.getResults().stream().map(TestResult::getTaskId).toList());
+            for (TestResult result : run.getResults()) {
+                assertEquals(TestResult.TaskStatus.FAILED, result.getStatus(), result.getTaskId());
+                assertEquals(
+                        "Stopped: the run failed while its tasks were being submitted:"
+                                + " java.lang.IllegalStateException: phase steady cannot be resolved",
+                        result.getError());
+                assertNotNull(result.getEndTime(), result.getTaskId());
+            }
+            assertEquals(0, orchestrator.activeTestCount(), "the run's permit is back");
+        }
+    }
+
+    /**
+     * A plain run whose submission throws part-way ends as a scenario's does:
+     * the tasks it started are stopped and failed with the reason. Once a task
+     * is submitted, only recording another task's failure to submit can throw.
+     */
+    @Nested
+    class PlainRunSubmission {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void aRunWhoseSubmissionThrowsStopsTheTasksItStarted() {
+            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            when(backend.name()).thenReturn("native");
+            when(backend.submit(any())).thenAnswer(invocation -> {
+                BenchmarkTask task = invocation.getArgument(0);
+                if (task.getWorkloadType() == BenchmarkTask.WorkloadType.CONSUME) {
+                    throw new BenchmarkException("the consumer was refused");
+                }
+                return new BenchmarkHandle("native", task.getTaskId());
+            });
+            Instance<BenchmarkBackend> backends = mock(Instance.class);
+            when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
+            TestRunRepository repository = mock(TestRunRepository.class);
+            when(repository.saveIfPresent(any())).thenReturn(true);
+            BenchmarkMetrics metrics = mock(BenchmarkMetrics.class);
+            doThrow(new IllegalStateException("the error counter is gone"))
+                    .when(metrics)
+                    .recordTaskStatus(anyString(), anyString(), anyString(), any());
+            TestOrchestrator withBackend = new TestOrchestrator(
+                    mock(TopicService.class),
+                    repository,
+                    backends,
+                    typeDefaults,
+                    metrics,
+                    mock(KatesMetrics.class),
+                    new SlaEvaluator(),
+                    mock(Event.class),
+                    "native",
+                    "localhost:9092",
+                    3,
+                    7_200_000L);
+            TestSpec spec = withBackend.applyTypeDefaults(TestType.LOAD, null);
+            TestRun run = new TestRun(TestType.LOAD, spec).withBackend("native");
+
+            withBackend.executeAsync(run, TestType.LOAD, spec, "native", backend);
+
+            String producer = run.getId() + "-produce-0";
+            verify(backend).stop(new BenchmarkHandle("native", producer));
+            org.mockito.ArgumentCaptor<TestRun> stored = org.mockito.ArgumentCaptor.forClass(TestRun.class);
+            verify(repository).saveIfPresent(stored.capture());
+            assertEquals(TestResult.TaskStatus.FAILED, stored.getValue().getStatus());
+            Map<String, TestResult> results = stored.getValue().getResults().stream()
+                    .collect(java.util.stream.Collectors.toMap(TestResult::getTaskId, r -> r));
+            assertEquals(TestResult.TaskStatus.FAILED, results.get(producer).getStatus());
+            assertEquals(
+                    "Stopped: the run failed while its tasks were being submitted:"
+                            + " java.lang.IllegalStateException: the error counter is gone",
+                    results.get(producer).getError());
+            assertEquals(
+                    "the consumer was refused",
+                    results.get(run.getId() + "-consume-0").getError(),
+                    "the task that failed to submit keeps its own error");
         }
     }
 

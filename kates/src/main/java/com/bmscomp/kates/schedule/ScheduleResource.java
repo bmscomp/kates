@@ -1,5 +1,6 @@
 package com.bmscomp.kates.schedule;
 
+import java.util.Optional;
 import java.util.UUID;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -15,6 +16,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.domain.CreateTestRequest;
+import com.bmscomp.kates.engine.TestOrchestrator;
 
 /**
  * REST API for managing scheduled/recurring test configurations.
@@ -29,6 +31,25 @@ public class ScheduleResource {
 
     @Inject
     ScheduledTestRunRepository repository;
+
+    @Inject
+    TestOrchestrator orchestrator;
+
+    /**
+     * A 400 naming each field of the schedule's test request that the Kates
+     * API would refuse, by its path under {@code testRequest}, or empty when
+     * it would run the request. Asked before the schedule is saved: the
+     * scheduler fires the request as saved, so a refused one would fail at
+     * every firing, start no run, and say why only in the server log.
+     */
+    private Optional<Response> refusal(CreateTestRequest testRequest) {
+        return orchestrator
+                .refusal(testRequest)
+                .map(refused -> refused.under("testRequest"))
+                .map(refused -> Response.status(400)
+                        .entity(ApiError.validationFailed(refused.getMessage(), refused.getFieldErrors()))
+                        .build());
+    }
 
     @GET
     @Operation(summary = "List all schedules")
@@ -53,6 +74,10 @@ public class ScheduleResource {
     @POST
     @Operation(summary = "Create a schedule", description = "Creates a new recurring test schedule")
     @APIResponse(responseCode = "201", description = "Schedule created")
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid request, including a testRequest that POST /api/tests would refuse;"
+                    + " fieldErrors names each field by its path under testRequest")
     public Response createSchedule(@jakarta.validation.Valid CreateScheduleRequest request) {
         if (request.name == null || request.name.isBlank()) {
             return Response.status(400)
@@ -68,6 +93,10 @@ public class ScheduleResource {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "Field 'testRequest' is required"))
                     .build();
+        }
+        Optional<Response> refused = refusal(request.testRequest);
+        if (refused.isPresent()) {
+            return refused.get();
         }
 
         try {
@@ -94,12 +123,25 @@ public class ScheduleResource {
     @Path("/{id}")
     @Operation(summary = "Update a schedule")
     @APIResponse(responseCode = "200", description = "Schedule updated")
+    @APIResponse(
+            responseCode = "400",
+            description = "A testRequest that POST /api/tests would refuse; fieldErrors names each field by its"
+                    + " path under testRequest")
     @APIResponse(responseCode = "404", description = "Schedule not found")
     public Response updateSchedule(
             @Parameter(description = "Schedule ID") @PathParam("id") String id, CreateScheduleRequest request) {
         return repository
                 .findById(id)
                 .map(schedule -> {
+                    // Only a testRequest the body sends is checked, so a
+                    // schedule saved before the check, whose firings the
+                    // Kates API refuses, can still be renamed or disabled.
+                    if (request.testRequest != null) {
+                        Optional<Response> refused = refusal(request.testRequest);
+                        if (refused.isPresent()) {
+                            return refused.get();
+                        }
+                    }
                     if (request.name != null) schedule.setName(request.name);
                     if (request.cronExpression != null) schedule.setCronExpression(request.cronExpression);
                     schedule.setEnabled(request.enabled);
