@@ -176,7 +176,8 @@ const (
 
 // The values TestSpec's bean validation accepts (domain/TestSpec.java:36,50,
 // 61-63). The backend does not always apply it: a scenario's base spec is
-// never validated (CreateTestRequest.java:14-18, TestScenario.java:26) and
+// validated only in a resilience run (ResilienceResource.java:88-116), not
+// by bean validation (CreateTestRequest.java:14-18, TestScenario.java:26), and
 // gRPC sets compressionType unchecked (GrpcTestService.java:52), so a stored
 // value outside these is third-party text.
 var (
@@ -2216,7 +2217,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:104-135",
 				`@Path("/compound")`, `"results", outcome.results()`),
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:67-93",
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:129-155",
 				"StreamingOutput executeWithKeepAlive(", "objectMapper.writeValue(os, payload);",
 				`"Failed to execute resilience test"`),
 		},
