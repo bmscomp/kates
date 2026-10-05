@@ -380,7 +380,7 @@
       "_name": "08 — Node Drain (NODE_DRAIN)",
       "_description": "Drain gamma, the Kubernetes node hosting the gamma broker pod, during a 5-minute ENDURANCE run. Validates that the Strimzi Drain Cleaner transfers leadership before eviction and the pod reschedules cleanly.",
       "_hypothesis": "Drain Cleaner intercepts the eviction, triggers Kafka controlled shutdown, and transfers all partition leaders off the node before the pod is evicted. Zero downtime expected.",
-      "_note": "Kates sets no TARGET_NODE for Litmus node-drain, so envOverrides names the node: gamma, which runs brokers-gamma on the Kind lab (config/cluster.yaml). On another cluster, name the node that runs it.",
+      "_note": "Kates drains the node that runs the pod targetLabel picks: the brokers-gamma broker, which runs on gamma on the Kind lab (config/cluster.yaml). On another cluster the same label drains whichever node runs that broker; envOverrides.TARGET_NODE would name a node instead.",
       "testRequest": {
         "type": "ENDURANCE",
         "spec": {
@@ -400,10 +400,7 @@
         "targetNamespace": "kafka",
         "targetLabel": "strimzi.io/pool-name=brokers-gamma",
         "chaosDurationSec": 60,
-        "delayBeforeSec": 0,
-        "envOverrides": {
-          "TARGET_NODE": "gamma"
-        }
+        "delayBeforeSec": 0
       },
       "steadyStateSec": 30,
       "maxRecoveryWaitSec": 180,
