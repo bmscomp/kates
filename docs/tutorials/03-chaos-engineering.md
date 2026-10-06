@@ -326,13 +326,14 @@ kates resilience run -f resilience-test.json
 ### Step 3: Interpret the Impact Analysis
 
 The command returns once the fault has ended and the backend has waited for the
-cluster to recover, which can be before the LOAD run finishes, and prints four
+cluster to recover, which can be before the LOAD run finishes, and prints these
 blocks:
 
 | Block | What it shows |
 |-------|---------------|
-| Status | `COMPLETED` when the chaos outcome passed, `CHAOS_FAILED` when it did not, `ERROR` with the reason when the run failed, `INTERRUPTED` when the backend was interrupted before the run ended |
+| Status | `COMPLETED` when the chaos outcome passed, `CHAOS_FAILED` when it did not, `ERROR` with the reason when the run failed, `INTERRUPTED` when the backend was interrupted before the run ended. `Test Run` under it is the LOAD run's ID |
 | Chaos Outcome | The experiment, its verdict, and how long the fault lasted |
+| Probes and Recovery | The recovery time, how many probe checks passed before, during and after the fault, and what each failing probe printed last |
 | Impact Analysis (% change) | How `throughputRecPerSec`, `avgLatencyMs`, `p99LatencyMs`, `maxLatencyMs` and `errorRate` changed, with ▲ or ▼ beside a change beyond 10% |
 | Pre-Chaos Baseline, Post-Chaos Impact | The run's throughput, P99 latency and error rate so far: just before the fault, and again once the cluster has recovered or the recovery wait, 120 seconds by default, has run out |
 
@@ -340,9 +341,9 @@ Read the Impact Analysis first: it is the cost of the fault. With three replicas
 and `min.insync.replicas=2`, losing one broker should cost latency while
 partition leaders move, and no records. A LOAD run does not check for lost
 records, though. To prove that nothing was lost, run an INTEGRITY test through
-the fault, as [Tutorial 4](04-integrity-under-fire.md) does. `kates test list`
-shows the LOAD run, and `kates report show <id>` its full report once it has
-finished.
+the fault, as [Tutorial 4](04-integrity-under-fire.md) does. The output ends
+with `kates test get <id>` for the LOAD run, and `kates report show <id>` shows
+its full report once it has finished.
 
 ## Part 5: Multi-Step Disruption Plans
 
