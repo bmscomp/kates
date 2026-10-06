@@ -253,7 +253,7 @@ The arithmetic: 13 panels at HEAD, 3 dropped, 2 added (*Request rate by endpoint
 
 **File:** `kates-chaos.json` | **UID:** `kafka-chaos-dashboard` | **Docs:** `dashboards/kates-chaos/README.md`
 
-This is the most specialized dashboard in the stack. It correlates LitmusChaos experiment status with Kafka cluster health and Kates benchmark performance *on the same timeline*. Its header and Experiment history rows read LitmusChaos series only, so a fault from the direct Kubernetes provider, and every `ROLLING_RESTART` and `SCALE_DOWN`, leaves them empty. When you inject a fault, this dashboard answers the question: "What happened to my cluster and my test when the chaos experiment fired?"
+This is the most specialized dashboard in the stack. It correlates LitmusChaos experiment status with Kafka cluster health and Kates benchmark performance *on the same timeline*. Its header and Experiment history rows read LitmusChaos series only, so a fault from the direct Kubernetes provider, and every `POD_DELETE`, `ROLLING_RESTART` and `SCALE_DOWN`, leaves them empty. When you inject a fault, this dashboard answers the question: "What happened to my cluster and my test when the chaos experiment fired?"
 
 | Row | Panels |
 |---|---|
