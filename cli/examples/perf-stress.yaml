@@ -4,6 +4,11 @@
 # Runs 4 sequential scenarios at increasing throughput to find the knee of the
 # latency curve. Each step increases load until SLA is breached.
 #
+# A STRESS run starts parallelProducers producers, and each one sends `records`
+# records at up to targetThroughput msg/s: a step's rate is parallelProducers ×
+# targetThroughput. kates test apply --wait checks each gate against every
+# producer.
+#
 # Usage:  kates test apply -f cli/examples/perf-stress.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
 scenarios:
@@ -14,10 +19,10 @@ scenarios:
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 500000
-      recordSize: 1024
-      throughput: 5000
-      numProducers: 3
+      records: 500000
+      recordSizeBytes: 1024
+      targetThroughput: 1667    # per producer: 3 × 1667 ≈ 5k msg/s
+      parallelProducers: 3
       acks: "all"
       enableIdempotence: true
       batchSize: 131072
@@ -34,10 +39,10 @@ scenarios:
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 500000
-      recordSize: 1024
-      throughput: 15000
-      numProducers: 3
+      records: 500000
+      recordSizeBytes: 1024
+      targetThroughput: 5000    # per producer: 3 × 5000 = 15k msg/s
+      parallelProducers: 3
       acks: "all"
       enableIdempotence: true
       batchSize: 131072
@@ -54,10 +59,10 @@ scenarios:
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 500000
-      recordSize: 1024
-      throughput: 30000
-      numProducers: 4
+      records: 500000
+      recordSizeBytes: 1024
+      targetThroughput: 7500    # per producer: 4 × 7500 = 30k msg/s
+      parallelProducers: 4
       acks: "all"
       enableIdempotence: true
       batchSize: 131072
@@ -74,15 +79,15 @@ scenarios:
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 500000
-      recordSize: 1024
-      throughput: -1            # no cap — saturate the cluster
-      numProducers: 6
+      records: 500000
+      recordSizeBytes: 1024
+      targetThroughput: -1      # no cap — saturate the cluster
+      parallelProducers: 6
       acks: "all"
       enableIdempotence: true
       batchSize: 131072
       lingerMs: 10
       compressionType: snappy
     validate:
-      minThroughputRecPerSec: 5000  # fail only if below 5k even uncapped
+      minThroughputRecPerSec: 834   # per producer, 6 × 834 ≈ 5k msg/s: fail only if below that even uncapped
       maxErrorRate: 5.0
