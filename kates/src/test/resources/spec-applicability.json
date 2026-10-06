@@ -1,5 +1,5 @@
 {
-  "about": "Which requested spec fields the backend refuses for a test type and backend (TestOrchestrator.inapplicableFields). kates mcp's draft_scenario keeps its own copy of the rules (cli/cmd/mcp_tools_scenario.go, mcpScnCheckApplies); TestOrchestratorTest and TestMCPDraftScenarioRulesMatchTheBackend both run these cases, so the two cannot drift apart. No value is 0: the CLI leaves a 0 out of the request, so the backend never sees it.",
+  "about": "Which requested spec fields the backend refuses for a test type and backend (TestOrchestrator.inapplicableFields). kates mcp's draft_scenario keeps its own copy of the rules (cli/cmd/mcp_tools_scenario.go, mcpScnCheckApplies); TestOrchestratorTest and TestMCPDraftScenarioRulesMatchTheBackend both run these cases, so the two cannot drift apart. A 0 appears only in batchSize, lingerMs and fetchMaxWaitMs, where it is a Kafka setting and the CLI sends it; the CLI leaves a 0 out of every other field, so the backend never sees one there.",
   "cases": [
     {"name": "a producer and a consumer take every field", "type": "LOAD",
      "spec": {"acks": "all", "targetThroughput": 1000, "consumerGroup": "perf-cg", "fetchMinBytes": 1024, "fetchMaxWaitMs": 100, "enableIdempotence": true, "enableTransactions": true},
@@ -13,6 +13,12 @@
     {"name": "no consumer, no consumer settings", "type": "STRESS",
      "spec": {"consumerGroup": "perf-cg", "fetchMinBytes": 1024, "fetchMaxWaitMs": 100},
      "refused": ["consumerGroup", "fetchMinBytes", "fetchMaxWaitMs"]},
+    {"name": "a 0 is a setting a producer and a consumer take", "type": "LOAD",
+     "spec": {"batchSize": 0, "lingerMs": 0, "fetchMaxWaitMs": 0},
+     "refused": []},
+    {"name": "a fetch wait of 0 is still a consumer setting", "type": "STRESS",
+     "spec": {"lingerMs": 0, "fetchMaxWaitMs": 0},
+     "refused": ["fetchMaxWaitMs"]},
     {"name": "volume starts no consumer", "type": "VOLUME",
      "spec": {"consumerGroup": "volume-cg", "fetchMinBytes": 1048576},
      "refused": ["consumerGroup", "fetchMinBytes"]},
