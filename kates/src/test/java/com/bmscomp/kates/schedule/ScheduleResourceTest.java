@@ -92,7 +92,8 @@ class ScheduleResourceTest {
                 .when()
                 .post("/api/schedules")
                 .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("message", is("name: name is required"));
     }
 
     @Test
@@ -103,7 +104,34 @@ class ScheduleResourceTest {
                 .when()
                 .post("/api/schedules")
                 .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("message", is("cronExpression: cronExpression is required"));
+    }
+
+    /**
+     * A testRequest value outside the limits POST /api/tests sets is named in
+     * the message, with its reason. The message said only "Request
+     * validation failed", so kates schedule create, which prints the message
+     * alone, never said which field to change. The reason depends on the
+     * JVM's locale, so it is read back from fieldErrors.
+     */
+    @Test
+    void aTestRequestValueOutsideItsLimitsIsNamedInTheMessage() {
+        var answer = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\","
+                        + "\"testRequest\":{\"type\":\"STRESS\",\"spec\":{\"numProducers\":1000}}}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(1))
+                .extract()
+                .jsonPath();
+
+        assertEquals("numProducers: " + answer.getString("fieldErrors.numProducers"), answer.getString("message"));
+        Mockito.verify(repository, Mockito.never()).save(any());
     }
 
     @Test
