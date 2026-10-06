@@ -129,7 +129,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"injects every fault except POD_DELETE, ROLLING_RESTART and SCALE_DOWN as its own litmus-admin service " +
 			"account, so for those the check does not show whether the fault can run.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:266-269,714-783",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:266-269,763-832",
 				"boolean canExecute = checkRbacPermissions(spec);", `"Insufficient RBAC permissions for "`,
 				"boolean checkRbacPermissions(FaultSpec spec)", `"RBAC check failed, assuming permitted"`),
 			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:41-53,75-77,254",

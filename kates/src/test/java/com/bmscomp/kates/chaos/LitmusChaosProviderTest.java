@@ -5,8 +5,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import io.fabric8.kubernetes.api.model.DeleteOptions;
 import io.fabric8.kubernetes.api.model.NodeBuilder;
@@ -18,8 +20,10 @@ import io.fabric8.mockwebserver.http.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import com.bmscomp.kates.chaos.litmus.ChaosEngine;
 import com.bmscomp.kates.chaos.litmus.ChaosResult;
@@ -443,6 +447,132 @@ class LitmusChaosProviderTest {
                 .build();
 
         assertEquals(Arrays.asList(null, null), litmusPodNodeSelectors(drain(spec)));
+    }
+
+    /** The Kates API, as if it ran on {@code node}, or on a node it doesn't know when null. */
+    static KatesNode katesOn(String node) {
+        return new KatesNode() {
+            @Override
+            public Optional<String> name() {
+                return Optional.ofNullable(node);
+            }
+        };
+    }
+
+    @Test
+    void aRandomDrainPicksAPodOffTheNodeTheKatesApiRunsOn() {
+        // Brokers 0 and 1 run on alpha with the Kates API, which a drain of
+        // their node would evict: broker 2 is left.
+        provider.katesNode = katesOn("alpha");
+        FaultSpec spec = FaultSpec.builder("drain")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .build();
+
+        // A pick among all three would land on alpha two times in three.
+        for (int i = 0; i < 20; i++) {
+            assertEquals("sigma", env(drain(spec), "TARGET_NODE"));
+        }
+    }
+
+    @Test
+    void anUnknownKatesNodeKeepsDrainsOffNoNode() {
+        provider.katesNode = katesOn(null);
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetBrokerId(0)
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .build();
+
+        assertEquals("alpha", env(drain(spec), "TARGET_NODE"));
+    }
+
+    static Stream<Arguments> drainsOfTheKatesNode() {
+        String why = ", the node the Kates API runs on, and draining it would evict the Kates API in the middle of"
+                + " the run";
+        String aim = ". Aim the drain at a pod on another node";
+        return Stream.of(
+                Arguments.of(
+                        "sigma",
+                        FaultSpec.builder("drain")
+                                .disruptionType(DisruptionType.NODE_DRAIN)
+                                .targetBrokerId(2)
+                                .build(),
+                        "NODE_DRAIN: pod krafter-brokers-2 runs on sigma" + why + aim),
+                Arguments.of(
+                        "alpha",
+                        FaultSpec.builder("drain")
+                                .disruptionType(DisruptionType.NODE_DRAIN)
+                                .targetLabel("zone=alpha")
+                                .targetAll(true)
+                                .build(),
+                        "NODE_DRAIN: pods krafter-brokers-0, krafter-brokers-1 run on alpha" + why + aim),
+                Arguments.of(
+                        "alpha",
+                        FaultSpec.builder("drain")
+                                .disruptionType(DisruptionType.NODE_DRAIN)
+                                .targetLabel("zone=alpha")
+                                .build(),
+                        "NODE_DRAIN: every pod targetLabel matches runs on alpha" + why),
+                Arguments.of(
+                        "gamma",
+                        FaultSpec.builder("drain")
+                                .disruptionType(DisruptionType.NODE_DRAIN)
+                                .envOverrides(Map.of("TARGET_NODE", "gamma"))
+                                .build(),
+                        "NODE_DRAIN: envOverrides.TARGET_NODE names gamma" + why),
+                Arguments.of(
+                        "gamma",
+                        FaultSpec.builder("drain")
+                                .disruptionType(DisruptionType.NODE_DRAIN)
+                                .envOverrides(Map.of("NODE_LABEL", "topology.kubernetes.io/zone=gamma"))
+                                .build(),
+                        "NODE_DRAIN: envOverrides.NODE_LABEL 'topology.kubernetes.io/zone=gamma' matches only gamma"
+                                + why));
+    }
+
+    /** It would evict the Kates API in the middle of the run it is driving. */
+    @ParameterizedTest
+    @MethodSource("drainsOfTheKatesNode")
+    void aDrainOfTheNodeTheKatesApiRunsOnFailsWithoutDraining(String kates, FaultSpec spec, String reason)
+            throws Exception {
+        provider.katesNode = katesOn(kates);
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertEquals(reason, outcome.failureReason());
+        assertTrue(client.resources(ChaosEngine.class)
+                .inNamespace("kafka")
+                .list()
+                .getItems()
+                .isEmpty());
+    }
+
+    @Test
+    void aNodeLabelThatMatchesTheKatesNodeHasKatesNameAnotherNode() {
+        // Litmus could pick sigma, where the Kates API runs; gamma is the
+        // other node the label matches.
+        provider.katesNode = katesOn("sigma");
+        FaultSpec spec = FaultSpec.builder("drain")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .envOverrides(Map.of("NODE_LABEL", "topology.kubernetes.io/zone in (sigma,gamma)"))
+                .build();
+
+        ChaosEngine engine = drain(spec);
+
+        assertEquals("gamma", env(engine, "TARGET_NODE"));
+        Map<String, String> sigma = Map.of("kubernetes.io/hostname", "sigma");
+        assertEquals(List.of(sigma, sigma), litmusPodNodeSelectors(engine));
+    }
+
+    @Test
+    void aNodeLabelThatMissesTheKatesNodeIsLeftToLitmus() {
+        provider.katesNode = katesOn("alpha");
+        FaultSpec spec = FaultSpec.builder("drain")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .envOverrides(Map.of("NODE_LABEL", "topology.kubernetes.io/zone=gamma"))
+                .build();
+
+        assertNull(env(drain(spec), "TARGET_NODE"));
     }
 
     /** The ways a node can be unfit for Litmus's pods, which tolerate no taint. */
