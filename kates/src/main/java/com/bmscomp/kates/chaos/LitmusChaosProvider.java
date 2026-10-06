@@ -321,9 +321,24 @@ public class LitmusChaosProvider implements ChaosProvider {
         // By experiment, not by type, so a step without a type that names
         // node-drain gets its node too. An override that picks the node is
         // left to do so: node-drain reads NODE_LABEL only when TARGET_NODE is
-        // empty, so a TARGET_NODE from Kates would overrule it.
-        if (EXPERIMENT_MAP.get(DisruptionType.NODE_DRAIN).equals(experimentName) && !overridesTheNode(spec)) {
-            envVars.add(new ChaosEngineSpec.EnvVar("TARGET_NODE", targetNode(spec)));
+        // empty, so a TARGET_NODE from Kates would overrule it. Either way,
+        // Litmus's own pods run on a node the drain doesn't take.
+        if (EXPERIMENT_MAP.get(DisruptionType.NODE_DRAIN).equals(experimentName)) {
+            java.util.function.Predicate<io.fabric8.kubernetes.api.model.Node> drained;
+            if (overridesTheNode(spec)) {
+                drained = drainedByOverride(spec);
+            } else {
+                String node = targetNode(spec);
+                envVars.add(new ChaosEngineSpec.EnvVar("TARGET_NODE", node));
+                drained = n -> node.equals(n.getMetadata().getName());
+            }
+            if (drained != null) {
+                Map<String, String> away = litmusPodsAwayFrom(drained);
+                components.nodeSelector = away;
+                engineSpec.components = new ChaosEngineSpec.EngineComponents();
+                engineSpec.components.runner = new ChaosEngineSpec.Runner();
+                engineSpec.components.runner.nodeSelector = away;
+            }
         }
 
         components.env = envVars;
@@ -409,6 +424,80 @@ public class LitmusChaosProvider implements ChaosProvider {
         String node = nodes.iterator().next();
         LOG.info("NODE_DRAIN: TARGET_NODE " + node + ", the node of " + String.join(", ", pods));
         return node;
+    }
+
+    /**
+     * The nodes an override may have node-drain drain: the one TARGET_NODE
+     * names, or else those NODE_LABEL matches. Null when both are empty, and
+     * node-drain then drains the node of a random pod in any namespace, which
+     * no node is safe from.
+     */
+    private static java.util.function.Predicate<io.fabric8.kubernetes.api.model.Node> drainedByOverride(
+            FaultSpec spec) {
+        String targetNode = spec.envOverrides().get("TARGET_NODE");
+        if (targetNode != null && !targetNode.isBlank()) {
+            return n -> targetNode.equals(n.getMetadata().getName());
+        }
+        String nodeLabel = spec.envOverrides().get("NODE_LABEL");
+        if (nodeLabel != null && !nodeLabel.isBlank()) {
+            ParsedLabelSelector selector = ParsedLabelSelector.parse(nodeLabel);
+            return n -> selector.matches(
+                    n.getMetadata().getLabels() != null ? n.getMetadata().getLabels() : Map.of());
+        }
+        return null;
+    }
+
+    /** The node label Litmus's pods are pinned by, which the kubelet sets on every node. */
+    private static final String HOSTNAME_LABEL = "kubernetes.io/hostname";
+
+    /**
+     * Where Litmus's runner and experiment pods run during a drain: on a node
+     * it doesn't drain. node-drain evicts every pod on its node, Litmus's own
+     * among them, and an evicted experiment uncordons the node and stops, so
+     * the fault ends early and Kates waits out the ChaosResult. Litmus asks
+     * for the node to be cordoned first instead. A ChaosEngine gives both pods
+     * a nodeSelector but no affinity, so they go to one other node by its
+     * hostname label: the first by name that is Ready and schedulable and has
+     * no NoSchedule or NoExecute taint, since they tolerate none.
+     *
+     * @throws IllegalStateException when no node qualifies; the fault fails
+     *     before the ChaosEngine exists, so nothing is drained
+     */
+    private Map<String, String> litmusPodsAwayFrom(
+            java.util.function.Predicate<io.fabric8.kubernetes.api.model.Node> drained) {
+        Map<String, String> away = client.nodes().list().getItems().stream()
+                .filter(n -> !drained.test(n) && canRunLitmusPods(n))
+                .sorted(Comparator.comparing(n -> n.getMetadata().getName()))
+                .map(n -> Map.of(HOSTNAME_LABEL, n.getMetadata().getLabels().get(HOSTNAME_LABEL)))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("NODE_DRAIN: no node it doesn't drain can run Litmus's"
+                        + " runner and experiment pods (Ready, schedulable, without a NoSchedule or NoExecute taint,"
+                        + " labelled " + HOSTNAME_LABEL + "), so the drain would evict them"));
+        LOG.info("NODE_DRAIN: Litmus's pods run on " + away.get(HOSTNAME_LABEL));
+        return away;
+    }
+
+    private static boolean canRunLitmusPods(io.fabric8.kubernetes.api.model.Node node) {
+        Map<String, String> labels = node.getMetadata().getLabels();
+        if (labels == null
+                || labels.get(HOSTNAME_LABEL) == null
+                || labels.get(HOSTNAME_LABEL).isBlank()) {
+            return false;
+        }
+        var spec = node.getSpec();
+        if (spec != null && Boolean.TRUE.equals(spec.getUnschedulable())) {
+            return false;
+        }
+        if (spec != null
+                && spec.getTaints() != null
+                && spec.getTaints().stream()
+                        .anyMatch(t -> "NoSchedule".equals(t.getEffect()) || "NoExecute".equals(t.getEffect()))) {
+            return false;
+        }
+        return node.getStatus() != null
+                && node.getStatus().getConditions() != null
+                && node.getStatus().getConditions().stream()
+                        .anyMatch(c -> "Ready".equals(c.getType()) && "True".equals(c.getStatus()));
     }
 
     @Override

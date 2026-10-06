@@ -9,6 +9,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import io.fabric8.kubernetes.api.model.DeleteOptions;
+import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
@@ -45,6 +46,31 @@ class LitmusChaosProviderTest {
         provider.kubernetes.client = client;
         provider.kubernetes.self = provider.kubernetes;
         provider.kubernetes.executor = new com.bmscomp.kates.engine.KatesExecutor();
+        // As on the Kind lab: alpha is the control plane, which Litmus's pods
+        // don't tolerate.
+        for (String node : List.of("alpha", "sigma", "gamma")) {
+            NodeBuilder builder = new NodeBuilder()
+                    .withNewMetadata()
+                    .withName(node)
+                    .addToLabels("kubernetes.io/hostname", node)
+                    .addToLabels("topology.kubernetes.io/zone", node)
+                    .endMetadata()
+                    .withNewStatus()
+                    .addNewCondition()
+                    .withType("Ready")
+                    .withStatus("True")
+                    .endCondition()
+                    .endStatus();
+            if (node.equals("alpha")) {
+                builder.withNewSpec()
+                        .addNewTaint()
+                        .withKey("node-role.kubernetes.io/control-plane")
+                        .withEffect("NoSchedule")
+                        .endTaint()
+                        .endSpec();
+            }
+            client.nodes().resource(builder.build()).create();
+        }
         String[][] brokers = {
             {"krafter-brokers-0", "alpha"}, {"krafter-brokers-1", "alpha"}, {"krafter-brokers-2", "sigma"}
         };
@@ -319,6 +345,141 @@ class LitmusChaosProviderTest {
                         .getItems()
                         .isEmpty(),
                 name);
+    }
+
+    /** Where the ChaosEngine puts the chaos-runner pod and the experiment pod. */
+    private static List<Map<String, String>> litmusPodNodeSelectors(ChaosEngine engine) {
+        var runner = engine.getSpec().components != null ? engine.getSpec().components.runner : null;
+        return Arrays.asList(
+                runner != null ? runner.nodeSelector : null,
+                engine.getSpec().experiments.getFirst().spec.components.nodeSelector);
+    }
+
+    @Test
+    void litmusPodsRunOnANodeTheDrainDoesNotTake() throws Exception {
+        // Used to go wherever the scheduler put them, the drained node
+        // included, where node-drain evicted them and the fault stopped early.
+        provider.resultPollIntervalMs = 20;
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .build();
+
+        CompletableFuture<ChaosOutcome> fault = provider.triggerFault(spec);
+        ChaosEngine engine = awaitEngine();
+        pass(engine.getMetadata().getName() + "-node-drain");
+
+        assertTrue(fault.get(5, TimeUnit.SECONDS).isPass());
+        assertEquals("sigma", env(engine, "TARGET_NODE"));
+        // alpha, the other node, is the tainted control plane.
+        Map<String, String> gamma = Map.of("kubernetes.io/hostname", "gamma");
+        assertEquals(List.of(gamma, gamma), litmusPodNodeSelectors(engine));
+    }
+
+    @ParameterizedTest
+    @EnumSource(UnfitNode.class)
+    void aNodeThatCannotRunLitmusPodsIsPassedOver(UnfitNode unfit) {
+        unfit.applyTo(client, "gamma");
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetBrokerId(0)
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .build();
+
+        ChaosEngine engine = drain(spec);
+
+        assertEquals("alpha", env(engine, "TARGET_NODE"));
+        Map<String, String> sigma = Map.of("kubernetes.io/hostname", "sigma");
+        assertEquals(List.of(sigma, sigma), litmusPodNodeSelectors(engine));
+    }
+
+    @Test
+    void aDrainWithNoOtherNodeForLitmusPodsFailsWithoutDraining() throws Exception {
+        UnfitNode.CORDONED.applyTo(client, "gamma");
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass());
+        assertEquals(
+                "NODE_DRAIN: no node it doesn't drain can run Litmus's runner and experiment pods (Ready, schedulable,"
+                        + " without a NoSchedule or NoExecute taint, labelled kubernetes.io/hostname), so the drain"
+                        + " would evict them",
+                outcome.failureReason());
+        assertTrue(client.resources(ChaosEngine.class)
+                .inNamespace("kafka")
+                .list()
+                .getItems()
+                .isEmpty());
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "TARGET_NODE | gamma | sigma",
+                "NODE_LABEL | topology.kubernetes.io/zone in (alpha,gamma) | sigma",
+                "NODE_LABEL | topology.kubernetes.io/zone=sigma | gamma"
+            })
+    void litmusPodsStayOffEveryNodeAnOverrideMayDrain(String key, String value, String litmusNode) {
+        FaultSpec spec = FaultSpec.builder("drain")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .envOverrides(Map.of(key, value))
+                .build();
+
+        Map<String, String> away = Map.of("kubernetes.io/hostname", litmusNode);
+        assertEquals(List.of(away, away), litmusPodNodeSelectors(drain(spec)));
+    }
+
+    @Test
+    void anEmptyOverrideLeavesLitmusPodsWhereverTheyLand() {
+        // node-drain then drains the node of a random pod in any namespace,
+        // which no node is safe from.
+        FaultSpec spec = FaultSpec.builder("drain")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .envOverrides(Map.of("TARGET_NODE", ""))
+                .build();
+
+        assertEquals(Arrays.asList(null, null), litmusPodNodeSelectors(drain(spec)));
+    }
+
+    /** The ways a node can be unfit for Litmus's pods, which tolerate no taint. */
+    enum UnfitNode {
+        CORDONED,
+        NOT_READY,
+        NO_EXECUTE_TAINT,
+        NO_HOSTNAME_LABEL;
+
+        void applyTo(KubernetesClient client, String node) {
+            client.nodes().withName(node).edit(n -> {
+                NodeBuilder builder = new NodeBuilder(n);
+                switch (this) {
+                    case CORDONED ->
+                        builder.editOrNewSpec().withUnschedulable(true).endSpec();
+                    case NOT_READY ->
+                        builder.editStatus()
+                                .withConditions(new io.fabric8.kubernetes.api.model.NodeConditionBuilder()
+                                        .withType("Ready")
+                                        .withStatus("False")
+                                        .build())
+                                .endStatus();
+                    case NO_EXECUTE_TAINT ->
+                        builder.editOrNewSpec()
+                                .addNewTaint()
+                                .withKey("node.kubernetes.io/unreachable")
+                                .withEffect("NoExecute")
+                                .endTaint()
+                                .endSpec();
+                    case NO_HOSTNAME_LABEL ->
+                        builder.editMetadata()
+                                .removeFromLabels("kubernetes.io/hostname")
+                                .endMetadata();
+                }
+                return builder.build();
+            });
+        }
     }
 
     @Test

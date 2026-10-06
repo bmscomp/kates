@@ -201,7 +201,9 @@ Both chaos providers resolve the pods the same way: `kubernetes` applies the fau
 
 A `NODE_DRAIN` drains the node that runs the pod these rules pick. On `litmus-crd`, Kates passes that node to the `node-drain` experiment as `TARGET_NODE`, with no `TARGET_PODS`; the `kubernetes` provider doesn't run `NODE_DRAIN`. The experiment drains one node, so with `targetAll` every pod the selector matches has to run on the same node. On the [`panda`](appendix-a-glossary.md#gl-panda) Kind cluster, a zone's broker pods all run on the node named after the zone. The step fails without draining anything when the pods run on several nodes, when the pod is gone, or when it isn't on a node yet.
 
-To drain a node you choose, name it in `envOverrides.TARGET_NODE`, or give `envOverrides.NODE_LABEL` for Litmus to pick a node with that label. Kates then picks no node. The drain evicts every pod on the node, not only the one picked: other Kafka pods, Litmus's own pods and the Kates API pod, when they run there.
+To drain a node you choose, name it in `envOverrides.TARGET_NODE`, or give `envOverrides.NODE_LABEL` for Litmus to pick a node with that label. Kates then picks no node. The drain evicts every pod on the node, not only the one picked: other Kafka pods, and the Kates API pod when it runs there.
+
+Litmus's own pods, the chaos runner and the experiment, are kept off the drained node, since the drain would evict them and end the experiment early. Kates pins both to another node through their `nodeSelector`: the first by name that is Ready and schedulable and has no `NoSchedule` or `NoExecute` taint. With `envOverrides.NODE_LABEL`, that node is one the label doesn't match. When no node qualifies, the step fails without draining.
 
 ::: {.callout-warning title="Litmus Deletes Several Targets One at a Time"}
 Kates runs `POD_KILL` and `LEADER_ELECTION` as Litmus `pod-delete` with `SEQUENCE=serial`, because the experiment's parallel mode fails its recovery check on pods owned by a StrimziPodSet. With several targets, Litmus therefore deletes them one at a time; the `kubernetes` provider deletes them all at once.

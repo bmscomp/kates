@@ -116,6 +116,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             // serialised into the CR sent to the cluster.
             com.bmscomp.kates.chaos.litmus.ChaosEngineSpec.class,
             com.bmscomp.kates.chaos.litmus.ChaosEngineSpec.AppInfo.class,
+            com.bmscomp.kates.chaos.litmus.ChaosEngineSpec.EngineComponents.class,
+            com.bmscomp.kates.chaos.litmus.ChaosEngineSpec.Runner.class,
             com.bmscomp.kates.chaos.litmus.ChaosEngineSpec.Experiment.class,
             com.bmscomp.kates.chaos.litmus.ChaosEngineSpec.ExperimentSpec.class,
             com.bmscomp.kates.chaos.litmus.ChaosEngineSpec.Components.class,
