@@ -1,6 +1,7 @@
 package com.bmscomp.kates.chaos;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.function.LongConsumer;
 
 /**
  * Service Provider Interface for chaos experiment backends.
@@ -38,6 +39,21 @@ public interface ChaosProvider {
      * The returned future resolves when the chaos experiment completes.
      */
     CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec);
+
+    /**
+     * Triggers the fault as {@link #triggerFault(FaultSpec)} does, and hands
+     * {@code onInject} the {@link System#nanoTime()} at which it goes in: once
+     * its {@code delayBeforeSec} is over, before the provider changes the
+     * cluster, so before the returned future completes. Called at most once,
+     * on whichever thread injects the fault, and not for a fault that fails
+     * before then, such as one interrupted during its delay.
+     *
+     * <p>This default never calls it, because it cannot tell when the provider
+     * injects; a resilience run on such a provider measures no RPO.
+     */
+    default CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec, LongConsumer onInject) {
+        return triggerFault(spec);
+    }
 
     /**
      * Checks whether a specific chaos engine is still running.

@@ -84,11 +84,11 @@ var mcpAdHocBounds = map[string]mcpAdHocBound{
 // type. A step may set it only for its own type, so a plan never carries a
 // number its type never reads. The providers read them differently, and the
 // field descriptions say so: the kubernetes provider sizes IO_STRESS by
-// ioWorkers alone (KubernetesChaosProvider.java:517-530), while litmus-crd
+// ioWorkers alone (KubernetesChaosProvider.java:525-538), while litmus-crd
 // sizes it by fillPercentage as well as ioWorkers
-// (LitmusChaosProvider.java:303-307). Both honour gracePeriodSec: litmus-crd
+// (LitmusChaosProvider.java:314-318). Both honour gracePeriodSec: litmus-crd
 // hands a POD_DELETE to the kubernetes provider, which deletes the pod with it
-// (LitmusChaosProvider.java:41-53,75-77; KubernetesChaosProvider.java:197-205).
+// (LitmusChaosProvider.java:42-54,81-83; KubernetesChaosProvider.java:205-213).
 // fillPercentage stays out of ad-hoc plans with DISK_FILL, the one type it is
 // meant for.
 var mcpAdHocTypeParam = map[string]string{
@@ -344,7 +344,7 @@ func mcpCheckAdHocTargets(at string, s *mcpAdHocStep) error {
 	if targets > 1 {
 		return mcpInvalidArgument(at+" sets more than one of targetBrokerId, targetPod and targetTopic; give at most one.", "")
 	}
-	// LitmusChaosProvider.java:308-312 makes a DNS_ERROR step's topic the
+	// LitmusChaosProvider.java:319-323 makes a DNS_ERROR step's topic the
 	// hostname whose lookups fail, so the fault would break only a hostname
 	// named after the topic.
 	if s.DisruptionType == "DNS_ERROR" && s.TargetTopic != "" {
@@ -764,7 +764,7 @@ func mcpTargetingOf(fs *mcpFaultSpecView) string {
 // experiment and routes those three, POD_DELETE, ROLLING_RESTART and
 // SCALE_DOWN, to the kubernetes provider: experimentName picks the experiment
 // only for a step without a type
-// (LitmusChaosProvider.java:28-53,75-77,217-244), and otherwise only names
+// (LitmusChaosProvider.java:29-54,81-83,228-255), and otherwise only names
 // the fault. The plan's wording is a follow-up.
 func mcpAgentLimitFindings(v *mcpPlanView) []mcpAgentLimitFinding {
 	findings := []mcpAgentLimitFinding{}
