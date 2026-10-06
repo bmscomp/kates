@@ -172,9 +172,9 @@ class ScheduleResourceTest {
     }
 
     /**
-     * A PUT runs no bean validation, but a scenario's specs are held to their
-     * limits all the same: the check is the one the Kates API asks of every
-     * request before it runs it.
+     * A PUT's bean validation, like a POST's, stops at the request's own
+     * spec, but a scenario's specs are held to their limits all the same: the
+     * check is the one the Kates API asks of every request before it runs it.
      */
     @Test
     void aPutsScenarioSpecsAreHeldToTheirLimits() {
