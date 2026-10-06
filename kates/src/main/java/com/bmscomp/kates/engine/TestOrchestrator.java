@@ -52,6 +52,8 @@ public class TestOrchestrator {
      * the only reason both can be trusted to agree.
      */
     private final SlaEvaluator slaEvaluator;
+    /** Holds a scenario's specs to the limits bean validation holds a request's own spec to. */
+    private final SpecLimits specLimits;
 
     private final Event<TestLifecycleEvent> lifecycleEvents;
     private final String defaultBackend;
@@ -98,6 +100,7 @@ public class TestOrchestrator {
             BenchmarkMetrics benchmarkMetrics,
             KatesMetrics katesMetrics,
             SlaEvaluator slaEvaluator,
+            SpecLimits specLimits,
             Event<TestLifecycleEvent> lifecycleEvents,
             @ConfigProperty(name = "kates.engine.default-backend", defaultValue = "native") String defaultBackend,
             @ConfigProperty(name = "kates.kafka.bootstrap-servers") String bootstrapServers,
@@ -110,6 +113,7 @@ public class TestOrchestrator {
         this.benchmarkMetrics = benchmarkMetrics;
         this.katesMetrics = katesMetrics;
         this.slaEvaluator = slaEvaluator;
+        this.specLimits = specLimits;
         this.lifecycleEvents = lifecycleEvents;
         this.defaultBackend = defaultBackend;
         this.bootstrapServers = bootstrapServers;
@@ -1057,13 +1061,24 @@ public class TestOrchestrator {
 
     /**
      * Why a run could not honour this request as written, or empty when it
-     * could, for a plain request or a scenario: no type to run as, a null
-     * where a scenario phase should be, the spec fields its type and backend
-     * cannot apply, and a length past {@code kates.engine.max-duration-ms},
-     * the most the timeout reaper allows a run. executeTest fails with this
-     * exception before it takes a concurrency permit. A caller that starts the
-     * run later, as a resilience run does after it has begun streaming its
-     * answer, asks first so that it can still answer the client with a 400.
+     * could, for a plain request or a scenario: a scenario spec value outside
+     * its limits, no type to run as, a null where a scenario phase should be,
+     * the spec fields its type and backend cannot apply, and a length past
+     * {@code kates.engine.max-duration-ms}, the most the timeout reaper allows
+     * a run. executeTest fails with this exception before it takes a
+     * concurrency permit. A caller that starts the run later, as a resilience
+     * run does after it has begun streaming its answer, asks first so that it
+     * can still answer the client with a 400.
+     *
+     * <p>Bean validation holds the request's own spec to TestSpec's limits, but
+     * not a scenario's (SpecLimits says why), so the scenario's base spec and
+     * phase specs are held to them here: a numRecords of 0 would send nothing,
+     * and a topic Kafka cannot create would fail the run. They are checked
+     * first and answered on their own, as bean validation answers before the
+     * orchestrator is asked, each value keyed by its path in the scenario. A
+     * scenario without phases, which runs as a plain request, is checked too,
+     * as bean validation checks the request's own spec whether the run reads
+     * it or not.
      *
      * <p>POST /api/tests requires a type through bean validation, but POST
      * /api/resilience runs none, and neither does a schedule as it fires, so
@@ -1071,6 +1086,10 @@ public class TestOrchestrator {
      * the request's own field, which a scenario's type overrides.
      */
     public java.util.Optional<InvalidTestSpecException> refusal(CreateTestRequest request) {
+        Map<String, String> outsideLimits = specLimits.violations(request.getScenario());
+        if (!outsideLimits.isEmpty()) {
+            return java.util.Optional.of(new InvalidTestSpecException("scenario.", outsideLimits));
+        }
         // The type the run would have: the scenario's, or else the request's.
         TestType type = request.isScenario() && request.getScenario().getType() != null
                 ? request.getScenario().getType()
@@ -1172,8 +1191,9 @@ public class TestOrchestrator {
 
     /**
      * The sum of two longs that are not negative, held at Long.MAX_VALUE: a
-     * scenario's spec is not validated, so its durations can be anything, and
-     * a sum that wrapped negative would pass for a short run.
+     * phase's own durationMs has no limit, nor does a spec bean validation never
+     * checked, such as one a PUT to /api/schedules saved, so a duration can be
+     * anything, and a sum that wrapped negative would pass for a short run.
      */
     private static long saturatedSum(long a, long b) {
         long sum = a + b;
