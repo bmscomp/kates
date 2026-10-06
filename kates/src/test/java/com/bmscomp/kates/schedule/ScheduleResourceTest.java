@@ -156,7 +156,44 @@ class ScheduleResourceTest {
                         "{\"type\":\"LOAD\",\"scenario\":{\"phases\":[{\"name\":\"up\",\"phaseType\":\"RAMP\","
                                 + "\"durationMs\":60000,\"rampSteps\":4}]}}",
                         "testRequest.scenario.phases[0].targetThroughput",
-                        "a RAMP phase needs a rate"));
+                        "a RAMP phase needs a rate"),
+                // A scenario's specs are held to the limits the request's own
+                // spec is; bean validation stops at the request's own.
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"scenario\":{\"baseSpec\":{\"acks\":\"2\"},\"phases\":[{\"name\":\"steady\","
+                                + "\"phaseType\":\"STEADY\",\"durationMs\":60000}]}}",
+                        "testRequest.scenario.baseSpec.acks",
+                        "acks must be one of: all, -1, 0, 1"),
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"scenario\":{\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\","
+                                + "\"durationMs\":60000,\"spec\":{\"topic\":\"not a topic!\"}}]}}",
+                        "testRequest.scenario.phases[0].spec.topic",
+                        "topic must be a legal Kafka topic name"));
+    }
+
+    /**
+     * A PUT runs no bean validation, but a scenario's specs are held to their
+     * limits all the same: the check is the one the Kates API asks of every
+     * request before it runs it.
+     */
+    @Test
+    void aPutsScenarioSpecsAreHeldToTheirLimits() {
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"testRequest\":{\"type\":\"LOAD\",\"scenario\":{\"phases\":[{\"name\":\"steady\","
+                        + "\"phaseType\":\"STEADY\",\"durationMs\":60000,\"spec\":{\"numRecords\":0}}]}}}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(1))
+                .body("fieldErrors", hasKey("testRequest.scenario.phases[0].spec.numRecords"));
+        Mockito.verify(repository, Mockito.never()).save(any());
+        assertEquals("{\"type\":\"LOAD\"}", s.getRequestJson());
     }
 
     /**
@@ -333,6 +370,25 @@ class ScheduleResourceTest {
     void aStoredTestRequestTheApiRefusesStartsNoRun() {
         ScheduledTestRun s = storedSchedule(
                 "{\"type\":\"STRESS\",\"backend\":\"trogdor\",\"spec\":{\"consumerGroup\":\"perf-cg\"}}");
+
+        scheduler.executeSchedule(s);
+
+        Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
+        Mockito.verifyNoInteractions(trogdorClient);
+    }
+
+    /**
+     * So does one whose scenario has a spec value outside its limits: the
+     * firing is refused before a run starts. Such a run used to start, and a
+     * topic Kafka cannot create failed it. The Trogdor mock refuses every
+     * task, so a run the check let through would fail at submission.
+     */
+    @Test
+    void aStoredScenarioOutsideItsLimitsStartsNoRun() {
+        Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"scenario\":{\"phases\":["
+                + "{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000,"
+                + "\"spec\":{\"topic\":\"not a topic!\"}}]}}");
 
         scheduler.executeSchedule(s);
 
