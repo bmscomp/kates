@@ -55,19 +55,19 @@ maxRecoveryWaitSec: 180      # rescheduling takes longer than pod restart
 
 probes:
   - name: isr-health-check
-    type: cmdProbe
+    type: kafkaProbe
     mode: Continuous
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    command: under-replicated-partitions
     expectedOutput: "50"
     comparator: "<="
     intervalSec: 10
     timeoutSec: 30
 
   - name: partition-availability
-    type: cmdProbe
+    type: kafkaProbe
     mode: Continuous
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    command: unavailable-partitions
     expectedOutput: "0"
-    comparator: "<="          # 0 or fewer; the probe executor has no ==
+    comparator: "<="
     intervalSec: 10
     timeoutSec: 30
