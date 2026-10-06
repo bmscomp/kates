@@ -81,7 +81,7 @@ The table sets a plan and a resilience run side by side. Read the guard, rollbac
 | Grade | An [SLA grade](appendix-a-glossary.md#gl-sla-grade) when the plan has an `sla` block | None |
 | Report | Saved: `kates disruption status <id>` and `kates chaos list` | Printed once; the [test run](appendix-a-glossary.md#gl-test-run) is saved like any other |
 
-`kates resilience run` prints the chaos outcome and the change in each metric, but not the recovery time or the INTEGRITY [verdict](appendix-a-glossary.md#gl-verdict). Read the verdict from the test run with `kates test get`, as [Data Integrity Verification](08-data-integrity.md) shows.
+`kates resilience run` prints the chaos outcome, the change in each metric, the recovery time, the probes' results and the test run's ID, but not the INTEGRITY [verdict](appendix-a-glossary.md#gl-verdict). Read the verdict from the test run with `kates test get <id>`, as [Data Integrity Verification](08-data-integrity.md) shows.
 
 Both paths get the fault itself from the same chaos provider, which [Choosing a Chaos Provider](#choosing-a-chaos-provider) describes, so the same fault spec (a plan step's `faultSpec`, a resilience file's `chaosSpec`) does the same thing either way. The one difference is aiming: only a plan step looks up a partition's [leader](appendix-a-glossary.md#gl-partition-leader) for you, when the step names a `targetTopic`.
 
@@ -869,13 +869,17 @@ kates resilience run -f resilience-test.yaml
 
 The rate limit keeps the load running across the fault: 180,000 records at 500 records per second take 360 s, while the fault is triggered after `steadyStateSec` (30 s) and lasts `chaosDurationSec` (30 s), and the run then polls its probes every 5 s until they pass or it has made `maxRecoveryWaitSec` ÷ 5 polls (24 with the default 120). An unthrottled run can finish before the fault. If it has ended when `steadyStateSec` is up, Kates injects nothing and the report is `ERROR`; if it ends after that, before the fault goes in, both summaries describe a run the fault never touched. The [`spec`](appendix-a-glossary.md#gl-test-spec) goes to the API as written, so it takes the API's field names: `throughput` sets the rate, and LOAD runs one producer and one consumer whatever `numProducers` says. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and a random pick could then kill a controller instead of a broker.
 
-The CLI prints the chaos outcome, a pre-chaos baseline and post-chaos summary (throughput, P99 latency, error rate), and an **Impact Analysis** table with the percentage change of each metric — `throughputRecPerSec`, `avgLatencyMs`, `p99LatencyMs`, `maxLatencyMs`, and `errorRate`. With illustrative numbers:
+The CLI prints the test run's ID, the chaos outcome, the recovery time and the probes' results. For the probes, it gives how many checks passed before the fault, during it and after the recovery wait, and what each failing probe printed last. Every probe is checked once before the fault and once after the recovery wait. During the fault only a probe whose `mode` is `Continuous` is checked, and it is checked repeatedly, so that phase counts checks rather than probes. The recovery time runs from the end of the fault to the first poll at which every probe passed. If no poll did, it is the whole recovery wait, so read it beside the count after that wait.
+
+The CLI then prints a pre-chaos baseline and post-chaos summary (throughput, P99 latency, error rate), and an **Impact Analysis** table with the percentage change of each metric — `throughputRecPerSec`, `avgLatencyMs`, `p99LatencyMs`, `maxLatencyMs`, and `errorRate`. With illustrative numbers:
 
 | Metric | Change | |
 |--------|-------:|:-:|
 | `throughputRecPerSec` | -15.6% | Down |
 | `p99LatencyMs` | +596.7% | Up |
 | `errorRate` | +0.3% | |
+
+The output ends with the `kates test get <id>` command for the test run. With `-o json`, the CLI prints the whole report the Kates API returns instead, the test run's own report included. A run that stops before its recovery wait prints neither the recovery time nor the ID; `kates test list` lists its test run, if one started.
 
 ::: {.callout-tip}
 **Try it**

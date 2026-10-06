@@ -189,7 +189,7 @@ func (c *Client) doRequest(ctx context.Context, req *http.Request, retryable boo
 }
 
 // doRequestWith sends req through hc, which is c.HTTPClient except for calls
-// that carry their own deadline (postJSONWithTimeout).
+// that carry their own deadline (postWithTimeout).
 func (c *Client) doRequestWith(ctx context.Context, hc *http.Client, req *http.Request, retryable bool) ([]byte, error) {
 	if c.setupErr != nil {
 		return nil, c.setupErr
@@ -611,14 +611,40 @@ func (c *Client) Resilience(ctx context.Context, request interface{}) (*Resilien
 	// Resilience tests are long-running: steady-state + chaos + recovery can
 	// easily exceed the default 60s client timeout. Use the same extended
 	// timeout as disruption tests.
-	return postJSONWithTimeout[*ResilienceResult](c, ctx, "/api/resilience", request, 20*time.Minute)
+	body, err := postWithTimeout(c, ctx, "/api/resilience", request, 20*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	return decodeResilienceReport(body)
 }
 
-func postJSONWithTimeout[T any](c *Client, ctx context.Context, path string, payload interface{}, timeout time.Duration) (T, error) {
-	var result T
+// decodeResilienceReport reads the answer to POST /api/resilience: a space
+// every 10 seconds while the run lasts, which keeps the call open, and then
+// the report. When the Kates API can't write the report, it logs why and
+// ends the answer there. An empty answer used to come back as a nil report
+// and no error, and kates resilience run then crashed reading its status;
+// here an answer without a report, or one that isn't a report, is an error.
+func decodeResilienceReport(body []byte) (*ResilienceResult, error) {
+	report := bytes.TrimSpace(body)
+	if len(report) == 0 {
+		return nil, errors.New("POST /api/resilience answered with no report; the Kates API's log says why")
+	}
+	var result *ResilienceResult
+	if err := json.Unmarshal(report, &result); err != nil {
+		return nil, fmt.Errorf("POST /api/resilience returned %.40q, not a resilience report: %w", report, err)
+	}
+	if result == nil || result.Status == "" {
+		return nil, fmt.Errorf("POST /api/resilience returned %.40q, not a resilience report", report)
+	}
+	result.Raw = report
+	return result, nil
+}
+
+// postWithTimeout posts payload as JSON and returns the answer's body.
+func postWithTimeout(c *Client, ctx context.Context, path string, payload interface{}, timeout time.Duration) ([]byte, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return result, fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	// The deadline for this call lives on its context. The client's own
@@ -635,19 +661,10 @@ func postJSONWithTimeout[T any](c *Client, ctx context.Context, path string, pay
 
 	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-
-	respData, err := c.doRequestWith(timeoutCtx, &longClient, req, false)
-	if err != nil {
-		return result, err
-	}
-
-	if len(respData) == 0 {
-		return result, nil
-	}
-	return result, json.Unmarshal(respData, &result)
+	return c.doRequestWith(timeoutCtx, &longClient, req, false)
 }
 
 // Terminal states a disruption report can settle into.
