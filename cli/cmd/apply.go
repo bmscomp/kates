@@ -47,11 +47,11 @@ type ScenarioFile struct {
 
 // parseScenarioFile reads the scenarios in a file's contents as kates test
 // apply runs them: its scenarios list, or, when that list is missing or
-// empty, the one scenario at its top level, which needs a type. A file named .json is read
-// with encoding/json and any other with yaml.v3; text that encoding/json
-// cannot read, such as YAML in a file named .json, is read as YAML. kates
-// scenario-diff and draft_scenario read a file through it too, so that they
-// see the scenarios apply would run.
+// empty, the one scenario at its top level, which needs a type. A file
+// named .json is read with encoding/json and any other with yaml.v3; text
+// that encoding/json cannot read, such as YAML in a file named .json, is
+// read as YAML. kates scenario-diff and draft_scenario read a file through
+// it too, so that they see the scenarios apply would run.
 //
 // Both decoders ignore a key the struct does not name, so a file of one
 // scenario reads as an empty list. The top level used to be read only when
