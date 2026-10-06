@@ -117,14 +117,24 @@ public final class ResilienceScenarios {
     }
 
     /**
-     * Build a FaultSpec from a scenario with optional target overrides. The
-     * duration is not clamped to the chaos limits: a spec past them is
-     * refused, not shortened behind the caller's back.
+     * The pods a scenario's fault picks from when the caller names none: the
+     * brokers, including nodes that are controllers too. The builder's
+     * default, {@code strimzi.io/component-type=kafka}, matches the dedicated
+     * KRaft controllers as well, so broker-crash's random pick could kill a
+     * controller instead of a broker.
+     */
+    static final String BROKERS = "strimzi.io/component-type=kafka,strimzi.io/broker-role=true";
+
+    /**
+     * Build a FaultSpec from a scenario with optional target overrides: the
+     * fault hits one of the {@link #BROKERS} at random, unless targetLabel or
+     * targetPod picks other pods. The duration is not clamped to the chaos
+     * limits: a spec past them is refused, not shortened behind the caller's
+     * back.
      */
     public static FaultSpec buildFaultSpec(Scenario scenario, Map<String, Object> overrides) {
-        String targetPod = overrides != null && overrides.containsKey("targetPod")
-                ? overrides.get("targetPod").toString()
-                : "";
+        String targetPod = text(overrides, "targetPod", "");
+        String targetLabel = text(overrides, "targetLabel", BROKERS);
 
         int durationSec = overrides != null && overrides.containsKey("chaosDurationSec")
                 ? seconds(overrides.get("chaosDurationSec"))
@@ -133,9 +143,16 @@ public final class ResilienceScenarios {
         return FaultSpec.builder(scenario.id())
                 .disruptionType(scenario.disruptionType())
                 .chaosDurationSec(durationSec)
+                .targetLabel(targetLabel)
                 .targetPod(targetPod)
                 .probes(scenario.probes())
                 .build();
+    }
+
+    /** The override as text, or {@code fallback} when the body has none, or a null. */
+    private static String text(Map<String, Object> overrides, String key, String fallback) {
+        Object value = overrides != null ? overrides.get(key) : null;
+        return value != null ? value.toString() : fallback;
     }
 
     /**
