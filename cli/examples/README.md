@@ -1,7 +1,8 @@
 # `cli/examples` — Kates Test Example Files
 
 Ready-to-run YAML examples for every test type and disruption type.
-Fields are taken directly from the Go CLI structs (`apply.go`, `resilience.go`).
+A performance file's fields are the ones `kates test apply` reads (`apply.go`).
+A resilience file is the body of `POST /api/resilience`, sent as written.
 
 ---
 
@@ -80,21 +81,31 @@ Schema: `scenarios: []` with `spec:` (flat map) and `validate:` block.
 
 ## Resilience Tests (`kates resilience run -f`)
 
-Schema: `testRequest` + `chaosSpec` + `steadyStateSec` + `probes`.
+Schema: `testRequest` + `chaosSpec` + `steadyStateSec` (default 30) +
+`maxRecoveryWaitSec` (default 120) + `probes`.
+
+The file is the body of `POST /api/resilience`, and `kates resilience run` sends
+it as written (`--dry-run` prints it). So its keys are the Kates API's field
+names: the API ignores a field it doesn't have, and gives each field the file
+leaves out its default. `testRequest` is a `POST /api/tests` body: a LOAD or
+ENDURANCE run starts one producer and one consumer whatever `numProducers` and
+`numConsumers` say, and only STRESS and CAPACITY start one producer per
+`numProducers`. `ResilienceExamplesTest` (`kates/src/test`) fails an example
+that sets a field its run doesn't read, or that the API would refuse.
 
 | File | `disruptionType` | Fault | Target |
 |---|---|---|---|
-| `resilience-test.yaml` | `POD_KILL` | Hard crash, gracePeriod=0 | brokers-alpha |
-| `resilience-pod-delete.yaml` | `POD_DELETE` | Graceful shutdown, 30s grace | brokers-alpha |
+| `resilience-test.yaml` | `POD_KILL` | Hard crash, no grace period | brokers-alpha |
+| `resilience-pod-delete.yaml` | `POD_DELETE` | Graceful shutdown, 30s grace (forced on `litmus-crd`) | brokers-gamma |
 | `resilience-network-partition.yaml` | `NETWORK_PARTITION` | Zone isolation | brokers-sigma |
-| `resilience-network-latency.yaml` | `NETWORK_LATENCY` | 200ms egress latency | brokers-alpha |
-| `resilience-cpu-stress.yaml` | `CPU_STRESS` | 1 core @ 90% | brokers-gamma |
+| `resilience-network-latency.yaml` | `NETWORK_LATENCY` | 200ms egress latency (needs `pod-network-latency`) | brokers-alpha |
+| `resilience-cpu-stress.yaml` | `CPU_STRESS` | 1 core | brokers-gamma |
 | `resilience-memory-stress.yaml` | `MEMORY_STRESS` | 500 MB native memory | brokers-sigma |
 | `resilience-io-stress.yaml` | `IO_STRESS` | 80% disk saturation | brokers-alpha |
-| `resilience-dns-error.yaml` | `DNS_ERROR` | CoreDNS failures | all brokers |
-| `resilience-rolling-restart.yaml` | `ROLLING_RESTART` | Strimzi rolling update, one pod at a time | all brokers |
-| `resilience-node-drain.yaml` | `NODE_DRAIN` | Node maintenance eviction | brokers-gamma |
-| `resilience-leader-election.yaml` | `LEADER_ELECTION` | Force re-election all partitions | all brokers |
+| `resilience-dns-error.yaml` | `DNS_ERROR` | CoreDNS failures | one broker, at random |
+| `resilience-rolling-restart.yaml` | `ROLLING_RESTART` | Strimzi rolling update, one broker at a time | all brokers |
+| `resilience-node-drain.yaml` | `NODE_DRAIN` | Node maintenance eviction | node gamma, which runs brokers-gamma |
+| `resilience-leader-election.yaml` | `LEADER_ELECTION` | Force-delete a broker; its partitions elect new leaders | one broker, at random |
 | `resilience-scale-down.yaml` | `SCALE_DOWN` | Pool contraction to 0 | brokers-sigma |
 
 ### `chaosSpec` field reference
@@ -104,19 +115,37 @@ Schema: `testRequest` + `chaosSpec` + `steadyStateSec` + `probes`.
 | `experimentName` | string | Unique name for this experiment |
 | `disruptionType` | string | See table above |
 | `targetNamespace` | string | Kubernetes namespace |
-| `targetLabel` | string | Pod selector label |
+| `targetLabel` | string | Pod label selector. A pod fault hits one pod it matches, at random, unless `targetPod`, `targetAll` or `targetBrokerId` picks. `strimzi.io/cluster=krafter` alone matches the KRaft controllers too: add `strimzi.io/broker-role=true` to hit brokers only |
+| `targetAll` | bool | Hit every pod `targetLabel` matches |
+| `targetBrokerId` | int | Hit this broker, by node ID, among the brokers `targetLabel` matches |
 | `targetPod` | string | Specific pod name (optional) |
 | `chaosDurationSec` | int | How long to run the fault |
-| `delayBeforeSec` | int | Wait before injecting |
-| `gracePeriodSec` | int | SIGTERM grace period (0 = SIGKILL) |
+| `delayBeforeSec` | int | Wait before injecting; only the `kubernetes` chaos provider waits it |
+| `gracePeriodSec` | int | Grace period of a `POD_DELETE` on the `kubernetes` chaos provider; `litmus-crd` forces every pod deletion |
 | `cpuCores` | int | Cores to hog (`CPU_STRESS`) |
 | `memoryMb` | int | MB to consume (`MEMORY_STRESS`) |
 | `fillPercentage` | int | Disk fill % (`IO_STRESS`) |
-| `ioWorkers` | int | Parallel dd workers (`IO_STRESS`) |
+| `ioWorkers` | int | Parallel I/O workers (`IO_STRESS`) |
 | `networkLatencyMs` | int | Added latency ms (`NETWORK_LATENCY`) |
-| `targetTopic` | string | Topic for `LEADER_ELECTION` |
-| `targetPartition` | int | Partition index (-1 = all) |
-| `envOverrides` | map | Extra env vars for the chaos runner |
+| `targetTopic` | string | A disruption plan aims a fault at the leader of this topic's `targetPartition`. A resilience run doesn't, but a `DNS_ERROR` on `litmus-crd` takes it as `TARGET_HOSTNAMES` |
+| `targetPartition` | int | Partition of `targetTopic`, in a disruption plan only |
+| `envOverrides` | map | Env vars for the Litmus experiment (`litmus-crd` only). For a `NODE_DRAIN`, `TARGET_NODE` or `NODE_LABEL` picks the node instead of the pod `targetLabel` picks |
+
+### `probes` field reference
+
+Every probe runs before the fault and after it, until all pass or
+`maxRecoveryWaitSec` is up; a `Continuous` one runs while the fault lasts too.
+
+| YAML key | Type | Notes |
+|---|---|---|
+| `name` | string | Probe name |
+| `type` | string | `cmdProbe` (the default) runs `command` with `sh -c` in the first pod labelled `strimzi.io/component-type=kafka`; a `k8sProbe` whose `command` names `kafka` and `Ready` reads the Kafka CR's status instead. Any other type runs as a `cmdProbe` |
+| `mode` | string | `Edge` (the default) or `Continuous` |
+| `command` | string | The command, or the `k8sProbe` query |
+| `expectedOutput` | string | What `comparator` compares the output with; default `""` |
+| `comparator` | string | `equal`, `contains` (the default), `notContains`, or `>=`, `<=`, `>`, `<`, which compare numbers. Any other, `==` included, runs as `contains` |
+| `intervalSec` | int | Seconds between `Continuous` runs: the first `Continuous` probe's paces them all; default 10 |
+| `timeoutSec` | int | Seconds to wait for `command`; default 30 |
 
 ---
 

@@ -1,12 +1,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Resilience Test: CPU_STRESS — Broker CPU Saturation
 # ─────────────────────────────────────────────────────────────────────────────
-# Pegs 1 CPU core at 90% on the gamma broker while heavy producers run.
+# Loads 1 CPU core of the gamma broker fully while a producer writes 8 KB
+# records at 1000 rec/s. For more producers, make it a STRESS run: a LOAD run
+# starts one producer and one consumer, whatever numProducers says.
 # Observes ISR shrink/expand cycle caused by replication lag under CPU pressure.
 #
 # Hypothesis:
 #   CPU-starved follower replication lag rises above replica.lag.time.max.ms (30s).
-#   gamma is evicted from ISR. Producers stall with acks=all until ISR recovers.
+#   gamma is evicted from ISR. The producer stalls with acks=all until ISR recovers.
 #   ISR returns to 3/3 within 90s of chaos ending.
 #
 # Usage:
@@ -23,7 +25,6 @@ testRequest:
     numRecords: 300000
     recordSize: 8192          # 8 KB — large records amplify CPU pressure
     throughput: 1000
-    numProducers: 6
     acks: "all"
     enableIdempotence: true
     batchSize: 131072
@@ -37,7 +38,7 @@ chaosSpec:
   targetLabel: "strimzi.io/pool-name=brokers-gamma"
   chaosDurationSec: 120
   delayBeforeSec: 0
-  cpuCores: 1                 # hog 1 core at 90%
+  cpuCores: 1                 # hog 1 core
 
 steadyStateSec: 20
 maxRecoveryWaitSec: 90
