@@ -1,13 +1,9 @@
 package com.bmscomp.kates.resilience;
 
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import jakarta.inject.Inject;
-import jakarta.validation.Validator;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -22,9 +18,6 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
-import com.bmscomp.kates.domain.CreateTestRequest;
-import com.bmscomp.kates.domain.ScenarioPhase;
-import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 
 /**
@@ -54,7 +47,7 @@ public class ResilienceResource {
     FaultLimits faultLimits;
 
     @Inject
-    Validator validator;
+    com.bmscomp.kates.engine.SpecLimits specLimits;
 
     /**
      * A 400 naming each parameter of the chaos spec outside the chaos limits,
@@ -76,54 +69,25 @@ public class ResilienceResource {
     }
 
     /**
-     * A 400 naming each value of a testRequest spec outside the limits TestSpec
-     * sets, or empty when all are within them. POST /api/tests checks its spec
-     * by bean validation, which can't run on the whole testRequest here: it
-     * would also require the request's own type, which a scenario with a type
-     * of its own goes without. So each spec is validated on its own, a
-     * scenario's base spec and phase specs too. The request's spec is keyed by
-     * field name, as bean validation keys it, and a scenario's by its path in
-     * the scenario, as refusal() keys a scenario's fields.
+     * A 400 naming each value of the testRequest's spec outside the limits
+     * TestSpec sets, or empty when all are within them. POST /api/tests checks
+     * its spec by bean validation, which can't run on the whole testRequest
+     * here: it would also require the request's own type, which a scenario
+     * with a type of its own goes without. So the spec is checked on its own,
+     * and keyed by field name, as bean validation keys it. A scenario's specs
+     * are refusal()'s to check, as on POST /api/tests.
      */
-    private Optional<Response> outsideSpecLimits(CreateTestRequest testRequest) {
-        // Each value's path in the testRequest, with the reason.
-        Map<String, String> found = new LinkedHashMap<>();
-        putViolations("spec.", testRequest.getSpec(), found);
-        TestScenario scenario = testRequest.getScenario();
-        if (scenario != null) {
-            putViolations("scenario.baseSpec.", scenario.getBaseSpec(), found);
-            List<ScenarioPhase> phases = scenario.getPhases() != null ? scenario.getPhases() : List.of();
-            for (int i = 0; i < phases.size(); i++) {
-                ScenarioPhase phase = phases.get(i);
-                // A null phase has no spec to check.
-                if (phase != null) {
-                    putViolations("scenario.phases[" + i + "].spec.", phase.getSpec(), found);
-                }
-            }
-        }
+    private Optional<Response> outsideSpecLimits(TestSpec spec) {
+        Map<String, String> found = specLimits.violations(spec);
         if (found.isEmpty()) {
             return Optional.empty();
         }
         String message = found.entrySet().stream()
-                .map(e -> e.getKey() + ": " + e.getValue())
+                .map(e -> "spec." + e.getKey() + ": " + e.getValue())
                 .collect(Collectors.joining("; "));
-        // Keyed below spec. or scenario., as refusal() keys the fields it names.
-        Map<String, String> fieldErrors = new LinkedHashMap<>();
-        found.forEach((path, reason) -> fieldErrors.put(path.substring(path.indexOf('.') + 1), reason));
         return Optional.of(Response.status(400)
-                .entity(ApiError.validationFailed(message, fieldErrors))
+                .entity(ApiError.validationFailed(message, found))
                 .build());
-    }
-
-    /** Puts each value of the spec outside its limits into found, under path. */
-    private void putViolations(String path, TestSpec spec, Map<String, String> found) {
-        if (spec == null) {
-            return;
-        }
-        // Sorted, so that the message names them in the same order each time.
-        validator.validate(spec).stream()
-                .sorted(Comparator.comparing(v -> v.getPropertyPath() + ": " + v.getMessage()))
-                .forEach(v -> found.putIfAbsent(path + v.getPropertyPath(), v.getMessage()));
     }
 
     private StreamingOutput executeWithKeepAlive(ResilienceTestRequest request, String scenarioId) {
@@ -178,7 +142,8 @@ public class ResilienceResource {
 
         // The spec limits first, as on POST /api/tests, where bean validation
         // answers before the orchestrator is asked.
-        Optional<Response> outsideSpecLimits = outsideSpecLimits(request.getTestRequest());
+        Optional<Response> outsideSpecLimits =
+                outsideSpecLimits(request.getTestRequest().getSpec());
         if (outsideSpecLimits.isPresent()) {
             return outsideSpecLimits.get();
         }
