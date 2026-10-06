@@ -180,7 +180,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"unknown or was unavailable when the backend started, the backend falls back to noop, which injects " +
 			"nothing and marks every step Skipped, and says so only in its log.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"chaos/CompoundChaosOrchestrator.java:143-162",
+			mcpAnchoredRef(mcpJava+"chaos/CompoundChaosOrchestrator.java:150-169",
 				"List<String> availableProviders()", `" (available)" : " (unavailable)"`, "return names;"),
 			mcpAnchoredRef(mcpJava+"chaos/ChaosCoordinator.java:34-75",
 				`name = "kates.chaos.provider"`, "matches no chaos provider"),
@@ -251,9 +251,9 @@ var mcpCaveatsChaos = []mcpCaveat{
 				"CompletableFuture.delayedExecutor(spec.delayBeforeSec(), TimeUnit.SECONDS, executor.get());",
 				"long startNanos = System.nanoTime();", "buildChaosEngine(spec, engineName, experimentName)",
 				"onInject.accept(startNanos);", ".resource(engine)"),
-			mcpAnchoredRef(mcpJava+"chaos/KubernetesChaosProvider.java:124-130",
-				"Thread.sleep(spec.delayBeforeSec() * 1000L);", "onInject.accept(System.nanoTime());",
-				"switch (spec.disruptionType())"),
+			mcpAnchoredRef(mcpJava+"chaos/KubernetesChaosProvider.java:152-161",
+				"Thread.sleep(spec.delayBeforeSec() * 1000L);", "onInject.accept(startNanos);",
+				"applyDisruption(spec, engineName);"),
 			mcpAnchoredRef(mcpJava+"chaos/PodTargets.java:58,69-75",
 				"public static List<String> resolve(KubernetesClient client, FaultSpec spec)",
 				"throw new IllegalStateException("),
