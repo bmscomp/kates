@@ -8,7 +8,7 @@
 # Hypothesis:
 #   Disk saturation delays log segment flushing (log.flush.interval.ms).
 #   The broker falls behind replication → ISR shrinks → leader migrates.
-#   Producers stall until the new leader is elected. No data loss.
+#   The producer stalls until the new leader is elected. No data loss.
 #
 # Usage:
 #   kates resilience run -f cli/examples/resilience-io-stress.yaml
@@ -24,7 +24,6 @@ testRequest:
     numRecords: 200000
     recordSize: 16384         # 16 KB — large records amplify I/O pressure
     throughput: 500
-    numProducers: 4
     acks: "all"
     enableIdempotence: true
     batchSize: 1048576         # 1 MB batch — maximum I/O per flush
