@@ -308,7 +308,7 @@ Everything else keeps the default 300 s, so that it moves to the surviving site:
 3. **One broker pool per rack, with equal broker counts.** KRaft's replica placer gives a rack with fewer brokers more replicas per broker.
 4. **Two controllers in one AZ run on different hosts.** That applies to AZ2 and AZ3 in A2, A4, A7 and A8, to AZ2 in A6's site-B cluster (KB), to AZ1 in A5-r3, and to the three controllers of every single-room cluster in AZ1 (A6's KA, the standby KS of A7 and A8). The chart renders only a preferred hostname anti-affinity between all controllers; add a required one through the pool's raw `template`. `helm template` renders both rules side by side.
 5. **A `site` pod label on every pool,** added through the raw `template.pod.metadata.labels`, so that site-wide selectors such as `strimzi.io/cluster=krafter,site=b` work.
-6. **Pool names.** `brokers-az1…` sorts before `controllers-*`. Kates `cmdProbes` exec into the alphabetically first Kafka pod, which for a site-B test must be a broker in site A. A8's main cluster has no broker in AZ1, so do not rely on `cmdProbes` for site-B tests there.
+6. **Pool names.** Kates `cmdProbes` exec into the alphabetically first broker pod that is Ready, which for a site-B test must be a broker in site A, so `brokers-az1…` should sort first. A8's main cluster has no broker in AZ1, so do not rely on `cmdProbes` for site-B tests there. The built-in probes are `kafkaProbe`s, which the Kates API runs over its own Kafka connection, in no pod.
 7. **Node IDs (optional).** Per-AZ ranges within 0–999 make placement visible in pod names:
 
    | Nodes | AZ1 | AZ2 | AZ3 | W |
