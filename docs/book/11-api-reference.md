@@ -903,6 +903,8 @@ A schedule stores `testRequest` with only the fields it sets. Each firing is a `
 
 A `testRequest` that `POST /api/tests` would refuse, for a field the run could not honour, a run longer than `kates.engine.max-duration-ms` or a scenario spec value outside its limits, is refused here too, and the schedule isn't saved. The answer is the same `400`, with each field keyed in `fieldErrors`, and named in `message`, by its path in the schedule, such as `testRequest.spec.consumerGroup` or `testRequest.scenario.phases[0].targetThroughput`.
 
+A `testRequest` without a `type`, or with a `spec` value outside the limits `POST /api/tests` sets, such as a `numProducers` above 100, gets the `400` that `POST /api/tests` gives it, with `fieldErrors` keyed by field name. A `backend` the Kates API doesn't have is refused too, keyed `testRequest.backend`, or `testRequest.scenario.backend` for a scenario that names its own. `POST /api/tests` refuses that one with a `400` that has no `fieldErrors`.
+
 A firing the Kates API refuses starts no run, and the reason is in the server log only. That happens to a schedule saved before the Kates API checked `testRequest`, and to one whose request it refuses later, after an upgrade or a change to its settings such as a lower `kates.engine.max-duration-ms`. A firing also holds the request's `spec`, and a scenario's, to the limits `POST /api/tests` sets, such as a `numProducers` of at most 100, and refuses a stored value outside them. Disable such a schedule, or `PUT` a `testRequest` the Kates API accepts.
 
 A schedule created before the Kates API kept the request stored every spec field, those it did not set at their Java defaults. When the Kates API upgrades, its database migration removes the defaults stored for `targetThroughput`, the fetch settings and the three `enable` options, which runs then ignored, so such a schedule runs as it did. A value the schedule did set for one of them now reaches the run, or is refused at each firing if the type cannot apply it. Its other fields keep the stored values, the Java defaults rather than the type's, all within the limits a firing holds `spec` to. `PUT` the schedule's `testRequest` again to have the type's defaults fill them in.
@@ -928,7 +930,7 @@ Get a single schedule, including the ID and time of its last triggered run.
 
 #### PUT /api/schedules/{id}
 
-Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse, for a field the run could not honour, a run longer than `kates.engine.max-duration-ms` or a scenario spec value outside its limits, gets the same `400`. The schedule then stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
+Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
 
 #### DELETE /api/schedules/{id}
 

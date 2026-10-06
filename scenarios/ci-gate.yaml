@@ -3,7 +3,6 @@ scenarios:
     type: LOAD
     spec:
       records: 10000
-      parallelProducers: 1
       recordSizeBytes: 512
       acks: "all"
       replicationFactor: 3
