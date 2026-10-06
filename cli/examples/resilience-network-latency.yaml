@@ -4,6 +4,10 @@
 # Adds 200ms artificial latency to all egress packets from the alpha broker
 # using tc netem. Simulates a degraded cross-AZ link or WAN replication delay.
 #
+# Litmus runs it as pod-network-latency, which the kates-chaos chart doesn't
+# install: add that ChaosExperiment to the kafka namespace first, or the fault
+# fails. The kubernetes chaos provider has no NETWORK_LATENCY.
+#
 # Hypothesis:
 #   Replication lag increases proportionally to injected latency.
 #   With replica.lag.time.max.ms=30s and 200ms latency, the broker stays in ISR.
@@ -24,8 +28,6 @@ testRequest:
     numRecords: 300000
     recordSize: 1024
     throughput: 3000
-    numProducers: 3
-    numConsumers: 2
     consumerGroup: latency-inject-cg
     acks: "all"
     enableIdempotence: true
@@ -60,6 +62,6 @@ probes:
     mode: Continuous
     command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
     expectedOutput: "0"
-    comparator: "=="
+    comparator: "<="          # 0 or fewer; the probe executor has no ==
     intervalSec: 10
     timeoutSec: 30
