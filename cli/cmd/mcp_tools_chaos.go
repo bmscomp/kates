@@ -126,13 +126,15 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"create NetworkPolicies or scale node pools, and only for the fault types that need one of those; every " +
 			"other type, and any check that fails with an error, counts as permitted, and a denied check is a step " +
 			"warning, never an error that makes wouldSucceed false. On the default litmus-crd provider Litmus " +
-			"injects every fault except ROLLING_RESTART and SCALE_DOWN as its own litmus-admin service account, so " +
-			"for those the check does not show whether the fault can run.",
+			"injects every fault except POD_DELETE, ROLLING_RESTART and SCALE_DOWN as its own litmus-admin service " +
+			"account, so for those the check does not show whether the fault can run.",
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:260-263,499-568",
 				"boolean canExecute = checkRbacPermissions(spec);", `"Insufficient RBAC permissions for "`,
 				"boolean checkRbacPermissions(FaultSpec spec)", `"RBAC check failed, assuming permitted"`),
-			mcpJava + "chaos/LitmusChaosProvider.java:56-63,225",
+			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:41-53,75-77,254",
+				"EnumSet.of(DisruptionType.ROLLING_RESTART, DisruptionType.SCALE_DOWN, DisruptionType.POD_DELETE)",
+				"return kubernetes.triggerFault(spec);", `engineSpec.chaosServiceAccount = "litmus-admin";`),
 			mcpAnchoredRef("kates/src/main/resources/application.properties:255-256",
 				"# Chaos coordination (noop | kubernetes | litmus-crd | hybrid)", "kates.chaos.provider=litmus-crd"),
 		},
@@ -177,7 +179,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"unknown or was unavailable when the backend started, the backend falls back to noop, which injects " +
 			"nothing and marks every step Skipped, and says so only in its log.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"chaos/CompoundChaosOrchestrator.java:143-162",
+			mcpAnchoredRef(mcpJava+"chaos/CompoundChaosOrchestrator.java:150-169",
 				"List<String> availableProviders()", `" (available)" : " (unavailable)"`, "return names;"),
 			mcpAnchoredRef(mcpJava+"chaos/ChaosCoordinator.java:33-74",
 				`name = "kates.chaos.provider"`, "matches no chaos provider"),
@@ -219,15 +221,20 @@ var mcpCaveatsChaos = []mcpCaveat{
 		ID: mcpCaveatRecoveryFromRequest,
 		Text: "A step's recovery times (time to first and to all pods ready, time to full ISR, time to lag recovery) " +
 			"count from the moment Kates asked the chaos provider for the fault, not from when the fault took effect. " +
-			"On the default litmus-crd provider that moment comes before the ChaosEngine is created, so the times " +
-			"include however long Litmus took to start the experiment. Time to first ready is the first Ready event " +
-			"from any watched Kafka pod after that moment, which need not be a pod the fault hit.",
+			"That moment comes before the step's delayBeforeSec, which both providers wait out before they inject, so " +
+			"the times include the delay. On the default litmus-crd provider it also comes before the ChaosEngine is " +
+			"created, so the times include however long Litmus took to start the experiment. Time to first ready is " +
+			"the first Ready event from any watched Kafka pod after that moment, which need not be a pod the fault hit.",
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionOrchestrator.java:297-313",
 				"session.markDisruptionStart();", "Instant disruptionStart = Instant.now();", ".triggerFault(spec)"),
 			mcpJava + "chaos/K8sPodWatcher.java:74-79,99-105,123-130,184-199",
 			mcpJava + "disruption/KafkaIntelligenceService.java:124-126,196-213,235-237,303-315",
-			mcpJava + "chaos/LitmusChaosProvider.java:65-81",
+			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:78-86,94-110",
+				"CompletableFuture.delayedExecutor(spec.delayBeforeSec(), TimeUnit.SECONDS, executor.get());",
+				"Instant start = Instant.now();", ".resource(engine)"),
+			mcpAnchoredRef(mcpJava+"chaos/KubernetesChaosProvider.java:146-152",
+				"Thread.sleep(spec.delayBeforeSec() * 1000L);"),
 		},
 	},
 	{

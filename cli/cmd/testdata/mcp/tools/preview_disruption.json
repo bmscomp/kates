@@ -71,7 +71,7 @@
                   "type": "string"
                 },
                 "gracePeriodSec": {
-                  "description": "POD_DELETE only: the pod's termination grace period, in seconds. Only the kubernetes provider honours it; on the default litmus-crd provider a POD_DELETE force-deletes the pod whatever this says",
+                  "description": "POD_DELETE only: the pod's termination grace period, in seconds. Both chaos providers honour it: the default litmus-crd provider hands a POD_DELETE to the kubernetes provider, which deletes the pod with it",
                   "maximum": 300,
                   "minimum": 0,
                   "type": [
