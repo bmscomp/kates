@@ -311,15 +311,18 @@ public class TestOrchestrator {
     }
 
     /**
-     * Executes a multi-phase scenario, using the resolved spec per phase
-     * (base + phase overrides + type defaults).
+     * Executes a multi-phase scenario, each phase with the spec it resolves:
+     * the base spec as sent, with the phase's own fields over it.
      *
-     * <p>Phases are SUBMITTED in order, not run one after another: the loop
-     * below hands every phase's tasks to the backend without waiting for the
-     * previous phase to finish, so they overlap. The javadoc here used to claim
-     * they ran sequentially, which is worth correcting because it changes how
-     * you read a scenario's results — a ramp defined as three phases produces
-     * three concurrent loads, not a staircase.
+     * <p>The phases run one after another, in the order sent, each for its
+     * duration. Every task is submitted here with the time it is to start,
+     * and the backend holds it back until then: a phase starts once the
+     * durations of the phases before it have passed, whether or not they
+     * stopped early at their record count, and a RAMP phase's steps take turns
+     * within it (buildPhaseTask). So the run lasts the phases' durations added
+     * up, which is what plannedDurationMs counts. The tasks used to start at
+     * once, so a ramp defined as three phases produced three concurrent loads,
+     * not a staircase.
      */
     @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.executeScenario")
     com.bmscomp.kates.util.Result<TestRun, Exception> executeScenario(CreateTestRequest request) {
@@ -383,26 +386,42 @@ public class TestOrchestrator {
             createTestTopic(baseSpec, type);
             benchmarkMetrics.startRun(run.getId(), type.name(), backendName);
 
+            // The schedule starts once the topic exists, and is fixed before
+            // the first task is submitted, so the time it takes to submit them
+            // one by one does not push the later phases back.
+            long phaseStartMs = System.currentTimeMillis();
+
             for (int phaseIdx = 0; phaseIdx < scenario.getPhases().size(); phaseIdx++) {
                 ScenarioPhase phase = scenario.getPhases().get(phaseIdx);
                 String phaseName = phase.getName() != null ? phase.getName() : "phase-" + phaseIdx;
                 TestSpec phaseSpec = scenario.resolveSpecForPhase(phase);
 
-                List<BenchmarkTask> tasks = buildPhaseTask(phase, phaseSpec, type, run.getId(), phaseName);
+                List<BenchmarkTask> tasks =
+                        buildPhaseTask(phase, phaseSpec, type, run.getId(), phaseName, phaseStartMs);
+                // The next phase starts after this one's duration, as
+                // plannedDurationMs counts it.
+                phaseStartMs = saturatedSum(phaseStartMs, Math.max(0, phaseSpec.getDurationMs()));
 
                 for (BenchmarkTask task : tasks) {
                     try {
                         BenchmarkHandle handle = backend.submit(task);
                         allHandles.add(handle);
 
+                        // A task whose turn has not come is PENDING until the
+                        // backend starts it, at the time it was given.
+                        boolean waits = task.getStartAtMs() > System.currentTimeMillis();
+                        String startTime = waits
+                                ? Instant.ofEpochMilli(task.getStartAtMs()).toString()
+                                : Instant.now().toString();
                         TestResult result = new TestResult()
                                 .withTaskId(task.getTaskId())
                                 .withTestType(type)
-                                .withStatus(TestResult.TaskStatus.RUNNING)
-                                .withStartTime(Instant.now().toString())
+                                .withStatus(waits ? TestResult.TaskStatus.PENDING : TestResult.TaskStatus.RUNNING)
+                                .withStartTime(startTime)
                                 .withPhaseName(phaseName);
                         run = run.withAddedResult(result);
-                        LOG.info("Scenario phase [" + phaseName + "] submitted: " + task.getTaskId());
+                        LOG.info("Scenario phase [" + phaseName + "] submitted: " + task.getTaskId()
+                                + (waits ? ", to start at " + startTime : ""));
                     } catch (Exception e) {
                         LOG.warn("Phase [" + phaseName + "] failed to submit: " + task.getTaskId(), e);
                         TestResult failedResult = new TestResult()
@@ -519,9 +538,16 @@ public class TestOrchestrator {
                         BenchmarkStatus status = backend.poll(handle);
                         result = applyStatus(result, status);
                         polledAnything = true;
-                        publishLiveMetrics(runId, result, status);
-                        slaViolations.addAll(
-                                slaEvaluator.evaluate(run.getSla(), status).violations());
+                        // A task waiting for its turn, such as a scenario's
+                        // later phase, has measured nothing: its zeros would
+                        // breach a minimum-throughput SLA, and add an empty
+                        // heatmap row, on every poll until it starts.
+                        boolean started = status.getState() != TestResult.TaskStatus.PENDING;
+                        if (started) {
+                            publishLiveMetrics(runId, result, status);
+                            slaViolations.addAll(
+                                    slaEvaluator.evaluate(run.getSla(), status).violations());
+                        }
 
                         // Propagate CDC phase data to the TestRun
                         if (status.getPhaseDurations() != null
@@ -532,7 +558,7 @@ public class TestOrchestrator {
                             run = run.withCdcPhase(status.getCurrentPhase());
                         }
 
-                        if (status.getHeatmapBuckets() != null) {
+                        if (started && status.getHeatmapBuckets() != null) {
                             heatmapRows
                                     .computeIfAbsent(runId, k -> {
                                         heatmapOrder.addLast(k);
@@ -909,17 +935,10 @@ public class TestOrchestrator {
             try {
                 var run = repository.findById(runId);
                 if (run.isPresent()) {
-                    TestRun updated = run.get().withStatus(TestResult.TaskStatus.FAILED);
-                    List<TestResult> newResults = new java.util.ArrayList<>();
-                    for (TestResult result : updated.getResults()) {
-                        if (result.getStatus() == TestResult.TaskStatus.RUNNING) {
-                            result = result.withStatus(TestResult.TaskStatus.FAILED)
-                                    .withError("Server shutdown")
-                                    .withEndTime(Instant.now().toString());
-                        }
-                        newResults.add(result);
-                    }
-                    updated = updated.withResults(newResults);
+                    // PENDING tasks too: a scenario's later phases wait for
+                    // their turn, and were left PENDING in a FAILED run.
+                    TestRun updated = withUnfinishedTasksFailed(
+                            run.get().withStatus(TestResult.TaskStatus.FAILED), "Server shutdown");
                     repository.save(updated);
                     LOG.infof("  Shutdown: marked test %s as FAILED", runId);
                 }
@@ -1157,8 +1176,9 @@ public class TestOrchestrator {
 
     /**
      * How long a scenario is set to last: its phases' durations added up.
-     * executeScenario submits the phases together, so they overlap and this is
-     * an upper bound; it stays the right one if they come to run in sequence.
+     * executeScenario runs the phases one after another, each starting when
+     * the durations of the ones before it have passed, so this is when the
+     * last one is due to end.
      */
     static long plannedDurationMs(TestScenario scenario) {
         long total = 0;
@@ -1261,9 +1281,10 @@ public class TestOrchestrator {
     }
 
     /**
-     * The most steps a RAMP phase may have. buildPhaseTask starts a producer
-     * for each step, all at once, so this bounds the producers of one phase as
-     * {@code numProducers} (at most 100) bounds those of a plain request.
+     * The most steps a RAMP phase may have. buildPhaseTask submits a producer
+     * for each step, all at once, each to wait for its turn, so this bounds the
+     * tasks of one phase as {@code numProducers} (at most 100) bounds those of
+     * a plain request.
      */
     static final int MAX_RAMP_STEPS = 100;
 
@@ -1355,7 +1376,7 @@ public class TestOrchestrator {
      * 1, 2, ... records a second, sending almost nothing while it looked like
      * a ramp; with fewer records a second than steps, the last steps ran past
      * the rate. So the rate has to come to at least one record a second per
-     * step. The steps are producers started together, at most MAX_RAMP_STEPS.
+     * step. The steps are producers that take turns, at most MAX_RAMP_STEPS.
      * A rampSteps below 1 ran as one step, the whole rate from the start, so
      * it is refused too.
      */
@@ -1391,7 +1412,7 @@ public class TestOrchestrator {
         if (steps > MAX_RAMP_STEPS) {
             errors.put(
                     path + "rampSteps",
-                    "a RAMP phase starts a producer for each step, all at once, and phase " + name + " has " + steps
+                    "a RAMP phase runs a producer for each step, and phase " + name + " has " + steps
                             + " steps; it may have at most " + MAX_RAMP_STEPS);
         }
         if (rate < 1) {
@@ -1558,8 +1579,14 @@ public class TestOrchestrator {
         };
     }
 
+    /**
+     * The tasks of one phase, to start at {@code startAtMs}: a producer, or
+     * for a RAMP phase one producer per step. The steps share the phase's
+     * duration equally and take turns, each faster than the one before, so
+     * the phase's load rises a step at a time.
+     */
     private List<BenchmarkTask> buildPhaseTask(
-            ScenarioPhase phase, TestSpec spec, TestType type, String runId, String phaseName) {
+            ScenarioPhase phase, TestSpec spec, TestType type, String runId, String phaseName, long startAtMs) {
         String topic = spec.getTopic() != null ? spec.getTopic() : type.name().toLowerCase() + "-test";
         Map<String, String> producerConfig = new HashMap<>();
         producerConfig.put("acks", spec.getAcks());
@@ -1576,13 +1603,15 @@ public class TestOrchestrator {
 
         return switch (phase.getPhaseType()) {
             case WARMUP, STEADY, COOLDOWN ->
-                List.of(produceTask(taskId + "-produce", runId, topic, spec, producerConfig));
+                List.of(produceTask(taskId + "-produce", runId, topic, spec, producerConfig, startAtMs));
             case RAMP -> {
                 // refuseInapplicableRate has made sure of a rate of at least a
                 // record a second per step, so no step runs past it.
                 var tasks = new java.util.ArrayList<BenchmarkTask>();
                 int steps = Math.max(1, phase.getRampSteps());
                 int baseTarget = Math.max(1, spec.getThroughput() / steps);
+                // Step s starts when the s steps before it have had their share.
+                long stepMs = Math.max(0, spec.getDurationMs()) / steps;
                 for (int s = 0; s < steps; s++) {
                     int stepTarget = baseTarget * (s + 1);
                     TestSpec stepSpec = new TestSpec();
@@ -1594,7 +1623,13 @@ public class TestOrchestrator {
                     stepSpec.setRecordSize(spec.getRecordSize());
                     stepSpec.setEnableIdempotence(spec.isEnableIdempotence());
                     stepSpec.setEnableTransactions(spec.isEnableTransactions());
-                    tasks.add(produceTask(taskId + "-ramp-" + s, runId, topic, stepSpec, producerConfig));
+                    tasks.add(produceTask(
+                            taskId + "-ramp-" + s,
+                            runId,
+                            topic,
+                            stepSpec,
+                            producerConfig,
+                            saturatedSum(startAtMs, s * stepMs)));
                 }
                 yield tasks;
             }
@@ -1610,6 +1645,7 @@ public class TestOrchestrator {
                         .producerConfig(producerConfig)
                         .enableIdempotence(spec.isEnableIdempotence())
                         .enableTransactions(spec.isEnableTransactions())
+                        .startAtMs(startAtMs)
                         .build());
         };
     }
@@ -1705,6 +1741,16 @@ public class TestOrchestrator {
 
     private BenchmarkTask produceTask(
             String taskId, String runId, String topic, TestSpec spec, Map<String, String> producerConfig) {
+        return produceTask(taskId, runId, topic, spec, producerConfig, 0);
+    }
+
+    private BenchmarkTask produceTask(
+            String taskId,
+            String runId,
+            String topic,
+            TestSpec spec,
+            Map<String, String> producerConfig,
+            long startAtMs) {
         return BenchmarkTask.builder(taskId, BenchmarkTask.WorkloadType.PRODUCE)
                 .runId(runId)
                 .topic(topic)
@@ -1716,6 +1762,7 @@ public class TestOrchestrator {
                 .producerConfig(producerConfig)
                 .enableIdempotence(spec.isEnableIdempotence())
                 .enableTransactions(spec.isEnableTransactions())
+                .startAtMs(startAtMs)
                 .build();
     }
 
