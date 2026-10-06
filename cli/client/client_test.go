@@ -933,10 +933,10 @@ func TestResilience_ConcurrentCallsShareClient(t *testing.T) {
 	wg.Wait()
 }
 
-// TestPostJSONWithTimeout_DeadlineReplacesClientTimeout checks that a long
-// call is bounded by its own deadline, not by the client's Timeout, and that
+// TestPostWithTimeout_DeadlineReplacesClientTimeout checks that a long call
+// is bounded by its own deadline, not by the client's Timeout, and that
 // ordinary calls keep the client's Timeout.
-func TestPostJSONWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
+func TestPostWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
 	const serverDelay = 300 * time.Millisecond
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -961,7 +961,7 @@ func TestPostJSONWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := postJSONWithTimeout[*ResilienceResult](c, ctx, "/api/resilience", nil, tt.deadline)
+			got, err := postWithTimeout(c, ctx, "/api/resilience", nil, tt.deadline)
 			if tt.wantErr {
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("err = %v, want context.DeadlineExceeded", err)
@@ -969,10 +969,10 @@ func TestPostJSONWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("postJSONWithTimeout: %v", err)
+				t.Fatalf("postWithTimeout: %v", err)
 			}
-			if got == nil || got.Status != "COMPLETED" {
-				t.Errorf("result = %+v, want status COMPLETED", got)
+			if string(got) != `{"status":"COMPLETED"}` {
+				t.Errorf("body = %q, want the server's answer", got)
 			}
 		})
 	}
