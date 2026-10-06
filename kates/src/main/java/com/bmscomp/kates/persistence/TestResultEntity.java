@@ -70,6 +70,10 @@ public class TestResultEntity {
     @Column(name = "phase_name", length = 128)
     private String phaseName;
 
+    /** An INTEGRITY task's integrity result, as JSON; NULL for any other task. */
+    @Column(name = "integrity_json", columnDefinition = "TEXT")
+    private String integrityJson;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "test_run_id", nullable = false)
     private TestRunEntity testRun;
@@ -202,6 +206,14 @@ public class TestResultEntity {
 
     public void setPhaseName(String phaseName) {
         this.phaseName = phaseName;
+    }
+
+    public String getIntegrityJson() {
+        return integrityJson;
+    }
+
+    public void setIntegrityJson(String integrityJson) {
+        this.integrityJson = integrityJson;
     }
 
     public TestRunEntity getTestRun() {

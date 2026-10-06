@@ -7,6 +7,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import com.bmscomp.kates.domain.IntegrityResult;
+import com.bmscomp.kates.domain.IntegrityResultFixtures;
 import com.bmscomp.kates.domain.SlaDefinition;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
@@ -132,6 +134,67 @@ class EntityMapperTest {
 
         assertEquals("{\"consumerGroup\":\"perf-cg\"}", entity.getRequestedSpecJson());
         assertEquals(TestResult.TaskStatus.DONE, entity.getStatus());
+    }
+
+    // ── An INTEGRITY task's integrity result ─────────────────────────────────
+    //
+    // It was not stored: only the status poll that saw the task end returned
+    // it, and every later read of the run had none, so kates test apply --wait
+    // checked no integrity gate whenever the reconciler had polled first.
+
+    private static TestRun integrityRun(TestResult.TaskStatus status, IntegrityResult integrity) {
+        return new TestRun(TestType.INTEGRITY, new TestSpec())
+                .withStatus(status)
+                .withResults(java.util.List.of(
+                        result("run-integrity-0", status, 100_000).withIntegrity(integrity)));
+    }
+
+    @Test
+    void theIntegrityResultReadsBackAsItWasWritten() {
+        IntegrityResult integrity = IntegrityResultFixtures.full();
+        TestRunEntity entity = EntityMapper.toEntity(integrityRun(TestResult.TaskStatus.DONE, integrity));
+
+        IntegrityResult restored =
+                EntityMapper.toDomain(entity).getResults().get(0).getIntegrity();
+
+        assertEquals(integrity, restored);
+        assertEquals(1500.000123, restored.maxRtoMs(), 1e-9);
+        assertEquals("DATA_LOSS", restored.verdict());
+    }
+
+    @Test
+    void anUnmeasuredRpoReadsBackUnmeasured() {
+        TestRunEntity entity =
+                EntityMapper.toEntity(integrityRun(TestResult.TaskStatus.DONE, IntegrityResultFixtures.withRpo(null)));
+
+        IntegrityResult restored =
+                EntityMapper.toDomain(entity).getResults().get(0).getIntegrity();
+
+        assertNull(restored.rpo());
+        assertEquals(-1.0, restored.rpoMs(), 1e-9, "not measured, which is never an RPO of 0");
+    }
+
+    @Test
+    void aTaskWithoutAnIntegrityResultStoresNone() {
+        TestRunEntity entity = EntityMapper.toEntity(buildFullRun());
+
+        assertNull(entity.getResults().get(0).getIntegrityJson());
+        assertNull(EntityMapper.toDomain(entity).getResults().get(0).getIntegrity());
+    }
+
+    @Test
+    void updateEntityKeepsTheStoredIntegrityResult() {
+        IntegrityResult integrity = IntegrityResultFixtures.full();
+        TestRunEntity entity = EntityMapper.toEntity(integrityRun(TestResult.TaskStatus.RUNNING, null));
+
+        // The poll that sees the task end writes the result...
+        EntityMapper.updateEntity(entity, integrityRun(TestResult.TaskStatus.DONE, integrity));
+        // ...and a later write from a copy of the task that does not carry
+        // it leaves it alone.
+        EntityMapper.updateEntity(entity, integrityRun(TestResult.TaskStatus.DONE, null));
+
+        assertEquals(
+                integrity, EntityMapper.toDomain(entity).getResults().get(0).getIntegrity());
     }
 
     private TestRun buildFullRun() {

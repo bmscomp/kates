@@ -46,6 +46,33 @@ func TestTestGet_ShowsIntegrityRtoRpoAndVerdict(t *testing.T) {
 	}
 }
 
+// The Kates API lists at most the first 1,000 lost ranges, while Lost counts
+// every lost record. A table whose ranges hold fewer records than that says
+// it shows the first ones, rather than passing for the whole list.
+func TestTestGet_SaysWhenTheLostRangesAreTheFirstOnes(t *testing.T) {
+	for _, tc := range []struct {
+		lost string
+		hint bool
+	}{{lost: "1000", hint: true}, {lost: "2", hint: false}} {
+		ts, buf := setupTest(t, "GET", "/api/tests/run-3", 200, `{
+			"id": "run-3", "testType": "INTEGRITY", "status": "DONE",
+			"results": [{"phaseName": "integrity", "status": "DONE", "integrity": {
+				"totalSent": 6000, "totalAcked": 6000, "lostRecords": `+tc.lost+`,
+				"rpoMs": -1.0, "verdict": "DATA_LOSS",
+				"lostRanges": [{"fromSeq": 1, "toSeq": 1, "count": 1}, {"fromSeq": 7, "toSeq": 7, "count": 1}]
+			}}]
+		}`)
+		if err := testGetCmd.RunE(testGetCmd, []string{"run-3"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		ts.Close()
+		out := stripAnsi(buf.String())
+		if got := strings.Contains(out, "showing the first 2 ranges: 2 of the 1000 lost records"); got != tc.hint {
+			t.Errorf("%s lost records in 2 listed ranges: hint shown %t, want %t:\n%s", tc.lost, got, tc.hint, out)
+		}
+	}
+}
+
 // The throughput bar is drawn against the rate the run used, spec.throughput:
 // throughput wins over targetThroughput when a request sets both, and a
 // request that sets only throughput has no targetThroughput at all.

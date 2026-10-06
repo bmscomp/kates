@@ -13,6 +13,8 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.bmscomp.kates.domain.IntegrityResult;
+import com.bmscomp.kates.domain.IntegrityResultFixtures;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
@@ -196,5 +198,45 @@ class TestRunRepositoryTest {
         TestRun updated = repository.findById(run.getId()).orElseThrow();
         assertEquals(TestResult.TaskStatus.DONE, updated.getStatus());
         assertEquals(1, repository.findAll().size());
+    }
+
+    /**
+     * An INTEGRITY task's integrity result is stored with it, so a finished
+     * run read back still carries it. It was not stored: every read after the
+     * poll that saw the run end had none.
+     */
+    @Test
+    void anIntegrityResultIsStoredWithItsTask() {
+        IntegrityResult integrity = IntegrityResultFixtures.full();
+        TestRun run = new TestRun(TestType.INTEGRITY, new TestSpec());
+        String taskId = run.getId() + "-integrity-0";
+        repository.save(run.withStatus(TestResult.TaskStatus.RUNNING)
+                .withResults(List.of(new TestResult().withTaskId(taskId).withStatus(TestResult.TaskStatus.RUNNING))));
+
+        TestResult done = new TestResult().withTaskId(taskId).withStatus(TestResult.TaskStatus.DONE);
+        assertTrue(repository.saveIfPresent(
+                run.withStatus(TestResult.TaskStatus.DONE).withResults(List.of(done.withIntegrity(integrity)))));
+        assertEquals(integrity, storedIntegrity(run.getId()));
+
+        // A later write of the task without it, such as one built before the
+        // poll that saw the run end, leaves it stored.
+        assertTrue(repository.saveIfPresent(
+                run.withStatus(TestResult.TaskStatus.DONE).withResults(List.of(done))));
+        assertEquals(integrity, storedIntegrity(run.getId()));
+    }
+
+    /**
+     * The integrity result of a run's first task, read in a transaction of its
+     * own: a read outside one would answer from the session's copy of the run,
+     * not from the database.
+     */
+    private IntegrityResult storedIntegrity(String runId) {
+        return QuarkusTransaction.requiringNew()
+                .call(() -> repository
+                        .findById(runId)
+                        .orElseThrow()
+                        .getResults()
+                        .get(0)
+                        .getIntegrity());
     }
 }

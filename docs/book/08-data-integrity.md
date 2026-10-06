@@ -365,6 +365,8 @@ Look at `Lost` and at the Lost Ranges table under it: two acknowledged records n
 
 (Counts are abbreviated in the display — the `Lost` count, `Data Loss` percentage, and `Lost Ranges` table carry the exact numbers.)
 
+The table lists 1,000 ranges at most, those with the lowest sequence numbers, while `Lost` counts every lost record. Records carry no key, so the producer spreads them over the partitions a batch at a time, and a partition that loses its data leaves a range for each batch it held. When the ranges listed hold fewer records than `Lost`, `kates test get` says so under the table.
+
 Data loss indicates a serious issue. Common causes:
 
 | Cause | How to Diagnose |

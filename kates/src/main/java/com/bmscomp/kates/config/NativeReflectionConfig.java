@@ -23,6 +23,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.domain.IntegrityResult.class,
             com.bmscomp.kates.domain.IntegrityEvent.class,
             com.bmscomp.kates.domain.LostRange.class,
+            // A component of IntegrityResult, which the database keeps as JSON.
+            com.bmscomp.kates.engine.AckTracker.FailureWindow.class,
             com.bmscomp.kates.domain.BaselineResponse.class,
             com.bmscomp.kates.domain.SetBaselineRequest.class,
             com.bmscomp.kates.domain.BulkCreateResponse.class,

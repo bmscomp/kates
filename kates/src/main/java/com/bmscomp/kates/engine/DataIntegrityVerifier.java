@@ -40,6 +40,16 @@ public class DataIntegrityVerifier {
     private final List<IntegrityEvent> timeline = Collections.synchronizedList(new ArrayList<>());
     private static final int MAX_TIMELINE_EVENTS = 1000;
 
+    /**
+     * The most lost ranges a result lists, lowest sequence numbers first;
+     * {@code lostRecords} still counts every lost record. Records carry no
+     * key, so the producer spreads its sequence numbers over the partitions a
+     * batch at a time, and a partition that loses its data leaves a range for
+     * each batch it held. Uncapped, the list grew with the run, and the
+     * database keeps it with the run's results.
+     */
+    static final int MAX_LOST_RANGES = 1000;
+
     private volatile long firstConsumeGapNanos = -1;
     private volatile long firstConsumeRecoveryNanos = -1;
     private volatile boolean inConsumeGap = false;
@@ -229,7 +239,7 @@ public class DataIntegrityVerifier {
     private List<LostRange> computeLostRanges(BitSet lostSet) {
         List<LostRange> ranges = new ArrayList<>();
         int pos = lostSet.nextSetBit(0);
-        while (pos >= 0) {
+        while (pos >= 0 && ranges.size() < MAX_LOST_RANGES) {
             int start = pos;
             int end = pos;
             while (lostSet.get(end + 1)) {

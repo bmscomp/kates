@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.domain.IntegrityResult;
+import com.bmscomp.kates.domain.LostRange;
 
 class DataIntegrityVerifierTest {
 
@@ -91,6 +92,28 @@ class DataIntegrityVerifierTest {
         assertEquals(4, result.lostRecords());
         assertNotNull(result.lostRanges());
         assertFalse(result.lostRanges().isEmpty());
+    }
+
+    /**
+     * Every other record lost, as when a partition loses its data, is a range
+     * per lost record. The result lists the first MAX_LOST_RANGES of them and
+     * still counts every lost record.
+     */
+    @Test
+    void lostRangesStopAtTheCapWhileLostRecordsCountsThemAll() {
+        int sent = 2 * DataIntegrityVerifier.MAX_LOST_RANGES + 10;
+        AckTracker tracker = trackerWithAcked(sent);
+        DataIntegrityVerifier verifier = new DataIntegrityVerifier(tracker);
+        for (int i = 0; i < sent; i += 2) {
+            verifier.recordConsumed(i, true, 0);
+        }
+
+        IntegrityResult result = verifier.verify(-1);
+
+        assertEquals(sent / 2, result.lostRecords());
+        assertEquals(DataIntegrityVerifier.MAX_LOST_RANGES, result.lostRanges().size());
+        assertEquals(new LostRange(1, 1, 1), result.lostRanges().get(0));
+        assertEquals(new LostRange(1999, 1999, 1), result.lostRanges().get(DataIntegrityVerifier.MAX_LOST_RANGES - 1));
     }
 
     @Test
