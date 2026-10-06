@@ -149,7 +149,7 @@ Four facts from the code shape how a chapter writes about these targets:
 - The target's P99 is the `produce` row's: send to acknowledgment, timed in the producer's callback. A `consume` row measures no latency and shows 0, and report summaries average the rows' P99s, so quote the `produce` row and never call the target end-to-end.
 - The throughput gate can't be 2,000. The rate limiter never makes up for a late send, and the measured rate also counts the time to build and close the producer, so a run offered 2,000 records per second measures less and `minThroughputRecPerSec: 2000` fails.
 - The Kates API applies `replicationFactor` and `minInsyncReplicas` only when it creates the topic. The first run that names `payments-load` creates it, and later runs leave it as it is.
-- `kates resilience run` returns after the fault, often while its INTEGRITY run is still producing, and its summary shows no integrity result. Find that run with `kates test list --type INTEGRITY` and read it with `kates test get <id>` once it's `DONE`. Start the zone file only after the broker file's run is `DONE`, because both use the same topic and consumer group.
+- `kates resilience run` returns after the fault, often while its INTEGRITY run is still producing, and its summary shows no integrity result. It names that run as `Test Run`: read the run with `kates test get <id>` once it's `DONE`. Start the zone file only after the broker file's run is `DONE`, because both use the same topic and consumer group.
 
 ### Names
 

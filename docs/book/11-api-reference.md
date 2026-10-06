@@ -758,13 +758,14 @@ Optional fields: `probes` (steady-state probe definitions) and `maxRecoveryWaitS
 
 The workload has to be running when the fault lands. At 500 records per second the 180,000 records take 360 s, while the fault is triggered after `steadyStateSec` (30 s), lasts `chaosDurationSec` (30 s), and the run then waits up to `maxRecoveryWaitSec` for recovery. Without `throughput` the producer runs unthrottled and can finish before the fault. A run that has ended when `steadyStateSec` is up gets no fault, and the report is `ERROR`; one that ends after that, before the fault goes in, leaves both summaries describing a run the fault never touched. `testRequest` is the body of [POST /api/tests](#post-apitests), so the same fields apply: `throughput` is the rate limit, and LOAD runs one producer and one consumer, so the spec sets no producer count. `disruptionType` picks the fault: on the default `litmus-crd` chaos provider `POD_KILL` runs the LitmusChaos `pod-delete` experiment, and the outcome reports that name, while `experimentName` only names the ChaosEngine. Without `disruptionType`, Litmus runs the experiment that `experimentName` names, and the `kates-chaos` chart installs none called `kafka-pod-kill`. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and the random pick could then kill a controller instead of a broker.
 
-The call returns once the probes pass after the fault, or once `maxRecoveryWaitSec` runs out, so with this example the response usually arrives while the LOAD run is still producing. `postChaosSummary` and `impactDeltas` cover the run up to that moment. The run keeps producing, and keeps its place among the `kates.engine.max-concurrent-tests` running tests, until it reaches `DONE`; its final numbers are then at `GET /api/tests/{id}`, with the id from `performanceReport.run.id`.
+The call returns once the probes pass after the fault, or once `maxRecoveryWaitSec` runs out, so with this example the response usually arrives while the LOAD run is still producing. `postChaosSummary` and `impactDeltas` cover the run up to that moment. The run keeps producing, and keeps its place among the `kates.engine.max-concurrent-tests` running tests, until it reaches `DONE`; its final numbers are then at `GET /api/tests/{id}`, with the id from `testRunId`. The report names the run there as soon as the run has started, so a report that ends `ERROR` or `INTERRUPTED` after that names it too; `performanceReport` comes only after the recovery wait.
 
 **Response** (cut down, with illustrative numbers):
 
 ```json
 {
   "status": "COMPLETED",
+  "testRunId": "3f6c2a1e",
   "chaosOutcome": { "experimentName": "pod-delete", "verdict": "Pass", "chaosDuration": 68.214530000 },
   "impactDeltas": { "throughputRecPerSec": -2.7, "avgLatencyMs": 216.1, "p99LatencyMs": 4891.9, "maxLatencyMs": 8909.6, "errorRate": 0.0 },
   "preChaosSummary": { "avgThroughputRecPerSec": 499.6, "avgLatencyMs": 3.1, "p99LatencyMs": 6.2, "maxLatencyMs": 20.8, "errorRate": 0.0 },

@@ -107,14 +107,13 @@ The rate limit is what makes the result mean something: an unthrottled run can f
 kates resilience run -f integrity-chaos.yaml
 ```
 
-The command prints the chaos outcome and a before/after impact analysis, not the integrity result, and it can return while the INTEGRITY run is still producing. Its `Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. Anything else — `CHAOS_FAILED`, or a `Skipped` verdict when no chaos provider is available — means the fault may not have landed, and the integrity verdict then proves nothing about the failure.
+The command prints the chaos outcome, a before/after impact analysis and the INTEGRITY run's ID, as `Test Run`, but not the integrity result, and it can return while the INTEGRITY run is still producing. Its `Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. Anything else — `CHAOS_FAILED`, or a `Skipped` verdict when no chaos provider is available — means the fault may not have landed, and the integrity verdict then proves nothing about the failure.
 
 ### Step 4: Analyze the Results
 
-Read the verdict from the INTEGRITY run itself:
+Read the verdict from the INTEGRITY run itself, with the ID that `kates resilience run` printed:
 
 ```bash
-kates test list --type INTEGRITY   # newest first: the top row is this run
 kates test watch <id>              # wait for produce, consume and verification
 kates test get <id>
 ```

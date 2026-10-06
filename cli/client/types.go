@@ -431,6 +431,7 @@ type CreateScheduleRequest struct {
 type ResilienceResult struct {
 	Status           string             `json:"status"`
 	Error            string             `json:"error,omitempty"`
+	TestRunID        string             `json:"testRunId,omitempty"`
 	ChaosOutcome     *ChaosOutcome      `json:"chaosOutcome,omitempty"`
 	ImpactDeltas     map[string]float64 `json:"impactDeltas,omitempty"`
 	PreChaosSummary  *ReportSummary     `json:"preChaosSummary,omitempty"`
@@ -457,9 +458,13 @@ type ResilienceResult struct {
 }
 
 // RunID is the id of the test run the fault went into, or "" when the
-// report has none: a run that ended before the recovery wait has no
-// performance report to carry it.
+// benchmark never started. The API names the run in testRunId as soon as it
+// starts. An API without testRunId names it only in the performance report,
+// which a run that ended before the recovery wait doesn't have.
 func (r *ResilienceResult) RunID() string {
+	if r.TestRunID != "" {
+		return r.TestRunID
+	}
 	if r.PerformanceReport == nil || r.PerformanceReport.Run == nil {
 		return ""
 	}
