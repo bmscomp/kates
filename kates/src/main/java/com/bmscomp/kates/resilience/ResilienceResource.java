@@ -1,13 +1,9 @@
 package com.bmscomp.kates.resilience;
 
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import jakarta.inject.Inject;
-import jakarta.validation.Validator;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -22,9 +18,6 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
-import com.bmscomp.kates.domain.CreateTestRequest;
-import com.bmscomp.kates.domain.ScenarioPhase;
-import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 
 /**
@@ -54,7 +47,7 @@ public class ResilienceResource {
     FaultLimits faultLimits;
 
     @Inject
-    Validator validator;
+    com.bmscomp.kates.engine.SpecLimits specLimits;
 
     /**
      * A 400 naming each parameter of the chaos spec outside the chaos limits,
@@ -76,54 +69,25 @@ public class ResilienceResource {
     }
 
     /**
-     * A 400 naming each value of a testRequest spec outside the limits TestSpec
-     * sets, or empty when all are within them. POST /api/tests checks its spec
-     * by bean validation, which can't run on the whole testRequest here: it
-     * would also require the request's own type, which a scenario with a type
-     * of its own goes without. So each spec is validated on its own, a
-     * scenario's base spec and phase specs too. The request's spec is keyed by
-     * field name, as bean validation keys it, and a scenario's by its path in
-     * the scenario, as refusal() keys a scenario's fields.
+     * A 400 naming each value of the testRequest's spec outside the limits
+     * TestSpec sets, or empty when all are within them. POST /api/tests checks
+     * its spec by bean validation, which can't run on the whole testRequest
+     * here: it would also require the request's own type, which a scenario
+     * with a type of its own goes without. So the spec is checked on its own,
+     * and keyed by field name, as bean validation keys it. A scenario's specs
+     * are refusal()'s to check, as on POST /api/tests.
      */
-    private Optional<Response> outsideSpecLimits(CreateTestRequest testRequest) {
-        // Each value's path in the testRequest, with the reason.
-        Map<String, String> found = new LinkedHashMap<>();
-        putViolations("spec.", testRequest.getSpec(), found);
-        TestScenario scenario = testRequest.getScenario();
-        if (scenario != null) {
-            putViolations("scenario.baseSpec.", scenario.getBaseSpec(), found);
-            List<ScenarioPhase> phases = scenario.getPhases() != null ? scenario.getPhases() : List.of();
-            for (int i = 0; i < phases.size(); i++) {
-                ScenarioPhase phase = phases.get(i);
-                // A null phase has no spec to check.
-                if (phase != null) {
-                    putViolations("scenario.phases[" + i + "].spec.", phase.getSpec(), found);
-                }
-            }
-        }
+    private Optional<Response> outsideSpecLimits(TestSpec spec) {
+        Map<String, String> found = specLimits.violations(spec);
         if (found.isEmpty()) {
             return Optional.empty();
         }
         String message = found.entrySet().stream()
-                .map(e -> e.getKey() + ": " + e.getValue())
+                .map(e -> "spec." + e.getKey() + ": " + e.getValue())
                 .collect(Collectors.joining("; "));
-        // Keyed below spec. or scenario., as refusal() keys the fields it names.
-        Map<String, String> fieldErrors = new LinkedHashMap<>();
-        found.forEach((path, reason) -> fieldErrors.put(path.substring(path.indexOf('.') + 1), reason));
         return Optional.of(Response.status(400)
-                .entity(ApiError.validationFailed(message, fieldErrors))
+                .entity(ApiError.validationFailed(message, found))
                 .build());
-    }
-
-    /** Puts each value of the spec outside its limits into found, under path. */
-    private void putViolations(String path, TestSpec spec, Map<String, String> found) {
-        if (spec == null) {
-            return;
-        }
-        // Sorted, so that the message names them in the same order each time.
-        validator.validate(spec).stream()
-                .sorted(Comparator.comparing(v -> v.getPropertyPath() + ": " + v.getMessage()))
-                .forEach(v -> found.putIfAbsent(path + v.getPropertyPath(), v.getMessage()));
     }
 
     private StreamingOutput executeWithKeepAlive(ResilienceTestRequest request, String scenarioId) {
@@ -154,6 +118,42 @@ public class ResilienceResource {
         };
     }
 
+    /**
+     * A 400 naming each value of the test request's spec outside its limits,
+     * or else each field the run could not apply, or empty when there is
+     * none. The spec limits come first, as on POST /api/tests, where bean
+     * validation answers before the orchestrator is asked. Asked before the
+     * stream starts: once the keep-alive bytes have gone out the status is
+     * 200, and a test request the orchestrator refuses could only end the
+     * report as ERROR.
+     */
+    private Optional<Response> refused(com.bmscomp.kates.domain.CreateTestRequest testRequest) {
+        return outsideSpecLimits(testRequest.getSpec())
+                .or(() -> testOrchestrator
+                        .refusal(testRequest)
+                        .map(refusal -> Response.status(400)
+                                .entity(ApiError.validationFailed(refusal.getMessage(), refusal.getFieldErrors()))
+                                .build()));
+    }
+
+    /**
+     * A 400 naming targetLabel when the fault's selector doesn't parse, or
+     * empty when it does. Asked before the stream starts: the fault parses it
+     * only as it goes in, after the benchmark has run for steadyStateSec, and
+     * the report then ends CHAOS_FAILED.
+     */
+    private static Optional<Response> unparsedTargetLabel(FaultSpec chaosSpec) {
+        try {
+            com.bmscomp.kates.chaos.ParsedLabelSelector.parse(chaosSpec.targetLabel());
+            return Optional.empty();
+        } catch (IllegalArgumentException e) {
+            return Optional.of(Response.status(400)
+                    .entity(ApiError.validationFailed(
+                            "targetLabel: " + e.getMessage(), Map.of("targetLabel", e.getMessage())))
+                    .build());
+        }
+    }
+
     @POST
     @Operation(
             summary = "Execute a resilience test",
@@ -176,21 +176,9 @@ public class ResilienceResource {
                     .build();
         }
 
-        // The spec limits first, as on POST /api/tests, where bean validation
-        // answers before the orchestrator is asked.
-        Optional<Response> outsideSpecLimits = outsideSpecLimits(request.getTestRequest());
-        if (outsideSpecLimits.isPresent()) {
-            return outsideSpecLimits.get();
-        }
-        // Checked here because the answer is a stream: once the keep-alive
-        // bytes have gone out the status is 200, and a test request the
-        // orchestrator refuses could only end the report as ERROR.
-        var refused = testOrchestrator.refusal(request.getTestRequest());
+        Optional<Response> refused = refused(request.getTestRequest());
         if (refused.isPresent()) {
-            return Response.status(400)
-                    .entity(ApiError.validationFailed(
-                            refused.get().getMessage(), refused.get().getFieldErrors()))
-                    .build();
+            return refused.get();
         }
         Optional<Response> outsideLimits = outsideLimits(request.getChaosSpec());
         if (outsideLimits.isPresent()) {
@@ -215,9 +203,16 @@ public class ResilienceResource {
     @Path("/scenarios/{id}")
     @Operation(
             summary = "Run a resilience scenario",
-            description =
-                    "Executes a pre-built scenario with optional parameter overrides (targetPod, chaosDurationSec)")
-    @APIResponse(responseCode = "200", description = "Resilience test report")
+            description = "Runs the body's testRequest, a POST /api/tests body, and injects the scenario's fault while"
+                    + " it runs, with the scenario's probes. The fault hits one broker pod at random; targetLabel or"
+                    + " targetPod in the body picks other pods, and chaosDurationSec sets its length")
+    @APIResponse(responseCode = "200", description = "The scenario id and its resilience test report")
+    @APIResponse(
+            responseCode = "400",
+            description = "No testRequest, or the node-maintenance scenario, which can't name the node to drain;"
+                    + " or, with fieldErrors naming each field, a testRequest spec value outside its limits, a"
+                    + " testRequest spec field the test type or backend cannot apply, a targetLabel that isn't a"
+                    + " label selector, or a chaosDurationSec outside the chaos limits")
     @APIResponse(responseCode = "404", description = "Scenario not found")
     public Response runScenario(
             @Parameter(description = "Scenario ID") @PathParam("id") String id, Map<String, Object> overrides) {
@@ -228,25 +223,36 @@ public class ResilienceResource {
                     .entity(ApiError.of(404, "Not Found", "No scenario with ID: " + id))
                     .build();
         }
+        // A scenario can't name the node to drain, and Kates sets no
+        // TARGET_NODE itself: Litmus node-drain, given none, drains the node
+        // of a random pod in any namespace, and the kubernetes provider has no
+        // NODE_DRAIN. The scenario stays listed, and is refused until Kates
+        // can aim a drain at a broker's node.
+        if (scenario.disruptionType() == com.bmscomp.kates.chaos.DisruptionType.NODE_DRAIN) {
+            return Response.status(400)
+                    .entity(ApiError.of(
+                            400,
+                            "Bad Request",
+                            "Scenario " + id + " is listed but not run: a scenario can't name the node to drain, and"
+                                    + " Litmus node-drain, given none, drains the node of a random pod in any"
+                                    + " namespace. POST /api/resilience takes a NODE_DRAIN with the node in"
+                                    + " chaosSpec.envOverrides.TARGET_NODE"))
+                    .build();
+        }
 
         ResilienceTestRequest request = new ResilienceTestRequest();
         request.setChaosSpec(ResilienceScenarios.buildFaultSpec(scenario, overrides));
-        Optional<Response> outsideLimits = outsideLimits(request.getChaosSpec());
-        if (outsideLimits.isPresent()) {
-            return outsideLimits.get();
+        Optional<Response> refusedFault =
+                unparsedTargetLabel(request.getChaosSpec()).or(() -> outsideLimits(request.getChaosSpec()));
+        if (refusedFault.isPresent()) {
+            return refusedFault.get();
         }
         request.setProbes(scenario.probes());
         request.setSteadyStateSec(scenario.steadyStateSec());
         request.setMaxRecoveryWaitSec(scenario.maxRecoveryWaitSec());
 
-        // Scenario requires a testRequest — use minimal load test if none provided
-        if (overrides != null && overrides.containsKey("testRequest")) {
-            // The caller provided a full testRequest via the overrides body
-            // In practice this would need deserialization — for now, scenarios
-            // run chaos-only (no benchmark) by returning an error
-        }
-
-        if (request.getTestRequest() == null) {
+        Object testRequest = overrides != null ? overrides.get("testRequest") : null;
+        if (testRequest == null) {
             return Response.status(400)
                     .entity(ApiError.of(
                             400,
@@ -254,6 +260,15 @@ public class ResilienceResource {
                             "A 'testRequest' override is required when running a scenario. "
                                     + "Include it in the request body to run a combined benchmark + chaos test."))
                     .build();
+        }
+        // Read by the mapper that reads POST /api/resilience's body, so the
+        // same fields count. One that isn't a test request throws an
+        // IllegalArgumentException, which GlobalExceptionMapper answers 400.
+        request.setTestRequest(
+                objectMapper.convertValue(testRequest, com.bmscomp.kates.domain.CreateTestRequest.class));
+        Optional<Response> refused = refused(request.getTestRequest());
+        if (refused.isPresent()) {
+            return refused.get();
         }
 
         StreamingOutput stream = executeWithKeepAlive(request, id);

@@ -220,7 +220,7 @@ Running a test once and drawing conclusions is dangerous [@georges2007statistica
 
 ### Warm-Up Phase
 
-Always discard the first few seconds of data. Multi-phase Kates scenarios support a dedicated WARMUP phase that runs at a reduced target throughput ahead of the steady-state phase; results are recorded per phase, so warm-up numbers stay out of your steady-state measurements.
+Always discard the first few seconds of data. A scenario sent to [POST /api/tests](11-api-reference.md#post-apitests) can open with a WARMUP phase at a lower rate: its phases run one after another, each for its duration, so the warm-up is over before the steady-state phase starts. The run's report gives each phase its own metrics, so the warm-up's numbers stay out of the steady-state phase's, though the run's summary covers every phase.
 
 ### Multiple Runs
 
