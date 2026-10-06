@@ -1,6 +1,7 @@
 package com.bmscomp.kates.chaos.litmus;
 
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
@@ -11,7 +12,19 @@ public class ChaosEngineSpec {
     public String chaosServiceAccount;
     public String annotationCheck;
     public AppInfo appinfo;
+    public EngineComponents components;
     public List<Experiment> experiments;
+
+    /** The chaos-runner pod's settings; the operator fills in what is left out. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class EngineComponents {
+        public Runner runner;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Runner {
+        public Map<String, String> nodeSelector;
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class AppInfo {
@@ -32,9 +45,11 @@ public class ChaosEngineSpec {
         public List<Probe> probe;
     }
 
+    /** The experiment pod's settings. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Components {
         public List<EnvVar> env;
+        public Map<String, String> nodeSelector;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
