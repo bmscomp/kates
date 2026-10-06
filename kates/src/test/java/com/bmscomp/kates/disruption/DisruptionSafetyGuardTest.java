@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
@@ -910,5 +911,92 @@ class DisruptionSafetyGuardTest {
         assertEquals(
                 List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"),
                 guard.validatePlan(plan(1, typeless)).errors());
+    }
+
+    // ── A drain never takes the node the Kates API runs on ──────────────────
+
+    /** The Kates API, as if it ran on {@code node}. */
+    private static com.bmscomp.kates.chaos.KatesNode katesOn(String node) {
+        return new com.bmscomp.kates.chaos.KatesNode() {
+            @Override
+            public Optional<String> name() {
+                return Optional.ofNullable(node);
+            }
+        };
+    }
+
+    private static final String EVICTS_KATES =
+            ", the node the Kates API runs on, and draining it would evict the Kates API in the middle of the run";
+
+    @Test
+    void aDrainOfTheKatesNodeIsRefused() {
+        createKafkaOnNodes();
+        guard.katesNode = katesOn("alpha");
+
+        // It used to run, and evict the Kates API in the middle of the plan.
+        assertEquals(
+                List.of("Step 'step-0': NODE_DRAIN: pod krafter-brokers-0 runs on alpha" + EVICTS_KATES
+                        + ". Aim the drain at a pod on another node"),
+                guard.validatePlan(plan(-1, drain().targetBrokerId(0).build())).errors());
+        assertEquals(
+                List.of("Step 'step-0': NODE_DRAIN: envOverrides.TARGET_NODE names alpha" + EVICTS_KATES),
+                guard.validatePlan(plan(
+                                -1,
+                                drain().envOverrides(Map.of("TARGET_NODE", "alpha"))
+                                        .build()))
+                        .errors());
+        assertFalse(guard.dryRun(plan(-1, drain().targetBrokerId(0).build())).wouldSucceed());
+    }
+
+    @Test
+    void aRandomDrainLeavesTheKatesNodeOutOfItsWorstCase() {
+        createKafkaOnNodes();
+        guard.katesNode = katesOn("alpha");
+        FaultSpec random = drain().build();
+
+        // alpha, with two brokers, would be the worst case, but the provider
+        // never drains it: sigma and gamma run one broker each.
+        assertTrue(guard.validatePlan(plan(1, random)).safe());
+        assertEquals(
+                List.of("NODE_DRAIN drains the node of a pod picked at random, never alpha, which the Kates API runs"
+                        + " on; the count takes the worst case, node gamma, which runs 1 broker"),
+                guard.dryRun(plan(1, random)).steps().getFirst().warnings());
+    }
+
+    @Test
+    void aRandomDrainWhosePodsAllRunOnTheKatesNodeIsRefused() {
+        createKafkaOnNodes();
+        guard.katesNode = katesOn("alpha");
+
+        assertEquals(
+                List.of("Step 'step-0': NODE_DRAIN: every pod targetLabel matches runs on alpha" + EVICTS_KATES),
+                guard.validatePlan(plan(-1, drain().targetLabel("zone=alpha").build()))
+                        .errors());
+    }
+
+    @Test
+    void aNodeLabelOverrideLeavesTheKatesNodeOut() {
+        createKafkaOnNodes();
+        guard.katesNode = katesOn("gamma");
+        FaultSpec byLabel =
+                drain().envOverrides(Map.of("NODE_LABEL", "drainable=true")).build();
+
+        // sigma is left: with broker 2's own step, that is still one broker.
+        assertTrue(guard.validatePlan(plan(1, byLabel, kill(2))).safe());
+        assertEquals(
+                List.of("NODE_DRAIN drains a node Kates picks among those envOverrides.NODE_LABEL 'drainable=true'"
+                        + " matches, never gamma, which the Kates API runs on; the count takes the worst case, node"
+                        + " sigma, which runs 1 broker"),
+                guard.dryRun(plan(-1, byLabel)).steps().getFirst().warnings());
+
+        guard.katesNode = katesOn("sigma");
+        assertEquals(
+                List.of("Step 'step-0': NODE_DRAIN: envOverrides.NODE_LABEL 'topology.kubernetes.io/zone=sigma'"
+                        + " matches only sigma" + EVICTS_KATES),
+                guard.validatePlan(plan(
+                                -1,
+                                drain().envOverrides(Map.of("NODE_LABEL", "topology.kubernetes.io/zone=sigma"))
+                                        .build()))
+                        .errors());
     }
 }

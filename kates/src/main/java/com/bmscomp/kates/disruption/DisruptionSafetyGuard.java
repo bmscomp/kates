@@ -452,6 +452,10 @@ public class DisruptionSafetyGuard {
      */
     record Drain(Impact impact, String target, List<String> notes) {}
 
+    /** The node the Kates API runs on, which a drain never takes. */
+    @Inject
+    com.bmscomp.kates.chaos.KatesNode katesNode;
+
     /** The Litmus settings that pick the node a node-drain drains. */
     private static final String TARGET_NODE = "TARGET_NODE";
 
@@ -473,19 +477,26 @@ public class DisruptionSafetyGuard {
      * the litmus-crd provider drains the node of the pod {@link PodTargets}
      * picks, looked up as the provider does. A random pick, or a node Litmus
      * picks by envOverrides.NODE_LABEL, counts the node it may land on that
-     * runs the most brokers. A drain that would drain nothing, such as one
-     * whose pod is on no node yet, counts none and says why: its step fails
-     * without draining.
+     * runs the most brokers, leaving out the node the Kates API runs on
+     * ({@link com.bmscomp.kates.chaos.KatesNode}), which the provider never
+     * drains. A drain that would drain nothing, such as one whose pod is on no
+     * node yet, counts none and says why: its step fails without draining.
      *
      * @throws IllegalArgumentException when targetLabel or NODE_LABEL is not a
-     *     valid selector, or the pods a targetAll drain picks run on more than
-     *     one node, which node-drain cannot drain at once
+     *     valid selector, the pods a targetAll drain picks run on more than one
+     *     node, which node-drain cannot drain at once, or the drain can take no
+     *     node but the Kates API's
      */
     Drain drain(FaultSpec spec, List<Pod> kafkaPods) {
         Map<String, String> overrides = spec.envOverrides() != null ? spec.envOverrides() : Map.of();
         String targetNode = overrides.get(TARGET_NODE);
         String nodeLabel = overrides.get(NODE_LABEL);
+        Optional<String> kates = katesNode != null ? katesNode.name() : Optional.empty();
         if (targetNode != null && !targetNode.isBlank()) {
+            if (kates.isPresent() && targetNode.equals(kates.get())) {
+                throw new IllegalArgumentException(
+                        com.bmscomp.kates.chaos.KatesNode.refusal("envOverrides.TARGET_NODE names", targetNode));
+            }
             return onNode(
                     targetNode,
                     null,
@@ -494,15 +505,29 @@ public class DisruptionSafetyGuard {
         }
         if (nodeLabel != null && !nodeLabel.isBlank()) {
             ParsedLabelSelector selector = ParsedLabelSelector.parse(nodeLabel);
-            List<String> nodes = kubeClient.nodes().withLabelSelector(selector.toString()).list().getItems().stream()
+            List<String> nodes = kubeClient.nodes().list().getItems().stream()
+                    .filter(n -> selector.matches(
+                            n.getMetadata().getLabels() != null
+                                    ? n.getMetadata().getLabels()
+                                    : Map.of()))
                     .map(n -> n.getMetadata().getName())
                     .toList();
-            return nodes.isEmpty()
-                    ? nothing("envOverrides.NODE_LABEL '" + nodeLabel + "' matches no node, so the step drains nothing")
-                    : worstOf(
-                            nodes,
-                            kafkaPods,
-                            "NODE_DRAIN drains a node Litmus picks by envOverrides.NODE_LABEL '" + nodeLabel + "'");
+            if (nodes.isEmpty()) {
+                return nothing(
+                        "envOverrides.NODE_LABEL '" + nodeLabel + "' matches no node, so the step drains nothing");
+            }
+            List<String> drainable = awayFrom(kates, nodes);
+            if (drainable.isEmpty()) {
+                throw new IllegalArgumentException(com.bmscomp.kates.chaos.KatesNode.refusal(
+                        "envOverrides.NODE_LABEL '" + nodeLabel + "' matches only", kates.get()));
+            }
+            return worstOf(
+                    drainable,
+                    kafkaPods,
+                    drainable.size() < nodes.size()
+                            ? "NODE_DRAIN drains a node Kates picks among those envOverrides.NODE_LABEL '" + nodeLabel
+                                    + "' matches, never " + kates.get() + ", which the Kates API runs on"
+                            : "NODE_DRAIN drains a node Litmus picks by envOverrides.NODE_LABEL '" + nodeLabel + "'");
         }
         if (overrides.containsKey(TARGET_NODE) || overrides.containsKey(NODE_LABEL)) {
             return worstOf(
@@ -549,9 +574,21 @@ public class DisruptionSafetyGuard {
                     .filter(Objects::nonNull)
                     .distinct()
                     .toList();
-            return nodes.isEmpty()
-                    ? nothing("no pod targetLabel matches is on a node yet, so the step drains nothing")
-                    : worstOf(nodes, kafkaPods, "NODE_DRAIN drains the node of a pod picked at random");
+            if (nodes.isEmpty()) {
+                return nothing("no pod targetLabel matches is on a node yet, so the step drains nothing");
+            }
+            List<String> drainable = awayFrom(kates, nodes);
+            if (drainable.isEmpty()) {
+                throw new IllegalArgumentException(com.bmscomp.kates.chaos.KatesNode.refusal(
+                        "every pod targetLabel matches runs on", kates.get()));
+            }
+            return worstOf(
+                    drainable,
+                    kafkaPods,
+                    drainable.size() < nodes.size()
+                            ? "NODE_DRAIN drains the node of a pod picked at random, never " + kates.get()
+                                    + ", which the Kates API runs on"
+                            : "NODE_DRAIN drains the node of a pod picked at random");
         }
 
         List<String> picked = PodTargets.select(spec, candidates);
@@ -588,6 +625,13 @@ public class DisruptionSafetyGuard {
             return new Drain(Impact.NONE, String.join(",", picked), notes);
         }
         String node = nodes.iterator().next();
+        if (kates.isPresent() && node.equals(kates.get())) {
+            List<String> onIt =
+                    picked.stream().filter(p -> node.equals(nodeOfPod.get(p))).toList();
+            throw new IllegalArgumentException(
+                    com.bmscomp.kates.chaos.KatesNode.refusal(com.bmscomp.kates.chaos.KatesNode.picked(onIt), node)
+                            + ". Aim the drain at a pod on another node");
+        }
         Drain drain = onNode(
                 node,
                 String.join(",", picked),
@@ -637,6 +681,11 @@ public class DisruptionSafetyGuard {
 
     private static Drain nothing(String why) {
         return new Drain(Impact.NONE, null, List.of(why));
+    }
+
+    /** The nodes a drain may land on, less {@code kates}, the node the Kates API runs on. */
+    private static List<String> awayFrom(Optional<String> kates, List<String> nodes) {
+        return kates.map(k -> nodes.stream().filter(n -> !n.equals(k)).toList()).orElse(nodes);
     }
 
     /** The node a pod runs on, or null when it is on none yet. */
