@@ -348,6 +348,65 @@ class TestResourceTest {
         verifyNoInteractions(trogdorClient);
     }
 
+    /**
+     * The run stores the scenario's name in 128 characters. A longer one
+     * failed the save as the run was registered, and the answer was a 400
+     * whose message, "Error invoking subclass method", named none of it.
+     */
+    @Test
+    void aScenarioNameLongerThanTheRunStoresIsRefused() {
+        given().contentType("application/json")
+                .body(scenario("x".repeat(129), "steady"))
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("name"))
+                .body(
+                        "message",
+                        is("scenario.name: a scenario's name is stored in 128 characters at most, and this one has"
+                                + " 129; shorten it"));
+        verifyNoInteractions(trogdorClient);
+    }
+
+    /**
+     * The ids of a phase's tasks hold its name, and the run stores an id in
+     * 128 characters. A name that made one longer failed the save after the
+     * tasks had started: the answer was a 500, and the tasks ran their course
+     * with nothing recorded.
+     */
+    @Test
+    void aPhaseNameLongerThanItsTasksIdsHoldIsRefused() {
+        given().contentType("application/json")
+                .body(scenario("payments", "x".repeat(112)))
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("phases[0].name"))
+                .body("message", containsString("scenario.phases[0].name: a phase's name is 100 characters at most,"));
+        verifyNoInteractions(trogdorClient);
+    }
+
+    /** A LOAD scenario of one STEADY phase, on the trogdor backend these tests mock. */
+    private static java.util.Map<String, Object> scenario(String name, String phaseName) {
+        return java.util.Map.of(
+                "type",
+                "LOAD",
+                "backend",
+                "trogdor",
+                "scenario",
+                java.util.Map.of(
+                        "name",
+                        name,
+                        "type",
+                        "LOAD",
+                        "phases",
+                        List.of(java.util.Map.of("name", phaseName, "phaseType", "STEADY", "durationMs", 60_000))));
+    }
+
     private static void awaitStatus(String id, String status) {
         long deadline = System.currentTimeMillis() + 10_000;
         while (System.currentTimeMillis() < deadline) {

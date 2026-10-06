@@ -1323,6 +1323,112 @@ class TestOrchestratorTest {
         }
 
         @Test
+        void aNameLongerThanTheRunStoresIsRefusedBeforeTakingAPermit() {
+            // The run stores the scenario's name in 128 characters
+            // (test_runs.scenario_name), so a longer one failed the save as
+            // the run was registered, with an answer that named none of it.
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest request = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY));
+            request.getScenario().setName("x".repeat(129));
+
+            for (int i = 0; i < 5; i++) {
+                Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+                InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+                assertEquals(
+                        Map.of(
+                                "name",
+                                "a scenario's name is stored in 128 characters at most, and this one has 129;"
+                                        + " shorten it"),
+                        invalid.getFieldErrors());
+                assertTrue(invalid.getMessage().startsWith("scenario.name: "), invalid.getMessage());
+            }
+            assertTrue(submitted.isEmpty());
+
+            // 128 characters fit, counted as PostgreSQL counts them: a
+            // character outside the BMP is one, though Java holds it in two.
+            request.getScenario().setName(new String(Character.toChars(0x1F680)).repeat(128));
+            assertTrue(engine.executeTest(request).isSuccess());
+        }
+
+        @Test
+        void aPhaseNameItsTasksIdsCannotHoldIsRefusedBeforeTheTasksStart() {
+            // Each id of a phase's tasks is the run's id, the phase's name and
+            // a suffix such as -produce or -ramp-99, stored in 128 characters
+            // (test_results.task_id). A save that failed on a longer one came
+            // after the tasks had started, so they ran their course with
+            // nothing recorded, and the run kept its slot until the reaper.
+            TestOrchestrator engine = withBackend("native");
+            ScenarioPhase ramp = phase("x".repeat(101), ScenarioPhase.PhaseType.RAMP);
+            ramp.setTargetThroughput(100);
+            ramp.setRampSteps(100);
+            CreateTestRequest request = scenario(new TestSpec(), phase("warm", ScenarioPhase.PhaseType.WARMUP), ramp);
+
+            Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(
+                    Map.of(
+                            "phases[1].name",
+                            "a phase's name is 100 characters at most, since the ids of its tasks hold it, and this one"
+                                    + " has 101; shorten it"),
+                    invalid.getFieldErrors());
+            assertTrue(submitted.isEmpty());
+
+            // At 100 characters every id fits, the last RAMP step's too.
+            ramp.setName("x".repeat(100));
+            assertTrue(engine.executeTest(request).isSuccess());
+            assertEquals(101, submitted.size());
+            assertTrue(
+                    submitted.stream().allMatch(task -> task.getTaskId().length() <= 128),
+                    () -> "the longest id has "
+                            + submitted.stream()
+                                    .mapToInt(task -> task.getTaskId().length())
+                                    .max()
+                                    .orElse(0)
+                            + " characters");
+        }
+
+        @Test
+        void aNulCharacterTheDatabaseCannotStoreIsRefused() {
+            // PostgreSQL stores no NUL character in text, and jsonb refuses
+            // one too. So a NUL in the scenario's name or in a label failed
+            // the run's first save, and one in a phase's name the save after
+            // its tasks had started.
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest request = scenario(new TestSpec(), phase("ste\0ady", ScenarioPhase.PhaseType.STEADY));
+            request.getScenario().setName("pay\0ments");
+            request.getScenario().setLabels(new java.util.LinkedHashMap<>(Map.of("team", "pay\0ments")));
+
+            Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(
+                    Map.of(
+                            "name",
+                            "a scenario's name holds a NUL character, which the Kates API's database cannot store;"
+                                    + " remove it",
+                            "labels",
+                            "a label's key or value holds a NUL character, which the Kates API's database cannot"
+                                    + " store; remove it",
+                            "phases[0].name",
+                            "a phase's name holds a NUL character, which the Kates API's database cannot store;"
+                                    + " remove it"),
+                    invalid.getFieldErrors());
+            assertTrue(submitted.isEmpty());
+
+            // In a label's key too.
+            request.getScenario().setName("payments");
+            request.getScenario().getPhases().get(0).setName("steady");
+            request.getScenario().setLabels(new java.util.LinkedHashMap<>(Map.of("te\0am", "payments")));
+            failure = engine.executeTest(request).asFailure().orElseThrow();
+            assertEquals(
+                    Set.of("labels"),
+                    assertInstanceOf(InvalidTestSpecException.class, failure)
+                            .getFieldErrors()
+                            .keySet());
+        }
+
+        @Test
         void aScenarioWhoseRunCannotBeBuiltTakesNoPermit() {
             // The run is built before the permit is taken, so whatever throws
             // while it's built, as the missing type did, costs no permit. A

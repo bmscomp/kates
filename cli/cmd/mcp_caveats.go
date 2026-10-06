@@ -67,7 +67,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		ID: mcpCaveatLoadSingleProducer,
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
-		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1447-1456", "case LOAD ->", "case STRESS ->")},
+		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1515-1524", "case LOAD ->", "case STRESS ->")},
 	},
 	{
 		ID: mcpCaveatReaperDeadline,
@@ -85,7 +85,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			"kates/src/main/resources/application.properties:317-331",
 			mcpJava + "engine/TestTimeoutReaper.java:39-47,50-136",
-			mcpJava + "engine/TestOrchestrator.java:127-149,181-184,342,1054-1151",
+			mcpJava + "engine/TestOrchestrator.java:127-149,181-184,342,1057-1111,1177-1219",
 			mcpJava + "persistence/EntityMapper.java:144-153",
 			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
 			mcpJava + "domain/TestRun.java:478-481",
@@ -109,7 +109,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:166,181-183,226",
 				"applyTypeDefaults(type, request.getSpec())", ".withRequestedSpec(", "buildTasks(type, spec, run.getId())"),
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:977-1022", "TestSpec applyTypeDefaults(", "return merged;"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1425-1430,1520-1523",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1493-1498,1588-1591",
 				"Only when asked", `"integrity-cg")`),
 			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:759", `task.getConsumerGroup() + "-integrity"`),
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:42,70-71,129-131",
@@ -152,7 +152,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration. The tuning report copies " +
 			"that one summary into every step, so all steps show the same numbers and the best step is always step 0.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1530-1531", "case TUNE_REPLICATION,", "-tune-0"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1598-1599", "case TUNE_REPLICATION,", "-tune-0"),
 			mcpJava + "trogdor/SpecFactory.java:38-39",
 			mcpJava + "engine/TuningTestRunner.java:101-139",
 		},

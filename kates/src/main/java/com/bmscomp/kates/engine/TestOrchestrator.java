@@ -1050,6 +1050,9 @@ public class TestOrchestrator {
      * /api/resilience runs none, and neither does a schedule as it fires, so
      * the type is checked here too. It is keyed {@code type}, with no prefix:
      * the request's own field, which a scenario's type overrides.
+     *
+     * <p>A scenario value that the run would store and the Kates API's
+     * database cannot hold is refused too: see {@link #unstorable}.
      */
     public java.util.Optional<InvalidTestSpecException> refusal(CreateTestRequest request) {
         // The type the run would have: the scenario's, or else the request's.
@@ -1077,7 +1080,8 @@ public class TestOrchestrator {
             if (!nulls.isEmpty()) {
                 return java.util.Optional.of(new InvalidTestSpecException("scenario.", nulls));
             }
-            Map<String, String> errors = scenarioInapplicableFields(scenario, scenarioBackend(request));
+            Map<String, String> errors = unstorable(scenario);
+            errors.putAll(scenarioInapplicableFields(scenario, scenarioBackend(request)));
             long planned = plannedDurationMs(scenario);
             if (planned > maxDurationMs) {
                 errors.put("phases", "the phases are set to last " + planned + " ms in all" + longerThanAllowed());
@@ -1104,6 +1108,70 @@ public class TestOrchestrator {
         return errors.isEmpty()
                 ? java.util.Optional.empty()
                 : java.util.Optional.of(new InvalidTestSpecException(errors));
+    }
+
+    /** The most characters of a scenario's name the run stores (test_runs.scenario_name). */
+    private static final int MAX_SCENARIO_NAME = 128;
+
+    /**
+     * The most characters of a phase's name. Each id of the phase's tasks
+     * holds it, after the run's id and before a suffix such as -produce or
+     * -ramp-99, and the run stores an id in 128 characters
+     * (test_results.task_id).
+     */
+    private static final int MAX_PHASE_NAME = 100;
+
+    private static final String NUL_REASON =
+            " holds a NUL character, which the Kates API's database cannot store; remove it";
+
+    /**
+     * The values of a scenario that its run would store and the Kates API's
+     * database cannot hold, each keyed by its path in the scenario: a name
+     * longer than the database keeps, and a NUL character in a name or a
+     * label, which PostgreSQL stores in neither text nor jsonb. Each failed
+     * the save that stores it. The scenario's name and labels are saved as
+     * the run is registered, and the answer named none of it. A phase's name
+     * is saved only once the phase's tasks have started, so the client got a
+     * 500 while the tasks ran their course with nothing recorded, and the run
+     * kept its slot until the reaper failed it.
+     */
+    private static Map<String, String> unstorable(TestScenario scenario) {
+        Map<String, String> errors = new java.util.LinkedHashMap<>();
+        String name = scenario.getName();
+        if (name != null && characters(name) > MAX_SCENARIO_NAME) {
+            errors.put(
+                    "name",
+                    "a scenario's name is stored in " + MAX_SCENARIO_NAME + " characters at most, and this one has "
+                            + characters(name) + "; shorten it");
+        } else if (holdsNul(name)) {
+            errors.put("name", "a scenario's name" + NUL_REASON);
+        }
+        if (scenario.getLabels() != null
+                && scenario.getLabels().entrySet().stream()
+                        .anyMatch(label -> holdsNul(label.getKey()) || holdsNul(label.getValue()))) {
+            errors.put("labels", "a label's key or value" + NUL_REASON);
+        }
+        for (int i = 0; i < scenario.getPhases().size(); i++) {
+            String phaseName = scenario.getPhases().get(i).getName();
+            if (phaseName != null && characters(phaseName) > MAX_PHASE_NAME) {
+                errors.put(
+                        "phases[" + i + "].name",
+                        "a phase's name is " + MAX_PHASE_NAME + " characters at most, since the ids of its tasks hold"
+                                + " it, and this one has " + characters(phaseName) + "; shorten it");
+            } else if (holdsNul(phaseName)) {
+                errors.put("phases[" + i + "].name", "a phase's name" + NUL_REASON);
+            }
+        }
+        return errors;
+    }
+
+    /** Its length as PostgreSQL counts it, one for each code point. */
+    private static int characters(String value) {
+        return value.codePointCount(0, value.length());
+    }
+
+    private static boolean holdsNul(String value) {
+        return value != null && value.indexOf('\0') >= 0;
     }
 
     private String longerThanAllowed() {
