@@ -93,8 +93,8 @@ func TestMCPPlannedDurationMs(t *testing.T) {
 		{"ENDURANCE", 3_600_000, 3_600_000, true},
 		{"INTEGRITY", 900_000, 1_800_000, true},
 		{"LOAD", -5, 0, true},
-		// A scenario's stored spec is not validated: the double holds at the
-		// largest value rather than wrapping to a short run.
+		// An older Kates API stored a scenario's spec unchecked: the double
+		// holds at the largest value rather than wrapping to a short run.
 		{"INTEGRITY", math.MaxInt64/2 + 1, math.MaxInt64, true},
 		{"INTEGRATION_CDC", 600_000, 0, false},
 	} {
