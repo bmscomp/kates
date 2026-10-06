@@ -14,9 +14,9 @@ type: application
 # inert, which left two keys that accept a number and ignore it; a release
 # setting either is now refused with the constant to edit named.
 # Patch: the pre-flight, data-test and secret-sync image moves to
-# kates-tester 1.24.0, the tag the v1.24.0 release publishes; every Strimzi
+# kates-tester 1.25.0, the tag the v1.25.0 release publishes; every Strimzi
 # chart pins the same one. Templates and defaults are otherwise unchanged.
-version: 0.11.2
+version: 0.11.3
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -43,6 +43,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.25.0, the tag the v1.25.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.24.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.24.0, the tag the v1.24.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image changes this time: its Kafka CLI moves from 3.7.0 on debian:bookworm-slim to 4.3.1 on debian:trixie-slim, the Kafka the charts deploy, without the 3.7 line's kafka-clients, ZooKeeper and Jetty 9.4 CVEs (#184). A 4.x CLI talks to brokers 2.1 and newer"
     - kind: changed

@@ -98,8 +98,8 @@ Override it like any other value:
 
 ```yaml
 testImages:
-  kubectl: ghcr.io/bmscomp/kates-tester:1.24.0
-  kafka:   ghcr.io/bmscomp/kates-tester:1.24.0
+  kubectl: ghcr.io/bmscomp/kates-tester:1.25.0
+  kafka:   ghcr.io/bmscomp/kates-tester:1.25.0
 ```
 
 ---
@@ -155,7 +155,7 @@ docker run --rm -it -v "$HOME/.kube:/home/kates/.kube:ro" \
 
 | Tag | Meaning |
 |---|---|
-| `1.24.0` | Release version — what the charts pin |
+| `1.25.0` | Release version — what the charts pin |
 | `latest` | Latest default-branch build |
 | `sha-<short-sha>` | Exact commit |
 

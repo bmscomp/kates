@@ -2,18 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: one Kates API pod everywhere, and no Secret read beyond the one the
-# backend needs. Every overlay runs one replica with no autoscaler, the
-# Deployment rolls with Recreate, and the schema refuses what would run a
-# second pod. The ClusterRole grants nothing on Secrets, and
-# rbac.cdcSecretNamespaces grants the CDC test's database password through a
-# Role in its namespace. appVersion is unchanged.
-version: 0.10.8
+# Patch: appVersion and the image tag move to 1.25.0, the image with the
+# backend fixes since 1.24.0. Templates and defaults are otherwise unchanged.
+version: 0.10.9
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.24.0"
+appVersion: "1.25.0"
 keywords:
   - kafka
   - testing
@@ -32,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.25.0, the first image with the backend fixes since 1.24.0. Scenario phases and RAMP steps run one after another (#307). A request the run could not honour is refused with a 400 before it takes a concurrency slot, as is a schedule whose request would be (#296, #298, #299, #302), and scenario and resilience spec values are held to the limits POST /api/tests sets (#303, #306). Deleting a run stops it and frees its slot (#290), a submission that fails part-way stops the tasks it started (#300), and the reaper keeps a failed run's results and reaps each run at its own deadline (#288). A FAILED run or an unmeasured latency no longer passes its gates (#289), and trends read their runs' results (#286). Fault parameters are bounded and each fault is injected once (#291). A resilience run injects its fault only while its benchmark runs, runs a scenario's testRequest and aims its fault at a broker (#309, #311). On litmus-crd a POD_DELETE honours its gracePeriodSec and a fault its delayBeforeSec, and a kubernetes fault is timed from the end of its delay (#304, #308)"
     - kind: fixed
       description: "ACTION REQUIRED for INTEGRATION_CDC on a plain Helm install — the ClusterRole granted get, list and watch on every Secret in the cluster, so the backend's service account could read every SCRAM password, CA key and token there. The backend reads one Secret through the API: the INTEGRATION_CDC test's database password, the Secret postgresql in that database's namespace. The ClusterRole grants nothing on Secrets now, and rbac.cdcSecretNamespaces (default empty) creates a Role with get on that one Secret, bound to the backend's ServiceAccount, in each namespace it lists. `kates deploy` sets it to --db-ns when it installs the CDC database or finds one. A release installed with Helm directly that runs INTEGRATION_CDC needs it set, or the run fails at DB_SETUP with Forbidden; each namespace listed must exist before the install"
     - kind: fixed
