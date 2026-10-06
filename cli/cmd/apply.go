@@ -104,7 +104,7 @@ exits 130 after the summary.`,
       type: LOAD
       spec:
         records: 100000
-        parallelProducers: 2
+        recordSizeBytes: 512
       validate:
         maxP99LatencyMs: 50
         minThroughputRecPerSec: 10000`,

@@ -9,7 +9,7 @@
 #   Partitioned broker is fenced by KRaft controller within 30s.
 #   Partition leaders on sigma migrate to alpha/gamma.
 #   Consumer group rebalances within 60s of the partition.
-#   Producers with acks=all recover with 0 errors after ISR restores.
+#   The producer, with acks=all, recovers with 0 errors after ISR restores.
 #
 # Usage:
 #   kates resilience run -f cli/examples/resilience-network-partition.yaml
@@ -25,8 +25,6 @@ testRequest:
     numRecords: 400000
     recordSize: 512
     throughput: 3000
-    numProducers: 3
-    numConsumers: 2
     consumerGroup: net-partition-cg
     acks: "all"
     enableIdempotence: true

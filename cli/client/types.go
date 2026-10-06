@@ -423,8 +423,11 @@ type CreateScheduleRequest struct {
 	TestRequest    interface{} `json:"testRequest"`
 }
 
-// ResilienceResult from POST /api/resilience. Error says why, when Status is
-// ERROR.
+// ResilienceResult from POST /api/resilience, the Kates API's
+// ResilienceReport. Error says why, when Status is ERROR. The fields are the
+// ones kates resilience run prints. Raw is the report as the API sent it,
+// which -o json prints: it also holds the test run's whole report and the
+// integrity result, which the fields leave out.
 type ResilienceResult struct {
 	Status           string             `json:"status"`
 	Error            string             `json:"error,omitempty"`
@@ -432,6 +435,43 @@ type ResilienceResult struct {
 	ImpactDeltas     map[string]float64 `json:"impactDeltas,omitempty"`
 	PreChaosSummary  *ReportSummary     `json:"preChaosSummary,omitempty"`
 	PostChaosSummary *ReportSummary     `json:"postChaosSummary,omitempty"`
+	// RecoveryTime runs from the end of the fault to the first poll at which
+	// every probe passed or, when no poll did, to the end of the recovery
+	// wait. It is unset when the run ended before that wait.
+	RecoveryTime BackendDuration `json:"recoveryTime"`
+	// Each probe runs once before the fault and once after the recovery
+	// wait. During the fault only Continuous probes run, again and again, so
+	// that list can hold one probe many times.
+	BaselineProbes     []ProbeResult `json:"baselineProbes,omitempty"`
+	DuringChaosProbes  []ProbeResult `json:"duringChaosProbes,omitempty"`
+	PostRecoveryProbes []ProbeResult `json:"postRecoveryProbes,omitempty"`
+	// PerformanceReport is the test run's own report, which the API adds
+	// after the recovery wait. The CLI reads only which run it is.
+	PerformanceReport *struct {
+		Run *struct {
+			ID string `json:"id"`
+		} `json:"run,omitempty"`
+	} `json:"performanceReport,omitempty"`
+
+	Raw json.RawMessage `json:"-"`
+}
+
+// RunID is the id of the test run the fault went into, or "" when the
+// report has none: a run that ended before the recovery wait has no
+// performance report to carry it.
+func (r *ResilienceResult) RunID() string {
+	if r.PerformanceReport == nil || r.PerformanceReport.Run == nil {
+		return ""
+	}
+	return r.PerformanceReport.Run.ID
+}
+
+// ProbeResult is one evaluation of a resilience run's probe. Output is what
+// the probe's command printed, or why it could not run.
+type ProbeResult struct {
+	Name   string `json:"name"`
+	Passed bool   `json:"passed"`
+	Output string `json:"output"`
 }
 
 type ChaosOutcome struct {
