@@ -226,6 +226,36 @@ func TestResilienceRun_SaysWhenNoProbeRanDuringTheFault(t *testing.T) {
 	}
 }
 
+// A run whose probes never all passed in one poll has no recovery time. The
+// table says so, with how long after the fault the last poll ended: the
+// Kates API used to report that wait as the recovery time.
+func TestResilienceRun_SaysWhenTheRunDidNotRecover(t *testing.T) {
+	report := `{"status":"COMPLETED",
+	  "chaosOutcome":{"experimentName":"kafka-pod-kill","verdict":"Pass","chaosDuration":30.000000000},
+	  "baselineProbes":[{"name":"isr-health-check","passed":true,"output":"0"}],
+	  "duringChaosProbes":[{"name":"isr-health-check","passed":false,"output":"61"}],
+	  "postRecoveryProbes":[{"name":"isr-health-check","passed":false,"output":"58"}],
+	  "unrecoveredAfter":115.250000000,
+	  "performanceReport":{"run":{"id":"run-1"}}}`
+	out, _, err := resilienceRunAnswered(t, "table", report)
+	if err != nil {
+		t.Fatalf("kates resilience run: %v", err)
+	}
+	lines := resilienceLines(out)
+	at := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, "Recovery Time ") })
+	if at < 0 || !strings.HasSuffix(lines[at], "NOT RECOVERED 115250 ms after the fault") {
+		t.Errorf("no line saying the run did not recover in:\n%s", stripAnsi(out))
+	}
+	for _, want := range []string{
+		"After recovery 0/1 passed",
+		"After recovery isr-health-check 1/1 58",
+	} {
+		if !slices.Contains(lines, want) {
+			t.Errorf("no line %q in:\n%s", want, stripAnsi(out))
+		}
+	}
+}
+
 // An answer without a report is an error in either output mode. An empty one
 // used to reach the command as a nil report, which the table dereferenced and
 // -o json printed as null. The Kates API sends one when it fails to write the

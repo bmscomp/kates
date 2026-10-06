@@ -435,13 +435,18 @@ type ResilienceResult struct {
 	ImpactDeltas     map[string]float64 `json:"impactDeltas,omitempty"`
 	PreChaosSummary  *ReportSummary     `json:"preChaosSummary,omitempty"`
 	PostChaosSummary *ReportSummary     `json:"postChaosSummary,omitempty"`
-	// RecoveryTime runs from the end of the fault to the first poll at which
-	// every probe passed or, when no poll did, to the end of the recovery
-	// wait. It is unset when the run ended before that wait.
-	RecoveryTime BackendDuration `json:"recoveryTime"`
-	// Each probe runs once before the fault and once after the recovery
-	// wait. During the fault only Continuous probes run, again and again, so
-	// that list can hold one probe many times.
+	// RecoveryTime runs from the end of the fault to the end of the first
+	// poll in which every probe passed. When no poll of the recovery wait
+	// did, the API sets UnrecoveredAfter instead, the time to the end of its
+	// last poll: the least the recovery took. An API without
+	// unrecoveredAfter reports that time as RecoveryTime. Both are unset
+	// when the run ended before the wait.
+	RecoveryTime     BackendDuration `json:"recoveryTime"`
+	UnrecoveredAfter BackendDuration `json:"unrecoveredAfter"`
+	// Each probe runs once before the fault, then in each poll of the
+	// recovery wait, whose last poll is PostRecoveryProbes. During the fault
+	// only Continuous probes run, again and again, so that list can hold one
+	// probe many times.
 	BaselineProbes     []ProbeResult `json:"baselineProbes,omitempty"`
 	DuringChaosProbes  []ProbeResult `json:"duringChaosProbes,omitempty"`
 	PostRecoveryProbes []ProbeResult `json:"postRecoveryProbes,omitempty"`
