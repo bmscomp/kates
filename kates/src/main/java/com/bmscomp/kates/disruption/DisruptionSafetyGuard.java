@@ -162,7 +162,7 @@ public class DisruptionSafetyGuard {
                         spec.disruptionType() == DisruptionType.ROLLING_RESTART && !hit.isEmpty()
                                 ? hit.subList(0, 1)
                                 : hit);
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException | io.fabric8.kubernetes.client.KubernetesClientException e) {
                 errors.add("Step '" + step.name() + "': " + e.getMessage());
             }
 
@@ -226,8 +226,15 @@ public class DisruptionSafetyGuard {
 
             String targetPod = null;
             try {
-                List<String> hit = impact(spec, kafkaPods).pods();
-                if (hit.isEmpty() && spec.disruptionType() == DisruptionType.SCALE_DOWN) {
+                Drain drain = drainsANode(spec) ? drain(spec, kafkaPods) : null;
+                List<String> hit = drain != null
+                        ? drain.impact().pods()
+                        : impact(spec, kafkaPods).pods();
+                if (drain != null) {
+                    targetPod = drain.target();
+                    affected.addAll(hit);
+                    stepWarnings.addAll(drain.notes());
+                } else if (hit.isEmpty() && spec.disruptionType() == DisruptionType.SCALE_DOWN) {
                     stepWarnings.add("SCALE_DOWN removes no broker in namespace '" + kafkaNamespace + "'");
                 } else if (hit.isEmpty()) {
                     stepWarnings.add("targetLabel '" + spec.targetLabel() + "' matches no broker pod in namespace '"
@@ -236,15 +243,14 @@ public class DisruptionSafetyGuard {
                     targetPod = String.join(",", hit);
                     affected.addAll(hit);
                 }
-                if (spec.disruptionType() != DisruptionType.SCALE_DOWN
+                if (drain == null
+                        && spec.disruptionType() != DisruptionType.SCALE_DOWN
                         && PodTargets.mode(spec) == PodTargets.Mode.BROKER_ID
                         && !hit.isEmpty()
                         && !hit.getFirst().endsWith("-" + spec.targetBrokerId())) {
-                    stepWarnings.add("targetBrokerId " + spec.targetBrokerId() + " matches no broker pod, so the step"
-                            + " falls back to " + hit.getFirst() + ", the first broker targetLabel matches. KRaft"
-                            + " controllers are never picked by ID");
+                    stepWarnings.add(brokerIdFallback(spec, hit.getFirst()));
                 }
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException | io.fabric8.kubernetes.client.KubernetesClientException e) {
                 stepWarnings.add(e.getMessage());
             }
 
@@ -380,11 +386,15 @@ public class DisruptionSafetyGuard {
      * not counted. A random pick is one pod, marked since the actual pod is
      * not known yet, and counts as a broker if the selector matches one. A
      * {@code SCALE_DOWN} step hits the broker each KafkaNodePool or
-     * StatefulSet it selects will lose ({@link ScaleDownTargets}).
+     * StatefulSet it selects will lose ({@link ScaleDownTargets}). A drain hits
+     * every Kafka pod on the node it drains ({@link #drain}).
      *
      * @throws IllegalArgumentException when {@code targetLabel} is not a valid selector
      */
     Impact impact(FaultSpec spec, List<Pod> kafkaPods) {
+        if (drainsANode(spec)) {
+            return drain(spec, kafkaPods).impact();
+        }
         boolean inKafkaNamespace =
                 spec.targetNamespace() == null || spec.targetNamespace().equals(kafkaNamespace);
         if (spec.disruptionType() == DisruptionType.SCALE_DOWN) {
@@ -428,6 +438,211 @@ public class DisruptionSafetyGuard {
                 .map(p -> p.getMetadata().getName())
                 .toList());
         return new Impact(pods, pods.stream().filter(brokers::contains).toList());
+    }
+
+    /** What the dry run warns when targetBrokerId names no broker, and the pick falls back to another. */
+    private static String brokerIdFallback(FaultSpec spec, String fallback) {
+        return "targetBrokerId " + spec.targetBrokerId() + " matches no broker pod, so the step falls back to "
+                + fallback + ", the first broker targetLabel matches. KRaft controllers are never picked by ID";
+    }
+
+    /**
+     * What a drain hits, and for the dry run the pods it picks and what it
+     * says about the node: the impact counts every Kafka pod on the node.
+     */
+    record Drain(Impact impact, String target, List<String> notes) {}
+
+    /** The Litmus settings that pick the node a node-drain drains. */
+    private static final String TARGET_NODE = "TARGET_NODE";
+
+    private static final String NODE_LABEL = "NODE_LABEL";
+
+    /**
+     * Whether a step drains a node: a NODE_DRAIN, or a step without a type
+     * that names Litmus's node-drain, which the litmus-crd provider aims the
+     * same way.
+     */
+    static boolean drainsANode(FaultSpec spec) {
+        return spec.disruptionType() == DisruptionType.NODE_DRAIN
+                || (spec.disruptionType() == null && "node-drain".equals(spec.experimentName()));
+    }
+
+    /**
+     * What a drain hits: every Kafka pod on the node it drains, whatever the
+     * namespace of the pod that picks it. Unless an override picks the node,
+     * the litmus-crd provider drains the node of the pod {@link PodTargets}
+     * picks, looked up as the provider does. A random pick, or a node Litmus
+     * picks by envOverrides.NODE_LABEL, counts the node it may land on that
+     * runs the most brokers. A drain that would drain nothing, such as one
+     * whose pod is on no node yet, counts none and says why: its step fails
+     * without draining.
+     *
+     * @throws IllegalArgumentException when targetLabel or NODE_LABEL is not a
+     *     valid selector, or the pods a targetAll drain picks run on more than
+     *     one node, which node-drain cannot drain at once
+     */
+    Drain drain(FaultSpec spec, List<Pod> kafkaPods) {
+        Map<String, String> overrides = spec.envOverrides() != null ? spec.envOverrides() : Map.of();
+        String targetNode = overrides.get(TARGET_NODE);
+        String nodeLabel = overrides.get(NODE_LABEL);
+        if (targetNode != null && !targetNode.isBlank()) {
+            return onNode(
+                    targetNode,
+                    null,
+                    kafkaPods,
+                    "NODE_DRAIN drains node " + targetNode + ", which envOverrides.TARGET_NODE names");
+        }
+        if (nodeLabel != null && !nodeLabel.isBlank()) {
+            ParsedLabelSelector selector = ParsedLabelSelector.parse(nodeLabel);
+            List<String> nodes = kubeClient.nodes().withLabelSelector(selector.toString()).list().getItems().stream()
+                    .map(n -> n.getMetadata().getName())
+                    .toList();
+            return nodes.isEmpty()
+                    ? nothing("envOverrides.NODE_LABEL '" + nodeLabel + "' matches no node, so the step drains nothing")
+                    : worstOf(
+                            nodes,
+                            kafkaPods,
+                            "NODE_DRAIN drains a node Litmus picks by envOverrides.NODE_LABEL '" + nodeLabel + "'");
+        }
+        if (overrides.containsKey(TARGET_NODE) || overrides.containsKey(NODE_LABEL)) {
+            return worstOf(
+                    kafkaPods.stream()
+                            .map(DisruptionSafetyGuard::nodeOf)
+                            .filter(Objects::nonNull)
+                            .distinct()
+                            .toList(),
+                    kafkaPods,
+                    "envOverrides sets TARGET_NODE or NODE_LABEL empty, so node-drain drains the node of a random pod"
+                            + " in any namespace");
+        }
+
+        String namespace = spec.targetNamespace() != null ? spec.targetNamespace() : kafkaNamespace;
+        PodTargets.Mode mode = PodTargets.mode(spec);
+        List<Pod> candidates;
+        if (mode == PodTargets.Mode.NAMED_POD) {
+            Pod pod = kubeClient
+                    .pods()
+                    .inNamespace(namespace)
+                    .withName(spec.targetPod())
+                    .get();
+            if (pod == null) {
+                return nothing("pod " + spec.targetPod() + " was not found in namespace '" + namespace
+                        + "', so the step drains nothing");
+            }
+            candidates = List.of(pod);
+        } else {
+            ParsedLabelSelector selector = ParsedLabelSelector.parse(spec.targetLabel());
+            candidates = kubeClient
+                    .pods()
+                    .inNamespace(namespace)
+                    .withLabelSelector(selector.toString())
+                    .list()
+                    .getItems();
+            if (candidates.isEmpty()) {
+                return nothing("targetLabel '" + spec.targetLabel() + "' matches no pod in namespace '" + namespace
+                        + "', so the step drains nothing");
+            }
+        }
+        if (mode == PodTargets.Mode.ONE_RANDOM) {
+            List<String> nodes = candidates.stream()
+                    .map(DisruptionSafetyGuard::nodeOf)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            return nodes.isEmpty()
+                    ? nothing("no pod targetLabel matches is on a node yet, so the step drains nothing")
+                    : worstOf(nodes, kafkaPods, "NODE_DRAIN drains the node of a pod picked at random");
+        }
+
+        List<String> picked = PodTargets.select(spec, candidates);
+        if (picked.isEmpty()) {
+            return nothing("targetBrokerId picks brokers only, and targetLabel matches no broker pod in namespace '"
+                    + namespace + "', so the step drains nothing");
+        }
+        Map<String, String> nodeOfPod = new HashMap<>();
+        candidates.forEach(p -> nodeOfPod.put(p.getMetadata().getName(), nodeOf(p)));
+        Set<String> nodes = new TreeSet<>();
+        List<String> notOnANode = new ArrayList<>();
+        for (String name : picked) {
+            String node = nodeOfPod.get(name);
+            if (node != null) {
+                nodes.add(node);
+            } else {
+                notOnANode.add(name);
+            }
+        }
+        if (nodes.size() > 1) {
+            throw new IllegalArgumentException("NODE_DRAIN with targetAll picks pods on " + nodes.size() + " nodes ("
+                    + String.join(", ", nodes) + "), and node-drain drains one. Narrow targetLabel to the pods of one"
+                    + " node, or name the node in envOverrides.TARGET_NODE");
+        }
+        List<String> notes = new ArrayList<>();
+        if (mode == PodTargets.Mode.BROKER_ID && !picked.getFirst().endsWith("-" + spec.targetBrokerId())) {
+            notes.add(brokerIdFallback(spec, picked.getFirst()));
+        }
+        if (!notOnANode.isEmpty()) {
+            notes.add("pod " + String.join(", ", notOnANode) + " is not on a node yet, and the step fails without"
+                    + " draining if it still isn't when the step runs");
+        }
+        if (nodes.isEmpty()) {
+            return new Drain(Impact.NONE, String.join(",", picked), notes);
+        }
+        String node = nodes.iterator().next();
+        Drain drain = onNode(
+                node,
+                String.join(",", picked),
+                kafkaPods,
+                "NODE_DRAIN drains node " + node + ", the node of " + String.join(", ", picked));
+        notes.addAll(drain.notes());
+        return new Drain(drain.impact(), drain.target(), notes);
+    }
+
+    /** Every Kafka pod on {@code node}, with a note naming it, which {@code lead} begins. */
+    private static Drain onNode(String node, String target, List<Pod> kafkaPods, String lead) {
+        List<Pod> onIt = kafkaPods.stream()
+                .filter(p -> node.equals(nodeOf(p)))
+                .sorted(Comparator.comparing(p -> p.getMetadata().getName()))
+                .toList();
+        List<String> pods = onIt.stream().map(p -> p.getMetadata().getName()).toList();
+        List<String> brokers = onIt.stream()
+                .filter(PodTargets::isBroker)
+                .map(p -> p.getMetadata().getName())
+                .toList();
+        String note = lead + (onIt.isEmpty() ? ", which runs no Kafka pod" : ", and evicts every pod on it");
+        return new Drain(new Impact(pods, brokers), target, List.of(note));
+    }
+
+    /**
+     * The worst case among the nodes a drain may land on: the one that runs
+     * the most brokers, and of those the first by name.
+     */
+    private static Drain worstOf(List<String> nodes, List<Pod> kafkaPods, String lead) {
+        if (nodes.isEmpty()) {
+            return nothing(lead + ", and no Kafka pod is on a node, so the count takes none");
+        }
+        String worst = nodes.stream()
+                .sorted()
+                .max(Comparator.comparingLong(n -> kafkaPods.stream()
+                        .filter(p -> n.equals(nodeOf(p)) && PodTargets.isBroker(p))
+                        .count()))
+                .orElseThrow();
+        Drain drain = onNode(worst, null, kafkaPods, lead);
+        int brokers = drain.impact().brokers().size();
+        return new Drain(
+                drain.impact(),
+                null,
+                List.of(lead + "; the count takes the worst case, node " + worst + ", which runs " + brokers
+                        + (brokers == 1 ? " broker" : " brokers")));
+    }
+
+    private static Drain nothing(String why) {
+        return new Drain(Impact.NONE, null, List.of(why));
+    }
+
+    /** The node a pod runs on, or null when it is on none yet. */
+    private static String nodeOf(Pod pod) {
+        String node = pod.getSpec() != null ? pod.getSpec().getNodeName() : null;
+        return node == null || node.isBlank() ? null : node;
     }
 
     /** What the dry run says about a SCALE_DOWN step, beyond the brokers it removes. */
