@@ -56,8 +56,8 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 			"the request set it; requestedSpec holds only what the request set, so the two show which values the " +
 			"defaults filled in. A run stored before the backend kept the request has " +
 			"no requestedSpec, and notCarried then names the request fields that backend never copied into the " +
-			"spec, so what a request said for them cannot be shown. The run's integrity result " +
-			"(lost records, RTO, RPO) is not stored. For a run still PENDING, RUNNING or STOPPING, " +
+			"spec, so what a request said for them cannot be shown. An INTEGRITY run's integrity result (lost " +
+			"records, RTO, RPO) is left out; the run's report shows it. For a run still PENDING, RUNNING or STOPPING, " +
 			"reading it makes the backend poll its tasks and save any change of status or results, the same " +
 			"update its 5-second reconciler makes; a finished run is not changed. Task ids and errors, scenario " +
 			"and phase names, labels, and spec values the backend never validated are third-party text and " +
@@ -817,7 +817,7 @@ func mcpRunCaveats(call *mcpCall, run *client.MCPRun) {
 	case run.TestType == "LOAD":
 		call.Caveat(mcpCaveatLoadSingleProducer)
 	case run.TestType == "INTEGRITY":
-		call.Caveat(mcpCaveatIntegrityNotStored)
+		call.Caveat(mcpCaveatIntegrityNotShown)
 	case strings.HasPrefix(run.TestType, "TUNE_"):
 		call.Caveat(mcpCaveatTuningOneMeasurement)
 	}
@@ -2060,7 +2060,7 @@ func mcpRunBounds(s *jsonschema.Schema, lo, hi float64) {
 
 const (
 	mcpCaveatSummaryAveragesTasks   mcpCaveatID = "summary-averages-tasks"
-	mcpCaveatIntegrityNotStored     mcpCaveatID = "integrity-not-stored"
+	mcpCaveatIntegrityNotShown      mcpCaveatID = "integrity-not-shown"
 	mcpCaveatCancelStoredAsFailed   mcpCaveatID = "cancel-stored-as-failed"
 	mcpCaveatScenarioPhaseSpecs     mcpCaveatID = "scenario-phase-specs"
 	mcpCaveatBrokerSkewProjected    mcpCaveatID = "broker-skew-projected"
@@ -2090,18 +2090,21 @@ var mcpCaveatsRuns = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatIntegrityNotStored,
-		Text: "An INTEGRITY run's integrity result (records lost and duplicated, RTO, RPO, the verdict) is not " +
-			"stored: the database keeps each task's counts, rates, latencies and error but not that result. A run " +
-			"read back has none, its Markdown report has no Data Integrity section, and its SLA verdict treats any " +
+		ID: mcpCaveatIntegrityNotShown,
+		Text: "get_run leaves out an INTEGRITY run's integrity result (records lost and duplicated, RTO, RPO, the " +
+			"verdict); the run's Markdown report shows it in a Data Integrity section. A run stored before the Kates " +
+			"API kept that result has none: its report has no such section, and its SLA verdict treats any " +
 			"data-loss, RTO or RPO limit as met, because a missing value is skipped rather than failed.",
 		Refs: []string{
-			mcpJava + "persistence/TestResultEntity.java:20-75",
-			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:186-221",
-				"static void applyResult(TestResultEntity entity, TestResult result)", ".withPhaseName(entity.getPhaseName());"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1790-1791", "getIntegrityResult() != null", "withIntegrity("),
+			mcpAnchoredRef("cli/client/mcp_runs.go:38-55", "get_run", "type MCPRunTask struct {"),
+			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:34-43,216-223,243",
+				"entity.setIntegrityJson(integrityJson);",
+				".withIntegrity(fromJson(INTEGRITY_JSON, entity.getIntegrityJson(), IntegrityResult.class));",
+				"DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false"),
+			"kates/src/main/resources/db/migration/V25__test_result_integrity.sql:1-13",
 			mcpJava + "report/ReportGenerator.java:106-132,479-484",
-			mcpJava + "engine/SlaEvaluator.java:92-103",
+			mcpAnchoredRef(mcpJava+"engine/SlaEvaluator.java:83-104",
+				"only an INTEGRITY task measures these", "metrics.rpoMs() >= 0"),
 		},
 	},
 	{

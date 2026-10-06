@@ -86,8 +86,8 @@ public class SlaEvaluator {
         // error-rate check above fixed. Negative observations mean the run
         // carried no integrity check, in which case the constraint is skipped
         // rather than passed. Unlike an unmeasured latency it does not fail:
-        // integrity results are not stored with a run, so a run a report reads
-        // back from the database never carries one.
+        // only an INTEGRITY task measures these, and a run stored before its
+        // integrity result was kept (V25) carries none.
         if (sla.getMaxDataLossPercent() != null
                 && metrics.dataLossPercent() >= 0
                 && metrics.dataLossPercent() > sla.getMaxDataLossPercent()) {
