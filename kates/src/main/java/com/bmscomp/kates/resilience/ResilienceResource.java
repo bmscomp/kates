@@ -18,6 +18,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
+import com.bmscomp.kates.domain.TestSpec;
 
 /**
  * REST endpoint for combined resilience testing (performance + chaos + probes).
@@ -45,6 +46,9 @@ public class ResilienceResource {
     @Inject
     FaultLimits faultLimits;
 
+    @Inject
+    com.bmscomp.kates.engine.SpecLimits specLimits;
+
     /**
      * A 400 naming each parameter of the chaos spec outside the chaos limits,
      * or empty when all are within them. Asked before the stream starts: the
@@ -58,6 +62,28 @@ public class ResilienceResource {
         }
         String message = found.entrySet().stream()
                 .map(e -> "chaosSpec." + e.getKey() + ": " + e.getValue())
+                .collect(Collectors.joining("; "));
+        return Optional.of(Response.status(400)
+                .entity(ApiError.validationFailed(message, found))
+                .build());
+    }
+
+    /**
+     * A 400 naming each value of the testRequest's spec outside the limits
+     * TestSpec sets, or empty when all are within them. POST /api/tests checks
+     * its spec by bean validation, which can't run on the whole testRequest
+     * here: it would also require the request's own type, which a scenario
+     * with a type of its own goes without. So the spec is checked on its own,
+     * and keyed by field name, as bean validation keys it. A scenario's specs
+     * are refusal()'s to check, as on POST /api/tests.
+     */
+    private Optional<Response> outsideSpecLimits(TestSpec spec) {
+        Map<String, String> found = specLimits.violations(spec);
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        String message = found.entrySet().stream()
+                .map(e -> "spec." + e.getKey() + ": " + e.getValue())
                 .collect(Collectors.joining("; "));
         return Optional.of(Response.status(400)
                 .entity(ApiError.validationFailed(message, found))
@@ -93,17 +119,21 @@ public class ResilienceResource {
     }
 
     /**
-     * A 400 naming each field of the test request the run could not apply, or
-     * empty when it can apply them all. Asked before the stream starts: once
-     * the keep-alive bytes have gone out the status is 200, and a test request
-     * the orchestrator refuses could only end the report as ERROR.
+     * A 400 naming each value of the test request's spec outside its limits,
+     * or else each field the run could not apply, or empty when there is
+     * none. The spec limits come first, as on POST /api/tests, where bean
+     * validation answers before the orchestrator is asked. Asked before the
+     * stream starts: once the keep-alive bytes have gone out the status is
+     * 200, and a test request the orchestrator refuses could only end the
+     * report as ERROR.
      */
     private Optional<Response> refused(com.bmscomp.kates.domain.CreateTestRequest testRequest) {
-        return testOrchestrator
-                .refusal(testRequest)
-                .map(refusal -> Response.status(400)
-                        .entity(ApiError.validationFailed(refusal.getMessage(), refusal.getFieldErrors()))
-                        .build());
+        return outsideSpecLimits(testRequest.getSpec())
+                .or(() -> testOrchestrator
+                        .refusal(testRequest)
+                        .map(refusal -> Response.status(400)
+                                .entity(ApiError.validationFailed(refusal.getMessage(), refusal.getFieldErrors()))
+                                .build()));
     }
 
     /**
@@ -131,9 +161,9 @@ public class ResilienceResource {
     @APIResponse(responseCode = "200", description = "Resilience test report with probe results and RTO")
     @APIResponse(
             responseCode = "400",
-            description = "Invalid request, including a testRequest with no type, a testRequest spec field the test"
-                    + " type or backend cannot apply, or a chaosSpec parameter outside the chaos limits; fieldErrors"
-                    + " names each field")
+            description = "Invalid request, including a testRequest with no type, a testRequest spec value outside"
+                    + " its limits, a testRequest spec field the test type or backend cannot apply, or a chaosSpec"
+                    + " parameter outside the chaos limits; fieldErrors names each field")
     public Response executeResilienceTest(ResilienceTestRequest request) {
         if (request.getTestRequest() == null) {
             return Response.status(400)

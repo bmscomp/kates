@@ -23,6 +23,7 @@ import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.ProbeExecutor;
 import com.bmscomp.kates.chaos.ProbeResult;
 import com.bmscomp.kates.chaos.ProbeSpec;
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
@@ -34,7 +35,8 @@ import com.bmscomp.kates.util.Result;
 /** The resilience run is the one place that knows both the benchmark and the moment of the fault. */
 class ResilienceOrchestratorChaosStartTest {
 
-    private final TestRun run = new TestRun(TestType.INTEGRITY, new TestSpec());
+    private final TestRun run =
+            new TestRun(TestType.INTEGRITY, new TestSpec()).withStatus(TestResult.TaskStatus.RUNNING);
     private final ResilienceOrchestrator orchestrator = new ResilienceOrchestrator();
 
     @BeforeEach

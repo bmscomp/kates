@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
+import jakarta.validation.Validation;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -31,6 +32,9 @@ import com.bmscomp.kates.service.TopicService;
 
 class TestOrchestratorTest {
 
+    private static final SpecLimits SPEC_LIMITS =
+            new SpecLimits(Validation.buildDefaultValidatorFactory().getValidator());
+
     private TestOrchestrator orchestrator;
     private TestTypeDefaults typeDefaults;
 
@@ -49,6 +53,7 @@ class TestOrchestratorTest {
                 // Real, not mocked: it is stateless and a mock would return a
                 // null verdict, which the poll path dereferences.
                 new SlaEvaluator(),
+                SPEC_LIMITS,
                 mock(Event.class),
                 "native",
                 "localhost:9092",
@@ -1250,6 +1255,7 @@ class TestOrchestratorTest {
                     mock(BenchmarkMetrics.class),
                     mock(KatesMetrics.class),
                     new SlaEvaluator(),
+                    SPEC_LIMITS,
                     mock(Event.class),
                     name,
                     "localhost:9092",
@@ -1690,6 +1696,114 @@ class TestOrchestratorTest {
             }
             assertEquals(0, orchestrator.activeTestCount(), "the run's permit is back");
         }
+
+        @Test
+        void aSpecValueOutsideItsLimitsIsRefusedByItsPath() {
+            // Bean validation holds a request's own spec to TestSpec's limits
+            // and stops there, so a scenario's specs reached the run as sent.
+            // Each value is keyed by its path, base spec first, then the
+            // phases in order, each spec's values by name.
+            TestSpec base = new TestSpec();
+            base.setAcks("2");
+            ScenarioPhase steady = phase("steady", ScenarioPhase.PhaseType.STEADY);
+            TestSpec steadySpec = new TestSpec();
+            steadySpec.setTopic("not a topic!");
+            steadySpec.setNumRecords(0);
+            steady.setSpec(steadySpec);
+            ScenarioPhase cooldown = phase("cooldown", ScenarioPhase.PhaseType.COOLDOWN);
+            TestSpec cooldownSpec = new TestSpec();
+            cooldownSpec.setThroughput(-5);
+            cooldown.setSpec(cooldownSpec);
+
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(base, steady, cooldown))
+                    .asFailure()
+                    .orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            Map<String, String> errors = invalid.getFieldErrors();
+            assertEquals(
+                    List.of(
+                            "baseSpec.acks",
+                            "phases[0].spec.numRecords",
+                            "phases[0].spec.topic",
+                            "phases[1].spec.throughput"),
+                    List.copyOf(errors.keySet()));
+            assertEquals("acks must be one of: all, -1, 0, 1", errors.get("baseSpec.acks"));
+            assertEquals("topic must be a legal Kafka topic name", errors.get("phases[0].spec.topic"));
+            assertEquals("throughput must be -1 (unlimited) or positive", errors.get("phases[1].spec.throughput"));
+            assertTrue(
+                    invalid.getMessage()
+                            .startsWith("scenario.baseSpec.acks: acks must be one of: all, -1, 0, 1;"
+                                    + " scenario.phases[0].spec.numRecords: "),
+                    invalid.getMessage());
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void theLimitsAreAnsweredBeforeWhatThePhasesCouldNotApply() {
+            // As bean validation answers before the orchestrator is asked,
+            // the consumer group no phase reads is named once the record
+            // count is within its limits.
+            TestSpec base = new TestSpec();
+            base.setNumRecords(0);
+            base.setConsumerGroup("perf-cg");
+
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(base, phase("steady", ScenarioPhase.PhaseType.STEADY)))
+                    .asFailure()
+                    .orElseThrow();
+
+            assertEquals(
+                    Set.of("baseSpec.numRecords"),
+                    assertInstanceOf(InvalidTestSpecException.class, failure)
+                            .getFieldErrors()
+                            .keySet());
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void theSpecsAfterANullPhaseAreChecked() {
+            // A null phase has no spec to check.
+            ScenarioPhase steady = phase("steady", ScenarioPhase.PhaseType.STEADY);
+            TestSpec own = new TestSpec();
+            own.setCompressionType("brotli");
+            steady.setSpec(own);
+            CreateTestRequest request = scenario(new TestSpec());
+            request.getScenario().setPhases(java.util.Arrays.asList(null, steady));
+
+            Exception failure =
+                    withBackend("native").executeTest(request).asFailure().orElseThrow();
+
+            assertEquals(
+                    Map.of(
+                            "phases[1].spec.compressionType",
+                            "compressionType must be one of: none, gzip, snappy, lz4, zstd"),
+                    assertInstanceOf(InvalidTestSpecException.class, failure).getFieldErrors());
+            assertTrue(submitted.isEmpty());
+        }
+
+        @Test
+        void aScenarioWithoutPhasesHasItsBaseSpecChecked() {
+            // Without phases the request runs as a plain one, and the scenario
+            // goes unread; its base spec is held to the limits all the same,
+            // as bean validation holds the request's own spec whether the run
+            // reads it or not.
+            TestSpec base = new TestSpec();
+            base.setPartitions(0);
+
+            Exception failure = withBackend("native")
+                    .executeTest(scenario(base))
+                    .asFailure()
+                    .orElseThrow();
+
+            assertEquals(
+                    Set.of("baseSpec.partitions"),
+                    assertInstanceOf(InvalidTestSpecException.class, failure)
+                            .getFieldErrors()
+                            .keySet());
+            assertTrue(submitted.isEmpty());
+        }
     }
 
     /**
@@ -1728,6 +1842,7 @@ class TestOrchestratorTest {
                     metrics,
                     mock(KatesMetrics.class),
                     new SlaEvaluator(),
+                    SPEC_LIMITS,
                     mock(Event.class),
                     "native",
                     "localhost:9092",
@@ -1827,6 +1942,7 @@ class TestOrchestratorTest {
                     mock(BenchmarkMetrics.class),
                     mock(KatesMetrics.class),
                     new SlaEvaluator(),
+                    SPEC_LIMITS,
                     mock(Event.class),
                     "native",
                     "localhost:9092",

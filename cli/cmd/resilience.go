@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -13,43 +16,56 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type ResilienceConfig struct {
-	TestRequest struct {
-		Type    string                 `yaml:"type" json:"type"`
-		Backend string                 `yaml:"backend,omitempty" json:"backend,omitempty"`
-		Spec    map[string]interface{} `yaml:"spec,omitempty" json:"spec,omitempty"`
-	} `yaml:"testRequest" json:"testRequest"`
+// parseResilienceFile reads a resilience file as the body of POST
+// /api/resilience, every field as the file has it, and kates resilience run
+// sends it so. Decoded into a struct, the file lost every field the struct
+// lacked: a probe's mode, expectedOutput, comparator, intervalSec and
+// timeoutSec, and testRequest.scenario. The Kates API then ran on its
+// defaults, so each probe was an Edge probe that passed whatever its
+// command printed (comparator contains, expectedOutput ""). The struct also
+// dropped every 0 an omitempty field held, so gracePeriodSec: 0 became the
+// API's 30 and targetBrokerId: 0 a random broker, and it sent steadyStateSec
+// 0 for a file that had none, where the API's default is 30 seconds.
+//
+// A .json file keeps its numbers as written. A value JSON can't hold, such as
+// YAML's .inf, is an error here rather than when the request is sent.
+func parseResilienceFile(path string, data []byte) (map[string]any, error) {
+	var cfg map[string]any
+	var err error
+	if strings.HasSuffix(path, ".json") {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.UseNumber()
+		err = dec.Decode(&cfg)
+		// Decode stops after one value, where Unmarshal refused what follows.
+		if _, rest := dec.Token(); err == nil && rest != io.EOF {
+			err = errors.New("invalid data after the top-level JSON value")
+		}
+	} else {
+		err = yaml.Unmarshal(data, &cfg)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := json.Marshal(cfg); err != nil {
+		return nil, fmt.Errorf("it doesn't convert to JSON: %w", err)
+	}
+	return cfg, nil
+}
 
-	ChaosSpec struct {
-		ExperimentName   string            `yaml:"experimentName" json:"experimentName"`
-		TargetNamespace  string            `yaml:"targetNamespace,omitempty" json:"targetNamespace,omitempty"`
-		TargetLabel      string            `yaml:"targetLabel,omitempty" json:"targetLabel,omitempty"`
-		TargetPod        string            `yaml:"targetPod,omitempty" json:"targetPod,omitempty"`
-		TargetAll        bool              `yaml:"targetAll,omitempty" json:"targetAll,omitempty"`
-		ChaosDurationSec int               `yaml:"chaosDurationSec,omitempty" json:"chaosDurationSec,omitempty"`
-		DelayBeforeSec   int               `yaml:"delayBeforeSec,omitempty" json:"delayBeforeSec,omitempty"`
-		DisruptionType   string            `yaml:"disruptionType,omitempty" json:"disruptionType,omitempty"`
-		TargetBrokerId   int               `yaml:"targetBrokerId,omitempty" json:"targetBrokerId,omitempty"`
-		NetworkLatencyMs int               `yaml:"networkLatencyMs,omitempty" json:"networkLatencyMs,omitempty"`
-		FillPercentage   int               `yaml:"fillPercentage,omitempty" json:"fillPercentage,omitempty"`
-		CpuCores         int               `yaml:"cpuCores,omitempty" json:"cpuCores,omitempty"`
-		MemoryMb         int               `yaml:"memoryMb,omitempty" json:"memoryMb,omitempty"`
-		IoWorkers        int               `yaml:"ioWorkers,omitempty" json:"ioWorkers,omitempty"`
-		GracePeriodSec   int               `yaml:"gracePeriodSec,omitempty" json:"gracePeriodSec,omitempty"`
-		TargetTopic      string            `yaml:"targetTopic,omitempty" json:"targetTopic,omitempty"`
-		TargetPartition  int               `yaml:"targetPartition,omitempty" json:"targetPartition,omitempty"`
-		EnvOverrides     map[string]string `yaml:"envOverrides,omitempty" json:"envOverrides,omitempty"`
-	} `yaml:"chaosSpec" json:"chaosSpec"`
-
-	SteadyStateSec     int `yaml:"steadyStateSec" json:"steadyStateSec"`
-	MaxRecoveryWaitSec int `yaml:"maxRecoveryWaitSec,omitempty" json:"maxRecoveryWaitSec,omitempty"`
-
-	Probes []struct {
-		Name     string `yaml:"name" json:"name"`
-		Type     string `yaml:"type" json:"type"`
-		Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
-		Command  string `yaml:"command,omitempty" json:"command,omitempty"`
-	} `yaml:"probes,omitempty" json:"probes,omitempty"`
+// checkResilienceFile refuses a file without the fields every resilience run
+// needs. A scenario may carry the test's type itself: the Kates API takes
+// testRequest.scenario.type in place of testRequest.type.
+func checkResilienceFile(cfg map[string]any) error {
+	test, _ := cfg["testRequest"].(map[string]any)
+	scenario, _ := test["scenario"].(map[string]any)
+	if mapStrEmpty(test, "type") == "" && mapStrEmpty(scenario, "type") == "" {
+		return errors.New("testRequest.type is required")
+	}
+	chaos, _ := cfg["chaosSpec"].(map[string]any)
+	if mapStrEmpty(chaos, "experimentName") == "" {
+		return errors.New("chaosSpec.experimentName is required")
+	}
+	return nil
 }
 
 var resilienceFile string
@@ -63,6 +79,10 @@ var resilienceCmd = &cobra.Command{
 var resilienceRunCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Execute a resilience test from a YAML or JSON config file",
+	Long: `Run a test and inject one fault while it runs. The file is the body of
+POST /api/resilience, sent as written, so its keys are the Kates API's field
+names: the API ignores a field it doesn't have, and gives each field the file
+leaves out its default. --dry-run prints the body.`,
 	Example: `  kates resilience run -f resilience-test.yaml
   kates resilience run -f resilience-test.json    # JSON still supported
   kates resilience run -f config.yaml --dry-run
@@ -71,16 +91,17 @@ var resilienceRunCmd = &cobra.Command{
   testRequest:
     type: LOAD
     spec:
-      numRecords: 100000
-      numProducers: 2
-      recordSize: 512
+      numRecords: 180000     # at 500 records/s: 360 s of load
+      throughput: 500
+      recordSize: 1024
+      acks: all
 
   chaosSpec:
-    experimentName: kafka-broker-pod-kill
-    targetNamespace: kafka
-    targetLabel: "strimzi.io/component-type=kafka"
-    chaosDurationSec: 30
+    experimentName: kafka-pod-kill
     disruptionType: POD_KILL
+    targetNamespace: kafka
+    targetLabel: "strimzi.io/component-type=kafka,strimzi.io/broker-role=true"
+    chaosDurationSec: 30
 
   steadyStateSec: 30`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -93,35 +114,22 @@ var resilienceRunCmd = &cobra.Command{
 			return cmdErr("Failed to read config file: " + err.Error())
 		}
 
-		var cfg ResilienceConfig
-		if strings.HasSuffix(resilienceFile, ".json") {
-			err = json.Unmarshal(data, &cfg)
-		} else {
-			err = yaml.Unmarshal(data, &cfg)
-		}
+		cfg, err := parseResilienceFile(resilienceFile, data)
 		if err != nil {
 			return cmdErr("Failed to parse config: " + err.Error())
 		}
-
-		if cfg.TestRequest.Type == "" {
-			return cmdErr("testRequest.type is required")
+		if err := checkResilienceFile(cfg); err != nil {
+			return cmdErr(err.Error())
 		}
-		if cfg.ChaosSpec.ExperimentName == "" {
-			return cmdErr("chaosSpec.experimentName is required")
-		}
-
-		payload, _ := json.Marshal(cfg)
-		var req interface{}
-		json.Unmarshal(payload, &req)
 
 		if resilienceDryRun {
-			printDryRun("Would run resilience test", req)
+			printDryRun("Would run resilience test", cfg)
 			return nil
 		}
 
 		fmt.Println(output.AccentStyle.Render("◉ Running resilience test..."))
 
-		result, err := apiClient.Resilience(context.Background(), req)
+		result, err := apiClient.Resilience(context.Background(), cfg)
 		if err != nil {
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "EOF") || strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "connection reset") {
@@ -196,7 +204,7 @@ var resilienceRunCmd = &cobra.Command{
 
 func init() {
 	resilienceRunCmd.Flags().StringVarP(&resilienceFile, "file", "f", "", "Path to resilience test config (YAML or JSON)")
-	resilienceRunCmd.Flags().BoolVar(&resilienceDryRun, "dry-run", false, "Print parsed config without executing")
+	resilienceRunCmd.Flags().BoolVar(&resilienceDryRun, "dry-run", false, "Print the request body without sending it")
 
 	resilienceCmd.AddCommand(resilienceRunCmd)
 	rootCmd.AddCommand(resilienceCmd)
