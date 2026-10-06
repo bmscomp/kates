@@ -343,8 +343,7 @@ class ResilienceResourceTest {
      * A scenario runs the test request its body sends, with the scenario's
      * fault and probes, and the fault picks among the brokers. The body's
      * testRequest used to go unread, so every scenario was refused for a
-     * missing testRequest. The answer sends a keep-alive byte and looks again
-     * 10 s later, so this test takes about 10 s.
+     * missing testRequest.
      */
     @Test
     void aScenarioRunsTheTestRequestItsBodySends() {
