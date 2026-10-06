@@ -395,6 +395,25 @@ class ResilienceResourceTest {
         verify(orchestrator, never()).execute(any());
     }
 
+    /**
+     * A scenario's testRequest is held to the spec limits POST /api/resilience
+     * holds its own to, checked first, as there.
+     */
+    @Test
+    void aScenarioSpecValueOutsideItsLimitsIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"SPIKE\",\"spec\":{\"topic\":\"not a topic!\",\"throughput\":500}}}")
+                .when()
+                .post("/api/resilience/scenarios/broker-crash")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(1))
+                .body("fieldErrors.topic", is("topic must be a legal Kafka topic name"))
+                .body("message", is("spec.topic: topic must be a legal Kafka topic name"));
+        verify(orchestrator, never()).execute(any());
+    }
+
     /** A testRequest that isn't a test request is a 400 that says why, not a 500. */
     @Test
     void aScenarioTestRequestThatIsNotOneIsRefused() {

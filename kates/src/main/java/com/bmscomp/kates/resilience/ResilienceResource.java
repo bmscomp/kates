@@ -210,9 +210,9 @@ public class ResilienceResource {
     @APIResponse(
             responseCode = "400",
             description = "No testRequest, or the node-maintenance scenario, which can't name the node to drain;"
-                    + " or, with fieldErrors naming each field, a testRequest spec field the test type or backend"
-                    + " cannot apply, a targetLabel that isn't a label selector, or a chaosDurationSec outside the"
-                    + " chaos limits")
+                    + " or, with fieldErrors naming each field, a testRequest spec value outside its limits, a"
+                    + " testRequest spec field the test type or backend cannot apply, a targetLabel that isn't a"
+                    + " label selector, or a chaosDurationSec outside the chaos limits")
     @APIResponse(responseCode = "404", description = "Scenario not found")
     public Response runScenario(
             @Parameter(description = "Scenario ID") @PathParam("id") String id, Map<String, Object> overrides) {
