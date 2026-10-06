@@ -16,7 +16,7 @@
 #
 # Hypothesis:
 #   With RF=3 and 2 brokers left, every partition keeps 2 in-sync replicas,
-#   so min.isr=2 is still satisfied. Producers with acks=all see no errors.
+#   so min.isr=2 is still satisfied. The producer, with acks=all, sees no errors.
 #
 # A resilience test does not bring the broker back. Kates orphan recovery
 # does, if Kates restarts 15 minutes or more after the test. To restore it
@@ -41,8 +41,6 @@ testRequest:
     numRecords: 900000
     recordSize: 1024
     throughput: 3000
-    numProducers: 3
-    numConsumers: 2
     consumerGroup: scale-down-cg
     acks: "all"
     enableIdempotence: true
