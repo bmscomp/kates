@@ -157,7 +157,7 @@ With idempotency, even if the producer retries a send (due to transient network 
 
 ### Transactional Integrity
 
-Kafka transactions add atomic, exactly-once writes on top of idempotence [@kip98; @wang2021consistency]. The built-in `integrity-tx` template asks for transactions, idempotence and CRC verification, and the run has all three: its producer commits a transaction every 100 records, or sooner when 10 seconds pass first, and the verifying consumer reads with `read_committed`, so it counts only committed records. The run has one producer and one consumer whatever `parallelProducers` and `numConsumers` say:
+Kafka transactions add atomic, exactly-once writes on top of idempotence [@kip98; @wang2021consistency]. The built-in `integrity-tx` template asks for transactions, idempotence and CRC verification, and the run has all three: its producer commits a transaction every 100 records, or sooner when 10 seconds pass first, and the verifying consumer reads with `read_committed`, so it counts only committed records. The run has one producer and one consumer, as every INTEGRITY run does:
 
 ```bash
 # Export the built-in integrity-tx template, then run it
@@ -168,12 +168,12 @@ kates test apply -f integrity-tx.yaml --wait
 The exported `integrity-tx.yaml`:
 
 ```yaml
+# An INTEGRITY run starts one producer and one consumer.
 scenarios:
   - name: "Transactional Integrity Verification"
     type: INTEGRITY
     spec:
       records: 200000
-      parallelProducers: 4
       recordSizeBytes: 512
       acks: "all"
       compressionType: "zstd"
@@ -182,7 +182,6 @@ scenarios:
       enableCrc: true
       replicationFactor: 3
       minInsyncReplicas: 2
-      numConsumers: 4
     validate:
       maxDataLossPercent: 0
       maxDuplicatePercent: 0
