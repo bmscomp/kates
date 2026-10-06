@@ -134,7 +134,7 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
 ::: {.callout-important}
 The Kates API merges `spec` with the defaults of the test type: a field the request sets wins, and the type's default fills each one it leaves out. What the fields do:
 
-- `throughput` is the rate each producer honours, in records per second, and -1 is unlimited. `targetThroughput` is another name for it, the one `kates test create --throughput` and scenario files send. When both are set, `throughput` wins; when only `targetThroughput` is, it sets the rate in place of the type's default. In the merged `spec`, `throughput` is the rate the run used.
+- `throughput` is the rate each producer honours, in records per second, and -1 is unlimited. `targetThroughput` is another name for it, the one `kates test create --throughput` and scenario files send. When both are set, `throughput` wins; when only `targetThroughput` is, it sets the rate in place of the type's default. In the merged `spec`, `throughput` is the rate the run used. Both take 1 or more, or -1: any other value, 0 included, is refused, with `fieldErrors` naming the field.
 - `consumerGroup` names the consumer's group, and must not be empty or blank. A group that already has committed offsets on the topic resumes from them, and a LOAD or ENDURANCE consumer commits offsets as it reads, so a group an application uses would rebalance and lose its place: give a test a group of its own. An INTEGRITY run's consumer joins the name with `-integrity` appended; without one it is `integrity-cg-integrity`, and a LOAD or ENDURANCE consumer gets a group named after its task.
 - `fetchMinBytes` and `fetchMaxWaitMs` become the consumer's `fetch.min.bytes` and `fetch.max.wait.ms`.
 - `enableIdempotence` sets the producer's `enable.idempotence`, `false` included. Left out, the Kafka client decides, and it turns idempotence on whenever `acks` is `all`.
@@ -169,6 +169,8 @@ A phase has a `name`, a `phaseType`, a `spec` of its own, and its own `durationM
 | `phases[i].targetThroughput`, `phases[i].spec.throughput`, `phases[i].spec.targetThroughput` | Any value but -1 in a SPIKE phase; a rate it takes from the `baseSpec` passes |
 | `phases[i].targetThroughput` | A RAMP phase has no rate, or one below 1 |
 | `phases[i].rampSteps` | A RAMP phase has under 1 or over 100 steps, or more than its rate in rec/s, since each step needs at least 1 rec/s |
+
+A phase's own `targetThroughput` is -1, its default, which runs the phase at its spec's rate, or 1 or more. Its own `durationMs` is 0, its default, which runs it for its spec's `durationMs`, or from 1,000 to 86,400,000 ms (24 hours), the limits of a spec's `durationMs`. A value outside these is refused before the checks above, with `fieldErrors` keyed by its path, such as `phases[0].durationMs`.
 
 ```json
 {

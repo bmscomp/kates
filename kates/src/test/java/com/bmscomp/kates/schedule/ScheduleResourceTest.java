@@ -233,6 +233,26 @@ class ScheduleResourceTest {
         Mockito.verifyNoInteractions(trogdorClient);
     }
 
+    /**
+     * A schedule's request is held to the limit on a rate, as POST /api/tests
+     * holds its own: a 0, which both benchmark backends ran unthrottled at
+     * every firing, is not saved.
+     */
+    @Test
+    void aRateOfZeroIsNotSaved() {
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\",\"testRequest\":"
+                        + "{\"type\":\"LOAD\",\"spec\":{\"throughput\":0}}}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors.throughput", is("throughput must be -1 (unlimited) or positive"));
+
+        Mockito.verify(repository, Mockito.never()).save(any());
+    }
+
     private static ScheduledTestRun storedSchedule(String requestJson) {
         ScheduledTestRun s = new ScheduledTestRun();
         s.setId("s1");
