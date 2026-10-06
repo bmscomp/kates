@@ -2,6 +2,7 @@ package com.bmscomp.kates.api;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -19,6 +20,7 @@ import com.bmscomp.kates.domain.BulkCreateResponse;
 import com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.ScenarioPhase;
+import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.domain.TestType;
@@ -153,6 +155,71 @@ class TestResourceCreateTest {
                 ((BulkCreateResponse) response.getEntity()).runs());
         assertEquals(0, engine.orchestrator.activeTestCount());
         verifyNoInteractions(audit);
+    }
+
+    @Test
+    void aBulkAnswerCountsTheRunsThatStarted() {
+        // created counted every item, so three items that all failed answered
+        // "created": 3.
+        CreateTestRequest unknownBackend = InMemoryEngine.request();
+        unknownBackend.setBackend("no-such-backend");
+
+        Response response =
+                resource.bulkCreate(List.of(InMemoryEngine.request(), unknownBackend, InMemoryEngine.request()));
+
+        assertEquals(202, response.getStatus());
+        BulkCreateResponse body = (BulkCreateResponse) response.getEntity();
+        assertEquals(2, body.created());
+        assertNotNull(body.runs().get(0).id());
+        assertEquals(
+                TestRunSummary.failure("Backend not found: 'no-such-backend'. Available: [fake]"),
+                body.runs().get(1));
+        assertNotNull(body.runs().get(2).id());
+        assertEquals(2, engine.orchestrator.activeTestCount());
+    }
+
+    @Test
+    void aBulkRequestWhoseRunsAllFailCreatesNone() {
+        doThrow(UNREACHABLE).when(engine.repository).save(any());
+
+        Response response = resource.bulkCreate(List.of(InMemoryEngine.request(), InMemoryEngine.request()));
+
+        assertEquals(0, ((BulkCreateResponse) response.getEntity()).created());
+    }
+
+    @Test
+    void aBulkItemWhoseRunStartedIsReportedWhenItsAuditFails() {
+        // The audit write came after the run had started, inside the try
+        // that reports a failure, so the item read as a run that never
+        // started, with no id to find or stop the run by.
+        doThrow(new IllegalStateException("the audit row was not committed"))
+                .when(audit)
+                .record(anyString(), anyString(), anyString(), anyString());
+
+        Response response = resource.bulkCreate(List.of(InMemoryEngine.request()));
+
+        BulkCreateResponse body = (BulkCreateResponse) response.getEntity();
+        assertEquals(1, body.created());
+        TestRunSummary started = body.runs().get(0);
+        assertNotNull(started.id(), "the run, by its id: " + started);
+        assertTrue(engine.rows.containsKey(started.id()));
+        assertEquals("PENDING", started.status());
+        assertNull(started.error());
+    }
+
+    @Test
+    void aRunThatStartedIsAcceptedWhenItsAuditFails() {
+        // The single POST answered such a run with a 500, which invited the
+        // same request again, and a second run.
+        doThrow(new IllegalStateException("the audit row was not committed"))
+                .when(audit)
+                .record(anyString(), anyString(), anyString(), anyString());
+
+        Response response = resource.createTest(InMemoryEngine.request());
+
+        assertEquals(202, response.getStatus());
+        assertTrue(engine.rows.containsKey(((TestRun) response.getEntity()).getId()));
+        assertEquals(1, engine.orchestrator.activeTestCount());
     }
 
     /** A 500 whose message keeps the cause, which can name hosts, to the server log. */
