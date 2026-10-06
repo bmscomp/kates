@@ -22,6 +22,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.ScenarioPhase;
+import com.bmscomp.kates.domain.SlaDefinition;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestScenario;
@@ -1695,6 +1696,235 @@ class TestOrchestratorTest {
                 assertNotNull(result.getEndTime(), result.getTaskId());
             }
             assertEquals(0, orchestrator.activeTestCount(), "the run's permit is back");
+        }
+
+        @Test
+        void thePhasesRunOneAfterAnother() {
+            // Every phase used to start at once, so a WARMUP phase ran beside
+            // the phase it was meant to lead into. Each starts now when the
+            // durations of the phases before it have passed.
+            TestSpec base = new TestSpec();
+            base.setThroughput(1000);
+            base.setDurationMs(60_000);
+            ScenarioPhase steady = new ScenarioPhase("steady", ScenarioPhase.PhaseType.STEADY, 300_000, -1);
+            ScenarioPhase burst = new ScenarioPhase("burst", ScenarioPhase.PhaseType.SPIKE, 30_000, -1);
+            ScenarioPhase cooldown = new ScenarioPhase("cooldown", ScenarioPhase.PhaseType.COOLDOWN, 120_000, 100);
+
+            long before = System.currentTimeMillis();
+            TestRun run = withBackend("native")
+                    .executeTest(
+                            scenario(base, phase("warmup", ScenarioPhase.PhaseType.WARMUP), steady, burst, cooldown))
+                    .asSuccess()
+                    .orElseThrow();
+
+            long start = submitted.get(0).getStartAtMs();
+            assertTrue(start >= before && start <= System.currentTimeMillis(), "the first phase starts at once");
+            assertEquals(
+                    List.of(0L, 60_000L, 360_000L, 390_000L),
+                    submitted.stream().map(task -> task.getStartAtMs() - start).toList(),
+                    "the warm-up takes the base spec's duration");
+            assertEquals(
+                    List.of(60_000L, 300_000L, 30_000L, 120_000L),
+                    submitted.stream().map(BenchmarkTask::getDurationMs).toList());
+            // The reaper's deadline counts from this: the last phase is due to
+            // end when the planned duration says.
+            assertEquals(390_000L + 120_000L, run.getPlannedDurationMs());
+
+            // A phase whose turn has not come waits, with the time it starts at.
+            assertEquals(
+                    List.of(
+                            TestResult.TaskStatus.RUNNING,
+                            TestResult.TaskStatus.PENDING,
+                            TestResult.TaskStatus.PENDING,
+                            TestResult.TaskStatus.PENDING),
+                    run.getResults().stream().map(TestResult::getStatus).toList());
+            assertEquals(
+                    Instant.ofEpochMilli(start + 360_000).toString(),
+                    run.getResults().get(2).getStartTime());
+            assertEquals(TestResult.TaskStatus.RUNNING, run.getStatus());
+        }
+
+        @Test
+        void aRampPhasesStepsTakeTurnsEachFasterThanTheLast() {
+            // The steps all started together, each for a quarter of the phase:
+            // 2,500 records a second for a minute, then nothing. Each step now
+            // has the next quarter, so the load climbs to the phase's rate.
+            TestSpec base = new TestSpec();
+            base.setThroughput(1000);
+            ScenarioPhase steady = new ScenarioPhase("steady", ScenarioPhase.PhaseType.STEADY, 30_000, -1);
+            ScenarioPhase ramp = new ScenarioPhase("ramp", ScenarioPhase.PhaseType.RAMP, 240_000, -1);
+            ramp.setRampSteps(4);
+            ScenarioPhase after = new ScenarioPhase("after", ScenarioPhase.PhaseType.STEADY, 60_000, -1);
+
+            assertTrue(withBackend("native")
+                    .executeTest(scenario(base, steady, ramp, after))
+                    .isSuccess());
+
+            long start = submitted.get(0).getStartAtMs();
+            List<BenchmarkTask> steps = submitted.subList(1, 5);
+            assertEquals(
+                    List.of(30_000L, 90_000L, 150_000L, 210_000L),
+                    steps.stream().map(task -> task.getStartAtMs() - start).toList());
+            assertEquals(
+                    List.of(60_000L, 60_000L, 60_000L, 60_000L),
+                    steps.stream().map(BenchmarkTask::getDurationMs).toList());
+            assertEquals(
+                    List.of(250, 500, 750, 1000),
+                    steps.stream().map(BenchmarkTask::getTargetMessagesPerSec).toList());
+            assertEquals(270_000L, submitted.get(5).getStartAtMs() - start, "it starts as the last step ends");
+        }
+
+        /** An orchestrator whose repository keeps the rows it is handed, as the database does. */
+        @SuppressWarnings("unchecked")
+        private TestOrchestrator storing(
+                Map<String, TestRun> rows, BenchmarkBackend backend, BenchmarkMetrics metrics) {
+            TestRunRepository repository = mock(TestRunRepository.class);
+            doAnswer(invocation -> {
+                        TestRun stored = invocation.getArgument(0);
+                        rows.put(stored.getId(), stored);
+                        return null;
+                    })
+                    .when(repository)
+                    .save(any());
+            when(repository.findById(anyString()))
+                    .thenAnswer(
+                            invocation -> java.util.Optional.ofNullable(rows.get(invocation.<String>getArgument(0))));
+            when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
+                TestRun stored = invocation.getArgument(0);
+                return rows.computeIfPresent(stored.getId(), (id, old) -> stored) != null;
+            });
+            Instance<BenchmarkBackend> backends = mock(Instance.class);
+            when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
+            return new TestOrchestrator(
+                    mock(TopicService.class),
+                    repository,
+                    backends,
+                    typeDefaults,
+                    metrics,
+                    mock(KatesMetrics.class),
+                    new SlaEvaluator(),
+                    SPEC_LIMITS,
+                    mock(Event.class),
+                    "native",
+                    "localhost:9092",
+                    3,
+                    7_200_000L);
+        }
+
+        /** A native backend that takes every task and answers each poll from {@code polls}. */
+        private BenchmarkBackend answering(Map<String, BenchmarkStatus> polls) {
+            BenchmarkBackend backend = mock(BenchmarkBackend.class);
+            when(backend.name()).thenReturn("native");
+            when(backend.submit(any()))
+                    .thenAnswer(invocation -> new BenchmarkHandle(
+                            "native", invocation.<BenchmarkTask>getArgument(0).getTaskId()));
+            when(backend.poll(any()))
+                    .thenAnswer(invocation ->
+                            polls.get(invocation.<BenchmarkHandle>getArgument(0).taskId()));
+            return backend;
+        }
+
+        /** Two STEADY phases of a minute each, at 1,000 records a second. */
+        private CreateTestRequest twoPhases() {
+            TestSpec base = new TestSpec();
+            base.setThroughput(1000);
+            return scenario(
+                    base,
+                    new ScenarioPhase("first", ScenarioPhase.PhaseType.STEADY, 60_000, -1),
+                    new ScenarioPhase("second", ScenarioPhase.PhaseType.STEADY, 60_000, -1));
+        }
+
+        @Test
+        void aPhaseWaitingForItsTurnMeasuresNothing() {
+            // A phase polls PENDING, with zeros, until its turn. Read as a
+            // measurement, those zeros breached a minimum-throughput SLA, and
+            // each poll added an empty heatmap row.
+            Map<String, BenchmarkStatus> polls = new java.util.concurrent.ConcurrentHashMap<>();
+            BenchmarkMetrics metrics = mock(BenchmarkMetrics.class);
+            TestOrchestrator orchestrator =
+                    storing(new java.util.concurrent.ConcurrentHashMap<>(), answering(polls), metrics);
+
+            SlaDefinition sla = new SlaDefinition();
+            sla.setMinThroughputRecPerSec(500.0);
+            CreateTestRequest request = twoPhases();
+            request.getScenario().setSla(sla);
+            TestRun run = orchestrator.executeTest(request).asSuccess().orElseThrow();
+            String first = run.getResults().get(0).getTaskId();
+            String second = run.getResults().get(1).getTaskId();
+
+            polls.put(
+                    first,
+                    BenchmarkStatus.builder(TestResult.TaskStatus.RUNNING)
+                            .recordsProcessed(30_000)
+                            .throughputRecordsPerSec(1000)
+                            .heatmapBuckets(new long[] {0, 3, 9})
+                            .build());
+            polls.put(
+                    second,
+                    BenchmarkStatus.builder(TestResult.TaskStatus.PENDING)
+                            .heatmapBuckets(new long[3])
+                            .build());
+            TestRun polled = orchestrator.refreshStatus(run.getId());
+
+            assertEquals(
+                    TestResult.TaskStatus.PENDING, polled.getResults().get(1).getStatus());
+            verify(metrics).recordSlaViolations(run.getId(), List.of());
+            assertEquals(
+                    List.of("first"),
+                    orchestrator.getHeatmapRows(run.getId()).stream()
+                            .map(com.bmscomp.kates.export.LatencyHeatmapData.HeatmapRow::phase)
+                            .toList());
+
+            // The first phase is over and the second has started: the run goes
+            // on, and the second phase is measured like any other.
+            polls.put(
+                    first,
+                    BenchmarkStatus.builder(TestResult.TaskStatus.DONE)
+                            .recordsProcessed(60_000)
+                            .throughputRecordsPerSec(1000)
+                            .build());
+            polls.put(
+                    second,
+                    BenchmarkStatus.builder(TestResult.TaskStatus.RUNNING)
+                            .recordsProcessed(100)
+                            .throughputRecordsPerSec(100)
+                            .build());
+            polled = orchestrator.refreshStatus(run.getId());
+
+            assertEquals(TestResult.TaskStatus.RUNNING, polled.getStatus());
+            verify(metrics)
+                    .recordSlaViolations(
+                            eq(run.getId()),
+                            argThat(violations -> violations.size() == 1
+                                    && "throughputRecPerSec"
+                                            .equals(violations.get(0).metric())));
+        }
+
+        @Test
+        void aShutdownFailsThePhasesStillWaiting() {
+            // Shutdown failed the RUNNING tasks only, so a phase waiting for
+            // its turn read PENDING in a FAILED run for good.
+            Map<String, TestRun> rows = new java.util.concurrent.ConcurrentHashMap<>();
+            BenchmarkBackend backend = answering(Map.of());
+            TestOrchestrator orchestrator = storing(rows, backend, mock(BenchmarkMetrics.class));
+            TestRun run = orchestrator.executeTest(twoPhases()).asSuccess().orElseThrow();
+            assertEquals(
+                    List.of(TestResult.TaskStatus.RUNNING, TestResult.TaskStatus.PENDING),
+                    rows.get(run.getId()).getResults().stream()
+                            .map(TestResult::getStatus)
+                            .toList());
+
+            orchestrator.shutdown();
+
+            TestRun stored = rows.get(run.getId());
+            assertEquals(TestResult.TaskStatus.FAILED, stored.getStatus());
+            assertEquals(
+                    List.of(TestResult.TaskStatus.FAILED, TestResult.TaskStatus.FAILED),
+                    stored.getResults().stream().map(TestResult::getStatus).toList());
+            assertEquals(
+                    List.of("Server shutdown", "Server shutdown"),
+                    stored.getResults().stream().map(TestResult::getError).toList());
+            verify(backend, times(2)).stop(any());
         }
 
         @Test
