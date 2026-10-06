@@ -22,7 +22,8 @@ import com.bmscomp.kates.domain.TestSpec;
  * keys every violation, so a phase's value would not say which phase it is in.
  * TestOrchestrator.refusal holds a scenario's specs to them instead, keyed by
  * their path in the scenario. ResilienceResource holds the request's own spec
- * to them too, since POST /api/resilience runs no bean validation.
+ * to them too, since POST /api/resilience runs no bean validation, and so does
+ * TestScheduler as a schedule fires, since executeTest runs none either.
  */
 @ApplicationScoped
 public class SpecLimits {

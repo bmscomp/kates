@@ -69,7 +69,7 @@ http://localhost:30083
 
 ## Endpoints
 
-This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The Kates API exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates and schedules, resilience scenarios, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi` (Swagger UI is available at `/q/swagger-ui` in dev mode).
+This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The Kates API exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates and schedules, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi` (Swagger UI is available at `/q/swagger-ui` in dev mode).
 
 ### Health & System
 
@@ -779,6 +779,59 @@ A `testRequest` that `POST /api/tests` would refuse for a field its type or benc
 
 `status` is one of `COMPLETED`, `CHAOS_FAILED`, `INTERRUPTED`, or `ERROR`; with `ERROR`, `error` says why, for example that the benchmark did not start. Kates injects the fault only into a test run that is `RUNNING`, and `steadyStateSec` counts from the moment the run's tasks are submitted. A run that has failed or finished by then, or when `steadyStateSec` is up, gets neither the fault nor the probes: `error` says the benchmark ended before the fault, names the run, and quotes the errors its tasks reported. A run whose tasks are still being submitted after five minutes gets `ERROR` too, with an `error` saying it had not started. Impact deltas are percentage changes between the pre- and post-chaos summaries. Durations are in seconds: `chaosDuration` runs from the moment Kates creates the fault to the chaos outcome's `verdict`, so on Litmus it includes the experiment's start-up. `recoveryTime` runs from that `verdict` until every probe passes, or until `maxRecoveryWaitSec` runs out.
 
+#### GET /api/resilience/scenarios
+
+List the pre-built resilience scenarios, each a fault with the probes that watch it. Each entry carries the scenario's `id`, `name`, `description` and `disruptionType`, the number of its probes as `probeCount`, and its `chaosDurationSec` and `maxRecoveryWaitSec`.
+
+```json
+[
+  {
+    "id": "broker-crash",
+    "name": "Broker Crash",
+    "description": "Kill a random broker pod and verify cluster recovers with full ISR",
+    "disruptionType": "POD_DELETE",
+    "probeCount": 2,
+    "chaosDurationSec": 30,
+    "maxRecoveryWaitSec": 120
+  }
+]
+```
+
+#### POST /api/resilience/scenarios/{id}
+
+Run a resilience scenario: a test run from the body's `testRequest`, with the scenario's fault and probes. The call answers like [POST /api/resilience](#post-apiresilience), with whitespace while the run goes on and then one JSON object: the scenario's id under `scenario`, and the report under `report`. A resilience scenario isn't the `scenario` of a test request, which holds a test's phases.
+
+**Request Body:**
+
+```json
+{
+  "testRequest": {
+    "type": "LOAD",
+    "spec": { "numRecords": 180000, "throughput": 500, "recordSize": 1024, "acks": "all" }
+  }
+}
+```
+
+The scenario brings the rest of the request: its fault and probes, a `steadyStateSec` of 30, and its own `maxRecoveryWaitSec`. The fault goes into the `kafka` namespace and hits one broker pod at random, picked by `strimzi.io/component-type=kafka,strimzi.io/broker-role=true`, so it never hits a dedicated KRaft controller. Three more fields of the body change the fault: `targetLabel` replaces that selector, `targetPod` names the pod to hit, and `chaosDurationSec` sets how long it lasts. The Kates API ignores any other field.
+
+**Response** (cut down, with illustrative numbers):
+
+```json
+{
+  "scenario": "broker-crash",
+  "report": { "status": "COMPLETED", "recoveryTime": 41.027310000 }
+}
+```
+
+The body is checked before the stream starts and before any fault is injected, and refused with a `400` in these cases:
+
+- It has no `testRequest`, or one that isn't a test request.
+- Its `testRequest` is one `POST /api/resilience` would refuse, as above, and the answer has the same `fieldErrors`.
+- Its `targetLabel` isn't a label selector, and `fieldErrors` has the key `targetLabel`.
+- Its `chaosDurationSec` is outside the [Fault Parameter Limits](07-chaos-practice.md#fault-parameter-limits), and `fieldErrors` has the key `chaosDurationSec`.
+
+An unknown `id` gets `404 Not Found`. The `node-maintenance` scenario is listed, but every call to run it gets a `400`. A scenario can't name the node its `NODE_DRAIN` drains, and Kates sets no `TARGET_NODE`, so the Litmus `node-drain` experiment would drain the node of a random pod in any namespace. To drain a node, send a `NODE_DRAIN` to `POST /api/resilience` with the node in `chaosSpec.envOverrides.TARGET_NODE`, as [LitmusChaos Integration](07-chaos-practice.md#litmuschaos-integration) describes.
+
 ---
 
 ### Trend Analysis
@@ -850,9 +903,11 @@ A schedule stores `testRequest` with only the fields it sets. Each firing is a `
 
 A `testRequest` that `POST /api/tests` would refuse, for a field the run could not honour, a run longer than `kates.engine.max-duration-ms` or a scenario spec value outside its limits, is refused here too, and the schedule isn't saved. The answer is the same `400`, with each field keyed in `fieldErrors`, and named in `message`, by its path in the schedule, such as `testRequest.spec.consumerGroup` or `testRequest.scenario.phases[0].targetThroughput`.
 
-A firing the Kates API refuses starts no run, and the reason is in the server log only. That happens to a schedule saved before the Kates API checked `testRequest`, and to one whose request it refuses later, after an upgrade or a change to its settings such as a lower `kates.engine.max-duration-ms`. Disable such a schedule, or `PUT` a `testRequest` the Kates API accepts.
+A `testRequest` without a `type`, or with a `spec` value outside the limits `POST /api/tests` sets, such as a `numProducers` above 100, gets the `400` that `POST /api/tests` gives it, with `fieldErrors` keyed by field name. A `backend` the Kates API doesn't have is refused too, keyed `testRequest.backend`, or `testRequest.scenario.backend` for a scenario that names its own. `POST /api/tests` refuses that one with a `400` that has no `fieldErrors`.
 
-A schedule created before the Kates API kept the request stored every spec field, those it did not set at their Java defaults. When the Kates API upgrades, its database migration removes the defaults stored for `targetThroughput`, the fetch settings and the three `enable` options, which runs then ignored, so such a schedule runs as it did. A value the schedule did set for one of them now reaches the run, or is refused at each firing if the type cannot apply it. Its other fields keep the stored values, the Java defaults rather than the type's; `PUT` the schedule's `testRequest` again to have the type's defaults fill them in.
+A firing the Kates API refuses starts no run, and the reason is in the server log only. That happens to a schedule saved before the Kates API checked `testRequest`, and to one whose request it refuses later, after an upgrade or a change to its settings such as a lower `kates.engine.max-duration-ms`. A firing also holds the request's `spec`, and a scenario's, to the limits `POST /api/tests` sets, such as a `numProducers` of at most 100, and refuses a stored value outside them. Disable such a schedule, or `PUT` a `testRequest` the Kates API accepts.
+
+A schedule created before the Kates API kept the request stored every spec field, those it did not set at their Java defaults. When the Kates API upgrades, its database migration removes the defaults stored for `targetThroughput`, the fetch settings and the three `enable` options, which runs then ignored, so such a schedule runs as it did. A value the schedule did set for one of them now reaches the run, or is refused at each firing if the type cannot apply it. Its other fields keep the stored values, the Java defaults rather than the type's, all within the limits a firing holds `spec` to. `PUT` the schedule's `testRequest` again to have the type's defaults fill them in.
 
 #### GET /api/schedules
 
@@ -875,7 +930,7 @@ Get a single schedule, including the ID and time of its last triggered run.
 
 #### PUT /api/schedules/{id}
 
-Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse, for a field the run could not honour, a run longer than `kates.engine.max-duration-ms` or a scenario spec value outside its limits, gets the same `400`. The schedule then stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
+Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
 
 #### DELETE /api/schedules/{id}
 
