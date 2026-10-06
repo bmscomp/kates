@@ -564,7 +564,7 @@
   "_usage": {
     "port_forward": "kates ports",
     "api_key": "export KATES_API_KEY=\"$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)\"",
-    "submit_single": "jq '.examples[0]' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{status, error, runId: .performanceReport.run.id, impactDeltas, recoveryTime}'",
+    "submit_single": "jq '.examples[0]' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{status, error, runId: .testRunId, impactDeltas, recoveryTime}'",
     "get_report": "curl -sS -H \"X-API-Key: $KATES_API_KEY\" http://localhost:8080/api/tests/{runId}/report | jq",
     "list_scenarios": "curl -sS -H \"X-API-Key: $KATES_API_KEY\" http://localhost:8080/api/resilience/scenarios | jq",
     "notes": [

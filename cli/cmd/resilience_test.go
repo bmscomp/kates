@@ -195,6 +195,29 @@ func TestResilienceRun_PrintsTheRunTheRecoveryAndTheProbes(t *testing.T) {
 	}
 }
 
+// A report that ended ERROR after its test run started names the run, so the
+// run's task errors, and an INTEGRITY run's verdict, are a kates test get
+// away. The id used to come only in the performance report, which a run that
+// ended before the recovery wait doesn't have. The test above reads the id
+// from there, as an API without testRunId sends it.
+func TestResilienceRun_NamesTheRunOfAReportThatErred(t *testing.T) {
+	out, _, err := resilienceRunAnswered(t, "table",
+		`{"status":"ERROR","error":"java.util.concurrent.TimeoutException","testRunId":"3f6c2a1e"}`)
+	if err != nil {
+		t.Fatalf("kates resilience run: %v", err)
+	}
+	lines := resilienceLines(out)
+	for _, want := range []string{
+		"Test Run 3f6c2a1e",
+		"Error java.util.concurrent.TimeoutException",
+		"Full details: kates test get 3f6c2a1e",
+	} {
+		if !slices.Contains(lines, want) {
+			t.Errorf("no line %q in:\n%s", want, stripAnsi(out))
+		}
+	}
+}
+
 // With every probe passing there is nothing to list, and a fault with no
 // Continuous probe has none run during it, which the table says rather than
 // "0/0 passed".

@@ -879,7 +879,7 @@ The CLI then prints a pre-chaos baseline and post-chaos summary (throughput, P99
 | `p99LatencyMs` | +596.7% | Up |
 | `errorRate` | +0.3% | |
 
-The output ends with the `kates test get <id>` command for the test run. With `-o json`, the CLI prints the whole report the Kates API returns instead, the test run's own report included. A run that stops before its recovery wait prints neither the recovery time nor the ID; `kates test list` lists its test run, if one started.
+The output ends with the `kates test get <id>` command for the test run. With `-o json`, the CLI prints the whole report the Kates API returns instead, the test run's ID (`testRunId`) and its own report included. A run that stops before its recovery wait has no recovery time, but it still names its test run, if one started.
 
 ::: {.callout-tip}
 **Try it**
