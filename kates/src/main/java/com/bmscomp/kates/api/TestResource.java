@@ -73,8 +73,8 @@ public class TestResource {
     @APIResponse(responseCode = "202", description = "Test accepted for execution")
     @APIResponse(
             responseCode = "400",
-            description = "Invalid request, including a spec field the test type or backend cannot apply;"
-                    + " fieldErrors names each field")
+            description = "Invalid request, including a value outside its limits in the spec or a scenario's specs,"
+                    + " or a spec field the test type or backend cannot apply; fieldErrors names each field")
     @APIResponse(responseCode = "429", description = "Concurrency limit reached — retry later")
     public Response createTest(@Valid CreateTestRequest request) {
         var result = orchestrator.executeTest(request);
