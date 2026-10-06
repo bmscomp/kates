@@ -22,6 +22,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
+import jakarta.validation.Validation;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.CreateTestRequest;
@@ -48,6 +49,9 @@ public final class InMemoryEngine {
 
     /** The default backend, which {@link #request()} runs on. */
     public static final String BACKEND = "fake";
+
+    private static final SpecLimits SPEC_LIMITS =
+            new SpecLimits(Validation.buildDefaultValidatorFactory().getValidator());
 
     /** What the store holds: the row every read of a run sees. */
     public final Map<String, TestRun> rows = new ConcurrentHashMap<>();
@@ -110,6 +114,7 @@ public final class InMemoryEngine {
                 benchmarkMetrics,
                 katesMetrics,
                 new SlaEvaluator(),
+                SPEC_LIMITS,
                 lifecycleEvents,
                 BACKEND,
                 "localhost:9092",

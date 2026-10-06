@@ -2,12 +2,29 @@ package com.bmscomp.kates.resilience;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import java.util.Map;
+import java.util.Set;
+
+import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import com.bmscomp.kates.chaos.DisruptionType;
+import com.bmscomp.kates.domain.TestType;
 
 @QuarkusTest
 class ResilienceResourceTest {
+
+    /** Stands in for the run, so a scenario that gets through every check injects nothing. */
+    @InjectMock
+    ResilienceOrchestrator orchestrator;
 
     @Test
     void postResilienceReturnsBadRequestWithoutTestRequest() {
@@ -121,6 +138,122 @@ class ResilienceResourceTest {
     }
 
     /**
+     * A spec value outside the limits POST /api/tests holds a spec to is
+     * refused before the stream starts, naming the field. This endpoint runs
+     * no bean validation, so such a value used to go into the run: a
+     * numRecords of 0 sent nothing, a topic Kafka cannot create failed the
+     * run, and the fault went in all the same.
+     */
+    @Test
+    void aSpecValueOutsideItsLimitsIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\",\"spec\":{\"numRecords\":0,\"topic\":\"not a topic!\"}},"
+                        + "\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors.numRecords", notNullValue())
+                .body("fieldErrors.topic", is("topic must be a legal Kafka topic name"))
+                .body("message", startsWith("spec.numRecords: "))
+                .body("message", endsWith("; spec.topic: topic must be a legal Kafka topic name"));
+    }
+
+    /**
+     * The limits are those of POST /api/tests, and so is the fieldErrors that
+     * names a value outside them. As there, they are checked before the
+     * fields the run could not apply, here the rate SPIKE ignores.
+     */
+    @Test
+    void theLimitsAndTheirFieldErrorsAreThoseOfPostApiTests() {
+        String testRequest = "{\"type\":\"SPIKE\",\"spec\":{\"numRecords\":0,\"topic\":\"not a topic!\","
+                + "\"acks\":\"2\",\"throughput\":500}}";
+        Map<String, String> tests = given().contentType("application/json")
+                .body(testRequest)
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .extract()
+                .path("fieldErrors");
+        Map<String, String> resilience = given().contentType("application/json")
+                .body("{\"testRequest\":" + testRequest + ",\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .extract()
+                .path("fieldErrors");
+
+        assertEquals(Set.of("numRecords", "topic", "acks"), tests.keySet());
+        assertEquals(tests, resilience);
+    }
+
+    /**
+     * A scenario's base spec and phase specs are held to the same limits, each
+     * value keyed by its path in the scenario, as the fields its phases could
+     * not apply are. Only the scenario has a type, and the check asks for no
+     * other: bean validation of the whole testRequest would have required the
+     * request's own.
+     */
+    @Test
+    void aScenarioSpecValueOutsideItsLimitsIsRefusedByItsPath() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"scenario\":{\"type\":\"LOAD\",\"baseSpec\":{\"acks\":\"2\"},\"phases\":["
+                        + "{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"spec\":{\"numRecords\":0}}]}},"
+                        + "\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(2))
+                .body("fieldErrors.'baseSpec.acks'", is("acks must be one of: all, -1, 0, 1"))
+                .body("fieldErrors", hasKey("phases[0].spec.numRecords"))
+                .body(
+                        "message",
+                        startsWith("scenario.baseSpec.acks: acks must be one of: all, -1, 0, 1;"
+                                + " scenario.phases[0].spec.numRecords: "));
+    }
+
+    /** A null phase has no spec to check, and the specs after it are still checked. */
+    @Test
+    void theSpecsAfterANullPhaseAreChecked() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\",\"scenario\":{\"phases\":[null,"
+                        + "{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"spec\":{\"topic\":\"not a topic!\"}}]}},"
+                        + "\"chaosSpec\":{\"experimentName\":\"test\"}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors", aMapWithSize(1))
+                .body("fieldErrors.'phases[1].spec.topic'", is("topic must be a legal Kafka topic name"));
+    }
+
+    /**
+     * A scenario with a type of its own needs none on the request, and with
+     * its specs within their limits, this one passes them and is refused
+     * only for its fault.
+     */
+    @Test
+    void aScenarioWithItsOwnTypeNeedsNoRequestType() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"scenario\":{\"type\":\"LOAD\",\"baseSpec\":{\"numRecords\":1000},"
+                        + "\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\","
+                        + "\"spec\":{\"topic\":\"kates-events\"}}]}},"
+                        + "\"chaosSpec\":{\"experimentName\":\"split\",\"disruptionType\":\"NETWORK_PARTITION\","
+                        + "\"chaosDurationSec\":0}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors", aMapWithSize(1))
+                .body("fieldErrors", hasKey("chaosDurationSec"));
+    }
+
+    /**
      * A resilience run never went through the safety guard, so its fault went
      * in with any parameter. The coordinator refuses it now, but only after
      * the benchmark has run, so it is refused here, before the stream starts.
@@ -181,6 +314,10 @@ class ResilienceResourceTest {
                 .body("message", containsString("nonexistent"));
     }
 
+    /**
+     * A scenario brings a fault and its probes, not the load they act on, so
+     * a body without a testRequest, or with a null one, is refused.
+     */
     @Test
     void runScenarioReturns400WhenNoTestRequestOverride() {
         given().contentType("application/json")
@@ -190,5 +327,142 @@ class ResilienceResourceTest {
                 .then()
                 .statusCode(400)
                 .body("message", containsString("testRequest"));
+
+        given().contentType("application/json")
+                .body("{\"testRequest\":null,\"chaosDurationSec\":30}")
+                .when()
+                .post("/api/resilience/scenarios/broker-crash")
+                .then()
+                .statusCode(400)
+                .body("error", is("Bad Request"))
+                .body("message", startsWith("A 'testRequest' override is required when running a scenario."));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /**
+     * A scenario runs the test request its body sends, with the scenario's
+     * fault and probes, and the fault picks among the brokers. The body's
+     * testRequest used to go unread, so every scenario was refused for a
+     * missing testRequest. The answer sends a keep-alive byte and looks again
+     * 10 s later, so this test takes about 10 s.
+     */
+    @Test
+    void aScenarioRunsTheTestRequestItsBodySends() {
+        ResilienceReport report = new ResilienceReport();
+        report.setStatus("COMPLETED");
+        when(orchestrator.execute(any())).thenReturn(report);
+
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\",\"spec\":{\"numRecords\":1000,\"throughput\":100}}}")
+                .when()
+                .post("/api/resilience/scenarios/broker-crash")
+                .then()
+                .statusCode(200)
+                .body("scenario", is("broker-crash"))
+                .body("report.status", is("COMPLETED"));
+
+        ArgumentCaptor<ResilienceTestRequest> sent = ArgumentCaptor.forClass(ResilienceTestRequest.class);
+        verify(orchestrator).execute(sent.capture());
+        ResilienceTestRequest request = sent.getValue();
+        assertEquals(TestType.LOAD, request.getTestRequest().getType());
+        assertEquals(1000, request.getTestRequest().getSpec().getNumRecords());
+        assertEquals(100, request.getTestRequest().getSpec().getThroughput());
+
+        var scenario = ResilienceScenarios.findById("broker-crash");
+        assertEquals(DisruptionType.POD_DELETE, request.getChaosSpec().disruptionType());
+        assertEquals(ResilienceScenarios.BROKERS, request.getChaosSpec().targetLabel());
+        assertEquals(scenario.chaosDurationSec(), request.getChaosSpec().chaosDurationSec());
+        assertEquals(scenario.probes(), request.getProbes());
+        assertEquals(scenario.steadyStateSec(), request.getSteadyStateSec());
+        assertEquals(scenario.maxRecoveryWaitSec(), request.getMaxRecoveryWaitSec());
+    }
+
+    /**
+     * A scenario's testRequest is refused as POST /api/resilience refuses its
+     * own, before the stream starts and before any fault, naming the field.
+     */
+    @Test
+    void aScenarioTestRequestTheRunCannotApplyIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"SPIKE\",\"spec\":{\"throughput\":500}}}")
+                .when()
+                .post("/api/resilience/scenarios/broker-crash")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors.throughput", containsString("unthrottled"))
+                .body("message", containsString("spec.throughput"));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /**
+     * A scenario's testRequest is held to the spec limits POST /api/resilience
+     * holds its own to, checked first, as there.
+     */
+    @Test
+    void aScenarioSpecValueOutsideItsLimitsIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"SPIKE\",\"spec\":{\"topic\":\"not a topic!\",\"throughput\":500}}}")
+                .when()
+                .post("/api/resilience/scenarios/broker-crash")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(1))
+                .body("fieldErrors.topic", is("topic must be a legal Kafka topic name"))
+                .body("message", is("spec.topic: topic must be a legal Kafka topic name"));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /** A testRequest that isn't a test request is a 400 that says why, not a 500. */
+    @Test
+    void aScenarioTestRequestThatIsNotOneIsRefused() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"BENCHMARK\"}}")
+                .when()
+                .post("/api/resilience/scenarios/broker-crash")
+                .then()
+                .statusCode(400)
+                .body("error", is("Bad Request"))
+                .body("message", containsString("BENCHMARK"));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /**
+     * A targetLabel that isn't a label selector is refused before the stream
+     * starts. The fault would parse it only as it went in, after the
+     * benchmark had run for the scenario's steadyStateSec.
+     */
+    @Test
+    void aScenarioTargetLabelThatIsNotASelectorIsRefusedByName() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\"},\"targetLabel\":\"zone in (alpha\"}")
+                .when()
+                .post("/api/resilience/scenarios/broker-crash")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors.targetLabel", startsWith("Invalid label selector 'zone in (alpha'"))
+                .body("message", startsWith("targetLabel: Invalid label selector 'zone in (alpha'"));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /**
+     * node-maintenance is listed but not run: a scenario can't name the node
+     * to drain, and Litmus node-drain, given none, drains the node of a
+     * random pod in any namespace. The answer says where a drain can name it.
+     */
+    @Test
+    void theNodeMaintenanceScenarioIsRefused() {
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\"}}")
+                .when()
+                .post("/api/resilience/scenarios/node-maintenance")
+                .then()
+                .statusCode(400)
+                .body("error", is("Bad Request"))
+                .body("message", startsWith("Scenario node-maintenance is listed but not run"))
+                .body("message", endsWith("chaosSpec.envOverrides.TARGET_NODE"));
+        verify(orchestrator, never()).execute(any());
     }
 }

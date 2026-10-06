@@ -42,7 +42,7 @@ flowchart LR
     PROM -->|"scrapes"| KAFKA
 ```
 
-Read it from the left. The CLI calls the Kates API over REST, with the URL and API key of your [CLI context](appendix-a-glossary.md#gl-cli-context). For the commands that install and reach the stack, such as `kates deploy` and `kates ports`, it runs `kubectl` and `helm` against your current Kubernetes context instead. The [Commands](10-cli-reference.md#commands) table in CLI Reference says which command takes which path. In the cluster, the Kates API talks to [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, as an ordinary Kafka client, and keeps each run in PostgreSQL. On the default [chaos provider](appendix-a-glossary.md#gl-chaos-provider), it creates [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos) resources for every fault except `ROLLING_RESTART` and `SCALE_DOWN`, which it injects itself through the Kubernetes API. [Prometheus](appendix-a-glossary.md#gl-prometheus) scrapes the [brokers](appendix-a-glossary.md#gl-broker) and the Kates API, and the Kates API reads Prometheus back for a disruption plan's broker metrics.
+Read it from the left. The CLI calls the Kates API over REST, with the URL and API key of your [CLI context](appendix-a-glossary.md#gl-cli-context). For the commands that install and reach the stack, such as `kates deploy` and `kates ports`, it runs `kubectl` and `helm` against your current Kubernetes context instead. The [Commands](10-cli-reference.md#commands) table in CLI Reference says which command takes which path. In the cluster, the Kates API talks to [`krafter`](appendix-a-glossary.md#gl-krafter), the Kafka cluster under test, as an ordinary Kafka client, and keeps each run in PostgreSQL. On the default [chaos provider](appendix-a-glossary.md#gl-chaos-provider), it creates [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos) resources for every fault except `POD_DELETE`, `ROLLING_RESTART` and `SCALE_DOWN`, which it injects itself through the Kubernetes API. [Prometheus](appendix-a-glossary.md#gl-prometheus) scrapes the [brokers](appendix-a-glossary.md#gl-broker) and the Kates API, and the Kates API reads Prometheus back for a disruption plan's broker metrics.
 
 Each part in the table runs in one place. The namespaces are those of the default [isolated topology](appendix-a-glossary.md#gl-isolated-topology); with `--topology single`, every part below that runs in the cluster, except Trogdor, shares `kates-stack`, as [Single-Namespace vs Multi-Namespace](12-deployment.md#single-namespace-vs-multi-namespace) describes.
 
@@ -175,7 +175,7 @@ The diagram shows the parts behind a disruption plan. Look at the Providers grou
 ```mermaid
 %%| label: fig-architecture-disruption-engine
 %%| fig-cap: "A disruption plan's orchestrator checks the plan, reads Kafka's state, and hands every fault to the one chaos provider that kates.chaos.provider selects."
-%%| fig-alt: "Flowchart in four groups. Control: the playbook catalog feeds the disruption orchestrator, which calls the safety guard. Intelligence: the Kafka intelligence service provides ISR tracking, consumer lag and leader resolution. Providers: the setting kates.chaos.provider selects the Litmus provider by default, the Kubernetes provider, or the hybrid provider, which picks one of the two; the Litmus provider sends ROLLING_RESTART and SCALE_DOWN to the Kubernetes provider. Reporting: the orchestrator writes a disruption report, graded by the SLA grader and fed by the Prometheus metrics capture."
+%%| fig-alt: "Flowchart in four groups. Control: the playbook catalog feeds the disruption orchestrator, which calls the safety guard. Intelligence: the Kafka intelligence service provides ISR tracking, consumer lag and leader resolution. Providers: the setting kates.chaos.provider selects the Litmus provider by default, the Kubernetes provider, or the hybrid provider, which picks one of the two; the Litmus provider sends POD_DELETE, ROLLING_RESTART and SCALE_DOWN to the Kubernetes provider. Reporting: the orchestrator writes a disruption report, graded by the SLA grader and fed by the Prometheus metrics capture."
 graph LR
     subgraph Control
         DO[DisruptionOrchestrator]
@@ -216,7 +216,7 @@ graph LR
     CP -->|hybrid| HCP
     HCP -.->|picks one| LCP
     HCP -.->|picks one| KCP
-    LCP -->|"ROLLING_RESTART, SCALE_DOWN"| KCP
+    LCP -->|"POD_DELETE,<br/>ROLLING_RESTART,<br/>SCALE_DOWN"| KCP
     DR --> SG
     DR --> PMC
 ```

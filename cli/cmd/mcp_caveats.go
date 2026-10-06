@@ -67,7 +67,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		ID: mcpCaveatLoadSingleProducer,
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
-		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1447-1456", "case LOAD ->", "case STRESS ->")},
+		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1488-1497", "case LOAD ->", "case STRESS ->")},
 	},
 	{
 		ID: mcpCaveatReaperDeadline,
@@ -85,7 +85,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			"kates/src/main/resources/application.properties:317-331",
 			mcpJava + "engine/TestTimeoutReaper.java:39-47,50-136",
-			mcpJava + "engine/TestOrchestrator.java:127-149,181-184,342,1054-1151",
+			mcpJava + "engine/TestOrchestrator.java:131-153,185-188,349,1088-1190",
 			mcpJava + "persistence/EntityMapper.java:144-153",
 			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
 			mcpJava + "domain/TestRun.java:478-481",
@@ -106,12 +106,12 @@ var mcpCaveatsCore = []mcpCaveat{
 			"integrity-cg-integrity, without transactions.",
 		Refs: []string{
 			mcpJava + "domain/TestSpec.java:14-32,111-113",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:166,181-183,226",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:170,185-187,230",
 				"applyTypeDefaults(type, request.getSpec())", ".withRequestedSpec(", "buildTasks(type, spec, run.getId())"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:977-1022", "TestSpec applyTypeDefaults(", "return merged;"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1425-1430,1520-1523",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1000-1045", "TestSpec applyTypeDefaults(", "return merged;"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1466-1471,1561-1564",
 				"Only when asked", `"integrity-cg")`),
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:759", `task.getConsumerGroup() + "-integrity"`),
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:786", `task.getConsumerGroup() + "-integrity"`),
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:42,70-71,129-131",
 				"entity.setRequestedSpecJson(toJson(run.getRequestedSpec()))", "fromJson(entity.getRequestedSpecJson()",
 				"if (run.getRequestedSpec() != null)"),
@@ -152,7 +152,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration. The tuning report copies " +
 			"that one summary into every step, so all steps show the same numbers and the best step is always step 0.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1530-1531", "case TUNE_REPLICATION,", "-tune-0"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1571-1572", "case TUNE_REPLICATION,", "-tune-0"),
 			mcpJava + "trogdor/SpecFactory.java:38-39",
 			mcpJava + "engine/TuningTestRunner.java:101-139",
 		},
@@ -214,7 +214,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef("kates/src/main/resources/application.properties:255-256",
 				"# Chaos coordination (noop | kubernetes | litmus-crd | hybrid)", "kates.chaos.provider=litmus-crd"),
-			mcpJava + "chaos/LitmusChaosProvider.java:65,88",
+			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:56,94",
+				"int resultPollIntervalMs = 5_000;", "Instant start = Instant.now();"),
 		},
 	},
 	{
@@ -246,8 +247,9 @@ const (
 // set to last, counted from its creation, as a current Kates API works it out
 // (TestOrchestrator.plannedDurationMs): the duration, twice that for
 // INTEGRITY, which reads its records back for up to as long again. ok is false
-// for INTEGRATION_CDC, which no duration bounds. A scenario's stored spec is
-// not validated, so the double is held at the largest int64 rather than wrap.
+// for INTEGRATION_CDC, which no duration bounds. An older Kates API stored a
+// scenario's spec unchecked, with any durationMs, so the double is held at the
+// largest int64 rather than wrap.
 func mcpPlannedDurationMs(testType string, durationMs int64) (ms int64, ok bool) {
 	d := max(durationMs, 0)
 	switch testType {
