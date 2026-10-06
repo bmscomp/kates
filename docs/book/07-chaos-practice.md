@@ -555,7 +555,8 @@ A refused plan starts nothing. Over the API it returns `422` with status `REJECT
 | Kates refuses the plan with | What to change |
 |-----------------------------|----------------|
 | `No broker pods found matching label '…' in namespace '…'` | Point `kates.chaos.kafka.namespace` and `kates.chaos.kafka.label` at your cluster, and check that the Kates API can list pods there |
-| `Step '…': …`, naming a selector that doesn't parse | Fix that step's `targetLabel` |
+| `Step '…': …`, naming a selector that doesn't parse | Fix that step's `targetLabel`, or its `envOverrides.NODE_LABEL` |
+| `Step '…': NODE_DRAIN with targetAll picks pods on N nodes (…)` | Narrow `targetLabel` to the pods of one node, or name the node in `envOverrides.TARGET_NODE` |
 | `Step '…':`, then a fault parameter that `is below` its floor or `is above the limit of` its ceiling | Bring the parameter into its range, or raise the limit (see [Fault Parameter Limits](#fault-parameter-limits)) |
 | `Plan would affect N brokers but maxAffectedBrokers=M` | Narrow the selectors, or raise the limit if you mean it |
 | `Plan would affect ALL N brokers — cluster would lose availability` | Narrow the selectors: Kates never runs a plan that hits every broker |
@@ -566,7 +567,7 @@ The count covers the whole plan, not one step at a time: Kates adds up the disti
 
 The label matches the KRaft controllers as well, so Kates counts as brokers only the pods Strimzi labels `strimzi.io/broker-role=true`: a node with both roles is a broker, and a dedicated controller is not. On the default cluster, with brokers 0–2 and controllers 3–5, a plan that takes down all three brokers is refused. A pod without the role label, such as Kafka not run by Strimzi, counts as a broker.
 
-A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step whose selector looks in a namespace other than the brokers' counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts the pods its selector picks, not the other brokers on the node it drains. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker.
+A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step whose selector looks in a namespace other than the brokers' counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts every broker on the node it drains, whatever namespace its pod is in. For a random pick, that's the node among the candidates' that runs the most brokers, and the same goes for a node Litmus picks by `envOverrides.NODE_LABEL`. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker. For a `NODE_DRAIN`, it lists every Kafka pod on the node and names the node.
 
 Kates runs the plan anyway, with a warning in `validationWarnings`, in three cases:
 
@@ -645,14 +646,13 @@ Preview `az-failure` against `krafter` without killing anything: `kates disrupti
 
 ### Limits of the Guard
 
-The guard counts brokers and reads pod readiness, and nothing more. Each of these limits follows from that:
+The guard counts brokers, reads pod readiness and, for a drain, where pods run, and nothing more. Each of these limits follows from that:
 
 - It doesn't count KRaft controllers, so a plan that takes down a majority of the controller quorum passes; the dry run lists the controllers a step hits.
 - It doesn't read the ISR or `min.insync.replicas`, so a plan that leaves one broker runs with only a warning. Yet on a topic that keeps the `kafka-cluster` chart's `min.insync.replicas: 2`, writes with [`acks=all`](appendix-a-glossary.md#gl-acks) then fail.
-- A step whose selector looks in another namespace, such as the consumers `consumer-isolation` isolates in `kates`, counts no broker, whatever it hits.
+- A step whose selector looks in another namespace, such as the consumers `consumer-isolation` isolates in `kates`, counts no broker, whatever it hits, unless it's a `NODE_DRAIN`.
 - Steps that pick one pod at random from the same selector count as one broker between them, although each can hit a different broker.
-- A `NODE_DRAIN` step counts the pods its selector picks, not the other brokers on the node it drains.
-- A `NODE_DRAIN` step with `targetAll` passes even when its pods run on several nodes. The step then fails without draining, because a drain takes one node.
+- A `NODE_DRAIN` step counts the brokers on its node as the pods run when you submit the plan. A pod that moves to another node before the step runs takes the drain with it.
 - A resilience run (`kates resilience run`) doesn't go through the guard at all: no broker count, no one-plan rule, no check before the fault and no rollback. Only the [fault parameter limits](#fault-parameter-limits) apply to it.
 - `make gameday` doesn't go through it either: it deletes a broker pod with `kubectl`.
 - The one-plan rule lives in the Kates API process, so it holds only while one Kates API pod runs. The `kates` chart refuses a second replica and rolls with `Recreate`, so it never runs two.

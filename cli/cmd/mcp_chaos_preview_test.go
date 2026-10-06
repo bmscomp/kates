@@ -711,7 +711,7 @@ func TestMCPPreviewRandomPickMayHitController(t *testing.T) {
 
 // TestMCPPreviewNamedPodInTopology: the dry run counts any named pod as a
 // broker, whether or not it is a Kafka node (DisruptionSafetyGuard.java:
-// 398-404).
+// 408-414).
 func TestMCPPreviewNamedPodInTopology(t *testing.T) {
 	fb := mcpChaosBackend(t)
 	var dry mcpDryRunRecorder
