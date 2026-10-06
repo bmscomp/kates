@@ -61,8 +61,12 @@ var scenarioDiffCmd = &cobra.Command{
 			diffs += diffSpecField(spec, "durationMs", run.Spec.DurationMs, "Duration (ms)")
 			diffs += diffSpecField(spec, "partitions", run.Spec.Partitions, "Partitions")
 			diffs += diffSpecField(spec, "replicationFactor", run.Spec.ReplicationFactor, "Replication Factor")
-			diffs += diffSpecField(spec, "batchSize", run.Spec.BatchSize, "Batch Size")
-			diffs += diffSpecField(spec, "lingerMs", run.Spec.LingerMs, "Linger Ms")
+			if run.Spec.BatchSize != nil {
+				diffs += diffSpecField(spec, "batchSize", *run.Spec.BatchSize, "Batch Size")
+			}
+			if run.Spec.LingerMs != nil {
+				diffs += diffSpecField(spec, "lingerMs", *run.Spec.LingerMs, "Linger Ms")
+			}
 
 			if compressionType, ok := spec["compressionType"].(string); ok && compressionType != "" {
 				if !strings.EqualFold(compressionType, run.Spec.CompressionType) {

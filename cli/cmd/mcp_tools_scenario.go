@@ -186,7 +186,7 @@ type mcpDraftScenarioOut struct {
 type mcpDraftedScenario struct {
 	Index     int                      `json:"index" jsonschema:"position in the file, from 0"`
 	Name      string                   `json:"name"`
-	Request   client.CreateTestRequest `json:"request" jsonschema:"the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; zero values are left out"`
+	Request   client.CreateTestRequest `json:"request" jsonschema:"the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; it leaves out an empty value and a 0, except the 0 of batchSize, lingerMs and fetchMaxWaitMs"`
 	Effective *mcpDraftEffective       `json:"effective,omitempty" jsonschema:"the request merged with the shipped defaults of its type, as the backend would merge it; absent when the type is unknown"`
 }
 
@@ -822,12 +822,13 @@ func mcpScnCheckTypeAndBackend(i int, req *client.CreateTestRequest, fs *mcpScnF
 // and the range the backend accepts for the field it becomes
 // (domain/TestSpec.java:34-113).
 type mcpScnSpecKey struct {
-	wire     string
-	kind     byte // 'i' number, 's' text, 'b' true/false
-	scale    int64
-	min, max int64
-	pattern  *regexp.Regexp
-	notBlank bool // the backend refuses a value with nothing but whitespace
+	wire      string
+	kind      byte // 'i' number, 's' text, 'b' true/false
+	scale     int64
+	min, max  int64
+	pattern   *regexp.Regexp
+	notBlank  bool // the backend refuses a value with nothing but whitespace
+	sendsZero bool // a 0 is sent, as the Kafka setting it is; any other number key leaves a 0 out
 }
 
 var (
@@ -845,8 +846,8 @@ var mcpScnSpecKeys = map[string]mcpScnSpecKey{
 	"durationSeconds":    {wire: "durationMs", kind: 'i', scale: 1000, min: 1_000, max: 86_400_000},
 	"topic":              {wire: "topic", kind: 's', pattern: mcpScnTopicRE},
 	"acks":               {wire: "acks", kind: 's', pattern: mcpScnAcksRE},
-	"batchSize":          {wire: "batchSize", kind: 'i', min: 0, max: 134_217_728},
-	"lingerMs":           {wire: "lingerMs", kind: 'i', min: 0, max: 300_000},
+	"batchSize":          {wire: "batchSize", kind: 'i', min: 0, max: 134_217_728, sendsZero: true},
+	"lingerMs":           {wire: "lingerMs", kind: 'i', min: 0, max: 300_000, sendsZero: true},
 	"compressionType":    {wire: "compressionType", kind: 's', pattern: mcpScnCompressionRE},
 	"numConsumers":       {wire: "numConsumers", kind: 'i', min: 0, max: 100},
 	"replicationFactor":  {wire: "replicationFactor", kind: 'i', min: 1, max: 10},
@@ -855,7 +856,7 @@ var mcpScnSpecKeys = map[string]mcpScnSpecKey{
 	"consumerGroup":      {wire: "consumerGroup", kind: 's', pattern: mcpScnGroupRE, notBlank: true},
 	"targetThroughput":   {wire: "targetThroughput", kind: 'i', min: -1, max: math.MaxInt32},
 	"fetchMinBytes":      {wire: "fetchMinBytes", kind: 'i', min: 1, max: math.MaxInt32},
-	"fetchMaxWaitMs":     {wire: "fetchMaxWaitMs", kind: 'i', min: 0, max: 300_000},
+	"fetchMaxWaitMs":     {wire: "fetchMaxWaitMs", kind: 'i', min: 0, max: 300_000, sendsZero: true},
 	"enableIdempotence":  {wire: "enableIdempotence", kind: 'b'},
 	"enableTransactions": {wire: "enableTransactions", kind: 'b'},
 	"enableCrc":          {wire: "enableCrc", kind: 'b'},
@@ -902,8 +903,9 @@ func mcpScnCheckSpecKey(i int, key string, v any, testType string, fs *mcpScnFin
 	}
 }
 
-// mcpScnCheckSpecNumber flags a number scenarioToRequest reads as 0 (and so
-// leaves out), cuts, or sends outside the range the backend accepts.
+// mcpScnCheckSpecNumber flags a value scenarioToRequest leaves out (one that
+// is not a number, or a 0 where the field leaves one out), a number it cuts,
+// and one it sends outside the range the backend accepts.
 func mcpScnCheckSpecNumber(i int, field string, k mcpScnSpecKey, v any, fs *mcpScnFindings) {
 	var n int64
 	switch x := v.(type) {
@@ -919,14 +921,18 @@ func mcpScnCheckSpecNumber(i int, field string, k mcpScnSpecKey, v any, fs *mcpS
 			fs.add(i, mcpScnWarning, field, fmt.Sprintf("it is %v, which scenarioToRequest cuts to %d", x, n))
 		}
 	default:
-		fs.add(i, mcpScnWarning, field, "it is "+mcpScnShow(v)+", which scenarioToRequest reads as 0, so it is left out "+
+		read := "which scenarioToRequest reads as 0"
+		if k.sendsZero {
+			read = "which is not a number"
+		}
+		fs.add(i, mcpScnWarning, field, "it is "+mcpScnShow(v)+", "+read+", so it is left out "+
 			"of the request and the type default applies")
 		return
 	}
 	scale := max(k.scale, 1)
 	sent := n * scale
 	switch {
-	case sent == 0:
+	case sent == 0 && !k.sendsZero:
 		fs.add(i, mcpScnWarning, field, "0 is left out of the request (the field is omitted when zero), so the type default applies")
 	case sent < k.min || sent > k.max:
 		fs.add(i, mcpScnInvalid, field, fmt.Sprintf("it is sent as %s %d, which the backend refuses (it accepts %d to %d)", k.wire, sent, k.min, k.max))
@@ -992,7 +998,7 @@ func mcpScnCheckApplies(i int, req *client.CreateTestRequest, fs *mcpScnFindings
 		if s.FetchMinBytes != 0 {
 			refuse("fetchMinBytes", why)
 		}
-		if s.FetchMaxWaitMs != 0 {
+		if s.FetchMaxWaitMs != nil {
 			refuse("fetchMaxWaitMs", why)
 		}
 	}
@@ -1243,7 +1249,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"plans/mcp-server.md:387-405",
 			mcpJava + "api/TestResource.java:69-104",
 			mcpJava + "domain/TestSpec.java:34-113",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1191-1256",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1231-1296",
 				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
 			mcpAnchoredRef("cli/cmd/apply.go:135-212",
 				"for i, scenario := range sf.Scenarios {", "apiClient.CreateTest(ctx, req)",
@@ -1259,7 +1265,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"listed as defaulted may differ on the cluster that runs the scenario.",
 		Refs: []string{
 			mcpJava + "config/TestTypeDefaults.java:22-64,323-464",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:992-1037", "TestSpec applyTypeDefaults(", "return merged;"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1015-1060", "TestSpec applyTypeDefaults(", "return merged;"),
 			mcpAnchoredRef("kates/src/main/resources/application.properties:73-114",
 				"# Per-type overrides: STRESS", "kates.tests.roundtrip.throughput=10000"),
 			mcpAnchoredRef("charts/kates/values.yaml:591-658", "defaults:", "tests:", `throughput: "10000"`),
@@ -1275,18 +1281,18 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"produce, and RPO is measured only when a resilience run marks a fault, so a scenario run never has one. " +
 			"Keys ValidationSpec does not name, such as maxDuplicatePercent, are dropped when the file is read.",
 		Refs: []string{
-			mcpAnchoredRef("cli/cmd/apply.go:29-39,178-211,300-312,466-521,538-563",
+			mcpAnchoredRef("cli/cmd/apply.go:29-39,178-211,300-312,486-541,558-583",
 				"type ValidationSpec struct {", `yaml:"maxCrcFailures,omitempty"`,
 				"if !applyWait {", "nonNil(validateSLAs(finalResult, scenario.Validate))",
 				"} else if r.SLA != nil {", `"✓ SLA Pass"`,
 				"func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"crcFail=%d > %d"`,
 				"func unevaluableSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"maxRpoMs (RPO not measured)"`),
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:191-196,379-398",
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:196-201,406-425",
 				"switch (task.getWorkloadType())", "case INTEGRITY -> runIntegrity(task, state);",
 				"void runIntegrity(BenchmarkTask task, WorkerState state)", "state.chaosStartNanos.get()"),
-			mcpJava + "engine/TrogdorBackend.java:150-151",
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceOrchestrator.java:141",
-				"testOrchestrator.markChaosStart(run.getId(), System.nanoTime());"),
+			mcpJava + "engine/TrogdorBackend.java:162-163",
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceOrchestrator.java:143-144",
+				"chaosCoordinator.triggerFault(", "testOrchestrator.markChaosStart(runId, injectedAt)"),
 		},
 	},
 }

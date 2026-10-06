@@ -19,6 +19,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
+import jakarta.validation.Validation;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -47,6 +48,9 @@ import com.bmscomp.kates.service.TopicService;
  * submission must not write over it.
  */
 class TestOrchestratorCancelTest {
+
+    private static final SpecLimits SPEC_LIMITS =
+            new SpecLimits(Validation.buildDefaultValidatorFactory().getValidator());
 
     private static final int MAX_CONCURRENT = 3;
 
@@ -107,6 +111,7 @@ class TestOrchestratorCancelTest {
                 benchmarkMetrics,
                 katesMetrics,
                 new SlaEvaluator(),
+                SPEC_LIMITS,
                 events,
                 "fake",
                 "localhost:9092",

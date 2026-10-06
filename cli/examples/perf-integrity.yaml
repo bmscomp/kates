@@ -1,6 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: INTEGRITY — Exactly-Once Delivery Verification
 # ─────────────────────────────────────────────────────────────────────────────
+# An INTEGRITY run starts one producer and one consumer.
+#
 # Usage:  kates test apply -f cli/examples/perf-integrity.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
 scenarios:
@@ -11,11 +13,9 @@ scenarios:
       partitions: 3
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 200000
-      recordSize: 512
-      throughput: 2000
-      numProducers: 2
-      numConsumers: 2
+      records: 200000
+      recordSizeBytes: 512
+      targetThroughput: 2000
       consumerGroup: integrity-cg
       acks: "all"
       enableIdempotence: true

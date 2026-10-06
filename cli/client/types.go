@@ -423,8 +423,11 @@ type CreateScheduleRequest struct {
 	TestRequest    interface{} `json:"testRequest"`
 }
 
-// ResilienceResult from POST /api/resilience. Error says why, when Status is
-// ERROR.
+// ResilienceResult from POST /api/resilience, the Kates API's
+// ResilienceReport. Error says why, when Status is ERROR. The fields are the
+// ones kates resilience run prints. Raw is the report as the API sent it,
+// which -o json prints: it also holds the test run's whole report and the
+// integrity result, which the fields leave out.
 type ResilienceResult struct {
 	Status           string             `json:"status"`
 	Error            string             `json:"error,omitempty"`
@@ -432,6 +435,43 @@ type ResilienceResult struct {
 	ImpactDeltas     map[string]float64 `json:"impactDeltas,omitempty"`
 	PreChaosSummary  *ReportSummary     `json:"preChaosSummary,omitempty"`
 	PostChaosSummary *ReportSummary     `json:"postChaosSummary,omitempty"`
+	// RecoveryTime runs from the end of the fault to the first poll at which
+	// every probe passed or, when no poll did, to the end of the recovery
+	// wait. It is unset when the run ended before that wait.
+	RecoveryTime BackendDuration `json:"recoveryTime"`
+	// Each probe runs once before the fault and once after the recovery
+	// wait. During the fault only Continuous probes run, again and again, so
+	// that list can hold one probe many times.
+	BaselineProbes     []ProbeResult `json:"baselineProbes,omitempty"`
+	DuringChaosProbes  []ProbeResult `json:"duringChaosProbes,omitempty"`
+	PostRecoveryProbes []ProbeResult `json:"postRecoveryProbes,omitempty"`
+	// PerformanceReport is the test run's own report, which the API adds
+	// after the recovery wait. The CLI reads only which run it is.
+	PerformanceReport *struct {
+		Run *struct {
+			ID string `json:"id"`
+		} `json:"run,omitempty"`
+	} `json:"performanceReport,omitempty"`
+
+	Raw json.RawMessage `json:"-"`
+}
+
+// RunID is the id of the test run the fault went into, or "" when the
+// report has none: a run that ended before the recovery wait has no
+// performance report to carry it.
+func (r *ResilienceResult) RunID() string {
+	if r.PerformanceReport == nil || r.PerformanceReport.Run == nil {
+		return ""
+	}
+	return r.PerformanceReport.Run.ID
+}
+
+// ProbeResult is one evaluation of a resilience run's probe. Output is what
+// the probe's command printed, or why it could not run.
+type ProbeResult struct {
+	Name   string `json:"name"`
+	Passed bool   `json:"passed"`
+	Output string `json:"output"`
 }
 
 type ChaosOutcome struct {
@@ -453,9 +493,8 @@ type CreateTestRequest struct {
 }
 
 // RerunTestRequest is a POST /api/tests whose spec is JSON the backend served,
-// sent back as it came. Through TestSpec, whose fields are omitempty, a spec
-// lost every 0 it held (lingerMs 0 became the type's default) and every field
-// TestSpec does not name.
+// sent back as it came. Through TestSpec, a spec would lose every field
+// TestSpec does not name, and the 0 in each int field that leaves one out.
 type RerunTestRequest struct {
 	TestType string          `json:"type"`
 	Backend  string          `json:"backend,omitempty"`
@@ -466,10 +505,15 @@ type RerunTestRequest struct {
 // fields are pointers so that an explicit false is sent: as plain bools under
 // omitempty they dropped it, and a scenario's enableCrc: false or
 // enableIdempotence: false reached the backend as nothing, which runs with CRC
-// checks on and leaves idempotence to the Kafka client. Throughput is the rate
-// the run used; TargetThroughput is the other name a request may give it, the
-// one scenario files and --throughput send, and the backend takes it as the
-// rate when a request sets no throughput.
+// checks on and leaves idempotence to the Kafka client. BatchSize, LingerMs and
+// FetchMaxWaitMs are pointers so that an explicit 0 is sent: 0 is a Kafka
+// setting there (no batching, no linger, a fetch that answers at once), and as
+// plain ints under omitempty a scenario's lingerMs: 0 reached the backend as
+// nothing, so a LOAD run lingered 5 ms, its type's default. The other int
+// fields leave a 0 out: the backend refuses one in most of them. Throughput is
+// the rate the run used; TargetThroughput is the other name a request may give
+// it, the one scenario files and --throughput send, and the backend takes it
+// as the rate when a request sets no throughput.
 type TestSpec struct {
 	Records            int    `json:"numRecords,omitempty"`
 	ParallelProducers  int    `json:"numProducers,omitempty"`
@@ -477,8 +521,8 @@ type TestSpec struct {
 	DurationMs         int    `json:"durationMs,omitempty"`
 	Topic              string `json:"topic,omitempty"`
 	Acks               string `json:"acks,omitempty"`
-	BatchSize          int    `json:"batchSize,omitempty"`
-	LingerMs           int    `json:"lingerMs,omitempty"`
+	BatchSize          *int   `json:"batchSize,omitempty"`
+	LingerMs           *int   `json:"lingerMs,omitempty"`
 	CompressionType    string `json:"compressionType,omitempty"`
 	NumConsumers       int    `json:"numConsumers,omitempty"`
 	ReplicationFactor  int    `json:"replicationFactor,omitempty"`
@@ -488,7 +532,7 @@ type TestSpec struct {
 	Throughput         int    `json:"throughput,omitempty"`
 	TargetThroughput   int    `json:"targetThroughput,omitempty"`
 	FetchMinBytes      int    `json:"fetchMinBytes,omitempty"`
-	FetchMaxWaitMs     int    `json:"fetchMaxWaitMs,omitempty"`
+	FetchMaxWaitMs     *int   `json:"fetchMaxWaitMs,omitempty"`
 	EnableIdempotence  *bool  `json:"enableIdempotence,omitempty"`
 	EnableTransactions *bool  `json:"enableTransactions,omitempty"`
 	EnableCrc          *bool  `json:"enableCrc,omitempty"`
