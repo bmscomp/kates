@@ -75,7 +75,7 @@ func TestMCPCaveatCatalogue(t *testing.T) {
 // TestMCPCaveatRetiredIDs: an id whose caveat changed meaning stays retired,
 // so a client keying on it never reads the new meaning under the old id.
 func TestMCPCaveatRetiredIDs(t *testing.T) {
-	for _, id := range []mcpCaveatID{"reaper-30-minutes", "scenario-base-spec-only"} {
+	for _, id := range []mcpCaveatID{"reaper-30-minutes", "scenario-base-spec-only", "scenario-phase-specs"} {
 		if _, ok := mcpCaveatIndex[id]; ok {
 			t.Errorf("caveat id %q is retired; give a changed caveat a new id", id)
 		}
@@ -93,8 +93,8 @@ func TestMCPPlannedDurationMs(t *testing.T) {
 		{"ENDURANCE", 3_600_000, 3_600_000, true},
 		{"INTEGRITY", 900_000, 1_800_000, true},
 		{"LOAD", -5, 0, true},
-		// A scenario's stored spec is not validated: the double holds at the
-		// largest value rather than wrapping to a short run.
+		// An older Kates API stored a scenario's spec unchecked: the double
+		// holds at the largest value rather than wrapping to a short run.
 		{"INTEGRITY", math.MaxInt64/2 + 1, math.MaxInt64, true},
 		{"INTEGRATION_CDC", 600_000, 0, false},
 	} {

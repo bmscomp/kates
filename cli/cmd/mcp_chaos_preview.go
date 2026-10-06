@@ -83,13 +83,14 @@ var mcpAdHocBounds = map[string]mcpAdHocBound{
 // mcpAdHocTypeParam is the parameter an ad-hoc step may set to size each fault
 // type. A step may set it only for its own type, so a plan never carries a
 // number its type never reads. The providers read them differently, and the
-// field descriptions say so: the kubernetes provider honours gracePeriodSec
-// for POD_DELETE and sizes IO_STRESS by ioWorkers alone
-// (KubernetesChaosProvider.java:195-203,515-528), while litmus-crd
-// force-deletes on POD_DELETE, never reading gracePeriodSec, and sizes
-// IO_STRESS by fillPercentage as well as ioWorkers (LitmusChaosProvider.java:
-// 263-285). fillPercentage stays out of ad-hoc plans with DISK_FILL, the one
-// type it is meant for.
+// field descriptions say so: the kubernetes provider sizes IO_STRESS by
+// ioWorkers alone (KubernetesChaosProvider.java:517-530), while litmus-crd
+// sizes it by fillPercentage as well as ioWorkers
+// (LitmusChaosProvider.java:303-307). Both honour gracePeriodSec: litmus-crd
+// hands a POD_DELETE to the kubernetes provider, which deletes the pod with it
+// (LitmusChaosProvider.java:41-53,75-77; KubernetesChaosProvider.java:197-205).
+// fillPercentage stays out of ad-hoc plans with DISK_FILL, the one type it is
+// meant for.
 var mcpAdHocTypeParam = map[string]string{
 	"POD_DELETE":      "gracePeriodSec",
 	"NETWORK_LATENCY": "networkLatencyMs",
@@ -136,7 +137,7 @@ type mcpAdHocStep struct {
 	// rather than read as partition 0.
 	TargetPartition      *int  `json:"targetPartition,omitempty" jsonschema:"the partition of targetTopic, 0 when left out"`
 	ChaosDurationSec     *int  `json:"chaosDurationSec,omitempty" jsonschema:"how long the fault lasts, in seconds; 30 when left out"`
-	GracePeriodSec       *int  `json:"gracePeriodSec,omitempty" jsonschema:"POD_DELETE only: the pod's termination grace period, in seconds. Only the kubernetes provider honours it; on the default litmus-crd provider a POD_DELETE force-deletes the pod whatever this says"`
+	GracePeriodSec       *int  `json:"gracePeriodSec,omitempty" jsonschema:"POD_DELETE only: the pod's termination grace period, in seconds. Both chaos providers honour it: the default litmus-crd provider hands a POD_DELETE to the kubernetes provider, which deletes the pod with it"`
 	NetworkLatencyMs     *int  `json:"networkLatencyMs,omitempty" jsonschema:"NETWORK_LATENCY only: the latency added, in milliseconds"`
 	CPUCores             *int  `json:"cpuCores,omitempty" jsonschema:"CPU_STRESS only: cores to load"`
 	MemoryMb             *int  `json:"memoryMb,omitempty" jsonschema:"MEMORY_STRESS only: memory to consume, in MB"`
@@ -343,7 +344,7 @@ func mcpCheckAdHocTargets(at string, s *mcpAdHocStep) error {
 	if targets > 1 {
 		return mcpInvalidArgument(at+" sets more than one of targetBrokerId, targetPod and targetTopic; give at most one.", "")
 	}
-	// LitmusChaosProvider.java:278-282 makes a DNS_ERROR step's topic the
+	// LitmusChaosProvider.java:308-312 makes a DNS_ERROR step's topic the
 	// hostname whose lookups fail, so the fault would break only a hostname
 	// named after the topic.
 	if s.DisruptionType == "DNS_ERROR" && s.TargetTopic != "" {
@@ -759,11 +760,12 @@ func mcpTargetingOf(fs *mcpFaultSpecView) string {
 // reading of plan §5.2 than its text ("no experimentName in the resolved
 // plan"). Every playbook sets experimentName on every step
 // (kates/src/main/resources/playbooks/*.yaml), so the literal rule would flag
-// them all, while the Litmus provider maps every type but two to its own
-// experiment and routes those two, ROLLING_RESTART and SCALE_DOWN, to the
-// kubernetes provider: experimentName picks the experiment only for a step
-// without a type (LitmusChaosProvider.java:25-37,60-63,188-215), and
-// otherwise only names the ChaosEngine. The plan's wording is a follow-up.
+// them all, while the Litmus provider maps every type but three to its own
+// experiment and routes those three, POD_DELETE, ROLLING_RESTART and
+// SCALE_DOWN, to the kubernetes provider: experimentName picks the experiment
+// only for a step without a type
+// (LitmusChaosProvider.java:28-53,75-77,217-244), and otherwise only names
+// the fault. The plan's wording is a follow-up.
 func mcpAgentLimitFindings(v *mcpPlanView) []mcpAgentLimitFinding {
 	findings := []mcpAgentLimitFinding{}
 	add := func(step, field, value string) {
