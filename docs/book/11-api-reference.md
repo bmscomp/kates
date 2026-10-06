@@ -592,6 +592,8 @@ Disruption IDs are 8-character UUID prefixes. `status` is `RUNNING` while the pl
 }
 ```
 
+For a `NODE_DRAIN` step, `affectedPods` lists every Kafka pod on the node the step drains, and a step warning names the node. [Safety Guardrails](07-chaos-practice.md#safety-guardrails) says how a drain counts against the plan's limits.
+
 #### GET /api/disruptions
 
 List recent disruption reports. Supports `planName`, `page`, and `size` (default 50) query parameters.
