@@ -254,8 +254,8 @@ type playbookFaultView struct {
 func faultParameters(fs *playbookFaultView) [][2]string {
 	switch fs.DisruptionType {
 	case "POD_DELETE":
-		// The Kubernetes provider deletes with this grace period; the
-		// LitmusChaos provider force-deletes, as it does for POD_KILL.
+		// Both providers delete with this grace period: the LitmusChaos
+		// provider hands a POD_DELETE to the Kubernetes provider.
 		return [][2]string{{"Grace Period", fmt.Sprintf("%ds", fs.GracePeriodSec)}}
 	case "DISK_FILL":
 		return [][2]string{{"Fill Percentage", fmt.Sprintf("%d%%", fs.FillPercentage)}}
