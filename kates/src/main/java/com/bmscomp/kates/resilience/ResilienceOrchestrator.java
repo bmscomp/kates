@@ -155,14 +155,22 @@ public class ResilienceOrchestrator {
                     duringChaosResults.stream().filter(ProbeResult::passed).count();
             LOG.infof("During-chaos probes: %d/%d passed", duringPass, duringChaosResults.size());
 
-            // 6. Measure recovery time (RTO)
+            // 6. Measure recovery time (RTO), when a poll finds every probe
+            // passing before the wait is over
             if (!probes.isEmpty()) {
                 String namespace = request.getChaosSpec().targetNamespace();
-                Duration rto = measureRecoveryTime(probes, namespace, request.getMaxRecoveryWaitSec());
-                report.setRecoveryTime(rto);
-                LOG.infof("Recovery time (RTO): %dms", rto.toMillis());
+                Recovery recovery = awaitRecovery(probes, namespace, request.getMaxRecoveryWaitSec());
+                if (recovery.recovered()) {
+                    report.setRecoveryTime(recovery.after());
+                    LOG.infof("Recovery time (RTO): %dms", recovery.after().toMillis());
+                } else {
+                    report.setUnrecoveredAfter(recovery.after());
+                    LOG.warnf(
+                            "No recovery: a probe still failed %dms after the fault",
+                            recovery.after().toMillis());
+                }
 
-                List<ProbeResult> postRecovery = probeExecutor.evaluateAll(probes, namespace);
+                List<ProbeResult> postRecovery = recovery.lastPoll();
                 report.setPostRecoveryProbes(postRecovery);
                 long postPass =
                         postRecovery.stream().filter(ProbeResult::passed).count();
@@ -296,28 +304,35 @@ public class ResilienceOrchestrator {
         });
     }
 
-    private Duration measureRecoveryTime(List<ProbeSpec> probes, String namespace, int maxWaitSec) {
+    /** How long the recovery wait sleeps between two polls of the probes. */
+    long recoveryPollIntervalMs = 5_000;
+
+    /**
+     * How the recovery wait ended: whether its last poll found every probe
+     * passing, that poll's results, and how long after the end of the fault
+     * the poll ended.
+     */
+    private record Recovery(boolean recovered, List<ProbeResult> lastPoll, Duration after) {}
+
+    /**
+     * Polls every probe until all of them pass in one poll, {@code maxWaitSec}
+     * / 5 times at most and once at least, {@link #recoveryPollIntervalMs}
+     * apart. The wait used to answer the time it had run for whether a poll
+     * passed or not, so a run that never recovered reported the whole wait as
+     * its recovery time, and a wait under 5 s made no poll and reported about
+     * 0. An interrupt ends the wait with no answer: the run is INTERRUPTED.
+     */
+    private Recovery awaitRecovery(List<ProbeSpec> probes, String namespace, int maxWaitSec)
+            throws InterruptedException {
         Instant chaosEnd = Instant.now();
-        int attempts = 0;
-        int maxAttempts = maxWaitSec / 5;
-
-        while (attempts < maxAttempts) {
+        int polls = Math.max(1, maxWaitSec / 5);
+        for (int poll = 1; ; poll++) {
             List<ProbeResult> results = probeExecutor.evaluateAll(probes, namespace);
-            boolean allPassing = results.stream().allMatch(ProbeResult::passed);
-
-            if (allPassing) {
-                return Duration.between(chaosEnd, Instant.now());
+            boolean recovered = results.stream().allMatch(ProbeResult::passed);
+            if (recovered || poll >= polls) {
+                return new Recovery(recovered, results, Duration.between(chaosEnd, Instant.now()));
             }
-
-            attempts++;
-            try {
-                Thread.sleep(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
+            Thread.sleep(recoveryPollIntervalMs);
         }
-
-        return Duration.between(chaosEnd, Instant.now());
     }
 }
