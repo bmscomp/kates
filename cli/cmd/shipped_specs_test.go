@@ -39,11 +39,12 @@ func TestShippedFilesTheBackendAccepts(t *testing.T) {
 func shippedRequests(t *testing.T, path string, data []byte) []*client.CreateTestRequest {
 	t.Helper()
 	if bytes.Contains(data, []byte("\ntestRequest:")) {
-		var cfg ResilienceConfig
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
+		cfg, err := parseResilienceFile(path, data)
+		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		raw, err := json.Marshal(cfg.TestRequest.Spec)
+		test, _ := cfg["testRequest"].(map[string]any)
+		raw, err := json.Marshal(test["spec"])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -51,7 +52,7 @@ func shippedRequests(t *testing.T, path string, data []byte) []*client.CreateTes
 		if err := json.Unmarshal(raw, spec); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		return []*client.CreateTestRequest{{TestType: strings.ToUpper(cfg.TestRequest.Type), Backend: cfg.TestRequest.Backend, Spec: spec}}
+		return []*client.CreateTestRequest{{TestType: strings.ToUpper(mapStrEmpty(test, "type")), Backend: mapStrEmpty(test, "backend"), Spec: spec}}
 	}
 	var sf ScenarioFile
 	if err := yaml.Unmarshal(data, &sf); err != nil {
