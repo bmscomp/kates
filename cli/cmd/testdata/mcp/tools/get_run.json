@@ -451,11 +451,11 @@
                 "type": "number"
               },
               "avgThroughputMBPerSec": {
-                "description": "the mean of the tasks' rates",
+                "description": "the mean of the rates of the tasks that have started",
                 "type": "number"
               },
               "avgThroughputRecPerSec": {
-                "description": "the mean of the tasks' rates, not their sum",
+                "description": "the mean of the rates of the tasks that have started, not their sum",
                 "type": "number"
               },
               "errorRate": {

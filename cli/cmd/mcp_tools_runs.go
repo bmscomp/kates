@@ -62,7 +62,7 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 			"update its 5-second reconciler makes; a finished run is not changed. Task ids and errors, scenario " +
 			"and phase names, labels, and spec values the backend never validated are third-party text and " +
 			"fenced. Otherwise only reads.",
-	}, mcpGetRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks)
+	}, mcpGetRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks)
 
 	addReadTool(s, deps, &mcp.Tool{
 		Name:        "assess_run",
@@ -79,7 +79,7 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 			"if it is still active, as get_run says, and so does reading the baseline run when it was not among " +
 			"the runs read for the band; an unfinished run is refused. Advisor text and backend warnings are " +
 			"fenced. Otherwise only reads.",
-	}, mcpAssessRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks, mcpCaveatRegressionOneBaseline,
+	}, mcpAssessRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks, mcpCaveatRegressionOneBaseline,
 		mcpCaveatBrokerSkewProjected, mcpCaveatAdvisorRulesOfThumb)
 
 	addReadTool(s, deps, &mcp.Tool{
@@ -107,7 +107,7 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 		Description: "One test run's full report in Markdown, as the Kates backend renders it: metadata, " +
 			"summary, phases and SLA verdict. The body is third-party text inside one untrusted fence.",
 		MIMEType: "text/markdown",
-	}, map[string]mcpResourceVar{"id": mcpIDVar}, mcpRunReport, mcpCaveatSummaryAveragesTasks)
+	}, map[string]mcpResourceVar{"id": mcpIDVar}, mcpRunReport, mcpCaveatSummaryAveragesStartedTasks)
 
 	s.AddPrompt(&mcp.Prompt{
 		Name:  "diagnose_run",
@@ -500,12 +500,12 @@ type mcpRunTaskOut struct {
 }
 
 // mcpRunSummaryOut is the report summary without the two fields the backend
-// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:101,105).
+// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:112,116).
 type mcpRunSummaryOut struct {
 	TotalRecords            int64   `json:"totalRecords" jsonschema:"records sent, summed over tasks"`
-	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec" jsonschema:"the mean of the tasks' rates, not their sum"`
+	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec" jsonschema:"the mean of the rates of the tasks that have started, not their sum"`
 	PeakThroughputRecPerSec float64 `json:"peakThroughputRecPerSec" jsonschema:"the fastest task's rate"`
-	AvgThroughputMBPerSec   float64 `json:"avgThroughputMBPerSec" jsonschema:"the mean of the tasks' rates"`
+	AvgThroughputMBPerSec   float64 `json:"avgThroughputMBPerSec" jsonschema:"the mean of the rates of the tasks that have started"`
 	AvgLatencyMs            float64 `json:"avgLatencyMs" jsonschema:"the mean latency of the tasks that measured latency, weighted by records"`
 	P50LatencyMs            float64 `json:"p50LatencyMs" jsonschema:"the p50 of the tasks that measured latency; with several, the highest"`
 	P95LatencyMs            float64 `json:"p95LatencyMs" jsonschema:"the p95 of the tasks that measured latency; with several, the highest"`
@@ -2067,15 +2067,15 @@ func mcpRunBounds(s *jsonschema.Schema, lo, hi float64) {
 // ---- caveats ----------------------------------------------------------------
 
 const (
-	mcpCaveatSummaryAveragesTasks   mcpCaveatID = "summary-averages-tasks"
-	mcpCaveatIntegrityNotStored     mcpCaveatID = "integrity-not-stored"
-	mcpCaveatCancelStoredAsFailed   mcpCaveatID = "cancel-stored-as-failed"
-	mcpCaveatScenarioPhasesInTurn   mcpCaveatID = "scenario-phases-in-turn"
-	mcpCaveatBrokerSkewProjected    mcpCaveatID = "broker-skew-projected"
-	mcpCaveatRegressionOneBaseline  mcpCaveatID = "regression-one-baseline"
-	mcpCaveatAdvisorRulesOfThumb    mcpCaveatID = "advisor-rules-of-thumb"
-	mcpCaveatAuditNoActor           mcpCaveatID = "audit-no-actor"
-	mcpCaveatActivityDisruptionRows mcpCaveatID = "activity-disruption-rows"
+	mcpCaveatSummaryAveragesStartedTasks mcpCaveatID = "summary-averages-started-tasks"
+	mcpCaveatIntegrityNotStored          mcpCaveatID = "integrity-not-stored"
+	mcpCaveatCancelStoredAsFailed        mcpCaveatID = "cancel-stored-as-failed"
+	mcpCaveatScenarioPhasesInTurn        mcpCaveatID = "scenario-phases-in-turn"
+	mcpCaveatBrokerSkewProjected         mcpCaveatID = "broker-skew-projected"
+	mcpCaveatRegressionOneBaseline       mcpCaveatID = "regression-one-baseline"
+	mcpCaveatAdvisorRulesOfThumb         mcpCaveatID = "advisor-rules-of-thumb"
+	mcpCaveatAuditNoActor                mcpCaveatID = "audit-no-actor"
+	mcpCaveatActivityDisruptionRows      mcpCaveatID = "activity-disruption-rows"
 )
 
 // mcpCaveatsRuns holds the caveats only this group's tools use (see mcpCaveats in
@@ -2083,18 +2083,29 @@ const (
 // mcpCaveatIDsRuns in the group's test file.
 var mcpCaveatsRuns = []mcpCaveat{
 	{
-		ID: mcpCaveatSummaryAveragesTasks,
+		ID: mcpCaveatSummaryAveragesStartedTasks,
 		Text: "A run's summary is built from its tasks rather than measured over the run as a whole: throughput is " +
-			"the mean of the tasks' rates (a LOAD run's producer and consumer alike; not the sum over STRESS " +
-			"producers), and peak is the fastest task. Latency comes only from the tasks that measured it, so a LOAD " +
-			"or ENDURANCE run's is its producer's; a consumer records none. Each percentile is the highest such " +
-			"task's, exact with one producer and an upper bound with several; the average is weighted by records, " +
-			"and maximum latency is the slowest task's. errorRate is the number of tasks that ended with an error " +
-			"divided by the records sent, not a share of failed records. The backend always sends p99.9 and " +
-			"duration as 0.",
+			"the mean of the rates of the tasks that have started (a LOAD run's producer and consumer alike; not the " +
+			"sum over STRESS producers), and peak is the fastest task. A task that has not started is PENDING with " +
+			"no records, as a scenario's later phase is until its turn, so while a scenario runs its throughput is " +
+			"that of the phases under way or done, and a phase that has not started reads 0 in the report's phases. " +
+			"A task that a cancel or a failure ends before its turn is stored FAILED, and counts as a rate of 0. " +
+			"An older Kates API counts a task that has not started as a rate of 0 too. Latency comes only from the " +
+			"tasks that measured it, so a LOAD or ENDURANCE run's is its producer's; a consumer records none. Each " +
+			"percentile is the highest such task's, exact with one producer and an upper bound with several; the " +
+			"average is weighted by records, and maximum latency is the slowest task's. errorRate is the number of " +
+			"tasks that ended with an error divided by the records sent, not a share of failed records. The backend " +
+			"always sends p99.9 and duration as 0.",
 		Refs: []string{
-			mcpJava + "util/MetricUtils.java:52-151",
-			mcpJava + "report/ReportGenerator.java:220-232",
+			mcpAnchoredRef(mcpJava+"util/MetricUtils.java:62-179",
+				"public static ReportSummary computeSummary(", "filter(r -> !notStarted(r))",
+				"result.getStatus() == TestResult.TaskStatus.PENDING", "private static double highest("),
+			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:220-249,283-294",
+				"report.setSummary(MetricUtils.computeSummary(results));",
+				"summaries.put(phase, MetricUtils.computeSummary(rows))"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:410-419,1929-1945",
+				"TestResult.TaskStatus.PENDING : TestResult.TaskStatus.RUNNING",
+				"private static TestRun withUnfinishedTasksFailed("),
 		},
 	},
 	{
