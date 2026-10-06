@@ -119,7 +119,7 @@ that sets a field its run doesn't read, or that the API would refuse.
 | `resilience-io-stress.yaml` | `IO_STRESS` | 80% disk saturation | brokers-alpha |
 | `resilience-dns-error.yaml` | `DNS_ERROR` | CoreDNS failures | one broker, at random |
 | `resilience-rolling-restart.yaml` | `ROLLING_RESTART` | Strimzi rolling update, one broker at a time | all brokers |
-| `resilience-node-drain.yaml` | `NODE_DRAIN` | Node maintenance eviction | node gamma (`TARGET_NODE`) |
+| `resilience-node-drain.yaml` | `NODE_DRAIN` | Node maintenance eviction | node gamma, which runs brokers-gamma |
 | `resilience-leader-election.yaml` | `LEADER_ELECTION` | Force-delete a broker; its partitions elect new leaders | one broker, at random |
 | `resilience-scale-down.yaml` | `SCALE_DOWN` | Pool contraction to 0 | brokers-sigma |
 
@@ -144,7 +144,7 @@ that sets a field its run doesn't read, or that the API would refuse.
 | `networkLatencyMs` | int | Added latency ms (`NETWORK_LATENCY`) |
 | `targetTopic` | string | A disruption plan aims a fault at the leader of this topic's `targetPartition`. A resilience run doesn't, but a `DNS_ERROR` on `litmus-crd` takes it as `TARGET_HOSTNAMES` |
 | `targetPartition` | int | Partition of `targetTopic`, in a disruption plan only |
-| `envOverrides` | map | Env vars for the Litmus experiment (`litmus-crd` only). `NODE_DRAIN` needs `TARGET_NODE`, the node to drain: Kates sets none |
+| `envOverrides` | map | Env vars for the Litmus experiment (`litmus-crd` only). For a `NODE_DRAIN`, `TARGET_NODE` or `NODE_LABEL` picks the node instead of the pod `targetLabel` picks |
 
 ### `probes` field reference
 
