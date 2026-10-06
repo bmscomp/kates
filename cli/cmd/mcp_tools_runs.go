@@ -2233,7 +2233,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:104-135",
 				`@Path("/compound")`, `"results", outcome.results()`),
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:93-119",
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:93-123",
 				"StreamingOutput executeWithKeepAlive(", "objectMapper.writeValue(os, payload);",
 				`"Failed to execute resilience test"`),
 		},

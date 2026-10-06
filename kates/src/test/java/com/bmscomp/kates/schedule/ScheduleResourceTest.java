@@ -212,9 +212,9 @@ class ScheduleResourceTest {
     }
 
     /**
-     * A PUT runs no bean validation, but a scenario's specs are held to their
-     * limits all the same: the check is the one the Kates API asks of every
-     * request before it runs it.
+     * A PUT's bean validation, like a POST's, stops at the request's own
+     * spec, but a scenario's specs are held to their limits all the same: the
+     * check is the one the Kates API asks of every request before it runs it.
      */
     @Test
     void aPutsScenarioSpecsAreHeldToTheirLimits() {
@@ -293,6 +293,113 @@ class ScheduleResourceTest {
                 .body("enabled", is(false));
 
         Mockito.verify(repository).save(s);
+    }
+
+    /**
+     * A PUT's testRequest is held to the bean constraints a POST's is, and
+     * gets the body a POST gets for it. A PUT ran no bean validation, so it
+     * saved what a POST refuses, such as STRESS with 1000 producers, which
+     * each firing then started, and it keyed a missing type otherwise than a
+     * POST does. The default messages depend on the JVM's locale, so the
+     * bodies are compared rather than spelled out.
+     */
+    @ParameterizedTest(name = "{1}")
+    @MethodSource("requestsBreakingTheirConstraints")
+    void aPutsTestRequestGetsTheBeanValidationAPostsGets(String testRequest, String field) {
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+
+        Map<String, Object> post = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\",\"testRequest\":" + testRequest + "}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .extract()
+                .jsonPath()
+                .getMap("");
+        Map<String, Object> put = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"renamed\",\"testRequest\":" + testRequest + "}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey(field))
+                .extract()
+                .jsonPath()
+                .getMap("");
+
+        assertEquals(post, put);
+        Mockito.verify(repository, Mockito.never()).save(any());
+        assertEquals("nightly", s.getName());
+        assertEquals("{\"type\":\"LOAD\"}", s.getRequestJson());
+    }
+
+    static Stream<Arguments> requestsBreakingTheirConstraints() {
+        return Stream.of(
+                Arguments.of("{\"type\":\"STRESS\",\"spec\":{\"numProducers\":1000}}", "numProducers"),
+                Arguments.of("{\"type\":\"LOAD\",\"spec\":{\"topic\":\"not a topic!\"}}", "topic"),
+                Arguments.of("{\"spec\":{\"numRecords\":10}}", "type"),
+                // A POST requires the request's own type, even beside a
+                // scenario's, so a PUT does too.
+                Arguments.of(
+                        "{\"scenario\":{\"type\":\"LOAD\",\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\","
+                                + "\"durationMs\":60000}]}}",
+                        "type"));
+    }
+
+    /**
+     * A backend the Kates API doesn't have is refused before the schedule is
+     * saved, keyed by the path of the backend the run would take. Such a
+     * schedule was saved, and each firing then failed on the backend and
+     * started no run, with the reason in the server log only.
+     */
+    @ParameterizedTest(name = "{1}")
+    @MethodSource("unknownBackends")
+    void aBackendTheApiDoesNotHaveIsNotSaved(String testRequest, String field) {
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+        String reason = "the Kates API has no backend 'nope'; set it to native or trogdor";
+
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\",\"testRequest\":" + testRequest + "}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", is(Map.of(field, reason)))
+                .body("message", is(field + ": " + reason));
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"testRequest\":" + testRequest + "}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", is(Map.of(field, reason)));
+
+        Mockito.verify(repository, Mockito.never()).save(any());
+        assertEquals("{\"type\":\"LOAD\"}", s.getRequestJson());
+    }
+
+    static Stream<Arguments> unknownBackends() {
+        String phases = "\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]";
+        return Stream.of(
+                Arguments.of("{\"type\":\"LOAD\",\"backend\":\"nope\"}", "testRequest.backend"),
+                // A scenario runs on the request's backend unless it names
+                // one of its own.
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"backend\":\"nope\",\"scenario\":{" + phases + "}}",
+                        "testRequest.backend"),
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"scenario\":{\"backend\":\"nope\"," + phases + "}}",
+                        "testRequest.scenario.backend"));
     }
 
     /**

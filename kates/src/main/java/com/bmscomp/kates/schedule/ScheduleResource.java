@@ -1,8 +1,14 @@
 package com.bmscomp.kates.schedule;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import jakarta.inject.Inject;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Validator;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -35,6 +41,9 @@ public class ScheduleResource {
     @Inject
     TestOrchestrator orchestrator;
 
+    @Inject
+    Validator validator;
+
     /**
      * A 400 naming each field of the schedule's test request that the Kates
      * API would refuse, by its path under {@code testRequest}, or empty when
@@ -43,12 +52,46 @@ public class ScheduleResource {
      * every firing, start no run, and say why only in the server log.
      */
     private Optional<Response> refusal(CreateTestRequest testRequest) {
-        return orchestrator
-                .refusal(testRequest)
-                .map(refused -> refused.under("testRequest"))
-                .map(refused -> Response.status(400)
-                        .entity(ApiError.validationFailed(refused.getMessage(), refused.getFieldErrors()))
-                        .build());
+        return unknownBackend(testRequest)
+                .or(() -> orchestrator
+                        .refusal(testRequest)
+                        .map(refused -> refused.under("testRequest"))
+                        .map(refused -> Response.status(400)
+                                .entity(ApiError.validationFailed(refused.getMessage(), refused.getFieldErrors()))
+                                .build()));
+    }
+
+    /**
+     * A 400 naming the backend the request would run on, when the Kates API
+     * has none by that name, or empty. TestOrchestrator.refusal() leaves the
+     * backend to executeTest, which refuses an unknown one as it starts the
+     * run, so each firing would fail on it. The run takes a scenario's own
+     * backend when the scenario has phases and names one, and the request's
+     * otherwise. Asked before refusal(), whose checks depend on the backend.
+     */
+    private Optional<Response> unknownBackend(CreateTestRequest testRequest) {
+        String field = "testRequest.backend";
+        String backend = testRequest.getBackend();
+        if (testRequest.isScenario() && testRequest.getScenario().getBackend() != null) {
+            field = "testRequest.scenario.backend";
+            backend = testRequest.getScenario().getBackend();
+        }
+        List<String> available = orchestrator.availableBackends();
+        if (backend == null || available.contains(backend)) {
+            return Optional.empty();
+        }
+        String why = "the Kates API has no backend '" + backend + "'; set it to " + oneOf(available);
+        return Optional.of(Response.status(400)
+                .entity(ApiError.validationFailed(field + ": " + why, Map.of(field, why)))
+                .build());
+    }
+
+    /** The names as "a", "a or b", or "a, b or c". */
+    private static String oneOf(List<String> names) {
+        if (names.size() < 2) {
+            return String.join("", names);
+        }
+        return String.join(", ", names.subList(0, names.size() - 1)) + " or " + names.getLast();
     }
 
     @GET
@@ -76,8 +119,8 @@ public class ScheduleResource {
     @APIResponse(responseCode = "201", description = "Schedule created")
     @APIResponse(
             responseCode = "400",
-            description = "Invalid request, including a testRequest that POST /api/tests would refuse;"
-                    + " fieldErrors names each field by its path under testRequest")
+            description = "Invalid request, including a testRequest that POST /api/tests would refuse, or one"
+                    + " whose backend the Kates API doesn't have; fieldErrors names each field")
     public Response createSchedule(@jakarta.validation.Valid CreateScheduleRequest request) {
         if (request.name == null || request.name.isBlank()) {
             return Response.status(400)
@@ -125,8 +168,8 @@ public class ScheduleResource {
     @APIResponse(responseCode = "200", description = "Schedule updated")
     @APIResponse(
             responseCode = "400",
-            description = "A testRequest that POST /api/tests would refuse; fieldErrors names each field by its"
-                    + " path under testRequest")
+            description = "A testRequest that POST /api/schedules would refuse, with the body POST answers;"
+                    + " fieldErrors names each field")
     @APIResponse(responseCode = "404", description = "Schedule not found")
     public Response updateSchedule(
             @Parameter(description = "Schedule ID") @PathParam("id") String id, CreateScheduleRequest request) {
@@ -137,6 +180,17 @@ public class ScheduleResource {
                     // schedule saved before the check, whose firings the
                     // Kates API refuses, can still be renamed or disabled.
                     if (request.testRequest != null) {
+                        // Held to the constraints POST's @Valid holds its
+                        // testRequest to, such as a type and at most 100
+                        // producers, and answered as POST is, by
+                        // ConstraintViolationExceptionMapper. A PUT can't take
+                        // the @Valid itself: it would also require a name and
+                        // a cronExpression, which a PUT may leave out.
+                        Set<ConstraintViolation<CreateTestRequest>> violations =
+                                validator.validate(request.testRequest);
+                        if (!violations.isEmpty()) {
+                            throw new ConstraintViolationException(violations);
+                        }
                         Optional<Response> refused = refusal(request.testRequest);
                         if (refused.isPresent()) {
                             return refused.get();
