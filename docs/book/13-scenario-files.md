@@ -59,11 +59,22 @@ scenarios:
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
-| `scenarios` | List | Yes | One or more test scenario definitions |
+| `scenarios` | List | | One or more test scenario definitions; a file of one scenario can leave the list out, as below |
+
+A file of one scenario can leave the list out and give that scenario's fields at its top level. `kates test apply` reads it as a list of one, and so do `kates scenario-diff` and the MCP server's `draft_scenario`. They read the top level only when the file's `scenarios` list is missing or empty and the top level has a `type`; beside a list of scenarios, top-level fields are ignored.
+
+```yaml
+name: "My First Test"
+type: LOAD
+spec:
+  records: 100000
+validate:
+  maxP99LatencyMs: 50
+```
 
 ### Scenario Fields
 
-Each entry in `scenarios` takes these five fields. Only `type` is required; `spec` and `validate` carry the settings and the gates that the next two sections describe.
+Each entry in `scenarios`, or the top level of a file of one scenario, takes these five fields. Only `type` is required; `spec` and `validate` carry the settings and the gates that the next two sections describe.
 
 | Field | Type | Required | Description |
 |-------|------|:---:|-------------|
@@ -533,7 +544,7 @@ No real cluster delivers a 1 ms P99, so the summary table marks the scenario `DO
 
 ## Summary
 
-- A scenario file is a `scenarios:` list in YAML or JSON; `type` is the only field a scenario must carry, and the Kates API fills in per-type defaults for everything else
+- A scenario file is a `scenarios:` list in YAML or JSON, or the fields of one scenario at its top level; `type` is the only field a scenario must carry, and the Kates API fills in per-type defaults for everything else
 - SLA gates in the `validate` block are evaluated only with `--wait` — without it, `kates test apply` is fire-and-forget, and how the runs turn out never affects its exit status
 - `kates test apply` exits 1 when any scenario fails to submit, with or without `--wait`; with `--wait` it also exits 1 when a scenario finishes `FAILED`, is lost track of (`ERROR`), or violates a gate, and a run that completes without a `validate` block passes whatever its numbers
 - The CLI never validates a file against a schema: malformed YAML aborts the run with the raw parse error, while an invalid `type` travels to the Kates API and is rejected there

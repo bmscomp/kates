@@ -708,7 +708,7 @@ kates test apply -f scenario.yaml --wait
 kates test apply -f scenario.yaml --wait -o json
 ```
 
-Apply a YAML scenario file. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
+Apply a YAML or JSON scenario file: a `scenarios` list, or the fields of one scenario at its top level. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
 
 In a terminal, `--wait` shows a spinner while each run goes. Without one (a pipe, a CI job, an agent's shell) or with `--plain`, it prints a plain line to stderr each time a run's status changes, such as `quick (3f8a2c1e): RUNNING`. With `-o json` stdout carries only the summary as JSON: each scenario's `name`, `type`, `runId`, `status` and `error`, and with `--wait`, for a scenario with a `validate` block, an `sla` object with its `violations` and the gates that were `notEvaluable`. A scenario that failed to submit has no `runId`. The exit code is the same in every mode.
 
