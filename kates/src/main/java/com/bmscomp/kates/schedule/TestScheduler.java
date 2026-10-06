@@ -2,13 +2,10 @@ package com.bmscomp.kates.schedule;
 
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.validation.Validator;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.scheduler.Scheduled;
@@ -16,8 +13,8 @@ import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestRun;
-import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.engine.InvalidTestSpecException;
+import com.bmscomp.kates.engine.SpecLimits;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.util.Result;
 
@@ -41,7 +38,7 @@ public class TestScheduler {
     com.bmscomp.kates.service.SchedulerLeaseService leases;
 
     @Inject
-    Validator validator;
+    SpecLimits specLimits;
 
     @Scheduled(every = "60s", identity = "kates-schedule-evaluator")
     void evaluateSchedules() {
@@ -75,21 +72,22 @@ public class TestScheduler {
      * refuses it and starts none. Package-private: a test fires a schedule
      * without waiting for its minute.
      *
-     * <p>The request's spec is held first to the limits TestSpec sets, as POST
-     * /api/tests holds it by bean validation, which executeTest doesn't run.
-     * A stored spec can break them, if a PUT saved it without bean validation
-     * or it was saved before TestSpec had limits. Its run went ahead anyway: a
-     * numProducers of 1000 started 1000 Trogdor tasks at each firing. The spec
-     * is validated on its own: validating the whole request would also require
-     * the request's own type, which a scenario with a type of its own goes
-     * without. A schedule saved before the Kates API kept only the fields a
-     * request sets holds the old Java defaults, which are all within the
-     * limits, so it still fires.
+     * <p>The request's own spec is held first to the limits TestSpec sets
+     * (SpecLimits), as POST /api/tests holds it by bean validation, which
+     * executeTest doesn't run; refusal(), which executeTest asks, holds a
+     * scenario's specs to them. A stored spec can break them, if a PUT saved
+     * it without bean validation or it was saved before TestSpec had limits.
+     * Its run went ahead anyway: a numProducers of 1000 started 1000 Trogdor
+     * tasks at each firing. The spec is validated on its own: validating the
+     * whole request would also require the request's own type, which a
+     * scenario with a type of its own goes without. A schedule saved before
+     * the Kates API kept only the fields a request sets holds the old Java
+     * defaults, which are all within the limits, so it still fires.
      */
     void executeSchedule(ScheduledTestRun schedule) {
         try {
             CreateTestRequest request = JSON.readValue(schedule.getRequestJson(), CreateTestRequest.class);
-            Map<String, String> outsideLimits = outsideLimits(request.getSpec());
+            Map<String, String> outsideLimits = specLimits.violations(request.getSpec());
             Result<TestRun, Exception> result = outsideLimits.isEmpty()
                     ? orchestrator.executeTest(request)
                     : Result.failure(new InvalidTestSpecException(outsideLimits));
@@ -104,22 +102,6 @@ public class TestScheduler {
         } catch (Exception e) {
             LOG.error("Failed to execute schedule '" + schedule.getName() + "'", e);
         }
-    }
-
-    /**
-     * Each value of the spec outside its limits, keyed by field name, with the
-     * reason; empty when all are within them, or there is no spec. Sorted, so
-     * that the log names them in the same order each time.
-     */
-    private Map<String, String> outsideLimits(TestSpec spec) {
-        Map<String, String> found = new LinkedHashMap<>();
-        if (spec == null) {
-            return found;
-        }
-        validator.validate(spec).stream()
-                .sorted(Comparator.comparing(v -> v.getPropertyPath() + ": " + v.getMessage()))
-                .forEach(v -> found.putIfAbsent(v.getPropertyPath().toString(), v.getMessage()));
-        return found;
     }
 
     /**
