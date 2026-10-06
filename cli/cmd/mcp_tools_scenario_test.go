@@ -123,7 +123,7 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 		t.Fatalf("verdict %s, %d scenarios", out.Verdict, len(out.Scenarios))
 	}
 	sc := out.Scenarios[0]
-	want := scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{"records": 50000, "parallelProducers": 2, "recordSizeBytes": 1024}})
+	want := scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{"records": 50000, "recordSizeBytes": 1024}})
 	if sc.Request.TestType != "LOAD" || sc.Request.Spec == nil || *sc.Request.Spec != *want.Spec {
 		t.Errorf("request = %+v, want what scenarioToRequest builds: %+v", sc.Request.Spec, want.Spec)
 	}
@@ -139,11 +139,30 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 	}
 	mcpScnHasFinding(t, out, 0, "spec.targetThroughput", mcpScnOutside, "the rate is unlimited: set targetThroughput")
 	mcpScnHasFinding(t, out, 0, "spec.topic", mcpScnOutside, "load-test, the topic every LOAD run shares")
-	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnWarning, "starts one producer")
 	mcpSecHasCaveats(t, env, mcpCaveatAgentEnvelopeProposed, mcpCaveatScenarioShippedDefaults,
-		mcpCaveatScenarioValidateGrading, mcpCaveatLoadSingleProducer)
+		mcpCaveatScenarioValidateGrading)
 	if out.Envelope.MaxRecordsPerSecond != mcpScnEnvMaxRecordsPerSec || out.Envelope.MaxBytes != 10<<30 || out.Envelope.TopicPrefix != "kates-mcp-" {
 		t.Errorf("envelope = %+v", out.Envelope)
+	}
+	mcpScnOnlyPinCheck(t, fb)
+}
+
+// TestMCPDraftScenarioCountsTheRunIgnores: a count above what the run starts
+// is a warning, and parallelProducers on a LOAD scenario brings the
+// single-producer caveat. No template sets either count
+// (TestShippedScenariosSetOnlyWhatTheirRunsRead), so an override adds them.
+func TestMCPDraftScenarioCountsTheRunIgnores(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	env, out := mcpDraft(t, h, map[string]any{
+		"template":       "quick-load",
+		"spec_overrides": map[string]any{"parallelProducers": 2, "numConsumers": 2},
+	})
+	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnWarning, "starts one producer")
+	mcpScnHasFinding(t, out, 0, "spec.numConsumers", mcpScnWarning, "no effect")
+	mcpSecHasCaveats(t, env, mcpCaveatLoadSingleProducer)
+	if e := out.Scenarios[0].Effective; e.ProducerTasks != 1 {
+		t.Errorf("effective = %+v", e)
 	}
 	mcpScnOnlyPinCheck(t, fb)
 }
@@ -167,6 +186,7 @@ func TestMCPDraftScenarioEveryTemplate(t *testing.T) {
 	mcpScnHasFinding(t, out, 0, "type", mcpScnOutside, "SPIKE runs its producer at an unlimited rate")
 	_, out = mcpDraft(t, h, map[string]any{"template": "endurance-soak"})
 	mcpScnHasFinding(t, out, 0, "spec.durationSeconds", mcpScnOutside, "the run may last up to 3600 s")
+	_, out = mcpDraft(t, h, map[string]any{"template": "stress-test"})
 	mcpScnHasFinding(t, out, 0, "spec", mcpScnOutside, "GiB")
 	_, out = mcpDraft(t, h, map[string]any{"template": "integrity-tx"})
 	mcpScnHasFinding(t, out, 0, "validate.maxDuplicatePercent", mcpScnWarning, "drops validate.maxDuplicatePercent")
@@ -201,7 +221,7 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	if sc.Name != "RT smoke" || sc.Request.Spec.Topic != "kates-mcp-rt" || sc.Request.Spec.Records != 20000 {
 		t.Errorf("scenario = %+v", sc)
 	}
-	if e := sc.Effective; e.Throughput != 10000 || e.RecordsPerSec != 20000 || e.DurationMs != 600_000 {
+	if e := sc.Effective; e.Throughput != 10000 || e.RecordsPerSec != 10000 || e.DurationMs != 600_000 {
 		t.Errorf("effective = %+v", e)
 	}
 	for _, want := range []string{"name: RT smoke", "topic: kates-mcp-rt", "records: 20000", "maxP99LatencyMs: 150", "enableTransactions: true"} {
@@ -217,7 +237,6 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	// Warnings remain: ROUND_TRIP reports no integrity data. Its producer
 	// takes the idempotence and transactions the template asks for.
 	mcpScnHasFinding(t, out, 0, "validate.maxOutOfOrder", mcpScnWarning, "never checked")
-	mcpScnHasFinding(t, out, 0, "spec.numConsumers", mcpScnWarning, "no effect")
 	if f := mcpScnFindingsOn(out, 0, "spec.enableIdempotence"); len(f) != 0 {
 		t.Errorf("spec.enableIdempotence has findings %+v", f)
 	}

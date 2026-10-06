@@ -246,6 +246,7 @@ Expected output, with illustrative numbers:
   Resilience Test Results
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Status                   ● COMPLETED
+  Test Run                 3f6c2a1e
 
  ▸ Chaos Outcome
   Experiment               kafka-broker-pod-kill
@@ -254,6 +255,16 @@ Expected output, with illustrative numbers:
   Phase                    Completed
   Fail Step                N/A
   Probe Success            ████████████████████ 100%
+
+ ▸ Probes and Recovery
+  Recovery Time            8214 ms
+  Baseline                 2/2 passed
+  During the fault         4/5 passed
+  After recovery           2/2 passed
+
+  Phase             Probe             Failed  Output
+  ────────────────  ────────────────  ──────  ──────
+  During the fault  isr-health-check  1/5     61
 
  ▸ Impact Analysis (% change)
   Metric               Change
@@ -273,9 +284,11 @@ Expected output, with illustrative numbers:
   Throughput (rec/s)       489.1
   P99 Latency (ms)         411.30
   Error Rate               0.0000%
+
+  Full details: kates test get 3f6c2a1e
 ```
 
-`Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. The Impact Analysis rows come in a different order from run to run. The command returns as soon as its recovery probes pass, usually while the LOAD run is still producing, so the post-chaos summary covers the run up to that moment. With the rate held at 500 records per second, throughput barely moves, and the fault shows in the latency rows.
+`Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. The Impact Analysis rows come in a different order from run to run. The command returns as soon as its recovery probes pass, usually while the LOAD run is still producing, so the post-chaos summary covers the run up to that moment. `Test Run` names that LOAD run, and the last line reads it with `kates test get`. With the rate held at 500 records per second, throughput barely moves, and the fault shows in the latency rows.
 
 ::: {.callout-tip}
 A playbook run prints the disruption ID and the final status, and gets no SLA grade: playbook YAML cannot carry an `sla` block. To fail a CI job on an SLA violation, with exit code 1, save a playbook's plan with `kates disruption playbook show <name> -o json > plan.json`, add an `sla` block, and run it with `kates disruption run --config plan.json --fail-on-sla-breach`. Use `kates disruption playbook list` to see the available playbooks and what each one does.

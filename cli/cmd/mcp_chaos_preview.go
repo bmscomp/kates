@@ -84,11 +84,11 @@ var mcpAdHocBounds = map[string]mcpAdHocBound{
 // type. A step may set it only for its own type, so a plan never carries a
 // number its type never reads. The providers read them differently, and the
 // field descriptions say so: the kubernetes provider sizes IO_STRESS by
-// ioWorkers alone (KubernetesChaosProvider.java:523-536), while litmus-crd
+// ioWorkers alone (KubernetesChaosProvider.java:525-538), while litmus-crd
 // sizes it by fillPercentage as well as ioWorkers
 // (LitmusChaosProvider.java:314-318). Both honour gracePeriodSec: litmus-crd
 // hands a POD_DELETE to the kubernetes provider, which deletes the pod with it
-// (LitmusChaosProvider.java:42-54,81-83; KubernetesChaosProvider.java:203-211).
+// (LitmusChaosProvider.java:42-54,81-83; KubernetesChaosProvider.java:205-213).
 // fillPercentage stays out of ad-hoc plans with DISK_FILL, the one type it is
 // meant for.
 var mcpAdHocTypeParam = map[string]string{

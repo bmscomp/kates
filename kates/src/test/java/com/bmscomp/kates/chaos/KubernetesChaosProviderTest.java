@@ -719,6 +719,26 @@ public class KubernetesChaosProviderTest {
         assertEquals(3, remainingPods().size());
     }
 
+    @Test
+    void aDelayedFaultIsTimedFromTheEndOfItsDelay() throws Exception {
+        createZonedBrokers();
+        // The start used to be taken before the delay, so the outcome's start
+        // and duration counted the wait as part of the fault.
+        FaultSpec spec = FaultSpec.builder("delayed-kill")
+                .targetPod("krafter-brokers-2")
+                .disruptionType(DisruptionType.POD_KILL)
+                .delayBeforeSec(1)
+                .build();
+        long delayNanos = TimeUnit.SECONDS.toNanos(1);
+
+        long triggered = System.nanoTime();
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(List.of("krafter-brokers-0", "krafter-brokers-1"), remainingPods());
+        assertTrue(outcome.chaosStartNanos() - triggered >= delayNanos, "the fault's start includes the delay");
+    }
+
     /** Every request the API server has had since the last call, as "METHOD path". */
     private List<String> requests() throws InterruptedException {
         List<String> seen = new ArrayList<>();

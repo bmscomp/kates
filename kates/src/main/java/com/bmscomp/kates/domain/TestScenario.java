@@ -9,9 +9,10 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Top-level scenario envelope for multi-phase test definitions.
- * When submitted via {@code POST /api/tests}, the orchestrator executes
- * each {@link ScenarioPhase} sequentially, applying per-phase overrides
- * and evaluating SLA gates between phases.
+ * When submitted via {@code POST /api/tests}, the orchestrator runs
+ * each {@link ScenarioPhase} in turn, for its duration, with the phase's
+ * overrides over the base spec. The SLA is evaluated as the run is polled
+ * and in its report, and no phase waits on it.
  *
  * <p>Backward-compatible: if {@code scenario} is absent on
  * {@link CreateTestRequest}, the legacy flat {@code type + spec} path is used.

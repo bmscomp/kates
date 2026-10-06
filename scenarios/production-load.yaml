@@ -1,9 +1,10 @@
+# A LOAD run starts one producer and one consumer. For more producers,
+# start from the stress-test template.
 scenarios:
   - name: "Production Load Simulation"
     type: LOAD
     spec:
       records: 1000000
-      parallelProducers: 8
       recordSizeBytes: 2048
       durationSeconds: 300
       acks: "all"

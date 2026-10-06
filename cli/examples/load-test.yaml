@@ -1,9 +1,12 @@
+# A LOAD or ENDURANCE run starts one producer and one consumer. For more
+# producers, make it a STRESS run (perf-stress.yaml).
+#
+# Usage:  kates test apply -f cli/examples/load-test.yaml [--wait]
 scenarios:
   - name: "Quick Load Test"
     type: LOAD
     spec:
       records: 50000
-      parallelProducers: 2
       recordSizeBytes: 512
 
   - name: "Endurance Soak"
