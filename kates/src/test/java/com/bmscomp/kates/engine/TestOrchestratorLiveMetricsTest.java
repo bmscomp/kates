@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
+import jakarta.validation.Validation;
 
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
@@ -50,6 +51,9 @@ import com.bmscomp.kates.service.TopicService;
  * so the numbers are the backend's own arithmetic; only the broker is missing.
  */
 class TestOrchestratorLiveMetricsTest {
+
+    private static final SpecLimits SPEC_LIMITS =
+            new SpecLimits(Validation.buildDefaultValidatorFactory().getValidator());
 
     private final PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
     private final BenchmarkMetrics benchmarkMetrics = new BenchmarkMetrics(registry);
@@ -100,6 +104,7 @@ class TestOrchestratorLiveMetricsTest {
                 benchmarkMetrics,
                 mock(KatesMetrics.class),
                 new SlaEvaluator(),
+                SPEC_LIMITS,
                 mock(Event.class),
                 "native",
                 "localhost:9092",

@@ -72,7 +72,7 @@ exits 130 after the summary.`,
       type: LOAD
       spec:
         records: 100000
-        parallelProducers: 2
+        recordSizeBytes: 512
       validate:
         maxP99LatencyMs: 50
         minThroughputRecPerSec: 10000`,
@@ -359,10 +359,10 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.Acks = fmt.Sprintf("%v", v)
 		}
 		if v, ok := s.Spec["batchSize"]; ok {
-			spec.BatchSize = toInt(v)
+			spec.BatchSize = toIntPtr(v)
 		}
 		if v, ok := s.Spec["lingerMs"]; ok {
-			spec.LingerMs = toInt(v)
+			spec.LingerMs = toIntPtr(v)
 		}
 		if v, ok := s.Spec["compressionType"]; ok {
 			spec.CompressionType = fmt.Sprintf("%v", v)
@@ -389,7 +389,7 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.FetchMinBytes = toInt(v)
 		}
 		if v, ok := s.Spec["fetchMaxWaitMs"]; ok {
-			spec.FetchMaxWaitMs = toInt(v)
+			spec.FetchMaxWaitMs = toIntPtr(v)
 		}
 		if v, ok := s.Spec["enableIdempotence"]; ok {
 			spec.EnableIdempotence = toBoolPtr(v)
@@ -417,6 +417,26 @@ func toInt(v interface{}) int {
 	default:
 		return 0
 	}
+}
+
+// toIntPtr reads a number the file sets, as toInt does, so that 0 is sent
+// too: read with toInt, a lingerMs, batchSize or fetchMaxWaitMs of 0 was left
+// out of the request, and the run used its type's setting instead. Anything
+// that is not a number is nil and sends nothing, as toInt's 0 did.
+func toIntPtr(v interface{}) *int {
+	switch n := v.(type) {
+	case float64:
+		i := int(n)
+		return &i
+	case int:
+		return &n
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			j := int(i)
+			return &j
+		}
+	}
+	return nil
 }
 
 func toBool(v interface{}) bool {

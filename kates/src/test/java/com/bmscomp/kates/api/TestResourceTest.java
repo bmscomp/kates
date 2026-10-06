@@ -330,6 +330,99 @@ class TestResourceTest {
     }
 
     /**
+     * A scenario's base spec and phase specs are held to the limits the
+     * request's own spec is, each value keyed by its path in the scenario, as
+     * the fields its phases could not apply are. Bean validation stopped at
+     * the request's own spec, so such a value went into the run: a numRecords
+     * of 0 sent nothing, and a topic Kafka cannot create failed the run. The
+     * Trogdor mock refuses every task, so a run the check let through would
+     * fail at submission and give back its permit.
+     */
+    @Test
+    void aScenarioSpecValueOutsideItsLimitsIsRefusedByItsPath() {
+        when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+
+        given().contentType("application/json")
+                .body("{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"scenario\": {\"baseSpec\": {\"acks\": \"2\"},"
+                        + " \"phases\": [{\"name\": \"steady\", \"phaseType\": \"STEADY\", \"durationMs\": 60000,"
+                        + " \"spec\": {\"numRecords\": 0, \"topic\": \"not a topic!\"}}]}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(3))
+                .body("fieldErrors.'baseSpec.acks'", is("acks must be one of: all, -1, 0, 1"))
+                .body("fieldErrors", hasKey("phases[0].spec.numRecords"))
+                .body("fieldErrors.'phases[0].spec.topic'", is("topic must be a legal Kafka topic name"))
+                .body(
+                        "message",
+                        org.hamcrest.Matchers.startsWith("scenario.baseSpec.acks: acks must be one of: all, -1, 0, 1;"
+                                + " scenario.phases[0].spec.numRecords: "));
+        verifyNoInteractions(trogdorClient);
+    }
+
+    /**
+     * As with the request's own spec, a scenario's values outside their
+     * limits are answered first, and on their own: the fields its phases could
+     * not apply, here a SPIKE phase's rate and a consumer group no phase
+     * reads, are named once the values are within them.
+     */
+    @Test
+    void aScenarioSpecsLimitsAreCheckedBeforeWhatItsPhasesCouldNotApply() {
+        given().contentType("application/json")
+                .body("{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"scenario\": {\"baseSpec\":"
+                        + " {\"numRecords\": 0, \"consumerGroup\": \"perf-cg\"}, \"phases\": [{\"name\": \"burst\","
+                        + " \"phaseType\": \"SPIKE\", \"durationMs\": 60000, \"spec\": {\"throughput\": 500}}]}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors", aMapWithSize(1))
+                .body("fieldErrors", hasKey("baseSpec.numRecords"));
+        verifyNoInteractions(trogdorClient);
+    }
+
+    /**
+     * The request's own spec is still held to its limits by bean validation,
+     * which answers first and keys each value by its field name, in a request
+     * with a scenario too.
+     */
+    @Test
+    void theRequestsOwnSpecIsStillKeyedByFieldName() {
+        given().contentType("application/json")
+                .body("{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"spec\": {\"numRecords\": 0}, \"scenario\":"
+                        + " {\"phases\": [{\"name\": \"steady\", \"phaseType\": \"STEADY\", \"durationMs\": 60000,"
+                        + " \"spec\": {\"topic\": \"not a topic!\"}}]}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("message", is("Request validation failed"))
+                .body("fieldErrors", aMapWithSize(1))
+                .body("fieldErrors", hasKey("numRecords"));
+        verifyNoInteractions(trogdorClient);
+    }
+
+    /** A scenario in a bulk request is held to the same limits, and refused in its own entry. */
+    @Test
+    void aBulkRequestsScenarioIsHeldToTheSameLimits() {
+        when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+
+        given().contentType("application/json")
+                .body("[{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"scenario\": {\"phases\": [{\"name\":"
+                        + " \"steady\", \"phaseType\": \"STEADY\", \"durationMs\": 60000,"
+                        + " \"spec\": {\"topic\": \"not a topic!\"}}]}}]")
+                .when()
+                .post("/api/tests/bulk")
+                .then()
+                .statusCode(202)
+                .body("runs[0].id", nullValue())
+                .body("runs[0].error", is("scenario.phases[0].spec.topic: topic must be a legal Kafka topic name"));
+        verifyNoInteractions(trogdorClient);
+    }
+
+    /**
      * A null where a scenario phase should be is refused by its index. The
      * checks of the phases read every one, so they threw on it, and the
      * answer was a 500.

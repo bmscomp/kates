@@ -9,6 +9,7 @@ import static org.mockito.Mockito.*;
 import java.util.stream.Stream;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
+import jakarta.validation.Validation;
 
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +26,9 @@ import com.bmscomp.kates.service.TopicService;
  * because nothing carried it, so RPO had nothing to measure from.
  */
 class ChaosStartPlumbingTest {
+
+    private static final SpecLimits SPEC_LIMITS =
+            new SpecLimits(Validation.buildDefaultValidatorFactory().getValidator());
 
     @Test
     void nativeWorkerKeepsTheFirstFaultItIsTold() {
@@ -74,6 +78,7 @@ class ChaosStartPlumbingTest {
                 mock(BenchmarkMetrics.class),
                 mock(KatesMetrics.class),
                 new SlaEvaluator(),
+                SPEC_LIMITS,
                 mock(Event.class),
                 "native",
                 "localhost:9092",
