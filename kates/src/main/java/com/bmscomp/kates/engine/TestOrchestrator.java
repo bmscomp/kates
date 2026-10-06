@@ -893,7 +893,7 @@ public class TestOrchestrator {
             List<BenchmarkHandle> handles = entry.getValue();
             for (BenchmarkHandle handle : handles) {
                 try {
-                    String backendName = defaultBackend;
+                    String backendName = handle.backendName();
                     var backendResult = resolveBackend(backendName);
                     if (backendResult.isSuccess()) {
                         backendResult.asSuccess().orElseThrow().stop(handle);
