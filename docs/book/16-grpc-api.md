@@ -410,7 +410,10 @@ All list RPCs use `page` (zero-based) and `size` (default 50, max 200) request f
 | `INVALID_ARGUMENT` | 400 | Missing/invalid fields | `Test type is required`, `Invalid test type: BENCHMARK`, `partitions: must be less than or equal to 10000` |
 | `NOT_FOUND` | 404 | Resource doesn't exist | `Test not found: 0badc0de` |
 | `FAILED_PRECONDITION` | 409 | `CancelTest` on a run that is neither pending nor running | `Test is not running (status: DONE)` |
-| `INTERNAL` | 500 or 429 | `CreateTest` could not start the run, for a reason other than its fields | Surfaces the underlying exception message verbatim — including `Concurrency limit reached: 3 tests already running`, which REST reports as `429` |
+| `RESOURCE_EXHAUSTED` | 429 | `CreateTest` while the Kates API runs as many tests as `kates.engine.max-concurrent-tests` allows | `Concurrency limit reached: 3 tests already running. Retry later or increase kates.engine.max-concurrent-tests.` |
+| `INTERNAL` | 500 | `CreateTest` could not start the run, for a reason other than its fields or a full engine | Surfaces the underlying exception message verbatim |
+
+After `RESOURCE_EXHAUSTED`, send the same request again later: no run started, and the next attempt can succeed once a running test ends. REST's `429` also sends `Retry-After: 60`; the gRPC status carries no delay, so wait about a minute between attempts.
 
 Any other exception inside an RPC — Kafka unreachable during `GetClusterInfo`, no Kubernetes API for `GetClusterTopology` — reaches the client as `UNKNOWN`, with the Java exception class and message as the description. Transport-level codes such as `UNAVAILABLE` come from the gRPC runtime itself (e.g. when the server cannot be reached), not from Kates.
 
@@ -482,7 +485,7 @@ Generated clients carry no credentials of their own: attach the API key as `x-ap
 - Server reflection is enabled only in the dev profile; against a deployed Kates API, pass `-import-path kates/src/main/proto -proto kates.proto` to `grpcurl`
 - `CreateTestRequest` exposes only a subset of `TestSpec`, held to the limits REST sets; unset fields fall back to per-test-type defaults, and the request's `labels` map is ignored by the current server
 - proto3 JSON output omits zero-valued fields — a missing `id` or `page` in a response means zero, not an error — and some declared fields (`controller_id`, most of `ClusterTopology`, the counts on `ListTopics` items) are never populated at all
-- Kates raises five application status codes — `UNAUTHENTICATED`, `INVALID_ARGUMENT`, `NOT_FOUND`, `FAILED_PRECONDITION` and `INTERNAL`; any other exception surfaces as `UNKNOWN`, and transport-level codes like `UNAVAILABLE` come from the gRPC runtime itself
+- Kates raises six application status codes — `UNAUTHENTICATED`, `INVALID_ARGUMENT`, `NOT_FOUND`, `FAILED_PRECONDITION`, `RESOURCE_EXHAUSTED` and `INTERNAL`; any other exception surfaces as `UNKNOWN`, and transport-level codes like `UNAVAILABLE` come from the gRPC runtime itself
 - Typed clients for Go, Java, and Python are generated with `protoc` from the bundled `kates/src/main/proto/kates.proto`; Go needs an `M` mapping because the file declares no `go_package`
 
 That ends the reference part. The appendices come next, starting with the [Glossary](appendix-a-glossary.md): look up ISR, KRaft or consumer lag there when one of these references uses a term without explaining it.

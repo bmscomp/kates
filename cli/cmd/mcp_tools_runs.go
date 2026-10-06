@@ -180,7 +180,7 @@ const (
 // a Kates API without the check of a scenario's specs
 // (TestOrchestrator.java:1089-1092) stored a scenario's base spec as sent, and
 // one without the check of a gRPC request's fields
-// (GrpcTestService.java:104-109) stored a compressionType sent over gRPC
+// (GrpcTestService.java:116-121) stored a compressionType sent over gRPC
 // unchecked. So a stored value outside these is third-party text.
 var (
 	mcpRunTopicRE       = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,249}$`)

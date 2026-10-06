@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.ObjIntConsumer;
 import java.util.stream.Stream;
+import jakarta.persistence.PersistenceException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -26,6 +28,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.bmscomp.kates.domain.TestSpec;
+import com.bmscomp.kates.engine.ConcurrencyLimitException;
 import com.bmscomp.kates.engine.InMemoryEngine;
 import com.bmscomp.kates.engine.InvalidTestSpecException;
 import com.bmscomp.kates.engine.TestOrchestrator;
@@ -43,7 +46,9 @@ import com.bmscomp.kates.util.Result;
  * 705032704 records and 3000000000 as a negative count; a record size,
  * partition count, replication factor or compression type outside TestSpec's
  * constraints reached the run; a negative value was dropped for the type's
- * default; and a refusal from the orchestrator came back INTERNAL.
+ * default; and a refusal from the orchestrator came back INTERNAL. A full
+ * engine is answered RESOURCE_EXHAUSTED, for the caller to retry, where it
+ * came back INTERNAL too.
  */
 class GrpcTestServiceCreateTest {
 
@@ -185,17 +190,36 @@ class GrpcTestServiceCreateTest {
         assertEquals("duration_ms: " + why, e.getStatus().getDescription());
     }
 
-    /** A full engine isn't the caller's error, and is answered as before. */
+    /**
+     * A full engine is a temporary condition: nothing started, so the caller
+     * can send the same request again later, as POST /api/tests answers it
+     * with a 429. It came back INTERNAL, which a client can't tell from a
+     * fault in the Kates API.
+     */
     @Test
-    void aFullEngineIsNotAnInvalidArgument() {
+    void aFullEngineIsResourceExhaustedForTheCallerToRetry() {
         engine.fill();
 
         var e = refused(load());
 
-        assertEquals(Status.Code.INTERNAL, e.getStatus().getCode());
-        assertTrue(
-                e.getStatus().getDescription().startsWith("Concurrency limit reached"),
+        assertEquals(Status.Code.RESOURCE_EXHAUSTED, e.getStatus().getCode());
+        assertEquals(
+                new ConcurrencyLimitException(InMemoryEngine.MAX_CONCURRENT).getMessage(),
                 e.getStatus().getDescription());
+        assertEquals(InMemoryEngine.MAX_CONCURRENT, engine.rows.size(), "the refused request stored no run");
+    }
+
+    /** Any other failure to start the run, here a database it can't be saved to, is the Kates API's own. */
+    @Test
+    void aFailureOfTheKatesApiItselfIsInternal() {
+        doThrow(new PersistenceException("Unable to acquire JDBC Connection"))
+                .when(engine.repository)
+                .save(any());
+
+        var e = refused(load());
+
+        assertEquals(Status.Code.INTERNAL, e.getStatus().getCode());
+        assertEquals("Unable to acquire JDBC Connection", e.getStatus().getDescription());
     }
 
     /** A row of outsideTheLimits, with the value set on both. */
