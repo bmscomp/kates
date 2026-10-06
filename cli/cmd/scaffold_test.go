@@ -70,7 +70,9 @@ func TestBuiltinScenarios_ExactlyOnceHasIntegrityFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(data)
-	for _, field := range []string{"enableIdempotence", "enableTransactions", "maxDataLossPercent"} {
+	// No maxDataLossPercent: a ROUND_TRIP run reports no integrity data, so
+	// the gate would check nothing (TestShippedScenariosGateOnlyWhatApplyChecks).
+	for _, field := range []string{"enableIdempotence", "enableTransactions"} {
 		if !strings.Contains(content, field) {
 			t.Errorf("exactly-once scenario missing field: %s", field)
 		}

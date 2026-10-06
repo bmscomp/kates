@@ -80,17 +80,29 @@ doesn't read.
 
 ### `validate` field reference
 
+`kates test apply --wait` checks the gates below and drops any other key
+without a word. It reads `maxErrorRate` but checks nothing against it, since a
+run reports no error count. `TestShippedScenariosGateOnlyWhatApplyChecks`
+(`cli/cmd`) fails an example with a gate `kates test apply` doesn't check for
+its type.
+
 | YAML key | Type | Fails when… |
 |---|---|---|
-| `maxP99LatencyMs` | float | p99 > threshold |
-| `maxAvgLatencyMs` | float | avg > threshold |
+| `maxP99LatencyMs` | float | p99 > threshold, or no task measured latency |
+| `maxAvgLatencyMs` | float | avg > threshold, or no task measured latency |
 | `minThroughputRecPerSec` | float | throughput < threshold |
-| `maxErrorRate` | float | error rate > threshold (%) |
-| `maxDataLossPercent` | float | data loss > threshold |
-| `maxRtoMs` | float | recovery time > threshold |
-| `maxRpoMs` | float | recovery point > threshold |
-| `maxOutOfOrder` | int | out-of-order records > threshold |
-| `maxCrcFailures` | int | CRC failures > threshold |
+| `maxErrorRate` | float | Never: read, but not checked |
+| `maxDataLossPercent` | float | data loss > threshold (%); `INTEGRITY` only |
+| `maxRtoMs` | float | recovery time > threshold; `INTEGRITY` only, *not evaluable* on any other type |
+| `maxRpoMs` | float | Never in a scenario file: RPO is measured from the fault a resilience run injects, so the gate is *not evaluable* |
+| `maxOutOfOrder` | int | out-of-order records > threshold; `INTEGRITY` only |
+| `maxCrcFailures` | int | CRC failures > threshold; `INTEGRITY` only |
+
+Only an `INTEGRITY` run reports integrity data. On any other type,
+`maxDataLossPercent`, `maxOutOfOrder` and `maxCrcFailures` never fail, and the
+summary still reads `✓ SLA Pass`. On an `INTEGRITY` run each of the three is 0
+when the `validate` block leaves it out, and a negative value turns it off. A
+*not evaluable* gate neither passes nor fails, and leaves the exit code alone.
 
 ---
 

@@ -94,7 +94,7 @@ kates test scaffold export --all --type LOAD  # export only LOAD templates
 | `ci-gate` | LOAD | CI pipeline gate — fast 10k-record validation |
 | `stress-test` | STRESS | High-throughput — 5M records, 16 producers |
 | `endurance-soak` | ENDURANCE | 1-hour soak at 5k msg/s |
-| `exactly-once` | ROUND_TRIP | E2E integrity — idempotent + transactional |
+| `exactly-once` | ROUND_TRIP | Round trip — idempotent + transactional producer |
 | `integrity-tx` | INTEGRITY | Transactional integrity — zstd, CRC, zero-loss |
 | `spike-test` | SPIKE | Burst traffic — one unthrottled producer for up to 60s |
 
