@@ -285,7 +285,7 @@ public class TestRunRepository {
 
     /**
      * How many runs in one of {@code statuses} were created before
-     * {@code before}: what DELETE /api/tests would prune, and what it left.
+     * {@code before}: what {@link RunRetention} would prune, and what it left.
      */
     public long countByStatusCreatedBefore(
             java.util.Set<com.bmscomp.kates.domain.TestResult.TaskStatus> statuses, java.time.Instant before) {
@@ -301,7 +301,7 @@ public class TestRunRepository {
      * The ids of the runs in one of {@code statuses} created before
      * {@code before}, oldest first, at most {@code limit} of them.
      *
-     * <p>Ids, not runs: DELETE /api/tests deletes each through the
+     * <p>Ids, not runs: {@link RunRetention} deletes each through the
      * orchestrator, which reads the run under its row lock itself. The id
      * orders runs created in the same instant, so a caller that prunes a
      * limit's worth per call goes through them in one order.
