@@ -2,10 +2,10 @@ apiVersion: v2
 name: kafka-cluster
 description: A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability
 type: application
-# Patch: the platform profile adds kates-probe-topic, the topic the Kates
-# API's built-in producer-throughput probe writes to. Templates and base
-# values are unchanged.
-version: 1.0.6
+# Patch: the Helm-test images move to kates-tester 1.25.0, the tag the
+# v1.25.0 release publishes; every Strimzi chart pins the same one.
+# Templates and defaults are otherwise unchanged.
+version: 1.0.7
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -39,6 +39,8 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kafka and testImages.kubectl move to kates-tester 1.25.0, the tag the v1.25.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.24.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: added
       description: "The platform profile creates kates-probe-topic: 3 partitions, delete cleanup, one hour of retention. The Kates API's built-in producer-throughput probe writes ten 100-byte records to it each time it runs, and the brokers create no topic on first use (auto.create.topics.enable is false), so before this the probe could never pass. Nothing reads the topic"
     - kind: changed

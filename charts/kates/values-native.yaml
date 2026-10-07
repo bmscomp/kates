@@ -23,7 +23,7 @@
 
 image:
   # Published as <appVersion>-native alongside the JVM tag.
-  tag: "1.24.0-native"
+  tag: "1.25.0-native"
 
 # Not read by a native image — see above.
 jvm:

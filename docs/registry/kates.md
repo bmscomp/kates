@@ -43,8 +43,8 @@ unhealthy on `/api/health` — which is expected, not a bug. See
 
 | Tag pattern | What it is |
 |---|---|
-| `1.24.0`, `1.24`, `1` | JVM build — Eclipse Temurin 21 JRE |
-| `1.24.0-native`, … | GraalVM native build — ahead-of-time compiled, UBI 9 minimal |
+| `1.25.0`, `1.25`, `1` | JVM build — Eclipse Temurin 21 JRE |
+| `1.25.0-native`, … | GraalVM native build — ahead-of-time compiled, UBI 9 minimal |
 | `latest` | Latest default-branch build (JVM) |
 | `<short-sha>` | Exact commit |
 
@@ -54,7 +54,7 @@ are signed with [cosign](https://docs.sigstore.dev/).
 
 ### Which variant should you run?
 
-|  | JVM (`1.24.0`) | Native (`1.24.0-native`) |
+|  | JVM (`1.25.0`) | Native (`1.25.0-native`) |
 |---|---|---|
 | Start-up | Seconds | Milliseconds |
 | Memory floor | Higher | Substantially lower |
@@ -68,7 +68,7 @@ it, so the chart's `jvm.options` are silently inert. Its heap comes from the def
 chart's `containerArgs`) or by passing arguments to `docker run`:
 
 ```
-docker run --rm ghcr.io/bmscomp/kates:1.24.0-native -XX:MaximumHeapSizePercent=50
+docker run --rm ghcr.io/bmscomp/kates:1.25.0-native -XX:MaximumHeapSizePercent=50
 ```
 
 Rule of thumb: **JVM for sustained benchmarking**, where JIT warm-up pays for itself over a

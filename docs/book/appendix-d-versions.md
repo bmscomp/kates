@@ -15,18 +15,18 @@ Every version the platform pins, in one place. This table is generated from the 
 | Quarkus | 3.20.6 | `kates/pom.xml` |
 | Go (CLI) | 1.26.0 | `cli/go.mod` |
 | `apicurio-registry` chart | 0.4.0 (app 3.3.0) | `charts/apicurio-registry/Chart.yaml` |
-| `connect-cluster` chart | 2.1.4 (app 4.3.1) | `charts/connect-cluster/Chart.yaml` |
+| `connect-cluster` chart | 2.1.5 (app 4.3.1) | `charts/connect-cluster/Chart.yaml` |
 | `headlamp` chart | 0.2.0 (app 0.40.1) | `charts/headlamp/Chart.yaml` |
-| `kafka-cluster` chart | 1.0.6 (app 4.3.1) | `charts/kafka-cluster/Chart.yaml` |
+| `kafka-cluster` chart | 1.0.7 (app 4.3.1) | `charts/kafka-cluster/Chart.yaml` |
 | `kafka-common` chart | 0.1.0 (library) | `charts/kafka-common/Chart.yaml` |
 | `kafka-ui` chart | 0.3.0 (app v1.5.0) | `charts/kafka-ui/Chart.yaml` |
 | `kates-chaos` chart | 2.2.1 (app 3.28.0) | `charts/kates-chaos/Chart.yaml` |
 | `kates-platform` chart | 0.7.0 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
-| `kates` chart | 0.10.8 (app 1.24.0) | `charts/kates/Chart.yaml` |
+| `kates` chart | 0.10.9 (app 1.25.0) | `charts/kates/Chart.yaml` |
 | `legacy-kafka` chart | 0.2.0 (app 3.9.1) | `charts/legacy-kafka/Chart.yaml` |
-| `mirror-maker2` chart | 0.11.2 (app 4.3.1) | `charts/mirror-maker2/Chart.yaml` |
+| `mirror-maker2` chart | 0.11.3 (app 4.3.1) | `charts/mirror-maker2/Chart.yaml` |
 | `monitoring` chart | 1.6.0 (app 82.4.3) | `charts/monitoring/Chart.yaml` |
-| `strimzi-operator` chart | 0.3.2 (app 1.2.0) | `charts/strimzi-operator/Chart.yaml` |
+| `strimzi-operator` chart | 0.3.3 (app 1.2.0) | `charts/strimzi-operator/Chart.yaml` |
 | `velero` chart | 11.3.3 (app 1.17.1) | `charts/velero/Chart.yaml` |
 <!-- version-matrix:end -->
 
