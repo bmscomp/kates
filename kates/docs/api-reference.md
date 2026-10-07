@@ -562,7 +562,7 @@ Interactive API explorer available in dev mode. All endpoints are documented wit
 GET /q/openapi
 ```
 
-Machine-readable OpenAPI 3.0 specification in YAML format. Can be used for client code generation in any language.
+Machine-readable OpenAPI 3.0 specification in YAML format. Can be used for client code generation in any language. With API security on, it needs the API key, as every endpoint but `/api/health` does.
 
 ---
 

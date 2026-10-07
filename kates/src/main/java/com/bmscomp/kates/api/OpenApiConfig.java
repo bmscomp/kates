@@ -28,9 +28,10 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
             @Tag(name = "Schedules", description = "Manage scheduled and recurring test configurations"),
             @Tag(name = "Trends", description = "Historical performance trend analysis")
         })
-// Document the API-key auth (ApiKeyAuthFilter) in the spec so Swagger UI and
-// generated clients surface the "Authorize" affordance. Declared, not globally
-// required, so public paths (e.g. /api/health) are not mislabeled as secured.
+// Document the API-key auth (ApiKeyAuthenticationMechanism) in the spec so
+// Swagger UI and generated clients surface the "Authorize" affordance.
+// Declared, not globally required, so public paths (e.g. /api/health) are not
+// mislabeled as secured.
 @SecurityScheme(
         securitySchemeName = "bearerAuth",
         type = SecuritySchemeType.HTTP,

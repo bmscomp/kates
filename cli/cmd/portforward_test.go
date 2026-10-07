@@ -19,7 +19,7 @@ import (
 
 // portsTestEnv isolates one syncPortsContext run: a temporary HOME for
 // ~/.kates.yaml, a stubbed kubectl for Secret kates-api-key, and a backend
-// that, like ApiKeyAuthFilter, serves /api/health to anyone and every other
+// that, like the Kates API, serves /api/health to anyone and every other
 // path only with validKey.
 type portsTestEnv struct {
 	endpoint string

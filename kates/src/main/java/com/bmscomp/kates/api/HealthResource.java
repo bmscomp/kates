@@ -2,6 +2,7 @@ package com.bmscomp.kates.api;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import jakarta.annotation.security.PermitAll;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -16,6 +17,8 @@ import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.service.ClusterHealthService;
 
+// Kubernetes probes and anyone checking the API call this without a key.
+@PermitAll
 @Path("/api/health")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Health")

@@ -746,7 +746,7 @@ func (d *mcpDeps) unpinned(te *mcpToolError) *mcpToolError {
 // argument; either means the URL reaches something that is not the Kates API
 // this server started with. A rejected key is rejected for every call, which
 // the per-request mapping (KATES_FORBIDDEN "for this request") would hide:
-// the backend answers 403 for a wrong key (security/ApiKeyAuthFilter.java:77-80).
+// the backend answers 403 for a wrong key (security/AuthenticationFailedExceptionMapper.java).
 func (d *mcpDeps) pinFailed(err error) *mcpToolError {
 	te := d.classify(err)
 	var he *client.HTTPError

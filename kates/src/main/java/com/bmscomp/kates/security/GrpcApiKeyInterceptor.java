@@ -1,8 +1,7 @@
 package com.bmscomp.kates.security;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import io.grpc.Metadata;
 import io.grpc.ServerCall;
@@ -10,13 +9,13 @@ import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.Status;
 import io.quarkus.grpc.GlobalInterceptor;
-import org.eclipse.microprofile.config.ConfigProvider;
 
 /**
- * gRPC counterpart of {@link ApiKeyAuthFilter}: the JAX-RS filter does not
- * cover gRPC calls, which were previously unauthenticated. Honors the same
- * config keys and accepts the key via {@code authorization: Bearer <key>}
- * or {@code x-api-key: <key>} metadata.
+ * gRPC counterpart of {@link ApiKeyAuthenticationMechanism}, which covers HTTP
+ * routes only: gRPC calls were unauthenticated before this interceptor.
+ * Accepts the key via {@code authorization: Bearer <key>} or
+ * {@code x-api-key: <key>} metadata, and refuses a call whose key no
+ * principal holds ({@link ApiKeys}).
  */
 @ApplicationScoped
 @GlobalInterceptor
@@ -27,16 +26,18 @@ public class GrpcApiKeyInterceptor implements ServerInterceptor {
     private static final Metadata.Key<String> X_API_KEY =
             Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER);
 
+    @Inject
+    ApiKeys keys;
+
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
             ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
-        if (!securityEnabled()) {
+        if (!keys.securityEnabled()) {
             return next.startCall(call, headers);
         }
 
-        String token = extractToken(headers);
-        String apiKey = configuredKey();
-        if (token == null || apiKey.isBlank() || !constantTimeEquals(apiKey, token)) {
+        String key = ApiKeys.presented(headers.get(AUTHORIZATION), headers.get(X_API_KEY));
+        if (keys.resolve(key).isEmpty()) {
             call.close(
                     Status.UNAUTHENTICATED.withDescription(
                             "Missing or invalid API key. Provide it via 'authorization: Bearer <key>'"
@@ -45,34 +46,5 @@ public class GrpcApiKeyInterceptor implements ServerInterceptor {
             return new ServerCall.Listener<>() {};
         }
         return next.startCall(call, headers);
-    }
-
-    private String extractToken(Metadata headers) {
-        String authHeader = headers.get(AUTHORIZATION);
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            return authHeader.substring(7).trim();
-        }
-        String apiKeyHeader = headers.get(X_API_KEY);
-        if (apiKeyHeader != null && !apiKeyHeader.isBlank()) {
-            return apiKeyHeader.trim();
-        }
-        return null;
-    }
-
-    private boolean securityEnabled() {
-        return ConfigProvider.getConfig()
-                .getOptionalValue("kates.api.security-enabled", Boolean.class)
-                .orElse(true);
-    }
-
-    private String configuredKey() {
-        return ConfigProvider.getConfig()
-                .getOptionalValue("kates.api.key", String.class)
-                .orElse("");
-    }
-
-    private static boolean constantTimeEquals(String expected, String provided) {
-        return MessageDigest.isEqual(
-                expected.getBytes(StandardCharsets.UTF_8), provided.getBytes(StandardCharsets.UTF_8));
     }
 }
