@@ -7,7 +7,8 @@ import java.util.stream.Collectors;
 /**
  * Thrown when a request sets a spec field the run it asks for could not honour:
  * a consumer setting for a type that starts no consumer, a rate for a type that
- * runs unthrottled, an option the producer's other settings rule out.
+ * runs unthrottled, an option the producer's other settings rule out, a
+ * scenario spec value outside its limits.
  *
  * <p>These used to be accepted and dropped, so the run went ahead on other
  * terms than the ones asked for and nothing said so. Refusing them names the

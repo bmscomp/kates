@@ -93,7 +93,7 @@ func mcpDidKatesCauseThis(_ context.Context, req *mcp.GetPromptRequest) (*mcp.Ge
 // persistence/AuditEventEntity.java:17-32); only test create, delete and
 // cancel through the REST API write audit rows (api/TestResource.java:101,175,
 // 205,305,337), while scheduled and gRPC runs go straight to the orchestrator
-// (schedule/TestScheduler.java:66, grpc/GrpcTestService.java:57).
+// (schedule/TestScheduler.java:92, grpc/GrpcTestService.java:61).
 //
 // The window it asks for reaches well before the problem, and the answer it
 // asks for weighs activity that ended before the problem began: a fault can

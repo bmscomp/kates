@@ -61,7 +61,7 @@ type mcpChaosSectionStatus struct {
 type mcpDisruptionReportSummary struct {
 	TotalSteps                int     `json:"totalSteps"`
 	PassedSteps               int     `json:"passedSteps" jsonschema:"steps whose chaos verdict was Pass"`
-	WorstRecoveryMs           *int64  `json:"worstRecoveryMs,omitempty" jsonschema:"the longest timeToAllReadyMs of any step. A step without one is not counted: one that never recovered (see unrecoveredSteps), one that did not wait for recovery, and one that failed first. 0 when no step measured one"`
+	WorstRecoveryMs           *int64  `json:"worstRecoveryMs,omitempty" jsonschema:"the longest timeToAllReadyMs of any step. A step without one is not counted: one that never recovered (see unrecoveredSteps), one that did not wait for recovery, one whose fault never went in, and one that failed first. 0 when no step measured one"`
 	UnrecoveredSteps          int     `json:"unrecoveredSteps" jsonschema:"steps with a pod the fault took down that was still not ready when Kates stopped waiting (unrecoveredAfterMs set). worstRecoveryMs leaves them out, so when this is above 0 it understates the worst recovery"`
 	LongestUnrecoveredAfterMs *int64  `json:"longestUnrecoveredAfterMs,omitempty" jsonschema:"the longest unrecoveredAfterMs of those steps: a lower bound on how long they took to recover, if they did"`
 	AvgThroughputDegradation  float64 `json:"avgThroughputDegradation" jsonschema:"the steps' changes in the messages-in rate (their throughputRecPerSec impact deltas) added up and divided by the number of steps, so a step Prometheus did not measure counts as 0. Each change is in percent, negative for a drop, except for a step whose rate was 0 before the fault, which adds its rate after instead. 0 when Prometheus measured nothing"`
@@ -97,8 +97,8 @@ type mcpDisruptionReportStep struct {
 	FaultStart             string                  `json:"faultStart,omitempty" jsonschema:"when the fault started, approximately"`
 	FaultEnd               string                  `json:"faultEnd,omitempty" jsonschema:"when the fault ended, approximately"`
 	FaultDurationMs        *int64                  `json:"faultDurationMs,omitempty"`
-	TimeToFirstReadyMs     *int64                  `json:"timeToFirstReadyMs,omitempty" jsonschema:"from the fault request until the first Ready event from any watched Kafka pod"`
-	TimeToAllReadyMs       *int64                  `json:"timeToAllReadyMs,omitempty" jsonschema:"from the fault request until every watched Kafka pod was ready again, after one went down"`
+	TimeToFirstReadyMs     *int64                  `json:"timeToFirstReadyMs,omitempty" jsonschema:"from when the fault went in until the first Ready event from any watched Kafka pod"`
+	TimeToAllReadyMs       *int64                  `json:"timeToAllReadyMs,omitempty" jsonschema:"from when the fault went in until every watched Kafka pod was ready again, after one went down"`
 	UnrecoveredAfterMs     *int64                  `json:"unrecoveredAfterMs,omitempty" jsonschema:"set when a pod the fault took down was still not ready when Kates stopped waiting: a lower bound on its recovery time"`
 	TargetedLeaderBrokerID *int                    `json:"targetedLeaderBrokerId,omitempty" jsonschema:"the partition leader a leader-aware step hit"`
 	RolledBack             bool                    `json:"rolledBack"`
@@ -106,13 +106,13 @@ type mcpDisruptionReportStep struct {
 	ImpactDeltas           map[string]float64      `json:"impactDeltas" jsonschema:"change of each Prometheus metric from before the fault to after, in percent, or its value after when it was 0 before; empty when Prometheus measured nothing"`
 	UnmeasuredMetrics      []string                `json:"unmeasuredMetrics" jsonschema:"metrics Prometheus returned no data for after the fault; their figures are not measurements"`
 	PodEvents              int                     `json:"podEvents" jsonschema:"pod events recorded during the step; the timeline resource lists them"`
-	ISR                    *mcpDisruptionReportISR `json:"isr,omitempty" jsonschema:"absent when the plan tracked no topic's ISR (isrTrackingTopic), or the step failed before it measured"`
-	Lag                    *mcpDisruptionReportLag `json:"lag,omitempty" jsonschema:"absent when the plan tracked no consumer group (lagTrackingGroupId), or the step failed before it measured"`
+	ISR                    *mcpDisruptionReportISR `json:"isr,omitempty" jsonschema:"absent when the plan tracked no topic's ISR (isrTrackingTopic), the step's fault never went in, or the step failed before it measured"`
+	Lag                    *mcpDisruptionReportLag `json:"lag,omitempty" jsonschema:"absent when the plan tracked no consumer group (lagTrackingGroupId), the step's fault never went in, or the step failed before it measured"`
 }
 
 type mcpDisruptionReportISR struct {
 	Measured                 bool   `json:"measured" jsonschema:"false when the tracker took no sample of the topic (it does not exist, or every poll failed); the figures are then absent, and the caveats say how the impact score misreads such a step"`
-	TimeToFullISRMs          *int64 `json:"timeToFullIsrMs,omitempty" jsonschema:"from the fault request until the tracked topic's ISR was full again; 0 when no sample after the fault request found it short, absent when it was not full again while tracked"`
+	TimeToFullISRMs          *int64 `json:"timeToFullIsrMs,omitempty" jsonschema:"from when the fault went in until the tracked topic's ISR was full again; 0 when no sample after that found it short, absent when it was not full again while tracked"`
 	MinISRDepth              *int   `json:"minIsrDepth,omitempty" jsonschema:"the smallest ISR of any partition in any sample, from before the fault to the end of the step"`
 	UnderReplicatedPeakCount *int   `json:"underReplicatedPeakCount,omitempty" jsonschema:"the most partitions under-replicated in one sample"`
 	TotalPartitions          *int   `json:"totalPartitions,omitempty"`
@@ -120,10 +120,10 @@ type mcpDisruptionReportISR struct {
 
 type mcpDisruptionReportLag struct {
 	Measured            bool   `json:"measured" jsonschema:"false when the tracker took no sample of the group (it has no committed offsets, or every poll failed); the figures are then absent"`
-	BaselineLag         *int64 `json:"baselineLag,omitempty" jsonschema:"the lag in the last sample before the fault request, or in the first sample when none came before"`
+	BaselineLag         *int64 `json:"baselineLag,omitempty" jsonschema:"the lag in the last sample before the fault went in, or in the first sample when none came before"`
 	PeakLag             *int64 `json:"peakLag,omitempty" jsonschema:"the highest lag in any sample, before the fault included"`
 	LagSpike            *int64 `json:"lagSpike,omitempty" jsonschema:"peakLag minus baselineLag"`
-	TimeToLagRecoveryMs *int64 `json:"timeToLagRecoveryMs,omitempty" jsonschema:"from the fault request until the lag came back within 10% of its baseline; 0 when it never rose more than 10% above the baseline after the fault; absent when it rose and had not come back within 10% while tracked"`
+	TimeToLagRecoveryMs *int64 `json:"timeToLagRecoveryMs,omitempty" jsonschema:"from when the fault went in until the lag came back within 10% of its baseline; 0 when it never rose more than 10% above the baseline after the fault; absent when it rose and had not come back within 10% while tracked"`
 }
 
 type mcpDisruptionReportImpact struct {
@@ -281,15 +281,15 @@ func mcpUnrecoveredSteps(r *client.DisruptionReportDetail) (int, *int64) {
 }
 
 // mcpISRSampled reports whether an ISR tracker took any sample. One that took
-// none reports 0 partitions (KafkaIntelligenceService.java:164-167), and every
-// sample adds its partition (:141-149,173-179).
+// none reports 0 partitions (KafkaIntelligenceService.java:165-168), and every
+// sample adds its partition (:142-150,174-180).
 func mcpISRSampled(m *client.DisruptionIsrDetail) bool { return m.TotalPartitions > 0 }
 
 // mcpLagSampled reports whether a lag tracker took any sample. One that took
 // none reports a baseline and a peak of 0 and no recovery time
-// (KafkaIntelligenceService.java:287-290); one that sampled a lag of 0
+// (KafkaIntelligenceService.java:293-296); one that sampled a lag of 0
 // throughout reports a recovery time of 0, since its lag never rose
-// (:304-317).
+// (:310-323).
 func mcpLagSampled(m *client.DisruptionLagDetail) bool {
 	return m.BaselineLag != 0 || m.PeakLag != 0 || m.TimeToLagRecovery.Set
 }
@@ -427,7 +427,7 @@ func mcpFitDisruptionReport(call *mcpCall, out *mcpDisruptionReportOut) {
 // strimziRecoveryTime: the orchestrator starts polling the Kafka resource only
 // after the step's observation window and recovery wait, and returns the
 // elapsed time on a timeout too (StrimziStateTracker.java:45-75,
-// DisruptionOrchestrator.java:380-381), so the figure is not a recovery time.
+// DisruptionOrchestrator.java:391-394), so the figure is not a recovery time.
 func mcpDisruptionReportStepFrom(call *mcpCall, s client.DisruptionStepDetail) mcpDisruptionReportStep {
 	step := mcpDisruptionReportStep{
 		Name:                   call.FenceN(s.StepName, 200),

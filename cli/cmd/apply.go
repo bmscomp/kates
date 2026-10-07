@@ -42,6 +42,38 @@ type ScenarioFile struct {
 	Scenarios []TestScenario `yaml:"scenarios" json:"scenarios"`
 }
 
+// parseScenarioFile reads the scenarios in a file's contents as kates test
+// apply runs them: a scenarios list, with encoding/json when the file is named
+// .json and yaml.v3 otherwise, or, when that list cannot be read, one scenario
+// with a type, read as YAML. kates scenario-diff reads a file through it too,
+// so that it compares the scenarios apply would run.
+func parseScenarioFile(name string, data []byte) (ScenarioFile, error) {
+	var sf ScenarioFile
+	var err error
+	if strings.HasSuffix(name, ".json") {
+		err = json.Unmarshal(data, &sf)
+	} else {
+		err = yaml.Unmarshal(data, &sf)
+	}
+	if err != nil {
+		var single TestScenario
+		if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
+			return ScenarioFile{Scenarios: []TestScenario{single}}, nil
+		}
+		return ScenarioFile{}, err
+	}
+	return sf, nil
+}
+
+// scenarioName is the name kates test apply shows for the scenario at index i
+// of its file: its own, or its number for one without.
+func scenarioName(s TestScenario, i int) string {
+	if s.Name != "" {
+		return s.Name
+	}
+	return fmt.Sprintf("Scenario %d", i+1)
+}
+
 var (
 	applyFile string
 	applyWait bool
@@ -72,7 +104,7 @@ exits 130 after the summary.`,
       type: LOAD
       spec:
         records: 100000
-        parallelProducers: 2
+        recordSizeBytes: 512
       validate:
         maxP99LatencyMs: 50
         minThroughputRecPerSec: 10000`,
@@ -86,19 +118,9 @@ exits 130 after the summary.`,
 			return cmdErr("Failed to read file: " + err.Error())
 		}
 
-		var sf ScenarioFile
-		if strings.HasSuffix(applyFile, ".json") {
-			err = json.Unmarshal(data, &sf)
-		} else {
-			err = yaml.Unmarshal(data, &sf)
-		}
+		sf, err := parseScenarioFile(applyFile, data)
 		if err != nil {
-			var single TestScenario
-			if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
-				sf.Scenarios = []TestScenario{single}
-			} else {
-				return cmdErr("Invalid scenario file: " + err.Error())
-			}
+			return cmdErr("Invalid scenario file: " + err.Error())
 		}
 
 		if len(sf.Scenarios) == 0 {
@@ -137,10 +159,7 @@ exits 130 after the summary.`,
 				res.Interrupted = true
 				break
 			}
-			name := scenario.Name
-			if name == "" {
-				name = fmt.Sprintf("Scenario %d", i+1)
-			}
+			name := scenarioName(scenario, i)
 
 			if !jsonOut {
 				fmt.Printf("  %s %s (%s)...\n",
@@ -359,10 +378,10 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.Acks = fmt.Sprintf("%v", v)
 		}
 		if v, ok := s.Spec["batchSize"]; ok {
-			spec.BatchSize = toInt(v)
+			spec.BatchSize = toIntPtr(v)
 		}
 		if v, ok := s.Spec["lingerMs"]; ok {
-			spec.LingerMs = toInt(v)
+			spec.LingerMs = toIntPtr(v)
 		}
 		if v, ok := s.Spec["compressionType"]; ok {
 			spec.CompressionType = fmt.Sprintf("%v", v)
@@ -389,7 +408,7 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.FetchMinBytes = toInt(v)
 		}
 		if v, ok := s.Spec["fetchMaxWaitMs"]; ok {
-			spec.FetchMaxWaitMs = toInt(v)
+			spec.FetchMaxWaitMs = toIntPtr(v)
 		}
 		if v, ok := s.Spec["enableIdempotence"]; ok {
 			spec.EnableIdempotence = toBoolPtr(v)
@@ -417,6 +436,26 @@ func toInt(v interface{}) int {
 	default:
 		return 0
 	}
+}
+
+// toIntPtr reads a number the file sets, as toInt does, so that 0 is sent
+// too: read with toInt, a lingerMs, batchSize or fetchMaxWaitMs of 0 was left
+// out of the request, and the run used its type's setting instead. Anything
+// that is not a number is nil and sends nothing, as toInt's 0 did.
+func toIntPtr(v interface{}) *int {
+	switch n := v.(type) {
+	case float64:
+		i := int(n)
+		return &i
+	case int:
+		return &n
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			j := int(i)
+			return &j
+		}
+	}
+	return nil
 }
 
 func toBool(v interface{}) bool {
