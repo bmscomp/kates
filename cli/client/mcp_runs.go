@@ -35,23 +35,25 @@ type MCPRun struct {
 	Results       []MCPRunTask      `json:"results,omitempty"`
 }
 
-// MCPRunTask is one task of a run (domain/TestResult.java), as stored. get_run
-// leaves out the integrity result an INTEGRITY task carries, so it is not read here.
+// MCPRunTask is one task of a run (domain/TestResult.java), as stored.
+// Integrity is the result an INTEGRITY task carries once the run has ended; a
+// run stored before the backend kept it (V25) has none.
 type MCPRunTask struct {
-	TaskID                  string  `json:"taskId"`
-	PhaseName               string  `json:"phaseName"`
-	Status                  string  `json:"status"`
-	RecordsSent             int64   `json:"recordsSent"`
-	ThroughputRecordsPerSec float64 `json:"throughputRecordsPerSec"`
-	ThroughputMBPerSec      float64 `json:"throughputMBPerSec"`
-	AvgLatencyMs            float64 `json:"avgLatencyMs"`
-	P50LatencyMs            float64 `json:"p50LatencyMs"`
-	P95LatencyMs            float64 `json:"p95LatencyMs"`
-	P99LatencyMs            float64 `json:"p99LatencyMs"`
-	MaxLatencyMs            float64 `json:"maxLatencyMs"`
-	StartTime               string  `json:"startTime"`
-	EndTime                 string  `json:"endTime"`
-	Error                   string  `json:"error"`
+	TaskID                  string           `json:"taskId"`
+	PhaseName               string           `json:"phaseName"`
+	Status                  string           `json:"status"`
+	RecordsSent             int64            `json:"recordsSent"`
+	ThroughputRecordsPerSec float64          `json:"throughputRecordsPerSec"`
+	ThroughputMBPerSec      float64          `json:"throughputMBPerSec"`
+	AvgLatencyMs            float64          `json:"avgLatencyMs"`
+	P50LatencyMs            float64          `json:"p50LatencyMs"`
+	P95LatencyMs            float64          `json:"p95LatencyMs"`
+	P99LatencyMs            float64          `json:"p99LatencyMs"`
+	MaxLatencyMs            float64          `json:"maxLatencyMs"`
+	StartTime               string           `json:"startTime"`
+	EndTime                 string           `json:"endTime"`
+	Error                   string           `json:"error"`
+	Integrity               *IntegrityResult `json:"integrity,omitempty"`
 }
 
 // MCPRunsPage is one page of GET /api/tests (api/PagedResponse.java). The
