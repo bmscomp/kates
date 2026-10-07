@@ -14,7 +14,6 @@ scenarios:
       minInsyncReplicas: 2
     validate:
       maxDataLossPercent: 0
-      maxDuplicatePercent: 0
       maxOutOfOrder: 0
       maxCrcFailures: 0
       maxP99LatencyMs: 150

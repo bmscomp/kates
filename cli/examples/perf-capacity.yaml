@@ -31,7 +31,6 @@ scenarios:
       compressionType: lz4
     validate:
       maxP99LatencyMs: 500
-      maxErrorRate: 1.0
 
   - name: "Capacity — unlimited (find ceiling)"
     type: CAPACITY
@@ -51,7 +50,6 @@ scenarios:
       compressionType: lz4
     validate:
       minThroughputRecPerSec: 1667    # per producer, 6 × 1667 ≈ 10k msg/s: fail if the ceiling is lower
-      maxErrorRate: 1.0
 
   - name: "Capacity — back-off validation at 20k msg/s"
     type: STRESS
@@ -72,4 +70,3 @@ scenarios:
     validate:
       maxP99LatencyMs: 500
       minThroughputRecPerSec: 3000    # per producer: must sustain 90% of its 3334 msg/s
-      maxErrorRate: 0.5

@@ -147,6 +147,8 @@ The merged `spec` holds every field the type has a default for. `targetThroughpu
 On the `trogdor` benchmark backend, the producer settings (`acks`, `batchSize`, `lingerMs`, `compressionType`, `enableIdempotence`) and the fetch settings go into the Trogdor spec's `producerConf` and `consumerConf`. A Trogdor run stored before the Kates API kept the request, one without `requestedSpec`, ran with the Kafka client's defaults whatever those settings said, so its results do not compare with a later Trogdor run of the same spec.
 :::
 
+A request without a `type`, or with a `spec` value outside its limits, such as a `numProducers` above 100 or a `topic` that isn't a legal Kafka topic name, is refused with `400` and `error` `Validation Failed`. Its `fieldErrors` keys each field by name, and its `message` names each one with the reason, such as `type: Test type is required`.
+
 A field the run could not honour is refused rather than ignored: the answer is `400` with `error` `Validation Failed`, a `message` that names each field, and `fieldErrors`, one entry per field with the reason. A value that asks for nothing passes, because the run honours it anyway, such as `throughput: -1` for SPIKE, `enableCrc: false` for LOAD or `enableIdempotence: false` for INTEGRATION_CDC. So the `spec` of a run that has a `requestedSpec` is valid input again, and can be sent back as a request; an older run's `spec` holds fields the Kates API then ignored (see `GET /api/tests/{id}` below), which is why `kates replay` leaves them out.
 
 | Field | Refused when |
@@ -173,6 +175,14 @@ The phases run one after another, in the order sent. Each starts once the durati
 | `phases[i].rampSteps` | A RAMP phase has under 1 or over 100 steps, or more than its rate in rec/s, since each step needs at least 1 rec/s |
 
 A phase's own `targetThroughput` is -1, its default, which runs the phase at its spec's rate, or 1 or more. Its own `durationMs` is 0, its default, which runs it for its spec's `durationMs`, or from 1,000 to 86,400,000 ms (24 hours), the limits of a spec's `durationMs`. A value outside these is refused before the checks above, with `fieldErrors` keyed by its path, such as `phases[0].durationMs`.
+
+The run stores the scenario's `name` and `labels`, and each phase's `name`, so the Kates API refuses a value its database can't hold, before the run starts. The database stores no NUL character (U+0000), and it keeps a name, and a task's id, which holds the run's id and the phase's name, in 128 characters:
+
+| Field | Refused when |
+|-------|--------------|
+| `name` | It is over 128 characters, or holds a NUL character |
+| `labels` | A key or a value holds a NUL character |
+| `phases[i].name` | It is over 100 characters, since each id of the phase's tasks holds it, or it holds a NUL character |
 
 ```json
 {
@@ -960,13 +970,14 @@ Errors follow a consistent JSON format:
 { "status": 404, "error": "Not Found", "message": "Test run not found: abc123" }
 ```
 
-The one exception is the disruption safety-guard rejection (`422`), which returns the shape shown in the examples below.
+The one exception is the disruption safety-guard rejection (`422`), which returns the shape shown in the examples below. A `400` whose `error` is `Validation Failed` also has `fieldErrors`, the reason for each field its `message` names.
 
 ### HTTP Error Codes
 
 | Status | Error | Description | Common Causes |
 |:---:|-------|-------------|---------------|
-| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON, a resilience `chaosSpec` parameter outside the fault parameter limits |
+| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON |
+| 400 | Validation Failed | A field the Kates API refuses, named in `message` and `fieldErrors` | A missing `type`, a `spec` value outside its limits or one the run can't honour, a resilience `chaosSpec` parameter outside the fault parameter limits |
 | 401 | Unauthorized | Missing API key | Security enabled and no `Authorization`/`X-API-Key` header sent |
 | 403 | Forbidden | Invalid API key | Key does not match `kates.api.key` |
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
@@ -981,6 +992,16 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 **400 — Invalid test type:**
 ```json
 { "status": 400, "error": "Bad Request", "message": "Invalid test type: BENCHMARK" }
+```
+
+**400 — A test request without a `type`:**
+```json
+{
+  "status": 400,
+  "error": "Validation Failed",
+  "message": "type: Test type is required",
+  "fieldErrors": { "type": "Test type is required" }
+}
 ```
 
 **409 — Cancelling a test that is not running:**

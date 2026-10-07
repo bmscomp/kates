@@ -348,13 +348,17 @@ func TestScenarioDiff_PicksTheScenarioToCompare(t *testing.T) {
 }
 
 // The file is read as kates test apply reads it: with encoding/json when it
-// is named .json, and as one scenario when its list cannot be read.
+// is named .json, and as the one scenario at its top level when it holds no
+// scenarios list.
 func TestScenarioDiff_ReadsTheFileAsApplyDoes(t *testing.T) {
 	// encoding/json matches a key to a field in any case; yaml.v3 does not.
 	const listJSON = `{"Scenarios": [{"name": "j", "type": "LOAD", "spec": {"records": 2000}}]}`
 	run := diffRun("LOAD", `{"numRecords": 1000}`)
 	for _, tt := range []struct{ name, file, scenario string }{
 		{"s.json", listJSON, "j"},
+		// One scenario at the top level of a file without a list.
+		{"s.yaml", "name: y\ntype: LOAD\nspec:\n  records: 2000\n", "y"},
+		{"s.json", `{"name": "j", "type": "LOAD", "spec": {"records": 2000}}`, "j"},
 		// Not JSON, so encoding/json reads no list; read as YAML, it is one
 		// scenario.
 		{"s.json", "name: y\ntype: LOAD\nspec:\n  records: 2000\n", "y"},
