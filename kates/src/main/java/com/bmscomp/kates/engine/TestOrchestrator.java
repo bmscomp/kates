@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.CreateTestRequest;
+import com.bmscomp.kates.domain.RateValidator;
 import com.bmscomp.kates.domain.ScenarioPhase;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
@@ -938,7 +939,7 @@ public class TestOrchestrator {
             List<BenchmarkHandle> handles = entry.getValue();
             for (BenchmarkHandle handle : handles) {
                 try {
-                    String backendName = defaultBackend;
+                    String backendName = handle.backendName();
                     var backendResult = resolveBackend(backendName);
                     if (backendResult.isSuccess()) {
                         backendResult.asSuccess().orElseThrow().stop(handle);
@@ -1076,20 +1077,22 @@ public class TestOrchestrator {
 
     /**
      * Why a run could not honour this request as written, or empty when it
-     * could, for a plain request or a scenario: a scenario spec value outside
-     * its limits, no type to run as, a null where a scenario phase should be,
-     * the spec fields its type and backend cannot apply, and a length past
-     * {@code kates.engine.max-duration-ms}, the most the timeout reaper allows
-     * a run. executeTest fails with this exception before it takes a
-     * concurrency permit. A caller that starts the run later, as a resilience
-     * run does after it has begun streaming its answer, asks first so that it
-     * can still answer the client with a 400.
+     * could, for a plain request or a scenario: a scenario spec value or a
+     * phase's own value outside its limits, no type to run as, a null where a
+     * scenario phase should be, the spec fields its type and backend cannot
+     * apply, and a length past {@code kates.engine.max-duration-ms}, the most
+     * the timeout reaper allows a run. executeTest fails with this exception
+     * before it takes a concurrency permit. A caller that starts the run
+     * later, as a resilience run does after it has begun streaming its answer,
+     * asks first so that it can still answer the client with a 400.
      *
      * <p>Bean validation holds the request's own spec to TestSpec's limits, but
      * not a scenario's (SpecLimits says why), so the scenario's base spec and
      * phase specs are held to them here: a numRecords of 0 would send nothing,
-     * and a topic Kafka cannot create would fail the run. They are checked
-     * first and answered on their own, as bean validation answers before the
+     * and a topic Kafka cannot create would fail the run. A phase's own
+     * targetThroughput and durationMs, which are not spec fields, are held to
+     * limits of their own (phaseValuesOutsideLimits). They are checked first
+     * and answered on their own, as bean validation answers before the
      * orchestrator is asked, each value keyed by its path in the scenario. A
      * scenario without phases, which runs as a plain request, is checked too,
      * as bean validation checks the request's own spec whether the run reads
@@ -1105,6 +1108,7 @@ public class TestOrchestrator {
      */
     public java.util.Optional<InvalidTestSpecException> refusal(CreateTestRequest request) {
         Map<String, String> outsideLimits = specLimits.violations(request.getScenario());
+        outsideLimits.putAll(phaseValuesOutsideLimits(request.getScenario()));
         if (!outsideLimits.isEmpty()) {
             return java.util.Optional.of(new InvalidTestSpecException("scenario.", outsideLimits));
         }
@@ -1236,6 +1240,59 @@ public class TestOrchestrator {
         List<String> names =
                 java.util.Arrays.stream(TestType.values()).map(TestType::name).toList();
         return String.join(", ", names.subList(0, names.size() - 1)) + " or " + names.getLast();
+    }
+
+    /**
+     * The shortest and the longest durationMs a phase may set for itself, the
+     * limits of a spec's durationMs. Its default, 0, runs the phase for its
+     * spec's durationMs.
+     */
+    private static final long MIN_PHASE_DURATION_MS = 1_000;
+
+    private static final long MAX_PHASE_DURATION_MS = 86_400_000;
+
+    /**
+     * The scenario's phase values outside their limits, keyed by their path
+     * in the scenario ({@code phases[i].x}); empty when there are none, or no
+     * scenario. A phase's own targetThroughput is -1, which runs the phase at
+     * its spec's rate, or 1 or more. Its own durationMs is 0, which runs it
+     * for its spec's durationMs, or within the limits of a spec's durationMs.
+     *
+     * <p>Neither is a spec field, so no limit held them: a targetThroughput of
+     * 0, or below -1, became the phase's rate, which both benchmark backends
+     * ran unthrottled. A durationMs of 500 ran a half-second phase, and a
+     * negative one took the spec's without a word. A null phase is left to
+     * refusal's check of the phases.
+     */
+    private static Map<String, String> phaseValuesOutsideLimits(TestScenario scenario) {
+        Map<String, String> errors = new java.util.LinkedHashMap<>();
+        if (scenario == null || scenario.getPhases() == null) {
+            return errors;
+        }
+        List<ScenarioPhase> phases = scenario.getPhases();
+        for (int i = 0; i < phases.size(); i++) {
+            ScenarioPhase phase = phases.get(i);
+            if (phase == null) {
+                continue;
+            }
+            String name = phase.getName() != null ? phase.getName() : "phase-" + i;
+            int rate = phase.getTargetThroughput();
+            if (!RateValidator.allows(rate)) {
+                errors.put(
+                        "phases[" + i + "].targetThroughput",
+                        "phase " + name + " sets targetThroughput " + rate + "; a phase's own rate must be -1,"
+                                + " which runs it at its spec's rate, or positive");
+            }
+            long duration = phase.getDurationMs();
+            if (duration != 0 && (duration < MIN_PHASE_DURATION_MS || duration > MAX_PHASE_DURATION_MS)) {
+                errors.put(
+                        "phases[" + i + "].durationMs",
+                        "phase " + name + " sets durationMs " + duration + "; a phase's own duration must be 0,"
+                                + " which runs it for its spec's durationMs, or from " + MIN_PHASE_DURATION_MS
+                                + " to " + MAX_PHASE_DURATION_MS + " ms, the limits of a spec's durationMs");
+            }
+        }
+        return errors;
     }
 
     /**

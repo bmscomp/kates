@@ -473,6 +473,58 @@ class TestResourceTest {
     }
 
     /**
+     * A rate is -1, which is unlimited, or 1 or more. Both benchmark backends
+     * ran a rate below 1 unthrottled, so a 0 ran flat out, and TestSpec's
+     * {@code @Min(-1)} let it through, although its message said only -1 or a
+     * positive rate would do.
+     */
+    @Test
+    void aRateOfZeroIsRefusedByName() {
+        // A request the check lets through fails at submission and frees its permit.
+        when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+
+        given().contentType("application/json")
+                .body("{\"type\": \"LOAD\", \"backend\": \"trogdor\","
+                        + " \"spec\": {\"throughput\": 0, \"targetThroughput\": 0}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors.throughput", is("throughput must be -1 (unlimited) or positive"))
+                .body("fieldErrors.targetThroughput", is("targetThroughput must be -1 (unlimited) or positive"));
+        verify(trogdorClient, never()).createTask(any());
+    }
+
+    /**
+     * A phase's own targetThroughput and durationMs are not spec fields, and
+     * nothing held them to a limit: a targetThroughput of 0 ran the phase
+     * unthrottled, and a durationMs of 500 ran it for half a second. Each is
+     * refused by its path in the scenario.
+     */
+    @Test
+    void aPhasesOwnRateOrDurationOutsideItsLimitsIsRefusedByItsPath() {
+        when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+
+        given().contentType("application/json")
+                .body("{\"type\": \"LOAD\", \"backend\": \"trogdor\", \"scenario\": {\"phases\": ["
+                        + "{\"name\": \"steady\", \"phaseType\": \"STEADY\", \"targetThroughput\": 0},"
+                        + " {\"name\": \"cooldown\", \"phaseType\": \"COOLDOWN\", \"durationMs\": 500}]}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey("phases[0].targetThroughput"))
+                .body("fieldErrors", hasKey("phases[1].durationMs"))
+                .body(
+                        "message",
+                        containsString("scenario.phases[0].targetThroughput: phase steady sets targetThroughput 0;"))
+                .body("message", containsString("scenario.phases[1].durationMs: phase cooldown sets durationMs 500;"));
+        verify(trogdorClient, never()).createTask(any());
+    }
+
+    /**
      * The run stores the scenario's name in 128 characters. A longer one
      * failed the save as the run was registered, and the answer was a 400
      * whose message, "Error invoking subclass method", named none of it.
