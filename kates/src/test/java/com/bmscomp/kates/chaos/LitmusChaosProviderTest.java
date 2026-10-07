@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import io.fabric8.kubernetes.api.model.DeleteOptions;
@@ -544,6 +545,51 @@ class LitmusChaosProviderTest {
         assertEquals("krafter-brokers-2", env(engine, "TARGET_PODS"));
         assertTrue(outcome.isPass(), outcome.failureReason());
         assertTrue(outcome.chaosStartNanos() - triggered >= delayNanos, "the fault's start includes the delay");
+    }
+
+    /** A resilience run measures RPO from the moment the fault reports. */
+    @Test
+    void aDelayedFaultIsReportedAtItsStartBeforeTheChaosEngineExists() throws Exception {
+        provider.resultPollIntervalMs = 20;
+        FaultSpec spec = FaultSpec.builder("delayed-kill")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.POD_KILL)
+                .delayBeforeSec(1)
+                .build();
+        List<Long> reported = new CopyOnWriteArrayList<>();
+        List<Integer> enginesWhenReported = new CopyOnWriteArrayList<>();
+
+        long triggered = System.nanoTime();
+        CompletableFuture<ChaosOutcome> fault = provider.triggerFault(spec, injectedAt -> {
+            reported.add(injectedAt);
+            enginesWhenReported.add(client.resources(ChaosEngine.class)
+                    .inNamespace("kafka")
+                    .list()
+                    .getItems()
+                    .size());
+        });
+        pass(awaitEngine().getMetadata().getName() + "-pod-delete");
+        ChaosOutcome outcome = fault.get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(List.of(outcome.chaosStartNanos()), reported, "reported once, at the fault's start");
+        assertTrue(
+                reported.getFirst() - triggered >= TimeUnit.SECONDS.toNanos(1), "reported before the delay was over");
+        assertEquals(List.of(0), enginesWhenReported, "reported after the ChaosEngine was created");
+    }
+
+    @Test
+    void aFaultTheKubernetesProviderInjectsIsReportedAsWell() throws Exception {
+        FaultSpec spec = FaultSpec.builder("graceful")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.POD_DELETE)
+                .build();
+        List<Long> reported = new CopyOnWriteArrayList<>();
+
+        ChaosOutcome outcome = provider.triggerFault(spec, reported::add).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(1, reported.size(), reported.toString());
     }
 
     private ChaosEngine awaitEngine() throws InterruptedException {

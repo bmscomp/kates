@@ -166,9 +166,9 @@ class TestRunRepositoryTest {
     }
 
     /**
-     * A run's own writes go through saveIfPresent, so a write that read the
-     * run before a delete and lands after it cannot insert the deleted run
-     * again, as a plain save would. Nothing reads the run before the delete
+     * A run's own writes go through saveIfPresent or saveIfStatus, so a write
+     * that read the run before a delete and lands after it cannot insert the
+     * deleted run again, as a plain save would. Nothing reads the run before the delete
      * here: the test's session would keep that copy and answer later reads
      * with it.
      */
