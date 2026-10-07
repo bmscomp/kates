@@ -24,6 +24,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.chaos.ChaosProvider;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestResult;
@@ -76,6 +77,7 @@ public class TestResource {
         this.chaosProvider = chaosProvider;
     }
 
+    @Audited(action = "CREATE", type = "test")
     @RolesAllowed(Scopes.TEST_RUN)
     @POST
     @Operation(
@@ -162,6 +164,7 @@ public class TestResource {
         return name.equals(request.getBackend()) || (scenario != null && name.equals(scenario.getBackend()));
     }
 
+    @Audited(action = "CREATE", type = "test")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/bulk")
@@ -209,6 +212,7 @@ public class TestResource {
                 .build();
     }
 
+    @Audited(action = "DELETE", type = "test")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/bulk")
@@ -309,6 +313,7 @@ public class TestResource {
                         .build());
     }
 
+    @Audited(action = "DELETE", type = "test")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{id}")
@@ -333,6 +338,7 @@ public class TestResource {
         return Response.noContent().build();
     }
 
+    @Audited(action = "CANCEL", type = "test")
     @RolesAllowed(Scopes.TEST_RUN)
     @POST
     @Path("/{id}/cancel")
@@ -425,6 +431,7 @@ public class TestResource {
                         .build());
     }
 
+    @Audited(action = "UPDATE", type = "baseline")
     @RolesAllowed(Scopes.ADMIN)
     @PUT
     @Path("/baselines/{type}")
@@ -456,6 +463,7 @@ public class TestResource {
         return Response.ok(baselineToResponse(baseline)).build();
     }
 
+    @Audited(action = "DELETE", type = "baseline")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/baselines/{type}")

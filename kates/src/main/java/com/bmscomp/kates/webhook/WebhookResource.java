@@ -16,6 +16,7 @@ import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.security.Scopes;
 
 /**
@@ -41,6 +42,7 @@ public class WebhookResource {
         return webhookService.list();
     }
 
+    @Audited(action = "CREATE", type = "webhook")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Operation(summary = "Register a webhook")
@@ -61,6 +63,7 @@ public class WebhookResource {
         return Response.status(201).entity(registration).build();
     }
 
+    @Audited(action = "DELETE", type = "webhook")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{name}")

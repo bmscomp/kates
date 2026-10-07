@@ -14,6 +14,7 @@ import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.audit.NotAudited;
 import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.ClusterHealthService;
 
@@ -49,6 +50,7 @@ public class CostResource {
             "gcp", new CostModel("GCP Pub/Sub (us-central1)", 0.04, 0.00, 0.12, 0.45),
             "confluent", new CostModel("Confluent Cloud", 0.10, 0.00, 0.11, 1.20));
 
+    @NotAudited("computes an estimate and stores nothing")
     @POST
     @Path("/estimate")
     @Consumes(MediaType.APPLICATION_JSON)
