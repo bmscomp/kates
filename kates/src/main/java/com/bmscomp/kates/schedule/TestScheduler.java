@@ -40,6 +40,9 @@ public class TestScheduler {
     @Inject
     SpecLimits specLimits;
 
+    @Inject
+    com.bmscomp.kates.service.AuditService auditService;
+
     @Scheduled(every = "60s", identity = "kates-schedule-evaluator")
     void evaluateSchedules() {
         // With replicas > 1 every instance fires this — only the lease holder
@@ -94,6 +97,12 @@ public class TestScheduler {
             if (result.isSuccess()) {
                 var run = result.asSuccess().orElseThrow();
                 repository.updateLastRun(schedule.getId(), run.getId());
+                auditService.record(
+                        "CREATE",
+                        "test",
+                        run.getId(),
+                        "schedule '" + schedule.getName() + "'",
+                        com.bmscomp.kates.audit.Actor.SCHEDULER);
                 LOG.info("Schedule '" + schedule.getName() + "' started run " + run.getId());
             } else {
                 LOG.error("Failed to execute schedule '" + schedule.getName() + "': "

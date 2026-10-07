@@ -21,7 +21,7 @@ func TestAudit(t *testing.T) {
 	})
 	defer srv.Close()
 
-	events, err := c.Audit(context.Background(), 50, "", "")
+	events, err := c.Audit(context.Background(), 50, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +50,15 @@ func TestAudit_WithFilter(t *testing.T) {
 		if !strings.Contains(r.URL.String(), "size=10") {
 			t.Error("expected size=10 in query")
 		}
+		if r.URL.Query().Get("actor") != "claude-on-lab" {
+			t.Errorf("actor = %q, want claude-on-lab", r.URL.Query().Get("actor"))
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"page":0,"size":10,"total":0,"count":0,"items":[]}`))
 	})
 	defer srv.Close()
 
-	events, err := c.Audit(context.Background(), 10, "test", "2025-01-01T00:00:00Z")
+	events, err := c.Audit(context.Background(), 10, "test", "2025-01-01T00:00:00Z", "claude-on-lab")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +74,7 @@ func TestAudit_Empty(t *testing.T) {
 	})
 	defer srv.Close()
 
-	events, err := c.Audit(context.Background(), 50, "", "")
+	events, err := c.Audit(context.Background(), 50, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +86,7 @@ func TestAudit_Empty(t *testing.T) {
 func TestAudit_Error(t *testing.T) {
 	c := New("http://127.0.0.1:1")
 	c.MaxRetries = 1
-	_, err := c.Audit(context.Background(), 50, "", "")
+	_, err := c.Audit(context.Background(), 50, "", "", "")
 	if err == nil {
 		t.Error("expected error for unreachable server")
 	}

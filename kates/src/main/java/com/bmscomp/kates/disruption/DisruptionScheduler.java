@@ -34,6 +34,9 @@ public class DisruptionScheduler {
     DisruptionPlaybookCatalog playbookCatalog;
 
     @Inject
+    com.bmscomp.kates.service.AuditService auditService;
+
+    @Inject
     DisruptionReportRepository reportRepository;
 
     @Inject
@@ -102,6 +105,12 @@ public class DisruptionScheduler {
                     objectMapper.writeValueAsString(report),
                     null);
             reportRepository.save(entity);
+            auditService.record(
+                    "RUN",
+                    "disruption",
+                    runId,
+                    "schedule '" + schedule.getName() + "'",
+                    com.bmscomp.kates.audit.Actor.SCHEDULER);
 
             updateLastRun(schedule.getId(), runId);
             LOG.info("Disruption schedule '" + schedule.getName() + "' completed: " + runId);

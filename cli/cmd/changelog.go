@@ -35,7 +35,7 @@ Groups events by category with statistics.`,
 	Example: `  kates changelog --since 2024-01-01 --until 2024-01-31
   kates changelog --since 2024-06-01`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		entries, err := apiClient.Audit(context.Background(), 500, "", changelogSince)
+		entries, err := apiClient.Audit(context.Background(), 500, "", changelogSince, "")
 		if err != nil {
 			return err
 		}

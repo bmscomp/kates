@@ -12,6 +12,7 @@ import jakarta.ws.rs.core.Response;
 
 import io.smallrye.common.annotation.Blocking;
 
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.ShareGroupConsumerService;
 
@@ -28,6 +29,7 @@ public class ShareGroupResource {
     @Inject
     ShareGroupConsumerService shareGroupService;
 
+    @Audited(action = "START", type = "share-group")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/start")
@@ -42,6 +44,7 @@ public class ShareGroupResource {
                 .build();
     }
 
+    @Audited(action = "STOP", type = "share-group")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/stop")

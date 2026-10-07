@@ -1097,7 +1097,7 @@ func (c *Client) TuningTypes(ctx context.Context) ([]TuningTypeInfo, error) {
 	return get[[]TuningTypeInfo](c, ctx, "/api/tests/tuning/types")
 }
 
-func (c *Client) Audit(ctx context.Context, limit int, eventType, since string) ([]AuditEntry, error) {
+func (c *Client) Audit(ctx context.Context, limit int, eventType, since, actor string) ([]AuditEntry, error) {
 	size := limit
 	if size <= 0 {
 		size = 50
@@ -1110,6 +1110,9 @@ func (c *Client) Audit(ctx context.Context, limit int, eventType, since string) 
 	}
 	if since != "" {
 		query.Set("since", since)
+	}
+	if actor != "" {
+		query.Set("actor", actor)
 	}
 	var paged struct {
 		Items []AuditEntry `json:"items"`

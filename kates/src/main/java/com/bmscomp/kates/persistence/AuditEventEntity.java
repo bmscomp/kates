@@ -31,6 +31,14 @@ public class AuditEventEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /** The principal that acted (V26); null on older rows. */
+    @Column(length = 64)
+    private String actor;
+
+    /** human, agent or system (V26); null on older rows. */
+    @Column(name = "principal_type", length = 16)
+    private String principalType;
+
     public AuditEventEntity() {}
 
     public AuditEventEntity(String action, String eventType, String target, String details) {
@@ -87,5 +95,21 @@ public class AuditEventEntity {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getActor() {
+        return actor;
+    }
+
+    public void setActor(String actor) {
+        this.actor = actor;
+    }
+
+    public String getPrincipalType() {
+        return principalType;
+    }
+
+    public void setPrincipalType(String principalType) {
+        this.principalType = principalType;
     }
 }
