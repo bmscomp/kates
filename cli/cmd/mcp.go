@@ -48,9 +48,10 @@ preview_disruption, disruption_report), and security posture and scenarios
 (security_evidence, draft_scenario). preview_disruption runs the backend's
 dry run, which injects nothing; draft_scenario checks a scenario file and
 saves nothing. The resources are kates://caveats, the run reports,
-disruption timelines, playbook plans and the built-in scenario templates;
-the prompts are diagnose_run, did_kates_cause_this, plan_game_day,
-debrief_disruption and security_posture_check.
+disruption timelines, playbook plans, the built-in scenario templates and
+the help of every kates command (kates://docs/cli); the prompts are
+diagnose_run, did_kates_cause_this, plan_game_day, debrief_disruption and
+security_posture_check.
 
 The command refuses to start without:
   --context, or KATES_CONTEXT     the context to use. The server never falls

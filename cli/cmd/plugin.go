@@ -98,6 +98,10 @@ func discoverPlugins() []pluginInfo {
 	return plugins
 }
 
+// pluginAnnotation marks the commands registerPlugins adds, which run an
+// executable named after a file on the PATH rather than Kates code.
+const pluginAnnotation = "kates.plugin"
+
 func registerPlugins() {
 	for _, p := range discoverPlugins() {
 		pluginPath := p.path
@@ -105,6 +109,7 @@ func registerPlugins() {
 		rootCmd.AddCommand(&cobra.Command{
 			Use:                pluginName,
 			Short:              fmt.Sprintf("Plugin: %s", pluginName),
+			Annotations:        map[string]string{pluginAnnotation: pluginPath},
 			DisableFlagParsing: true,
 			SilenceUsage:       true,
 			SilenceErrors:      true,
