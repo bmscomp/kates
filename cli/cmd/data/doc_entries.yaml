@@ -992,13 +992,25 @@
 
 - name: scenario-diff
   category: Analysis
-  synopsis: "kates scenario-diff <id> [flags]"
-  short: "Compare a scenario YAML against actual test results"
+  synopsis: "kates scenario-diff <scenario.yaml> <test-id> [flags]"
+  short: "Compare a scenario file against a test run to detect config drift"
   description: |
-    Loads a YAML scenario and compares its expected SLA thresholds
-    against the actual results of a completed test run.
+    Reads a scenario file as kates test apply does, builds the request
+    apply would send for one of its scenarios, and compares its type,
+    backend and spec fields with the spec the run reports. The spec keys
+    are the file's (records, durationSeconds, ...), and durationSeconds
+    is compared as the durationMs it is sent as. A field the run's spec
+    does not report, and a spec key apply does not read or leaves out of
+    the request, is listed as not compared rather than counted as drift.
+    The validate block is not compared: kates test apply --wait grades it.
+  flags:
+    - name: "--scenario"
+      type: string
+      desc: "Scenario to compare, by name or number (from 1); required when the file holds more than one"
   examples:
-    - "kates scenario-diff abc123 -f scenario.yaml"
+    - "kates scenario-diff scenario.yaml 69acdf31"
+    - "kates scenario-diff cli/examples/load-test.yaml 69acdf31 --scenario \"Endurance Soak\""
+    - "kates scenario-diff cli/examples/perf-stress.yaml 69acdf31 --scenario 2 -o json"
   see_also:
     - test apply
     - diff
@@ -1237,15 +1249,21 @@
   synopsis: "kates resilience run [flags]"
   short: "Run combined performance + chaos resilience tests"
   description: |
-    Executes a combined performance and chaos resilience test
-    using a JSON configuration file. Measures impact deltas
-    between baseline and chaos states.
+    Runs a test and injects one fault while it runs, then
+    reports the change in each metric between the baseline
+    before the fault and the whole run. The YAML or JSON file
+    is the body of POST /api/resilience, sent as written.
   flags:
-    - name: "--config"
+    - name: "--file"
+      short: "-f"
       type: string
-      desc: "Path to resilience test config JSON (required)"
+      desc: "Path to the resilience test file, YAML or JSON (required)"
+    - name: "--dry-run"
+      type: bool
+      desc: "Print the request body without sending it"
   examples:
-    - "kates resilience run --config resilience.json"
+    - "kates resilience run -f cli/examples/resilience-test.yaml"
+    - "kates resilience run -f cli/examples/resilience-test.yaml --dry-run"
   see_also:
     - disruption run
     - benchmark
