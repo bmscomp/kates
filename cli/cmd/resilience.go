@@ -12,6 +12,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -127,7 +128,11 @@ leaves out its default. --dry-run prints the body.`,
 			return nil
 		}
 
-		fmt.Println(output.AccentStyle.Render("◉ Running resilience test..."))
+		// Above a table only: ahead of -o json it left stdout unreadable as
+		// JSON.
+		if outputMode != "json" {
+			fmt.Println(output.AccentStyle.Render("◉ Running resilience test..."))
+		}
 
 		result, err := apiClient.Resilience(context.Background(), cfg)
 		if err != nil {
@@ -143,12 +148,15 @@ leaves out its default. --dry-run prints the body.`,
 		}
 
 		if outputMode == "json" {
-			output.JSON(result)
+			printResilienceJSON(result.Raw)
 			return nil
 		}
 
 		output.Header("Resilience Test Results")
 		output.KeyValue("Status", output.StatusBadge(result.Status))
+		if id := result.RunID(); id != "" {
+			output.KeyValue("Test Run", output.Printable(id))
+		}
 		if result.Error != "" {
 			output.KeyValue("Error", result.Error)
 		}
@@ -171,6 +179,8 @@ leaves out its default. --dry-run prints the body.`,
 				output.KeyValue("Failure Reason", chaos.FailureReason)
 			}
 		}
+
+		printResilienceProbes(result)
 
 		if len(result.ImpactDeltas) > 0 {
 			output.SubHeader("Impact Analysis (% change)")
@@ -198,8 +208,111 @@ leaves out its default. --dry-run prints the body.`,
 		showSummary("Pre-Chaos Baseline", result.PreChaosSummary)
 		showSummary("Post-Chaos Impact", result.PostChaosSummary)
 
+		if id := result.RunID(); id != "" {
+			fmt.Fprintln(output.Out)
+			output.Hint("Full details: kates test get " + output.Printable(id))
+		}
 		return nil
 	},
+}
+
+// printResilienceJSON prints the report as the Kates API sent it, indented.
+// It used to print the struct the CLI reads the report into, which held only
+// what the table showed, so -o json dropped the recovery time, every probe
+// result and the test run with its id. json.Indent also keeps each number as
+// written and each <, > and &, which encoding the report again would escape.
+func printResilienceJSON(raw json.RawMessage) {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+		fmt.Fprintln(output.Out, string(raw))
+		return
+	}
+	fmt.Fprintln(output.Out, buf.String())
+}
+
+// printResilienceProbes prints what the probes saw: the recovery time they
+// measured, how many of their evaluations passed before the fault, during it
+// and after the recovery wait, and each probe that failed, with what it
+// printed. During the fault only Continuous probes run, each of them many
+// times, so a probe's row counts its failed evaluations out of its runs in
+// that phase, and shows what the last failed one printed.
+func printResilienceProbes(r *client.ResilienceResult) {
+	if !r.RecoveryTime.Set && r.BaselineProbes == nil && r.DuringChaosProbes == nil && r.PostRecoveryProbes == nil {
+		return
+	}
+	output.SubHeader("Probes and Recovery")
+	if r.RecoveryTime.Set {
+		output.KeyValue("Recovery Time", fmt.Sprintf("%d ms", r.RecoveryTime.Millis))
+	}
+
+	type probeRuns struct {
+		phase, name, lastFailure string
+		failed, runs             int
+	}
+	var failing []*probeRuns
+	for _, phase := range []struct {
+		name, none string
+		results    []client.ProbeResult
+	}{
+		{"Baseline", "none ran", r.BaselineProbes},
+		{"During the fault", "none ran: only Continuous probes run during the fault", r.DuringChaosProbes},
+		{"After recovery", "none ran", r.PostRecoveryProbes},
+	} {
+		if phase.results == nil {
+			continue
+		}
+		if len(phase.results) == 0 {
+			output.KeyValue(phase.name, phase.none)
+			continue
+		}
+		passed := 0
+		var probes []*probeRuns
+		byName := map[string]*probeRuns{}
+		for _, res := range phase.results {
+			probe := byName[res.Name]
+			if probe == nil {
+				probe = &probeRuns{phase: phase.name, name: res.Name}
+				byName[res.Name] = probe
+				probes = append(probes, probe)
+			}
+			probe.runs++
+			if res.Passed {
+				passed++
+				continue
+			}
+			probe.failed++
+			probe.lastFailure = res.Output
+		}
+		output.KeyValue(phase.name, fmt.Sprintf("%d/%d passed", passed, len(phase.results)))
+		for _, probe := range probes {
+			if probe.failed > 0 {
+				failing = append(failing, probe)
+			}
+		}
+	}
+	if len(failing) == 0 {
+		return
+	}
+
+	fmt.Fprintln(output.Out)
+	width, tail := output.ColumnWidth(50, 30), "…"
+	if output.ASCII() {
+		tail = "..."
+	}
+	rows := make([][]string, 0, len(failing))
+	for _, probe := range failing {
+		printed := strings.TrimSpace(output.Printable(probe.lastFailure))
+		if printed == "" {
+			printed = "(no output)"
+		}
+		rows = append(rows, []string{
+			probe.phase,
+			output.Printable(probe.name),
+			fmt.Sprintf("%d/%d", probe.failed, probe.runs),
+			runewidth.Truncate(printed, width, tail),
+		})
+	}
+	output.Table([]string{"Phase", "Probe", "Failed", "Output"}, rows)
 }
 
 func init() {
