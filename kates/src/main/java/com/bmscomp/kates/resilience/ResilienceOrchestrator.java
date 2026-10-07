@@ -86,6 +86,7 @@ public class ResilienceOrchestrator {
                 return report;
             }
             TestRun run = result.asSuccess().orElseThrow();
+            report.setTestRunId(run.getId());
 
             // A scenario's tasks are submitted before executeTest answers, a
             // plain test's on a thread of their own: its run reads PENDING

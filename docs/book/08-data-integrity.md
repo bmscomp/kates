@@ -267,10 +267,9 @@ kates resilience run -f integrity-chaos.yaml --dry-run   # print the request, se
 kates resilience run -f integrity-chaos.yaml
 ```
 
-`kates resilience run` prints the chaos outcome and the before/after impact analysis but not the integrity result, and it can return while the INTEGRITY run is still producing. Its `Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. Anything else — `CHAOS_FAILED`, or a `Skipped` verdict when no chaos provider is available — means the fault may not have landed, and the integrity verdict then proves nothing about the failure. Read the verdict from the INTEGRITY run itself:
+`kates resilience run` prints the chaos outcome, the before/after impact analysis and the INTEGRITY run's ID, as `Test Run`, but not the integrity result, and it can return while the INTEGRITY run is still producing. Its `Status` is `COMPLETED` only when the chaos outcome's verdict is `Pass`. Anything else — `CHAOS_FAILED`, or a `Skipped` verdict when no chaos provider is available — means the fault may not have landed, and the integrity verdict then proves nothing about the failure. Read the verdict from the INTEGRITY run itself, with that ID:
 
 ```bash
-kates test list --type INTEGRITY   # newest first: the top row is this run
 kates test watch <id>              # wait for produce, consume and verification
 kates test get <id>
 ```
@@ -565,8 +564,7 @@ Prove zero data loss under a broker failure with one resilience run, using the `
 kates resilience run -f integrity-chaos.yaml --dry-run
 kates resilience run -f integrity-chaos.yaml
 
-# Find the INTEGRITY run (newest first), wait for it, then read the verdict and timeline
-kates test list --type INTEGRITY
+# Wait for the INTEGRITY run it names as Test Run, then read the verdict and timeline
 kates test watch <id>
 kates test get <id>
 ```

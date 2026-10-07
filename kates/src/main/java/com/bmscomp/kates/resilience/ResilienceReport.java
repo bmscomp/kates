@@ -27,6 +27,13 @@ public class ResilienceReport {
     private String status;
     /** Why the status is ERROR, when it is; the log used to be the only place that said. */
     private String error;
+    /**
+     * The id of the test run the fault goes into, set as soon as the run has
+     * started. The run used to be named only in {@link #performanceReport},
+     * which comes after the recovery wait, so a report that ended ERROR or
+     * INTERRUPTED before it didn't say which run went on producing.
+     */
+    private String testRunId;
 
     private IntegrityResult integrityResult;
 
@@ -101,6 +108,14 @@ public class ResilienceReport {
 
     public void setError(String error) {
         this.error = error;
+    }
+
+    public String getTestRunId() {
+        return testRunId;
+    }
+
+    public void setTestRunId(String testRunId) {
+        this.testRunId = testRunId;
     }
 
     public IntegrityResult getIntegrityResult() {

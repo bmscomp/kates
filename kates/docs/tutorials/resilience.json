@@ -561,10 +561,10 @@
   "_usage": {
     "port_forward": "kates ports",
     "api_key": "export KATES_API_KEY=\"$(kubectl get secret kates-api-key -n kates -o jsonpath='{.data.api-key}' | base64 -d)\"",
-    "submit_single": "jq '.examples[0]' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{status, error, runId: .performanceReport.run.id, impactDeltas, recoveryTime, unrecoveredAfter}'",
+    "submit_single": "jq '.examples[0]' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{status, error, runId: .testRunId, impactDeltas, recoveryTime, unrecoveredAfter}'",
     "get_report": "curl -sS -H \"X-API-Key: $KATES_API_KEY\" http://localhost:8080/api/tests/{runId}/report | jq",
     "list_scenarios": "curl -sS -H \"X-API-Key: $KATES_API_KEY\" http://localhost:8080/api/resilience/scenarios | jq",
-    "submit_by_scenario": "jq '{testRequest: .examples[0].testRequest}' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience/scenarios/broker-crash -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{scenario} + (.report | {status, error, runId: .performanceReport.run.id, impactDeltas, recoveryTime, unrecoveredAfter})'",
+    "submit_by_scenario": "jq '{testRequest: .examples[0].testRequest}' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience/scenarios/broker-crash -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{scenario} + (.report | {status, error, runId: .testRunId, impactDeltas, recoveryTime, unrecoveredAfter})'",
     "notes": [
       "kates ports forwards the Kates API to http://localhost:8080. Every /api endpoint but /api/health needs the key, whose Secret is in kates-stack instead with the single-namespace topology.",
       "submit_single sends examples[0], example 01; change the index to send another. It answers with one JSON report once the probes pass after the fault, or maxRecoveryWaitSec runs out.",

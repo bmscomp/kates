@@ -624,7 +624,7 @@ steadyStateSec: 60
 maxRecoveryWaitSec: 300
 ```
 
-`kates resilience run` leaves out every `chaosSpec` field whose value is 0 or `false`, so those take the builder defaults on the server: `delayBeforeSec` 0 as written, and a `gracePeriodSec` of 30 that `POD_KILL` ignores, since the direct backend always deletes with a grace period of 0. It does not print the integrity result, and its HTTP response returns while the INTEGRITY run is still producing: find the run with `kates test list --type INTEGRITY` (newest first) and read it with `kates test get <id>`, or wait for it with `gate_integrity`. `kates test list` filters on type or on status, not both: with `--type` set, `--status` is ignored.
+`kates resilience run` leaves out every `chaosSpec` field whose value is 0 or `false`, so those take the builder defaults on the server: `delayBeforeSec` 0 as written, and a `gracePeriodSec` of 30 that `POD_KILL` ignores, since the direct backend always deletes with a grace period of 0. It does not print the integrity result, and its HTTP response returns while the INTEGRITY run is still producing. It names that run as `Test Run`, or as `testRunId` with `-o json`: read the run with `kates test get <id>`, or wait for it with `gate_integrity`.
 
 ### What Needs Infrastructure
 
@@ -726,7 +726,7 @@ The pods come back within seconds: this is not an outage test.
 
 **Gate.** `lostRecords` = 0 and `dataLossPercent` = 0 for every injection. An unclean election that does not match the RECOVERING-plus-restart pattern blocks further testing until it is explained.
 
-**Run it.** From the site-A Kates, with the plan above saved as `t0-plan.json` and the resilience file as `t0-integrity.yaml`. The dry run goes straight to the REST API, and `jq -e '.wouldSucceed'` stops the loop at a plan the guard would refuse:
+**Run it.** From the site-A Kates, with the plan above saved as `t0-plan.json` and the resilience file as `t0-integrity.yaml`. The dry run goes straight to the REST API, and `jq -e '.wouldSucceed'` stops the loop at a plan the guard would refuse. Each resilience run's report is saved as `<name>.report.json`, and its `testRunId` is the INTEGRITY run that `gate_integrity` checks:
 
 ```bash
 source integrity.sh
@@ -744,8 +744,9 @@ for c in "az1 site=a" "az2 zone=az2" "az3 zone=az3" "siteb site=b"; do
     -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' -d @"$name.json" |
     jq -e '.wouldSucceed' >/dev/null || { echo "rejected: $name"; break; }
   sed -e "s|__NAME__|$name|g" -e "s|__SELECTOR__|$sel|" t0-integrity.yaml > "$name.yaml"
-  kates --context site-a resilience run -f "$name.yaml"
-  ID=$(kates --context site-a -o json test list --type INTEGRITY --size 1 | jq -r '.items[0].id')
+  kates --context site-a -o json resilience run -f "$name.yaml" > "$name.report.json"
+  ID=$(jq -r '.testRunId // empty' "$name.report.json")
+  [ -n "$ID" ] || { echo "no INTEGRITY run: $name"; break; }
   gate_integrity site-a "$ID" || { echo "acknowledged records lost: $name"; break; }
   ./exposure.sh site b      # must print 0, with URP = 0, before the next injection
 done

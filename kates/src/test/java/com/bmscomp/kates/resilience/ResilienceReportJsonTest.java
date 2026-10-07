@@ -105,6 +105,24 @@ class ResilienceReportJsonTest {
     }
 
     /**
+     * A report that ended ERROR after its test run started names the run at
+     * the top, where the CLI reads it first: it has no performanceReport.
+     */
+    @Test
+    void aReportNamesItsTestRunAtTheTop() throws Exception {
+        ResilienceReport report = new ResilienceReport();
+        report.setStatus("ERROR");
+        report.setError("java.util.concurrent.TimeoutException");
+        report.setTestRunId("run-1");
+
+        JsonNode json = wire(report);
+
+        assertTrue(json.get("testRunId").isTextual(), "testRunId is " + json.get("testRunId"));
+        assertEquals("run-1", json.get("testRunId").asText());
+        assertFalse(json.has("performanceReport"), "performanceReport in " + json);
+    }
+
+    /**
      * A report that ends before the recovery wait leaves those keys out, which
      * the CLI reads as nothing to print, not as a recovery time of 0.
      */
