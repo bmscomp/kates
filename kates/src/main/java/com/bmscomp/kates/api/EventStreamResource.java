@@ -1,6 +1,7 @@
 package com.bmscomp.kates.api;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
+import jakarta.annotation.security.PermitAll;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.ObservesAsync;
@@ -76,7 +77,10 @@ public class EventStreamResource {
 
     /**
      * Observes CDI async events from the orchestrator and broadcasts to all SSE subscribers.
+     * @PermitAll: the class's role would hold this observer to it too, and an
+     * event is fired with no request, so no identity, behind it.
      */
+    @PermitAll
     public void onTestEvent(@ObservesAsync TestLifecycleEvent event) {
         var iter = subscribers.iterator();
         while (iter.hasNext()) {
@@ -101,6 +105,8 @@ public class EventStreamResource {
         }
     }
 
+    // @PermitAll for the same reason: the scheduler calls this with no identity.
+    @PermitAll
     @Scheduled(every = "30s")
     void pruneAndHeartbeat() {
         if (sse == null || subscribers.isEmpty()) return;
