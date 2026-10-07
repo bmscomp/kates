@@ -8,7 +8,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
 
+import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
@@ -683,5 +685,230 @@ class DisruptionSafetyGuardTest {
         assertEquals(2, slaWarnings.size(), "p99 is evaluable, the other two are not: " + slaWarnings);
         assertTrue(slaWarnings.get(0).contains("maxDataLossPercent"), slaWarnings.get(0));
         assertTrue(slaWarnings.get(1).contains("maxRpoMs"), slaWarnings.get(1));
+    }
+
+    // ── NODE_DRAIN counts every broker on the node it drains ────────────────
+
+    /**
+     * Brokers 0 and 1 and controller 4 on alpha, broker 2 and controller 5 on
+     * sigma, broker 3 on gamma, and a consumer in namespace kates on sigma.
+     * Each node carries its zone label, as on the Kind lab, and sigma and
+     * gamma a drainable label. The mock API server ignores set-based
+     * selectors, so the tests list by equality.
+     */
+    private void createKafkaOnNodes() {
+        for (String node : List.of("alpha", "sigma", "gamma")) {
+            client.nodes()
+                    .resource(new NodeBuilder()
+                            .withNewMetadata()
+                            .withName(node)
+                            .addToLabels("topology.kubernetes.io/zone", node)
+                            .addToLabels("drainable", String.valueOf(!node.equals("alpha")))
+                            .endMetadata()
+                            .build())
+                    .create();
+        }
+        String[][] pods = {
+            {"krafter-brokers-0", "alpha", "true"},
+            {"krafter-brokers-1", "alpha", "true"},
+            {"krafter-brokers-2", "sigma", "true"},
+            {"krafter-brokers-3", "gamma", "true"},
+            {"krafter-controllers-4", "alpha", "false"},
+            {"krafter-controllers-5", "sigma", "false"}
+        };
+        for (String[] p : pods) {
+            client.pods()
+                    .inNamespace("kafka")
+                    .resource(new PodBuilder()
+                            .withNewMetadata()
+                            .withName(p[0])
+                            .withNamespace("kafka")
+                            .addToLabels("strimzi.io/component-type", "kafka")
+                            .addToLabels("strimzi.io/broker-role", p[2])
+                            .addToLabels("zone", p[1])
+                            .endMetadata()
+                            .withNewSpec()
+                            .withNodeName(p[1])
+                            .endSpec()
+                            .build())
+                    .create();
+        }
+        client.pods()
+                .inNamespace("kates")
+                .resource(new PodBuilder()
+                        .withNewMetadata()
+                        .withName("consumer-0")
+                        .withNamespace("kates")
+                        .addToLabels("app", "consumer")
+                        .endMetadata()
+                        .withNewSpec()
+                        .withNodeName("sigma")
+                        .endSpec()
+                        .build())
+                .create();
+    }
+
+    private static FaultSpec.Builder drain() {
+        return FaultSpec.builder("drain").disruptionType(DisruptionType.NODE_DRAIN);
+    }
+
+    @Test
+    void aDrainCountsEveryBrokerOnTheNodeItDrains() {
+        createKafkaOnNodes();
+        FaultSpec drainBroker0 = drain().targetBrokerId(0).build();
+
+        // Counted broker 0 alone, though draining alpha evicts broker 1 too.
+        assertEquals(
+                List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"),
+                guard.validatePlan(plan(1, drainBroker0)).errors());
+        assertTrue(guard.validatePlan(plan(2, drainBroker0)).safe());
+    }
+
+    @Test
+    void theDryRunListsEveryKafkaPodOnTheDrainedNodeAndNamesIt() {
+        createKafkaOnNodes();
+
+        var step = guard.dryRun(plan(-1, drain().targetBrokerId(2).build()))
+                .steps()
+                .getFirst();
+
+        assertEquals("krafter-brokers-2", step.targetPod());
+        assertEquals(List.of("krafter-brokers-2", "krafter-controllers-5"), step.affectedPods());
+        assertEquals(
+                List.of("NODE_DRAIN drains node sigma, the node of krafter-brokers-2, and evicts every pod on it"),
+                step.warnings());
+    }
+
+    @Test
+    void aRandomDrainCountsTheNodeThatRunsTheMostBrokers() {
+        createKafkaOnNodes();
+        FaultSpec random = drain().build();
+
+        assertEquals(
+                List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"),
+                guard.validatePlan(plan(1, random)).errors());
+        var step = guard.dryRun(plan(2, random)).steps().getFirst();
+        assertNull(step.targetPod());
+        assertEquals(List.of("krafter-brokers-0", "krafter-brokers-1", "krafter-controllers-4"), step.affectedPods());
+        assertEquals(
+                List.of("NODE_DRAIN drains the node of a pod picked at random; the count takes the worst case, node"
+                        + " alpha, which runs 2 brokers"),
+                step.warnings());
+    }
+
+    @Test
+    void aTargetAllDrainOverSeveralNodesIsRefused() {
+        createKafkaOnNodes();
+        // The two controllers, on alpha and sigma.
+        FaultSpec controllers = drain().targetLabel("strimzi.io/broker-role=false")
+                .targetAll(true)
+                .build();
+        String refusal = "NODE_DRAIN with targetAll picks pods on 2 nodes (alpha, sigma), and node-drain drains one."
+                + " Narrow targetLabel to the pods of one node, or name the node in envOverrides.TARGET_NODE";
+
+        // Passed, and its step then failed without draining.
+        assertEquals(
+                List.of("Step 'step-0': " + refusal),
+                guard.validatePlan(plan(-1, controllers)).errors());
+        var dryRun = guard.dryRun(plan(-1, controllers));
+        assertFalse(dryRun.wouldSucceed());
+        assertEquals(List.of(refusal), dryRun.steps().getFirst().warnings());
+    }
+
+    @Test
+    void aTargetAllDrainOfOneNodesPodsCountsItsBrokers() {
+        createKafkaOnNodes();
+        FaultSpec zone = drain().targetLabel("zone=alpha").targetAll(true).build();
+
+        assertEquals(
+                List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"),
+                guard.validatePlan(plan(1, zone)).errors());
+    }
+
+    @Test
+    void aDrainAimedAtAPodInAnotherNamespaceCountsTheBrokersOnItsNode() {
+        createKafkaOnNodes();
+        FaultSpec consumers =
+                drain().targetNamespace("kates").targetLabel("app=consumer").build();
+
+        // The consumer runs on sigma, with broker 2: with broker 0 that is two.
+        // A step in another namespace counted no broker.
+        assertEquals(
+                List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"),
+                guard.validatePlan(plan(1, consumers, kill(0))).errors());
+        assertEquals(
+                List.of("krafter-brokers-2", "krafter-controllers-5"),
+                guard.dryRun(plan(-1, consumers)).steps().getFirst().affectedPods());
+    }
+
+    @Test
+    void aTargetNodeOverrideCountsThatNode() {
+        createKafkaOnNodes();
+        FaultSpec gamma = drain().targetBrokerId(0)
+                .envOverrides(Map.of("TARGET_NODE", "gamma"))
+                .build();
+
+        var step = guard.dryRun(plan(1, gamma)).steps().getFirst();
+
+        assertTrue(guard.validatePlan(plan(1, gamma, kill(3))).safe(), "both hit broker 3, on gamma");
+        assertEquals(List.of("krafter-brokers-3"), step.affectedPods());
+        assertEquals(
+                List.of(
+                        "NODE_DRAIN drains node gamma, which envOverrides.TARGET_NODE names, and evicts every pod on it"),
+                step.warnings());
+    }
+
+    @Test
+    void aNodeLabelOverrideCountsTheWorstNodeItMatches() {
+        createKafkaOnNodes();
+        // sigma and gamma, one broker each; alpha, with two, is not among them.
+        FaultSpec byLabel =
+                drain().envOverrides(Map.of("NODE_LABEL", "drainable=true")).build();
+
+        assertTrue(guard.validatePlan(plan(1, byLabel)).safe());
+        assertEquals(
+                List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"),
+                guard.validatePlan(plan(1, byLabel, kill(0))).errors());
+        assertEquals(
+                List.of("NODE_DRAIN drains a node Litmus picks by envOverrides.NODE_LABEL 'drainable=true'; the count"
+                        + " takes the worst case, node gamma, which runs 1 broker"),
+                guard.dryRun(plan(-1, byLabel)).steps().getFirst().warnings());
+    }
+
+    @Test
+    void aDrainWhosePodIsOnNoNodeCountsNoneAndSaysSo() {
+        createKafkaOnNodes();
+        client.pods()
+                .inNamespace("kafka")
+                .resource(new PodBuilder()
+                        .withNewMetadata()
+                        .withName("krafter-brokers-6")
+                        .withNamespace("kafka")
+                        .addToLabels("strimzi.io/component-type", "kafka")
+                        .addToLabels("strimzi.io/broker-role", "true")
+                        .endMetadata()
+                        .build())
+                .create();
+        FaultSpec pending = drain().targetPod("krafter-brokers-6").build();
+
+        var step = guard.dryRun(plan(-1, pending)).steps().getFirst();
+
+        assertTrue(guard.validatePlan(plan(1, pending)).safe());
+        assertEquals("krafter-brokers-6", step.targetPod());
+        assertTrue(step.affectedPods().isEmpty());
+        assertEquals(
+                List.of("pod krafter-brokers-6 is not on a node yet, and the step fails without draining if it still"
+                        + " isn't when the step runs"),
+                step.warnings());
+    }
+
+    @Test
+    void aStepWithoutATypeThatNamesNodeDrainCountsAsADrain() {
+        createKafkaOnNodes();
+        FaultSpec typeless = FaultSpec.builder("node-drain").targetBrokerId(0).build();
+
+        assertEquals(
+                List.of("Plan would affect 2 brokers but maxAffectedBrokers=1"),
+                guard.validatePlan(plan(1, typeless)).errors());
     }
 }
