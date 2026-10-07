@@ -1154,6 +1154,43 @@ func (d *mcpDeps) resourceError(uri string, te *mcpToolError) *jsonrpc.Error {
 	return e
 }
 
+// addStaticResourceTemplate registers a resource template whose pages are
+// fixed when the server starts, keyed by the value of its one variable, such
+// as kates://docs/cli/{+command}. Like addStaticResource it reads nothing from
+// the backend, so it needs no guard. A URI that names no page is a
+// resource-not-found error, with notFound as its message.
+func addStaticResourceTemplate(s *mcp.Server, d *mcpDeps, rt *mcp.ResourceTemplate, pages map[string]string, notFound string) {
+	t := *rt
+	key := t.URITemplate
+	tmpl, err := uritemplate.New(key)
+	switch {
+	case err != nil:
+		panic(fmt.Sprintf("kates mcp: resource template %q: %v", key, err))
+	case !strings.HasPrefix(key, "kates://"):
+		panic(fmt.Sprintf("kates mcp: resource template %q must start with kates://", key))
+	case t.Name == "" || t.Title == "" || t.Description == "" || t.MIMEType == "" || notFound == "":
+		panic(fmt.Sprintf("kates mcp: resource template %q needs a Name, Title, Description, MIMEType and a not-found message", key))
+	case len(tmpl.Varnames()) != 1:
+		panic(fmt.Sprintf("kates mcp: static resource template %q must have one variable", key))
+	case d.resources[key]:
+		panic(fmt.Sprintf("kates mcp: resource template %q registered twice", key))
+	}
+	d.resources[key] = true
+	name := tmpl.Varnames()[0]
+	s.AddResourceTemplate(&t, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		uri := req.Params.URI
+		var page string
+		var ok bool
+		if values := tmpl.Match(uri); values != nil {
+			page, ok = pages[values.Get(name).String()]
+		}
+		if !ok {
+			return nil, d.resourceError(uri, &mcpToolError{Code: mcpErrNotFound, Message: notFound})
+		}
+		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: uri, MIMEType: t.MIMEType, Text: page}}}, nil
+	})
+}
+
 // addStaticResource registers a resource whose text is fixed when the server
 // starts, such as kates://caveats. It reads nothing from the backend, so it
 // needs no guard; it is recorded so that a test can tell it from a resource

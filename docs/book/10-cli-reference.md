@@ -2300,6 +2300,7 @@ Resources, which Claude Code offers as `@` mentions:
 - `kates://disruptions/{id}/timeline` — a disruption's steps and pod events
 - `kates://playbooks/{name}` — a built-in playbook's resolved plan
 - `kates://scenarios/{name}` — the built-in scenario templates that `kates test apply` accepts
+- `kates://docs/cli` — every `kates` command with what it does, and the global flags; `kates://docs/cli/{+command}` is one command's help, as `--help` shows it, with `command` its words joined by `/`, such as `kates://docs/cli/test/create`. Both are generated from the binary the server runs, so they match its commands and flags
 
 Prompts, which Claude Code offers as slash commands: `diagnose_run` (a `run_id`), `did_kates_cause_this` (`since`, and optionally `topic` and `group`), `plan_game_day` (`topic` and `minutes`), `debrief_disruption` (`id`, and optionally `baseline_id`) and `security_posture_check` (optionally `framework`: `cis`, `soc2` or `pci`). A prompt is a template the agent follows with the tools; it reads nothing itself.
 
