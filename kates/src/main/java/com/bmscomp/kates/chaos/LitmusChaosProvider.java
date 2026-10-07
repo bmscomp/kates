@@ -6,6 +6,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.function.LongConsumer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -72,25 +73,32 @@ public class LitmusChaosProvider implements ChaosProvider {
 
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
+        return triggerFault(spec, injectedAt -> {});
+    }
+
+    @Override
+    public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec, LongConsumer onInject) {
         if (ON_KUBERNETES_API.contains(spec.disruptionType())) {
-            return kubernetes.triggerFault(spec);
+            return kubernetes.triggerFault(spec, onInject);
         }
         if (spec.delayBeforeSec() <= 0) {
-            return inject(spec);
+            return inject(spec, onInject);
         }
         // Waited out before the pods are picked and the ChaosEngine exists, as
         // the kubernetes provider waits it. Litmus's own RAMP_TIME would wait
         // after the fault as well, past the time Kates waits for the result.
         Executor afterDelay =
                 CompletableFuture.delayedExecutor(spec.delayBeforeSec(), TimeUnit.SECONDS, executor.get());
-        return CompletableFuture.supplyAsync(() -> inject(spec), afterDelay).thenCompose(Function.identity());
+        return CompletableFuture.supplyAsync(() -> inject(spec, onInject), afterDelay)
+                .thenCompose(Function.identity());
     }
 
     /**
      * Creates the ChaosEngine and polls its ChaosResult. The start is taken
-     * here, after any delay, so the outcome times the fault, not the wait.
+     * here, after any delay, so the outcome times the fault, not the wait, and
+     * it is the moment {@code onInject} gets.
      */
-    private CompletableFuture<ChaosOutcome> inject(FaultSpec spec) {
+    private CompletableFuture<ChaosOutcome> inject(FaultSpec spec, LongConsumer onInject) {
         Instant start = Instant.now();
         long startNanos = System.nanoTime();
         String engineName = "kates-" + spec.experimentName() + "-" + System.currentTimeMillis();
@@ -102,6 +110,9 @@ public class LitmusChaosProvider implements ChaosProvider {
 
             ChaosEngine engine = buildChaosEngine(spec, engineName, experimentName);
             String resultName = engineName + "-" + experimentName;
+
+            // Once the pods are picked, before the engine that injects the fault exists.
+            onInject.accept(startNanos);
 
             // NOW create the engine
             client.resources(ChaosEngine.class)

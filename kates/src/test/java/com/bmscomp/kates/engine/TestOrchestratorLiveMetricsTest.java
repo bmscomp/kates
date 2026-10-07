@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
+import jakarta.validation.Validation;
 
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
@@ -51,6 +52,9 @@ import com.bmscomp.kates.service.TopicService;
  */
 class TestOrchestratorLiveMetricsTest {
 
+    private static final SpecLimits SPEC_LIMITS =
+            new SpecLimits(Validation.buildDefaultValidatorFactory().getValidator());
+
     private final PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
     private final BenchmarkMetrics benchmarkMetrics = new BenchmarkMetrics(registry);
     private final ScriptedNativeBackend backend = new ScriptedNativeBackend();
@@ -77,6 +81,16 @@ class TestOrchestratorLiveMetricsTest {
             TestRun run = invocation.getArgument(0);
             return rows.computeIfPresent(run.getId(), (id, stored) -> run) != null;
         });
+        // The submission's write: only over the row executeTest stored, PENDING.
+        when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
+            TestRun run = invocation.getArgument(0);
+            TestRun stored = rows.get(run.getId());
+            if (stored == null || stored.getStatus() != invocation.getArgument(1)) {
+                return false;
+            }
+            rows.put(run.getId(), run);
+            return true;
+        });
 
         Instance<BenchmarkBackend> backends = mock(Instance.class);
         // A fresh stream per call: resolveBackend runs on every poll.
@@ -90,6 +104,7 @@ class TestOrchestratorLiveMetricsTest {
                 benchmarkMetrics,
                 mock(KatesMetrics.class),
                 new SlaEvaluator(),
+                SPEC_LIMITS,
                 mock(Event.class),
                 "native",
                 "localhost:9092",
