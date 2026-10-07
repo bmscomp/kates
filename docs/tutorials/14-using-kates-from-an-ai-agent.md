@@ -109,6 +109,12 @@ Output:
   ✖ cluster <clusterId> is not allowed: http://localhost:8080 reaches Kafka cluster <clusterId>, which is not in --allow-cluster. If it is the cluster you mean, add --allow-cluster <clusterId>
 ```
 
+When the API does not answer, because the forward is down or not started
+yet, the server starts anyway and logs `starting with no cluster pinned`.
+Every tool call then fails with `KATES_UNAVAILABLE` and says that no cluster
+is pinned yet. Once `kates ports` brings the API back, the first call pins
+the cluster, with no restart.
+
 ## 4. Add the Server to Claude Code
 
 ```bash

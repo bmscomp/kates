@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
@@ -64,11 +65,19 @@ The command refuses to start without:
 It also refuses --url, KATES_URL and --api-key. The API URL comes from the
 context alone, as written, so the context names the API the server reads:
 other commands switch between localhost:8080 and localhost:30083 when the
-context's port does not answer and the other does, and kates mcp refuses to
-start instead. A key on the command line shows in the process list and is
-stored in the MCP client's configuration. The key is KATES_API_KEY when it is
-set in the environment the client starts the server with, and the context's
-key otherwise.
+context's port does not answer and the other does, and kates mcp does not. A
+key on the command line shows in the process list and is stored in the MCP
+client's configuration. The key is KATES_API_KEY when it is set in the
+environment the client starts the server with, and the context's key
+otherwise.
+
+The Kates API need not be up for the server to start. When the clusterId
+cannot be read at start (the API does not answer within 10 seconds, answers
+with an error, or rejects the key), the server starts anyway with no cluster
+pinned, and logs why. Every call then reads the clusterId first and fails,
+with the reason, until the API names a cluster --allow-cluster lists; the
+first call that reads one pins it. A cluster not listed is refused with
+KATES_CLUSTER_NOT_ALLOWED.
 
 Before every tool call it reads the clusterId again and refuses the call if
 the context's URL now reaches a different cluster, as it does when a
@@ -181,25 +190,48 @@ func mcpPrintableID(s string) bool {
 	return true
 }
 
-// mcpContextClient returns base, the client the root command built, when its
-// URL is the context's as written. The root command's PersistentPreRun swaps
-// localhost:8080 for localhost:30083, and back, when the context's port does
-// not answer and the other one does (resolveFallbackURL). For kates mcp that
-// would send the key to whatever listens on the other port, and the start-up
-// pin check would send it before the allowlist is checked, while the help and
-// the log say the context names the API. So the swap stops the server.
-func mcpContextClient(base *client.Client, contextName, contextURL string) (*client.Client, error) {
+// mcpContextClient returns a client for the context's URL as written: base,
+// the client the root command built, when that is its URL. The root
+// command's PersistentPreRun swaps localhost:8080 for localhost:30083, and
+// back, when the context's port does not answer and the other one does
+// (resolveFallbackURL). For kates mcp that would send the key to whatever
+// listens on the other port, while the help and the log say the context names
+// the API. So the server keeps the context's URL, and its calls fail until
+// that URL answers; moved reports that base's URL was not it. The swap is
+// only ever between two ports of one loopback host, so base's key, proxy and
+// TLS settings are the context's either way.
+func mcpContextClient(base *client.Client, contextURL string) (c *client.Client, moved bool) {
 	want := strings.TrimRight(contextURL, "/")
 	if base.BaseURL == want {
-		return base, nil
+		return base, false
 	}
-	return nil, fmt.Errorf("the URL of context %s, %s, does not answer, and kates mcp uses it as written: it does not "+
-		"switch to %s as other kates commands do. Start what serves the context's URL (kates ports starts the "+
-		"port-forward), or point the context at the URL you mean: kates ctx set %s --url <url>",
-		contextName, mcpRedactURL(want), mcpRedactURL(base.BaseURL), contextName)
+	c2 := *base
+	c2.BaseURL = want
+	return &c2, true
+}
+
+// mcpStartPinTimeout bounds the pin check at start. The MCP client waits for
+// the server to answer its initialize request while it runs, and a server
+// that cannot read the clusterId starts anyway, so there is no point in
+// waiting out the call timeout a slow tool call gets. Tests shorten it.
+var mcpStartPinTimeout = 10 * time.Second
+
+// mcpClusterNotAllowedError is a live clusterId --allow-cluster does not
+// list. It is the one outcome of the pin check at start that stops the
+// server: the configuration names another cluster, and starting would only
+// refuse every call.
+type mcpClusterNotAllowedError struct {
+	live, base string
+}
+
+func (e *mcpClusterNotAllowedError) Error() string {
+	return fmt.Sprintf("cluster %s is not allowed: %s reaches Kafka cluster %s, which is not in --allow-cluster. "+
+		"If it is the cluster you mean, add --allow-cluster %s", e.live, e.base, e.live, e.live)
 }
 
 // mcpPinCluster reads the live clusterId and returns it when it is allowed.
+// A clusterId not allowed is a *mcpClusterNotAllowedError; any other error
+// means the clusterId could not be read.
 func mcpPinCluster(ctx context.Context, c *client.Client, allowed []string) (string, error) {
 	base := mcpRedactURL(c.BaseURL)
 	info, err := c.ClusterInfo(ctx)
@@ -214,9 +246,7 @@ func mcpPinCluster(ctx context.Context, c *client.Client, allowed []string) (str
 			return id, nil
 		}
 	}
-	live := mcpSanitizeLine(info.ClusterID, 128)
-	return "", fmt.Errorf("cluster %s is not allowed: %s reaches Kafka cluster %s, which is not in --allow-cluster. "+
-		"If it is the cluster you mean, add --allow-cluster %s", live, base, live, live)
+	return "", &mcpClusterNotAllowedError{live: mcpSanitizeLine(info.ClusterID, 128), base: base}
 }
 
 // mcpRedactURL is raw as the log and error messages show it, which the MCP
@@ -287,21 +317,31 @@ func runMCP(ctx context.Context, overrides []string) error {
 	if err != nil {
 		return err
 	}
-	base, err := mcpContextClient(apiClient, cfg.context, cfg.url)
-	if err != nil {
-		return err
-	}
+	base, moved := mcpContextClient(apiClient, cfg.url)
 	c, err := newMCPClient(base)
 	if err != nil {
 		return err
 	}
 	logger := newMCPLogger(os.Stderr)
+	if moved {
+		logger.Warn("the context's URL did not answer at start; kates mcp keeps it, and does not switch to the port "+
+			"that answered as other kates commands do", "context", cfg.context, "url", mcpRedactURL(c.BaseURL),
+			"answered", mcpRedactURL(apiClient.BaseURL))
+	}
 
-	pinCtx, cancel := context.WithTimeout(ctx, mcpDefaultLimits.CallTimeout)
+	// Only a cluster that is not allowed stops the server. When the
+	// clusterId cannot be read, it starts with none pinned, and every call
+	// says why until one is (mcpDeps.pin).
+	pinCtx, cancel := context.WithTimeout(ctx, mcpStartPinTimeout)
 	clusterID, err := mcpPinCluster(pinCtx, c, cfg.allowed)
 	cancel()
-	if err != nil {
+	var notAllowed *mcpClusterNotAllowedError
+	if errors.As(err, &notAllowed) {
 		return err
+	}
+	if err != nil {
+		logger.Warn("starting with no cluster pinned: every call fails until the Kates API names a cluster "+
+			"--allow-cluster lists", "error", err)
 	}
 
 	// The first SIGINT or SIGTERM cancels the calls in flight (Lifetime) and
@@ -314,6 +354,7 @@ func runMCP(ctx context.Context, overrides []string) error {
 	deps, err := newMCPDeps(mcpDepsConfig{
 		Client:   c,
 		Cluster:  mcpClusterRef{ID: clusterID, Label: cfg.label},
+		Allowed:  cfg.allowed,
 		Limits:   mcpDefaultLimits,
 		Logger:   logger,
 		Lifetime: ctx,
@@ -323,8 +364,12 @@ func runMCP(ctx context.Context, overrides []string) error {
 	}
 	server := newMCPServer(deps)
 
+	pinned := clusterID
+	if pinned == "" {
+		pinned = "(none yet)"
+	}
 	logger.Info("serving on stdio (read-only, experimental)",
-		"context", cfg.context, "url", mcpRedactURL(c.BaseURL), "cluster", clusterID, "label", cfg.label)
+		"context", cfg.context, "url", mcpRedactURL(c.BaseURL), "cluster", pinned, "label", cfg.label)
 	err = server.Run(ctx, &mcpStdioTransport{})
 	if errors.Is(err, context.Canceled) {
 		return nil

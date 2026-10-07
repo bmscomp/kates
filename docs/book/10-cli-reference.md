@@ -2269,7 +2269,9 @@ Both required flags are there to stop accidents. At start, the server reads the 
 kates cluster info --context ports -o json | jq -r .clusterId
 ```
 
-The URL comes from the context alone, as written: the command refuses `--url` and `KATES_URL`, and where other commands switch between `localhost:8080` and `localhost:30083` when the context's port does not answer and the other does, `kates mcp` refuses to start, so the key goes only to the API the context names. It also refuses `--api-key`, because a key on its command line shows in the process list and is stored in the MCP client's configuration. The key is `KATES_API_KEY` when it is set in the environment the client starts the server with, and the context's key otherwise. Keep it in the context, which `kates ports` writes for you.
+The URL comes from the context alone, as written: the command refuses `--url` and `KATES_URL`, and where other commands switch between `localhost:8080` and `localhost:30083` when the context's port does not answer and the other does, `kates mcp` keeps the context's URL, so the key goes only to the API the context names. It also refuses `--api-key`, because a key on its command line shows in the process list and is stored in the MCP client's configuration. The key is `KATES_API_KEY` when it is set in the environment the client starts the server with, and the context's key otherwise. Keep it in the context, which `kates ports` writes for you.
+
+The API need not be up when the client starts the server. When the server cannot read the clusterId at start, because the API does not answer within 10 seconds, answers with an error or rejects the key, it starts anyway with no cluster pinned and logs why. Every tool call then fails with the reason, and says that no cluster is pinned yet, until the API names a cluster that `--allow-cluster` lists; the first call that reads one pins it, with no restart. A cluster not listed is refused with `KATES_CLUSTER_NOT_ALLOWED`. So a server that Claude Code starts before `kates ports` runs works once the forward is up.
 
 Calls are limited to 60 a minute and 4 at a time. A call over either limit gets a retryable `KATES_RATE_LIMITED` error instead of waiting. A call that runs longer than 90 seconds fails with `KATES_UNAVAILABLE`. stdout carries only JSON-RPC; the log goes to stderr, where your MCP client keeps it. The server stops when the client closes its stdin, or on SIGINT or SIGTERM, which cancel the calls in flight; a second signal ends it at once.
 
@@ -2326,6 +2328,7 @@ A failed call returns an error with a fixed code, a message, the fenced detail a
 | `KATES_RATE_LIMITED` | Over the server's limits, or the API answered 429; retryable |
 | `KATES_CANCELLED` | The client cancelled the call, or the server is shutting down |
 | `KATES_CLUSTER_CHANGED` | The context's URL now reaches a different Kafka cluster |
+| `KATES_CLUSTER_NOT_ALLOWED` | The server started before the API answered, and the context's URL reaches a Kafka cluster that `--allow-cluster` does not list |
 | `KATES_BACKEND_ERROR` | The API failed or answered with data the server could not read |
 | `KATES_RESULT_TOO_LARGE` | The result would not fit; ask for a smaller page |
 | `KATES_INTERNAL` | A bug in `kates mcp` |
