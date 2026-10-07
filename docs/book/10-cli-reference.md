@@ -613,6 +613,8 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 | `--backend` | Benchmark backend: `native` or `trogdor` (default: the Kates API's `kates.engine.default-backend`, `native`) |
 | `--wait` | Wait for test completion; Ctrl-C cancels the run and exits 130 |
 
+A value outside the limits the Kates API sets, such as more than 100 `--producers` or a `--topic` that isn't a legal Kafka topic name, fails the command with `[400] Validation Failed:`, and no run starts. The message names the request field, `numProducers` or `topic`, with the reason.
+
 ::: {.callout-important}
 **`--throughput` sets the rate, and some flags do not apply to every type**
 
@@ -1115,6 +1117,8 @@ kates schedule create --name "Nightly Endurance" --cron "0 2 * * *" --request en
 | `--request` | Yes | Path to JSON file containing the test request body |
 
 The request file should contain the same JSON body you would send to `POST /api/tests`. The schedule keeps the fields it sets, and each firing merges them with the test type's defaults, as a `POST /api/tests` would. A request with a spec field its test type cannot apply, a run longer than two hours, or a `backend` the Kates API doesn't have, fails the command with `[400] Validation Failed:` and each field's path under `testRequest`, and no schedule is saved. A firing the Kates API refuses, such as one of a schedule saved before it checked requests, starts no run, and says why only in the server log.
+
+A request without a `type`, or with a `spec` value outside the limits the Kates API sets, such as a `numProducers` above 100, fails the command with `[400] Validation Failed:` and the field's name, and no schedule is saved.
 
 #### schedule delete
 

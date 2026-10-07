@@ -1244,7 +1244,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"plans/mcp-server.md:387-405",
 			mcpJava + "api/TestResource.java:76-103",
 			mcpJava + "domain/TestSpec.java:34-113",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1231-1296",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1299-1364",
 				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
 			mcpAnchoredRef("cli/cmd/apply.go:177-251",
 				"for i, scenario := range sf.Scenarios {", "apiClient.CreateTest(ctx, req)",
