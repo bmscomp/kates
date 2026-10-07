@@ -1,9 +1,9 @@
+# An ENDURANCE run starts one producer and one consumer.
 scenarios:
   - name: "Endurance / Soak Test"
     type: ENDURANCE
     spec:
       records: 10000000
-      parallelProducers: 4
       recordSizeBytes: 1024
       durationSeconds: 3600
       acks: "all"

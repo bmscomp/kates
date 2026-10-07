@@ -123,7 +123,7 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 		t.Fatalf("verdict %s, %d scenarios", out.Verdict, len(out.Scenarios))
 	}
 	sc := out.Scenarios[0]
-	want := scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{"records": 50000, "parallelProducers": 2, "recordSizeBytes": 1024}})
+	want := scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{"records": 50000, "recordSizeBytes": 1024}})
 	if sc.Request.TestType != "LOAD" || sc.Request.Spec == nil || *sc.Request.Spec != *want.Spec {
 		t.Errorf("request = %+v, want what scenarioToRequest builds: %+v", sc.Request.Spec, want.Spec)
 	}
@@ -139,11 +139,30 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 	}
 	mcpScnHasFinding(t, out, 0, "spec.targetThroughput", mcpScnOutside, "the rate is unlimited: set targetThroughput")
 	mcpScnHasFinding(t, out, 0, "spec.topic", mcpScnOutside, "load-test, the topic every LOAD run shares")
-	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnWarning, "starts one producer")
 	mcpSecHasCaveats(t, env, mcpCaveatAgentEnvelopeProposed, mcpCaveatScenarioShippedDefaults,
-		mcpCaveatScenarioValidateGrading, mcpCaveatLoadSingleProducer)
+		mcpCaveatScenarioValidateGrading)
 	if out.Envelope.MaxRecordsPerSecond != mcpScnEnvMaxRecordsPerSec || out.Envelope.MaxBytes != 10<<30 || out.Envelope.TopicPrefix != "kates-mcp-" {
 		t.Errorf("envelope = %+v", out.Envelope)
+	}
+	mcpScnOnlyPinCheck(t, fb)
+}
+
+// TestMCPDraftScenarioCountsTheRunIgnores: a count above what the run starts
+// is a warning, and parallelProducers on a LOAD scenario brings the
+// single-producer caveat. No template sets either count
+// (TestShippedScenariosSetOnlyWhatTheirRunsRead), so an override adds them.
+func TestMCPDraftScenarioCountsTheRunIgnores(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	env, out := mcpDraft(t, h, map[string]any{
+		"template":       "quick-load",
+		"spec_overrides": map[string]any{"parallelProducers": 2, "numConsumers": 2},
+	})
+	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnWarning, "starts one producer")
+	mcpScnHasFinding(t, out, 0, "spec.numConsumers", mcpScnWarning, "no effect")
+	mcpSecHasCaveats(t, env, mcpCaveatLoadSingleProducer)
+	if e := out.Scenarios[0].Effective; e.ProducerTasks != 1 {
+		t.Errorf("effective = %+v", e)
 	}
 	mcpScnOnlyPinCheck(t, fb)
 }
@@ -167,6 +186,7 @@ func TestMCPDraftScenarioEveryTemplate(t *testing.T) {
 	mcpScnHasFinding(t, out, 0, "type", mcpScnOutside, "SPIKE runs its producer at an unlimited rate")
 	_, out = mcpDraft(t, h, map[string]any{"template": "endurance-soak"})
 	mcpScnHasFinding(t, out, 0, "spec.durationSeconds", mcpScnOutside, "the run may last up to 3600 s")
+	_, out = mcpDraft(t, h, map[string]any{"template": "stress-test"})
 	mcpScnHasFinding(t, out, 0, "spec", mcpScnOutside, "GiB")
 	_, out = mcpDraft(t, h, map[string]any{"template": "integrity-tx"})
 	mcpScnHasFinding(t, out, 0, "validate.maxDuplicatePercent", mcpScnWarning, "drops validate.maxDuplicatePercent")
@@ -201,7 +221,7 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	if sc.Name != "RT smoke" || sc.Request.Spec.Topic != "kates-mcp-rt" || sc.Request.Spec.Records != 20000 {
 		t.Errorf("scenario = %+v", sc)
 	}
-	if e := sc.Effective; e.Throughput != 10000 || e.RecordsPerSec != 20000 || e.DurationMs != 600_000 {
+	if e := sc.Effective; e.Throughput != 10000 || e.RecordsPerSec != 10000 || e.DurationMs != 600_000 {
 		t.Errorf("effective = %+v", e)
 	}
 	for _, want := range []string{"name: RT smoke", "topic: kates-mcp-rt", "records: 20000", "maxP99LatencyMs: 150", "enableTransactions: true"} {
@@ -217,7 +237,6 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	// Warnings remain: ROUND_TRIP reports no integrity data. Its producer
 	// takes the idempotence and transactions the template asks for.
 	mcpScnHasFinding(t, out, 0, "validate.maxOutOfOrder", mcpScnWarning, "never checked")
-	mcpScnHasFinding(t, out, 0, "spec.numConsumers", mcpScnWarning, "no effect")
 	if f := mcpScnFindingsOn(out, 0, "spec.enableIdempotence"); len(f) != 0 {
 		t.Errorf("spec.enableIdempotence has findings %+v", f)
 	}
@@ -432,13 +451,15 @@ validate:
 		t.Errorf("verdict %s, want invalid (acks \"2\")", out.Verdict)
 	}
 	sc := out.Scenarios[0]
-	if sc.Request.TestType != "STRESS" || sc.Request.Spec.Records != 0 || sc.Request.Spec.LingerMs != 0 {
+	if s := sc.Request.Spec; sc.Request.TestType != "STRESS" || s.Records != 0 || s.LingerMs == nil || *s.LingerMs != 0 {
 		t.Errorf("request = %+v", sc.Request.Spec)
 	}
 	mcpScnHasFinding(t, out, 0, "spec.records", mcpScnWarning, "reads as 0")
 	mcpScnHasFinding(t, out, 0, "spec.throughput", mcpScnWarning, "the scenario key for the producer rate is targetThroughput")
 	mcpScnHasFinding(t, out, 0, "spec.numRecords", mcpScnWarning, "the scenario key is records")
-	mcpScnHasFinding(t, out, 0, "spec.lingerMs", mcpScnWarning, "0 is left out")
+	if f := mcpScnFindingsOn(out, 0, "spec.lingerMs"); len(f) != 0 {
+		t.Errorf("lingerMs: 0 is sent, and a STRESS run lingers 0 ms; findings %+v", f)
+	}
 	mcpScnHasFinding(t, out, 0, "spec.acks", mcpScnInvalid, "the backend refuses for acks")
 	mcpScnHasFinding(t, out, 0, "phases", mcpScnWarning, "no scenario phases")
 	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnOutside, "STRESS starts 8 producers")
@@ -719,6 +740,78 @@ func TestMCPDraftScenarioSpecKeysMatchScenarioToRequest(t *testing.T) {
 			t.Errorf("spec.%s sets no field named %s: %s", key, k.wire, b)
 		}
 	}
+}
+
+// TestMCPDraftScenarioZeroWarningMatchesTheRequest holds the zero warning to
+// what scenarioToRequest sends: a number key whose 0 the request leaves out
+// is warned about, and one that sends its 0 is not. Those are batchSize,
+// lingerMs and fetchMaxWaitMs, where 0 is a Kafka setting.
+func TestMCPDraftScenarioZeroWarningMatchesTheRequest(t *testing.T) {
+	var keys, sendsZero []string
+	for key := range mcpScnSpecKeys {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		k := mcpScnSpecKeys[key]
+		if k.kind != 'i' {
+			continue
+		}
+		b, err := json.Marshal(scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{key: 0}}).Spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sent := strings.Contains(string(b), `"`+k.wire+`":0`)
+		if sent != k.sendsZero {
+			t.Errorf("spec.%s: scenarioToRequest sends a 0: %t; draft_scenario says %t (%s)", key, sent, k.sendsZero, b)
+		}
+		var fs mcpScnFindings
+		mcpScnCheckSpecKey(0, key, 0, "LOAD", &fs)
+		warned := false
+		for _, f := range fs.list {
+			warned = warned || strings.Contains(f.Message, "0 is left out")
+		}
+		if warned == sent {
+			t.Errorf("spec.%s: a 0 the request sends: %t, warned as left out: %t; findings %+v", key, sent, warned, fs.list)
+		}
+		if sent {
+			sendsZero = append(sendsZero, key)
+		}
+	}
+	if want := []string{"batchSize", "fetchMaxWaitMs", "lingerMs"}; !slices.Equal(sendsZero, want) {
+		t.Errorf("the keys that send a 0 are %v, want %v", sendsZero, want)
+	}
+}
+
+// TestMCPDraftScenarioZeroSettings: a 0 in batchSize, lingerMs or
+// fetchMaxWaitMs is checked as sent. A LOAD run takes all three, and a STRESS
+// run's fetchMaxWaitMs: 0 is refused, as the backend refuses any fetch
+// setting for a type that starts no consumer; left out, it passed unnoticed.
+func TestMCPDraftScenarioZeroSettings(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	_, out := mcpDraft(t, h, map[string]any{"yaml": `scenarios:
+  - name: no-wait
+    type: LOAD
+    spec: {topic: kates-mcp-zero, batchSize: 0, lingerMs: 0, fetchMaxWaitMs: 0}
+  - name: stress
+    type: STRESS
+    spec: {topic: kates-mcp-zero, lingerMs: 0, fetchMaxWaitMs: 0}
+`})
+	if s := out.Scenarios[0].Request.Spec; s.BatchSize == nil || *s.BatchSize != 0 || s.LingerMs == nil || *s.LingerMs != 0 ||
+		s.FetchMaxWaitMs == nil || *s.FetchMaxWaitMs != 0 {
+		t.Errorf("request = %+v", s)
+	}
+	for _, field := range []string{"spec.batchSize", "spec.lingerMs", "spec.fetchMaxWaitMs"} {
+		if f := mcpScnFindingsOn(out, 0, field); len(f) != 0 {
+			t.Errorf("a LOAD run takes %s: 0; findings %+v", field, f)
+		}
+	}
+	if f := mcpScnFindingsOn(out, 1, "spec.lingerMs"); len(f) != 0 {
+		t.Errorf("a STRESS run takes lingerMs: 0; findings %+v", f)
+	}
+	mcpScnHasFinding(t, out, 1, "spec.fetchMaxWaitMs", mcpScnInvalid, "STRESS starts no consumer")
+	mcpScnOnlyPinCheck(t, fb)
 }
 
 // TestMCPDraftScenarioEscapesNeverChangeTheFile: a YAML escape can put a
