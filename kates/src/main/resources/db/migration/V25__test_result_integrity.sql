@@ -1,0 +1,13 @@
+-- An INTEGRITY task's integrity result, as JSON: the records it sent, saw
+-- acknowledged, consumed, lost and read twice, the lost ranges, RTO, RPO,
+-- out-of-order records, CRC failures and the timeline. It was never stored, so
+-- only the status poll that saw the task end returned it, and every later read
+-- of the run had none. kates test apply --wait then checked no loss, ordering
+-- or CRC gate whenever the 5-second status reconciler polled first, a finished
+-- run's report had no Data Integrity section, and the report's SLA verdict
+-- skipped every data-loss, RTO and RPO limit.
+--
+-- Nullable and without a default, so adding it rewrites no rows. It stays NULL
+-- for every task that is not an INTEGRITY one, and on rows written before this
+-- column.
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS integrity_json TEXT;

@@ -75,7 +75,7 @@ func TestMCPCaveatCatalogue(t *testing.T) {
 // TestMCPCaveatRetiredIDs: an id whose caveat changed meaning stays retired,
 // so a client keying on it never reads the new meaning under the old id.
 func TestMCPCaveatRetiredIDs(t *testing.T) {
-	for _, id := range []mcpCaveatID{"reaper-30-minutes", "scenario-base-spec-only", "scenario-phase-specs", "summary-averages-tasks", "recovery-times-from-request"} {
+	for _, id := range []mcpCaveatID{"reaper-30-minutes", "scenario-base-spec-only", "scenario-phase-specs", "summary-averages-tasks", "recovery-times-from-request", "integrity-not-stored"} {
 		if _, ok := mcpCaveatIndex[id]; ok {
 			t.Errorf("caveat id %q is retired; give a changed caveat a new id", id)
 		}

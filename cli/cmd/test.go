@@ -234,7 +234,9 @@ var testGetCmd = &cobra.Command{
 					if len(ir.LostRanges) > 0 {
 						output.SubHeader("Lost Ranges")
 						lostRows := make([][]string, 0, len(ir.LostRanges))
+						var listed int64
 						for _, lr := range ir.LostRanges {
+							listed += lr.Count
 							lostRows = append(lostRows, []string{
 								fmt.Sprintf("%d", lr.FromSeq),
 								fmt.Sprintf("%d", lr.ToSeq),
@@ -242,6 +244,12 @@ var testGetCmd = &cobra.Command{
 							})
 						}
 						output.Table([]string{"From Seq", "To Seq", "Count"}, lostRows)
+						// The Kates API lists at most the first 1,000 ranges,
+						// while Lost counts every lost record.
+						if listed < ir.LostRecords {
+							output.Hint(fmt.Sprintf("  (showing the first %d ranges: %d of the %d lost records)",
+								len(ir.LostRanges), listed, ir.LostRecords))
+						}
 					}
 					if len(ir.Timeline) > 0 {
 						output.SubHeader("Integrity Timeline")

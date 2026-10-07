@@ -35,8 +35,8 @@ type MCPRun struct {
 	Results       []MCPRunTask      `json:"results,omitempty"`
 }
 
-// MCPRunTask is one task of a run (domain/TestResult.java), as stored: the
-// integrity result is not persisted, so it is not read here.
+// MCPRunTask is one task of a run (domain/TestResult.java), as stored. get_run
+// leaves out the integrity result an INTEGRITY task carries, so it is not read here.
 type MCPRunTask struct {
 	TaskID                  string  `json:"taskId"`
 	PhaseName               string  `json:"phaseName"`

@@ -24,7 +24,7 @@ import (
 // mcpCaveatIDsRuns lists the constants of mcpCaveatsRuns.
 var mcpCaveatIDsRuns = []mcpCaveatID{
 	mcpCaveatSummaryAveragesStartedTasks,
-	mcpCaveatIntegrityNotStored,
+	mcpCaveatIntegrityNotShown,
 	mcpCaveatCancelStoredAsFailed,
 	mcpCaveatScenarioPhasesInTurn,
 	mcpCaveatBrokerSkewProjected,
@@ -474,7 +474,7 @@ func TestMCPGetRun(t *testing.T) {
 		t.Error("nothing was cut")
 	}
 	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks, mcpCaveatLoadSingleProducer)
-	mcpNoCaveat(t, env, mcpCaveatReaperDeadline, mcpCaveatIntegrityNotStored, mcpCaveatScenarioPhasesInTurn)
+	mcpNoCaveat(t, env, mcpCaveatReaperDeadline, mcpCaveatIntegrityNotShown, mcpCaveatScenarioPhasesInTurn)
 
 	// list_runs shows the same digest for the same run.
 	list := mcpData[mcpListRunsOut](t, h.callOK("list_runs", nil))
@@ -573,7 +573,7 @@ func TestMCPGetRunFailedScenarioRun(t *testing.T) {
 	if len(got.Run.Labels) != 2 || !mcpFenced(h, got.Run.Labels[0]) || !strings.Contains(string(got.Run.Labels[1]), "team=payments") {
 		t.Errorf("labels = %q", got.Run.Labels)
 	}
-	mcpWantCaveats(t, env, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed, mcpCaveatIntegrityNotStored, mcpCaveatScenarioPhasesInTurn)
+	mcpWantCaveats(t, env, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed, mcpCaveatIntegrityNotShown, mcpCaveatScenarioPhasesInTurn)
 	mcpNoCaveat(t, env, mcpCaveatLoadSingleProducer)
 	assertReadOnly(t, fb.Requests())
 }
@@ -1821,7 +1821,7 @@ func TestMCPRunReportResource(t *testing.T) {
 	}
 	// A label that imitates a metadata row adds nothing: the first testType
 	// row is the run's own.
-	if strings.Contains(head, string(mcpCaveatIntegrityNotStored)) {
+	if strings.Contains(head, string(mcpCaveatIntegrityNotShown)) {
 		t.Errorf("a label changed the caveats:\n%s", head)
 	}
 

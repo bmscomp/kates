@@ -14,6 +14,10 @@ import com.bmscomp.kates.engine.AckTracker;
  * <p>Tracks both producer-side and consumer-side RTO for a complete picture
  * of recovery time from the perspective of both writers and readers.
  *
+ * <p>{@code lostRanges} lists at most the first 1,000 ranges of lost
+ * sequence numbers ({@code DataIntegrityVerifier.MAX_LOST_RANGES});
+ * {@code lostRecords} counts every lost record.
+ *
  * <p>{@code rpo} is how far back before the fault acknowledged writes were
  * lost. It is {@code null} when the run did not know when a fault started —
  * a plain INTEGRITY run, or one a separate disruption was injected into —

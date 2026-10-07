@@ -16,7 +16,12 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.Test;
 
+import com.bmscomp.kates.domain.IntegrityResult;
+import com.bmscomp.kates.domain.IntegrityResultFixtures;
+import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
+import com.bmscomp.kates.domain.TestSpec;
+import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.SchedulerLeaseService;
 import com.bmscomp.kates.service.TestRunRepository;
 import com.bmscomp.kates.webhook.WebhookService;
@@ -126,5 +131,26 @@ class PersistenceIT {
                         .setParameter("name", lease)
                         .executeUpdate());
         assertTrue(leases.tryAcquire(lease, Duration.ofSeconds(30)));
+    }
+
+    /**
+     * An INTEGRITY task's integrity result goes into the integrity_json column
+     * V25 adds, and comes back with the run. It was not stored, so a finished
+     * run read back had none.
+     */
+    @Test
+    void integrityResultSurvivesAReadBack() {
+        IntegrityResult integrity = IntegrityResultFixtures.full();
+        TestRun run = new TestRun(TestType.INTEGRITY, new TestSpec())
+                .withStatus(TestResult.TaskStatus.DONE)
+                .withResults(List.of(new TestResult()
+                        .withTaskId(UUID.randomUUID() + "-integrity-0")
+                        .withStatus(TestResult.TaskStatus.DONE)
+                        .withIntegrity(integrity)));
+        repository.save(run);
+
+        TestRun stored = QuarkusTransaction.requiringNew()
+                .call(() -> repository.findById(run.getId()).orElseThrow());
+        assertEquals(integrity, stored.getResults().get(0).getIntegrity());
     }
 }

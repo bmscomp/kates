@@ -11,9 +11,12 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.domain.IntegrityResult;
 import com.bmscomp.kates.domain.SlaDefinition;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
@@ -27,6 +30,17 @@ public final class EntityMapper {
 
     private static final Logger LOG = Logger.getLogger(EntityMapper.class);
     private static final ObjectMapper JSON = new ObjectMapper();
+
+    /**
+     * Writes and reads a task's integrity result. Its RTO and RPO are
+     * {@code Duration}s, which {@link #JSON} cannot write, and what it writes
+     * holds keys the record has no component for ({@code maxRtoMs},
+     * {@code verdict} and the other values the CLI reads), which reading it
+     * back skips.
+     */
+    private static final ObjectMapper INTEGRITY_JSON = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private EntityMapper() {}
 
@@ -199,6 +213,14 @@ public final class EntityMapper {
         entity.setEndTime(result.getEndTime());
         entity.setError(result.getError());
         entity.setPhaseName(result.getPhaseName());
+        // The integrity result was not stored, so only the poll that saw an
+        // INTEGRITY task end returned it, and every later read had none. It
+        // is set once, when the task ends, and never changes after: a copy of
+        // the task that does not carry it must not erase the stored one.
+        String integrityJson = toJson(INTEGRITY_JSON, result.getIntegrity());
+        if (integrityJson != null) {
+            entity.setIntegrityJson(integrityJson);
+        }
     }
 
     private static TestResult toResultDomain(TestResultEntity entity) {
@@ -217,13 +239,18 @@ public final class EntityMapper {
                 .withStartTime(entity.getStartTime())
                 .withEndTime(entity.getEndTime())
                 .withError(entity.getError())
-                .withPhaseName(entity.getPhaseName());
+                .withPhaseName(entity.getPhaseName())
+                .withIntegrity(fromJson(INTEGRITY_JSON, entity.getIntegrityJson(), IntegrityResult.class));
     }
 
     private static String toJson(Object obj) {
+        return toJson(JSON, obj);
+    }
+
+    private static String toJson(ObjectMapper mapper, Object obj) {
         if (obj == null) return null;
         try {
-            return JSON.writeValueAsString(obj);
+            return mapper.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
             LOG.warn("Failed to serialize to JSON", e);
             return null;
@@ -231,9 +258,13 @@ public final class EntityMapper {
     }
 
     private static <T> T fromJson(String json, Class<T> type) {
+        return fromJson(JSON, json, type);
+    }
+
+    private static <T> T fromJson(ObjectMapper mapper, String json, Class<T> type) {
         if (json == null || json.isBlank()) return null;
         try {
-            return JSON.readValue(json, type);
+            return mapper.readValue(json, type);
         } catch (JsonProcessingException e) {
             LOG.warn("Failed to deserialize JSON", e);
             return null;
