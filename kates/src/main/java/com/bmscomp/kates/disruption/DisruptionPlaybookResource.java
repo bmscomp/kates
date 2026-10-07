@@ -1,6 +1,7 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.Map;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -17,7 +18,9 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.security.Scopes;
 
+@RolesAllowed(Scopes.READ)
 @Path("/api/disruptions/playbooks")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -64,6 +67,7 @@ public class DisruptionPlaybookResource {
                         .build());
     }
 
+    @RolesAllowed(Scopes.CHAOS_RUN)
     @POST
     @Path("/{name}")
     @Operation(

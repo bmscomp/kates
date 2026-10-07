@@ -3,6 +3,7 @@ package com.bmscomp.kates.api;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
@@ -24,9 +25,11 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.persistence.ProfileEntity;
 import com.bmscomp.kates.report.ReportSummary;
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.TestRunRepository;
 import com.bmscomp.kates.util.MetricUtils;
 
+@RolesAllowed(Scopes.READ)
 @Path("/api/profiles")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Profiles")
@@ -74,6 +77,7 @@ public class ProfileResource {
         return Response.ok(toMap(results.getFirst())).build();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(summary = "Save a profile from a test run")
@@ -114,6 +118,7 @@ public class ProfileResource {
                         .build());
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{name}")
     @Operation(summary = "Delete a profile")

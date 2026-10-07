@@ -2,6 +2,7 @@ package com.bmscomp.kates.api;
 
 import java.util.List;
 import java.util.Map;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -20,6 +21,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.ClusterHealthService;
 import com.bmscomp.kates.service.ConsumerGroupService;
 import com.bmscomp.kates.service.KafkaClientService;
@@ -29,6 +31,7 @@ import com.bmscomp.kates.service.TopicService;
  * Interactive Kafka client endpoints: produce, consume, and full topic/broker inspection.
  * These power the `kates kafka` CLI command suite.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/kafka")
 @Tag(name = "Kafka Client")
 @Produces(MediaType.APPLICATION_JSON)
@@ -151,6 +154,7 @@ public class KafkaClientResource {
         }
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @GET
     @Path("/consume/{topic}")
     @Operation(summary = "Fetch recent records from a topic")
@@ -170,6 +174,7 @@ public class KafkaClientResource {
         }
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/produce/{topic}")
     @Operation(summary = "Produce a record to a topic")
@@ -192,6 +197,7 @@ public class KafkaClientResource {
 
     public record ProduceRequest(String key, String value) {}
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/topics")
     @Operation(summary = "Create a new topic")
@@ -214,6 +220,7 @@ public class KafkaClientResource {
         }
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @PATCH
     @Path("/topics/{name}")
     @Operation(summary = "Alter topic configuration entries")
@@ -242,6 +249,7 @@ public class KafkaClientResource {
         }
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/topics/{name}")
     @Operation(summary = "Delete a topic")

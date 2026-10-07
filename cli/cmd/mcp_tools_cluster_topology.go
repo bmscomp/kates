@@ -253,7 +253,7 @@ func mcpClusterTopology(ctx context.Context, call *mcpCall, in mcpClusterTopolog
 // mcpTopologyError says what a failed topology read means. The backend
 // answers 503 when it cannot reach the Kubernetes API, which it reads the
 // Strimzi resources through (ClusterTopologyService.java:115-122,
-// ClusterResource.java:226-229): for a backend outside Kubernetes that is
+// ClusterResource.java:229-232): for a backend outside Kubernetes that is
 // every call, so the generic "retry later" would send an agent round in
 // circles.
 func mcpTopologyError(call *mcpCall, err error) *mcpToolError {
@@ -606,7 +606,7 @@ const (
 // failed: TopicService wraps every failure as "Failed to describe topic", and
 // the resource answers 404 only for a message containing "not found", which
 // that one never does (TopicService.java:138-140,201-203;
-// KafkaClientResource.java:111-119). So on a 5xx the topic list decides: a
+// KafkaClientResource.java:114-122). So on a 5xx the topic list decides: a
 // topic missing from it is reported as not found, anything else is passed on.
 func mcpTopicDetailError(ctx context.Context, call *mcpCall, topic string, err error) error {
 	var he *client.HTTPError
