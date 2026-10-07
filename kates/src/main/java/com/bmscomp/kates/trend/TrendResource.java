@@ -1,6 +1,7 @@
 package com.bmscomp.kates.trend;
 
 import java.util.List;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -12,11 +13,13 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.domain.TestType;
+import com.bmscomp.kates.security.Scopes;
 
 /**
  * REST endpoint for querying historical performance trends.
  * Supports overall and phase-level metric analysis.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/trends")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Trends")

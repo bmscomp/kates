@@ -1,12 +1,15 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.*;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -15,12 +18,14 @@ import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.chaos.DisruptionType;
+import com.bmscomp.kates.security.Scopes;
 
 /**
  * Core disruption endpoints: execute, list, get, timeline, kafka-metrics, compare, types.
  *
  * Playbook, schedule, template, and analysis endpoints are in separate sub-resources.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/disruptions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -44,6 +49,12 @@ public class DisruptionResource {
     @Inject
     DisruptionLauncher launcher;
 
+    @Inject
+    SecurityIdentity identity;
+
+    // read, not chaos:run: the dry run, which injects nothing, is a read (plan
+    // §5.3), and the same method runs it. A plan that is not a dry run needs
+    // chaos:run, checked below once dryRun is known.
     @POST
     @Operation(
             summary = "Execute a disruption",
@@ -63,6 +74,11 @@ public class DisruptionResource {
             return Response.status(400)
                     .entity(ApiError.of(400, "Bad Request", "At least one disruption step is required"))
                     .build();
+        }
+
+        if (!dryRun && !identity.hasRole(Scopes.CHAOS_RUN)) {
+            throw new ForbiddenException("Running a disruption needs the " + Scopes.CHAOS_RUN + " scope; ?dryRun=true"
+                    + " previews the plan without it");
         }
 
         if (dryRun) {

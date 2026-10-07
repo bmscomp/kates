@@ -17,7 +17,7 @@ import (
 )
 
 // preview_disruption: the backend's dry run (POST /api/disruptions?dryRun=true,
-// DisruptionResource.java:55-72, DisruptionSafetyGuard.dryRun) of a playbook's
+// DisruptionResource.java:66-88, DisruptionSafetyGuard.dryRun) of a playbook's
 // plan or of an ad-hoc plan, joined with the cluster topology so that the
 // KRaft controllers a plan hits are named: the dry run lists them among the
 // affected pods but never counts them (P-18).
