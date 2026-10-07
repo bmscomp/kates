@@ -10,6 +10,8 @@ import org.jboss.logging.Logger;
  * No-op chaos provider for environments without a chaos backend.
  * Used in tests and for manual fault injection workflows where the
  * operator triggers faults externally while Kates measures the impact.
+ * It never reports a fault going in, so it starts no recovery clock: a plan
+ * step it runs has no recovery times, and a resilience run no RPO.
  */
 @ApplicationScoped
 @Named("noop")

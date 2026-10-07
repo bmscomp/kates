@@ -175,8 +175,8 @@ public class SlaGrader {
             unevaluated.add("minThroughputRecPerSec" + noData);
         }
         if (sla.getMaxRtoMs() != null && !anyRecovery && !rtoIndeterminate) {
-            unevaluated.add("maxRtoMs: no step measured a recovery time (requireRecovery is off, no pod went"
-                    + " NotReady, or the step failed)");
+            unevaluated.add("maxRtoMs: no step measured a recovery time (requireRecovery is off, the fault never"
+                    + " went in, no pod went NotReady, or the step failed)");
         }
 
         int passedChecks = totalChecks - violations.size();
