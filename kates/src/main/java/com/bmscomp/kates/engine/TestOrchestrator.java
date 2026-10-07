@@ -1464,8 +1464,8 @@ public class TestOrchestrator {
                 .filter(b -> b.name().equals(name))
                 .findFirst()
                 .<com.bmscomp.kates.util.Result<BenchmarkBackend, Exception>>map(com.bmscomp.kates.util.Result::success)
-                .orElseGet(() -> com.bmscomp.kates.util.Result.failure(new BenchmarkException(
-                        "Backend not found: '" + name + "'. Available: " + availableBackends())));
+                .orElseGet(() ->
+                        com.bmscomp.kates.util.Result.failure(new UnknownBackendException(name, availableBackends())));
     }
 
     @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.buildTasks")

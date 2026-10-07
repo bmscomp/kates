@@ -183,6 +183,16 @@ The phases run one after another, in the order sent. Each starts once the durati
 }
 ```
 
+A run can also fail to start for a reason that no field of the request explains. These answers carry the error body that [Error Responses](#error-responses) describes:
+
+| Status | Error | When |
+|:---:|-------|------|
+| 400 | Bad Request | The request, or its `scenario`, names a `backend` the Kates API doesn't have; `message` lists the benchmark backends it has |
+| 429 | Too Many Requests | `kates.engine.max-concurrent-tests` tests are already running; the `Retry-After` header says to wait 60 seconds |
+| 500 | Internal Server Error | A fault in the Kates API, such as its database being unreachable, or a `kates.engine.default-backend` that names no benchmark backend it has |
+
+Only the `400` asks you to change the request. After a `429` or a `500`, the same request can start a run later: after the 60 seconds, or once the fault is fixed. The cause of a `500` is in the Kates API's log, not in the answer.
+
 **Response:** `202 Accepted`
 
 ```json
@@ -960,7 +970,8 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
 | 409 | Conflict | Conflicts with current state | Cancelling a test that is not running; starting a disruption while one is already running |
 | 422 | Unprocessable Entity | Rejected by the safety guard | No broker pods in the Kafka namespace, a `targetLabel` that doesn't parse, a fault parameter outside its limit, `maxAffectedBrokers` exceeded, every broker hit |
-| 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable |
+| 429 | Too Many Requests | Too many test runs at once | `kates.engine.max-concurrent-tests` tests already running when another is created |
+| 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable, a test run the Kates API couldn't save |
 | 503 | Service Unavailable | Dependent system unavailable | Kubernetes API not reachable |
 
 ### Error Examples
