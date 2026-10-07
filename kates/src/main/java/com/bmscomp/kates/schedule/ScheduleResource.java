@@ -22,6 +22,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.security.Scopes;
@@ -117,6 +118,7 @@ public class ScheduleResource {
                         .build());
     }
 
+    @Audited(action = "CREATE", type = "schedule")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Operation(summary = "Create a schedule", description = "Creates a new recurring test schedule")
@@ -166,6 +168,7 @@ public class ScheduleResource {
         }
     }
 
+    @Audited(action = "UPDATE", type = "schedule")
     @RolesAllowed(Scopes.ADMIN)
     @PUT
     @Path("/{id}")
@@ -219,6 +222,7 @@ public class ScheduleResource {
                         .build());
     }
 
+    @Audited(action = "DELETE", type = "schedule")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{id}")

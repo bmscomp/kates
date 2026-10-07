@@ -912,11 +912,16 @@ type TuningTypeInfo struct {
 	Description string `json:"description"`
 }
 
+// AuditEntry is one row of GET /api/audit. Actor is the principal of the API
+// key behind the change, and PrincipalType human, agent or system; a Kates
+// API that predates them, or a row it wrote before, sends neither.
 type AuditEntry struct {
-	ID        int    `json:"id"`
-	Action    string `json:"action"`
-	EventType string `json:"eventType"`
-	Target    string `json:"target"`
-	Details   string `json:"details"`
-	Timestamp string `json:"timestamp"`
+	ID            int    `json:"id"`
+	Action        string `json:"action"`
+	EventType     string `json:"eventType"`
+	Target        string `json:"target"`
+	Details       string `json:"details"`
+	Actor         string `json:"actor,omitempty"`
+	PrincipalType string `json:"principalType,omitempty"`
+	Timestamp     string `json:"timestamp"`
 }

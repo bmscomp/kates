@@ -384,7 +384,7 @@ Turn `DEBUG` on for an investigation, then set the logger back to `INFO`. The au
 :::
 
 ::: {.callout-tip}
-For lighter-weight auditing, Kates records every mutating operation issued through the Kates API — test creates and deletes, topic changes, disruption runs — in its audit log. Inspect the trail with `kates audit`, filtering with `--type` and `--since`.
+For lighter-weight auditing, Kates records every change made through the Kates API, over REST or gRPC, in its audit log: what was done, to what, and who did it. Who is the principal of the API key used (see `GET /api/whoami`), marked as a person, an agent, or `system:scheduler` for a schedule's firing. A refused or failed change leaves a row too, with how it ended; a request without a valid key leaves none. When a change started a test run or a disruption, its row's target is that run's or report's id, which is how to find who started it: runs and reports record no owner of their own. Inspect the trail with `kates audit`, filtering with `--type`, `--since` and `--actor`. Rows written before the Kates API recorded actors name no one.
 :::
 
 ## Network Policies

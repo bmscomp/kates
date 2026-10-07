@@ -23,6 +23,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.persistence.ProfileEntity;
 import com.bmscomp.kates.report.ReportSummary;
 import com.bmscomp.kates.security.Scopes;
@@ -77,6 +78,7 @@ public class ProfileResource {
         return Response.ok(toMap(results.getFirst())).build();
     }
 
+    @Audited(action = "UPDATE", type = "profile")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -118,6 +120,7 @@ public class ProfileResource {
                         .build());
     }
 
+    @Audited(action = "DELETE", type = "profile")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{name}")
