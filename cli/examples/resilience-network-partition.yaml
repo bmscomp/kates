@@ -45,18 +45,18 @@ maxRecoveryWaitSec: 120
 
 probes:
   - name: min-isr-check
-    type: cmdProbe
+    type: kafkaProbe
     mode: Edge
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    command: unavailable-partitions
     expectedOutput: "5"
     comparator: "<="
     intervalSec: 15
     timeoutSec: 30
 
   - name: consumer-lag
-    type: cmdProbe
+    type: kafkaProbe
     mode: Continuous
-    command: "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group net-partition-cg 2>/dev/null | awk 'NR>1{sum+=$6} END{print sum+0}'"
+    command: consumer-lag net-partition-cg
     expectedOutput: "100000"
     comparator: "<"
     intervalSec: 15
