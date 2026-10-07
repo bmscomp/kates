@@ -218,6 +218,9 @@ type mcpHarnessConfig struct {
 	extra    []func(s *mcp.Server, d *mcpDeps)
 	logger   *slog.Logger
 	base     func(*client.Client)
+	// unpinned, when set, are the allowed clusterIds of a server that
+	// started without reading one: nothing is pinned.
+	unpinned []string
 }
 
 type mcpHarnessOption func(*mcpHarnessConfig)
@@ -233,6 +236,12 @@ func withMCPProtocol(v string) mcpHarnessOption { return func(c *mcpHarnessConfi
 // withMCPTools registers extra tools (test-only) after the real ones.
 func withMCPTools(fs ...func(s *mcp.Server, d *mcpDeps)) mcpHarnessOption {
 	return func(c *mcpHarnessConfig) { c.extra = append(c.extra, fs...) }
+}
+
+// withMCPUnpinned builds the server as kates mcp does when it could not read
+// the clusterId at start: nothing pinned, and allowed the clusterIds given.
+func withMCPUnpinned(allowed ...string) mcpHarnessOption {
+	return func(c *mcpHarnessConfig) { c.unpinned = allowed }
 }
 
 // withMCPBase changes the CLI client the server's client is copied from, as
@@ -298,8 +307,8 @@ type mcpHarness struct {
 }
 
 // newMCPHarness builds the server exactly as kates mcp does (newMCPClient,
-// newMCPDeps, newMCPServer) against fb, pinned to fb's current clusterId, and
-// connects a client to it.
+// newMCPDeps, newMCPServer) against fb, pinned to fb's current clusterId
+// unless withMCPUnpinned says otherwise, and connects a client to it.
 func newMCPHarness(t *testing.T, fb *mcpFakeBackend, opts ...mcpHarnessOption) *mcpHarness {
 	t.Helper()
 	cfg := mcpHarnessConfig{limits: mcpTestLimits}
@@ -324,9 +333,14 @@ func newMCPHarness(t *testing.T, fb *mcpFakeBackend, opts ...mcpHarnessOption) *
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	cluster := mcpClusterRef{ID: fb.ClusterID(), Label: "test"}
+	if cfg.unpinned != nil {
+		cluster.ID = ""
+	}
 	deps, err := newMCPDeps(mcpDepsConfig{
 		Client:  c,
-		Cluster: mcpClusterRef{ID: fb.ClusterID(), Label: "test"},
+		Cluster: cluster,
+		Allowed: cfg.unpinned,
 		Limits:  cfg.limits,
 		Now:     cfg.now,
 		Logger:  logger,
@@ -416,8 +430,8 @@ func (h *mcpHarness) callOK(name string, args map[string]any) mcpEnvelope {
 	if err := json.Unmarshal(structured, &env); err != nil {
 		h.t.Fatal(err)
 	}
-	if env.Cluster != h.deps.cluster {
-		h.t.Errorf("%s: envelope cluster = %+v, want %+v", name, env.Cluster, h.deps.cluster)
+	if env.Cluster != h.deps.cluster() {
+		h.t.Errorf("%s: envelope cluster = %+v, want %+v", name, env.Cluster, h.deps.cluster())
 	}
 	if env.Tier != mcpTierObserve {
 		h.t.Errorf("%s: tier = %q, want %q", name, env.Tier, mcpTierObserve)
@@ -443,8 +457,8 @@ func (h *mcpHarness) callErr(name string, args map[string]any) mcpErrorResult {
 	if err := json.Unmarshal([]byte(mcpResultText(h.t, res)), &e); err != nil {
 		h.t.Fatalf("%s: error text is not the error JSON: %v", name, err)
 	}
-	if e.Cluster != h.deps.cluster || e.Tier != mcpTierObserve {
-		h.t.Errorf("%s: error names cluster %+v tier %q, want %+v %q", name, e.Cluster, e.Tier, h.deps.cluster, mcpTierObserve)
+	if e.Cluster != mcpErrorCluster(h.deps.cluster()) || e.Tier != mcpTierObserve {
+		h.t.Errorf("%s: error names cluster %+v tier %q, want %+v %q", name, e.Cluster, e.Tier, h.deps.cluster(), mcpTierObserve)
 	}
 	return e
 }
