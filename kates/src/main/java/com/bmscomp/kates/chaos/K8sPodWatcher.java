@@ -71,12 +71,19 @@ public class K8sPodWatcher {
             return Collections.unmodifiableList(events);
         }
 
-        public void markDisruptionStart() {
-            this.disruptionStart = Instant.now();
+        /**
+         * Starts the recovery clock at {@code at}, the moment the fault went
+         * in. Called once, and not on the watch's thread: the chaos provider
+         * reports the moment on its own. The start is written last. The watch
+         * thread counts an event toward recovery only once it sees the start,
+         * so the resets cannot clear an event it counted.
+         */
+        public void markDisruptionStart(Instant at) {
             this.firstReadyTime = null;
             this.allReadyTime = null;
             this.podWentDown = false;
             this.readyPods.clear();
+            this.disruptionStart = at;
         }
 
         void addEvent(PodEvent event) {

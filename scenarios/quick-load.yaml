@@ -1,9 +1,10 @@
+# A LOAD run starts one producer and one consumer. For more producers,
+# start from the stress-test template.
 scenarios:
   - name: "Quick Load Test"
     type: LOAD
     spec:
       records: 50000
-      parallelProducers: 2
       recordSizeBytes: 1024
     validate:
       maxP99LatencyMs: 100
