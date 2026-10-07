@@ -603,6 +603,41 @@
   see_also:
     - test list
     - test delete
+    - test prune
+
+- name: test prune
+  category: Test
+  synopsis: "kates test prune --older-than <duration> [flags]"
+  short: "Delete finished test runs created before a cutoff"
+  description: |
+    Deletes the finished runs, DONE or FAILED (a cancelled run is stored
+    as FAILED), created more than --older-than ago, with their results,
+    through DELETE /api/tests. Counts them first and asks; without a
+    terminal, pass --yes. The Kates API deletes the oldest first, 1000 a
+    call, and kates calls it until none is left. Needs a Kates API with
+    DELETE /api/tests.
+  flags:
+    - name: "--older-than"
+      type: string
+      desc: "Delete the runs created more than this long ago, such as 30d, 720h or 90m (required)"
+    - name: "--status"
+      type: strings
+      default: "DONE,FAILED"
+      desc: "Statuses of the finished runs to delete: DONE, FAILED or both"
+    - name: "--dry-run"
+      type: bool
+      desc: "Count the runs without deleting them"
+    - name: "--yes"
+      short: "-y"
+      type: bool
+      desc: "Delete without asking"
+  examples:
+    - "kates test prune --older-than 30d --dry-run"
+    - "kates test prune --older-than 720h"
+    - "kates test prune --older-than 7d --status FAILED --yes -o json"
+  see_also:
+    - test cleanup
+    - test delete
 
 - name: test compare
   category: Test

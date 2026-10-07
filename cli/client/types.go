@@ -251,6 +251,20 @@ type PagedTests struct {
 	Count      int       `json:"count"`
 }
 
+// PruneResult from DELETE /api/tests. Matched counts the runs that matched
+// before the call and Remaining those that still match after it; Deleted is
+// what this call deleted, 0 for a dry run. CreatedBefore is the cutoff as the
+// API read it, and Statuses the finished statuses it pruned, DONE before
+// FAILED.
+type PruneResult struct {
+	CreatedBefore string   `json:"createdBefore"`
+	Statuses      []string `json:"statuses"`
+	DryRun        bool     `json:"dryRun"`
+	Matched       int64    `json:"matched"`
+	Deleted       int64    `json:"deleted"`
+	Remaining     int64    `json:"remaining"`
+}
+
 // ReportSummary from GET /api/tests/:id/report/summary
 type ReportSummary struct {
 	TotalRecords            float64 `json:"totalRecords"`

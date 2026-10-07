@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // hostileID reaches /api/security/pentest if the client joins it into a path
@@ -327,6 +328,15 @@ func TestQueryValuesAreEscaped(t *testing.T) {
 		{"SecurityGate", "/api/security/gate",
 			url.Values{"min-grade": {"B+"}},
 			func(ctx context.Context, c *Client) error { return ignore(c.SecurityGate(ctx, "B+")) }},
+		// The cutoff goes out in UTC, so no "+" offset; a status stays one
+		// value of the repeated parameter.
+		{"PruneTests", "/api/tests",
+			url.Values{"createdBefore": {"2026-09-25T08:00:00Z"}, "status": {"DONE&status=RUNNING", "FAILED#x"},
+				"limit": {"1000"}, "dryRun": {"true"}},
+			func(ctx context.Context, c *Client) error {
+				cutoff, _ := time.Parse(time.RFC3339, timestamp)
+				return ignore(c.PruneTests(ctx, cutoff, []string{"DONE&status=RUNNING", "FAILED#x"}, 1000, true))
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

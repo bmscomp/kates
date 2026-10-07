@@ -340,6 +340,7 @@ Testing:
   test apply     Apply a YAML test scenario definition
   test delete    Delete a test run
   test cleanup   Delete orphaned RUNNING tests
+  test prune     Delete finished runs older than a cutoff
   test compare   Side-by-side metric diff of two runs
   test summary   Aggregate stats across all tests
   test export    Export results to CSV or JSON file

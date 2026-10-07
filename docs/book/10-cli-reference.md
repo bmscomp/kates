@@ -682,7 +682,7 @@ Cancel runs that are `PENDING` or `RUNNING` and keep them. Each run's tasks stop
 
 #### test cleanup
 
-Aliases: `gc`, `prune`
+Aliases: `gc`
 
 ```bash
 kates test cleanup --dry-run
@@ -692,7 +692,33 @@ kates test cleanup --older-than 2h --yes
 
 Delete runs that are still `RUNNING` long after they should have ended. A run counts as orphaned when it is more than `--older-than` (default `30m`) past its planned end, which is its start plus the `durationMs` in its spec, twice that for an INTEGRITY run, which reads its records back for up to as long again. A run of a phased `scenario` sent to `POST /api/tests` is the exception, since its spec shows none of its phases, which run one after another. Its planned end is its start plus two hours, the longest the Kates API lets one last by default (`kates.engine.max-duration-ms`). The command lists those runs and asks before deleting them; without a terminal it refuses unless `--yes` is given. `--dry-run` only lists them. Deleting a run stops it and removes it with its results, as `kates test delete` does. To stop a run and keep it, use `kates test cancel`. The CLI exits 1 when a delete fails or when you decline.
 
-The Kates API already marks a run `FAILED` once it is still `RUNNING` five minutes past its planned end (see the callout under `test create`), so a run this command finds is one that check did not catch.
+The Kates API already marks a run `FAILED` once it is still `RUNNING` five minutes past its planned end (see the callout under `test create`), so a run this command finds is one that check did not catch. To delete finished runs by age, use `kates test prune`.
+
+#### test prune
+
+```bash
+kates test prune --older-than 30d --dry-run
+kates test prune --older-than 30d
+kates test prune --older-than 720h --status FAILED --yes
+kates test prune --older-than 60d --yes -o json
+```
+
+`--older-than` is the one flag you must give; the others narrow the runs or skip the question:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--older-than` | | Required. How long ago a run must have been created to go: a Go duration such as `720h`, or whole days, such as `30d` |
+| `--status` | `DONE,FAILED` | The statuses to delete: `DONE`, `FAILED` or both, comma-separated, in any case |
+| `--dry-run` | `false` | Count the runs and delete nothing |
+| `--yes`, `-y` | `false` | Delete without asking |
+
+Delete the finished runs created more than `--older-than` ago, to keep the run history to a retention period of your own. Where `kates test cleanup` repairs, deleting runs still `RUNNING` long after their planned end, `prune` keeps a retention: it deletes only `DONE` and `FAILED` runs, judged by when they were created. A cancelled run is stored as `FAILED`, so it goes too.
+
+The command first counts the runs, deleting none, and prints how many it found, their statuses and the instant they were created before. It stops there when none match, or with `--dry-run`. Otherwise it asks before deleting them; without a terminal it refuses unless `--yes` is given, and it exits 1 when you decline. It then deletes the oldest first, up to 1,000 runs a call, until none are left, and prints the total. Each run goes as `kates test delete` deletes it, with its results, and leaves a row in the Kates API's audit log.
+
+The command stops after 100 calls, or after a call that deleted nothing. When runs still match then, it exits 1 and says how many are left; run it again to go on. With `-o json` it prints one answer for the whole command, in the fields of [DELETE /api/tests](11-api-reference.md#delete-apitests). `deleted` adds up every call, `matched` is the count the first delete found and `remaining` the one after the last; with `--dry-run`, or when none match, it prints the count.
+
+Once a day the Kates API deletes, on its own, every run older than 90 days that is not `RUNNING` or `PENDING`, so `prune` is for keeping finished runs for less long. To prune on a schedule, enable the `kates` chart's cleanup CronJob, described in [Where Kates Stores Test Data](12-deployment.md#where-kates-stores-test-data). A Kates API too old to have `DELETE /api/tests` answers `405`, and the command fails, saying to upgrade it.
 
 #### test watch
 

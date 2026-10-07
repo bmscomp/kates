@@ -216,6 +216,53 @@ Removes the test run with its results. A run that is still pending or running is
 
 ---
 
+### Delete Finished Runs by Age
+
+```
+DELETE /api/tests?createdBefore=2026-09-07T00:00:00Z
+DELETE /api/tests?createdBefore=2026-09-07T00:00:00Z&status=FAILED&dryRun=true
+```
+
+Deletes the finished runs created before a cutoff, to keep the run history to a retention period of your own. Only `DONE` and `FAILED` runs match; a cancelled run is stored as `FAILED`, so it matches too. A run still pending, running or stopping is never deleted here: `kates test cleanup` deals with one left running. `kates test prune` and the chart's cleanup CronJob (`cleanup.*` in `charts/kates/values.yaml`) call this endpoint.
+
+A call deletes the oldest matching runs first, by `createdAt`, and at most `limit` of them. Each goes through the same delete as `DELETE /api/tests/{id}`, and leaves an audit row: action `DELETE`, type `test`, the run's ID, and the details `retention: created before <cutoff>`. Once a day the Kates API also deletes, on its own, every run older than `kates.cleanup.retention-days` (90) that is not `RUNNING` or `PENDING`, without an audit row; this endpoint is for keeping finished runs for less long.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|:---:|-------------|
+| `createdBefore` | ISO-8601 instant | Yes | A run created before it matches, such as `2026-09-07T00:00:00Z` |
+| `status` | `DONE` or `FAILED` | No | Repeatable, in any case; both when absent |
+| `limit` | int | No | The most runs one call deletes, from 1 to 1000 (default 1000) |
+| `dryRun` | boolean | No | Count the matching runs and delete nothing (default `false`) |
+
+**Response: `200 OK`**
+
+```json
+{
+  "createdBefore": "2026-09-07T00:00:00Z",
+  "statuses": ["DONE", "FAILED"],
+  "dryRun": false,
+  "matched": 1240,
+  "deleted": 1000,
+  "remaining": 240
+}
+```
+
+`matched` counts the runs that matched before the call, `deleted` the runs it deleted (0 for a dry run), and `remaining` those that still match after it; while `remaining` is above 0, call again. A run another caller deleted first is not counted in `deleted`. `createdBefore` is the cutoff in UTC as the API read it, and `statuses` lists the statuses matched, in the order `DONE`, `FAILED`.
+
+**Error Responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `400 Bad Request` | `createdBefore is required: an ISO-8601 instant such as 2026-09-07T00:00:00Z` |
+| `400 Bad Request` | `createdBefore must be an ISO-8601 instant such as 2026-09-07T00:00:00Z` |
+| `400 Bad Request` | `status must be DONE or FAILED: only finished runs can be pruned` |
+| `400 Bad Request` | `limit must be from 1 to 1000` |
+| `400 Bad Request` | `dryRun must be true or false` |
+
+---
+
 ### List Available Test Types
 
 ```

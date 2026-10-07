@@ -705,6 +705,13 @@
                 "enabled": { "type": "boolean" },
                 "schedule": { "type": "string" },
                 "retentionDays": { "type": "integer", "minimum": 1 },
+                "statuses": {
+                    "type": "array",
+                    "description": "Which finished runs the job deletes. Not empty: the API reads no status as both",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": { "type": "string", "enum": [ "DONE", "FAILED" ] }
+                },
                 "image": { "type": "string", "minLength": 1 }
             }
         }

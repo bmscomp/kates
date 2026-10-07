@@ -164,7 +164,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			mcpJava + "trend/TrendResource.java:28-57",
 			mcpJava + "trend/TrendService.java:53-54,185-189",
-			mcpAnchoredRef(mcpJava+"service/TestRunRepository.java:317-337",
+			mcpAnchoredRef(mcpJava+"service/TestRunRepository.java:354-374",
 				"List<TestRun> findWithResults(", "WHERE r.testType = :type AND r.status = :status",
 				".map(EntityMapper::toDomain)"),
 		},

@@ -284,6 +284,43 @@ public class TestRunRepository {
     }
 
     /**
+     * How many runs in one of {@code statuses} were created before
+     * {@code before}: what DELETE /api/tests would prune, and what it left.
+     */
+    public long countByStatusCreatedBefore(
+            java.util.Set<com.bmscomp.kates.domain.TestResult.TaskStatus> statuses, java.time.Instant before) {
+        return em.createQuery(
+                        "SELECT COUNT(r) FROM TestRunEntity r WHERE r.status IN :statuses AND r.createdAt < :before",
+                        Long.class)
+                .setParameter("statuses", statuses)
+                .setParameter("before", before)
+                .getSingleResult();
+    }
+
+    /**
+     * The ids of the runs in one of {@code statuses} created before
+     * {@code before}, oldest first, at most {@code limit} of them.
+     *
+     * <p>Ids, not runs: DELETE /api/tests deletes each through the
+     * orchestrator, which reads the run under its row lock itself. The id
+     * orders runs created in the same instant, so a caller that prunes a
+     * limit's worth per call goes through them in one order.
+     */
+    public List<String> findIdsByStatusCreatedBefore(
+            java.util.Set<com.bmscomp.kates.domain.TestResult.TaskStatus> statuses,
+            java.time.Instant before,
+            int limit) {
+        return em.createQuery(
+                        "SELECT r.id FROM TestRunEntity r WHERE r.status IN :statuses AND r.createdAt < :before"
+                                + " ORDER BY r.createdAt ASC, r.id ASC",
+                        String.class)
+                .setParameter("statuses", statuses)
+                .setParameter("before", before)
+                .setMaxResults(limit)
+                .getResultList();
+    }
+
+    /**
      * The runs in this status, read without their task results (see
      * {@link EntityMapper#toDomainSummary}). A caller that changes a run and
      * saves it reads it whole with {@link #findById} first, so that its task
