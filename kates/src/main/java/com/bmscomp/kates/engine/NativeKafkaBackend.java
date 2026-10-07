@@ -184,10 +184,15 @@ public class NativeKafkaBackend implements BenchmarkBackend {
     }
 
     private void executeTask(BenchmarkTask task, WorkerState state) {
-        state.status = TaskStatus.RUNNING;
-        state.startTimeMs = System.currentTimeMillis();
-
         try {
+            if (!awaitStart(task, state)) {
+                // Stopped before its turn came: it ran nothing, as asked.
+                state.status = TaskStatus.DONE;
+                return;
+            }
+            state.status = TaskStatus.RUNNING;
+            state.startTimeMs = System.currentTimeMillis();
+
             switch (task.getWorkloadType()) {
                 case PRODUCE -> runProducer(task, state);
                 case CONSUME -> runConsumer(task, state);
@@ -225,6 +230,28 @@ public class NativeKafkaBackend implements BenchmarkBackend {
             state.releaseHeavyState();
             retireWorker(task.getTaskId());
         }
+    }
+
+    /**
+     * How often a worker waiting for its start looks for a stop request: a
+     * stop sets a flag, which a parked worker reads when it wakes.
+     */
+    static final long START_CHECK_MS = 100;
+
+    /**
+     * Holds the worker, PENDING, until its task's start time; false when it is
+     * asked to stop first. A scenario submits every phase at once, each with
+     * the time it is to start; a task without one starts at once.
+     */
+    private static boolean awaitStart(BenchmarkTask task, WorkerState state) {
+        long waitMs;
+        while ((waitMs = task.getStartAtMs() - System.currentTimeMillis()) > 0) {
+            if (state.stopRequested.get()) {
+                return false;
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(Math.min(waitMs, START_CHECK_MS)));
+        }
+        return true;
     }
 
     /**
