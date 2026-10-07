@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -164,6 +166,57 @@ func TestShippedScenariosSetOnlyWhatTheirRunsRead(t *testing.T) {
 					fail("a " + testType + " run starts one producer whatever it says; only STRESS and CAPACITY start one per parallelProducers")
 				case key == "numConsumers":
 					fail("no test type reads it; a run starts one consumer at most")
+				}
+			}
+		}
+	}
+}
+
+// TestShippedScenariosGateOnlyWhatApplyChecks fails on a validate gate in a
+// scenario file Kates ships that kates test apply --wait does not check for
+// the scenario's type. validateSLAs never checks maxErrorRate, since a run
+// reports no error count. It checks the loss, ordering, CRC and RTO gates
+// only on results with integrity data, which only an INTEGRITY run reports,
+// a scenario's run never measures RPO, and apply drops a key ValidationSpec
+// does not name. The shipped files once set such gates, each read as a check
+// the run never made: most set maxErrorRate, ci-gate's LOAD run a data-loss
+// gate, the exactly-once ROUND_TRIP loss, ordering and CRC gates, and
+// integrity-tx a maxDuplicatePercent. mcpScnCheckValidate, which
+// draft_scenario runs, holds the rules: a finding on a validate key marks a
+// gate that does not check what it says, and one on the block as a whole (no
+// block, or integrity gates held at 0 without being written) does not.
+func TestShippedScenariosGateOnlyWhatApplyChecks(t *testing.T) {
+	// The keys mcpScnCheckValidate takes as read are the ones ValidationSpec
+	// reads, so no key apply drops passes for a gate.
+	var read []string
+	for _, f := range reflect.VisibleFields(reflect.TypeOf(ValidationSpec{})) {
+		read = append(read, strings.Split(f.Tag.Get("yaml"), ",")[0])
+	}
+	if !slices.Equal(slices.Sorted(slices.Values(read)), slices.Sorted(slices.Values(mcpScnValidateFields))) {
+		t.Fatalf("ValidationSpec reads %v; mcpScnCheckValidate knows %v", read, mcpScnValidateFields)
+	}
+	for _, path := range shippedFiles(t) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(data, []byte("\ntestRequest:")) {
+			continue // a resilience file
+		}
+		sf, err := parseScenarioFile(path, data)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		var raw map[string]any
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		for i, s := range sf.Scenarios {
+			var fs mcpScnFindings
+			mcpScnCheckValidate(i, scenarioToRequest(s), mcpScnRawScenario(raw, i, sf.lone), &fs)
+			for _, f := range fs.list {
+				if strings.HasPrefix(f.Field, "validate.") {
+					t.Errorf("%s, scenario %d (%s): %s: %s", path, i+1, s.Name, f.Field, f.Message)
 				}
 			}
 		}

@@ -184,14 +184,13 @@ scenarios:
       minInsyncReplicas: 2
     validate:
       maxDataLossPercent: 0
-      maxDuplicatePercent: 0
       maxOutOfOrder: 0
       maxCrcFailures: 0
       maxP99LatencyMs: 150
 ```
 
 ::: {.callout-important}
-`kates test apply` checks [gates](appendix-a-glossary.md#gl-gate) for `maxDataLossPercent`, `maxOutOfOrder`, `maxCrcFailures` and `maxP99LatencyMs`, but not for `maxDuplicatePercent`: its validator has no duplicate gate and ignores the key. A run whose verdict is `DUPLICATES_DETECTED` can still show `✓ SLA Pass`, so read `Duplicates` and `Verdict` in `kates test get <id>`.
+`kates test apply` checks [gates](appendix-a-glossary.md#gl-gate) for `maxDataLossPercent`, `maxOutOfOrder`, `maxCrcFailures` and `maxP99LatencyMs`, but none for duplicates: its validator has no duplicate gate, and drops a `maxDuplicatePercent` key without a word. A run whose verdict is `DUPLICATES_DETECTED` can still show `✓ SLA Pass`, so read `Duplicates` and `Verdict` in `kates test get <id>`.
 :::
 
 ## Integrity Under Chaos
