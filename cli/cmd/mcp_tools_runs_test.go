@@ -30,7 +30,7 @@ var mcpCaveatIDsRuns = []mcpCaveatID{
 	mcpCaveatBrokerSkewProjected,
 	mcpCaveatRegressionOneBaseline,
 	mcpCaveatAdvisorRulesOfThumb,
-	mcpCaveatAuditNoActor,
+	mcpCaveatAuditActorRecorded,
 	mcpCaveatActivityDisruptionRows,
 }
 
@@ -1586,7 +1586,7 @@ func mcpActivityFixture(fb *mcpFakeBackend) {
 	fb.JSON("GET", "/api/audit", http.StatusOK, map[string]any{
 		"page": 0, "size": 15, "total": 2, "count": 2,
 		"items": []map[string]any{
-			{"id": 12, "action": "CANCEL", "eventType": "test", "target": "0000000c", "details": "Test cancelled by user", "timestamp": "2026-09-25T11:40:00Z"},
+			{"id": 12, "action": "CANCEL", "eventType": "test", "target": "0000000c", "details": "Test cancelled by user", "actor": "claude-on-lab\x1b[2J", "principalType": "agent", "timestamp": "2026-09-25T11:40:00Z"},
 			{"id": 11, "action": "CREATE", "eventType": "test", "target": "0000000c", "details": "LOAD test " + mcpInjection, "timestamp": "2026-09-25T11:30:00Z"},
 		},
 	})
@@ -1628,7 +1628,7 @@ func TestMCPKatesActivity(t *testing.T) {
 	}
 	mcpCheckActivityDisruptions(t, h, got.Disruptions)
 	mcpCheckActivityAudit(t, h, got.Audit)
-	mcpWantCaveats(t, env, mcpCaveatAuditNoActor, mcpCaveatActivityDisruptionRows, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed)
+	mcpWantCaveats(t, env, mcpCaveatAuditActorRecorded, mcpCaveatActivityDisruptionRows, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed)
 	if env.Truncated {
 		t.Error("nothing was cut")
 	}
@@ -1662,6 +1662,11 @@ func mcpCheckActivityAudit(t *testing.T, h *mcpHarness, a mcpActivityAudit) {
 	}
 	if a.Rows[0].Action != "CANCEL" || a.Rows[0].Target != "0000000c" || a.Rows[0].ID != 12 {
 		t.Errorf("audit row 0 = %+v", a.Rows[0])
+	}
+	// Who acted, cleaned; a row from before the Kates API recorded actors
+	// names no one.
+	if a.Rows[0].Actor != "claude-on-lab" || a.Rows[0].PrincipalType != "agent" || a.Rows[1].Actor != "" || a.Rows[1].PrincipalType != "" {
+		t.Errorf("actors = %q (%q), %q (%q)", a.Rows[0].Actor, a.Rows[0].PrincipalType, a.Rows[1].Actor, a.Rows[1].PrincipalType)
 	}
 	if d := a.Rows[1].Details; !mcpFenced(h, d) || strings.Contains(string(d), "\u202e") {
 		t.Errorf("details not fenced and cleaned: %q", d)

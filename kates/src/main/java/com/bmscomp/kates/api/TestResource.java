@@ -32,6 +32,8 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.audit.AuditTrail;
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.chaos.ChaosProvider;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.PruneResponse;
@@ -85,6 +87,9 @@ public class TestResource {
     AuditService auditService;
 
     @Inject
+    AuditTrail auditTrail;
+
+    @Inject
     public TestResource(
             TestOrchestrator orchestrator,
             TestRunRepository repository,
@@ -94,6 +99,7 @@ public class TestResource {
         this.chaosProvider = chaosProvider;
     }
 
+    @Audited(action = "CREATE", type = "test")
     @RolesAllowed(Scopes.TEST_RUN)
     @POST
     @Operation(
@@ -180,6 +186,7 @@ public class TestResource {
         return name.equals(request.getBackend()) || (scenario != null && name.equals(scenario.getBackend()));
     }
 
+    @Audited(action = "CREATE", type = "test")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/bulk")
@@ -227,6 +234,7 @@ public class TestResource {
                 .build();
     }
 
+    @Audited(action = "DELETE", type = "test")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/bulk")
@@ -257,6 +265,9 @@ public class TestResource {
     }
 
     // admin, as the single and bulk deletes: it removes evidence, so an agent's key never may.
+    // Each run it deletes gets a row of its own; a call that deletes none,
+    // or is refused, gets the response filter's row.
+    @Audited(action = "DELETE", type = "test")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Operation(
@@ -357,6 +368,8 @@ public class TestResource {
         List<String> names = statuses.stream().map(Enum::name).toList();
         long matched = repository.countByStatusCreatedBefore(statuses, before);
         if (countOnly) {
+            // A count changes nothing, so it leaves no audit row.
+            auditTrail.done();
             return Response.ok(new PruneResponse(before.toString(), names, true, matched, 0, matched))
                     .build();
         }
@@ -456,6 +469,7 @@ public class TestResource {
                         .build());
     }
 
+    @Audited(action = "DELETE", type = "test")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{id}")
@@ -480,6 +494,7 @@ public class TestResource {
         return Response.noContent().build();
     }
 
+    @Audited(action = "CANCEL", type = "test")
     @RolesAllowed(Scopes.TEST_RUN)
     @POST
     @Path("/{id}/cancel")
@@ -572,6 +587,7 @@ public class TestResource {
                         .build());
     }
 
+    @Audited(action = "UPDATE", type = "baseline")
     @RolesAllowed(Scopes.ADMIN)
     @PUT
     @Path("/baselines/{type}")
@@ -603,6 +619,7 @@ public class TestResource {
         return Response.ok(baselineToResponse(baseline)).build();
     }
 
+    @Audited(action = "DELETE", type = "baseline")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/baselines/{type}")

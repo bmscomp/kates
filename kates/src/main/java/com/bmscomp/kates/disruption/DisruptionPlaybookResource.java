@@ -18,6 +18,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.security.Scopes;
 
 @RolesAllowed(Scopes.READ)
@@ -67,6 +68,7 @@ public class DisruptionPlaybookResource {
                         .build());
     }
 
+    @Audited(action = "RUN", type = "playbook")
     @RolesAllowed(Scopes.CHAOS_RUN)
     @POST
     @Path("/{name}")
