@@ -330,6 +330,56 @@ Stop and delete a test run with its results. A run that is still `PENDING` or `R
 
 **Response:** `204 No Content` on success. Returns `404 Not Found` if the test ID does not exist.
 
+#### DELETE /api/tests
+
+Delete the finished runs created before a cutoff, to keep the run history to a retention period of your own. Only `DONE` and `FAILED` runs match, and a cancelled run is stored as `FAILED`, so it matches too. A run still `PENDING`, `RUNNING` or `STOPPING` is never deleted here; [test cleanup](10-cli-reference.md#test-cleanup) deals with one left `RUNNING`. `kates test prune` and the `kates` chart's cleanup CronJob call this endpoint.
+
+A call deletes the oldest matching runs first, by `createdAt`, and at most `limit` of them. Each goes as `DELETE /api/tests/{id}` deletes it, with its results, and leaves a row in the audit log: action `DELETE`, type `test`, the run's ID, and the details `retention: created before <cutoff>`. `kates audit --type test` lists them. Once a day the Kates API also deletes, on its own, every run older than 90 days (`kates.cleanup.retention-days`) that is not `RUNNING` or `PENDING`, without an audit row; this endpoint is for keeping finished runs for less long.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `createdBefore` | String | | Required. An ISO-8601 instant, such as `2026-09-07T00:00:00Z`; a run created before it matches |
+| `status` | String | `DONE` and `FAILED` | `DONE` or `FAILED`, in any case; repeat the parameter to name both |
+| `limit` | int | 1000 | The most runs one call deletes, from 1 to 1000 |
+| `dryRun` | boolean | `false` | Count the matching runs and delete nothing |
+
+Count the matching runs first with `dryRun`, then delete them:
+
+```bash
+BASE="http://localhost:30083"
+curl -s -X DELETE -H "X-API-Key: $KATES_API_KEY" \
+  "$BASE/api/tests?createdBefore=2026-09-07T00:00:00Z&dryRun=true"
+curl -s -X DELETE -H "X-API-Key: $KATES_API_KEY" \
+  "$BASE/api/tests?createdBefore=2026-09-07T00:00:00Z&status=DONE&status=FAILED"
+```
+
+**Response:** `200 OK`, for the second call
+
+```json
+{
+  "createdBefore": "2026-09-07T00:00:00Z",
+  "statuses": ["DONE", "FAILED"],
+  "dryRun": false,
+  "matched": 1240,
+  "deleted": 1000,
+  "remaining": 240
+}
+```
+
+`matched` counts the runs that matched before the call, `deleted` the runs it deleted, 0 for a dry run, and `remaining` those that still match after it. While `remaining` is above 0, call again for the next oldest. A run that another caller deleted first isn't counted in `deleted`. `createdBefore` is the cutoff in UTC, as the Kates API read it, and `statuses` names the statuses the call matched, in the order `DONE`, `FAILED`.
+
+A request the Kates API refuses deletes nothing and gets a `400` in the shared format of [Error Responses](#error-responses), whose `message` is one of these:
+
+| `message` | Cause |
+|-----------|-------|
+| `createdBefore is required: an ISO-8601 instant such as 2026-09-07T00:00:00Z` | No `createdBefore` |
+| `createdBefore must be an ISO-8601 instant such as 2026-09-07T00:00:00Z` | A value that isn't an instant, such as a date without a time or a zone |
+| `status must be DONE or FAILED: only finished runs can be pruned` | Any other `status`, such as `RUNNING` |
+| `limit must be from 1 to 1000` | A `limit` outside that range, or not a whole number |
+| `dryRun must be true or false` | Any other `dryRun`, such as `yes` |
+
 ---
 
 ### Reports

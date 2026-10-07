@@ -1,4 +1,10 @@
 {{- if .Values.cleanup.enabled }}
+{{- $keySecret := .Values.apiKey.existingSecret | default (printf "%s-api-key" (include "kates.fullname" .)) }}
+{{- $keyName := .Values.apiKey.secretKey | default "api-key" }}
+{{- $statusParams := list }}
+{{- range .Values.cleanup.statuses }}
+{{- $statusParams = append $statusParams (printf "status=%s" .) }}
+{{- end }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -13,10 +19,19 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # A missing or wrong key, or an API without DELETE /api/tests, fails
+      # every attempt the same way. Two retries cover a restarting API; the
+      # default of six only repeats the same failure.
+      backoffLimit: 2
       template:
         metadata:
           labels:
-            {{- include "kates.selectorLabels" . | nindent 12 }}
+            # Not kates.selectorLabels: those are the API pod's, and the
+            # chart's NetworkPolicy selects on them. It allows that pod no
+            # egress to port 8080, so a job pod carrying them could not reach
+            # the API at all. The Service and the PodDisruptionBudget select
+            # on them too.
+            {{- include "kates.labels" . | nindent 12 }}
             app.kubernetes.io/component: cleanup
         spec:
           restartPolicy: OnFailure
@@ -31,6 +46,15 @@ spec:
             securityContext:
               {{- toYaml . | nindent 14 }}
             {{- end }}
+            {{- if .Values.apiKey.enabled }}
+            env:
+            - name: KATES_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $keySecret }}
+                  key: {{ $keyName }}
+                  optional: true
+            {{- end }}
             resources:
               requests:
                 memory: "32Mi"
@@ -42,27 +66,105 @@ spec:
               - sh
               - -c
               - |
-                echo "Cleaning up test runs older than {{ .Values.cleanup.retentionDays }} days..."
-                CUTOFF=$(date -u -d "-{{ .Values.cleanup.retentionDays }} days" +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -v-{{ .Values.cleanup.retentionDays }}d +%Y-%m-%dT%H:%M:%S)
-                RESPONSE=$(curl -s -w "\n%{http_code}" \
-                  "http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/tests?size=200&status=COMPLETED")
-                HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-                BODY=$(echo "$RESPONSE" | head -1)
-                if [ "$HTTP_CODE" != "200" ]; then
-                  echo "Failed to fetch tests (HTTP $HTTP_CODE)"
+                # The API picks the runs: DELETE /api/tests deletes finished
+                # runs created before the cutoff, oldest first, at most 1000 a
+                # call, and says how many still match. This job used to pick
+                # them itself, from GET /api/tests?status=COMPLETED, a status
+                # the API refuses, sent with no key, and it paired fields in
+                # an order the JSON never has, so it never deleted a run.
+                DAYS={{ .Values.cleanup.retentionDays | int }}
+                # busybox date, in this image, and GNU date both read
+                # -d @SECONDS. busybox reads neither "-N days" nor BSD's -v,
+                # which left the old cutoff empty.
+                CUTOFF=$(date -u -d "@$(( $(date -u +%s) - DAYS * 86400 ))" +%Y-%m-%dT%H:%M:%SZ)
+                if [ -z "$CUTOFF" ]; then
+                  echo "FAIL: this image's date could not compute the cutoff $DAYS days back."
                   exit 1
                 fi
-                echo "$BODY" | grep -o '"id":"[^"]*","createdAt":"[^"]*"' | while read PAIR; do
-                  ID=$(echo "$PAIR" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"//')
-                  CREATED=$(echo "$PAIR" | grep -o '"createdAt":"[^"]*"' | sed 's/"createdAt":"//;s/"//')
-                  if [ "$CREATED" \< "$CUTOFF" ]; then
-                    echo "Deleting old test run: $ID (created $CREATED, before cutoff $CUTOFF)"
-                    curl -s -X DELETE "http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/tests/$ID"
-                  else
-                    echo "Keeping test run: $ID (created $CREATED, after cutoff $CUTOFF)"
+                URL="http://{{ include "kates.fullname" . }}:{{ .Values.service.port }}/api/tests?createdBefore=${CUTOFF}&{{ join "&" $statusParams }}&limit=1000"
+                echo "Deleting {{ join ", " .Values.cleanup.statuses }} runs created before $CUTOFF ($DAYS days ago)..."
+                TOTAL=0
+                CALLS=0
+                REMAINING=
+                while [ "$CALLS" -lt 100 ]; do
+                  CALLS=$((CALLS + 1))
+                  # A failed connection writes no body, so clear the last one.
+                  rm -f /tmp/body
+                  CODE=$(curl -sS -o /tmp/body -w "%{http_code}" -X DELETE \
+                    --connect-timeout 10 --max-time 600 \
+                    ${KATES_API_KEY:+-H "X-API-Key: ${KATES_API_KEY}"} \
+                    "$URL")
+                  BODY=$(cat /tmp/body 2>/dev/null)
+                  case "$CODE" in
+                    200)
+                      ;;
+                    401)
+                      # The job's own credentials, not the runs.
+                      {{- if .Values.apiKey.enabled }}
+                      if [ -z "${KATES_API_KEY:-}" ]; then
+                        echo "FAIL: the Kates API wants a key (HTTP 401) and this job sent none:"
+                        echo "      Secret {{ $keySecret }} has no {{ $keyName }} key, or it is empty."
+                      else
+                        echo "FAIL: the Kates API refused this job's key (HTTP 401): Secret {{ $keySecret }}"
+                        echo "      ({{ $keyName }}) is not the key the API runs with. The API reads it when it"
+                        echo "      starts, so restart it after the Secret changes."
+                      fi
+                      {{- else }}
+                      echo "FAIL: the Kates API wants a key (HTTP 401) and apiKey.enabled is false,"
+                      echo "      so this job has none to send."
+                      {{- end }}
+                      printf '%s\n' "$BODY"
+                      exit 1
+                      ;;
+                    403)
+                      echo "FAIL: the Kates API does not let this job's key delete runs (HTTP 403)."
+                      printf '%s\n' "$BODY"
+                      exit 1
+                      ;;
+                    404|405)
+                      echo "FAIL: this Kates API has no DELETE /api/tests (HTTP $CODE). It takes an image"
+                      echo "      newer than 1.25.0; upgrade the Kates API or set cleanup.enabled=false."
+                      printf '%s\n' "$BODY"
+                      exit 1
+                      ;;
+                    000)
+                      echo "FAIL: the Kates API is not reachable at {{ include "kates.fullname" . }}:{{ .Values.service.port }}."
+                      exit 1
+                      ;;
+                    *)
+                      echo "FAIL: DELETE /api/tests answered HTTP $CODE:"
+                      printf '%s\n' "$BODY"
+                      exit 1
+                      ;;
+                  esac
+                  # The answer is one line of JSON with plain numbers.
+                  DELETED=$(printf '%s\n' "$BODY" | sed -n 's/.*"deleted"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+                  REMAINING=$(printf '%s\n' "$BODY" | sed -n 's/.*"remaining"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+                  if [ -z "$DELETED" ] || [ -z "$REMAINING" ]; then
+                    echo "FAIL: DELETE /api/tests answered 200 without deleted and remaining:"
+                    printf '%s\n' "$BODY"
+                    exit 1
+                  fi
+                  if [ "$CALLS" -eq 1 ]; then
+                    MATCHED=$(printf '%s\n' "$BODY" | sed -n 's/.*"matched"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+                    echo "${MATCHED:-?} runs matched."
+                  fi
+                  TOTAL=$((TOTAL + DELETED))
+                  echo "Call $CALLS: deleted $DELETED, $REMAINING still match."
+                  if [ "$REMAINING" -eq 0 ]; then
+                    echo "Cleanup complete: deleted $TOTAL runs created before $CUTOFF in $CALLS calls."
+                    exit 0
+                  fi
+                  if [ "$DELETED" -eq 0 ]; then
+                    # Runs match that the API would not delete; going on would
+                    # only ask again. A failed job is what shows it.
+                    echo "FAIL: $REMAINING runs still match and the last call deleted none of them."
+                    echo "      Deleted $TOTAL in $CALLS calls; the Kates API's log says why."
+                    exit 1
                   fi
                 done
-                echo "Cleanup complete."
+                echo "Stopped after $CALLS calls: deleted $TOTAL runs, $REMAINING still match."
+                echo "The next scheduled run goes on from there."
             volumeMounts:
             - name: tmp
               mountPath: /tmp

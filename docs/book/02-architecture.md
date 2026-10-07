@@ -379,7 +379,7 @@ The table lists what Kates keeps about a run, where each piece lives and how lon
 
 | What | Where it lives | How long it lasts |
 |:--|:--|:--|
-| The run: its spec, status, per-task results, an INTEGRITY task's integrity result among them, and SLA | PostgreSQL: the `kates` chart's own, beside the Kates API, or an external database | 90 days; once a day the Kates API deletes finished runs older than that |
+| The run: its spec, status, per-task results, an INTEGRITY task's integrity result among them, and SLA | PostgreSQL: the `kates` chart's own, beside the Kates API, or an external database | 90 days; once a day the Kates API deletes finished runs older than that, and `kates test prune` deletes them sooner |
 | Disruption reports, schedules, webhooks and audit events | PostgreSQL | No automatic expiry |
 | A baseline: the run each test type is compared with | PostgreSQL | The baseline never expires; the run it names is deleted at 90 days like any other |
 | The report of a finished run, as `report show` prints it | Built from the stored run when first asked for, then kept in the Kates API's memory | The 200 most recently used, until the pod restarts; then built again |

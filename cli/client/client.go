@@ -439,6 +439,47 @@ func (c *Client) DeleteTest(ctx context.Context, id string) error {
 	return c.delete(ctx, path)
 }
 
+// PruneTests deletes, through DELETE /api/tests, the finished runs with one
+// of statuses (DONE, FAILED; none means both) created before createdBefore,
+// the oldest first and at most limit of them (0 leaves the API's own limit);
+// with dryRun it only counts them. A call that deletes is sent once, as every
+// other DELETE the client sends is; a dry run changes nothing, so it is
+// retried like a read.
+func (c *Client) PruneTests(ctx context.Context, createdBefore time.Time, statuses []string, limit int, dryRun bool) (*PruneResult, error) {
+	query := url.Values{}
+	query.Set("createdBefore", createdBefore.UTC().Format(time.RFC3339Nano))
+	for _, s := range statuses {
+		query.Add("status", s)
+	}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	if dryRun {
+		query.Set("dryRun", "true")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+withQuery("/api/tests", query), nil)
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.doRequest(ctx, req, dryRun)
+	if err != nil {
+		// A Kates API from before the endpoint serves GET and POST on
+		// /api/tests and nothing else, so it refuses a DELETE there as 405.
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) &&
+			(httpErr.StatusCode == http.StatusMethodNotAllowed || httpErr.StatusCode == http.StatusNotFound) {
+			return nil, fmt.Errorf("this Kates API has no DELETE /api/tests, which prunes finished runs; "+
+				"upgrade the Kates API to use it: %w", err)
+		}
+		return nil, err
+	}
+	var result *PruneResult
+	if err := json.Unmarshal(data, &result); err != nil || result == nil {
+		return nil, fmt.Errorf("DELETE /api/tests returned %.40q, not a prune result", data)
+	}
+	return result, nil
+}
+
 func (c *Client) CancelTest(ctx context.Context, id string) error {
 	path, err := pathf("/api/tests/%s/cancel", id)
 	if err != nil {

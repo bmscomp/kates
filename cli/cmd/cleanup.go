@@ -26,8 +26,10 @@ var (
 const defaultCleanupOlderThan = 30 * time.Minute
 
 var testCleanupCmd = &cobra.Command{
-	Use:     "cleanup",
-	Aliases: []string{"gc", "prune"},
+	Use: "cleanup",
+	// prune was an alias too, until kates test prune, which deletes finished
+	// runs by age, took the name.
+	Aliases: []string{"gc"},
 	Short:   "Delete orphaned tests stuck in RUNNING state",
 	Long: `Delete test runs that still say RUNNING long after they should have ended.
 

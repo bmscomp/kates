@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -455,6 +456,110 @@ func TestDeleteTest(t *testing.T) {
 	err := c.DeleteTest(context.Background(), "run-123")
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPruneTests(t *testing.T) {
+	// A cutoff in another zone goes out in UTC, as the API's example has it.
+	cutoff := time.Date(2026, 9, 7, 2, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
+	for _, tt := range []struct {
+		name      string
+		statuses  []string
+		limit     int
+		dryRun    bool
+		wantQuery url.Values
+	}{
+		{"delete", []string{"DONE", "FAILED"}, 1000, false,
+			url.Values{"createdBefore": {"2026-09-07T00:00:00Z"}, "status": {"DONE", "FAILED"}, "limit": {"1000"}}},
+		{"dry run of one status", []string{"FAILED"}, 1000, true,
+			url.Values{"createdBefore": {"2026-09-07T00:00:00Z"}, "status": {"FAILED"}, "limit": {"1000"}, "dryRun": {"true"}}},
+		{"API defaults", nil, 0, false,
+			url.Values{"createdBefore": {"2026-09-07T00:00:00Z"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete || r.URL.Path != "/api/tests" {
+					t.Errorf("request = %s %s, want DELETE /api/tests", r.Method, r.URL.Path)
+				}
+				if got := r.URL.Query(); got.Encode() != tt.wantQuery.Encode() {
+					t.Errorf("query = %v, want %v", got, tt.wantQuery)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"createdBefore":"2026-09-07T00:00:00Z","statuses":["DONE","FAILED"],` +
+					`"dryRun":false,"matched":1500,"deleted":1000,"remaining":500}`))
+			})
+			got, err := c.PruneTests(context.Background(), cutoff, tt.statuses, tt.limit, tt.dryRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := PruneResult{CreatedBefore: "2026-09-07T00:00:00Z", Statuses: []string{"DONE", "FAILED"},
+				Matched: 1500, Deleted: 1000, Remaining: 500}
+			if got.CreatedBefore != want.CreatedBefore || strings.Join(got.Statuses, ",") != "DONE,FAILED" ||
+				got.DryRun || got.Matched != want.Matched || got.Deleted != want.Deleted || got.Remaining != want.Remaining {
+				t.Errorf("result = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// A Kates API from before DELETE /api/tests refuses it as 405, the method
+// not allowed on a path that serves GET and POST; the error says to upgrade
+// and still carries the status.
+func TestPruneTests_OlderAPI(t *testing.T) {
+	for _, status := range []int{http.StatusMethodNotAllowed, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			})
+			_, err := c.PruneTests(context.Background(), time.Now(), nil, 1000, true)
+			if err == nil || !strings.Contains(err.Error(), "has no DELETE /api/tests") || !strings.Contains(err.Error(), "upgrade") {
+				t.Fatalf("err = %v, want one saying the Kates API has no DELETE /api/tests and must be upgraded", err)
+			}
+			var httpErr *HTTPError
+			if !errors.As(err, &httpErr) || httpErr.StatusCode != status {
+				t.Errorf("err = %v, want it to wrap the HTTP %d", err, status)
+			}
+		})
+	}
+}
+
+// The API's 400 reaches the caller as it said it, not as an older API.
+func TestPruneTests_Refused(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"status":400,"error":"Bad Request","message":"status must be DONE or FAILED: only finished runs can be pruned"}`))
+	})
+	_, err := c.PruneTests(context.Background(), time.Now(), []string{"RUNNING"}, 1000, false)
+	if err == nil || !strings.Contains(err.Error(), "only finished runs can be pruned") || strings.Contains(err.Error(), "upgrade") {
+		t.Errorf("err = %v, want the API's own message", err)
+	}
+}
+
+func TestPruneTests_NotAResult(t *testing.T) {
+	for _, body := range []string{"", "null", "[]"} {
+		c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(body))
+		})
+		if got, err := c.PruneTests(context.Background(), time.Now(), nil, 1000, false); err == nil {
+			t.Errorf("body %q: got %+v, want an error", body, got)
+		}
+	}
+}
+
+// A dry run deletes nothing, so a 5xx is retried; a delete is sent once.
+func TestPruneTests_RetriesOnlyADryRun(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		var calls atomic.Int32
+		c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+		})
+		c.MaxRetries = 2
+		_, _ = c.PruneTests(context.Background(), time.Now(), nil, 1000, dryRun)
+		if want := map[bool]int32{true: 2, false: 1}[dryRun]; calls.Load() != want {
+			t.Errorf("dryRun %v: %d calls, want %d", dryRun, calls.Load(), want)
+		}
 	}
 }
 

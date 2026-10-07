@@ -703,14 +703,23 @@ migration:
       memory: "512Mi"
       cpu: "500m"
 
-# -- Stale test run cleanup CronJob
+# -- Stale test run cleanup CronJob. It deletes finished runs through the
+# API's DELETE /api/tests, sending the key from apiKey's Secret. That
+# endpoint takes an image newer than 1.25.0: on 1.25.0 every job fails with
+# HTTP 405 and deletes nothing.
 cleanup:
   # -- Enable cleanup CronJob
   enabled: false
   # -- Cron schedule expression
   schedule: "0 4 * * 0"
-  # -- Delete completed test runs older than N days
+  # -- Delete finished test runs created more than N days ago
   retentionDays: 30
+  # -- Which finished runs to delete: DONE, FAILED or both. A cancelled run
+  # is stored FAILED. A run still PENDING, RUNNING or STOPPING is never
+  # deleted, however old it is.
+  statuses:
+    - DONE
+    - FAILED
   # -- Curl image for API calls
   image: curlimages/curl:8.7.1
 
