@@ -50,15 +50,15 @@ probes:
     type: k8sProbe
     mode: Edge
     command: "kafka Ready"
-    expectedOutput: "Ready"
-    comparator: contains
+    expectedOutput: "Ready=True"
+    comparator: equal
     intervalSec: 15
     timeoutSec: 30
 
   - name: consumer-lag
-    type: cmdProbe
+    type: kafkaProbe
     mode: Continuous
-    command: "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group dns-error-cg 2>/dev/null | awk 'NR>1{sum+=$6} END{print sum+0}'"
+    command: consumer-lag dns-error-cg
     expectedOutput: "100000"
     comparator: "<"
     intervalSec: 15

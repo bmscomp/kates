@@ -146,7 +146,7 @@ users:
 
 Items are maps keyed by name, so an overlay changes one field of one topic (`--set topics.items.orders.partitions=24`) or drops one (`enabled: false`). The 0.4 list form is still accepted. A topic asking for more replicas than there are brokers is refused. With tiered storage active every topic gets `remote.storage.enable: "true"` unless it says otherwise.
 
-**The platform profile** (`profile: platform`, `profiles/platform.yaml`) adds the platform's eight topics, six users (`kates-backend`, `kafka-ui`, `apicurio-registry`, `litmus-chaos`, `kates-connect`, `kates-mm2`), `kates-backend` as super user, and the client grants below. Your items are merged over the profile's by name, so `users.items.kates-connect.enabled=false` hands that user to `connect-cluster` (adopt the object first — a recreated KafkaUser gets a new password; see the upgrade guide).
+**The platform profile** (`profile: platform`, `profiles/platform.yaml`) adds the platform's nine topics, six users (`kates-backend`, `kafka-ui`, `apicurio-registry`, `litmus-chaos`, `kates-connect`, `kates-mm2`), `kates-backend` as super user, and the client grants below. Your items are merged over the profile's by name, so `users.items.kates-connect.enabled=false` hands that user to `connect-cluster` (adopt the object first — a recreated KafkaUser gets a new password; see the upgrade guide).
 
 ## Rebalancing
 
