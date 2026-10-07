@@ -3,6 +3,7 @@ package com.bmscomp.kates.api;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
@@ -21,12 +22,14 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.ClusterAlertsService;
 import com.bmscomp.kates.service.ClusterHealthService;
 import com.bmscomp.kates.service.ClusterTopologyService;
 import com.bmscomp.kates.service.ConsumerGroupService;
 import com.bmscomp.kates.service.TopicService;
 
+@RolesAllowed(Scopes.READ)
 @Path("/api/cluster")
 @Produces(MediaType.APPLICATION_JSON)
 @Blocking

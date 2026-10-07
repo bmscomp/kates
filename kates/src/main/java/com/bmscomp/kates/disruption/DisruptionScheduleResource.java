@@ -3,6 +3,7 @@ package com.bmscomp.kates.disruption;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
@@ -27,7 +28,9 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.security.Scopes;
 
+@RolesAllowed(Scopes.READ)
 @Path("/api/disruptions/schedules")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -69,6 +72,7 @@ public class DisruptionScheduleResource {
                 .build();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Transactional
     @Operation(
@@ -113,6 +117,7 @@ public class DisruptionScheduleResource {
         return Response.status(201).entity(entity).build();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @PUT
     @Path("/{id}")
     @Transactional
@@ -146,6 +151,7 @@ public class DisruptionScheduleResource {
         return Response.ok(entity).build();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{id}")
     @Transactional

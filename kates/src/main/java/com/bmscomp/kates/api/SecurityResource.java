@@ -1,5 +1,6 @@
 package com.bmscomp.kates.api;
 
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
@@ -16,9 +17,11 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.SecurityPentestService;
 import com.bmscomp.kates.service.SecurityService;
 
+@RolesAllowed(Scopes.READ)
 @Path("/api/security")
 @Produces(MediaType.APPLICATION_JSON)
 @Blocking
@@ -66,6 +69,7 @@ public class SecurityResource {
         }
     }
 
+    @RolesAllowed(Scopes.READ_SENSITIVE)
     @GET
     @Path("/auth-test")
     @Operation(
@@ -123,6 +127,7 @@ public class SecurityResource {
         }
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/baseline")
     @Operation(
@@ -221,6 +226,7 @@ public class SecurityResource {
         }
     }
 
+    @RolesAllowed(Scopes.READ_SENSITIVE)
     @GET
     @Path("/acl-map")
     @Operation(
@@ -253,6 +259,7 @@ public class SecurityResource {
         }
     }
 
+    @RolesAllowed(Scopes.READ_SENSITIVE)
     @GET
     @Path("/secrets")
     @Operation(

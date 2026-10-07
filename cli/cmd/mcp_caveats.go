@@ -83,7 +83,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"was set to last, and deletes the task results of each run it fails, and of each run a restart left " +
 			"RUNNING, so such a run has no tasks. Neither /api/health nor a run says which of the two the API is.",
 		Refs: []string{
-			"kates/src/main/resources/application.properties:330-344",
+			"kates/src/main/resources/application.properties:336-350",
 			mcpJava + "engine/TestTimeoutReaper.java:39-47,50-136",
 			mcpJava + "engine/TestOrchestrator.java:132-154,186-189,354,1109-1168,1234-1243,1298-1330",
 			mcpJava + "persistence/EntityMapper.java:158-167",
@@ -162,7 +162,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "GET /api/trends selects runs by test type, date and status only: a trend takes every DONE run of " +
 			"that type in its window, whatever its spec (partitions, record size, throughput).",
 		Refs: []string{
-			mcpJava + "trend/TrendResource.java:28-57",
+			mcpJava + "trend/TrendResource.java:31-60",
 			mcpJava + "trend/TrendService.java:53-54,185-189",
 			mcpAnchoredRef(mcpJava+"service/TestRunRepository.java:354-374",
 				"List<TestRun> findWithResults(", "WHERE r.testType = :type AND r.status = :status",
@@ -191,7 +191,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"measure out of its grade and lists it, with the reason, under unevaluated (with nothing measured the grade " +
 			"is \"-\"), so read a grade that has unevaluated checks as partial.",
 		Refs: []string{
-			mcpAnchoredRef("kates/src/main/resources/application.properties:323-328",
+			mcpAnchoredRef("kates/src/main/resources/application.properties:329-334",
 				"# Prometheus server (for disruption metrics capture)",
 				"kates.prometheus.url=http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"),
 			mcpAnchoredRef("charts/kates/values.yaml:395-405",
@@ -212,7 +212,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "On the default litmus-crd chaos provider the start time is taken before the ChaosEngine is created and " +
 			"the end is found by polling every 5 seconds, so fault start, end and duration are approximate by several seconds.",
 		Refs: []string{
-			mcpAnchoredRef("kates/src/main/resources/application.properties:268-269",
+			mcpAnchoredRef("kates/src/main/resources/application.properties:274-275",
 				"# Chaos coordination (noop | kubernetes | litmus-crd | hybrid)", "kates.chaos.provider=litmus-crd"),
 			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:57,102",
 				"int resultPollIntervalMs = 5_000;", "Instant start = Instant.now();"),
@@ -236,7 +236,7 @@ var mcpCaveatsCore = []mcpCaveat{
 // Kates API runs, so they hold a run to both: an older API fails every run
 // mcpReaperOlderLimitMs after its creation, and a current one refuses a run
 // set to last longer than kates.engine.max-duration-ms, mcpReaperMaxDurationMs
-// as Kates ships it (application.properties:335).
+// as Kates ships it (application.properties:341).
 // TestMCPReaperLimitsMatchTheBackend holds the second to the backend.
 const (
 	mcpReaperOlderLimitMs  = 30 * 60 * 1000

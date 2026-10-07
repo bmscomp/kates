@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
@@ -29,6 +30,7 @@ import com.bmscomp.kates.export.CsvExporter;
 import com.bmscomp.kates.export.HeatmapExporter;
 import com.bmscomp.kates.export.JunitXmlExporter;
 import com.bmscomp.kates.export.LatencyHeatmapData;
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.BaselineService;
 import com.bmscomp.kates.service.TestRunRepository;
 import com.bmscomp.kates.util.MetricUtils;
@@ -36,6 +38,7 @@ import com.bmscomp.kates.util.MetricUtils;
 /**
  * REST endpoints for test report generation, export, and comparison.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/tests")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Reports")
