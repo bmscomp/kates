@@ -1,9 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Resilience Test: POD_DELETE — Graceful Broker Shutdown (SIGTERM)
 # ─────────────────────────────────────────────────────────────────────────────
-# Respects terminationGracePeriodSeconds. Kafka's controlled-shutdown protocol
-# transfers partition leaders before the pod exits, so clients should see
-# near-zero disruption.
+# Deletes the broker pod with a grace period of gracePeriodSec. Kafka's
+# controlled-shutdown protocol transfers partition leaders before the pod
+# exits, so clients should see near-zero disruption.
+#
+# Only the kubernetes chaos provider deletes the pod gracefully. On litmus-crd,
+# the default, POD_DELETE runs pod-delete with FORCE=true, as POD_KILL does:
+# the broker gets no SIGTERM, and gracePeriodSec has no effect.
 #
 # Hypothesis:
 #   Controlled shutdown completes within gracePeriodSec.
@@ -24,7 +28,6 @@ testRequest:
     numRecords: 600000
     recordSize: 1024
     throughput: 2000
-    numProducers: 3
     acks: "all"
     enableIdempotence: true
     batchSize: 65536
@@ -49,7 +52,7 @@ probes:
     mode: Continuous
     command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
     expectedOutput: "0"    # expect NO shrink during graceful shutdown
-    comparator: "=="
+    comparator: "<="       # 0 or fewer; the probe executor has no ==
     intervalSec: 10
     timeoutSec: 30
 

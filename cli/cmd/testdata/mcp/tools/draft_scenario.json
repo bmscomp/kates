@@ -269,7 +269,7 @@
                 },
                 "request": {
                   "additionalProperties": false,
-                  "description": "the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; zero values are left out",
+                  "description": "the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; it leaves out an empty value and a 0, except the 0 of batchSize, lingerMs and fetchMaxWaitMs",
                   "properties": {
                     "backend": {
                       "type": "string"
@@ -281,7 +281,10 @@
                           "type": "string"
                         },
                         "batchSize": {
-                          "type": "integer"
+                          "type": [
+                            "null",
+                            "integer"
+                          ]
                         },
                         "compressionType": {
                           "type": "string"
@@ -311,13 +314,19 @@
                           ]
                         },
                         "fetchMaxWaitMs": {
-                          "type": "integer"
+                          "type": [
+                            "null",
+                            "integer"
+                          ]
                         },
                         "fetchMinBytes": {
                           "type": "integer"
                         },
                         "lingerMs": {
-                          "type": "integer"
+                          "type": [
+                            "null",
+                            "integer"
+                          ]
                         },
                         "minInsyncReplicas": {
                           "type": "integer"
