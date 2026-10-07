@@ -380,7 +380,7 @@
       "_name": "08 — Node Drain (NODE_DRAIN)",
       "_description": "Drain gamma, the Kubernetes node hosting the gamma broker pod, during a 5-minute ENDURANCE run. Validates that the Strimzi Drain Cleaner transfers leadership before eviction and the pod reschedules cleanly.",
       "_hypothesis": "Drain Cleaner intercepts the eviction, triggers Kafka controlled shutdown, and transfers all partition leaders off the node before the pod is evicted. Zero downtime expected.",
-      "_note": "Kates sets no TARGET_NODE for Litmus node-drain, so envOverrides names the node: gamma, which runs brokers-gamma on the Kind lab (config/cluster.yaml). On another cluster, name the node that runs it.",
+      "_note": "Kates drains the node that runs the pod targetLabel picks: the brokers-gamma broker, which runs on gamma on the Kind lab (config/cluster.yaml). On another cluster the same label drains whichever node runs that broker; envOverrides.TARGET_NODE would name a node instead.",
       "testRequest": {
         "type": "ENDURANCE",
         "spec": {
@@ -400,10 +400,7 @@
         "targetNamespace": "kafka",
         "targetLabel": "strimzi.io/pool-name=brokers-gamma",
         "chaosDurationSec": 60,
-        "delayBeforeSec": 0,
-        "envOverrides": {
-          "TARGET_NODE": "gamma"
-        }
+        "delayBeforeSec": 0
       },
       "steadyStateSec": 30,
       "maxRecoveryWaitSec": 180,
@@ -482,7 +479,7 @@
 
     {
       "_name": "10 — Full Game Day (Multi-Phase Scenario)",
-      "_description": "Three sequential chaos steps with recovery windows: broker crash → CPU saturation → network partition. Two STEADY scenario phases, which start together, keep 2000 rec/s on each of two topics for 7 minutes, past this step's recovery window. Models a realistic cascading incident.",
+      "_description": "Three sequential chaos steps with recovery windows: broker crash → CPU saturation → network partition. Two STEADY scenario phases take turns at 2000 rec/s: kates-events for the first 7 minutes, past this step's recovery window and the report it returns, then kates-results for the next 7. Models a realistic cascading incident.",
       "_hypothesis": "Cluster survives 3 sequential faults without producer errors. Each step's fault resolves before the next begins.",
       "_note": "Step 1 only — submit steps 2/3 as separate requests after step 1 ChaosResult=Pass",
       "testRequest": {
@@ -567,10 +564,12 @@
     "submit_single": "jq '.examples[0]' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{status, error, runId: .performanceReport.run.id, impactDeltas, recoveryTime, unrecoveredAfter}'",
     "get_report": "curl -sS -H \"X-API-Key: $KATES_API_KEY\" http://localhost:8080/api/tests/{runId}/report | jq",
     "list_scenarios": "curl -sS -H \"X-API-Key: $KATES_API_KEY\" http://localhost:8080/api/resilience/scenarios | jq",
+    "submit_by_scenario": "jq '{testRequest: .examples[0].testRequest}' kates/docs/tutorials/resilience.json | curl -sS -X POST http://localhost:8080/api/resilience/scenarios/broker-crash -H \"X-API-Key: $KATES_API_KEY\" -H 'Content-Type: application/json' -d @- | jq '{scenario} + (.report | {status, error, runId: .performanceReport.run.id, impactDeltas, recoveryTime})'",
     "notes": [
       "kates ports forwards the Kates API to http://localhost:8080. Every /api endpoint but /api/health needs the key, whose Secret is in kates-stack instead with the single-namespace topology.",
       "submit_single sends examples[0], example 01; change the index to send another. It answers with one JSON report once the probes pass after the fault, or maxRecoveryWaitSec runs out.",
-      "get_report takes the runId submit_single prints. The test run goes on after that answer, and its report is final once the run is DONE."
+      "submit_by_scenario runs the broker-crash scenario from list_scenarios with example 01's testRequest. The scenario brings the rest: its fault deletes one broker pod at random in namespace kafka, never a dedicated KRaft controller, and its probes, steadyStateSec and maxRecoveryWaitSec are its own. The body can also set targetLabel or targetPod to pick other pods, and chaosDurationSec. node-maintenance is listed but refused.",
+      "get_report takes the runId submit_single or submit_by_scenario prints. The test run goes on after that answer, and its report is final once the run is DONE."
     ],
     "script_alternatives": {
       "broker_delete": "./scripts/test-chaos-broker-delete.sh",

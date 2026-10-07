@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.LongConsumer;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -63,10 +64,12 @@ class ResilienceOrchestratorBenchmarkStatusTest {
 
         Instant now = Instant.now();
         orchestrator.chaosCoordinator = mock(ChaosCoordinator.class);
-        when(orchestrator.chaosCoordinator.injectsFaults()).thenReturn(true);
-        when(orchestrator.chaosCoordinator.triggerFault(any()))
-                .thenReturn(CompletableFuture.completedFuture(
-                        ChaosOutcome.success("engine", "pod-kill", now, now, System.nanoTime(), null, null, null)));
+        // A provider reports the moment the fault goes in, and the run marks it.
+        when(orchestrator.chaosCoordinator.triggerFault(any(), any())).thenAnswer(invocation -> {
+            invocation.<LongConsumer>getArgument(1).accept(System.nanoTime());
+            return CompletableFuture.completedFuture(
+                    ChaosOutcome.success("engine", "pod-kill", now, now, System.nanoTime(), null, null, null));
+        });
 
         orchestrator.reportGenerator = mock(ReportGenerator.class);
         when(orchestrator.reportGenerator.generate(any())).thenReturn(new TestReport());
@@ -116,7 +119,7 @@ class ResilienceOrchestratorBenchmarkStatusTest {
 
     /** No fault went in, none was marked on the run, and no probe ran. */
     private void assertNoFault() {
-        verify(orchestrator.chaosCoordinator, never()).triggerFault(any());
+        verify(orchestrator.chaosCoordinator, never()).triggerFault(any(), any());
         verify(orchestrator.testOrchestrator, never()).markChaosStart(anyString(), anyLong());
         verifyNoInteractions(orchestrator.probeExecutor);
     }
@@ -130,7 +133,7 @@ class ResilienceOrchestratorBenchmarkStatusTest {
         assertEquals("COMPLETED", report.getStatus());
         assertNull(report.getError());
         verify(orchestrator.testOrchestrator).markChaosStart(eq(id), anyLong());
-        verify(orchestrator.chaosCoordinator).triggerFault(any());
+        verify(orchestrator.chaosCoordinator).triggerFault(any(), any());
     }
 
     /**
@@ -206,7 +209,7 @@ class ResilienceOrchestratorBenchmarkStatusTest {
         ResilienceReport report = execute(0);
 
         assertEquals("COMPLETED", report.getStatus());
-        verify(orchestrator.chaosCoordinator).triggerFault(any());
+        verify(orchestrator.chaosCoordinator).triggerFault(any(), any());
     }
 
     /**
@@ -269,11 +272,10 @@ class ResilienceOrchestratorBenchmarkStatusTest {
 
         /**
          * The engine is real, so the fault is checked where it would go in:
-         * the chaos coordinator was asked nothing, not even whether it injects
-         * faults, which is asked before the run is told a fault started.
+         * the chaos coordinator was asked nothing.
          */
         private void assertNoFaultReachedTheCoordinator() {
-            verify(orchestrator.chaosCoordinator, never()).triggerFault(any());
+            verify(orchestrator.chaosCoordinator, never()).triggerFault(any(), any());
             verifyNoInteractions(orchestrator.chaosCoordinator, orchestrator.probeExecutor);
         }
 

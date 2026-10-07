@@ -28,6 +28,16 @@ public final class MetricUtils {
      * Aggregates a list of {@link TestResult}s into a single {@link ReportSummary}.
      * Returns an empty summary when the list is null or empty.
      *
+     * <p>The throughput means leave out a task that has not started (see
+     * {@link #notStarted}). A scenario's later phase waits for its turn, and
+     * averaging its 0 in understated a running scenario: while the second of
+     * two phases waited, the run read half the first phase's rate, and so did
+     * the snapshot a resilience run takes before its fault. Only the means
+     * leave it out. It adds nothing to the other figures, and the latency rows
+     * are still chosen from every task, so that a LOAD run whose producer has
+     * not started yet does not report its consumer's Trogdor poll times as
+     * latency.
+     *
      * <p>The latency figures come only from the rows that measured latency
      * (see {@link #latencyRows}), and they are never averaged. The percentiles
      * used to be the mean of every row's, so a LOAD run's consumer, which
@@ -56,7 +66,8 @@ public final class MetricUtils {
 
         long totalRecords =
                 results.stream().mapToLong(TestResult::getRecordsSent).sum();
-        double avgThroughput = results.stream()
+        List<TestResult> started = results.stream().filter(r -> !notStarted(r)).toList();
+        double avgThroughput = started.stream()
                 .mapToDouble(TestResult::getThroughputRecordsPerSec)
                 .average()
                 .orElse(0);
@@ -64,7 +75,7 @@ public final class MetricUtils {
                 .mapToDouble(TestResult::getThroughputRecordsPerSec)
                 .max()
                 .orElse(0);
-        double avgThroughputMB = results.stream()
+        double avgThroughputMB = started.stream()
                 .mapToDouble(TestResult::getThroughputMBPerSec)
                 .average()
                 .orElse(0);
@@ -103,6 +114,23 @@ public final class MetricUtils {
                 totalErrors,
                 errorRate,
                 0);
+    }
+
+    /**
+     * Whether the task has not started: PENDING, with no records and no rate.
+     * A scenario's later phase is, until its turn
+     * (TestOrchestrator.executeScenario), and so is any task its backend has
+     * not started yet. Its rates are 0 because it measured nothing, not
+     * because it ran at 0. A row that carries records or a rate measured
+     * something, whatever its status, so leaving such rows out drops only 0s.
+     * A task a cancel or a failure ends before its turn is stored FAILED, so
+     * it is not one either.
+     */
+    private static boolean notStarted(TestResult result) {
+        return result.getStatus() == TestResult.TaskStatus.PENDING
+                && result.getRecordsSent() == 0
+                && result.getThroughputRecordsPerSec() == 0
+                && result.getThroughputMBPerSec() == 0;
     }
 
     /**
