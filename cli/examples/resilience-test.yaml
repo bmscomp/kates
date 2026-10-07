@@ -47,9 +47,9 @@ maxRecoveryWaitSec: 120
 
 probes:
   - name: isr-health-check
-    type: cmdProbe
+    type: kafkaProbe
     mode: Continuous
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    command: under-replicated-partitions
     expectedOutput: "50"
     comparator: "<="
     intervalSec: 10
@@ -59,7 +59,7 @@ probes:
     type: k8sProbe
     mode: Edge
     command: "kafka Ready"
-    expectedOutput: "Ready"
-    comparator: contains
+    expectedOutput: "Ready=True"
+    comparator: equal
     intervalSec: 15
     timeoutSec: 30

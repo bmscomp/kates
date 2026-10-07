@@ -132,7 +132,8 @@ class ScheduleResourceTest {
                 .when()
                 .post("/api/schedules")
                 .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("message", is("name: name is required"));
     }
 
     @Test
@@ -143,7 +144,34 @@ class ScheduleResourceTest {
                 .when()
                 .post("/api/schedules")
                 .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("message", is("cronExpression: cronExpression is required"));
+    }
+
+    /**
+     * A testRequest value outside the limits POST /api/tests sets is named in
+     * the message, with its reason. The message said only "Request
+     * validation failed", so kates schedule create, which prints the message
+     * alone, never said which field to change. The reason depends on the
+     * JVM's locale, so it is read back from fieldErrors.
+     */
+    @Test
+    void aTestRequestValueOutsideItsLimitsIsNamedInTheMessage() {
+        var answer = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\","
+                        + "\"testRequest\":{\"type\":\"STRESS\",\"spec\":{\"numProducers\":1000}}}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(1))
+                .extract()
+                .jsonPath();
+
+        assertEquals("numProducers: " + answer.getString("fieldErrors.numProducers"), answer.getString("message"));
+        Mockito.verify(repository, Mockito.never()).save(any());
     }
 
     @Test
@@ -434,6 +462,53 @@ class ScheduleResourceTest {
 
         Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
         Mockito.verifyNoInteractions(trogdorClient);
+    }
+
+    /**
+     * A rate of 0, which both benchmark backends ran unthrottled, is refused
+     * wherever a schedule's request comes in: POST and PUT hold the request to
+     * TestSpec's limits, and so does each firing of a schedule saved while 0
+     * passed. The orchestrator refuses a phase's own rate of 0 at firing.
+     */
+    @Test
+    void aRateOfZeroIsRefusedOnPostOnPutAndAtEachFiring() {
+        // A request the checks let through fails at submission and frees its permit.
+        Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+        String zero = "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"spec\":{\"throughput\":0}}";
+        String why = "throughput must be -1 (unlimited) or positive";
+
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\",\"testRequest\":" + zero + "}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors.throughput", is(why));
+
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"testRequest\":" + zero + "}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors.throughput", is(why));
+        Mockito.verify(repository, Mockito.never()).save(any());
+        assertEquals("{\"type\":\"LOAD\"}", s.getRequestJson());
+
+        for (String stored : List.of(
+                zero,
+                "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"scenario\":{\"baseSpec\":{\"throughput\":0},"
+                        + "\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]}}",
+                "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"scenario\":{\"phases\":[{\"name\":\"steady\","
+                        + "\"phaseType\":\"STEADY\",\"durationMs\":60000,\"targetThroughput\":0}]}}")) {
+            scheduler.executeSchedule(storedSchedule(stored));
+        }
+        Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
+        Mockito.verify(trogdorClient, Mockito.never()).createTask(any());
     }
 
     private static ScheduledTestRun storedSchedule(String requestJson) {

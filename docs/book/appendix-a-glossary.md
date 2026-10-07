@@ -616,7 +616,7 @@ The load at which a stage of the produce path can't keep up, so requests queue, 
 
 ### Scenario File {#gl-scenario-file}
 
-A YAML or JSON file with a `scenarios` list, each a test type, a `spec` and optional gates in `validate`, run with `kates test apply -f`. See [Scenario Files & SLA Gates](13-scenario-files.md#file-format).
+A YAML or JSON file of test scenarios, each a test type, a `spec` and optional gates in `validate`, run with `kates test apply -f`: a `scenarios` list, or one scenario at the file's top level. See [Scenario Files & SLA Gates](13-scenario-files.md#file-format).
 
 ### SCRAM-SHA-512 {#gl-scram-sha-512}
 

@@ -3,23 +3,37 @@ package com.bmscomp.kates.chaos;
 import java.util.List;
 
 /**
- * Factory for reusable Kafka-specific probes.
- * Each probe maps to a Litmus YAML probe equivalent.
+ * The built-in probes: what {@link ProbeRegistry} gives a fault that declares
+ * none, and what the resilience scenarios run. The Kafka ones are
+ * {@code kafkaProbe}s, which Kates evaluates over its own authenticated
+ * connection ({@link KafkaProbeChecks}); each is named after the Litmus YAML
+ * probe it stands for.
+ *
+ * <p>They used to run the Kafka CLI in a broker pod, without the SCRAM
+ * credentials the brokers' 9092 listener asks for, and printed 0 when the CLI
+ * failed. The ISR and partition probes passed whenever they could not ask,
+ * and the producer probe wrote to a topic nothing created.
  */
 public final class KafkaProbes {
+
+    /**
+     * The topic {@link #producerThroughput()} writes to. The brokers create no
+     * topic on first use, so the kafka-cluster chart's platform profile
+     * creates this one.
+     */
+    public static final String PROBE_TOPIC = "kates-probe-topic";
 
     private KafkaProbes() {}
 
     /**
-     * Checks under-replicated partitions are below threshold.
+     * At most 50 under-replicated partitions.
      * Equivalent to {@code isr-health-probe.yaml}.
      */
     public static ProbeSpec isrHealth() {
         return ProbeSpec.builder("isr-health-check")
+                .type("kafkaProbe")
                 .mode("Continuous")
-                .command("kafka-topics.sh --bootstrap-server localhost:9092 "
-                        + "--describe --under-replicated-partitions 2>/dev/null "
-                        + "| grep -c 'Topic:' || echo '0'")
+                .command(KafkaProbeChecks.UNDER_REPLICATED_PARTITIONS)
                 .expectedOutput("50")
                 .comparator("<=")
                 .intervalSec(10)
@@ -28,15 +42,14 @@ public final class KafkaProbes {
     }
 
     /**
-     * Checks for zero unavailable partitions.
-     * Equivalent to min-isr-check probe.
+     * At most 5 unavailable partitions, as many as the Litmus min-isr-check
+     * probe in {@code isr-health-probe.yaml} allows during chaos.
      */
     public static ProbeSpec minIsr() {
         return ProbeSpec.builder("min-isr-check")
+                .type("kafkaProbe")
                 .mode("Edge")
-                .command("kafka-topics.sh --bootstrap-server localhost:9092 "
-                        + "--describe --unavailable-partitions 2>/dev/null "
-                        + "| grep -c 'Topic:' || echo '0'")
+                .command(KafkaProbeChecks.UNAVAILABLE_PARTITIONS)
                 .expectedOutput("5")
                 .comparator("<=")
                 .intervalSec(15)
@@ -45,32 +58,31 @@ public final class KafkaProbes {
     }
 
     /**
-     * Checks Kafka cluster CR is in Ready state.
+     * The Kafka resource's Ready condition is True.
      */
     public static ProbeSpec clusterReady() {
         return ProbeSpec.builder("cluster-ready")
                 .type("k8sProbe")
                 .mode("Edge")
                 .command("kafka Ready")
-                .expectedOutput("Ready")
-                .comparator("contains")
+                .expectedOutput("Ready=True")
+                .comparator("equal")
                 .intervalSec(15)
                 .timeoutSec(30)
                 .build();
     }
 
     /**
-     * Checks producer can write within latency bound.
+     * Records sent to {@link #PROBE_TOPIC} with {@code acks=all} are
+     * acknowledged: the probe prints the acknowledged records per second, and
+     * fails when none is.
      * Equivalent to {@code producer-throughput-probe.yaml}.
      */
     public static ProbeSpec producerThroughput() {
         return ProbeSpec.builder("producer-throughput")
+                .type("kafkaProbe")
                 .mode("Continuous")
-                .command("kafka-producer-perf-test.sh --topic kates-probe-topic "
-                        + "--num-records 10 --record-size 100 "
-                        + "--throughput -1 "
-                        + "--producer-props bootstrap.servers=localhost:9092 "
-                        + "2>/dev/null | tail -1 | awk '{print $6}'")
+                .command(KafkaProbeChecks.PRODUCE + " " + PROBE_TOPIC)
                 .expectedOutput("0")
                 .comparator(">")
                 .intervalSec(15)
@@ -79,15 +91,14 @@ public final class KafkaProbes {
     }
 
     /**
-     * Checks consumer group lag is recovering.
+     * The lag of every consumer group adds up to at most 100,000 records.
      * Equivalent to {@code consumer-latency-probe.yaml}.
      */
     public static ProbeSpec consumerLatency() {
         return ProbeSpec.builder("consumer-latency")
+                .type("kafkaProbe")
                 .mode("Edge")
-                .command("kafka-consumer-groups.sh --bootstrap-server localhost:9092 "
-                        + "--describe --all-groups 2>/dev/null "
-                        + "| awk 'NR>1 {sum+=$6} END {print sum+0}'")
+                .command(KafkaProbeChecks.CONSUMER_LAG)
                 .expectedOutput("100000")
                 .comparator("<=")
                 .intervalSec(15)
@@ -96,14 +107,13 @@ public final class KafkaProbes {
     }
 
     /**
-     * Checks for zero offline partitions.
+     * No unavailable partitions.
      */
     public static ProbeSpec partitionAvailability() {
         return ProbeSpec.builder("partition-availability")
+                .type("kafkaProbe")
                 .mode("Edge")
-                .command("kafka-topics.sh --bootstrap-server localhost:9092 "
-                        + "--describe --unavailable-partitions 2>/dev/null "
-                        + "| grep -c 'Topic:' || echo '0'")
+                .command(KafkaProbeChecks.UNAVAILABLE_PARTITIONS)
                 .expectedOutput("0")
                 .comparator("<=")
                 .intervalSec(10)

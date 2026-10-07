@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
 import com.bmscomp.kates.domain.CreateTestRequest;
+import com.bmscomp.kates.domain.RateValidator;
 import com.bmscomp.kates.domain.ScenarioPhase;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
@@ -938,7 +939,7 @@ public class TestOrchestrator {
             List<BenchmarkHandle> handles = entry.getValue();
             for (BenchmarkHandle handle : handles) {
                 try {
-                    String backendName = defaultBackend;
+                    String backendName = handle.backendName();
                     var backendResult = resolveBackend(backendName);
                     if (backendResult.isSuccess()) {
                         backendResult.asSuccess().orElseThrow().stop(handle);
@@ -1076,20 +1077,22 @@ public class TestOrchestrator {
 
     /**
      * Why a run could not honour this request as written, or empty when it
-     * could, for a plain request or a scenario: a scenario spec value outside
-     * its limits, no type to run as, a null where a scenario phase should be,
-     * the spec fields its type and backend cannot apply, and a length past
-     * {@code kates.engine.max-duration-ms}, the most the timeout reaper allows
-     * a run. executeTest fails with this exception before it takes a
-     * concurrency permit. A caller that starts the run later, as a resilience
-     * run does after it has begun streaming its answer, asks first so that it
-     * can still answer the client with a 400.
+     * could, for a plain request or a scenario: a scenario spec value or a
+     * phase's own value outside its limits, no type to run as, a null where a
+     * scenario phase should be, the spec fields its type and backend cannot
+     * apply, and a length past {@code kates.engine.max-duration-ms}, the most
+     * the timeout reaper allows a run. executeTest fails with this exception
+     * before it takes a concurrency permit. A caller that starts the run
+     * later, as a resilience run does after it has begun streaming its answer,
+     * asks first so that it can still answer the client with a 400.
      *
      * <p>Bean validation holds the request's own spec to TestSpec's limits, but
      * not a scenario's (SpecLimits says why), so the scenario's base spec and
      * phase specs are held to them here: a numRecords of 0 would send nothing,
-     * and a topic Kafka cannot create would fail the run. They are checked
-     * first and answered on their own, as bean validation answers before the
+     * and a topic Kafka cannot create would fail the run. A phase's own
+     * targetThroughput and durationMs, which are not spec fields, are held to
+     * limits of their own (phaseValuesOutsideLimits). They are checked first
+     * and answered on their own, as bean validation answers before the
      * orchestrator is asked, each value keyed by its path in the scenario. A
      * scenario without phases, which runs as a plain request, is checked too,
      * as bean validation checks the request's own spec whether the run reads
@@ -1099,9 +1102,13 @@ public class TestOrchestrator {
      * /api/resilience runs none, and neither does a schedule as it fires, so
      * the type is checked here too. It is keyed {@code type}, with no prefix:
      * the request's own field, which a scenario's type overrides.
+     *
+     * <p>A scenario value that the run would store and the Kates API's
+     * database cannot hold is refused too: see {@link #unstorable}.
      */
     public java.util.Optional<InvalidTestSpecException> refusal(CreateTestRequest request) {
         Map<String, String> outsideLimits = specLimits.violations(request.getScenario());
+        outsideLimits.putAll(phaseValuesOutsideLimits(request.getScenario()));
         if (!outsideLimits.isEmpty()) {
             return java.util.Optional.of(new InvalidTestSpecException("scenario.", outsideLimits));
         }
@@ -1130,7 +1137,8 @@ public class TestOrchestrator {
             if (!nulls.isEmpty()) {
                 return java.util.Optional.of(new InvalidTestSpecException("scenario.", nulls));
             }
-            Map<String, String> errors = scenarioInapplicableFields(scenario, scenarioBackend(request));
+            Map<String, String> errors = unstorable(scenario);
+            errors.putAll(scenarioInapplicableFields(scenario, scenarioBackend(request)));
             long planned = plannedDurationMs(scenario);
             if (planned > maxDurationMs) {
                 errors.put("phases", "the phases are set to last " + planned + " ms in all" + longerThanAllowed());
@@ -1159,6 +1167,70 @@ public class TestOrchestrator {
                 : java.util.Optional.of(new InvalidTestSpecException(errors));
     }
 
+    /** The most characters of a scenario's name the run stores (test_runs.scenario_name). */
+    private static final int MAX_SCENARIO_NAME = 128;
+
+    /**
+     * The most characters of a phase's name. Each id of the phase's tasks
+     * holds it, after the run's id and before a suffix such as -produce or
+     * -ramp-99, and the run stores an id in 128 characters
+     * (test_results.task_id).
+     */
+    private static final int MAX_PHASE_NAME = 100;
+
+    private static final String NUL_REASON =
+            " holds a NUL character, which the Kates API's database cannot store; remove it";
+
+    /**
+     * The values of a scenario that its run would store and the Kates API's
+     * database cannot hold, each keyed by its path in the scenario: a name
+     * longer than the database keeps, and a NUL character in a name or a
+     * label, which PostgreSQL stores in neither text nor jsonb. Each failed
+     * the save that stores it. The scenario's name and labels are saved as
+     * the run is registered, and the answer named none of it. A phase's name
+     * is saved only once the phase's tasks have started, so the client got a
+     * 500 while the tasks ran their course with nothing recorded, and the run
+     * kept its slot until the reaper failed it.
+     */
+    private static Map<String, String> unstorable(TestScenario scenario) {
+        Map<String, String> errors = new java.util.LinkedHashMap<>();
+        String name = scenario.getName();
+        if (name != null && characters(name) > MAX_SCENARIO_NAME) {
+            errors.put(
+                    "name",
+                    "a scenario's name is stored in " + MAX_SCENARIO_NAME + " characters at most, and this one has "
+                            + characters(name) + "; shorten it");
+        } else if (holdsNul(name)) {
+            errors.put("name", "a scenario's name" + NUL_REASON);
+        }
+        if (scenario.getLabels() != null
+                && scenario.getLabels().entrySet().stream()
+                        .anyMatch(label -> holdsNul(label.getKey()) || holdsNul(label.getValue()))) {
+            errors.put("labels", "a label's key or value" + NUL_REASON);
+        }
+        for (int i = 0; i < scenario.getPhases().size(); i++) {
+            String phaseName = scenario.getPhases().get(i).getName();
+            if (phaseName != null && characters(phaseName) > MAX_PHASE_NAME) {
+                errors.put(
+                        "phases[" + i + "].name",
+                        "a phase's name is " + MAX_PHASE_NAME + " characters at most, since the ids of its tasks hold"
+                                + " it, and this one has " + characters(phaseName) + "; shorten it");
+            } else if (holdsNul(phaseName)) {
+                errors.put("phases[" + i + "].name", "a phase's name" + NUL_REASON);
+            }
+        }
+        return errors;
+    }
+
+    /** Its length as PostgreSQL counts it, one for each code point. */
+    private static int characters(String value) {
+        return value.codePointCount(0, value.length());
+    }
+
+    private static boolean holdsNul(String value) {
+        return value != null && value.indexOf('\0') >= 0;
+    }
+
     private String longerThanAllowed() {
         return "; the Kates API allows a run at most " + maxDurationMs + " ms (kates.engine.max-duration-ms)";
     }
@@ -1168,6 +1240,59 @@ public class TestOrchestrator {
         List<String> names =
                 java.util.Arrays.stream(TestType.values()).map(TestType::name).toList();
         return String.join(", ", names.subList(0, names.size() - 1)) + " or " + names.getLast();
+    }
+
+    /**
+     * The shortest and the longest durationMs a phase may set for itself, the
+     * limits of a spec's durationMs. Its default, 0, runs the phase for its
+     * spec's durationMs.
+     */
+    private static final long MIN_PHASE_DURATION_MS = 1_000;
+
+    private static final long MAX_PHASE_DURATION_MS = 86_400_000;
+
+    /**
+     * The scenario's phase values outside their limits, keyed by their path
+     * in the scenario ({@code phases[i].x}); empty when there are none, or no
+     * scenario. A phase's own targetThroughput is -1, which runs the phase at
+     * its spec's rate, or 1 or more. Its own durationMs is 0, which runs it
+     * for its spec's durationMs, or within the limits of a spec's durationMs.
+     *
+     * <p>Neither is a spec field, so no limit held them: a targetThroughput of
+     * 0, or below -1, became the phase's rate, which both benchmark backends
+     * ran unthrottled. A durationMs of 500 ran a half-second phase, and a
+     * negative one took the spec's without a word. A null phase is left to
+     * refusal's check of the phases.
+     */
+    private static Map<String, String> phaseValuesOutsideLimits(TestScenario scenario) {
+        Map<String, String> errors = new java.util.LinkedHashMap<>();
+        if (scenario == null || scenario.getPhases() == null) {
+            return errors;
+        }
+        List<ScenarioPhase> phases = scenario.getPhases();
+        for (int i = 0; i < phases.size(); i++) {
+            ScenarioPhase phase = phases.get(i);
+            if (phase == null) {
+                continue;
+            }
+            String name = phase.getName() != null ? phase.getName() : "phase-" + i;
+            int rate = phase.getTargetThroughput();
+            if (!RateValidator.allows(rate)) {
+                errors.put(
+                        "phases[" + i + "].targetThroughput",
+                        "phase " + name + " sets targetThroughput " + rate + "; a phase's own rate must be -1,"
+                                + " which runs it at its spec's rate, or positive");
+            }
+            long duration = phase.getDurationMs();
+            if (duration != 0 && (duration < MIN_PHASE_DURATION_MS || duration > MAX_PHASE_DURATION_MS)) {
+                errors.put(
+                        "phases[" + i + "].durationMs",
+                        "phase " + name + " sets durationMs " + duration + "; a phase's own duration must be 0,"
+                                + " which runs it for its spec's durationMs, or from " + MIN_PHASE_DURATION_MS
+                                + " to " + MAX_PHASE_DURATION_MS + " ms, the limits of a spec's durationMs");
+            }
+        }
+        return errors;
     }
 
     /**
@@ -1464,8 +1589,8 @@ public class TestOrchestrator {
                 .filter(b -> b.name().equals(name))
                 .findFirst()
                 .<com.bmscomp.kates.util.Result<BenchmarkBackend, Exception>>map(com.bmscomp.kates.util.Result::success)
-                .orElseGet(() -> com.bmscomp.kates.util.Result.failure(new BenchmarkException(
-                        "Backend not found: '" + name + "'. Available: " + availableBackends())));
+                .orElseGet(() ->
+                        com.bmscomp.kates.util.Result.failure(new UnknownBackendException(name, availableBackends())));
     }
 
     @io.opentelemetry.instrumentation.annotations.WithSpan("TestOrchestrator.buildTasks")

@@ -64,6 +64,24 @@ class ResilienceReportJsonTest {
         assertEquals("12.345678901", recoveryTime.decimalValue().toPlainString());
     }
 
+    /**
+     * A run whose probes never all passed in one poll has no recoveryTime,
+     * only unrecoveredAfter, as decimal seconds too.
+     */
+    @Test
+    void aRunThatDidNotRecoverHasUnrecoveredAfterInstead() throws Exception {
+        ResilienceReport report = completed();
+        report.setRecoveryTime(null);
+        report.setUnrecoveredAfter(Duration.ofSeconds(115, 250_000_000));
+
+        JsonNode json = wire(report);
+
+        assertFalse(json.has("recoveryTime"), "recoveryTime in " + json);
+        JsonNode unrecoveredAfter = json.get("unrecoveredAfter");
+        assertTrue(unrecoveredAfter != null && unrecoveredAfter.isNumber(), "unrecoveredAfter is " + unrecoveredAfter);
+        assertEquals(115.25, unrecoveredAfter.asDouble(), 1e-9);
+    }
+
     @Test
     void eachProbeResultHasTheKeysTheCliReads() throws Exception {
         JsonNode json = wire(completed());
@@ -118,7 +136,12 @@ class ResilienceReportJsonTest {
 
         assertEquals("ERROR", json.get("status").asText());
         for (String key : List.of(
-                "recoveryTime", "baselineProbes", "duringChaosProbes", "postRecoveryProbes", "performanceReport")) {
+                "recoveryTime",
+                "unrecoveredAfter",
+                "baselineProbes",
+                "duringChaosProbes",
+                "postRecoveryProbes",
+                "performanceReport")) {
             assertFalse(json.has(key), key + " in " + json);
         }
     }

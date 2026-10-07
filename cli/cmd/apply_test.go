@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -260,6 +261,93 @@ func TestApply_PostsAZeroSetting(t *testing.T) {
 	}
 	if want := `{"type":"LOAD","spec":{"lingerMs":0}}`; len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
+// parseScenarioFile reads a file as kates test apply runs it: its scenarios
+// list, or, in a file without one, the one scenario at its top level. A file
+// of one scenario used to run nothing: both decoders read it as an empty
+// list, and the top level was read only when the list could not be read.
+func TestParseScenarioFile(t *testing.T) {
+	for _, tt := range []struct {
+		name, file string
+		types      []string // the types of the scenarios read
+		lone       bool
+		err        string // part of the error, for a file that is refused
+	}{
+		{"list.yaml", "scenarios:\n  - {name: a, type: LOAD}\n  - {name: b, type: STRESS}\n", []string{"LOAD", "STRESS"}, false, ""},
+		{"lone.yaml", "name: a\ntype: LOAD\nspec:\n  records: 1000\n", []string{"LOAD"}, true, ""},
+		// encoding/json matches a key to a field in any case; yaml.v3 does not.
+		{"list.json", `{"Scenarios": [{"name": "a", "type": "LOAD"}]}`, []string{"LOAD"}, false, ""},
+		{"lone.json", `{"name": "a", "Type": "LOAD"}`, []string{"LOAD"}, true, ""},
+		{"lone-json.yaml", `{"name": "a", "Type": "LOAD"}`, nil, false, ""},
+		// Text that is not JSON, in a file named .json, is read as YAML.
+		{"yaml.json", "name: a\ntype: LOAD\n", []string{"LOAD"}, true, ""},
+		// A list is read, and a scenario at the top level beside it is not.
+		{"both.yaml", "type: STRESS\nscenarios:\n  - {name: a, type: LOAD}\n", []string{"LOAD"}, false, ""},
+		{"empty.yaml", "scenarios: []\n", nil, false, ""},
+		{"untyped.yaml", "name: a\nspec:\n  records: 1000\n", nil, false, ""},
+		// With a type it is a scenario, so a value one of its fields cannot
+		// hold is named, rather than the file read as holding none.
+		{"bad.yaml", "name: a\ntype: LOAD\nvalidate:\n  maxP99LatencyMs: 50ms\n", nil, false, "cannot unmarshal !!str `50ms`"},
+		{"bad.json", `{"type": "LOAD", "validate": {"maxOutOfOrder": 0.5}}`, nil, false, "maxOutOfOrder"},
+		{"broken.yaml", "scenarios: [\n", nil, false, "yaml:"},
+	} {
+		sf, err := parseScenarioFile(tt.name, []byte(tt.file))
+		var types []string
+		for _, s := range sf.Scenarios {
+			types = append(types, s.Type)
+		}
+		switch {
+		case tt.err != "" && (err == nil || !strings.Contains(err.Error(), tt.err)):
+			t.Errorf("%s: err = %v, want one that says %s", tt.name, err, tt.err)
+		case tt.err == "" && err != nil:
+			t.Errorf("%s: %v", tt.name, err)
+		case !slices.Equal(types, tt.types) || sf.lone != tt.lone:
+			t.Errorf("%s: read %v (lone %t), want %v (lone %t)", tt.name, types, sf.lone, tt.types, tt.lone)
+		}
+	}
+}
+
+// kates test apply runs a file of one scenario, written at its top level, in
+// YAML or in JSON. It used to stop with "No scenarios found in file".
+func TestApply_RunsAFileOfOneScenario(t *testing.T) {
+	for _, tt := range []struct{ name, file string }{
+		{"one.yaml", "name: one\ntype: load\nspec:\n  records: 1000\n  lingerMs: 0\n"},
+		{"one.json", `{"name": "one", "type": "load", "spec": {"records": 1000, "lingerMs": 0}}`},
+		{"none.yaml", "name: none\nspec:\n  records: 1000\n"},
+	} {
+		path := filepath.Join(t.TempDir(), tt.name)
+		if err := os.WriteFile(path, []byte(tt.file), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var posted []string
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			posted = append(posted, string(body))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"run-1","testType":"LOAD","status":"PENDING"}`)
+		}))
+		apiClient = client.New(ts.URL)
+		output.ResetForTesting()
+		applyFile, applyWait = path, false
+
+		err := testApplyCmd.RunE(testApplyCmd, nil)
+		ts.Close()
+		applyFile = ""
+
+		if tt.name == "none.yaml" {
+			if err == nil || !strings.Contains(err.Error(), "No scenarios found in file: it needs a scenarios list, or one scenario with a type") || len(posted) != 0 {
+				t.Errorf("%s: err = %v, posted %q", tt.name, err, posted)
+			}
+			continue
+		}
+		if want := `{"type":"LOAD","spec":{"numRecords":1000,"lingerMs":0}}`; err != nil || len(posted) != 1 || posted[0] != want {
+			t.Errorf("%s: err = %v, posted %q, want %s", tt.name, err, posted, want)
+		}
 	}
 }
 

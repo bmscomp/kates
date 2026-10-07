@@ -53,7 +53,7 @@ block is not compared: kates test apply --wait grades it after the run.`,
 			return cmdErr("Invalid scenario file: " + err.Error())
 		}
 		if len(sf.Scenarios) == 0 {
-			return cmdErr("No scenarios found in " + scenarioPath)
+			return cmdErr("No scenarios found in " + scenarioPath + ": it needs a scenarios list, or one scenario with a type at its top level")
 		}
 		i, err := pickScenario(scenarioPath, sf.Scenarios, scenarioDiffPick)
 		if err != nil {

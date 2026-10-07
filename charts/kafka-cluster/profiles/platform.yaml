@@ -55,6 +55,15 @@ topics:
       config:
         retention.ms: "-1"
         cleanup.policy: delete
+    # Where the Kates API's built-in producer-throughput probe writes, as
+    # kates-backend: ten 100-byte records each time it runs. The brokers
+    # create no topic on first use (auto.create.topics.enable: false), so
+    # without this one the probe can never pass. Nothing reads it.
+    kates-probe-topic:
+      partitions: 3
+      config:
+        retention.ms: "3600000"
+        cleanup.policy: delete
     # Debezium CDC internal topics
     #
     # The schema history is Debezium's own log of every DDL statement, read
