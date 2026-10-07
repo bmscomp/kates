@@ -192,7 +192,7 @@ The sketches target `charts/kafka-cluster`, whose node pool model is described u
 - **`KAFKA_RACK` on broker pools only.** Strimzi writes `broker.rack` only for broker and dual-role nodes ([KafkaBrokerConfigurationBuilder](https://github.com/strimzi/strimzi-kafka-operator/blob/1.2.0/cluster-operator/src/main/java/io/strimzi/operator/cluster/model/KafkaBrokerConfigurationBuilder.java#L162-L170)); setting it on controllers is harmless.
 - **A `site` pod label on every pool**, through the pool's raw `template`, which the chart deep-merges last. With `zone`, it gives chaos tests and runbooks a selector per site (`strimzi.io/cluster=krafter,site=b`).
 - **Required host anti-affinity** for pools with two or more controllers in one AZ, also through the raw `template`. It renders beside the chart's preferred rule.
-- **Pool names** `brokers-*` sort before `controllers-*`. Kates command probes run in the first Kafka pod by name ([ProbeExecutor.java](../../kates/src/main/java/com/bmscomp/kates/chaos/ProbeExecutor.java)), and for a site-B test that pod should be a site-A broker.
+- **Pool names.** Kates command probes (`cmdProbe`) run in the first Ready broker pod by name ([ProbeExecutor.java](../../kates/src/main/java/com/bmscomp/kates/chaos/ProbeExecutor.java)), and for a site-B test that pod should be a site-A broker, so site A's broker pools should sort first. The built-in probes are `kafkaProbe`s, which the Kates API runs over its own Kafka connection, in no pod.
 - **Lists in a pool's `template` replace the chart's.** If tiered storage is on, the chart puts its object-store credentials in `kafkaContainer.env`; a pool that sets `env` for `KAFKA_RACK` must repeat them.
 
 Check a sketch before you install it:

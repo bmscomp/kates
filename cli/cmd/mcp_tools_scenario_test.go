@@ -189,7 +189,6 @@ func TestMCPDraftScenarioEveryTemplate(t *testing.T) {
 	_, out = mcpDraft(t, h, map[string]any{"template": "stress-test"})
 	mcpScnHasFinding(t, out, 0, "spec", mcpScnOutside, "GiB")
 	_, out = mcpDraft(t, h, map[string]any{"template": "integrity-tx"})
-	mcpScnHasFinding(t, out, 0, "validate.maxDuplicatePercent", mcpScnWarning, "drops validate.maxDuplicatePercent")
 	// The backend carries the integrity options now, and an INTEGRITY run with
 	// acks=all can apply all three.
 	for _, key := range []string{"spec.enableIdempotence", "spec.enableTransactions", "spec.enableCrc"} {
@@ -197,9 +196,6 @@ func TestMCPDraftScenarioEveryTemplate(t *testing.T) {
 			t.Errorf("integrity-tx: %s has findings %+v", key, f)
 		}
 	}
-	_, out = mcpDraft(t, h, map[string]any{"template": "ci-gate"})
-	mcpScnHasFinding(t, out, 0, "validate.maxErrorRate", mcpScnWarning, "never checks maxErrorRate")
-	mcpScnHasFinding(t, out, 0, "validate.maxDataLossPercent", mcpScnWarning, "only INTEGRITY runs")
 	mcpScnOnlyPinCheck(t, fb)
 }
 
@@ -234,9 +230,7 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	if err != nil || len(again) != 1 || scenarioToRequest(again[0]).Spec.Topic != "kates-mcp-rt" {
 		t.Errorf("the YAML does not read back: %v %+v", err, again)
 	}
-	// Warnings remain: ROUND_TRIP reports no integrity data. Its producer
-	// takes the idempotence and transactions the template asks for.
-	mcpScnHasFinding(t, out, 0, "validate.maxOutOfOrder", mcpScnWarning, "never checked")
+	// The producer takes the idempotence and transactions the template asks for.
 	if f := mcpScnFindingsOn(out, 0, "spec.enableIdempotence"); len(f) != 0 {
 		t.Errorf("spec.enableIdempotence has findings %+v", f)
 	}
@@ -567,6 +561,17 @@ func TestMCPDraftScenarioIntegrityGates(t *testing.T) {
 	mcpScnHasFinding(t, out, 0, "validate", mcpScnWarning, "maxDataLossPercent absent")
 	_, out = mcpDraft(t, h, map[string]any{"yaml": "scenarios:\n  - {name: n, type: VOLUME, spec: {topic: kates-mcp-v}}\n"})
 	mcpScnHasFinding(t, out, 0, "validate", mcpScnWarning, "grades nothing")
+	// The gates the ci-gate and integrity-tx templates once set, which
+	// TestShippedScenariosGateOnlyWhatApplyChecks now keeps out of them.
+	_, out = mcpDraft(t, h, map[string]any{"yaml": `scenarios:
+  - name: g
+    type: LOAD
+    spec: {topic: kates-mcp-g}
+    validate: {maxErrorRate: 0, maxDataLossPercent: 0, maxDuplicatePercent: 0}
+`})
+	mcpScnHasFinding(t, out, 0, "validate.maxErrorRate", mcpScnWarning, "never checks maxErrorRate")
+	mcpScnHasFinding(t, out, 0, "validate.maxDataLossPercent", mcpScnWarning, "only INTEGRITY runs")
+	mcpScnHasFinding(t, out, 0, "validate.maxDuplicatePercent", mcpScnWarning, "drops validate.maxDuplicatePercent")
 	mcpScnOnlyPinCheck(t, fb)
 }
 

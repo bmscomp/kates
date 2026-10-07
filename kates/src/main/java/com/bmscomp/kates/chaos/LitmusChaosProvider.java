@@ -361,6 +361,12 @@ public class LitmusChaosProvider implements ChaosProvider {
         if (spec.probes() != null && !spec.probes().isEmpty()) {
             List<ChaosEngineSpec.Probe> litmusProbes = new ArrayList<>();
             for (ProbeSpec p : spec.probes()) {
+                // Only a cmdProbe gets inputs below. Litmus has no kafkaProbe,
+                // and the k8sProbe "kafka Ready" is Kates' own query; Kates
+                // evaluates both itself, and Litmus would fail them empty.
+                if (!"cmdProbe".equals(p.type())) {
+                    continue;
+                }
                 ChaosEngineSpec.Probe lp = new ChaosEngineSpec.Probe();
                 lp.name = p.name();
                 lp.type = p.type();
@@ -379,7 +385,9 @@ public class LitmusChaosProvider implements ChaosProvider {
                 lp.runProperties = new ChaosEngineSpec.RunProperties();
                 litmusProbes.add(lp);
             }
-            expSpec.probe = litmusProbes;
+            if (!litmusProbes.isEmpty()) {
+                expSpec.probe = litmusProbes;
+            }
         }
 
         experiment.spec = expSpec;

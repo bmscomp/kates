@@ -45,9 +45,9 @@ maxRecoveryWaitSec: 90
 
 probes:
   - name: producer-throughput
-    type: cmdProbe
+    type: kafkaProbe
     mode: Continuous
-    command: "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'"
+    command: produce kates-probe-topic
     expectedOutput: "0"
     comparator: ">"
     intervalSec: 15
@@ -57,7 +57,7 @@ probes:
     type: k8sProbe
     mode: Edge
     command: "kafka Ready"
-    expectedOutput: "Ready"
-    comparator: contains
+    expectedOutput: "Ready=True"
+    comparator: equal
     intervalSec: 15
     timeoutSec: 30
