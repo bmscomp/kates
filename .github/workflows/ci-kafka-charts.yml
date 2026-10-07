@@ -557,6 +557,20 @@ jobs:
       - name: Apply storage classes
         run: kubectl apply -f config/storage/storage-classes.yaml
 
+      # The charts pin kates-tester to the kates chart's appVersion, and a
+      # release PR moves that pin to the tag its release has yet to publish:
+      # ghcr.io answers 404 for it, so strimzi-operator's CRD hook waited on
+      # the pull until the install timed out. Build the pinned tag from
+      # tester/ and load it into the nodes. No chart sets a pull policy that
+      # would bypass it, so the kubelet uses the loaded image (IfNotPresent).
+      - name: Load the kates-tester image the charts pin
+        run: |
+          set -euo pipefail
+          tag=$(sed -nE 's/^appVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' charts/kates/Chart.yaml)
+          image="ghcr.io/bmscomp/kates-tester:${tag}"
+          scripts/retry.sh 3 docker build -t "${image}" tester/
+          kind load docker-image "${image}" --name panda
+
       - name: Build kates CLI
         working-directory: cli
         run: go build -o ../build/kates .
