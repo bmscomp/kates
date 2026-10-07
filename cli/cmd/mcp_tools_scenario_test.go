@@ -420,6 +420,9 @@ func TestMCPDraftScenarioTargetThroughputSetsTheRate(t *testing.T) {
 	mcpScnOnlyPinCheck(t, fb)
 }
 
+// TestMCPDraftScenarioYAML: a lone scenario, with no scenarios list, is what
+// kates test apply runs from such a file, so it is checked as it is written:
+// the file comes back unchanged, and its keys are checked as the scenario's.
 func TestMCPDraftScenarioYAML(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
 	h := newMCPHarness(t, fb)
@@ -443,10 +446,14 @@ validate:
   maxRpoMs: 100
 `
 	env, out := mcpDraft(t, h, map[string]any{"yaml": yamlText})
-	if !strings.HasPrefix(out.YAML, "scenarios:\n") || !strings.Contains(out.YAML, "# drafted by an agent") {
-		t.Errorf("a lone scenario is put under scenarios:, comments kept:\n%s", out.YAML)
+	if out.YAML != yamlText {
+		t.Errorf("a lone scenario comes back as it was written:\n%s", out.YAML)
 	}
-	mcpScnHasFinding(t, out, -1, "scenarios", mcpScnWarning, "was not under scenarios:")
+	for _, f := range out.Findings {
+		if f.Scenario == -1 {
+			t.Errorf("a lone scenario's keys are the scenario's, not top-level keys apply ignores: %+v", f)
+		}
+	}
 	if out.Verdict != mcpScnInvalid {
 		t.Errorf("verdict %s, want invalid (acks \"2\")", out.Verdict)
 	}
@@ -472,6 +479,38 @@ validate:
 		t.Errorf("effective = %+v", e)
 	}
 	mcpSecHasCaveats(t, env, mcpCaveatReaperDeadline)
+	mcpScnOnlyPinCheck(t, fb)
+}
+
+// TestMCPDraftScenarioLoneScenarioOverrides: the overrides on a file of one
+// scenario at its top level go on that scenario, and the file keeps its form,
+// with no scenarios list, which is how kates test apply reads it.
+func TestMCPDraftScenarioLoneScenarioOverrides(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	_, out := mcpDraft(t, h, map[string]any{
+		"yaml":               "# one scenario\nname: bare\ntype: ROUND_TRIP\nspec:\n  topic: kates-mcp-a\n  records: 1000\n",
+		"name":               "renamed",
+		"spec_overrides":     map[string]any{"records": 5000, "lingerMs": 0},
+		"validate_overrides": map[string]any{"maxP99LatencyMs": 25},
+	})
+	if strings.Contains(out.YAML, "scenarios") || !strings.Contains(out.YAML, "# one scenario") ||
+		!strings.Contains(out.YAML, "maxP99LatencyMs: 25") {
+		t.Errorf("the lone scenario is edited where it is, comments kept:\n%s", out.YAML)
+	}
+	sc := out.Scenarios[0]
+	if s := sc.Request.Spec; sc.Name != "renamed" || s == nil || s.Records != 5000 || s.LingerMs == nil || *s.LingerMs != 0 {
+		t.Errorf("scenario %q, request spec %+v", sc.Name, sc.Request.Spec)
+	}
+	// A file kates test apply cannot read yet is edited by its shape, as a
+	// list is, and the edited file is what is checked.
+	_, out = mcpDraft(t, h, map[string]any{
+		"yaml":               "name: bare\ntype: ROUND_TRIP\nspec:\n  topic: kates-mcp-a\nvalidate:\n  maxP99LatencyMs: 50ms\n",
+		"validate_overrides": map[string]any{"maxP99LatencyMs": 50},
+	})
+	if strings.Contains(out.YAML, "scenarios") || !strings.Contains(out.YAML, "maxP99LatencyMs: 50\n") {
+		t.Errorf("the override replaces the value apply cannot read:\n%s", out.YAML)
+	}
 	mcpScnOnlyPinCheck(t, fb)
 }
 
@@ -551,6 +590,7 @@ func TestMCPDraftScenarioArguments(t *testing.T) {
 		{"not YAML", map[string]any{"yaml": "scenarios: [\n"}},
 		{"not a mapping", map[string]any{"yaml": "- a\n- b\n"}},
 		{"no scenarios", map[string]any{"yaml": "name: x\n"}},
+		{"overrides on no scenario", map[string]any{"yaml": "name: x\n", "name": "y"}},
 		{"empty list", map[string]any{"yaml": "scenarios: []\n"}},
 		{"wrong threshold type", map[string]any{"yaml": "scenarios:\n  - {type: LOAD, validate: {maxOutOfOrder: none}}\n"}},
 		{"too many", map[string]any{"yaml": six}},
@@ -876,6 +916,16 @@ func TestMCPDraftScenarioJSON(t *testing.T) {
 		`"spec":{"topic":"kates-mcp-a","records":1000},"validate":{"maxP99LatencyMs":10,"maxOutOfOrder":0.5}}]}`})
 	mcpScnHasFinding(t, out, -1, "scenarios", mcpScnWarning, "save it as .yaml")
 
+	// A lone scenario in JSON is read both ways too.
+	loneJSON := `{"name":"x","type":"ROUND_TRIP",%s"spec":{"topic":"kates-mcp-a","records":1000},"validate":{"maxP99LatencyMs":10}}`
+	_, out = mcpDraft(t, h, map[string]any{"yaml": fmt.Sprintf(loneJSON, "")})
+	if out.Verdict != "inside_envelope" || len(out.Scenarios) != 1 || len(mcpScnFindingsOn(out, -1, "scenarios")) != 0 {
+		t.Errorf("verdict %s, scenarios %d, findings %+v", out.Verdict, len(out.Scenarios), out.Findings)
+	}
+	_, out = mcpDraft(t, h, map[string]any{"yaml": fmt.Sprintf(loneJSON, `"Type":"SPIKE",`)})
+	mcpScnHasFinding(t, out, -1, "scenarios", mcpScnInvalid, "when it is named .json")
+	mcpScnHasFinding(t, out, 0, "Type", mcpScnInvalid, "differs from type only in case")
+
 	// A case variant in a YAML file is invalid too: saved as .json, the same
 	// scenario written as JSON would run it.
 	_, out = mcpDraft(t, h, map[string]any{"yaml": "scenarios:\n  - {name: x, type: ROUND_TRIP, Backend: trogdor, spec: {topic: kates-mcp-a}}\n"})
@@ -968,11 +1018,15 @@ func TestMCPDraftScenarioFitsAtTheLimits(t *testing.T) {
 		t.Errorf("result is %d bytes on the wire, over %d", size, mcpDefaultLimits.MaxResultBytes)
 	}
 
-	// An edited file cannot be left out, and one that still does not fit is
-	// refused as too large an input, not failed as too large a page.
+	// A lone scenario is checked as written, so its echo gives way too.
 	lone := "name: x\ntype: LOAD\n# "
 	lone += strings.Repeat("&", mcpDraftMaxYAMLBytes-len(lone)-1) + "\n"
-	if e := h.callErr("draft_scenario", map[string]any{"yaml": lone}); e.Error.Code != mcpErrInvalidArgument {
+	if _, out := mcpDraft(t, h, map[string]any{"yaml": lone}); !out.YAMLOmitted || out.Verdict != mcpScnOutside {
+		t.Errorf("a lone scenario at the limit: yamlOmitted %v, verdict %s", out.YAMLOmitted, out.Verdict)
+	}
+	// An edited file cannot be left out, and one that still does not fit is
+	// refused as too large an input, not failed as too large a page.
+	if e := h.callErr("draft_scenario", map[string]any{"yaml": lone, "name": "renamed"}); e.Error.Code != mcpErrInvalidArgument {
 		t.Errorf("code %s, want %s", e.Error.Code, mcpErrInvalidArgument)
 	}
 	mcpScnOnlyPinCheck(t, fb)
