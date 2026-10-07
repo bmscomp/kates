@@ -114,7 +114,14 @@ public class CompoundChaosOrchestrator {
             }
 
             try {
-                ChaosOutcome outcome = provider.triggerFault(fault.spec()).get(120, TimeUnit.SECONDS);
+                // The wait covers the fault's delay, which both chaos providers
+                // wait out before they inject, its duration, and the two
+                // minutes past that litmus-crd waits for its ChaosResult. A
+                // fixed two minutes reported a longer fault as failed while it
+                // still ran, and the next fault went in on top of it.
+                FaultSpec spec = fault.spec();
+                ChaosOutcome outcome = provider.triggerFault(spec)
+                        .get(spec.delayBeforeSec() + spec.chaosDurationSec() + 120, TimeUnit.SECONDS);
                 results.add(new ProviderOutcome(
                         fault.providerName(), fault.spec().experimentName(),
                         outcome.isPass(), outcome.failureReason()));

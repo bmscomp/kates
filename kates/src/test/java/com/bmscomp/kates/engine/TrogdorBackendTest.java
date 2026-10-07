@@ -163,6 +163,37 @@ class TrogdorBackendTest {
         assertEquals(fixture("round-trip-spec.json"), asSent(backend.toTrogdorSpec(task)));
     }
 
+    @Test
+    void aTaskWithAStartTimeStartsThen() {
+        // A scenario's later phase: the coordinator holds the task PENDING
+        // until startMs, and its agent stops it at startMs plus durationMs.
+        // Every spec used to start when it was built, so every phase ran at once.
+        long startAtMs = System.currentTimeMillis() + 90_000;
+        for (BenchmarkTask.WorkloadType type : List.of(
+                BenchmarkTask.WorkloadType.PRODUCE,
+                BenchmarkTask.WorkloadType.CONSUME,
+                BenchmarkTask.WorkloadType.ROUND_TRIP)) {
+            BenchmarkTask task = BenchmarkTask.builder("t-later-" + type, type)
+                    .producerConfig(PRODUCER)
+                    .durationMs(60_000)
+                    .startAtMs(startAtMs)
+                    .build();
+
+            TrogdorSpec spec = backend.toTrogdorSpec(task);
+
+            assertEquals(startAtMs, spec.getStartMs(), type.name());
+            assertEquals(60_000, spec.getDurationMs(), type.name());
+        }
+
+        long before = System.currentTimeMillis();
+        TrogdorSpec now = backend.toTrogdorSpec(BenchmarkTask.builder("t-now", BenchmarkTask.WorkloadType.PRODUCE)
+                .producerConfig(PRODUCER)
+                .build());
+        assertTrue(
+                now.getStartMs() >= before && now.getStartMs() <= System.currentTimeMillis(),
+                "a task without a start time starts when its spec is built");
+    }
+
     /**
      * The properties each spec's {@code @JsonCreator} takes in apache/kafka's
      * trogdor module (trunk; the same in 3.9). The coordinator reads a spec

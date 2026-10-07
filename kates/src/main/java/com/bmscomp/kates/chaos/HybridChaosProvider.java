@@ -1,6 +1,7 @@
 package com.bmscomp.kates.chaos;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.function.LongConsumer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -73,6 +74,11 @@ public class HybridChaosProvider implements ChaosProvider {
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
         return delegate.triggerFault(spec);
+    }
+
+    @Override
+    public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec, LongConsumer onInject) {
+        return delegate.triggerFault(spec, onInject);
     }
 
     @Override

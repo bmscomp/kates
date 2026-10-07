@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -642,6 +643,36 @@ public class KubernetesChaosProviderTest {
         assertTrue(remaining.contains("krafter-brokers-2"));
     }
 
+    /** A resilience run measures RPO from the moment the fault reports. */
+    @Test
+    void aDelayedFaultIsReportedOnceItsDelayIsOverAndBeforeThePodGoes() throws Exception {
+        createZonedBrokers();
+        FaultSpec spec = FaultSpec.builder("delayed-kill")
+                .targetPod("krafter-brokers-2")
+                .disruptionType(DisruptionType.POD_KILL)
+                .delayBeforeSec(1)
+                .build();
+        List<Long> reported = new CopyOnWriteArrayList<>();
+        List<List<String>> podsWhenReported = new CopyOnWriteArrayList<>();
+
+        long triggered = System.nanoTime();
+        ChaosOutcome outcome = provider.triggerFault(spec, injectedAt -> {
+                    reported.add(injectedAt);
+                    podsWhenReported.add(remainingPods());
+                })
+                .get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(1, reported.size(), "reported once");
+        assertTrue(
+                reported.getFirst() - triggered >= TimeUnit.SECONDS.toNanos(1), "reported before the delay was over");
+        assertEquals(
+                List.of(List.of("krafter-brokers-0", "krafter-brokers-1", "krafter-brokers-2")),
+                podsWhenReported,
+                "reported after the pod went");
+        assertEquals(List.of("krafter-brokers-0", "krafter-brokers-1"), remainingPods());
+    }
+
     @Test
     void podKillByBrokerIdNeverKillsAKraftController() throws Exception {
         // The default Kind cluster: brokers are nodes 0–2, dedicated controllers 3–5.
@@ -686,6 +717,26 @@ public class KubernetesChaosProviderTest {
         assertFalse(outcome.isPass());
         assertTrue(outcome.failureReason().contains("No pods found"), outcome.failureReason());
         assertEquals(3, remainingPods().size());
+    }
+
+    @Test
+    void aDelayedFaultIsTimedFromTheEndOfItsDelay() throws Exception {
+        createZonedBrokers();
+        // The start used to be taken before the delay, so the outcome's start
+        // and duration counted the wait as part of the fault.
+        FaultSpec spec = FaultSpec.builder("delayed-kill")
+                .targetPod("krafter-brokers-2")
+                .disruptionType(DisruptionType.POD_KILL)
+                .delayBeforeSec(1)
+                .build();
+        long delayNanos = TimeUnit.SECONDS.toNanos(1);
+
+        long triggered = System.nanoTime();
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(List.of("krafter-brokers-0", "krafter-brokers-1"), remainingPods());
+        assertTrue(outcome.chaosStartNanos() - triggered >= delayNanos, "the fault's start includes the delay");
     }
 
     /** Every request the API server has had since the last call, as "METHOD path". */
