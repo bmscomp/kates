@@ -127,6 +127,34 @@ class EndpointScopesTest {
         assertEquals(List.of(), problems);
     }
 
+    /**
+     * A resource is a CDI bean, and a class-level @RolesAllowed holds every
+     * one of its methods to the role, not only its endpoints: an observer or a
+     * scheduled method then runs with no request identity and is refused, as
+     * EventStreamResource's lifecycle observer was, so the event stream sent
+     * nothing. Each such method says @PermitAll.
+     */
+    @Test
+    void noMethodBesidesTheEndpointsInheritsTheClassScope() throws Exception {
+        List<String> problems = new ArrayList<>();
+        for (Class<?> c : resources()) {
+            if (!names(c)) {
+                continue;
+            }
+            for (Method m : c.getDeclaredMethods()) {
+                int mod = m.getModifiers();
+                if (Modifier.isPrivate(mod) || Modifier.isStatic(mod) || m.isSynthetic() || hasVerb(m, VERBS)) {
+                    continue;
+                }
+                if (!names(m)) {
+                    problems.add(c.getSimpleName() + "." + m.getName()
+                            + " is not an endpoint but inherits the class's scope; mark it @PermitAll");
+                }
+            }
+        }
+        assertEquals(List.of(), problems);
+    }
+
     @Test
     void everyKatesRpcHasAScope() {
         List<String> missing = new ArrayList<>();
