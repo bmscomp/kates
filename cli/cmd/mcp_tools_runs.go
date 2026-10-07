@@ -30,7 +30,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:447-453, TestOrchestrator.refreshStatus); both
+// (TestResource.java:445-451, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -1284,7 +1284,7 @@ func mcpRunHasRequested(r *client.MCPRun) bool {
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:576-604 checks only that it exists),
+// any type or status (TestResource.java:574-602 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -2264,7 +2264,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2011-2089",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:484-529",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:482-527",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},
@@ -2345,12 +2345,14 @@ var mcpCaveatsRuns = []mcpCaveat{
 	{
 		ID: mcpCaveatAuditNoActor,
 		Text: "Audit rows record no actor, only an action, event type, target, details and time. Only the REST " +
-			"test endpoints write them (create, bulk create, delete, bulk delete, cancel); disruptions, topic " +
+			"test endpoints write them (create, bulk create, delete, bulk delete, prune, cancel), and the Kates " +
+			"API's daily retention sweep for each run it deletes; disruptions, topic " +
 			"changes, schedules, webhooks and every gRPC call leave no row. The endpoint reads at most the 500 " +
 			"newest matching rows.",
 		Refs: []string{
 			mcpJava + "persistence/AuditEventEntity.java:15-32",
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:136,249,479,512",
+			mcpAnchoredRef(mcpJava+"service/RunRetention.java:72", `auditService.record("DELETE", "test"`),
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:140,253,477,510",
 				`auditService.record("CREATE"`, `auditService.record("DELETE"`, `auditService.record("CANCEL"`),
 			mcpJava + "service/AuditService.java:52-78",
 			mcpJava + "api/AuditResource.java:46-50",
