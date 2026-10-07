@@ -12,18 +12,26 @@ var (
 	auditLimit int
 	auditType  string
 	auditSince string
+	auditActor string
 )
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "View audit log of cluster mutations",
-	Long:  "Shows a log of all mutating operations (test creates/deletes, topic changes, disruption runs) with timestamps and details.",
+	Long: `Shows a log of the changes made through the Kates API, newest first: what was done, to what,
+when, and who did it. Who is the principal of the API key used (kates whoami's
+names: "legacy" for the key in kates.api.key), marked "agent" when an agent
+holds the key, or system:scheduler for a schedule's firing. Every REST or gRPC
+call that changes something leaves a row, a refused or failed one too, with
+its status in Details. Rows written before the Kates API recorded actors show
+no one.`,
 	Example: `  kates audit
   kates audit --limit 20 --type test
   kates audit --type topic --since 2024-01-01T00:00:00Z
+  kates audit --actor claude-on-lab
   kates audit -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		events, err := apiClient.Audit(context.Background(), auditLimit, auditType, auditSince)
+		events, err := apiClient.Audit(context.Background(), auditLimit, auditType, auditSince, auditActor)
 		if err != nil {
 			return cmdErr("Failed to fetch audit log: " + err.Error())
 		}
@@ -35,7 +43,7 @@ var auditCmd = &cobra.Command{
 
 		if len(events) == 0 {
 			output.Hint("No audit events found.")
-			if auditType != "" || auditSince != "" {
+			if auditType != "" || auditSince != "" || auditActor != "" {
 				output.Hint("Try removing filters to see more results.")
 			}
 			return nil
@@ -65,8 +73,17 @@ var auditCmd = &cobra.Command{
 				details = details[:27] + "..."
 			}
 
+			by := e.Actor
+			switch {
+			case by == "":
+				by = "-"
+			case e.PrincipalType == "agent":
+				by += " (agent)"
+			}
+
 			rows = append(rows, []string{
 				formatTime(e.Timestamp),
+				by,
 				action,
 				e.EventType,
 				target,
@@ -74,7 +91,7 @@ var auditCmd = &cobra.Command{
 			})
 		}
 
-		output.Table([]string{"Time", "Action", "Type", "Target", "Details"}, rows)
+		output.Table([]string{"Time", "By", "Action", "Type", "Target", "Details"}, rows)
 		return nil
 	},
 }
@@ -83,5 +100,6 @@ func init() {
 	auditCmd.Flags().IntVar(&auditLimit, "limit", 50, "Maximum number of events to show")
 	auditCmd.Flags().StringVar(&auditType, "type", "", "Filter by event type (test, topic, disruption, resilience)")
 	auditCmd.Flags().StringVar(&auditSince, "since", "", "Show events after this ISO-8601 timestamp")
+	auditCmd.Flags().StringVar(&auditActor, "actor", "", "Only events by this principal, as kates whoami names it")
 	rootCmd.AddCommand(auditCmd)
 }

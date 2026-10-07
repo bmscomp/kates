@@ -17,6 +17,7 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.SecurityPentestService;
 import com.bmscomp.kates.service.SecurityService;
@@ -69,6 +70,7 @@ public class SecurityResource {
         }
     }
 
+    @Audited(action = "READ", type = "auth-test")
     @RolesAllowed(Scopes.READ_SENSITIVE)
     @GET
     @Path("/auth-test")
@@ -127,6 +129,7 @@ public class SecurityResource {
         }
     }
 
+    @Audited(action = "UPDATE", type = "security-baseline")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/baseline")
@@ -226,6 +229,7 @@ public class SecurityResource {
         }
     }
 
+    @Audited(action = "READ", type = "acl-map")
     @RolesAllowed(Scopes.READ_SENSITIVE)
     @GET
     @Path("/acl-map")
@@ -259,6 +263,7 @@ public class SecurityResource {
         }
     }
 
+    @Audited(action = "READ", type = "secrets")
     @RolesAllowed(Scopes.READ_SENSITIVE)
     @GET
     @Path("/secrets")

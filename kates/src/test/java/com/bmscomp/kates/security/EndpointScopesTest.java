@@ -28,13 +28,15 @@ import io.quarkus.security.Authenticated;
 import org.junit.jupiter.api.Test;
 
 import com.bmscomp.kates.api.HealthResource;
+import com.bmscomp.kates.audit.Audited;
+import com.bmscomp.kates.audit.NotAudited;
 import com.bmscomp.kates.grpc.proto.ClusterServiceGrpc;
 import com.bmscomp.kates.grpc.proto.HealthServiceGrpc;
 import com.bmscomp.kates.grpc.proto.TestServiceGrpc;
 
 /**
- * Every REST endpoint names what it needs, and none that changes anything
- * needs only read. quarkus.security.jaxrs.deny-unannotated-endpoints refuses
+ * Every REST endpoint names what it needs, none that changes anything needs
+ * only read, and each one that changes anything leaves an audit row. quarkus.security.jaxrs.deny-unannotated-endpoints refuses
  * an endpoint that names nothing at run time; this test says so at build time,
  * with the endpoint's name. The same for gRPC: every Kates RPC has a scope.
  */
@@ -104,6 +106,14 @@ class EndpointScopesTest {
                 if (!names(source)) {
                     problems.add(name + " names no scope (@RolesAllowed, @PermitAll or @Authenticated)");
                     continue;
+                }
+                Audited audited = m.getAnnotation(Audited.class);
+                if (hasVerb(m, WRITES) && audited == null && !m.isAnnotationPresent(NotAudited.class)) {
+                    problems.add(name + " changes something but is neither @Audited nor @NotAudited");
+                }
+                if (audited != null
+                        && (audited.action().length() > 32 || audited.type().length() > 32)) {
+                    problems.add(name + "'s audit action or type is longer than the column's 32 characters");
                 }
                 if (hasVerb(m, WRITES) && !WRITES_THAT_READ.contains(name)) {
                     RolesAllowed roles = source.getAnnotation(RolesAllowed.class);

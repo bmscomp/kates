@@ -314,9 +314,9 @@ func TestQueryValuesAreEscaped(t *testing.T) {
 				return ignore(c.KafkaConsume(ctx, "orders", "earliest&limit=100000", 5))
 			}},
 		{"Audit", "/api/audit",
-			url.Values{"page": {"0"}, "size": {"10"}, "type": {"test&size=1000"}, "since": {timestamp}},
+			url.Values{"page": {"0"}, "size": {"10"}, "type": {"test&size=1000"}, "since": {timestamp}, "actor": {"a&b=c"}},
 			func(ctx context.Context, c *Client) error {
-				return ignore(c.Audit(ctx, 10, "test&size=1000", timestamp))
+				return ignore(c.Audit(ctx, 10, "test&size=1000", timestamp, "a&b=c"))
 			}},
 		{"SecurityAuthTest", "/api/security/auth-test",
 			url.Values{"user": {"alice&user=admin"}},

@@ -152,10 +152,11 @@ The agent calls `cluster_overview` and `kates_activity`.
   rows.
 
 What they cannot show: the alert rules are definitions, not alerts that are
-firing; the health figures can be 30 seconds old; audit rows name no actor,
-so nothing says who started a run; and a disruption report stored as
-`RUNNING` says only that a plan started, not that its fault is still running.
-The answer carries these as caveats, and a good agent repeats them.
+firing; the health figures can be 30 seconds old; an audit row names who
+started a run only on a Kates API that records actors; and a disruption
+report stored as `RUNNING` says only that a plan started, not that its fault
+is still running. The answer carries these as caveats, and a good agent
+repeats them.
 
 When the question comes from a problem you already see, the
 `did_kates_cause_this` prompt walks the same tools in order. Give it the time

@@ -17,6 +17,8 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.audit.AuditTrail;
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.security.Scopes;
 
@@ -52,9 +54,13 @@ public class DisruptionResource {
     @Inject
     SecurityIdentity identity;
 
+    @Inject
+    AuditTrail auditTrail;
+
     // read, not chaos:run: the dry run, which injects nothing, is a read (plan
     // §5.3), and the same method runs it. A plan that is not a dry run needs
     // chaos:run, checked below once dryRun is known.
+    @Audited(action = "RUN", type = "disruption")
     @POST
     @Operation(
             summary = "Execute a disruption",
@@ -82,6 +88,8 @@ public class DisruptionResource {
         }
 
         if (dryRun) {
+            // A preview injects nothing, so it leaves no audit row.
+            auditTrail.done();
             LOG.info("Dry-run for disruption plan: " + plan.getName());
             DisruptionSafetyGuard.DryRunResult result = safetyGuard.dryRun(plan);
             return Response.ok(result).build();

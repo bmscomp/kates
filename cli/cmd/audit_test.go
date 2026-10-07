@@ -53,6 +53,30 @@ func TestAuditCmd_WithFilters(t *testing.T) {
 	}
 }
 
+// A row names who made the change, and marks an agent's key; a row from
+// before the Kates API recorded actors shows no one.
+func TestAuditCmd_ShowsWhoActed(t *testing.T) {
+	mockResponse := `{"page":0,"size":50,"total":3,"count":3,"items":[
+		{"id": 5, "timestamp": "2026-10-07T12:00:00Z", "eventType": "webhook", "action": "CREATE", "target": "/api/webhooks", "details": "HTTP 403", "actor": "claude-on-lab", "principalType": "agent"},
+		{"id": 4, "timestamp": "2026-10-07T11:00:00Z", "eventType": "test", "action": "CREATE", "target": "0a1b2c3d", "details": "schedule 'nightly'", "actor": "system:scheduler", "principalType": "system"},
+		{"id": 3, "timestamp": "2026-10-01T11:00:00Z", "eventType": "test", "action": "DELETE", "target": "9f8e7d6c", "details": "Test deleted"}
+	]}`
+	ts, buf := setupTest(t, "GET", "/api/audit", 200, mockResponse)
+	defer ts.Close()
+
+	auditLimit, auditType, auditSince, auditActor = 50, "", "", ""
+
+	if err := auditCmd.RunE(auditCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stripAnsi(buf.String())
+	for _, want := range []string{"claude-on-lab (agent)", "system:scheduler", "By"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestAuditCmd_Empty(t *testing.T) {
 	ts, buf := setupTest(t, "GET", "/api/audit", 200, `{"page":0,"size":50,"total":0,"count":0,"items":[]}`)
 	defer ts.Close()
@@ -60,6 +84,7 @@ func TestAuditCmd_Empty(t *testing.T) {
 	auditLimit = 50
 	auditType = ""
 	auditSince = ""
+	auditActor = ""
 
 	err := auditCmd.RunE(auditCmd, nil)
 	if err != nil {
