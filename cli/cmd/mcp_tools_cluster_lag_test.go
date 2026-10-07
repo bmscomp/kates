@@ -342,7 +342,7 @@ func TestMCPConsumerGroupLagBackendErrors(t *testing.T) {
 	fb.JSON("GET", "/api/kafka/topics/payments", http.StatusInternalServerError,
 		map[string]any{"status": 500, "error": "Kafka Error", "message": "Failed to describe topic: payments"})
 	// ClusterResource answers 404 when the service's message holds "not
-	// found" (ClusterResource.java:164-172).
+	// found" (ClusterResource.java:167-175).
 	fb.JSON("GET", "/api/cluster/groups/gone", http.StatusNotFound,
 		map[string]any{"status": 404, "error": "Not Found", "message": "Consumer group not found: gone"})
 	h := newMCPHarness(t, fb)

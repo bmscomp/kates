@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -23,10 +24,12 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.engine.TestOrchestrator;
+import com.bmscomp.kates.security.Scopes;
 
 /**
  * REST API for managing scheduled/recurring test configurations.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/schedules")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -114,6 +117,7 @@ public class ScheduleResource {
                         .build());
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Operation(summary = "Create a schedule", description = "Creates a new recurring test schedule")
     @APIResponse(responseCode = "201", description = "Schedule created")
@@ -162,6 +166,7 @@ public class ScheduleResource {
         }
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @PUT
     @Path("/{id}")
     @Operation(summary = "Update a schedule")
@@ -214,6 +219,7 @@ public class ScheduleResource {
                         .build());
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{id}")
     @Operation(summary = "Delete a schedule")

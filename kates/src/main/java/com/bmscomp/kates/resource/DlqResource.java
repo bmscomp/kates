@@ -3,6 +3,7 @@ package com.bmscomp.kates.resource;
 import java.time.Instant;
 import java.util.Map;
 import java.util.stream.Collectors;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -11,11 +12,13 @@ import jakarta.ws.rs.core.MediaType;
 
 import io.smallrye.common.annotation.Blocking;
 
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.DeadLetterQueueService;
 
 /**
  * REST endpoint for Dead Letter Queue monitoring and inspection.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/dlq")
 @Produces(MediaType.APPLICATION_JSON)
 @Blocking

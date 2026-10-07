@@ -1,6 +1,7 @@
 package com.bmscomp.kates.disruption;
 
 import java.util.function.Consumer;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -15,10 +16,13 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.security.Scopes;
+
 /**
  * SSE endpoint for streaming real-time disruption test progress.
  * Clients connect and receive events as disruption steps execute.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/disruptions")
 @Tag(name = "Disruptions")
 public class DisruptionStreamResource {

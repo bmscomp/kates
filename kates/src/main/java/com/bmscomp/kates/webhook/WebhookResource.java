@@ -1,6 +1,7 @@
 package com.bmscomp.kates.webhook;
 
 import java.util.List;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -15,10 +16,13 @@ import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.security.Scopes;
+
 /**
  * REST endpoints for managing webhook registrations.
  * Webhooks receive HTTP POST notifications when test runs complete.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/webhooks")
 @Tag(name = "Webhooks")
 @Produces(MediaType.APPLICATION_JSON)
@@ -37,6 +41,7 @@ public class WebhookResource {
         return webhookService.list();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Operation(summary = "Register a webhook")
     public Response register(WebhookService.WebhookRegistration registration) {
@@ -56,6 +61,7 @@ public class WebhookResource {
         return Response.status(201).entity(registration).build();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{name}")
     @Operation(summary = "Unregister a webhook")

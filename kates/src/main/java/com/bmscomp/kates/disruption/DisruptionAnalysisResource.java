@@ -2,6 +2,7 @@ package com.bmscomp.kates.disruption;
 
 import java.util.List;
 import java.util.Map;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
@@ -21,7 +22,9 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.security.Scopes;
 
+@RolesAllowed(Scopes.READ)
 @Path("/api/disruptions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -101,6 +104,7 @@ public class DisruptionAnalysisResource {
                 .build();
     }
 
+    @RolesAllowed(Scopes.CHAOS_RUN)
     @POST
     @Path("/compound")
     @Operation(

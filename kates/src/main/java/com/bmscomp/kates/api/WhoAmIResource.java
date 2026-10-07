@@ -8,6 +8,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.quarkus.security.Authenticated;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -22,6 +23,8 @@ import com.bmscomp.kates.security.KatesPrincipal;
  * to learn whether it runs on an agent's key or a person's, and what that key
  * may do.
  */
+// Any key may ask who it is, whatever its scopes.
+@Authenticated
 @Path("/api/whoami")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Security")
