@@ -33,8 +33,11 @@ var testCleanupCmd = &cobra.Command{
 
 A run is orphaned when it is RUNNING more than --older-than after its planned
 end: its start plus the duration in its spec, twice that for INTEGRITY, which
-reads its records back for up to as long again. A run inside that window is
-left alone, however long it has been running.
+reads its records back for up to as long again. A run of a phased scenario sent
+to POST /api/tests shows none of its phases in its spec, and they run one after
+another, so its planned end is its start plus two hours, the longest the Kates
+API lets one last as Kates ships it (kates.engine.max-duration-ms). A run inside
+that window is left alone, however long it has been running.
 
 kates lists the runs it would delete and asks before deleting them. Deleting a
 run stops it and removes it with its results; kates test cancel stops a run and
@@ -128,7 +131,7 @@ func runTestCleanup(cmd *cobra.Command, args []string) error {
 type orphanedRun struct {
 	Run     client.TestRun
 	Started time.Time
-	Planned time.Duration // the spec's duration, twice that for INTEGRITY; 0 when it has none
+	Planned time.Duration // the spec's duration, twice that for INTEGRITY, the cap for a scenario; 0 when it has none
 	Overdue time.Duration // how long past its planned end it still runs
 }
 
@@ -143,7 +146,17 @@ func findOrphanedRuns(runs []client.TestRun, now time.Time, olderThan time.Durat
 			continue
 		}
 		var planned time.Duration
-		if run.Spec != nil && run.Spec.DurationMs > 0 {
+		if run.ScenarioName != "" {
+			// A scenario's phases run one after another, so it lasts their
+			// durations added up, and its spec is the base spec, which shows
+			// none of them. Judged by that spec, a scenario that outlasted it
+			// by --older-than counted as orphaned while it still ran. A
+			// current Kates API refuses one set to last longer than
+			// kates.engine.max-duration-ms, and an older one fails every run
+			// after 30 minutes, so that cap, as Kates ships it, is the longest
+			// a scenario can be set to last.
+			planned = mcpReaperMaxDurationMs * time.Millisecond
+		} else if run.Spec != nil && run.Spec.DurationMs > 0 {
 			planned = time.Duration(run.Spec.DurationMs) * time.Millisecond
 			// An INTEGRITY run reads its records back for up to its duration
 			// again once it has produced them, and the Kates API allows it

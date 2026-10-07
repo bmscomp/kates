@@ -157,7 +157,7 @@ With idempotency, even if the producer retries a send (due to transient network 
 
 ### Transactional Integrity
 
-Kafka transactions add atomic, exactly-once writes on top of idempotence [@kip98; @wang2021consistency]. The built-in `integrity-tx` template asks for transactions, idempotence and CRC verification, and the run has all three: its producer commits a transaction every 100 records, or sooner when 10 seconds pass first, and the verifying consumer reads with `read_committed`, so it counts only committed records. The run has one producer and one consumer whatever `parallelProducers` and `numConsumers` say:
+Kafka transactions add atomic, exactly-once writes on top of idempotence [@kip98; @wang2021consistency]. The built-in `integrity-tx` template asks for transactions, idempotence and CRC verification, and the run has all three: its producer commits a transaction every 100 records, or sooner when 10 seconds pass first, and the verifying consumer reads with `read_committed`, so it counts only committed records. The run has one producer and one consumer, as every INTEGRITY run does:
 
 ```bash
 # Export the built-in integrity-tx template, then run it
@@ -168,12 +168,12 @@ kates test apply -f integrity-tx.yaml --wait
 The exported `integrity-tx.yaml`:
 
 ```yaml
+# An INTEGRITY run starts one producer and one consumer.
 scenarios:
   - name: "Transactional Integrity Verification"
     type: INTEGRITY
     spec:
       records: 200000
-      parallelProducers: 4
       recordSizeBytes: 512
       acks: "all"
       compressionType: "zstd"
@@ -182,7 +182,6 @@ scenarios:
       enableCrc: true
       replicationFactor: 3
       minInsyncReplicas: 2
-      numConsumers: 4
     validate:
       maxDataLossPercent: 0
       maxDuplicatePercent: 0
@@ -197,7 +196,7 @@ scenarios:
 
 ## Integrity Under Chaos
 
-The real power of integrity testing emerges when combined with fault injection — but only when the fault lands while the producer is writing, and the producer keeps writing until the cluster has recovered. A run that finishes before the fault is injected passes, and its verdict says nothing about the failure. `kates resilience run` handles the timing: it starts the INTEGRITY run, waits `steadyStateSec`, marks the moment on the run so the verifier can measure [RPO](appendix-a-glossary.md#gl-rpo) against it, and triggers the fault. A [disruption plan](appendix-a-glossary.md#gl-disruption-plan) can't do this, because it sends no records; [Chaos Engineering in Practice](07-chaos-practice.md#two-ways-to-run-a-fault) compares the two and covers the chaos fields. What is left to you is sizing the run so it outlasts the fault and the recovery:
+The real power of integrity testing emerges when combined with fault injection — but only when the fault lands while the producer is writing, and the producer keeps writing until the cluster has recovered. A run that finishes before the fault is injected passes, and its verdict says nothing about the failure. `kates resilience run` handles the timing: it starts the INTEGRITY run, waits `steadyStateSec`, triggers the fault, and marks on the run the moment the fault goes in, so the verifier can measure [RPO](appendix-a-glossary.md#gl-rpo) against it. A [disruption plan](appendix-a-glossary.md#gl-disruption-plan) can't do this, because it sends no records; [Chaos Engineering in Practice](07-chaos-practice.md#two-ways-to-run-a-fault) compares the two and covers the chaos fields. What is left to you is sizing the run so it outlasts the fault and the recovery:
 
 ```yaml
 # integrity-chaos.yaml
@@ -281,7 +280,7 @@ With three brokers, [`replicationFactor: 3`](appendix-a-glossary.md#gl-rf) and `
 
 - `Lost 0` — every acknowledged record was consumed back.
 - `Duplicates 0` — with `acks=all` the producer is idempotent, so its retries through the [leader election](appendix-a-glossary.md#gl-leader-election) write nothing twice.
-- `RPO 0 ms` — a chaos start was marked on the run, and nothing written before it was lost. The mark is set just before the fault is triggered, so a Litmus experiment that then fails still gives `RPO 0 ms`: only `Status COMPLETED` from `kates resilience run` shows that the fault landed. `RPO not measured` means no chaos start reached the run, for one of two reasons. If the INTEGRITY run finished before the fault, resize it. If the chaos outcome's verdict is `Skipped`, the chaos provider is `noop` and injected nothing; resizing changes nothing, so set up a chaos provider first, as [Choosing a Chaos Provider](07-chaos-practice.md#choosing-a-chaos-provider) shows.
+- `RPO 0 ms` — a chaos start was marked on the run, and nothing written before it was lost. The mark is set just before the chaos provider injects the fault, once its `delayBeforeSec` is over. On Litmus that is just before Kates creates the ChaosEngine, so a Litmus experiment that then fails still gives `RPO 0 ms`: only `Status COMPLETED` from `kates resilience run` shows that the fault landed. `RPO not measured` means no chaos start reached the run, for one of two reasons. If the INTEGRITY run finished before the fault, resize it. If the chaos outcome's verdict is `Skipped`, the chaos provider is `noop` and injected nothing; resizing changes nothing, so set up a chaos provider first, as [Choosing a Chaos Provider](07-chaos-practice.md#choosing-a-chaos-provider) shows.
 - `Producer RTO` appears only when a send failed outright. Retries the producer absorbs within its delivery timeout leave it out.
 
 The verdict is `DATA_LOSS` if an acknowledged record is missing, otherwise `CORRUPTION` on a CRC failure, `ORDERING_VIOLATION` on a record out of order within its [partition](appendix-a-glossary.md#gl-partition), `DUPLICATES_DETECTED` on a record consumed twice, and `PASS` when none of these occurred.

@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import io.fabric8.kubernetes.api.model.DeleteOptions;
@@ -16,6 +18,7 @@ import io.fabric8.mockwebserver.http.RecordedRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import com.bmscomp.kates.chaos.litmus.ChaosEngine;
@@ -63,6 +66,10 @@ class LitmusChaosProviderTest {
                             .withUid("podset-uid")
                             .endOwnerReference()
                             .endMetadata()
+                            // Each runs on the node named after its zone.
+                            .withNewSpec()
+                            .withNodeName(b[1])
+                            .endSpec()
                             .build())
                     .create();
         }
@@ -183,13 +190,137 @@ class LitmusChaosProviderTest {
                 .isEmpty());
     }
 
+    private ChaosEngine drain(FaultSpec spec) {
+        return provider.buildChaosEngine(spec, "engine", "node-drain");
+    }
+
     @Test
-    void nodeDrainTakesNoTargetPods() {
+    void nodeDrainTakesTheNodeOfThePodItPicks() throws Exception {
+        // Used to set no TARGET_NODE, and node-drain then drained the node of
+        // a random pod in any namespace.
+        provider.resultPollIntervalMs = 20;
         FaultSpec spec = FaultSpec.builder("drain")
+                .targetBrokerId(2)
                 .disruptionType(DisruptionType.NODE_DRAIN)
                 .build();
 
-        assertNull(env(provider.buildChaosEngine(spec, "engine", "node-drain"), "TARGET_PODS"));
+        CompletableFuture<ChaosOutcome> fault = provider.triggerFault(spec);
+        ChaosEngine engine = awaitEngine();
+        pass(engine.getMetadata().getName() + "-node-drain");
+
+        assertTrue(fault.get(5, TimeUnit.SECONDS).isPass());
+        assertEquals("node-drain", engine.getSpec().experiments.getFirst().name);
+        assertEquals("sigma", env(engine, "TARGET_NODE"));
+        assertNull(env(engine, "TARGET_PODS"));
+    }
+
+    @Test
+    void nodeDrainOfANamedPodTakesItsNode() {
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetPod("krafter-brokers-0")
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .build();
+
+        assertEquals("alpha", env(drain(spec), "TARGET_NODE"));
+    }
+
+    @Test
+    void targetAllDrainTakesTheNodeItsPodsShare() {
+        FaultSpec spec = FaultSpec.builder("zone-drain")
+                .targetLabel("strimzi.io/component-type=kafka,zone=alpha")
+                .targetAll(true)
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .build();
+
+        assertEquals("alpha", env(drain(spec), "TARGET_NODE"));
+    }
+
+    @Test
+    void stepWithoutATypeThatNamesNodeDrainTakesItsNodeToo() throws Exception {
+        provider.resultPollIntervalMs = 20;
+        FaultSpec spec = FaultSpec.builder("node-drain").targetBrokerId(2).build();
+
+        CompletableFuture<ChaosOutcome> fault = provider.triggerFault(spec);
+        ChaosEngine engine = awaitEngine();
+        pass(engine.getMetadata().getName() + "-node-drain");
+
+        assertTrue(fault.get(5, TimeUnit.SECONDS).isPass());
+        assertEquals("sigma", env(engine, "TARGET_NODE"));
+        assertNull(env(engine, "TARGET_PODS"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"TARGET_NODE, gamma", "NODE_LABEL, topology.kubernetes.io/zone=gamma"})
+    void overrideThatPicksTheNodeIsLeftToPickIt(String key, String value) {
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .envOverrides(Map.of(key, value))
+                .build();
+
+        List<String> picks = drain(spec).getSpec().experiments.getFirst().spec.components.env.stream()
+                .filter(e -> e.name.equals("TARGET_NODE") || e.name.equals("NODE_LABEL"))
+                .map(e -> e.name + "=" + e.value)
+                .toList();
+
+        assertEquals(List.of(key + "=" + value), picks);
+    }
+
+    /**
+     * Each fails the fault before the ChaosEngine exists, so nothing is
+     * drained. A drain with no selector and no pod used to go to node-drain
+     * without TARGET_NODE as well.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            quoteCharacter = '"',
+            value = {
+                "targetAll over two nodes | | strimzi.io/component-type=kafka | true"
+                        + " | NODE_DRAIN: the pods targetAll picks run on 2 nodes (alpha, sigma), and node-drain drains"
+                        + " one. Narrow targetLabel to the pods of one node, or name the node in"
+                        + " envOverrides.TARGET_NODE",
+                "a pod on no node yet | | zone=gamma | false"
+                        + " | NODE_DRAIN: pod krafter-brokers-3 is not on a node yet, so there is no node to drain",
+                "a named pod that is gone | krafter-brokers-9 | strimzi.io/component-type=kafka | false"
+                        + " | NODE_DRAIN: pod krafter-brokers-9 was not found in namespace 'kafka', so there is no node"
+                        + " to drain",
+                "a selector that matches no pod | | zone=omega | false"
+                        + " | No pods found matching label selector 'zone=omega' in namespace 'kafka'",
+                "no selector and no pod | | | false"
+                        + " | Empty label selector: it would match every pod in the namespace"
+            })
+    void drainWithNoNodeToDrainFailsWithoutDraining(
+            String name, String targetPod, String targetLabel, boolean targetAll, String reason) throws Exception {
+        // Pending: the scheduler has not put it on a node.
+        client.pods()
+                .inNamespace("kafka")
+                .resource(new PodBuilder()
+                        .withNewMetadata()
+                        .withName("krafter-brokers-3")
+                        .withNamespace("kafka")
+                        .addToLabels("zone", "gamma")
+                        .endMetadata()
+                        .build())
+                .create();
+        FaultSpec spec = FaultSpec.builder("drain")
+                .targetPod(targetPod != null ? targetPod : "")
+                .targetLabel(targetLabel != null ? targetLabel : "")
+                .targetAll(targetAll)
+                .disruptionType(DisruptionType.NODE_DRAIN)
+                .build();
+
+        ChaosOutcome outcome = provider.triggerFault(spec).get(5, TimeUnit.SECONDS);
+
+        assertFalse(outcome.isPass(), name);
+        assertEquals(reason, outcome.failureReason(), name);
+        assertTrue(
+                client.resources(ChaosEngine.class)
+                        .inNamespace("kafka")
+                        .list()
+                        .getItems()
+                        .isEmpty(),
+                name);
     }
 
     /**
@@ -290,6 +421,51 @@ class LitmusChaosProviderTest {
         assertEquals("krafter-brokers-2", env(engine, "TARGET_PODS"));
         assertTrue(outcome.isPass(), outcome.failureReason());
         assertTrue(outcome.chaosStartNanos() - triggered >= delayNanos, "the fault's start includes the delay");
+    }
+
+    /** A resilience run measures RPO from the moment the fault reports. */
+    @Test
+    void aDelayedFaultIsReportedAtItsStartBeforeTheChaosEngineExists() throws Exception {
+        provider.resultPollIntervalMs = 20;
+        FaultSpec spec = FaultSpec.builder("delayed-kill")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.POD_KILL)
+                .delayBeforeSec(1)
+                .build();
+        List<Long> reported = new CopyOnWriteArrayList<>();
+        List<Integer> enginesWhenReported = new CopyOnWriteArrayList<>();
+
+        long triggered = System.nanoTime();
+        CompletableFuture<ChaosOutcome> fault = provider.triggerFault(spec, injectedAt -> {
+            reported.add(injectedAt);
+            enginesWhenReported.add(client.resources(ChaosEngine.class)
+                    .inNamespace("kafka")
+                    .list()
+                    .getItems()
+                    .size());
+        });
+        pass(awaitEngine().getMetadata().getName() + "-pod-delete");
+        ChaosOutcome outcome = fault.get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(List.of(outcome.chaosStartNanos()), reported, "reported once, at the fault's start");
+        assertTrue(
+                reported.getFirst() - triggered >= TimeUnit.SECONDS.toNanos(1), "reported before the delay was over");
+        assertEquals(List.of(0), enginesWhenReported, "reported after the ChaosEngine was created");
+    }
+
+    @Test
+    void aFaultTheKubernetesProviderInjectsIsReportedAsWell() throws Exception {
+        FaultSpec spec = FaultSpec.builder("graceful")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.POD_DELETE)
+                .build();
+        List<Long> reported = new CopyOnWriteArrayList<>();
+
+        ChaosOutcome outcome = provider.triggerFault(spec, reported::add).get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(1, reported.size(), reported.toString());
     }
 
     private ChaosEngine awaitEngine() throws InterruptedException {

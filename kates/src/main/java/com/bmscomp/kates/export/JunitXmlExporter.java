@@ -120,7 +120,10 @@ public class JunitXmlExporter {
             if (r.getStartTime() != null && r.getEndTime() != null) {
                 Instant start = Instant.parse(r.getStartTime());
                 Instant end = Instant.parse(r.getEndTime());
-                return java.time.Duration.between(start, end).toMillis() / 1000.0;
+                // A scenario's later phase has the startTime it was due to
+                // start at, so one cancelled before its turn ends before it
+                // starts: it ran for no time.
+                return Math.max(0, java.time.Duration.between(start, end).toMillis()) / 1000.0;
             }
         } catch (Exception ignored) {
         }

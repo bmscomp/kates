@@ -43,6 +43,25 @@ class JunitXmlExporterTest {
     }
 
     @Test
+    void aPhaseCancelledBeforeItsTurnTookNoTime() {
+        // A scenario's later phase has the startTime it was due to start at,
+        // which comes after the time a cancel ended it.
+        TestRun run = new TestRun()
+                .withAddedResult(new TestResult()
+                        .withTaskId("a1b2c3d4-ramp-ramp-3")
+                        .withPhaseName("ramp")
+                        .withStartTime("2026-10-05T12:10:00Z")
+                        .withEndTime("2026-10-05T12:01:00Z")
+                        .withError("Cancelled by user"));
+        TestReport report = new TestReport();
+        report.setRun(run);
+        report.setMetadata(Map.of("testType", "LOAD"));
+
+        String xml = exporter.export(report);
+        assertTrue(xml.matches("(?s).*<testcase name=\"ramp\"[^>]*time=\"0[.,]000\".*"), xml);
+    }
+
+    @Test
     void errorResultHasFailureElement() {
         TestRun run = new TestRun();
         TestResult result = new TestResult().withTaskId("produce-1").withError("Connection refused");
