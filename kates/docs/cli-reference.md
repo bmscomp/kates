@@ -268,13 +268,17 @@ Generates a human-readable explanation including:
 
 ### scenario-diff
 
-Compare a scenario YAML file against a completed test run to detect configuration drift:
+Compare a scenario file against a completed test run to detect configuration drift:
 
 ```bash
 kates scenario-diff scenario.yaml 69acdf31
+kates scenario-diff cli/examples/load-test.yaml 69acdf31 --scenario "Endurance Soak"
+kates scenario-diff cli/examples/perf-stress.yaml 69acdf31 --scenario 2 -o json
 ```
 
-Checks the YAML fields (type, backend, spec parameters) against the actual values used in the test run and reports any differences. Useful for auditing whether a test was run with the intended configuration.
+Reads the file as `kates test apply` does and builds the request apply would send for the scenario, so the spec keys are the file's (`records`, `parallelProducers`, `durationSeconds`, …) and `durationSeconds` is compared as the `durationMs` it is sent as. The scenario's type, backend and each spec field the request carries are compared with the spec the run reports; `targetThroughput` is compared with the rate the run used, its `throughput`. A file with more than one scenario needs `--scenario`, with the scenario's name or its number in the file, counting from 1.
+
+A field the run's spec does not report, and a spec key apply does not read or leaves out of the request, is listed as not compared rather than counted as drift. Useful for auditing whether a test was run with the intended configuration.
 
 ## Observability
 
