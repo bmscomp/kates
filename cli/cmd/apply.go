@@ -40,6 +40,57 @@ type ValidationSpec struct {
 
 type ScenarioFile struct {
 	Scenarios []TestScenario `yaml:"scenarios" json:"scenarios"`
+	// lone is set when the file's scenarios list is missing or empty, and its
+	// one scenario is the one at its top level.
+	lone bool
+}
+
+// parseScenarioFile reads the scenarios in a file's contents as kates test
+// apply runs them: its scenarios list, or, when that list is missing or
+// empty, the one scenario at its top level, which needs a type. A file
+// named .json is read with encoding/json and any other with yaml.v3; text
+// that encoding/json cannot read, such as YAML in a file named .json, is
+// read as YAML. kates scenario-diff and draft_scenario read a file through
+// it too, so that they see the scenarios apply would run.
+//
+// Both decoders ignore a key the struct does not name, so a file of one
+// scenario reads as an empty list. The top level used to be read only when
+// the list could not be read at all, so such a file ran nothing.
+func parseScenarioFile(name string, data []byte) (ScenarioFile, error) {
+	unmarshal := yaml.Unmarshal
+	if strings.HasSuffix(name, ".json") {
+		unmarshal = json.Unmarshal
+	}
+	var sf ScenarioFile
+	err := unmarshal(data, &sf)
+	if err == nil && len(sf.Scenarios) > 0 {
+		return sf, nil
+	}
+	if err != nil {
+		unmarshal = yaml.Unmarshal
+	}
+	var lone TestScenario
+	loneErr := unmarshal(data, &lone)
+	switch {
+	case lone.Type == "" && err != nil:
+		return ScenarioFile{}, err
+	case lone.Type == "":
+		return ScenarioFile{}, nil
+	case loneErr != nil:
+		// A scenario with a type and a value its field cannot hold: the
+		// error names the value, where "no scenarios" would hide it.
+		return ScenarioFile{}, loneErr
+	}
+	return ScenarioFile{Scenarios: []TestScenario{lone}, lone: true}, nil
+}
+
+// scenarioName is the name kates test apply shows for the scenario at index i
+// of its file: its own, or its number for one without.
+func scenarioName(s TestScenario, i int) string {
+	if s.Name != "" {
+		return s.Name
+	}
+	return fmt.Sprintf("Scenario %d", i+1)
 }
 
 var (
@@ -50,9 +101,10 @@ var (
 var testApplyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Run tests from a YAML/JSON scenario file",
-	Long: `Submit each scenario in a YAML or JSON file as a test run. With --wait it
-waits for each run to finish before the next and checks the SLA gates in its
-validate block.
+	Long: `Submit each scenario in a YAML or JSON file as a test run. The file holds
+a scenarios list, as in the example below, or the name, type, spec and validate
+of one scenario at its top level. With --wait it waits for each run to finish
+before the next and checks the SLA gates in its validate block.
 
 In a terminal --wait shows a spinner. Without one (a pipe, a CI job, an agent's
 shell), or with --plain, it prints a plain line to stderr each time a run's
@@ -72,7 +124,7 @@ exits 130 after the summary.`,
       type: LOAD
       spec:
         records: 100000
-        parallelProducers: 2
+        recordSizeBytes: 512
       validate:
         maxP99LatencyMs: 50
         minThroughputRecPerSec: 10000`,
@@ -86,23 +138,13 @@ exits 130 after the summary.`,
 			return cmdErr("Failed to read file: " + err.Error())
 		}
 
-		var sf ScenarioFile
-		if strings.HasSuffix(applyFile, ".json") {
-			err = json.Unmarshal(data, &sf)
-		} else {
-			err = yaml.Unmarshal(data, &sf)
-		}
+		sf, err := parseScenarioFile(applyFile, data)
 		if err != nil {
-			var single TestScenario
-			if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
-				sf.Scenarios = []TestScenario{single}
-			} else {
-				return cmdErr("Invalid scenario file: " + err.Error())
-			}
+			return cmdErr("Invalid scenario file: " + err.Error())
 		}
 
 		if len(sf.Scenarios) == 0 {
-			return cmdErr("No scenarios found in file")
+			return cmdErr("No scenarios found in file: it needs a scenarios list, or one scenario with a type at its top level")
 		}
 		// Checked before the first test starts, so a file with a mistake
 		// runs none of its tests rather than the ones above it.
@@ -137,10 +179,7 @@ exits 130 after the summary.`,
 				res.Interrupted = true
 				break
 			}
-			name := scenario.Name
-			if name == "" {
-				name = fmt.Sprintf("Scenario %d", i+1)
-			}
+			name := scenarioName(scenario, i)
 
 			if !jsonOut {
 				fmt.Printf("  %s %s (%s)...\n",
@@ -359,10 +398,10 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.Acks = fmt.Sprintf("%v", v)
 		}
 		if v, ok := s.Spec["batchSize"]; ok {
-			spec.BatchSize = toInt(v)
+			spec.BatchSize = toIntPtr(v)
 		}
 		if v, ok := s.Spec["lingerMs"]; ok {
-			spec.LingerMs = toInt(v)
+			spec.LingerMs = toIntPtr(v)
 		}
 		if v, ok := s.Spec["compressionType"]; ok {
 			spec.CompressionType = fmt.Sprintf("%v", v)
@@ -389,7 +428,7 @@ func scenarioToRequest(s TestScenario) *client.CreateTestRequest {
 			spec.FetchMinBytes = toInt(v)
 		}
 		if v, ok := s.Spec["fetchMaxWaitMs"]; ok {
-			spec.FetchMaxWaitMs = toInt(v)
+			spec.FetchMaxWaitMs = toIntPtr(v)
 		}
 		if v, ok := s.Spec["enableIdempotence"]; ok {
 			spec.EnableIdempotence = toBoolPtr(v)
@@ -417,6 +456,26 @@ func toInt(v interface{}) int {
 	default:
 		return 0
 	}
+}
+
+// toIntPtr reads a number the file sets, as toInt does, so that 0 is sent
+// too: read with toInt, a lingerMs, batchSize or fetchMaxWaitMs of 0 was left
+// out of the request, and the run used its type's setting instead. Anything
+// that is not a number is nil and sends nothing, as toInt's 0 did.
+func toIntPtr(v interface{}) *int {
+	switch n := v.(type) {
+	case float64:
+		i := int(n)
+		return &i
+	case int:
+		return &n
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			j := int(i)
+			return &j
+		}
+	}
+	return nil
 }
 
 func toBool(v interface{}) bool {
