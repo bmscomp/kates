@@ -23,14 +23,14 @@ type scenarioMeta struct {
 }
 
 var builtinScenarios = []scenarioMeta{
-	{filename: "quick-load.yaml", name: "quick-load", testType: "LOAD", description: "Quick smoke test — 50k records, 2 producers, p99 < 100ms gate"},
-	{filename: "production-load.yaml", name: "production-load", testType: "LOAD", description: "Production-grade — 1M records, 8 producers, acks=all, lz4, strict SLA"},
+	{filename: "quick-load.yaml", name: "quick-load", testType: "LOAD", description: "Quick smoke test — 50k records, p99 < 100ms gate"},
+	{filename: "production-load.yaml", name: "production-load", testType: "LOAD", description: "Production-grade — 1M records, acks=all, lz4, strict SLA"},
 	{filename: "stress-test.yaml", name: "stress-test", testType: "STRESS", description: "High-throughput stress — 5M records, 16 producers, find breaking points"},
 	{filename: "endurance-soak.yaml", name: "endurance-soak", testType: "ENDURANCE", description: "1-hour soak at 5k msg/s — detect GC pauses and log compaction issues"},
 	{filename: "exactly-once.yaml", name: "exactly-once", testType: "ROUND_TRIP", description: "Round trip, idempotent + transactional producer — 100k records, p99 < 200ms gate"},
-	{filename: "integrity-tx.yaml", name: "integrity-tx", testType: "INTEGRITY", description: "Transactional integrity — 4 producers, zstd, CRC, zero-loss verification"},
-	{filename: "spike-test.yaml", name: "spike-test", testType: "SPIKE", description: "Burst traffic — 32 producers for 60s, test backpressure handling"},
-	{filename: "ci-gate.yaml", name: "ci-gate", testType: "LOAD", description: "CI pipeline gate — fast 10k-record validation with strict zero-error SLA"},
+	{filename: "integrity-tx.yaml", name: "integrity-tx", testType: "INTEGRITY", description: "Transactional integrity — zstd, CRC, zero-loss verification"},
+	{filename: "spike-test.yaml", name: "spike-test", testType: "SPIKE", description: "Burst traffic — one unthrottled producer for up to 60s, test backpressure handling"},
+	{filename: "ci-gate.yaml", name: "ci-gate", testType: "LOAD", description: "CI pipeline gate — fast 10k-record validation, p99 < 100ms and at least 1,000 rec/s"},
 }
 
 var (

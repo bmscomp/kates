@@ -1,9 +1,9 @@
+# A SPIKE run starts one producer and runs it unthrottled.
 scenarios:
   - name: "Spike Test — Burst Traffic"
     type: SPIKE
     spec:
       records: 500000
-      parallelProducers: 32
       recordSizeBytes: 1024
       durationSeconds: 60
       acks: "1"
@@ -12,4 +12,3 @@ scenarios:
       partitions: 12
     validate:
       maxP99LatencyMs: 500
-      maxErrorRate: 0.01

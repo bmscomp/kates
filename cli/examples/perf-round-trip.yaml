@@ -1,6 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: ROUND_TRIP — End-to-End Latency Benchmark
 # ─────────────────────────────────────────────────────────────────────────────
+# A ROUND_TRIP run starts one producer and one consumer.
+#
 # Usage:  kates test apply -f cli/examples/perf-round-trip.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
 scenarios:
@@ -11,11 +13,9 @@ scenarios:
       partitions: 3
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 50000
-      recordSize: 256
-      throughput: 1000
-      numProducers: 1
-      numConsumers: 1
+      records: 50000
+      recordSizeBytes: 256
+      targetThroughput: 1000
       acks: "all"
       enableIdempotence: true
       batchSize: 16384          # small batch — reduce buffering latency
@@ -24,5 +24,4 @@ scenarios:
     validate:
       maxP99LatencyMs: 50
       maxAvgLatencyMs: 10
-      maxErrorRate: 0.0
       minThroughputRecPerSec: 900

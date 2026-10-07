@@ -1,10 +1,17 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Resilience Test: NODE_DRAIN — Kubernetes Node Maintenance
 # ─────────────────────────────────────────────────────────────────────────────
-# Drains the Kubernetes node hosting the gamma broker pool.
-# The Strimzi Drain Cleaner intercepts the eviction webhook and triggers
-# a controlled Kafka shutdown before the pod is evicted, ensuring zero
-# partition downtime during node maintenance windows.
+# Drains gamma, the Kubernetes node that runs the brokers-gamma pool on the
+# Kind lab (config/cluster.yaml), and evicts every pod on it, not only the
+# broker. The Strimzi Drain Cleaner intercepts the eviction webhook and
+# triggers a controlled Kafka shutdown before the pod is evicted, ensuring zero
+# partition downtime during node maintenance windows. brokers-gamma is pinned
+# to gamma (a required node affinity and a local volume), so its pod stays
+# Pending until node-drain uncordons gamma, when chaosDurationSec ends.
+#
+# Kates drains the node that runs the pod targetLabel picks, the brokers-gamma
+# broker, and passes it to Litmus's node-drain as TARGET_NODE. On another
+# cluster the same label drains whichever node runs that broker.
 #
 # Hypothesis:
 #   Drain Cleaner intercepts eviction → triggers controlled shutdown →
@@ -26,8 +33,6 @@ testRequest:
     numRecords: 900000
     recordSize: 1024
     throughput: 3000
-    numProducers: 3
-    numConsumers: 3
     consumerGroup: drain-test-cg
     acks: "all"
     enableIdempotence: true
@@ -42,7 +47,6 @@ chaosSpec:
   targetLabel: "strimzi.io/pool-name=brokers-gamma"
   chaosDurationSec: 60
   delayBeforeSec: 0
-  gracePeriodSec: 30
 
 steadyStateSec: 30
 maxRecoveryWaitSec: 180      # rescheduling takes longer than pod restart
@@ -62,6 +66,6 @@ probes:
     mode: Continuous
     command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
     expectedOutput: "0"
-    comparator: "=="
+    comparator: "<="          # 0 or fewer; the probe executor has no ==
     intervalSec: 10
     timeoutSec: 30

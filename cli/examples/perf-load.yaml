@@ -1,21 +1,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: LOAD — Baseline Throughput
 # ─────────────────────────────────────────────────────────────────────────────
+# One producer writes 1M records at up to 10k msg/s while one consumer reads
+# them. For more producers, make it a STRESS run (perf-stress.yaml): a LOAD run
+# starts one producer and one consumer.
+#
 # Usage:  kates test apply -f cli/examples/perf-load.yaml [--wait]
 # ─────────────────────────────────────────────────────────────────────────────
 scenarios:
-  - name: "Baseline Load — 3 producers, lz4, acks=all"
+  - name: "Baseline Load — 10k msg/s, lz4, acks=all"
     type: LOAD
     spec:
       topic: kates-events
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 1000000
-      recordSize: 1024
-      throughput: 10000         # cap at 10 k msg/s; set -1 for unlimited
-      numProducers: 3
-      numConsumers: 2
+      records: 1000000
+      recordSizeBytes: 1024
+      targetThroughput: 10000   # cap at 10 k msg/s; set -1 for unlimited
       consumerGroup: load-test-cg
       acks: "all"
       enableIdempotence: true
@@ -28,4 +30,3 @@ scenarios:
       maxP99LatencyMs: 200
       maxAvgLatencyMs: 50
       minThroughputRecPerSec: 8000
-      maxErrorRate: 0.0

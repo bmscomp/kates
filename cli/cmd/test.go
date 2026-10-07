@@ -105,8 +105,15 @@ var testGetCmd = &cobra.Command{
 			output.KeyValue("Producers", fmt.Sprintf("%d", result.Spec.ParallelProducers))
 			output.KeyValue("Acks", result.Spec.Acks)
 			output.KeyValue("Compression", result.Spec.CompressionType)
-			output.KeyValue("Batch Size", fmtNum(float64(result.Spec.BatchSize)))
-			output.KeyValue("Linger ms", fmt.Sprintf("%d", result.Spec.LingerMs))
+			batchSize, lingerMs := "—", "—"
+			if result.Spec.BatchSize != nil {
+				batchSize = fmtNum(float64(*result.Spec.BatchSize))
+			}
+			if result.Spec.LingerMs != nil {
+				lingerMs = fmt.Sprintf("%d", *result.Spec.LingerMs)
+			}
+			output.KeyValue("Batch Size", batchSize)
+			output.KeyValue("Linger ms", lingerMs)
 			output.KeyValue("Partitions", fmt.Sprintf("%d", result.Spec.Partitions))
 			output.KeyValue("Replication", fmt.Sprintf("%d", result.Spec.ReplicationFactor))
 		}
@@ -355,7 +362,13 @@ var testCreateCmd = &cobra.Command{
 		if createBackend != "" {
 			req.Backend = createBackend
 		}
-		if hasSpecOverrides() {
+		// A 0 is a setting for these three, not an absent value, so each is
+		// sent when given, 0 included. --linger-ms 0 used to be left out, and
+		// a LOAD run lingered its type's 5 ms.
+		batchSize := givenInt(cmd, "batch-size", createBatchSize)
+		lingerMs := givenInt(cmd, "linger-ms", createLingerMs)
+		fetchMaxWaitMs := givenInt(cmd, "fetch-max-wait-ms", createFetchMaxWaitMs)
+		if hasSpecOverrides() || batchSize != nil || lingerMs != nil || fetchMaxWaitMs != nil {
 			req.Spec = &client.TestSpec{
 				Records:           createRecords,
 				ParallelProducers: createProducers,
@@ -363,8 +376,8 @@ var testCreateCmd = &cobra.Command{
 				DurationMs:        createDuration * 1000,
 				Topic:             createTopic,
 				Acks:              createAcks,
-				BatchSize:         createBatchSize,
-				LingerMs:          createLingerMs,
+				BatchSize:         batchSize,
+				LingerMs:          lingerMs,
 				CompressionType:   createCompression,
 				NumConsumers:      createConsumers,
 				ReplicationFactor: createReplicationFactor,
@@ -373,7 +386,7 @@ var testCreateCmd = &cobra.Command{
 				ConsumerGroup:     createConsumerGroup,
 				TargetThroughput:  createThroughput,
 				FetchMinBytes:     createFetchMinBytes,
-				FetchMaxWaitMs:    createFetchMaxWaitMs,
+				FetchMaxWaitMs:    fetchMaxWaitMs,
 			}
 		}
 
@@ -571,13 +584,25 @@ func optionalPositiveInt(s string) error {
 	return nil
 }
 
+// hasSpecOverrides reports whether the flags, or the wizard, set a spec field
+// other than the three givenInt reads. A --throughput of -1 counts: given
+// alone, it sent no spec at all, so an ENDURANCE run took its type's 5,000
+// records/s instead of running unlimited.
 func hasSpecOverrides() bool {
 	return createRecords > 0 || createProducers > 0 || createRecordSize > 0 ||
-		createDuration > 0 || createTopic != "" || createAcks != "" ||
-		createBatchSize > 0 || createLingerMs > 0 || createCompression != "" ||
+		createDuration > 0 || createTopic != "" || createAcks != "" || createCompression != "" ||
 		createConsumers > 0 || createReplicationFactor > 0 || createPartitions > 0 ||
-		createMinISR > 0 || createConsumerGroup != "" || createThroughput > 0 ||
-		createFetchMinBytes > 0 || createFetchMaxWaitMs > 0
+		createMinISR > 0 || createConsumerGroup != "" || createThroughput != 0 ||
+		createFetchMinBytes > 0
+}
+
+// givenInt is the value of the int flag name when the command line gives it,
+// 0 included, and nil when it does not, which leaves the type's default.
+func givenInt(cmd *cobra.Command, name string, v int) *int {
+	if !cmd.Flags().Changed(name) {
+		return nil
+	}
+	return &v
 }
 
 var validTestTypes = []string{

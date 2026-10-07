@@ -1,6 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: ENDURANCE — Long-Running Soak
 # ─────────────────────────────────────────────────────────────────────────────
+# An ENDURANCE run starts one producer and one consumer.
+#
 # Usage:  kates test apply -f cli/examples/perf-endurance.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
 scenarios:
@@ -11,12 +13,10 @@ scenarios:
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      duration: 600             # 600s = 10 min (passed via durationMs on the server)
-      numRecords: 3600000
-      recordSize: 1024
-      throughput: 6000
-      numProducers: 3
-      numConsumers: 3
+      durationSeconds: 600      # 10 min; kates test apply sends it as durationMs
+      records: 3600000
+      recordSizeBytes: 1024
+      targetThroughput: 6000
       consumerGroup: soak-cg
       acks: "all"
       enableIdempotence: true
@@ -29,5 +29,3 @@ scenarios:
       maxP99LatencyMs: 300
       maxAvgLatencyMs: 75
       minThroughputRecPerSec: 5500
-      maxErrorRate: 0.1
-      maxDataLossPercent: 0.0

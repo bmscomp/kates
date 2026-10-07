@@ -171,6 +171,31 @@ class ReportGeneratorTest {
     }
 
     @Test
+    void aRunningScenarioIsSummarisedOverTheTasksThatHaveStarted() {
+        // A RAMP phase half-way through its steps, with a STEADY phase after
+        // it. The next step and the STEADY phase wait for their turn, PENDING,
+        // and their 0s halved the ramp's rate and more than halved the run's.
+        TestResult warmup = producer(40.0).withPhaseName("warmup").withThroughputRecordsPerSec(500);
+        TestResult firstStep = producer(40.0)
+                .withPhaseName("ramp")
+                .withStatus(TaskStatus.RUNNING)
+                .withThroughputRecordsPerSec(250);
+        TestResult nextStep = new TestResult().withPhaseName("ramp").withStatus(TaskStatus.PENDING);
+        TestResult steady = new TestResult().withPhaseName("steady").withStatus(TaskStatus.PENDING);
+
+        TestReport report =
+                generator.generate(run(TaskStatus.RUNNING, null, List.of(warmup, firstStep, nextStep, steady)));
+
+        assertEquals(375.0, report.getSummary().avgThroughputRecPerSec(), 0.001);
+        assertEquals(
+                List.of("warmup", "ramp", "steady"),
+                report.getPhases().stream().map(PhaseReport::getPhaseName).toList());
+        assertEquals(250.0, report.getPhases().get(1).getMetrics().avgThroughputRecPerSec(), 0.001);
+        // A phase that has not started is still listed, with nothing measured.
+        assertEquals(0.0, report.getPhases().get(2).getMetrics().avgThroughputRecPerSec());
+    }
+
+    @Test
     void failedRunWithNoRowsExportsOneFailingTestCase() {
         TestReport report = generator.generate(run(TaskStatus.FAILED, null, List.of()));
 

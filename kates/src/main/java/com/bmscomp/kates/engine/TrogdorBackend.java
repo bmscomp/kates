@@ -107,7 +107,19 @@ public class TrogdorBackend implements BenchmarkBackend {
     // backend's work, and checking it through submit would need a coordinator.
     // Each call takes the next agent in turn, so a run's tasks spread over
     // every configured agent.
+    //
+    // A task with a start time keeps it as the spec's startMs: the coordinator
+    // holds the task PENDING until then, and the agent stops it at startMs
+    // plus durationMs. Without one, the spec starts when it is built.
     TrogdorSpec toTrogdorSpec(BenchmarkTask task) {
+        TrogdorSpec spec = workloadSpec(task);
+        if (task.getStartAtMs() > 0) {
+            spec.setStartMs(task.getStartAtMs());
+        }
+        return spec;
+    }
+
+    private TrogdorSpec workloadSpec(BenchmarkTask task) {
         return switch (task.getWorkloadType()) {
             case PRODUCE -> {
                 var produce = ProduceBenchSpec.create(
