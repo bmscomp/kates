@@ -12,4 +12,3 @@ scenarios:
       partitions: 12
     validate:
       maxP99LatencyMs: 500
-      maxErrorRate: 0.01

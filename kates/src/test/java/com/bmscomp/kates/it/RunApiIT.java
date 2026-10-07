@@ -153,10 +153,10 @@ class RunApiIT {
         // Seeded PENDING rather than submitted, on purpose. Cancelling a run
         // that was just POSTed races the submission itself: executeTest saves
         // PENDING, then a virtual thread creates the topic and saves RUNNING.
-        // A cancel landing in that window writes FAILED and is then overwritten
-        // by the RUNNING save, so the run finishes DONE. That race is worth
-        // fixing in the orchestrator; it is not worth encoding as a flaky test,
-        // and it is not what this test is about.
+        // A cancel landing in that window used to be overwritten by the
+        // RUNNING save, so the run finished DONE. The submission's write now
+        // leaves a cancelled run as it is, which TestOrchestratorCancelTest
+        // covers; it is not what this test is about.
         String id = seedRun(TestResult.TaskStatus.PENDING);
 
         // TaskStatus has no CANCELLED, so the run is persisted as FAILED, and

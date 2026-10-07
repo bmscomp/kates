@@ -302,7 +302,7 @@ Performance tests use port 9092 (plain) for [baseline](appendix-a-glossary.md#gl
 
 ## Topics
 
-The `kafka-cluster` chart's platform profile creates these topics as [`KafkaTopic`](appendix-a-glossary.md#gl-kafkatopic) resources. Notice the last column: the [Kates API](appendix-a-glossary.md#gl-kates-api) writes none of them on its own.
+The `kafka-cluster` chart's platform profile creates these topics as [`KafkaTopic`](appendix-a-glossary.md#gl-kafkatopic) resources. Notice the last column: the [Kates API](appendix-a-glossary.md#gl-kates-api) writes only one of them on its own, and only during a resilience run.
 
 | Topic | Partitions | Retention | Compression | What the Kates API Does With It |
 |-------|:----------:|-----------|:-----------:|---------|
@@ -311,10 +311,11 @@ The `kafka-cluster` chart's platform profile creates these topics as [`KafkaTopi
 | `kates-metrics` | 6 | 24h | lz4 | Nothing |
 | `kates-audit` | 3 | 30d | — | Nothing |
 | `kates-dlq` | 3 | ∞ | — | Polls it every 30 seconds and logs what arrives |
+| `kates-probe-topic` | 3 | 1h | — | Writes ten 100-byte records to it each time a resilience run's `producer-throughput` probe runs |
 
-A test produces to whatever topic its spec names, so these topics carry traffic only when a test or a script names them, as several example [scenario files](appendix-a-glossary.md#gl-scenario-file) in `cli/examples` do. Their partition counts, retention and compression are the profile's settings, not a measure of any traffic Kates generates.
+A test produces to whatever topic its spec names, so the others carry traffic only when a test or a script names them, as several example [scenario files](appendix-a-glossary.md#gl-scenario-file) in `cli/examples` do. Their partition counts, retention and compression are the profile's settings, not a measure of any traffic Kates generates.
 
-The one topic the Kates API writes on its own isn't in the table, because the profile doesn't create it. `kates-test-events` carries each run's lifecycle events to the Kates API's webhook consumer, and `krafter` doesn't create a topic on first use (`auto.create.topics.enable: false`). So the Kates API creates it through the Kafka Admin API, checking when it starts and every minute after. It gives the topic one partition, three replicas (fewer on a smaller cluster), `cleanup.policy: delete` and 7 days' retention, and leaves an existing `kates-test-events` as it is. [Where Results Live](02-architecture.md#where-results-live) follows an event through it.
+The topic the Kates API writes on every run isn't in the table, because the profile doesn't create it. `kates-test-events` carries each run's lifecycle events to the Kates API's webhook consumer, and `krafter` doesn't create a topic on first use (`auto.create.topics.enable: false`). So the Kates API creates it through the Kafka Admin API, checking when it starts and every minute after. It gives the topic one partition, three replicas (fewer on a smaller cluster), `cleanup.policy: delete` and 7 days' retention, and leaves an existing `kates-test-events` as it is. [Where Results Live](02-architecture.md#where-results-live) follows an event through it.
 
 ## Operational Components
 

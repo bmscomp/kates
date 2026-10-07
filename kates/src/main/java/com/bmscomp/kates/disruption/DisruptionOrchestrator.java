@@ -294,10 +294,10 @@ public class DisruptionOrchestrator {
                         "Baseline metrics captured");
             }
 
-            session.markDisruptionStart();
-            if (isrTracker != null) isrTracker.markDisruptionStart();
-            if (lagTracker != null) lagTracker.markDisruptionStart();
-            Instant disruptionStart = Instant.now();
+            // The recovery clocks start when the chaos provider reports the
+            // fault going in, once its delayBeforeSec is over. Started before
+            // the trigger, they counted the delay as recovery time.
+            RecoveryClocks clocks = new RecoveryClocks(session, isrTracker, lagTracker);
 
             LOG.info("  Injecting fault: " + spec.experimentName());
             eventBus.emit(
@@ -309,7 +309,7 @@ public class DisruptionOrchestrator {
             // inject, and a step that stopped waiting first went on while the
             // fault was still to come.
             ChaosOutcome outcome = chaosCoordinator
-                    .triggerFault(spec)
+                    .triggerFault(spec, clocks::start)
                     .get(spec.delayBeforeSec() + spec.chaosDurationSec() + 120, TimeUnit.SECONDS);
 
             if (step.observationWindowSec() > 0) {
@@ -337,10 +337,21 @@ public class DisruptionOrchestrator {
                         "Post-disruption metrics captured");
             }
 
+            // When the fault went in, or null when the provider never said so:
+            // noop injects nothing, and a fault can fail before it goes in.
+            // With nothing to recover from, such a step waits for no recovery
+            // and measures none. Nor does it keep the ISR and lag figures,
+            // whose missing recovery times would read as never recovered.
+            Instant disruptionStart = clocks.startedAt();
+            boolean injected = disruptionStart != null;
+            if (!injected) {
+                LOG.info("  The fault never went in (" + outcome.verdict() + "): no recovery to wait for");
+            }
+
             Duration tfr = null;
             Duration tar = null;
             Duration unrecoveredAfter = null;
-            if (step.requireRecovery()) {
+            if (step.requireRecovery() && injected) {
                 LOG.info("  Waiting for recovery (timeout=" + recoveryTimeoutSec + "s)");
                 eventBus.emit(
                         plan.getName(),
@@ -377,11 +388,13 @@ public class DisruptionOrchestrator {
                 }
             }
 
-            Duration strimziRecovery = strimziTracker.measureRecoveryTime(
-                    kafkaNamespace, kafkaCluster, disruptionStart, Duration.ofSeconds(recoveryTimeoutSec));
+            Duration strimziRecovery = injected
+                    ? strimziTracker.measureRecoveryTime(
+                            kafkaNamespace, kafkaCluster, disruptionStart, Duration.ofSeconds(recoveryTimeoutSec))
+                    : null;
 
-            IsrSnapshot.Metrics isrMetrics = isrTracker != null ? isrTracker.stop() : null;
-            LagSnapshot.Metrics lagMetrics = lagTracker != null ? lagTracker.stop() : null;
+            IsrSnapshot.Metrics isrMetrics = injected && isrTracker != null ? isrTracker.stop() : null;
+            LagSnapshot.Metrics lagMetrics = injected && lagTracker != null ? lagTracker.stop() : null;
 
             return new DisruptionReport.StepReport(
                     step.name(),
@@ -457,5 +470,46 @@ public class DisruptionOrchestrator {
                 rollbackReason,
                 null,
                 null);
+    }
+
+    /**
+     * A step's recovery clocks: the pod watch, and the ISR and lag trackers
+     * when the plan names a topic or a group. {@link #start} is the
+     * {@code onInject} the chaos provider calls on its own thread.
+     */
+    private static final class RecoveryClocks {
+        private final K8sPodWatcher.WatchSession session;
+        private final KafkaIntelligenceService.IsrTracker isrTracker;
+        private final KafkaIntelligenceService.LagTracker lagTracker;
+        private volatile Instant startedAt;
+
+        RecoveryClocks(
+                K8sPodWatcher.WatchSession session,
+                KafkaIntelligenceService.IsrTracker isrTracker,
+                KafkaIntelligenceService.LagTracker lagTracker) {
+            this.session = session;
+            this.isrTracker = isrTracker;
+            this.lagTracker = lagTracker;
+        }
+
+        /**
+         * Starts every clock at the moment the provider reports, a
+         * {@link System#nanoTime()} reading. The watch and the trackers time
+         * what they see with {@link Instant#now()}, so the reading is moved
+         * onto that clock: the instant now, less the time since the reading.
+         */
+        void start(long injectedAtNanos) {
+            long sinceInjected = System.nanoTime() - injectedAtNanos;
+            Instant at = Instant.now().minusNanos(sinceInjected);
+            session.markDisruptionStart(at);
+            if (isrTracker != null) isrTracker.markDisruptionStart(at);
+            if (lagTracker != null) lagTracker.markDisruptionStart(at);
+            startedAt = at;
+        }
+
+        /** When the fault went in, or null while the provider has not reported it. */
+        Instant startedAt() {
+            return startedAt;
+        }
     }
 }

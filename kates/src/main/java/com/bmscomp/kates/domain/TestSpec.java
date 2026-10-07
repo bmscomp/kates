@@ -44,7 +44,7 @@ public class TestSpec {
     @Max(104_857_600) // 100 MiB
     private Integer recordSize;
 
-    @Min(value = -1, message = "throughput must be -1 (unlimited) or positive")
+    @Rate(message = "throughput must be -1 (unlimited) or positive")
     private Integer throughput;
 
     @Pattern(regexp = "all|-1|0|1", message = "acks must be one of: all, -1, 0, 1")
@@ -93,7 +93,7 @@ public class TestSpec {
     @Pattern(regexp = ".*\\S.*", message = "consumerGroup must name a group; Kafka refuses an empty or blank one")
     private String consumerGroup;
 
-    @Min(value = -1, message = "targetThroughput must be -1 (unlimited) or positive")
+    @Rate(message = "targetThroughput must be -1 (unlimited) or positive")
     private Integer targetThroughput;
 
     @Min(1)

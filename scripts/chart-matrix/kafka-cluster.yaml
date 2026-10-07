@@ -181,7 +181,7 @@ renders:
     values: [values-prod.yaml, values-platform.yaml]
     assert:
       - kind: KafkaTopic
-        count: 8
+        count: 9
       - kind: KafkaUser
         count: 7
       - kind: Kafka
@@ -207,6 +207,11 @@ renders:
         name: kates-dlq
         path: spec/config/cleanup.policy
         equals: delete
+      - why: "the producer-throughput probe writes to it, and the brokers create no topic on first use"
+        kind: KafkaTopic
+        name: kates-probe-topic
+        path: spec/config/retention.ms
+        equals: "3600000"
   - name: additional
     values: [values-ci.yaml, values-additional.yaml]
     assert:
@@ -265,7 +270,7 @@ renders:
         path: spec/kafka/listeners/*/type
         notEquals: nodeport
       - kind: KafkaTopic
-        count: 8
+        count: 9
   - name: kates deploy on a generic cluster
     values: [../../scripts/chart-matrix/fixtures/kafka-cluster-detected.yaml, values-platform.yaml]
     set: *cli
@@ -639,7 +644,7 @@ renders:
       - kind: KafkaUser
         count: 7
       - kind: KafkaTopic
-        count: 8
+        count: 9
       - why: "0.4 base values had no pools: the 1.0 defaults apply"
         kind: KafkaNodePool
         count: 2

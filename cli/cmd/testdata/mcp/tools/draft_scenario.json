@@ -45,7 +45,7 @@
         "type": "object"
       },
       "yaml": {
-        "description": "a scenario file as kates test apply -f reads it: a scenarios list of name, type, spec and validate. JSON is checked both as kates test apply reads a .json file and as YAML, and must read the same both ways. Give this or template",
+        "description": "a scenario file as kates test apply -f reads it: a scenarios list of name, type, spec and validate, or one such scenario at its top level. JSON is checked both as kates test apply reads a .json file and as YAML, and must read the same both ways. Give this or template",
         "maxLength": 8000,
         "type": "string"
       }
@@ -269,7 +269,7 @@
                 },
                 "request": {
                   "additionalProperties": false,
-                  "description": "the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; zero values are left out",
+                  "description": "the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; it leaves out an empty value and a 0, except the 0 of batchSize, lingerMs and fetchMaxWaitMs",
                   "properties": {
                     "backend": {
                       "type": "string"
@@ -281,7 +281,10 @@
                           "type": "string"
                         },
                         "batchSize": {
-                          "type": "integer"
+                          "type": [
+                            "null",
+                            "integer"
+                          ]
                         },
                         "compressionType": {
                           "type": "string"
@@ -311,13 +314,19 @@
                           ]
                         },
                         "fetchMaxWaitMs": {
-                          "type": "integer"
+                          "type": [
+                            "null",
+                            "integer"
+                          ]
                         },
                         "fetchMinBytes": {
                           "type": "integer"
                         },
                         "lingerMs": {
-                          "type": "integer"
+                          "type": [
+                            "null",
+                            "integer"
+                          ]
                         },
                         "minInsyncReplicas": {
                           "type": "integer"

@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.LongConsumer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -133,6 +134,11 @@ public class KubernetesChaosProvider implements ChaosProvider {
 
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
+        return triggerFault(spec, injectedAt -> {});
+    }
+
+    @Override
+    public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec, LongConsumer onInject) {
         return CompletableFuture.supplyAsync(
                 () -> {
                     Instant start = Instant.now();
@@ -150,6 +156,8 @@ public class KubernetesChaosProvider implements ChaosProvider {
                             start = Instant.now();
                             startNanos = System.nanoTime();
                         }
+                        // The fault goes in from here, once its delay is over.
+                        onInject.accept(startNanos);
                         applyDisruption(spec, engineName);
                         return ChaosOutcome.success(
                                 engineName, spec.experimentName(), start, Instant.now(), startNanos, null, null, null);

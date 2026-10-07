@@ -247,7 +247,7 @@ class MetricUtilsTest {
     }
 
     @Test
-    void throughputStillAveragesEveryRow() {
+    void throughputStillAveragesTheConsumer() {
         TestResult produce = producer(10_000, 12.0, 8.0, 25.0, 40.0, 95.0).withThroughputRecordsPerSec(1_000.0);
         TestResult consume = nativeConsumer(10_000).withThroughputRecordsPerSec(900.0);
 
@@ -256,6 +256,102 @@ class MetricUtilsTest {
         assertEquals(950.0, s.avgThroughputRecPerSec(), 0.001);
         assertEquals(1_000.0, s.peakThroughputRecPerSec(), 0.001);
         assertEquals(20_000, s.totalRecords());
+    }
+
+    /** A scenario's later phase, stored as it waits for its turn: PENDING, nothing measured. */
+    private static TestResult waitingPhase(String name) {
+        return new TestResult().withPhaseName(name).withStatus(TestResult.TaskStatus.PENDING);
+    }
+
+    @Test
+    void aTaskThatHasNotStartedIsLeftOutOfTheThroughputMeans() {
+        // Two STEADY phases taking turns, as the resilience tutorial's
+        // game-day example runs: averaging the second's 0 in halved the rate.
+        TestResult running = producer(60_000, 12.0, 8.0, 25.0, 40.0, 95.0)
+                .withPhaseName("events")
+                .withStatus(TestResult.TaskStatus.RUNNING)
+                .withThroughputRecordsPerSec(1_000.0)
+                .withThroughputMBPerSec(1.0);
+
+        ReportSummary s = MetricUtils.computeSummary(List.of(running, waitingPhase("results")));
+
+        assertEquals(1_000.0, s.avgThroughputRecPerSec(), 0.001);
+        assertEquals(1.0, s.avgThroughputMBPerSec(), 0.001);
+        // Nothing else had anything from it.
+        assertEquals(1_000.0, s.peakThroughputRecPerSec(), 0.001);
+        assertEquals(60_000, s.totalRecords());
+        assertEquals(40.0, s.p99LatencyMs(), 0.001);
+        assertEquals(12.0, s.avgLatencyMs(), 0.001);
+        assertEquals(0, s.totalErrors());
+    }
+
+    @Test
+    void aProducerThatHasNotStartedStillKeepsTheConsumersPollTimesOut() {
+        // A Trogdor LOAD run polled before its producer started: the poll
+        // times are not the run's latency, which nothing has measured yet.
+        TestResult waitingProducer = waitingPhase("produce");
+        TestResult trogdorConsumer = new TestResult()
+                .withPhaseName("consume")
+                .withStatus(TestResult.TaskStatus.RUNNING)
+                .withRecordsSent(1_000)
+                .withThroughputRecordsPerSec(500.0)
+                .withAvgLatencyMs(300.0)
+                .withP99LatencyMs(500.0);
+
+        ReportSummary s = MetricUtils.computeSummary(List.of(waitingProducer, trogdorConsumer));
+
+        assertEquals(0.0, s.p99LatencyMs());
+        assertEquals(0.0, s.avgLatencyMs());
+        assertFalse(MetricUtils.measuredLatency(List.of(waitingProducer, trogdorConsumer)));
+        assertEquals(500.0, s.avgThroughputRecPerSec(), 0.001);
+    }
+
+    @Test
+    void aRunWhoseTasksHaveNotStartedHasNoThroughputYet() {
+        // A mean over no task is 0, not NaN.
+        ReportSummary s = MetricUtils.computeSummary(List.of(waitingPhase("warmup"), waitingPhase("steady")));
+
+        assertEquals(0.0, s.avgThroughputRecPerSec());
+        assertEquals(0.0, s.avgThroughputMBPerSec());
+    }
+
+    @Test
+    void aPendingRowThatMeasuredSomethingStillCounts() {
+        // Only a PENDING row with no records and no rate is taken for a task
+        // that has not started, so leaving it out drops nothing but a 0.
+        TestResult running = producer(10_000, 12.0, 8.0, 25.0, 40.0, 95.0)
+                .withStatus(TestResult.TaskStatus.RUNNING)
+                .withThroughputRecordsPerSec(1_000.0)
+                .withThroughputMBPerSec(1.0);
+        TestResult withRecords = waitingPhase("steady").withRecordsSent(1_000);
+        TestResult withARate = waitingPhase("steady").withThroughputRecordsPerSec(100.0);
+        TestResult withAnMBRate = waitingPhase("steady").withThroughputMBPerSec(0.5);
+
+        assertEquals(
+                500.0, MetricUtils.computeSummary(List.of(running, withRecords)).avgThroughputRecPerSec(), 0.001);
+        assertEquals(
+                550.0, MetricUtils.computeSummary(List.of(running, withARate)).avgThroughputRecPerSec(), 0.001);
+        assertEquals(
+                0.75, MetricUtils.computeSummary(List.of(running, withAnMBRate)).avgThroughputMBPerSec(), 0.001);
+    }
+
+    @Test
+    void aTaskEndedBeforeItsTurnCountsAsARateOfZero() {
+        // A cancel fails a waiting task, with the startTime it was due at, so
+        // it is no longer PENDING: like any task that failed, its 0 counts.
+        TestResult ran = producer(60_000, 12.0, 8.0, 25.0, 40.0, 95.0)
+                .withStatus(TestResult.TaskStatus.FAILED)
+                .withError("Cancelled by user")
+                .withThroughputRecordsPerSec(1_000.0);
+        TestResult cancelledBeforeItsTurn = waitingPhase("results")
+                .withStatus(TestResult.TaskStatus.FAILED)
+                .withError("Cancelled by user")
+                .withStartTime("2026-10-05T12:07:00Z")
+                .withEndTime("2026-10-05T12:03:00Z");
+
+        ReportSummary s = MetricUtils.computeSummary(List.of(ran, cancelledBeforeItsTurn));
+
+        assertEquals(500.0, s.avgThroughputRecPerSec(), 0.001);
     }
 
     @Test

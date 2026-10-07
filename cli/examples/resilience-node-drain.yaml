@@ -9,9 +9,9 @@
 # to gamma (a required node affinity and a local volume), so its pod stays
 # Pending until node-drain uncordons gamma, when chaosDurationSec ends.
 #
-# Litmus's node-drain drains the node named in TARGET_NODE. Kates sets none,
-# and passes node-drain no pods from targetLabel, so envOverrides names the
-# node. On another cluster, name the node that runs the broker to drain.
+# Kates drains the node that runs the pod targetLabel picks, the brokers-gamma
+# broker, and passes it to Litmus's node-drain as TARGET_NODE. On another
+# cluster the same label drains whichever node runs that broker.
 #
 # Hypothesis:
 #   Drain Cleaner intercepts eviction → triggers controlled shutdown →
@@ -47,27 +47,25 @@ chaosSpec:
   targetLabel: "strimzi.io/pool-name=brokers-gamma"
   chaosDurationSec: 60
   delayBeforeSec: 0
-  envOverrides:
-    TARGET_NODE: gamma
 
 steadyStateSec: 30
 maxRecoveryWaitSec: 180      # rescheduling takes longer than pod restart
 
 probes:
   - name: isr-health-check
-    type: cmdProbe
+    type: kafkaProbe
     mode: Continuous
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    command: under-replicated-partitions
     expectedOutput: "50"
     comparator: "<="
     intervalSec: 10
     timeoutSec: 30
 
   - name: partition-availability
-    type: cmdProbe
+    type: kafkaProbe
     mode: Continuous
-    command: "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'"
+    command: unavailable-partitions
     expectedOutput: "0"
-    comparator: "<="          # 0 or fewer; the probe executor has no ==
+    comparator: "<="
     intervalSec: 10
     timeoutSec: 30

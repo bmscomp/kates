@@ -1330,6 +1330,112 @@ class TestOrchestratorTest {
         }
 
         @Test
+        void aNameLongerThanTheRunStoresIsRefusedBeforeTakingAPermit() {
+            // The run stores the scenario's name in 128 characters
+            // (test_runs.scenario_name), so a longer one failed the save as
+            // the run was registered, with an answer that named none of it.
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest request = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY));
+            request.getScenario().setName("x".repeat(129));
+
+            for (int i = 0; i < 5; i++) {
+                Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+                InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+                assertEquals(
+                        Map.of(
+                                "name",
+                                "a scenario's name is stored in 128 characters at most, and this one has 129;"
+                                        + " shorten it"),
+                        invalid.getFieldErrors());
+                assertTrue(invalid.getMessage().startsWith("scenario.name: "), invalid.getMessage());
+            }
+            assertTrue(submitted.isEmpty());
+
+            // 128 characters fit, counted as PostgreSQL counts them: a
+            // character outside the BMP is one, though Java holds it in two.
+            request.getScenario().setName(new String(Character.toChars(0x1F680)).repeat(128));
+            assertTrue(engine.executeTest(request).isSuccess());
+        }
+
+        @Test
+        void aPhaseNameItsTasksIdsCannotHoldIsRefusedBeforeTheTasksStart() {
+            // Each id of a phase's tasks is the run's id, the phase's name and
+            // a suffix such as -produce or -ramp-99, stored in 128 characters
+            // (test_results.task_id). A save that failed on a longer one came
+            // after the tasks had started, so they ran their course with
+            // nothing recorded, and the run kept its slot until the reaper.
+            TestOrchestrator engine = withBackend("native");
+            ScenarioPhase ramp = phase("x".repeat(101), ScenarioPhase.PhaseType.RAMP);
+            ramp.setTargetThroughput(100);
+            ramp.setRampSteps(100);
+            CreateTestRequest request = scenario(new TestSpec(), phase("warm", ScenarioPhase.PhaseType.WARMUP), ramp);
+
+            Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(
+                    Map.of(
+                            "phases[1].name",
+                            "a phase's name is 100 characters at most, since the ids of its tasks hold it, and this one"
+                                    + " has 101; shorten it"),
+                    invalid.getFieldErrors());
+            assertTrue(submitted.isEmpty());
+
+            // At 100 characters every id fits, the last RAMP step's too.
+            ramp.setName("x".repeat(100));
+            assertTrue(engine.executeTest(request).isSuccess());
+            assertEquals(101, submitted.size());
+            assertTrue(
+                    submitted.stream().allMatch(task -> task.getTaskId().length() <= 128),
+                    () -> "the longest id has "
+                            + submitted.stream()
+                                    .mapToInt(task -> task.getTaskId().length())
+                                    .max()
+                                    .orElse(0)
+                            + " characters");
+        }
+
+        @Test
+        void aNulCharacterTheDatabaseCannotStoreIsRefused() {
+            // PostgreSQL stores no NUL character in text, and jsonb refuses
+            // one too. So a NUL in the scenario's name or in a label failed
+            // the run's first save, and one in a phase's name the save after
+            // its tasks had started.
+            TestOrchestrator engine = withBackend("native");
+            CreateTestRequest request = scenario(new TestSpec(), phase("ste\0ady", ScenarioPhase.PhaseType.STEADY));
+            request.getScenario().setName("pay\0ments");
+            request.getScenario().setLabels(new java.util.LinkedHashMap<>(Map.of("team", "pay\0ments")));
+
+            Exception failure = engine.executeTest(request).asFailure().orElseThrow();
+
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+            assertEquals(
+                    Map.of(
+                            "name",
+                            "a scenario's name holds a NUL character, which the Kates API's database cannot store;"
+                                    + " remove it",
+                            "labels",
+                            "a label's key or value holds a NUL character, which the Kates API's database cannot"
+                                    + " store; remove it",
+                            "phases[0].name",
+                            "a phase's name holds a NUL character, which the Kates API's database cannot store;"
+                                    + " remove it"),
+                    invalid.getFieldErrors());
+            assertTrue(submitted.isEmpty());
+
+            // In a label's key too.
+            request.getScenario().setName("payments");
+            request.getScenario().getPhases().get(0).setName("steady");
+            request.getScenario().setLabels(new java.util.LinkedHashMap<>(Map.of("te\0am", "payments")));
+            failure = engine.executeTest(request).asFailure().orElseThrow();
+            assertEquals(
+                    Set.of("labels"),
+                    assertInstanceOf(InvalidTestSpecException.class, failure)
+                            .getFieldErrors()
+                            .keySet());
+        }
+
+        @Test
         void aScenarioWhoseRunCannotBeBuiltTakesNoPermit() {
             // The run is built before the permit is taken, so whatever throws
             // while it's built, as the missing type did, costs no permit. A
@@ -1449,14 +1555,12 @@ class TestOrchestratorTest {
         void aRampPhaseWithoutARateIsRefusedByName() {
             // ENDURANCE's default rate is 5000 records a second, but a phase
             // resolves its spec without the type's defaults: with no rate set,
-            // this ramp's four steps ran at 1, 2, 3 and 4 records a second. A
-            // rate of 0 is no rate either. The STEADY phase runs unthrottled.
+            // this ramp's four steps ran at 1, 2, 3 and 4 records a second.
+            // The STEADY phase runs unthrottled. A phase's own rate of 0 is
+            // outside its limits (PhaseValuesOutsideTheirLimits).
             ScenarioPhase ramp = phase("ramp-up", ScenarioPhase.PhaseType.RAMP);
             ramp.setRampSteps(4);
-            ScenarioPhase zero = phase("zero", ScenarioPhase.PhaseType.RAMP);
-            zero.setTargetThroughput(0);
-            CreateTestRequest request =
-                    scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY), ramp, zero);
+            CreateTestRequest request = scenario(new TestSpec(), phase("steady", ScenarioPhase.PhaseType.STEADY), ramp);
             request.setType(TestType.ENDURANCE);
             request.getScenario().setType(TestType.ENDURANCE);
 
@@ -1465,12 +1569,10 @@ class TestOrchestratorTest {
 
             InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
             Map<String, String> errors = invalid.getFieldErrors();
-            assertEquals(Set.of("phases[1].targetThroughput", "phases[2].targetThroughput"), errors.keySet());
+            assertEquals(Set.of("phases[1].targetThroughput"), errors.keySet());
             assertTrue(
                     errors.get("phases[1].targetThroughput").contains("phase ramp-up has none (-1, unlimited)"),
                     errors.toString());
-            assertTrue(
-                    errors.get("phases[2].targetThroughput").contains("phase zero has none (0, "), errors.toString());
             assertTrue(invalid.getMessage().contains("scenario.phases[1].targetThroughput: "), invalid.getMessage());
             assertTrue(submitted.isEmpty());
         }
@@ -1669,7 +1771,7 @@ class TestOrchestratorTest {
                     .resolveSpecForPhase(any());
             request.setScenario(scenario);
             TestOrchestrator orchestrator = withBackend("native");
-            when(repository.saveIfPresent(any())).thenReturn(true);
+            when(repository.saveIfStatus(any(), any())).thenReturn(true);
 
             TestRun run = orchestrator.executeTest(request).asSuccess().orElseThrow();
 
@@ -1683,7 +1785,7 @@ class TestOrchestratorTest {
                 verify(backend).stop(new BenchmarkHandle("native", taskId));
             }
             assertEquals(TestResult.TaskStatus.FAILED, run.getStatus());
-            verify(repository).saveIfPresent(run);
+            verify(repository).saveIfStatus(run, TestResult.TaskStatus.RUNNING);
             assertEquals(
                     started,
                     run.getResults().stream().map(TestResult::getTaskId).toList());
@@ -1792,6 +1894,16 @@ class TestOrchestratorTest {
             when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
                 TestRun stored = invocation.getArgument(0);
                 return rows.computeIfPresent(stored.getId(), (id, old) -> stored) != null;
+            });
+            // The submission's last write: only over the row as first saved.
+            when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
+                TestRun stored = invocation.getArgument(0);
+                TestRun old = rows.get(stored.getId());
+                if (old == null || old.getStatus() != invocation.getArgument(1)) {
+                    return false;
+                }
+                rows.put(stored.getId(), stored);
+                return true;
             });
             Instance<BenchmarkBackend> backends = mock(Instance.class);
             when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
@@ -2059,7 +2171,7 @@ class TestOrchestratorTest {
             Instance<BenchmarkBackend> backends = mock(Instance.class);
             when(backends.stream()).thenAnswer(invocation -> java.util.stream.Stream.of(backend));
             TestRunRepository repository = mock(TestRunRepository.class);
-            when(repository.saveIfPresent(any())).thenReturn(true);
+            when(repository.saveIfStatus(any(), any())).thenReturn(true);
             BenchmarkMetrics metrics = mock(BenchmarkMetrics.class);
             doThrow(new IllegalStateException("the error counter is gone"))
                     .when(metrics)
@@ -2086,7 +2198,7 @@ class TestOrchestratorTest {
             String producer = run.getId() + "-produce-0";
             verify(backend).stop(new BenchmarkHandle("native", producer));
             org.mockito.ArgumentCaptor<TestRun> stored = org.mockito.ArgumentCaptor.forClass(TestRun.class);
-            verify(repository).saveIfPresent(stored.capture());
+            verify(repository).saveIfStatus(stored.capture(), eq(TestResult.TaskStatus.PENDING));
             assertEquals(TestResult.TaskStatus.FAILED, stored.getValue().getStatus());
             Map<String, TestResult> results = stored.getValue().getResults().stream()
                     .collect(java.util.stream.Collectors.toMap(TestResult::getTaskId, r -> r));
@@ -2324,6 +2436,113 @@ class TestOrchestratorTest {
             assertTrue(orchestrator
                     .refusal(scenarioOf(2_400_000, 2_400_000, 2_400_000))
                     .isEmpty());
+        }
+    }
+
+    /**
+     * A phase's own targetThroughput and durationMs are not spec fields, and
+     * nothing held them to a limit: a targetThroughput of 0 or below -1 was
+     * the phase's rate, which both benchmark backends ran unthrottled, and a
+     * durationMs of 500 ran a half-second phase. Values outside their limits
+     * are refused first, and on their own, as bean validation refuses a spec
+     * value outside its limits on POST /api/tests before the orchestrator is
+     * asked.
+     */
+    @Nested
+    class PhaseValuesOutsideTheirLimits {
+
+        private CreateTestRequest scenarioWith(ScenarioPhase... phases) {
+            TestScenario scenario = new TestScenario();
+            scenario.setName("limits");
+            scenario.setType(TestType.LOAD);
+            scenario.setPhases(List.of(phases));
+            CreateTestRequest request = new CreateTestRequest();
+            request.setType(TestType.LOAD);
+            request.setScenario(scenario);
+            return request;
+        }
+
+        private Map<String, String> refusedFields(CreateTestRequest request) {
+            return orchestrator
+                    .refusal(request)
+                    .map(InvalidTestSpecException::getFieldErrors)
+                    .orElse(Map.of());
+        }
+
+        @Test
+        void aPhasesOwnRateOutsideItsLimitsIsRefusedByItsPath() {
+            // -1 runs the phase at its spec's rate. Any other value below 1
+            // was the phase's rate, which both backends ran unthrottled.
+            Exception failure = orchestrator
+                    .executeTest(scenarioWith(
+                            new ScenarioPhase("zero", ScenarioPhase.PhaseType.STEADY, 0, 0),
+                            new ScenarioPhase("negative", ScenarioPhase.PhaseType.WARMUP, 0, -5),
+                            new ScenarioPhase("burst", ScenarioPhase.PhaseType.SPIKE, 0, 0),
+                            new ScenarioPhase("inherits", ScenarioPhase.PhaseType.COOLDOWN, 0, -1),
+                            new ScenarioPhase("own", ScenarioPhase.PhaseType.STEADY, 0, 1)))
+                    .asFailure()
+                    .orElseThrow();
+            InvalidTestSpecException invalid = assertInstanceOf(InvalidTestSpecException.class, failure);
+
+            Map<String, String> errors = invalid.getFieldErrors();
+            assertEquals(
+                    Set.of("phases[0].targetThroughput", "phases[1].targetThroughput", "phases[2].targetThroughput"),
+                    errors.keySet());
+            assertEquals(
+                    "phase zero sets targetThroughput 0; a phase's own rate must be -1, which runs it at its"
+                            + " spec's rate, or positive",
+                    errors.get("phases[0].targetThroughput"));
+            assertTrue(
+                    errors.get("phases[1].targetThroughput").startsWith("phase negative sets targetThroughput -5;"),
+                    errors.toString());
+            assertTrue(
+                    invalid.getMessage().startsWith("scenario.phases[0].targetThroughput: phase zero sets"),
+                    invalid.getMessage());
+            assertEquals(0, orchestrator.activeTestCount(), "a refused request takes no permit");
+        }
+
+        @Test
+        void aPhasesOwnDurationIsHeldToTheLimitsOfASpecsDuration() throws Exception {
+            // 0, a phase's default, runs it for its spec's durationMs. 500 ran
+            // a half-second phase, and -1 took the spec's in silence.
+            Field durationMs = TestSpec.class.getDeclaredField("durationMs");
+            long min = durationMs
+                    .getAnnotation(jakarta.validation.constraints.Min.class)
+                    .value();
+            long max = durationMs
+                    .getAnnotation(jakarta.validation.constraints.Max.class)
+                    .value();
+
+            for (long refused : new long[] {-1, 500, min - 1, max + 1}) {
+                Map<String, String> errors = refusedFields(
+                        scenarioWith(new ScenarioPhase("steady", ScenarioPhase.PhaseType.STEADY, refused, -1)));
+                assertEquals(Set.of("phases[0].durationMs"), errors.keySet(), refused + " ms: " + errors);
+            }
+            // The longest a phase may set is past the two-hour cap on a run,
+            // which refuses it as the phases' length.
+            for (long allowed : new long[] {0, min, max}) {
+                Map<String, String> errors = refusedFields(
+                        scenarioWith(new ScenarioPhase("steady", ScenarioPhase.PhaseType.STEADY, allowed, -1)));
+                assertFalse(errors.containsKey("phases[0].durationMs"), allowed + " ms: " + errors);
+            }
+            assertEquals(
+                    "phase short sets durationMs 500; a phase's own duration must be 0, which runs it for its"
+                            + " spec's durationMs, or from 1000 to 86400000 ms, the limits of a spec's durationMs",
+                    refusedFields(scenarioWith(new ScenarioPhase("short", ScenarioPhase.PhaseType.WARMUP, 500, -1)))
+                            .get("phases[0].durationMs"));
+        }
+
+        @Test
+        void aPhaseOutsideItsLimitsIsRefusedBeforeTheOtherChecks() {
+            // As bean validation answers on its own: the base spec's consumer
+            // group, which no phase can use, waits its turn.
+            CreateTestRequest request =
+                    scenarioWith(new ScenarioPhase("short", ScenarioPhase.PhaseType.STEADY, 500, -1));
+            TestSpec base = new TestSpec();
+            base.setConsumerGroup("perf-cg");
+            request.getScenario().setBaseSpec(base);
+
+            assertEquals(Set.of("phases[0].durationMs"), refusedFields(request).keySet());
         }
     }
 }

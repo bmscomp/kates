@@ -23,9 +23,9 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
+import com.bmscomp.kates.chaos.ProbeExecutor;
 import com.bmscomp.kates.chaos.ProbeSpec;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.ScenarioPhase;
@@ -41,11 +41,11 @@ import com.bmscomp.kates.engine.TestOrchestrator;
  * settings its test type, its fault or its probes don't read, so neither
  * fails the run: it goes ahead on other terms. The examples set numProducers
  * and numConsumers on LOAD and ENDURANCE runs, which start one producer and
- * one consumer whatever they say; they drained a node without naming it, aimed
- * a leader election at a topic, and compared probe output with ==, which the
- * probe executor reads as contains. Here each of those fails its example, as
- * does a field the request classes lack, and a request the resource would
- * refuse before its stream starts.
+ * one consumer whatever they say; they aimed a leader election at a topic, and
+ * compared probe output with ==, which the probe executor read as contains.
+ * Here each of those fails its example, as do a comparator or a kafkaProbe
+ * check the probe executor doesn't have, a field the request classes lack,
+ * and a request the resource would refuse before its stream starts.
  */
 @QuarkusTest
 class ResilienceExamplesTest {
@@ -56,14 +56,8 @@ class ResilienceExamplesTest {
     /** The types whose run starts a producer per numProducers (TestOrchestrator.buildTasks). */
     private static final Set<TestType> PRODUCER_PER_NUM_PRODUCERS = Set.of(TestType.STRESS, TestType.CAPACITY);
 
-    /** The comparators ProbeExecutor.checkComparator has; it reads any other as contains. */
-    private static final List<String> COMPARATORS = List.of("equal", "contains", "notContains", ">=", "<=", ">", "<");
-
     /** ResilienceOrchestrator runs a Continuous probe during the fault too, and any other as Edge. */
     private static final List<String> MODES = List.of("Edge", "Continuous");
-
-    /** ProbeExecutor runs a k8sProbe as such, and any other type as a cmdProbe. */
-    private static final List<String> PROBE_TYPES = List.of("cmdProbe", "k8sProbe");
 
     @Inject
     ObjectMapper objectMapper;
@@ -179,14 +173,6 @@ class ResilienceExamplesTest {
             }
         }
 
-        // Litmus's node-drain drains the node in TARGET_NODE, and Kates sets
-        // none, nor gives node-drain the pods targetLabel picks
-        // (LitmusChaosProvider.buildChaosEngine).
-        if (chaos.disruptionType() == DisruptionType.NODE_DRAIN
-                && !chaos.envOverrides().containsKey("TARGET_NODE")) {
-            found.add("chaosSpec.envOverrides.TARGET_NODE: node-drain drains the node it names, and Kates sets none");
-        }
-
         // Only a disruption plan aims a fault at a partition's leader
         // (DisruptionOrchestrator); a resilience run hands the fault to the
         // chaos provider as it is.
@@ -201,16 +187,16 @@ class ResilienceExamplesTest {
         for (int i = 0; i < probes.size(); i++) {
             ProbeSpec probe = probes.get(i);
             String at = "probes[" + i + "].";
-            if (!in(COMPARATORS, probe.comparator())) {
-                found.add(at + "comparator: the probe executor has no " + probe.comparator()
-                        + ", and compares with contains instead; use one of " + COMPARATORS);
-            }
             if (!in(MODES, probe.mode())) {
                 found.add(at + "mode: " + probe.mode() + " runs as Edge; use Edge or Continuous");
             }
-            if (!in(PROBE_TYPES, probe.type())) {
-                found.add(at + "type: " + probe.type() + " runs as a cmdProbe; use cmdProbe or k8sProbe");
+            if (!in(ProbeExecutor.TYPES, probe.type())) {
+                found.add(at + "type: " + probe.type() + " runs as a cmdProbe; use one of " + ProbeExecutor.TYPES);
             }
+            // A comparator or a kafkaProbe check the executor doesn't have
+            // fails the probe before it runs.
+            String probeAt = "probes[" + i + "]: ";
+            ProbeExecutor.problem(probe).ifPresent(problem -> found.add(probeAt + problem));
         }
         return found;
     }

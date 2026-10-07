@@ -142,7 +142,7 @@ func TestMCPDisruptionReport(t *testing.T) {
 		t.Errorf("result:\n got %s\nwant %s", g, w)
 	}
 
-	if want := "chaos-times-approximate,recovery-times-from-request,prometheus-may-be-unreachable,impact-score-misreads-metrics"; strings.Join(mcpChaosCaveatIDs(env), ",") != want {
+	if want := "chaos-times-approximate,recovery-times-from-injection,prometheus-may-be-unreachable,impact-score-misreads-metrics"; strings.Join(mcpChaosCaveatIDs(env), ",") != want {
 		t.Errorf("caveats = %v, want %s", mcpChaosCaveatIDs(env), want)
 	}
 	paths := mcpPaths(fb.Requests())
@@ -364,7 +364,7 @@ func TestMCPDisruptionReportCapsSteps(t *testing.T) {
 }
 
 // TestMCPDisruptionReportTrackers: the ISR and lag figures as the trackers
-// leave them (KafkaIntelligenceService.java:164-216,287-317). A lag that
+// leave them (KafkaIntelligenceService.java:165-217,293-323). A lag that
 // never rose recovers in 0, not "never"; a tracker with no sample is not
 // measured, not a reading of 0; an ISR not full again is counted, since the
 // summary's worst ISR recovery leaves it out.
