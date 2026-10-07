@@ -78,6 +78,13 @@ jobs:
           # ~/.TinyTeX, and links its tools into a bin directory only when
           # given --update-path, so there is no ~/bin/tlmgr.
           tlmgr=("$HOME"/.TinyTeX/bin/*/tlmgr)
+          # The TinyTeX quarto installs can hold a tlmgr older than its package
+          # repository requires, and that tlmgr installs nothing ("tlmgr itself
+          # needs to be updated") until it updates itself. On 2026-10-06 that
+          # failed the Render PDF job before anything rendered. When tlmgr is
+          # current, the update does nothing. Quarto installs the LaTeX packages
+          # a render lacks with this tlmgr too.
+          scripts/retry.sh 3 "${tlmgr[0]}" update --self
           scripts/retry.sh 3 "${tlmgr[0]}" install ebgaramond
           scripts/retry.sh 3 quarto install chromium --no-prompt
 
@@ -176,8 +183,9 @@ jobs:
           scripts/retry.sh 3 quarto install tool tinytex --no-prompt --log-level warning
           echo "$HOME/bin" >> "$GITHUB_PATH"
           # See the build job for why TeX Live's EB Garamond, not Ubuntu's,
-          # and why tlmgr is found this way.
+          # why tlmgr is found this way, and why it updates itself first.
           tlmgr=("$HOME"/.TinyTeX/bin/*/tlmgr)
+          scripts/retry.sh 3 "${tlmgr[0]}" update --self
           scripts/retry.sh 3 "${tlmgr[0]}" install ebgaramond
           scripts/retry.sh 3 quarto install chromium --no-prompt
 

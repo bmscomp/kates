@@ -1,18 +1,16 @@
+# A ROUND_TRIP run starts one producer and one consumer. It reports no
+# integrity data, so loss, ordering and CRC gates have nothing to check here;
+# the integrity-tx template's INTEGRITY run checks all three.
 scenarios:
-  - name: "Exactly-Once Integrity Check"
+  - name: "Exactly-Once Round Trip"
     type: ROUND_TRIP
     spec:
       records: 100000
-      parallelProducers: 2
       recordSizeBytes: 256
       acks: "all"
       enableIdempotence: true
       enableTransactions: true
       replicationFactor: 3
       minInsyncReplicas: 2
-      numConsumers: 2
     validate:
-      maxDataLossPercent: 0
-      maxOutOfOrder: 0
-      maxCrcFailures: 0
       maxP99LatencyMs: 200
