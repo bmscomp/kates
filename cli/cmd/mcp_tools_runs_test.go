@@ -24,7 +24,7 @@ import (
 // mcpCaveatIDsRuns lists the constants of mcpCaveatsRuns.
 var mcpCaveatIDsRuns = []mcpCaveatID{
 	mcpCaveatSummaryAveragesStartedTasks,
-	mcpCaveatIntegrityNotShown,
+	mcpCaveatIntegrityFromStoredResult,
 	mcpCaveatCancelStoredAsFailed,
 	mcpCaveatScenarioPhasesInTurn,
 	mcpCaveatBrokerSkewProjected,
@@ -474,7 +474,7 @@ func TestMCPGetRun(t *testing.T) {
 		t.Error("nothing was cut")
 	}
 	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks, mcpCaveatLoadSingleProducer)
-	mcpNoCaveat(t, env, mcpCaveatReaperDeadline, mcpCaveatIntegrityNotShown, mcpCaveatScenarioPhasesInTurn)
+	mcpNoCaveat(t, env, mcpCaveatReaperDeadline, mcpCaveatIntegrityFromStoredResult, mcpCaveatScenarioPhasesInTurn)
 
 	// list_runs shows the same digest for the same run.
 	list := mcpData[mcpListRunsOut](t, h.callOK("list_runs", nil))
@@ -573,9 +573,114 @@ func TestMCPGetRunFailedScenarioRun(t *testing.T) {
 	if len(got.Run.Labels) != 2 || !mcpFenced(h, got.Run.Labels[0]) || !strings.Contains(string(got.Run.Labels[1]), "team=payments") {
 		t.Errorf("labels = %q", got.Run.Labels)
 	}
-	mcpWantCaveats(t, env, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed, mcpCaveatIntegrityNotShown, mcpCaveatScenarioPhasesInTurn)
+	mcpWantCaveats(t, env, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed, mcpCaveatIntegrityFromStoredResult, mcpCaveatScenarioPhasesInTurn)
 	mcpNoCaveat(t, env, mcpCaveatLoadSingleProducer)
 	assertReadOnly(t, fb.Requests())
+}
+
+// mcpIntegrityRun is an INTEGRITY run that ended with lost records: 15 lost
+// ranges, 25 timeline events, and the -1 RPO of a run that did not know when
+// a fault started.
+func mcpIntegrityRun() mcpFakeRun {
+	var ranges, timeline []map[string]any
+	for i := 0; i < 15; i++ {
+		ranges = append(ranges, map[string]any{"fromSeq": i * 100, "toSeq": i*100 + 9, "count": 10})
+	}
+	for i := 0; i < 25; i++ {
+		timeline = append(timeline, map[string]any{"timestampMs": 1759000000000 + i, "type": "LOST_RANGE", "detail": fmt.Sprintf("from=%d to=%d count=10", i*100, i*100+9)})
+	}
+	return mcpFakeRun{
+		ID: "0000cafe", Type: "INTEGRITY", Status: "DONE", CreatedAt: "2026-10-06T11:00:00Z", Backend: "native",
+		Spec: mcpLoadSpec(map[string]any{"topic": "orders-it"}),
+		Results: []map[string]any{{
+			"taskId": "0000cafe-integrity-0 " + mcpInjection, "phaseName": "integrity", "status": "DONE", "recordsSent": 100000,
+			"integrity": map[string]any{
+				"totalSent": 100000, "totalAcked": 99990, "totalConsumed": 99840, "lostRecords": 150, "duplicateRecords": 0,
+				"dataLossPercent": 0.15, "lostRanges": ranges, "producerRtoMs": 2500.5, "consumerRtoMs": 3100,
+				"maxRtoMs": 3100, "rpoMs": -1, "outOfOrderCount": 0, "crcFailures": 0, "orderingVerified": true,
+				"crcVerified": true, "idempotenceEnabled": true, "transactionsEnabled": false, "verdict": "DATA_LOSS",
+				"timeline": timeline,
+			},
+		}},
+	}
+}
+
+// An INTEGRITY run that has ended shows its integrity result, with its lost
+// ranges and timeline cut to their first entries and their counts whole.
+func TestMCPGetRunIntegrity(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	mcpServeRuns(fb, []mcpFakeRun{mcpIntegrityRun()})
+	fb.JSON("GET", "/api/tests/0000cafe/report/summary", http.StatusOK, mcpSummary(1, 1))
+	h := newMCPHarness(t, fb)
+
+	env := h.callOK("get_run", map[string]any{"run_id": "0000cafe"})
+	got := mcpData[mcpGetRunOut](t, env)
+	if len(got.Integrity) != 1 {
+		t.Fatalf("integrity = %+v", got.Integrity)
+	}
+	ir := got.Integrity[0]
+	if ir.Verdict != "DATA_LOSS" || ir.TotalSent != 100000 || ir.TotalAcked != 99990 || ir.TotalConsumed != 99840 ||
+		ir.LostRecords != 150 || ir.DataLossPercent != 0.15 || ir.ProducerRtoMs != 2500.5 || ir.ConsumerRtoMs != 3100 ||
+		!ir.OrderingVerified || !ir.CrcVerified || !ir.IdempotenceEnabled || ir.TransactionsEnabled {
+		t.Errorf("integrity = %+v", ir)
+	}
+	if ir.MaxRtoMs == nil || *ir.MaxRtoMs != 3100 {
+		t.Errorf("maxRtoMs = %v", ir.MaxRtoMs)
+	}
+	// The backend's -1 is an RPO it did not measure, not a zero.
+	if ir.RpoMs != nil {
+		t.Errorf("rpoMs = %v, want absent", *ir.RpoMs)
+	}
+	if ir.LostRangeCount != 15 || len(ir.LostRanges) != mcpRunMaxLostRanges || ir.LostRanges[1] != (mcpRunLostRange{FromSeq: 100, ToSeq: 109, Count: 10}) {
+		t.Errorf("lost ranges: count %d, %+v", ir.LostRangeCount, ir.LostRanges)
+	}
+	if ir.TimelineCount != 25 || len(ir.Timeline) != mcpRunMaxIntegrityEvent || ir.Timeline[0].Type != "LOST_RANGE" ||
+		ir.Timeline[0].Detail != "from=0 to=9 count=10" {
+		t.Errorf("timeline: count %d, %+v", ir.TimelineCount, ir.Timeline)
+	}
+	if !mcpFenced(h, ir.TaskID) || !env.Truncated {
+		t.Errorf("taskId %q fenced=%v, truncated=%v", ir.TaskID, mcpFenced(h, ir.TaskID), env.Truncated)
+	}
+	mcpWantCaveats(t, env, mcpCaveatIntegrityFromStoredResult)
+
+	// A measured RPO is shown, a zero one too.
+	for _, rpo := range []float64{0, 1250} {
+		run := mcpIntegrityRun()
+		run.Results[0]["integrity"].(map[string]any)["rpoMs"] = rpo
+		fb.JSON("GET", "/api/tests/0000cafe", http.StatusOK, run.json(true))
+		got = mcpData[mcpGetRunOut](t, h.callOK("get_run", map[string]any{"run_id": "0000cafe"}))
+		if r := got.Integrity[0].RpoMs; r == nil || *r != rpo {
+			t.Errorf("rpoMs = %v, want %v", r, rpo)
+		}
+	}
+
+	// A run stored before the backend kept the result, or one still
+	// running, has none.
+	run := mcpIntegrityRun()
+	delete(run.Results[0], "integrity")
+	fb.JSON("GET", "/api/tests/0000cafe", http.StatusOK, run.json(true))
+	env = h.callOK("get_run", map[string]any{"run_id": "0000cafe"})
+	if got = mcpData[mcpGetRunOut](t, env); got.Integrity != nil {
+		t.Errorf("integrity = %+v, want absent", got.Integrity)
+	}
+	mcpWantCaveats(t, env, mcpCaveatIntegrityFromStoredResult)
+	assertReadOnly(t, fb.Requests())
+}
+
+// An integrity result too large for one answer loses its timeline and lost
+// ranges before anything else, and keeps its verdict and counts.
+func TestMCPRunIntegrityShrink(t *testing.T) {
+	results := []mcpRunIntegrityOut{{Verdict: "DATA_LOSS", LostRecords: 7, LostRangeCount: 2, TimelineCount: 1,
+		LostRanges: []mcpRunLostRange{{}, {}}, Timeline: []mcpRunIntegrityEventOut{{}}}}
+	var steps int
+	for mcpRunIntegrityShrink(results) {
+		steps++
+	}
+	r := results[0]
+	if steps != 3 || len(r.Timeline) != 0 || len(r.LostRanges) != 0 ||
+		r.Verdict != "DATA_LOSS" || r.LostRecords != 7 || r.LostRangeCount != 2 || r.TimelineCount != 1 {
+		t.Errorf("after %d steps: %+v", steps, r)
+	}
 }
 
 func TestMCPGetRunTuningRun(t *testing.T) {
@@ -1821,7 +1926,7 @@ func TestMCPRunReportResource(t *testing.T) {
 	}
 	// A label that imitates a metadata row adds nothing: the first testType
 	// row is the run's own.
-	if strings.Contains(head, string(mcpCaveatIntegrityNotShown)) {
+	if strings.Contains(head, string(mcpCaveatIntegrityFromStoredResult)) {
 		t.Errorf("a label changed the caveats:\n%s", head)
 	}
 

@@ -2287,7 +2287,7 @@ Twelve tools, all read-only:
 |------|-------|
 | Cluster | `cluster_overview` (start here: clusterId, brokers, partition health, the KRaft quorum, alert rules), `cluster_topology` (node pools, controllers, brokers; with a topic, its partitions), `consumer_group_lag` (one group's lag by topic, partition and leader) |
 | Kates activity | `kates_activity` (tests not yet finished, runs, disruption reports and audit rows since a time) |
-| Test runs | `list_runs`, `get_run` (effective spec, the request's own spec fields, tasks and summary), `assess_run` (regression, a noise band over earlier runs with the same spec, broker skew, advisor rules) |
+| Test runs | `list_runs`, `get_run` (effective spec, the request's own spec fields, tasks, summary and an INTEGRITY run's integrity result), `assess_run` (regression, a noise band over earlier runs with the same spec, broker skew, advisor rules) |
 | Chaos | `list_chaos_catalog` (disruption types, playbooks, templates, chaos providers), `preview_disruption` (the Kates API's dry run of a playbook or an ad-hoc plan), `disruption_report` (one disruption, with an optional baseline) |
 | Security and scenarios | `security_evidence` (the security checks, as a lab posture and drift check), `draft_scenario` (checks a `kates test apply` scenario file and saves nothing) |
 

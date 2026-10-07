@@ -56,8 +56,9 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 			"the request set it; requestedSpec holds only what the request set, so the two show which values the " +
 			"defaults filled in. A run stored before the backend kept the request has " +
 			"no requestedSpec, and notCarried then names the request fields that backend never copied into the " +
-			"spec, so what a request said for them cannot be shown. An INTEGRITY run's integrity result (lost " +
-			"records, RTO, RPO) is left out; the run's report shows it. For a run still PENDING, RUNNING or STOPPING, " +
+			"spec, so what a request said for them cannot be shown. An INTEGRITY run that has ended has an integrity " +
+			"result: the verdict, records sent, acknowledged, consumed, lost and duplicated, producer and consumer " +
+			"RTO, RPO where it was measured, and the first lost ranges and timeline events. For a run still PENDING, RUNNING or STOPPING, " +
 			"reading it makes the backend poll its tasks and save any change of status or results, the same " +
 			"update its 5-second reconciler makes; a finished run is not changed. Task ids and errors, scenario " +
 			"and phase names, labels, and spec values the backend never validated are third-party text and " +
@@ -158,6 +159,10 @@ const (
 
 	mcpRunMaxTasks  = 20
 	mcpRunMaxLabels = 10
+
+	mcpRunMaxIntegrity      = 5
+	mcpRunMaxLostRanges     = 10
+	mcpRunMaxIntegrityEvent = 20
 
 	mcpBandDefaultRuns  = 10
 	mcpBandMinRuns      = 3
@@ -409,6 +414,7 @@ type mcpGetRunOut struct {
 	Tasks         []mcpRunTaskOut      `json:"tasks" jsonschema:"the run's tasks as stored, in order; at most 20"`
 	Summary       *mcpRunSummaryOut    `json:"summary,omitempty" jsonschema:"the report summary; absent when it could not be read"`
 	SummaryError  mcpErrorCode         `json:"summaryError,omitempty" jsonschema:"why the summary could not be read"`
+	Integrity     []mcpRunIntegrityOut `json:"integrity,omitempty" jsonschema:"the integrity result of each task that carries one, in task order: an INTEGRITY run's, once it has ended; absent while it runs, and for a run stored before the backend kept the result; at most 5"`
 }
 
 type mcpRunHead struct {
@@ -550,6 +556,13 @@ func mcpGetRun(ctx context.Context, call *mcpCall, in mcpGetRunIn) (mcpGetRunOut
 		tasks = append(tasks, mcpRunTaskFrom(call, t))
 	}
 	out.Tasks = mcpCap(call, tasks, mcpRunMaxTasks)
+	var integrity []mcpRunIntegrityOut
+	for _, t := range run.Results {
+		if t.Integrity != nil {
+			integrity = append(integrity, mcpRunIntegrityFrom(call, t.TaskID, *t.Integrity))
+		}
+	}
+	out.Integrity = mcpCap(call, integrity, mcpRunMaxIntegrity)
 
 	summary, err := call.Client().MCPRunSummary(ctx, string(in.RunID))
 	switch {
@@ -564,7 +577,9 @@ func mcpGetRun(ctx context.Context, call *mcpCall, in mcpGetRunIn) (mcpGetRunOut
 	}
 
 	// A run with many tasks and long errors can outgrow one result; tasks are
-	// dropped from the end (taskCount stays whole), then labels.
+	// dropped from the end (taskCount stays whole), then labels, then the
+	// integrity results' timelines and lost ranges (their counts stay whole).
+	// The integrity verdicts and counts are never dropped.
 	mcpRunsFit(call, &out, func() bool {
 		switch {
 		case len(out.Tasks) > 0:
@@ -572,7 +587,7 @@ func mcpGetRun(ctx context.Context, call *mcpCall, in mcpGetRunIn) (mcpGetRunOut
 		case len(out.Run.Labels) > 0:
 			out.Run.Labels = out.Run.Labels[:len(out.Run.Labels)/2]
 		default:
-			return false
+			return mcpRunIntegrityShrink(out.Integrity)
 		}
 		return true
 	})
@@ -787,6 +802,113 @@ func mcpRunTaskFrom(call *mcpCall, t client.MCPRunTask) mcpRunTaskOut {
 	}
 }
 
+// mcpRunIntegrityOut is one task's integrity result
+// (domain/IntegrityResult.java, DataIntegrityVerifier.java).
+type mcpRunIntegrityOut struct {
+	TaskID              mcpUntrusted              `json:"taskId" jsonschema:"the task that carries the result"`
+	Verdict             string                    `json:"verdict" jsonschema:"the first that applies of DATA_LOSS (lostRecords above 0), CORRUPTION (crcFailures), ORDERING_VIOLATION (outOfOrderCount), DUPLICATES_DETECTED (duplicateRecords), else PASS"`
+	TotalSent           int64                     `json:"totalSent"`
+	TotalAcked          int64                     `json:"totalAcked" jsonschema:"records the brokers acknowledged"`
+	TotalConsumed       int64                     `json:"totalConsumed" jsonschema:"records read back, duplicates included"`
+	LostRecords         int64                     `json:"lostRecords" jsonschema:"acknowledged records that were never read back"`
+	DuplicateRecords    int64                     `json:"duplicateRecords" jsonschema:"records read back more than once, counted beyond the first"`
+	DataLossPercent     float64                   `json:"dataLossPercent" jsonschema:"lostRecords as a percentage of totalSent"`
+	LostRangeCount      int                       `json:"lostRangeCount" jsonschema:"ranges of lost sequence numbers the backend stored; it stores at most the first 1000, while lostRecords counts every lost record"`
+	LostRanges          []mcpRunLostRange         `json:"lostRanges,omitempty" jsonschema:"the first lost ranges, at most 10"`
+	ProducerRtoMs       float64                   `json:"producerRtoMs" jsonschema:"the longest time the producer's sends kept failing; 0 when none failed"`
+	ConsumerRtoMs       float64                   `json:"consumerRtoMs" jsonschema:"from the consumer's first gap in reading to when it read again; 0 when it had none"`
+	MaxRtoMs            *float64                  `json:"maxRtoMs,omitempty" jsonschema:"the larger of the two RTOs; absent when the backend sent none"`
+	RpoMs               *float64                  `json:"rpoMs,omitempty" jsonschema:"how far before the fault started the oldest lost record was sent; 0 when none sent before it was lost. Absent when not measured: the run did not know when a fault started (a plain INTEGRITY run, or one a separate disruption hit)"`
+	OutOfOrderCount     int64                     `json:"outOfOrderCount"`
+	CrcFailures         int64                     `json:"crcFailures"`
+	OrderingVerified    bool                      `json:"orderingVerified" jsonschema:"whether the run checked ordering; outOfOrderCount means nothing when false"`
+	CrcVerified         bool                      `json:"crcVerified" jsonschema:"whether the run checked each record's CRC; crcFailures means nothing when false"`
+	IdempotenceEnabled  bool                      `json:"idempotenceEnabled"`
+	TransactionsEnabled bool                      `json:"transactionsEnabled"`
+	TimelineCount       int                       `json:"timelineCount" jsonschema:"events the backend stored"`
+	Timeline            []mcpRunIntegrityEventOut `json:"timeline,omitempty" jsonschema:"the first events: CRC_FAILURE, OUT_OF_ORDER, LOST_RANGE and SUMMARY, at most 20"`
+}
+
+type mcpRunLostRange struct {
+	FromSeq int64 `json:"fromSeq"`
+	ToSeq   int64 `json:"toSeq"`
+	Count   int64 `json:"count"`
+}
+
+type mcpRunIntegrityEventOut struct {
+	TimestampMs int64  `json:"timestampMs" jsonschema:"Unix milliseconds"`
+	Type        string `json:"type"`
+	Detail      string `json:"detail,omitempty" jsonschema:"the backend's own text, made of the event's numbers"`
+}
+
+func mcpRunIntegrityFrom(call *mcpCall, taskID string, ir client.IntegrityResult) mcpRunIntegrityOut {
+	out := mcpRunIntegrityOut{
+		TaskID:              call.FenceN(taskID, 128),
+		Verdict:             mcpSanitizeLine(ir.Verdict, 32),
+		TotalSent:           ir.TotalSent,
+		TotalAcked:          ir.TotalAcked,
+		TotalConsumed:       ir.TotalConsumed,
+		LostRecords:         ir.LostRecords,
+		DuplicateRecords:    ir.DuplicateRecords,
+		DataLossPercent:     mcpRunFinite(ir.DataLossPercent),
+		LostRangeCount:      len(ir.LostRanges),
+		ProducerRtoMs:       mcpRunFinite(ir.ProducerRtoMs),
+		ConsumerRtoMs:       mcpRunFinite(ir.ConsumerRtoMs),
+		OutOfOrderCount:     ir.OutOfOrderCount,
+		CrcFailures:         ir.CrcFailures,
+		OrderingVerified:    ir.OrderingVerified,
+		CrcVerified:         ir.CrcVerified,
+		IdempotenceEnabled:  ir.IdempotenceEnabled,
+		TransactionsEnabled: ir.TransactionsEnabled,
+		TimelineCount:       len(ir.Timeline),
+	}
+	if v, ok := ir.MeasuredMaxRtoMs(); ok {
+		v = mcpRunFinite(v)
+		out.MaxRtoMs = &v
+	}
+	if v, ok := ir.MeasuredRpoMs(); ok {
+		v = mcpRunFinite(v)
+		out.RpoMs = &v
+	}
+	ranges := make([]mcpRunLostRange, 0, len(ir.LostRanges))
+	for _, r := range ir.LostRanges {
+		ranges = append(ranges, mcpRunLostRange(r))
+	}
+	if len(ranges) > 0 {
+		out.LostRanges = mcpCap(call, ranges, mcpRunMaxLostRanges)
+	}
+	events := make([]mcpRunIntegrityEventOut, 0, len(ir.Timeline))
+	for _, e := range ir.Timeline {
+		events = append(events, mcpRunIntegrityEventOut{
+			TimestampMs: e.TimestampMs,
+			Type:        mcpSanitizeLine(e.Type, 32),
+			Detail:      mcpSanitizeLine(e.Detail, 120),
+		})
+	}
+	if len(events) > 0 {
+		out.Timeline = mcpCap(call, events, mcpRunMaxIntegrityEvent)
+	}
+	return out
+}
+
+// mcpRunIntegrityShrink halves the longest timeline, then the longest list
+// of lost ranges, and reports whether it dropped anything.
+func mcpRunIntegrityShrink(results []mcpRunIntegrityOut) bool {
+	for i := range results {
+		if n := len(results[i].Timeline); n > 0 {
+			results[i].Timeline = results[i].Timeline[:n/2]
+			return true
+		}
+	}
+	for i := range results {
+		if n := len(results[i].LostRanges); n > 0 {
+			results[i].LostRanges = results[i].LostRanges[:n/2]
+			return true
+		}
+	}
+	return false
+}
+
 func mcpRunSummaryFrom(s client.MCPRunSummary) mcpRunSummaryOut {
 	return mcpRunSummaryOut{
 		TotalRecords:            s.TotalRecords,
@@ -825,7 +947,7 @@ func mcpRunCaveats(call *mcpCall, run *client.MCPRun) {
 	case run.TestType == "LOAD":
 		call.Caveat(mcpCaveatLoadSingleProducer)
 	case run.TestType == "INTEGRITY":
-		call.Caveat(mcpCaveatIntegrityNotShown)
+		call.Caveat(mcpCaveatIntegrityFromStoredResult)
 	case strings.HasPrefix(run.TestType, "TUNE_"):
 		call.Caveat(mcpCaveatTuningOneMeasurement)
 	}
@@ -1949,7 +2071,7 @@ func mcpRunReportMetadata(md string) *client.MCPRun {
 // run id, which is checked to be 8 hex characters before it is put in.
 const mcpDiagnoseRunText = `Diagnose Kates test run %[1]s on the Kafka cluster this server is pinned to.
 
-1. Call get_run with run_id %[1]s. Note the type, status, effective spec, each task's status and error, and the summary.
+1. Call get_run with run_id %[1]s. Note the type, status, effective spec, each task's status and error, the summary, and for an INTEGRITY run its integrity verdict, lost records, RTO and RPO.
 2. If the run is DONE or FAILED, call assess_run with run_id %[1]s. Note the regression verdict and whether the baseline had the same spec, whether each metric is below, within or above the noise band of earlier runs with the same spec (and how many runs the band has), broker skew, and the advisor's rules.
 3. Read the caveats in both results; read the kates://caveats resource for their sources if one matters to your conclusion.
 
@@ -2068,7 +2190,7 @@ func mcpRunBounds(s *jsonschema.Schema, lo, hi float64) {
 
 const (
 	mcpCaveatSummaryAveragesStartedTasks mcpCaveatID = "summary-averages-started-tasks"
-	mcpCaveatIntegrityNotShown           mcpCaveatID = "integrity-not-shown"
+	mcpCaveatIntegrityFromStoredResult   mcpCaveatID = "integrity-from-stored-result"
 	mcpCaveatCancelStoredAsFailed        mcpCaveatID = "cancel-stored-as-failed"
 	mcpCaveatScenarioPhasesInTurn        mcpCaveatID = "scenario-phases-in-turn"
 	mcpCaveatBrokerSkewProjected         mcpCaveatID = "broker-skew-projected"
@@ -2109,13 +2231,19 @@ var mcpCaveatsRuns = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatIntegrityNotShown,
-		Text: "get_run leaves out an INTEGRITY run's integrity result (records lost and duplicated, RTO, RPO, the " +
-			"verdict); the run's Markdown report shows it in a Data Integrity section. A run stored before the Kates " +
-			"API kept that result has none: its report has no such section, and its SLA verdict treats any " +
-			"data-loss, RTO or RPO limit as met, because a missing value is skipped rather than failed.",
+		ID: mcpCaveatIntegrityFromStoredResult,
+		Text: "An INTEGRITY run's integrity result is made when its consumer has read the records back, after " +
+			"the run's producing, so a run still under way has none yet. A run stored before the Kates API kept " +
+			"that result has none at all: get_run shows no integrity, its report has no Data Integrity section, " +
+			"and its SLA verdict treats any data-loss, RTO or RPO limit as met, because a missing value is skipped " +
+			"rather than failed. The backend stores at most the first 1,000 ranges of lost records, while " +
+			"lostRecords counts every one. RPO is measured only for a run that knew when its fault started, a " +
+			"resilience run's; a plain INTEGRITY run, or one a separate disruption hit, has none.",
 		Refs: []string{
-			mcpAnchoredRef("cli/client/mcp_runs.go:38-55", "get_run", "type MCPRunTask struct {"),
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:405-425",
+				"private void runIntegrity(", "state.integrityResult = state.verifier.verify("),
+			mcpAnchoredRef(mcpJava+"engine/DataIntegrityVerifier.java:51,224-227",
+				"static final int MAX_LOST_RANGES = 1000;", "if (chaosStartNanos <= 0) {"),
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:34-43,216-223,243",
 				"entity.setIntegrityJson(integrityJson);",
 				".withIntegrity(fromJson(INTEGRITY_JSON, entity.getIntegrityJson(), IntegrityResult.class));",
