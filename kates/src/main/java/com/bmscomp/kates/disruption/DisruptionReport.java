@@ -30,6 +30,12 @@ public class DisruptionReport {
     private SlaGrader.SlaVerdict slaVerdict;
 
     /**
+     * The recovery times count from the moment the chaos provider reported
+     * the fault going in, after its {@code delayBeforeSec}. A step whose
+     * fault never went in (noop injects nothing, and a fault can fail before
+     * it goes in) has none, and no ISR or lag metrics: there was nothing to
+     * recover from.
+     *
      * @param unmeasuredMetrics the post-disruption metrics Prometheus returned
      *     no data for; their {@code postDisruptionMetrics} fields hold 0, which
      *     is not a measurement

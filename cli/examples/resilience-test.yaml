@@ -2,20 +2,19 @@
 # Resilience Test: POD_KILL — Hard Broker Crash (SIGKILL)
 # ─────────────────────────────────────────────────────────────────────────────
 # Simulates a kernel panic or OOM kill. The broker receives no SIGTERM and has
-# no time to flush logs or transfer partition leadership before termination.
+# no time to flush logs or transfer partition leadership before termination:
+# POD_KILL deletes the pod with no grace period on either chaos provider.
 #
 # Hypothesis:
 #   Leader re-election completes within 15s (controller.quorum.fetch.timeout.ms).
 #   Idempotent producer with acks=all stalls, then retries successfully.
 #   ISR recovers to 3/3 within 120s. Zero data loss.
 #
-# Pass criteria (SLA):
-#   - maxRtoMs: 30000        (cluster resumes writes within 30s)
-#   - maxRpoMs: 0            (zero committed message loss)
-#   - maxP99LatencyMs: 30000 (30s spike tolerated during re-election)
+# A resilience run checks no SLA: compare its report with the hypothesis. Only
+# an INTEGRITY test measures data loss.
 #
 # Usage:
-#   kates resilience run -f cli/examples/resilience-pod-kill.yaml
+#   kates resilience run -f cli/examples/resilience-test.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 
 testRequest:
@@ -28,8 +27,6 @@ testRequest:
     numRecords: 500000
     recordSize: 1024
     throughput: 5000
-    numProducers: 3
-    numConsumers: 2
     consumerGroup: resilience-pod-kill-cg
     acks: "all"
     enableIdempotence: true
@@ -44,7 +41,6 @@ chaosSpec:
   targetLabel: "strimzi.io/pool-name=brokers-alpha"
   chaosDurationSec: 30      # kill window — Kubernetes restarts the pod
   delayBeforeSec: 0
-  gracePeriodSec: 0         # SIGKILL — no graceful shutdown
 
 steadyStateSec: 30
 maxRecoveryWaitSec: 120
