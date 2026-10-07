@@ -2,6 +2,8 @@ package com.bmscomp.kates.chaos;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 
 import io.fabric8.kubernetes.api.model.Pod;
@@ -16,15 +18,52 @@ import org.junit.jupiter.api.Test;
  */
 class K8sPodWatcherTest {
 
-    /** Three Ready brokers, the disruption just started. */
-    private static K8sPodWatcher.WatchSession threeBrokersDisrupted() {
+    /** Three Ready brokers, watched before the fault goes in. */
+    private static K8sPodWatcher.WatchSession threeBrokers() {
         K8sPodWatcher.WatchSession session = new K8sPodWatcher.WatchSession();
         session.expectPods(3);
         session.recordInitial("krafter-brokers-0", true);
         session.recordInitial("krafter-brokers-1", true);
         session.recordInitial("krafter-brokers-2", true);
-        session.markDisruptionStart();
         return session;
+    }
+
+    /** Three Ready brokers, the disruption just started. */
+    private static K8sPodWatcher.WatchSession threeBrokersDisrupted() {
+        K8sPodWatcher.WatchSession session = threeBrokers();
+        session.markDisruptionStart(Instant.now());
+        return session;
+    }
+
+    @Test
+    void recoveryCountsFromTheMomentTheFaultWentIn() {
+        // The provider's report can reach the watch a little after the moment
+        // it reports: litmus-crd reports the start it took before picking pods.
+        K8sPodWatcher.WatchSession session = threeBrokers();
+        session.markDisruptionStart(Instant.now().minusSeconds(5));
+
+        session.recordNotReady("krafter-brokers-0");
+        session.recordReady("krafter-brokers-0");
+
+        K8sPodWatcher.RecoveryMetrics recovery = session.computeRecovery();
+        assertTrue(recovery.timeToFirstReady().compareTo(Duration.ofSeconds(5)) >= 0);
+        assertTrue(recovery.timeToAllReady().compareTo(Duration.ofSeconds(5)) >= 0);
+    }
+
+    @Test
+    void aPodThatCameBackBeforeTheFaultWentInIsNotTheFaults() {
+        // A restart during the fault's delayBeforeSec, before the provider
+        // reported the fault going in.
+        K8sPodWatcher.WatchSession session = threeBrokers();
+        session.recordNotReady("krafter-brokers-0");
+        session.recordReady("krafter-brokers-0");
+
+        session.markDisruptionStart(Instant.now());
+
+        K8sPodWatcher.RecoveryMetrics recovery = session.computeRecovery();
+        assertFalse(recovery.podWentDown());
+        assertNull(recovery.timeToFirstReady());
+        assertNull(recovery.timeToAllReady());
     }
 
     @Test

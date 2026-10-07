@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -75,11 +76,11 @@ func TestScenarioToRequest_ProducerTuning(t *testing.T) {
 	if spec.Acks != "1" {
 		t.Errorf("expected acks=1, got %s", spec.Acks)
 	}
-	if spec.BatchSize != 131072 {
-		t.Errorf("expected batchSize=131072, got %d", spec.BatchSize)
+	if spec.BatchSize == nil || *spec.BatchSize != 131072 {
+		t.Errorf("expected batchSize=131072, got %v", spec.BatchSize)
 	}
-	if spec.LingerMs != 10 {
-		t.Errorf("expected lingerMs=10, got %d", spec.LingerMs)
+	if spec.LingerMs == nil || *spec.LingerMs != 10 {
+		t.Errorf("expected lingerMs=10, got %v", spec.LingerMs)
 	}
 	if spec.CompressionType != "zstd" {
 		t.Errorf("expected compression=zstd, got %s", spec.CompressionType)
@@ -109,8 +110,8 @@ func TestScenarioToRequest_ConsumerFields(t *testing.T) {
 	if spec.FetchMinBytes != 1048576 {
 		t.Errorf("expected fetchMinBytes=1048576, got %d", spec.FetchMinBytes)
 	}
-	if spec.FetchMaxWaitMs != 1000 {
-		t.Errorf("expected fetchMaxWaitMs=1000, got %d", spec.FetchMaxWaitMs)
+	if spec.FetchMaxWaitMs == nil || *spec.FetchMaxWaitMs != 1000 {
+		t.Errorf("expected fetchMaxWaitMs=1000, got %v", spec.FetchMaxWaitMs)
 	}
 }
 
@@ -182,6 +183,83 @@ func TestScenarioToRequest_ExplicitFalseIsSent(t *testing.T) {
 	}
 	if strings.Contains(string(body), "enable") {
 		t.Errorf("a file that sets no option sends none: %s", body)
+	}
+}
+
+// A 0 in batchSize, lingerMs or fetchMaxWaitMs is a Kafka setting, so the
+// request sends it, from a YAML file and from a JSON one. Read with toInt it
+// was left out, and a LOAD scenario's lingerMs: 0 lingered the type's 5 ms;
+// perf-round-trip and spike-test got their 0 only because their types'
+// default is 0 too. A key the scenario leaves out is still left out, and so
+// is a 0 in the other number keys.
+func TestScenarioToRequest_SendsAZeroWhereItIsASetting(t *testing.T) {
+	const file = `{"scenarios": [
+  {"name": "zeros", "type": "LOAD",
+   "spec": {"batchSize": 0, "lingerMs": 0, "fetchMaxWaitMs": 0, "numConsumers": 0, "targetThroughput": 0}},
+  {"name": "unset", "type": "LOAD", "spec": {"records": 1000}}]}`
+	want := []string{
+		`{"type":"LOAD","spec":{"batchSize":0,"lingerMs":0,"fetchMaxWaitMs":0}}`,
+		`{"type":"LOAD","spec":{"numRecords":1000}}`,
+	}
+	var fromYAML, fromJSON ScenarioFile
+	if err := yaml.Unmarshal([]byte(file), &fromYAML); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(file), &fromJSON); err != nil {
+		t.Fatal(err)
+	}
+	for _, sf := range []ScenarioFile{fromYAML, fromJSON} {
+		for i, s := range sf.Scenarios {
+			body, err := json.Marshal(scenarioToRequest(s))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != want[i] {
+				t.Errorf("scenario %s sends %s, want %s", s.Name, body, want[i])
+			}
+		}
+	}
+}
+
+// A value that is not a number is not sent as 0 either: it is left out, as
+// it was, and the type's default applies.
+func TestScenarioToRequest_AValueThatIsNotANumberIsNotSentAsZero(t *testing.T) {
+	req := scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{
+		"batchSize": "64k", "lingerMs": nil, "fetchMaxWaitMs": true,
+	}})
+	if s := req.Spec; s.BatchSize != nil || s.LingerMs != nil || s.FetchMaxWaitMs != nil {
+		body, _ := json.Marshal(req)
+		t.Errorf("sent %s", body)
+	}
+}
+
+// kates test apply posts the 0 a scenario file sets.
+func TestApply_PostsAZeroSetting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.yaml")
+	if err := os.WriteFile(path, []byte("scenarios:\n  - name: no-linger\n    type: LOAD\n    spec:\n      lingerMs: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var posted []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		posted = append(posted, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"run-1","testType":"LOAD","status":"PENDING"}`)
+	}))
+	defer ts.Close()
+	apiClient = client.New(ts.URL)
+	output.ResetForTesting()
+	applyFile, applyWait = path, false
+	defer func() { applyFile = "" }()
+
+	if err := testApplyCmd.RunE(testApplyCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"type":"LOAD","spec":{"lingerMs":0}}`; len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
 	}
 }
 

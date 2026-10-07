@@ -1,10 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Resilience Test: ROLLING_RESTART — Strimzi Rolling Update
 # ─────────────────────────────────────────────────────────────────────────────
-# Annotates every Kafka pod of the cluster with strimzi.io/manual-rolling-update
+# Annotates every broker pod of the cluster with strimzi.io/manual-rolling-update
 # and lets the Strimzi Cluster Operator roll them, one pod at a time, exactly
-# as it does for a version upgrade or config change. Pods the selector matches
-# that no StrimziPodSet runs (entity operator, exporter) are skipped.
+# as it does for a version upgrade or config change. strimzi.io/cluster alone
+# matches every pod Strimzi runs for the cluster, so the selector adds
+# strimzi.io/broker-role=true: without it the operator rolls the KRaft
+# controllers too.
 #
 # Hypothesis:
 #   Each broker restart triggers a brief leader transfer. The operator waits
@@ -27,8 +29,6 @@ testRequest:
     numRecords: 900000
     recordSize: 1024
     throughput: 3000
-    numProducers: 3
-    numConsumers: 3
     consumerGroup: rolling-restart-cg
     acks: "all"
     enableIdempotence: true
@@ -37,10 +37,10 @@ testRequest:
     compressionType: lz4
 
 chaosSpec:
-  experimentName: rolling-restart-all-pools
+  experimentName: rolling-restart-brokers
   disruptionType: ROLLING_RESTART
   targetNamespace: kafka
-  targetLabel: "strimzi.io/cluster=krafter"
+  targetLabel: "strimzi.io/cluster=krafter,strimzi.io/broker-role=true"
   chaosDurationSec: 300      # wait for the roll: next reconciliation (≤2 min) + restarts
   delayBeforeSec: 0
 

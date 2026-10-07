@@ -1,6 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: VOLUME — Large Message Payload Throughput
 # ─────────────────────────────────────────────────────────────────────────────
+# A VOLUME run starts one producer and no consumer.
+#
 # Usage:  kates test apply -f cli/examples/perf-volume.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
 scenarios:
@@ -11,14 +13,12 @@ scenarios:
       partitions: 3
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 100000
-      recordSize: 65536         # 64 KB
-      throughput: 500           # 500 × 64 KB ≈ 32 MB/s
-      numProducers: 2
-      numConsumers: 1
+      records: 100000
+      recordSizeBytes: 65536    # 64 KB
+      targetThroughput: 500     # 500 × 64 KB ≈ 32 MB/s
       acks: "all"
       enableIdempotence: true
-      batchSize: 1048576        # 1 MB — must be ≥ recordSize
+      batchSize: 1048576        # 1 MB — must be ≥ recordSizeBytes
       lingerMs: 20
       compressionType: snappy
     validate:

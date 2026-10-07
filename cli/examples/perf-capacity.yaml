@@ -4,21 +4,26 @@
 # Runs 3 sequential scenarios stepping from a known-safe load to unlimited,
 # then backs off to confirm stability at the observed ceiling.
 #
+# A CAPACITY run starts parallelProducers producers, all unthrottled: the Kates
+# API refuses any rate but -1 for it. So the two steps at a set rate are STRESS
+# runs, which start the same 6 producers at up to targetThroughput msg/s each.
+# In both types each producer sends `records` records, and kates test apply
+# --wait checks each gate against every producer.
+#
 # Usage:  kates test apply -f cli/examples/perf-capacity.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
 scenarios:
   - name: "Capacity — ramp 10k msg/s"
-    type: CAPACITY
+    type: STRESS
     spec:
       topic: kates-events
       partitions: 12
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 600000
-      recordSize: 1024
-      throughput: 10000
-      numProducers: 6
-      numConsumers: 3
+      records: 600000
+      recordSizeBytes: 1024
+      targetThroughput: 1667    # per producer: 6 × 1667 ≈ 10k msg/s
+      parallelProducers: 6
       acks: "all"
       enableIdempotence: true
       batchSize: 131072
@@ -35,32 +40,30 @@ scenarios:
       partitions: 12
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 600000
-      recordSize: 1024
-      throughput: -1            # no cap
-      numProducers: 6
-      numConsumers: 3
+      records: 600000
+      recordSizeBytes: 1024
+      targetThroughput: -1      # no cap, the only rate CAPACITY takes
+      parallelProducers: 6
       acks: "all"
       enableIdempotence: true
       batchSize: 131072
       lingerMs: 10
       compressionType: lz4
     validate:
-      minThroughputRecPerSec: 10000   # fail if ceiling < 10k msg/s
+      minThroughputRecPerSec: 1667    # per producer, 6 × 1667 ≈ 10k msg/s: fail if the ceiling is lower
       maxErrorRate: 1.0
 
   - name: "Capacity — back-off validation at 20k msg/s"
-    type: CAPACITY
+    type: STRESS
     spec:
       topic: kates-events
       partitions: 12
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 300000
-      recordSize: 1024
-      throughput: 20000
-      numProducers: 6
-      numConsumers: 3
+      records: 300000
+      recordSizeBytes: 1024
+      targetThroughput: 3334    # per producer: 6 × 3334 ≈ 20k msg/s
+      parallelProducers: 6
       acks: "all"
       enableIdempotence: true
       batchSize: 131072
@@ -68,5 +71,5 @@ scenarios:
       compressionType: lz4
     validate:
       maxP99LatencyMs: 500
-      minThroughputRecPerSec: 18000   # must sustain 90% of target
+      minThroughputRecPerSec: 3000    # per producer: must sustain 90% of its 3334 msg/s
       maxErrorRate: 0.5
