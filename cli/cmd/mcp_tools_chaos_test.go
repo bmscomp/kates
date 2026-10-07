@@ -28,7 +28,7 @@ var mcpCaveatIDsChaos = []mcpCaveatID{
 	mcpCaveatChaosStepSkipped,
 	mcpCaveatImpactScoreMisreads,
 	mcpCaveatDisruptionRunningStale,
-	mcpCaveatRecoveryFromRequest,
+	mcpCaveatRecoveryFromInjection,
 	mcpCaveatISRNotSampled,
 }
 
