@@ -105,6 +105,10 @@ class TestResourceTest {
                                 "TUNE_PARTITIONS"));
     }
 
+    /**
+     * The message names the field, as fieldErrors does, for clients that
+     * print only the message, such as the CLI.
+     */
     @Test
     void createTestRequiresType() {
         given().contentType("application/json")
@@ -112,7 +116,34 @@ class TestResourceTest {
                 .when()
                 .post("/api/tests")
                 .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", is(java.util.Map.of("type", "Test type is required")))
+                .body("message", is("type: Test type is required"));
+    }
+
+    /**
+     * A value outside the limits TestSpec sets is named in the message, with
+     * its reason. The message said only "Request validation failed", so
+     * kates test create, which prints the message alone, never said which
+     * field to change. The reason depends on the JVM's locale, so it is read
+     * back from fieldErrors.
+     */
+    @Test
+    void aValueOutsideItsLimitsIsNamedInTheMessage() {
+        var answer = given().contentType("application/json")
+                .body("{\"type\": \"STRESS\", \"backend\": \"trogdor\", \"spec\": {\"numProducers\": 1000}}")
+                .when()
+                .post("/api/tests")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(1))
+                .extract()
+                .jsonPath();
+
+        assertEquals("numProducers: " + answer.getString("fieldErrors.numProducers"), answer.getString("message"));
+        verifyNoInteractions(trogdorClient);
     }
 
     @Test
@@ -398,7 +429,7 @@ class TestResourceTest {
                 .post("/api/tests")
                 .then()
                 .statusCode(400)
-                .body("message", is("Request validation failed"))
+                .body("message", org.hamcrest.Matchers.startsWith("numRecords: "))
                 .body("fieldErrors", aMapWithSize(1))
                 .body("fieldErrors", hasKey("numRecords"));
         verifyNoInteractions(trogdorClient);

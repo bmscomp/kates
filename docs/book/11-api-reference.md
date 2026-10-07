@@ -147,6 +147,8 @@ The merged `spec` holds every field the type has a default for. `targetThroughpu
 On the `trogdor` benchmark backend, the producer settings (`acks`, `batchSize`, `lingerMs`, `compressionType`, `enableIdempotence`) and the fetch settings go into the Trogdor spec's `producerConf` and `consumerConf`. A Trogdor run stored before the Kates API kept the request, one without `requestedSpec`, ran with the Kafka client's defaults whatever those settings said, so its results do not compare with a later Trogdor run of the same spec.
 :::
 
+A request without a `type`, or with a `spec` value outside its limits, such as a `numProducers` above 100 or a `topic` that isn't a legal Kafka topic name, is refused with `400` and `error` `Validation Failed`. Its `fieldErrors` keys each field by name, and its `message` names each one with the reason, such as `type: Test type is required`.
+
 A field the run could not honour is refused rather than ignored: the answer is `400` with `error` `Validation Failed`, a `message` that names each field, and `fieldErrors`, one entry per field with the reason. A value that asks for nothing passes, because the run honours it anyway, such as `throughput: -1` for SPIKE, `enableCrc: false` for LOAD or `enableIdempotence: false` for INTEGRATION_CDC. So the `spec` of a run that has a `requestedSpec` is valid input again, and can be sent back as a request; an older run's `spec` holds fields the Kates API then ignored (see `GET /api/tests/{id}` below), which is why `kates replay` leaves them out.
 
 | Field | Refused when |
@@ -966,13 +968,14 @@ Errors follow a consistent JSON format:
 { "status": 404, "error": "Not Found", "message": "Test run not found: abc123" }
 ```
 
-The one exception is the disruption safety-guard rejection (`422`), which returns the shape shown in the examples below.
+The one exception is the disruption safety-guard rejection (`422`), which returns the shape shown in the examples below. A `400` whose `error` is `Validation Failed` also has `fieldErrors`, the reason for each field its `message` names.
 
 ### HTTP Error Codes
 
 | Status | Error | Description | Common Causes |
 |:---:|-------|-------------|---------------|
-| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON, a resilience `chaosSpec` parameter outside the fault parameter limits |
+| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON |
+| 400 | Validation Failed | A field the Kates API refuses, named in `message` and `fieldErrors` | A missing `type`, a `spec` value outside its limits or one the run can't honour, a resilience `chaosSpec` parameter outside the fault parameter limits |
 | 401 | Unauthorized | Missing API key | Security enabled and no `Authorization`/`X-API-Key` header sent |
 | 403 | Forbidden | Invalid API key | Key does not match `kates.api.key` |
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
@@ -987,6 +990,16 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 **400 — Invalid test type:**
 ```json
 { "status": 400, "error": "Bad Request", "message": "Invalid test type: BENCHMARK" }
+```
+
+**400 — A test request without a `type`:**
+```json
+{
+  "status": 400,
+  "error": "Validation Failed",
+  "message": "type: Test type is required",
+  "fieldErrors": { "type": "Test type is required" }
+}
 ```
 
 **409 — Cancelling a test that is not running:**
