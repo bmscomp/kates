@@ -282,19 +282,23 @@ public class TestOrchestrator {
         // virtual thread. The finally matters: workers are already running by
         // now, so a failed save must not leave them with no handle to stop them.
         //
-        // An update only: the client has the run's id from executeTest's
-        // answer, so a delete can land while the tasks are being submitted, and
-        // a plain save would insert the deleted run again, RUNNING.
+        // Written only over the row executeTest stored, still PENDING: the
+        // client has the run's id from executeTest's answer, so a cancel or a
+        // delete can land while the tasks are being submitted. A plain save
+        // inserted a deleted run again, and an update wrote RUNNING over a
+        // cancelled run's FAILED, so the run produced on with no permit.
         boolean stored = false;
         try {
-            stored = repository.saveIfPresent(run);
+            stored = repository.saveIfStatus(run, TestResult.TaskStatus.PENDING);
         } finally {
             registerHandles(run, submitted);
         }
         if (!stored) {
-            // Deleted while its tasks were being submitted. The delete settled
-            // the run before these workers had handles to stop, so stop them now.
-            LOG.infof("Run %s was deleted while its tasks were being submitted; stopping them", run.getId());
+            // Cancelled or deleted while its tasks were being submitted. Either
+            // settled the run before these workers had handles to stop, so stop
+            // them now. The row stays as the cancel stored it, or gone.
+            LOG.infof(
+                    "Run %s was cancelled or deleted while its tasks were being submitted; stopping them", run.getId());
             settle(run.getId());
         } else if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
@@ -454,17 +458,21 @@ public class TestOrchestrator {
         // Same ordering rule as executeAsync: publish handles only once the row
         // they belong to is persisted, so the reconciler cannot race this write
         // — but publish them even if that write fails, so running workers stay
-        // stoppable. An update only, as there: the row is listed from the
-        // first save, so a delete can come before this one.
+        // stoppable. Written only over the row as first saved, RUNNING, as
+        // there: the run is listed from that save, so a cancel, a delete or the
+        // timeout reaper can end it before this write.
         boolean stored = false;
         try {
-            stored = repository.saveIfPresent(run);
+            stored = repository.saveIfStatus(run, TestResult.TaskStatus.RUNNING);
         } finally {
             registerHandles(run, submitted);
         }
         if (!stored) {
-            LOG.infof("Run %s was deleted while its phases were being submitted; stopping them", run.getId());
+            LOG.infof("Run %s ended or was deleted while its phases were being submitted; stopping them", run.getId());
             settle(run.getId());
+            // A cancelled or reaped run is answered as stored, as every later
+            // read sees it; a deleted one, as it was submitted.
+            run = repository.findById(run.getId()).orElse(run);
         } else if (run.getStatus() == TestResult.TaskStatus.FAILED) {
             fireEvent(run, TestLifecycleEvent.EventKind.FAILED);
             benchmarkMetrics.endRun(run.getId());
@@ -497,7 +505,15 @@ public class TestOrchestrator {
         // lifecycle event and double-count completion metrics.
         TestResult.TaskStatus priorStatus = run.getStatus();
         if (priorStatus == TestResult.TaskStatus.DONE || priorStatus == TestResult.TaskStatus.FAILED) {
-            activeHandles.remove(runId);
+            // Handles still here for a run stored as ended were published after
+            // whoever ended it had settled it, so nothing has stopped their
+            // workers. A submission publishes its handles once its own write
+            // lands, and a cancel or the timeout reaper can settle the run
+            // before that and store it ended after. They used to be dropped
+            // here, and the workers produced on.
+            if (activeHandles.containsKey(runId)) {
+                settle(runId);
+            }
             return run;
         }
 
@@ -709,11 +725,11 @@ public class TestOrchestrator {
      *
      * <p>Their handles are registered only once every task is submitted, so
      * such a submission left them none: a delete found nothing to stop, and a
-     * FAILED run cannot be cancelled. Registering them would not have done it
-     * either, since the reconciler drops a FAILED run's handles without
-     * stopping them. A scenario whose later phase failed to build used to leave
-     * the phases before it producing for their whole duration, 600 s by
-     * default, with their tasks RUNNING in the FAILED run.
+     * FAILED run cannot be cancelled. Registering them would have stopped them
+     * only at the reconciler's next tick, which settles a run stored as ended
+     * that still has handles. A scenario whose later phase failed to build
+     * used to leave the phases before it producing for their whole duration,
+     * 600 s by default, with their tasks RUNNING in the FAILED run.
      */
     private TestRun failSubmission(TestRun run, List<BenchmarkHandle> started, Exception cause) {
         stopTasks(run.getId(), started);
@@ -726,11 +742,10 @@ public class TestOrchestrator {
      * Publishes a run's backend handles so the reconciler, the reaper and
      * shutdown can poll and stop its workers.
      *
-     * <p>Registered even when the run already looks terminal, though that keeps
-     * its workers stoppable only until the reconciler's next tick: the terminal
-     * path in {@link #refreshStatus(String)} drops the entry without stopping
-     * them. So a submission that throws part-way stops the tasks it started
-     * itself ({@link #failSubmission}).
+     * <p>Registered even when the run already looks terminal: the reconciler's
+     * next tick then settles the run, which stops them (see
+     * {@link #refreshStatus(String)}). A submission that throws part-way stops
+     * the tasks it started itself, at once ({@link #failSubmission}).
      */
     private void registerHandles(TestRun run, List<BenchmarkHandle> handles) {
         if (!handles.isEmpty()) {
@@ -1878,15 +1893,19 @@ public class TestOrchestrator {
      * FAILED is what a cancelled run reads back as; REST and gRPC both answer
      * with the run as stored here, so the answer and every later read agree.
      *
-     * <p>It ends the run the way the timeout reaper does, because nothing
-     * settles a FAILED run afterwards: {@link #refreshStatus} returns early for
-     * it and the reaper only scans RUNNING. So {@link #settle} hands back
-     * the concurrency slot and the per-run meters here, before FAILED is
-     * written, since once the row reads FAILED the reconciler drops the run's
-     * handles and nothing could stop its workers. The write is a compare-and-set
-     * on the status read, so a run that ends on its own in between keeps its
-     * ending; one that only moved from PENDING to RUNNING is cancelled on the
-     * second pass.
+     * <p>It ends the run the way the timeout reaper does, because nothing polls
+     * or reaps a FAILED run afterwards: {@link #refreshStatus} returns early for
+     * it and the reaper only scans RUNNING. So {@link #settle} stops its
+     * workers and hands back the concurrency slot and the per-run meters here,
+     * before FAILED is written. The write is a compare-and-set on the status
+     * read, so a run that ends on its own in between keeps its ending; one that
+     * only moved from PENDING to RUNNING is cancelled on the second pass.
+     *
+     * <p>A run whose tasks are still being submitted has no handles yet, so
+     * there is nothing here to stop. Its submission's own write is conditional
+     * too: it finds the run cancelled, leaves the row as stored here, without
+     * the tasks it started, and stops them. That write used to land on this
+     * one, RUNNING over FAILED, and the run went on without a permit.
      *
      * @return the run as stored, or empty when no run has that id
      * @throws RunNotCancellableException when the run is neither PENDING nor
