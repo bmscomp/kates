@@ -984,7 +984,7 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"this server cannot save one: the baseline is a POST, which its transport refuses.",
 		Refs: []string{
 			mcpJava + "service/SecurityService.java:908-975,1010-1017",
-			mcpJava + "api/SecurityResource.java:131-145",
+			mcpJava + "api/SecurityResource.java:134-148",
 			"cli/cmd/mcp_guard.go:1110-1145",
 		},
 	},

@@ -2,15 +2,21 @@ package com.bmscomp.kates.security;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import io.grpc.ForwardingServerCall;
+import io.grpc.ForwardingServerCallListener;
 import io.grpc.Metadata;
 import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.Status;
 import io.quarkus.grpc.GlobalInterceptor;
+
+import com.bmscomp.kates.audit.Actor;
+import com.bmscomp.kates.service.AuditService;
 
 /**
  * gRPC counterpart of {@link ApiKeyAuthenticationMechanism}, which covers HTTP
@@ -57,8 +63,17 @@ public class GrpcApiKeyInterceptor implements ServerInterceptor {
         return fullMethodName.startsWith("kates.") ? Scopes.ADMIN : Scopes.READ;
     }
 
+    /** The audit action of each RPC that changes something; the others leave no row. */
+    static final Map<String, String> AUDITED = Map.of(
+            "kates.TestService/CreateTest", "CREATE",
+            "kates.TestService/CancelTest", "CANCEL",
+            "kates.TestService/DeleteTest", "DELETE");
+
     @Inject
     ApiKeys keys;
+
+    @Inject
+    AuditService auditService;
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
@@ -77,14 +92,80 @@ public class GrpcApiKeyInterceptor implements ServerInterceptor {
                     new Metadata());
             return new ServerCall.Listener<>() {};
         }
-        String scope = scopeOf(call.getMethodDescriptor().getFullMethodName());
+        String method = call.getMethodDescriptor().getFullMethodName();
+        String scope = scopeOf(method);
+        String action = AUDITED.get(method);
         if (!principal.get().scopes().contains(scope)) {
+            if (action != null) {
+                audit(action, method, Status.Code.PERMISSION_DENIED, principal.get());
+            }
             call.close(
                     Status.PERMISSION_DENIED.withDescription("The API key's principal "
                             + principal.get().name() + " lacks the " + scope + " scope this method needs."),
                     new Metadata());
             return new ServerCall.Listener<>() {};
         }
-        return next.startCall(call, headers);
+        if (action == null) {
+            return next.startCall(call, headers);
+        }
+        return audited(call, headers, next, action, principal.get());
+    }
+
+    /**
+     * Starts a call to an RPC that changes something so that it leaves an
+     * audit row when it ends, as REST calls do: the principal, the run it
+     * acted on (the request's id, or the reply's for a run it created) and
+     * the status it ended with.
+     */
+    private <ReqT, RespT> ServerCall.Listener<ReqT> audited(
+            ServerCall<ReqT, RespT> call,
+            Metadata headers,
+            ServerCallHandler<ReqT, RespT> next,
+            String action,
+            KatesPrincipal principal) {
+        String method = call.getMethodDescriptor().getFullMethodName();
+        AtomicReference<String> target = new AtomicReference<>(method);
+        ServerCall<ReqT, RespT> watched = new ForwardingServerCall.SimpleForwardingServerCall<>(call) {
+            @Override
+            public void sendMessage(RespT message) {
+                String id = idOf(message);
+                if (id != null) {
+                    target.set(id);
+                }
+                super.sendMessage(message);
+            }
+
+            @Override
+            public void close(Status status, Metadata trailers) {
+                audit(action, target.get(), status.getCode(), principal);
+                super.close(status, trailers);
+            }
+        };
+        return new ForwardingServerCallListener.SimpleForwardingServerCallListener<>(next.startCall(watched, headers)) {
+            @Override
+            public void onMessage(ReqT message) {
+                String id = idOf(message);
+                if (id != null) {
+                    target.set(id);
+                }
+                super.onMessage(message);
+            }
+        };
+    }
+
+    private void audit(String action, String target, Status.Code code, KatesPrincipal principal) {
+        AuditService.blockingSafe(
+                () -> auditService.record(action, "test", target, "gRPC " + code, Actor.of(principal)));
+    }
+
+    /** The id field of a protobuf message, or null when it has none or it is empty. */
+    static String idOf(Object message) {
+        if (message instanceof com.google.protobuf.Message m) {
+            var field = m.getDescriptorForType().findFieldByName("id");
+            if (field != null && m.getField(field) instanceof String id && !id.isEmpty()) {
+                return id;
+            }
+        }
+        return null;
     }
 }

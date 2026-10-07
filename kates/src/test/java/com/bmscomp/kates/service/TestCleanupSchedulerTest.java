@@ -38,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
 
+import com.bmscomp.kates.audit.Actor;
 import com.bmscomp.kates.domain.TestResult.TaskStatus;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
@@ -135,6 +136,11 @@ class TestCleanupSchedulerTest {
                 store(TaskStatus.FAILED, CUTOFF.plus(1, ChronoUnit.DAYS)));
 
         assertEquals(5, scheduler.sweep(CUTOFF));
+        // Each row names the sweep, as a schedule's firing is named.
+        var bySweep = auditService.list(500, "test", started.toString(), Actor.SCHEDULER.name()).stream()
+                .map(row -> (String) row.get("target"))
+                .toList();
+        assertTrue(bySweep.containsAll(finished), "rows by system:scheduler: " + bySweep);
 
         finished.forEach(this::assertGone);
         survivors.forEach(this::assertStored);
@@ -160,14 +166,15 @@ class TestCleanupSchedulerTest {
     @Test
     void aPassThatThrowsEndsTheSweepWithoutThrowing() {
         TestCleanupScheduler sweeper = sweeper();
-        when(sweeper.retention.prune(any(), any(), anyInt(), anyString(), any()))
+        when(sweeper.retention.prune(any(), any(), anyInt(), anyString(), any(), any()))
                 .thenAnswer(pass(5, 2, 3))
                 .thenThrow(new IllegalStateException("the database is gone"));
         when(sweeper.retention.count(any(), any())).thenThrow(new IllegalStateException("the database is gone"));
 
         assertEquals(2, sweeper.sweep(CUTOFF));
 
-        verify(sweeper.retention, times(2)).prune(eq(FINISHED), eq(CUTOFF), eq(1000), eq(DETAILS_30_DAYS), any());
+        verify(sweeper.retention, times(2))
+                .prune(eq(FINISHED), eq(CUTOFF), eq(1000), eq(DETAILS_30_DAYS), eq(Actor.SCHEDULER), any());
         assertEquals(
                 List.of("Retention sweep of the runs created before 2002-01-01T00:00:00Z stopped after deleting 2:"
                         + " the database is gone"),
@@ -200,8 +207,9 @@ class TestCleanupSchedulerTest {
 
         assertEquals(3, sweeper.sweep(CUTOFF));
 
-        List.of("a", "b", "c").forEach(id -> verify(audit).record("DELETE", "test", id, DETAILS_30_DAYS));
-        verify(audit, never()).record(anyString(), anyString(), eq("d"), anyString());
+        List.of("a", "b", "c")
+                .forEach(id -> verify(audit).record("DELETE", "test", id, DETAILS_30_DAYS, Actor.SCHEDULER));
+        verify(audit, never()).record(anyString(), anyString(), eq("d"), anyString(), any());
         assertEquals(
                 List.of("Retention sweep of the runs created before 2002-01-01T00:00:00Z stopped after deleting 3:"
                         + " lock timeout"),
@@ -216,7 +224,7 @@ class TestCleanupSchedulerTest {
     @Test
     void theScheduledSweepCutsOffAtTheRetentionAndThrowsNothing() {
         TestCleanupScheduler sweeper = sweeper();
-        when(sweeper.retention.prune(any(), any(), anyInt(), anyString(), any()))
+        when(sweeper.retention.prune(any(), any(), anyInt(), anyString(), any(), any()))
                 .thenThrow(new IllegalStateException("the database is gone"));
 
         Instant from = Instant.now().minus(Duration.ofDays(30));
@@ -224,7 +232,8 @@ class TestCleanupSchedulerTest {
         Instant to = Instant.now().minus(Duration.ofDays(30));
 
         ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
-        verify(sweeper.retention).prune(eq(FINISHED), cutoff.capture(), eq(1000), anyString(), any());
+        verify(sweeper.retention)
+                .prune(eq(FINISHED), cutoff.capture(), eq(1000), anyString(), eq(Actor.SCHEDULER), any());
         assertFalse(cutoff.getValue().isBefore(from), cutoff.getValue() + " is at or after " + from);
         assertFalse(cutoff.getValue().isAfter(to), cutoff.getValue() + " is at or before " + to);
     }
@@ -236,24 +245,24 @@ class TestCleanupSchedulerTest {
     @Test
     void aPassThatDeletesNoneEndsTheSweep() {
         TestCleanupScheduler sweeper = sweeper();
-        when(sweeper.retention.prune(any(), any(), anyInt(), anyString(), any()))
+        when(sweeper.retention.prune(any(), any(), anyInt(), anyString(), any(), any()))
                 .thenAnswer(pass(5, 0, 5));
 
         assertEquals(0, sweeper.sweep(CUTOFF));
 
-        verify(sweeper.retention).prune(any(), any(), anyInt(), anyString(), any());
+        verify(sweeper.retention).prune(any(), any(), anyInt(), anyString(), any(), any());
         assertEquals(List.of(), logged(Level.INFO));
     }
 
     @Test
     void aSweepStopsAfterAThousandPasses() {
         TestCleanupScheduler sweeper = sweeper();
-        when(sweeper.retention.prune(any(), any(), anyInt(), anyString(), any()))
+        when(sweeper.retention.prune(any(), any(), anyInt(), anyString(), any(), any()))
                 .thenAnswer(pass(2, 1, 1));
 
         assertEquals(1000, sweeper.sweep(CUTOFF));
 
-        verify(sweeper.retention, times(1000)).prune(any(), any(), anyInt(), anyString(), any());
+        verify(sweeper.retention, times(1000)).prune(any(), any(), anyInt(), anyString(), any(), any());
     }
 
     /** A scheduler of its own, with a mocked RunRetention and 30 days' retention. */
@@ -270,7 +279,7 @@ class TestCleanupSchedulerTest {
      */
     private static Answer<RunRetention.Pass> pass(long matched, int deleted, long remaining) {
         return invocation -> {
-            Runnable onDeleted = invocation.getArgument(4);
+            Runnable onDeleted = invocation.getArgument(5);
             for (int i = 0; i < deleted; i++) {
                 onDeleted.run();
             }
@@ -327,7 +336,7 @@ class TestCleanupSchedulerTest {
      * duplicate key.
      */
     private Map<String, String> auditRows() {
-        return auditService.list(500, "test", started.toString()).stream()
+        return auditService.list(500, "test", started.toString(), null).stream()
                 .filter(row -> stored.contains((String) row.get("target")))
                 .collect(
                         toMap(row -> (String) row.get("target"), row -> row.get("action") + ": " + row.get("details")));

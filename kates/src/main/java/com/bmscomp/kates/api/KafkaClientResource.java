@@ -21,6 +21,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.ClusterHealthService;
 import com.bmscomp.kates.service.ConsumerGroupService;
@@ -154,6 +155,7 @@ public class KafkaClientResource {
         }
     }
 
+    @Audited(action = "READ", type = "topic")
     @RolesAllowed(Scopes.ADMIN)
     @GET
     @Path("/consume/{topic}")
@@ -174,6 +176,7 @@ public class KafkaClientResource {
         }
     }
 
+    @Audited(action = "PRODUCE", type = "topic")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/produce/{topic}")
@@ -197,6 +200,7 @@ public class KafkaClientResource {
 
     public record ProduceRequest(String key, String value) {}
 
+    @Audited(action = "CREATE", type = "topic")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/topics")
@@ -220,6 +224,7 @@ public class KafkaClientResource {
         }
     }
 
+    @Audited(action = "UPDATE", type = "topic")
     @RolesAllowed(Scopes.ADMIN)
     @PATCH
     @Path("/topics/{name}")
@@ -249,6 +254,7 @@ public class KafkaClientResource {
         }
     }
 
+    @Audited(action = "DELETE", type = "topic")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/topics/{name}")

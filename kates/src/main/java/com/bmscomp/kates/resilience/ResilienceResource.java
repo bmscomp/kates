@@ -17,6 +17,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.domain.TestSpec;
@@ -161,6 +162,7 @@ public class ResilienceResource {
         }
     }
 
+    @Audited(action = "RUN", type = "resilience")
     @RolesAllowed(Scopes.CHAOS_RUN)
     @POST
     @Operation(
@@ -207,6 +209,7 @@ public class ResilienceResource {
         return Response.ok(ResilienceScenarios.listAll()).build();
     }
 
+    @Audited(action = "RUN", type = "resilience")
     @RolesAllowed(Scopes.CHAOS_RUN)
     @POST
     @Path("/scenarios/{id}")

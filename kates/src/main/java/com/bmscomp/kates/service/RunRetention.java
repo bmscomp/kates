@@ -5,6 +5,7 @@ import java.util.Set;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import com.bmscomp.kates.audit.Actor;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.engine.TestOrchestrator;
 
@@ -51,17 +52,23 @@ public class RunRetention {
      * deleted with {@code auditDetails}.
      */
     public Pass prune(Set<TestResult.TaskStatus> statuses, Instant before, int limit, String auditDetails) {
-        return prune(statuses, before, limit, auditDetails, () -> {});
+        return prune(statuses, before, limit, auditDetails, null, () -> {});
     }
 
     /**
-     * {@link #prune(Set, Instant, int, String)}, calling {@code onDeleted}
-     * once each run it deletes has its audit row. A pass that throws returns
-     * no {@link Pass}, but the runs it deleted before the throw stay deleted,
-     * so a caller that reports totals counts them here.
+     * {@link #prune(Set, Instant, int, String)}, its audit rows naming
+     * {@code actor}, or the current request's principal when it is null, and
+     * calling {@code onDeleted} once each run it deletes has its audit row. A
+     * pass that throws returns no {@link Pass}, but the runs it deleted before
+     * the throw stay deleted, so a caller that reports totals counts them here.
      */
     public Pass prune(
-            Set<TestResult.TaskStatus> statuses, Instant before, int limit, String auditDetails, Runnable onDeleted) {
+            Set<TestResult.TaskStatus> statuses,
+            Instant before,
+            int limit,
+            String auditDetails,
+            Actor actor,
+            Runnable onDeleted) {
         long matched = count(statuses, before);
         int deleted = 0;
         for (String id : repository.findIdsByStatusCreatedBefore(statuses, before, limit)) {
@@ -69,7 +76,11 @@ public class RunRetention {
             // run another delete took first is gone: it is not counted, and
             // the delete that took it wrote its row.
             if (orchestrator.deleteTest(id)) {
-                auditService.record("DELETE", "test", id, auditDetails);
+                if (actor == null) {
+                    auditService.record("DELETE", "test", id, auditDetails);
+                } else {
+                    auditService.record("DELETE", "test", id, auditDetails, actor);
+                }
                 deleted++;
                 onDeleted.run();
             }
