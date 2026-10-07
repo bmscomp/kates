@@ -30,7 +30,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:274-280, TestOrchestrator.refreshStatus); both
+// (TestResource.java:294-300, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -151,7 +151,7 @@ const (
 	mcpRunsMaxPageSize     = 25
 	mcpRunsMaxPage         = 10_000
 	// With both filters the backend applies only the type (TestResource.java:
-	// 229-241), so the status is filtered here over the newest runs of the
+	// 249-261), so the status is filtered here over the newest runs of the
 	// type, read in the backend's largest pages (size is capped at 200).
 	mcpRunsScanPageSize = 200
 	mcpRunsMaxScan      = 1000
@@ -1162,7 +1162,7 @@ func mcpRunHasRequested(r *client.MCPRun) bool {
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:400-428 checks only that it exists),
+// any type or status (TestResource.java:420-448 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -2133,7 +2133,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1954-2032",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:309-354",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:329-374",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},
@@ -2219,7 +2219,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"newest matching rows.",
 		Refs: []string{
 			mcpJava + "persistence/AuditEventEntity.java:15-32",
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:101,175,205,305,337",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:114,225,325,357",
 				`auditService.record("CREATE"`, `auditService.record("DELETE"`, `auditService.record("CANCEL"`),
 			mcpJava + "service/AuditService.java:52-78",
 			mcpJava + "api/AuditResource.java:43-47",
