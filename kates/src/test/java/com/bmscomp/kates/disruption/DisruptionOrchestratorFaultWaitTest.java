@@ -46,7 +46,7 @@ class DisruptionOrchestratorFaultWaitTest {
         Instant now = Instant.now();
         CompletableFuture<ChaosOutcome> fault = spy(CompletableFuture.completedFuture(
                 ChaosOutcome.success("engine", "kill", now, now, System.nanoTime(), null, null, null)));
-        when(orchestrator.chaosCoordinator.triggerFault(any())).thenReturn(fault);
+        when(orchestrator.chaosCoordinator.triggerFault(any(), any())).thenReturn(fault);
 
         DisruptionPlan plan = new DisruptionPlan();
         plan.setName("delayed-kill");

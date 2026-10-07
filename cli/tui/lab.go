@@ -1016,8 +1016,10 @@ func (m LabModel) buildSpec() (*client.TestSpec, *client.CreateTestRequest) {
 	spec.RecordSizeBytes = labParseInt(m.paramVal("recordSize"))
 	spec.Acks = m.paramVal("acks")
 	spec.CompressionType = m.paramVal("compression")
-	spec.BatchSize = labParseInt(m.paramVal("batchSize"))
-	spec.LingerMs = labParseInt(m.paramVal("lingerMs"))
+	// Sent when 0 too: linger 0, the lab's first value, used to be left out
+	// of the request, so a LOAD iteration shown at 0 lingered 5 ms.
+	batchSize, lingerMs := labParseInt(m.paramVal("batchSize")), labParseInt(m.paramVal("lingerMs"))
+	spec.BatchSize, spec.LingerMs = &batchSize, &lingerMs
 	spec.Partitions = labParseInt(m.paramVal("partitions"))
 	spec.ReplicationFactor = labParseInt(m.paramVal("replication"))
 

@@ -51,9 +51,9 @@
       "probes": [
         {
           "name": "isr-health-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "under-replicated-partitions",
           "expectedOutput": "50",
           "comparator": "<=",
           "intervalSec": 10,
@@ -64,8 +64,8 @@
           "type": "k8sProbe",
           "mode": "Edge",
           "command": "kafka Ready",
-          "expectedOutput": "Ready",
-          "comparator": "contains",
+          "expectedOutput": "Ready=True",
+          "comparator": "equal",
           "intervalSec": 15,
           "timeoutSec": 30
         }
@@ -101,9 +101,9 @@
       "probes": [
         {
           "name": "isr-health-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "under-replicated-partitions",
           "expectedOutput": "0",
           "comparator": "<=",
           "intervalSec": 10,
@@ -114,8 +114,8 @@
           "type": "k8sProbe",
           "mode": "Edge",
           "command": "kafka Ready",
-          "expectedOutput": "Ready",
-          "comparator": "contains",
+          "expectedOutput": "Ready=True",
+          "comparator": "equal",
           "intervalSec": 15,
           "timeoutSec": 30
         }
@@ -152,9 +152,9 @@
       "probes": [
         {
           "name": "isr-health-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "under-replicated-partitions",
           "expectedOutput": "50",
           "comparator": "<=",
           "intervalSec": 10,
@@ -162,9 +162,9 @@
         },
         {
           "name": "producer-throughput",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'",
+          "command": "produce kates-probe-topic",
           "expectedOutput": "0",
           "comparator": ">",
           "intervalSec": 15,
@@ -203,9 +203,9 @@
       "probes": [
         {
           "name": "producer-throughput",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'",
+          "command": "produce kates-probe-topic",
           "expectedOutput": "0",
           "comparator": ">",
           "intervalSec": 15,
@@ -216,8 +216,8 @@
           "type": "k8sProbe",
           "mode": "Edge",
           "command": "kafka Ready",
-          "expectedOutput": "Ready",
-          "comparator": "contains",
+          "expectedOutput": "Ready=True",
+          "comparator": "equal",
           "intervalSec": 15,
           "timeoutSec": 30
         }
@@ -255,9 +255,9 @@
       "probes": [
         {
           "name": "isr-health-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "under-replicated-partitions",
           "expectedOutput": "50",
           "comparator": "<=",
           "intervalSec": 10,
@@ -265,9 +265,9 @@
         },
         {
           "name": "producer-throughput",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-producer-perf-test.sh --topic kates-probe-topic --num-records 10 --record-size 100 --throughput -1 --producer-props bootstrap.servers=localhost:9092 2>/dev/null | tail -1 | awk '{print $6}'",
+          "command": "produce kates-probe-topic",
           "expectedOutput": "0",
           "comparator": ">",
           "intervalSec": 15,
@@ -308,16 +308,16 @@
           "type": "k8sProbe",
           "mode": "Edge",
           "command": "kafka Ready",
-          "expectedOutput": "Ready",
-          "comparator": "contains",
+          "expectedOutput": "Ready=True",
+          "comparator": "equal",
           "intervalSec": 15,
           "timeoutSec": 30
         },
         {
           "name": "consumer-latency",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group dns-failure-cg 2>/dev/null | awk 'NR>1{sum+=$6} END{print sum+0}'",
+          "command": "consumer-lag dns-failure-cg",
           "expectedOutput": "100000",
           "comparator": "<",
           "intervalSec": 15,
@@ -355,9 +355,9 @@
       "probes": [
         {
           "name": "min-isr-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Edge",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "unavailable-partitions",
           "expectedOutput": "5",
           "comparator": "<=",
           "intervalSec": 15,
@@ -365,9 +365,9 @@
         },
         {
           "name": "consumer-latency",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group net-split-cg 2>/dev/null | awk 'NR>1{sum+=$6} END{print sum+0}'",
+          "command": "consumer-lag net-split-cg",
           "expectedOutput": "100000",
           "comparator": "<",
           "intervalSec": 15,
@@ -380,7 +380,7 @@
       "_name": "08 — Node Drain (NODE_DRAIN)",
       "_description": "Drain gamma, the Kubernetes node hosting the gamma broker pod, during a 5-minute ENDURANCE run. Validates that the Strimzi Drain Cleaner transfers leadership before eviction and the pod reschedules cleanly.",
       "_hypothesis": "Drain Cleaner intercepts the eviction, triggers Kafka controlled shutdown, and transfers all partition leaders off the node before the pod is evicted. Zero downtime expected.",
-      "_note": "Kates sets no TARGET_NODE for Litmus node-drain, so envOverrides names the node: gamma, which runs brokers-gamma on the Kind lab (config/cluster.yaml). On another cluster, name the node that runs it.",
+      "_note": "Kates drains the node that runs the pod targetLabel picks: the brokers-gamma broker, which runs on gamma on the Kind lab (config/cluster.yaml). On another cluster the same label drains whichever node runs that broker; envOverrides.TARGET_NODE would name a node instead.",
       "testRequest": {
         "type": "ENDURANCE",
         "spec": {
@@ -400,19 +400,16 @@
         "targetNamespace": "kafka",
         "targetLabel": "strimzi.io/pool-name=brokers-gamma",
         "chaosDurationSec": 60,
-        "delayBeforeSec": 0,
-        "envOverrides": {
-          "TARGET_NODE": "gamma"
-        }
+        "delayBeforeSec": 0
       },
       "steadyStateSec": 30,
       "maxRecoveryWaitSec": 180,
       "probes": [
         {
           "name": "isr-health-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "under-replicated-partitions",
           "expectedOutput": "50",
           "comparator": "<=",
           "intervalSec": 10,
@@ -420,11 +417,11 @@
         },
         {
           "name": "partition-availability",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "unavailable-partitions",
           "expectedOutput": "0",
-          "comparator": "==",
+          "comparator": "<=",
           "intervalSec": 10,
           "timeoutSec": 30
         }
@@ -459,9 +456,9 @@
       "probes": [
         {
           "name": "isr-health-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "under-replicated-partitions",
           "expectedOutput": "50",
           "comparator": "<=",
           "intervalSec": 10,
@@ -472,8 +469,8 @@
           "type": "k8sProbe",
           "mode": "Edge",
           "command": "kafka Ready",
-          "expectedOutput": "Ready",
-          "comparator": "contains",
+          "expectedOutput": "Ready=True",
+          "comparator": "equal",
           "intervalSec": 15,
           "timeoutSec": 30
         }
@@ -529,9 +526,9 @@
       "probes": [
         {
           "name": "isr-health-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Continuous",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "under-replicated-partitions",
           "expectedOutput": "50",
           "comparator": "<=",
           "intervalSec": 10,
@@ -542,16 +539,16 @@
           "type": "k8sProbe",
           "mode": "Edge",
           "command": "kafka Ready",
-          "expectedOutput": "Ready",
-          "comparator": "contains",
+          "expectedOutput": "Ready=True",
+          "comparator": "equal",
           "intervalSec": 15,
           "timeoutSec": 30
         },
         {
           "name": "min-isr-check",
-          "type": "cmdProbe",
+          "type": "kafkaProbe",
           "mode": "Edge",
-          "command": "kafka-topics.sh --bootstrap-server localhost:9092 --describe --unavailable-partitions 2>/dev/null | grep -c 'Topic:' || echo '0'",
+          "command": "unavailable-partitions",
           "expectedOutput": "5",
           "comparator": "<=",
           "intervalSec": 15,

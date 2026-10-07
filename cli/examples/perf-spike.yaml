@@ -25,7 +25,6 @@ scenarios:
       compressionType: lz4
     validate:
       maxP99LatencyMs: 100
-      maxErrorRate: 0.0
 
   - name: "Spike — unlimited burst"
     type: SPIKE
@@ -44,8 +43,6 @@ scenarios:
       compressionType: lz4
     validate:
       maxP99LatencyMs: 1000     # spikes tolerate higher latency
-      maxErrorRate: 0.5         # brief quota rejections allowed
-      maxDataLossPercent: 0.0
 
   - name: "Spike — post-burst recovery"
     type: LOAD
@@ -65,4 +62,3 @@ scenarios:
     validate:
       maxP99LatencyMs: 200
       minThroughputRecPerSec: 2500
-      maxErrorRate: 0.0

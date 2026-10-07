@@ -134,7 +134,7 @@ Create and start a new test run. Execution is asynchronous — poll `GET /api/te
 ::: {.callout-important}
 The Kates API merges `spec` with the defaults of the test type: a field the request sets wins, and the type's default fills each one it leaves out. What the fields do:
 
-- `throughput` is the rate each producer honours, in records per second, and -1 is unlimited. `targetThroughput` is another name for it, the one `kates test create --throughput` and scenario files send. When both are set, `throughput` wins; when only `targetThroughput` is, it sets the rate in place of the type's default. In the merged `spec`, `throughput` is the rate the run used.
+- `throughput` is the rate each producer honours, in records per second, and -1 is unlimited. `targetThroughput` is another name for it, the one `kates test create --throughput` and scenario files send. When both are set, `throughput` wins; when only `targetThroughput` is, it sets the rate in place of the type's default. In the merged `spec`, `throughput` is the rate the run used. Both take 1 or more, or -1: any other value, 0 included, is refused, with `fieldErrors` naming the field.
 - `consumerGroup` names the consumer's group, and must not be empty or blank. A group that already has committed offsets on the topic resumes from them, and a LOAD or ENDURANCE consumer commits offsets as it reads, so a group an application uses would rebalance and lose its place: give a test a group of its own. An INTEGRITY run's consumer joins the name with `-integrity` appended; without one it is `integrity-cg-integrity`, and a LOAD or ENDURANCE consumer gets a group named after its task.
 - `fetchMinBytes` and `fetchMaxWaitMs` become the consumer's `fetch.min.bytes` and `fetch.max.wait.ms`.
 - `enableIdempotence` sets the producer's `enable.idempotence`, `false` included. Left out, the Kafka client decides, and it turns idempotence on whenever `acks` is `all`.
@@ -146,6 +146,8 @@ The merged `spec` holds every field the type has a default for. `targetThroughpu
 
 On the `trogdor` benchmark backend, the producer settings (`acks`, `batchSize`, `lingerMs`, `compressionType`, `enableIdempotence`) and the fetch settings go into the Trogdor spec's `producerConf` and `consumerConf`. A Trogdor run stored before the Kates API kept the request, one without `requestedSpec`, ran with the Kafka client's defaults whatever those settings said, so its results do not compare with a later Trogdor run of the same spec.
 :::
+
+A request without a `type`, or with a `spec` value outside its limits, such as a `numProducers` above 100 or a `topic` that isn't a legal Kafka topic name, is refused with `400` and `error` `Validation Failed`. Its `fieldErrors` keys each field by name, and its `message` names each one with the reason, such as `type: Test type is required`.
 
 A field the run could not honour is refused rather than ignored: the answer is `400` with `error` `Validation Failed`, a `message` that names each field, and `fieldErrors`, one entry per field with the reason. A value that asks for nothing passes, because the run honours it anyway, such as `throughput: -1` for SPIKE, `enableCrc: false` for LOAD or `enableIdempotence: false` for INTEGRATION_CDC. So the `spec` of a run that has a `requestedSpec` is valid input again, and can be sent back as a request; an older run's `spec` holds fields the Kates API then ignored (see `GET /api/tests/{id}` below), which is why `kates replay` leaves them out.
 
@@ -172,6 +174,16 @@ The phases run one after another, in the order sent. Each starts once the durati
 | `phases[i].targetThroughput` | A RAMP phase has no rate, or one below 1 |
 | `phases[i].rampSteps` | A RAMP phase has under 1 or over 100 steps, or more than its rate in rec/s, since each step needs at least 1 rec/s |
 
+A phase's own `targetThroughput` is -1, its default, which runs the phase at its spec's rate, or 1 or more. Its own `durationMs` is 0, its default, which runs it for its spec's `durationMs`, or from 1,000 to 86,400,000 ms (24 hours), the limits of a spec's `durationMs`. A value outside these is refused before the checks above, with `fieldErrors` keyed by its path, such as `phases[0].durationMs`.
+
+The run stores the scenario's `name` and `labels`, and each phase's `name`, so the Kates API refuses a value its database can't hold, before the run starts. The database stores no NUL character (U+0000), and it keeps a name, and a task's id, which holds the run's id and the phase's name, in 128 characters:
+
+| Field | Refused when |
+|-------|--------------|
+| `name` | It is over 128 characters, or holds a NUL character |
+| `labels` | A key or a value holds a NUL character |
+| `phases[i].name` | It is over 100 characters, since each id of the phase's tasks holds it, or it holds a NUL character |
+
 ```json
 {
   "status": 400,
@@ -182,6 +194,16 @@ The phases run one after another, in the order sent. Each starts once the durati
   }
 }
 ```
+
+A run can also fail to start for a reason that no field of the request explains. These answers carry the error body that [Error Responses](#error-responses) describes:
+
+| Status | Error | When |
+|:---:|-------|------|
+| 400 | Bad Request | The request, or its `scenario`, names a `backend` the Kates API doesn't have; `message` lists the benchmark backends it has |
+| 429 | Too Many Requests | `kates.engine.max-concurrent-tests` tests are already running; the `Retry-After` header says to wait 60 seconds |
+| 500 | Internal Server Error | A fault in the Kates API, such as its database being unreachable, or a `kates.engine.default-backend` that names no benchmark backend it has |
+
+Only the `400` asks you to change the request. After a `429` or a `500`, the same request can start a run later: after the 60 seconds, or once the fault is fixed. The cause of a `500` is in the Kates API's log, not in the answer.
 
 **Response:** `202 Accepted`
 
@@ -344,13 +366,15 @@ The summary is computed from the run's task rows, and the example is a LOAD run 
 | Field | How the task rows combine |
 |-------|---------------------------|
 | `totalRecords` | Summed over every task, producer and consumer alike |
-| `avgThroughputRecPerSec`, `avgThroughputMBPerSec` | The mean of the tasks' rates, not their sum |
+| `avgThroughputRecPerSec`, `avgThroughputMBPerSec` | The mean of the rates of the tasks that have started, not their sum |
 | `peakThroughputRecPerSec` | The fastest task's rate |
 | `p50LatencyMs`, `p95LatencyMs`, `p99LatencyMs` | The producer's; with several producers, the highest of theirs |
 | `avgLatencyMs` | The producers' mean latency, weighted by their records |
 | `maxLatencyMs` | The slowest producer's |
 | `totalErrors`, `errorRate` | Tasks that ended with an error, and that count divided by `totalRecords` |
 | `p999LatencyMs`, `durationMs` | Always 0 |
+
+A task that has not started is `PENDING` with no records, as a scenario's later phase is until its turn, and the means leave it out. So while a scenario runs, its throughput is that of the phases under way or done, and a phase that has not started reads 0 in `phases`. A task that a cancel or a failure ends before its turn is stored `FAILED`, and counts as a rate of 0.
 
 Latency leaves consumers out because they don't measure it: a consumer's row carries no latency on the native backend and only poll times on Trogdor. A LOAD or ENDURANCE run's P99 is therefore its producer's send-to-acknowledgement P99. A task keeps its percentiles but not its latency histogram, so the percentiles of several producers cannot be merged. The highest of them is an upper bound on the run's percentile, so it never understates the tail. `kates report show`, `report diff`, `report compare`, the regression check, `kates trend` and the resilience comparison all read this summary.
 
@@ -760,7 +784,7 @@ Optional fields: `probes` (steady-state probe definitions) and `maxRecoveryWaitS
 
 The workload has to be running when the fault lands. At 500 records per second the 180,000 records take 360 s, while the fault is triggered after `steadyStateSec` (30 s), lasts `chaosDurationSec` (30 s), and the run then waits up to `maxRecoveryWaitSec` for recovery. Without `throughput` the producer runs unthrottled and can finish before the fault. A run that has ended when `steadyStateSec` is up gets no fault, and the report is `ERROR`; one that ends after that, before the fault goes in, leaves both summaries describing a run the fault never touched. `testRequest` is the body of [POST /api/tests](#post-apitests), so the same fields apply: `throughput` is the rate limit, and LOAD runs one producer and one consumer, so the spec sets no producer count. `disruptionType` picks the fault: on the default `litmus-crd` chaos provider `POD_KILL` runs the LitmusChaos `pod-delete` experiment, and the outcome reports that name, while `experimentName` only names the ChaosEngine. Without `disruptionType`, Litmus runs the experiment that `experimentName` names, and the `kates-chaos` chart installs none called `kafka-pod-kill`. The selector adds `strimzi.io/broker-role=true` because `strimzi.io/component-type=kafka` alone also matches the KRaft controllers, and the random pick could then kill a controller instead of a broker.
 
-The call returns once the probes pass after the fault, or once `maxRecoveryWaitSec` runs out, so with this example the response usually arrives while the LOAD run is still producing. `postChaosSummary` and `impactDeltas` cover the run up to that moment. The run keeps producing, and keeps its place among the `kates.engine.max-concurrent-tests` running tests, until it reaches `DONE`; its final numbers are then at `GET /api/tests/{id}`, with the id from `performanceReport.run.id`.
+The call returns once the probes pass after the fault, or once `maxRecoveryWaitSec` runs out, so with this example the response usually arrives while the LOAD run is still producing. `postChaosSummary` and `impactDeltas` cover the run up to that moment. When `testRequest` is a scenario, a phase still waiting for its turn is left out of the throughput of both summaries. The run keeps producing, and keeps its place among the `kates.engine.max-concurrent-tests` running tests, until it reaches `DONE`; its final numbers are then at `GET /api/tests/{id}`, with the id from `performanceReport.run.id`.
 
 **Response** (cut down, with illustrative numbers):
 
@@ -903,9 +927,11 @@ A schedule stores `testRequest` with only the fields it sets. Each firing is a `
 
 A `testRequest` that `POST /api/tests` would refuse, for a field the run could not honour, a run longer than `kates.engine.max-duration-ms` or a scenario spec value outside its limits, is refused here too, and the schedule isn't saved. The answer is the same `400`, with each field keyed in `fieldErrors`, and named in `message`, by its path in the schedule, such as `testRequest.spec.consumerGroup` or `testRequest.scenario.phases[0].targetThroughput`.
 
-A firing the Kates API refuses starts no run, and the reason is in the server log only. That happens to a schedule saved before the Kates API checked `testRequest`, and to one whose request it refuses later, after an upgrade or a change to its settings such as a lower `kates.engine.max-duration-ms`. Disable such a schedule, or `PUT` a `testRequest` the Kates API accepts.
+A `testRequest` without a `type`, or with a `spec` value outside the limits `POST /api/tests` sets, such as a `numProducers` above 100, gets the `400` that `POST /api/tests` gives it, with `fieldErrors` keyed by field name. A `backend` the Kates API doesn't have is refused too, keyed `testRequest.backend`, or `testRequest.scenario.backend` for a scenario that names its own. `POST /api/tests` refuses that one with a `400` that has no `fieldErrors`.
 
-A schedule created before the Kates API kept the request stored every spec field, those it did not set at their Java defaults. When the Kates API upgrades, its database migration removes the defaults stored for `targetThroughput`, the fetch settings and the three `enable` options, which runs then ignored, so such a schedule runs as it did. A value the schedule did set for one of them now reaches the run, or is refused at each firing if the type cannot apply it. Its other fields keep the stored values, the Java defaults rather than the type's; `PUT` the schedule's `testRequest` again to have the type's defaults fill them in.
+A firing the Kates API refuses starts no run, and the reason is in the server log only. That happens to a schedule saved before the Kates API checked `testRequest`, and to one whose request it refuses later, after an upgrade or a change to its settings such as a lower `kates.engine.max-duration-ms`. A firing also holds the request's `spec`, and a scenario's, to the limits `POST /api/tests` sets, such as a `numProducers` of at most 100, and refuses a stored value outside them. Disable such a schedule, or `PUT` a `testRequest` the Kates API accepts.
+
+A schedule created before the Kates API kept the request stored every spec field, those it did not set at their Java defaults. When the Kates API upgrades, its database migration removes the defaults stored for `targetThroughput`, the fetch settings and the three `enable` options, which runs then ignored, so such a schedule runs as it did. A value the schedule did set for one of them now reaches the run, or is refused at each firing if the type cannot apply it. Its other fields keep the stored values, the Java defaults rather than the type's, all within the limits a firing holds `spec` to. `PUT` the schedule's `testRequest` again to have the type's defaults fill them in.
 
 #### GET /api/schedules
 
@@ -928,7 +954,7 @@ Get a single schedule, including the ID and time of its last triggered run.
 
 #### PUT /api/schedules/{id}
 
-Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse, for a field the run could not honour, a run longer than `kates.engine.max-duration-ms` or a scenario spec value outside its limits, gets the same `400`. The schedule then stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
+Update a schedule. Accepts the same body as `POST /api/schedules` (fields you omit keep their current values, except `enabled`, which is always applied). Returns the updated schedule. A `testRequest` in the body that `POST /api/schedules` would refuse gets the same `400`, whatever the reason, and the schedule stays as it was. A body without one leaves the stored request unchecked, so you can rename or disable a schedule whose firings the Kates API refuses.
 
 #### DELETE /api/schedules/{id}
 
@@ -944,19 +970,21 @@ Errors follow a consistent JSON format:
 { "status": 404, "error": "Not Found", "message": "Test run not found: abc123" }
 ```
 
-The one exception is the disruption safety-guard rejection (`422`), which returns the shape shown in the examples below.
+The one exception is the disruption safety-guard rejection (`422`), which returns the shape shown in the examples below. A `400` whose `error` is `Validation Failed` also has `fieldErrors`, the reason for each field its `message` names.
 
 ### HTTP Error Codes
 
 | Status | Error | Description | Common Causes |
 |:---:|-------|-------------|---------------|
-| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON, a resilience `chaosSpec` parameter outside the fault parameter limits |
+| 400 | Bad Request | Malformed or invalid request | Invalid `type`, missing required fields, malformed JSON |
+| 400 | Validation Failed | A field the Kates API refuses, named in `message` and `fieldErrors` | A missing `type`, a `spec` value outside its limits or one the run can't honour, a resilience `chaosSpec` parameter outside the fault parameter limits |
 | 401 | Unauthorized | Missing API key | Security enabled and no `Authorization`/`X-API-Key` header sent |
 | 403 | Forbidden | Invalid API key | Key does not match `kates.api.key` |
 | 404 | Not Found | Resource does not exist | Unknown test ID, deleted report, non-existent schedule |
 | 409 | Conflict | Conflicts with current state | Cancelling a test that is not running; starting a disruption while one is already running |
 | 422 | Unprocessable Entity | Rejected by the safety guard | No broker pods in the Kafka namespace, a `targetLabel` that doesn't parse, a fault parameter outside its limit, `maxAffectedBrokers` exceeded, every broker hit |
-| 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable |
+| 429 | Too Many Requests | Too many test runs at once | `kates.engine.max-concurrent-tests` tests already running when another is created |
+| 500 | Internal Server Error | Unexpected server failure | Kafka admin call failed, cluster unreachable, a test run the Kates API couldn't save |
 | 503 | Service Unavailable | Dependent system unavailable | Kubernetes API not reachable |
 
 ### Error Examples
@@ -964,6 +992,16 @@ The one exception is the disruption safety-guard rejection (`422`), which return
 **400 — Invalid test type:**
 ```json
 { "status": 400, "error": "Bad Request", "message": "Invalid test type: BENCHMARK" }
+```
+
+**400 — A test request without a `type`:**
+```json
+{
+  "status": 400,
+  "error": "Validation Failed",
+  "message": "type: Test type is required",
+  "fieldErrors": { "type": "Test type is required" }
+}
 ```
 
 **409 — Cancelling a test that is not running:**

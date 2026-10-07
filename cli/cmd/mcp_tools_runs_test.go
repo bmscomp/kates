@@ -23,7 +23,7 @@ import (
 
 // mcpCaveatIDsRuns lists the constants of mcpCaveatsRuns.
 var mcpCaveatIDsRuns = []mcpCaveatID{
-	mcpCaveatSummaryAveragesTasks,
+	mcpCaveatSummaryAveragesStartedTasks,
 	mcpCaveatIntegrityNotStored,
 	mcpCaveatCancelStoredAsFailed,
 	mcpCaveatScenarioPhasesInTurn,
@@ -473,7 +473,7 @@ func TestMCPGetRun(t *testing.T) {
 	if env.Truncated {
 		t.Error("nothing was cut")
 	}
-	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks, mcpCaveatLoadSingleProducer)
+	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks, mcpCaveatLoadSingleProducer)
 	mcpNoCaveat(t, env, mcpCaveatReaperDeadline, mcpCaveatIntegrityNotStored, mcpCaveatScenarioPhasesInTurn)
 
 	// list_runs shows the same digest for the same run.
@@ -707,9 +707,9 @@ func mcpOutsideFences(h *mcpHarness, raw []byte) string {
 }
 
 // A scenario run's text reaches the store unvalidated: its phase names
-// become task ids (TestOrchestrator.java:1602), and an older Kates API
+// become task ids (TestOrchestrator.java:1742), and an older Kates API
 // stored its base spec's topic, acks and compression as sent
-// (TestOrchestrator.java:342-350,368-372). None of it may reach the model outside a
+// (TestOrchestrator.java:347-355,373-377). None of it may reach the model outside a
 // fence.
 func TestMCPGetRunUnvalidatedScenarioText(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
@@ -948,7 +948,7 @@ func TestMCPAssessRun(t *testing.T) {
 		t.Errorf("advice without fix or evidence = %+v", r)
 	}
 
-	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks, mcpCaveatRegressionOneBaseline,
+	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks, mcpCaveatRegressionOneBaseline,
 		mcpCaveatBrokerSkewProjected, mcpCaveatAdvisorRulesOfThumb, mcpCaveatLoadSingleProducer)
 	mcpNoCaveat(t, env, mcpCaveatTrendsMixSpecs, mcpCaveatReaperDeadline)
 	if env.Truncated {
@@ -1814,7 +1814,7 @@ func TestMCPRunReportResource(t *testing.T) {
 	if !ok || !strings.Contains(body, "| testType | LOAD |") || strings.ContainsAny(body, "\x1b\u202e\u200b") {
 		t.Fatalf("report not fenced and cleaned:\n%s", text)
 	}
-	for _, id := range []mcpCaveatID{mcpCaveatSummaryAveragesTasks, mcpCaveatLoadSingleProducer, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed} {
+	for _, id := range []mcpCaveatID{mcpCaveatSummaryAveragesStartedTasks, mcpCaveatLoadSingleProducer, mcpCaveatReaperDeadline, mcpCaveatCancelStoredAsFailed} {
 		if !strings.Contains(head, "- "+string(id)+": ") {
 			t.Errorf("the header lacks caveat %s:\n%s", id, head)
 		}

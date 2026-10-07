@@ -10,6 +10,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 import jakarta.inject.Inject;
 
@@ -18,6 +22,9 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
+import org.jboss.logmanager.ExtLogRecord;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -45,6 +52,39 @@ class ScheduleResourceTest {
 
     @Inject
     TestScheduler scheduler;
+
+    /** Held so the logger, and the handler on it, outlive the test's own references. */
+    private final java.util.logging.Logger schedulerLog =
+            java.util.logging.Logger.getLogger(TestScheduler.class.getName());
+
+    /** What the scheduler logged at ERROR during the test. */
+    private final List<String> schedulerErrors = new CopyOnWriteArrayList<>();
+
+    private final Handler captureErrors = new Handler() {
+        @Override
+        public void publish(LogRecord record) {
+            if (record.getLevel().intValue() >= Level.SEVERE.intValue()) {
+                schedulerErrors.add(
+                        record instanceof ExtLogRecord ext ? ext.getFormattedMessage() : record.getMessage());
+            }
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() {}
+    };
+
+    @BeforeEach
+    void captureSchedulerErrors() {
+        schedulerLog.addHandler(captureErrors);
+    }
+
+    @AfterEach
+    void releaseSchedulerLog() {
+        schedulerLog.removeHandler(captureErrors);
+    }
 
     @Test
     void listSchedulesReturnsAll() {
@@ -92,7 +132,8 @@ class ScheduleResourceTest {
                 .when()
                 .post("/api/schedules")
                 .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("message", is("name: name is required"));
     }
 
     @Test
@@ -103,7 +144,34 @@ class ScheduleResourceTest {
                 .when()
                 .post("/api/schedules")
                 .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("message", is("cronExpression: cronExpression is required"));
+    }
+
+    /**
+     * A testRequest value outside the limits POST /api/tests sets is named in
+     * the message, with its reason. The message said only "Request
+     * validation failed", so kates schedule create, which prints the message
+     * alone, never said which field to change. The reason depends on the
+     * JVM's locale, so it is read back from fieldErrors.
+     */
+    @Test
+    void aTestRequestValueOutsideItsLimitsIsNamedInTheMessage() {
+        var answer = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\","
+                        + "\"testRequest\":{\"type\":\"STRESS\",\"spec\":{\"numProducers\":1000}}}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", aMapWithSize(1))
+                .extract()
+                .jsonPath();
+
+        assertEquals("numProducers: " + answer.getString("fieldErrors.numProducers"), answer.getString("message"));
+        Mockito.verify(repository, Mockito.never()).save(any());
     }
 
     @Test
@@ -172,9 +240,9 @@ class ScheduleResourceTest {
     }
 
     /**
-     * A PUT runs no bean validation, but a scenario's specs are held to their
-     * limits all the same: the check is the one the Kates API asks of every
-     * request before it runs it.
+     * A PUT's bean validation, like a POST's, stops at the request's own
+     * spec, but a scenario's specs are held to their limits all the same: the
+     * check is the one the Kates API asks of every request before it runs it.
      */
     @Test
     void aPutsScenarioSpecsAreHeldToTheirLimits() {
@@ -256,6 +324,113 @@ class ScheduleResourceTest {
     }
 
     /**
+     * A PUT's testRequest is held to the bean constraints a POST's is, and
+     * gets the body a POST gets for it. A PUT ran no bean validation, so it
+     * saved what a POST refuses, such as STRESS with 1000 producers, which
+     * each firing then started, and it keyed a missing type otherwise than a
+     * POST does. The default messages depend on the JVM's locale, so the
+     * bodies are compared rather than spelled out.
+     */
+    @ParameterizedTest(name = "{1}")
+    @MethodSource("requestsBreakingTheirConstraints")
+    void aPutsTestRequestGetsTheBeanValidationAPostsGets(String testRequest, String field) {
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+
+        Map<String, Object> post = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\",\"testRequest\":" + testRequest + "}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .extract()
+                .jsonPath()
+                .getMap("");
+        Map<String, Object> put = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"renamed\",\"testRequest\":" + testRequest + "}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", hasKey(field))
+                .extract()
+                .jsonPath()
+                .getMap("");
+
+        assertEquals(post, put);
+        Mockito.verify(repository, Mockito.never()).save(any());
+        assertEquals("nightly", s.getName());
+        assertEquals("{\"type\":\"LOAD\"}", s.getRequestJson());
+    }
+
+    static Stream<Arguments> requestsBreakingTheirConstraints() {
+        return Stream.of(
+                Arguments.of("{\"type\":\"STRESS\",\"spec\":{\"numProducers\":1000}}", "numProducers"),
+                Arguments.of("{\"type\":\"LOAD\",\"spec\":{\"topic\":\"not a topic!\"}}", "topic"),
+                Arguments.of("{\"spec\":{\"numRecords\":10}}", "type"),
+                // A POST requires the request's own type, even beside a
+                // scenario's, so a PUT does too.
+                Arguments.of(
+                        "{\"scenario\":{\"type\":\"LOAD\",\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\","
+                                + "\"durationMs\":60000}]}}",
+                        "type"));
+    }
+
+    /**
+     * A backend the Kates API doesn't have is refused before the schedule is
+     * saved, keyed by the path of the backend the run would take. Such a
+     * schedule was saved, and each firing then failed on the backend and
+     * started no run, with the reason in the server log only.
+     */
+    @ParameterizedTest(name = "{1}")
+    @MethodSource("unknownBackends")
+    void aBackendTheApiDoesNotHaveIsNotSaved(String testRequest, String field) {
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+        String reason = "the Kates API has no backend 'nope'; set it to native or trogdor";
+
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\",\"testRequest\":" + testRequest + "}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", is(Map.of(field, reason)))
+                .body("message", is(field + ": " + reason));
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"testRequest\":" + testRequest + "}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(400)
+                .body("error", is("Validation Failed"))
+                .body("fieldErrors", is(Map.of(field, reason)));
+
+        Mockito.verify(repository, Mockito.never()).save(any());
+        assertEquals("{\"type\":\"LOAD\"}", s.getRequestJson());
+    }
+
+    static Stream<Arguments> unknownBackends() {
+        String phases = "\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]";
+        return Stream.of(
+                Arguments.of("{\"type\":\"LOAD\",\"backend\":\"nope\"}", "testRequest.backend"),
+                // A scenario runs on the request's backend unless it names
+                // one of its own.
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"backend\":\"nope\",\"scenario\":{" + phases + "}}",
+                        "testRequest.backend"),
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"scenario\":{\"backend\":\"nope\"," + phases + "}}",
+                        "testRequest.scenario.backend"));
+    }
+
+    /**
      * A schedule saved before the check still fails at each firing: the
      * Kates API refuses its request, and no run starts.
      */
@@ -287,6 +462,53 @@ class ScheduleResourceTest {
 
         Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
         Mockito.verifyNoInteractions(trogdorClient);
+    }
+
+    /**
+     * A rate of 0, which both benchmark backends ran unthrottled, is refused
+     * wherever a schedule's request comes in: POST and PUT hold the request to
+     * TestSpec's limits, and so does each firing of a schedule saved while 0
+     * passed. The orchestrator refuses a phase's own rate of 0 at firing.
+     */
+    @Test
+    void aRateOfZeroIsRefusedOnPostOnPutAndAtEachFiring() {
+        // A request the checks let through fails at submission and frees its permit.
+        Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+        String zero = "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"spec\":{\"throughput\":0}}";
+        String why = "throughput must be -1 (unlimited) or positive";
+
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"nightly\",\"cronExpression\":\"0 0 * * *\",\"testRequest\":" + zero + "}")
+                .when()
+                .post("/api/schedules")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors.throughput", is(why));
+
+        ScheduledTestRun s = storedSchedule("{\"type\":\"LOAD\"}");
+        Mockito.when(repository.findById("s1")).thenReturn(Optional.of(s));
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body("{\"testRequest\":" + zero + "}")
+                .when()
+                .put("/api/schedules/s1")
+                .then()
+                .statusCode(400)
+                .body("fieldErrors.throughput", is(why));
+        Mockito.verify(repository, Mockito.never()).save(any());
+        assertEquals("{\"type\":\"LOAD\"}", s.getRequestJson());
+
+        for (String stored : List.of(
+                zero,
+                "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"scenario\":{\"baseSpec\":{\"throughput\":0},"
+                        + "\"phases\":[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]}}",
+                "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"scenario\":{\"phases\":[{\"name\":\"steady\","
+                        + "\"phaseType\":\"STEADY\",\"durationMs\":60000,\"targetThroughput\":0}]}}")) {
+            scheduler.executeSchedule(storedSchedule(stored));
+        }
+        Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
+        Mockito.verify(trogdorClient, Mockito.never()).createTask(any());
     }
 
     private static ScheduledTestRun storedSchedule(String requestJson) {
@@ -359,6 +581,79 @@ class ScheduleResourceTest {
             }
         }
         throw new AssertionError("run " + id + " never finished");
+    }
+
+    /**
+     * A firing holds the request's spec to the limits POST /api/tests holds
+     * it to, whether the run reads that spec or not, and starts no run for a
+     * value outside them: it logs each one, as it logs any refused firing.
+     * The run used to go ahead: a numProducers of 1000, which a PUT saved
+     * unchecked, started 1000 Trogdor tasks at each firing.
+     */
+    @ParameterizedTest(name = "{1}")
+    @MethodSource("specsOutsideTheLimits")
+    void aStoredSpecOutsideItsLimitsStartsNoRun(String requestJson, String field) {
+        // A run the check let through would fail here, at submission.
+        Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+
+        scheduler.executeSchedule(storedSchedule(requestJson));
+
+        Mockito.verify(repository, Mockito.never()).updateLastRun(anyString(), anyString());
+        Mockito.verifyNoInteractions(trogdorClient);
+        assertTrue(
+                schedulerErrors.stream()
+                        .anyMatch(e ->
+                                e.startsWith("Failed to execute schedule 'nightly': ") && e.contains(field + ": ")),
+                schedulerErrors.toString());
+    }
+
+    static Stream<Arguments> specsOutsideTheLimits() {
+        return Stream.of(
+                Arguments.of(
+                        "{\"type\":\"STRESS\",\"backend\":\"trogdor\",\"spec\":{\"numProducers\":1000}}",
+                        "spec.numProducers"),
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"spec\":{\"topic\":\"no spaces\"}}", "spec.topic"),
+                Arguments.of(
+                        "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"spec\":{\"numRecords\":0},\"scenario\":{\"phases\":"
+                                + "[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]}}",
+                        "spec.numRecords"));
+    }
+
+    /**
+     * Only the request's spec is held to the limits, so a request within them
+     * still fires. A schedule stored before the Kates API kept only the fields
+     * a request sets holds every spec field at its old Java default, all within
+     * the limits; the first case is its spec as migration V23 leaves it. A
+     * scenario with a type of its own, and none in the request, runs as the
+     * scenario's type, though bean validation of the whole request would
+     * refuse it for the missing type.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("requestsWithinTheLimits")
+    void aStoredRequestWithinTheLimitsStillRuns(String name, String requestJson) {
+        Mockito.when(trogdorClient.createTask(any())).thenThrow(new IllegalStateException("no coordinator in tests"));
+
+        scheduler.executeSchedule(storedSchedule(requestJson));
+
+        ArgumentCaptor<String> runId = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(repository).updateLastRun(eq("s1"), runId.capture());
+        awaitFinished(runId.getValue());
+    }
+
+    static Stream<Arguments> requestsWithinTheLimits() {
+        return Stream.of(
+                Arguments.of(
+                        "old Java defaults",
+                        "{\"type\":\"LOAD\",\"backend\":\"trogdor\",\"spec\":{\"numRecords\":1000000,\"recordSize\":1024,"
+                                + "\"throughput\":-1,\"acks\":\"all\",\"batchSize\":65536,\"lingerMs\":5,"
+                                + "\"compressionType\":\"lz4\",\"numProducers\":1,\"numConsumers\":1,"
+                                + "\"durationMs\":600000,\"replicationFactor\":3,\"partitions\":3,"
+                                + "\"minInsyncReplicas\":2}}"),
+                Arguments.of(
+                        "a scenario's own type",
+                        "{\"backend\":\"trogdor\",\"scenario\":{\"type\":\"LOAD\",\"phases\":"
+                                + "[{\"name\":\"steady\",\"phaseType\":\"STEADY\",\"durationMs\":60000}]}}"));
     }
 
     @Test

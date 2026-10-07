@@ -6,6 +6,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.function.LongConsumer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
@@ -72,25 +73,32 @@ public class LitmusChaosProvider implements ChaosProvider {
 
     @Override
     public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec) {
+        return triggerFault(spec, injectedAt -> {});
+    }
+
+    @Override
+    public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec, LongConsumer onInject) {
         if (ON_KUBERNETES_API.contains(spec.disruptionType())) {
-            return kubernetes.triggerFault(spec);
+            return kubernetes.triggerFault(spec, onInject);
         }
         if (spec.delayBeforeSec() <= 0) {
-            return inject(spec);
+            return inject(spec, onInject);
         }
         // Waited out before the pods are picked and the ChaosEngine exists, as
         // the kubernetes provider waits it. Litmus's own RAMP_TIME would wait
         // after the fault as well, past the time Kates waits for the result.
         Executor afterDelay =
                 CompletableFuture.delayedExecutor(spec.delayBeforeSec(), TimeUnit.SECONDS, executor.get());
-        return CompletableFuture.supplyAsync(() -> inject(spec), afterDelay).thenCompose(Function.identity());
+        return CompletableFuture.supplyAsync(() -> inject(spec, onInject), afterDelay)
+                .thenCompose(Function.identity());
     }
 
     /**
      * Creates the ChaosEngine and polls its ChaosResult. The start is taken
-     * here, after any delay, so the outcome times the fault, not the wait.
+     * here, after any delay, so the outcome times the fault, not the wait, and
+     * it is the moment {@code onInject} gets.
      */
-    private CompletableFuture<ChaosOutcome> inject(FaultSpec spec) {
+    private CompletableFuture<ChaosOutcome> inject(FaultSpec spec, LongConsumer onInject) {
         Instant start = Instant.now();
         long startNanos = System.nanoTime();
         String engineName = "kates-" + spec.experimentName() + "-" + System.currentTimeMillis();
@@ -102,6 +110,9 @@ public class LitmusChaosProvider implements ChaosProvider {
 
             ChaosEngine engine = buildChaosEngine(spec, engineName, experimentName);
             String resultName = engineName + "-" + experimentName;
+
+            // Once the pods are picked, before the engine that injects the fault exists.
+            onInject.accept(startNanos);
 
             // NOW create the engine
             client.resources(ChaosEngine.class)
@@ -267,10 +278,10 @@ public class LitmusChaosProvider implements ChaosProvider {
         envVars.add(new ChaosEngineSpec.EnvVar("TOTAL_CHAOS_DURATION", String.valueOf(spec.chaosDurationSec())));
 
         // Resolved here, not by Litmus, so targetBrokerId and targetAll mean the
-        // same thing as on the kubernetes backend. node-drain takes TARGET_NODE.
+        // same thing as on the kubernetes backend. node-drain takes their node.
         boolean hasTarget = (spec.targetPod() != null && !spec.targetPod().isEmpty())
                 || (spec.targetLabel() != null && !spec.targetLabel().isBlank());
-        if (hasTarget && spec.disruptionType() != DisruptionType.NODE_DRAIN) {
+        if (hasTarget && !EXPERIMENT_MAP.get(DisruptionType.NODE_DRAIN).equals(experimentName)) {
             envVars.add(new ChaosEngineSpec.EnvVar("TARGET_PODS", String.join(",", PodTargets.resolve(client, spec))));
         }
 
@@ -318,6 +329,14 @@ public class LitmusChaosProvider implements ChaosProvider {
             }
         }
 
+        // By experiment, not by type, so a step without a type that names
+        // node-drain gets its node too. An override that picks the node is
+        // left to do so: node-drain reads NODE_LABEL only when TARGET_NODE is
+        // empty, so a TARGET_NODE from Kates would overrule it.
+        if (EXPERIMENT_MAP.get(DisruptionType.NODE_DRAIN).equals(experimentName) && !overridesTheNode(spec)) {
+            envVars.add(new ChaosEngineSpec.EnvVar("TARGET_NODE", targetNode(spec)));
+        }
+
         components.env = envVars;
         ChaosEngineSpec.ExperimentSpec expSpec = new ChaosEngineSpec.ExperimentSpec();
         expSpec.components = components;
@@ -325,6 +344,12 @@ public class LitmusChaosProvider implements ChaosProvider {
         if (spec.probes() != null && !spec.probes().isEmpty()) {
             List<ChaosEngineSpec.Probe> litmusProbes = new ArrayList<>();
             for (ProbeSpec p : spec.probes()) {
+                // Only a cmdProbe gets inputs below. Litmus has no kafkaProbe,
+                // and the k8sProbe "kafka Ready" is Kates' own query; Kates
+                // evaluates both itself, and Litmus would fail them empty.
+                if (!"cmdProbe".equals(p.type())) {
+                    continue;
+                }
                 ChaosEngineSpec.Probe lp = new ChaosEngineSpec.Probe();
                 lp.name = p.name();
                 lp.type = p.type();
@@ -343,7 +368,9 @@ public class LitmusChaosProvider implements ChaosProvider {
                 lp.runProperties = new ChaosEngineSpec.RunProperties();
                 litmusProbes.add(lp);
             }
-            expSpec.probe = litmusProbes;
+            if (!litmusProbes.isEmpty()) {
+                expSpec.probe = litmusProbes;
+            }
         }
 
         experiment.spec = expSpec;
@@ -352,6 +379,55 @@ public class LitmusChaosProvider implements ChaosProvider {
         engine.setSpec(engineSpec);
 
         return engine;
+    }
+
+    /** Whether envOverrides picks the node: TARGET_NODE names it, NODE_LABEL has Litmus pick one. */
+    private static boolean overridesTheNode(FaultSpec spec) {
+        return spec.envOverrides() != null
+                && (spec.envOverrides().containsKey("TARGET_NODE")
+                        || spec.envOverrides().containsKey("NODE_LABEL"));
+    }
+
+    /**
+     * The node a drain drains: the one the pods it picks run on
+     * ({@link PodTargets}), so it hits the pod its targetPod, targetBrokerId
+     * or selector picks, as every other fault does. node-drain, given no
+     * TARGET_NODE, drains the node of a random pod in any namespace, the
+     * control plane's among them, and Kates used to give it none. It drains
+     * one node, so the pods a targetAll drain picks must all run on the same
+     * one.
+     *
+     * @throws IllegalStateException when a pod is gone or not on a node yet,
+     *     or the pods run on more than one node; the fault fails before the
+     *     ChaosEngine exists, so nothing is drained
+     */
+    private String targetNode(FaultSpec spec) {
+        List<String> pods = PodTargets.resolve(client, spec);
+        Set<String> nodes = new TreeSet<>();
+        for (String name : pods) {
+            var pod = client.pods()
+                    .inNamespace(spec.targetNamespace())
+                    .withName(name)
+                    .get();
+            if (pod == null) {
+                throw new IllegalStateException("NODE_DRAIN: pod " + name + " was not found in namespace '"
+                        + spec.targetNamespace() + "', so there is no node to drain");
+            }
+            String node = pod.getSpec() != null ? pod.getSpec().getNodeName() : null;
+            if (node == null || node.isBlank()) {
+                throw new IllegalStateException(
+                        "NODE_DRAIN: pod " + name + " is not on a node yet, so there is no node to drain");
+            }
+            nodes.add(node);
+        }
+        if (nodes.size() > 1) {
+            throw new IllegalStateException("NODE_DRAIN: the pods targetAll picks run on " + nodes.size() + " nodes ("
+                    + String.join(", ", nodes) + "), and node-drain drains one. Narrow targetLabel to the pods of"
+                    + " one node, or name the node in envOverrides.TARGET_NODE");
+        }
+        String node = nodes.iterator().next();
+        LOG.info("NODE_DRAIN: TARGET_NODE " + node + ", the node of " + String.join(", ", pods));
+        return node;
     }
 
     @Override

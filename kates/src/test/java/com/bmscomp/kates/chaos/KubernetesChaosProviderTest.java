@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -640,6 +641,36 @@ public class KubernetesChaosProviderTest {
         List<String> remaining = remainingPods();
         assertEquals(2, remaining.size());
         assertTrue(remaining.contains("krafter-brokers-2"));
+    }
+
+    /** A resilience run measures RPO from the moment the fault reports. */
+    @Test
+    void aDelayedFaultIsReportedOnceItsDelayIsOverAndBeforeThePodGoes() throws Exception {
+        createZonedBrokers();
+        FaultSpec spec = FaultSpec.builder("delayed-kill")
+                .targetPod("krafter-brokers-2")
+                .disruptionType(DisruptionType.POD_KILL)
+                .delayBeforeSec(1)
+                .build();
+        List<Long> reported = new CopyOnWriteArrayList<>();
+        List<List<String>> podsWhenReported = new CopyOnWriteArrayList<>();
+
+        long triggered = System.nanoTime();
+        ChaosOutcome outcome = provider.triggerFault(spec, injectedAt -> {
+                    reported.add(injectedAt);
+                    podsWhenReported.add(remainingPods());
+                })
+                .get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertEquals(1, reported.size(), "reported once");
+        assertTrue(
+                reported.getFirst() - triggered >= TimeUnit.SECONDS.toNanos(1), "reported before the delay was over");
+        assertEquals(
+                List.of(List.of("krafter-brokers-0", "krafter-brokers-1", "krafter-brokers-2")),
+                podsWhenReported,
+                "reported after the pod went");
+        assertEquals(List.of("krafter-brokers-0", "krafter-brokers-1"), remainingPods());
     }
 
     @Test

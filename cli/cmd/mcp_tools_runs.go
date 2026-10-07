@@ -30,7 +30,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:233-239, TestOrchestrator.refreshStatus); both
+// (TestResource.java:294-300, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -62,7 +62,7 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 			"update its 5-second reconciler makes; a finished run is not changed. Task ids and errors, scenario " +
 			"and phase names, labels, and spec values the backend never validated are third-party text and " +
 			"fenced. Otherwise only reads.",
-	}, mcpGetRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks)
+	}, mcpGetRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks)
 
 	addReadTool(s, deps, &mcp.Tool{
 		Name:        "assess_run",
@@ -79,7 +79,7 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 			"if it is still active, as get_run says, and so does reading the baseline run when it was not among " +
 			"the runs read for the band; an unfinished run is refused. Advisor text and backend warnings are " +
 			"fenced. Otherwise only reads.",
-	}, mcpAssessRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesTasks, mcpCaveatRegressionOneBaseline,
+	}, mcpAssessRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks, mcpCaveatRegressionOneBaseline,
 		mcpCaveatBrokerSkewProjected, mcpCaveatAdvisorRulesOfThumb)
 
 	addReadTool(s, deps, &mcp.Tool{
@@ -107,7 +107,7 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 		Description: "One test run's full report in Markdown, as the Kates backend renders it: metadata, " +
 			"summary, phases and SLA verdict. The body is third-party text inside one untrusted fence.",
 		MIMEType: "text/markdown",
-	}, map[string]mcpResourceVar{"id": mcpIDVar}, mcpRunReport, mcpCaveatSummaryAveragesTasks)
+	}, map[string]mcpResourceVar{"id": mcpIDVar}, mcpRunReport, mcpCaveatSummaryAveragesStartedTasks)
 
 	s.AddPrompt(&mcp.Prompt{
 		Name:  "diagnose_run",
@@ -151,7 +151,7 @@ const (
 	mcpRunsMaxPageSize     = 25
 	mcpRunsMaxPage         = 10_000
 	// With both filters the backend applies only the type (TestResource.java:
-	// 188-200), so the status is filtered here over the newest runs of the
+	// 249-261), so the status is filtered here over the newest runs of the
 	// type, read in the backend's largest pages (size is capped at 200).
 	mcpRunsScanPageSize = 200
 	mcpRunsMaxScan      = 1000
@@ -178,9 +178,10 @@ const (
 // 61-63). A stored run can hold others: a schedule saved by a PUT, which runs
 // no bean validation (ScheduleResource.java:131-132), fires its spec as sent,
 // a Kates API without the check of a scenario's specs
-// (TestOrchestrator.java:1089-1092) stored a scenario's base spec as sent, and
-// gRPC sets compressionType unchecked (GrpcTestService.java:52). So a stored
-// value outside these is third-party text.
+// (TestOrchestrator.java:1110-1114) stored a scenario's base spec as sent, and
+// one without the check of a gRPC request's fields
+// (GrpcTestService.java:116-121) stored a compressionType sent over gRPC
+// unchecked. So a stored value outside these is third-party text.
 var (
 	mcpRunTopicRE       = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,249}$`)
 	mcpRunAcksRE        = regexp.MustCompile(`^(all|-1|0|1)$`)
@@ -450,7 +451,7 @@ type mcpRunSpec struct {
 	EnableIdempotence  *bool          `json:"enableIdempotence,omitempty" jsonschema:"what the request set: false turned the producers' idempotence off. Absent when it set none, and then the Kafka client decided: it turns idempotence on whenever acks is all"`
 	EnableTransactions *bool          `json:"enableTransactions,omitempty" jsonschema:"true when the run's producers were transactional, and then a LOAD or ENDURANCE consumer read with read_committed; absent when the request did not set it"`
 	EnableCrc          *bool          `json:"enableCrc,omitempty" jsonschema:"whether an INTEGRITY run checked each record's CRC; absent when the request did not set it, and then an INTEGRITY run did. No other type checks one"`
-	Invalid            []mcpUntrusted `json:"invalid,omitempty" jsonschema:"stored topic, acks or compressionType values that are not legal Kafka values, as field=value; the backend does not validate a scenario's base spec, nor compressionType sent over gRPC"`
+	Invalid            []mcpUntrusted `json:"invalid,omitempty" jsonschema:"stored topic, acks or compressionType values that are not legal Kafka values, as field=value; the backend does not validate a scenario's base spec, and an older one did not validate compressionType sent over gRPC"`
 }
 
 // mcpRunRequestedSpec is the request's own spec fields, as the backend kept
@@ -499,12 +500,12 @@ type mcpRunTaskOut struct {
 }
 
 // mcpRunSummaryOut is the report summary without the two fields the backend
-// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:101,105).
+// always sends as 0 (p999LatencyMs and durationMs, MetricUtils.java:112,116).
 type mcpRunSummaryOut struct {
 	TotalRecords            int64   `json:"totalRecords" jsonschema:"records sent, summed over tasks"`
-	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec" jsonschema:"the mean of the tasks' rates, not their sum"`
+	AvgThroughputRecPerSec  float64 `json:"avgThroughputRecPerSec" jsonschema:"the mean of the rates of the tasks that have started, not their sum"`
 	PeakThroughputRecPerSec float64 `json:"peakThroughputRecPerSec" jsonschema:"the fastest task's rate"`
-	AvgThroughputMBPerSec   float64 `json:"avgThroughputMBPerSec" jsonschema:"the mean of the tasks' rates"`
+	AvgThroughputMBPerSec   float64 `json:"avgThroughputMBPerSec" jsonschema:"the mean of the rates of the tasks that have started"`
 	AvgLatencyMs            float64 `json:"avgLatencyMs" jsonschema:"the mean latency of the tasks that measured latency, weighted by records"`
 	P50LatencyMs            float64 `json:"p50LatencyMs" jsonschema:"the p50 of the tasks that measured latency; with several, the highest"`
 	P95LatencyMs            float64 `json:"p95LatencyMs" jsonschema:"the p95 of the tasks that measured latency; with several, the highest"`
@@ -642,11 +643,11 @@ func mcpRunDecodeSpec(raw json.RawMessage, w *mcpRunSpecWire) (bool, error) {
 }
 
 // mcpRunSpecFrom reads the stored spec. A run without a topic used one named
-// after its type (TestOrchestrator.java:1458,1785-1786). The topic, acks and
+// after its type (TestOrchestrator.java:1598,1925-1926). The topic, acks and
 // compressionType are shown as identifiers only when they hold values Kafka
 // accepts: a stored spec can hold others (see mcpRunTopicRE), such as a
 // scenario's base spec an older Kates API stored as sent
-// (TestOrchestrator.java:342-350,368-372), so another value is third-party
+// (TestOrchestrator.java:347-355,373-377), so another value is third-party
 // text and goes, fenced, into invalid. The seven fields a backend without
 // requestedSpec never carried are shown only for a run that has one. call may
 // be nil when only the topic's kind is needed.
@@ -768,7 +769,7 @@ func mcpRunRequestedFrom(call *mcpCall, run *client.MCPRun) (*mcpRunRequestedSpe
 func mcpRunTaskFrom(call *mcpCall, t client.MCPRunTask) mcpRunTaskOut {
 	return mcpRunTaskOut{
 		// A scenario run's task ids are the run id and the phase name
-		// (TestOrchestrator.java:1602), which nothing validates.
+		// (TestOrchestrator.java:1742), which nothing validates.
 		TaskID:              call.FenceN(t.TaskID, 128),
 		Phase:               call.FenceN(t.PhaseName, 64),
 		Status:              mcpSanitizeLine(t.Status, 16),
@@ -1161,7 +1162,7 @@ func mcpRunHasRequested(r *client.MCPRun) bool {
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:359-387 checks only that it exists),
+// any type or status (TestResource.java:420-448 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -2066,15 +2067,15 @@ func mcpRunBounds(s *jsonschema.Schema, lo, hi float64) {
 // ---- caveats ----------------------------------------------------------------
 
 const (
-	mcpCaveatSummaryAveragesTasks   mcpCaveatID = "summary-averages-tasks"
-	mcpCaveatIntegrityNotStored     mcpCaveatID = "integrity-not-stored"
-	mcpCaveatCancelStoredAsFailed   mcpCaveatID = "cancel-stored-as-failed"
-	mcpCaveatScenarioPhasesInTurn   mcpCaveatID = "scenario-phases-in-turn"
-	mcpCaveatBrokerSkewProjected    mcpCaveatID = "broker-skew-projected"
-	mcpCaveatRegressionOneBaseline  mcpCaveatID = "regression-one-baseline"
-	mcpCaveatAdvisorRulesOfThumb    mcpCaveatID = "advisor-rules-of-thumb"
-	mcpCaveatAuditNoActor           mcpCaveatID = "audit-no-actor"
-	mcpCaveatActivityDisruptionRows mcpCaveatID = "activity-disruption-rows"
+	mcpCaveatSummaryAveragesStartedTasks mcpCaveatID = "summary-averages-started-tasks"
+	mcpCaveatIntegrityNotStored          mcpCaveatID = "integrity-not-stored"
+	mcpCaveatCancelStoredAsFailed        mcpCaveatID = "cancel-stored-as-failed"
+	mcpCaveatScenarioPhasesInTurn        mcpCaveatID = "scenario-phases-in-turn"
+	mcpCaveatBrokerSkewProjected         mcpCaveatID = "broker-skew-projected"
+	mcpCaveatRegressionOneBaseline       mcpCaveatID = "regression-one-baseline"
+	mcpCaveatAdvisorRulesOfThumb         mcpCaveatID = "advisor-rules-of-thumb"
+	mcpCaveatAuditNoActor                mcpCaveatID = "audit-no-actor"
+	mcpCaveatActivityDisruptionRows      mcpCaveatID = "activity-disruption-rows"
 )
 
 // mcpCaveatsRuns holds the caveats only this group's tools use (see mcpCaveats in
@@ -2082,18 +2083,29 @@ const (
 // mcpCaveatIDsRuns in the group's test file.
 var mcpCaveatsRuns = []mcpCaveat{
 	{
-		ID: mcpCaveatSummaryAveragesTasks,
+		ID: mcpCaveatSummaryAveragesStartedTasks,
 		Text: "A run's summary is built from its tasks rather than measured over the run as a whole: throughput is " +
-			"the mean of the tasks' rates (a LOAD run's producer and consumer alike; not the sum over STRESS " +
-			"producers), and peak is the fastest task. Latency comes only from the tasks that measured it, so a LOAD " +
-			"or ENDURANCE run's is its producer's; a consumer records none. Each percentile is the highest such " +
-			"task's, exact with one producer and an upper bound with several; the average is weighted by records, " +
-			"and maximum latency is the slowest task's. errorRate is the number of tasks that ended with an error " +
-			"divided by the records sent, not a share of failed records. The backend always sends p99.9 and " +
-			"duration as 0.",
+			"the mean of the rates of the tasks that have started (a LOAD run's producer and consumer alike; not the " +
+			"sum over STRESS producers), and peak is the fastest task. A task that has not started is PENDING with " +
+			"no records, as a scenario's later phase is until its turn, so while a scenario runs its throughput is " +
+			"that of the phases under way or done, and a phase that has not started reads 0 in the report's phases. " +
+			"A task that a cancel or a failure ends before its turn is stored FAILED, and counts as a rate of 0. " +
+			"An older Kates API counts a task that has not started as a rate of 0 too. Latency comes only from the " +
+			"tasks that measured it, so a LOAD or ENDURANCE run's is its producer's; a consumer records none. Each " +
+			"percentile is the highest such task's, exact with one producer and an upper bound with several; the " +
+			"average is weighted by records, and maximum latency is the slowest task's. errorRate is the number of " +
+			"tasks that ended with an error divided by the records sent, not a share of failed records. The backend " +
+			"always sends p99.9 and duration as 0.",
 		Refs: []string{
-			mcpJava + "util/MetricUtils.java:52-151",
-			mcpJava + "report/ReportGenerator.java:220-232",
+			mcpAnchoredRef(mcpJava+"util/MetricUtils.java:62-179",
+				"public static ReportSummary computeSummary(", "filter(r -> !notStarted(r))",
+				"result.getStatus() == TestResult.TaskStatus.PENDING", "private static double highest("),
+			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:220-249,283-294",
+				"report.setSummary(MetricUtils.computeSummary(results));",
+				"summaries.put(phase, MetricUtils.computeSummary(rows))"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:415-424,2073-2089",
+				"TestResult.TaskStatus.PENDING : TestResult.TaskStatus.RUNNING",
+				"private static TestRun withUnfinishedTasksFailed("),
 		},
 	},
 	{
@@ -2106,7 +2118,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "persistence/TestResultEntity.java:20-75",
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:186-221",
 				"static void applyResult(TestResultEntity entity, TestResult result)", ".withPhaseName(entity.getPhaseName());"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1857-1858", "getIntegrityResult() != null", "withIntegrity("),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1997-1998", "getIntegrityResult() != null", "withIntegrity("),
 			mcpJava + "report/ReportGenerator.java:106-132,479-484",
 			mcpJava + "engine/SlaEvaluator.java:92-103",
 		},
@@ -2119,9 +2131,9 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
 			"audit row.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1871-1945",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2011-2089",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:268-313",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:329-374",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},
@@ -2148,14 +2160,14 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"say which the API is, but a scenario run's tasks do: on an older API they all start within moments " +
 			"of one another.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:342-350,392-420",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:347-355,397-425",
 				"applyTypeDefaults(type, scenario.getBaseSpec())", ".withRequestedSpec(",
 				"long phaseStartMs = System.currentTimeMillis();", "scenario.resolveSpecForPhase(phase)",
 				"phaseStartMs = saturatedSum(phaseStartMs", "backend.submit(task)", "TestResult.TaskStatus.PENDING"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1289-1445",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1429-1585",
 				"MAX_RAMP_STEPS = 100", "scenarioInapplicableFields(TestScenario scenario", "is a SPIKE phase",
 				"has none (", "check no record CRCs"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1582-1651", "List<BenchmarkTask> buildPhaseTask(",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1722-1791", "List<BenchmarkTask> buildPhaseTask(",
 				"int baseTarget = Math.max(1, spec.getThroughput() / steps);", "saturatedSum(startAtMs, s * stepMs)",
 				`taskId + "-spike"`),
 			mcpAnchoredRef(mcpJava+"domain/TestScenario.java:108-183",
@@ -2207,7 +2219,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"newest matching rows.",
 		Refs: []string{
 			mcpJava + "persistence/AuditEventEntity.java:15-32",
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:102,134,164,264,296",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:114,225,325,357",
 				`auditService.record("CREATE"`, `auditService.record("DELETE"`, `auditService.record("CANCEL"`),
 			mcpJava + "service/AuditService.java:52-78",
 			mcpJava + "api/AuditResource.java:43-47",
@@ -2233,7 +2245,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:104-135",
 				`@Path("/compound")`, `"results", outcome.results()`),
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:93-119",
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:93-123",
 				"StreamingOutput executeWithKeepAlive(", "objectMapper.writeValue(os, payload);",
 				`"Failed to execute resilience test"`),
 		},

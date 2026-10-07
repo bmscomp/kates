@@ -613,6 +613,8 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 | `--backend` | Benchmark backend: `native` or `trogdor` (default: the Kates API's `kates.engine.default-backend`, `native`) |
 | `--wait` | Wait for test completion; Ctrl-C cancels the run and exits 130 |
 
+A value outside the limits the Kates API sets, such as more than 100 `--producers` or a `--topic` that isn't a legal Kafka topic name, fails the command with `[400] Validation Failed:`, and no run starts. The message names the request field, `numProducers` or `topic`, with the reason.
+
 ::: {.callout-important}
 **`--throughput` sets the rate, and some flags do not apply to every type**
 
@@ -708,7 +710,7 @@ kates test apply -f scenario.yaml --wait
 kates test apply -f scenario.yaml --wait -o json
 ```
 
-Apply a YAML scenario file. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
+Apply a YAML or JSON scenario file: a `scenarios` list, or the fields of one scenario at its top level. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
 
 In a terminal, `--wait` shows a spinner while each run goes. Without one (a pipe, a CI job, an agent's shell) or with `--plain`, it prints a plain line to stderr each time a run's status changes, such as `quick (3f8a2c1e): RUNNING`. With `-o json` stdout carries only the summary as JSON: each scenario's `name`, `type`, `runId`, `status` and `error`, and with `--wait`, for a scenario with a `validate` block, an `sla` object with its `violations` and the gates that were `notEvaluable`. A scenario that failed to submit has no `runId`. The exit code is the same in every mode.
 
@@ -733,12 +735,12 @@ kates test scaffold export --all           # export every template
 | `production-load` | LOAD | Up to 1M records of 2 KiB with `acks=all`, lz4 and 12 partitions for at most 300 s, through one producer and one consumer; gates on P99 ≤ 50 ms, average ≤ 10 ms and at least 50,000 rec/s |
 | `stress-test` | STRESS | 16 producers, each sending up to 5M records of 512 B with `acks=1` and snappy to 24 partitions; gates each producer on P99 ≤ 200 ms and at least 100,000 rec/s |
 | `endurance-soak` | ENDURANCE | 10M records of 1 KiB at 5,000 rec/s through one producer and one consumer; gates on P99 ≤ 100 ms and average ≤ 20 ms. The records take about 33 minutes, so the run ends on its record count, well inside its `durationSeconds` of 3,600 |
-| `exactly-once` | ROUND_TRIP | 100k records of 256 B with `acks=all` through one idempotent, transactional producer at 10,000 rec/s; gates on P99 ≤ 200 ms. A ROUND_TRIP run makes no integrity check, so its loss, ordering and CRC gates have nothing to check |
+| `exactly-once` | ROUND_TRIP | 100k records of 256 B with `acks=all` through one idempotent, transactional producer at 10,000 rec/s; gates on P99 ≤ 200 ms. A ROUND_TRIP run makes no integrity check, so the template sets no loss, ordering or CRC gate; `integrity-tx` sets all three |
 | `integrity-tx` | INTEGRITY | 200k records of 512 B with `acks=all` and zstd through one producer and one consumer — CRC-checked, idempotent and transactional, read with `read_committed`; gates on zero loss, zero out-of-order, zero CRC failures and P99 ≤ 150 ms |
 | `spike-test` | SPIKE | One unthrottled producer sending up to 500k records of 1 KiB with `acks=1` for at most 60 s; gates on P99 ≤ 500 ms |
 | `ci-gate` | LOAD | 10k records of 512 B with `acks=all` through one producer and one consumer; gates on P99 ≤ 100 ms and at least 1,000 rec/s |
 
-`kates test scaffold` prints the CLI's own one-line descriptions, which promise more than the runs deliver: a one-hour soak whose records run out after about 33 minutes, and a zero-error gate for `ci-gate`. The table above says what the Kates API runs. The Kates API keeps a file's producer count only for STRESS and CAPACITY and reads `numConsumers` for no type, so `stress-test` is the only template that sets a count; `targetThroughput` and the integrity options `enableIdempotence`, `enableTransactions` and `enableCrc` reach the run. The files also declare gates that `kates test apply` does not check: `maxErrorRate` in `production-load`, `endurance-soak`, `spike-test` and `ci-gate`, `maxDuplicatePercent` in `integrity-tx`, and `maxDataLossPercent` in `ci-gate`, whose LOAD run reports no integrity result — see [Scenario Files & SLA Gates](13-scenario-files.md).
+`kates test scaffold` prints the CLI's own one-line descriptions, and the one for `endurance-soak` promises more than its run delivers: a one-hour soak whose records run out after about 33 minutes. The table above says what the Kates API runs. The Kates API keeps a file's producer count only for STRESS and CAPACITY and reads `numConsumers` for no type, so `stress-test` is the only template that sets a count; `targetThroughput` and the integrity options `enableIdempotence`, `enableTransactions` and `enableCrc` reach the run. Every gate the files declare is one `kates test apply` checks: none sets `maxErrorRate`, which it reads but never checks, and only `integrity-tx` sets loss, ordering and CRC gates, because only its INTEGRITY run reports integrity data — see [Scenario Files & SLA Gates](13-scenario-files.md).
 
 **See also:** [Test Types Deep Dive](05-test-types.md) for the theory behind each test type, [Scenario Files & SLA Gates](13-scenario-files.md) for YAML scenario syntax.
 
@@ -1114,7 +1116,9 @@ kates schedule create --name "Nightly Endurance" --cron "0 2 * * *" --request en
 | `--cron` | Yes | Cron expression (e.g., `0 * * * *`) |
 | `--request` | Yes | Path to JSON file containing the test request body |
 
-The request file should contain the same JSON body you would send to `POST /api/tests`. The schedule keeps the fields it sets, and each firing merges them with the test type's defaults, as a `POST /api/tests` would. A request with a spec field its test type cannot apply, or a run longer than two hours, fails the command with `[400] Validation Failed:` and each field's path under `testRequest`, and no schedule is saved. A firing the Kates API refuses, such as one of a schedule saved before it checked requests, starts no run, and says why only in the server log.
+The request file should contain the same JSON body you would send to `POST /api/tests`. The schedule keeps the fields it sets, and each firing merges them with the test type's defaults, as a `POST /api/tests` would. A request with a spec field its test type cannot apply, a run longer than two hours, or a `backend` the Kates API doesn't have, fails the command with `[400] Validation Failed:` and each field's path under `testRequest`, and no schedule is saved. A firing the Kates API refuses, such as one of a schedule saved before it checked requests, starts no run, and says why only in the server log.
+
+A request without a `type`, or with a `spec` value outside the limits the Kates API sets, such as a `numProducers` above 100, fails the command with `[400] Validation Failed:` and the field's name, and no schedule is saved.
 
 #### schedule delete
 

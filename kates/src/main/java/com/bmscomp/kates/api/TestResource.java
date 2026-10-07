@@ -21,6 +21,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.ChaosProvider;
 import com.bmscomp.kates.domain.CreateTestRequest;
@@ -45,6 +46,12 @@ public class TestResource {
      * bounce; a minute is the smallest interval likely to find a free slot.
      */
     private static final String RETRY_AFTER_SECONDS = "60";
+
+    /** What a client is told of a run that did not start for a fault in the Kates API. */
+    private static final String NOT_STARTED =
+            "The Kates API failed to start the test run — see server logs for details";
+
+    private static final Logger LOG = Logger.getLogger(TestResource.class);
 
     private final TestOrchestrator orchestrator;
     private final TestRunRepository repository;
@@ -76,31 +83,79 @@ public class TestResource {
             description = "Invalid request, including a value outside its limits in the spec or a scenario's specs,"
                     + " or a spec field the test type or backend cannot apply; fieldErrors names each field")
     @APIResponse(responseCode = "429", description = "Concurrency limit reached — retry later")
+    @APIResponse(
+            responseCode = "500",
+            description = "A fault in the Kates API, such as its database being unreachable; the run did not start")
     public Response createTest(@Valid CreateTestRequest request) {
         var result = orchestrator.executeTest(request);
         if (result.isFailure()) {
             Exception failure = result.asFailure().orElseThrow();
-            // A full engine is a temporary condition, not a malformed request.
-            // Returning 400 for it made the two indistinguishable to clients and
-            // to CI, which then retried nothing and failed the build instead.
+            ApiError error = notStarted(request, failure);
+            Response.ResponseBuilder answer = Response.status(error.getStatus()).entity(error);
             if (failure instanceof com.bmscomp.kates.engine.ConcurrencyLimitException) {
-                return Response.status(429)
-                        .header("Retry-After", RETRY_AFTER_SECONDS)
-                        .entity(ApiError.of(429, "Too Many Requests", failure.getMessage()))
-                        .build();
+                answer.header("Retry-After", RETRY_AFTER_SECONDS);
             }
-            if (failure instanceof com.bmscomp.kates.engine.InvalidTestSpecException invalid) {
-                return Response.status(400)
-                        .entity(ApiError.validationFailed(invalid.getMessage(), invalid.getFieldErrors()))
-                        .build();
-            }
-            return Response.status(400)
-                    .entity(ApiError.of(400, "Bad Request", failure.getMessage()))
-                    .build();
+            return answer.build();
         }
         TestRun run = result.asSuccess().orElseThrow();
-        auditService.record("CREATE", "test", run.getId(), request.getType() + " test");
+        recordCreated(run, request.getType() + " test");
         return Response.accepted(run).build();
+    }
+
+    /**
+     * Writes a started run's audit row. The run is producing by now, so a
+     * write that fails is logged, not answered. Answering it reported the run
+     * as one that never started: a 500 from POST /api/tests, which invited
+     * the same request again, and a second run; a failed item with no id from
+     * POST /api/tests/bulk, which left the run nothing to find or stop it by.
+     */
+    private void recordCreated(TestRun run, String details) {
+        try {
+            auditService.record("CREATE", "test", run.getId(), details);
+        } catch (RuntimeException e) {
+            LOG.warnf("Run %s started, but its audit row was not written: %s", run.getId(), e);
+        }
+    }
+
+    /**
+     * The answer to a request whose run the orchestrator did not start, with
+     * the status POST /api/tests gives it. POST /api/tests/bulk gives such an
+     * item the same message.
+     *
+     * <p>A request the run could not honour as written, or one that names a
+     * backend the Kates API does not have, is the caller's to change: 400. A
+     * full engine is 429. Anything else is a fault in the Kates API, such as
+     * its database being unreachable when the run is saved, or
+     * kates.engine.default-backend naming no backend it has: 500, since the
+     * same request can start a run once the fault is fixed. Such a fault was
+     * answered 400, which told the caller to change a request that had
+     * nothing wrong with it.
+     */
+    private static ApiError notStarted(CreateTestRequest request, Exception failure) {
+        // A full engine is a temporary condition, not a malformed request.
+        // Returning 400 for it made the two indistinguishable to clients and
+        // to CI, which then retried nothing and failed the build instead.
+        if (failure instanceof com.bmscomp.kates.engine.ConcurrencyLimitException) {
+            return ApiError.of(429, "Too Many Requests", failure.getMessage());
+        }
+        if (failure instanceof com.bmscomp.kates.engine.InvalidTestSpecException invalid) {
+            return ApiError.validationFailed(invalid.getMessage(), invalid.getFieldErrors());
+        }
+        if (failure instanceof com.bmscomp.kates.engine.UnknownBackendException unknown
+                && namesBackend(request, unknown.getBackend())) {
+            return ApiError.of(400, "Bad Request", failure.getMessage());
+        }
+        // The cause goes to the server log only, as GlobalExceptionMapper
+        // keeps it: its message can name hosts and SQL statements. One line:
+        // the orchestrator logs a run it could not save with the stack.
+        LOG.errorf("A test run did not start for a fault in the Kates API: %s", failure);
+        return ApiError.of(500, "Internal Server Error", NOT_STARTED);
+    }
+
+    /** Whether the request, or its scenario, names the backend {@code name}. */
+    private static boolean namesBackend(CreateTestRequest request, String name) {
+        var scenario = request.getScenario();
+        return name.equals(request.getBackend()) || (scenario != null && name.equals(scenario.getBackend()));
     }
 
     @POST
@@ -109,7 +164,9 @@ public class TestResource {
             summary = "Create multiple tests",
             description = "Submits up to 10 test runs in a single request. Requests beyond"
                     + " kates.engine.max-concurrent-tests (default 3) are reported as"
-                    + " per-item failures rather than being queued.")
+                    + " per-item failures rather than being queued. runs answers each request in"
+                    + " order, with its run's id and status, or why it did not start; created"
+                    + " counts the runs that started.")
     @APIResponse(responseCode = "202", description = "Tests accepted for execution")
     public Response bulkCreate(List<@Valid CreateTestRequest> requests) {
         if (requests == null || requests.isEmpty()) {
@@ -127,19 +184,23 @@ public class TestResource {
             try {
                 var testResult = orchestrator.executeTest(req);
                 if (testResult.isFailure()) {
-                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(
-                            testResult.asFailure().orElseThrow().getMessage()));
+                    String error = notStarted(req, testResult.asFailure().orElseThrow())
+                            .getMessage();
+                    results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(error));
                 } else {
                     TestRun run = testResult.asSuccess().orElseThrow();
-                    auditService.record("CREATE", "test", run.getId(), req.getType() + " bulk test");
                     results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.success(
                             run.getId(), run.getStatus().name()));
+                    recordCreated(run, req.getType() + " bulk test");
                 }
             } catch (Exception e) {
                 results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(e.getMessage()));
             }
         }
-        return Response.accepted(new com.bmscomp.kates.domain.BulkCreateResponse(results.size(), results))
+        // The runs that started. Counting every item answered "created": 3
+        // for three items that had all failed.
+        long created = results.stream().filter(summary -> summary.id() != null).count();
+        return Response.accepted(new com.bmscomp.kates.domain.BulkCreateResponse(created, results))
                 .build();
     }
 

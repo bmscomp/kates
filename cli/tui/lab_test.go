@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -936,5 +937,21 @@ func TestStripAnsi(t *testing.T) {
 				t.Errorf("stripAnsi(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// A lab run sends the batch size and linger it shows, 0 included. The first
+// linger, 0, used to be left out of the request, so a LOAD iteration shown at
+// linger 0 ran at its type's 5 ms.
+func TestLabBuildSpecSendsTheSettingsShown(t *testing.T) {
+	_, req := NewLab(nil, "").buildSpec()
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"type":"LOAD"`, `"batchSize":16384`, `"lingerMs":0`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("request %s lacks %s", body, want)
+		}
 	}
 }

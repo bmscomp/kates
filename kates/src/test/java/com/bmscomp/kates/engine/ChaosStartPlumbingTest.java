@@ -64,10 +64,11 @@ class ChaosStartPlumbingTest {
                         "native", invocation.<BenchmarkTask>getArgument(0).getTaskId()));
         Instance<BenchmarkBackend> backends = mock(Instance.class);
         when(backends.stream()).thenAnswer(invocation -> Stream.of(backend));
-        // The run's row is there to write over: a submission that finds it
-        // gone stops the tasks it started, and they would get no fault.
+        // The run's row is there to write over, still PENDING: a submission
+        // that finds it gone or ended stops the tasks it started, and they
+        // would get no fault.
         TestRunRepository repository = mock(TestRunRepository.class);
-        when(repository.saveIfPresent(any())).thenReturn(true);
+        when(repository.saveIfStatus(any(), any())).thenReturn(true);
 
         TestOrchestrator orchestrator = new TestOrchestrator(
                 mock(TopicService.class),
