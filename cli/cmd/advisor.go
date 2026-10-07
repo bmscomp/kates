@@ -192,16 +192,16 @@ func analyzeRun(run *client.TestRun, report *client.Report) []advisorRule {
 	avgThroughput /= float64(len(run.Results))
 	p99 := latencyOf(run.Results).P99Ms
 
-	if spec.BatchSize > 0 && spec.BatchSize <= 16384 && avgThroughput > 10000 {
+	if b := spec.BatchSize; b != nil && *b > 0 && *b <= 16384 && avgThroughput > 10000 {
 		rules = append(rules, advisorRule{
 			Severity: "HIGH",
-			Title:    fmt.Sprintf("batch.size=%d is leaving throughput on the table", spec.BatchSize),
+			Title:    fmt.Sprintf("batch.size=%d is leaving throughput on the table", *b),
 			Fix:      "Try batch.size=65536 for improved batching efficiency",
 			Evidence: fmt.Sprintf("current throughput: %s rec/s, estimated gain: ~30-50%%", fmtAdvisorNum(avgThroughput)),
 		})
 	}
 
-	if spec.LingerMs == 0 && avgThroughput > 5000 {
+	if spec.LingerMs != nil && *spec.LingerMs == 0 && avgThroughput > 5000 {
 		rules = append(rules, advisorRule{
 			Severity: "HIGH",
 			Title:    "linger.ms=0 causes excessive small-batch sends",
@@ -278,10 +278,10 @@ func analyzeRun(run *client.TestRun, report *client.Report) []advisorRule {
 		})
 	}
 
-	if p99 > 100 && spec.BatchSize > 65536 {
+	if b := spec.BatchSize; p99 > 100 && b != nil && *b > 65536 {
 		rules = append(rules, advisorRule{
 			Severity: "MED",
-			Title:    fmt.Sprintf("p99=%.0fms with large batch.size=%d — try reducing", p99, spec.BatchSize),
+			Title:    fmt.Sprintf("p99=%.0fms with large batch.size=%d — try reducing", p99, *b),
 			Fix:      "Reduce batch.size or linger.ms to trade throughput for latency",
 			Evidence: "large batches increase fill time, raising tail latency",
 		})

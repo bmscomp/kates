@@ -380,6 +380,68 @@ func TestCreateTest(t *testing.T) {
 	}
 }
 
+// A 0 in batchSize, lingerMs or fetchMaxWaitMs is a Kafka setting, so it
+// reaches the backend. As omitempty ints they dropped it: lingerMs 0 arrived
+// as nothing, and the run lingered its type's default. Left nil, they are
+// still left out, so the type's default applies, and every other int field
+// still leaves a 0 out.
+func TestCreateTest_SendsAZeroWhereItIsASetting(t *testing.T) {
+	var specs []map[string]any
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Spec map[string]any `json:"spec"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		specs = append(specs, body.Spec)
+		if err := json.NewEncoder(w).Encode(TestRun{ID: "new-run", TestType: "LOAD", Status: "PENDING"}); err != nil {
+			t.Error(err)
+		}
+	})
+	zero := 0
+	for _, spec := range []*TestSpec{
+		{Records: 1000, BatchSize: &zero, LingerMs: &zero, FetchMaxWaitMs: &zero},
+		{Records: 1000},
+	} {
+		if _, err := c.CreateTest(context.Background(), &CreateTestRequest{TestType: "LOAD", Spec: spec}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(specs) != 2 {
+		t.Fatalf("%d requests", len(specs))
+	}
+	for _, key := range []string{"batchSize", "lingerMs", "fetchMaxWaitMs"} {
+		if v, ok := specs[0][key]; !ok || v != 0.0 {
+			t.Errorf("an explicit 0 sends %s as %v (sent: %t); spec %v", key, v, ok, specs[0])
+		}
+		if v, ok := specs[1][key]; ok {
+			t.Errorf("a spec that does not set %s sends it as %v", key, v)
+		}
+	}
+	if len(specs[0]) != 4 || len(specs[1]) != 1 {
+		t.Errorf("specs %v: only numRecords and the three set fields are sent", specs)
+	}
+}
+
+// A run's spec reads back the same way: lingerMs 0 is 0, not a field the run
+// did not report, and an absent field is nil rather than a 0 nobody set.
+func TestGetTest_ReadsAZeroSettingAsSet(t *testing.T) {
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"run-1","testType":"ROUND_TRIP","status":"DONE",` +
+			`"spec":{"numRecords":500000,"batchSize":16384,"lingerMs":0}}`))
+	})
+	run, err := c.GetTest(context.Background(), "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := run.Spec
+	if s == nil || s.LingerMs == nil || *s.LingerMs != 0 || s.BatchSize == nil || *s.BatchSize != 16384 || s.FetchMaxWaitMs != nil {
+		t.Errorf("spec = %+v", s)
+	}
+}
+
 func TestDeleteTest(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "DELETE" {
@@ -933,10 +995,10 @@ func TestResilience_ConcurrentCallsShareClient(t *testing.T) {
 	wg.Wait()
 }
 
-// TestPostJSONWithTimeout_DeadlineReplacesClientTimeout checks that a long
-// call is bounded by its own deadline, not by the client's Timeout, and that
+// TestPostWithTimeout_DeadlineReplacesClientTimeout checks that a long call
+// is bounded by its own deadline, not by the client's Timeout, and that
 // ordinary calls keep the client's Timeout.
-func TestPostJSONWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
+func TestPostWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
 	const serverDelay = 300 * time.Millisecond
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -961,7 +1023,7 @@ func TestPostJSONWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := postJSONWithTimeout[*ResilienceResult](c, ctx, "/api/resilience", nil, tt.deadline)
+			got, err := postWithTimeout(c, ctx, "/api/resilience", nil, tt.deadline)
 			if tt.wantErr {
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("err = %v, want context.DeadlineExceeded", err)
@@ -969,10 +1031,10 @@ func TestPostJSONWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("postJSONWithTimeout: %v", err)
+				t.Fatalf("postWithTimeout: %v", err)
 			}
-			if got == nil || got.Status != "COMPLETED" {
-				t.Errorf("result = %+v, want status COMPLETED", got)
+			if string(got) != `{"status":"COMPLETED"}` {
+				t.Errorf("body = %q, want the server's answer", got)
 			}
 		})
 	}
