@@ -26,7 +26,6 @@ scenarios:
       compressionType: lz4
     validate:
       maxDataLossPercent: 0.0
-      maxErrorRate: 0.0
       maxCrcFailures: 0
       maxOutOfOrder: 0
       maxP99LatencyMs: 500      # transactions add ~10-20ms overhead

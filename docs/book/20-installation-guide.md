@@ -1175,7 +1175,7 @@ This section documents every default topic and user the chart creates. You rarel
 
 ### Default Topics
 
-The chart creates these 8 topics. The Kates API writes none of the `kates-*` ones; the last column says what uses each topic.
+The chart creates these 9 topics. Of the `kates-*` ones, the Kates API writes only `kates-probe-topic`; the last column says what uses each topic.
 
 | Topic | Partitions | Replicas | Retention | Compression | Cleanup | Purpose |
 |-------|:----------:|:--------:|:---------:|:-----------:|:-------:|---------|
@@ -1184,6 +1184,7 @@ The chart creates these 8 topics. The Kates API writes none of the `kates-*` one
 | `kates-metrics` | 6 | 3 | 1 day | lz4 | delete | Created by the platform profile; the Kates API doesn't use it |
 | `kates-audit` | 3 | 3 | 30 days | — | delete | Created by the platform profile; the Kates API doesn't use it |
 | `kates-dlq` | 3 | 3 | unlimited | — | delete | Polled every 30 seconds by the Kates API, which logs what arrives |
+| `kates-probe-topic` | 3 | 3 | 1 hour | — | delete | Written by the Kates API's built-in `producer-throughput` probe during resilience runs; nothing reads it |
 | `cdc-schema-history` | 1 | 3 | forever, no size limit | — | delete | Debezium schema history for CDC connectors |
 | `cdc-heartbeat` | 1 | 3 | 1 day | — | delete | CDC liveness heartbeats (detects stalled connectors) |
 | `test-sink-topic` | 3 | 3 | 1 day | — | delete | Sink target for Kafka Connect sink connector validation |

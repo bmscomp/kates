@@ -98,8 +98,23 @@ public class TestResource {
             return answer.build();
         }
         TestRun run = result.asSuccess().orElseThrow();
-        auditService.record("CREATE", "test", run.getId(), request.getType() + " test");
+        recordCreated(run, request.getType() + " test");
         return Response.accepted(run).build();
+    }
+
+    /**
+     * Writes a started run's audit row. The run is producing by now, so a
+     * write that fails is logged, not answered. Answering it reported the run
+     * as one that never started: a 500 from POST /api/tests, which invited
+     * the same request again, and a second run; a failed item with no id from
+     * POST /api/tests/bulk, which left the run nothing to find or stop it by.
+     */
+    private void recordCreated(TestRun run, String details) {
+        try {
+            auditService.record("CREATE", "test", run.getId(), details);
+        } catch (RuntimeException e) {
+            LOG.warnf("Run %s started, but its audit row was not written: %s", run.getId(), e);
+        }
     }
 
     /**
@@ -149,7 +164,9 @@ public class TestResource {
             summary = "Create multiple tests",
             description = "Submits up to 10 test runs in a single request. Requests beyond"
                     + " kates.engine.max-concurrent-tests (default 3) are reported as"
-                    + " per-item failures rather than being queued.")
+                    + " per-item failures rather than being queued. runs answers each request in"
+                    + " order, with its run's id and status, or why it did not start; created"
+                    + " counts the runs that started.")
     @APIResponse(responseCode = "202", description = "Tests accepted for execution")
     public Response bulkCreate(List<@Valid CreateTestRequest> requests) {
         if (requests == null || requests.isEmpty()) {
@@ -172,15 +189,18 @@ public class TestResource {
                     results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(error));
                 } else {
                     TestRun run = testResult.asSuccess().orElseThrow();
-                    auditService.record("CREATE", "test", run.getId(), req.getType() + " bulk test");
                     results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.success(
                             run.getId(), run.getStatus().name()));
+                    recordCreated(run, req.getType() + " bulk test");
                 }
             } catch (Exception e) {
                 results.add(com.bmscomp.kates.domain.BulkCreateResponse.TestRunSummary.failure(e.getMessage()));
             }
         }
-        return Response.accepted(new com.bmscomp.kates.domain.BulkCreateResponse(results.size(), results))
+        // The runs that started. Counting every item answered "created": 3
+        // for three items that had all failed.
+        long created = results.stream().filter(summary -> summary.id() != null).count();
+        return Response.accepted(new com.bmscomp.kates.domain.BulkCreateResponse(created, results))
                 .build();
     }
 

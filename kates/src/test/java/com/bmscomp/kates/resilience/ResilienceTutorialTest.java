@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -21,6 +22,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import com.bmscomp.kates.chaos.FaultLimits;
+import com.bmscomp.kates.chaos.ProbeExecutor;
+import com.bmscomp.kates.chaos.ProbeSpec;
 import com.bmscomp.kates.engine.TestOrchestrator;
 
 /**
@@ -31,8 +34,9 @@ import com.bmscomp.kates.engine.TestOrchestrator;
  * dropped without a word. The examples sent producers, linger, durationSec and
  * other fields TestSpec doesn't have, and ran on the defaults instead: the
  * ENDURANCE example was set to last an hour, not the five minutes it asked for.
- * Here such a field fails its example, and so does a request the resource
- * would refuse before its stream starts.
+ * Here such a field fails its example, and so do a request the resource would
+ * refuse before its stream starts and a probe the probe executor would not run
+ * as written.
  */
 @QuarkusTest
 class ResilienceTutorialTest {
@@ -100,6 +104,31 @@ class ResilienceTutorialTest {
                 validator.validate(request.getTestRequest()).stream()
                         .map(v -> v.getPropertyPath() + ": " + v.getMessage())
                         .toList());
+    }
+
+    /**
+     * Each probe runs as written: its type is one the probe executor runs as
+     * such, its mode one the orchestrator reads, and nothing fails it before
+     * it runs, such as a comparator the executor doesn't have or a kafkaProbe
+     * check that doesn't exist. The examples compared with ==, which the
+     * executor read as contains.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("examples")
+    void probesRunAsWritten(String name) throws IOException {
+        ResilienceTestRequest request = objectMapper.treeToValue(example(name), ResilienceTestRequest.class);
+
+        List<String> found = new ArrayList<>();
+        for (ProbeSpec probe : request.getProbes() != null ? request.getProbes() : List.<ProbeSpec>of()) {
+            if (probe.type() == null || !ProbeExecutor.TYPES.contains(probe.type())) {
+                found.add(probe.name() + ": type " + probe.type() + " runs as a cmdProbe");
+            }
+            if (!"Edge".equals(probe.mode()) && !"Continuous".equals(probe.mode())) {
+                found.add(probe.name() + ": mode " + probe.mode() + " runs as Edge");
+            }
+            ProbeExecutor.problem(probe).ifPresent(problem -> found.add(probe.name() + ": " + problem));
+        }
+        assertEquals(List.of(), found);
     }
 
     private static JsonNode read() throws IOException {

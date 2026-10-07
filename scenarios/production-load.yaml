@@ -16,4 +16,3 @@ scenarios:
       maxP99LatencyMs: 50
       maxAvgLatencyMs: 10
       minThroughputRecPerSec: 50000
-      maxErrorRate: 0.001

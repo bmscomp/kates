@@ -86,6 +86,24 @@ spec:
     min.insync.replicas: "2"
     cleanup.policy: delete
 ---
+# The Kates API's built-in producer-throughput probe writes here; the brokers
+# create no topic on first use.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: kates-probe-topic
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: krafter
+    app.kubernetes.io/part-of: kates
+spec:
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: "3600000"
+    min.insync.replicas: "2"
+    cleanup.policy: delete
+---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
