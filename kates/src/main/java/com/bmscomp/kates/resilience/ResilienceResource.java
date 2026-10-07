@@ -3,6 +3,7 @@ package com.bmscomp.kates.resilience;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -19,10 +20,12 @@ import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.domain.TestSpec;
+import com.bmscomp.kates.security.Scopes;
 
 /**
  * REST endpoint for combined resilience testing (performance + chaos + probes).
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/resilience")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -158,6 +161,7 @@ public class ResilienceResource {
         }
     }
 
+    @RolesAllowed(Scopes.CHAOS_RUN)
     @POST
     @Operation(
             summary = "Execute a resilience test",
@@ -203,6 +207,7 @@ public class ResilienceResource {
         return Response.ok(ResilienceScenarios.listAll()).build();
     }
 
+    @RolesAllowed(Scopes.CHAOS_RUN)
     @POST
     @Path("/scenarios/{id}")
     @Operation(

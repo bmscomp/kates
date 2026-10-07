@@ -711,7 +711,7 @@ func TestMCPGetRunSummaryErrors(t *testing.T) {
 		code   mcpErrorCode
 	}{
 		// The report endpoints answer a missing run with 400
-		// (ReportResource.java:149-150, GlobalExceptionMapper.java:31-33).
+		// (ReportResource.java:152-153, GlobalExceptionMapper.java:31-33).
 		{http.StatusBadRequest, "Test run not found: 0a1b2c3d", mcpErrNotFound},
 		{http.StatusBadRequest, "something else", mcpErrInvalidArgument},
 		{http.StatusInternalServerError, "Unexpected server error", mcpErrBackend},

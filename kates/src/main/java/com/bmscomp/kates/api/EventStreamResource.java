@@ -1,6 +1,7 @@
 package com.bmscomp.kates.api;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.ObservesAsync;
 import jakarta.ws.rs.GET;
@@ -19,12 +20,14 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.engine.TestLifecycleEvent;
+import com.bmscomp.kates.security.Scopes;
 
 /**
  * SSE endpoint for real-time test lifecycle events.
  * Clients connect via GET /api/events/stream and receive
  * JSON events as tests are created, started, completed, or failed.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/events")
 @ApplicationScoped
 @Tag(name = "Events")

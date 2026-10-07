@@ -1,6 +1,7 @@
 package com.bmscomp.kates.api;
 
 import java.util.List;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -13,9 +14,11 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.AdvisorService;
 import com.bmscomp.kates.service.TestRunRepository;
 
+@RolesAllowed(Scopes.READ)
 @Path("/api/tests/{id}/advisor")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Advisor")

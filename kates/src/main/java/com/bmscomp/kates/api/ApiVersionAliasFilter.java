@@ -19,9 +19,9 @@ import jakarta.ws.rs.ext.Provider;
  * and all existing tests are unaffected. New/external consumers can adopt
  * {@code /api/v1} and get a versioned contract.
  *
- * Authentication does not look at the path: each endpoint says what it
- * needs (quarkus.security.jaxrs.default-roles-allowed, @PermitAll), so an
- * endpoint needs the same key under both paths.
+ * Authentication does not look at the path: each endpoint names the scope it
+ * needs (@RolesAllowed, @PermitAll), so an endpoint needs the same key under
+ * both paths.
  */
 @Provider
 @PreMatching

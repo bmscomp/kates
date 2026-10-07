@@ -30,7 +30,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:294-300, TestOrchestrator.refreshStatus); both
+// (TestResource.java:300-306, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -181,7 +181,7 @@ const (
 
 // The values TestSpec's bean validation accepts (domain/TestSpec.java:36,50,
 // 61-63). A stored run can hold others: a schedule saved by a PUT, which runs
-// no bean validation (ScheduleResource.java:131-132), fires its spec as sent,
+// no bean validation (ScheduleResource.java:135-136), fires its spec as sent,
 // a Kates API without the check of a scenario's specs
 // (TestOrchestrator.java:1110-1114) stored a scenario's base spec as sent, and
 // one without the check of a gRPC request's fields
@@ -1096,7 +1096,7 @@ var mcpBandMetrics = []struct {
 }
 
 // mcpCompareMetrics maps the deltas the backend's compare sends to the
-// summary value each is computed from (ReportResource.java:315-324).
+// summary value each is computed from (ReportResource.java:318-327).
 var mcpCompareMetrics = map[string]func(s *client.MCPRunSummary) float64{
 	"throughputRecPerSec": func(s *client.MCPRunSummary) float64 { return s.AvgThroughputRecPerSec },
 	"avgLatencyMs":        func(s *client.MCPRunSummary) float64 { return s.AvgLatencyMs },
@@ -1200,7 +1200,7 @@ type mcpAssessReads struct {
 // assess_run's reads may use. Every report the backend has not cached makes
 // it describe the cluster, with 30-second timeouts (ReportGenerator.java:
 // 251-261, ClusterHealthService.java:36,194-231), and the compare call
-// builds one per run, one after another (ReportResource.java:290-302). A
+// builds one per run, one after another (ReportResource.java:293-305). A
 // slow cluster must cost the parts that wait on it, not the whole call.
 const mcpAssessPartsShare = 0.75
 
@@ -1284,7 +1284,7 @@ func mcpRunHasRequested(r *client.MCPRun) bool {
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:420-448 checks only that it exists),
+// any type or status (TestResource.java:429-457 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -1414,7 +1414,7 @@ func mcpScanBand(ctx context.Context, call *mcpCall, run *client.MCPRun, key str
 	}
 	// One compare call gives every summary. The previous run goes first and
 	// this run last, so the backend's deltas run from the one to the other
-	// (ReportResource.java:304-310).
+	// (ReportResource.java:307-313).
 	ids := append(append([]string(nil), scan.matches...), run.ID)
 	scan.comparison, scan.compareErr = call.Client().MCPRunsCompare(ctx, ids)
 	return scan
@@ -1947,7 +1947,7 @@ func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.
 				CreatedAt: mcpSanitizeLine(d.CreatedAt, 40),
 			}
 			// The list sends "-" for a report without a grade
-			// (DisruptionResource.java:127).
+			// (DisruptionResource.java:143).
 			if d.SlaGrade != "-" {
 				row.SLAGrade = mcpSanitizeLine(d.SlaGrade, 4)
 			}
@@ -2135,7 +2135,7 @@ func mcpRunSpecHash(key string) string {
 
 // mcpRunReportErr maps the report endpoints' answer for a missing run. They
 // throw IllegalArgumentException("Test run not found: …"), which the
-// backend's exception mapper turns into a 400 (ReportResource.java:138-139;
+// backend's exception mapper turns into a 400 (ReportResource.java:141-142;
 // GlobalExceptionMapper.java:31-33), so a missing run would otherwise read
 // as a bad argument.
 func mcpRunReportErr(err error) error {
@@ -2264,7 +2264,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2011-2089",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:329-374",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:337-382",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},
@@ -2350,10 +2350,10 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"newest matching rows.",
 		Refs: []string{
 			mcpJava + "persistence/AuditEventEntity.java:15-32",
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:114,225,325,357",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:118,231,332,365",
 				`auditService.record("CREATE"`, `auditService.record("DELETE"`, `auditService.record("CANCEL"`),
 			mcpJava + "service/AuditService.java:52-78",
-			mcpJava + "api/AuditResource.java:43-47",
+			mcpJava + "api/AuditResource.java:46-50",
 		},
 	},
 	{
@@ -2371,12 +2371,12 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionPersistence.java:16-37",
 			mcpJava + "disruption/DisruptionReportRepository.java:20-43",
 			mcpJava + "disruption/DisruptionOrphanReconciler.java:152-203",
-			mcpJava + "disruption/DisruptionTemplateResource.java:57-59",
+			mcpJava + "disruption/DisruptionTemplateResource.java:61-63",
 			mcpJava + "disruption/DisruptionScheduler.java:92-104",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:104-135",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:108-139",
 				`@Path("/compound")`, `"results", outcome.results()`),
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:93-123",
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:96-126",
 				"StreamingOutput executeWithKeepAlive(", "objectMapper.writeValue(os, payload);",
 				`"Failed to execute resilience test"`),
 		},

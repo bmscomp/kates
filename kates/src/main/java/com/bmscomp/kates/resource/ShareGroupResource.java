@@ -1,6 +1,7 @@
 package com.bmscomp.kates.resource;
 
 import java.util.List;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -11,12 +12,14 @@ import jakarta.ws.rs.core.Response;
 
 import io.smallrye.common.annotation.Blocking;
 
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.ShareGroupConsumerService;
 
 /**
  * REST endpoint for managing the Kafka 4.2 Share Groups consumer.
  * Share Groups (KIP-932) provide work-queue semantics for kates-results processing.
  */
+@RolesAllowed(Scopes.READ)
 @Path("/api/share-groups")
 @Produces(MediaType.APPLICATION_JSON)
 @Blocking
@@ -25,6 +28,7 @@ public class ShareGroupResource {
     @Inject
     ShareGroupConsumerService shareGroupService;
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/start")
     public Response start() {
@@ -38,6 +42,7 @@ public class ShareGroupResource {
                 .build();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/stop")
     public Response stop() {

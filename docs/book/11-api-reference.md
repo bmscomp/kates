@@ -62,6 +62,45 @@ curl -s -H "X-API-Key: $KATES_API_KEY" http://localhost:30083/api/whoami | jq .
 
 The key in `kates.api.key` is the principal `legacy`, a person (`human`) with every scope; `allowedClusterIds` is left out because it may act on any cluster. With security switched off, as in dev mode, every caller is `anonymous` with every scope, and `securityEnabled` is `false`.
 
+### Scopes and Named Keys
+
+Every endpoint needs a scope. A key whose principal lacks it gets `403` with the error `Forbidden`, which tells it apart from a wrong key (`Invalid API key`); over gRPC, `PERMISSION_DENIED`.
+
+| Scope | Allows |
+|-------|--------|
+| `read` | Every `GET` but those below, `POST /api/cost/estimate`, and the dry run `POST /api/disruptions?dryRun=true` |
+| `read:sensitive` | `GET /api/security/secrets`, `/acl-map` and `/auth-test` |
+| `test:run` | Creating a test run and cancelling one |
+| `chaos:run` | Running a disruption, playbook, template, compound plan or resilience test |
+| `admin` | Deleting test runs, bulk creation, baselines, topics, producing and consuming records, profiles, webhooks, test and disruption schedules, the security baseline, share groups |
+| `chaos:propose`, `chaos:approve`, `abort` | Reserved for proposals and aborts, which no endpoint offers yet |
+
+`kates.api.key` holds every scope. To lower them, set `kates.api.legacy-key.scopes`, for example to `read,test:run`.
+
+Named keys give each person or agent a key of its own, with the scopes it needs. They live in a YAML file named by `kates.api.keys-file` (the `KATES_API_KEYS_FILE` environment variable), which holds each key's SHA-256 and never the key. The Kates API reads the file at start, and again every 30 seconds, so a key added, disabled or removed there takes effect without a restart. A file that does not parse stops the start; later, it leaves the keys loaded before it, and the log says why.
+
+```yaml
+keys:
+  - id: 3f9a1c2e                  # the id inside the key
+    name: claude-on-lab           # the principal the audit log names
+    type: agent                   # human or agent
+    scopes: [read]
+    allowedClusterIds: [<clusterId>]   # optional
+    expiresAt: 2026-12-31T00:00:00Z    # optional
+    disabled: false                     # optional
+    sha256: <the key's SHA-256, 64 hex characters>
+```
+
+A key has the shape `kates_<id>_<secret>`. Make one, and the hash for its entry, with:
+
+```bash
+ID=$(openssl rand -hex 4)
+KEY="kates_${ID}_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+printf %s "$KEY" | sha256sum | cut -d' ' -f1   # shasum -a 256 on macOS
+```
+
+An agent's key (`type: agent`) may carry only `read` and `read:sensitive` for now: no agent starts load or faults, or changes anything. The file is refused when an agent's entry asks for more. `/api/whoami` reports `allowedClusterIds`, but the Kates API does not yet refuse a key used on a cluster it does not list.
+
 ### Common Request Headers
 
 | Header | Value | Required | Description |

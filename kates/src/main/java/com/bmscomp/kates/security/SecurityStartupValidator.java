@@ -23,16 +23,24 @@ public class SecurityStartupValidator {
     @ConfigProperty(name = "kates.api.key")
     java.util.Optional<String> configuredKey;
 
+    // A Kates API with named keys may do without kates.api.key.
+    @ConfigProperty(name = "kates.api.keys-file")
+    java.util.Optional<String> keysFile;
+
     void onStart(@Observes StartupEvent event) {
         if (!securityEnabled) {
             return;
         }
         String apiKey = configuredKey.orElse("");
+        if (apiKey.isBlank() && keysFile.filter(f -> !f.isBlank()).isPresent()) {
+            return;
+        }
         if (apiKey.isBlank() || "changeme".equals(apiKey)) {
             throw new IllegalStateException("kates.api.security-enabled=true but kates.api.key is "
                     + (apiKey.isBlank() ? "not set" : "the well-known default 'changeme'")
                     + ". Set the KATES_API_KEY environment variable (from a Kubernetes Secret) to a"
-                    + " strong random value, or explicitly disable API auth for local development"
+                    + " strong random value, set kates.api.keys-file to a file of named keys, or"
+                    + " explicitly disable API auth for local development"
                     + " with KATES_API_SECURITY_ENABLED=false.");
         }
     }
