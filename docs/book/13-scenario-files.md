@@ -182,7 +182,7 @@ graph LR
 
 ### Performance Gates
 
-These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated. Each gate is checked against every task of the run, not against the report summary, so every task must meet it. A consumer records no latency on the native backend, so there a LOAD run's latency gates judge its producer, while `minThroughputRecPerSec` judges the producer and the consumer alike. A latency gate needs at least one task that measured latency. When none did, as with a producer that failed before its first acknowledgment or a ROUND_TRIP run on the Trogdor backend, the gate fails as `p99 not measured` or `avg not measured`.
+These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated, since a run reports no error count. Each gate is checked against every task of the run, not against the report summary, so every task must meet it. A consumer records no latency on the native backend, so there a LOAD run's latency gates judge its producer, while `minThroughputRecPerSec` judges the producer and the consumer alike. A latency gate needs at least one task that measured latency. When none did, as with a producer that failed before its first acknowledgment or a ROUND_TRIP run on the Trogdor backend, the gate fails as `p99 not measured` or `avg not measured`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -193,7 +193,7 @@ These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` 
 
 ### Resilience Gates
 
-These gates judge recovery, so they need a run that measured it. When a run reports no [RTO](appendix-a-glossary.md#gl-rto) or no [RPO](appendix-a-glossary.md#gl-rpo), the summary marks the gate *not evaluable*, and the exit code is unchanged.
+These gates judge recovery, so they need a run that measured it. When a run reports no [RTO](appendix-a-glossary.md#gl-rto) or no [RPO](appendix-a-glossary.md#gl-rpo), the summary marks the gate *not evaluable*, and the exit code is unchanged. Only an INTEGRITY run reports RTO, and it reports RPO only when a resilience run marks the moment its fault goes in, so a scenario file's run never measures RPO.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -202,7 +202,7 @@ These gates judge recovery, so they need a run that measured it. When a run repo
 
 ### Integrity Gates
 
-These gates cap the loss, disorder and corruption an INTEGRITY run may report, and 0 is the strict setting for each.
+These gates cap the loss, disorder and corruption an INTEGRITY run may report, and 0 is the strict setting for each. No other type reports them, so on any other run these gates never fail, and the summary still shows `✓ SLA Pass`. On an INTEGRITY run with a `validate` block, a gate the block leaves out is held at 0, and a negative value turns it off.
 
 | Field | Type | Description |
 |-------|------|-------------|

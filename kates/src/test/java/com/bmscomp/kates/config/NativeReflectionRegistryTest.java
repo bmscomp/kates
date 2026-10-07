@@ -57,6 +57,9 @@ class NativeReflectionRegistryTest {
             // Internal carrier between the engine and the SLA evaluator; never
             // leaves the process.
             "com.bmscomp.kates.domain.SlaMetrics",
+            // A constraint validator: bean validation runs it, and nothing
+            // serializes it.
+            "com.bmscomp.kates.domain.RateValidator",
             // Control-flow result between the launcher and the two disruption
             // resources; the resources build the HTTP body themselves.
             "com.bmscomp.kates.disruption.DisruptionLauncher$LaunchResult",

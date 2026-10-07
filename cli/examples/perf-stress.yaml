@@ -30,7 +30,6 @@ scenarios:
       compressionType: snappy
     validate:
       maxP99LatencyMs: 200
-      maxErrorRate: 1.0
 
   - name: "Stress — 15k msg/s"
     type: STRESS
@@ -50,7 +49,6 @@ scenarios:
       compressionType: snappy
     validate:
       maxP99LatencyMs: 300
-      maxErrorRate: 1.0
 
   - name: "Stress — 30k msg/s"
     type: STRESS
@@ -70,7 +68,6 @@ scenarios:
       compressionType: snappy
     validate:
       maxP99LatencyMs: 500
-      maxErrorRate: 1.0
 
   - name: "Stress — unlimited (find ceiling)"
     type: STRESS
@@ -90,4 +87,3 @@ scenarios:
       compressionType: snappy
     validate:
       minThroughputRecPerSec: 834   # per producer, 6 × 834 ≈ 5k msg/s: fail only if below that even uncapped
-      maxErrorRate: 5.0

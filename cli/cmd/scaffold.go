@@ -30,7 +30,7 @@ var builtinScenarios = []scenarioMeta{
 	{filename: "exactly-once.yaml", name: "exactly-once", testType: "ROUND_TRIP", description: "Round trip, idempotent + transactional producer — 100k records, p99 < 200ms gate"},
 	{filename: "integrity-tx.yaml", name: "integrity-tx", testType: "INTEGRITY", description: "Transactional integrity — zstd, CRC, zero-loss verification"},
 	{filename: "spike-test.yaml", name: "spike-test", testType: "SPIKE", description: "Burst traffic — one unthrottled producer for up to 60s, test backpressure handling"},
-	{filename: "ci-gate.yaml", name: "ci-gate", testType: "LOAD", description: "CI pipeline gate — fast 10k-record validation with strict zero-error SLA"},
+	{filename: "ci-gate.yaml", name: "ci-gate", testType: "LOAD", description: "CI pipeline gate — fast 10k-record validation, p99 < 100ms and at least 1,000 rec/s"},
 }
 
 var (

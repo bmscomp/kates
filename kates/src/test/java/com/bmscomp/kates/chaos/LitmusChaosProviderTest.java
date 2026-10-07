@@ -23,6 +23,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import com.bmscomp.kates.chaos.litmus.ChaosEngine;
+import com.bmscomp.kates.chaos.litmus.ChaosEngineSpec;
 import com.bmscomp.kates.chaos.litmus.ChaosResult;
 import com.bmscomp.kates.chaos.litmus.ChaosResultStatus;
 
@@ -481,6 +482,42 @@ class LitmusChaosProviderTest {
                 return builder.build();
             });
         }
+    }
+
+    /**
+     * Only a cmdProbe becomes a Litmus probe, the one type the provider gives
+     * inputs. Litmus has no kafkaProbe, and the k8sProbe "kafka Ready" is
+     * Kates' own query: Kates evaluates both, and Litmus would fail them empty.
+     */
+    @Test
+    void onlyCmdProbesBecomeLitmusProbes() {
+        FaultSpec spec = FaultSpec.builder("probed")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.POD_KILL)
+                .probes(List.of(
+                        KafkaProbes.isrHealth(),
+                        KafkaProbes.clusterReady(),
+                        ProbeSpec.builder("custom")
+                                .command("echo 0")
+                                .expectedOutput("0")
+                                .build()))
+                .build();
+
+        List<ChaosEngineSpec.Probe> probes = build(spec).getSpec().experiments.getFirst().spec.probe;
+
+        assertEquals(List.of("custom"), probes.stream().map(p -> p.name).toList());
+        assertEquals("echo 0", probes.getFirst().cmdProbe.inputs.command);
+    }
+
+    @Test
+    void aFaultWhoseProbesKatesEvaluatesSendsLitmusNone() {
+        FaultSpec spec = FaultSpec.builder("probed")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.POD_KILL)
+                .probes(List.of(KafkaProbes.isrHealth(), KafkaProbes.clusterReady()))
+                .build();
+
+        assertNull(build(spec).getSpec().experiments.getFirst().spec.probe);
     }
 
     @Test
