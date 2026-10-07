@@ -89,7 +89,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			mcpJava + "persistence/EntityMapper.java:158-167",
 			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
 			mcpJava + "domain/TestRun.java:478-481",
-			mcpJava + "api/HealthResource.java:48-69",
+			mcpJava + "api/HealthResource.java:51-72",
 		},
 	},
 	{
