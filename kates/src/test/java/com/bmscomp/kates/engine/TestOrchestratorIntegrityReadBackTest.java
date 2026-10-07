@@ -43,6 +43,9 @@ class TestOrchestratorIntegrityReadBackTest {
     @Inject
     TestTypeDefaults typeDefaults;
 
+    @Inject
+    SpecLimits specLimits;
+
     @Test
     @SuppressWarnings("unchecked")
     void aPollAfterTheOneThatSawTheRunEndStillHasItsIntegrityResult() {
@@ -68,6 +71,7 @@ class TestOrchestratorIntegrityReadBackTest {
                 mock(BenchmarkMetrics.class),
                 mock(KatesMetrics.class),
                 new SlaEvaluator(),
+                specLimits,
                 mock(Event.class),
                 "native",
                 "localhost:9092",

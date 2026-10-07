@@ -4,7 +4,7 @@ import java.util.Map;
 
 /**
  * Backend-agnostic descriptor for a benchmark workload.
- * Each phase of a scenario produces one BenchmarkTask.
+ * Each phase of a scenario produces one BenchmarkTask, and a RAMP phase one per step.
  */
 public class BenchmarkTask {
 
@@ -32,6 +32,13 @@ public class BenchmarkTask {
     private final boolean enableIdempotence;
     private final boolean enableTransactions;
     private final boolean enableCrc;
+    /**
+     * When the task is to start, in milliseconds since the epoch; 0, or a
+     * time already past, starts it as soon as it is submitted. A scenario
+     * submits all its phases at once, and each later phase, and each later
+     * step of a RAMP phase, waits for its turn (TestOrchestrator.executeScenario).
+     */
+    private final long startAtMs;
 
     private BenchmarkTask(Builder builder) {
         this.taskId = builder.taskId;
@@ -50,6 +57,7 @@ public class BenchmarkTask {
         this.enableIdempotence = builder.enableIdempotence;
         this.enableTransactions = builder.enableTransactions;
         this.enableCrc = builder.enableCrc;
+        this.startAtMs = builder.startAtMs;
     }
 
     public String getTaskId() {
@@ -116,6 +124,10 @@ public class BenchmarkTask {
         return enableCrc;
     }
 
+    public long getStartAtMs() {
+        return startAtMs;
+    }
+
     public static Builder builder(String taskId, WorkloadType type) {
         return new Builder(taskId, type);
     }
@@ -137,6 +149,7 @@ public class BenchmarkTask {
         private boolean enableIdempotence = false;
         private boolean enableTransactions = false;
         private boolean enableCrc = true;
+        private long startAtMs = 0;
 
         private Builder(String taskId, WorkloadType workloadType) {
             this.taskId = taskId;
@@ -210,6 +223,11 @@ public class BenchmarkTask {
 
         public Builder enableCrc(boolean b) {
             this.enableCrc = b;
+            return this;
+        }
+
+        public Builder startAtMs(long ms) {
+            this.startAtMs = ms;
             return this;
         }
 

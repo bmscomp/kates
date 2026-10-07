@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.LongConsumer;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -44,8 +45,23 @@ class ChaosCoordinatorTest {
                 new ChaosCoordinator(providers(new NoOpChaosProvider(), hybrid()), "hybrid", new FaultLimits());
 
         assertEquals("hybrid(kubernetes)", coordinator.activeProviderName());
-        assertTrue(coordinator.injectsFaults());
         assertTrue(errors().isEmpty(), "a selected provider is not an error: " + errors());
+    }
+
+    /** A resilience run on hybrid measures RPO from the moment its delegate injects. */
+    @Test
+    void hybridHandsTheInjectionReportToTheProviderItDelegatesTo() {
+        KubernetesChaosProvider kubernetes = mock(KubernetesChaosProvider.class);
+        ChaosCoordinator coordinator = new ChaosCoordinator(
+                providers(new NoOpChaosProvider(), hybrid(kubernetes)), "hybrid", new FaultLimits());
+        FaultSpec kill = FaultSpec.builder("kill")
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+        LongConsumer onInject = injectedAt -> {};
+
+        coordinator.triggerFault(kill, onInject);
+
+        verify(kubernetes).triggerFault(kill, onInject);
     }
 
     @Test
@@ -64,7 +80,9 @@ class ChaosCoordinatorTest {
                 new ChaosCoordinator(providers(new NoOpChaosProvider(), hybrid()), "hybird", new FaultLimits());
 
         assertEquals("noop", coordinator.activeProviderName());
-        assertFalse(coordinator.injectsFaults(), "a fallback injects nothing");
+        List<Long> injected = new CopyOnWriteArrayList<>();
+        coordinator.triggerFault(FaultSpec.builder("kill").build(), injected::add);
+        assertEquals(List.of(), injected, "a fallback injects nothing");
         List<String> errors = errors();
         assertEquals(1, errors.size(), "expected one ERROR, got " + errors);
         assertTrue(errors.getFirst().contains("hybird"), errors.getFirst());
@@ -115,18 +133,24 @@ class ChaosCoordinatorTest {
 
         IllegalArgumentException refused =
                 assertThrows(IllegalArgumentException.class, () -> coordinator.triggerFault(forever));
+        // A resilience run asks for its fault with a report of when it goes in.
+        assertThrows(IllegalArgumentException.class, () -> coordinator.triggerFault(forever, injectedAt -> {}));
 
         assertEquals(
                 "Fault 'split' is outside the chaos limits: chaosDurationSec 0 is below 1, and a NETWORK_PARTITION"
                         + " is undone only when its duration ends",
                 refused.getMessage());
         verify(kubernetes, never()).triggerFault(any());
+        verify(kubernetes, never()).triggerFault(any(), any());
     }
 
     private static HybridChaosProvider hybrid() {
+        return hybrid(mock(KubernetesChaosProvider.class));
+    }
+
+    private static HybridChaosProvider hybrid(KubernetesChaosProvider kubernetes) {
         // A client whose CRD lookup fails means "Litmus not installed", so the
         // hybrid provider delegates to the kubernetes provider.
-        KubernetesChaosProvider kubernetes = mock(KubernetesChaosProvider.class);
         when(kubernetes.isAvailable()).thenReturn(true);
         return new HybridChaosProvider(mock(KubernetesClient.class), mock(LitmusChaosProvider.class), kubernetes);
     }

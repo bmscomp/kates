@@ -3,6 +3,7 @@ package com.bmscomp.kates.chaos;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.LongConsumer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -88,15 +89,22 @@ public class ChaosCoordinator {
     }
 
     /**
+     * Triggers the fault as {@link #triggerFault(FaultSpec)} does, and hands
+     * {@code onInject} the moment the active provider injects it (see
+     * {@link ChaosProvider#triggerFault(FaultSpec, LongConsumer)}). A fault
+     * outside the limits never reaches the provider, and noop injects nothing,
+     * so neither calls it.
+     */
+    public CompletableFuture<ChaosOutcome> triggerFault(FaultSpec spec, LongConsumer onInject) {
+        limits.check(spec);
+        return activeProvider.triggerFault(spec, onInject);
+    }
+
+    /**
      * Returns the name of the active provider.
      */
     public String activeProviderName() {
         return activeProvider.name();
-    }
-
-    /** False when the active provider is noop, which skips every experiment. */
-    public boolean injectsFaults() {
-        return !NOOP.equals(activeProvider.id());
     }
 
     /**

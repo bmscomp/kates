@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -19,9 +18,9 @@ import (
 
 // draft_scenario and the kates://scenarios/{name} resources (plan §4.1,
 // §4.2). The tool is local compute: it parses a scenario file the way
-// kates test apply does (apply.go:89-106), a JSON one both as a .json and as a
-// YAML file, converts each scenario with
-// scenarioToRequest (apply.go:333), and checks the result against the agent
+// kates test apply does (apply.go:59-85,141-148), a JSON one both as a .json
+// and as a YAML file, converts each scenario with
+// scenarioToRequest (apply.go:372), and checks the result against the agent
 // envelope of plan §5.4-§5.5. It saves nothing and sends the scenario
 // nowhere; like every tool it runs behind the guard, whose pin check is the
 // only request it causes.
@@ -142,7 +141,7 @@ const (
 )
 
 type mcpDraftScenarioIn struct {
-	YAML              string             `json:"yaml,omitempty" jsonschema:"a scenario file as kates test apply -f reads it: a scenarios list of name, type, spec and validate. JSON is checked both as kates test apply reads a .json file and as YAML, and must read the same both ways. Give this or template"`
+	YAML              string             `json:"yaml,omitempty" jsonschema:"a scenario file as kates test apply -f reads it: a scenarios list of name, type, spec and validate, or one such scenario at its top level. JSON is checked both as kates test apply reads a .json file and as YAML, and must read the same both ways. Give this or template"`
 	Template          string             `json:"template,omitempty" jsonschema:"a built-in scenario template to start from, as listed under kates://scenarios/. Give this or yaml"`
 	Name              string             `json:"name,omitempty" jsonschema:"a new name for every scenario in the file"`
 	SpecOverrides     map[string]any     `json:"spec_overrides,omitempty" jsonschema:"spec keys to set in every scenario, named as scenario files name them (records, parallelProducers, recordSizeBytes, durationSeconds, topic, partitions, ...); each a number, text or true/false"`
@@ -186,7 +185,7 @@ type mcpDraftScenarioOut struct {
 type mcpDraftedScenario struct {
 	Index     int                      `json:"index" jsonschema:"position in the file, from 0"`
 	Name      string                   `json:"name"`
-	Request   client.CreateTestRequest `json:"request" jsonschema:"the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; zero values are left out"`
+	Request   client.CreateTestRequest `json:"request" jsonschema:"the body kates test apply would POST to /api/tests, as scenarioToRequest builds it; it leaves out an empty value and a 0, except the 0 of batchSize, lingerMs and fetchMaxWaitMs"`
 	Effective *mcpDraftEffective       `json:"effective,omitempty" jsonschema:"the request merged with the shipped defaults of its type, as the backend would merge it; absent when the type is unknown"`
 }
 
@@ -242,8 +241,7 @@ func mcpDraftScenario(_ context.Context, call *mcpCall, in mcpDraftScenarioIn) (
 	if err != nil {
 		return mcpDraftScenarioOut{}, err
 	}
-	var fs mcpScnFindings
-	text, err := mcpScnEdit(source, in, &fs)
+	text, err := mcpScnEdit(source, in)
 	if err != nil {
 		return mcpDraftScenarioOut{}, err
 	}
@@ -259,16 +257,22 @@ func mcpDraftScenario(_ context.Context, call *mcpCall, in mcpDraftScenarioIn) (
 			Message: "draft_scenario produced a scenario file it cannot return as it is, so it checked nothing. This is a bug in kates mcp.",
 		}
 	}
-	scenarios, raw, err := mcpScnParseDraft(text)
+	sf, raw, err := mcpScnParseDraft(text)
 	if err != nil {
 		return mcpDraftScenarioOut{}, err
 	}
+	scenarios := sf.Scenarios
 	out := mcpDraftScenarioOut{
 		YAML:      text,
 		Scenarios: make([]mcpDraftedScenario, 0, len(scenarios)),
 		Envelope:  mcpScnEnvelopeLimits(),
 	}
-	fs.file(raw)
+	var fs mcpScnFindings
+	// A lone scenario's keys are the file's top-level keys, checked as the
+	// scenario's below.
+	if !sf.lone {
+		fs.file(raw)
+	}
 	mcpScnCheckJSON(text, scenarios, &fs)
 	if len(scenarios) > 1 {
 		fs.add(-1, mcpScnOutside, "scenarios", fmt.Sprintf("the file holds %d scenarios, and the envelope allows one agent "+
@@ -276,7 +280,7 @@ func mcpDraftScenario(_ context.Context, call *mcpCall, in mcpDraftScenarioIn) (
 			"--wait, so draft one scenario per file", len(scenarios)))
 	}
 	for i, sc := range scenarios {
-		out.Scenarios = append(out.Scenarios, mcpScnCheckScenario(call, i, sc, mcpScnRawScenario(raw, i), &fs))
+		out.Scenarios = append(out.Scenarios, mcpScnCheckScenario(call, i, sc, mcpScnRawScenario(raw, i, sf.lone), &fs))
 	}
 	call.Caveat(fs.caveats...)
 	out.Verdict = fs.verdict()
@@ -344,11 +348,11 @@ func mcpScnCleanText(s string) bool {
 
 var mcpScnOverrideKeyRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
 
-// mcpScnEdit applies the overrides and the new name to every scenario, and
-// puts a lone scenario under scenarios:, where kates test apply looks for it.
-// Unchanged text comes back as it was, comments and all; an edited file is
-// re-encoded from its YAML tree, which keeps comments and key order.
-func mcpScnEdit(text string, in mcpDraftScenarioIn, fs *mcpScnFindings) (string, error) {
+// mcpScnEdit applies the overrides and the new name to every scenario: each
+// one in the scenarios list, or the lone one at the top of a file without a
+// list. Unchanged text comes back as it was, comments and all; an edited file
+// is re-encoded from its YAML tree, which keeps comments and key order.
+func mcpScnEdit(text string, in mcpDraftScenarioIn) (string, error) {
 	if err := mcpScnCheckOverrides(in); err != nil {
 		return "", err
 	}
@@ -357,32 +361,27 @@ func mcpScnEdit(text string, in mcpDraftScenarioIn, fs *mcpScnFindings) (string,
 		return "", mcpScnNotAScenarioFile(err)
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return "", mcpInvalidArgument("The YAML is not a scenario file: it needs a scenarios list of name, type, spec and validate.", "")
+		return "", mcpInvalidArgument("The YAML is not a scenario file: it needs a scenarios list of name, type, spec and "+
+			"validate, or one such scenario at its top level.", "")
 	}
 	if !mcpScnCleanScalars(&doc) {
 		return "", mcpInvalidArgument("yaml holds an escape that decodes to a control, format or fence character, such as "+
 			"\"\\u200b\"; scenario keys and values have no use for one.", "")
 	}
-	edited := false
-	root := doc.Content[0]
-	if mcpScnMapValue(root, "scenarios") == nil && mcpScnMapValue(root, "type") != nil {
-		root = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
-			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "scenarios"},
-			{Kind: yaml.SequenceNode, Tag: "!!seq", Content: []*yaml.Node{doc.Content[0]}},
-		}}
-		doc.Content[0] = root
-		edited = true
-		fs.add(-1, mcpScnWarning, "scenarios", "the scenario was not under scenarios:, so kates test apply would have "+
-			"found none in it and stopped; the returned YAML puts it there")
-	}
-	if in.Name != "" || len(in.SpecOverrides) > 0 || len(in.ValidateOverrides) > 0 {
-		if err := mcpScnApplyOverrides(root, in); err != nil {
-			return "", err
-		}
-		edited = true
-	}
-	if !edited {
+	if in.Name == "" && len(in.SpecOverrides) == 0 && len(in.ValidateOverrides) == 0 {
 		return text, nil
+	}
+	// The overrides go where kates test apply reads the scenarios. A file it
+	// cannot read yet is placed by its shape, a type and no list being a lone
+	// scenario, and the checks then read the edited file.
+	root := doc.Content[0]
+	sf, err := parseScenarioFile("draft.yaml", []byte(text))
+	lone := sf.lone
+	if err != nil {
+		lone = mcpScnMapValue(root, "scenarios") == nil && mcpScnMapValue(root, "type") != nil
+	}
+	if err := mcpScnApplyOverrides(root, in, lone); err != nil {
+		return "", err
 	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -440,14 +439,19 @@ func mcpScnCheckOverrides(in mcpDraftScenarioIn) error {
 	return nil
 }
 
-// mcpScnApplyOverrides sets the name, spec and validate overrides on every
-// scenario of root's scenarios list, in key order.
-func mcpScnApplyOverrides(root *yaml.Node, in mcpDraftScenarioIn) error {
-	seq := mcpScnMapValue(root, "scenarios")
-	if seq == nil || seq.Kind != yaml.SequenceNode {
-		return mcpInvalidArgument("Overrides need a scenario file whose scenarios is a list.", "")
+// mcpScnApplyOverrides sets the name, spec and validate overrides, in key
+// order, on every scenario of root's scenarios list, or on root itself when
+// it is a lone scenario.
+func mcpScnApplyOverrides(root *yaml.Node, in mcpDraftScenarioIn, lone bool) error {
+	scenarios := []*yaml.Node{root}
+	if !lone {
+		seq := mcpScnMapValue(root, "scenarios")
+		if seq == nil || seq.Kind != yaml.SequenceNode {
+			return mcpInvalidArgument("Overrides need a scenarios list, or one scenario with a type at the top level.", "")
+		}
+		scenarios = seq.Content
 	}
-	for _, sc := range seq.Content {
+	for _, sc := range scenarios {
 		if sc.Kind != yaml.MappingNode {
 			return mcpInvalidArgument("Overrides need every entry of scenarios to be a mapping.", "")
 		}
@@ -537,18 +541,10 @@ func mcpScnNotAScenarioFile(err error) error {
 }
 
 // mcpScnParseFile reads a scenario file as kates test apply reads a YAML
-// one (apply.go:89-106): a scenarios list, or failing that one scenario with a
-// type. yaml.v3 ignores keys the structs do not name.
+// one, with parseScenarioFile. yaml.v3 ignores keys the structs do not name.
 func mcpScnParseFile(data []byte) ([]TestScenario, error) {
-	var sf ScenarioFile
-	if err := yaml.Unmarshal(data, &sf); err != nil {
-		var single TestScenario
-		if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
-			return []TestScenario{single}, nil
-		}
-		return nil, err
-	}
-	return sf.Scenarios, nil
+	sf, err := parseScenarioFile("draft.yaml", data)
+	return sf.Scenarios, err
 }
 
 // mcpScnLooksJSON reports whether text is JSON, a file someone would save as
@@ -559,19 +555,12 @@ func mcpScnLooksJSON(text string) bool {
 }
 
 // mcpScnParseJSONFile reads a scenario file as kates test apply reads a .json
-// one (apply.go:89-106): with encoding/json, which matches a key to a field in
-// any case and lets a later key replace an earlier one, and failing that as
-// one scenario in YAML.
+// one, with parseScenarioFile: with encoding/json, which matches a key to a
+// field in any case and lets a later key replace an earlier one, and as YAML
+// when encoding/json cannot read it.
 func mcpScnParseJSONFile(data []byte) ([]TestScenario, error) {
-	var sf ScenarioFile
-	if err := json.Unmarshal(data, &sf); err != nil {
-		var single TestScenario
-		if yaml.Unmarshal(data, &single) == nil && single.Type != "" {
-			return []TestScenario{single}, nil
-		}
-		return nil, err
-	}
-	return sf.Scenarios, nil
+	sf, err := parseScenarioFile("draft.json", data)
+	return sf.Scenarios, err
 }
 
 // mcpScnCheckJSON flags JSON that kates test apply would read, from a file
@@ -610,25 +599,31 @@ func mcpScnSameScenarios(a, b []TestScenario) bool {
 
 // mcpScnParseDraft parses the text twice: as kates test apply does, which is
 // what runs, and as plain maps, which shows the keys apply drops.
-func mcpScnParseDraft(text string) ([]TestScenario, map[string]any, error) {
-	scenarios, err := mcpScnParseFile([]byte(text))
+func mcpScnParseDraft(text string) (ScenarioFile, map[string]any, error) {
+	sf, err := parseScenarioFile("draft.yaml", []byte(text))
 	if err != nil {
-		return nil, nil, mcpScnNotAScenarioFile(err)
+		return ScenarioFile{}, nil, mcpScnNotAScenarioFile(err)
 	}
 	switch {
-	case len(scenarios) == 0:
-		return nil, nil, mcpInvalidArgument("kates test apply finds no scenarios in this file: it needs a scenarios list.", "")
-	case len(scenarios) > mcpDraftMaxScenarios:
-		return nil, nil, mcpInvalidArgument(fmt.Sprintf("The file holds %d scenarios; draft at most %d at a time.", len(scenarios), mcpDraftMaxScenarios), "")
+	case len(sf.Scenarios) == 0:
+		return ScenarioFile{}, nil, mcpInvalidArgument("kates test apply finds no scenarios in this file: it needs a "+
+			"scenarios list, or one scenario with a type at its top level.", "")
+	case len(sf.Scenarios) > mcpDraftMaxScenarios:
+		return ScenarioFile{}, nil, mcpInvalidArgument(fmt.Sprintf("The file holds %d scenarios; draft at most %d at a time.", len(sf.Scenarios), mcpDraftMaxScenarios), "")
 	}
 	var raw map[string]any
 	if err := yaml.Unmarshal([]byte(text), &raw); err != nil {
-		return nil, nil, mcpScnNotAScenarioFile(err)
+		return ScenarioFile{}, nil, mcpScnNotAScenarioFile(err)
 	}
-	return scenarios, raw, nil
+	return sf, raw, nil
 }
 
-func mcpScnRawScenario(raw map[string]any, i int) map[string]any {
+// mcpScnRawScenario is scenario i of the file as plain maps: an entry of its
+// scenarios list, or the file's top level when the scenario is a lone one.
+func mcpScnRawScenario(raw map[string]any, i int, lone bool) map[string]any {
+	if lone {
+		return raw
+	}
 	list, _ := raw["scenarios"].([]any)
 	if i < len(list) {
 		if m, ok := list[i].(map[string]any); ok {
@@ -697,7 +692,7 @@ func (f *mcpScnFindings) file(raw map[string]any) {
 }
 
 // The field names kates test apply reads, as its structs name them
-// (apply.go:21-43).
+// (apply.go:21-46).
 var (
 	mcpScnFileFields     = []string{"scenarios"}
 	mcpScnScenarioFields = []string{"name", "type", "backend", "spec", "validate"}
@@ -818,16 +813,17 @@ func mcpScnCheckTypeAndBackend(i int, req *client.CreateTestRequest, fs *mcpScnF
 	return known
 }
 
-// mcpScnSpecKey describes one spec key scenarioToRequest reads (apply.go:338-402)
+// mcpScnSpecKey describes one spec key scenarioToRequest reads (apply.go:377-441)
 // and the range the backend accepts for the field it becomes
 // (domain/TestSpec.java:34-113).
 type mcpScnSpecKey struct {
-	wire     string
-	kind     byte // 'i' number, 's' text, 'b' true/false
-	scale    int64
-	min, max int64
-	pattern  *regexp.Regexp
-	notBlank bool // the backend refuses a value with nothing but whitespace
+	wire      string
+	kind      byte // 'i' number, 's' text, 'b' true/false
+	scale     int64
+	min, max  int64
+	pattern   *regexp.Regexp
+	notBlank  bool // the backend refuses a value with nothing but whitespace
+	sendsZero bool // a 0 is sent, as the Kafka setting it is; any other number key leaves a 0 out
 }
 
 var (
@@ -845,8 +841,8 @@ var mcpScnSpecKeys = map[string]mcpScnSpecKey{
 	"durationSeconds":    {wire: "durationMs", kind: 'i', scale: 1000, min: 1_000, max: 86_400_000},
 	"topic":              {wire: "topic", kind: 's', pattern: mcpScnTopicRE},
 	"acks":               {wire: "acks", kind: 's', pattern: mcpScnAcksRE},
-	"batchSize":          {wire: "batchSize", kind: 'i', min: 0, max: 134_217_728},
-	"lingerMs":           {wire: "lingerMs", kind: 'i', min: 0, max: 300_000},
+	"batchSize":          {wire: "batchSize", kind: 'i', min: 0, max: 134_217_728, sendsZero: true},
+	"lingerMs":           {wire: "lingerMs", kind: 'i', min: 0, max: 300_000, sendsZero: true},
 	"compressionType":    {wire: "compressionType", kind: 's', pattern: mcpScnCompressionRE},
 	"numConsumers":       {wire: "numConsumers", kind: 'i', min: 0, max: 100},
 	"replicationFactor":  {wire: "replicationFactor", kind: 'i', min: 1, max: 10},
@@ -855,7 +851,7 @@ var mcpScnSpecKeys = map[string]mcpScnSpecKey{
 	"consumerGroup":      {wire: "consumerGroup", kind: 's', pattern: mcpScnGroupRE, notBlank: true},
 	"targetThroughput":   {wire: "targetThroughput", kind: 'i', min: -1, max: math.MaxInt32},
 	"fetchMinBytes":      {wire: "fetchMinBytes", kind: 'i', min: 1, max: math.MaxInt32},
-	"fetchMaxWaitMs":     {wire: "fetchMaxWaitMs", kind: 'i', min: 0, max: 300_000},
+	"fetchMaxWaitMs":     {wire: "fetchMaxWaitMs", kind: 'i', min: 0, max: 300_000, sendsZero: true},
 	"enableIdempotence":  {wire: "enableIdempotence", kind: 'b'},
 	"enableTransactions": {wire: "enableTransactions", kind: 'b'},
 	"enableCrc":          {wire: "enableCrc", kind: 'b'},
@@ -902,8 +898,9 @@ func mcpScnCheckSpecKey(i int, key string, v any, testType string, fs *mcpScnFin
 	}
 }
 
-// mcpScnCheckSpecNumber flags a number scenarioToRequest reads as 0 (and so
-// leaves out), cuts, or sends outside the range the backend accepts.
+// mcpScnCheckSpecNumber flags a value scenarioToRequest leaves out (one that
+// is not a number, or a 0 where the field leaves one out), a number it cuts,
+// and one it sends outside the range the backend accepts.
 func mcpScnCheckSpecNumber(i int, field string, k mcpScnSpecKey, v any, fs *mcpScnFindings) {
 	var n int64
 	switch x := v.(type) {
@@ -919,14 +916,18 @@ func mcpScnCheckSpecNumber(i int, field string, k mcpScnSpecKey, v any, fs *mcpS
 			fs.add(i, mcpScnWarning, field, fmt.Sprintf("it is %v, which scenarioToRequest cuts to %d", x, n))
 		}
 	default:
-		fs.add(i, mcpScnWarning, field, "it is "+mcpScnShow(v)+", which scenarioToRequest reads as 0, so it is left out "+
+		read := "which scenarioToRequest reads as 0"
+		if k.sendsZero {
+			read = "which is not a number"
+		}
+		fs.add(i, mcpScnWarning, field, "it is "+mcpScnShow(v)+", "+read+", so it is left out "+
 			"of the request and the type default applies")
 		return
 	}
 	scale := max(k.scale, 1)
 	sent := n * scale
 	switch {
-	case sent == 0:
+	case sent == 0 && !k.sendsZero:
 		fs.add(i, mcpScnWarning, field, "0 is left out of the request (the field is omitted when zero), so the type default applies")
 	case sent < k.min || sent > k.max:
 		fs.add(i, mcpScnInvalid, field, fmt.Sprintf("it is sent as %s %d, which the backend refuses (it accepts %d to %d)", k.wire, sent, k.min, k.max))
@@ -992,7 +993,7 @@ func mcpScnCheckApplies(i int, req *client.CreateTestRequest, fs *mcpScnFindings
 		if s.FetchMinBytes != 0 {
 			refuse("fetchMinBytes", why)
 		}
-		if s.FetchMaxWaitMs != 0 {
+		if s.FetchMaxWaitMs != nil {
 			refuse("fetchMaxWaitMs", why)
 		}
 	}
@@ -1241,11 +1242,11 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"and kates test apply sends a scenario with whatever key it holds.",
 		Refs: []string{
 			"plans/mcp-server.md:387-405",
-			mcpJava + "api/TestResource.java:69-104",
+			mcpJava + "api/TestResource.java:76-103",
 			mcpJava + "domain/TestSpec.java:34-113",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1176-1241",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1231-1296",
 				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
-			mcpAnchoredRef("cli/cmd/apply.go:135-212",
+			mcpAnchoredRef("cli/cmd/apply.go:177-251",
 				"for i, scenario := range sf.Scenarios {", "apiClient.CreateTest(ctx, req)",
 				"unevaluableSLAs(finalResult, scenario.Validate)"),
 		},
@@ -1259,7 +1260,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"listed as defaulted may differ on the cluster that runs the scenario.",
 		Refs: []string{
 			mcpJava + "config/TestTypeDefaults.java:22-64,323-464",
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:977-1022", "TestSpec applyTypeDefaults(", "return merged;"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1015-1060", "TestSpec applyTypeDefaults(", "return merged;"),
 			mcpAnchoredRef("kates/src/main/resources/application.properties:73-114",
 				"# Per-type overrides: STRESS", "kates.tests.roundtrip.throughput=10000"),
 			mcpAnchoredRef("charts/kates/values.yaml:591-658", "defaults:", "tests:", `throughput: "10000"`),
@@ -1275,18 +1276,18 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"produce, and RPO is measured only when a resilience run marks a fault, so a scenario run never has one. " +
 			"Keys ValidationSpec does not name, such as maxDuplicatePercent, are dropped when the file is read.",
 		Refs: []string{
-			mcpAnchoredRef("cli/cmd/apply.go:29-39,178-211,300-312,466-521,538-563",
+			mcpAnchoredRef("cli/cmd/apply.go:29-39,217-250,339-351,525-580,597-622",
 				"type ValidationSpec struct {", `yaml:"maxCrcFailures,omitempty"`,
 				"if !applyWait {", "nonNil(validateSLAs(finalResult, scenario.Validate))",
 				"} else if r.SLA != nil {", `"✓ SLA Pass"`,
 				"func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"crcFail=%d > %d"`,
 				"func unevaluableSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"maxRpoMs (RPO not measured)"`),
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:191-196,379-398",
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:196-201,406-425",
 				"switch (task.getWorkloadType())", "case INTEGRITY -> runIntegrity(task, state);",
 				"void runIntegrity(BenchmarkTask task, WorkerState state)", "state.chaosStartNanos.get()"),
-			mcpJava + "engine/TrogdorBackend.java:150-151",
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceOrchestrator.java:141",
-				"testOrchestrator.markChaosStart(run.getId(), System.nanoTime());"),
+			mcpJava + "engine/TrogdorBackend.java:162-163",
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceOrchestrator.java:143-144",
+				"chaosCoordinator.triggerFault(", "testOrchestrator.markChaosStart(runId, injectedAt)"),
 		},
 	},
 }

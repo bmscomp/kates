@@ -123,7 +123,7 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 		t.Fatalf("verdict %s, %d scenarios", out.Verdict, len(out.Scenarios))
 	}
 	sc := out.Scenarios[0]
-	want := scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{"records": 50000, "parallelProducers": 2, "recordSizeBytes": 1024}})
+	want := scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{"records": 50000, "recordSizeBytes": 1024}})
 	if sc.Request.TestType != "LOAD" || sc.Request.Spec == nil || *sc.Request.Spec != *want.Spec {
 		t.Errorf("request = %+v, want what scenarioToRequest builds: %+v", sc.Request.Spec, want.Spec)
 	}
@@ -139,11 +139,30 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 	}
 	mcpScnHasFinding(t, out, 0, "spec.targetThroughput", mcpScnOutside, "the rate is unlimited: set targetThroughput")
 	mcpScnHasFinding(t, out, 0, "spec.topic", mcpScnOutside, "load-test, the topic every LOAD run shares")
-	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnWarning, "starts one producer")
 	mcpSecHasCaveats(t, env, mcpCaveatAgentEnvelopeProposed, mcpCaveatScenarioShippedDefaults,
-		mcpCaveatScenarioValidateGrading, mcpCaveatLoadSingleProducer)
+		mcpCaveatScenarioValidateGrading)
 	if out.Envelope.MaxRecordsPerSecond != mcpScnEnvMaxRecordsPerSec || out.Envelope.MaxBytes != 10<<30 || out.Envelope.TopicPrefix != "kates-mcp-" {
 		t.Errorf("envelope = %+v", out.Envelope)
+	}
+	mcpScnOnlyPinCheck(t, fb)
+}
+
+// TestMCPDraftScenarioCountsTheRunIgnores: a count above what the run starts
+// is a warning, and parallelProducers on a LOAD scenario brings the
+// single-producer caveat. No template sets either count
+// (TestShippedScenariosSetOnlyWhatTheirRunsRead), so an override adds them.
+func TestMCPDraftScenarioCountsTheRunIgnores(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	env, out := mcpDraft(t, h, map[string]any{
+		"template":       "quick-load",
+		"spec_overrides": map[string]any{"parallelProducers": 2, "numConsumers": 2},
+	})
+	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnWarning, "starts one producer")
+	mcpScnHasFinding(t, out, 0, "spec.numConsumers", mcpScnWarning, "no effect")
+	mcpSecHasCaveats(t, env, mcpCaveatLoadSingleProducer)
+	if e := out.Scenarios[0].Effective; e.ProducerTasks != 1 {
+		t.Errorf("effective = %+v", e)
 	}
 	mcpScnOnlyPinCheck(t, fb)
 }
@@ -167,9 +186,9 @@ func TestMCPDraftScenarioEveryTemplate(t *testing.T) {
 	mcpScnHasFinding(t, out, 0, "type", mcpScnOutside, "SPIKE runs its producer at an unlimited rate")
 	_, out = mcpDraft(t, h, map[string]any{"template": "endurance-soak"})
 	mcpScnHasFinding(t, out, 0, "spec.durationSeconds", mcpScnOutside, "the run may last up to 3600 s")
+	_, out = mcpDraft(t, h, map[string]any{"template": "stress-test"})
 	mcpScnHasFinding(t, out, 0, "spec", mcpScnOutside, "GiB")
 	_, out = mcpDraft(t, h, map[string]any{"template": "integrity-tx"})
-	mcpScnHasFinding(t, out, 0, "validate.maxDuplicatePercent", mcpScnWarning, "drops validate.maxDuplicatePercent")
 	// The backend carries the integrity options now, and an INTEGRITY run with
 	// acks=all can apply all three.
 	for _, key := range []string{"spec.enableIdempotence", "spec.enableTransactions", "spec.enableCrc"} {
@@ -177,9 +196,6 @@ func TestMCPDraftScenarioEveryTemplate(t *testing.T) {
 			t.Errorf("integrity-tx: %s has findings %+v", key, f)
 		}
 	}
-	_, out = mcpDraft(t, h, map[string]any{"template": "ci-gate"})
-	mcpScnHasFinding(t, out, 0, "validate.maxErrorRate", mcpScnWarning, "never checks maxErrorRate")
-	mcpScnHasFinding(t, out, 0, "validate.maxDataLossPercent", mcpScnWarning, "only INTEGRITY runs")
 	mcpScnOnlyPinCheck(t, fb)
 }
 
@@ -201,7 +217,7 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	if sc.Name != "RT smoke" || sc.Request.Spec.Topic != "kates-mcp-rt" || sc.Request.Spec.Records != 20000 {
 		t.Errorf("scenario = %+v", sc)
 	}
-	if e := sc.Effective; e.Throughput != 10000 || e.RecordsPerSec != 20000 || e.DurationMs != 600_000 {
+	if e := sc.Effective; e.Throughput != 10000 || e.RecordsPerSec != 10000 || e.DurationMs != 600_000 {
 		t.Errorf("effective = %+v", e)
 	}
 	for _, want := range []string{"name: RT smoke", "topic: kates-mcp-rt", "records: 20000", "maxP99LatencyMs: 150", "enableTransactions: true"} {
@@ -214,10 +230,7 @@ func TestMCPDraftScenarioInsideEnvelope(t *testing.T) {
 	if err != nil || len(again) != 1 || scenarioToRequest(again[0]).Spec.Topic != "kates-mcp-rt" {
 		t.Errorf("the YAML does not read back: %v %+v", err, again)
 	}
-	// Warnings remain: ROUND_TRIP reports no integrity data. Its producer
-	// takes the idempotence and transactions the template asks for.
-	mcpScnHasFinding(t, out, 0, "validate.maxOutOfOrder", mcpScnWarning, "never checked")
-	mcpScnHasFinding(t, out, 0, "spec.numConsumers", mcpScnWarning, "no effect")
+	// The producer takes the idempotence and transactions the template asks for.
 	if f := mcpScnFindingsOn(out, 0, "spec.enableIdempotence"); len(f) != 0 {
 		t.Errorf("spec.enableIdempotence has findings %+v", f)
 	}
@@ -401,6 +414,9 @@ func TestMCPDraftScenarioTargetThroughputSetsTheRate(t *testing.T) {
 	mcpScnOnlyPinCheck(t, fb)
 }
 
+// TestMCPDraftScenarioYAML: a lone scenario, with no scenarios list, is what
+// kates test apply runs from such a file, so it is checked as it is written:
+// the file comes back unchanged, and its keys are checked as the scenario's.
 func TestMCPDraftScenarioYAML(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
 	h := newMCPHarness(t, fb)
@@ -424,21 +440,27 @@ validate:
   maxRpoMs: 100
 `
 	env, out := mcpDraft(t, h, map[string]any{"yaml": yamlText})
-	if !strings.HasPrefix(out.YAML, "scenarios:\n") || !strings.Contains(out.YAML, "# drafted by an agent") {
-		t.Errorf("a lone scenario is put under scenarios:, comments kept:\n%s", out.YAML)
+	if out.YAML != yamlText {
+		t.Errorf("a lone scenario comes back as it was written:\n%s", out.YAML)
 	}
-	mcpScnHasFinding(t, out, -1, "scenarios", mcpScnWarning, "was not under scenarios:")
+	for _, f := range out.Findings {
+		if f.Scenario == -1 {
+			t.Errorf("a lone scenario's keys are the scenario's, not top-level keys apply ignores: %+v", f)
+		}
+	}
 	if out.Verdict != mcpScnInvalid {
 		t.Errorf("verdict %s, want invalid (acks \"2\")", out.Verdict)
 	}
 	sc := out.Scenarios[0]
-	if sc.Request.TestType != "STRESS" || sc.Request.Spec.Records != 0 || sc.Request.Spec.LingerMs != 0 {
+	if s := sc.Request.Spec; sc.Request.TestType != "STRESS" || s.Records != 0 || s.LingerMs == nil || *s.LingerMs != 0 {
 		t.Errorf("request = %+v", sc.Request.Spec)
 	}
 	mcpScnHasFinding(t, out, 0, "spec.records", mcpScnWarning, "reads as 0")
 	mcpScnHasFinding(t, out, 0, "spec.throughput", mcpScnWarning, "the scenario key for the producer rate is targetThroughput")
 	mcpScnHasFinding(t, out, 0, "spec.numRecords", mcpScnWarning, "the scenario key is records")
-	mcpScnHasFinding(t, out, 0, "spec.lingerMs", mcpScnWarning, "0 is left out")
+	if f := mcpScnFindingsOn(out, 0, "spec.lingerMs"); len(f) != 0 {
+		t.Errorf("lingerMs: 0 is sent, and a STRESS run lingers 0 ms; findings %+v", f)
+	}
 	mcpScnHasFinding(t, out, 0, "spec.acks", mcpScnInvalid, "the backend refuses for acks")
 	mcpScnHasFinding(t, out, 0, "phases", mcpScnWarning, "no scenario phases")
 	mcpScnHasFinding(t, out, 0, "spec.parallelProducers", mcpScnOutside, "STRESS starts 8 producers")
@@ -451,6 +473,38 @@ validate:
 		t.Errorf("effective = %+v", e)
 	}
 	mcpSecHasCaveats(t, env, mcpCaveatReaperDeadline)
+	mcpScnOnlyPinCheck(t, fb)
+}
+
+// TestMCPDraftScenarioLoneScenarioOverrides: the overrides on a file of one
+// scenario at its top level go on that scenario, and the file keeps its form,
+// with no scenarios list, which is how kates test apply reads it.
+func TestMCPDraftScenarioLoneScenarioOverrides(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	_, out := mcpDraft(t, h, map[string]any{
+		"yaml":               "# one scenario\nname: bare\ntype: ROUND_TRIP\nspec:\n  topic: kates-mcp-a\n  records: 1000\n",
+		"name":               "renamed",
+		"spec_overrides":     map[string]any{"records": 5000, "lingerMs": 0},
+		"validate_overrides": map[string]any{"maxP99LatencyMs": 25},
+	})
+	if strings.Contains(out.YAML, "scenarios") || !strings.Contains(out.YAML, "# one scenario") ||
+		!strings.Contains(out.YAML, "maxP99LatencyMs: 25") {
+		t.Errorf("the lone scenario is edited where it is, comments kept:\n%s", out.YAML)
+	}
+	sc := out.Scenarios[0]
+	if s := sc.Request.Spec; sc.Name != "renamed" || s == nil || s.Records != 5000 || s.LingerMs == nil || *s.LingerMs != 0 {
+		t.Errorf("scenario %q, request spec %+v", sc.Name, sc.Request.Spec)
+	}
+	// A file kates test apply cannot read yet is edited by its shape, as a
+	// list is, and the edited file is what is checked.
+	_, out = mcpDraft(t, h, map[string]any{
+		"yaml":               "name: bare\ntype: ROUND_TRIP\nspec:\n  topic: kates-mcp-a\nvalidate:\n  maxP99LatencyMs: 50ms\n",
+		"validate_overrides": map[string]any{"maxP99LatencyMs": 50},
+	})
+	if strings.Contains(out.YAML, "scenarios") || !strings.Contains(out.YAML, "maxP99LatencyMs: 50\n") {
+		t.Errorf("the override replaces the value apply cannot read:\n%s", out.YAML)
+	}
 	mcpScnOnlyPinCheck(t, fb)
 }
 
@@ -507,6 +561,17 @@ func TestMCPDraftScenarioIntegrityGates(t *testing.T) {
 	mcpScnHasFinding(t, out, 0, "validate", mcpScnWarning, "maxDataLossPercent absent")
 	_, out = mcpDraft(t, h, map[string]any{"yaml": "scenarios:\n  - {name: n, type: VOLUME, spec: {topic: kates-mcp-v}}\n"})
 	mcpScnHasFinding(t, out, 0, "validate", mcpScnWarning, "grades nothing")
+	// The gates the ci-gate and integrity-tx templates once set, which
+	// TestShippedScenariosGateOnlyWhatApplyChecks now keeps out of them.
+	_, out = mcpDraft(t, h, map[string]any{"yaml": `scenarios:
+  - name: g
+    type: LOAD
+    spec: {topic: kates-mcp-g}
+    validate: {maxErrorRate: 0, maxDataLossPercent: 0, maxDuplicatePercent: 0}
+`})
+	mcpScnHasFinding(t, out, 0, "validate.maxErrorRate", mcpScnWarning, "never checks maxErrorRate")
+	mcpScnHasFinding(t, out, 0, "validate.maxDataLossPercent", mcpScnWarning, "only INTEGRITY runs")
+	mcpScnHasFinding(t, out, 0, "validate.maxDuplicatePercent", mcpScnWarning, "drops validate.maxDuplicatePercent")
 	mcpScnOnlyPinCheck(t, fb)
 }
 
@@ -530,6 +595,7 @@ func TestMCPDraftScenarioArguments(t *testing.T) {
 		{"not YAML", map[string]any{"yaml": "scenarios: [\n"}},
 		{"not a mapping", map[string]any{"yaml": "- a\n- b\n"}},
 		{"no scenarios", map[string]any{"yaml": "name: x\n"}},
+		{"overrides on no scenario", map[string]any{"yaml": "name: x\n", "name": "y"}},
 		{"empty list", map[string]any{"yaml": "scenarios: []\n"}},
 		{"wrong threshold type", map[string]any{"yaml": "scenarios:\n  - {type: LOAD, validate: {maxOutOfOrder: none}}\n"}},
 		{"too many", map[string]any{"yaml": six}},
@@ -721,6 +787,78 @@ func TestMCPDraftScenarioSpecKeysMatchScenarioToRequest(t *testing.T) {
 	}
 }
 
+// TestMCPDraftScenarioZeroWarningMatchesTheRequest holds the zero warning to
+// what scenarioToRequest sends: a number key whose 0 the request leaves out
+// is warned about, and one that sends its 0 is not. Those are batchSize,
+// lingerMs and fetchMaxWaitMs, where 0 is a Kafka setting.
+func TestMCPDraftScenarioZeroWarningMatchesTheRequest(t *testing.T) {
+	var keys, sendsZero []string
+	for key := range mcpScnSpecKeys {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		k := mcpScnSpecKeys[key]
+		if k.kind != 'i' {
+			continue
+		}
+		b, err := json.Marshal(scenarioToRequest(TestScenario{Type: "LOAD", Spec: map[string]any{key: 0}}).Spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sent := strings.Contains(string(b), `"`+k.wire+`":0`)
+		if sent != k.sendsZero {
+			t.Errorf("spec.%s: scenarioToRequest sends a 0: %t; draft_scenario says %t (%s)", key, sent, k.sendsZero, b)
+		}
+		var fs mcpScnFindings
+		mcpScnCheckSpecKey(0, key, 0, "LOAD", &fs)
+		warned := false
+		for _, f := range fs.list {
+			warned = warned || strings.Contains(f.Message, "0 is left out")
+		}
+		if warned == sent {
+			t.Errorf("spec.%s: a 0 the request sends: %t, warned as left out: %t; findings %+v", key, sent, warned, fs.list)
+		}
+		if sent {
+			sendsZero = append(sendsZero, key)
+		}
+	}
+	if want := []string{"batchSize", "fetchMaxWaitMs", "lingerMs"}; !slices.Equal(sendsZero, want) {
+		t.Errorf("the keys that send a 0 are %v, want %v", sendsZero, want)
+	}
+}
+
+// TestMCPDraftScenarioZeroSettings: a 0 in batchSize, lingerMs or
+// fetchMaxWaitMs is checked as sent. A LOAD run takes all three, and a STRESS
+// run's fetchMaxWaitMs: 0 is refused, as the backend refuses any fetch
+// setting for a type that starts no consumer; left out, it passed unnoticed.
+func TestMCPDraftScenarioZeroSettings(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	_, out := mcpDraft(t, h, map[string]any{"yaml": `scenarios:
+  - name: no-wait
+    type: LOAD
+    spec: {topic: kates-mcp-zero, batchSize: 0, lingerMs: 0, fetchMaxWaitMs: 0}
+  - name: stress
+    type: STRESS
+    spec: {topic: kates-mcp-zero, lingerMs: 0, fetchMaxWaitMs: 0}
+`})
+	if s := out.Scenarios[0].Request.Spec; s.BatchSize == nil || *s.BatchSize != 0 || s.LingerMs == nil || *s.LingerMs != 0 ||
+		s.FetchMaxWaitMs == nil || *s.FetchMaxWaitMs != 0 {
+		t.Errorf("request = %+v", s)
+	}
+	for _, field := range []string{"spec.batchSize", "spec.lingerMs", "spec.fetchMaxWaitMs"} {
+		if f := mcpScnFindingsOn(out, 0, field); len(f) != 0 {
+			t.Errorf("a LOAD run takes %s: 0; findings %+v", field, f)
+		}
+	}
+	if f := mcpScnFindingsOn(out, 1, "spec.lingerMs"); len(f) != 0 {
+		t.Errorf("a STRESS run takes lingerMs: 0; findings %+v", f)
+	}
+	mcpScnHasFinding(t, out, 1, "spec.fetchMaxWaitMs", mcpScnInvalid, "STRESS starts no consumer")
+	mcpScnOnlyPinCheck(t, fb)
+}
+
 // TestMCPDraftScenarioEscapesNeverChangeTheFile: a YAML escape can put a
 // format character in a key of a plain ASCII file. Re-encoding writes it raw,
 // and cleaning the result for display would then turn "re\u200bcords", a key
@@ -782,6 +920,16 @@ func TestMCPDraftScenarioJSON(t *testing.T) {
 	_, out = mcpDraft(t, h, map[string]any{"yaml": `{"scenarios":[{"name":"x","type":"ROUND_TRIP",` +
 		`"spec":{"topic":"kates-mcp-a","records":1000},"validate":{"maxP99LatencyMs":10,"maxOutOfOrder":0.5}}]}`})
 	mcpScnHasFinding(t, out, -1, "scenarios", mcpScnWarning, "save it as .yaml")
+
+	// A lone scenario in JSON is read both ways too.
+	loneJSON := `{"name":"x","type":"ROUND_TRIP",%s"spec":{"topic":"kates-mcp-a","records":1000},"validate":{"maxP99LatencyMs":10}}`
+	_, out = mcpDraft(t, h, map[string]any{"yaml": fmt.Sprintf(loneJSON, "")})
+	if out.Verdict != "inside_envelope" || len(out.Scenarios) != 1 || len(mcpScnFindingsOn(out, -1, "scenarios")) != 0 {
+		t.Errorf("verdict %s, scenarios %d, findings %+v", out.Verdict, len(out.Scenarios), out.Findings)
+	}
+	_, out = mcpDraft(t, h, map[string]any{"yaml": fmt.Sprintf(loneJSON, `"Type":"SPIKE",`)})
+	mcpScnHasFinding(t, out, -1, "scenarios", mcpScnInvalid, "when it is named .json")
+	mcpScnHasFinding(t, out, 0, "Type", mcpScnInvalid, "differs from type only in case")
 
 	// A case variant in a YAML file is invalid too: saved as .json, the same
 	// scenario written as JSON would run it.
@@ -875,11 +1023,15 @@ func TestMCPDraftScenarioFitsAtTheLimits(t *testing.T) {
 		t.Errorf("result is %d bytes on the wire, over %d", size, mcpDefaultLimits.MaxResultBytes)
 	}
 
-	// An edited file cannot be left out, and one that still does not fit is
-	// refused as too large an input, not failed as too large a page.
+	// A lone scenario is checked as written, so its echo gives way too.
 	lone := "name: x\ntype: LOAD\n# "
 	lone += strings.Repeat("&", mcpDraftMaxYAMLBytes-len(lone)-1) + "\n"
-	if e := h.callErr("draft_scenario", map[string]any{"yaml": lone}); e.Error.Code != mcpErrInvalidArgument {
+	if _, out := mcpDraft(t, h, map[string]any{"yaml": lone}); !out.YAMLOmitted || out.Verdict != mcpScnOutside {
+		t.Errorf("a lone scenario at the limit: yamlOmitted %v, verdict %s", out.YAMLOmitted, out.Verdict)
+	}
+	// An edited file cannot be left out, and one that still does not fit is
+	// refused as too large an input, not failed as too large a page.
+	if e := h.callErr("draft_scenario", map[string]any{"yaml": lone, "name": "renamed"}); e.Error.Code != mcpErrInvalidArgument {
 		t.Errorf("code %s, want %s", e.Error.Code, mcpErrInvalidArgument)
 	}
 	mcpScnOnlyPinCheck(t, fb)

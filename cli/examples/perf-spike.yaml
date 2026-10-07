@@ -1,21 +1,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Performance Test: SPIKE — Burst After Idle
 # ─────────────────────────────────────────────────────────────────────────────
+# A SPIKE run starts one producer and runs it unthrottled: the Kates API
+# refuses any rate but -1 for it. So the idle baseline and the recovery, which
+# run at a set rate, are LOAD runs, each with one producer and one consumer.
+#
 # Usage:  kates test apply -f cli/examples/perf-spike.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
 scenarios:
   - name: "Spike — idle baseline"
-    type: SPIKE
+    type: LOAD
     spec:
       topic: kates-events
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 30000
-      recordSize: 512
-      throughput: 500
-      numProducers: 2
-      numConsumers: 2
+      records: 30000
+      recordSizeBytes: 512
+      targetThroughput: 500
       acks: "all"
       enableIdempotence: true
       batchSize: 65536
@@ -23,7 +25,6 @@ scenarios:
       compressionType: lz4
     validate:
       maxP99LatencyMs: 100
-      maxErrorRate: 0.0
 
   - name: "Spike — unlimited burst"
     type: SPIKE
@@ -32,11 +33,9 @@ scenarios:
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 300000
-      recordSize: 512
-      throughput: -1            # maximum burst
-      numProducers: 4
-      numConsumers: 2
+      records: 300000
+      recordSizeBytes: 512
+      targetThroughput: -1      # maximum burst
       acks: "all"
       enableIdempotence: true
       batchSize: 65536
@@ -44,21 +43,17 @@ scenarios:
       compressionType: lz4
     validate:
       maxP99LatencyMs: 1000     # spikes tolerate higher latency
-      maxErrorRate: 0.5         # brief quota rejections allowed
-      maxDataLossPercent: 0.0
 
   - name: "Spike — post-burst recovery"
-    type: SPIKE
+    type: LOAD
     spec:
       topic: kates-events
       partitions: 6
       replicationFactor: 3
       minInsyncReplicas: 2
-      numRecords: 180000
-      recordSize: 512
-      throughput: 3000
-      numProducers: 2
-      numConsumers: 2
+      records: 180000
+      recordSizeBytes: 512
+      targetThroughput: 3000
       acks: "all"
       enableIdempotence: true
       batchSize: 65536
@@ -67,4 +62,3 @@ scenarios:
     validate:
       maxP99LatencyMs: 200
       minThroughputRecPerSec: 2500
-      maxErrorRate: 0.0

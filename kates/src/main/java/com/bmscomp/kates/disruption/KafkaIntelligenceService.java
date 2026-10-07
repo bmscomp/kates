@@ -121,8 +121,9 @@ public class KafkaIntelligenceService {
             this.future = scheduler.scheduleAtFixedRate(this::poll, 0, pollIntervalMs, TimeUnit.MILLISECONDS);
         }
 
-        public void markDisruptionStart() {
-            this.disruptionStartTime = Instant.now();
+        /** Starts the time to full ISR at {@code at}, the moment the fault went in; any thread may call it. */
+        public void markDisruptionStart(Instant at) {
+            this.disruptionStartTime = at;
         }
 
         private void poll() {
@@ -232,8 +233,13 @@ public class KafkaIntelligenceService {
             this.future = scheduler.scheduleAtFixedRate(this::poll, 0, pollIntervalMs, TimeUnit.MILLISECONDS);
         }
 
-        public void markDisruptionStart() {
-            this.disruptionStartTime = Instant.now();
+        /**
+         * Starts the time to lag recovery at {@code at}, the moment the fault
+         * went in, and takes the last sample so far as the baseline. Any
+         * thread may call it: samples are only ever added.
+         */
+        public void markDisruptionStart(Instant at) {
+            this.disruptionStartTime = at;
             if (!timeline.isEmpty()) {
                 this.baselineLag = timeline.getLast().totalLag();
             }
