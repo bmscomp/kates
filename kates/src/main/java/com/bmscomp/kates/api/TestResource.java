@@ -1,6 +1,7 @@
 package com.bmscomp.kates.api;
 
 import java.util.List;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
@@ -30,10 +31,12 @@ import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.engine.TestOrchestrator;
 import com.bmscomp.kates.persistence.BaselineEntity;
+import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.AuditService;
 import com.bmscomp.kates.service.BaselineService;
 import com.bmscomp.kates.service.TestRunRepository;
 
+@RolesAllowed(Scopes.READ)
 @Path("/api/tests")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -73,6 +76,7 @@ public class TestResource {
         this.chaosProvider = chaosProvider;
     }
 
+    @RolesAllowed(Scopes.TEST_RUN)
     @POST
     @Operation(
             summary = "Create and execute a test",
@@ -158,6 +162,7 @@ public class TestResource {
         return name.equals(request.getBackend()) || (scenario != null && name.equals(scenario.getBackend()));
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @POST
     @Path("/bulk")
     @Operation(
@@ -204,6 +209,7 @@ public class TestResource {
                 .build();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/bulk")
     @Operation(
@@ -303,6 +309,7 @@ public class TestResource {
                         .build());
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{id}")
     @Operation(
@@ -326,6 +333,7 @@ public class TestResource {
         return Response.noContent().build();
     }
 
+    @RolesAllowed(Scopes.TEST_RUN)
     @POST
     @Path("/{id}/cancel")
     // Overrides the class-level @Consumes(APPLICATION_JSON). Cancel takes no
@@ -417,6 +425,7 @@ public class TestResource {
                         .build());
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @PUT
     @Path("/baselines/{type}")
     @Operation(
@@ -447,6 +456,7 @@ public class TestResource {
         return Response.ok(baselineToResponse(baseline)).build();
     }
 
+    @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/baselines/{type}")
     @Operation(summary = "Remove baseline for a test type")

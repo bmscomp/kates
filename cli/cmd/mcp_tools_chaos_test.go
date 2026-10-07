@@ -35,7 +35,7 @@ var mcpCaveatIDsChaos = []mcpCaveatID{
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
 // mcpChaosTypes is GET /api/disruptions/types as the backend answers it
-// (DisruptionResource.java:340-369).
+// (DisruptionResource.java:356-385).
 func mcpChaosTypes() []map[string]any {
 	names := []string{"POD_KILL", "POD_DELETE", "NETWORK_PARTITION", "NETWORK_LATENCY", "CPU_STRESS", "MEMORY_STRESS",
 		"IO_STRESS", "DNS_ERROR", "DISK_FILL", "ROLLING_RESTART", "LEADER_ELECTION", "SCALE_DOWN", "NODE_DRAIN"}
