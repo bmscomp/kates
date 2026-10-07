@@ -80,17 +80,29 @@ doesn't read.
 
 ### `validate` field reference
 
+`kates test apply --wait` checks the gates below and drops any other key
+without a word. It reads `maxErrorRate` but checks nothing against it, since a
+run reports no error count. `TestShippedScenariosGateOnlyWhatApplyChecks`
+(`cli/cmd`) fails an example with a gate `kates test apply` doesn't check for
+its type.
+
 | YAML key | Type | Fails when… |
 |---|---|---|
-| `maxP99LatencyMs` | float | p99 > threshold |
-| `maxAvgLatencyMs` | float | avg > threshold |
+| `maxP99LatencyMs` | float | p99 > threshold, or no task measured latency |
+| `maxAvgLatencyMs` | float | avg > threshold, or no task measured latency |
 | `minThroughputRecPerSec` | float | throughput < threshold |
-| `maxErrorRate` | float | error rate > threshold (%) |
-| `maxDataLossPercent` | float | data loss > threshold |
-| `maxRtoMs` | float | recovery time > threshold |
-| `maxRpoMs` | float | recovery point > threshold |
-| `maxOutOfOrder` | int | out-of-order records > threshold |
-| `maxCrcFailures` | int | CRC failures > threshold |
+| `maxErrorRate` | float | Never: read, but not checked |
+| `maxDataLossPercent` | float | data loss > threshold (%); `INTEGRITY` only |
+| `maxRtoMs` | float | recovery time > threshold; `INTEGRITY` only, *not evaluable* on any other type |
+| `maxRpoMs` | float | Never in a scenario file: RPO is measured from the fault a resilience run injects, so the gate is *not evaluable* |
+| `maxOutOfOrder` | int | out-of-order records > threshold; `INTEGRITY` only |
+| `maxCrcFailures` | int | CRC failures > threshold; `INTEGRITY` only |
+
+Only an `INTEGRITY` run reports integrity data. On any other type,
+`maxDataLossPercent`, `maxOutOfOrder` and `maxCrcFailures` never fail, and the
+summary still reads `✓ SLA Pass`. On an `INTEGRITY` run each of the three is 0
+when the `validate` block leaves it out, and a negative value turns it off. A
+*not evaluable* gate neither passes nor fails, and leaves the exit code alone.
 
 ---
 
@@ -154,11 +166,11 @@ Every probe runs before the fault and after it, until all pass or
 | YAML key | Type | Notes |
 |---|---|---|
 | `name` | string | Probe name |
-| `type` | string | `cmdProbe` (the default) runs `command` with `sh -c` in the first pod labelled `strimzi.io/component-type=kafka`; a `k8sProbe` whose `command` names `kafka` and `Ready` reads the Kafka CR's status instead. Any other type runs as a `cmdProbe` |
+| `type` | string | `kafkaProbe` runs the check `command` names, over the Kates API's own Kafka connection. A `k8sProbe` whose `command` names `kafka` and `Ready` prints the Kafka CR's readiness, `Ready=True` when it is ready. `cmdProbe` (the default) runs `command` with `sh -c` in the first Ready broker pod by name, which needs `get` and `create` on `pods/exec` in the target namespace: the kates chart grants neither. Any other type runs as a `cmdProbe` |
 | `mode` | string | `Edge` (the default) or `Continuous` |
-| `command` | string | The command, or the `k8sProbe` query |
+| `command` | string | A `kafkaProbe`'s check: `under-replicated-partitions`, `unavailable-partitions`, `produce <topic>` (prints the acknowledged records per second; the platform profile creates `kates-probe-topic`) or `consumer-lag [<group>]`. A `cmdProbe`'s shell command, or the `k8sProbe` query |
 | `expectedOutput` | string | What `comparator` compares the output with; default `""` |
-| `comparator` | string | `equal`, `contains` (the default), `notContains`, or `>=`, `<=`, `>`, `<`, which compare numbers. Any other, `==` included, runs as `contains` |
+| `comparator` | string | `equal`, `contains` (the default), `notContains`, or `==`, `!=`, `>=`, `<=`, `>`, `<`, which compare numbers. The probe fails when its comparator is none of these, when its check or command fails or runs out of time, and when a numeric comparator meets output that is not one number |
 | `intervalSec` | int | Seconds between `Continuous` runs: the first `Continuous` probe's paces them all; default 10 |
 | `timeoutSec` | int | Seconds to wait for `command`; default 30 |
 

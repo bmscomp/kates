@@ -39,8 +39,20 @@ public class ResilienceReport {
 
     private List<ProbeResult> baselineProbes;
     private List<ProbeResult> duringChaosProbes;
+    /** The last poll of the recovery wait: the one in which every probe passed, if any did. */
     private List<ProbeResult> postRecoveryProbes;
+    /**
+     * From the end of the fault to the end of the first poll in which every
+     * probe passed. Set only when a poll did, so that it is never the time the
+     * wait ran for: see {@link #unrecoveredAfter}.
+     */
     private Duration recoveryTime;
+    /**
+     * Set instead of {@link #recoveryTime} when no poll of the recovery wait
+     * found every probe passing: from the end of the fault to the end of the
+     * last poll, the least the recovery took, if it came at all.
+     */
+    private Duration unrecoveredAfter;
 
     public TestReport getPerformanceReport() {
         return performanceReport;
@@ -144,5 +156,13 @@ public class ResilienceReport {
 
     public void setRecoveryTime(Duration recoveryTime) {
         this.recoveryTime = recoveryTime;
+    }
+
+    public Duration getUnrecoveredAfter() {
+        return unrecoveredAfter;
+    }
+
+    public void setUnrecoveredAfter(Duration unrecoveredAfter) {
+        this.unrecoveredAfter = unrecoveredAfter;
     }
 }
