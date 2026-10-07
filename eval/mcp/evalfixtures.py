@@ -50,7 +50,7 @@ def make_wrapper(directory: Path, name: str, script: Path) -> Path:
 class FakeKatesAPI:
     """GET /api/cluster/info, /api/security/audit and /api/security/drift on a
     loopback port, answering only the human key, sent as the backend accepts
-    it (security/ApiKeyAuthFilter.java): a Bearer token, as the CLI and
+    it (security/ApiKeys.java): a Bearer token, as the CLI and
     kates_api send it, or an X-API-Key header, as oracle.py sends it."""
 
     def __init__(self, key: str = HUMAN_KEY, drift: dict[str, Any] | None = None):

@@ -109,6 +109,13 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-smallrye-openapi</artifactId>
         </dependency>
+        <!-- API keys become a SecurityIdentity with scopes as roles
+             (security/ApiKeyAuthenticationMechanism), for @RolesAllowed on
+             the REST endpoints and an HTTP permission on /q/openapi. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-security</artifactId>
+        </dependency>
 
         <!-- Micrometer with Prometheus registry -->
         <dependency>
