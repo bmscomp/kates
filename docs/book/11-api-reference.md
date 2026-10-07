@@ -172,6 +172,14 @@ The phases run one after another, in the order sent. Each starts once the durati
 | `phases[i].targetThroughput` | A RAMP phase has no rate, or one below 1 |
 | `phases[i].rampSteps` | A RAMP phase has under 1 or over 100 steps, or more than its rate in rec/s, since each step needs at least 1 rec/s |
 
+The run stores the scenario's `name` and `labels`, and each phase's `name`, so the Kates API refuses a value its database can't hold, before the run starts. The database stores no NUL character (U+0000), and it keeps a name, and a task's id, which holds the run's id and the phase's name, in 128 characters:
+
+| Field | Refused when |
+|-------|--------------|
+| `name` | It is over 128 characters, or holds a NUL character |
+| `labels` | A key or a value holds a NUL character |
+| `phases[i].name` | It is over 100 characters, since each id of the phase's tasks holds it, or it holds a NUL character |
+
 ```json
 {
   "status": 400,
