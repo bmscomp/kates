@@ -15,12 +15,13 @@ import jakarta.ws.rs.ext.Provider;
  * reachable under both paths.
  *
  * This is intentionally non-breaking: the unversioned {@code /api/...} paths
- * keep working, so the Go CLI, the Kubernetes probes ({@code /api/health}),
- * the API-key filter's public prefixes, and all existing tests are unaffected.
- * New/external consumers can adopt {@code /api/v1} and get a versioned contract.
+ * keep working, so the Go CLI, the Kubernetes probes ({@code /api/health})
+ * and all existing tests are unaffected. New/external consumers can adopt
+ * {@code /api/v1} and get a versioned contract.
  *
- * Runs at the highest precedence so the rewrite happens before authentication
- * evaluates the path.
+ * Authentication does not look at the path: each endpoint says what it
+ * needs (quarkus.security.jaxrs.default-roles-allowed, @PermitAll), so an
+ * endpoint needs the same key under both paths.
  */
 @Provider
 @PreMatching

@@ -40,7 +40,27 @@ curl -H "Authorization: Bearer $KATES_API_KEY" http://localhost:30083/api/tests
 curl -H "X-API-Key: $KATES_API_KEY" http://localhost:30083/api/tests
 ```
 
-Requests without a key receive `401 Unauthorized`; requests with a wrong key receive `403 Forbidden`. The paths `/api/health`, `/openapi`, and everything under `/q/` (metrics, OpenAPI spec) are public and never require a key.
+Requests without a key receive `401 Unauthorized`; requests with a wrong key receive `403 Forbidden`. `/api/health`, the probes under `/q/health` and the metrics at `/q/metrics` are public and never require a key; a wrong key sent to them is ignored. The OpenAPI specification at `/q/openapi` needs the key, like every other endpoint.
+
+To see whom a key belongs to and what it may do, ask the Kates API:
+
+```bash
+curl -s -H "X-API-Key: $KATES_API_KEY" http://localhost:30083/api/whoami | jq .
+```
+
+```json
+{
+  "principal": "legacy",
+  "principalType": "human",
+  "scopes": [
+    "read", "read:sensitive", "test:run", "chaos:run",
+    "chaos:propose", "chaos:approve", "abort", "admin"
+  ],
+  "securityEnabled": true
+}
+```
+
+The key in `kates.api.key` is the principal `legacy`, a person (`human`) with every scope; `allowedClusterIds` is left out because it may act on any cluster. With security switched off, as in dev mode, every caller is `anonymous` with every scope, and `securityEnabled` is `false`.
 
 ### Common Request Headers
 
@@ -69,7 +89,7 @@ http://localhost:30083
 
 ## Endpoints
 
-This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The Kates API exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates and schedules, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi` (Swagger UI is available at `/q/swagger-ui` in dev mode).
+This chapter documents the most commonly used endpoints in the core resource families: health, tests, reports, cluster inspection, disruptions, resilience, trends, and schedules. The Kates API exposes more than is listed here — bulk operations, test cancellation, baselines, report comparison and markdown export, disruption templates and schedules, plus entire resource families (webhooks, events, cost, advisor, audit, profiles, security, Kafka client tooling, DLQ, share groups). The complete, always-current machine-readable specification is generated from the code by MicroProfile OpenAPI and served at `/q/openapi`, to callers with the API key (Swagger UI is available at `/q/swagger-ui` in dev mode).
 
 ### Health & System
 
@@ -1141,7 +1161,7 @@ The health check works with no key, the create call returns `202 Accepted` with 
 ## Summary
 
 - Most CLI commands call this API, so `curl` and `jq` can script them; those that install and reach the stack run `kubectl` and `helm` instead
-- Authentication is on by default: pass the key as `Authorization: Bearer` or `X-API-Key`, expect `401` without one and `403` with a wrong one; only `/api/health`, `/openapi`, and everything under `/q/` stay public
+- Authentication is on by default: pass the key as `Authorization: Bearer` or `X-API-Key`, expect `401` without one and `403` with a wrong one; only `/api/health`, `/q/health` and `/q/metrics` stay public; `GET /api/whoami` names the key's principal and scopes
 - Test execution and disruption execution are both asynchronous — the `POST` returns `202 Accepted` with an id and you poll `GET /api/tests/{id}` or `GET /api/disruptions/{id}` until the status is terminal
 - One report feeds many consumers: JSON for dashboards, CSV for spreadsheets, JUnit XML for CI jobs, and heatmap data for latency visualization
 - This chapter covers the core endpoint families only; the complete, always-current spec lives at `/q/openapi`
