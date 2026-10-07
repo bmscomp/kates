@@ -334,7 +334,9 @@ Stop and delete a test run with its results. A run that is still `PENDING` or `R
 
 Delete the finished runs created before a cutoff, to keep the run history to a retention period of your own. Only `DONE` and `FAILED` runs match, and a cancelled run is stored as `FAILED`, so it matches too. A run still `PENDING`, `RUNNING` or `STOPPING` is never deleted here; [test cleanup](10-cli-reference.md#test-cleanup) deals with one left `RUNNING`. `kates test prune` and the `kates` chart's cleanup CronJob call this endpoint.
 
-A call deletes the oldest matching runs first, by `createdAt`, and at most `limit` of them. Each goes as `DELETE /api/tests/{id}` deletes it, with its results, and leaves a row in the audit log: action `DELETE`, type `test`, the run's ID, and the details `retention: created before <cutoff>`. `kates audit --type test` lists them. Once a day the Kates API also deletes, on its own, every run older than 90 days (`kates.cleanup.retention-days`) that is not `RUNNING` or `PENDING`, without an audit row; this endpoint is for keeping finished runs for less long.
+A call deletes the oldest matching runs first, by `createdAt`, and at most `limit` of them. Each goes as `DELETE /api/tests/{id}` deletes it, with its results, and leaves a row in the audit log: action `DELETE`, type `test`, the run's ID, and the details `retention: created before <cutoff>`. `kates audit --type test` lists them.
+
+Once a day the Kates API also prunes by itself, through the same delete: it deletes the `DONE` and `FAILED` runs created more than `kates.cleanup.retention-days` days ago, 90 by default, oldest first and 1,000 at a time. Each run it deletes leaves an audit row too, with the details `retention sweep: created before <cutoff> (kates.cleanup.retention-days=<n>)`. A run still `PENDING`, `RUNNING` or `STOPPING` is left alone, however old it is. This endpoint is for keeping finished runs for less long.
 
 **Query Parameters:**
 

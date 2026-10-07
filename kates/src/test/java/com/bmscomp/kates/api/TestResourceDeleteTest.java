@@ -24,6 +24,7 @@ import com.bmscomp.kates.domain.PruneResponse;
 import com.bmscomp.kates.domain.TestResult.TaskStatus;
 import com.bmscomp.kates.engine.InMemoryEngine;
 import com.bmscomp.kates.service.AuditService;
+import com.bmscomp.kates.service.RunRetention;
 
 /**
  * Deleting runs that are still going, through DELETE /api/tests/{id} and
@@ -43,6 +44,7 @@ class TestResourceDeleteTest {
     void setUp() {
         resource = new TestResource(engine.orchestrator, engine.repository, null);
         resource.auditService = audit;
+        resource.retention = new RunRetention(engine.orchestrator, engine.repository, audit);
     }
 
     @Test
