@@ -30,7 +30,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:445-451, TestOrchestrator.refreshStatus); both
+// (TestResource.java:458-464, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -93,13 +93,14 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 			"disruption report stored as RUNNING is a plan still in progress, or one whose backend process " +
 			"stopped mid-plan and has not started again (the backend marks such a report INTERRUPTED when it " +
 			"starts). A plan in progress injects its faults for only part of its run, so this cannot show " +
-			"whether Kates is injecting a fault now. Audit rows name no actor, so this cannot say who did something, " +
-			"and only the REST test endpoints write them. Disruptions appear only when Kates wrote a report " +
+			"whether Kates is injecting a fault now. An audit row names who made a change (the principal of the API " +
+			"key, and whether a person, an agent or a schedule acted) and, when the change started a run or a " +
+			"disruption, its id; rows older than the Kates API's recording of actors name no one. Disruptions appear only when Kates wrote a report " +
 			"row. since is an RFC 3339 time, a duration back from now such as 30m or 2h, or a clock time such " +
 			"as 13:30 (its latest occurrence, in the server's time zone); the default is 1h. Each list holds " +
 			"at most limit items; count and complete say when a list is cut. Plan names and audit details " +
 			"are fenced. Only reads.",
-	}, mcpKatesActivity, mcpCaveatAuditNoActor, mcpCaveatActivityDisruptionRows)
+	}, mcpKatesActivity, mcpCaveatAuditActorRecorded, mcpCaveatActivityDisruptionRows)
 
 	addReadResourceTemplate(s, deps, &mcp.ResourceTemplate{
 		URITemplate: mcpRunReportURITemplate,
@@ -181,7 +182,7 @@ const (
 
 // The values TestSpec's bean validation accepts (domain/TestSpec.java:36,50,
 // 61-63). A stored run can hold others: a schedule saved by a PUT, which runs
-// no bean validation (ScheduleResource.java:135-136), fires its spec as sent,
+// no bean validation (ScheduleResource.java:137-138), fires its spec as sent,
 // a Kates API without the check of a scenario's specs
 // (TestOrchestrator.java:1110-1114) stored a scenario's base spec as sent, and
 // one without the check of a gRPC request's fields
@@ -1284,7 +1285,7 @@ func mcpRunHasRequested(r *client.MCPRun) bool {
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:574-602 checks only that it exists),
+// any type or status (TestResource.java:590-618 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -1705,16 +1706,18 @@ type mcpActivityAudit struct {
 	Available bool                  `json:"available" jsonschema:"false when the audit rows could not be read"`
 	ErrorCode mcpErrorCode          `json:"errorCode,omitempty"`
 	Total     int                   `json:"total" jsonschema:"rows since then that the backend read, at most 500"`
-	Rows      []mcpActivityAuditRow `json:"rows" jsonschema:"newest first; no row names who acted"`
+	Rows      []mcpActivityAuditRow `json:"rows" jsonschema:"newest first"`
 }
 
 type mcpActivityAuditRow struct {
-	ID        int          `json:"id"`
-	Action    string       `json:"action" jsonschema:"CREATE, DELETE or CANCEL"`
-	EventType string       `json:"eventType"`
-	Target    string       `json:"target" jsonschema:"the test run id acted on"`
-	Details   mcpUntrusted `json:"details,omitempty"`
-	Timestamp string       `json:"timestamp"`
+	ID            int          `json:"id"`
+	Action        string       `json:"action" jsonschema:"what was done: CREATE, UPDATE, DELETE, RUN, CANCEL, START, STOP, PRODUCE or READ"`
+	EventType     string       `json:"eventType" jsonschema:"what kind of thing: test, disruption, playbook, topic, webhook, schedule and so on"`
+	Target        string       `json:"target" jsonschema:"what was acted on: the id of the test run or disruption, when the change started or named one; else the request path or the gRPC method"`
+	Details       mcpUntrusted `json:"details,omitempty" jsonschema:"for a change through the API, how it ended: HTTP 403 for a refusal, gRPC NOT_FOUND and so on"`
+	Actor         string       `json:"actor,omitempty" jsonschema:"who made the change: the principal of the API key used, as GET /api/whoami names it, or system:scheduler for a schedule's firing; absent on rows written before the Kates API recorded actors"`
+	PrincipalType string       `json:"principalType,omitempty" jsonschema:"human, agent or system"`
+	Timestamp     string       `json:"timestamp"`
 }
 
 func mcpActivityInputSchema() *jsonschema.Schema {
@@ -1947,7 +1950,7 @@ func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.
 				CreatedAt: mcpSanitizeLine(d.CreatedAt, 40),
 			}
 			// The list sends "-" for a report without a grade
-			// (DisruptionResource.java:143).
+			// (DisruptionResource.java:151).
 			if d.SlaGrade != "-" {
 				row.SLAGrade = mcpSanitizeLine(d.SlaGrade, 4)
 			}
@@ -1982,7 +1985,7 @@ func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.
 func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, limit int) (mcpActivityAudit, error) {
 	out := mcpActivityAudit{Rows: []mcpActivityAuditRow{}}
 	// A UTC "Z" instant: the backend ignores a since it cannot parse and
-	// returns every row (AuditService.java:63-68).
+	// returns every row (AuditService.java:110-115).
 	pg, err := call.Client().MCPActivityAudit(ctx, since.UTC().Format(time.RFC3339Nano), 0, limit)
 	if err != nil {
 		out.ErrorCode = call.deps.classify(err).Code
@@ -1995,12 +1998,14 @@ func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, 
 	out.Total = pg.Total
 	for _, a := range pg.Items {
 		out.Rows = append(out.Rows, mcpActivityAuditRow{
-			ID:        a.ID,
-			Action:    mcpSanitizeLine(a.Action, 32),
-			EventType: mcpSanitizeLine(a.EventType, 32),
-			Target:    mcpSanitizeLine(a.Target, 128),
-			Details:   call.FenceN(a.Details, 200),
-			Timestamp: mcpSanitizeLine(a.Timestamp, 40),
+			ID:            a.ID,
+			Action:        mcpSanitizeLine(a.Action, 32),
+			EventType:     mcpSanitizeLine(a.EventType, 32),
+			Target:        mcpSanitizeLine(a.Target, 128),
+			Details:       call.FenceN(a.Details, 200),
+			Actor:         mcpSanitizeLine(a.Actor, 64),
+			PrincipalType: mcpSanitizeLine(a.PrincipalType, 16),
+			Timestamp:     mcpSanitizeLine(a.Timestamp, 40),
 		})
 	}
 	if pg.Total > len(out.Rows) {
@@ -2196,7 +2201,7 @@ const (
 	mcpCaveatBrokerSkewProjected         mcpCaveatID = "broker-skew-projected"
 	mcpCaveatRegressionOneBaseline       mcpCaveatID = "regression-one-baseline"
 	mcpCaveatAdvisorRulesOfThumb         mcpCaveatID = "advisor-rules-of-thumb"
-	mcpCaveatAuditNoActor                mcpCaveatID = "audit-no-actor"
+	mcpCaveatAuditActorRecorded          mcpCaveatID = "audit-actor-recorded"
 	mcpCaveatActivityDisruptionRows      mcpCaveatID = "activity-disruption-rows"
 )
 
@@ -2264,7 +2269,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2011-2089",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:482-527",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:497-542",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},
@@ -2343,19 +2348,30 @@ var mcpCaveatsRuns = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatAuditNoActor,
-		Text: "Audit rows record no actor, only an action, event type, target, details and time. Only the REST " +
-			"test endpoints write them (create, bulk create, delete, bulk delete, prune, cancel), and the Kates " +
-			"API's daily retention sweep for each run it deletes; disruptions, topic " +
-			"changes, schedules, webhooks and every gRPC call leave no row. The endpoint reads at most the 500 " +
-			"newest matching rows.",
+		ID: mcpCaveatAuditActorRecorded,
+		Text: "An audit row names who made a change: actor is the principal of the API key used, and " +
+			"principalType says whether a person (human), an agent or a schedule (system, actor system:scheduler) " +
+			"acted. Every REST and gRPC call that changes something leaves a row, a refused or failed one too, " +
+			"with how it ended in details, and its target is the id of the run or disruption it started when it " +
+			"started one. The Kates API's daily retention sweep leaves one as system:scheduler for each finished " +
+			"run it deletes. A call without a valid key, and a dry run, leave none. Rows written before the Kates " +
+			"API recorded actors name no one, and then only the REST test endpoints wrote rows at all. Runs and " +
+			"disruption reports record no owner of their own: who started one shows only in its audit row. The " +
+			"endpoint reads at most the 500 newest matching rows.",
 		Refs: []string{
-			mcpJava + "persistence/AuditEventEntity.java:15-32",
-			mcpAnchoredRef(mcpJava+"service/RunRetention.java:72", `auditService.record("DELETE", "test"`),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:140,253,477,510",
-				`auditService.record("CREATE"`, `auditService.record("DELETE"`, `auditService.record("CANCEL"`),
-			mcpJava + "service/AuditService.java:52-78",
-			mcpJava + "api/AuditResource.java:46-50",
+			mcpAnchoredRef(mcpJava+"service/RunRetention.java:82",
+				`auditService.record("DELETE", "test", id, auditDetails, actor);`),
+			mcpAnchoredRef(mcpJava+"service/TestCleanupScheduler.java:99", "Actor.SCHEDULER"),
+			mcpAnchoredRef(mcpJava+"audit/AuditResponseFilter.java:42-62",
+				"public void filter(ContainerRequestContext request", "if (actor == null)", "static String idOf("),
+			mcpAnchoredRef(mcpJava+"security/GrpcApiKeyInterceptor.java:67-70,100,156-159",
+				"static final Map<String, String> AUDITED", "audit(action, method, Status.Code.PERMISSION_DENIED",
+				"private void audit("),
+			mcpAnchoredRef(mcpJava+"schedule/TestScheduler.java:99-105", "Actor.SCHEDULER"),
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionScheduler.java:107-113", "Actor.SCHEDULER"),
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionResource.java:92", "auditTrail.done();"),
+			"kates/src/main/resources/db/migration/V26__audit_actor.sql:1-8",
+			mcpAnchoredRef(mcpJava+"api/AuditResource.java:53", "auditService.list(500"),
 		},
 	},
 	{
@@ -2373,12 +2389,12 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionPersistence.java:16-37",
 			mcpJava + "disruption/DisruptionReportRepository.java:20-43",
 			mcpJava + "disruption/DisruptionOrphanReconciler.java:152-203",
-			mcpJava + "disruption/DisruptionTemplateResource.java:61-63",
-			mcpJava + "disruption/DisruptionScheduler.java:92-104",
+			mcpJava + "disruption/DisruptionTemplateResource.java:63-65",
+			mcpJava + "disruption/DisruptionScheduler.java:95-107",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:108-139",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:110-141",
 				`@Path("/compound")`, `"results", outcome.results()`),
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:96-126",
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:97-127",
 				"StreamingOutput executeWithKeepAlive(", "objectMapper.writeValue(os, payload);",
 				`"Failed to execute resilience test"`),
 		},

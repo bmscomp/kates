@@ -28,6 +28,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import com.bmscomp.kates.api.ApiError;
+import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.security.Scopes;
 
 @RolesAllowed(Scopes.READ)
@@ -72,6 +73,7 @@ public class DisruptionScheduleResource {
                 .build();
     }
 
+    @Audited(action = "CREATE", type = "disruption-schedule")
     @RolesAllowed(Scopes.ADMIN)
     @POST
     @Transactional
@@ -117,6 +119,7 @@ public class DisruptionScheduleResource {
         return Response.status(201).entity(entity).build();
     }
 
+    @Audited(action = "UPDATE", type = "disruption-schedule")
     @RolesAllowed(Scopes.ADMIN)
     @PUT
     @Path("/{id}")
@@ -151,6 +154,7 @@ public class DisruptionScheduleResource {
         return Response.ok(entity).build();
     }
 
+    @Audited(action = "DELETE", type = "disruption-schedule")
     @RolesAllowed(Scopes.ADMIN)
     @DELETE
     @Path("/{id}")

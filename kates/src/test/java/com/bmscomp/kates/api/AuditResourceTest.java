@@ -25,7 +25,7 @@ class AuditResourceTest {
                 Map.<String, Object>of("type", "test", "action", "created"),
                 Map.<String, Object>of("type", "topic", "action", "deleted"));
 
-        Mockito.when(auditService.list(500, null, null)).thenReturn(events);
+        Mockito.when(auditService.list(500, null, null, null)).thenReturn(events);
 
         var response = RestAssured.given()
                 .when()
@@ -47,7 +47,7 @@ class AuditResourceTest {
                 Map.<String, Object>of("type", "test", "action", "b"),
                 Map.<String, Object>of("type", "test", "action", "c"));
 
-        Mockito.when(auditService.list(500, null, null)).thenReturn(events);
+        Mockito.when(auditService.list(500, null, null, null)).thenReturn(events);
 
         var response = RestAssured.given()
                 .queryParam("size", 2)
@@ -65,7 +65,7 @@ class AuditResourceTest {
 
     @Test
     void listFiltersByType() {
-        Mockito.when(auditService.list(500, "topic", null)).thenReturn(List.of());
+        Mockito.when(auditService.list(500, "topic", null, null)).thenReturn(List.of());
 
         var response = RestAssured.given()
                 .queryParam("type", "topic")

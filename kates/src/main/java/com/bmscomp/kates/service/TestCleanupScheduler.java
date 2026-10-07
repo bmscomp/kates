@@ -12,6 +12,7 @@ import io.quarkus.scheduler.Scheduled;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.audit.Actor;
 import com.bmscomp.kates.domain.TestResult;
 
 /**
@@ -95,7 +96,7 @@ public class TestCleanupScheduler {
         for (int pass = 0; pass < MAX_PASSES; pass++) {
             RunRetention.Pass done;
             try {
-                done = retention.prune(FINISHED, cutoff, batchSize, details, deleted::incrementAndGet);
+                done = retention.prune(FINISHED, cutoff, batchSize, details, Actor.SCHEDULER, deleted::incrementAndGet);
             } catch (RuntimeException e) {
                 LOG.errorf(
                         e,

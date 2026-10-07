@@ -227,7 +227,7 @@ Deletes the finished runs created before a cutoff, to keep the run history to a 
 
 A call deletes the oldest matching runs first, by `createdAt`, and at most `limit` of them. Each goes through the same delete as `DELETE /api/tests/{id}`, and leaves an audit row: action `DELETE`, type `test`, the run's ID, and the details `retention: created before <cutoff>`.
 
-Once a day the Kates API also prunes by itself, through the same delete: it deletes the `DONE` and `FAILED` runs created more than `kates.cleanup.retention-days` (90) days ago, oldest first and 1,000 at a time. Each leaves an audit row too, with the details `retention sweep: created before <cutoff> (kates.cleanup.retention-days=<n>)`. A run still pending, running or stopping is left alone, however old it is. This endpoint is for keeping finished runs for less long.
+Once a day the Kates API also prunes by itself, through the same delete: it deletes the `DONE` and `FAILED` runs created more than `kates.cleanup.retention-days` (90) days ago, oldest first and 1,000 at a time. Each leaves an audit row too, naming `system:scheduler`, with the details `retention sweep: created before <cutoff> (kates.cleanup.retention-days=<n>)`. A run still pending, running or stopping is left alone, however old it is. This endpoint is for keeping finished runs for less long.
 
 **Query Parameters:**
 

@@ -34,17 +34,23 @@ public class AuditResource {
     @GET
     @Operation(
             summary = "List audit events",
-            description = "Returns paginated mutation events, optionally filtered by type and time range")
+            description = "Returns paginated mutation events, newest first, optionally filtered by type, actor and"
+                    + " time: what was done (action, eventType, target, details) and who did it (actor, the"
+                    + " principal of the API key used, and principalType: human, agent or system). Every REST"
+                    + " and gRPC call that changes something leaves one, a refused or failed call too, with its"
+                    + " status in details; rows written before the Kates API recorded actors have none.")
     @APIResponse(responseCode = "200", description = "Paginated list of audit events")
     public Response listAuditEvents(
             @Parameter(description = "Page number (0-based)") @QueryParam("page") @DefaultValue("0") int page,
             @Parameter(description = "Page size (max 200)") @QueryParam("size") @DefaultValue("50") int size,
             @Parameter(description = "Filter by event type (test, topic, disruption, resilience)") @QueryParam("type")
                     String type,
-            @Parameter(description = "Filter events after this ISO-8601 timestamp") @QueryParam("since") String since) {
+            @Parameter(description = "Filter events after this ISO-8601 timestamp") @QueryParam("since") String since,
+            @Parameter(description = "Only events by this principal, as GET /api/whoami names it") @QueryParam("actor")
+                    String actor) {
 
         int effectiveSize = Math.min(Math.max(size, 1), 200);
-        List<Map<String, Object>> allEvents = auditService.list(500, type, since);
+        List<Map<String, Object>> allEvents = auditService.list(500, type, since, actor);
         int start = Math.min(page * effectiveSize, allEvents.size());
         int end = Math.min(start + effectiveSize, allEvents.size());
         List<Map<String, Object>> paged = allEvents.subList(start, end);
