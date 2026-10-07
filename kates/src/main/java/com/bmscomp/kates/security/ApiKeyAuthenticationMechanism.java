@@ -23,10 +23,10 @@ import io.vertx.ext.web.RoutingContext;
  *
  * <p>Authentication is not proactive ({@code quarkus.http.auth.proactive}):
  * it runs only when a request reaches a route that needs an identity. Every
- * REST endpoint needs one unless it is {@code @PermitAll}
- * ({@code quarkus.security.jaxrs.default-roles-allowed}). A request without a
- * key is anonymous, and then refused with 401
- * ({@link UnauthorizedExceptionMapper}).
+ * REST endpoint names the scope it needs ({@code @RolesAllowed}) unless it is
+ * {@code @PermitAll}. A request without a key is anonymous, and then refused
+ * with 401 ({@link UnauthorizedExceptionMapper}); one whose principal lacks
+ * the scope, with 403 ({@link ForbiddenExceptionMapper}).
  *
  * <p>With {@code kates.api.security-enabled=false}, as in the dev and test
  * profiles, every request is {@link ApiKeys#UNSECURED}, with every scope.

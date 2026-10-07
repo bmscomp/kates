@@ -14,7 +14,7 @@ import (
 // (/compare) and the baseline's own report, for its plan name and the steps
 // that never recovered. The ISR and consumer-lag figures come from the report
 // itself: /kafka-metrics formats the same fields of the same stored report
-// (DisruptionResource.java:186-251), and reading it separately could join a
+// (DisruptionResource.java:202-267), and reading it separately could join a
 // finished report with the metrics of one still running. Pod events are
 // counted, not listed: kates://disruptions/{id}/timeline lists them.
 
@@ -381,7 +381,7 @@ func mcpDisruptionReportComparisonFrom(call *mcpCall, baseline string, r mcpDisr
 		c.mcpChaosSectionStatus = mcpChaosSectionStatus{Available: false, ErrorCode: mcpErrBackend}
 		return c
 	}
-	// The backend compares any two reports (DisruptionResource.java:260-332):
+	// The backend compares any two reports (DisruptionResource.java:276-348):
 	// the baseline's own report says whether it ran the same plan, and
 	// whether its worst recovery left steps out as this one's may.
 	haveBaseline := r.baselineErr == nil && r.baseline != nil
