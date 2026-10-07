@@ -231,18 +231,24 @@ func printResilienceJSON(raw json.RawMessage) {
 }
 
 // printResilienceProbes prints what the probes saw: the recovery time they
-// measured, how many of their evaluations passed before the fault, during it
-// and after the recovery wait, and each probe that failed, with what it
-// printed. During the fault only Continuous probes run, each of them many
-// times, so a probe's row counts its failed evaluations out of its runs in
-// that phase, and shows what the last failed one printed.
+// measured, or that no poll found them all passing, how many of their
+// evaluations passed before the fault, during it and after the recovery
+// wait, and each probe that failed, with what it printed. During the fault
+// only Continuous probes run, each of them many times, so a probe's row
+// counts its failed evaluations out of its runs in that phase, and shows
+// what the last failed one printed.
 func printResilienceProbes(r *client.ResilienceResult) {
-	if !r.RecoveryTime.Set && r.BaselineProbes == nil && r.DuringChaosProbes == nil && r.PostRecoveryProbes == nil {
+	if !r.RecoveryTime.Set && !r.UnrecoveredAfter.Set &&
+		r.BaselineProbes == nil && r.DuringChaosProbes == nil && r.PostRecoveryProbes == nil {
 		return
 	}
 	output.SubHeader("Probes and Recovery")
-	if r.RecoveryTime.Set {
+	switch {
+	case r.RecoveryTime.Set:
 		output.KeyValue("Recovery Time", fmt.Sprintf("%d ms", r.RecoveryTime.Millis))
+	case r.UnrecoveredAfter.Set:
+		output.KeyValue("Recovery Time", output.StatusBadge("NOT RECOVERED")+
+			fmt.Sprintf(" %d ms after the fault", r.UnrecoveredAfter.Millis))
 	}
 
 	type probeRuns struct {
