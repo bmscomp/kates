@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -68,6 +70,10 @@ func TestMCPConfigFromFlags(t *testing.T) {
 // written. When the root command's port fallback has swapped 8080 for 30083
 // (or back), it refuses to start rather than send the key to the other port,
 // and the refusal names both URLs without their user information.
+// TestMCPContextClient: kates mcp reads the context's URL as written. When
+// the root command moved it to the other local port, the server gets a copy
+// of the client at the context's URL, with the same key, and the CLI's own
+// client is left as it was.
 func TestMCPContextClient(t *testing.T) {
 	for _, tt := range []struct{ built, context string }{
 		{"http://localhost:8080", "http://localhost:8080"},
@@ -75,27 +81,22 @@ func TestMCPContextClient(t *testing.T) {
 		{"https://kates.example/base", "https://kates.example/base/"},
 	} {
 		base := client.New(tt.built)
-		if got, err := mcpContextClient(base, "lab", tt.context); err != nil || got != base {
-			t.Errorf("built %s, context %s: got %v, %v; want the same client", tt.built, tt.context, got, err)
+		if got, moved := mcpContextClient(base, tt.context); moved || got != base {
+			t.Errorf("built %s, context %s: got %v, moved=%v; want the same client", tt.built, tt.context, got, moved)
 		}
 	}
-	for _, tt := range []struct{ built, context string }{
-		{"http://localhost:30083", "http://localhost:8080"},
-		{"http://127.0.0.1:8080", "http://127.0.0.1:30083"},
-		{"http://tok3n-user:pw@localhost:30083", "http://tok3n-user:pw@localhost:8080"},
+	for _, tt := range []struct{ built, context, want string }{
+		{"http://localhost:30083", "http://localhost:8080", "http://localhost:8080"},
+		{"http://127.0.0.1:8080", "http://127.0.0.1:30083/", "http://127.0.0.1:30083"},
 	} {
-		got, err := mcpContextClient(client.New(tt.built), "lab", tt.context)
-		if err == nil || got != nil {
-			t.Errorf("built %s, context %s: got %v, want a refusal", tt.built, tt.context, got)
-			continue
+		base := client.NewWithAPIKey(tt.built, "lab-key")
+		got, moved := mcpContextClient(base, tt.context)
+		if !moved || got == base || got.BaseURL != tt.want || got.APIKey != "lab-key" || got.HTTPClient != base.HTTPClient {
+			t.Errorf("built %s, context %s: got %+v, moved=%v; want a copy at %s with the same key and HTTP client",
+				tt.built, tt.context, got, moved, tt.want)
 		}
-		msg := err.Error()
-		if !strings.Contains(msg, "does not answer") || !strings.Contains(msg, "kates ctx set lab --url") ||
-			!strings.Contains(msg, mcpRedactURL(tt.built)) || !strings.Contains(msg, mcpRedactURL(tt.context)) {
-			t.Errorf("refusal = %q", msg)
-		}
-		if strings.Contains(msg, "tok3n-user") || strings.Contains(msg, "pw@") {
-			t.Errorf("the refusal names the URL with its user information: %q", msg)
+		if base.BaseURL != tt.built {
+			t.Errorf("the CLI's client moved to %s", base.BaseURL)
 		}
 	}
 }
@@ -478,6 +479,107 @@ func TestMCPCommandStdoutCarriesOnlyJSONRPC(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"serving on stdio", "cluster=cluster-a", "tool=cluster_overview outcome=ok"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr lacks %q:\n%s", want, stderr.String())
+		}
+	}
+	assertReadOnly(t, fb.Requests())
+}
+
+// TestMCPCommandStartsWithoutTheAPI runs the real command against a context
+// whose API hangs at start: the server starts with no cluster pinned. A call
+// while something else answers on the URL fails and says so; the first call
+// once the API answers pins the cluster.
+func TestMCPCommandStartsWithoutTheAPI(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	status := mcpSwitchableInfo(fb)
+	fb.mu.Lock()
+	info := fb.routes["GET /api/cluster/info"]
+	fb.mu.Unlock()
+	var requests atomic.Int32
+	fb.Handle("GET", "/api/cluster/info", func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			// Only the start-up pin check hangs, until it gives up.
+			<-r.Context().Done()
+			return
+		}
+		info(w, r)
+	})
+	mcpIsolateCommand(t, fb.URL())
+	saved := mcpStartPinTimeout
+	mcpStartPinTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { mcpStartPinTimeout = saved })
+
+	inR, inW := mcpPipe(t)
+	outR, outW := mcpPipe(t)
+	errR, errW := mcpPipe(t)
+	os.Stdin, os.Stdout, os.Stderr = inR, outW, errW
+	output.Out, output.Err = outW, errW
+	var stderr bytes.Buffer
+	stderrDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&stderr, errR)
+		close(stderrDone)
+	}()
+
+	rootCmd.SetArgs([]string{"mcp", "--context", "lab", "--allow-cluster", "cluster-a", "--cluster-label", "e2e"})
+	done := make(chan error, 1)
+	go func() { done <- rootCmd.Execute() }()
+	exited := false
+	t.Cleanup(func() {
+		if !exited {
+			inW.Close()
+			<-done
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "e2e", Version: "test"}, nil).
+		Connect(ctx, &mcp.IOTransport{Reader: outR, Writer: inW}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	call := func() (*mcp.CallToolResult, string) {
+		t.Helper()
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "cluster_overview"})
+		if err != nil {
+			t.Fatalf("cluster_overview: %v", err)
+		}
+		return res, mcpResultText(t, res)
+	}
+
+	status.Store(http.StatusNotFound)
+	res, text := call()
+	var e mcpErrorResult
+	if err := json.Unmarshal([]byte(text), &e); err != nil || !res.IsError || e.Error.Code != mcpErrBackend ||
+		!strings.Contains(e.Error.Message, "No cluster is pinned yet") || e.Cluster != (mcpErrorCluster{Label: "e2e"}) {
+		t.Errorf("a call before the API answers: %s", text)
+	}
+
+	status.Store(0)
+	res, text = call()
+	var env mcpEnvelope
+	if err := json.Unmarshal([]byte(text), &env); err != nil || res.IsError || env.Cluster != (mcpClusterRef{ID: "cluster-a", Label: "e2e"}) {
+		t.Errorf("a call once the API answers: %s", text)
+	}
+
+	if err := cs.Close(); err != nil {
+		t.Logf("client close: %v", err)
+	}
+	select {
+	case err := <-done:
+		exited = true
+		if err != nil {
+			t.Fatalf("kates mcp exited with %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("kates mcp did not exit after its stdin closed")
+	}
+	errW.Close()
+	<-stderrDone
+	for _, want := range []string{"starting with no cluster pinned", "context deadline exceeded", `cluster="(none yet)"`,
+		`msg="pinned the Kafka cluster" component=kates-mcp cluster=cluster-a label=e2e`} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr.String())
 		}

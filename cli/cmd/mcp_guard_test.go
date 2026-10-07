@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1052,6 +1053,9 @@ func TestMCPNewDepsRefusesBadConfig(t *testing.T) {
 		"no client":        {Limits: mcpTestLimits},
 		"a zero limit":     {Client: c, Limits: bad},
 		"no limits at all": {Client: c},
+		"no cluster":       {Client: c, Limits: mcpTestLimits},
+		"a pin not allowed": {Client: c, Limits: mcpTestLimits, Cluster: mcpClusterRef{ID: "cluster-a"},
+			Allowed: []string{"cluster-b"}},
 	} {
 		if _, err := newMCPDeps(cfg); err == nil {
 			t.Errorf("%s: newMCPDeps accepted it", name)
@@ -1073,6 +1077,133 @@ func TestMCPToolCallsAreLogged(t *testing.T) {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("log lacks %q:\n%s", want, logs.String())
 		}
+	}
+}
+
+// mcpSwitchableInfo makes fb's /api/cluster/info answer with the status
+// stored in the returned value, or as usual while it holds 0.
+func mcpSwitchableInfo(fb *mcpFakeBackend) *atomic.Int32 {
+	fb.mu.Lock()
+	info := fb.routes["GET /api/cluster/info"]
+	fb.mu.Unlock()
+	var status atomic.Int32
+	fb.Handle("GET", "/api/cluster/info", func(w http.ResponseWriter, r *http.Request) {
+		if s := int(status.Load()); s != 0 {
+			mcpWriteJSON(w, s, map[string]any{"status": s, "error": http.StatusText(s)})
+			return
+		}
+		info(w, r)
+	})
+	return &status
+}
+
+// A server that could not read the clusterId at start pins the first one a
+// call reads that --allow-cluster lists. Until then every call is refused
+// with its reason, nothing past the pin check is read, and an error names
+// only the label.
+func TestMCPPinsTheFirstAllowedCluster(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-x")
+	status := mcpSwitchableInfo(fb)
+	var logs bytes.Buffer
+	var mu sync.Mutex
+	h := newMCPHarness(t, fb, withMCPUnpinned("cluster-a", "cluster-b"),
+		withMCPLogger(slog.New(slog.NewTextHandler(&mcpLockedWriter{mu: &mu, w: &logs}, nil))))
+	ctx := context.Background()
+	onlyThePinCheck := func(what string) {
+		t.Helper()
+		if got := mcpPaths(fb.Requests()); len(got) != 1 || got[0] != "GET /api/cluster/info" {
+			t.Errorf("%s: requests = %v, want the pin check alone", what, got)
+		}
+		fb.ResetLog()
+	}
+
+	// Something that is not the Kates API answers on the context's URL.
+	status.Store(http.StatusNotFound)
+	fb.ResetLog()
+	e := h.callErr("cluster_overview", nil)
+	if e.Error.Code != mcpErrBackend || !strings.Contains(e.Error.Message, "No cluster is pinned yet") ||
+		e.Cluster != (mcpErrorCluster{Label: "test"}) {
+		t.Errorf("API not there: %+v", e)
+	}
+	onlyThePinCheck("API not there")
+	_, err := h.session.ReadResource(ctx, &mcp.ReadResourceParams{URI: "kates://runs/0a1b2c3d/report.md"})
+	if got := mcpResourceErr(t, err); got.body.Error.Code != mcpErrBackend || got.body.Cluster.ID != "" {
+		t.Errorf("resource read before the pin: %+v", got.body)
+	}
+	onlyThePinCheck("resource read before the pin")
+	// A resource that reads nothing needs no pin.
+	if _, err := h.session.ReadResource(ctx, &mcp.ReadResourceParams{URI: mcpCaveatsURI}); err != nil {
+		t.Errorf("read %s before the pin: %v", mcpCaveatsURI, err)
+	}
+
+	// The API answers, for a cluster that is not allowed: nothing is pinned.
+	status.Store(0)
+	fb.ResetLog()
+	e = h.callErr("cluster_overview", nil)
+	if e.Error.Code != mcpErrClusterNotAllowed || e.Error.Retryable || !mcpFenced(h, e.Error.Detail) ||
+		!strings.Contains(string(e.Error.Detail), "cluster-x") {
+		t.Errorf("cluster not allowed: %+v", e)
+	}
+	onlyThePinCheck("cluster not allowed")
+	if id := h.deps.cluster().ID; id != "" {
+		t.Fatalf("pinned %q, a cluster not allowed", id)
+	}
+
+	// An allowed cluster is pinned by the call that reads it.
+	fb.SetClusterID("cluster-b")
+	env := h.callOK("cluster_overview", nil)
+	if env.Cluster != (mcpClusterRef{ID: "cluster-b", Label: "test"}) {
+		t.Errorf("envelope cluster = %+v", env.Cluster)
+	}
+
+	// The pin holds: another allowed cluster is a change, not a new pin.
+	fb.SetClusterID("cluster-a")
+	e = h.callErr("cluster_overview", nil)
+	if e.Error.Code != mcpErrClusterChanged || e.Cluster.ID != "cluster-b" || !strings.Contains(e.Error.Message, "pinned to") {
+		t.Errorf("after the pin, another allowed cluster: %+v", e)
+	}
+	// And a failed pin check no longer says nothing is pinned.
+	status.Store(http.StatusNotFound)
+	if e = h.callErr("cluster_overview", nil); strings.Contains(e.Error.Message, "No cluster is pinned yet") {
+		t.Errorf("after the pin: %s", e.Error.Message)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, want := range []string{"outcome=KATES_CLUSTER_NOT_ALLOWED", `msg="pinned the Kafka cluster" cluster=cluster-b label=test`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("log lacks %q:\n%s", want, logs.String())
+		}
+	}
+}
+
+// Calls that race to pin the first cluster pin it once.
+func TestMCPPinRace(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	var logs bytes.Buffer
+	var mu sync.Mutex
+	h := newMCPHarness(t, fb, withMCPUnpinned("cluster-a"),
+		withMCPLogger(slog.New(slog.NewTextHandler(&mcpLockedWriter{mu: &mu, w: &logs}, nil))))
+	results := make([]*mcp.CallToolResult, mcpTestLimits.MaxInFlight)
+	errs := make([]error, len(results))
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = h.session.CallTool(context.Background(), &mcp.CallToolParams{Name: "cluster_overview"})
+		}()
+	}
+	wg.Wait()
+	for i, res := range results {
+		if errs[i] != nil || res.IsError {
+			t.Errorf("call %d: err=%v result=%s", i, errs[i], mcpResultText(t, res))
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if n := strings.Count(logs.String(), "pinned the Kafka cluster"); n != 1 {
+		t.Errorf("pinned %d times:\n%s", n, logs.String())
 	}
 }
 
@@ -1328,7 +1459,7 @@ func TestMCPResourceTemplate(t *testing.T) {
 			if got.rpc != tt.rpcCode || got.body.Error.Code != tt.code || got.body.Error.Retryable != tt.retryable {
 				t.Errorf("got %d %s retryable=%v, want %d %s %v", got.rpc, got.body.Error.Code, got.body.Error.Retryable, tt.rpcCode, tt.code, tt.retryable)
 			}
-			if got.body.Cluster != h.deps.cluster || got.body.Tier != mcpTierObserve {
+			if got.body.Cluster != mcpErrorCluster(h.deps.cluster()) || got.body.Tier != mcpTierObserve {
 				t.Errorf("the error names cluster %+v tier %q", got.body.Cluster, got.body.Tier)
 			}
 			if reached := len(fb.Requests()) > 0; reached != tt.reaches {

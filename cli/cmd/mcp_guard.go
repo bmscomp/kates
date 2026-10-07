@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +79,10 @@ const (
 	// answers a cancelled request; the answer says what happened, and the log
 	// tells it from an outage.
 	mcpErrCancelled mcpErrorCode = "KATES_CANCELLED"
+	// mcpErrClusterNotAllowed is a clusterId --allow-cluster does not list,
+	// read by a server that started before the Kates API answered: a server
+	// that reads one at start refuses to start instead.
+	mcpErrClusterNotAllowed mcpErrorCode = "KATES_CLUSTER_NOT_ALLOWED"
 )
 
 // mcpDetailRunes bounds the fenced detail of an error: enough for a backend
@@ -333,7 +338,7 @@ func (c *mcpCall) MarkTruncated() {
 // for endpoints that report one (the health check does). The pin check ran a
 // moment earlier; this catches a switch between the two requests.
 func (c *mcpCall) CheckCluster(clusterID string) error {
-	if clusterID == "" || clusterID == c.deps.cluster.ID {
+	if clusterID == "" || clusterID == c.deps.cluster().ID {
 		return nil
 	}
 	return c.deps.clusterChanged(clusterID)
@@ -511,7 +516,7 @@ func (d *mcpDeps) envelope(name string, data any, call *mcpCall) (json.RawMessag
 
 func (d *mcpDeps) marshalEnvelope(refs []mcpCaveatRef, truncated bool, data any) ([]byte, error) {
 	return json.Marshal(mcpResult[any]{
-		Cluster:   d.cluster,
+		Cluster:   d.cluster(),
 		Tier:      mcpTierObserve,
 		Caveats:   refs,
 		Truncated: truncated,
@@ -673,26 +678,66 @@ func (d *mcpDeps) admit() (release func(), refusal *mcpToolError) {
 }
 
 // pin reads the live clusterId and refuses the call when it is not the one
-// the server started with. Comparing against a value cached at start would
+// the server is pinned to. Comparing against a value cached at start would
 // not catch drift: the context URL is usually a localhost port, and whatever
-// a port-forward serves on it is the cluster (plan §5.4).
+// a port-forward serves on it is the cluster (plan §5.4). A server that
+// started without reading an allowed clusterId has no pin yet: the first call
+// that reads one --allow-cluster lists pins it, and every call before that is
+// refused, a clusterId not listed with KATES_CLUSTER_NOT_ALLOWED.
 func (d *mcpDeps) pin(ctx context.Context, call *mcpCall) error {
 	info, err := d.client.ClusterInfo(ctx)
 	if err != nil {
-		return d.pinFailed(err)
+		return d.unpinned(d.pinFailed(err))
 	}
 	if info == nil || info.ClusterID == "" {
-		return &mcpToolError{
+		return d.unpinned(&mcpToolError{
 			Code:      mcpErrBackend,
 			Message:   "The Kates API returned no Kafka clusterId, so this server cannot tell which cluster it would read. Nothing was read.",
 			Retryable: true,
-		}
+		})
 	}
-	if info.ClusterID != d.cluster.ID {
+	pinned, newly, err := d.pinTo(info.ClusterID)
+	if err != nil {
+		return err
+	}
+	if newly {
+		d.logger.Info("pinned the Kafka cluster", "cluster", pinned, "label", d.label)
+	}
+	if info.ClusterID != pinned {
 		return d.clusterChanged(info.ClusterID)
 	}
 	call.info = info
 	return nil
+}
+
+// pinTo returns the pinned clusterId. When none is pinned yet it pins live,
+// if --allow-cluster lists it; newly reports that this call pinned it. Two
+// calls that race to pin different allowed clusters get one pin between
+// them, and the other call is refused as a cluster change.
+func (d *mcpDeps) pinTo(live string) (pinned string, newly bool, err error) {
+	d.pinMu.Lock()
+	defer d.pinMu.Unlock()
+	if d.pinnedID != "" {
+		return d.pinnedID, false, nil
+	}
+	if !slices.Contains(d.allowed, live) {
+		return "", false, d.clusterNotAllowed(live)
+	}
+	d.pinnedID = live
+	return live, true, nil
+}
+
+// unpinned adds to the message of a failed pin check, while no cluster is
+// pinned, that the server reads nothing until one is: the call did not fail
+// on its own account.
+func (d *mcpDeps) unpinned(te *mcpToolError) *mcpToolError {
+	if te.Code == mcpErrCancelled || te.Code == mcpErrInternal || d.cluster().ID != "" {
+		return te
+	}
+	out := *te
+	out.Message += " No cluster is pinned yet: kates mcp started without reading an allowed clusterId from the Kates API, " +
+		"and reads nothing until it does."
+	return &out
 }
 
 // pinFailed says what a failed pin check means. The check is not what the
@@ -730,11 +775,23 @@ func (d *mcpDeps) pinFailed(err error) *mcpToolError {
 }
 
 func (d *mcpDeps) clusterChanged(live string) *mcpToolError {
+	c := d.cluster()
 	return &mcpToolError{
 		Code: mcpErrClusterChanged,
 		Message: fmt.Sprintf("The Kates API behind this context now serves a different Kafka cluster from %s (%s), "+
-			"the one this server was started for, so the call was refused. Restart kates mcp against the intended cluster.",
-			d.cluster.ID, d.cluster.Label),
+			"the one this server is pinned to, so the call was refused. Restart kates mcp against the intended cluster.",
+			c.ID, c.Label),
+		Detail: "live clusterId: " + live,
+	}
+}
+
+func (d *mcpDeps) clusterNotAllowed(live string) *mcpToolError {
+	return &mcpToolError{
+		Code: mcpErrClusterNotAllowed,
+		Message: "The Kates API behind this context serves a Kafka cluster that --allow-cluster does not list, so the " +
+			"call was refused and nothing was read. No cluster is pinned yet: kates mcp started before the Kates API " +
+			"answered. Point the context's URL at an allowed cluster or, if this is the cluster you mean, restart " +
+			"kates mcp with --allow-cluster set to the clusterId in the detail.",
 		Detail: "live clusterId: " + live,
 	}
 }
@@ -877,9 +934,16 @@ func mcpClassifyStatus(he *client.HTTPError) *mcpToolError {
 // mcpErrorResult is the text an error result carries: the code an agent
 // branches on, and the pinned cluster, so an error names the cluster too.
 type mcpErrorResult struct {
-	Error   mcpErrorBody  `json:"error"`
-	Cluster mcpClusterRef `json:"cluster"`
-	Tier    string        `json:"tier"`
+	Error   mcpErrorBody    `json:"error"`
+	Cluster mcpErrorCluster `json:"cluster"`
+	Tier    string          `json:"tier"`
+}
+
+// mcpErrorCluster is the cluster an error names: the pinned one, or only its
+// label while no cluster is pinned.
+type mcpErrorCluster struct {
+	ID    string `json:"id,omitempty"`
+	Label string `json:"label"`
 }
 
 type mcpErrorBody struct {
@@ -900,7 +964,7 @@ func (d *mcpDeps) errorPayload(te *mcpToolError) mcpErrorResult {
 	if te.Retryable && te.RetryAfter > 0 {
 		body.RetryAfterSeconds = int(math.Ceil(te.RetryAfter.Seconds()))
 	}
-	return mcpErrorResult{Error: body, Cluster: d.cluster, Tier: mcpTierObserve}
+	return mcpErrorResult{Error: body, Cluster: mcpErrorCluster(d.cluster()), Tier: mcpTierObserve}
 }
 
 // errorResult renders a tool error. It has no structuredContent: the output
@@ -1038,7 +1102,8 @@ func (d *mcpDeps) resourceText(key string, call *mcpCall, body string) (string, 
 		return "", &mcpToolError{Code: mcpErrInternal, Message: "kates mcp built an invalid resource. This is a bug in kates mcp; its log on stderr has the details.", cause: err}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Kafka cluster %s (%s), tier %s.\n", d.cluster.ID, d.cluster.Label, mcpTierObserve)
+	c := d.cluster()
+	fmt.Fprintf(&b, "Kafka cluster %s (%s), tier %s.\n", c.ID, c.Label, mcpTierObserve)
 	if truncated {
 		b.WriteString("Parts of this resource were left out to fit.\n")
 	}
