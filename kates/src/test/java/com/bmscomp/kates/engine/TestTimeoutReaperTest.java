@@ -34,6 +34,15 @@ import com.bmscomp.kates.service.TestRunRepository;
  * <p>The reaper reads each run's deadline from what is stored with it, so a
  * run still inside its own is left alone. TestOrchestratorTest.RunDeadlines
  * covers the deadline each kind of run gets.
+ *
+ * <p>It holds a PENDING or a STOPPING run to the same deadline. Nothing else
+ * ended either once the process that had it was gone, so a run whose
+ * submission died, or that a Kates API before 1.25.0 left STOPPING, stayed
+ * so for good, and the daily sweep, which deletes ended runs only, never took
+ * it. These runs have no handle or permit in this process, as a run another
+ * replica runs has none here: inside its deadline, each is left alone.
+ * TestTimeoutReaperSubmissionTest covers a PENDING run whose submission is
+ * under way here.
  */
 @QuarkusTest
 class TestTimeoutReaperTest {
@@ -128,19 +137,113 @@ class TestTimeoutReaperTest {
         assertEquals(42_000, task(stored, "-consume-0").getRecordsSent(), "what the task measured is kept");
     }
 
+    @Test
+    void theReaperFailsAPendingRunPastItsDeadlineWithATaskThatSaysWhy() {
+        // Its submission never stored it RUNNING, as when the Kates API stops
+        // while it creates the run's topic: the run has no task.
+        TestRun run = storePending(Instant.now().minus(Duration.ofMinutes(20)));
+
+        reaper.reapStuckTests();
+
+        TestRun stored = reread(run);
+        assertEquals(TaskStatus.FAILED, stored.getStatus());
+        assertEquals(1, stored.getResults().size(), "one task carries the reason");
+        TestResult reason = task(stored, "-submission");
+        assertEquals(TaskStatus.FAILED, reason.getStatus());
+        assertEquals(TestType.LOAD, reason.getTestType());
+        assertNull(reason.getPhaseName(), "it is no phase of the run");
+        assertEquals(
+                "Timeout: still pending 900000ms after it was created, its planned 600000ms plus a 300000ms grace;"
+                        + " its tasks were never stored as started, as when the Kates API stops while it starts them",
+                reason.getError());
+        assertNotNull(reason.getEndTime());
+    }
+
+    @Test
+    void theReaperLeavesAPendingRunInsideItsDeadlinePending() {
+        // Fourteen minutes into a ten-minute run, with no handle or permit in
+        // this process: it may be one another replica is still starting.
+        TestRun run = storePending(Instant.now().minus(Duration.ofMinutes(14)));
+
+        reaper.reapStuckTests();
+
+        TestRun stored = reread(run);
+        assertEquals(TaskStatus.PENDING, stored.getStatus());
+        assertTrue(stored.getResults().isEmpty());
+    }
+
+    @Test
+    void theReaperFailsAStoppingRunPastItsDeadline() {
+        // A Kates API before 1.25.0 stored the run STOPPING on the way to
+        // ending it, and stopped before it did.
+        TestRun run = storeRun(TaskStatus.STOPPING, Instant.now().minus(Duration.ofMinutes(20)));
+
+        reaper.reapStuckTests();
+
+        TestRun stored = reread(run);
+        assertEquals(TaskStatus.FAILED, stored.getStatus());
+        assertEquals(3, taskRows(run.getId()), "no task row is deleted, and none is added");
+        TestResult produced = task(stored, "-produce-0");
+        assertEquals(TaskStatus.DONE, produced.getStatus(), "a task that finished is left as it was");
+        assertNull(produced.getError());
+        for (String suffix : List.of("-consume-0", "-verify-0")) {
+            TestResult unfinished = task(stored, suffix);
+            assertEquals(TaskStatus.FAILED, unfinished.getStatus(), suffix);
+            assertEquals(
+                    "Timeout: still stopping 900000ms after it was created, its planned 600000ms plus a 300000ms"
+                            + " grace; only a Kates API before 1.25.0 stores a run STOPPING, and nothing ended this"
+                            + " one",
+                    unfinished.getError(),
+                    suffix);
+            assertNotNull(unfinished.getEndTime(), suffix);
+        }
+        assertEquals(42_000, task(stored, "-consume-0").getRecordsSent(), "what the task measured is kept");
+    }
+
+    @Test
+    void theReaperLeavesAStoppingRunInsideItsDeadlineStopping() {
+        TestRun run = storeRun(TaskStatus.STOPPING, Instant.now().minus(Duration.ofMinutes(14)));
+
+        reaper.reapStuckTests();
+
+        TestRun stored = reread(run);
+        assertEquals(TaskStatus.STOPPING, stored.getStatus());
+        assertEquals(TaskStatus.RUNNING, task(stored, "-consume-0").getStatus());
+        assertNull(task(stored, "-consume-0").getError());
+    }
+
     /**
-     * A ten-minute RUNNING LOAD run as the orchestrator stores it once its
-     * tasks are under way: a producer that has finished, a consumer still
-     * reading, and a task that has not started.
+     * A ten-minute LOAD run as executeTest stores it before its submission:
+     * PENDING, with no task yet.
      */
+    private TestRun storePending(Instant createdAt) {
+        TestSpec spec = new TestSpec();
+        spec.setDurationMs(600_000);
+        TestRun run = new TestRun(TestType.LOAD, spec)
+                .withBackend("native")
+                .withCreatedAt(createdAt.toString())
+                .withPlannedDurationMs(600_000L);
+        repository.save(run);
+        return run;
+    }
+
     private TestRun storeRunning(Instant createdAt) {
+        return storeRun(TaskStatus.RUNNING, createdAt);
+    }
+
+    /**
+     * A ten-minute LOAD run in this status, with the tasks the orchestrator
+     * stores once they are under way: a producer that has finished, a consumer
+     * still reading, and a task that has not started.
+     */
+    private TestRun storeRun(TaskStatus status, Instant createdAt) {
         TestSpec spec = new TestSpec();
         spec.setDurationMs(600_000);
         TestRun run = new TestRun(TestType.LOAD, spec)
                 .withBackend("native")
                 .withCreatedAt(createdAt.toString())
                 .withPlannedDurationMs(600_000L)
-                .withStatus(TaskStatus.RUNNING);
+                .withStatus(status);
         String started = createdAt.plusSeconds(2).toString();
         run = run.withResults(List.of(
                 new TestResult()

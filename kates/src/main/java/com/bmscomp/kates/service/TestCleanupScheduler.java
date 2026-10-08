@@ -43,11 +43,9 @@ public class TestCleanupScheduler {
      * DONE and FAILED only. A PENDING, RUNNING or STOPPING run may still have
      * tasks producing, in this replica or another, so it is left alone. The
      * reconciler ends a RUNNING run, or the timeout reaper fails it past its
-     * deadline, and a later sweep takes it. Nothing ends a PENDING run whose
-     * submission died, nor a STOPPING run an older version left: the reaper
-     * and orphan recovery read RUNNING runs only, and the reconciler only
-     * this process's handles. Such a run stays until DELETE /api/tests/{id}
-     * deletes it.
+     * deadline, and a later sweep takes it. The reaper fails a PENDING run
+     * whose submission died, and a STOPPING run an older version left, past
+     * the same deadline.
      */
     private static final Set<TestResult.TaskStatus> FINISHED =
             EnumSet.of(TestResult.TaskStatus.DONE, TestResult.TaskStatus.FAILED);
