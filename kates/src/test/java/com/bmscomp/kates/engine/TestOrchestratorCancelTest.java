@@ -41,11 +41,11 @@ import com.bmscomp.kates.service.TopicService;
 /**
  * What a cancel leaves behind. The run is stored FAILED, and nothing polls or
  * reaps a FAILED run afterwards: the reconciler's poll returns early for it and
- * the timeout reaper only scans RUNNING. So the cancel itself has to hand back
- * everything the run held, its concurrency slot, its per-run meters and its
- * backend workers, and say that the run ended. A cancel that lands while the
- * run's tasks are being submitted finds no workers to stop yet, and the
- * submission must not write over it.
+ * the timeout reaper only scans runs that have not ended. So the cancel itself
+ * has to hand back everything the run held, its concurrency slot, its per-run
+ * meters and its backend workers, and say that the run ended. A cancel that
+ * lands while the run's tasks are being submitted finds no workers to stop
+ * yet, and the submission must not write over it.
  */
 class TestOrchestratorCancelTest {
 

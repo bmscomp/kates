@@ -707,9 +707,9 @@ public class TestOrchestrator {
      * Best-effort FAILED for a run whose registration blew up half-way.
      *
      * <p>If the save succeeded and only the event failed, the row is left
-     * PENDING — a state nothing scans: orphan recovery looks for RUNNING and the
-     * timeout reaper only reaps RUNNING, so the run would sit there forever
-     * looking like it was about to start. Failing to write this is not worth
+     * PENDING, which orphan recovery does not read: the run would look as if
+     * it were about to start until the timeout reaper failed it, once its
+     * deadline had passed. Failing to write this is not worth
      * masking the original error, so it only logs.
      */
     private void markStrandedAsFailed(TestRun run) {
@@ -2020,11 +2020,11 @@ public class TestOrchestrator {
      *
      * <p>It ends the run the way the timeout reaper does, because nothing polls
      * or reaps a FAILED run afterwards: {@link #refreshStatus} returns early for
-     * it and the reaper only scans RUNNING. So {@link #settle} stops its
-     * workers and hands back the concurrency slot and the per-run meters here,
-     * before FAILED is written. The write is a compare-and-set on the status
-     * read, so a run that ends on its own in between keeps its ending; one that
-     * only moved from PENDING to RUNNING is cancelled on the second pass.
+     * it and the reaper reads only runs that have not ended. So {@link #settle}
+     * stops its workers and hands back the concurrency slot and the per-run
+     * meters here, before FAILED is written. The write is a compare-and-set on
+     * the status read, so a run that ends on its own in between keeps its
+     * ending; one that only moved PENDING to RUNNING is cancelled on pass two.
      *
      * <p>A run whose tasks are still being submitted has no handles yet, so
      * there is nothing here to stop. Its submission's own write is conditional

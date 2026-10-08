@@ -290,7 +290,9 @@ The `spec` in the response is the merged one: the request's values, and the LOAD
 
 Run IDs are 8-character UUID prefixes. `status` moves through `PENDING` and `RUNNING`, and ends at `DONE` or `FAILED`. There is no cancelled status: `POST /api/tests/{id}/cancel` stores the run as `FAILED` and answers `{"id": ..., "status": "FAILED", "reason": "cancelled", ...}`, and each task it stopped carries the error `Cancelled by user`. The cancel also ends the run's workers and gives back its place among the `kates.engine.max-concurrent-tests` running tests. A run that finishes on its own while the cancel is being made keeps its own ending, and the cancel answers `409`.
 
-A run still `RUNNING` five minutes (`kates.engine.reaper-grace-ms`) after the time it was set to last, counted from its creation, is stopped and stored as `FAILED` too. That time is its `durationMs`, twice that for INTEGRITY, or a scenario's phases added up; INTEGRATION_CDC, which has no duration of its own, gets `kates.engine.max-duration-ms`. Each task that had not finished carries an error that starts `Timeout:`, and the tasks that had keep their results.
+A run still `PENDING`, `RUNNING` or `STOPPING` five minutes (`kates.engine.reaper-grace-ms`) after the time it was set to last, counted from its creation, is stopped and stored as `FAILED` too. That time is its `durationMs`, twice that for INTEGRITY, or a scenario's phases added up; INTEGRATION_CDC, which has no duration of its own, gets `kates.engine.max-duration-ms`. Each task that had not finished carries an error that starts `Timeout:`, and the tasks that had keep their results.
+
+A run stays `PENDING` when the Kates API stops while it starts the run's tasks, and a restart leaves it so until that time is up. Such a run has no task, so it gets one, `<id>-submission`, that carries the error. Only a Kates API before 1.25.0 stores a run as `STOPPING`, and a run one left so ends the same way.
 
 #### GET /api/tests
 

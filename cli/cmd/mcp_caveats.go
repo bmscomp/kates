@@ -71,20 +71,24 @@ var mcpCaveatsCore = []mcpCaveat{
 	},
 	{
 		ID: mcpCaveatReaperDeadline,
-		Text: "A run still RUNNING past its deadline is marked FAILED by a reaper that checks every 60 seconds. The " +
-			"deadline counts from the run's creation, so time spent waiting to start counts. A current Kates API sets " +
-			"it when it creates the run: how long the run is set to last, at most kates.engine.max-duration-ms " +
-			"(default 7200000), plus kates.engine.reaper-grace-ms (default 300000). That length is the spec's " +
-			"durationMs, twice that for INTEGRITY, which reads its records back for up to as long again, or a " +
-			"scenario's phases added up; an INTEGRATION_CDC run, which no duration bounds, gets the cap. That API " +
-			"refuses with 400 a request set to last longer than the cap, and when it fails a run, each task that had " +
-			"not finished gets an error that starts \"Timeout:\" and the others keep their results. An older Kates " +
-			"API fails every run 30 minutes after its creation (max-duration-ms, default 1800000), whatever the run " +
-			"was set to last, and deletes the task results of each run it fails, and of each run a restart left " +
-			"RUNNING, so such a run has no tasks. Neither /api/health nor a run says which of the two the API is.",
+		Text: "A run still PENDING, RUNNING or STOPPING past its deadline is marked FAILED by a reaper that checks " +
+			"every 60 seconds. The deadline counts from the run's creation, so time spent waiting to start counts. A " +
+			"current Kates API sets it when it creates the run: how long the run is set to last, at most " +
+			"kates.engine.max-duration-ms (default 7200000), plus kates.engine.reaper-grace-ms (default 300000). That " +
+			"length is the spec's durationMs, twice that for INTEGRITY, which reads its records back for up to as " +
+			"long again, or a scenario's phases added up; an INTEGRATION_CDC run, which no duration bounds, gets the " +
+			"cap. That API refuses with 400 a request set to last longer than the cap, and when it fails a run, each " +
+			"task that had not finished gets an error that starts \"Timeout:\" and the others keep their results. A run " +
+			"with no task, as a PENDING run whose submission never stored it RUNNING has none, gets one, " +
+			"<id>-submission, with that error. Kates API 1.25.0 holds only RUNNING runs to the deadline, and leaves a " +
+			"PENDING or STOPPING run as it is. An older Kates API fails every run 30 minutes after its creation " +
+			"(max-duration-ms, default 1800000), whatever the run was set to last, and deletes the task results of " +
+			"each run it fails, and of each run a restart left RUNNING, so such a run has no tasks. Neither " +
+			"/api/health nor a run says which of these the API is.",
 		Refs: []string{
 			"kates/src/main/resources/application.properties:336-350",
-			mcpJava + "engine/TestTimeoutReaper.java:39-47,50-136",
+			mcpAnchoredRef(mcpJava+"engine/TestTimeoutReaper.java:55-56,64-73,75-205",
+				"TestResult.TaskStatus.STOPPING", "kates.engine.reaper-grace-ms", "\"-submission\"", "\"Timeout: still \""),
 			mcpJava + "engine/TestOrchestrator.java:132-154,186-189,354,1109-1168,1234-1243,1298-1330",
 			mcpJava + "persistence/EntityMapper.java:158-167",
 			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
