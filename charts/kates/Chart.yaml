@@ -2,9 +2,11 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.25.0, the image with the
-# backend fixes since 1.24.0. Templates and defaults are otherwise unchanged.
-version: 0.10.9
+# Patch: the test run cleanup CronJob deletes runs at last, through the
+# API's DELETE /api/tests with the apiKey Secret's key, and cleanup.statuses
+# picks which finished runs it deletes. appVersion is unchanged; the job
+# takes an image newer than it.
+version: 0.10.10
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +30,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The test run cleanup CronJob (cleanup.enabled, which values-prod.yaml and values-staging.yaml set) never deleted a run. It asked GET /api/tests for status COMPLETED, which the API refuses, sent no API key, paired the runs' fields in an order the JSON never has, and computed its cutoff with date options the curl image's busybox lacks; and it carried the API pod's labels, so with networkPolicy.enabled (the default) the chart's NetworkPolicy blocked it from the API. Each job now calls DELETE /api/tests with the key from the apiKey Secret, which deletes the runs created more than cleanup.retentionDays ago with a status in cleanup.statuses (new, default DONE and FAILED; a cancelled run is stored FAILED), oldest first and 1000 a call, until none match. On anything but a 200 it prints the API's answer and fails, after two retries (backoffLimit 2). It takes an image newer than 1.25.0, which has no DELETE /api/tests: there every job fails with HTTP 405. With cleanup.enabled, the first job against a Kates API that has the endpoint deletes every finished run older than cleanup.retentionDays, back to the 90 days after which the API's own daily sweep (kates.cleanup.retention-days) has already deleted them: 60 to 90 days in values-staging.yaml, and nothing more in values-prod.yaml, whose 90 days the sweep covers"
     - kind: changed
       description: "appVersion 1.25.0, the first image with the backend fixes since 1.24.0. Requests: a request, scenario or schedule the run could not honour is refused with a 400 before it takes a concurrency slot, among them spec, scenario and phase values outside their limits, a rate of 0, a phase without a type or rate, and values the database cannot store (#296, #298, #299, #302, #303, #306, #313, #314, #329, #333). A bean-validation 400 names each field (#330), a run the Kates API fails to start is a 500 (#325), and bulk create counts only the runs it started (#332). Runs: scenario phases and RAMP steps run one after another (#307); deleting or cancelling a run stops its tasks and frees its slot, during submission too (#290, #300, #321); the reaper keeps a failed run's results and reaps each run at its own deadline (#288); shutdown stops each task through its own backend (#331). Results: a FAILED run or an unmeasured latency no longer passes its gates (#289), trends read their runs' results (#286), and a task that has not started is left out of a run's throughput means (#315). Faults: parameters are bounded and each fault is injected once (#291); on litmus-crd a POD_DELETE honours its gracePeriodSec and a fault its delayBeforeSec, and a kubernetes fault is timed from the end of its delay (#304, #308); a NODE_DRAIN drains the node of the pod its selector picks (#319); a plan step's recovery clocks start when its fault goes in (#324). Resilience runs inject their fault only while the benchmark runs, run a scenario's testRequest, aim the fault at a broker, measure RPO from the injection and log no false error (#309, #311, #318, #320). The built-in Kafka probes ask the cluster, and a probe that cannot run fails (#334): the producer-throughput probe writes to kates-probe-topic, which kafka-cluster's platform profile creates from 1.0.6. gRPC CreateTest holds its fields to the same limits, answers a refusal INVALID_ARGUMENT, and a full engine RESOURCE_EXHAUSTED (#317, #322)"
     - kind: fixed

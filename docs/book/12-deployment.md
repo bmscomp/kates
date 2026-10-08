@@ -77,6 +77,18 @@ The default deployment uses **NodePort** for all services (Grafana on 30080, Kaf
 
 The Kates API keeps every run in PostgreSQL. The `kates` chart runs its own PostgreSQL on a 1 GiB PersistentVolumeClaim on the cluster's default StorageClass, so runs survive pod restarts; there is no emptyDir mode. For production, point the chart at an external database instead, with `postgresql.enabled: false` and `externalDatabase`, as `values-prod.yaml` does. Either way, the Kates API deletes finished runs older than 90 days by default, and [Architecture & Design](02-architecture.md) describes what else it keeps.
 
+To keep runs for less time, set `cleanup.enabled: true` in the `kates` chart's values. Its CronJob then deletes the finished runs older than `cleanup.retentionDays`, through [DELETE /api/tests](11-api-reference.md#delete-apitests), with the key from the Secret the `apiKey` values name. The table gives the values and their defaults:
+
+| Value | Default | What it sets |
+|-------|---------|--------------|
+| `cleanup.enabled` | `false` | Whether the chart renders the CronJob |
+| `cleanup.schedule` | `0 4 * * 0` | When the job runs: every Sunday at 04:00, in the time zone of the cluster's controller manager, usually UTC |
+| `cleanup.retentionDays` | `30` | How many days a finished run is kept, counted from its creation |
+| `cleanup.statuses` | `[DONE, FAILED]` | Which finished runs go; a cancelled run is stored as `FAILED` |
+| `cleanup.image` | `curlimages/curl:8.7.1` | The image the job runs `curl` in |
+
+Each time it runs, the job deletes the oldest first, up to 1,000 runs a call, until none older are left or it has made 100 calls, and the next job goes on from there. Its log ends with how many it deleted. A call the Kates API refuses fails the job, with the answer in its log. A `401` or `403` there means the key is missing or wrong, and a `405` that the Kates API is too old to have `DELETE /api/tests`. The Kates API's own daily sweep deletes every run that is not `RUNNING` or `PENDING` at 90 days by default, so a `retentionDays` of 90 or more adds nothing to it. To prune once, by hand, run `kates test prune`.
+
 For Kafka broker storage, **always use persistent volumes** — even in development. Kafka's log retention depends on data being durable, and losing broker data mid-test invalidates results.
 
 ### Deployment Topologies

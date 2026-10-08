@@ -1,6 +1,11 @@
 package com.bmscomp.kates.api;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
@@ -19,14 +24,19 @@ import jakarta.ws.rs.core.Response;
 
 import io.smallrye.common.annotation.Blocking;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
+import com.bmscomp.kates.audit.AuditTrail;
 import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.chaos.ChaosProvider;
 import com.bmscomp.kates.domain.CreateTestRequest;
+import com.bmscomp.kates.domain.PruneResponse;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
@@ -55,6 +65,15 @@ public class TestResource {
     private static final String NOT_STARTED =
             "The Kates API failed to start the test run — see server logs for details";
 
+    /**
+     * The most runs one DELETE /api/tests deletes, and what it deletes when it
+     * is not told. Each is a delete of its own, so the bound keeps one call
+     * short; a caller calls again while runs remain.
+     */
+    private static final int PRUNE_LIMIT = 1000;
+
+    private static final String AN_INSTANT = "an ISO-8601 instant such as 2026-09-07T00:00:00Z";
+
     private static final Logger LOG = Logger.getLogger(TestResource.class);
 
     private final TestOrchestrator orchestrator;
@@ -66,6 +85,9 @@ public class TestResource {
 
     @Inject
     AuditService auditService;
+
+    @Inject
+    AuditTrail auditTrail;
 
     @Inject
     public TestResource(
@@ -239,6 +261,140 @@ public class TestResource {
             }
         }
         return Response.ok(new com.bmscomp.kates.domain.BulkDeleteResponse(deleted, notFound))
+                .build();
+    }
+
+    // admin, as the single and bulk deletes: it removes evidence, so an agent's key never may.
+    // Each run it deletes gets a row of its own; a call that deletes none,
+    // or is refused, gets the response filter's row.
+    @Audited(action = "DELETE", type = "test")
+    @RolesAllowed(Scopes.ADMIN)
+    @DELETE
+    @Operation(
+            summary = "Prune finished test runs",
+            description = "Deletes the finished runs, DONE or FAILED, created before createdBefore: the oldest"
+                    + " first, at most limit of them, each as DELETE /api/tests/{id} deletes it and with an audit"
+                    + " row. A cancelled run is stored as FAILED, so it is pruned with them; a run that has not"
+                    + " finished is never pruned. matched counts the runs that matched before the call, deleted"
+                    + " those the call deleted, and remaining those that still match: a caller calls again until"
+                    + " remaining is 0. A dry run counts and deletes nothing. The chart's cleanup CronJob and"
+                    + " kates test prune call it.")
+    @APIResponse(
+            responseCode = "200",
+            description = "What matched, what the call deleted, and what still matches",
+            content = @Content(schema = @Schema(implementation = PruneResponse.class)))
+    @APIResponse(
+            responseCode = "400",
+            description = "createdBefore missing or not an ISO-8601 instant, a status other than DONE or FAILED,"
+                    + " a limit outside 1 to 1000, or a dryRun other than true or false; nothing is deleted")
+    public Response pruneTests(
+            @Parameter(
+                            description = "Prunes the runs created before this ISO-8601 instant",
+                            required = true,
+                            example = "2026-09-07T00:00:00Z",
+                            schema = @Schema(type = SchemaType.STRING, format = "date-time"))
+                    @QueryParam("createdBefore")
+                    String createdBefore,
+            @Parameter(description = "DONE or FAILED, case-insensitive and repeatable; both when absent")
+                    @QueryParam("status")
+                    List<String> status,
+            @Parameter(
+                            description = "The most runs this call deletes, from 1 to 1000",
+                            schema =
+                                    @Schema(
+                                            type = SchemaType.INTEGER,
+                                            format = "int32",
+                                            minimum = "1",
+                                            maximum = "1000",
+                                            defaultValue = "1000"))
+                    @QueryParam("limit")
+                    String limit,
+            @Parameter(
+                            description = "Count the runs that match and delete none",
+                            schema = @Schema(type = SchemaType.BOOLEAN, defaultValue = "false"))
+                    @QueryParam("dryRun")
+                    String dryRun) {
+        if (createdBefore == null || createdBefore.isBlank()) {
+            return badRequest("createdBefore is required: " + AN_INSTANT);
+        }
+        Instant before;
+        try {
+            before = Instant.parse(createdBefore.trim());
+        } catch (DateTimeParseException e) {
+            return badRequest("createdBefore must be " + AN_INSTANT);
+        }
+
+        // An EnumSet answers the statuses in the enum's order, DONE then
+        // FAILED, whatever order the request named them in.
+        Set<TestResult.TaskStatus> statuses = EnumSet.noneOf(TestResult.TaskStatus.class);
+        for (String value : status != null ? status : List.<String>of()) {
+            // Locale.ROOT: in a Turkish locale "failed" upper-cases to FAİLED.
+            String name = value.trim().toUpperCase(Locale.ROOT);
+            if (!name.equals("DONE") && !name.equals("FAILED")) {
+                return badRequest("status must be DONE or FAILED: only finished runs can be pruned");
+            }
+            statuses.add(TestResult.TaskStatus.valueOf(name));
+        }
+        if (statuses.isEmpty()) {
+            statuses = EnumSet.of(TestResult.TaskStatus.DONE, TestResult.TaskStatus.FAILED);
+        }
+
+        // limit and dryRun are read here, not bound as int and boolean: JAX-RS
+        // answers a query parameter it cannot convert with 404, and binds a
+        // boolean with Boolean.valueOf, which reads anything but "true" as
+        // false, so dryRun=yes would delete what the caller meant only to
+        // count. An empty value never gets here: RESTEasy Reactive passes
+        // limit= or dryRun= on as absent.
+        String outOfRange = "limit must be from 1 to " + PRUNE_LIMIT;
+        int max = PRUNE_LIMIT;
+        if (limit != null) {
+            try {
+                max = Integer.parseInt(limit.trim());
+            } catch (NumberFormatException e) {
+                return badRequest(outOfRange);
+            }
+            if (max < 1 || max > PRUNE_LIMIT) {
+                return badRequest(outOfRange);
+            }
+        }
+        boolean countOnly = false;
+        if (dryRun != null) {
+            if (!dryRun.trim().equalsIgnoreCase("true") && !dryRun.trim().equalsIgnoreCase("false")) {
+                return badRequest("dryRun must be true or false");
+            }
+            countOnly = Boolean.parseBoolean(dryRun.trim());
+        }
+
+        List<String> names = statuses.stream().map(Enum::name).toList();
+        long matched = repository.countByStatusCreatedBefore(statuses, before);
+        if (countOnly) {
+            // A count changes nothing, so it leaves no audit row.
+            auditTrail.done();
+            return Response.ok(new PruneResponse(before.toString(), names, true, matched, 0, matched))
+                    .build();
+        }
+        int deleted = 0;
+        for (String id : repository.findIdsByStatusCreatedBefore(statuses, before, max)) {
+            // The single delete, as the bulk one uses. A run another delete
+            // took first is gone, and is not counted.
+            if (orchestrator.deleteTest(id)) {
+                auditService.record("DELETE", "test", id, "retention: created before " + before);
+                deleted++;
+            }
+        }
+        long remaining = repository.countByStatusCreatedBefore(statuses, before);
+        if (deleted > 0) {
+            LOG.infof(
+                    "Pruned %d %s run(s) created before %s; %d still match",
+                    deleted, String.join(" or ", names), before, remaining);
+        }
+        return Response.ok(new PruneResponse(before.toString(), names, false, matched, deleted, remaining))
+                .build();
+    }
+
+    private static Response badRequest(String message) {
+        return Response.status(400)
+                .entity(ApiError.of(400, "Bad Request", message))
                 .build();
     }
 

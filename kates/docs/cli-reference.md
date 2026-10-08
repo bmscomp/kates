@@ -68,6 +68,7 @@ kates test delete <id>
 | `test summary` | Aggregate statistics across all completed tests |
 | `test flame` | ASCII latency distribution histogram |
 | `test cleanup` | Delete orphaned RUNNING tests (more than 30 minutes past their planned end) |
+| `test prune` | Delete finished (DONE and FAILED) tests created more than `--older-than` ago |
 | `test export` | Export results to CSV or JSON file |
 
 #### test scaffold
@@ -146,6 +147,18 @@ kates test cleanup --older-than 2h -y  # no prompt, for scripts
 ```
 
 A test is orphaned when it is still RUNNING more than `--older-than` (default 30 minutes) after its planned end: its start plus the duration in its spec. Without a terminal the command refuses unless `--yes` is given.
+
+#### test prune
+
+Delete finished tests by age, to keep the run history to a retention period of your own:
+
+```bash
+kates test prune --older-than 30d --dry-run   # count them, delete nothing
+kates test prune --older-than 30d             # count them, then ask before deleting
+kates test prune --older-than 720h --status FAILED --yes  # no prompt, for scripts
+```
+
+`--older-than` is required: a Go duration such as `720h`, or whole days such as `30d`. `--status` takes `DONE`, `FAILED` or both (the default); a cancelled test is stored as `FAILED`. Where `test cleanup` deletes tests still RUNNING long past their planned end, `test prune` deletes only finished ones, by when they were created. It counts them first, asks before deleting unless `--yes` is given (without a terminal it refuses), then deletes the oldest first, 1,000 a call, through `DELETE /api/tests`. It stops after 100 calls (100,000 tests) and exits 1 if any still match. `-o json` prints one answer for the whole run, `deleted` added up over the calls. An API too old to have `DELETE /api/tests` makes it fail with a request to upgrade.
 
 #### test export
 

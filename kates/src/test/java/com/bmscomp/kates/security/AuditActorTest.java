@@ -126,6 +126,18 @@ class AuditActorTest {
     }
 
     @Test
+    void aRefusedPruneNamesTheAgentThatTriedIt() {
+        given().header("X-API-Key", TestKeys.AGENT)
+                .delete("/api/tests?createdBefore=2001-06-01T00:00:00Z")
+                .then()
+                .statusCode(403);
+        var row = awaitRow("the agent's prune", target("/api/tests").and(r -> "claude-on-lab".equals(r.get("actor"))));
+        assertEquals("DELETE", row.get("action"));
+        assertEquals("test", row.get("eventType"));
+        assertEquals("HTTP 403", row.get("details"));
+    }
+
+    @Test
     void aFailedChangeIsAuditedWithItsStatus() {
         given().header("X-API-Key", TestKeys.LEGACY)
                 .delete("/api/tests/0bad0bad")

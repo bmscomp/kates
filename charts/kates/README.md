@@ -199,9 +199,19 @@ that — `image.tag` does.
 | `backup.persistence.storageClass` | `""` | StorageClass (empty = default) |
 | `backup.persistence.existingClaim` | `""` | Use an existing PVC |
 | `migration.enabled` | `false` | Enable pre-upgrade migration Job |
-| `cleanup.enabled` | `false` | Enable test run cleanup CronJob |
+| `cleanup.enabled` | `false` | Enable the test run cleanup CronJob; see [Test run cleanup](#test-run-cleanup) |
 | `cleanup.schedule` | `0 4 * * 0` | Cleanup cron schedule |
-| `cleanup.retentionDays` | `30` | Days to keep completed tests |
+| `cleanup.retentionDays` | `30` | Delete finished runs created more than this many days ago |
+| `cleanup.statuses` | `[DONE, FAILED]` | Which finished runs to delete: `DONE`, `FAILED` or both. A cancelled run is stored `FAILED` |
+| `cleanup.image` | `curlimages/curl:8.7.1` | Image the job runs `curl` from |
+
+### Test run cleanup
+
+Each job asks the Kates API to delete the finished runs created more than `cleanup.retentionDays` ago whose status is in `cleanup.statuses`, through `DELETE /api/tests?createdBefore=…&status=DONE&status=FAILED&limit=1000`. The API deletes them oldest first, at most 1000 a call, writes an audit row for each, and says how many still match; the job calls again until none do, at most 100 times, and the next job goes on from there. A run still `PENDING`, `RUNNING` or `STOPPING` is never deleted, however old it is. `kates test prune` does the same from the command line. The Kates API's own daily sweep already deletes old finished runs at 90 days (`kates.cleanup.retention-days`), so a `retentionDays` of 90 or more adds nothing to it.
+
+The job sends the key from the `apiKey` Secret (`apiKey.existingSecret`, or `<fullname>-api-key`, at `apiKey.secretKey`) as `X-API-Key`, as the chart's tests do. On anything but a 200 it prints the API's answer and fails, and Kubernetes retries it twice: a 401 names the Secret it read the key from, and a 405 means a Kates API without `DELETE /api/tests`. That endpoint takes an image newer than `1.25.0`.
+
+Upgrading from 0.10.9 or earlier: the job there never deleted a run. It asked for a status the API does not have, sent no key, computed its cutoff with `date` options the image's busybox lacks, and carried the API pod's labels, so with `networkPolicy.enabled` (the default) the chart's NetworkPolicy blocked it from the API. `values-staging.yaml` enables it with 60 days, so its first job against a Kates API that has the endpoint deletes every finished run created 60 to 90 days ago; raise `cleanup.retentionDays`, or set `cleanup.enabled=false`, to keep them. `values-prod.yaml` enables it with 90 days, which the API's sweep already covers.
 
 ### Extensibility
 

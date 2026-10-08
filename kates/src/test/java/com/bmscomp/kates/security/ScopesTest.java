@@ -97,6 +97,7 @@ class ScopesTest {
                 new String[] {"POST", "/api/tests/bulk", "[]"},
                 new String[] {"POST", "/api/tests/deadbeef/cancel", "{}"},
                 new String[] {"DELETE", "/api/tests/deadbeef", null},
+                new String[] {"DELETE", "/api/tests?createdBefore=2026-01-01T00:00:00Z", null},
                 new String[] {"POST", "/api/kafka/topics", "{\"name\":\"t\"}"},
                 new String[] {"POST", "/api/kafka/produce/t", "{}"},
                 new String[] {"GET", "/api/kafka/consume/t", null},

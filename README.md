@@ -213,7 +213,7 @@ When you install charts with Helm directly:
 | [`kafka-ui`](charts/kafka-ui/) | 0.3.0 | v1.5.0 | A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication |
 | [`kates-chaos`](charts/kates-chaos/) | 2.2.1 | 3.28.0 | Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring |
 | [`kates-platform`](charts/kates-platform/) | 0.7.0 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
-| [`kates`](charts/kates/) | 0.10.9 | 1.25.0 | Kates — Kafka Advanced Testing & Engineering Suite |
+| [`kates`](charts/kates/) | 0.10.10 | 1.25.0 | Kates — Kafka Advanced Testing & Engineering Suite |
 | [`legacy-kafka`](charts/legacy-kafka/) | 0.2.0 | 3.9.1 | A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to migrate FROM — the replication source that the pinned Strimzi release cannot deploy |
 | [`mirror-maker2`](charts/mirror-maker2/) | 0.11.3 | 4.3.1 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |
 | [`monitoring`](charts/monitoring/) | 1.6.0 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
