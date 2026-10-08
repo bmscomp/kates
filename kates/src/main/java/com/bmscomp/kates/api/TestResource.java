@@ -45,6 +45,7 @@ import com.bmscomp.kates.persistence.BaselineEntity;
 import com.bmscomp.kates.security.Scopes;
 import com.bmscomp.kates.service.AuditService;
 import com.bmscomp.kates.service.BaselineService;
+import com.bmscomp.kates.service.RunRetention;
 import com.bmscomp.kates.service.TestRunRepository;
 
 @RolesAllowed(Scopes.READ)
@@ -85,6 +86,9 @@ public class TestResource {
 
     @Inject
     AuditService auditService;
+
+    @Inject
+    RunRetention retention;
 
     @Inject
     AuditTrail auditTrail;
@@ -366,29 +370,23 @@ public class TestResource {
         }
 
         List<String> names = statuses.stream().map(Enum::name).toList();
-        long matched = repository.countByStatusCreatedBefore(statuses, before);
         if (countOnly) {
             // A count changes nothing, so it leaves no audit row.
             auditTrail.done();
+            long matched = retention.count(statuses, before);
             return Response.ok(new PruneResponse(before.toString(), names, true, matched, 0, matched))
                     .build();
         }
-        int deleted = 0;
-        for (String id : repository.findIdsByStatusCreatedBefore(statuses, before, max)) {
-            // The single delete, as the bulk one uses. A run another delete
-            // took first is gone, and is not counted.
-            if (orchestrator.deleteTest(id)) {
-                auditService.record("DELETE", "test", id, "retention: created before " + before);
-                deleted++;
-            }
-        }
-        long remaining = repository.countByStatusCreatedBefore(statuses, before);
-        if (deleted > 0) {
+        // The delete TestCleanupScheduler sweeps with, each run through the
+        // single delete, as the bulk one uses.
+        RunRetention.Pass pass = retention.prune(statuses, before, max, "retention: created before " + before);
+        if (pass.deleted() > 0) {
             LOG.infof(
                     "Pruned %d %s run(s) created before %s; %d still match",
-                    deleted, String.join(" or ", names), before, remaining);
+                    pass.deleted(), String.join(" or ", names), before, pass.remaining());
         }
-        return Response.ok(new PruneResponse(before.toString(), names, false, matched, deleted, remaining))
+        return Response.ok(new PruneResponse(
+                        before.toString(), names, false, pass.matched(), pass.deleted(), pass.remaining()))
                 .build();
     }
 

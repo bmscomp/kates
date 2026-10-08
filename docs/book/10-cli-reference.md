@@ -718,7 +718,7 @@ The command first counts the runs, deleting none, and prints how many it found, 
 
 The command stops after 100 calls, or after a call that deleted nothing. When runs still match then, it exits 1 and says how many are left; run it again to go on. With `-o json` it prints one answer for the whole command, in the fields of [DELETE /api/tests](11-api-reference.md#delete-apitests). `deleted` adds up every call, `matched` is the count the first delete found and `remaining` the one after the last; with `--dry-run`, or when none match, it prints the count.
 
-Once a day the Kates API deletes, on its own, every run older than 90 days that is not `RUNNING` or `PENDING`, so `prune` is for keeping finished runs for less long. To prune on a schedule, enable the `kates` chart's cleanup CronJob, described in [Where Kates Stores Test Data](12-deployment.md#where-kates-stores-test-data). A Kates API too old to have `DELETE /api/tests` answers `405`, and the command fails, saying to upgrade it.
+Once a day the Kates API prunes by itself, the same way: it deletes the `DONE` and `FAILED` runs created more than 90 days ago (`kates.cleanup.retention-days`), each with an audit row. It leaves `PENDING`, `RUNNING` and `STOPPING` runs alone, however old they are. So `prune` is for keeping finished runs for less long. To prune on a schedule, enable the `kates` chart's cleanup CronJob, described in [Where Kates Stores Test Data](12-deployment.md#where-kates-stores-test-data). A Kates API too old to have `DELETE /api/tests` answers `405`, and the command fails, saying to upgrade it.
 
 #### test watch
 

@@ -30,7 +30,7 @@ import (
 // Every tool goes through addReadTool and reads only with GET. get_run and
 // assess_run read the run with GET /api/tests/{id}, which makes the backend
 // poll a run that is still active and save what it finds
-// (TestResource.java:460-466, TestOrchestrator.refreshStatus); both
+// (TestResource.java:458-464, TestOrchestrator.refreshStatus); both
 // descriptions say so. Third-party text (task errors, scenario and phase
 // names, labels, plan names, audit details, backend messages) is fenced;
 // ids, types and statuses are cleaned so an agent can pass them back.
@@ -1285,7 +1285,7 @@ func mcpRunHasRequested(r *client.MCPRun) bool {
 
 // mcpAssessBaseline finds the baseline run: among the runs the band's scan
 // read, or else with one read of its own. The baseline may be any run, of
-// any type or status (TestResource.java:592-620 checks only that it exists),
+// any type or status (TestResource.java:590-618 checks only that it exists),
 // so reading it polls it if it is still active, as get_run does.
 func mcpAssessBaseline(ctx context.Context, call *mcpCall, baselineID string, band mcpBandScan) *mcpRunIdentity {
 	if b, ok := band.byID[baselineID]; ok {
@@ -1998,10 +1998,10 @@ func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, 
 	out.Total = pg.Total
 	for _, a := range pg.Items {
 		out.Rows = append(out.Rows, mcpActivityAuditRow{
-			ID:        a.ID,
-			Action:    mcpSanitizeLine(a.Action, 32),
-			EventType: mcpSanitizeLine(a.EventType, 32),
-			Target:    mcpSanitizeLine(a.Target, 128),
+			ID:            a.ID,
+			Action:        mcpSanitizeLine(a.Action, 32),
+			EventType:     mcpSanitizeLine(a.EventType, 32),
+			Target:        mcpSanitizeLine(a.Target, 128),
 			Details:       call.FenceN(a.Details, 200),
 			Actor:         mcpSanitizeLine(a.Actor, 64),
 			PrincipalType: mcpSanitizeLine(a.PrincipalType, 16),
@@ -2269,7 +2269,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2011-2089",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
-			mcpAnchoredRef(mcpJava+"api/TestResource.java:499-544",
+			mcpAnchoredRef(mcpJava+"api/TestResource.java:497-542",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
 			mcpJava + "domain/TestResult.java:25-31",
 		},
@@ -2353,11 +2353,15 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"principalType says whether a person (human), an agent or a schedule (system, actor system:scheduler) " +
 			"acted. Every REST and gRPC call that changes something leaves a row, a refused or failed one too, " +
 			"with how it ended in details, and its target is the id of the run or disruption it started when it " +
-			"started one. A call without a valid key, and a dry run, leave none. Rows written before the Kates " +
+			"started one. The Kates API's daily retention sweep leaves one as system:scheduler for each finished " +
+			"run it deletes. A call without a valid key, and a dry run, leave none. Rows written before the Kates " +
 			"API recorded actors name no one, and then only the REST test endpoints wrote rows at all. Runs and " +
 			"disruption reports record no owner of their own: who started one shows only in its audit row. The " +
 			"endpoint reads at most the 500 newest matching rows.",
 		Refs: []string{
+			mcpAnchoredRef(mcpJava+"service/RunRetention.java:82",
+				`auditService.record("DELETE", "test", id, auditDetails, actor);`),
+			mcpAnchoredRef(mcpJava+"service/TestCleanupScheduler.java:99", "Actor.SCHEDULER"),
 			mcpAnchoredRef(mcpJava+"audit/AuditResponseFilter.java:42-62",
 				"public void filter(ContainerRequestContext request", "if (actor == null)", "static String idOf("),
 			mcpAnchoredRef(mcpJava+"security/GrpcApiKeyInterceptor.java:67-70,100,156-159",
