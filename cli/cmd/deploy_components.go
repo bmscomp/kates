@@ -669,6 +669,76 @@ func cleanupStaleKatesChartDependencies(chartDir string) error {
 	return nil
 }
 
+func isKatesPostgresImmutableStatefulSetError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, `StatefulSet.apps "kates-postgresql" is invalid`) &&
+		strings.Contains(msg, "Forbidden: updates to statefulset spec") &&
+		strings.Contains(msg, "are forbidden")
+}
+
+func runKatesHelmUpgrade(ctx context.Context, appNS string, args ...string) error {
+	err := runHelmFn(ctx, args...)
+	if err == nil {
+		return nil
+	}
+	if !isKatesPostgresImmutableStatefulSetError(err) {
+		return err
+	}
+
+	dl.Println("    - Recreating immutable kates-postgresql StatefulSet object, preserving pod and PVC...")
+	if _, deleteErr := runExecCombinedFn(ctx, "kubectl", "delete", "statefulset", "kates-postgresql",
+		"-n", appNS, "--cascade=orphan", "--ignore-not-found"); deleteErr != nil {
+		return fmt.Errorf("kates helm upgrade hit immutable PostgreSQL StatefulSet and recovery failed: %v (original: %w)", deleteErr, err)
+	}
+
+	dl.Println("    - Retrying Kates backend Helm upgrade...")
+	if retryErr := runHelmFn(ctx, args...); retryErr != nil {
+		return fmt.Errorf("kates helm upgrade retry after recreating PostgreSQL StatefulSet failed: %w", retryErr)
+	}
+	return nil
+}
+
+func cleanupStaleKatesChartDependencies(chartDir string) error {
+	data, err := os.ReadFile(filepath.Join(chartDir, "Chart.yaml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", filepath.Join(chartDir, "Chart.yaml"), err)
+	}
+
+	var chart struct {
+		Dependencies []struct {
+			Name string `yaml:"name"`
+		} `yaml:"dependencies"`
+	}
+	if err := yaml.Unmarshal(data, &chart); err != nil {
+		return fmt.Errorf("parsing %s: %w", filepath.Join(chartDir, "Chart.yaml"), err)
+	}
+	if len(chart.Dependencies) > 0 {
+		return nil
+	}
+
+	removed := false
+	for _, path := range []string{filepath.Join(chartDir, "Chart.lock"), filepath.Join(chartDir, "charts")} {
+		if _, err := os.Stat(path); err == nil {
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("removing stale Helm dependency artifact %s: %w", path, err)
+			}
+			removed = true
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("checking stale Helm dependency artifact %s: %w", path, err)
+		}
+	}
+	if removed {
+		dl.Println("    - Removed stale Kates chart dependency artifacts...")
+	}
+	return nil
+}
+
 // deployGroupA deploys Group A components (Operators & CRDs) in parallel:
 // Strimzi, Cert-Manager, and Kyverno.
 func deployGroupA(dc *deployContext) error {
