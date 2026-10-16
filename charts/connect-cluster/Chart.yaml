@@ -5,7 +5,7 @@ type: application
 # Patch: the Helm-test image moves to kates-tester 1.25.0, the tag the
 # v1.25.0 release publishes; every Strimzi chart pins the same one.
 # Templates and defaults are otherwise unchanged.
-version: 2.1.5
+version: 2.1.6
 # Tracks the Kafka line the workers run, as mirror-maker2's does. The plugin
 # set is in the image; its pin is the kates.io/connect-image annotation.
 appVersion: "4.3.1"
@@ -32,6 +32,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl (and testImages.kafka where present) move to kates-tester 1.25.1, the tag the v1.25.1 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion)."
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.25.0, the tag the v1.25.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.24.0 — nothing under tester/ moved — so this is the pin, not the tooling"
     - kind: changed
