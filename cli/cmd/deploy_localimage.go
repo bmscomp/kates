@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -31,8 +30,10 @@ const (
 	// this file, so building with `make kates-native` instead of
 	// `make kates-image-native-local` is not a silent failure.
 	localNativeValues = "charts/kates/values-native-local.yaml"
-	// localNativeMake is the target that builds and loads it.
-	localNativeMake = "make kates-image-native-local"
+	// publishedNativeValues keeps the native runtime but uses the published image
+	// tag and normal image pulling, which is what a proxied kind cluster needs
+	// when no local backend image has been built.
+	publishedNativeValues = "charts/kates/values-native.yaml"
 )
 
 // localNativeCandidates are the native images a local build produces, newest
@@ -49,48 +50,49 @@ func kindClusterName(kubeContext string) string {
 	return strings.TrimPrefix(strings.TrimSpace(kubeContext), "kind-")
 }
 
-// ensureLocalNativeImage makes sure kates:native-local is on the kind node
-// before the chart that pins it (pullPolicy: Never) is installed.
+// kindBackendImageArgs picks the backend image strategy for kind.
 //
 // Order matters: the host's Docker is the source of truth when it has the
 // image, because that is the build you just made and the node may be holding
 // an older copy. Only when the host has nothing do we ask the node, which
 // covers the case where the image was loaded earlier and the local Docker has
-// since been pruned.
+// since been pruned. If neither local path is usable, the deploy falls back to
+// the published native image so kind can pull it through its configured proxy.
 //
 // It never builds. A native compile is minutes of GraalVM and needs ~8GB for
 // the compiler; starting one inside `kates deploy` because an image was
 // missing would turn a deploy into something you cannot predict the length
-// of. Refusing early with the command is faster than an ErrImageNeverPull
-// nobody reads until the next morning.
-// It returns the image reference the chart should be pinned to, so the caller
-// sets the tag explicitly rather than trusting the overlay to have named the
-// one that exists.
-func ensureLocalNativeImage(ctx context.Context, kubeContext string) (string, error) {
+// of. Pulling the published native image is predictable and matches the rest of
+// the internet-pulled dependency stack.
+func kindBackendImageArgs(ctx context.Context, kubeContext string) ([]string, error) {
 	cluster := kindClusterName(kubeContext)
 	if cluster == "" {
-		return "", fmt.Errorf("cannot tell which kind cluster %q refers to", kubeContext)
+		return nil, fmt.Errorf("cannot tell which kind cluster %q refers to", kubeContext)
 	}
 
 	for _, image := range localNativeCandidates {
 		if !localImageOnHost(ctx, image) {
 			continue
 		}
-		dl.Printf("    - Backend image: %s (local build) → loading into kind cluster %q...\n", image, cluster)
+		dl.Printf("    - Backend image: %s (local build) -> loading into kind cluster %q...\n", image, cluster)
 		if err := runExecFn(ctx, "kind", "load", "docker-image", image, "--name", cluster); err != nil {
-			return "", fmt.Errorf("loading %s into kind cluster %q: %w", image, cluster, err)
+			return nil, fmt.Errorf("loading %s into kind cluster %q: %w", image, cluster, err)
 		}
-		return image, nil
+		return append([]string{"-f", localNativeValues}, localImageArgs(image)...), nil
 	}
 
-	for _, image := range localNativeCandidates {
-		if localImageOnNode(ctx, cluster, image) {
-			dl.Printf("    - Backend image: %s (already on the node, not in local Docker)\n", image)
-			return image, nil
+	nodes, err := kindNodeContainers(ctx, cluster)
+	if err == nil {
+		for _, image := range localNativeCandidates {
+			if localImageOnAllNodes(ctx, nodes, image) {
+				dl.Printf("    - Backend image: %s (already on every kind node, not in local Docker)\n", image)
+				return append([]string{"-f", localNativeValues}, localImageArgs(image)...), nil
+			}
 		}
 	}
 
-	return "", errors.New(localImageMissing(cluster))
+	dl.Println("    - Backend image: published native image (cluster will pull it)")
+	return []string{"-f", publishedNativeValues}, nil
 }
 
 // localImageOnHost reports whether the local Docker daemon has the image.
@@ -99,13 +101,34 @@ func localImageOnHost(ctx context.Context, image string) bool {
 	return err == nil
 }
 
-// localImageOnNode reports whether the kind node's container runtime already
-// has the image. kind nodes ship crictl, and the node is a container named
-// <cluster>-control-plane.
-func localImageOnNode(ctx context.Context, cluster, image string) bool {
-	out, err := runExecOutputFn(ctx, "docker", "exec", cluster+"-control-plane",
-		"crictl", "images", "-q", "docker.io/library/"+image)
-	return err == nil && strings.TrimSpace(string(out)) != ""
+func kindNodeContainers(ctx context.Context, cluster string) ([]string, error) {
+	out, err := runExecOutputFn(ctx, "kind", "get", "nodes", "--name", cluster)
+	if err != nil {
+		return nil, fmt.Errorf("listing kind nodes for cluster %q: %w", cluster, err)
+	}
+	nodes := strings.Fields(string(out))
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("kind cluster %q has no node containers", cluster)
+	}
+	return nodes, nil
+}
+
+func localImageOnAllNodes(ctx context.Context, nodes []string, image string) bool {
+	for _, node := range nodes {
+		if !localImageOnNode(ctx, node, image) {
+			return false
+		}
+	}
+	return true
+}
+
+// localImageOnNode reports whether one kind node's container runtime already
+// has the exact image. `crictl images -q <ref>` can print unrelated image IDs on
+// some versions, so use inspecti and trust only its exit code.
+func localImageOnNode(ctx context.Context, node, image string) bool {
+	_, err := runExecOutputFn(ctx, "docker", "exec", node,
+		"crictl", "inspecti", "docker.io/library/"+image)
+	return err == nil
 }
 
 // localImageArgs pins the chart to the image that was found, overriding the
@@ -123,28 +146,10 @@ func localImageArgs(image string) []string {
 	}
 }
 
-// localImageMissing is the refusal: what is missing, why deploy will not make
-// it, and the one command that fixes it.
-func localImageMissing(cluster string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "no local backend image (%s) in Docker or on the kind node %q.\n",
-		strings.Join(localNativeCandidates, " or "), cluster)
-	b.WriteString("  A local deploy runs the backend you built, not a published image — and\n")
-	b.WriteString("  the chart pins it with pullPolicy: Never, so there is nothing to pull.\n")
-	b.WriteString("  Build it once (a native compile, several minutes, ~8GB for the compiler):\n\n")
-	fmt.Fprintf(&b, "    %s\n\n", localNativeMake)
-	b.WriteString("  Then run kates deploy again.")
-	return b.String()
-}
-
-// katesChartValues returns the values files the backend chart is installed
-// with. On kind the native-local overlay comes last so its image, resources
-// and probes win over the kind overlay, while the kind overlay's NodePort
-// service, tolerations and disabled production features survive.
+// katesChartValues returns the base values files the backend chart is installed
+// with. The kind-specific backend image overlay is chosen later, after checking
+// whether a real local image exists.
 func (dc *deployContext) katesChartValues() []string {
 	args := []string{"-f", dc.valuesFile, "-f", dc.chartOverlay("charts/kates")}
-	if dc.isKind {
-		args = append(args, "-f", localNativeValues)
-	}
 	return args
 }

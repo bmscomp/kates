@@ -22,6 +22,9 @@ const (
 	// WrapperChartPrefix is the "chart" column helm list shows for releases
 	// of the kates wrapper chart (strimzi-operator-<chart version>).
 	WrapperChartPrefix = "strimzi-operator-"
+	// UpstreamChartPrefix is the "chart" column helm list shows for releases
+	// installed directly from Strimzi's upstream Helm chart.
+	UpstreamChartPrefix = ChartName + "-"
 	// CRDLabelSelector selects the Strimzi CRDs.
 	CRDLabelSelector = "app=strimzi"
 
@@ -56,6 +59,10 @@ type Operator struct {
 	// the same namespace; both are empty for a foreign operator that kates
 	// did not install.
 	Release, AppVersion string
+	// HelmRelease and HelmChart come from any Strimzi operator Helm release in
+	// the same namespace, including upstream charts. They let deploy remove an
+	// empty pre-v1 operator cleanly before handing ownership to the wrapper.
+	HelmRelease, HelmChart string
 }
 
 // IsForeign reports whether no kates wrapper release owns the operator.
@@ -259,7 +266,8 @@ func watchScope(c container, ownNamespace string) (scope string, watches []strin
 }
 
 // attachReleases sets Release and AppVersion from helm list output for the
-// wrapper release in each operator's namespace.
+// wrapper release in each operator's namespace. It also records an upstream
+// Strimzi Helm release, when present, without marking it as Kates-owned.
 func attachReleases(ops []Operator, listJSON []byte) error {
 	var releases []struct {
 		Name       string `json:"name"`
@@ -272,13 +280,24 @@ func attachReleases(ops []Operator, listJSON []byte) error {
 	}
 	for i := range ops {
 		for _, rel := range releases {
-			if rel.Namespace == ops[i].Namespace && strings.HasPrefix(rel.Chart, WrapperChartPrefix) {
+			if rel.Namespace != ops[i].Namespace || !isStrimziHelmChart(rel.Chart) {
+				continue
+			}
+			if ops[i].HelmRelease == "" {
+				ops[i].HelmRelease, ops[i].HelmChart = rel.Name, rel.Chart
+			}
+			if strings.HasPrefix(rel.Chart, WrapperChartPrefix) {
 				ops[i].Release, ops[i].AppVersion = rel.Name, rel.AppVersion
+				ops[i].HelmRelease, ops[i].HelmChart = rel.Name, rel.Chart
 				break
 			}
 		}
 	}
 	return nil
+}
+
+func isStrimziHelmChart(chart string) bool {
+	return strings.HasPrefix(chart, WrapperChartPrefix) || strings.HasPrefix(chart, UpstreamChartPrefix)
 }
 
 // ScopeShape is the shape of the operators installed on a cluster.
@@ -370,6 +389,44 @@ func StoredVersions(ctx context.Context, r Runner) (map[string][]string, error) 
 	return parseStoredVersions([]byte(out))
 }
 
+// ResourceInstance is one custom resource backed by a Strimzi CRD.
+type ResourceInstance struct {
+	CRD       string
+	Kind      string
+	Namespace string
+	Name      string
+}
+
+// Ref returns a human-sized resource reference for diagnostics.
+func (i ResourceInstance) Ref() string {
+	if i.Namespace == "" {
+		return i.Kind + "/" + i.Name
+	}
+	return i.Namespace + "/" + i.Kind + "/" + i.Name
+}
+
+// ResourceInstances lists every object stored under the given Strimzi CRDs.
+// It accepts CRD names instead of kind names so callers can ask about exactly
+// what the apiserver says exists, including older CRDs whose preferred API
+// version is no longer what this checkout renders.
+func ResourceInstances(ctx context.Context, r Runner, crds []string) ([]ResourceInstance, error) {
+	var found []ResourceInstance
+	names := slices.Clone(crds)
+	slices.Sort(names)
+	for _, crd := range names {
+		out, err := r.Run(ctx, "kubectl", "get", crd, "-A", "-o", "json", "--ignore-not-found")
+		if err != nil {
+			return nil, fmt.Errorf("list %s: %w", crd, err)
+		}
+		items, err := parseResourceInstances(crd, []byte(out))
+		if err != nil {
+			return nil, err
+		}
+		found = append(found, items...)
+	}
+	return found, nil
+}
+
 func parseStoredVersions(crdListJSON []byte) (map[string][]string, error) {
 	var list struct {
 		Items []struct {
@@ -392,4 +449,32 @@ func parseStoredVersions(crdListJSON []byte) (map[string][]string, error) {
 		stored[item.Metadata.Name] = slices.Clone(item.Status.StoredVersions)
 	}
 	return stored, nil
+}
+
+func parseResourceInstances(crd string, resourceListJSON []byte) ([]ResourceInstance, error) {
+	if strings.TrimSpace(string(resourceListJSON)) == "" {
+		return nil, nil
+	}
+	var list struct {
+		Items []struct {
+			Kind     string `json:"kind"`
+			Metadata struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(resourceListJSON, &list); err != nil {
+		return nil, fmt.Errorf("parse %s list: %w", crd, err)
+	}
+	items := make([]ResourceInstance, 0, len(list.Items))
+	for _, item := range list.Items {
+		items = append(items, ResourceInstance{
+			CRD:       crd,
+			Kind:      item.Kind,
+			Namespace: item.Metadata.Namespace,
+			Name:      item.Metadata.Name,
+		})
+	}
+	return items, nil
 }

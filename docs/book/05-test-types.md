@@ -251,7 +251,7 @@ Each row is a slow failure and the symptom it leaves over a long run: drift that
 ::: {.callout-important}
 **No run lasts longer than two hours by default**
 
-The Kates API refuses, with `400`, a run set to last longer than two hours, and fails a run still `RUNNING` five minutes after its own `durationSeconds` is up, counted from the run's creation. The two hours are the Kates API setting `kates.engine.max-duration-ms`, 7,200,000 ms by default, and the `kates` chart has no value for it. To allow longer soaks, save the release's values with `helm get values kates -n kates -o yaml`, add the environment variable `KATES_ENGINE_MAX_DURATION_MS`, in milliseconds, to their `extraEnv`, and `helm upgrade` the release with that file. `kates deploy` upgrades the release from its own [values files](appendix-a-glossary.md#gl-values-overlay), which drops the entry, so repeat the upgrade after it.
+The Kates API refuses, with `400`, a run set to last longer than two hours, and fails a run still `RUNNING` five minutes after its own `durationSeconds` is up, counted from the run's creation. A run still `PENDING`, meaning its tasks were never stored as started, fails after two minutes. The two hours are `kates.engine.max-duration-ms`, 7,200,000 ms by default; the five-minute execution grace is `kates.engine.reaper-grace-ms`; the pending-submission timeout is `kates.engine.submission-timeout-ms`. The `kates` chart exposes them as `engine.maxDurationMs`, `engine.reaperGraceMs` and `engine.submissionTimeoutMs`.
 :::
 
 ---

@@ -61,4 +61,37 @@ class CdcIntegrationServiceTest {
         assertEquals(32, resources.runToken().length());
         assertTrue(resources.runToken().matches("^[a-z0-9]+$"));
     }
+
+    @Test
+    void sinkConnectorStartsAtEarliestForTheUniqueTestTopic() {
+        CdcIntegrationService.CdcRunResources resources = CdcIntegrationService.createRunResources("race-proof-run");
+
+        String yaml = CdcIntegrationService.sinkConnectorYaml(
+                resources, "connect", "connect-cluster", "database", "secret-password");
+
+        assertTrue(yaml.contains("name: " + resources.sinkConnectorName()));
+        assertTrue(yaml.contains("namespace: connect"));
+        assertTrue(yaml.contains("strimzi.io/cluster: connect-cluster"));
+        assertTrue(yaml.contains("connection.url: jdbc:postgresql://postgresql.database.svc:5432/postgres"));
+        assertTrue(yaml.contains("topics: " + resources.topicName()));
+        assertTrue(yaml.contains("table.name.format: " + resources.sinkTable()));
+        assertTrue(yaml.contains("consumer.override.auto.offset.reset: earliest"));
+        assertFalse(yaml.contains("consumer.override.auto.offset.reset: latest"));
+    }
+
+    @Test
+    void sourceConnectorUsesTheSameUniqueTopicSourceTableAndSlot() {
+        CdcIntegrationService.CdcRunResources resources = CdcIntegrationService.createRunResources("race-proof-run");
+
+        String yaml = CdcIntegrationService.sourceConnectorYaml(
+                resources, "connect", "connect-cluster", "database", "secret-password");
+
+        assertTrue(yaml.contains("name: " + resources.sourceConnectorName()));
+        assertTrue(yaml.contains("namespace: connect"));
+        assertTrue(yaml.contains("strimzi.io/cluster: connect-cluster"));
+        assertTrue(yaml.contains("database.hostname: postgresql.database.svc"));
+        assertTrue(yaml.contains("slot.name: " + resources.slotName()));
+        assertTrue(yaml.contains("table.include.list: public." + resources.sourceTable()));
+        assertTrue(yaml.contains("topic.prefix: cdc"));
+    }
 }

@@ -24,6 +24,7 @@ import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.ScenarioPhase;
 import com.bmscomp.kates.domain.SlaDefinition;
 import com.bmscomp.kates.domain.TestResult;
+import com.bmscomp.kates.domain.TestResult.TaskStatus;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestScenario;
 import com.bmscomp.kates.domain.TestSpec;
@@ -2264,6 +2265,7 @@ class TestOrchestratorTest {
         void reaperSettings() {
             reaper.maxDurationMs = CAP_MS;
             reaper.graceMs = GRACE_MS;
+            reaper.submissionTimeoutMs = 120_000;
         }
 
         /** The run executeTest creates for this request, on a backend that takes every task. */
@@ -2301,7 +2303,7 @@ class TestOrchestratorTest {
 
         @Test
         void aDefaultEnduranceRunOutlivesThirtyOneMinutes() {
-            TestRun run = started(request(TestType.ENDURANCE, null));
+            TestRun run = started(request(TestType.ENDURANCE, null)).withStatus(TaskStatus.RUNNING);
 
             assertEquals(3_600_000L, run.getPlannedDurationMs());
             assertFalse(reapedAfter(run, Duration.ofMinutes(31)), "past the old 30-minute limit");
@@ -2311,7 +2313,7 @@ class TestOrchestratorTest {
 
         @Test
         void aTenMinuteLoadRunIsReapedOnceTenMinutesAndTheGraceHavePassed() {
-            TestRun run = started(request(TestType.LOAD, lasting(600_000)));
+            TestRun run = started(request(TestType.LOAD, lasting(600_000))).withStatus(TaskStatus.RUNNING);
 
             assertEquals(600_000L, run.getPlannedDurationMs());
             assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(600_000 + GRACE_MS), reaper.deadlineOf(run));
@@ -2321,7 +2323,7 @@ class TestOrchestratorTest {
 
         @Test
         void anIntegrityRunIsAllowedTwiceItsDuration() {
-            TestRun run = started(request(TestType.INTEGRITY, lasting(600_000)));
+            TestRun run = started(request(TestType.INTEGRITY, lasting(600_000))).withStatus(TaskStatus.RUNNING);
 
             assertEquals(1_200_000L, run.getPlannedDurationMs(), "it produces, then reads back for as long again");
             assertFalse(reapedAfter(run, Duration.ofMinutes(24)));
@@ -2330,7 +2332,7 @@ class TestOrchestratorTest {
 
         @Test
         void aScenarioIsAllowedItsPhasesAddedUp() {
-            TestRun run = started(scenarioOf(300_000, 600_000, 300_000));
+            TestRun run = started(scenarioOf(300_000, 600_000, 300_000)).withStatus(TaskStatus.RUNNING);
 
             assertEquals(1_200_000L, run.getPlannedDurationMs());
             assertFalse(reapedAfter(run, Duration.ofMinutes(24)));
@@ -2339,7 +2341,7 @@ class TestOrchestratorTest {
 
         @Test
         void aRunNoDurationBoundsIsAllowedTheCap() {
-            TestRun run = started(request(TestType.INTEGRATION_CDC, null));
+            TestRun run = started(request(TestType.INTEGRATION_CDC, null)).withStatus(TaskStatus.RUNNING);
 
             assertNull(run.getPlannedDurationMs(), "the CDC service ends it on timeouts of its own");
             assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(CAP_MS + GRACE_MS), reaper.deadlineOf(run));
@@ -2348,9 +2350,18 @@ class TestOrchestratorTest {
         @Test
         void aStoredDurationPastTheCapIsHeldToIt() {
             // As a run created before the cap was lowered would have it.
-            TestRun run = new TestRun(TestType.LOAD, new TestSpec()).withPlannedDurationMs(3 * CAP_MS);
+            TestRun run = new TestRun(TestType.LOAD, new TestSpec())
+                    .withStatus(TaskStatus.RUNNING)
+                    .withPlannedDurationMs(3 * CAP_MS);
 
             assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(CAP_MS + GRACE_MS), reaper.deadlineOf(run));
+        }
+
+        @Test
+        void aPendingRunUsesTheSubmissionDeadline() {
+            TestRun run = started(request(TestType.LOAD, lasting(600_000)));
+
+            assertEquals(Instant.parse(run.getCreatedAt()).plusMillis(120_000), reaper.deadlineOf(run));
         }
     }
 

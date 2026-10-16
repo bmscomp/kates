@@ -408,6 +408,12 @@ prometheus:
 engine:
   # -- Default benchmark backend (native or trogdor)
   defaultBackend: "native"
+  # -- Maximum planned duration accepted for one run (ms)
+  maxDurationMs: "7200000"
+  # -- Grace after a RUNNING/STOPPING run's planned duration before it is failed (ms)
+  reaperGraceMs: "300000"
+  # -- Maximum time a run may stay PENDING before submission is considered stranded (ms)
+  submissionTimeoutMs: "120000"
 
 # -- Fault tolerance timeout configuration (ms)
 faultTolerance:
@@ -450,6 +456,15 @@ networkPolicy:
   prometheus:
     namespace: monitoring
     port: 9090
+  # -- CDC integration test database egress. `kates deploy
+  # --with-kafka-connect` sets namespace from --db-ns so the backend can
+  # create/read the test tables in the demo PostgreSQL database.
+  cdcDatabase:
+    enabled: false
+    namespace: database
+    podLabels:
+      app.kubernetes.io/name: postgresql
+    port: 5432
   # -- Extra egress rules
   egressRules: []
 

@@ -70,4 +70,10 @@ func TestDeployCommand_KafkaUIFollowsKafkaName(t *testing.T) {
 	if !strings.Contains(ui, "--set kafka.clusterName=orders ") {
 		t.Errorf("Kafka UI is not pointed at the primary, orders:\n%s", ui)
 	}
+	if !strings.Contains(ui, "--set-string kafka.clusterDomain=cluster.local ") {
+		t.Errorf("Kafka UI is not using the detected cluster domain:\n%s", ui)
+	}
+	if !strings.Contains(ui, "--set kafkaUser.enabled=false ") {
+		t.Errorf("Kafka UI should consume the Kafka cluster chart's KafkaUser instead of creating its own:\n%s", ui)
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -132,6 +133,8 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	report.Workload = hydrateWorkloadPressure(report.Nodes, report.Workload)
 
 	if !c.ReadOnly {
 		c.runWriteProbes(ctx, report)
@@ -1207,6 +1210,64 @@ func (c *Collector) getMonitoringStatus() MonitoringInfo {
 // its command line, as the jsonpath prints it (a JSON array): the first CIDR,
 // up to the quote or comma that ends it.
 var serviceCIDRFlag = regexp.MustCompile(`service-cluster-ip-range=([^",\\]+)`)
+var coreDNSKubernetesDomainLine = regexp.MustCompile(`(?m)^\s*kubernetes\s+([^\s{]+)`)
+
+func parseCoreDNSClusterDomain(corefile string) string {
+	for _, match := range coreDNSKubernetesDomainLine.FindAllStringSubmatch(corefile, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		domain := strings.Trim(strings.TrimSpace(match[1]), ".")
+		switch domain {
+		case "", "in-addr.arpa", "ip6.arpa":
+			continue
+		default:
+			return domain
+		}
+	}
+	return ""
+}
+
+func parseResolvConfClusterDomain(resolvContent string) string {
+	for _, line := range strings.Split(resolvContent, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToLower(line), "search ") {
+			continue
+		}
+		fields := strings.Fields(line)[1:]
+
+		// Priority: find entry starting exactly with svc.
+		var found string
+		for _, f := range fields {
+			if strings.HasPrefix(f, "svc.") {
+				found = strings.TrimPrefix(f, "svc.")
+				break
+			}
+		}
+
+		// Fallback: strip namespace.svc. or svc.
+		if found == "" {
+			for _, f := range fields {
+				clean := f
+				idx := strings.Index(clean, ".svc.")
+				if idx != -1 {
+					clean = clean[idx+5:]
+				}
+				clean = strings.TrimPrefix(clean, "svc.")
+				if clean != "" {
+					found = clean
+					break
+				}
+			}
+		}
+
+		if found != "" {
+			return found
+		}
+		break
+	}
+	return ""
+}
 
 func (c *Collector) getNetworkStatus() NetworkInfo {
 	info := NetworkInfo{CNI: "unknown"}
@@ -1249,60 +1310,32 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 
 	// Detect cluster DNS domain using robust pod-based extraction
 	info.ClusterDomain = "cluster.local"
-
-	// Attempt 1: Get from an already running pod
-	podOut, _ := c.exec.Exec("kubectl", "get", "pods", "--all-namespaces", "--field-selector=status.phase=Running",
-		"-o", "jsonpath={.items[0].metadata.namespace} {.items[0].metadata.name}")
-	var resolvContent string
-	if podOut != "" {
-		parts := strings.Fields(podOut)
-		if len(parts) == 2 {
-			resolvContent, _ = c.exec.Exec("kubectl", "exec", "-n", parts[0], parts[1], "--", "cat", "/etc/resolv.conf")
+	if corefile, _ := c.exec.Exec("kubectl", "get", "configmap", "-n", "kube-system", "coredns", "-o", "jsonpath={.data.Corefile}"); corefile != "" {
+		if domain := parseCoreDNSClusterDomain(corefile); domain != "" {
+			info.ClusterDomain = domain
 		}
 	}
 
-	// Attempt 2: If no running pods, spin up a temporary pod. A read-only
-	// collection keeps the cluster.local default instead.
-	if resolvContent == "" && !c.ReadOnly {
-		resolvContent, _ = c.exec.Exec("kubectl", "run", "--rm", "-i", "--image=busybox:1.36", "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
-	}
-
-	if resolvContent != "" {
-		for _, line := range strings.Split(resolvContent, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(strings.ToLower(line), "search ") {
-				fields := strings.Fields(line)[1:]
-
-				// Priority: find entry starting exactly with svc.
-				var found string
-				for _, f := range fields {
-					if strings.HasPrefix(f, "svc.") {
-						found = strings.TrimPrefix(f, "svc.")
-						break
-					}
-				}
-
-				// Fallback: strip namespace.svc. or svc.
-				if found == "" {
-					for _, f := range fields {
-						clean := f
-						idx := strings.Index(clean, ".svc.")
-						if idx != -1 {
-							clean = clean[idx+5:]
-						}
-						clean = strings.TrimPrefix(clean, "svc.")
-						if clean != "" {
-							found = clean
-							break
-						}
-					}
-				}
-
-				if found != "" && found != "cluster.local" {
-					info.ClusterDomain = found
-				}
-				break
+	// Attempt 1: Get from an already running pod
+	if info.ClusterDomain == "cluster.local" {
+		podOut, _ := c.exec.Exec("kubectl", "get", "pods", "--all-namespaces", "--field-selector=status.phase=Running",
+			"-o", "jsonpath={.items[0].metadata.namespace} {.items[0].metadata.name}")
+		var resolvContent string
+		if podOut != "" {
+			parts := strings.Fields(podOut)
+			if len(parts) == 2 {
+				resolvContent, _ = c.exec.Exec("kubectl", "exec", "-n", parts[0], parts[1], "--", "cat", "/etc/resolv.conf")
 			}
+		}
+
+		// Attempt 2: If no running pods, spin up a temporary pod. A read-only
+		// collection keeps the cluster.local default instead.
+		if resolvContent == "" && !c.ReadOnly {
+			resolvContent, _ = c.exec.Exec("kubectl", "run", "--rm", "-i", "--image=busybox:1.36", "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
+		}
+
+		if domain := parseResolvConfClusterDomain(resolvContent); domain != "" {
+			info.ClusterDomain = domain
 		}
 	}
 
@@ -1671,6 +1704,83 @@ func (c *Collector) getWorkloadPressure() WorkloadPressure {
 			nodeMem[pod.Spec.NodeName] += memGi
 		}
 	}
+
+	for node, cpu := range nodeCPU {
+		wp.PerNode = append(wp.PerNode, NodePressure{
+			Name:         node,
+			CPURequested: cpu,
+			MemRequested: nodeMem[node],
+		})
+	}
+	sort.Slice(wp.PerNode, func(i, j int) bool {
+		return wp.PerNode[i].Name < wp.PerNode[j].Name
+	})
+
+	return wp
+}
+
+func hydrateWorkloadPressure(nodes []NodeInfo, wp WorkloadPressure) WorkloadPressure {
+	requests := map[string]NodePressure{}
+	for _, node := range wp.PerNode {
+		requests[node.Name] = node
+	}
+
+	type zoneTotals struct {
+		pressure           ZonePressure
+		cpuAlloc, memAlloc int
+	}
+	zones := map[string]*zoneTotals{}
+	wp.PerNode = nil
+	wp.PerZone = nil
+
+	for _, node := range nodes {
+		req := requests[node.Name]
+		cpuAvailable := node.CPU - req.CPURequested
+		if cpuAvailable < 0 {
+			cpuAvailable = 0
+		}
+		memAvailable := node.MemoryGi - req.MemRequested
+		if memAvailable < 0 {
+			memAvailable = 0
+		}
+		wp.PerNode = append(wp.PerNode, NodePressure{
+			Name:           node.Name,
+			Zone:           node.Zone,
+			CPUAllocatable: node.CPU,
+			CPURequested:   req.CPURequested,
+			CPUAvailable:   cpuAvailable,
+			MemAllocatable: node.MemoryGi,
+			MemRequested:   req.MemRequested,
+			MemAvailable:   memAvailable,
+		})
+
+		if node.Zone == "" || node.Zone == "-" {
+			continue
+		}
+		zt := zones[node.Zone]
+		if zt == nil {
+			zt = &zoneTotals{pressure: ZonePressure{Name: node.Zone}}
+			zones[node.Zone] = zt
+		}
+		zt.pressure.Nodes++
+		zt.pressure.CPUAvailable += cpuAvailable
+		zt.pressure.MemAvailable += memAvailable
+		zt.cpuAlloc += node.CPU
+		zt.memAlloc += node.MemoryGi
+	}
+
+	sort.Slice(wp.PerNode, func(i, j int) bool {
+		return wp.PerNode[i].Name < wp.PerNode[j].Name
+	})
+	for _, zt := range zones {
+		if zt.cpuAlloc > 0 {
+			zt.pressure.Utilization = float64(zt.cpuAlloc-zt.pressure.CPUAvailable) / float64(zt.cpuAlloc)
+		}
+		wp.PerZone = append(wp.PerZone, zt.pressure)
+	}
+	sort.Slice(wp.PerZone, func(i, j int) bool {
+		return wp.PerZone[i].Name < wp.PerZone[j].Name
+	})
 
 	return wp
 }

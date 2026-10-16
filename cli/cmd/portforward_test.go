@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/bmscomp/kates/cli/client"
 )
 
 // portsTestEnv isolates one syncPortsContext run: a temporary HOME for
@@ -798,6 +800,144 @@ func TestLocalPortTaken(t *testing.T) {
 	if localPortTaken(port) {
 		t.Errorf("port %d is free, want it reported free", port)
 	}
+}
+
+func TestKatesGRPCForwardUsesLocal9090AndPrometheusMovesAside(t *testing.T) {
+	seen := map[int]string{}
+	foundGRPC, foundPrometheus := false, false
+	for _, spec := range matchSpecs(map[string]bool{"kates/kates": true}) {
+		if prev := seen[spec.Local]; prev != "" {
+			t.Fatalf("local port %d is shared by %s and %s", spec.Local, prev, spec.Label)
+		}
+		seen[spec.Local] = spec.Label
+		if spec.Label == katesGRPCLabel {
+			if spec.Remote != 9000 {
+				t.Errorf("Kates gRPC remote port = %d, want service port 9000", spec.Remote)
+			}
+			if spec.Local != 9090 {
+				t.Errorf("Kates gRPC local port = %d, want 9090", spec.Local)
+			}
+			foundGRPC = true
+		}
+	}
+	for _, spec := range matchSpecs(map[string]bool{"monitoring/monitoring-kube-prometheus-prometheus": true}) {
+		if spec.Label == "Prometheus" {
+			if spec.Remote != 9090 {
+				t.Errorf("Prometheus remote port = %d, want service port 9090", spec.Remote)
+			}
+			if spec.Local != prometheusLocalPort || spec.Local == 9090 {
+				t.Errorf("Prometheus local port = %d, want %d and not Kates gRPC port 9090", spec.Local, prometheusLocalPort)
+			}
+			foundPrometheus = true
+		}
+	}
+	if !foundGRPC {
+		t.Fatal("Kates gRPC port-forward spec not found")
+	}
+	if !foundPrometheus {
+		t.Fatal("Prometheus port-forward spec not found")
+	}
+}
+
+func TestRepairLocalAPIPortForward_StartsOnlyKatesAPI(t *testing.T) {
+	port := freeLocalPort(t)
+	origClient, origContext, origOverride := apiClient, activeContext, apiURLOverridden
+	origExec, origStart, origKubeContext := runExecOutputFn, startPortForwardFn, portsKubeContext
+	origKafkaNS, origAppNS, origMonitoringNS, origAll := portsKafkaNS, portsAppNS, portsMonitoringNS, portsAll
+	t.Cleanup(func() {
+		apiClient, activeContext, apiURLOverridden = origClient, origContext, origOverride
+		runExecOutputFn, startPortForwardFn, portsKubeContext = origExec, origStart, origKubeContext
+		portsKafkaNS, portsAppNS, portsMonitoringNS, portsAll = origKafkaNS, origAppNS, origMonitoringNS, origAll
+	})
+
+	apiClient = client.New("http://127.0.0.1:" + strconv.Itoa(port))
+	activeContext = portsContextName
+	apiURLOverridden = false
+	portsKubeContext = ""
+	portsKafkaNS, portsAppNS, portsMonitoringNS, portsAll = "kafka", "kates", "monitoring", true
+
+	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name != "kubectl" || strings.Join(args, " ") != "get svc -A --no-headers -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name" {
+			t.Fatalf("unexpected discovery command: %s %s", name, strings.Join(args, " "))
+		}
+		return []byte("connect kates\nkafka kafka-ui\n"), nil
+	}
+
+	var listener net.Listener
+	var started []portForwardSpec
+	startPortForwardFn = func(spec portForwardSpec) error {
+		started = append(started, spec)
+		var err error
+		listener, err = net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(spec.Local))
+		return err
+	}
+	t.Cleanup(func() {
+		if listener != nil {
+			listener.Close()
+		}
+	})
+
+	repaired, err := repairLocalAPIPortForward(context.Background(), errors.New("connection refused"))
+	if err != nil {
+		t.Fatalf("repairLocalAPIPortForward: %v", err)
+	}
+	if !repaired {
+		t.Fatal("repairLocalAPIPortForward did not report a repair")
+	}
+	if len(started) != 1 {
+		t.Fatalf("started %d forwards, want 1", len(started))
+	}
+	got := started[0]
+	if got.Label != katesAPILabel || got.Namespace != "connect" || got.Resource != "service/kates" || got.Local != port || got.Remote != 8080 {
+		t.Errorf("started spec = %+v, want Kates API in discovered namespace on local port %d", got, port)
+	}
+}
+
+func TestRepairLocalAPIPortForward_SkipsNonPortsContext(t *testing.T) {
+	port := freeLocalPort(t)
+	origClient, origContext, origOverride := apiClient, activeContext, apiURLOverridden
+	origExec, origStart := runExecOutputFn, startPortForwardFn
+	t.Cleanup(func() {
+		apiClient, activeContext, apiURLOverridden = origClient, origContext, origOverride
+		runExecOutputFn, startPortForwardFn = origExec, origStart
+	})
+
+	apiClient = client.New("http://127.0.0.1:" + strconv.Itoa(port))
+	activeContext = "prod"
+	apiURLOverridden = false
+	called := false
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) {
+		called = true
+		return nil, nil
+	}
+	startPortForwardFn = func(portForwardSpec) error {
+		called = true
+		return nil
+	}
+
+	repaired, err := repairLocalAPIPortForward(context.Background(), errors.New("connection refused"))
+	if err != nil {
+		t.Fatalf("repairLocalAPIPortForward: %v", err)
+	}
+	if repaired {
+		t.Fatal("non-ports context must not auto-repair")
+	}
+	if called {
+		t.Fatal("non-ports context should not touch kubectl or start a forward")
+	}
+}
+
+func freeLocalPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return port
 }
 
 func TestPrintAPIPortTaken(t *testing.T) {

@@ -92,6 +92,7 @@ type pollModel struct {
 	staleRetries   int
 	connRetries    int
 	lastErr        error
+	repairErr      error
 	summary        *client.ReportSummary
 	err            error
 }
@@ -153,16 +154,26 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pollResultMsg:
 		if msg.err != nil {
+			repaired, repairErr := tryRepairPollingConnection(m.ctx, msg.err, m.connRetries)
+			if repaired {
+				m.lastErr = nil
+				m.repairErr = nil
+				return m, m.fetchTest()
+			}
+			if repairErr != nil {
+				m.repairErr = repairErr
+			}
 			m.connRetries++
-			m.lastErr = msg.err
+			m.lastErr = pollErrorWithRepair(msg.err, m.repairErr)
 			if m.connRetries > maxConnRetries {
-				m.err = fmt.Errorf("connection lost after %d retries: %w", maxConnRetries, msg.err)
+				m.err = fmt.Errorf("connection lost after %d retries: %w", maxConnRetries, m.lastErr)
 				return m, tea.Quit
 			}
 			return m, nil
 		}
 		m.connRetries = 0
 		m.lastErr = nil
+		m.repairErr = nil
 		test := msg.test
 		m.lastStatus = strings.ToUpper(test.Status)
 		m.phases = test.Results
@@ -387,7 +398,8 @@ var (
 	pollGetTestFn = func(ctx context.Context, id string) (*client.TestRun, error) {
 		return apiClient.GetTest(ctx, id)
 	}
-	pollInterval = 2 * time.Second
+	repairPollingConnectionFn = repairLocalAPIPortForward
+	pollInterval              = 2 * time.Second
 )
 
 // isFailedStatus reports whether a terminal test status means failure.
@@ -447,6 +459,7 @@ func lastPolledStatus(m tea.Model) string {
 func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, error) {
 	lastStatus := ""
 	retries := 0
+	var repairErr error
 	for {
 		test, err := pollGetTestFn(ctx, id)
 		if err != nil {
@@ -456,6 +469,16 @@ func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, er
 			if ctx.Err() != nil {
 				return lastStatus, errStoppedWaiting
 			}
+			repaired, nextRepairErr := tryRepairPollingConnection(ctx, err, retries)
+			if repaired {
+				retries = 0
+				repairErr = nil
+				continue
+			}
+			if nextRepairErr != nil {
+				repairErr = nextRepairErr
+			}
+			err = pollErrorWithRepair(err, repairErr)
 			retries++
 			if retries > maxConnRetries {
 				return "", fmt.Errorf("connection lost after %d retries: %w", maxConnRetries, err)
@@ -466,6 +489,7 @@ func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, er
 			continue
 		}
 		retries = 0
+		repairErr = nil
 
 		status := strings.ToUpper(test.Status)
 		if status != lastStatus {
@@ -490,6 +514,24 @@ func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, er
 			return lastStatus, errStoppedWaiting
 		}
 	}
+}
+
+func tryRepairPollingConnection(ctx context.Context, pollErr error, _ int) (bool, error) {
+	repaired, repairErr := repairPollingConnectionFn(ctx, pollErr)
+	if repairErr != nil {
+		return false, repairErr
+	}
+	if repaired {
+		return true, nil
+	}
+	return false, nil
+}
+
+func pollErrorWithRepair(pollErr, repairErr error) error {
+	if repairErr == nil {
+		return pollErr
+	}
+	return fmt.Errorf("%w; port-forward repair failed: %v", pollErr, repairErr)
 }
 
 // sleepCtx sleeps for d, or until ctx is done; it reports whether it slept

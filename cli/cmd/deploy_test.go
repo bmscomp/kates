@@ -37,6 +37,9 @@ func init() {
 	resolveVersionPlanFn = func(_ context.Context, _ strimzi.Runner, o versionOptions) (*versionPlan, error) {
 		return stubVersionPlan(o), nil
 	}
+	readStrimziCRDBundleFn = func(string) (string, []string, error) {
+		return fakeStrimziCRDBundle(), strimzi.RequiredCRDNames(), nil
+	}
 }
 
 // stubVersionPlan is the "pin, fresh cluster, newest Kafka" plan.
@@ -52,6 +55,7 @@ func stubVersionPlan(o versionOptions) *versionPlan {
 		StrimziSource:  "pinned",
 		Pinned:         true,
 		PinnedVersion:  "1.1.0",
+		ChartPath:      "test-strimzi.tgz",
 		ChartDir:       "charts/strimzi-operator",
 		Window:         window.Strings(),
 		KafkaVersion:   "4.3.0",
@@ -71,6 +75,18 @@ func stubVersionPlan(o versionOptions) *versionPlan {
 	return vp
 }
 
+func fakeStrimziCRDBundle() string {
+	var b strings.Builder
+	for _, name := range strimzi.RequiredCRDNames() {
+		b.WriteString("---\n")
+		b.WriteString("apiVersion: apiextensions.k8s.io/v1\n")
+		b.WriteString("kind: CustomResourceDefinition\n")
+		b.WriteString("metadata:\n")
+		b.WriteString("  name: " + name + "\n")
+	}
+	return b.String()
+}
+
 // stubClusterRead answers the cluster queries the deploy paths make, in the
 // shape each caller parses. Anything unrecognised returns empty output and no
 // error, i.e. "nothing there", which is the safe default for a probe.
@@ -87,6 +103,10 @@ func stubClusterRead(_ context.Context, name string, args ...string) ([]byte, er
 		return []byte("dGVzdC1wYXNzd29yZA=="), nil
 	// CRD establishment checks look for "True".
 	case strings.Contains(joined, "get crd") && strings.Contains(joined, "Established"):
+		return []byte("True"), nil
+	case strings.Contains(joined, "get kafka") && strings.Contains(joined, "jsonpath={.status.conditions"):
+		return []byte("True"), nil
+	case strings.Contains(joined, "get kafkaconnect connect-cluster") && strings.Contains(joined, "jsonpath={.status.conditions"):
 		return []byte("True"), nil
 	case strings.Contains(joined, "get pods") && strings.Contains(joined, "entity-operator"):
 		return []byte("Running"), nil
@@ -439,7 +459,11 @@ func TestDeployCommand_KafkaConnectParameters(t *testing.T) {
 		foundKafkaConnect = true
 
 		connectSets := []string{
+			"--reset-values",
+			"--set-string clusterDomain=cluster.local",
+			"--set-string kafka.bootstrapServers=krafter-kafka-bootstrap.kafka.svc.cluster.local:9092",
 			"schemaRegistry.enabled=true",
+			"--set-string extraConfig.schema\\.registry\\.url=http://apicurio-apicurio-registry.kafka.svc.cluster.local:80/apis/ccompat/v7",
 			"networkPolicy.egress.databases[0].namespace=database",
 		}
 		for _, expected := range connectSets {
@@ -478,13 +502,21 @@ func TestDeployCommand_KafkaConnectParameters(t *testing.T) {
 	}
 
 	// 4. The backend may read that database's password Secret, and only in
-	// its namespace: the chart's ClusterRole grants no Secret at all.
+	// its namespace: the chart's ClusterRole grants no Secret at all. The
+	// backend also needs egress to the same database namespace for the CDC
+	// smoke test's JDBC setup and verification queries.
 	foundKates := false
 	for _, cmd := range executedCommands {
 		if strings.Contains(cmd, "helm upgrade --install kates charts/kates") {
 			foundKates = true
 			if !strings.Contains(cmd, "--set rbac.cdcSecretNamespaces={database}") {
 				t.Errorf("Expected the kates release to grant the CDC Secret in 'database', got: %s", cmd)
+			}
+			if !strings.Contains(cmd, "--set networkPolicy.cdcDatabase.enabled=true") {
+				t.Errorf("Expected the kates release to enable CDC database egress, got: %s", cmd)
+			}
+			if !strings.Contains(cmd, "--set networkPolicy.cdcDatabase.namespace=database") {
+				t.Errorf("Expected the kates release to point CDC database egress at 'database', got: %s", cmd)
 			}
 		}
 	}
@@ -494,10 +526,11 @@ func TestDeployCommand_KafkaConnectParameters(t *testing.T) {
 }
 
 // The INTEGRATION_CDC test reads the Secret postgresql in the database's
-// namespace, which the kates chart grants only in the namespaces it is
-// given. Naming a namespace that does not exist fails the install, so the
-// grant follows the database: the one this run installs or an earlier one.
-func TestCdcSecretArgsFollowTheDatabase(t *testing.T) {
+// namespace and connects to the matching Service. Both the RBAC grant and
+// NetworkPolicy egress follow the database: the one this run installs or an
+// earlier one. Naming a namespace that does not exist fails the install, so
+// no args are passed without a selected or existing CDC database.
+func TestCdcDatabaseAccessArgsFollowTheDatabase(t *testing.T) {
 	origDeployed := isHelmReleaseDeployedFn
 	defer func() {
 		isHelmReleaseDeployedFn = origDeployed
@@ -513,15 +546,20 @@ func TestCdcSecretArgsFollowTheDatabase(t *testing.T) {
 		asked = append(asked, namespace+"/"+release)
 		return dbInstalled
 	}
-	want := "--set rbac.cdcSecretNamespaces={cdc-db}"
-
 	deployWithKafkaConnect = true
-	if got := strings.Join(dc.cdcSecretArgs(), " "); got != want {
-		t.Errorf("with --with-kafka-connect: cdcSecretArgs = %q, want %q", got, want)
+	got := strings.Join(dc.cdcDatabaseAccessArgs(), " ")
+	for _, want := range []string{
+		"--set rbac.cdcSecretNamespaces={cdc-db}",
+		"--set networkPolicy.cdcDatabase.enabled=true",
+		"--set networkPolicy.cdcDatabase.namespace=cdc-db",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("with --with-kafka-connect: cdcDatabaseAccessArgs lacks %q in %q", want, got)
+		}
 	}
 
 	deployWithKafkaConnect = false
-	if args := dc.cdcSecretArgs(); args != nil {
+	if args := dc.cdcDatabaseAccessArgs(); args != nil {
 		t.Errorf("no database and no --with-kafka-connect: want no grant, got %q", args)
 	}
 	if len(asked) == 0 || asked[len(asked)-1] != "cdc-db/postgresql" {
@@ -529,8 +567,15 @@ func TestCdcSecretArgsFollowTheDatabase(t *testing.T) {
 	}
 
 	dbInstalled = true
-	if got := strings.Join(dc.cdcSecretArgs(), " "); got != want {
-		t.Errorf("database from an earlier run: cdcSecretArgs = %q, want %q", got, want)
+	got = strings.Join(dc.cdcDatabaseAccessArgs(), " ")
+	for _, want := range []string{
+		"--set rbac.cdcSecretNamespaces={cdc-db}",
+		"--set networkPolicy.cdcDatabase.enabled=true",
+		"--set networkPolicy.cdcDatabase.namespace=cdc-db",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("database from an earlier run: cdcDatabaseAccessArgs lacks %q in %q", want, got)
+		}
 	}
 }
 
@@ -894,6 +939,8 @@ func TestRunDeploy_PinsEveryCallToTheChosenCluster(t *testing.T) {
 	joined := strings.Join(all, "\n")
 	for _, want := range []string{
 		"helm status",                            // the release lookups
+		"kubectl apply --server-side",            // local Strimzi CRD apply
+		"--set crdUpgrade.enabled=false",         // no in-cluster GitHub-fetch hook
 		"helm upgrade --install monitoring",      // monitoring
 		"helm upgrade kyverno kyverno/kyverno",   // Kyverno's scrape, after monitoring
 		"helm upgrade --install connect-cluster", // Kafka Connect

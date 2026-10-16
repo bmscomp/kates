@@ -424,6 +424,18 @@
                 "defaultBackend": {
                     "type": "string",
                     "enum": [ "native", "trogdor" ]
+                },
+                "maxDurationMs": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                },
+                "reaperGraceMs": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                },
+                "submissionTimeoutMs": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
                 }
             }
         },
@@ -468,6 +480,18 @@
                     "type": "object",
                     "properties": {
                         "namespace": { "type": "string" },
+                        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+                    }
+                },
+                "cdcDatabase": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": { "type": "boolean" },
+                        "namespace": { "type": "string" },
+                        "podLabels": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" }
+                        },
                         "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
                     }
                 },

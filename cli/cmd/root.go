@@ -20,12 +20,14 @@ import (
 )
 
 var (
-	apiURL      string
-	outputMode  string
-	contextFlag string
-	apiKeyFlag  string
-	plainOutput bool
-	apiClient   *client.Client
+	apiURL           string
+	outputMode       string
+	contextFlag      string
+	apiKeyFlag       string
+	plainOutput      bool
+	apiClient        *client.Client
+	activeContext    string
+	apiURLOverridden bool
 )
 
 type Context struct {
@@ -450,7 +452,7 @@ var rootCmd = &cobra.Command{
 			}
 		}
 		cfg := loadConfig()
-		_, ctx, ctxErr := resolveContext(cfg)
+		ctxName, ctx, ctxErr := resolveContext(cfg)
 		urlOverridden := apiURL != ""
 		if apiURL == "" {
 			if envURL := os.Getenv("KATES_URL"); envURL != "" {
@@ -459,6 +461,8 @@ var rootCmd = &cobra.Command{
 				apiURL = ctx.URL
 			}
 		}
+		activeContext = ctxName
+		apiURLOverridden = urlOverridden
 		// The context's API key, proxy and TLS setting belong to its server.
 		// They used to go with whatever URL --url or KATES_URL gave, so the
 		// key was sent to that host too.

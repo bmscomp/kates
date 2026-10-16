@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,22 +47,28 @@ var wellKnownPorts = []struct {
 	Local  int
 	URL    string
 }{
-	{"kates/kates", katesAPILabel, 8080, 8080, "http://localhost:8080/api/health"},
-	{"kates/kates", "Kates gRPC", 9000, 9000, ""},
+	{"kates/kates", katesAPILabel, 8080, 8080, "http://127.0.0.1:8080/api/health"},
+	{"kates/kates", katesGRPCLabel, 9000, katesGRPCLocalPort, ""},
 	{"kafka/" + kafkaBootstrapPlaceholder, "Kafka Bootstrap (plain)", 9092, 9092, ""},
 	{"kafka/" + kafkaBootstrapPlaceholder, "Kafka Bootstrap (TLS)", 9093, 9093, ""},
-	{"kafka/apicurio", "Apicurio Schema Registry", 80, 8081, "http://localhost:8081/ui"},
-	{"kafka-ui/kafka-ui", "Kafka UI", 8080, 8085, "http://localhost:8085"},
-	{"monitoring/monitoring-grafana", "Grafana", 80, 3000, "http://localhost:3000"},
-	{"monitoring/monitoring-kube-prometheus-prometheus", "Prometheus", 9090, 9090, "http://localhost:9090"},
-	{"monitoring/monitoring-kube-prometheus-alertmanager", "Alertmanager", 9093, 9094, "http://localhost:9094"},
-	{"jaeger/jaeger-query", "Jaeger UI", 16686, 16686, "http://localhost:16686"},
+	{"kafka/apicurio", "Apicurio Schema Registry", 80, 8081, "http://127.0.0.1:8081/ui"},
+	{"kafka-ui/kafka-ui", "Kafka UI", 8080, 8085, "http://127.0.0.1:8085"},
+	{"monitoring/monitoring-grafana", "Grafana", 80, 3000, "http://127.0.0.1:3000"},
+	{"monitoring/monitoring-kube-prometheus-prometheus", "Prometheus", 9090, prometheusLocalPort, "http://127.0.0.1:30090"},
+	{"monitoring/monitoring-kube-prometheus-alertmanager", "Alertmanager", 9093, 9094, "http://127.0.0.1:9094"},
+	{"jaeger/jaeger-query", "Jaeger UI", 16686, 16686, "http://127.0.0.1:16686"},
 	{"kates/kates-postgresql", "PostgreSQL", 5432, 5432, ""},
 }
 
 // katesAPILabel names the forward of the Kates REST API, the one whose local
 // port the "ports" context points at.
 const katesAPILabel = "Kates REST API"
+
+const katesGRPCLabel = "Kates gRPC"
+
+const katesGRPCLocalPort = 9090
+
+const prometheusLocalPort = 30090
 
 // kafkaBootstrapPlaceholder stands for "<primary name>-kafka-bootstrap" in
 // wellKnownPorts and is substituted at match time from --kafka-name.
@@ -184,19 +191,7 @@ func runPorts(ctx context.Context) {
 		if taken[spec.Local] {
 			continue
 		}
-		cmd := exec.Command("kubectl", portForwardArgs(spec)...)
-		// Detach from the current process group so forwards survive after
-		// `kates ports` exits and the shell returns to prompt.
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-		if err == nil {
-			cmd.Stdout = devNull
-			cmd.Stderr = devNull
-		}
-		cmd.Stdin = nil
-		if err := cmd.Start(); err == nil && cmd.Process != nil {
-			_ = cmd.Process.Release()
-		}
+		_ = startPortForwardFn(spec)
 	}
 
 	// Verify reachability
@@ -262,7 +257,7 @@ func runPorts(ctx context.Context) {
 	// follow-up commands (health, resilience, tests) work without manual
 	// ctx/api-key edits.
 	if katesAPIForwardActive {
-		endpoint := fmt.Sprintf("http://localhost:%d", katesAPILocalPort)
+		endpoint := fmt.Sprintf("http://127.0.0.1:%d", katesAPILocalPort)
 		printPortsSync(os.Stdout, syncPortsContext(ctx, katesAPINS, endpoint))
 	} else if katesAPIPortTaken != 0 {
 		printAPIPortTaken(os.Stdout, katesAPIPortTaken)
@@ -276,6 +271,29 @@ func runPorts(ctx context.Context) {
 		fmt.Printf("    %s %s\n", errStyle.Render("⚠"), boldStyle.Render("Some port forwards failed to establish."))
 		fmt.Printf("      %s\n\n", output.DimStyle.Render("Check that the pods are ready, then run 'kates ports' again."))
 	}
+}
+
+var startPortForwardFn = startDetachedPortForward
+
+func startDetachedPortForward(spec portForwardSpec) error {
+	cmd := exec.Command("kubectl", portForwardArgs(spec)...)
+	// Detach from the current process group so forwards survive after
+	// `kates ports` exits and the shell returns to prompt.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err == nil {
+		defer devNull.Close()
+		cmd.Stdout = devNull
+		cmd.Stderr = devNull
+	}
+	cmd.Stdin = nil
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		return cmd.Process.Release()
+	}
+	return nil
 }
 
 // isKatesPortsCommand reports whether cmdLine, as ps prints it, runs kates
@@ -624,7 +642,16 @@ func checkAPIKey(ctx context.Context, endpoint, apiKey string) keyCheck {
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	httpClient := http.DefaultClient
+	if endpointIsLoopback(endpoint) {
+		httpClient = &http.Client{
+			Timeout: checkCtxDeadline(checkCtx),
+			Transport: &http.Transport{
+				Proxy: nil,
+			},
+		}
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return keyCheck{Verdict: keyUnverified, Detail: err.Error()}
 	}
@@ -640,6 +667,23 @@ func checkAPIKey(ctx context.Context, endpoint, apiKey string) keyCheck {
 	default:
 		return keyCheck{Verdict: keyUnverified, Detail: detail}
 	}
+}
+
+func endpointIsLoopback(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	return isLoopbackHost(u.Hostname())
+}
+
+func checkCtxDeadline(ctx context.Context) time.Duration {
+	if deadline, ok := ctx.Deadline(); ok {
+		if timeout := time.Until(deadline); timeout > 0 {
+			return timeout
+		}
+	}
+	return 5 * time.Second
 }
 
 // fetchKatesAPIKey reads the API key from Secret kates-api-key.
@@ -755,10 +799,85 @@ func printPortsSync(w io.Writer, s portsSync) {
 // reads from has to be on its command line.
 func portForwardArgs(spec portForwardSpec) []string {
 	return withKubeContext(portsKubeContext, "kubectl", []string{"port-forward",
+		"--address", "127.0.0.1",
 		spec.Resource,
 		fmt.Sprintf("%d:%d", spec.Local, spec.Remote),
 		"-n", spec.Namespace,
 	})
+}
+
+const localAPIRepairWait = 3 * time.Second
+
+func repairLocalAPIPortForward(ctx context.Context, _ error) (bool, error) {
+	if apiClient == nil || activeContext != portsContextName || apiURLOverridden {
+		return false, nil
+	}
+	u, err := url.Parse(apiClient.BaseURL)
+	if err != nil || !strings.EqualFold(u.Scheme, "http") || !isLoopbackHost(u.Hostname()) {
+		return false, nil
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port <= 0 {
+		return false, nil
+	}
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	if isPortReachable(addr) || localPortTaken(port) {
+		return false, nil
+	}
+
+	repairCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	spec, err := findKatesAPIPortForwardSpec(repairCtx, port)
+	if err != nil {
+		return false, err
+	}
+	if err := startPortForwardFn(spec); err != nil {
+		return false, err
+	}
+	if !waitForLocalPort(repairCtx, port, localAPIRepairWait) {
+		return false, fmt.Errorf("port-forward %s %d:%d in namespace %s did not become reachable",
+			spec.Resource, spec.Local, spec.Remote, spec.Namespace)
+	}
+	return true, nil
+}
+
+func findKatesAPIPortForwardSpec(ctx context.Context, localPort int) (portForwardSpec, error) {
+	discovered := discoverServices(ctx)
+	if len(discovered) == 0 {
+		return portForwardSpec{}, errors.New("could not discover service/kates in the current Kubernetes context")
+	}
+	for _, spec := range matchSpecs(discovered) {
+		if spec.Label == katesAPILabel {
+			spec.Local = localPort
+			spec.URL = fmt.Sprintf("http://127.0.0.1:%d/api/health", localPort)
+			return spec, nil
+		}
+	}
+	return portForwardSpec{}, errors.New("service/kates was not found in any namespace")
+}
+
+func waitForLocalPort(ctx context.Context, port int, wait time.Duration) bool {
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	if isPortReachable(addr) {
+		return true
+	}
+	deadline := time.NewTimer(wait)
+	defer deadline.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline.C:
+			return isPortReachable(addr)
+		case <-tick.C:
+			if isPortReachable(addr) {
+				return true
+			}
+		}
+	}
 }
 
 // discoverServices returns a set of "namespace/service-name" strings for all

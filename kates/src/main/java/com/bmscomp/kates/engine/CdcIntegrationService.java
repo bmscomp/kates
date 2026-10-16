@@ -37,6 +37,7 @@ import com.bmscomp.kates.domain.TestResult;
 public class CdcIntegrationService {
 
     private static final Logger LOG = Logger.getLogger(CdcIntegrationService.class);
+    static final String SINK_AUTO_OFFSET_RESET = "earliest";
     private static final String SOURCE_CONNECTOR_PREFIX = "integration-test-source-";
     private static final String SINK_CONNECTOR_PREFIX = "integration-test-sink-";
     private static final String SOURCE_TABLE_PREFIX = "connect_test_src_";
@@ -269,42 +270,8 @@ public class CdcIntegrationService {
                         // Note: database password is embedded in the connector config. This is acceptable
                         // for short-lived integration test connectors that are deleted within minutes.
                         // For production connectors, use KafkaConnect externalConfiguration with mounted secrets.
-                        String sourceYaml = String.format(
-                                """
-                        apiVersion: kafka.strimzi.io/v1
-                        kind: KafkaConnector
-                        metadata:
-                          name: %s
-                          namespace: %s
-                          labels:
-                            strimzi.io/cluster: %s
-                        spec:
-                          class: io.debezium.connector.postgresql.PostgresConnector
-                          tasksMax: 1
-                          config:
-                            database.hostname: postgresql.%s.svc
-                            database.port: "5432"
-                            database.user: postgres
-                            database.password: %s
-                            database.dbname: postgres
-                            topic.prefix: cdc
-                            plugin.name: pgoutput
-                            slot.name: %s
-                            table.include.list: public.%s
-                            transforms: unwrap
-                            transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState
-                            key.converter: org.apache.kafka.connect.json.JsonConverter
-                            key.converter.schemas.enable: true
-                            value.converter: org.apache.kafka.connect.json.JsonConverter
-                            value.converter.schemas.enable: true
-                        """,
-                                runResources.sourceConnectorName(),
-                                connectNamespace,
-                                connectName,
-                                testDbNS,
-                                dbPassword,
-                                runResources.slotName(),
-                                runResources.sourceTable());
+                        String sourceYaml =
+                                sourceConnectorYaml(runResources, connectNamespace, connectName, testDbNS, dbPassword);
 
                         kubernetesClient
                                 .genericKubernetesResources(CONNECTOR_CRD)
@@ -319,43 +286,8 @@ public class CdcIntegrationService {
                         if (progressCallback != null) progressCallback.accept("SINK_DEPLOY", phaseDurations);
                         phaseStart = Instant.now();
                         LOG.info("Deploying Kafka Sink Connector...");
-                        String sinkYaml = String.format(
-                                """
-                        apiVersion: kafka.strimzi.io/v1
-                        kind: KafkaConnector
-                        metadata:
-                          name: %s
-                          namespace: %s
-                          labels:
-                            strimzi.io/cluster: %s
-                        spec:
-                          class: io.debezium.connector.jdbc.JdbcSinkConnector
-                          tasksMax: 1
-                          config:
-                            connection.url: jdbc:postgresql://postgresql.%s.svc:5432/postgres
-                            connection.username: postgres
-                            connection.password: %s
-                            topics: %s
-                            table.name.format: %s
-                            insert.mode: insert
-                            auto.create: false
-                            auto.evolve: false
-                            consumer.override.auto.offset.reset: latest
-                            transforms: dropDeleted
-                            transforms.dropDeleted.type: org.apache.kafka.connect.transforms.ReplaceField$Value
-                            transforms.dropDeleted.blacklist: __deleted
-                            key.converter: org.apache.kafka.connect.json.JsonConverter
-                            key.converter.schemas.enable: true
-                            value.converter: org.apache.kafka.connect.json.JsonConverter
-                            value.converter.schemas.enable: true
-                        """,
-                                runResources.sinkConnectorName(),
-                                connectNamespace,
-                                connectName,
-                                testDbNS,
-                                dbPassword,
-                                runResources.topicName(),
-                                runResources.sinkTable());
+                        String sinkYaml =
+                                sinkConnectorYaml(runResources, connectNamespace, connectName, testDbNS, dbPassword);
 
                         kubernetesClient
                                 .genericKubernetesResources(CONNECTOR_CRD)
@@ -599,6 +531,96 @@ public class CdcIntegrationService {
                 buildName(SLOT_PREFIX, runToken, POSTGRES_IDENTIFIER_MAX_LENGTH),
                 TOPIC_NAME_PREFIX + sourceTable,
                 buildName(TOPIC_RESOURCE_PREFIX, runToken, K8S_NAME_MAX_LENGTH));
+    }
+
+    static String sourceConnectorYaml(
+            CdcRunResources runResources,
+            String connectNamespace,
+            String connectName,
+            String testDbNS,
+            String dbPassword) {
+        return String.format(
+                """
+        apiVersion: kafka.strimzi.io/v1
+        kind: KafkaConnector
+        metadata:
+          name: %s
+          namespace: %s
+          labels:
+            strimzi.io/cluster: %s
+        spec:
+          class: io.debezium.connector.postgresql.PostgresConnector
+          tasksMax: 1
+          config:
+            database.hostname: postgresql.%s.svc
+            database.port: "5432"
+            database.user: postgres
+            database.password: %s
+            database.dbname: postgres
+            topic.prefix: cdc
+            plugin.name: pgoutput
+            slot.name: %s
+            table.include.list: public.%s
+            transforms: unwrap
+            transforms.unwrap.type: io.debezium.transforms.ExtractNewRecordState
+            key.converter: org.apache.kafka.connect.json.JsonConverter
+            key.converter.schemas.enable: true
+            value.converter: org.apache.kafka.connect.json.JsonConverter
+            value.converter.schemas.enable: true
+        """,
+                runResources.sourceConnectorName(),
+                connectNamespace,
+                connectName,
+                testDbNS,
+                dbPassword,
+                runResources.slotName(),
+                runResources.sourceTable());
+    }
+
+    static String sinkConnectorYaml(
+            CdcRunResources runResources,
+            String connectNamespace,
+            String connectName,
+            String testDbNS,
+            String dbPassword) {
+        return String.format(
+                """
+        apiVersion: kafka.strimzi.io/v1
+        kind: KafkaConnector
+        metadata:
+          name: %s
+          namespace: %s
+          labels:
+            strimzi.io/cluster: %s
+        spec:
+          class: io.debezium.connector.jdbc.JdbcSinkConnector
+          tasksMax: 1
+          config:
+            connection.url: jdbc:postgresql://postgresql.%s.svc:5432/postgres
+            connection.username: postgres
+            connection.password: %s
+            topics: %s
+            table.name.format: %s
+            insert.mode: insert
+            auto.create: false
+            auto.evolve: false
+            consumer.override.auto.offset.reset: %s
+            transforms: dropDeleted
+            transforms.dropDeleted.type: org.apache.kafka.connect.transforms.ReplaceField$Value
+            transforms.dropDeleted.blacklist: __deleted
+            key.converter: org.apache.kafka.connect.json.JsonConverter
+            key.converter.schemas.enable: true
+            value.converter: org.apache.kafka.connect.json.JsonConverter
+            value.converter.schemas.enable: true
+        """,
+                runResources.sinkConnectorName(),
+                connectNamespace,
+                connectName,
+                testDbNS,
+                dbPassword,
+                runResources.topicName(),
+                runResources.sinkTable(),
+                SINK_AUTO_OFFSET_RESET);
     }
 
     private static String sanitizeRunToken(String tokenSeed) {

@@ -63,11 +63,11 @@ func TestReadChartVendored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadChart: %v", err)
 	}
-	if c.Version != "1.1.0" {
-		t.Errorf("Version = %q, want 1.1.0", c.Version)
+	if c.Version != "1.2.0" {
+		t.Errorf("Version = %q, want 1.2.0", c.Version)
 	}
-	if got := c.Window.Strings(); !slices.Equal(got, []string{"4.2.0", "4.2.1", "4.3.0"}) {
-		t.Errorf("Window = %v, want [4.2.0 4.2.1 4.3.0]", got)
+	if got := c.Window.Strings(); !slices.Equal(got, []string{"4.2.0", "4.2.1", "4.3.0", "4.3.1"}) {
+		t.Errorf("Window = %v, want [4.2.0 4.2.1 4.3.0 4.3.1]", got)
 	}
 	if !slices.Equal(c.Served, []string{"v1"}) {
 		t.Errorf("Served = %v, want [v1]", c.Served)
@@ -75,8 +75,8 @@ func TestReadChartVendored(t *testing.T) {
 	if c.Stored != "v1" {
 		t.Errorf("Stored = %q, want v1", c.Stored)
 	}
-	if c.ImageTag != "1.1.0" {
-		t.Errorf("ImageTag = %q, want 1.1.0", c.ImageTag)
+	if c.ImageTag != "1.2.0" {
+		t.Errorf("ImageTag = %q, want 1.2.0", c.ImageTag)
 	}
 	if fc := CheckPrimaryFloor(c, kafkaversion.MustParse("4.2.0")); !fc.OK {
 		t.Errorf("CheckPrimaryFloor(pin) = %+v", fc)
@@ -124,6 +124,56 @@ func TestReadChartVariants(t *testing.T) {
 			t.Errorf("ImageTag = %q", c.ImageTag)
 		}
 	})
+}
+
+func TestCRDBundle(t *testing.T) {
+	path := buildChartTgz(t, chart110Files())
+	bundle, names, err := CRDBundle(path)
+	if err != nil {
+		t.Fatalf("CRDBundle: %v", err)
+	}
+
+	wantNames := []string{
+		"kafkaconnects.kafka.strimzi.io",
+		"kafkas.kafka.strimzi.io",
+		"kafkatopics.kafka.strimzi.io",
+	}
+	if !slices.Equal(names, wantNames) {
+		t.Errorf("names = %v, want %v", names, wantNames)
+	}
+	for _, want := range []string{
+		"# Source: crds/040-Crd-kafka.yaml",
+		"name: kafkas.kafka.strimzi.io",
+		"# Source: crds/041-Crd-kafkaconnect.yaml",
+		"name: kafkaconnects.kafka.strimzi.io",
+		"# Source: crds/043-Crd-kafkatopic.yaml",
+		"name: kafkatopics.kafka.strimzi.io",
+	} {
+		if !strings.Contains(bundle, want) {
+			t.Errorf("bundle does not contain %q:\n%s", want, bundle)
+		}
+	}
+	if strings.Contains(bundle, "README.md") || strings.Contains(bundle, "grafana-dashboards") {
+		t.Errorf("bundle included non-CRD chart files:\n%s", bundle)
+	}
+}
+
+func TestCRDBundleErrors(t *testing.T) {
+	noCRDs := chart110Files()
+	for name := range noCRDs {
+		if strings.HasPrefix(name, "crds/") {
+			delete(noCRDs, name)
+		}
+	}
+	if _, _, err := CRDBundle(buildChartTgz(t, noCRDs)); err == nil || !strings.Contains(err.Error(), "no CRDs") {
+		t.Fatalf("no CRDs error = %v, want no CRDs", err)
+	}
+
+	bad := chart110Files()
+	bad["crds/043-Crd-kafkatopic.yaml"] = "metadata: [\n  name: kafkatopics.kafka.strimzi.io"
+	if _, _, err := CRDBundle(buildChartTgz(t, bad)); err == nil || !strings.Contains(err.Error(), "crds/043-Crd-kafkatopic.yaml") {
+		t.Fatalf("bad CRD error = %v, want file name", err)
+	}
 }
 
 func TestReadChartErrors(t *testing.T) {
@@ -209,7 +259,7 @@ func TestVendoredChartPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("VendoredChartPath: %v", err)
 		}
-		if filepath.Base(got) != "strimzi-kafka-operator-1.1.0.tgz" {
+		if filepath.Base(got) != "strimzi-kafka-operator-1.2.0.tgz" {
 			t.Errorf("VendoredChartPath = %q", got)
 		}
 	})

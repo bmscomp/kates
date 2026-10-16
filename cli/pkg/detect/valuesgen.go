@@ -98,15 +98,9 @@ func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
 		cb.WeakestZoneCPU = int(^uint(0) >> 1) // MaxInt
 		cb.WeakestZoneMem = int(^uint(0) >> 1)
 		for _, z := range zones {
-			zoneCPU := int(float64(z.CPUAllocatable) * usable)
-			zoneMem := int(float64(z.MemAllocatableGi) * usable)
-			// Subtract per-zone workload pressure if available
-			for _, zp := range g.Report.Workload.PerZone {
-				if zp.Name == z.Name {
-					zoneCPU -= zp.CPUAvailable // already net
-					zoneMem -= zp.MemAvailable
-				}
-			}
+			availableCPU, availableMem := g.availableInZone(z)
+			zoneCPU := int(float64(availableCPU) * usable)
+			zoneMem := int(float64(availableMem) * usable)
 			if zoneCPU < cb.WeakestZoneCPU {
 				cb.WeakestZoneCPU = zoneCPU
 				cb.WeakestZone = z.Name
@@ -129,6 +123,7 @@ func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
 
 	// Step 7: Distribute across components
 	totalBrokers := cb.BrokerReplicas * max(len(zones), 1)
+	podCPUCap, podMemCap := g.schedulablePodBudget(zones, usable)
 
 	// Controller distribution
 	if cb.ControllerReplicas > 0 {
@@ -136,10 +131,12 @@ func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
 			int(float64(cb.KafkaCPU)*controllerCPUShare)/cb.ControllerReplicas,
 			minControllerCPU, maxControllerCPU,
 		)
+		cb.ControllerCPU = capRequest(cb.ControllerCPU, podCPUCap)
 		cb.ControllerMem = clamp(
 			int(float64(cb.KafkaMem)*controllerMemShare)/cb.ControllerReplicas,
 			minControllerMem, maxControllerMem,
 		)
+		cb.ControllerMem = capRequest(cb.ControllerMem, podMemCap)
 	}
 
 	// Broker distribution
@@ -148,10 +145,12 @@ func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
 			int(float64(cb.KafkaCPU)*brokerCPUShare)/totalBrokers,
 			minBrokerCPU, maxBrokerCPU,
 		)
+		cb.BrokerCPU = capRequest(cb.BrokerCPU, podCPUCap)
 		cb.BrokerMem = clamp(
 			int(float64(cb.KafkaMem)*brokerMemShare)/totalBrokers,
 			minBrokerMem, maxBrokerMem,
 		)
+		cb.BrokerMem = capRequest(cb.BrokerMem, podMemCap)
 	}
 
 	// Step 8: Storage budget
@@ -181,6 +180,110 @@ func (g *ValuesGenerator) selectBrokerReplicas() int {
 	// Kates currently provisions 3 Broker Pools (one for each availability zone).
 	// To deploy a standard 3-broker topology, we set the replicas per pool to 1.
 	return 1
+}
+
+func (g *ValuesGenerator) availableInZone(zone ZoneInfo) (cpuMilli int, memGi int) {
+	for _, pressure := range g.Report.Workload.PerZone {
+		if pressure.Name == zone.Name {
+			return max(pressure.CPUAvailable, 0), max(pressure.MemAvailable, 0)
+		}
+	}
+	return max(zone.CPUAllocatable, 0), max(zone.MemAllocatableGi, 0)
+}
+
+func (g *ValuesGenerator) schedulablePodBudget(zones []ZoneInfo, usable float64) (cpuMilli int, memGi int) {
+	if len(g.Report.Nodes) == 0 {
+		return 0, 0
+	}
+
+	if len(zones) > 0 {
+		selectedZones := zones
+		if len(selectedZones) > 3 {
+			selectedZones = selectedZones[:3]
+		}
+		cpuMilli = int(^uint(0) >> 1)
+		memGi = int(^uint(0) >> 1)
+		for _, zone := range selectedZones {
+			bestCPU, bestMem, found := g.bestNodeBudgetInZone(zone.Name, usable)
+			if !found {
+				bestCPU, bestMem = g.availableInZone(zone)
+				bestCPU = int(float64(bestCPU) * usable)
+				bestMem = int(float64(bestMem) * usable)
+			}
+			if bestCPU < cpuMilli {
+				cpuMilli = bestCPU
+			}
+			if bestMem < memGi {
+				memGi = bestMem
+			}
+		}
+		if cpuMilli != int(^uint(0)>>1) || memGi != int(^uint(0)>>1) {
+			return max(cpuMilli, 0), max(memGi, 0)
+		}
+	}
+
+	for _, node := range g.Report.Nodes {
+		availableCPU, availableMem := g.availableOnNode(node)
+		nodeCPU := int(float64(availableCPU) * usable)
+		nodeMem := int(float64(availableMem) * usable)
+		if nodeCPU > cpuMilli {
+			cpuMilli = nodeCPU
+		}
+		if nodeMem > memGi {
+			memGi = nodeMem
+		}
+	}
+	return max(cpuMilli, 0), max(memGi, 0)
+}
+
+func (g *ValuesGenerator) bestNodeBudgetInZone(zone string, usable float64) (cpuMilli int, memGi int, found bool) {
+	for _, node := range g.Report.Nodes {
+		if node.Zone != zone {
+			continue
+		}
+		found = true
+		availableCPU, availableMem := g.availableOnNode(node)
+		nodeCPU := int(float64(availableCPU) * usable)
+		nodeMem := int(float64(availableMem) * usable)
+		if nodeCPU > cpuMilli {
+			cpuMilli = nodeCPU
+		}
+		if nodeMem > memGi {
+			memGi = nodeMem
+		}
+	}
+	return cpuMilli, memGi, found
+}
+
+func (g *ValuesGenerator) availableOnNode(node NodeInfo) (cpuMilli int, memGi int) {
+	cpuMilli = max(node.CPU, 0)
+	memGi = max(node.MemoryGi, 0)
+	for _, pressure := range g.Report.Workload.PerNode {
+		if pressure.Name != node.Name {
+			continue
+		}
+		if pressure.CPUAvailable > 0 || pressure.CPURequested > 0 || pressure.CPUAllocatable > 0 {
+			cpuMilli = pressure.CPUAvailable
+			if cpuMilli == 0 {
+				cpuMilli = node.CPU - pressure.CPURequested
+			}
+		}
+		if pressure.MemAvailable > 0 || pressure.MemRequested > 0 || pressure.MemAllocatable > 0 {
+			memGi = pressure.MemAvailable
+			if memGi == 0 {
+				memGi = node.MemoryGi - pressure.MemRequested
+			}
+		}
+		return max(cpuMilli, 0), max(memGi, 0)
+	}
+	return cpuMilli, memGi
+}
+
+func capRequest(value, podCap int) int {
+	if podCap > 0 && value > podCap {
+		return podCap
+	}
+	return value
 }
 
 func (g *ValuesGenerator) computeStorageBudget(totalBrokers, totalControllers int) (brokerSt, ctrlSt string) {

@@ -42,8 +42,9 @@ import com.bmscomp.kates.service.TopicService;
  * PENDING, and settles it only once that write has landed: settling first
  * would hand back the permit of a run that then goes on producing.
  *
- * <p>Each run here gets a deadline of its creation itself (a max duration and
- * a grace of 0), so it is past it as soon as it is stored.
+ * <p>Each run here gets a deadline of its creation itself (a submission
+ * timeout, max duration and grace of 0), so it is past it as soon as it is
+ * stored.
  */
 class TestTimeoutReaperSubmissionTest {
 
@@ -119,6 +120,7 @@ class TestTimeoutReaperSubmissionTest {
         reaper.orchestrator = orchestrator;
         reaper.maxDurationMs = 0;
         reaper.graceMs = 0;
+        reaper.submissionTimeoutMs = 0;
     }
 
     @Test

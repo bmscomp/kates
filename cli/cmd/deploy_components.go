@@ -3,19 +3,671 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/strimzi"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 )
 
 // kyvernoChartVersion pins the Kyverno chart: the last stable patch of the
 // 3.6 minor series. Chart versions: https://kyverno.github.io/kyverno/
 const kyvernoChartVersion = "3.6.4"
+
+type deployProxySettings struct {
+	http    string
+	https   string
+	noProxy string
+}
+
+var readStrimziCRDBundleFn = strimzi.CRDBundle
+
+var prometheusOperatorCRDNames = []string{
+	"alertmanagerconfigs.monitoring.coreos.com",
+	"alertmanagers.monitoring.coreos.com",
+	"podmonitors.monitoring.coreos.com",
+	"probes.monitoring.coreos.com",
+	"prometheusagents.monitoring.coreos.com",
+	"prometheuses.monitoring.coreos.com",
+	"prometheusrules.monitoring.coreos.com",
+	"scrapeconfigs.monitoring.coreos.com",
+	"servicemonitors.monitoring.coreos.com",
+	"thanosrulers.monitoring.coreos.com",
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func loadProxyConf(path string) map[string]string {
+	values := map[string]string{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return values
+	}
+
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+		values[key] = value
+	}
+	return values
+}
+
+func rewriteLoopbackProxyURLForKind(proxyURL string) string {
+	if proxyURL == "" {
+		return proxyURL
+	}
+	rewritten := proxyURL
+	rewritten = strings.ReplaceAll(rewritten, "://localhost", "://host.docker.internal")
+	rewritten = strings.ReplaceAll(rewritten, "://127.0.0.1", "://host.docker.internal")
+	rewritten = strings.ReplaceAll(rewritten, "://[::1]", "://host.docker.internal")
+	rewritten = strings.ReplaceAll(rewritten, "@localhost", "@host.docker.internal")
+	rewritten = strings.ReplaceAll(rewritten, "@127.0.0.1", "@host.docker.internal")
+	rewritten = strings.ReplaceAll(rewritten, "@[::1]", "@host.docker.internal")
+	return rewritten
+}
+
+func detectDeployProxySettings(isKind bool) deployProxySettings {
+	settings := deployProxySettings{
+		http:    firstNonEmpty(os.Getenv("HTTP_PROXY"), os.Getenv("http_proxy")),
+		https:   firstNonEmpty(os.Getenv("HTTPS_PROXY"), os.Getenv("https_proxy")),
+		noProxy: firstNonEmpty(os.Getenv("NO_PROXY"), os.Getenv("no_proxy")),
+	}
+
+	if settings.http == "" || settings.https == "" || settings.noProxy == "" {
+		conf := loadProxyConf("proxy/proxy.conf")
+		if settings.http == "" {
+			settings.http = firstNonEmpty(conf["HTTP_PROXY"], conf["http_proxy"])
+		}
+		if settings.https == "" {
+			settings.https = firstNonEmpty(conf["HTTPS_PROXY"], conf["https_proxy"])
+		}
+		if settings.noProxy == "" {
+			settings.noProxy = firstNonEmpty(conf["NO_PROXY"], conf["no_proxy"])
+		}
+	}
+
+	if isKind {
+		settings.http = rewriteLoopbackProxyURLForKind(settings.http)
+		settings.https = rewriteLoopbackProxyURLForKind(settings.https)
+	} else {
+		settings.http = dropLoopbackProxyURL(settings.http)
+		settings.https = dropLoopbackProxyURL(settings.https)
+	}
+
+	return settings
+}
+
+func dropLoopbackProxyURL(proxyURL string) string {
+	if isLoopbackProxyURL(proxyURL) {
+		return ""
+	}
+	return proxyURL
+}
+
+func isLoopbackProxyURL(proxyURL string) bool {
+	if strings.TrimSpace(proxyURL) == "" {
+		return false
+	}
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func appendUniqueCommaSeparated(existing string, values ...string) string {
+	result := []string{}
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		result = append(result, trimmed)
+	}
+
+	for _, item := range strings.Split(existing, ",") {
+		add(item)
+	}
+	for _, item := range values {
+		add(item)
+	}
+
+	return strings.Join(result, ",")
+}
+
+func ensureKubernetesNoProxy(noProxy, clusterDomain string) string {
+	domain := strings.TrimSpace(clusterDomain)
+	if domain == "" {
+		domain = "cluster.local"
+	}
+
+	return appendUniqueCommaSeparated(
+		noProxy,
+		"localhost",
+		"127.0.0.1",
+		"::1",
+		"kubernetes",
+		"kubernetes.default",
+		"kubernetes.default.svc",
+		"kubernetes.default.svc."+domain,
+	)
+}
+
+func deployNamespaceLabelMap() (map[string]string, error) {
+	labels := map[string]string{
+		"app.kubernetes.io/managed-by": "kates",
+	}
+	if raw := strings.TrimSpace(os.Getenv("KATES_NAMESPACE_LABELS")); raw != "" {
+		if err := addDeployNamespaceLabelSpecs(labels, raw); err != nil {
+			return nil, err
+		}
+	}
+	for _, raw := range deployNamespaceLabels {
+		if err := addDeployNamespaceLabelSpecs(labels, raw); err != nil {
+			return nil, err
+		}
+	}
+	return labels, nil
+}
+
+func podSecurityRejectsHostLevelPods(level string) bool {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "baseline", "restricted":
+		return true
+	default:
+		return false
+	}
+}
+
+func monitoringNamespaceRejectsNodeExporter(ctx context.Context, namespace string) (bool, error) {
+	labels, err := deployNamespaceLabelMap()
+	if err != nil {
+		return false, err
+	}
+	if podSecurityRejectsHostLevelPods(labels["pod-security.kubernetes.io/enforce"]) {
+		return true, nil
+	}
+
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "namespace", namespace, "-o", `jsonpath={.metadata.labels.pod-security\.kubernetes\.io/enforce}`)
+	if err != nil {
+		return false, nil
+	}
+	return podSecurityRejectsHostLevelPods(string(out)), nil
+}
+
+func monitoringNodeExporterDaemonSetScheduled(ctx context.Context, namespace string) bool {
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "daemonset", "monitoring-prometheus-node-exporter",
+		"-n", namespace, "-o", "jsonpath={.status.desiredNumberScheduled}")
+	if err != nil {
+		return false
+	}
+	desired, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	return err == nil && desired > 0
+}
+
+func addDeployNamespaceLabelSpecs(labels map[string]string, raw string) error {
+	for _, spec := range strings.Split(raw, ",") {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(spec, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if !ok || key == "" || value == "" {
+			return fmt.Errorf("invalid namespace label %q: expected key=value", spec)
+		}
+		labels[key] = value
+	}
+	return nil
+}
+
+func deployNamespaceManifest(name string, labels map[string]string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n", name)
+	if len(labels) > 0 {
+		b.WriteString("  labels:\n")
+		keys := make([]string, 0, len(labels))
+		for key := range labels {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fmt.Fprintf(&b, "    %s: %s\n", key, strconv.Quote(labels[key]))
+		}
+	}
+	return b.String()
+}
+
+func ensureDeployNamespace(ctx context.Context, namespace string, labels map[string]string) error {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return nil
+	}
+	exists, err := deployNamespaceExists(ctx, namespace)
+	if err != nil {
+		return fmt.Errorf("check namespace %s: %w", namespace, err)
+	}
+	if !exists {
+		if err := runExecStdinFn(ctx, "kubectl", []string{"create", "-f", "-"}, deployNamespaceManifest(namespace, labels)); err != nil {
+			return fmt.Errorf("create namespace %s: %w", namespace, err)
+		}
+		return nil
+	}
+	if len(labels) == 0 {
+		return nil
+	}
+
+	labelArgs := []string{"label", "namespace", namespace}
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		labelArgs = append(labelArgs, key+"="+labels[key])
+	}
+	labelArgs = append(labelArgs, "--overwrite")
+	if out, err := runExecCombinedFn(ctx, "kubectl", labelArgs...); err != nil {
+		return commandErrorWithOutput("label namespace "+namespace, err, out)
+	}
+	return nil
+}
+
+func deployNamespaceExists(ctx context.Context, namespace string) (bool, error) {
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found", "-o", "jsonpath={.metadata.name}")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == namespace, nil
+}
+
+func ensureConfiguredDeployNamespace(ctx context.Context, namespace string) error {
+	labels, err := deployNamespaceLabelMap()
+	if err != nil {
+		return err
+	}
+	return ensureDeployNamespace(ctx, namespace, labels)
+}
+
+func ensureDeployNamespaces(ctx context.Context, dc *deployContext) error {
+	labels, err := deployNamespaceLabelMap()
+	if err != nil {
+		return err
+	}
+	names := selectedDeployNamespaces(dc)
+	if len(names) == 0 {
+		return nil
+	}
+	dl.Printf("    - Ensuring deploy namespaces exist (%s)...\n", strings.Join(names, ", "))
+	for _, name := range names {
+		if err := ensureDeployNamespace(ctx, name, labels); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func selectedDeployNamespaces(dc *deployContext) []string {
+	seen := map[string]bool{}
+	var names []string
+	add := func(namespace string) {
+		namespace = strings.TrimSpace(namespace)
+		if namespace == "" || seen[namespace] {
+			return
+		}
+		seen[namespace] = true
+		names = append(names, namespace)
+	}
+
+	add(dc.ns.kafka)
+	add(dc.ns.app)
+	if deployWithMonitoring {
+		add(dc.ns.jaeger)
+	}
+	if deployWithKafkaConnect {
+		add(dc.ns.connect)
+		add(deployDbNS)
+	}
+	if deployWithKafkaUI {
+		add(dc.ns.kafkaUI)
+	}
+	if deployWithMirrorMaker2 {
+		add(dc.ns.mm2)
+	}
+	if deployWithChaos {
+		add(dc.ns.chaos)
+	}
+	return names
+}
+
+func isKatesPostgresImmutableStatefulSetError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, `StatefulSet.apps "kates-postgresql" is invalid`) &&
+		strings.Contains(msg, "Forbidden: updates to statefulset spec") &&
+		strings.Contains(msg, "are forbidden")
+}
+
+func runKatesHelmUpgrade(ctx context.Context, appNS string, args ...string) error {
+	err := runHelmFn(ctx, args...)
+	if err == nil {
+		return nil
+	}
+	if !isKatesPostgresImmutableStatefulSetError(err) {
+		return err
+	}
+
+	dl.Println("    - Recreating immutable kates-postgresql StatefulSet object, preserving pod and PVC...")
+	if _, deleteErr := runExecCombinedFn(ctx, "kubectl", "delete", "statefulset", "kates-postgresql",
+		"-n", appNS, "--cascade=orphan", "--ignore-not-found"); deleteErr != nil {
+		return fmt.Errorf("kates helm upgrade hit immutable PostgreSQL StatefulSet and recovery failed: %v (original: %w)", deleteErr, err)
+	}
+
+	dl.Println("    - Retrying Kates backend Helm upgrade...")
+	if retryErr := runHelmFn(ctx, args...); retryErr != nil {
+		return fmt.Errorf("kates helm upgrade retry after recreating PostgreSQL StatefulSet failed: %w", retryErr)
+	}
+	return nil
+}
+
+func prepareEmptyPreV1StrimziReplacement(ctx context.Context, vp *versionPlan) error {
+	if vp == nil || !vp.ReplaceEmptyPreV1CRDs {
+		return nil
+	}
+	if vp.primaryOp != nil {
+		release := vp.primaryOp.HelmRelease
+		if release == "" {
+			return fmt.Errorf("cannot replace empty pre-v1 Strimzi CRDs automatically: the running operator %s/%s is not owned by a discoverable Helm release",
+				vp.primaryOp.Namespace, vp.primaryOp.Name)
+		}
+
+		dl.Printf("    - Empty pre-v1 Strimzi install detected; uninstalling Helm release %s/%s before CRD replacement...\n", vp.primaryOp.Namespace, release)
+		if out, err := runExecCombinedFn(ctx, "helm", "uninstall", release, "-n", vp.primaryOp.Namespace, "--wait", "--timeout", "5m"); err != nil {
+			return commandErrorWithOutput(fmt.Sprintf("uninstall old Strimzi operator release %s/%s", vp.primaryOp.Namespace, release), err, out)
+		}
+	}
+
+	if len(vp.ReplaceCRDs) == 0 {
+		return nil
+	}
+	dl.Printf("    - Labelling %d empty pre-v1 Strimzi CRDs for deletion...\n", len(vp.ReplaceCRDs))
+	labelArgs := append([]string{"label", "crd"}, vp.ReplaceCRDs...)
+	labelArgs = append(labelArgs, "allowDeletion=true", "--overwrite")
+	if out, err := runExecCombinedFn(ctx, "kubectl", labelArgs...); err != nil {
+		return commandErrorWithOutput("label empty pre-v1 Strimzi CRDs for deletion", err, out)
+	}
+	dl.Printf("    - Deleting %d empty pre-v1 Strimzi CRDs so v1 CRDs can be installed cleanly...\n", len(vp.ReplaceCRDs))
+	args := append([]string{"delete", "crd"}, vp.ReplaceCRDs...)
+	args = append(args, "--ignore-not-found", "--timeout=120s")
+	if out, err := runExecCombinedFn(ctx, "kubectl", args...); err != nil {
+		return commandErrorWithOutput("delete empty pre-v1 Strimzi CRDs", err, out)
+	}
+	return nil
+}
+
+func applyLocalStrimziCRDs(ctx context.Context, vp *versionPlan) error {
+	if vp == nil || strings.TrimSpace(vp.ChartPath) == "" {
+		return fmt.Errorf("cannot apply Strimzi CRDs locally: no operator chart tarball was resolved")
+	}
+	bundle, names, err := readStrimziCRDBundleFn(vp.ChartPath)
+	if err != nil {
+		return fmt.Errorf("read Strimzi CRDs from local chart %s: %w", vp.ChartPath, err)
+	}
+	if missing := missingRequiredStrimziCRDs(names); len(missing) > 0 {
+		return fmt.Errorf("operator chart %s does not contain required Strimzi CRDs: %s", vp.ChartPath, strings.Join(missing, ", "))
+	}
+
+	dl.Printf("    - Applying Strimzi CRDs from local chart %s...\n", filepath.Base(vp.ChartPath))
+	if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "--server-side", "--force-conflicts", "-f", "-"}, bundle); err != nil {
+		return fmt.Errorf("apply Strimzi CRDs from local chart %s: %w", vp.ChartPath, err)
+	}
+
+	args := []string{"wait", "--for=condition=Established"}
+	for _, crd := range strimzi.RequiredCRDNames() {
+		args = append(args, "crd/"+crd)
+	}
+	args = append(args, "--timeout=180s")
+	if out, err := runExecCombinedFn(ctx, "kubectl", args...); err != nil {
+		return commandErrorWithOutput("wait for Strimzi CRDs to be Established", err, out)
+	}
+	return nil
+}
+
+func missingRequiredStrimziCRDs(names []string) []string {
+	present := map[string]bool{}
+	for _, name := range names {
+		present[name] = true
+	}
+	var missing []string
+	for _, required := range strimzi.RequiredCRDNames() {
+		if !present[required] {
+			missing = append(missing, required)
+		}
+	}
+	return missing
+}
+
+func commandErrorWithOutput(action string, err error, out []byte) error {
+	msg := strings.TrimSpace(string(out))
+	if msg == "" {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	return fmt.Errorf("%s: %w: %s", action, err, msg)
+}
+
+func isKyvernoAvailable(ctx context.Context) bool {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	out, err := runExecOutputFn(checkCtx, "kubectl", "-n", "kyverno", "get", "deploy", "-l", "app.kubernetes.io/part-of=kyverno", "-o", "json")
+	if err != nil {
+		return false
+	}
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Spec struct {
+				Replicas *int32 `json:"replicas"`
+			} `json:"spec"`
+			Status struct {
+				ReadyReplicas int32 `json:"readyReplicas"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return false
+	}
+
+	required := map[string]bool{
+		"kyverno-admission-controller":  false,
+		"kyverno-background-controller": false,
+		"kyverno-cleanup-controller":    false,
+		"kyverno-reports-controller":    false,
+	}
+	for _, item := range list.Items {
+		if _, ok := required[item.Metadata.Name]; !ok {
+			continue
+		}
+		desired := int32(1)
+		if item.Spec.Replicas != nil {
+			desired = *item.Spec.Replicas
+		}
+		if desired > 0 && item.Status.ReadyReplicas >= desired {
+			required[item.Metadata.Name] = true
+		}
+	}
+	for _, ready := range required {
+		if !ready {
+			return false
+		}
+	}
+	return true
+}
+
+func prometheusOperatorCRDsAvailable(ctx context.Context) bool {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	args := append([]string{"get", "crd"}, prometheusOperatorCRDNames...)
+	if _, err := runExecOutputFn(checkCtx, "kubectl", args...); err != nil {
+		return false
+	}
+	return true
+}
+
+func isKafkaClusterReady(ctx context.Context, namespace, name string) bool {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	out, err := runExecOutputFn(checkCtx,
+		"kubectl", "get", "kafka", name, "-n", namespace,
+		"-o", `jsonpath={.status.conditions[?(@.type=="Ready")].status}`,
+	)
+	return err == nil && strings.Contains(string(out), "True")
+}
+
+func kafkaConnectNeedsReconcile(ctx context.Context, namespace, name, expectedBootstrap, expectedKafkaSearch string) (bool, string) {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	out, err := runExecOutputFn(checkCtx, "kubectl", "get", "kafkaconnect", name, "-n", namespace, "-o", "json")
+	if err != nil {
+		return true, "KafkaConnect CR is missing or unreadable"
+	}
+
+	var kc struct {
+		Spec struct {
+			BootstrapServers string         `json:"bootstrapServers"`
+			Config           map[string]any `json:"config"`
+			Template         struct {
+				Pod struct {
+					DNSConfig struct {
+						Searches []string `json:"searches"`
+					} `json:"dnsConfig"`
+				} `json:"pod"`
+			} `json:"template"`
+		} `json:"spec"`
+		Status struct {
+			Conditions []statusCondition `json:"conditions"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(out, &kc); err != nil {
+		return true, "KafkaConnect CR cannot be parsed"
+	}
+
+	if expectedBootstrap != "" && strings.TrimSpace(kc.Spec.BootstrapServers) != expectedBootstrap {
+		return true, fmt.Sprintf("bootstrap is %q, expected %q", strings.TrimSpace(kc.Spec.BootstrapServers), expectedBootstrap)
+	}
+	if expectedKafkaSearch != "" && !stringSliceContains(kc.Spec.Template.Pod.DNSConfig.Searches, expectedKafkaSearch) {
+		return true, fmt.Sprintf("DNS search list misses %q", expectedKafkaSearch)
+	}
+	if v, ok := kc.Spec.Config["schema"]; ok {
+		if _, nested := v.(map[string]any); nested {
+			return true, "dotted Connect config key schema.registry.url was stored as a nested map"
+		}
+	}
+	if isReadyConditionTrue(kc.Status.Conditions) != "True" {
+		return true, "KafkaConnect CR is not Ready"
+	}
+	return false, ""
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanupStaleKatesChartDependencies(chartDir string) error {
+	data, err := os.ReadFile(filepath.Join(chartDir, "Chart.yaml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", filepath.Join(chartDir, "Chart.yaml"), err)
+	}
+
+	var chart struct {
+		Dependencies []struct {
+			Name string `yaml:"name"`
+		} `yaml:"dependencies"`
+	}
+	if err := yaml.Unmarshal(data, &chart); err != nil {
+		return fmt.Errorf("parsing %s: %w", filepath.Join(chartDir, "Chart.yaml"), err)
+	}
+	if len(chart.Dependencies) > 0 {
+		return nil
+	}
+
+	removed := false
+	for _, path := range []string{filepath.Join(chartDir, "Chart.lock"), filepath.Join(chartDir, "charts")} {
+		if _, err := os.Stat(path); err == nil {
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("removing stale Helm dependency artifact %s: %w", path, err)
+			}
+			removed = true
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("checking stale Helm dependency artifact %s: %w", path, err)
+		}
+	}
+	if removed {
+		dl.Println("    - Removed stale Kates chart dependency artifacts...")
+	}
+	return nil
+}
 
 // deployGroupA deploys Group A components (Operators & CRDs) in parallel:
 // Strimzi, Cert-Manager, and Kyverno.
@@ -27,9 +679,8 @@ func deployGroupA(dc *deployContext) error {
 	// ---------------------------------------------------------
 	// Strimzi is reconciled unconditionally. `helm upgrade --install` converges,
 	// and charts/strimzi-operator's pre-upgrade hook is what keeps the CRDs
-	// current — skipping when the release already exists means the hook never
-	// fires on an existing cluster and the CRDs silently freeze at whatever
-	// version first installed them.
+	// current — skipping when the release already exists means the CRDs can
+	// silently freeze at whatever version first installed them.
 	deployStrimzi := deployWithStrimzi
 	deployCertMgr := false
 	if deployWithCertManager {
@@ -38,6 +689,9 @@ func deployGroupA(dc *deployContext) error {
 	deployKyvernoFlag := false
 	if deployWithKyverno {
 		deployKyvernoFlag = !isHelmReleaseDeployedFn(ctx, "kyverno", "kyverno")
+		if deployKyvernoFlag && isKyvernoAvailable(ctx) {
+			deployKyvernoFlag = false
+		}
 	}
 	dc.kyvernoInstalled = deployKyvernoFlag
 
@@ -53,11 +707,13 @@ func deployGroupA(dc *deployContext) error {
 				return nil
 			}
 			dl.Println("\n📦 Deploying Strimzi Operator (Namespace: strimzi-operator)...")
+			if err := prepareEmptyPreV1StrimziReplacement(gCtx, dc.versions); err != nil {
+				return err
+			}
 			// Create namespace properly
-			runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, `apiVersion: v1
-kind: Namespace
-metadata:
-  name: strimzi-operator`)
+			if err := ensureConfiguredDeployNamespace(gCtx, "strimzi-operator"); err != nil {
+				return err
+			}
 			clusterDomain := dc.resolveClusterDomain()
 			// The wrapper chart does not render until its subchart is fetched.
 			// `build` (not `update`) resolves from Chart.lock, so the pinned
@@ -77,6 +733,9 @@ metadata:
 					return err
 				}
 			}
+			if err := applyLocalStrimziCRDs(gCtx, dc.versions); err != nil {
+				return err
+			}
 			// Everything this call site used to --set is now pinned in the
 			// chart's values.yaml; only the cluster domain is environment-
 			// specific. The old leaderElection.enabled=false is gone on
@@ -90,7 +749,8 @@ metadata:
 			opArgs := []string{"upgrade", "--install", "strimzi-operator", chartDir, "-n", "strimzi-operator",
 				"--reset-values",
 				"-f", dc.chartOverlay("charts/strimzi-operator"),
-				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain=" + clusterDomain}
+				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain=" + clusterDomain,
+				"--set", "crdUpgrade.enabled=false"}
 			opArgs = append(opArgs, versionArgs...)
 			opArgs = append(opArgs, "--timeout", "10m")
 			if err := runHelmFn(gCtx, opArgs...); err != nil {
@@ -374,9 +1034,23 @@ func deployGroupB(dc *deployContext) error {
 	// ---------------------------------------------------------
 
 	deployKafka := !isHelmReleaseDeployedFn(ctx, dc.primary.Name, kafkaNS)
+	if !deployKafka && !isKafkaClusterReady(ctx, kafkaNS, dc.primary.Name) {
+		dl.Println("    - Kafka Helm release exists but Kafka CR is not Ready; reconciling release...")
+		deployKafka = true
+	}
 	deployMon := false
+	monitoringRejectsNodeExporter := false
 	if deployWithMonitoring {
+		var err error
+		monitoringRejectsNodeExporter, err = monitoringNamespaceRejectsNodeExporter(ctx, jaegerNS)
+		if err != nil {
+			return err
+		}
 		deployMon = !isHelmReleaseDeployedFn(ctx, "monitoring", jaegerNS)
+		if !deployMon && monitoringRejectsNodeExporter && monitoringNodeExporterDaemonSetScheduled(ctx, jaegerNS) {
+			dl.Println("    - Monitoring Helm release exists but node-exporter cannot run under namespace PodSecurity; reconciling release...")
+			deployMon = true
+		}
 	}
 	deployPG := false
 	if deployWithKafkaConnect {
@@ -428,13 +1102,24 @@ func deployGroupB(dc *deployContext) error {
 		// Update chart dependencies (kube-prometheus-stack subchart).
 		runHelmFn(ctx, "dependency", "update", "charts/monitoring")
 
-		if err := runHelmFn(ctx, "upgrade", "--install", "monitoring",
+		monitoringArgs := []string{"upgrade", "--install", "monitoring",
 			"charts/monitoring",
 			"-n", jaegerNS, "--create-namespace",
 			"-f", dc.chartOverlay("charts/monitoring"),
-			"--set", "kube-prometheus-stack.global.clusterDomain="+dc.report.Network.ClusterDomain,
+			"--set", "kube-prometheus-stack.global.clusterDomain=" + dc.report.Network.ClusterDomain,
 			"--set", fmt.Sprintf("chaosAlerts.enabled=%t", deployWithChaos),
-			"--timeout", "10m"); err != nil {
+			"--timeout", "10m"}
+		if monitoringRejectsNodeExporter {
+			dl.Println("    - Monitoring namespace enforces baseline/restricted PodSecurity; disabling node-exporter...")
+			monitoringArgs = append(monitoringArgs,
+				"--set", "kube-prometheus-stack.nodeExporter.enabled=false",
+				"--set", "kube-prometheus-stack.prometheus-node-exporter.enabled=false")
+		}
+		if prometheusOperatorCRDsAvailable(ctx) {
+			dl.Println("    - Reusing existing Prometheus Operator CRDs...")
+			monitoringArgs = append(monitoringArgs, "--set", "kube-prometheus-stack.crds.enabled=false")
+		}
+		if err := runHelmFn(ctx, monitoringArgs...); err != nil {
 			return fmt.Errorf("failed during Group B (Core Infra) deployments: %w", err)
 		}
 	}
@@ -445,10 +1130,9 @@ func deployGroupB(dc *deployContext) error {
 		g2.Go(func() error {
 			dbNS := deployDbNS
 
-			runExecStdinFn(g2Ctx, "kubectl", []string{"apply", "-f", "-"}, fmt.Sprintf(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s`, dbNS))
+			if err := ensureConfiguredDeployNamespace(g2Ctx, dbNS); err != nil {
+				return err
+			}
 
 			runHelmFn(g2Ctx, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami")
 			runHelmFn(g2Ctx, "repo", "update", "bitnami")
@@ -628,14 +1312,16 @@ func deployKafkaConnectStack(dc *deployContext) error {
 
 	// Ensure connect namespace exists (idempotent — won't fail if already present)
 	dl.Println("    - Ensuring connect namespace exists...")
-	connectNsYaml := fmt.Sprintf(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s`, connectNS)
-	runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectNsYaml)
+	if err := ensureConfiguredDeployNamespace(ctx, connectNS); err != nil {
+		return err
+	}
 
 	connectDomain := dc.resolveClusterDomain()
 	bootstrap := dc.primary.Bootstrap(connectDomain)
+	kafkaSvcDomain := ""
+	if connectNS != kafkaNS {
+		kafkaSvcDomain = fmt.Sprintf("%s.svc.%s", kafkaNS, connectDomain)
+	}
 
 	// Copy the kates-connect credentials from the kafka namespace to the connect
 	// namespace (cross-namespace). The worker's exporter rules used to be copied
@@ -704,14 +1390,9 @@ stringData:
 
 	connectDeployed := isHelmReleaseDeployedFn(ctx, "connect-cluster", connectNS)
 	if connectDeployed && !isTesting {
-		// Helm says deployed, but verify pods actually exist.
-		// A previous deploy may have installed the chart but the
-		// workload never started (e.g. missing ConfigMap).
-		podCheck, _ := runExecOutputFn(ctx, "kubectl", "get", "pods",
-			"-n", connectNS, "-l", "strimzi.io/kind=KafkaConnect",
-			"-o", "jsonpath={.items}")
-		if string(podCheck) == "[]" || len(strings.TrimSpace(string(podCheck))) == 0 {
-			dl.Println("    ⚠  Kafka Connect release exists but no pods found — upgrading...")
+		needsReconcile, reason := kafkaConnectNeedsReconcile(ctx, connectNS, "connect-cluster", bootstrap, kafkaSvcDomain)
+		if needsReconcile {
+			dl.Printf("    ⚠  Kafka Connect release exists but %s — upgrading...\n", reason)
 			connectDeployed = false
 		}
 	}
@@ -728,17 +1409,15 @@ stringData:
 		registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
 			kafkaNS, connectDomain)
 
-		// Use the same FQDN pattern as the kates backend for bootstrap servers
-		bootstrap := dc.primary.Bootstrap(connectDomain)
-
 		connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
 			"-n", connectNS, "--create-namespace",
+			"--reset-values",
 			"-f", dc.chartOverlay("charts/connect-cluster"),
-			"--set", "clusterDomain=" + connectDomain,
+			"--set-string", "clusterDomain=" + connectDomain,
 			"--set", "kafka.namespace=" + kafkaNS,
-			"--set", "kafka.bootstrapServers=" + bootstrap,
+			"--set-string", "kafka.bootstrapServers=" + bootstrap,
 			"--set", "schemaRegistry.enabled=true",
-			"--set", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
+			"--set-string", "extraConfig.schema\\.registry\\.url=" + registryFQDN,
 			"--set", "networkPolicy.egress.databases[0].namespace=" + deployDbNS,
 			"--set", "networkPolicy.egress.databases[0].port=5432",
 			"--set", "networkPolicy.egress.databases[0].podSelector.app\\.kubernetes\\.io/name=postgresql",
@@ -759,10 +1438,9 @@ stringData:
 		// short hostnames (e.g. krafter-brokers-0.krafter-kafka-brokers.kafka.svc)
 		// that only resolve within the kafka namespace DNS search domain.
 		// Add the kafka namespace to Connect pod DNS search list.
-		if connectNS != kafkaNS {
-			kafkaSvcDomain := fmt.Sprintf("%s.svc.%s", kafkaNS, connectDomain)
+		if kafkaSvcDomain != "" {
 			connectArgs = append(connectArgs,
-				"--set", "dnsConfig.searches[0]="+kafkaSvcDomain,
+				"--set-string", "dnsConfig.searches[0]="+kafkaSvcDomain,
 			)
 		}
 
@@ -782,13 +1460,17 @@ stringData:
 		}
 	} else {
 		dl.Println(output.Glyphs().Skip + "  Kafka Connect already deployed. Skipping.")
-		dl.FinishComponent("kafka-connect", true)
-		dc.advanceStep()
 	}
 
-	if err := dc.deployComponent("kafka-connect", connectNS, "strimzi.io/kind=KafkaConnect", 15*time.Minute, ""); err != nil {
-		return fmt.Errorf("Kafka Connect failed to become ready: %w", err)
+	dl.StartComponent("kafka-connect", 15*time.Minute)
+	if !isTesting {
+		if err := waitKafkaConnectReadySilent(ctx, connectNS, "connect-cluster", 15*time.Minute); err != nil {
+			dl.FinishComponent("kafka-connect", false)
+			return fmt.Errorf("kafka connect failed to become ready: %w", err)
+		}
 	}
+	dl.FinishComponent("kafka-connect", true)
+	dc.advanceStep()
 
 	// Deploy Debezium connector
 	checkOut, checkErr := runExecCombinedFn(ctx, "kubectl", "get", "kafkaconnector", "debezium-postgres-source", "-n", connectNS, "--no-headers")
@@ -948,12 +1630,9 @@ func deployGroupC(dc *deployContext) error {
 
 		if kafkaNS != appNS {
 			// Ensure app namespace exists before copying secrets into it.
-			nsYaml := fmt.Sprintf(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s
-spec: {}`, appNS)
-			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
+			if err := ensureConfiguredDeployNamespace(ctx, appNS); err != nil {
+				return err
+			}
 
 			// The KafkaUser was already waited on in Group B — just read the Secret.
 			pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-backend",
@@ -977,41 +1656,39 @@ data:
 
 		katesBootstrap := dc.primary.Bootstrap(dc.report.Network.ClusterDomain)
 
-		// On kind the backend runs the native image built from the working
-		// tree (deploy_localimage.go). Checked before the Helm call, because
-		// the overlay pins pullPolicy: Never: a missing image would otherwise
-		// be an ErrImageNeverPull discovered eight minutes later, at the
-		// timeout, instead of now with the command that fixes it.
-		var localImage string
+		// On kind, prefer a real local backend image when one is available on
+		// every node; otherwise use the published native image and let the
+		// cluster pull it through its configured proxy.
+		var kindBackendArgs []string
 		if dc.isKind {
-			img, err := ensureLocalNativeImage(ctx, dc.report.Context)
+			args, err := kindBackendImageArgs(ctx, dc.report.Context)
 			if err != nil {
 				return err
 			}
-			localImage = img
+			kindBackendArgs = args
 		} else {
 			dl.Println("    - Backend image: the chart's published image (not a kind cluster)")
+		}
+
+		if err := cleanupStaleKatesChartDependencies("charts/kates"); err != nil {
+			return err
 		}
 
 		katesArgs := []string{"upgrade", "--install", "kates", "charts/kates",
 			"-n", appNS, "--create-namespace"}
 		katesArgs = append(katesArgs, dc.katesChartValues()...)
-		if localImage != "" {
-			// After the values files, so the tag that actually exists wins
-			// over the one the overlay names.
-			katesArgs = append(katesArgs, localImageArgs(localImage)...)
-		}
+		katesArgs = append(katesArgs, kindBackendArgs...)
 		katesArgs = append(katesArgs,
 			"--set", "kafka.bootstrapServers="+katesBootstrap,
 			"--set", "kafka.topicNamespace="+kafkaNS,
 			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring))
 		katesArgs = append(katesArgs, dc.scrapeArgs("charts/kates")...)
 		katesArgs = append(katesArgs, dc.prometheusArgs()...)
-		katesArgs = append(katesArgs, dc.cdcSecretArgs()...)
+		katesArgs = append(katesArgs, dc.cdcDatabaseAccessArgs()...)
 		katesArgs = append(katesArgs, "--timeout", "8m")
 
 		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
-		if err := runHelmFn(ctx, katesArgs...); err != nil {
+		if err := runKatesHelmUpgrade(ctx, appNS, katesArgs...); err != nil {
 			return err
 		}
 
@@ -1028,12 +1705,9 @@ data:
 
 			// Cross-namespace secret copy (KafkaUser secret lives in Kafka NS)
 			if kafkaUINS != kafkaNS {
-				nsYaml := fmt.Sprintf(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s
-spec: {}`, kafkaUINS)
-				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
+				if err := ensureConfiguredDeployNamespace(ctx, kafkaUINS); err != nil {
+					return err
+				}
 
 				dl.Println("    - Copying kafka-ui SASL credentials to UI namespace...")
 				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kafka-ui",
@@ -1061,6 +1735,8 @@ data:
 				// --kafka-name left kafka-ui on a cluster named krafter.
 				"--set", "kafka.clusterName=" + dc.primary.Name,
 				"--set", "kafka.namespace=" + kafkaNS,
+				"--set-string", "kafka.clusterDomain=" + dc.resolveClusterDomain(),
+				"--set", "kafkaUser.enabled=false",
 				"--timeout", "5m",
 			}
 			if overlay := dc.chartOverlay("charts/kafka-ui"); dc.fileExists(overlay) {
@@ -1093,12 +1769,9 @@ data:
 			// The kates-mm2 credential is a KafkaUser of the primary, so its
 			// Secret lives in the Kafka namespace; MM2 reads it from its own.
 			if mm2NS != kafkaNS {
-				nsYaml := fmt.Sprintf(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s
-spec: {}`, mm2NS)
-				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, nsYaml)
+				if err := ensureConfiguredDeployNamespace(ctx, mm2NS); err != nil {
+					return err
+				}
 				dl.Println("    - Copying kates-mm2 SASL credentials to the MirrorMaker 2 namespace...")
 				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-mm2",
 					"-n", kafkaNS, "-o", "jsonpath={.data.password}")
@@ -1284,18 +1957,22 @@ func printDeployKeySync(w io.Writer, s deployKeySync, appNS string) {
 	fmt.Fprintln(w)
 }
 
-// cdcSecretArgs lets the backend read the password of the PostgreSQL that
-// the INTEGRATION_CDC test (`kates kafka connect test`) connects to: the
-// Secret postgresql in --db-ns, where --with-kafka-connect installs it. The
-// chart grants no Secret otherwise, and this one only through a Role in each
-// namespace it is given. A database an earlier run installed counts too, so
-// a later deploy without the flag keeps the grant. Without either nothing is
-// passed: a Role in a namespace that does not exist fails the install.
-func (dc *deployContext) cdcSecretArgs() []string {
+// cdcDatabaseAccessArgs lets the backend read and reach the PostgreSQL that
+// the INTEGRATION_CDC test (`kates kafka connect test`) uses: the Secret and
+// Service in --db-ns, where --with-kafka-connect installs it. The chart grants
+// no Secret and no cross-namespace database egress otherwise. A database an
+// earlier run installed counts too, so a later deploy without the flag keeps
+// the access. Without either nothing is passed: a Role in a namespace that
+// does not exist fails the install.
+func (dc *deployContext) cdcDatabaseAccessArgs() []string {
 	if !deployWithKafkaConnect && !isHelmReleaseDeployedFn(dc.ctx, "postgresql", deployDbNS) {
 		return nil
 	}
-	return []string{"--set", "rbac.cdcSecretNamespaces={" + deployDbNS + "}"}
+	return []string{
+		"--set", "rbac.cdcSecretNamespaces={" + deployDbNS + "}",
+		"--set", "networkPolicy.cdcDatabase.enabled=true",
+		"--set", "networkPolicy.cdcDatabase.namespace=" + deployDbNS,
+	}
 }
 
 func (dc *deployContext) resolveClusterDomain() string {

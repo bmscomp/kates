@@ -21,4 +21,4 @@ make monitoring-generic
 | Service | URL |
 |---|---|
 | Grafana | `http://localhost:30080` (admin / admin) |
-| Prometheus | `http://localhost:9090` (port-forward) |
+| Prometheus | `http://localhost:30090` (port-forward) |

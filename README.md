@@ -94,7 +94,7 @@ Kind publishes no NodePorts on the host, so every `localhost` address is a port-
 | Kates API | http://localhost:8080 | http://localhost:30083 | API key |
 | Kafka UI | http://localhost:8085 | http://localhost:30081 | `admin`, password in Secret `kafka-ui-web-password` (namespace `kafka`) |
 | Grafana | http://localhost:3000 | http://localhost:30080 ¹ | `admin` / `admin` |
-| Prometheus | http://localhost:9090 | http://localhost:30090 ¹ | none |
+| Prometheus | http://localhost:30090 | http://localhost:30090 ¹ | none |
 
 ¹ `make ports` looks for Grafana and Prometheus in namespace `kafka`. With the default isolated topology they are in `monitoring`, so run `MONITORING_NS=monitoring make ports`. With `--topology single` everything is in `kates-stack`: set `KAFKA_NS`, `KATES_NS` and `MONITORING_NS` to `kates-stack`, or use `kates ports`, which finds the services in any namespace.
 
@@ -118,8 +118,8 @@ Kafka UI can only read: its Kafka user has Describe and Read ACLs, so the broker
 | `[401] Missing API key` or `[403] Invalid API key` while `kates health` works | If the active context has no key or a stale one, run `kates ports`: it makes the `ports` context current with the key from the Secret, and says when the API rejects that key. An exported `KATES_API_KEY` wins over the context, so if it is stale, `unset KATES_API_KEY` (or export the current key, read as shown above). |
 | A chaos run changes nothing | If `kubectl logs -n kates deploy/kates \| grep noop` shows `falling back to noop`, the backend found no usable chaos provider when it started; it picks the provider once. Check Litmus (`kubectl get pods -n litmus`), then `kubectl rollout restart deploy/kates -n kates`. |
 | A disruption plan leaves p99 latency and throughput unevaluated, or reads them as 0 | The backend cannot reach Prometheus. The kates chart's `prometheus.url` defaults to `http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090`, the Service of the monitoring stack `kates deploy` installs, and `kates deploy` sets it for the namespace it uses. `make monitoring` installs into `kafka` instead: `make kates`, which applies the raw manifests in `kates/k8s/`, already points there, and a kates chart install needs `--set prometheus.url=http://monitoring-kube-prometheus-prometheus.kafka.svc:9090 --set networkPolicy.prometheus.namespace=kafka`. Charts before 0.10.5 set no URL, and the backend's own default named a Service that does not exist: set `KATES_PROMETHEUS_URL` in `extraEnv` there. Backends from release 1.23.0 and earlier also read p99 as 0, and pass it, whatever the URL. |
-| A test is refused with `400` and `fieldErrors.durationMs` | `kates.engine.max-duration-ms`, two hours by default, caps how long a run may be set to last, and an `INTEGRITY` run counts its duration twice. Pass a shorter `--duration`, or raise the cap with `KATES_ENGINE_MAX_DURATION_MS` in `extraEnv`. |
-| A test ends `FAILED` with a `Timeout:` error | The backend fails a run still `RUNNING` five minutes after its duration is up, counted from its creation (`kates.engine.reaper-grace-ms`). Its finished tasks keep their results, and `kates test get` shows which task had not finished. |
+| A test is refused with `400` and `fieldErrors.durationMs` | `kates.engine.max-duration-ms`, two hours by default, caps how long a run may be set to last, and an `INTEGRITY` run counts its duration twice. Pass a shorter `--duration`, or raise the cap with `engine.maxDurationMs` in the `kates` chart. |
+| A test ends `FAILED` with a `Timeout:` error | The backend fails a run still `PENDING` after `kates.engine.submission-timeout-ms` (two minutes by default), and fails a run still `RUNNING` or `STOPPING` after its duration plus `kates.engine.reaper-grace-ms`. Its finished tasks keep their results, and `kates test get` shows which task had not finished. |
 
 The [Troubleshooting Index](docs/book/appendix-b-troubleshooting.md) covers the rest.
 
