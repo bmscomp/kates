@@ -132,6 +132,29 @@ func TestInstalledOperators(t *testing.T) {
 		}
 	})
 
+	t.Run("upstream Helm release is discoverable but still foreign to kates", func(t *testing.T) {
+		r := newFakeRunner(t)
+		r.outputs[listPods] = podList(operatorPod("strimzi-operator", "strimzi-cluster-operator", "5d8f9c7b6", "abcde"))
+		r.outputs["kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json"] =
+			operatorDeployment("strimzi-operator", "strimzi-cluster-operator", "quay.io/strimzi/operator:0.48.0", `"value": "*"`, imagesEnv101)
+		r.outputs[helmList] = `[{"name":"strimzi-operator","namespace":"strimzi-operator","chart":"strimzi-kafka-operator-0.48.0","app_version":"0.48.0"}]`
+
+		ops, err := InstalledOperators(ctx, r)
+		if err != nil {
+			t.Fatalf("InstalledOperators: %v", err)
+		}
+		if len(ops) != 1 {
+			t.Fatalf("ops = %+v", ops)
+		}
+		op := ops[0]
+		if !op.IsForeign() || op.Release != "" || op.AppVersion != "" {
+			t.Errorf("upstream chart must not be reported as kates-owned: %+v", op)
+		}
+		if op.HelmRelease != "strimzi-operator" || op.HelmChart != "strimzi-kafka-operator-0.48.0" {
+			t.Errorf("upstream Helm owner not recorded: %+v", op)
+		}
+	})
+
 	t.Run("rolling update: two pods, one Deployment", func(t *testing.T) {
 		r := newFakeRunner(t)
 		r.outputs[listPods] = podList(
@@ -196,6 +219,51 @@ func TestInstalledOperators(t *testing.T) {
 		r.outputs[helmList] = `nope`
 		if _, err := InstalledOperators(ctx, r); err == nil {
 			t.Error("bad helm json: want error")
+		}
+	})
+}
+
+func TestResourceInstances(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("lists instances for CRD names", func(t *testing.T) {
+		r := newFakeRunner(t)
+		r.outputs["kubectl get kafkas.kafka.strimzi.io -A -o json --ignore-not-found"] = `{"items":[{"kind":"Kafka","metadata":{"namespace":"kafka","name":"krafter"}}]}`
+		r.outputs["kubectl get kafkatopics.kafka.strimzi.io -A -o json --ignore-not-found"] = `{"items":[]}`
+
+		got, err := ResourceInstances(ctx, r, []string{"kafkatopics.kafka.strimzi.io", "kafkas.kafka.strimzi.io"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.assertCalls(
+			"kubectl get kafkas.kafka.strimzi.io -A -o json --ignore-not-found",
+			"kubectl get kafkatopics.kafka.strimzi.io -A -o json --ignore-not-found",
+		)
+		if len(got) != 1 || got[0].CRD != "kafkas.kafka.strimzi.io" || got[0].Ref() != "kafka/Kafka/krafter" {
+			t.Errorf("instances = %+v", got)
+		}
+	})
+
+	t.Run("empty output means no instances", func(t *testing.T) {
+		r := newFakeRunner(t)
+		r.outputs["kubectl get kafkas.kafka.strimzi.io -A -o json --ignore-not-found"] = ""
+		got, err := ResourceInstances(ctx, r, []string{"kafkas.kafka.strimzi.io"})
+		if err != nil || len(got) != 0 {
+			t.Errorf("instances = %+v, err = %v", got, err)
+		}
+	})
+
+	t.Run("errors", func(t *testing.T) {
+		r := newFakeRunner(t)
+		r.errors["kubectl get kafkas.kafka.strimzi.io -A -o json --ignore-not-found"] = errors.New("forbidden")
+		if _, err := ResourceInstances(ctx, r, []string{"kafkas.kafka.strimzi.io"}); err == nil || !strings.Contains(err.Error(), "forbidden") {
+			t.Errorf("want list error, got %v", err)
+		}
+
+		r = newFakeRunner(t)
+		r.outputs["kubectl get kafkas.kafka.strimzi.io -A -o json --ignore-not-found"] = `{"items":[}`
+		if _, err := ResourceInstances(ctx, r, []string{"kafkas.kafka.strimzi.io"}); err == nil {
+			t.Error("bad json: want error")
 		}
 	})
 }

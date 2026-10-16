@@ -15,7 +15,7 @@ import (
 // cleanup. The zero poll interval keeps these tests instant.
 func stubPoll(t *testing.T, seq []func() (*client.TestRun, error)) {
 	t.Helper()
-	origGet, origInterval := pollGetTestFn, pollInterval
+	origGet, origRepair, origInterval := pollGetTestFn, repairPollingConnectionFn, pollInterval
 	i := 0
 	pollGetTestFn = func(context.Context, string) (*client.TestRun, error) {
 		f := seq[i]
@@ -24,8 +24,9 @@ func stubPoll(t *testing.T, seq []func() (*client.TestRun, error)) {
 		}
 		return f()
 	}
+	repairPollingConnectionFn = func(context.Context, error) (bool, error) { return false, nil }
 	pollInterval = 0
-	t.Cleanup(func() { pollGetTestFn, pollInterval = origGet, origInterval })
+	t.Cleanup(func() { pollGetTestFn, repairPollingConnectionFn, pollInterval = origGet, origRepair, origInterval })
 }
 
 func run(status string, sent float64) func() (*client.TestRun, error) {
@@ -140,5 +141,93 @@ func TestPollPlain_TransientErrorRecovers(t *testing.T) {
 	status, err := pollUntilDonePlain(context.Background(), "test-1234", &out)
 	if err != nil || status != "COMPLETED" {
 		t.Fatalf("got (%q, %v), want recovery to (COMPLETED, nil)", status, err)
+	}
+}
+
+func TestPollPlain_RepairsLocalPortForward(t *testing.T) {
+	origGet, origRepair, origInterval := pollGetTestFn, repairPollingConnectionFn, pollInterval
+	t.Cleanup(func() { pollGetTestFn, repairPollingConnectionFn, pollInterval = origGet, origRepair, origInterval })
+
+	calls := 0
+	pollGetTestFn = func(context.Context, string) (*client.TestRun, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("connection refused")
+		}
+		return &client.TestRun{ID: "test-1234", Status: "COMPLETED"}, nil
+	}
+	repairs := 0
+	repairPollingConnectionFn = func(context.Context, error) (bool, error) {
+		repairs++
+		return true, nil
+	}
+	pollInterval = 0
+
+	var out bytes.Buffer
+	status, err := pollUntilDonePlain(context.Background(), "test-1234", &out)
+	if err != nil || status != "COMPLETED" {
+		t.Fatalf("got (%q, %v), want repaired completion", status, err)
+	}
+	if calls != 2 {
+		t.Errorf("poll calls = %d, want 2", calls)
+	}
+	if repairs != 1 {
+		t.Errorf("repair attempts = %d, want 1", repairs)
+	}
+}
+
+func TestPollPlain_ReattemptsRepairAfterInitialNoop(t *testing.T) {
+	origGet, origRepair, origInterval := pollGetTestFn, repairPollingConnectionFn, pollInterval
+	t.Cleanup(func() { pollGetTestFn, repairPollingConnectionFn, pollInterval = origGet, origRepair, origInterval })
+
+	calls := 0
+	pollGetTestFn = func(context.Context, string) (*client.TestRun, error) {
+		calls++
+		if calls <= 2 {
+			return nil, errors.New("connection refused")
+		}
+		return &client.TestRun{ID: "test-1234", Status: "COMPLETED"}, nil
+	}
+	repairs := 0
+	repairPollingConnectionFn = func(context.Context, error) (bool, error) {
+		repairs++
+		return repairs == 2, nil
+	}
+	pollInterval = 0
+
+	var out bytes.Buffer
+	status, err := pollUntilDonePlain(context.Background(), "test-1234", &out)
+	if err != nil || status != "COMPLETED" {
+		t.Fatalf("got (%q, %v), want repaired completion", status, err)
+	}
+	if calls != 3 {
+		t.Errorf("poll calls = %d, want 3", calls)
+	}
+	if repairs != 2 {
+		t.Errorf("repair attempts = %d, want 2", repairs)
+	}
+}
+
+func TestPollPlain_ReportsRepairFailure(t *testing.T) {
+	origGet, origRepair, origInterval := pollGetTestFn, repairPollingConnectionFn, pollInterval
+	t.Cleanup(func() { pollGetTestFn, repairPollingConnectionFn, pollInterval = origGet, origRepair, origInterval })
+
+	pollGetTestFn = func(context.Context, string) (*client.TestRun, error) {
+		return nil, errors.New("connection refused")
+	}
+	repairPollingConnectionFn = func(context.Context, error) (bool, error) {
+		return false, errors.New("kubectl unreachable")
+	}
+	pollInterval = 0
+
+	var out bytes.Buffer
+	_, err := pollUntilDonePlain(context.Background(), "test-1234", &out)
+	if err == nil {
+		t.Fatal("want connection loss after failed repair")
+	}
+	for _, want := range []string{"connection lost", "port-forward repair failed", "kubectl unreachable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
 	}
 }

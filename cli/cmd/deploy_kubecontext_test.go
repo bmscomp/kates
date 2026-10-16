@@ -136,7 +136,7 @@ func TestPortForwardArgs(t *testing.T) {
 	spec := portForwardSpec{Resource: "service/kates", Namespace: "kates", Remote: 8080, Local: 18080}
 
 	portsKubeContext = ""
-	if got, want := strings.Join(portForwardArgs(spec), " "), "port-forward service/kates 18080:8080 -n kates"; got != want {
+	if got, want := strings.Join(portForwardArgs(spec), " "), "port-forward --address 127.0.0.1 service/kates 18080:8080 -n kates"; got != want {
 		t.Errorf("kates ports: %q, want %q", got, want)
 	}
 
@@ -146,7 +146,7 @@ func TestPortForwardArgs(t *testing.T) {
 	// forwards matches on.
 	portsKubeContext = "kind-panda"
 	line := "kubectl " + strings.Join(portForwardArgs(spec), " ")
-	if want := "kubectl port-forward service/kates 18080:8080 -n kates --context=kind-panda"; line != want {
+	if want := "kubectl port-forward --address 127.0.0.1 service/kates 18080:8080 -n kates --context=kind-panda"; line != want {
 		t.Errorf("deploy --port-forward: %q, want %q", line, want)
 	}
 }

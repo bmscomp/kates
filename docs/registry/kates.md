@@ -104,7 +104,7 @@ kates test create --type LOAD
 To see the API without a cluster, point it at any reachable Kafka:
 
 ```
-docker run --rm -p 8080:8080 \
+docker run --rm -p 8080:8080 -p 9090:8080 \
   -e KATES_KAFKA_BOOTSTRAP_SERVERS=host.docker.internal:9092 \
   -e KATES_KAFKA_SECURITY_PROTOCOL=PLAINTEXT \
   ghcr.io/bmscomp/kates:latest
@@ -115,6 +115,10 @@ Then:
 ```
 curl -s localhost:8080/q/health/ready
 curl -s localhost:8080/api/cluster | jq
+# From the repository root: gRPC is the same in-container listener,
+# exposed here as host port 9090.
+grpcurl -plaintext -import-path kates/src/main/proto -proto kates.proto \
+  localhost:9090 kates.HealthService/Check
 ```
 
 Without a PostgreSQL database, anything that persists a run will fail. Supply one with
@@ -125,12 +129,14 @@ Without a PostgreSQL database, anything that persists a run will fail. Supply on
 
 ## Ports
 
-| Port | Protocol | Purpose |
-|---|---|---|
-| `8080` | HTTP | REST API, health endpoints, Prometheus metrics |
-| `9000` | gRPC | `TestService`, `ClusterService`, `HealthService` |
+| Host port | Container port | Protocol | Purpose |
+|---|---|---|---|
+| `8080` | `8080` | HTTP | REST API, health endpoints, Prometheus metrics |
+| `9090` | `8080` | gRPC | `TestService`, `ClusterService`, `HealthService` |
 
-The chart exposes both. Server reflection is disabled outside dev mode, so bring your own
+Kates serves REST and gRPC through the same Quarkus HTTP listener inside the
+container. The chart still exposes a separate Service port 9000 for compatibility,
+but the Docker image only needs container port 8080. Server reflection is disabled outside dev mode, so bring your own
 `.proto` — it is at
 [`kates/src/main/proto/kates.proto`](https://github.com/bmscomp/kates/blob/main/kates/src/main/proto/kates.proto).
 

@@ -69,6 +69,7 @@ var (
 	deployWithKafkaUI        bool
 	deployWithMirrorMaker2   bool
 	deployMM2NS              string
+	deployNamespaceLabels    []string
 	deployYes                bool
 
 	// Versions and scope (multi-version plan §3.1–3.3).
@@ -103,6 +104,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithKafkaUI, "with-kafka-ui", true, "Deploy Kafka UI for browser-based cluster monitoring")
 	deployCmd.Flags().BoolVar(&deployWithMirrorMaker2, "with-mirror-maker2", false, "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)")
 	deployCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
+	deployCmd.Flags().StringArrayVar(&deployNamespaceLabels, "namespace-label", nil, "Label to apply to namespaces created by deploy (key=value, repeatable; KATES_NAMESPACE_LABELS also accepts comma-separated key=value entries)")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, run kates ports: forward every service in the background and make the ports context current")
@@ -332,6 +334,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}()
 
 		deployErr = func() error {
+			if err := ensureDeployNamespaces(ctx, dc); err != nil {
+				return err
+			}
 			if err := deployGroupA(dc); err != nil {
 				return err
 			}

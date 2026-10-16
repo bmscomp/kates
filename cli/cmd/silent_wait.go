@@ -72,8 +72,28 @@ func waitCustomResourceReadySilent(ctx context.Context, kind, namespace, selecto
 	return fmt.Errorf("timeout waiting for %s to become ready", kind)
 }
 
+func waitNamedCustomResourceReadySilent(ctx context.Context, kind, namespace, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := runExecOutputFn(ctx, "kubectl", "get", kind, name, "-n", namespace, "-o", `jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
+		if err == nil && strings.Contains(string(out), "True") {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
+	return fmt.Errorf("timeout waiting for %s/%s to become ready", kind, name)
+}
+
 func waitKafkaUsersReadySilent(ctx context.Context, namespace string, timeout time.Duration) error {
 	return waitCustomResourceReadySilent(ctx, "kafkauser", namespace, "strimzi.io/cluster="+deployKafkaName, timeout)
+}
+
+func waitKafkaConnectReadySilent(ctx context.Context, namespace, name string, timeout time.Duration) error {
+	return waitNamedCustomResourceReadySilent(ctx, "kafkaconnect", namespace, name, timeout)
 }
 
 func waitConnectorReadySilent(ctx context.Context, namespace string, timeout time.Duration) error {

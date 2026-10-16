@@ -14,8 +14,10 @@ import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.service.TestRunRepository;
 
 /**
- * Periodically fails runs that have not ended past their deadline: the run's
- * planned duration, counted from its creation, plus a grace.
+ * Periodically fails runs that have not ended past their deadline. A run that
+ * never leaves PENDING is bounded by a short submission timeout; a run that
+ * starts is bounded by its planned duration, counted from creation, plus a
+ * grace.
  *
  * <p>The orchestrator stores the planned duration with the run when it
  * creates it (TestOrchestrator.plannedDurationMs): the run's durationMs, twice
@@ -25,26 +27,19 @@ import com.bmscomp.kates.service.TestRunRepository;
  * was set to last, so a default ENDURANCE run, an hour long, always ended
  * FAILED.
  *
- * <p>A PENDING or STOPPING run is held to the same deadline as a RUNNING one,
- * as nothing else ends it once the process that had it is gone: orphan
- * recovery reads RUNNING runs only, and the reconciler only this process's
- * handles. A run stays PENDING when its submission never stored it RUNNING,
- * as when the Kates API stops while it starts the run's tasks. It stays
- * STOPPING when a Kates API before 1.25.0, which stored a run STOPPING on the
- * way to ending it, stopped before it did; no later version stores it. Such a
- * run used to stay so for good, and the daily sweep, which deletes only ended
- * runs, never took it.
+ * <p>A PENDING run is not a workload yet: its tasks were not durably stored.
+ * Holding it for a ten-minute LOAD duration made a broken submission look like
+ * a slow benchmark, so PENDING gets its own short bound. A STOPPING run is held
+ * to the same deadline as RUNNING: old Kates API versions could store STOPPING
+ * before ending a run, then stop before the final write.
  *
  * <p>The deadline is the one rule that holds whichever replica runs the run.
  * Which process runs it is not stored, and its handles and its concurrency
  * permit are in that process's memory, so a run with no handle here may be
  * another replica's, alive; a PENDING run has no handle even in its own
- * process, as they are published once it is stored RUNNING. Orphan recovery
- * does not tell the two apart either: it fails every RUNNING run it finds,
- * which is why the chart runs one replica. The deadline is stored with the
- * run and bounds its whole life, whoever runs it: a RUNNING run past it is
- * failed here already, so failing a PENDING or STOPPING one past it ends no
- * run sooner than that.
+ * process, as they are published once it is stored RUNNING. The chart runs one
+ * replica, and the deadline is stored with the run, so the reaper can safely
+ * end a stranded run without in-memory ownership.
  */
 @ApplicationScoped
 public class TestTimeoutReaper {
@@ -71,6 +66,15 @@ public class TestTimeoutReaper {
      */
     @ConfigProperty(name = "kates.engine.reaper-grace-ms", defaultValue = "300000")
     long graceMs;
+
+    /**
+     * How long a run may stay PENDING before its submission is considered
+     * stranded. Topic creation has its own 35s timeout by default, so two
+     * minutes leaves room for slow clusters without hiding a dead submission
+     * behind the workload's whole duration.
+     */
+    @ConfigProperty(name = "kates.engine.submission-timeout-ms", defaultValue = "120000")
+    long submissionTimeoutMs;
 
     @Scheduled(every = "60s", identity = "test-timeout-reaper")
     void reapStuckTests() {
@@ -172,6 +176,9 @@ public class TestTimeoutReaper {
 
     /** How long after its creation the run may still be going. */
     private long allowedMs(TestRun run) {
+        if (run.getStatus() == TestResult.TaskStatus.PENDING) {
+            return Math.max(0, submissionTimeoutMs);
+        }
         Long planned = run.getPlannedDurationMs();
         long bound = planned != null ? Math.min(planned, maxDurationMs) : maxDurationMs;
         return Math.max(0, bound) + graceMs;
@@ -185,7 +192,9 @@ public class TestTimeoutReaper {
     private String timeoutError(TestRun run) {
         Long planned = run.getPlannedDurationMs();
         String bound;
-        if (planned == null) {
+        if (run.getStatus() == TestResult.TaskStatus.PENDING) {
+            bound = "kates.engine.submission-timeout-ms (" + Math.max(0, submissionTimeoutMs) + "ms)";
+        } else if (planned == null) {
             bound = "kates.engine.max-duration-ms (" + maxDurationMs + "ms) for a run no duration bounds,";
         } else if (planned > maxDurationMs) {
             bound = "kates.engine.max-duration-ms (" + maxDurationMs + "ms)";
@@ -193,7 +202,10 @@ public class TestTimeoutReaper {
             bound = "its planned " + planned + "ms";
         }
         String error = "Timeout: still " + run.getStatus().name().toLowerCase(java.util.Locale.ROOT) + " "
-                + allowedMs(run) + "ms after it was created, " + bound + " plus a " + graceMs + "ms grace";
+                + allowedMs(run) + "ms after it was created, " + bound;
+        if (run.getStatus() != TestResult.TaskStatus.PENDING) {
+            error += " plus a " + graceMs + "ms grace";
+        }
         return switch (run.getStatus()) {
             case PENDING ->
                 error + "; its tasks were never stored as started, as when the Kates API stops"

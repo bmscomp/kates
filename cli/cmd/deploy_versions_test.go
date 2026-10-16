@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -156,6 +157,15 @@ func kafkaListJSON(entries ...string) string {
 	for _, e := range entries {
 		p := strings.Split(e, "/")
 		items = append(items, fmt.Sprintf(`{"metadata":{"name":%q,"namespace":%q},"spec":{"kafka":{"version":%q}}}`, p[1], p[0], p[2]))
+	}
+	return `{"items":[` + strings.Join(items, ",") + `]}`
+}
+
+func resourceListJSON(kind string, refs ...string) string {
+	var items []string
+	for _, ref := range refs {
+		p := strings.Split(ref, "/")
+		items = append(items, fmt.Sprintf(`{"kind":%q,"metadata":{"namespace":%q,"name":%q}}`, kind, p[0], p[1]))
 	}
 	return `{"items":[` + strings.Join(items, ",") + `]}`
 }
@@ -491,18 +501,58 @@ func TestResolveVersionPlan_OneZeroBoundary(t *testing.T) {
 	r := &scriptedRunner{answers: map[string]string{
 		"get pods -A -l strimzi.io/kind=cluster-operator": pods,
 		"get deployment -n strimzi-operator":              dep,
-		"helm list -A -o json":                            `[]`,
+		"helm list -A -o json":                            `[{"name":"strimzi-operator","namespace":"strimzi-operator","chart":"strimzi-kafka-operator-0.51.0","app_version":"0.51.0"}]`,
 		"get kafka -A -o json":                            kafkaListJSON("kafka/krafter/4.2.0"),
 		"get crd -l app=strimzi -o json":                  `{"items":[{"metadata":{"name":"kafkas.kafka.strimzi.io"},"status":{"storedVersions":["v1beta2","v1"]}}]}`,
+		"get kafkas.kafka.strimzi.io -A -o json":          resourceListJSON("Kafka", "kafka/krafter"),
 	}}
 	_, err := resolveVersionPlan(context.Background(), r, versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true, KafkaNS: "kafka"})
-	if err == nil || !strings.Contains(err.Error(), "still stores v1beta2") {
+	if err == nil || !strings.Contains(err.Error(), "still store non-v1 API data") || !strings.Contains(err.Error(), "kafkas.kafka.strimzi.io (v1beta2,v1)") || !strings.Contains(err.Error(), "kafka/Kafka/krafter") {
 		t.Errorf("1.0 boundary must be refused until converted: %v", err)
 	}
-	r.answers["get crd -l app=strimzi -o json"] = `{"items":[{"metadata":{"name":"kafkas.kafka.strimzi.io"},"status":{"storedVersions":["v1"]}}]}`
+
+	r.answers["get crd -l app=strimzi -o json"] = `{"items":[` +
+		`{"metadata":{"name":"kafkabridges.kafka.strimzi.io"},"status":{"storedVersions":["v1beta2"]}},` +
+		`{"metadata":{"name":"kafkas.kafka.strimzi.io"},"status":{"storedVersions":["v1"]}}]}`
+	r.answers["get kafkabridges.kafka.strimzi.io -A -o json"] = resourceListJSON("KafkaBridge")
 	vp, err := resolveVersionPlan(context.Background(), r, versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true, KafkaNS: "kafka"})
+	if err != nil {
+		t.Fatalf("empty blocking CRD should not be held hostage by Kafka resources in other CRDs: %v", err)
+	}
+	if !vp.ReplaceEmptyPreV1CRDs || !slices.Equal(vp.ReplaceCRDs, []string{"kafkabridges.kafka.strimzi.io"}) {
+		t.Errorf("replacement should be limited to the empty blocking CRD: %+v", vp)
+	}
+
+	r.answers["get crd -l app=strimzi -o json"] = `{"items":[{"metadata":{"name":"kafkas.kafka.strimzi.io"},"status":{"storedVersions":["v1beta2","v1"]}}]}`
+	r.answers["get kafkas.kafka.strimzi.io -A -o json"] = resourceListJSON("Kafka")
+	vp, err = resolveVersionPlan(context.Background(), r, versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true, KafkaNS: "kafka"})
+	if err != nil {
+		t.Fatalf("empty pre-v1 CRDs should be replaceable: %v", err)
+	}
+	if !vp.ReplaceEmptyPreV1CRDs || !slices.Equal(vp.ReplaceCRDs, []string{"kafkas.kafka.strimzi.io"}) {
+		t.Errorf("replacement plan missing: %+v", vp)
+	}
+	r.answers["get crd -l app=strimzi -o json"] = `{"items":[{"metadata":{"name":"kafkas.kafka.strimzi.io"},"status":{"storedVersions":["v1"]}}]}`
+	vp, err = resolveVersionPlan(context.Background(), r, versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true, KafkaNS: "kafka"})
 	if err != nil || vp.OperatorAction != "upgrade" {
 		t.Errorf("converted cluster may cross: %v %+v", err, vp)
+	}
+}
+
+func TestResolveVersionPlan_ReplacesEmptyPreV1CRDsWithoutOperator(t *testing.T) {
+	root := versionsRepo(t, "1.1.0", "4.2.0")
+	r := &scriptedRunner{answers: map[string]string{
+		"get pods -A -l strimzi.io/kind=cluster-operator": operatorPodsList(),
+		"get crd -l app=strimzi -o json":                  `{"items":[{"metadata":{"name":"kafkas.kafka.strimzi.io"},"status":{"storedVersions":["v1beta2"]}}]}`,
+		"get kafkas.kafka.strimzi.io -A -o json":          resourceListJSON("Kafka"),
+	}}
+
+	vp, err := resolveVersionPlan(context.Background(), r, versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true, KafkaNS: "kafka"})
+	if err != nil {
+		t.Fatalf("empty pre-v1 CRDs without an operator should be replaceable: %v", err)
+	}
+	if vp.OperatorAction != "install" || !vp.ReplaceEmptyPreV1CRDs || !slices.Equal(vp.ReplaceCRDs, []string{"kafkas.kafka.strimzi.io"}) {
+		t.Errorf("replacement install plan missing: %+v", vp)
 	}
 }
 

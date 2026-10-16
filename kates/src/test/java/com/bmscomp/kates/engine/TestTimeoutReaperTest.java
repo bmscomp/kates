@@ -66,6 +66,7 @@ class TestTimeoutReaperTest {
         // Use it now, so that it finds an empty table rather than a run a test
         // has just stored for the reaper.
         orchestrator.activeTestCount();
+        reaper.submissionTimeoutMs = 120_000;
         em.createQuery("DELETE FROM TestResultEntity").executeUpdate();
         em.createQuery("DELETE FROM TestRunEntity").executeUpdate();
     }
@@ -138,10 +139,11 @@ class TestTimeoutReaperTest {
     }
 
     @Test
-    void theReaperFailsAPendingRunPastItsDeadlineWithATaskThatSaysWhy() {
+    void theReaperFailsAPendingRunAfterTheSubmissionTimeoutWithATaskThatSaysWhy() {
         // Its submission never stored it RUNNING, as when the Kates API stops
-        // while it creates the run's topic: the run has no task.
-        TestRun run = storePending(Instant.now().minus(Duration.ofMinutes(20)));
+        // while it creates the run's topic: the run has no task. It must not
+        // wait for the LOAD run's whole ten-minute duration.
+        TestRun run = storePending(Instant.now().minus(Duration.ofMinutes(3)));
 
         reaper.reapStuckTests();
 
@@ -153,23 +155,37 @@ class TestTimeoutReaperTest {
         assertEquals(TestType.LOAD, reason.getTestType());
         assertNull(reason.getPhaseName(), "it is no phase of the run");
         assertEquals(
-                "Timeout: still pending 900000ms after it was created, its planned 600000ms plus a 300000ms grace;"
+                "Timeout: still pending 120000ms after it was created,"
+                        + " kates.engine.submission-timeout-ms (120000ms);"
                         + " its tasks were never stored as started, as when the Kates API stops while it starts them",
                 reason.getError());
         assertNotNull(reason.getEndTime());
     }
 
     @Test
-    void theReaperLeavesAPendingRunInsideItsDeadlinePending() {
-        // Fourteen minutes into a ten-minute run, with no handle or permit in
-        // this process: it may be one another replica is still starting.
-        TestRun run = storePending(Instant.now().minus(Duration.ofMinutes(14)));
+    void theReaperLeavesAPendingRunInsideTheSubmissionTimeoutPending() {
+        TestRun run = storePending(Instant.now().minus(Duration.ofSeconds(30)));
 
         reaper.reapStuckTests();
 
         TestRun stored = reread(run);
         assertEquals(TaskStatus.PENDING, stored.getStatus());
         assertTrue(stored.getResults().isEmpty());
+    }
+
+    @Test
+    void recoveryFailsAPendingRunWithATaskThatSaysWhy() {
+        TestRun run = storePending(Instant.now());
+
+        orchestrator.recoverOrphans();
+
+        TestRun stored = reread(run);
+        assertEquals(TaskStatus.FAILED, stored.getStatus());
+        assertEquals(1, stored.getResults().size(), "one task carries the reason");
+        TestResult reason = task(stored, "-submission");
+        assertEquals(TaskStatus.FAILED, reason.getStatus());
+        assertEquals(
+                "Recovered: test was orphaned before submission completed after server restart", reason.getError());
     }
 
     @Test

@@ -624,21 +624,20 @@ A value outside the limits the Kates API sets, such as more than 100 `--producer
 ::: {.callout-important}
 **No run lasts longer than two hours by default**
 
-The Kates API gives each run its duration, `--duration` or the type's default, and five minutes more, counted from the run's creation. An INTEGRITY run is set to last twice its duration, since it reads its records back for up to as long again, and gets that and the five minutes. A run still `RUNNING` after that is failed: the Kates API stops its producers and consumers and marks the run `FAILED`, each unfinished task with an error that starts `Timeout:`, and `--wait` then exits 1. It checks once a minute. An INTEGRATION_CDC run has no duration of its own and gets two hours and five minutes. A run set to last longer than two hours is refused: the command fails with `[400] Validation Failed:` and a message naming `durationMs`, and no run starts.
+The Kates API gives each run its duration, `--duration` or the type's default, and five minutes more, counted from the run's creation. An INTEGRITY run is set to last twice its duration, since it reads its records back for up to as long again, and gets that and the five minutes. A run still `RUNNING` or `STOPPING` after that is failed: the Kates API stops its producers and consumers and marks the run `FAILED`, each unfinished task with an error that starts `Timeout:`, and `--wait` then exits 1. It checks once a minute. A run still `PENDING`, meaning its tasks were never stored as started, fails after two minutes by default instead of waiting for the workload duration. An INTEGRATION_CDC run has no duration of its own and gets two hours and five minutes after it starts. A run set to last longer than two hours is refused: the command fails with `[400] Validation Failed:` and a message naming `durationMs`, and no run starts.
 
-The two hours are the Kates API setting `kates.engine.max-duration-ms`, 7,200,000 ms by default, and the five minutes `kates.engine.reaper-grace-ms`; the `kates` chart has a value for neither. To allow longer runs, set the environment variable `KATES_ENGINE_MAX_DURATION_MS` through the chart's `extraEnv`. Start from the values the release runs with, and upgrade from a checkout of the version it runs, so the upgrade changes nothing else:
+The two hours are the Kates API setting `kates.engine.max-duration-ms`, 7,200,000 ms by default; the five minutes are `kates.engine.reaper-grace-ms`; the pending-submission timeout is `kates.engine.submission-timeout-ms`, 120,000 ms by default. The `kates` chart exposes them as `engine.maxDurationMs`, `engine.reaperGraceMs` and `engine.submissionTimeoutMs`. Start from the values the release runs with, and upgrade from a checkout of the version it runs, so the upgrade changes nothing else:
 
 ```bash
 # Every value the release was installed with — its files and its --set flags
 helm get values kates -n kates -o yaml > kates-current.yaml
 ```
 
-Add the variable to `extraEnv` in `kates-current.yaml`, next to any entries already there:
+Change the engine value in `kates-current.yaml`, next to the values already there:
 
 ```yaml
-extraEnv:
-  - name: KATES_ENGINE_MAX_DURATION_MS
-    value: "14400000"   # four hours, in milliseconds
+engine:
+  maxDurationMs: "14400000"   # four hours, in milliseconds
 ```
 
 ```bash

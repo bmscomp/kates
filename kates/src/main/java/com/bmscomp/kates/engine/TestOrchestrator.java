@@ -39,6 +39,8 @@ import com.bmscomp.kates.service.TopicService;
 public class TestOrchestrator {
 
     private static final Logger LOG = Logger.getLogger(TestOrchestrator.class);
+    private static final List<TestResult.TaskStatus> ORPHAN_STATUSES =
+            List.of(TestResult.TaskStatus.RUNNING, TestResult.TaskStatus.PENDING, TestResult.TaskStatus.STOPPING);
 
     private final TopicService topicService;
     private final TestRunRepository repository;
@@ -125,30 +127,22 @@ public class TestOrchestrator {
 
     @PostConstruct
     void recoverOrphans() {
-        List<TestRun> orphans = repository.findByStatus(TestResult.TaskStatus.RUNNING);
+        List<TestRun> orphans = ORPHAN_STATUSES.stream()
+                .flatMap(status -> repository.findByStatus(status).stream())
+                .toList();
         if (orphans.isEmpty()) {
             return;
         }
-        LOG.infof("Recovering %d orphaned RUNNING tests from previous lifecycle", orphans.size());
+        LOG.infof("Recovering %d orphaned tests from previous lifecycle", orphans.size());
         for (TestRun orphan : orphans) {
             // findByStatus reads runs without their task results. Read the run
             // whole, so that each task that had not finished is failed with the
             // reason and every task is written back with what it measured.
             TestRun run = repository.findById(orphan.getId()).orElse(null);
-            if (run == null) {
+            if (run == null || !ORPHAN_STATUSES.contains(run.getStatus())) {
                 continue;
             }
-            run = run.withStatus(TestResult.TaskStatus.FAILED);
-            List<TestResult> newResults = new java.util.ArrayList<>();
-            for (TestResult result : run.getResults()) {
-                if (result.getStatus() == TestResult.TaskStatus.RUNNING
-                        || result.getStatus() == TestResult.TaskStatus.PENDING) {
-                    result = result.withStatus(TestResult.TaskStatus.FAILED)
-                            .withError("Recovered: test was orphaned after server restart");
-                }
-                newResults.add(result);
-            }
-            run = run.withResults(newResults);
+            run = withRecoveredTasksFailed(run);
             repository.save(run);
             LOG.infof("  Marked test %s as FAILED (orphan recovery)", run.getId());
         }
@@ -718,6 +712,26 @@ public class TestOrchestrator {
         } catch (RuntimeException e) {
             LOG.warnf("Could not mark stranded run %s as FAILED: %s", run.getId(), e.getMessage());
         }
+    }
+
+    private static TestRun withRecoveredTasksFailed(TestRun run) {
+        String error =
+                switch (run.getStatus()) {
+                    case PENDING -> "Recovered: test was orphaned before submission completed after server restart";
+                    case STOPPING -> "Recovered: test was orphaned while stopping after server restart";
+                    default -> "Recovered: test was orphaned after server restart";
+                };
+        TestRun failed = withUnfinishedTasksFailed(run.withStatus(TestResult.TaskStatus.FAILED), error);
+        if (!failed.getResults().isEmpty()) {
+            return failed;
+        }
+        TestResult reason = new TestResult()
+                .withTaskId(run.getId() + "-submission")
+                .withTestType(run.getTestType())
+                .withStatus(TestResult.TaskStatus.FAILED)
+                .withError(error)
+                .withEndTime(Instant.now().toString());
+        return failed.withResult(reason);
     }
 
     /**

@@ -264,11 +264,13 @@ func setDeployFlags(t *testing.T, set func()) {
 	chaos, monitoring, certManager := deployWithChaos, deployWithMonitoring, deployWithCertManager
 	kyverno, strimzi, connect := deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect
 	ui, mm2, dry := deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun
+	namespaceLabels := append([]string(nil), deployNamespaceLabels...)
 	t.Cleanup(func() {
 		deployTopology, deployNamespace, deployWithSchemaRegistry = topology, namespace, registry
 		deployWithChaos, deployWithMonitoring, deployWithCertManager = chaos, monitoring, certManager
 		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = kyverno, strimzi, connect
 		deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun = ui, mm2, dry
+		deployNamespaceLabels = namespaceLabels
 	})
 	set()
 }

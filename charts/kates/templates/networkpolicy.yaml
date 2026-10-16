@@ -48,6 +48,18 @@ spec:
         - port: {{ .Values.externalDatabase.port | default 5432 }}
           protocol: TCP
     {{- end }}
+    {{- if .Values.networkPolicy.cdcDatabase.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.cdcDatabase.namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.cdcDatabase.podLabels | nindent 14 }}
+      ports:
+        - port: {{ .Values.networkPolicy.cdcDatabase.port | default 5432 }}
+          protocol: TCP
+    {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:

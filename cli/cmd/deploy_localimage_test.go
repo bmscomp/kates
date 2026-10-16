@@ -18,25 +18,18 @@ func TestKindClusterName(t *testing.T) {
 	}
 }
 
-// A local deploy must run the image you built. The published tag is right for
-// a real cluster and wrong for kind — charts/kates asks for
-// ghcr.io/bmscomp/kates:<appVersion>, and when appVersion is ahead of the
-// registry (as 1.22.0 was) that is an ImagePullBackOff on a tag that does not
-// exist.
-func TestKatesChartValuesUsesTheLocalNativeImageOnKind(t *testing.T) {
+func TestKatesChartValuesDoesNotChooseTheKindBackendImage(t *testing.T) {
 	dc := &deployContext{
 		valuesFile:   "values-dev.yaml",
 		chartOverlay: func(dir string) string { return dir + "/values-kind.yaml" },
 		isKind:       true,
 	}
 	got := strings.Join(dc.katesChartValues(), " ")
-	if !strings.Contains(got, localNativeValues) {
-		t.Errorf("a kind deploy must use %s: %s", localNativeValues, got)
+	if strings.Contains(got, localNativeValues) || strings.Contains(got, publishedNativeValues) {
+		t.Errorf("base chart values should not choose the kind backend image: %s", got)
 	}
-	// Last wins in Helm: the native overlay's image and sizing must override
-	// the kind overlay's, not the other way round.
-	if strings.Index(got, "values-kind.yaml") > strings.Index(got, localNativeValues) {
-		t.Errorf("the native overlay must come after the kind overlay: %s", got)
+	if !strings.Contains(got, "values-kind.yaml") {
+		t.Errorf("a kind deploy must still include the kind overlay: %s", got)
 	}
 
 	// Anywhere else, the published image stands.
@@ -47,78 +40,122 @@ func TestKatesChartValuesUsesTheLocalNativeImageOnKind(t *testing.T) {
 	}
 }
 
-func TestEnsureLocalNativeImage(t *testing.T) {
+func installKindExecSpies(t *testing.T) (*[]string, func(func(context.Context, string, ...string) ([]byte, error))) {
+	t.Helper()
 	origOut, origExec := runExecOutputFn, runExecFn
-	defer func() { runExecOutputFn, runExecFn = origOut, origExec }()
+	t.Cleanup(func() { runExecOutputFn, runExecFn = origOut, origExec })
 
-	var loaded []string
+	loaded := []string{}
 	runExecFn = func(_ context.Context, name string, args ...string) error {
 		loaded = append(loaded, name+" "+strings.Join(args, " "))
 		return nil
 	}
-	// hostHas answers `docker image inspect` for exactly one image.
-	hostHas := func(image string) func(context.Context, string, ...string) ([]byte, error) {
-		return func(_ context.Context, _ string, args ...string) ([]byte, error) {
-			if len(args) > 2 && args[0] == "image" && args[2] == image {
-				return []byte("sha256:abc"), nil
-			}
-			return nil, context.Canceled
-		}
+	return &loaded, func(fn func(context.Context, string, ...string) ([]byte, error)) {
+		runExecOutputFn = fn
 	}
+}
 
-	// The working-tree build is preferred and loaded onto the node.
-	runExecOutputFn = hostHas(localNativeImage)
-	got, err := ensureLocalNativeImage(context.Background(), "kind-panda")
+func hostHasImage(image string) func(context.Context, string, ...string) ([]byte, error) {
+	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) > 2 && args[0] == "image" && args[2] == image {
+			return []byte("sha256:abc"), nil
+		}
+		return nil, context.Canceled
+	}
+}
+
+func TestKindBackendImageArgsPrefersWorkingTreeBuild(t *testing.T) {
+	loaded, setOutput := installKindExecSpies(t)
+	setOutput(hostHasImage(localNativeImage))
+
+	got, err := kindBackendImageArgs(context.Background(), "kind-panda")
 	if err != nil {
 		t.Fatalf("image present should not fail: %v", err)
 	}
-	if got != localNativeImage {
-		t.Errorf("chose %q, want %q", got, localNativeImage)
+	gotArgs := strings.Join(got, " ")
+	for _, want := range []string{localNativeValues, "image.repository=kates", "image.tag=native-local", "image.pullPolicy=Never"} {
+		if !strings.Contains(gotArgs, want) {
+			t.Errorf("local image args missing %q: %s", want, gotArgs)
+		}
 	}
-	if len(loaded) != 1 || !strings.Contains(loaded[0], "kind load docker-image "+localNativeImage+" --name panda") {
-		t.Errorf("should have loaded the image into the named cluster: %v", loaded)
+	if len(*loaded) != 1 || !strings.Contains((*loaded)[0], "kind load docker-image "+localNativeImage+" --name panda") {
+		t.Errorf("should have loaded the image into the named cluster: %v", *loaded)
 	}
+}
 
-	// Only `make kates-native` was run: that image is native and local too,
-	// and which target you happened to use must not decide whether the
-	// backend starts.
-	loaded = nil
-	runExecOutputFn = hostHas("kates:native")
-	got, err = ensureLocalNativeImage(context.Background(), "kind-panda")
+func TestKindBackendImageArgsAcceptsKatesNativeImage(t *testing.T) {
+	_, setOutput := installKindExecSpies(t)
+	setOutput(hostHasImage("kates:native"))
+
+	got, err := kindBackendImageArgs(context.Background(), "kind-panda")
 	if err != nil {
 		t.Fatalf("kates:native should be accepted: %v", err)
 	}
-	if got != "kates:native" {
-		t.Errorf("chose %q, want kates:native", got)
+	if gotArgs := strings.Join(got, " "); !strings.Contains(gotArgs, "image.tag=native") {
+		t.Errorf("chose %q, want kates:native overrides", gotArgs)
 	}
+}
 
-	// Not in Docker but already on the node → accepted, nothing loaded.
-	loaded = nil
-	runExecOutputFn = func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "exec" {
-			return []byte("abc123\n"), nil
+func TestKindBackendImageArgsUsesNodeLocalImageWhenPresentEverywhere(t *testing.T) {
+	loaded, setOutput := installKindExecSpies(t)
+	setOutput(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if strings.Join(args, " ") == "get nodes --name panda" {
+			return []byte("panda-control-plane\npanda-worker\n"), nil
+		}
+		if len(args) > 4 && args[0] == "exec" && args[2] == "crictl" && args[3] == "inspecti" {
+			return []byte("{}"), nil
 		}
 		return nil, context.Canceled
-	}
-	if _, err := ensureLocalNativeImage(context.Background(), "kind-panda"); err != nil {
-		t.Fatalf("image on the node should not fail: %v", err)
-	}
-	if len(loaded) != 0 {
-		t.Errorf("nothing to load when the node already has it: %v", loaded)
-	}
+	})
 
-	// Nowhere → refused before Helm, naming the command.
-	runExecOutputFn = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-		return nil, context.Canceled
+	got, err := kindBackendImageArgs(context.Background(), "kind-panda")
+	if err != nil {
+		t.Fatalf("image on every node should not fail: %v", err)
 	}
-	_, err = ensureLocalNativeImage(context.Background(), "kind-panda")
-	if err == nil {
-		t.Fatal("a missing image must refuse rather than install a chart that cannot pull")
+	if gotArgs := strings.Join(got, " "); !strings.Contains(gotArgs, localNativeValues) || !strings.Contains(gotArgs, "image.pullPolicy=Never") {
+		t.Errorf("node-local image args missing expected overrides: %s", gotArgs)
 	}
-	for _, want := range []string{localNativeImage, "panda", localNativeMake, "pullPolicy: Never"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal must mention %q:\n%s", want, err)
+	if len(*loaded) != 0 {
+		t.Errorf("nothing to load when every node already has it: %v", *loaded)
+	}
+}
+
+func TestKindBackendImageArgsFallsBackWhenOnlySomeNodesHaveImage(t *testing.T) {
+	_, setOutput := installKindExecSpies(t)
+	setOutput(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if strings.Join(args, " ") == "get nodes --name panda" {
+			return []byte("panda-control-plane\npanda-worker\n"), nil
 		}
+		if len(args) > 4 && args[0] == "exec" && args[1] == "panda-control-plane" && args[2] == "crictl" && args[3] == "inspecti" {
+			return []byte("{}"), nil
+		}
+		return nil, context.Canceled
+	})
+
+	got, err := kindBackendImageArgs(context.Background(), "kind-panda")
+	if err != nil {
+		t.Fatalf("partial node image should fall back to published native image: %v", err)
+	}
+	if gotArgs := strings.Join(got, " "); gotArgs != "-f "+publishedNativeValues {
+		t.Fatalf("partial node image args = %q, want published native values", gotArgs)
+	}
+}
+
+func TestKindBackendImageArgsFallsBackWhenImageMissingLocally(t *testing.T) {
+	_, setOutput := installKindExecSpies(t)
+	setOutput(func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "kind" && strings.Join(args, " ") == "get nodes --name panda" {
+			return []byte("panda-control-plane\n"), nil
+		}
+		return nil, context.Canceled
+	})
+
+	got, err := kindBackendImageArgs(context.Background(), "kind-panda")
+	if err != nil {
+		t.Fatalf("missing local image should fall back to published native image: %v", err)
+	}
+	if gotArgs := strings.Join(got, " "); gotArgs != "-f "+publishedNativeValues {
+		t.Fatalf("missing local image args = %q, want published native values", gotArgs)
 	}
 }
 
