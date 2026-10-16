@@ -390,13 +390,19 @@ class ProbeExecutorTest {
                 .create();
     }
 
-    /** Answers the exec of {@link #cmdProbe} with {@code messages}, then closes the stream. */
+    /**
+     * Answers the exec of {@link #cmdProbe} with {@code messages}, then closes the stream.
+     *
+     * <p>The command exit status is reported on a final status frame; closing immediately after
+     * emit can race that frame on slower runners.
+     */
     private void exec(String pod, Object... messages) {
         server.expect()
                 .get()
                 .withPath(execPath(pod))
                 .andUpgradeToWebSocket()
                 .open(messages)
+                .waitFor(50)
                 .done()
                 .always();
     }
