@@ -277,11 +277,18 @@ class ProbeExecutorTest {
     @Test
     void cmdProbeWhoseCommandExitsNonZeroFailsWhateverItPrinted() {
         pod("krafter-brokers-0", true, true);
-        exec(
-                "krafter-brokers-0",
-                new OutputStreamMessage("0\n"),
-                new ErrorStreamMessage("Timed out waiting for a node assignment."),
-                new StatusStreamMessage(1));
+        server.expect()
+                .get()
+                .withPath(execPath("krafter-brokers-0"))
+                .andUpgradeToWebSocket()
+                .open(
+                        new OutputStreamMessage("0\n"),
+                        new ErrorStreamMessage("Timed out waiting for a node assignment."))
+                // The status frame arrives last; give it a beat before closing the stream.
+                .waitFor(50)
+                .andEmit(new StatusStreamMessage(1))
+                .done()
+                .always();
 
         ProbeResult result = executor.evaluate(cmdProbe(30), NAMESPACE);
 
@@ -390,19 +397,13 @@ class ProbeExecutorTest {
                 .create();
     }
 
-    /**
-     * Answers the exec of {@link #cmdProbe} with {@code messages}, then closes the stream.
-     *
-     * <p>The command exit status is reported on a final status frame; closing immediately after
-     * emit can race that frame on slower runners.
-     */
+    /** Answers the exec of {@link #cmdProbe} with {@code messages}, then closes the stream. */
     private void exec(String pod, Object... messages) {
         server.expect()
                 .get()
                 .withPath(execPath(pod))
                 .andUpgradeToWebSocket()
                 .open(messages)
-                .waitFor(50)
                 .done()
                 .always();
     }
