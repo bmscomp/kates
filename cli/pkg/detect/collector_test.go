@@ -410,6 +410,43 @@ func TestGetNetworkStatus_ServiceCIDRFromTheAPIServerCommand(t *testing.T) {
 	}
 }
 
+func TestParseCoreDNSClusterDomain(t *testing.T) {
+	corefile := `. {
+    errors
+    kubernetes taz-tls-int-1.local in-addr.arpa ip6.arpa {
+        pods insecure
+    }
+}`
+	if got := parseCoreDNSClusterDomain(corefile); got != "taz-tls-int-1.local" {
+		t.Fatalf("parseCoreDNSClusterDomain = %q, want taz-tls-int-1.local", got)
+	}
+}
+
+func TestGetNetworkStatus_PrefersCoreDNSClusterDomain(t *testing.T) {
+	m := NewMockExecutor()
+	m.Set(`.:53 {
+    kubernetes taz-tls-int-1.local in-addr.arpa ip6.arpa {
+        pods insecure
+    }
+}`, "kubectl", "get", "configmap", "-n", "kube-system", "coredns", "-o", "jsonpath={.data.Corefile}")
+	m.Set("default misleading-pod", "kubectl", "get", "pods", "--all-namespaces", "--field-selector=status.phase=Running",
+		"-o", "jsonpath={.items[0].metadata.namespace} {.items[0].metadata.name}")
+	m.Set("search default.svc.cluster.local svc.cluster.local cluster.local", "kubectl", "exec", "-n", "default", "misleading-pod", "--", "cat", "/etc/resolv.conf")
+
+	got := NewCollector(m).getNetworkStatus().ClusterDomain
+	if got != "taz-tls-int-1.local" {
+		t.Fatalf("ClusterDomain = %q, want taz-tls-int-1.local", got)
+	}
+}
+
+func TestParseResolvConfClusterDomain(t *testing.T) {
+	resolv := `search kafka.svc.taz-tls-int-1.local svc.taz-tls-int-1.local taz-tls-int-1.local
+nameserver 100.64.224.10`
+	if got := parseResolvConfClusterDomain(resolv); got != "taz-tls-int-1.local" {
+		t.Fatalf("parseResolvConfClusterDomain = %q, want taz-tls-int-1.local", got)
+	}
+}
+
 // mutatingVerbs are the kubectl verbs that create, change or delete an object
 // in the cluster. `kubectl auth can-i create` is a question, and its verb is
 // auth.

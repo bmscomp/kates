@@ -30,6 +30,25 @@ const (
 	maxEntrySize = 16 << 20
 )
 
+var requiredCRDNames = []string{
+	"kafkas.kafka.strimzi.io",
+	"kafkaconnects.kafka.strimzi.io",
+	"kafkatopics.kafka.strimzi.io",
+	"kafkausers.kafka.strimzi.io",
+	"kafkanodepools.kafka.strimzi.io",
+	"kafkabridges.kafka.strimzi.io",
+	"kafkaconnectors.kafka.strimzi.io",
+	"kafkamirrormaker2s.kafka.strimzi.io",
+	"kafkarebalances.kafka.strimzi.io",
+	"strimzipodsets.core.strimzi.io",
+}
+
+// RequiredCRDNames returns the Strimzi CRDs the Kates charts render resources
+// for. The returned slice is a copy so callers cannot mutate the package set.
+func RequiredCRDNames() []string {
+	return slices.Clone(requiredCRDNames)
+}
+
 // Chart is what a strimzi-kafka-operator chart tarball says about itself,
 // read from its files without rendering a template.
 type Chart struct {
@@ -82,6 +101,79 @@ func ReadChart(tgzPath string) (*Chart, error) {
 		return nil, fmt.Errorf("%s: values.yaml: %w", tgzPath, err)
 	}
 	return c, nil
+}
+
+// CRDBundle returns the chart's crds/ YAML as one deterministic multi-document
+// stream, plus the CRD names found in that stream. This is used by deploy to
+// apply CRDs from the already-resolved chart tarball instead of running an
+// in-cluster hook that must reach GitHub.
+func CRDBundle(tgzPath string) (string, []string, error) {
+	files, err := readChartFiles(tgzPath)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(files.crds) == 0 {
+		return "", nil, fmt.Errorf("%s: no CRDs under crds/", tgzPath)
+	}
+
+	paths := make([]string, 0, len(files.crds))
+	for p := range files.crds {
+		paths = append(paths, p)
+	}
+	slices.Sort(paths)
+
+	var b strings.Builder
+	seen := map[string]bool{}
+	var names []string
+	for _, p := range paths {
+		data := files.crds[p]
+		found, err := crdNamesFromYAML(p, data)
+		if err != nil {
+			return "", nil, err
+		}
+		for _, name := range found {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+
+		if b.Len() > 0 {
+			b.WriteString("---\n")
+		}
+		fmt.Fprintf(&b, "# Source: %s\n", p)
+		b.Write(data)
+		if len(data) == 0 || data[len(data)-1] != '\n' {
+			b.WriteByte('\n')
+		}
+	}
+	slices.Sort(names)
+	return b.String(), names, nil
+}
+
+func crdNamesFromYAML(rel string, data []byte) ([]string, error) {
+	type crd struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var names []string
+	for {
+		var doc crd
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", rel, err)
+		}
+		if doc.Kind == "CustomResourceDefinition" && doc.Metadata.Name != "" {
+			names = append(names, doc.Metadata.Name)
+		}
+	}
+	return names, nil
 }
 
 func readChartFiles(tgzPath string) (*chartFiles, error) {

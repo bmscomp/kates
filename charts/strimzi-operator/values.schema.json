@@ -34,6 +34,16 @@
           "type": "string",
           "description": "Override the CRD bundle URL. Empty derives it from strimziVersion. Point this at an internal mirror for airgapped clusters."
         },
+        "proxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "http": { "type": "string" },
+            "https": { "type": "string" },
+            "noProxy": { "type": "string" },
+            "caBundle": { "type": "string" }
+          }
+        },
         "backoffLimit": { "type": "integer", "minimum": 0 },
         "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 }
       }

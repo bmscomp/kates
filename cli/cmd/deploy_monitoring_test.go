@@ -85,6 +85,9 @@ func TestDeployCommand_MonitoringWiresEveryScrape(t *testing.T) {
 	if !strings.Contains(mon, "--set chaosAlerts.enabled=true") {
 		t.Errorf("the chaos recording rules were not switched on: %s", mon)
 	}
+	if !strings.Contains(mon, "--set kube-prometheus-stack.crds.enabled=false") {
+		t.Errorf("existing Prometheus Operator CRDs should be reused: %s", mon)
+	}
 
 	want := map[string][]string{
 		"helm upgrade --install krafter charts/kafka-cluster":           {"--set monitoring.podMonitor.enabled=true", "--set alerts.enabled=true"},
@@ -126,6 +129,91 @@ func TestDeployCommand_MonitoringWiresEveryScrape(t *testing.T) {
 	} {
 		if !strings.Contains(ky, f) {
 			t.Errorf("the Kyverno upgrade is missing %q: %s", f, ky)
+		}
+	}
+}
+
+func TestDeployCommand_MonitoringDisablesNodeExporterWhenPSARejectsHostPods(t *testing.T) {
+	t.Setenv("KATES_NAMESPACE_LABELS", "pod-security.kubernetes.io/enforce=baseline")
+
+	cmds := deployForScrapeTest(t, true)
+	_, mon := findHelm(cmds, "helm upgrade --install monitoring charts/monitoring")
+	if mon == "" {
+		t.Fatalf("monitoring was not installed; helm calls:\n%s", strings.Join(cmds, "\n"))
+	}
+	for _, want := range []string{
+		"--set kube-prometheus-stack.nodeExporter.enabled=false",
+		"--set kube-prometheus-stack.prometheus-node-exporter.enabled=false",
+	} {
+		if !strings.Contains(mon, want) {
+			t.Errorf("monitoring Helm call lacks %q under baseline PodSecurity:\n%s", want, mon)
+		}
+	}
+}
+
+func TestDeployGroupB_ReconcilesMonitoringNodeExporterRejectedByPSA(t *testing.T) {
+	t.Setenv("KATES_NAMESPACE_LABELS", "pod-security.kubernetes.io/enforce=baseline")
+
+	origHelm, origOutput, origDeployed := runHelmFn, runExecOutputFn, isHelmReleaseDeployedFn
+	origMonitoring, origConnect, origChaos := deployWithMonitoring, deployWithKafkaConnect, deployWithChaos
+	t.Cleanup(func() {
+		runHelmFn, runExecOutputFn, isHelmReleaseDeployedFn = origHelm, origOutput, origDeployed
+		deployWithMonitoring, deployWithKafkaConnect, deployWithChaos = origMonitoring, origConnect, origChaos
+	})
+
+	deployWithMonitoring = true
+	deployWithKafkaConnect = false
+	deployWithChaos = false
+	dl = &DashboardController{}
+
+	isHelmReleaseDeployedFn = func(_ context.Context, release, namespace string) bool {
+		return (release == "monitoring" && namespace == "monitoring") ||
+			(release == "krafter" && namespace == "kafka")
+	}
+	runExecOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		joined := name + " " + strings.Join(args, " ")
+		if strings.Contains(joined, "get daemonset monitoring-prometheus-node-exporter") {
+			return []byte("9"), nil
+		}
+		return stubClusterRead(ctx, name, args...)
+	}
+
+	var helmCalls []string
+	runHelmFn = func(_ context.Context, args ...string) error {
+		helmCalls = append(helmCalls, strings.Join(args, " "))
+		return nil
+	}
+
+	err := deployGroupB(&deployContext{
+		ctx:          context.Background(),
+		ns:           resolvedNamespaces{kafka: "kafka", connect: "connect", jaeger: "monitoring"},
+		valuesFile:   ".build/values-detected.yaml",
+		report:       &detect.DetectReport{Network: detect.NetworkInfo{ClusterDomain: "cluster.local"}},
+		chartOverlay: func(dir string) string { return dir + "/values-generic.yaml" },
+		advanceStep:  func() {},
+		versions:     stubVersionPlan(versionOptions{}),
+		primary:      primaryCluster{Name: "krafter", Namespace: "kafka"},
+	})
+	if err != nil {
+		t.Fatalf("deployGroupB returned error: %v", err)
+	}
+
+	var mon string
+	for _, call := range helmCalls {
+		if strings.HasPrefix(call, "upgrade --install monitoring charts/monitoring") {
+			mon = call
+			break
+		}
+	}
+	if mon == "" {
+		t.Fatalf("monitoring was not reconciled; helm calls = %v", helmCalls)
+	}
+	for _, want := range []string{
+		"--set kube-prometheus-stack.nodeExporter.enabled=false",
+		"--set kube-prometheus-stack.prometheus-node-exporter.enabled=false",
+	} {
+		if !strings.Contains(mon, want) {
+			t.Errorf("monitoring reconcile lacks %q:\n%s", want, mon)
 		}
 	}
 }

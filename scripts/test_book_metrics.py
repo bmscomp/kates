@@ -160,7 +160,7 @@ class HeadingTest(unittest.TestCase):
         #### GetTest
 
         ```bash
-        grpcurl localhost:9000 kates.TestService/GetTest
+        grpcurl localhost:9090 kates.TestService/GetTest
         ```
 
         ### `POST /api/tests`

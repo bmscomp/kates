@@ -39,6 +39,9 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address |
 | `kafka.topicNamespace` | `""` | Namespace for CDC test `KafkaTopic` CRs (`""` = auto-detect) |
 | `engine.defaultBackend` | `native` | Benchmark engine (`native` or `trogdor`) |
+| `engine.maxDurationMs` | `7200000` | Maximum planned duration accepted for one run |
+| `engine.reaperGraceMs` | `300000` | Grace after a `RUNNING` or `STOPPING` run's planned duration before the reaper fails it |
+| `engine.submissionTimeoutMs` | `120000` | Maximum time a run may stay `PENDING` before submission is considered stranded |
 | `prometheus.url` | `http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090` | Prometheus the backend queries for a disruption's Kafka metrics: kube-prometheus-stack's Service for `charts/monitoring` installed as release `monitoring` in namespace `monitoring`, as `kates deploy` does. After `make monitoring`, which uses namespace `kafka`, set `http://monitoring-kube-prometheus-prometheus.kafka.svc:9090` and `networkPolicy.prometheus.namespace=kafka` |
 
 ### Networking

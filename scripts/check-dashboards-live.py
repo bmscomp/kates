@@ -2,7 +2,7 @@
 """Do the boards' panels return data against a real scrape?
 
     scripts/check-dashboards-live.py --scrape /tmp/scrape/broker.txt [--scrape …]
-    scripts/check-dashboards-live.py --prometheus http://localhost:9090
+    scripts/check-dashboards-live.py --prometheus http://localhost:30090
 
 WHAT THIS ADDS TO THE CHECKS THAT ALREADY EXIST. Three things already look at
 the boards and none of them runs a query:

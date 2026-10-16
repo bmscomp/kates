@@ -106,9 +106,9 @@ func TestMCPPlannedDurationMs(t *testing.T) {
 }
 
 // TestMCPReaperLimitsMatchTheBackend holds mcpReaperMaxDurationMs to
-// kates.engine.max-duration-ms as Kates ships it: application.properties, and
-// the @ConfigProperty fallbacks of the reaper and of the orchestrator, which
-// refuses a longer run. Neither the kates chart nor kates/k8s sets it.
+// kates.engine.max-duration-ms as Kates ships it: application.properties, the
+// @ConfigProperty fallbacks, and the Helm chart default passed into the pod.
+// The plain k8s manifest leaves it to application.properties.
 func TestMCPReaperLimitsMatchTheBackend(t *testing.T) {
 	read := func(path string) string {
 		t.Helper()
@@ -129,10 +129,17 @@ func TestMCPReaperLimitsMatchTheBackend(t *testing.T) {
 			t.Errorf("%s falls back to %q for kates.engine.max-duration-ms; the tools assume %s", f, m, want)
 		}
 	}
-	for _, f := range []string{"charts/kates/values.yaml", "charts/kates/templates/configmap.yaml", "kates/k8s/configmap.yaml"} {
-		if s := read(f); strings.Contains(s, "max-duration") || strings.Contains(s, "MAX_DURATION") {
-			t.Errorf("%s sets the longest run; the tools assume the %s ms application.properties ships", f, want)
-		}
+	values := read("charts/kates/values.yaml")
+	if m := regexp.MustCompile(`(?m)^\s*maxDurationMs:\s*"?([^"\n]*)"?\s*$`).FindStringSubmatch(values); m == nil || strings.TrimSpace(m[1]) != want {
+		t.Errorf("charts/kates/values.yaml sets engine.maxDurationMs as %q; the tools assume %s", m, want)
+	}
+	configMap := read("charts/kates/templates/configmap.yaml")
+	wantConfigMap := `KATES_ENGINE_MAX_DURATION_MS: {{ .Values.engine.maxDurationMs | default "7200000" | quote }}`
+	if !strings.Contains(configMap, wantConfigMap) {
+		t.Errorf("charts/kates/templates/configmap.yaml does not expose engine.maxDurationMs with the %s default", want)
+	}
+	if s := read("kates/k8s/configmap.yaml"); strings.Contains(s, "max-duration") || strings.Contains(s, "MAX_DURATION") {
+		t.Errorf("kates/k8s/configmap.yaml sets the longest run; the tools assume the %s ms application.properties ships", want)
 	}
 }
 

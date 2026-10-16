@@ -62,21 +62,23 @@ type versionPlan struct {
 	Pinned         bool   `json:"pinned"`
 	// Adopted is true when no version was requested and the operator already
 	// on the cluster is newer than the pin, so deploy keeps it.
-	Adopted        bool     `json:"adoptedInstalled,omitempty"`
-	PinnedVersion  string   `json:"pinnedVersion"`
-	ChartPath      string   `json:"chartPath"`
-	ChartDir       string   `json:"chartDir"` // the wrapper directory helm installs from
-	Window         []string `json:"window"`
-	KafkaVersion   string   `json:"kafkaVersion"`
-	KafkaDefaulted bool     `json:"kafkaDefaulted"`
-	Metadata       string   `json:"metadataVersion"`
-	KafkaFloor     string   `json:"kafkaFloor"`
-	Watch          []string `json:"watchNamespaces,omitempty"`
-	OperatorAction string   `json:"operatorAction"` // install | same | upgrade
-	Installed      string   `json:"installedVersion,omitempty"`
-	ScopeChange    string   `json:"scopeChange,omitempty"`
-	Notes          []string `json:"notes,omitempty"`
-	RollingCRs     []string `json:"rollingResources,omitempty"`
+	Adopted               bool     `json:"adoptedInstalled,omitempty"`
+	PinnedVersion         string   `json:"pinnedVersion"`
+	ChartPath             string   `json:"chartPath"`
+	ChartDir              string   `json:"chartDir"` // the wrapper directory helm installs from
+	Window                []string `json:"window"`
+	KafkaVersion          string   `json:"kafkaVersion"`
+	KafkaDefaulted        bool     `json:"kafkaDefaulted"`
+	Metadata              string   `json:"metadataVersion"`
+	KafkaFloor            string   `json:"kafkaFloor"`
+	Watch                 []string `json:"watchNamespaces,omitempty"`
+	OperatorAction        string   `json:"operatorAction"` // install | same | upgrade
+	Installed             string   `json:"installedVersion,omitempty"`
+	ScopeChange           string   `json:"scopeChange,omitempty"`
+	Notes                 []string `json:"notes,omitempty"`
+	RollingCRs            []string `json:"rollingResources,omitempty"`
+	ReplaceEmptyPreV1CRDs bool     `json:"replaceEmptyPreV1CRDs,omitempty"`
+	ReplaceCRDs           []string `json:"replaceCRDs,omitempty"`
 
 	chart     *strimzi.Chart
 	kafka     kafkaversion.Version
@@ -315,6 +317,9 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 		if err := vp.compareInstalled(ctx, r, o); err != nil {
 			return nil, err
 		}
+		if err := vp.checkStrimziCRDStorage(ctx, r); err != nil {
+			return nil, err
+		}
 	}
 
 	// 7. Derived settings: the chart directory helm installs from.
@@ -472,21 +477,6 @@ func (vp *versionPlan) compareInstalled(ctx context.Context, r strimzi.Runner, o
 	}
 	vp.OperatorAction = "upgrade"
 
-	// The 1.0 boundary.
-	if below, _ := compareVersions(primary.Version, strimziV1); below < 0 {
-		if at, _ := compareVersions(vp.StrimziVersion, strimziV1); at >= 0 {
-			stored, err := strimzi.StoredVersions(ctx, r)
-			if err != nil {
-				return fmt.Errorf("checking the stored CRD versions before crossing Strimzi 1.0: %w", err)
-			}
-			for crd, versions := range stored {
-				if len(versions) != 1 || versions[0] != "v1" {
-					return fmt.Errorf("%s still stores %s: Strimzi %s removes v1beta2, so every resource must be converted first (Strimzi's API conversion procedure), then deploy again", crd, strings.Join(versions, ","), vp.StrimziVersion)
-				}
-			}
-		}
-	}
-
 	// Every Kafka the upgraded operator will find must be in its window.
 	running, err := runningKafkaVersions(ctx, r, primary)
 	if err != nil {
@@ -507,6 +497,74 @@ func (vp *versionPlan) compareInstalled(ctx context.Context, r strimzi.Runner, o
 }
 
 type runningKafka struct{ namespace, name, version string }
+
+func (vp *versionPlan) checkStrimziCRDStorage(ctx context.Context, r strimzi.Runner) error {
+	if at, _ := compareVersions(vp.StrimziVersion, strimziV1); at < 0 {
+		return nil
+	}
+	if vp.primaryOp != nil {
+		if below, _ := compareVersions(vp.primaryOp.Version, strimziV1); below >= 0 {
+			return nil
+		}
+	}
+	stored, err := strimzi.StoredVersions(ctx, r)
+	if err != nil {
+		return fmt.Errorf("checking the stored CRD versions before installing Strimzi %s: %w", vp.StrimziVersion, err)
+	}
+	blocking := nonV1StoredCRDs(stored)
+	if len(blocking) == 0 {
+		return nil
+	}
+	instances, err := strimzi.ResourceInstances(ctx, r, blocking)
+	if err != nil {
+		return fmt.Errorf("checking Strimzi resources before installing Strimzi %s: %w", vp.StrimziVersion, err)
+	}
+	if len(instances) > 0 {
+		return fmt.Errorf("%s still store non-v1 API data: Strimzi %s removes v1beta2, and %d Strimzi resource(s) still exist in those CRDs (%s). Run Strimzi's API conversion procedure, then deploy again",
+			describeStoredVersions(stored, blocking), vp.StrimziVersion, len(instances), describeResourceInstances(instances, 5))
+	}
+	vp.ReplaceEmptyPreV1CRDs = true
+	vp.ReplaceCRDs = blocking
+	vp.Notes = append(vp.Notes, fmt.Sprintf("No custom resources exist for %s, so deploy will replace only those empty pre-v1 CRDs before installing Strimzi %s.",
+		strings.Join(blocking, ", "), vp.StrimziVersion))
+	return nil
+}
+
+func nonV1StoredCRDs(stored map[string][]string) []string {
+	var blocking []string
+	for crd, versions := range stored {
+		if len(versions) != 1 || versions[0] != "v1" {
+			blocking = append(blocking, crd)
+		}
+	}
+	sort.Strings(blocking)
+	return blocking
+}
+
+func describeStoredVersions(stored map[string][]string, crds []string) string {
+	parts := make([]string, 0, len(crds))
+	for _, crd := range crds {
+		versions := stored[crd]
+		if len(versions) == 0 {
+			parts = append(parts, crd)
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", crd, strings.Join(versions, ",")))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func describeResourceInstances(instances []strimzi.ResourceInstance, limit int) string {
+	refs := make([]string, 0, len(instances))
+	for _, instance := range instances {
+		refs = append(refs, instance.Ref())
+	}
+	sort.Strings(refs)
+	if len(refs) <= limit {
+		return strings.Join(refs, ", ")
+	}
+	return strings.Join(refs[:limit], ", ") + fmt.Sprintf(", and %d more", len(refs)-limit)
+}
 
 // runningKafkaVersions lists the Kafka CRs the operator watches, with their versions.
 func runningKafkaVersions(ctx context.Context, r strimzi.Runner, op *strimzi.Operator) ([]runningKafka, error) {

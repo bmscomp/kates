@@ -13,7 +13,7 @@ import (
 
 // vendoredChart is the pin's tarball relative to this package directory,
 // used by the tests that can run against the real thing.
-const vendoredChart = "../../../charts/strimzi-operator/charts/strimzi-kafka-operator-1.1.0.tgz"
+const vendoredChart = "../../../charts/strimzi-operator/charts/strimzi-kafka-operator-1.2.0.tgz"
 
 // imageMap110 is templates/_kafka_image_map.tpl of the vendored 1.1.0 chart.
 const imageMap110 = `{{/* vim: set filetype=mustache: */}}

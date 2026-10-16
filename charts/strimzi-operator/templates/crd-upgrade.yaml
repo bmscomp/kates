@@ -1,4 +1,5 @@
 {{- if .Values.crdUpgrade.enabled }}
+{{- $proxyCABundle := .Values.crdUpgrade.proxy.caBundle | default "" }}
 {{- /*
 Strimzi CRD applier.
 
@@ -85,6 +86,26 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
     namespace: {{ .Release.Namespace }}
+{{- if $proxyCABundle }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade-proxy-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "strimzi-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- with (include "strimzi-operator.annotations" .) }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  ca.crt: |
+{{ $proxyCABundle | nindent 4 }}
+{{- end }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -116,6 +137,36 @@ spec:
       containers:
         - name: crd-upgrade
           image: {{ include "strimzi-operator.kubectlImage" . }}
+          {{- $httpProxy := .Values.crdUpgrade.proxy.http | default "" }}
+          {{- $httpsProxy := .Values.crdUpgrade.proxy.https | default "" }}
+          {{- $noProxy := .Values.crdUpgrade.proxy.noProxy | default "" }}
+          {{- if or $httpProxy $httpsProxy $noProxy }}
+          env:
+            {{- if $httpProxy }}
+            - name: HTTP_PROXY
+              value: {{ $httpProxy | quote }}
+            - name: http_proxy
+              value: {{ $httpProxy | quote }}
+            {{- end }}
+            {{- if $httpsProxy }}
+            - name: HTTPS_PROXY
+              value: {{ $httpsProxy | quote }}
+            - name: https_proxy
+              value: {{ $httpsProxy | quote }}
+            {{- end }}
+            {{- if $noProxy }}
+            - name: NO_PROXY
+              value: {{ $noProxy | quote }}
+            - name: no_proxy
+              value: {{ $noProxy | quote }}
+            {{- end }}
+          {{- end }}
+          {{- if $proxyCABundle }}
+          volumeMounts:
+            - name: proxy-ca
+              mountPath: /kates-proxy
+              readOnly: true
+          {{- end }}
           command:
             - /bin/sh
             - -c
@@ -139,6 +190,12 @@ spec:
 
               echo "Applying Strimzi CRDs (v{{ .Values.strimziVersion }})..."
               echo "Source: ${CRD_URL}"
+              if [ -f /kates-proxy/ca.crt ]; then
+                cat /etc/ssl/certs/ca-certificates.crt /kates-proxy/ca.crt > /tmp/kates-ca-bundle.crt
+                export CURL_CA_BUNDLE=/tmp/kates-ca-bundle.crt
+                export SSL_CERT_FILE=/tmp/kates-ca-bundle.crt
+                echo "Using extra proxy CA bundle from /kates-proxy/ca.crt"
+              fi
 
               # -f makes HTTP errors exit non-zero. Without it curl exits 0 on a
               # 404 and writes the error body, so the failure would only surface
@@ -240,4 +297,10 @@ spec:
             limits:
               memory: 128Mi
               cpu: 200m
+      {{- if $proxyCABundle }}
+      volumes:
+        - name: proxy-ca
+          configMap:
+            name: {{ include "strimzi-operator.fullname" . }}-crd-upgrade-proxy-ca
+      {{- end }}
 {{- end }}

@@ -56,6 +56,19 @@ crdUpgrade:
   # -- Override the CRD bundle URL (empty = derive from strimziVersion).
   # Set this to an internal mirror for airgapped clusters — see values-prod.yaml.
   url: ""
+  # -- Proxy values for the CRD-upgrade Job's curl/kubectl calls.
+  # Use when the job needs egress through a corporate proxy.
+  proxy:
+    # -- HTTP proxy URL
+    http: ""
+    # -- HTTPS proxy URL
+    https: ""
+    # -- NO_PROXY comma-separated list
+    noProxy: ""
+    # -- Additional PEM certificate bundle (content) trusted by the CRD-upgrade job.
+    # Use `--set-file crdUpgrade.proxy.caBundle=/path/to/ca.pem` when the proxy
+    # re-signs TLS traffic with a private CA.
+    caBundle: ""
   # -- Job retry budget before the install/upgrade is aborted
   backoffLimit: 3
   # -- Seconds to retain a FAILED Job for log inspection. This never applies to

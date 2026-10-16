@@ -189,7 +189,7 @@ func TestWrapperForRealRepository(t *testing.T) {
 	}
 	root := "../../.."
 	cacheDir := t.TempDir()
-	dir, err := WrapperFor(root, cacheDir, "1.1.0", vendoredChart)
+	dir, err := WrapperFor(root, cacheDir, "1.2.0", vendoredChart)
 	if err != nil {
 		t.Fatalf("WrapperFor: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestWrapperForRealRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "strimzi-kafka-operator-1.1.0.tgz" {
+	if len(entries) != 1 || entries[0].Name() != "strimzi-kafka-operator-1.2.0.tgz" {
 		t.Errorf("charts/ = %v", entries)
 	}
 	for _, f := range []string{"values.yaml", "values.schema.json", "templates"} {

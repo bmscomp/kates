@@ -60,7 +60,7 @@ sequenceDiagram
 Kates serves gRPC through the unified Quarkus HTTP server: `quarkus.grpc.server.use-separate-server=false` in `application.properties` routes gRPC (HTTP/2) traffic over the same port as REST — **8080**. The separate-server port setting (`quarkus.grpc.server.port=9000`) is ignored in this mode. So the port-forward that carries the REST API carries gRPC too: with `make ports` running, both answer in plaintext on `localhost:30083`.
 
 ::: {.callout-warning}
-The Helm chart still declares a `grpc` container and Service port 9000 (`charts/kates/values.yaml`), but nothing listens there. `kates ports` forwards it to `localhost:9000` all the same, and the chart's gRPC Ingress (`ingress.grpc.enabled`) routes to it, so calls through either never reach the server. Connect to the HTTP port instead: `localhost:30083` with `make ports`, `localhost:8080` with `kates ports`.
+The Helm chart still declares a `grpc` container and Service port 9000 (`charts/kates/values.yaml`), but nothing listens there. `kates ports` forwards it to `localhost:9090` all the same, and the chart's gRPC Ingress (`ingress.grpc.enabled`) routes to it, so calls through either never reach the server. Connect to the HTTP port instead: `localhost:30083` with `make ports`, `localhost:8080` with `kates ports`.
 :::
 
 ### Authentication

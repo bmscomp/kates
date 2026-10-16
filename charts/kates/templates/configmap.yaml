@@ -38,6 +38,9 @@ data:
   KATES_PROMETHEUS_URL: {{ . | quote }}
   {{- end }}
   KATES_ENGINE_DEFAULT_BACKEND: {{ .Values.engine.defaultBackend | quote }}
+  KATES_ENGINE_MAX_DURATION_MS: {{ .Values.engine.maxDurationMs | default "7200000" | quote }}
+  KATES_ENGINE_REAPER_GRACE_MS: {{ .Values.engine.reaperGraceMs | default "300000" | quote }}
+  KATES_ENGINE_SUBMISSION_TIMEOUT_MS: {{ .Values.engine.submissionTimeoutMs | default "120000" | quote }}
   KATES_API_SECURITY_ENABLED: {{ .Values.apiKey.enabled | default false | quote }}
 
   {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}

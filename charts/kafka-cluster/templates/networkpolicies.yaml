@@ -133,7 +133,6 @@ spec:
 {{- /* The operator drives Cruise Control over its REST API (9090). */ -}}
 {{- $operands = append $operands (dict "name" "cruise-control" "legacy" "cruise-control" "ingress" (list (dict "from" (list $operator) "ports" (include "kafka-cluster.tcpPorts" (list 9090) | fromYamlArray)) (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 9404) | fromYamlArray)))) -}}
 {{- end -}}
-{{- $operands = append $operands (dict "name" "entity-operator" "legacy" "entity-operator" "ingress" (list (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 8080 8081) | fromYamlArray)))) -}}
 {{- if include "kafka-common.enabled" (list .Values.kafkaExporter.enabled true) -}}
 {{- $operands = append $operands (dict "name" "kafka-exporter" "legacy" "kafka-exporter" "ingress" (list (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 9404) | fromYamlArray)))) -}}
 {{- end -}}
@@ -163,4 +162,34 @@ spec:
               strimzi.io/cluster: {{ $cluster }}
     {{- toYaml $apiServer | nindent 4 }}
 {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  # Strimzi owns <cluster>-entity-operator and may rewrite it. Keep this
+  # supplemental policy separate so default-deny egress cannot isolate the
+  # Topic/User Operators from Kafka and the Kubernetes API.
+  name: {{ include "kafka-cluster.resourceName" (list . "entity-operator-egress" "") }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kafka-cluster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/cluster: {{ $cluster }}
+      strimzi.io/name: {{ $cluster }}-entity-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - {{- toYaml $monitoring | nindent 10 }}
+      ports:
+        {{- include "kafka-cluster.tcpPorts" (list 8080 8081) | nindent 8 }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ $cluster }}
+    {{- toYaml $apiServer | nindent 4 }}
 {{- end }}

@@ -241,6 +241,62 @@ func TestSizingProfile_Production(t *testing.T) {
 	}
 }
 
+func TestGenerateValues_CapsKafkaPodsToSchedulableNode(t *testing.T) {
+	r := &DetectReport{
+		Context:  "remote",
+		Provider: "generic",
+		Network:  NetworkInfo{ClusterDomain: "cluster.local"},
+		Zones: []ZoneInfo{
+			{Name: "ext", Nodes: 3, CPUAllocatable: 23100, MemAllocatableGi: 90},
+			{Name: "mrs3", Nodes: 3, CPUAllocatable: 23100, MemAllocatableGi: 90},
+			{Name: "vil", Nodes: 3, CPUAllocatable: 23100, MemAllocatableGi: 90},
+		},
+		Nodes: []NodeInfo{
+			{Name: "ext-a", Zone: "ext", CPU: 7700, MemoryGi: 30},
+			{Name: "ext-b", Zone: "ext", CPU: 7700, MemoryGi: 30},
+			{Name: "ext-c", Zone: "ext", CPU: 7700, MemoryGi: 30},
+			{Name: "mrs3-a", Zone: "mrs3", CPU: 7700, MemoryGi: 30},
+			{Name: "mrs3-b", Zone: "mrs3", CPU: 7700, MemoryGi: 30},
+			{Name: "mrs3-c", Zone: "mrs3", CPU: 7700, MemoryGi: 30},
+			{Name: "vil-a", Zone: "vil", CPU: 7700, MemoryGi: 30},
+			{Name: "vil-b", Zone: "vil", CPU: 7700, MemoryGi: 30},
+			{Name: "vil-c", Zone: "vil", CPU: 7700, MemoryGi: 30},
+		},
+		Workload: WorkloadPressure{
+			TotalCPURequests: 24050,
+			TotalMemRequests: 4,
+			PerNode: []NodePressure{
+				{Name: "ext-a", CPURequested: 2980, MemRequested: 4},
+				{Name: "ext-b", CPURequested: 4623, MemRequested: 8},
+				{Name: "ext-c", CPURequested: 2930, MemRequested: 4},
+				{Name: "mrs3-a", CPURequested: 2880, MemRequested: 4},
+				{Name: "mrs3-b", CPURequested: 2990, MemRequested: 4},
+				{Name: "mrs3-c", CPURequested: 4063, MemRequested: 7},
+				{Name: "vil-a", CPURequested: 2680, MemRequested: 3},
+				{Name: "vil-b", CPURequested: 4223, MemRequested: 7},
+				{Name: "vil-c", CPURequested: 2880, MemRequested: 4},
+			},
+		},
+	}
+	r.Workload = hydrateWorkloadPressure(r.Nodes, r.Workload)
+
+	gen := NewValuesGeneratorWithReserve(r, "krafter", 0.30)
+	vals := gen.Generate()
+
+	if gen.Cap.WeakestZoneCPU != 8796 {
+		t.Fatalf("weakest zone budget = %dm, want 8796m", gen.Cap.WeakestZoneCPU)
+	}
+	if gen.Cap.BrokerCPU != 3339 {
+		t.Fatalf("broker CPU = %dm, want the weakest zone's best-node cap of 3339m", gen.Cap.BrokerCPU)
+	}
+	if vals.BrokerDefaults.Resources.Requests.CPU != "3339m" {
+		t.Fatalf("rendered broker CPU request = %s, want 3339m", vals.BrokerDefaults.Resources.Requests.CPU)
+	}
+	if gen.Cap.BrokerMem != 16 {
+		t.Fatalf("broker memory should still use the configured max when node memory permits it, got %dGi", gen.Cap.BrokerMem)
+	}
+}
+
 func TestSizingProfile_Minimal(t *testing.T) {
 	r := &DetectReport{
 		Nodes:   []NodeInfo{{CPU: 500, MemoryGi: 1}},
