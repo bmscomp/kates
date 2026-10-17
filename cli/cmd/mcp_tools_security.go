@@ -68,7 +68,7 @@ var mcpSecuritySections = []string{
 }
 
 // mcpComplianceFramework names a framework as the tool takes it and as the
-// backend keys it (SecurityService.java:796-798).
+// backend keys it (SecurityService.java:800-802).
 type mcpComplianceFrameworkName struct{ key, name string }
 
 var mcpComplianceFrameworks = []mcpComplianceFrameworkName{
@@ -710,7 +710,7 @@ const (
 // version. It reads kafkaVersion from a cluster description that never holds
 // one (ClusterHealthService.describeCluster), so it gets "unknown", and its
 // compareVersions, failing to parse that, calls every entry PATCHED
-// (SecurityService.java:1390,1448,1572-1586). A version counts as known when
+// (SecurityService.java:1394,1452,1576-1590). A version counts as known when
 // every dot-separated part holds a digit, as compareVersions needs.
 func mcpCVEVersionKnown(v string) bool {
 	if v == "" {
@@ -936,8 +936,10 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"backend logs a warning and runs the checks on an empty configuration or an empty ACL list, and the " +
 			"result does not say so: each check then reports the value it assumes for a missing setting.",
 		Refs: []string{
-			mcpJava + "service/SecurityKafkaHelpers.java:31-60",
-			mcpJava + "service/SecurityService.java:88-97,1055-1061,1293-1297,1511-1519",
+			mcpAnchoredRef(mcpJava+"service/SecurityKafkaHelpers.java:36-65",
+				"fetchBrokerConfig(AdminClient client, int brokerId)", "fetchAcls(AdminClient client)"),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:88-97,1059-1065,1297-1301,1515-1523",
+				"helpers.fetchBrokerConfig(client, brokerId)", "helpers.fetchBrokerConfig(client, bId)"),
 			mcpJava + "service/SecurityPentestService.java:46-51",
 		},
 	},
@@ -950,28 +952,39 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"pass, and no certificate is opened: expiry, issuer and chain are never read, only whether a keystore and " +
 			"a truststore location are set.",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:1049-1158",
-			mcpJava + "service/SecurityService.java:1286-1380",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1053-1162", "public Map<String, Object> tlsInspect()"),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1290-1384", "public Map<String, Object> certificateCheck()"),
 		},
 	},
 	{
 		ID: mcpCaveatSecurityBrokerWideKeys,
-		Text: "The audit, pentest, TLS and certificate checks read only broker-wide settings (sasl.enabled.mechanisms, " +
-			"ssl.keystore.location, ssl.truststore.location, ssl.client.auth, ssl.protocol and the like), never " +
-			"listener.name.<listener>.* settings. The audit's No Plaintext Listeners check and the pentest's " +
-			"unencrypted check only look for the text PLAINTEXT:// in the listeners setting (the audit also in " +
-			"advertised.listeners): a listener named after its protocol (PLAINTEXT, SASL_PLAINTEXT) holds it, and one " +
-			"with a name of its own, such as plain, never does, whatever its protocol. On a " +
-			"cluster that sets security per named listener, such as the Strimzi cluster the kafka-cluster chart " +
-			"installs (listener plain on 9092, SCRAM without TLS; listener tls on 9093, TLS), these checks can report " +
-			"no SASL, no keystore and TLS unavailable, and at the same time no plaintext listener: read neither " +
-			"result as the truth about the listeners. The Listener Protocol Map check's detail lists each listener's " +
-			"protocol unless the map holds PLAINTEXT without SASL_PLAINTEXT; it passes whenever the map holds " +
-			"SASL_PLAINTEXT, which is authenticated but unencrypted, even beside a PLAINTEXT listener.",
+		Text: "The audit's SASL Authentication, SASL Mechanism Strength, No Plaintext Listeners and Listener Protocol " +
+			"Map checks and the pentest's metadata-leak and unencrypted checks take each listener's protocol from " +
+			"listeners and listener.security.protocol.map (a listener the map does not name has the protocol of its " +
+			"name, and a configuration without listeners counts as Kafka's default, PLAINTEXT://:9092). Unencrypted " +
+			"means PLAINTEXT or SASL_PLAINTEXT. SASL counts as on when some listener is SASL_PLAINTEXT or SASL_SSL and " +
+			"none is PLAINTEXT. An SSL listener counts as neither: a cluster whose clients authenticate only with " +
+			"certificates reports no SASL, and an SSL listener beside a SASL one passes whether or not it asks for a " +
+			"certificate. SASL Mechanism Strength reads each SASL listener's " +
+			"listener.name.<listener>.sasl.enabled.mechanisms and, when Kafka does not report that key, the " +
+			"broker-wide sasl.enabled.mechanisms. Whether Kafka reports the per-listener key has not been checked on a " +
+			"live cluster; where it does not, a Strimzi cluster, which leaves the broker-wide key empty, reports no SASL " +
+			"mechanisms beside a passing SASL Authentication. The keystore, truststore, mTLS, TLS and certificate " +
+			"checks still read only broker-wide ssl.* settings (ssl.keystore.location, ssl.truststore.location, " +
+			"ssl.client.auth, ssl.protocol and the like), never listener.name.<listener>.* settings. On a cluster that " +
+			"sets TLS per named listener, such as the Strimzi cluster the kafka-cluster chart installs (listener plain " +
+			"on 9092, SCRAM without TLS; listener tls on 9093, TLS with client certificates), they can report no " +
+			"keystore and no client authentication while the tls listener has both: read none of them as the truth " +
+			"about the listeners.",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:99-126,357-393,685-699",
-			mcpJava + "service/SecurityService.java:1049-1158,1286-1310",
-			mcpJava + "service/SecurityPentestService.java:127-137,155-166",
+			mcpAnchoredRef(mcpJava+"service/SecurityKafkaHelpers.java:74-156",
+				"listener.security.protocol.map", "static boolean saslRequired(", "static String saslMechanisms("),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:99-132,332-348,365-401,693-703",
+				`"SASL Authentication"`, `"SASL Mechanism Strength"`, `"SSL Keystore Configured"`, `"Listener Protocol Map"`),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1053-1162,1290-1314",
+				"public Map<String, Object> tlsInspect()", "public Map<String, Object> certificateCheck()"),
+			mcpAnchoredRef(mcpJava+"service/SecurityPentestService.java:127-138,156-168",
+				`"metadata-leak"`, `"unencrypted"`),
 			"charts/kafka-cluster/values.yaml:90-105",
 			"charts/kafka-cluster/README.md:370-379",
 		},
@@ -983,7 +996,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"has but the fresh audit lacks is not listed. Without a saved baseline there is no drift to report, and " +
 			"this server cannot save one: the baseline is a POST, which its transport refuses.",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:908-975,1010-1017",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:912-979,1014-1021",
+				"public Map<String, Object> securityDrift()", "private int statusRank(String status)"),
 			mcpJava + "api/SecurityResource.java:134-148",
 			"cli/cmd/mcp_guard.go:1110-1145",
 		},
@@ -994,6 +1008,7 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 			"CIS ids are the ones the checks carry, SOC2 and PCI-DSS controls are assigned by check category alone " +
 			"(auth, authz and transport for SOC2; transport, auth and limits for PCI-DSS), and the percentage is the " +
 			"share of mapped checks that pass.",
-		Refs: []string{mcpJava + "service/SecurityService.java:788-849,1030-1047"},
+		Refs: []string{mcpAnchoredRef(mcpJava+"service/SecurityService.java:792-853,1034-1051",
+			"public Map<String, Object> securityCompliance()", "private String mapToSoc2(String category)")},
 	},
 }, mcpCaveatsScenario)
