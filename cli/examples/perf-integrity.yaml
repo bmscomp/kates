@@ -16,7 +16,6 @@ scenarios:
       records: 200000
       recordSizeBytes: 512
       targetThroughput: 2000
-      consumerGroup: integrity-cg
       acks: "all"
       enableIdempotence: true
       enableTransactions: true  # exactly-once semantics

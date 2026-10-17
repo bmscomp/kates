@@ -452,7 +452,7 @@ type mcpRunSpec struct {
 	// backend that stored no requestedSpec dropped them and stored their Java
 	// defaults (mcpRunNotCarried), which would read as values the run used.
 	TargetThroughput   *int64         `json:"targetThroughput,omitempty" jsonschema:"the rate as requested under its other name, the one the CLI and scenario files send; throughput is the rate the run used, taken from this when the request set no throughput. Absent when the request did not set it"`
-	ConsumerGroup      mcpUntrusted   `json:"consumerGroup,omitempty" jsonschema:"the consumer group the request named; absent when it named none, and then each consumer used a group of its own: the task id with -group appended for LOAD and ENDURANCE, integrity-cg-integrity for INTEGRITY. An INTEGRITY run's consumer joins a named group with -integrity appended"`
+	ConsumerGroup      mcpUntrusted   `json:"consumerGroup,omitempty" jsonschema:"the consumer group the request named; absent when it named none, and then each consumer used a group of its own: the task id with -group appended, and -group-integrity for an INTEGRITY run's (one created before the backend gave each run its own group joined integrity-cg-integrity). An INTEGRITY run's consumer joins a named group with -integrity appended"`
 	FetchMinBytes      *int64         `json:"fetchMinBytes,omitempty" jsonschema:"the consumers' fetch.min.bytes; absent when the request set none, and then the Kafka client's default, 1"`
 	FetchMaxWaitMs     *int64         `json:"fetchMaxWaitMs,omitempty" jsonschema:"the consumers' fetch.max.wait.ms; absent when the request set none, and then the Kafka client's default, 500"`
 	EnableIdempotence  *bool          `json:"enableIdempotence,omitempty" jsonschema:"what the request set: false turned the producers' idempotence off. Absent when it set none, and then the Kafka client decided: it turns idempotence on whenever acks is all"`
@@ -2245,7 +2245,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"lostRecords counts every one. RPO is measured only for a run that knew when its fault started, a " +
 			"resilience run's; a plain INTEGRITY run, or one a separate disruption hit, has none.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:405-425",
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:411-431",
 				"private void runIntegrity(", "state.integrityResult = state.verifier.verify("),
 			mcpAnchoredRef(mcpJava+"engine/DataIntegrityVerifier.java:51,224-227",
 				"static final int MAX_LOST_RANGES = 1000;", "if (chaosStartNanos <= 0) {"),
@@ -2309,7 +2309,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"domain/TestScenario.java:108-183",
 				"TestSpec base = baseSpec != null ? baseSpec : new TestSpec();", "private TestSpec copySpec("),
 			mcpAnchoredRef(mcpJava+"domain/ScenarioPhase.java:21-26", "private int rampSteps = 1;"),
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:123-127,186-196,241-255,458-459",
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:129-133,192-202,247-257,464-465",
 				"Thread.ofVirtual()", "awaitStart(task, state)", "task.getStartAtMs() - System.currentTimeMillis()",
 				"1_000_000_000L / task.getTargetMessagesPerSec()"),
 			mcpAnchoredRef(mcpJava+"engine/TrogdorBackend.java:110-121,178-179",
