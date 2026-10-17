@@ -404,11 +404,11 @@ class TestOrchestratorTest {
         }
 
         @Test
-        void defaultConsumerGroupIsIntegrityCg() {
+        void defaultConsumerGroupIsTheTasksOwn() {
             TestSpec spec = specWith(1000, 1);
             List<BenchmarkTask> tasks = orchestrator.buildTasks(TestType.INTEGRITY, spec, "run-1");
 
-            assertEquals("integrity-cg", tasks.get(0).getConsumerGroup());
+            assertEquals("run-1-integrity-0-group", tasks.get(0).getConsumerGroup());
         }
 
         @Test
@@ -919,7 +919,7 @@ class TestOrchestratorTest {
                             "run-1")
                     .get(0);
 
-            assertEquals("integrity-cg", task.getConsumerGroup(), "the backend appends -integrity to it");
+            assertEquals("run-1-integrity-0-group", task.getConsumerGroup(), "the backend appends -integrity to it");
             assertTrue(task.isEnableCrc(), "CRC checks stay on unless a request turns them off");
         }
     }

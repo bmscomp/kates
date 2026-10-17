@@ -1282,7 +1282,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 				"} else if r.SLA != nil {", `"✓ SLA Pass"`,
 				"func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"crcFail=%d > %d"`,
 				"func unevaluableSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"maxRpoMs (RPO not measured)"`),
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:196-201,406-425",
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:202-207,412-431",
 				"switch (task.getWorkloadType())", "case INTEGRITY -> runIntegrity(task, state);",
 				"void runIntegrity(BenchmarkTask task, WorkerState state)", "state.chaosStartNanos.get()"),
 			mcpJava + "engine/TrogdorBackend.java:162-163",

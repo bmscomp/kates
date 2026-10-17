@@ -1712,10 +1712,10 @@ public class TestOrchestrator {
                         .maxMessages(spec.getNumRecords())
                         .durationMs(spec.getDurationMs())
                         .recordSize(spec.getRecordSize())
-                        // The backend's integrity consumer joins this name with
-                        // "-integrity" appended (NativeKafkaBackend), so the
-                        // default group is integrity-cg-integrity.
-                        .consumerGroup(spec.getConsumerGroup() != null ? spec.getConsumerGroup() : "integrity-cg")
+                        // A group of the task's own, as consumeTask's: a shared
+                        // default resumed where another run had committed. The
+                        // backend appends "-integrity" (NativeKafkaBackend).
+                        .consumerGroup(spec.hasConsumerGroup() ? spec.getConsumerGroup() : runId + "-integrity-0-group")
                         .producerConfig(producerConfig)
                         .consumerConfig(consumerConfig)
                         .enableIdempotence(spec.isEnableIdempotence())
