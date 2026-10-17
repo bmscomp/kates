@@ -19,6 +19,7 @@ import jakarta.inject.Inject;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
@@ -33,11 +34,13 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import com.bmscomp.kates.SchedulerOffTestProfile;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.TopicService;
 import com.bmscomp.kates.trogdor.TrogdorClient;
 
 @QuarkusTest
+@TestProfile(SchedulerOffTestProfile.class)
 class ScheduleResourceTest {
 
     @InjectMock

@@ -7,16 +7,19 @@ import java.util.Optional;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.RestAssured;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import com.bmscomp.kates.SchedulerOffTestProfile;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.AdvisorService;
 import com.bmscomp.kates.service.TestRunRepository;
 
 @QuarkusTest
+@TestProfile(SchedulerOffTestProfile.class)
 class AdvisorResourceTest {
 
     @InjectMock
