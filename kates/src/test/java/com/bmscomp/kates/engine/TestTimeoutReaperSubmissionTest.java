@@ -82,10 +82,6 @@ class TestTimeoutReaperSubmissionTest {
                 .thenAnswer(invocation -> rows.values().stream()
                         .filter(run -> run.getStatus() == invocation.getArgument(0))
                         .toList());
-        when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
-            TestRun run = invocation.getArgument(0);
-            return rows.computeIfPresent(run.getId(), (id, stored) -> run) != null;
-        });
         when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
             beforeConditionalWrite.run();
             TestRun run = invocation.getArgument(0);

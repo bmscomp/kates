@@ -77,11 +77,8 @@ class TestOrchestratorLiveMetricsTest {
                 .save(any());
         when(repository.findById(anyString()))
                 .thenAnswer(invocation -> Optional.ofNullable(rows.get(invocation.<String>getArgument(0))));
-        when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
-            TestRun run = invocation.getArgument(0);
-            return rows.computeIfPresent(run.getId(), (id, stored) -> run) != null;
-        });
-        // The submission's write: only over the row executeTest stored, PENDING.
+        // The submission's write, only over the row executeTest stored, PENDING,
+        // and each poll's, only over the status it read.
         when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
             TestRun run = invocation.getArgument(0);
             TestRun stored = rows.get(run.getId());

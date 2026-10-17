@@ -1892,10 +1892,6 @@ class TestOrchestratorTest {
             when(repository.findById(anyString()))
                     .thenAnswer(
                             invocation -> java.util.Optional.ofNullable(rows.get(invocation.<String>getArgument(0))));
-            when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
-                TestRun stored = invocation.getArgument(0);
-                return rows.computeIfPresent(stored.getId(), (id, old) -> stored) != null;
-            });
             // The submission's last write: only over the row as first saved.
             when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
                 TestRun stored = invocation.getArgument(0);
