@@ -27,14 +27,18 @@ var kafkaConnectCmd = &cobra.Command{
 	// completion included, a kubectl call with no time limit: with an
 	// unreachable cluster in the kubeconfig, `kates version` waited minutes.
 	// Cobra runs only the nearest PersistentPreRun, so this one runs the
-	// root's first, which sets up the output mode and the API client.
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if rootPreRun := cmd.Root().PersistentPreRun; rootPreRun != nil {
-			rootPreRun(cmd, args)
+	// root's first, which sets up the output mode and the API client, and
+	// refuses a command the context's profiles do not enable.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if rootPreRun := cmd.Root().PersistentPreRunE; rootPreRun != nil {
+			if err := rootPreRun(cmd, args); err != nil {
+				return err
+			}
 		}
 		if !cmd.Flags().Changed("namespace") {
 			connectNamespace = detectConnectNamespace(cmd.Context())
 		}
+		return nil
 	},
 }
 
