@@ -19,7 +19,7 @@
 #   so min.isr=2 is still satisfied. The producer, with acks=all, sees no errors.
 #
 # A resilience test does not bring the broker back. Kates orphan recovery
-# does, if Kates restarts 15 minutes or more after the test. To restore it
+# does, the next time the Kates API starts. To restore it
 # yourself:
 #
 #   kubectl patch kafkanodepool brokers-sigma -n kafka --type merge -p '{"spec":{"replicas":1}}'

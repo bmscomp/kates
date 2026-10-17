@@ -1067,7 +1067,7 @@ kates chaos show <id>
 
 ### Resilience
 
-Combined performance and chaos testing: a resilience run starts one Kates test, injects one fault while it runs, and prints the change in throughput, latency and error rate from before the fault. Unlike a disruption plan, it has no safety guard, rollback or grade, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
+Combined performance and chaos testing: a resilience run starts one Kates test, injects one fault while it runs, and prints the change in throughput, latency and error rate from before the fault. Unlike a disruption plan, it has no rollback or grade, and the safety guard checks less of it, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
 
 ```bash
 kates resilience run -f resilience-test.yaml
@@ -1448,6 +1448,8 @@ Two combinations the chart refuses at render time are refused by the CLI first, 
 
 - **the same alias twice** (`--from 2.8.2 --from 2.8.2`) — an alias names the replicated topic prefix, the offset-syncs topic and the checkpoints topic, so two sources sharing one interleave into a single set of target topics without any error;
 - **an identity fan-in over one topic name** (`--from 2.8.2 --from 3.9.1 --topics orders`) — under the identity policy topic names are kept, so both legs would write `orders` on the target. The refusal names the three ways out: `--policy default` (each source's topics land as `<alias>.<topic>`), dropping `--topics` so the lab gives each source its own corpus, or one lab per source.
+
+`up` and `run` also refuse a lab whose topic names on the target, after the policy, are already there. A re-run, whose own KafkaMirrorMaker2 exists, may keep only the topics that mirror already writes: new `--topics` or a new `--policy` under the same lab name are checked like a new lab. Removing a lab deletes the topics it mirrored into, so with the identity policy `--topics orders` would take the primary's own `orders` with it, data and all. The CLI lists the target's topics as `kates-mm2` from a client pod it deletes afterwards, and refuses when it cannot. The refusal names each topic and the ways out: `--topics` with names the target does not have, or `--policy default`. A `run` refused at its prerequisites, by this check or because another lab already mirrors one of its topics, removes nothing.
 
 #### Read-only sources
 

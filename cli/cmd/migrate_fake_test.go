@@ -186,14 +186,20 @@ func scriptCluster(f *fakeProc, kind bool) {
 	f.on("kubectl get daemonset kindnet -n kube-system --ignore-not-found --no-headers", kindnet)
 }
 
-// scriptPrerequisites scripts the scripts' phase 1.
+// scriptPrerequisites scripts the scripts' phase 1, with a target that has
+// none of the lab's topics yet.
 func scriptPrerequisites(f *fakeProc) {
 	f.on("kubectl cluster-info", "Kubernetes control plane is running")
 	f.on("kubectl config current-context", "kind-panda")
 	f.on("kubectl get crd kafkamirrormaker2s.kafka.strimzi.io -o name", "customresourcedefinition.apiextensions.k8s.io/kafkamirrormaker2s.kafka.strimzi.io")
 	f.on("kubectl -n kafka wait kafka/krafter --for=condition=Ready", "kafka.kafka.strimzi.io/krafter condition met")
 	f.on("kubectl -n kafka get kafkamirrormaker2 -l kates.io/lab -o json", `{"items":[]}`)
+	scriptPods(f)
+	f.on(targetTopicsList, "__consumer_offsets\nkates-events")
 }
+
+// targetTopicsList is the topic listing the prerequisites run on the target.
+const targetTopicsList = "kubectl -n kafka exec kates-migrate-target -c client -- /opt/kafka/bin/kafka-topics.sh --bootstrap-server krafter-kafka-bootstrap.kafka.svc.cluster.local:9092 --command-config /tmp/client.properties --list"
 
 // mirrorCRJSON renders a KafkaMirrorMaker2 object with the given connector
 // states.

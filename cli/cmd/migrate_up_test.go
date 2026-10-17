@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -41,6 +42,7 @@ func TestMigrateUpPhasesAndHelmArgv(t *testing.T) {
 		"kubectl get crd kafkamirrormaker2s.kafka.strimzi.io -o name",
 		"kubectl -n kafka wait kafka/krafter --for=condition=Ready --timeout=300s",
 		"kubectl -n kafka get secret kates-mm2 --ignore-not-found",
+		targetTopicsList,
 		"kubectl create namespace kafka-m282-430-src",
 		"kubectl label namespace kafka-m282-430-src --overwrite kates.io/lab=m282-430 kates.io/lab-role=source",
 		"helm upgrade --install m282-430-src charts/legacy-kafka -n kafka-m282-430-src -f .build/migrate/m282-430/source-values.yaml --wait --timeout 600s",
@@ -224,11 +226,17 @@ func TestMigrateUpSASLWritesTheCredentialOnStdin(t *testing.T) {
 	if err := runMigrateUp(nil, flags); err != nil {
 		t.Fatalf("up: %v", err)
 	}
-	applies := f.find("kubectl -n kafka apply -f -")
-	if len(applies) != 1 {
-		t.Fatalf("want one Secret apply, got %d", len(applies))
+	// The prerequisites' client pod is applied in kafka too.
+	var secrets []fakeCall
+	for _, a := range f.find("kubectl -n kafka apply -f -") {
+		if strings.Contains(a.stdin, "kind: Secret") {
+			secrets = append(secrets, a)
+		}
 	}
-	manifest := applies[0].stdin
+	if len(secrets) != 1 {
+		t.Fatalf("want one Secret apply, got %d", len(secrets))
+	}
+	manifest := secrets[0].stdin
 	if !strings.Contains(manifest, "name: m282-430-src-mm2reader") || !strings.Contains(manifest, "password:") || !strings.Contains(manifest, "kates.io/lab: m282-430") {
 		t.Fatalf("secret manifest:\n%s", manifest)
 	}
@@ -300,6 +308,128 @@ func TestMigrateUpRefusesOverlappingLab(t *testing.T) {
 	}
 	if f.hasLine("kubectl create namespace") {
 		t.Fatal("nothing may be created after the refusal")
+	}
+}
+
+func TestMigrateUpRefusesATopicTheTargetHas(t *testing.T) {
+	migrateTestRepo(t)
+	f := newFakeProc(t)
+	scriptCluster(f, true)
+	scriptPrerequisites(f)
+	// kates.orders is already on the target, made by something else.
+	f.on(targetTopicsList, "__consumer_offsets\nkates-events\nkates.orders")
+	captureOutput(t, "table")
+
+	flags := newPairFlags("2.8.2")
+	flags.SkipBuild = true
+	err := runMigrateUp(context.Background(), flags)
+	if err == nil || !strings.Contains(err.Error(), "kates.orders") || !strings.Contains(err.Error(), "--topics") {
+		t.Fatalf("want the refusal naming kates.orders and --topics, got %v", err)
+	}
+	if f.hasLine("kubectl create namespace") {
+		t.Fatal("nothing may be created after the refusal")
+	}
+	if !f.hasLine("kubectl -n kafka delete pod kates-migrate-target") {
+		t.Fatal("the check's client pod was left behind")
+	}
+}
+
+func TestMigrateUpReRunSkipsTheTopicCheck(t *testing.T) {
+	migrateTestRepo(t)
+	f := newFakeProc(t)
+	scriptCluster(f, true)
+	scriptPrerequisites(f)
+	scriptUp(f)
+	// The lab's own mirror is there, and so is the topic it mirrored.
+	f.on("kubectl -n kafka get kafkamirrormaker2 -l kates.io/lab -o json", `{"items":[{"metadata":{"name":"mm2-m282-430-mirror-maker2","labels":{"kates.io/lab":"m282-430"}},
+	  "spec":{"mirrors":[{"topicsPattern":"kates\\.orders"}]}}]}`)
+	f.on(targetTopicsList, "kates.orders")
+	captureOutput(t, "table")
+
+	flags := newPairFlags("2.8.2")
+	flags.SkipBuild = true
+	if err := runMigrateUp(context.Background(), flags); err != nil {
+		t.Fatalf("a re-run of the same lab must pass: %v", err)
+	}
+	if f.hasLine(targetTopicsList) {
+		t.Fatal("a re-run must not list the target's topics")
+	}
+}
+
+func TestMigrateUpReRunWithNewTopicsIsChecked(t *testing.T) {
+	migrateTestRepo(t)
+	f := newFakeProc(t)
+	scriptCluster(f, true)
+	scriptPrerequisites(f)
+	scriptUp(f)
+	// The lab's own mirror writes kates.orders; the re-run asks for orders,
+	// which the target has and the mirror never wrote.
+	f.on("kubectl -n kafka get kafkamirrormaker2 -l kates.io/lab -o json", `{"items":[{"metadata":{"name":"mm2-m282-430-mirror-maker2","labels":{"kates.io/lab":"m282-430"}},
+	  "spec":{"mirrors":[{"topicsPattern":"kates\\.orders"}]}}]}`)
+	f.on(targetTopicsList, "__consumer_offsets\nkates.orders\norders")
+	captureOutput(t, "table")
+
+	flags := newPairFlags("2.8.2")
+	flags.SkipBuild = true
+	flags.Topics = "orders"
+	err := runMigrateUp(context.Background(), flags)
+	if err == nil || !strings.Contains(err.Error(), "topic(s) orders already exist") {
+		t.Fatalf("want the refusal naming orders, got %v", err)
+	}
+	if f.hasLine("helm upgrade") {
+		t.Fatalf("nothing may be upgraded after the refusal:\n  %s", strings.Join(f.lines(), "\n  "))
+	}
+}
+
+func TestMigrateUpRefusesWhenTheTargetCannotBeListed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fail string
+	}{
+		{"the listing fails", targetTopicsList},
+		{"the client pod is never Ready", "kubectl -n kafka wait --for=condition=Ready pod/kates-migrate-target"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			migrateTestRepo(t)
+			f := newFakeProc(t)
+			scriptCluster(f, true)
+			scriptPrerequisites(f)
+			scriptUp(f)
+			f.fail(tc.fail, "boom")
+			captureOutput(t, "table")
+
+			flags := newPairFlags("2.8.2")
+			flags.SkipBuild = true
+			err := runMigrateUp(context.Background(), flags)
+			if err == nil || !strings.Contains(err.Error(), "cannot list the topics") {
+				t.Fatalf("want a refusal when the target cannot be listed, got %v", err)
+			}
+			if f.hasLine("kubectl create namespace") {
+				t.Fatal("nothing may be created when the check cannot run")
+			}
+		})
+	}
+}
+
+func TestMigrateUpChecksTheNameOnTheTarget(t *testing.T) {
+	migrateTestRepo(t)
+	f := newFakeProc(t)
+	scriptCluster(f, true)
+	scriptPrerequisites(f)
+	scriptUp(f)
+	f.on(targetTopicsList, "__consumer_offsets\nkates.orders")
+	captureOutput(t, "table")
+
+	// Under the default policy the lab writes source.kates.orders, which the
+	// target does not have.
+	flags := newPairFlags("2.8.2")
+	flags.SkipBuild = true
+	flags.Policy = migrate.PolicyDefault
+	if err := runMigrateUp(context.Background(), flags); err != nil {
+		t.Fatalf("up --policy default: %v", err)
+	}
+	if !f.hasLine(targetTopicsList) {
+		t.Fatal("the target's topics were not checked")
 	}
 }
 

@@ -21,6 +21,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.bmscomp.kates.disruption.DisruptionSafetyGuard;
+
 /**
  * The answer to a resilience run that gets through every check: a space every
  * 10 s while the run goes on, then its report. The orchestrator is a mock, so
@@ -35,6 +37,10 @@ class ResilienceResourceStreamTest {
     @InjectMock
     ResilienceOrchestrator orchestrator;
 
+    /** Lets the fault through: in CI the real guard finds no broker, and refuses every fault. */
+    @InjectMock
+    DisruptionSafetyGuard safetyGuard;
+
     /** Held so the logger, and the handler on it, outlive the test's own references. */
     private final java.util.logging.Logger resourceLog =
             java.util.logging.Logger.getLogger(ResilienceResource.class.getName());
@@ -44,6 +50,11 @@ class ResilienceResourceStreamTest {
     @BeforeEach
     void captureLogs() {
         resourceLog.addHandler(captured);
+    }
+
+    @BeforeEach
+    void aSafeFault() {
+        when(safetyGuard.validatePlan(any())).thenReturn(DisruptionSafetyGuard.ValidationResult.ok(List.of()));
     }
 
     @AfterEach

@@ -1,5 +1,6 @@
 package com.bmscomp.kates.resilience;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -20,6 +21,9 @@ import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.audit.Audited;
 import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
+import com.bmscomp.kates.disruption.DisruptionConcurrencyGuard;
+import com.bmscomp.kates.disruption.DisruptionPlan;
+import com.bmscomp.kates.disruption.DisruptionSafetyGuard;
 import com.bmscomp.kates.domain.TestSpec;
 import com.bmscomp.kates.security.Scopes;
 
@@ -52,6 +56,12 @@ public class ResilienceResource {
 
     @Inject
     com.bmscomp.kates.engine.SpecLimits specLimits;
+
+    @Inject
+    DisruptionSafetyGuard safetyGuard;
+
+    @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
 
     /**
      * A 400 naming each parameter of the chaos spec outside the chaos limits,
@@ -162,6 +172,38 @@ public class ResilienceResource {
         }
     }
 
+    /**
+     * A 409 while another disruption holds the cluster, or a 400 naming each
+     * reason the safety guard refuses the fault, counted as a one-step plan,
+     * or empty. Asked last, since it reads the cluster, and before the stream
+     * starts. The run takes the lease itself, just before the fault goes in.
+     */
+    private Optional<Response> unsafeOrBusy(FaultSpec chaosSpec) {
+        String target = concurrencyGuard.currentTarget();
+        if (concurrencyGuard.isBusy(target)) {
+            return Optional.of(Response.status(409)
+                    .entity(ApiError.of(
+                            409,
+                            "Conflict",
+                            "Another disruption is running against " + target + ", so no fault was injected"))
+                    .build());
+        }
+        // A resilience fault is never aimed at a topic's leader, so
+        // targetTopic is dropped: the guard would count the leader instead.
+        DisruptionPlan plan = new DisruptionPlan();
+        plan.setName("resilience");
+        plan.setSteps(List.of(new DisruptionPlan.DisruptionStep(
+                "chaosSpec", chaosSpec.toBuilder().targetTopic("").build(), 0, 0, false)));
+        DisruptionSafetyGuard.ValidationResult validation = safetyGuard.validatePlan(plan);
+        if (validation.safe()) {
+            return Optional.empty();
+        }
+        return Optional.of(Response.status(400)
+                .entity(ApiError.of(
+                        400, "Bad Request", "No fault was injected: " + String.join("; ", validation.errors())))
+                .build());
+    }
+
     @Audited(action = "RUN", type = "resilience")
     @RolesAllowed(Scopes.CHAOS_RUN)
     @POST
@@ -173,7 +215,11 @@ public class ResilienceResource {
             responseCode = "400",
             description = "Invalid request, including a testRequest with no type, a testRequest spec value outside"
                     + " its limits, a testRequest spec field the test type or backend cannot apply, or a chaosSpec"
-                    + " parameter outside the chaos limits; fieldErrors names each field")
+                    + " parameter outside the chaos limits, where fieldErrors names each field; or a chaosSpec the"
+                    + " safety guard refuses, such as one that would hit every broker")
+    @APIResponse(
+            responseCode = "409",
+            description = "Another disruption is running against this cluster; no test is started")
     public Response executeResilienceTest(ResilienceTestRequest request) {
         if (request.getTestRequest() == null) {
             return Response.status(400)
@@ -193,6 +239,10 @@ public class ResilienceResource {
         Optional<Response> outsideLimits = outsideLimits(request.getChaosSpec());
         if (outsideLimits.isPresent()) {
             return outsideLimits.get();
+        }
+        Optional<Response> unsafeOrBusy = unsafeOrBusy(request.getChaosSpec());
+        if (unsafeOrBusy.isPresent()) {
+            return unsafeOrBusy.get();
         }
 
         StreamingOutput stream = executeWithKeepAlive(request, null);
@@ -224,8 +274,12 @@ public class ResilienceResource {
             description = "No testRequest, or the node-maintenance scenario, which can't name the node to drain;"
                     + " or, with fieldErrors naming each field, a testRequest spec value outside its limits, a"
                     + " testRequest spec field the test type or backend cannot apply, a targetLabel that isn't a"
-                    + " label selector, or a chaosDurationSec outside the chaos limits")
+                    + " label selector, or a chaosDurationSec outside the chaos limits; or a fault the safety guard"
+                    + " refuses, such as one that would hit every broker")
     @APIResponse(responseCode = "404", description = "Scenario not found")
+    @APIResponse(
+            responseCode = "409",
+            description = "Another disruption is running against this cluster; no test is started")
     public Response runScenario(
             @Parameter(description = "Scenario ID") @PathParam("id") String id, Map<String, Object> overrides) {
 
@@ -281,6 +335,10 @@ public class ResilienceResource {
         Optional<Response> refused = refused(request.getTestRequest());
         if (refused.isPresent()) {
             return refused.get();
+        }
+        Optional<Response> unsafeOrBusy = unsafeOrBusy(request.getChaosSpec());
+        if (unsafeOrBusy.isPresent()) {
+            return unsafeOrBusy.get();
         }
 
         StreamingOutput stream = executeWithKeepAlive(request, id);

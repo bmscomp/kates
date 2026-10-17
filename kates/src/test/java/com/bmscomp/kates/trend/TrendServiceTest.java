@@ -13,11 +13,13 @@ import jakarta.transaction.Transactional;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.RestAssured;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import com.bmscomp.kates.SchedulerOffTestProfile;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
@@ -37,6 +39,7 @@ import com.bmscomp.kates.service.TestRunRepository;
  * found it.
  */
 @QuarkusTest
+@TestProfile(SchedulerOffTestProfile.class)
 class TrendServiceTest {
 
     private static final String TOPIC = "trend-topic";
