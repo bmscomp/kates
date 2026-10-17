@@ -31,6 +31,7 @@ import com.bmscomp.kates.domain.TestResult.TaskStatus;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestType;
 import com.bmscomp.kates.service.AuditService;
+import com.bmscomp.kates.service.BaselineService;
 import com.bmscomp.kates.service.TestRunRepository;
 
 /**
@@ -59,6 +60,9 @@ class TestResourcePruneTest {
     @Inject
     AuditService auditService;
 
+    @Inject
+    BaselineService baselines;
+
     @TestHTTPResource("/api/tests")
     URI tests;
 
@@ -72,6 +76,7 @@ class TestResourcePruneTest {
 
     @AfterEach
     void deleteTheRuns() {
+        baselines.unset(TestType.LOAD);
         stored.forEach(repository::delete);
         stored.clear();
     }
@@ -212,6 +217,30 @@ class TestResourcePruneTest {
 
         String row = "DELETE: retention: created before 2001-01-11T00:00:00Z";
         assertEquals(Map.of(oldest, row, cancelled, row, third, row), auditRows());
+    }
+
+    /**
+     * The run a baseline names stays, however old: the regression check
+     * compares each run of its type against it, and answered 404 for every
+     * one once retention had deleted it. matched leaves it out too, so
+     * remaining reaches 0 and a caller stops.
+     */
+    @Test
+    void aBaselineRunIsNeverPruned() {
+        String baseline = store(TaskStatus.DONE, day(1));
+        String other = store(TaskStatus.DONE, day(2));
+        baselines.set(TestType.LOAD, baseline);
+
+        assertEquals(1, prune(given().queryParam("dryRun", "true")).getLong("matched"));
+
+        JsonPath answer = prune(given());
+
+        assertEquals(1, answer.getLong("matched"));
+        assertEquals(1, answer.getInt("deleted"));
+        assertEquals(0, answer.getLong("remaining"));
+        assertStored(baseline);
+        assertGone(other);
+        assertEquals(Map.of(other, "DELETE: retention: created before 2001-01-11T00:00:00Z"), auditRows());
     }
 
     /** status is case-insensitive, and a run of a status not asked for stays. */

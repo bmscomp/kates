@@ -267,11 +267,14 @@ public class TestRunRepository {
     /**
      * How many runs in one of {@code statuses} were created before
      * {@code before}: what {@link RunRetention} would prune, and what it left.
+     * A run a test type's baseline names is left out, as it is from
+     * {@link #findIdsByStatusCreatedBefore}.
      */
     public long countByStatusCreatedBefore(
             java.util.Set<com.bmscomp.kates.domain.TestResult.TaskStatus> statuses, java.time.Instant before) {
         return em.createQuery(
-                        "SELECT COUNT(r) FROM TestRunEntity r WHERE r.status IN :statuses AND r.createdAt < :before",
+                        "SELECT COUNT(r) FROM TestRunEntity r WHERE r.status IN :statuses AND r.createdAt < :before"
+                                + " AND r.id NOT IN (SELECT b.runId FROM BaselineEntity b)",
                         Long.class)
                 .setParameter("statuses", statuses)
                 .setParameter("before", before)
@@ -285,7 +288,9 @@ public class TestRunRepository {
      * <p>Ids, not runs: {@link RunRetention} deletes each through the
      * orchestrator, which reads the run under its row lock itself. The id
      * orders runs created in the same instant, so a caller that prunes a
-     * limit's worth per call goes through them in one order.
+     * limit's worth per call goes through them in one order. A run a test
+     * type's baseline names is left out: the regression check compares runs
+     * against it, so retention keeps it however old it is.
      */
     public List<String> findIdsByStatusCreatedBefore(
             java.util.Set<com.bmscomp.kates.domain.TestResult.TaskStatus> statuses,
@@ -293,6 +298,7 @@ public class TestRunRepository {
             int limit) {
         return em.createQuery(
                         "SELECT r.id FROM TestRunEntity r WHERE r.status IN :statuses AND r.createdAt < :before"
+                                + " AND r.id NOT IN (SELECT b.runId FROM BaselineEntity b)"
                                 + " ORDER BY r.createdAt ASC, r.id ASC",
                         String.class)
                 .setParameter("statuses", statuses)
