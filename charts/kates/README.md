@@ -57,7 +57,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `ingress.certManager.issuerName` | `""` | cert-manager issuer name |
 | `ingress.certManager.issuerKind` | `ClusterIssuer` | Issuer kind |
 | `networkPolicy.enabled` | `true` | Enable NetworkPolicy |
-| `networkPolicy.kafka.namespace` | `kafka` | Kafka egress target namespace |
+| `networkPolicy.kafka.namespace` | `kafka` | Namespace the brokers (`networkPolicy.kafka.port`) and the Trogdor coordinator (8889) run in; `kates deploy` sets it |
 | `networkPolicy.kafka.port` | `9092` | Kafka egress target port |
 | `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace: the one `prometheus.url` points into |
 | `networkPolicy.prometheus.port` | `9090` | Prometheus egress target port |
@@ -69,6 +69,16 @@ from one of them (`helm show values`) still says `kafka`, which now takes
 effect and moves the egress there while `prometheus.url` points into
 `monitoring`, so the backend loses Prometheus. Remove that line, or set it to
 the namespace your Prometheus runs in.
+
+Upgrading from chart 0.11.0 or earlier: those charts ignored
+`networkPolicy.kafka.namespace` and always allowed egress to `kafka`, allowed
+Trogdor's 8889 only to `monitoring`, and had no egress to the Kubernetes API,
+so on a CNI that enforces policy every chaos fault and pod listing failed. The
+Kafka egress now follows the value, with 8889 next to the brokers, and TCP
+443/6443 is open to any address. A release that set the value to anything but
+where Kafka runs loses Kafka after the upgrade. A Trogdor coordinator outside
+that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
+`networkPolicy.egressRules` entry.
 
 ### Security
 

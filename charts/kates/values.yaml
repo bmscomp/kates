@@ -447,7 +447,7 @@ networkPolicy:
       ports:
         - port: 8080
           protocol: TCP
-  # -- Kafka egress configuration
+  # -- Kafka egress: the brokers on port and Trogdor on 8889 (kates deploy sets namespace)
   kafka:
     namespace: kafka
     port: 9092
