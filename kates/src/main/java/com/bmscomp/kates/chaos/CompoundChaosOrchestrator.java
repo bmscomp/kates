@@ -71,13 +71,18 @@ public class CompoundChaosOrchestrator {
         List<ProviderOutcome> results = new ArrayList<>();
         boolean allOk = true;
 
-        for (CompletableFuture<ProviderOutcome> f : futures) {
+        for (int i = 0; i < futures.size(); i++) {
+            // At least the wait a sequential run gives the fault: a shorter
+            // timeoutSec reported a longer fault as timed out while it still
+            // ran, and the disruption lease was given up with it still in.
+            FaultSpec spec = faults.get(i).spec();
+            int waitSec = Math.max(timeoutSec, spec.delayBeforeSec() + spec.chaosDurationSec() + 120);
             try {
-                ProviderOutcome outcome = f.get(timeoutSec, TimeUnit.SECONDS);
+                ProviderOutcome outcome = futures.get(i).get(waitSec, TimeUnit.SECONDS);
                 results.add(outcome);
                 if (!outcome.succeeded()) allOk = false;
             } catch (TimeoutException e) {
-                results.add(new ProviderOutcome("unknown", "unknown", false, "Timed out after " + timeoutSec + "s"));
+                results.add(new ProviderOutcome("unknown", "unknown", false, "Timed out after " + waitSec + "s"));
                 allOk = false;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -171,10 +176,10 @@ public class CompoundChaosOrchestrator {
     /**
      * Refuses the whole run, before any fault is triggered, when one fault has
      * no spec or a parameter outside the chaos limits. A compound run calls the
-     * providers itself, past the coordinator and the safety guard, so this is
-     * the only check its faults get.
+     * providers itself, past the coordinator; its resource asks this first, then
+     * the safety guard, and holds the disruption lease while the faults run.
      */
-    private void checkLimits(List<CompoundFault> faults) {
+    public void checkLimits(List<CompoundFault> faults) {
         List<String> refused = new ArrayList<>();
         for (int i = 0; i < faults.size(); i++) {
             String path = "faults[" + i + "].faultSpec";

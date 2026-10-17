@@ -15,6 +15,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import com.bmscomp.kates.chaos.*;
+import com.bmscomp.kates.disruption.DisruptionConcurrencyGuard;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.engine.TestOrchestrator;
@@ -30,7 +31,7 @@ import com.bmscomp.kates.util.MetricUtils;
  * 1. Start benchmark, and wait for its tasks to be submitted
  * 2. Wait for steady-state period
  * 3. Evaluate baseline probes
- * 4. Inject fault via ChaosCoordinator
+ * 4. Take the disruption lease, held to the end, and inject fault via ChaosCoordinator
  * 5. Run continuous probes during chaos
  * 6. Wait for fault to complete
  * 7. Measure recovery time (RTO) via probe polling
@@ -58,6 +59,9 @@ public class ResilienceOrchestrator {
     @Inject
     ProbeExecutor probeExecutor;
 
+    @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
+
     /**
      * How long to wait for a run's tasks to be submitted. Creating its topic
      * can take about two minutes to fail (four attempts of up to 30 s), and a
@@ -71,6 +75,10 @@ public class ResilienceOrchestrator {
     @ActivateRequestContext
     public ResilienceReport execute(ResilienceTestRequest request) {
         ResilienceReport report = new ResilienceReport();
+        String target = concurrencyGuard.currentTarget();
+        // Set when the fault is about to go in; release() frees the lease only
+        // while this token holds it.
+        String leaseToken = null;
 
         try {
             List<ProbeSpec> probes = resolveProbes(request);
@@ -122,7 +130,13 @@ public class ResilienceOrchestrator {
                 LOG.infof("Baseline probes: %d/%d passed", passCount, baseline.size());
             }
 
-            // 4. Inject fault + start continuous probes
+            // 4. Take the lease a plan takes, then inject fault + start
+            // continuous probes. It is held through the recovery wait, so a
+            // plan's fault or rollback doesn't land on this one's.
+            leaseToken = "resilience:" + run.getId() + "#" + UUID.randomUUID();
+            if (!concurrencyGuard.tryAcquire(target, leaseToken)) {
+                return refuse(report, "Another disruption is running against " + target + ", so no fault was injected");
+            }
             LOG.info("Resilience test: injecting fault '"
                     + request.getChaosSpec().experimentName() + "'");
 
@@ -221,6 +235,10 @@ public class ResilienceOrchestrator {
             report.setError(
                     e.getMessage() != null ? e.getMessage() : e.getClass().getName());
             LOG.error("Resilience test failed", e);
+        } finally {
+            if (leaseToken != null) {
+                concurrencyGuard.release(target, leaseToken);
+            }
         }
 
         return report;

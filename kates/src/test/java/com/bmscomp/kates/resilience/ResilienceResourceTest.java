@@ -3,20 +3,26 @@ package com.bmscomp.kates.resilience;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import jakarta.inject.Inject;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import com.bmscomp.kates.chaos.DisruptionType;
+import com.bmscomp.kates.disruption.DisruptionConcurrencyGuard;
+import com.bmscomp.kates.disruption.DisruptionSafetyGuard;
 import com.bmscomp.kates.domain.TestType;
 
 @QuarkusTest
@@ -25,6 +31,20 @@ class ResilienceResourceTest {
     /** Stands in for the run, so a scenario that gets through every check injects nothing. */
     @InjectMock
     ResilienceOrchestrator orchestrator;
+
+    @InjectMock
+    DisruptionSafetyGuard safetyGuard;
+
+    @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
+
+    private static final String EVERY_BROKER = "Plan would affect ALL 3 brokers — cluster would lose availability";
+
+    /** A fault the guard lets through: in CI the real one finds no broker, and refuses every fault. */
+    @BeforeEach
+    void aSafeFault() {
+        when(safetyGuard.validatePlan(any())).thenReturn(DisruptionSafetyGuard.ValidationResult.ok(List.of()));
+    }
 
     @Test
     void postResilienceReturnsBadRequestWithoutTestRequest() {
@@ -443,6 +463,71 @@ class ResilienceResourceTest {
                 .body("error", is("Validation Failed"))
                 .body("fieldErrors.targetLabel", startsWith("Invalid label selector 'zone in (alpha'"))
                 .body("message", startsWith("targetLabel: Invalid label selector 'zone in (alpha'"));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /**
+     * A fault the safety guard refuses, here one that would hit every broker,
+     * is refused before the stream starts, naming why. It went in past the
+     * guard, which refuses the same fault as a plan step.
+     */
+    @Test
+    void anUnsafeFaultIsRefusedBeforeTheStream() {
+        when(safetyGuard.validatePlan(any()))
+                .thenReturn(DisruptionSafetyGuard.ValidationResult.rejected(List.of(), List.of(EVERY_BROKER)));
+
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\"},\"chaosSpec\":{\"experimentName\":\"kill\","
+                        + "\"disruptionType\":\"POD_KILL\",\"targetAll\":true}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("error", is("Bad Request"))
+                .body("message", is("No fault was injected: " + EVERY_BROKER));
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\"}}")
+                .when()
+                .post("/api/resilience/scenarios/broker-crash")
+                .then()
+                .statusCode(400)
+                .body("message", is("No fault was injected: " + EVERY_BROKER));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /**
+     * A run started while a disruption plan holds the cluster is refused
+     * before the stream starts. Its fault went in on top of the plan's: a
+     * broker each, two of three down together.
+     */
+    @Test
+    void aRunWhileADisruptionHoldsTheLeaseIsAConflict() {
+        String target = concurrencyGuard.currentTarget();
+        assertTrue(concurrencyGuard.tryAcquire(target, "leader-cascade#1"));
+        try {
+            given().contentType("application/json")
+                    .body("{\"testRequest\":{\"type\":\"LOAD\"},\"chaosSpec\":{\"experimentName\":\"kill\","
+                            + "\"disruptionType\":\"POD_KILL\",\"chaosDurationSec\":30}}")
+                    .when()
+                    .post("/api/resilience")
+                    .then()
+                    .statusCode(409)
+                    .body("error", is("Conflict"))
+                    .body(
+                            "message",
+                            is("Another disruption is running against " + target + ", so no fault was injected"));
+            given().contentType("application/json")
+                    .body("{\"testRequest\":{\"type\":\"LOAD\"}}")
+                    .when()
+                    .post("/api/resilience/scenarios/broker-crash")
+                    .then()
+                    .statusCode(409)
+                    .body(
+                            "message",
+                            is("Another disruption is running against " + target + ", so no fault was injected"));
+        } finally {
+            concurrencyGuard.release(target, "leader-cascade#1");
+        }
         verify(orchestrator, never()).execute(any());
     }
 

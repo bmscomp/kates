@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -399,6 +400,41 @@ func TestMigrateRunKeepLeavesTheLab(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("output lacks %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestMigrateRunRefusedAtPrerequisitesRemovesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name, mirrors, topics, want string
+	}{
+		{"the topic is on the target", `{"items":[]}`, "__consumer_offsets\nkates.orders", "kates.orders"},
+		{"another lab mirrors it", `{"items":[{"metadata":{"name":"mm2-other-mirror-maker2","labels":{"kates.io/lab":"other"}},
+		  "spec":{"mirrors":[{"topicsPattern":"kates\\.orders"}]}}]}`, "__consumer_offsets\nkates.orders", "lab other"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			migrateTestRepo(t)
+			f := newFakeProc(t)
+			scriptCluster(f, true)
+			scriptPrerequisites(f)
+			f.on("kubectl -n kafka get kafkamirrormaker2 -l kates.io/lab -o json", tc.mirrors)
+			f.on(targetTopicsList, tc.topics)
+			captureOutput(t, "json")
+
+			// --yes, as newPairFlags sets: nothing but the refusal stands
+			// between the run and its teardown.
+			err := runMigrateRun(context.Background(), newPairFlags("2.8.2"))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want the refusal naming %s, got %v", tc.want, err)
+			}
+			if f.hasLine("kubectl -n kafka delete kafkatopic") || f.hasLine("helm uninstall") {
+				t.Fatalf("a refused run must remove nothing:\n  %s", strings.Join(f.lines(), "\n  "))
+			}
+			for _, a := range f.find("kubectl -n kafka apply -f -") {
+				if strings.Contains(a.stdin, "kind: KafkaTopic") {
+					t.Fatalf("a refused run adopted a topic:\n%s", a.stdin)
+				}
+			}
+		})
 	}
 }
 

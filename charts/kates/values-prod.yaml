@@ -73,13 +73,10 @@ externalDatabase:
   # your secrets operator:
   # existingSecret: "kates-db-credentials"
 
-backup:
-  enabled: true
-  schedule: "0 1 * * *"
-  retention: 30
-  persistence:
-    enabled: true
-    size: 50Gi
+# No backup block: the chart's backup dumps only the bundled PostgreSQL, which
+# productionMode refuses. Back the external database up with its own tooling
+# (CloudNativePG backups, a managed service's point-in-time recovery); see the
+# externalDatabase comment in values.yaml.
 
 cleanup:
   enabled: true

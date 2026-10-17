@@ -74,9 +74,9 @@ public class DisruptionOrchestrator {
     int recoveryTimeoutSec;
 
     /**
-     * Executes a plan, refusing to start while another plan is running against
-     * the same cluster. Every entry point (API, playbook, scheduler) funnels
-     * through here, so the guard cannot be bypassed by adding a caller.
+     * Executes a plan, refusing to start while another disruption holds the
+     * cluster's lease. Plans from every entry point take it here; compound runs
+     * and resilience faults take the same lease themselves.
      */
     public DisruptionReport execute(DisruptionPlan plan) {
         String target = concurrencyGuard.currentTarget();
@@ -90,7 +90,7 @@ public class DisruptionOrchestrator {
             DisruptionReport rejected = new DisruptionReport();
             rejected.setPlanName(plan.getName());
             rejected.setStatus("REJECTED");
-            rejected.setValidationWarnings(List.of("ERROR: another disruption plan is already running against "
+            rejected.setValidationWarnings(List.of("ERROR: another disruption is already running against "
                     + target + " (" + holder + "). Concurrent plans race the rollback"
                     + " state stored on the target, which can leave the cluster under-scaled."));
             return rejected;

@@ -2,10 +2,13 @@ package com.bmscomp.kates.engine;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,9 +22,12 @@ import jakarta.inject.Named;
 
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -745,7 +751,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         int maxEmptyPolls = 20;
 
         try (Consumer<byte[], byte[]> consumer = consumers.apply(props)) {
-            consumer.subscribe(Collections.singletonList(task.getTopic()));
+            consumer.subscribe(Collections.singletonList(task.getTopic()), sinceSubmit(consumer, state.submittedAtMs));
 
             long consumed = 0;
             while (!state.stopRequested.get()
@@ -802,7 +808,7 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         int maxEmptyPolls = 20;
 
         try (Consumer<byte[], byte[]> consumer = consumers.apply(props)) {
-            consumer.subscribe(Collections.singletonList(task.getTopic()));
+            consumer.subscribe(Collections.singletonList(task.getTopic()), sinceSubmit(consumer, state.submittedAtMs));
 
             long consumed = 0;
             while (!state.stopRequested.get() && System.currentTimeMillis() < deadline) {
@@ -840,6 +846,42 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         }
     }
 
+    /**
+     * Starts each partition its group has no committed offset for at the first
+     * record written since {@code sinceMs}, less a second. Left to earliest, a
+     * new group read every record earlier runs had left on the topic first, so
+     * a LOAD consumer's throughput counted them too. kafka-clients 3.9 has no
+     * by_duration reset, so a listener does it.
+     */
+    static ConsumerRebalanceListener sinceSubmit(Consumer<byte[], byte[]> consumer, long sinceMs) {
+        return new ConsumerRebalanceListener() {
+            @Override
+            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {}
+
+            @Override
+            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                Map<TopicPartition, OffsetAndMetadata> committed = consumer.committed(Set.copyOf(partitions));
+                Map<TopicPartition, Long> since = new HashMap<>();
+                for (TopicPartition tp : partitions) {
+                    if (committed.get(tp) == null) {
+                        since.put(tp, sinceMs - 1000);
+                    }
+                }
+                if (since.isEmpty()) {
+                    return;
+                }
+                // The end before the lookup: a record the producer writes after
+                // the lookup is at or past that end, so none is skipped.
+                Map<TopicPartition, Long> ends = consumer.endOffsets(since.keySet());
+                Map<TopicPartition, OffsetAndTimestamp> found = consumer.offsetsForTimes(since);
+                for (TopicPartition tp : since.keySet()) {
+                    OffsetAndTimestamp first = found.get(tp);
+                    consumer.seek(tp, first != null ? first.offset() : ends.get(tp));
+                }
+            }
+        };
+    }
+
     static class WorkerState {
         final BenchmarkTask task;
         final AtomicLong recordsProcessed = new AtomicLong();
@@ -866,6 +908,9 @@ public class NativeKafkaBackend implements BenchmarkBackend {
         final AckTracker ackTracker;
 
         final long runIdHash;
+
+        /** When the orchestrator submitted the task; a new group reads from here. */
+        final long submittedAtMs = System.currentTimeMillis();
 
         volatile TaskStatus status = TaskStatus.PENDING;
         volatile long startTimeMs;

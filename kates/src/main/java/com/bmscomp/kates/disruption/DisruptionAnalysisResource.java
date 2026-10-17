@@ -1,7 +1,9 @@
 package com.bmscomp.kates.disruption;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -37,6 +39,12 @@ public class DisruptionAnalysisResource {
 
     @Inject
     com.bmscomp.kates.chaos.CompoundChaosOrchestrator compoundOrchestrator;
+
+    @Inject
+    DisruptionSafetyGuard safetyGuard;
+
+    @Inject
+    DisruptionConcurrencyGuard concurrencyGuard;
 
     @Inject
     DisruptionReportRepository repository;
@@ -115,8 +123,12 @@ public class DisruptionAnalysisResource {
     @APIResponse(responseCode = "200", description = "Each fault's outcome")
     @APIResponse(
             responseCode = "400",
-            description = "No fault, or a fault without a faultSpec or with a parameter outside the chaos limits;"
-                    + " no fault is triggered")
+            description = "No fault, a fault without a faultSpec or with a parameter outside the chaos limits, or"
+                    + " faults the safety guard refuses, such as faults that would hit every broker; no fault is"
+                    + " triggered")
+    @APIResponse(
+            responseCode = "409",
+            description = "Another disruption is running against this cluster; no fault is triggered")
     public Response executeCompound(DisruptionDtos.CompoundChaosRequest request) {
         if (request.faults == null || request.faults.isEmpty()) {
             return Response.status(400)
@@ -129,15 +141,54 @@ public class DisruptionAnalysisResource {
                         f.faultSpec, f.providerName != null ? f.providerName : "kubernetes"))
                 .toList();
 
-        var outcome = request.sequential
-                ? compoundOrchestrator.executeSequential(faults, request.delayBetweenSec)
-                : compoundOrchestrator.executeConcurrent(faults, request.timeoutSec);
+        // The limits first, so a fault without a spec is refused by its place:
+        // the guard reads every spec.
+        compoundOrchestrator.checkLimits(faults);
 
-        return Response.ok(Map.of(
-                        "allSucceeded", outcome.allSucceeded(),
-                        "mode", request.sequential ? "sequential" : "concurrent",
-                        "results", outcome.results()))
-                .build();
+        // Each fault is counted as a plan step, aimed as posted. A compound
+        // fault is never aimed at a topic's leader, so targetTopic is dropped:
+        // the guard would count the leader instead.
+        DisruptionPlan plan = new DisruptionPlan();
+        plan.setName("compound");
+        List<DisruptionPlan.DisruptionStep> steps = new ArrayList<>();
+        for (int i = 0; i < faults.size(); i++) {
+            var spec = faults.get(i).spec().toBuilder().targetTopic("").build();
+            steps.add(new DisruptionPlan.DisruptionStep("faults[" + i + "]", spec, 0, 0, false));
+        }
+        plan.setSteps(steps);
+        DisruptionSafetyGuard.ValidationResult validation = safetyGuard.validatePlan(plan);
+        if (!validation.safe()) {
+            return Response.status(400)
+                    .entity(ApiError.of(
+                            400, "Bad Request", "No fault was triggered: " + String.join("; ", validation.errors())))
+                    .build();
+        }
+
+        // The lease a plan holds, so a compound run and a plan don't take
+        // down brokers together or undo each other's faults.
+        String target = concurrencyGuard.currentTarget();
+        String token = "compound#" + UUID.randomUUID();
+        if (!concurrencyGuard.tryAcquire(target, token)) {
+            return Response.status(409)
+                    .entity(ApiError.of(
+                            409,
+                            "Conflict",
+                            "Another disruption is running against " + target + ", so no fault was triggered"))
+                    .build();
+        }
+        try {
+            var outcome = request.sequential
+                    ? compoundOrchestrator.executeSequential(faults, request.delayBetweenSec)
+                    : compoundOrchestrator.executeConcurrent(faults, request.timeoutSec);
+
+            return Response.ok(Map.of(
+                            "allSucceeded", outcome.allSucceeded(),
+                            "mode", request.sequential ? "sequential" : "concurrent",
+                            "results", outcome.results()))
+                    .build();
+        } finally {
+            concurrencyGuard.release(target, token);
+        }
     }
 
     @GET
