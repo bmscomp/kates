@@ -17,9 +17,10 @@ const (
 )
 
 // runCtxCommandLine runs a ctx command line as runCommandLine does, for the
-// ctx commands, which use Run rather than RunE. It resets the flags they bind
-// first, as a new process would start.
-func runCtxCommandLine(t *testing.T, args ...string) {
+// ctx commands, and returns the command's error: ctx show uses Run rather
+// than RunE and has none. It resets the flags they bind first, as a new
+// process would start.
+func runCtxCommandLine(t *testing.T, args ...string) error {
 	t.Helper()
 	ctxExportFlag, ctxExportReveal, ctxImportFile = "", false, ""
 	t.Cleanup(func() { ctxExportFlag, ctxExportReveal, ctxImportFile = "", false, "" })
@@ -30,7 +31,11 @@ func runCtxCommandLine(t *testing.T, args ...string) {
 	if err := cmd.ParseFlags(rest); err != nil {
 		t.Fatalf("flags %q: %v", rest, err)
 	}
+	if cmd.RunE != nil {
+		return cmd.RunE(cmd, cmd.Flags().Args())
+	}
 	cmd.Run(cmd, cmd.Flags().Args())
+	return nil
 }
 
 func exportTestConfig() Config {
@@ -68,7 +73,7 @@ func TestCtxExport_MasksKeys(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	mustSaveConfig(t, exportTestConfig())
 
-	stdout, stderr, err := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "export"); return nil })
+	stdout, stderr, err := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "export") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +94,7 @@ func TestCtxExport_MasksKeys(t *testing.T) {
 	}
 
 	// --name masks too.
-	stdout, _, _ = commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "export", "--name", "lab"); return nil })
+	stdout, _, _ = commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "export", "--name", "lab") })
 	if strings.Contains(string(stdout), exportLongKey) || !strings.Contains(string(stdout), "api-key: Zk3v****") {
 		t.Errorf("export --name lab:\n%s", stdout)
 	}
@@ -99,7 +104,7 @@ func TestCtxExport_Reveal(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	mustSaveConfig(t, exportTestConfig())
 
-	stdout, stderr, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "export", "--reveal"); return nil })
+	stdout, stderr, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "export", "--reveal") })
 	var got Config
 	if err := yaml.Unmarshal(stdout, &got); err != nil {
 		t.Fatalf("export is not YAML: %v\n%s", err, stdout)
@@ -123,8 +128,8 @@ func TestCtxExport_Reveal(t *testing.T) {
 func TestCtxImport_RoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	mustSaveConfig(t, exportTestConfig())
-	revealed, _, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "export", "--reveal"); return nil })
-	masked, _, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "export"); return nil })
+	revealed, _, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "export", "--reveal") })
+	masked, _, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "export") })
 	dir := t.TempDir()
 	revealedFile, maskedFile := filepath.Join(dir, "revealed.yaml"), filepath.Join(dir, "masked.yaml")
 	for file, data := range map[string][]byte{revealedFile: revealed, maskedFile: masked} {
@@ -135,7 +140,7 @@ func TestCtxImport_RoundTrip(t *testing.T) {
 
 	t.Run("revealed", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		_, _, _ = commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "import", "--file", revealedFile); return nil })
+		_, _, _ = commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "import", "--file", revealedFile) })
 		got := loadConfig().Contexts
 		for name, want := range exportTestConfig().Contexts {
 			if got[name] != want {
@@ -149,7 +154,7 @@ func TestCtxImport_RoundTrip(t *testing.T) {
 		mustSaveConfig(t, Config{CurrentContext: "lab", Contexts: map[string]Context{
 			"lab": {URL: "http://localhost:8080", Output: "json", APIKey: exportLongKey, KeySource: "kates-api-key@x"},
 		}})
-		stdout, _, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "import", "--file", maskedFile); return nil })
+		stdout, _, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "import", "--file", maskedFile) })
 		got := loadConfig().Contexts
 		if lab := got["lab"]; lab.APIKey != exportLongKey || lab.KeySource != "kates-api-key@x" || lab.Output != "table" {
 			t.Errorf("lab = %+v, want the file's settings with the key and key-source it had", lab)
@@ -212,7 +217,7 @@ func TestCtxImport_MaskedKeyStaysWithItsServer(t *testing.T) {
 			if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			stdout, _, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "import", "--file", file); return nil })
+			stdout, _, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "import", "--file", file) })
 			lab := loadConfig().Contexts["lab"]
 			if tt.wantKey && (lab.APIKey != exportLongKey || lab.KeySource != "kates-api-key@x") {
 				t.Errorf("lab = %+v, want the key and key-source it had", lab)
@@ -245,7 +250,7 @@ func TestCtxExport_MasksProxyAndKeySource(t *testing.T) {
 		"nopass": {URL: "http://localhost:8080", ProxyURL: "http://proxy.corp:3128"},
 	}})
 
-	masked, _, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "export"); return nil })
+	masked, _, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "export") })
 	for _, secret := range []string{exportLongKey, "s3cretProxyPass", source, "key-source"} {
 		if strings.Contains(string(masked), secret) {
 			t.Errorf("masked export prints %q:\n%s", secret, masked)
@@ -262,7 +267,7 @@ func TestCtxExport_MasksProxyAndKeySource(t *testing.T) {
 		t.Errorf("nopass proxy-url = %q, want it as it is", p)
 	}
 
-	revealed, _, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "export", "--reveal"); return nil })
+	revealed, _, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "export", "--reveal") })
 	for _, want := range []string{exportLongKey, proxy, source} {
 		if !strings.Contains(string(revealed), want) {
 			t.Errorf("export --reveal lacks %q:\n%s", want, revealed)
@@ -276,7 +281,7 @@ func TestCtxExport_MasksProxyAndKeySource(t *testing.T) {
 	if err := os.WriteFile(file, masked, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	stdout, _, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "import", "--file", file); return nil })
+	stdout, _, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "import", "--file", file) })
 	if p := loadConfig().Contexts["lab"].ProxyURL; p != "http://alice@proxy.corp:3128" {
 		t.Errorf("imported proxy-url = %q, want it without the masked password", p)
 	}
@@ -290,7 +295,7 @@ func TestCtxExport_MasksProxyAndKeySource(t *testing.T) {
 func TestCtxShow_ShortKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	mustSaveConfig(t, exportTestConfig())
-	stdout, _, _ := commandOutput(t, func() error { runCtxCommandLine(t, "ctx", "show"); return nil })
+	stdout, _, _ := commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "show") })
 	out := stripAnsi(string(stdout))
 	if !tableHasRow(out, []string{"tiny", "http://localhost:30083", "json", "****"}) ||
 		!tableHasRow(out, []string{"lab", "http://localhost:8080", "table", "Zk3v****"}) {
