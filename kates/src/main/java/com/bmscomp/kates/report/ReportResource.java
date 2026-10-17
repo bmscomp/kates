@@ -55,9 +55,6 @@ public class ReportResource {
     BaselineService baselineService;
 
     @Inject
-    TuningTestRunner tuningRunner;
-
-    @Inject
     public ReportResource(
             ReportGenerator generator,
             TestRunRepository repository,
@@ -93,25 +90,6 @@ public class ReportResource {
                     .build();
         }
         return Response.ok(result).build();
-    }
-
-    @GET
-    @Path("{id}/report/tuning")
-    @Operation(
-            summary = "Tuning comparison report",
-            description = "Returns step-by-step parameter sweep results with best-configuration recommendation")
-    @APIResponse(responseCode = "200", description = "Tuning report with ranked steps")
-    @APIResponse(responseCode = "404", description = "Run not found or not a tuning test")
-    @Tag(name = "Tuning")
-    public Response getTuningReport(@Parameter(description = "Test run ID") @PathParam("id") String id) {
-        TuningReport report = tuningRunner.buildReport(id);
-        if (report == null) {
-            return Response.status(404)
-                    .entity(com.bmscomp.kates.api.ApiError.of(
-                            404, "Not Found", "Run not found or not a tuning test: " + id))
-                    .build();
-        }
-        return Response.ok(report).build();
     }
 
     @GET

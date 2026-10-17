@@ -198,8 +198,6 @@ func TestPathSegmentsAreEscaped(t *testing.T) {
 			func(ctx context.Context, c *Client) error { return ignore(c.BaselineGet(ctx, hostileID)) }},
 		{"ReportRegression", http.MethodGet, "/api/tests/" + id + "/report/regression",
 			func(ctx context.Context, c *Client) error { return ignore(c.ReportRegression(ctx, hostileID)) }},
-		{"ReportTuning", http.MethodGet, "/api/tests/" + id + "/report/tuning",
-			func(ctx context.Context, c *Client) error { return ignore(c.ReportTuning(ctx, hostileID)) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

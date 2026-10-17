@@ -706,7 +706,7 @@ The settings of one test — records, record size, `acks`, topic, rate and the r
 
 ### Test Type {#gl-test-type}
 
-What a test measures, named by the `TestType` enum: LOAD (steady rate), STRESS and CAPACITY (the ceiling), SPIKE (a burst), ENDURANCE (time), VOLUME (record size), ROUND_TRIP (produce-to-consume latency) and INTEGRITY (loss). TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS (parameter sweeps) and INTEGRATION_CDC complete the enum; `kates test types` lists them. See [Test Types Deep Dive](05-test-types.md#test-type-overview).
+What a test measures, named by the `TestType` enum: LOAD (steady rate), STRESS and CAPACITY (the ceiling), SPIKE (a burst), ENDURANCE (time), VOLUME (record size), ROUND_TRIP (produce-to-consume latency) and INTEGRITY (loss). TUNE_REPLICATION, TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS and INTEGRATION_CDC complete the enum; `kates test types` lists them. See [Test Types Deep Dive](05-test-types.md#test-type-overview).
 
 ### Throughput {#gl-throughput}
 
