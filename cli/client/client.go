@@ -1126,14 +1126,6 @@ func (c *Client) ReportRegression(ctx context.Context, runID string) (*Regressio
 	return get[*RegressionReport](c, ctx, path)
 }
 
-func (c *Client) ReportTuning(ctx context.Context, runID string) (*TuningReport, error) {
-	path, err := pathf("/api/tests/%s/report/tuning", runID)
-	if err != nil {
-		return nil, err
-	}
-	return get[*TuningReport](c, ctx, path)
-}
-
 func (c *Client) TuningTypes(ctx context.Context) ([]TuningTypeInfo, error) {
 	return get[[]TuningTypeInfo](c, ctx, "/api/tests/tuning/types")
 }

@@ -57,8 +57,6 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.report.ClusterSnapshot.PartitionAssignment.class,
             com.bmscomp.kates.report.ComparisonReport.class,
             com.bmscomp.kates.report.ComparisonReport.ComparisonEntry.class,
-            com.bmscomp.kates.report.TuningReport.class,
-            com.bmscomp.kates.report.TuningReport.TuningStep.class,
             // Exports
             com.bmscomp.kates.export.LatencyHeatmapData.class,
             com.bmscomp.kates.export.LatencyHeatmapData.HeatmapRow.class,

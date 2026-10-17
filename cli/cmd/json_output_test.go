@@ -20,15 +20,14 @@ import (
 
 // runsBackend is a fake Kates API for the commands that create, poll and
 // grade test runs. Each created run answers RUNNING to its first poll and
-// then the final run the test gave for its type. Reports, report summaries
-// and tuning reports are served from the maps; anything else fails the test.
+// then the final run the test gave for its type. Reports and report
+// summaries are served from the maps; anything else fails the test.
 type runsBackend struct {
 	t *testing.T
 
 	final    map[string]string // test type → final run JSON, with "{{id}}" for the run id
 	reports  map[string]string // run id → GET /report
 	summary  map[string]string // run id → GET /report/summary
-	tuning   map[string]string // run id → GET /report/tuning
 	runs     map[string]string // run id → GET /api/tests/{id} for runs the test did not create
 	stuck    map[string]bool   // test type → its runs answer RUNNING to every poll
 	failPost bool
@@ -47,7 +46,7 @@ func newRunsBackend(t *testing.T) *runsBackend {
 	t.Helper()
 	b := &runsBackend{
 		t: t, final: map[string]string{}, reports: map[string]string{}, summary: map[string]string{},
-		tuning: map[string]string{}, runs: map[string]string{}, stuck: map[string]bool{}, typeOf: map[string]string{},
+		runs: map[string]string{}, stuck: map[string]bool{}, typeOf: map[string]string{},
 		polls: map[string]int{},
 	}
 	ts := httptest.NewServer(http.HandlerFunc(b.serve))
@@ -152,8 +151,6 @@ func (b *runsBackend) serve(w http.ResponseWriter, r *http.Request) {
 			serveFrom(b.reports, id)
 		case "report/summary":
 			serveFrom(b.summary, id)
-		case "report/tuning":
-			serveFrom(b.tuning, id)
 		default:
 			b.t.Errorf("unexpected request %s %s", r.Method, r.URL)
 			notFound()
@@ -549,48 +546,6 @@ func TestBenchmark_LostRun(t *testing.T) {
 
 func TestTune_JSON(t *testing.T) {
 	b := newRunsBackend(t)
-	b.tuning["run-t"] = `{"testType":"TUNE_BATCHING","parameterName":"batch.size","bestStepIndex":1,
-	 "recommendation":"Use batch.size=65536","steps":[
-	 {"stepIndex":0,"label":"16384","metrics":{"avgThroughputRecPerSec":1000,"p99LatencyMs":5,"errorRate":0}},
-	 {"stepIndex":1,"label":"65536","metrics":{"avgThroughputRecPerSec":3000,"p99LatencyMs":6,"errorRate":0.001}},
-	 {"stepIndex":2,"label":"262144"}]}`
-
-	t.Run("report", func(t *testing.T) {
-		stdout := commandStdout(t, func() error { return runCommandLine(t, "tune", "report", "run-t", "-o", "json") })
-		var got tuneReportResult
-		decodeStdout(t, stdout, &got)
-		f := func(v float64) *float64 { return &v }
-		want := tuneReportResult{
-			RunID: "run-t", TestType: "TUNE_BATCHING", ParameterName: "batch.size", BestStepIndex: 1,
-			Recommendation: "Use batch.size=65536",
-			Steps: []tuneStepRow{
-				{StepIndex: 0, Label: "16384", AvgThroughputRecPerSec: f(1000), P99LatencyMs: f(5), ErrorRate: f(0), Verdict: "WORST"},
-				{StepIndex: 1, Label: "65536", AvgThroughputRecPerSec: f(3000), P99LatencyMs: f(6), ErrorRate: f(0.001), Verdict: "BEST"},
-				{StepIndex: 2, Label: "262144"},
-			},
-		}
-		if !reflect.DeepEqual(got, want) {
-			gotJSON, _ := json.Marshal(got)
-			wantJSON, _ := json.Marshal(want)
-			t.Errorf("tune report -o json =\n %s\nwant\n %s", gotJSON, wantJSON)
-		}
-		// A metric the step lacks is null, not 0, which would be a reading.
-		if !strings.Contains(compactJSON(t, stdout), `"label":"262144","avgThroughputRecPerSec":null`) {
-			t.Errorf("a missing metric is not null:\n%s", stdout)
-		}
-
-		b.resetFlags()
-		table := stripAnsi(string(commandStdout(t, func() error { return runCommandLine(t, "tune", "report", "run-t") })))
-		for _, row := range [][]string{
-			{"16384", "1000 rec/s", "5.0 ms", "0.000%", "WORST"},
-			{"65536", "3000 rec/s", "6.0 ms", "0.100%", "BEST"},
-			{"262144", "—", "—", "—"},
-		} {
-			if !tableHasRow(table, row) {
-				t.Errorf("table lacks row %q:\n%s", row, table)
-			}
-		}
-	})
 
 	t.Run("run", func(t *testing.T) {
 		stdout := commandStdout(t, func() error { return runCommandLine(t, "tune", "run", "batching", "-o", "json") })
@@ -598,6 +553,13 @@ func TestTune_JSON(t *testing.T) {
 		decodeStdout(t, stdout, &got)
 		if got.ID != "run-1" || got.TestType != "TUNE_BATCHING" {
 			t.Errorf("tune run -o json = %+v, want run-1 of TUNE_BATCHING", got)
+		}
+
+		// The hint names a command that shows the one measurement.
+		b.resetFlags()
+		table := stripAnsi(string(commandStdout(t, func() error { return runCommandLine(t, "tune", "run", "batching") })))
+		if !strings.Contains(table, "kates report show run-2") {
+			t.Errorf("tune run hint does not name kates report show:\n%s", table)
 		}
 	})
 

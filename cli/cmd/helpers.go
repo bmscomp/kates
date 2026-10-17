@@ -143,15 +143,15 @@ func describeType(t string) string {
 	case "INTEGRITY":
 		return "Data integrity verification with CRC checks"
 	case "TUNE_REPLICATION":
-		return "Sweep replication factor to measure throughput cost"
+		return "Measures throughput and latency at one replication factor"
 	case "TUNE_ACKS":
-		return "Compare acks=0, acks=1, acks=all throughput"
+		return "Measures throughput and latency at one acks setting"
 	case "TUNE_BATCHING":
-		return "Sweep batch size and linger.ms for optimal throughput"
+		return "Measures throughput and latency at one batch.size and linger.ms"
 	case "TUNE_COMPRESSION":
-		return "Compare none, lz4, snappy, zstd compression"
+		return "Measures throughput and latency with one compression codec"
 	case "TUNE_PARTITIONS":
-		return "Sweep partition count to find parallelism sweet spot"
+		return "Measures throughput and latency at one partition count"
 	default:
 		return ""
 	}

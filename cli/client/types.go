@@ -889,22 +889,6 @@ type MetricDelta struct {
 	Delta    *float64 `json:"delta,omitempty"`
 }
 
-type TuningReport struct {
-	TestType       string       `json:"testType"`
-	ParameterName  string       `json:"parameterName"`
-	Steps          []TuningStep `json:"steps"`
-	BestStepIndex  int          `json:"bestStepIndex"`
-	Recommendation string       `json:"recommendation"`
-}
-
-type TuningStep struct {
-	StepIndex      int                `json:"stepIndex"`
-	Label          string             `json:"label"`
-	Config         map[string]any     `json:"config"`
-	Metrics        map[string]float64 `json:"metrics,omitempty"`
-	TopicCleanupMs int64              `json:"topicCleanupMs"`
-}
-
 type TuningTypeInfo struct {
 	Type        string `json:"type"`
 	Parameter   string `json:"parameter"`

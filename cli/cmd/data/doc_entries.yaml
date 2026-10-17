@@ -770,30 +770,18 @@
 - name: tune run
   category: Tuning
   synopsis: "kates tune run <type>"
-  short: "Run a parameter sweep tuning test"
+  short: "Run a tuning test"
   description: |
-    Executes a tuning test that sweeps a single configuration
-    parameter across multiple values. Types: TUNE_REPLICATION,
-    TUNE_ACKS, TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS.
+    Executes a tuning test: one produce run with a single
+    configuration, the backend's defaults for the type. It
+    measures that one setting and compares none; view it with
+    kates report show. Types: TUNE_REPLICATION, TUNE_ACKS,
+    TUNE_BATCHING, TUNE_COMPRESSION, TUNE_PARTITIONS.
   examples:
     - "kates tune run compression"
     - "kates tune run TUNE_BATCHING"
   see_also:
-    - tune report
-    - tune types
-
-- name: tune report
-  category: Tuning
-  synopsis: "kates tune report <run-id>"
-  short: "Show tuning comparison report"
-  description: |
-    Displays a ranked comparison table of each parameter value
-    tested, with throughput, latency, and error rate columns.
-    Marks the best (★) and worst (▼) configurations.
-  examples:
-    - "kates tune report abc123"
-  see_also:
-    - tune run
+    - report show
     - tune types
 
 - name: tune types
@@ -802,12 +790,12 @@
   short: "List available tuning tests"
   description: |
     Shows all available tuning test types with their target
-    parameter, number of sweep steps, and description.
+    parameter, number of steps (one: a run measures one
+    setting), and description.
   examples:
     - "kates tune types"
   see_also:
     - tune run
-    - tune report
 
 - name: report show
   category: Report

@@ -1454,38 +1454,6 @@ func TestReportRegression(t *testing.T) {
 	}
 }
 
-func TestReportTuning(t *testing.T) {
-	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/tests/run1/report/tuning" {
-			t.Errorf("path = %s", r.URL.Path)
-		}
-		json.NewEncoder(w).Encode(TuningReport{
-			TestType:       "TUNE_COMPRESSION",
-			ParameterName:  "compression.type",
-			BestStepIndex:  2,
-			Recommendation: "lz4 provides the best throughput",
-			Steps: []TuningStep{
-				{StepIndex: 0, Label: "none"},
-				{StepIndex: 1, Label: "snappy"},
-				{StepIndex: 2, Label: "lz4"},
-			},
-		})
-	})
-	report, err := c.ReportTuning(context.Background(), "run1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if report.TestType != "TUNE_COMPRESSION" {
-		t.Errorf("TestType = %s", report.TestType)
-	}
-	if report.BestStepIndex != 2 {
-		t.Errorf("BestStepIndex = %d", report.BestStepIndex)
-	}
-	if len(report.Steps) != 3 {
-		t.Errorf("Steps = %d", len(report.Steps))
-	}
-}
-
 func TestTuningTypes(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/tests/tuning/types" {

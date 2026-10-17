@@ -166,9 +166,6 @@ class ReportingApiIT {
     @Test
     void tuningCatalogIsServedIndependentlyOfAnyRun() {
         given().when().get("/api/tests/tuning/types").then().statusCode(200).body("size()", greaterThanOrEqualTo(1));
-
-        // A run that was never a tuning sweep has no tuning report.
-        given().when().get("/api/tests/" + runId + "/report/tuning").then().statusCode(404);
     }
 
     @Test
