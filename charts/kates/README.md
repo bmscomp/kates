@@ -194,7 +194,7 @@ that — `image.tag` does.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `backup.enabled` | `false` | Enable PostgreSQL backup CronJob |
+| `backup.enabled` | `false` | Enable PostgreSQL backup CronJob (bundled PostgreSQL only; rendering fails with `postgresql.enabled=false`) |
 | `backup.schedule` | `0 2 * * *` | Backup cron schedule |
 | `backup.retention` | `7` | Days to keep backups |
 | `backup.persistence.enabled` | `false` | Use PVC instead of emptyDir |
@@ -256,7 +256,6 @@ helm install kates ./charts/kates \
   --set networkPolicy.enabled=true \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.prometheusRule.enabled=true \
-  --set backup.enabled=true \
   --set cleanup.enabled=true
 ```
 
