@@ -282,7 +282,7 @@ public class TestResource {
                     + " finished is never pruned. matched counts the runs that matched before the call, deleted"
                     + " those the call deleted, and remaining those that still match: a caller calls again until"
                     + " remaining is 0. A dry run counts and deletes nothing. The chart's cleanup CronJob and"
-                    + " kates test prune call it.")
+                    + " kates test prune call it. A run a test type's baseline names is never pruned.")
     @APIResponse(
             responseCode = "200",
             description = "What matched, what the call deleted, and what still matches",
