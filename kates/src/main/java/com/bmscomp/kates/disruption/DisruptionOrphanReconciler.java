@@ -1,6 +1,7 @@
 package com.bmscomp.kates.disruption;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,12 +30,12 @@ import com.bmscomp.kates.chaos.ScaleDownSnapshots;
  * brokers simply stayed, with nothing left running that knew to clean them up.
  * Tests already had {@code recoverOrphans}; disruptions had no equivalent.
  *
- * <p><b>Why age matters.</b> Kates may run more than one replica, so a fault
- * seen at startup is not necessarily abandoned — another pod could be running
- * that plan right now. Only faults older than
- * {@code kates.chaos.orphan-recovery.min-age-sec} (default 15m, comfortably past
- * the per-step recovery timeout) are treated as orphans, so live chaos is never
- * ripped out from under a peer.
+ * <p><b>Why the process start is the cutoff.</b> The chart pins Kates to one
+ * replica and rolls it with {@code Recreate}, so no other pod can be running a
+ * plan: every Kates fault created before this process started is an orphan,
+ * however recent. {@code kates.chaos.orphan-recovery.min-age-sec} (default 0)
+ * moves the cutoff that many seconds earlier, for a deployment that runs a
+ * second Kates pod anyway.
  */
 @ApplicationScoped
 public class DisruptionOrphanReconciler {
@@ -53,7 +54,7 @@ public class DisruptionOrphanReconciler {
     @ConfigProperty(name = "kates.chaos.orphan-recovery.enabled", defaultValue = "true")
     boolean enabled;
 
-    @ConfigProperty(name = "kates.chaos.orphan-recovery.min-age-sec", defaultValue = "900")
+    @ConfigProperty(name = "kates.chaos.orphan-recovery.min-age-sec", defaultValue = "0")
     long minAgeSec;
 
     @ConfigProperty(name = "kates.chaos.kafka.namespace", defaultValue = "kafka")
@@ -80,15 +81,15 @@ public class DisruptionOrphanReconciler {
         // boot-time categories are at WARN, so a blocked boot prints nothing
         // at all.
         //
-        // Recovery is cleanup of faults at least `min-age-sec` old. Nothing
-        // about it needs to happen before the first request is served.
+        // Recovery is cleanup of faults made before this process started.
+        // Nothing about it needs to happen before the first request is served.
         Thread.ofVirtual().name("disruption-orphan-recovery").start(() -> reconcile(startedAt));
     }
 
     private void reconcile(Instant startedAt) {
         try {
-            int policies = reconcileNetworkPolicies();
-            ScaleDownSnapshots.Restored scaled = reconcileScaleDowns();
+            int policies = reconcileNetworkPolicies(startedAt);
+            ScaleDownSnapshots.Restored scaled = reconcileScaleDowns(startedAt);
             int reports = markInterruptedReports(startedAt);
             if (policies + scaled.total() + reports > 0) {
                 LOG.warnf(
@@ -102,38 +103,50 @@ public class DisruptionOrphanReconciler {
         }
     }
 
-    /** Deletes stale Kates-managed NetworkPolicies (network partitions). */
-    private int reconcileNetworkPolicies() {
-        long cutoff = System.currentTimeMillis() - minAgeSec * 1000L;
-        int removed = 0;
+    /**
+     * Deletes the Kates-managed NetworkPolicies (network partitions) left from
+     * before this process started, in every namespace, as cleanup does: a
+     * playbook can isolate pods outside the Kafka namespace.
+     */
+    int reconcileNetworkPolicies(Instant startedAt) {
+        long cutoff = cutoff(startedAt);
+        List<NetworkPolicy> policies;
         try {
-            List<NetworkPolicy> policies = kubeClient
+            policies = kubeClient
                     .network()
                     .networkPolicies()
-                    .inNamespace(kafkaNamespace)
+                    .inAnyNamespace()
                     .withLabel("managed-by", "kates")
                     .list()
                     .getItems();
-            for (NetworkPolicy policy : policies) {
-                if (!isOlderThan(policy.getMetadata().getCreationTimestamp(), cutoff)) {
-                    continue;
-                }
-                kubeClient
-                        .network()
-                        .networkPolicies()
-                        .inNamespace(kafkaNamespace)
-                        .withName(policy.getMetadata().getName())
-                        .delete();
-                LOG.warnf(
-                        "Orphan recovery: deleted abandoned NetworkPolicy %s",
-                        policy.getMetadata().getName());
-                removed++;
-            }
         } catch (Exception e) {
             // Concise on purpose: running without a reachable Kubernetes API
             // (dev, unit tests) is normal and must not dump a stack trace on
             // every boot.
             LOG.warnf("Could not reconcile orphaned NetworkPolicies: %s", e.getMessage());
+            return 0;
+        }
+        int removed = 0;
+        for (NetworkPolicy policy : policies) {
+            if (!isOlderThan(policy.getMetadata().getCreationTimestamp(), cutoff)) {
+                continue;
+            }
+            String namespace = policy.getMetadata().getNamespace();
+            String name = policy.getMetadata().getName();
+            // One try per policy: a namespace that refuses the delete must not
+            // stop recovery in the others.
+            try {
+                kubeClient
+                        .network()
+                        .networkPolicies()
+                        .inNamespace(namespace)
+                        .withName(name)
+                        .delete();
+                LOG.warnf("Orphan recovery: deleted abandoned NetworkPolicy %s/%s", namespace, name);
+                removed++;
+            } catch (Exception e) {
+                LOG.warnf("Could not delete orphaned NetworkPolicy %s/%s: %s", namespace, name, e.getMessage());
+            }
         }
         return removed;
     }
@@ -144,9 +157,15 @@ public class DisruptionOrphanReconciler {
      * durable record of the original size — it survives the pod that created
      * it, which is exactly what makes recovery possible here.
      */
-    ScaleDownSnapshots.Restored reconcileScaleDowns() {
-        long cutoff = System.currentTimeMillis() - minAgeSec * 1000L;
+    ScaleDownSnapshots.Restored reconcileScaleDowns(Instant startedAt) {
+        long cutoff = cutoff(startedAt);
         return ScaleDownSnapshots.restore(kubeClient, kafkaNamespace, meta -> isScaleDownOlderThan(meta, cutoff));
+    }
+
+    private long cutoff(Instant startedAt) {
+        // creationTimestamp has whole seconds: a policy made in this process's
+        // first second can be stamped before startedAt itself.
+        return startedAt.truncatedTo(ChronoUnit.SECONDS).toEpochMilli() - minAgeSec * 1000L;
     }
 
     /**
