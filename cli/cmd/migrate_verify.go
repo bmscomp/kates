@@ -1049,12 +1049,17 @@ func runMigrateRun(ctx context.Context, f *migratePairFlags) error {
 
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*r.timeout)
 	defer cancel()
-	if f.Keep {
+	var phaseErr *migrate.PhaseError
+	switch {
+	case errors.As(runErr, &phaseErr) && phaseErr.Phase == "prerequisites":
+		// Nothing exists yet, and what the target holds is not the lab's: a
+		// teardown would delete the very topics a refusal protects.
+	case f.Keep:
 		if r.clients != nil {
 			r.deleteClients(cleanupCtx)
 		}
 		printKeepBlock(r.lab)
-	} else {
+	default:
 		r.deleteClients(cleanupCtx)
 		migrateHint("cleaning up...")
 		if err := labDown(cleanupCtx, discoveryFromLab(r.lab, r.createdNamespace), r.timeout); err != nil {

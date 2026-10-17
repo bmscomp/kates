@@ -24,6 +24,7 @@ import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.ProbeExecutor;
 import com.bmscomp.kates.chaos.ProbeResult;
 import com.bmscomp.kates.chaos.ProbeSpec;
+import com.bmscomp.kates.disruption.DisruptionConcurrencyGuard;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.ScenarioPhase;
 import com.bmscomp.kates.domain.TestResult;
@@ -78,6 +79,7 @@ class ResilienceOrchestratorBenchmarkStatusTest {
         orchestrator.probeExecutor = mock(ProbeExecutor.class);
         when(orchestrator.probeExecutor.evaluateAll(any(), any())).thenReturn(List.of(ProbeResult.pass("up", "", 1)));
 
+        orchestrator.concurrencyGuard = new DisruptionConcurrencyGuard();
         orchestrator.submissionPollIntervalMs = 1;
     }
 

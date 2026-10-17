@@ -34,7 +34,7 @@ This Part checks the loss target: `krafter` loses no acknowledged record when on
 
 A plan can't measure loss, so the verdicts come from two resilience files, `payments-integrity-broker.yaml` and `payments-integrity-zone.yaml`. Each runs an INTEGRITY test through one of the same two faults with `kates resilience run -f <file>`, which prints that run's ID as `Test Run` and can return before the run ends. Wait until `kates test get <id>` shows the run `DONE`, and read its `Lost`, `RPO` and `Verdict` there. The target holds when `kates resilience run` reported `Status COMPLETED` and the INTEGRITY run shows `Lost` 0 with a measured RPO. When `Lost` is 0, an RPO of `not measured` means the fault never reached the run.
 
-Run the zone file only once the broker file's INTEGRITY run is `DONE`, because the two runs share a topic and a consumer group. A resilience run's fault skips the safety guard, so first preview the zone's pods with `kates disruption playbook run az-failure --dry-run`.
+Run the zone file only once the broker file's INTEGRITY run is `DONE`, because the two runs share a topic and a consumer group. The safety guard only checks that a resilience run's fault leaves a broker untouched, so first preview the zone's pods with `kates disruption playbook run az-failure --dry-run`.
 
 ## Practice
 

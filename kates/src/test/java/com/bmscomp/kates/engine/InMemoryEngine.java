@@ -40,8 +40,8 @@ import com.bmscomp.kates.service.TopicService;
  * and the concurrency permits left.
  *
  * <p>The store keeps the distinction {@link TestRunRepository} draws:
- * {@code save} inserts a run it cannot find, while {@code saveIfPresent} and
- * {@code saveIfStatus} only write over a row that is there.
+ * {@code save} inserts a run it cannot find, while {@code saveIfStatus} only
+ * writes over a row that is there.
  */
 public final class InMemoryEngine {
 
@@ -76,10 +76,6 @@ public final class InMemoryEngine {
                 })
                 .when(repository)
                 .save(any());
-        when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
-            TestRun run = invocation.getArgument(0);
-            return rows.computeIfPresent(run.getId(), (id, stored) -> run) != null;
-        });
         when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
             TestRun run = invocation.getArgument(0);
             TestRun stored = rows.get(run.getId());

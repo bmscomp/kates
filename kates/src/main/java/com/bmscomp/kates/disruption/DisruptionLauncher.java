@@ -70,8 +70,8 @@ public class DisruptionLauncher {
             return new LaunchResult(
                     Status.CONFLICT,
                     null,
-                    List.of("A disruption plan is already running against " + target
-                            + ". Wait for it to finish before starting another."));
+                    List.of("Another disruption (a plan, a compound run or a resilience run's fault) is running"
+                            + " against " + target + ". Wait for it to finish before starting another."));
         }
 
         String id = UUID.randomUUID().toString().substring(0, 8);

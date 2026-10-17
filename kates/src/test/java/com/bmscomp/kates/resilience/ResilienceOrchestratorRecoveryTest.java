@@ -20,6 +20,7 @@ import com.bmscomp.kates.chaos.FaultSpec;
 import com.bmscomp.kates.chaos.ProbeExecutor;
 import com.bmscomp.kates.chaos.ProbeResult;
 import com.bmscomp.kates.chaos.ProbeSpec;
+import com.bmscomp.kates.disruption.DisruptionConcurrencyGuard;
 import com.bmscomp.kates.domain.CreateTestRequest;
 import com.bmscomp.kates.domain.TestResult.TaskStatus;
 import com.bmscomp.kates.domain.TestRun;
@@ -66,6 +67,7 @@ class ResilienceOrchestratorRecoveryTest {
         when(orchestrator.reportGenerator.generate(any())).thenReturn(new TestReport());
 
         orchestrator.probeExecutor = mock(ProbeExecutor.class);
+        orchestrator.concurrencyGuard = new DisruptionConcurrencyGuard();
         orchestrator.recoveryPollIntervalMs = 1;
     }
 

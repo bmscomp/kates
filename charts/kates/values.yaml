@@ -674,7 +674,9 @@ tests:
 
 # -- PostgreSQL backup CronJob
 backup:
-  # -- Enable backup CronJob
+  # -- Enable backup CronJob. It dumps the bundled PostgreSQL only, so
+  # rendering fails with postgresql.enabled=false: back an external database
+  # up with its own tooling.
   enabled: false
   # -- Cron schedule expression
   schedule: "0 2 * * *"

@@ -184,7 +184,7 @@ const (
 // 61-63). A stored run can hold others: a schedule saved by a PUT, which runs
 // no bean validation (ScheduleResource.java:137-138), fires its spec as sent,
 // a Kates API without the check of a scenario's specs
-// (TestOrchestrator.java:1110-1114) stored a scenario's base spec as sent, and
+// (TestOrchestrator.java:1126-1130) stored a scenario's base spec as sent, and
 // one without the check of a gRPC request's fields
 // (GrpcTestService.java:116-121) stored a compressionType sent over gRPC
 // unchecked. So a stored value outside these is third-party text.
@@ -452,7 +452,7 @@ type mcpRunSpec struct {
 	// backend that stored no requestedSpec dropped them and stored their Java
 	// defaults (mcpRunNotCarried), which would read as values the run used.
 	TargetThroughput   *int64         `json:"targetThroughput,omitempty" jsonschema:"the rate as requested under its other name, the one the CLI and scenario files send; throughput is the rate the run used, taken from this when the request set no throughput. Absent when the request did not set it"`
-	ConsumerGroup      mcpUntrusted   `json:"consumerGroup,omitempty" jsonschema:"the consumer group the request named; absent when it named none, and then each consumer used a group of its own: the task id with -group appended for LOAD and ENDURANCE, integrity-cg-integrity for INTEGRITY. An INTEGRITY run's consumer joins a named group with -integrity appended"`
+	ConsumerGroup      mcpUntrusted   `json:"consumerGroup,omitempty" jsonschema:"the consumer group the request named; absent when it named none, and then each consumer used a group of its own: the task id with -group appended, and -group-integrity for an INTEGRITY run's (one created before the backend gave each run its own group joined integrity-cg-integrity). An INTEGRITY run's consumer joins a named group with -integrity appended"`
 	FetchMinBytes      *int64         `json:"fetchMinBytes,omitempty" jsonschema:"the consumers' fetch.min.bytes; absent when the request set none, and then the Kafka client's default, 1"`
 	FetchMaxWaitMs     *int64         `json:"fetchMaxWaitMs,omitempty" jsonschema:"the consumers' fetch.max.wait.ms; absent when the request set none, and then the Kafka client's default, 500"`
 	EnableIdempotence  *bool          `json:"enableIdempotence,omitempty" jsonschema:"what the request set: false turned the producers' idempotence off. Absent when it set none, and then the Kafka client decided: it turns idempotence on whenever acks is all"`
@@ -659,7 +659,7 @@ func mcpRunDecodeSpec(raw json.RawMessage, w *mcpRunSpecWire) (bool, error) {
 }
 
 // mcpRunSpecFrom reads the stored spec. A run without a topic used one named
-// after its type (TestOrchestrator.java:1598,1925-1926). The topic, acks and
+// after its type (TestOrchestrator.java:1614,1941-1942). The topic, acks and
 // compressionType are shown as identifiers only when they hold values Kafka
 // accepts: a stored spec can hold others (see mcpRunTopicRE), such as a
 // scenario's base spec an older Kates API stored as sent
@@ -785,7 +785,7 @@ func mcpRunRequestedFrom(call *mcpCall, run *client.MCPRun) (*mcpRunRequestedSpe
 func mcpRunTaskFrom(call *mcpCall, t client.MCPRunTask) mcpRunTaskOut {
 	return mcpRunTaskOut{
 		// A scenario run's task ids are the run id and the phase name
-		// (TestOrchestrator.java:1742), which nothing validates.
+		// (TestOrchestrator.java:1758), which nothing validates.
 		TaskID:              call.FenceN(t.TaskID, 128),
 		Phase:               call.FenceN(t.PhaseName, 64),
 		Status:              mcpSanitizeLine(t.Status, 16),
@@ -1928,7 +1928,7 @@ func mcpActivityTestsSince(ctx context.Context, call *mcpCall, since time.Time, 
 // are injected for part of its run, or one whose backend process stopped
 // before it ended and has not started again to mark it INTERRUPTED
 // (DisruptionLauncher.java:95-123, DisruptionReportRepository.java:35-43,
-// DisruptionOrphanReconciler.java:152-203).
+// DisruptionOrphanReconciler.java:171-222).
 func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.Time, limit int) (mcpActivityDisruptions, error) {
 	out := mcpActivityDisruptions{StoredAsRunning: []mcpActivityDisruptionRow{}, Since: []mcpActivityDisruptionRow{}}
 	for p := 0; p < mcpActivityMaxPages; p++ {
@@ -2230,7 +2230,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:220-249,283-294",
 				"report.setSummary(MetricUtils.computeSummary(results));",
 				"summaries.put(phase, MetricUtils.computeSummary(rows))"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:415-424,2073-2089",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:415-424,2089-2105",
 				"TestResult.TaskStatus.PENDING : TestResult.TaskStatus.RUNNING",
 				"private static TestRun withUnfinishedTasksFailed("),
 		},
@@ -2245,7 +2245,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"lostRecords counts every one. RPO is measured only for a run that knew when its fault started, a " +
 			"resilience run's; a plain INTEGRITY run, or one a separate disruption hit, has none.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:405-425",
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:411-431",
 				"private void runIntegrity(", "state.integrityResult = state.verifier.verify("),
 			mcpAnchoredRef(mcpJava+"engine/DataIntegrityVerifier.java:51,224-227",
 				"static final int MAX_LOST_RANGES = 1000;", "if (chaosStartNanos <= 0) {"),
@@ -2267,7 +2267,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			"except for a run cancelled before its tasks existed; a cancel through the REST API also leaves a CANCEL " +
 			"audit row.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2024-2102",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:2040-2118",
 				`"Cancelled by user"`, `EventKind.FAILED, "cancelled"`, "return run.withResults(updatedResults);"),
 			mcpAnchoredRef(mcpJava+"api/TestResource.java:497-542",
 				`@Path("/{id}/cancel")`, `auditService.record("CANCEL"`, `"Test cancelled; it is stored as FAILED"`),
@@ -2300,16 +2300,16 @@ var mcpCaveatsRuns = []mcpCaveat{
 				"applyTypeDefaults(type, scenario.getBaseSpec())", ".withRequestedSpec(",
 				"long phaseStartMs = System.currentTimeMillis();", "scenario.resolveSpecForPhase(phase)",
 				"phaseStartMs = saturatedSum(phaseStartMs", "backend.submit(task)", "TestResult.TaskStatus.PENDING"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1436-1464,1536-1575,1585-1597",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1452-1480,1552-1591,1601-1613",
 				"MAX_RAMP_STEPS = 100", "scenarioInapplicableFields(TestScenario scenario", "is a SPIKE phase",
 				"has none (", "check no record CRCs"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1722-1791", "List<BenchmarkTask> buildPhaseTask(",
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1738-1807", "List<BenchmarkTask> buildPhaseTask(",
 				"int baseTarget = Math.max(1, spec.getThroughput() / steps);", "saturatedSum(startAtMs, s * stepMs)",
 				`taskId + "-spike"`),
 			mcpAnchoredRef(mcpJava+"domain/TestScenario.java:108-183",
 				"TestSpec base = baseSpec != null ? baseSpec : new TestSpec();", "private TestSpec copySpec("),
 			mcpAnchoredRef(mcpJava+"domain/ScenarioPhase.java:21-26", "private int rampSteps = 1;"),
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:123-127,186-196,241-255,458-459",
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:129-133,192-202,247-257,464-465",
 				"Thread.ofVirtual()", "awaitStart(task, state)", "task.getStartAtMs() - System.currentTimeMillis()",
 				"1_000_000_000L / task.getTargetMessagesPerSec()"),
 			mcpAnchoredRef(mcpJava+"engine/TrogdorBackend.java:110-121,178-179",
@@ -2388,13 +2388,13 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionLauncher.java:95-123",
 			mcpJava + "disruption/DisruptionPersistence.java:16-37",
 			mcpJava + "disruption/DisruptionReportRepository.java:20-43",
-			mcpJava + "disruption/DisruptionOrphanReconciler.java:152-203",
+			mcpJava + "disruption/DisruptionOrphanReconciler.java:171-222",
 			mcpJava + "disruption/DisruptionTemplateResource.java:63-65",
 			mcpJava + "disruption/DisruptionScheduler.java:95-107",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",
-			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:110-141",
+			mcpAnchoredRef(mcpJava+"disruption/DisruptionAnalysisResource.java:118-192",
 				`@Path("/compound")`, `"results", outcome.results()`),
-			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:97-127",
+			mcpAnchoredRef(mcpJava+"resilience/ResilienceResource.java:107-137",
 				"StreamingOutput executeWithKeepAlive(", "objectMapper.writeValue(os, payload);",
 				`"Failed to execute resilience test"`),
 		},

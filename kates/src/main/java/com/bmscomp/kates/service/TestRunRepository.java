@@ -38,8 +38,11 @@ public class TestRunRepository {
      * re-reads the freshest row and therefore never sees a stale version. This
      * check does, by refusing to write over a state that moved on.
      *
+     * <p>An update, never an insert, so a write that read the run before a
+     * delete cannot bring it back: {@link #delete} takes the same row lock.
+     *
      * @return true if the run was saved, false if another writer changed its
-     *     status first (the caller should leave it alone)
+     *     status first, or its row is gone (the caller should leave it alone)
      */
     @Transactional
     public boolean saveIfStatus(TestRun run, com.bmscomp.kates.domain.TestResult.TaskStatus expectedCurrent) {
@@ -50,28 +53,6 @@ public class TestRunRepository {
         TestRunEntity existing =
                 em.find(TestRunEntity.class, run.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
         if (existing == null || existing.getStatus() != expectedCurrent) {
-            return false;
-        }
-        save(run);
-        return true;
-    }
-
-    /**
-     * Saves a run only if its row still exists: an update, never an insert.
-     *
-     * <p>A plain {@link #save} inserts a run it cannot find, so a write that
-     * read the run before a delete and landed after it brought the deleted run
-     * back. The reconciler's poll and the submission's RUNNING write both could.
-     * The row lock makes the check and the write one step against
-     * {@link #delete}, which takes the same lock.
-     *
-     * @return true if the run was saved, false if its row is gone
-     */
-    @Transactional
-    public boolean saveIfPresent(TestRun run) {
-        TestRunEntity existing =
-                em.find(TestRunEntity.class, run.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
-        if (existing == null) {
             return false;
         }
         save(run);
@@ -154,9 +135,9 @@ public class TestRunRepository {
      * over exactly when its row goes. A delete used to queue nothing, so a
      * webhook never heard that a deleted run had ended.
      *
-     * <p>The run's row is locked first, as {@link #saveIfPresent} and
-     * {@link #saveIfStatus} lock it, so a concurrent write either lands before
-     * the delete or finds the row gone. Without the lock a delete could
+     * <p>The run's row is locked first, as {@link #saveIfStatus} locks it, so
+     * a concurrent write either lands before the delete or finds the row
+     * gone. Without the lock a delete could
      * deadlock with a write that holds the run's row and wants its results, or
      * fail on a version that write had just moved. Reading the status under
      * the lock also means a run that ended on its own just before the delete

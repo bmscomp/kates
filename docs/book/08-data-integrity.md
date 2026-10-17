@@ -238,7 +238,7 @@ The combined flow looks like this:
 ```mermaid
 %%| label: fig-integrity-under-chaos
 %%| fig-cap: "`kates resilience run` starts the INTEGRITY run, marks the chaos start and deletes a broker pod, and returns once at most 50 partitions are under-replicated; the verdict and RPO come later, from the INTEGRITY run itself."
-%%| fig-alt: "Sequence diagram with kates resilience run, the INTEGRITY producer, the Kafka cluster and the INTEGRITY consumer. The resilience run starts the producer at 500 records per second, and the producer sends sequenced records with acks=all. After 30 seconds of steady state, the resilience run marks the chaos start and deletes one broker pod, and, on LitmusChaos, the same broker can be deleted again until 60 seconds. Sends to the lost leaders are retried, a leader election runs and the ISR shrinks to 2. The resilience run returns once its probes pass, when at most 50 partitions are under-replicated. The broker restarts and rejoins the ISR, and the producer keeps going until 180,000 records are sent. The consumer then reads the topic from the start and reconciles acknowledged against consumed sequences, and the verdict and RPO are read with kates test get."
+%%| fig-alt: "Sequence diagram with kates resilience run, the INTEGRITY producer, the Kafka cluster and the INTEGRITY consumer. The resilience run starts the producer at 500 records per second, and the producer sends sequenced records with acks=all. After 30 seconds of steady state, the resilience run marks the chaos start and deletes one broker pod, and, on LitmusChaos, the same broker can be deleted again until 60 seconds. Sends to the lost leaders are retried, a leader election runs and the ISR shrinks to 2. The resilience run returns once its probes pass, when at most 50 partitions are under-replicated. The broker restarts and rejoins the ISR, and the producer keeps going until 180,000 records are sent. The consumer then reads the topic back from the run's first record and reconciles acknowledged against consumed sequences, and the verdict and RPO are read with kates test get."
 sequenceDiagram
     participant Res as kates resilience run
     participant Producer as INTEGRITY producer
@@ -255,7 +255,7 @@ sequenceDiagram
     Note over Res: Returns once at most 50 partitions are under-replicated
     Note over Kafka: Broker restarts and rejoins the ISR
     Producer->>Kafka: Keep producing until 180,000 records are sent
-    Consumer->>Kafka: Read the topic from the start
+    Consumer->>Kafka: Read the topic from the run's first record
     Consumer->>Consumer: Reconcile acked against consumed sequences
     Note over Consumer: Verdict and RPO, read with kates test get
 ```
@@ -465,7 +465,7 @@ With `--wait`, `kates test apply` shows a spinner per scenario and a summary tab
   Transactional Integrity Verification   a1b2c3d4  DONE    ✓ SLA Pass
 ```
 
-Internally the test runs its produce phase to completion, then consumes everything back from the beginning, then reconciles ACKed against consumed sequence numbers. The topic is named after the test type (`integrity-test`) unless overridden with the `topic` spec field.
+Internally the test runs its produce phase to completion, then consumes the run's records back, from the first one written since the task was submitted (see [Consumer Groups, Offsets and Lag](03-cluster.md#consumer-groups-offsets-and-lag)), then reconciles ACKed against consumed sequence numbers. The topic is named after the test type (`integrity-test`) unless overridden with the `topic` spec field.
 
 ### Step 3 — Read the Verification Report
 

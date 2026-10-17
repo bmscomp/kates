@@ -227,7 +227,7 @@ Kates's [disruption types](appendix-a-glossary.md#gl-disruption-type) run from k
 
 ### Safety Guardrails
 
-Before a disruption plan touches the cluster, Kates counts the brokers its steps would hit, and refuses the plan if that's every broker, or more than the plan's `maxAffectedBrokers`. Before each fault it checks that every Kafka pod is Running and Ready. When a step fails with `autoRollback` on, [rollback](appendix-a-glossary.md#gl-disruption-rollback) gives a scaled-down node pool its broker back, or deletes the [NetworkPolicies](appendix-a-glossary.md#gl-networkpolicy) Kates created for a network partition. The safety guard doesn't read the [ISR](appendix-a-glossary.md#gl-isr) or the [KRaft](appendix-a-glossary.md#gl-kraft) quorum, and a resilience run doesn't go through it: [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails) says exactly what it checks.
+Before a disruption plan touches the cluster, Kates counts the brokers its steps would hit, and refuses the plan if that's every broker, or more than the plan's `maxAffectedBrokers`. Before each fault it checks that every Kafka pod is Running and Ready. When a step fails with `autoRollback` on, [rollback](appendix-a-glossary.md#gl-disruption-rollback) gives a scaled-down node pool its broker back, or deletes the [NetworkPolicies](appendix-a-glossary.md#gl-networkpolicy) Kates created for a network partition. The safety guard doesn't read the [ISR](appendix-a-glossary.md#gl-isr) or the [KRaft](appendix-a-glossary.md#gl-kraft) quorum, and a resilience run goes through only part of it: the broker count and the one-at-a-time rule before its test starts, with no Ready check before the fault and no rollback (see [Limits of the Guard](07-chaos-practice.md#limits-of-the-guard)). [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails) says exactly what it checks.
 
 ## CLI Architecture
 
@@ -519,7 +519,7 @@ kates report show <id>
 - Kates has two halves: the Go CLI on your machine and the Kates API, one Quarkus service in the cluster that serves REST and gRPC.
 - The `TestOrchestrator` owns a run's lifecycle: resolve defaults, create the topic, launch workers, poll status and collect heatmap rows; reports are built on request.
 - Latency measurement rests on HdrHistogram (1µs–60s, microsecond precision), compressed into 25 heatmap buckets for export.
-- The safety guard refuses a disruption plan that would hit too many brokers, and rollback undoes some faults; a resilience run skips both.
+- The safety guard refuses a disruption plan or resilience run that would hit too many brokers, and rollback undoes some faults; a resilience run skips rollback.
 - Results live in PostgreSQL, not Kafka; heatmaps, security grades and built reports live only in the Kates API's memory.
 
 [The Cluster Under Test](03-cluster.md) comes next: it builds the Kubernetes and Kafka environment that the Kates API runs in and tests.
