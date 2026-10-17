@@ -455,3 +455,48 @@ func TestApply_RefusesAFlagThatIsNotABoolean(t *testing.T) {
 		t.Errorf("%d requests reached the backend", requests)
 	}
 }
+
+// A number key that holds no number is refused too. A quoted number, a unit
+// or a bare key was left out of the request, so the run used its type's
+// default records and duration, and --wait graded that shorter run.
+func TestScenarioSpecProblems_ANumberKeyThatIsNotANumber(t *testing.T) {
+	var sf ScenarioFile
+	if err := yaml.Unmarshal([]byte("scenarios:\n  - name: x\n    type: LOAD\n    spec:\n      records: \"5000000\"\n      durationSeconds: 10m\n      lingerMs:\n"), &sf); err != nil {
+		t.Fatal(err)
+	}
+	problems := scenarioSpecProblems(sf.Scenarios[0])
+	if len(problems) != 3 || !slices.Contains(problems, `spec.records is "5000000"; write a number`) ||
+		!slices.Contains(problems, "spec.lingerMs is empty; write a number") {
+		t.Errorf("problems = %q", problems)
+	}
+	sf.Scenarios[0].Spec = map[string]any{"records": 5000000, "lingerMs": 0, "durationSeconds": 1.5}
+	if problems := scenarioSpecProblems(sf.Scenarios[0]); len(problems) != 0 {
+		t.Errorf("numbers, 0 among them, are fine: %q", problems)
+	}
+}
+
+// kates test apply refuses a file with such a number before it starts any of
+// its tests.
+func TestApply_RefusesANumberThatIsNotANumber(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.yaml")
+	data := "scenarios:\n  - name: first\n    type: LOAD\n  - name: second\n    type: LOAD\n    spec:\n      records: \"5000000\"\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var requests int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++ }))
+	defer ts.Close()
+	apiClient = client.New(ts.URL)
+	output.ResetForTesting()
+	applyFile, applyWait = path, false
+	defer func() { applyFile = "" }()
+
+	err := testApplyCmd.RunE(testApplyCmd, nil)
+
+	if err == nil || !strings.Contains(err.Error(), `scenario 2 (second): spec.records is "5000000"; write a number`) {
+		t.Errorf("err = %v", err)
+	}
+	if requests != 0 {
+		t.Errorf("%d requests reached the backend", requests)
+	}
+}
