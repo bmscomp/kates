@@ -286,13 +286,12 @@ type Report struct {
 	Phases            []ReportPhase  `json:"phases,omitempty"`
 }
 
+// ReportPhase is the backend's PhaseReport: a phase's name, its own summary
+// and its own SLA verdict.
 type ReportPhase struct {
-	Name                string  `json:"name"`
-	Status              string  `json:"status"`
-	RecordsSent         float64 `json:"recordsSent"`
-	ThroughputRecPerSec float64 `json:"throughputRecordsPerSec"`
-	P99LatencyMs        float64 `json:"p99LatencyMs"`
-	ErrorRate           float64 `json:"errorRate"`
+	Name       string         `json:"phaseName"`
+	Metrics    *ReportSummary `json:"metrics,omitempty"`
+	SlaVerdict *SlaVerdict    `json:"slaVerdict,omitempty"`
 }
 
 type SlaVerdict struct {

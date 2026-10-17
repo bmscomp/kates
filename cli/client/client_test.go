@@ -586,16 +586,17 @@ func TestBackends(t *testing.T) {
 	}
 }
 
+// The report is served as the backend writes it, not as the Go struct
+// encodes it, so a phase key the CLI names wrongly fails here.
 func TestReport(t *testing.T) {
-	c, _ := testServer(t, jsonHandler(t, "GET", "/api/tests/", Report{
-		Summary: &ReportSummary{
-			TotalRecords: 100000, AvgLatencyMs: 5.2, P99LatencyMs: 12.3,
-			AvgThroughputRecPerSec: 50000, ErrorRate: 0.001,
-		},
-		OverallSlaVerdict: &SlaVerdict{
-			Passed: true,
-		},
-	}))
+	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"summary":{"totalRecords":100000,"avgThroughputRecPerSec":50000,` +
+			`"avgLatencyMs":5.2,"p99LatencyMs":12.3,"errorRate":0.001},` +
+			`"overallSlaVerdict":{"passed":true},"phases":[` +
+			`{"phaseName":"produce","metrics":{"totalRecords":60000,"avgThroughputRecPerSec":30000,"p99LatencyMs":9.5},"slaVerdict":{"passed":true}},` +
+			`{"phaseName":"consume","metrics":{"totalRecords":40000,"avgThroughputRecPerSec":20000},"slaVerdict":{"passed":false}}]}`))
+	})
 	resp, err := c.Report(context.Background(), "run-1")
 	if err != nil {
 		t.Fatal(err)
@@ -605,6 +606,15 @@ func TestReport(t *testing.T) {
 	}
 	if !resp.OverallSlaVerdict.Passed {
 		t.Error("SLA should have passed")
+	}
+	if len(resp.Phases) != 2 {
+		t.Fatalf("Phases = %+v", resp.Phases)
+	}
+	if p := resp.Phases[0]; p.Metrics == nil || p.Metrics.AvgThroughputRecPerSec != 30000 || p.Metrics.P99LatencyMs != 9.5 {
+		t.Errorf("produce = %+v", p.Metrics)
+	}
+	if p := resp.Phases[1]; p.Name != "consume" || p.SlaVerdict == nil || p.SlaVerdict.Passed {
+		t.Errorf("consume = %+v", p)
 	}
 }
 
