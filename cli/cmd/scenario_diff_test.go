@@ -273,14 +273,12 @@ func TestScenarioDiff_KeysApplyDoesNotSendAreNotCompared(t *testing.T) {
     spec:
       numRecords: 500000
       throughput: 5000
-      records: "50000"
       topic: ""
       partitions: 0
 `
 	d := diffScenarioJSON(t, "s.yaml", file,
 		diffRun("STRESS", `{"numRecords": 1000000, "throughput": -1, "partitions": 3, "topic": "stress-test"}`), "")
 	want := []scenarioDiffSkip{
-		{"spec.records", "it is not a number, so kates test apply leaves it out"},
 		{"spec.topic", "it is empty, so kates test apply leaves it out"},
 		{"spec.partitions", "kates test apply reads it as 0 and leaves it out"},
 		{"spec.numRecords", "kates test apply does not read it; the scenario key is records"},
@@ -380,6 +378,16 @@ func TestScenarioDiff_RefusesAFlagApplyRefuses(t *testing.T) {
 	const file = "scenarios:\n  - name: crc\n    type: INTEGRITY\n    spec:\n      enableCrc: yes\n"
 	_, err := runScenarioDiff(t, "s.yaml", file, diffRun("INTEGRITY", `{"enableCrc": true}`), "", "table")
 	if err == nil || !strings.Contains(err.Error(), "scenario 1 (crc): spec.enableCrc is yes; write true or false") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// kates test apply refuses a number key that holds no number, so no run came
+// from such a scenario either.
+func TestScenarioDiff_RefusesANumberApplyRefuses(t *testing.T) {
+	const file = "scenarios:\n  - name: quoted\n    type: LOAD\n    spec:\n      records: \"50000\"\n"
+	_, err := runScenarioDiff(t, "s.yaml", file, diffRun("LOAD", `{"numRecords": 50000}`), "", "table")
+	if err == nil || !strings.Contains(err.Error(), `scenario 1 (quoted): spec.records is "50000"; write a number`) {
 		t.Errorf("err = %v", err)
 	}
 }

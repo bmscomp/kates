@@ -510,10 +510,23 @@ func toBoolPtr(v interface{}) *bool {
 // scenarioBoolKeys are the spec keys scenarioToRequest sends as true or false.
 var scenarioBoolKeys = []string{"enableIdempotence", "enableTransactions", "enableCrc"}
 
+// scenarioIntKeys are the spec keys scenarioToRequest reads as numbers. A
+// quoted number, a unit such as 10m, or a bare key was left out of the
+// request, and the run used its type's default without a word.
+var scenarioIntKeys = []string{
+	"records", "parallelProducers", "recordSizeBytes", "durationSeconds", "batchSize", "lingerMs", "numConsumers",
+	"replicationFactor", "partitions", "minInsyncReplicas", "targetThroughput", "fetchMinBytes", "fetchMaxWaitMs",
+}
+
 // scenarioSpecProblems names the spec keys of a scenario that
 // scenarioToRequest cannot send as written.
 func scenarioSpecProblems(s TestScenario) []string {
 	var problems []string
+	for _, key := range scenarioIntKeys {
+		if v, ok := s.Spec[key]; ok && toIntPtr(v) == nil {
+			problems = append(problems, fmt.Sprintf("spec.%s is %s; write a number", key, mcpScnShow(v)))
+		}
+	}
 	for _, key := range scenarioBoolKeys {
 		if v, ok := s.Spec[key]; ok && toBoolPtr(v) == nil {
 			problems = append(problems, fmt.Sprintf("spec.%s is %v; write true or false", key, v))

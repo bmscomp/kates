@@ -898,9 +898,9 @@ func mcpScnCheckSpecKey(i int, key string, v any, testType string, fs *mcpScnFin
 	}
 }
 
-// mcpScnCheckSpecNumber flags a value scenarioToRequest leaves out (one that
-// is not a number, or a 0 where the field leaves one out), a number it cuts,
-// and one it sends outside the range the backend accepts.
+// mcpScnCheckSpecNumber flags a value that is not a number, which kates test
+// apply refuses, a 0 where the field leaves one out, a number scenarioToRequest
+// cuts, and one it sends outside the range the backend accepts.
 func mcpScnCheckSpecNumber(i int, field string, k mcpScnSpecKey, v any, fs *mcpScnFindings) {
 	var n int64
 	switch x := v.(type) {
@@ -916,12 +916,7 @@ func mcpScnCheckSpecNumber(i int, field string, k mcpScnSpecKey, v any, fs *mcpS
 			fs.add(i, mcpScnWarning, field, fmt.Sprintf("it is %v, which scenarioToRequest cuts to %d", x, n))
 		}
 	default:
-		read := "which scenarioToRequest reads as 0"
-		if k.sendsZero {
-			read = "which is not a number"
-		}
-		fs.add(i, mcpScnWarning, field, "it is "+mcpScnShow(v)+", "+read+", so it is left out "+
-			"of the request and the type default applies")
+		fs.add(i, mcpScnInvalid, field, "it is "+mcpScnShow(v)+"; kates test apply refuses it: write a number")
 		return
 	}
 	scale := max(k.scale, 1)
@@ -1276,7 +1271,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			"produce, and RPO is measured only when a resilience run marks a fault, so a scenario run never has one. " +
 			"Keys ValidationSpec does not name, such as maxDuplicatePercent, are dropped when the file is read.",
 		Refs: []string{
-			mcpAnchoredRef("cli/cmd/apply.go:29-39,217-250,339-351,525-580,597-622",
+			mcpAnchoredRef("cli/cmd/apply.go:29-39,217-250,339-351,538-593,610-635",
 				"type ValidationSpec struct {", `yaml:"maxCrcFailures,omitempty"`,
 				"if !applyWait {", "nonNil(validateSLAs(finalResult, scenario.Validate))",
 				"} else if r.SLA != nil {", `"✓ SLA Pass"`,
