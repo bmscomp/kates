@@ -24,6 +24,8 @@ import jakarta.validation.Validation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 
 import com.bmscomp.kates.config.TestTypeDefaults;
@@ -83,10 +85,6 @@ class TestOrchestratorCancelTest {
                 .save(any());
         when(repository.findById(anyString()))
                 .thenAnswer(invocation -> Optional.ofNullable(rows.get(invocation.<String>getArgument(0))));
-        when(repository.saveIfPresent(any())).thenAnswer(invocation -> {
-            TestRun run = invocation.getArgument(0);
-            return rows.computeIfPresent(run.getId(), (id, stored) -> run) != null;
-        });
         when(repository.saveIfStatus(any(), any())).thenAnswer(invocation -> {
             beforeConditionalWrite.run();
             TestRun run = invocation.getArgument(0);
@@ -169,6 +167,81 @@ class TestOrchestratorCancelTest {
         // Later ticks leave the cancelled run as it was stored.
         orchestrator.reconcileActiveRuns();
         assertEquals(TaskStatus.FAILED, rows.get(id).getStatus());
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = TaskStatus.class,
+            names = {"RUNNING", "DONE"})
+    @DisplayName("a cancel that lands while the run is being polled stays the run's ending")
+    void aCancelDuringAPollStaysTheRunsEnding(TaskStatus stoppedState) {
+        // The poll read the run RUNNING, and its write landed on the cancel's.
+        // A stopped task still RUNNING put the run back to RUNNING, with no
+        // handles and no permit, and nothing polled it again; one that had
+        // finished stored a cancelled run DONE, and announced it ended twice.
+        TestSpec spec = spec();
+        TestRun run = new TestRun(TestType.LOAD, spec).withBackend("fake");
+        String id = run.getId();
+        rows.put(id, run);
+        orchestrator.executeAsync(run, TestType.LOAD, spec, "fake", backend);
+        assertEquals(TaskStatus.RUNNING, rows.get(id).getStatus());
+        backend.stoppedAnswer =
+                BenchmarkStatus.builder(stoppedState).recordsProcessed(1000).build();
+        AtomicBoolean armed = new AtomicBoolean(true);
+        AtomicReference<TestRun> cancelled = new AtomicReference<>();
+        backend.onPoll = handle -> {
+            if (armed.getAndSet(false)) {
+                cancelled.set(orchestrator.cancelTest(id).orElseThrow());
+            }
+        };
+
+        TestRun answered = orchestrator.refreshStatus(id);
+
+        assertFalse(armed.get(), "the cancel came during the poll");
+        assertSame(cancelled.get(), rows.get(id), "the row is the run as the cancel stored it");
+        assertEquals(TaskStatus.FAILED, answered.getStatus(), "the poll answers the run it reads back");
+        assertEquals(List.of("cancelled"), endingsOf(id), "the run's end is announced once, by the cancel");
+        verify(katesMetrics).recordTestCompleted("LOAD", "failed");
+        verify(katesMetrics, never()).recordTestCompleted("LOAD", "done");
+        orchestrator.reconcileActiveRuns();
+        assertSame(cancelled.get(), rows.get(id), "and later ticks leave it so");
+        assertEverySlotFree();
+    }
+
+    @Test
+    @DisplayName("a poll whose ending loses to the submission's RUNNING leaves the run to its next poll")
+    void aPollThatLosesToTheSubmissionKeepsTheRunGoing() {
+        // The poll read the run PENDING, and the submission's RUNNING landed
+        // while it polled. Nobody ended the run, so dropping its handles, ending
+        // its meters or announcing its end here would leave it RUNNING with
+        // nothing to poll it, until the timeout reaper.
+        TestSpec spec = spec();
+        TestRun run = new TestRun(TestType.LOAD, spec).withBackend("fake");
+        String id = run.getId();
+        rows.put(id, run);
+        orchestrator.executeAsync(run, TestType.LOAD, spec, "fake", backend);
+        TestRun running = rows.get(id);
+        rows.put(id, running.withStatus(TaskStatus.PENDING));
+        AtomicBoolean armed = new AtomicBoolean(true);
+        backend.onPoll = handle -> {
+            if (armed.getAndSet(false)) {
+                rows.put(id, running);
+            }
+        };
+        backend.liveAnswer =
+                BenchmarkStatus.builder(TaskStatus.DONE).recordsProcessed(1000).build();
+
+        TestRun answered = orchestrator.refreshStatus(id);
+
+        assertSame(running, rows.get(id), "the row is the run as the submission stored it");
+        assertEquals(TaskStatus.RUNNING, answered.getStatus());
+        assertEquals(List.of(), endingsOf(id), "nothing announced the run ended");
+        verify(katesMetrics, never()).recordTestCompleted(anyString(), anyString());
+        verify(benchmarkMetrics, never()).endRun(id);
+
+        orchestrator.reconcileActiveRuns();
+        assertEquals(TaskStatus.DONE, rows.get(id).getStatus(), "the next poll ends the run");
+        assertEquals(1, endingsOf(id).size(), "and announces it once");
     }
 
     @Test
@@ -400,6 +473,17 @@ class TestOrchestratorCancelTest {
         /** Runs inside each submit before the task starts, as a slow backend's would. */
         volatile Consumer<BenchmarkTask> onSubmit = task -> {};
 
+        /** Runs first in each poll, as another writer would while a slow poll is under way. */
+        volatile Consumer<BenchmarkHandle> onPoll = handle -> {};
+
+        /** What a stopped task answers a poll with. */
+        volatile BenchmarkStatus stoppedAnswer =
+                BenchmarkStatus.builder(TaskStatus.FAILED).build();
+
+        /** What a task that has not been stopped answers a poll with. */
+        volatile BenchmarkStatus liveAnswer =
+                BenchmarkStatus.builder(TaskStatus.RUNNING).build();
+
         @Override
         public String name() {
             return "fake";
@@ -414,8 +498,8 @@ class TestOrchestratorCancelTest {
 
         @Override
         public BenchmarkStatus poll(BenchmarkHandle handle) {
-            return BenchmarkStatus.builder(stopped.contains(handle.taskId()) ? TaskStatus.FAILED : TaskStatus.RUNNING)
-                    .build();
+            onPoll.accept(handle);
+            return stopped.contains(handle.taskId()) ? stoppedAnswer : liveAnswer;
         }
 
         @Override

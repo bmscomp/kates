@@ -623,8 +623,41 @@ public class TestOrchestrator {
         }
         run = run.withResults(updatedResults);
 
-        if (allDone && !updatedResults.isEmpty()) {
+        boolean ended = allDone && !updatedResults.isEmpty();
+        if (ended) {
             run = run.withStatus(anyFailed ? TestResult.TaskStatus.FAILED : TestResult.TaskStatus.DONE);
+        }
+
+        if (!pollSignature(run).equals(signatureBefore)) {
+            try {
+                // Written only over the status this poll read. A cancel, the
+                // timeout reaper or a delete that lands while this poll is under
+                // way has already settled the run, and its write must stay: a
+                // plain write put a cancelled run back to RUNNING, with no
+                // handles and no permit, or stored it DONE.
+                if (!repository.saveIfStatus(run, priorStatus)) {
+                    java.util.Optional<TestRun> stored = repository.findById(runId);
+                    if (stored.isEmpty()) {
+                        settle(runId);
+                        return run;
+                    }
+                    // Not settled: a run that only moved PENDING to RUNNING is
+                    // still going, and its next poll needs its handles.
+                    return stored.get();
+                }
+            } catch (jakarta.persistence.OptimisticLockException e) {
+                // Another writer (the reconciler, the reaper, a concurrent GET)
+                // moved the row first. Their write is as valid as this one, so
+                // return what is actually stored rather than turning a plain
+                // read into a 409 for the client.
+                LOG.debugf("Lost the optimistic-lock race refreshing %s; returning the stored run", runId);
+                return repository.findById(runId).orElse(run);
+            }
+        }
+
+        // Only once this poll's ending is the one stored, so a run that
+        // another writer ended is not announced or counted a second time.
+        if (ended) {
             activeHandles.remove(runId);
             fireEvent(run, anyFailed ? TestLifecycleEvent.EventKind.FAILED : TestLifecycleEvent.EventKind.DONE);
 
@@ -676,23 +709,6 @@ public class TestOrchestrator {
             // submission time so the cap never applied.
             benchmarkMetrics.endRun(runId);
             releasePermit(runId);
-        }
-
-        if (!pollSignature(run).equals(signatureBefore)) {
-            try {
-                // An update only. A delete that lands while this poll is under
-                // way must stay a delete: a plain save inserts the run again.
-                if (!repository.saveIfPresent(run)) {
-                    settle(runId);
-                }
-            } catch (jakarta.persistence.OptimisticLockException e) {
-                // Another writer (the reconciler, the reaper, a concurrent GET)
-                // moved the row first. Their write is as valid as this one, so
-                // return what is actually stored rather than turning a plain
-                // read into a 409 for the client.
-                LOG.debugf("Lost the optimistic-lock race refreshing %s; returning the stored run", runId);
-                return repository.findById(runId).orElse(run);
-            }
         }
         return run;
     }
@@ -910,7 +926,7 @@ public class TestOrchestrator {
      * <p>Settled first, so the reconciler stops tracking the run before its
      * row goes. A write already under way cannot bring the row back, because
      * the run's own writes only update a row (see
-     * {@link TestRunRepository#saveIfPresent}). Workers a submission still
+     * {@link TestRunRepository#saveIfStatus}). Workers a submission still
      * under way registers after the settle are stopped by whichever finds the
      * row gone first: that submission's write, or the reconciler.
      *

@@ -156,11 +156,15 @@ class TestRunRepositoryTest {
     }
 
     @Test
-    void saveIfPresentUpdatesAStoredRun() {
+    void saveIfStatusWritesOnlyOverTheStatusItExpects() {
         TestRun run = new TestRun(TestType.LOAD, new TestSpec());
         repository.save(run);
 
-        assertTrue(repository.saveIfPresent(run.withStatus(TestResult.TaskStatus.RUNNING)));
+        assertTrue(
+                repository.saveIfStatus(run.withStatus(TestResult.TaskStatus.RUNNING), TestResult.TaskStatus.PENDING));
+        assertFalse(
+                repository.saveIfStatus(run.withStatus(TestResult.TaskStatus.DONE), TestResult.TaskStatus.PENDING),
+                "a write that read the run PENDING does not land on its RUNNING");
 
         assertEquals(
                 TestResult.TaskStatus.RUNNING,
@@ -168,20 +172,23 @@ class TestRunRepositoryTest {
     }
 
     /**
-     * A run's own writes go through saveIfPresent or saveIfStatus, so a write
-     * that read the run before a delete and lands after it cannot insert the
-     * deleted run again, as a plain save would. Nothing reads the run before the delete
+     * A run's own writes go through saveIfStatus, so a write that read the
+     * run before a delete and lands after it cannot insert the deleted run
+     * again, as a plain save would. Nothing reads the run before the delete
      * here: the test's session would keep that copy and answer later reads
      * with it.
      */
     @Test
-    void saveIfPresentNeverInsertsARun() {
+    void saveIfStatusNeverInsertsARun() {
         TestRun run = new TestRun(TestType.LOAD, new TestSpec());
         repository.save(run);
         repository.delete(run.getId());
 
-        assertFalse(repository.saveIfPresent(run.withStatus(TestResult.TaskStatus.RUNNING)));
-        assertFalse(repository.saveIfPresent(new TestRun(TestType.LOAD, new TestSpec())), "nor one never stored");
+        assertFalse(
+                repository.saveIfStatus(run.withStatus(TestResult.TaskStatus.RUNNING), TestResult.TaskStatus.PENDING));
+        assertFalse(
+                repository.saveIfStatus(new TestRun(TestType.LOAD, new TestSpec()), TestResult.TaskStatus.PENDING),
+                "nor one never stored");
 
         assertTrue(repository.findById(run.getId()).isEmpty(), "the deleted run stays deleted");
         assertEquals(0, repository.findAll().size());
@@ -214,14 +221,15 @@ class TestRunRepositoryTest {
                 .withResults(List.of(new TestResult().withTaskId(taskId).withStatus(TestResult.TaskStatus.RUNNING))));
 
         TestResult done = new TestResult().withTaskId(taskId).withStatus(TestResult.TaskStatus.DONE);
-        assertTrue(repository.saveIfPresent(
-                run.withStatus(TestResult.TaskStatus.DONE).withResults(List.of(done.withIntegrity(integrity)))));
+        assertTrue(repository.saveIfStatus(
+                run.withStatus(TestResult.TaskStatus.DONE).withResults(List.of(done.withIntegrity(integrity))),
+                TestResult.TaskStatus.RUNNING));
         assertEquals(integrity, storedIntegrity(run.getId()));
 
         // A later write of the task without it, such as one built before the
         // poll that saw the run end, leaves it stored.
-        assertTrue(repository.saveIfPresent(
-                run.withStatus(TestResult.TaskStatus.DONE).withResults(List.of(done))));
+        assertTrue(repository.saveIfStatus(
+                run.withStatus(TestResult.TaskStatus.DONE).withResults(List.of(done)), TestResult.TaskStatus.DONE));
         assertEquals(integrity, storedIntegrity(run.getId()));
     }
 
