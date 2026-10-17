@@ -105,7 +105,9 @@ func runWithPreRun(t *testing.T, labURL, flagURL string, env map[string]string) 
 	var stderr bytes.Buffer
 	output.Err = &stderr
 
-	rootCmd.PersistentPreRun(rootCmd, nil)
+	if err := rootCmd.PersistentPreRunE(rootCmd, nil); err != nil {
+		t.Fatal(err)
+	}
 	commandStdout(t, func() error { return runCommandLine(t, "test", "list") })
 	return stderr.String()
 }

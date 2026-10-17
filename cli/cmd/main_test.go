@@ -27,6 +27,11 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("HOME", home)
+	// A developer's own KATES_PROFILES would refuse the commands tests run. As
+	// runKates' kates, the binary keeps the one the test passes.
+	if os.Getenv("KATES_TEST_RUN_AS_CLI") != "1" {
+		os.Unsetenv("KATES_PROFILES")
+	}
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)

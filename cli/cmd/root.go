@@ -43,6 +43,9 @@ type Context struct {
 	// with kates ctx import, one changed in the file by hand, and every key in
 	// a config written before this field existed.
 	KeySource string `yaml:"key-source,omitempty"`
+	// Profiles are the command profiles this context enables (see
+	// commandProfiles). None enables every command.
+	Profiles []string `yaml:"profiles,omitempty"`
 }
 
 type Config struct {
@@ -277,6 +280,16 @@ func followSymlinks(path string) (string, error) {
 // about it can say where the name came from.
 var contextFromEnv bool
 
+// readContextEnv takes the context name from KATES_CONTEXT when --context
+// gave none.
+func readContextEnv() {
+	if contextFlag == "" {
+		if envCtx := os.Getenv("KATES_CONTEXT"); envCtx != "" {
+			contextFlag, contextFromEnv = envCtx, true
+		}
+	}
+}
+
 // resolveContext returns the context commands talk to, by name: the one
 // --context or KATES_CONTEXT names, or else the config's current context.
 //
@@ -330,10 +343,9 @@ Health & Status:
   health         System health, Kafka connectivity, engine status
   status         Quick one-line system status
   doctor         Pre-flight cluster readiness checklist
-  detect         Deep cluster compatibility report for Kafka
-  auto           Auto-detect cluster config and deploy Kafka
   version        CLI, API, and runtime version info
   cluster        Kafka cluster metadata and topic listing
+  diff           Compare Kafka cluster state between two contexts
   test list      List test runs with optional filters
   test get       Show details of a specific test run
 
@@ -359,7 +371,6 @@ Tuning:
 Analysis:
   report         View reports, export CSV/JUnit/Markdown/HTML
   trend          Historical performance trends with sparkline charts
-  diff           Side-by-side comparison of two test run reports
   explain        Plain-English test narrative with verdict
   replay         Re-run a previous test with the same parameters
   scenario-diff  Compare scenario YAML against a test run
@@ -387,9 +398,13 @@ Toolbox:
   tldr           Quick command reference cheatsheet
   docs           Man-style documentation for all commands
   theme          Manage CLI color themes
+  mcp            Serve Kates to AI agents over MCP
+  upgrade        Build and install a new version of the CLI
 
 Configuration:
   ctx            Manage server contexts (like kubectl contexts)
+  ctx profiles   Show or choose the command profiles a context enables
+  ports          Port-forward the Kates services to localhost
   completion     Shell auto-completion (bash, zsh, fish, powershell)
 
 Disruption & Chaos:
@@ -399,20 +414,31 @@ Disruption & Chaos:
   schedule       Automated recurring test schedules
 
 Security:
-  security audit      Full security posture scan with A-F grading
-  security tls        TLS protocol, cipher, and certificate inspection
-  security auth-test  ACL authorization probing per user
-  security pentest    Adversarial penetration tests
-  security compliance CIS Kafka, SOC2, PCI-DSS compliance report
-  security baseline   Save security snapshot for drift detection
-  security drift      Compare posture against saved baseline
-  security gate       CI/CD gate — exit non-zero if below grade
+  security audit       Full security posture scan with A-F grading
+  security tls         TLS protocol, cipher, and certificate inspection
+  security auth-test   ACL authorization probing per user
+  security pentest     Adversarial penetration tests
+  security compliance  CIS Kafka, SOC2, PCI-DSS compliance report
+  security baseline    Save security snapshot for drift detection
+  security drift       Compare posture against saved baseline
+  security gate        CI/CD gate — exit non-zero if below grade
 
 Policy Engine (Kyverno):
-  kyverno status      Show all ClusterPolicies with mode and rule counts
-  kyverno violations  Pretty-print policy violations by namespace
-  kyverno enforce     Switch a policy from Audit to Enforce mode
-  kyverno audit       Switch a policy from Enforce to Audit mode
+  kyverno status       Show all ClusterPolicies with mode and rule counts
+  kyverno violations   Pretty-print policy violations by namespace
+  kyverno enforce      Switch a policy from Audit to Enforce mode
+  kyverno audit        Switch a policy from Enforce to Audit mode
+
+Deployment:
+  deploy         Deploy the Kates stack (Kafka, Kates, chaos, monitoring)
+  deploy status  Health of the deployed components
+  detect         Deep cluster compatibility report for Kafka
+  auto           Auto-detect cluster config and deploy Kafka
+  operators      Strimzi operators on this cluster
+  versions       Strimzi and Kafka versions this cluster can run
+  migrate        Cross-version Kafka migration with MirrorMaker 2
+  operator       Run the Kates Environment Operator
+  clean          Remove every Kates-managed release and namespace
 
 Flags:
   -o, --output     Output format: table or json
@@ -426,6 +452,7 @@ Environment Variables:
   KATES_OUTPUT     Override output format (lower priority than -o)
   KATES_CONTEXT    Override context (lower priority than --context)
   KATES_API_KEY    API key for authentication (lower priority than --api-key)
+  KATES_PROFILES   Command profiles for this call; all enables every command
 
 Examples:
   $ kates health
@@ -445,14 +472,24 @@ var rootCmd = &cobra.Command{
 	Use:   "kates",
 	Short: "Kates — Kafka Advanced Testing & Engineering Suite CLI",
 	Long:  helpTemplate,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if contextFlag == "" {
-			if envCtx := os.Getenv("KATES_CONTEXT"); envCtx != "" {
-				contextFlag, contextFromEnv = envCtx, true
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		complete := cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd
+		if complete {
+			// Cobra parses no flags for __complete: read the --context of the
+			// command line being completed, whose last word is still typed.
+			words := args[:max(0, len(args)-1)]
+			for i, w := range words {
+				if v, ok := strings.CutPrefix(w, "--context="); ok {
+					contextFlag = v
+				} else if w == "--context" && i+1 < len(words) {
+					contextFlag = words[i+1]
+				}
 			}
 		}
+		readContextEnv()
 		cfg := loadConfig()
 		ctxName, ctx, ctxErr := resolveContext(cfg)
+		profiles, profilesFrom := activeProfiles(ctxName, ctx)
 		urlOverridden := apiURL != ""
 		if apiURL == "" {
 			if envURL := os.Getenv("KATES_URL"); envURL != "" {
@@ -495,6 +532,12 @@ var rootCmd = &cobra.Command{
 
 		output.SetPlain(plainOutput)
 
+		if complete {
+			hideDisabledCommands(cmd.Root(), profiles)
+		} else if err := profileRefusal(cmd, ctxName, profiles, profilesFrom); err != nil {
+			return err
+		}
+
 		if apiKeyFlag == "" {
 			if envKey := os.Getenv("KATES_API_KEY"); envKey != "" {
 				apiKeyFlag = envKey
@@ -514,6 +557,7 @@ var rootCmd = &cobra.Command{
 			// still run; every API call reports the missing context.
 			apiClient = client.Failing(ctxErr)
 		}
+		return nil
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -613,7 +657,12 @@ func init() {
 			defaultHelp(cmd, args)
 			return
 		}
-		fmt.Println(cmd.Long)
+		// Cobra prints help before PersistentPreRunE runs, so the profiles are
+		// read here too.
+		readContextEnv()
+		ctxName, ctx, _ := resolveContext(loadConfig())
+		profiles, from := activeProfiles(ctxName, ctx)
+		fmt.Println(profileHelp(cmd.Long, ctxName, profiles, from))
 		fmt.Println()
 		fmt.Println("Usage:")
 		fmt.Printf("  %s [command]\n", cmd.CommandPath())

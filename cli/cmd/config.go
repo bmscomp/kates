@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -63,9 +64,13 @@ var ctxShowCmd = &cobra.Command{
 			if ctx.APIKey != "" {
 				key = maskAPIKey(ctx.APIKey)
 			}
-			rows = append(rows, []string{marker, name, ctx.URL, out, key})
+			profiles := "all"
+			if len(ctx.Profiles) > 0 {
+				profiles = ansi.Truncate(strings.Join(ctx.Profiles, ", "), 24, ellipsis())
+			}
+			rows = append(rows, []string{marker, name, ctx.URL, out, key, profiles})
 		}
-		output.Table([]string{"", "Name", "URL", "Output", "API Key"}, rows)
+		output.Table([]string{"", "Name", "URL", "Output", "API Key", "Profiles"}, rows)
 	},
 }
 
@@ -117,6 +122,8 @@ var ctxSetCmd = &cobra.Command{
 				APIKey:   ctxSetAPIKey,
 				ProxyURL: ctxSetProxy,
 				Insecure: ctxSetInsecure,
+				// Set only by kates ctx profiles set, so kept here.
+				Profiles: c.Contexts[name].Profiles,
 			}
 
 			// Auto-select if first context

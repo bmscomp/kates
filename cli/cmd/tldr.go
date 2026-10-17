@@ -26,6 +26,7 @@ var tldrGroups = []tldrGroup{
 			{"Set up a context", "kates ctx set local --url http://localhost:30083"},
 			{"Switch context", "kates ctx use local"},
 			{"Check system health", "kates health"},
+			{"Enable only chaos commands", "kates ctx profiles set chaos"},
 			{"Initialize a project", "kates init --name my-project"},
 		},
 	},
