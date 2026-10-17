@@ -110,6 +110,8 @@ Healthy ranges are environment-dependent — treat these as starting points and 
 | Error Rate | 0% | Any errors indicate a configuration problem |
 | Throughput variability | \< 10% stddev | High variance suggests GC or I/O pressure |
 
+Before the native backend started a new consumer group at the run's own first record, a LOAD or ENDURANCE run on a reused topic read every record earlier runs had left there first, so its consume throughput, and the run's average, are understated by up to the ratio of all the records it read to its own.
+
 ::: {.callout-tip}
 For iterative parameter tuning, use [`kates lab`](appendix-a-glossary.md#gl-lab) instead of individual `test create` commands. Lab lets you tweak parameters, run tests, and compare results in a single session — see [Lab — Interactive Performance Tuning](10b-lab.md).
 :::
@@ -462,7 +464,7 @@ An INTEGRITY run needs the native backend. The Trogdor backend has no workload t
 | `enableTransactions` | `false` | Transactional producer, committing every 100 records or every 10 seconds, whichever comes first; the verifying consumer then reads with `read_committed` |
 | `enableCrc` | `true` | Per-record [CRC](appendix-a-glossary.md#gl-crc32) payload verification; `false` turns it off |
 | `numConsumers` | 1 | Ignored: INTEGRITY runs one producer and one consumer |
-| `consumerGroup` | `integrity-cg` | Base of the [consumer group](appendix-a-glossary.md#gl-consumer-group) name: the verifying consumer joins it with `-integrity` appended, `integrity-cg-integrity` by default |
+| `consumerGroup` | the run's own | Base of the [consumer group](appendix-a-glossary.md#gl-consumer-group) name: the verifying consumer joins it with `-integrity` appended; left out, each run gets `<run id>-integrity-0-group-integrity` |
 
 ::: {.callout-important}
 `enableIdempotence` and `enableTransactions` need `acks` to be `all`, which the Kafka producer requires for both, and a transactional producer is always idempotent: the Kates API refuses a request that asks for either with other `acks`, or for transactions with `enableIdempotence: false`, with a `400` that names the field. A request that leaves `enableIdempotence` out gets the client's choice, idempotent whenever `acks` is `all`. [Data Integrity Verification](08-data-integrity.md) covers what each integrity mode checks.

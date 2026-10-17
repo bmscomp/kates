@@ -102,8 +102,10 @@ var mcpCaveatsCore = []mcpCaveat{
 			"for shows the value the run used; targetThroughput, consumerGroup, fetchMinBytes, fetchMaxWaitMs and " +
 			"the enable options appear only when the request set them, so enableIdempotence false there means the " +
 			"request turned the producer's idempotence off, and an absent one that the Kafka client decided, which " +
-			"turns it on whenever acks is all. Absent, an INTEGRITY run checked CRCs and its consumer joined " +
-			"integrity-cg-integrity. requestedSpec holds the request's own fields. A run stored before the backend " +
+			"turns it on whenever acks is all. Absent, an INTEGRITY run checked CRCs and its consumer joined a " +
+			"group of its own, the task id with -group-integrity appended; a run created before the backend gave " +
+			"each run its own group joined integrity-cg-integrity, which every such run shared. requestedSpec " +
+			"holds the request's own fields. A run stored before the backend " +
 			"kept the request has no requestedSpec, and its spec shows all seven of those fields at the Java " +
 			"defaults whatever the request said: that backend dropped them when it merged the spec and ran without " +
 			"them, so its enableIdempotence false means the client decided, and such an INTEGRITY run used " +
@@ -114,8 +116,8 @@ var mcpCaveatsCore = []mcpCaveat{
 				"applyTypeDefaults(type, request.getSpec())", ".withRequestedSpec(", "buildTasks(type, spec, run.getId())"),
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1029-1075", "TestSpec applyTypeDefaults(", "return merged;"),
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1619-1623,1714-1718",
-				"Only when asked", `"integrity-cg")`),
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:786", `task.getConsumerGroup() + "-integrity"`),
+				"Only when asked", `"-integrity-0-group")`),
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:792", `task.getConsumerGroup() + "-integrity"`),
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:56,84-85,143-145",
 				"entity.setRequestedSpecJson(toJson(run.getRequestedSpec()))", "fromJson(entity.getRequestedSpecJson()",
 				"if (run.getRequestedSpec() != null)"),
