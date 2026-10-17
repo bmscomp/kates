@@ -95,9 +95,11 @@ IMAGE=kates:native-ci make kates-native-smoke  # or any other tag
 `scripts/native-smoke-test.sh` boots the binary against a throwaway Postgres and
 calls the paths where AOT breakage shows up: liveness, readiness (which proves
 Flyway ran, including the non-transactional V20), OpenAPI, the playbook catalog
-(classpath YAML), and a domain payload (reflection). CI runs the same script on
-every PR that touches `kates/**`, plus nightly — see
-`.github/workflows/native.yml`.
+(classpath YAML), and a domain payload (reflection). It then boots the binary
+again with API security on and a one-key keys file, and checks that
+`GET /api/tests` answers 200 with that key and 401 without one, because the keys
+file's YAML model needs reflection too. CI runs the same script on every PR that
+touches `kates/**`, plus nightly — see `.github/workflows/native.yml`.
 
 ## Keeping reflection registration honest
 
@@ -109,6 +111,10 @@ in the unit suite instead of in production.
 When it fails, add the class to `NativePayloadReflectionConfig`. If the class
 genuinely never leaves the process, add it to that test's `NOT_SERIALIZED` set
 with a one-line reason instead.
+
+The test scans only public classes in the payload packages, so a package-private
+model that Jackson reads, such as `ApiKeyFile.FileModel`, carries
+`@RegisterForReflection` itself.
 
 Registration is needed because almost every endpoint here returns
 `Response.ok(...)`. Quarkus registers types it can see in a resource method's

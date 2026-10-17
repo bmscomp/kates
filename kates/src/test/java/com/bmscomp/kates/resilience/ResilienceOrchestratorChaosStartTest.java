@@ -27,6 +27,7 @@ import com.bmscomp.kates.chaos.NoOpChaosProvider;
 import com.bmscomp.kates.chaos.ProbeExecutor;
 import com.bmscomp.kates.chaos.ProbeResult;
 import com.bmscomp.kates.chaos.ProbeSpec;
+import com.bmscomp.kates.disruption.DisruptionConcurrencyGuard;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
@@ -59,6 +60,7 @@ class ResilienceOrchestratorChaosStartTest {
         // A passing Edge probe keeps the run off the fixed 10s no-probe wait.
         orchestrator.probeExecutor = mock(ProbeExecutor.class);
         when(orchestrator.probeExecutor.evaluateAll(any(), any())).thenReturn(List.of(ProbeResult.pass("up", "", 1)));
+        orchestrator.concurrencyGuard = new DisruptionConcurrencyGuard();
     }
 
     private static ChaosOutcome passed() {

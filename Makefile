@@ -284,11 +284,8 @@ monitoring-generic:  ## Deploy Prometheus & Grafana (generic K8s overlay)
 monitoring-undeploy:  ## Remove the monitoring stack (keeps the namespace)
 	@echo "🗑️ Undeploying monitoring stack..."
 	helm uninstall monitoring -n kafka || true
-	kubectl delete pvc --all -n kafka || true
-	@# The namespace is deliberately NOT deleted: it is shared with Kafka, and
-	@# removing it here has taken brokers with it. A bare `kubectl` was left on
-	@# this line by a half-finished comment-out, which prints usage and exits 1,
-	@# so the target failed after doing its work.
+	@# Neither the namespace nor its PVCs are deleted: both are shared with Kafka
+	@# (data-0-krafter-*). Only kafka-undeploy removes broker volumes, by label.
 
 cert-manager:  ## Deploy cert-manager
 	@echo "🔐 Deploying cert-manager..."
@@ -806,8 +803,11 @@ kates-prod:  ## Deploy Kates via Helm (production overlay)
 kates-helm-undeploy:  ## Remove Kates Helm release
 	@echo "🗑️  Removing Kates (Helm release)..."
 	helm uninstall kates -n $(KATES_NS) 2>/dev/null || true
-	kubectl delete namespace $(KATES_NS) --ignore-not-found
-	@echo "✅ Kates Helm release removed"
+	@# The namespace itself is left in place on purpose — it holds the database
+	@# PVC, and dropping it silently destroys every stored run. Delete it by hand
+	@# when that is what you actually want:
+	@#   kubectl delete namespace $(KATES_NS)
+	@echo "✅ Kates Helm release removed (namespace $(KATES_NS) and its data kept)"
 
 ##@ Helm Charts
 chart-lint:  ## Lint the Helm chart
@@ -1448,12 +1448,9 @@ litmus:  ## Deploy Kates Chaos (Kind overlay)
 		--timeout 10m --wait
 	@echo "✅ Kates Chaos deployed"
 
-litmus-undeploy:  ## Remove Kates Chaos stack completely
+litmus-undeploy:  ## Remove the Kates Chaos release (keeps the kafka namespace and its volumes)
 	@echo "🧹 Removing Kates Chaos (LitmusChaos)..."
 	@helm uninstall chaos -n kafka 2>/dev/null || true
-	@kubectl delete pvc --all -n kafka 2>/dev/null || true
-	@kubectl delete all --all -n kafka 2>/dev/null || true
-	@kubectl # delete namespace litmus 2>/dev/null || true
 	@echo "✅ Kates Chaos removed"
 
 chaos-ui:  ## Explain chaos access (no UI in execution-plane chart)

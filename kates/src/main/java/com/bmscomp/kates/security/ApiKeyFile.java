@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
  * The named API keys file ({@code kates.api.keys-file}): one entry per key,
@@ -64,11 +65,13 @@ final class ApiKeyFile {
         }
     }
 
-    // Read by Jackson.
+    // Read by Jackson, so the native image registers them.
+    @RegisterForReflection
     static final class FileModel {
         public List<EntryModel> keys;
     }
 
+    @RegisterForReflection
     static final class EntryModel {
         public String id;
         public String name;

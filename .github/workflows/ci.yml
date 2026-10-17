@@ -191,6 +191,31 @@ jobs:
       - name: Template validation
         run: helm template kates charts/kates/ > /dev/null
 
+      # The backup CronJob dumps only the bundled PostgreSQL. values-prod.yaml
+      # set backup.enabled with externalDatabase and rendered no backup,
+      # silently. Assert the prod overlay renders and that the combination is
+      # refused.
+      - name: Assert backup needs the bundled database
+        run: |
+          helm template kates charts/kates/ \
+            -f charts/kates/values-prod.yaml \
+            --set externalDatabase.existingSecret=ci > /dev/null
+          if out=$(helm template kates charts/kates/ \
+               --set backup.enabled=true \
+               --set postgresql.enabled=false \
+               --set externalDatabase.enabled=true \
+               --set externalDatabase.host=db \
+               --set externalDatabase.password=x 2>&1); then
+            echo "::error::backup.enabled with postgresql.enabled=false rendered; it must fail"
+            exit 1
+          fi
+          # Any other failure would pass the check above without testing it.
+          if ! grep -q 'backup.enabled: the backup CronJob dumps the bundled PostgreSQL' <<< "$out"; then
+            echo "::error::the render failed, but not on the backup check: $out"
+            exit 1
+          fi
+          echo "OK: backup without the bundled database is refused"
+
       # The Strimzi version is declared in five places. If values.yaml's
       # strimziVersion drifts from the Chart.yaml dependency version, the CRD
       # hook applies CRDs for a different operator than the one installed —

@@ -7,8 +7,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
- * Serialises disruption plans per target cluster: at most one plan may be
- * running against a given namespace/cluster at a time.
+ * Serialises plans, compound runs and resilience faults per target cluster:
+ * at most one of them may be running against a given namespace/cluster.
  *
  * <p><b>Why.</b> Plans are executed asynchronously, so nothing stopped two of
  * them overlapping. Rollback state is stored on the target itself — the

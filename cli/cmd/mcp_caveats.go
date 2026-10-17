@@ -67,7 +67,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		ID: mcpCaveatLoadSingleProducer,
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
-		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1640-1649", "case LOAD ->", "case STRESS ->")},
+		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1656-1665", "case LOAD ->", "case STRESS ->")},
 	},
 	{
 		ID: mcpCaveatReaperDeadline,
@@ -89,7 +89,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"kates/src/main/resources/application.properties:336-350",
 			mcpAnchoredRef(mcpJava+"engine/TestTimeoutReaper.java:49-51,67-76,161-164,192-205",
 				"TestResult.TaskStatus.STOPPING", "kates.engine.reaper-grace-ms", "\"-submission\"", "\"Timeout: still \""),
-			mcpJava + "engine/TestOrchestrator.java:132-154,186-189,354,1109-1168,1234-1243,1298-1330",
+			mcpJava + "engine/TestOrchestrator.java:132-154,186-189,354,1125-1184,1250-1259,1314-1346",
 			mcpJava + "persistence/EntityMapper.java:158-167",
 			"kates/src/main/resources/db/migration/V24__run_planned_duration.sql:1-13",
 			mcpJava + "domain/TestRun.java:478-481",
@@ -102,8 +102,10 @@ var mcpCaveatsCore = []mcpCaveat{
 			"for shows the value the run used; targetThroughput, consumerGroup, fetchMinBytes, fetchMaxWaitMs and " +
 			"the enable options appear only when the request set them, so enableIdempotence false there means the " +
 			"request turned the producer's idempotence off, and an absent one that the Kafka client decided, which " +
-			"turns it on whenever acks is all. Absent, an INTEGRITY run checked CRCs and its consumer joined " +
-			"integrity-cg-integrity. requestedSpec holds the request's own fields. A run stored before the backend " +
+			"turns it on whenever acks is all. Absent, an INTEGRITY run checked CRCs and its consumer joined a " +
+			"group of its own, the task id with -group-integrity appended; a run created before the backend gave " +
+			"each run its own group joined integrity-cg-integrity, which every such run shared. requestedSpec " +
+			"holds the request's own fields. A run stored before the backend " +
 			"kept the request has no requestedSpec, and its spec shows all seven of those fields at the Java " +
 			"defaults whatever the request said: that backend dropped them when it merged the spec and ran without " +
 			"them, so its enableIdempotence false means the client decided, and such an INTEGRITY run used " +
@@ -112,10 +114,10 @@ var mcpCaveatsCore = []mcpCaveat{
 			mcpJava + "domain/TestSpec.java:14-32,111-113",
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:165,180-182,225",
 				"applyTypeDefaults(type, request.getSpec())", ".withRequestedSpec(", "buildTasks(type, spec, run.getId())"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1029-1075", "TestSpec applyTypeDefaults(", "return merged;"),
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1619-1623,1714-1718",
-				"Only when asked", `"integrity-cg")`),
-			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:786", `task.getConsumerGroup() + "-integrity"`),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1045-1091", "TestSpec applyTypeDefaults(", "return merged;"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1635-1639,1730-1734",
+				"Only when asked", `"-integrity-0-group")`),
+			mcpAnchoredRef(mcpJava+"engine/NativeKafkaBackend.java:792", `task.getConsumerGroup() + "-integrity"`),
 			mcpAnchoredRef(mcpJava+"persistence/EntityMapper.java:56,84-85,143-145",
 				"entity.setRequestedSpecJson(toJson(run.getRequestedSpec()))", "fromJson(entity.getRequestedSpecJson()",
 				"if (run.getRequestedSpec() != null)"),
@@ -156,7 +158,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration. The tuning report copies " +
 			"that one summary into every step, so all steps show the same numbers and the best step is always step 0.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1725-1726", "case TUNE_REPLICATION,", "-tune-0"),
+			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1741-1742", "case TUNE_REPLICATION,", "-tune-0"),
 			mcpJava + "trogdor/SpecFactory.java:38-39",
 			mcpJava + "engine/TuningTestRunner.java:101-139",
 		},
@@ -168,7 +170,7 @@ var mcpCaveatsCore = []mcpCaveat{
 		Refs: []string{
 			mcpJava + "trend/TrendResource.java:31-60",
 			mcpJava + "trend/TrendService.java:53-54,185-189",
-			mcpAnchoredRef(mcpJava+"service/TestRunRepository.java:360-380",
+			mcpAnchoredRef(mcpJava+"service/TestRunRepository.java:341-361",
 				"List<TestRun> findWithResults(", "WHERE r.testType = :type AND r.status = :status",
 				".map(EntityMapper::toDomain)"),
 		},

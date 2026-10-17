@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/bmscomp/kates/cli/internal/podrun"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/kafkaversion"
 	"github.com/bmscomp/kates/cli/pkg/migrate"
@@ -218,50 +219,109 @@ func (r *labRun) phasePrerequisites(ctx context.Context, s *migrate.State) error
 		return fmt.Errorf("Secret %s not found in %s. The kafka-cluster chart provisions the KafkaUser %q", migrate.TargetUser, l.TargetNamespace, migrate.TargetUser)
 	}
 	rep.Pass(migrate.RowTargetCredentials, "secret "+migrate.TargetUser)
-	return r.refuseOverlappingLab(ctx)
+	written, err := r.refuseOverlappingLab(ctx)
+	if err != nil {
+		return err
+	}
+	return r.refuseExistingTopics(ctx, written)
 }
 
 // refuseOverlappingLab refuses a second lab against the same target whose
 // topic set overlaps this one's: under the identity policy two mirrors
-// writing one topic name is data corruption, not a test.
-func (r *labRun) refuseOverlappingLab(ctx context.Context) error {
+// writing one topic name is data corruption, not a test. written holds the
+// target-side names this lab's own KafkaMirrorMaker2, if there is one
+// already, writes: on a re-run those topics are the lab's own.
+func (r *labRun) refuseOverlappingLab(ctx context.Context) (written map[string]bool, err error) {
 	l := r.lab
 	out, err := defaultRunner.Run(ctx, "kubectl", "-n", l.MirrorNamespace, "get", "kafkamirrormaker2", "-l", migrate.LabelLab, "-o", "json")
 	if err != nil {
-		return nil // best effort: the mirror's own install still fails on a real collision
+		return nil, nil // best effort: the mirror's own install still fails on a real collision
 	}
 	var list struct {
 		Items []struct {
 			Metadata struct {
 				Labels map[string]string `json:"labels"`
 			} `json:"metadata"`
-			Spec struct {
-				Mirrors []struct {
-					TopicsPattern string `json:"topicsPattern"`
-				} `json:"mirrors"`
-			} `json:"spec"`
+			Spec json.RawMessage `json:"spec"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
-		return nil
+		return nil, nil
 	}
 	mine := map[string]bool{}
 	for _, t := range l.Topics {
 		mine[t] = true
 	}
+	written = map[string]bool{}
 	for _, item := range list.Items {
 		other := item.Metadata.Labels[migrate.LabelLab]
-		if other == "" || other == l.Name {
+		if other == "" {
 			continue
 		}
-		for _, m := range item.Spec.Mirrors {
-			for _, t := range topicsFromPattern(m.TopicsPattern) {
-				if mine[t] {
-					return fmt.Errorf("lab %s already mirrors topic %s onto %s in %s — two mirrors writing one topic name is corruption, not a test; pass --topics with names of your own, or kates migrate down --name %s",
-						other, t, l.TargetCluster, l.MirrorNamespace, other)
+		d := &labDiscovery{}
+		d.readMirrorSpec(item.Spec)
+		if other == l.Name {
+			for _, leg := range d.legs {
+				for _, t := range leg.Topics {
+					written[d.replicatedTopicOf(leg.Alias, t)] = true
 				}
 			}
+			continue
 		}
+		for _, t := range d.Topics {
+			if mine[t] {
+				return nil, fmt.Errorf("lab %s already mirrors topic %s onto %s in %s — two mirrors writing one topic name is corruption, not a test; pass --topics with names of your own, or kates migrate down --name %s",
+					other, t, l.TargetCluster, l.MirrorNamespace, other)
+			}
+		}
+	}
+	return written, nil
+}
+
+// refuseExistingTopics refuses a lab whose mirrored topic names the target
+// already has: removing a lab deletes the topics it mirrored into, so such
+// a topic would go with it, data and all. It asks the brokers, because a
+// topic made through the AdminClient has no KafkaTopic, and it fails
+// closed: a lab whose names cannot be checked is not created. Names in
+// written are the lab's own mirror's, so a re-run keeps them.
+func (r *labRun) refuseExistingTopics(ctx context.Context, written map[string]bool) error {
+	l := r.lab
+	var check []string
+	for _, t := range l.ReplicatedTopics() {
+		if !written[t] {
+			check = append(check, t)
+		}
+	}
+	if len(check) == 0 {
+		return nil
+	}
+	c, err := openTargetClient(ctx, migrateTargetOptions{Namespace: l.TargetNamespace, Cluster: l.TargetCluster, User: migrate.TargetUser, Timeout: int(r.timeout / time.Second)})
+	if err != nil {
+		return fmt.Errorf("cannot list the topics on %s to check that the lab's are new: %w", l.TargetCluster, err)
+	}
+	// The pod carries no lab label, so no teardown would remove it.
+	defer func() {
+		if err := podrun.Delete(context.Background(), defaultRunner, c.pod); err != nil {
+			migrateWarn(err.Error())
+		}
+	}()
+	out, err := podrun.Exec(ctx, defaultRunner, c.pod, c.tools.ListTopics(c.bootstrap, c.cfg)...)
+	if err != nil {
+		return fmt.Errorf("cannot list the topics on %s to check that the lab's are new: %w", l.TargetCluster, err)
+	}
+	have := map[string]bool{}
+	for _, t := range strings.Fields(out) {
+		have[t] = true
+	}
+	var taken []string
+	for _, t := range check {
+		if have[t] {
+			taken = append(taken, t)
+		}
+	}
+	if len(taken) > 0 {
+		return fmt.Errorf("topic(s) %s already exist on %s in %s — removing a lab deletes the topics it mirrored into, so their data would go with it; pass --topics with names the target does not have, or --policy default (each source's topics land as <alias>.<topic>)",
+			strings.Join(taken, ", "), l.TargetCluster, l.TargetNamespace)
 	}
 	return nil
 }

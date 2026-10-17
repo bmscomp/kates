@@ -10,6 +10,7 @@ import jakarta.inject.Inject;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 
+import com.bmscomp.kates.SchedulerOffTestProfile;
 import com.bmscomp.kates.domain.TestResult;
 import com.bmscomp.kates.domain.TestRun;
 import com.bmscomp.kates.domain.TestSpec;
@@ -28,6 +30,7 @@ import com.bmscomp.kates.trogdor.spec.ConsumeBenchSpec;
 import com.bmscomp.kates.trogdor.spec.ProduceBenchSpec;
 
 @QuarkusTest
+@TestProfile(SchedulerOffTestProfile.class)
 class TestResourceTest {
 
     @InjectMock
