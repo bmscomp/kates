@@ -383,7 +383,7 @@ charts/kates-chaos/
 |--------|-------------|
 | `make litmus` | Deploy with Kind overlay (development) |
 | `make litmus-generic` | Deploy with generic Kubernetes overlay (production) |
-| `make litmus-undeploy` | Full teardown (release + namespace) |
+| `make litmus-undeploy` | Remove the chaos release (keeps the shared kafka namespace and its volumes) |
 | `make litmus-test` | Run Helm test suite |
 | `make litmus-gameday` | Trigger GameDay validation |
 | `make chaos-status` | Show release, pods, experiments, engines, results |
