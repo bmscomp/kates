@@ -213,17 +213,20 @@ func renderHTMLReport(id string, r *client.Report) string {
 		b.WriteString(`<div class="card">
   <h2>Phase Breakdown</h2>
   <table>
-    <thead><tr><th>Phase</th><th>Status</th><th>Records</th><th>Throughput</th><th>P99 (ms)</th><th>Errors</th></tr></thead>
+    <thead><tr><th>Phase</th><th>SLA</th><th>Records</th><th>Throughput</th><th>P99 (ms)</th><th>Errors</th></tr></thead>
     <tbody>
 `)
 		for _, p := range r.Phases {
-			phaseName := p.Name
-			if phaseName == "" {
-				phaseName = "main"
+			m := client.ReportSummary{}
+			if p.Metrics != nil {
+				m = *p.Metrics
 			}
-			statusBadge := `<span class="badge badge-pass">` + p.Status + `</span>`
-			if strings.EqualFold(p.Status, "FAILED") || strings.EqualFold(p.Status, "ERROR") {
-				statusBadge = `<span class="badge badge-fail">` + p.Status + `</span>`
+			slaBadge := "—"
+			if v := p.SlaVerdict; v != nil {
+				slaBadge = `<span class="badge badge-pass">✓ PASSED</span>`
+				if !v.Passed {
+					slaBadge = `<span class="badge badge-fail">✖ FAILED</span>`
+				}
 			}
 			b.WriteString(fmt.Sprintf(`    <tr>
       <td>%s</td>
@@ -233,7 +236,7 @@ func renderHTMLReport(id string, r *client.Report) string {
       <td class="metric-value">%s</td>
       <td class="metric-value">%.4f%%</td>
     </tr>
-`, phaseName, statusBadge, fmtNum(p.RecordsSent), fmtFloat(p.ThroughputRecPerSec, 1), fmtFloat(p.P99LatencyMs, 2), p.ErrorRate*100))
+`, html.EscapeString(p.Name), slaBadge, fmtNum(m.TotalRecords), fmtFloat(m.AvgThroughputRecPerSec, 1), fmtFloat(m.P99LatencyMs, 2), m.ErrorRate*100))
 		}
 		b.WriteString(`    </tbody>
   </table>

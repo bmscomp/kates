@@ -35,61 +35,39 @@ var reportShowCmd = &cobra.Command{
 		summary := result.Summary
 
 		if summary == nil || summary.AvgThroughputRecPerSec == 0 {
-			if len(result.Phases) > 0 {
+			run, fetchErr := apiClient.GetTest(context.Background(), args[0])
+			if fetchErr == nil && len(run.Results) > 0 && !isStaleResult(run.Results) {
 				s := &client.ReportSummary{}
 				count := 0
-				for _, p := range result.Phases {
-					s.TotalRecords += p.RecordsSent
-					if p.ThroughputRecPerSec > s.PeakThroughputRecPerSec {
-						s.PeakThroughputRecPerSec = p.ThroughputRecPerSec
+				for _, r := range run.Results {
+					s.TotalRecords += r.RecordsSent
+					if r.ThroughputRecordsPerSec > s.PeakThroughputRecPerSec {
+						s.PeakThroughputRecPerSec = r.ThroughputRecordsPerSec
 					}
-					if p.ThroughputRecPerSec > 0 {
-						s.AvgThroughputRecPerSec += p.ThroughputRecPerSec
+					if r.ThroughputRecordsPerSec > 0 {
+						s.AvgThroughputRecPerSec += r.ThroughputRecordsPerSec
 						count++
 					}
-					if p.P99LatencyMs > s.P99LatencyMs {
-						s.P99LatencyMs = p.P99LatencyMs
+					if r.P99LatencyMs > s.P99LatencyMs {
+						s.P99LatencyMs = r.P99LatencyMs
+					}
+					if r.AvgLatencyMs > s.AvgLatencyMs {
+						s.AvgLatencyMs = r.AvgLatencyMs
+					}
+					if r.P50LatencyMs > s.P50LatencyMs {
+						s.P50LatencyMs = r.P50LatencyMs
+					}
+					if r.P95LatencyMs > s.P95LatencyMs {
+						s.P95LatencyMs = r.P95LatencyMs
+					}
+					if r.MaxLatencyMs > s.MaxLatencyMs {
+						s.MaxLatencyMs = r.MaxLatencyMs
 					}
 				}
 				if count > 0 {
 					s.AvgThroughputRecPerSec /= float64(count)
 				}
 				summary = s
-			} else {
-				run, fetchErr := apiClient.GetTest(context.Background(), args[0])
-				if fetchErr == nil && len(run.Results) > 0 && !isStaleResult(run.Results) {
-					s := &client.ReportSummary{}
-					count := 0
-					for _, r := range run.Results {
-						s.TotalRecords += r.RecordsSent
-						if r.ThroughputRecordsPerSec > s.PeakThroughputRecPerSec {
-							s.PeakThroughputRecPerSec = r.ThroughputRecordsPerSec
-						}
-						if r.ThroughputRecordsPerSec > 0 {
-							s.AvgThroughputRecPerSec += r.ThroughputRecordsPerSec
-							count++
-						}
-						if r.P99LatencyMs > s.P99LatencyMs {
-							s.P99LatencyMs = r.P99LatencyMs
-						}
-						if r.AvgLatencyMs > s.AvgLatencyMs {
-							s.AvgLatencyMs = r.AvgLatencyMs
-						}
-						if r.P50LatencyMs > s.P50LatencyMs {
-							s.P50LatencyMs = r.P50LatencyMs
-						}
-						if r.P95LatencyMs > s.P95LatencyMs {
-							s.P95LatencyMs = r.P95LatencyMs
-						}
-						if r.MaxLatencyMs > s.MaxLatencyMs {
-							s.MaxLatencyMs = r.MaxLatencyMs
-						}
-					}
-					if count > 0 {
-						s.AvgThroughputRecPerSec /= float64(count)
-					}
-					summary = s
-				}
 			}
 		}
 

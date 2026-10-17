@@ -110,8 +110,11 @@ func TestRenderMarkdownReport_WithPhases(t *testing.T) {
 	report := &client.Report{
 		Summary: &client.ReportSummary{TotalRecords: 1000},
 		Phases: []client.ReportPhase{
-			{Name: "warmup", Status: "DONE", RecordsSent: 500, ThroughputRecPerSec: 10000, P99LatencyMs: 15.5, ErrorRate: 0},
-			{Name: "main", Status: "DONE", RecordsSent: 500, ThroughputRecPerSec: 25000, P99LatencyMs: 22.3, ErrorRate: 0.001},
+			{Name: "produce", Metrics: &client.ReportSummary{TotalRecords: 600, AvgThroughputRecPerSec: 10000, P99LatencyMs: 15.5},
+				SlaVerdict: &client.SlaVerdict{Passed: true}},
+			{Name: "consume", Metrics: &client.ReportSummary{TotalRecords: 400, AvgThroughputRecPerSec: 25000, P99LatencyMs: 22.3, ErrorRate: 0.001},
+				SlaVerdict: &client.SlaVerdict{Passed: false}},
+			{Name: "a|b"},
 		},
 	}
 
@@ -120,11 +123,18 @@ func TestRenderMarkdownReport_WithPhases(t *testing.T) {
 	if !strings.Contains(md, "## Phase Breakdown") {
 		t.Error("expected Phase Breakdown section")
 	}
-	if !strings.Contains(md, "warmup") {
-		t.Error("expected warmup phase")
+	if !strings.Contains(md, "| produce | ✓ | 600 | 10000.0 rec/s | 15.50 | 0.0000% |") {
+		t.Errorf("the produce row does not carry its own numbers:\n%s", md)
 	}
-	if !strings.Contains(md, "main") {
-		t.Error("expected main phase")
+	if !strings.Contains(md, "| consume | ✖ |") {
+		t.Errorf("a phase whose SLA failed is not marked failed:\n%s", md)
+	}
+	// A phase name is the user's text; a | in it would split the row.
+	if !strings.Contains(md, `| a\|b | — |`) {
+		t.Errorf("the phase name is not escaped, or a phase with no verdict is not —:\n%s", md)
+	}
+	if strings.Contains(md, "| main |") {
+		t.Errorf("a phase is named main:\n%s", md)
 	}
 }
 
