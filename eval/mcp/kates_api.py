@@ -120,7 +120,8 @@ def read_context(kates_bin: str, name: str, env: dict[str, str] | None = None) -
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         raise ContextError(f"cannot run {kates_bin} ctx export: {e}") from e
-    # ctx export exits 0 and prints nothing when the context does not exist.
+    # ctx export exits 1 when the context does not exist; CLIs before that
+    # exited 0 with nothing on stdout, so both are checked.
     if proc.returncode != 0 or not proc.stdout.strip():
         detail = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "no output"
         raise ContextError(f"context {name!r} is not in the kates config ({detail}); "

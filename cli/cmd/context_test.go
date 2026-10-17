@@ -136,6 +136,37 @@ func TestUnknownContextCanBeCreated(t *testing.T) {
 	}
 }
 
+// The ctx commands that fail used to exit 0, so in
+// "kates ctx import --file f && kates ctx use lab && kates test create ..."
+// a missing lab sent the test to whichever context was current.
+func TestCtxFailuresExitOne(t *testing.T) {
+	dir := t.TempDir()
+	invalid := filepath.Join(dir, "invalid.yaml")
+	if err := os.WriteFile(invalid, []byte("contexts: ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"ctx", "use", "nope"},
+		{"ctx", "delete", "nope"},
+		{"ctx", "export", "--name", "nope"},
+		{"ctx", "import", "--file", filepath.Join(dir, "missing.yaml")},
+		{"ctx", "import", "--file", invalid},
+		{"--context", "nope", "ctx", "current"},
+	} {
+		out, code, _ := runKatesCLI(t, nil, args...)
+		if code != 1 {
+			t.Errorf("%v: exit %d, want 1:\n%s", args, code, out)
+		}
+		if strings.Contains(out, "contexts:") {
+			t.Errorf("%v printed contexts:\n%s", args, out)
+		}
+	}
+
+	if out, code, _ := runKatesCLI(t, nil, "ctx", "use", "lab"); code != 0 {
+		t.Errorf("ctx use lab: exit %d, want 0:\n%s", code, out)
+	}
+}
+
 // kates status named the file's current context, not the one --context chose.
 func TestStatusNamesTheContextUsed(t *testing.T) {
 	out, code, _ := runKatesCLI(t, nil, "--context", "labb", "status")

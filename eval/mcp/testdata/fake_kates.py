@@ -20,9 +20,9 @@ def main(argv):
     if argv[:2] == ["ctx", "export"]:
         name = argv[argv.index("--name") + 1]
         if name not in KEYS:
-            # kates ctx export exits 0 with nothing on stdout for a missing context.
+            # kates ctx export exits 1 for a missing context.
             print(f"  ✖ Context '{name}' not found", file=sys.stderr)
-            return 0
+            return 1
         print(f"current-context: {name}\ncontexts:\n    {name}:\n        url: {url}\n"
               f"        output: table\n        api-key: \"{KEYS[name]}\"")
         return 0
