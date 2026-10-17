@@ -73,6 +73,28 @@ class DisruptionResourceTest {
                         startsWith("No fault was triggered: faults[1].faultSpec.chaosDurationSec 0 is below 1"));
     }
 
+    /**
+     * A compound run within the limits goes to the safety guard, which counts
+     * the brokers its faults hit. In CI there is no cluster, so it counts
+     * none; on a machine whose kubeconfig reaches one, the targetAll kill
+     * hits every broker. Either way it is refused, and nothing is killed.
+     */
+    @Test
+    void aCompoundRunWithNoBrokerToCountIsRefused() {
+        given().contentType("application/json")
+                .body("{\"faults\":[{\"faultSpec\":{\"experimentName\":\"kill\",\"disruptionType\":\"POD_KILL\","
+                        + "\"targetAll\":true}}]}")
+                .when()
+                .post("/api/disruptions/compound")
+                .then()
+                .statusCode(400)
+                .body(
+                        "message",
+                        anyOf(
+                                startsWith("No fault was triggered: No broker pods found"),
+                                startsWith("No fault was triggered: Plan would affect ALL ")));
+    }
+
     @Test
     void executeDisruptionReturns400WithEmptyPlan() {
         given().contentType("application/json")
