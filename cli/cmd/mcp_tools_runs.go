@@ -1928,7 +1928,7 @@ func mcpActivityTestsSince(ctx context.Context, call *mcpCall, since time.Time, 
 // are injected for part of its run, or one whose backend process stopped
 // before it ended and has not started again to mark it INTERRUPTED
 // (DisruptionLauncher.java:95-123, DisruptionReportRepository.java:35-43,
-// DisruptionOrphanReconciler.java:152-203).
+// DisruptionOrphanReconciler.java:171-222).
 func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.Time, limit int) (mcpActivityDisruptions, error) {
 	out := mcpActivityDisruptions{StoredAsRunning: []mcpActivityDisruptionRow{}, Since: []mcpActivityDisruptionRow{}}
 	for p := 0; p < mcpActivityMaxPages; p++ {
@@ -2388,7 +2388,7 @@ var mcpCaveatsRuns = []mcpCaveat{
 			mcpJava + "disruption/DisruptionLauncher.java:95-123",
 			mcpJava + "disruption/DisruptionPersistence.java:16-37",
 			mcpJava + "disruption/DisruptionReportRepository.java:20-43",
-			mcpJava + "disruption/DisruptionOrphanReconciler.java:152-203",
+			mcpJava + "disruption/DisruptionOrphanReconciler.java:171-222",
 			mcpJava + "disruption/DisruptionTemplateResource.java:63-65",
 			mcpJava + "disruption/DisruptionScheduler.java:95-107",
 			mcpJava + "disruption/DisruptionReportEntity.java:39-47",

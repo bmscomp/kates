@@ -628,7 +628,7 @@ So rollback matters for two faults. For a partition, it deletes the policies the
 
 Rollback is per step, and a rolled-back step can still count as passed. The plan goes on to its next step, and a step whose fault went in counts toward `passedSteps` even when it rolled back afterward. Read each step's `rolledBack` and `rollbackReason`, which `kates disruption run` prints under the step. `rolledBack` says that rollback ran, not that it put anything back: it's `true` for a fault with nothing to undo, and for a rollback that failed.
 
-If the Kates API pod dies in the middle of a plan, no rollback runs. When the Kates API starts again, it deletes the `managed-by=kates` NetworkPolicies and restores the scaled-down node pools and StatefulSets it finds in the Kafka namespace. It also marks `INTERRUPTED` the report of a plan that `kates disruption run` or `kates disruption playbook run` started. It does this once, at startup, and touches only faults older than `kates.chaos.orphan-recovery.min-age-sec`, 900 seconds by default. So when the Kates API is back within 15 minutes of the fault, the fault stays until you undo it, or until the Kates API starts again after those 15 minutes.
+If the Kates API pod dies in the middle of a plan, no rollback runs. When the Kates API starts again, it deletes the `managed-by=kates` NetworkPolicies in every namespace, and restores the scaled-down node pools and StatefulSets it finds in the Kafka namespace. It also marks `INTERRUPTED` the report of a plan that `kates disruption run` or `kates disruption playbook run` started. It does this once, at startup, and undoes every fault made before the Kates API started, however recent: the `kates` chart runs one Kates API pod, so no other pod can still be running the plan. `kates.chaos.orphan-recovery.min-age-sec`, 0 by default, moves that cutoff earlier by as many seconds.
 
 ### Guardrail Parameters
 
@@ -659,7 +659,7 @@ The guard counts brokers, reads pod readiness and, for a drain, where pods run, 
 - A resilience run (`kates resilience run`) doesn't go through the guard at all: no broker count, no one-plan rule, no check before the fault and no rollback. Only the [fault parameter limits](#fault-parameter-limits) apply to it.
 - `make gameday` doesn't go through it either: it deletes a broker pod with `kubectl`.
 - The one-plan rule lives in the Kates API process, so it holds only while one Kates API pod runs. The `kates` chart refuses a second replica and rolls with `Recreate`, so it never runs two.
-- Orphan recovery covers the Kafka namespace only. A NetworkPolicy that a Kates API left in another namespace when it died stays until you run `kubectl delete networkpolicy -n <namespace> -l managed-by=kates`.
+- Orphan recovery deletes Kates NetworkPolicies in every namespace, but restores scale-downs in the Kafka namespace only. A StatefulSet that a Kates API left scaled down in another namespace when it died stays so until you scale it back to the count in its `kates.io/original-replicas` annotation.
 - The dry run's RBAC check (see [Previewing a Playbook](#previewing-a-playbook)) asks about the Kates API's own service account, and a missing permission is a warning, not a refusal.
 
 ## Kafka Intelligence
