@@ -114,6 +114,28 @@ class CompoundChaosOrchestratorTest {
         verify(kill).get(KILL.chaosDurationSec() + 120, TimeUnit.SECONDS);
     }
 
+    /**
+     * A concurrent run waited for each fault only timeoutSec, 120 s by
+     * default, whatever its delay and duration. A longer fault was reported
+     * timed out while it still ran, and the resource gave up the disruption
+     * lease with it still in.
+     */
+    @Test
+    void aConcurrentFaultLongerThanTimeoutSecIsWaitedFor() {
+        ChaosProvider slow = mock(ChaosProvider.class);
+        when(slow.name()).thenReturn("slow");
+        when(slow.isAvailable()).thenReturn(true);
+        when(slow.triggerFault(any()))
+                .thenReturn(CompletableFuture.supplyAsync(
+                        () -> passed("kill").join(), CompletableFuture.delayedExecutor(200, TimeUnit.MILLISECONDS)));
+        when(orchestrator.providers.iterator())
+                .thenAnswer(invocation -> List.of(slow).iterator());
+
+        var outcome = orchestrator.executeConcurrent(List.of(new CompoundFault(KILL, "slow")), 0);
+
+        assertTrue(outcome.allSucceeded(), outcome.toString());
+    }
+
     private static CompletableFuture<ChaosOutcome> passed(String experimentName) {
         Instant now = Instant.now();
         return spy(CompletableFuture.completedFuture(

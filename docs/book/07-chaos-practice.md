@@ -75,8 +75,8 @@ The table sets a plan and a resilience run side by side. Read the guard, rollbac
 | Faults | One per step | One |
 | Workload | None | The Kates test in `testRequest` |
 | What it measures | Pod recovery, Prometheus snapshots before and after each fault, and ISR and lag when asked | The test's throughput, latency and error rate just before the fault, and again over the whole run after the recovery wait |
-| Safety guard | Checks the plan before the first fault, and the Kafka pods before each fault | None, apart from the [fault parameter limits](#fault-parameter-limits) |
-| Another plan running | Refused | Not checked |
+| Safety guard | Checks the plan before the first fault, and the Kafka pods before each fault | Counts the brokers the fault hits, and holds it to the [fault parameter limits](#fault-parameter-limits), before the test starts; doesn't check the Kafka pods before the fault |
+| Another disruption running | Refused | Refused with `409` before the test starts; a run that finds one when `steadyStateSec` is up ends `ERROR` with no fault |
 | Rollback | After a step fails its recovery check or errors, with `autoRollback` | None |
 | Grade | An [SLA grade](appendix-a-glossary.md#gl-sla-grade) when the plan has an `sla` block | None |
 | Report | Saved: `kates disruption status <id>` and `kates chaos list` | Printed once; the [test run](appendix-a-glossary.md#gl-test-run) is saved like any other |
@@ -85,8 +85,8 @@ The table sets a plan and a resilience run side by side. Read the guard, rollbac
 
 Both paths get the fault itself from the same chaos provider, which [Choosing a Chaos Provider](#choosing-a-chaos-provider) describes, so the same fault spec (a plan step's `faultSpec`, a resilience file's `chaosSpec`) does the same thing either way. The one difference is aiming: only a plan step looks up a partition's [leader](appendix-a-glossary.md#gl-partition-leader) for you, when the step names a `targetTopic`.
 
-::: {.callout-caution title="A Resilience Run Has No Safety Guard"}
-Nothing checks a resilience run's `chaosSpec` against `maxAffectedBrokers` or waits for a running plan to finish, and nothing rolls its fault back. Aim it with a selector that matches only the pods you mean to hit, such as the brokers.
+::: {.callout-caution title="A Resilience Run Has No Rollback"}
+Kates refuses a resilience run whose `chaosSpec` would leave no broker untouched, and one started while another disruption holds the cluster. A resilience run has no `maxAffectedBrokers`, though, nothing checks that the Kafka pods are Ready before its fault, and nothing rolls the fault back. Aim it with a selector that matches only the pods you mean to hit, such as the brokers.
 :::
 
 ## Disruption Types
@@ -578,7 +578,7 @@ Kates runs the plan anyway, with a warning in `validationWarnings`, in three cas
 - A step is a `SCALE_DOWN`, whose broker stays removed until rollback puts it back.
 - The `sla` block sets a threshold a plan can't evaluate (see [SLA Grading](#sla-grading)).
 
-Only one plan runs against the cluster at a time. While one runs, Kates refuses a second, with `409 Conflict` over the API, because both would rely on the original replica counts that rollback restores from.
+Only one disruption runs against the cluster at a time, whether a plan, a compound run or a resilience run's fault. While one runs, Kates refuses another, with `409 Conflict` over the API, because two would take down brokers together, and two plans would both rely on the original replica counts that rollback restores from. A resilience run is refused before its test starts, and checked again just before its fault: one that finds the cluster taken then ends `ERROR` with no fault injected.
 
 ### What Kates Checks Before Each Fault
 
@@ -588,7 +588,7 @@ If one isn't, the step fails with `Cluster is not in a stable baseline state bef
 
 ### Fault Parameter Limits
 
-Every number in a fault spec has a range, and Kates refuses a fault with one outside it before anything is injected. A plan is checked before its first fault, whether you post it or it comes from a playbook, a template or a schedule, and one with a fault outside its range ends `REJECTED`. A resilience run's `chaosSpec` is checked before its test starts, and every fault of a compound run (`POST /api/disruptions/compound`) before any goes in; both get a `400` naming each parameter. The ranges are generous on purpose: they stop a typo or a runaway value, not a fault you mean to run. The table gives each range with the defaults, and the Kates API setting that raises its ceiling:
+Every number in a fault spec has a range, and Kates refuses a fault with one outside it before anything is injected. A plan is checked before its first fault, whether you post it or it comes from a playbook, a template or a schedule, and one with a fault outside its range ends `REJECTED`. A resilience run's `chaosSpec` is checked before its test starts, and every fault of a compound run (`POST /api/disruptions/compound`) before any goes in; both get a `400` naming each parameter. Both are then counted by the safety guard, each fault as a plan step, and get a `400` with the guard's reasons when it refuses them. The ranges are generous on purpose: they stop a typo or a runaway value, not a fault you mean to run. The table gives each range with the defaults, and the Kates API setting that raises its ceiling:
 
 | Parameter | Range with the defaults | Setting for the ceiling |
 |-----------|-------------------------|-------------------------|
@@ -656,7 +656,7 @@ The guard counts brokers, reads pod readiness and, for a drain, where pods run, 
 - A step whose selector looks in another namespace, such as the consumers `consumer-isolation` isolates in `kates`, counts no broker, whatever it hits, unless it's a `NODE_DRAIN`.
 - Steps that pick one pod at random from the same selector count as one broker between them, although each can hit a different broker.
 - A `NODE_DRAIN` step counts the brokers on its node as the pods run when you submit the plan. A pod that moves to another node before the step runs takes the drain with it.
-- A resilience run (`kates resilience run`) doesn't go through the guard at all: no broker count, no one-plan rule, no check before the fault and no rollback. Only the [fault parameter limits](#fault-parameter-limits) apply to it.
+- A resilience run (`kates resilience run`) gets the broker count before its test starts, with no `maxAffectedBrokers`, and the one-at-a-time rule then and again just before its fault. It gets no check of the Kafka pods before the fault and no rollback.
 - `make gameday` doesn't go through it either: it deletes a broker pod with `kubectl`.
 - The one-plan rule lives in the Kates API process, so it holds only while one Kates API pod runs. The `kates` chart refuses a second replica and rolls with `Recreate`, so it never runs two.
 - Orphan recovery deletes Kates NetworkPolicies in every namespace, but restores scale-downs in the Kafka namespace only. A StatefulSet that a Kates API left scaled down in another namespace when it died stays so until you scale it back to the count in its `kates.io/original-replicas` annotation.
@@ -817,7 +817,7 @@ The Kates API emits these events under the plan's name, not under the disruption
 
 ## Resilience Testing: Performance + Chaos Combined
 
-The `kates resilience run` command combines a performance test with chaos injection, providing a **before/after impact analysis**. It is the second of the [Two Ways to Run a Fault](#two-ways-to-run-a-fault), and it doesn't go through the safety guard: see [Limits of the Guard](#limits-of-the-guard). The diagram shows its phases:
+The `kates resilience run` command combines a performance test with chaos injection, providing a **before/after impact analysis**. It is the second of the [Two Ways to Run a Fault](#two-ways-to-run-a-fault), and the safety guard checks less of it than of a plan: see [Limits of the Guard](#limits-of-the-guard). The diagram shows its phases:
 
 ```mermaid
 %%| label: fig-practice-resilience-run

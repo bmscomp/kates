@@ -594,7 +594,7 @@ Correlated pod kills (T0) and the active-controller kill (T10) run as Kates faul
 
 Set `maxAffectedBrokers` to exactly the number of pods the selector should hit (four for AZ1 in A1, A2 and A7 at production size: one controller and three brokers), so a selector that matches more is rejected. `targetAll` outranks `targetBrokerId`, and on `main` fields a JSON spec leaves out get the builder defaults; the example still sets them explicitly. The `isrTrackingTopic` must exist: point it at the topic of an INTEGRITY run that writes during the plan.
 
-A resilience run adds an INTEGRITY workload and is the only way to get `rpoMs`. It bypasses the safety guard, so dry-run the equivalent plan first:
+A resilience run adds an INTEGRITY workload and is the only way to get `rpoMs`. It has no `maxAffectedBrokers`, and the safety guard refuses it only when it would leave no broker untouched, so dry-run the equivalent plan first:
 
 ```yaml
 # t0-integrity.yaml: replace __NAME__ and __SELECTOR__
@@ -707,7 +707,7 @@ Each test lists what to inject, the workload, the expected result per architectu
 1. S1: one random broker (`strimzi.io/cluster=krafter,strimzi.io/broker-role=true`, `targetAll: false`, `targetBrokerId: -1`, `maxAffectedBrokers: 1`).
 2. S2: one random controller (`strimzi.io/cluster=krafter,strimzi.io/controller-role=true`, same settings).
 3. S3, S4, S5: every Kafka pod of one room, as three separate plans: `site=a` for AZ1 (A4 and A5 pods carry `zone=az1a` or `zone=az1b`), `zone=az2`, `zone=az3`.
-4. A site-B transient: every Kafka pod with `site=b`, `maxAffectedBrokers` = the site-B pod count. In A6 that is every pod of KB, which the safety guard rejects as a plan: run it as a resilience run only, and check its selector with `kubectl get pods -l` instead of a dry run.
+4. A site-B transient: every Kafka pod with `site=b`, `maxAffectedBrokers` = the site-B pod count. In A6 that is every pod of KB, which the safety guard rejects as a plan and as a resilience run: run it outside Kates, with `kubectl delete pod -l` as `make gameday` does, while a REST INTEGRITY run writes (no `rpoMs`), and check its selector with `kubectl get pods -l` first.
 
 The pods come back within seconds: this is not an outage test.
 
@@ -739,7 +739,7 @@ for c in "az1 site=a" "az2 zone=az2" "az3 zone=az3" "siteb site=b"; do
       | .maxAffectedBrokers = $n | .isrTrackingTopic = $name
       | .steps[0].faultSpec.experimentName = $name | .steps[0].faultSpec.targetLabel = $sel' \
      t0-plan.json > "$name.json"
-  # The resilience run skips the guard: check the targets with the plan's dry run
+  # The resilience run gets only the broker count: check the targets with the plan's dry run
   curl -sf -X POST "http://localhost:30083/api/disruptions?dryRun=true" \
     -H "Authorization: Bearer $KEY_A" -H 'Content-Type: application/json' -d @"$name.json" |
     jq -e '.wouldSucceed' >/dev/null || { echo "rejected: $name"; break; }

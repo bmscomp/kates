@@ -180,7 +180,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"unknown or was unavailable when the backend started, the backend falls back to noop, which injects " +
 			"nothing and marks every step Skipped, and says so only in its log.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"chaos/CompoundChaosOrchestrator.java:150-169",
+			mcpAnchoredRef(mcpJava+"chaos/CompoundChaosOrchestrator.java:155-174",
 				"List<String> availableProviders()", `" (available)" : " (unavailable)"`, "return names;"),
 			mcpAnchoredRef(mcpJava+"chaos/ChaosCoordinator.java:34-75",
 				`name = "kates.chaos.provider"`, "matches no chaos provider"),

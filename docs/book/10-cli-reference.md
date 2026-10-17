@@ -1067,7 +1067,7 @@ kates chaos show <id>
 
 ### Resilience
 
-Combined performance and chaos testing: a resilience run starts one Kates test, injects one fault while it runs, and prints the change in throughput, latency and error rate from before the fault. Unlike a disruption plan, it has no safety guard, rollback or grade, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
+Combined performance and chaos testing: a resilience run starts one Kates test, injects one fault while it runs, and prints the change in throughput, latency and error rate from before the fault. Unlike a disruption plan, it has no rollback or grade, and the safety guard checks less of it, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
 
 ```bash
 kates resilience run -f resilience-test.yaml
