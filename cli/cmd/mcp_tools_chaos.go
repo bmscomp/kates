@@ -282,7 +282,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"backend replica: a replica that starts while another runs a plan marks that plan's report too, until " +
 			"the plan ends and stores its outcome.",
 		Refs: []string{
-			mcpJava + "disruption/DisruptionOrphanReconciler.java:53-54,62-69,85-92,152-203",
+			mcpJava + "disruption/DisruptionOrphanReconciler.java:54-55,63-70,86-93,171-222",
 			mcpJava + "disruption/DisruptionReportRepository.java:35-60,93-102",
 			mcpJava + "disruption/DisruptionPersistence.java:26-37",
 			mcpJava + "disruption/DisruptionLauncher.java:95-102,110-123",

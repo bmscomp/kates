@@ -578,7 +578,7 @@ MirrorMaker 2's `replication-latency-ms` and `record-age-ms` update only while r
 
 ## Where to Run the Test Harness (B0-H)
 
-- **Pin the harness to the survivors.** Pin Kates, its PostgreSQL, Prometheus and the Litmus operator to the site each test expects to survive. The Kates chart's defaults are unpinned, with one replica. A harness in the lost site dies with it. The faults it injected are cleaned up only by orphan recovery at its next start, and only once they are 15 min old.
+- **Pin the harness to the survivors.** Pin Kates, its PostgreSQL, Prometheus and the Litmus operator to the site each test expects to survive. The Kates chart's defaults are unpinned, with one replica. A harness in the lost site dies with it. The faults it injected are cleaned up only by orphan recovery at its next start.
 - **Partition tests need both sites.** For S7 tests (T3), run one Kates per site, each with its own INTEGRITY workload.
 - **Set the real cluster name** in `KATES_CHAOS_KAFKA_CLUSTER`.
 - **One Kates per chaos provider.** Use the direct backend (`kubernetes`) for simultaneous kills, and Litmus (`litmus-crd`) for network faults. The provider is fixed for the life of the process.
