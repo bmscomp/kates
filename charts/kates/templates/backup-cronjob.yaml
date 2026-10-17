@@ -1,4 +1,5 @@
-{{- if and .Values.backup.enabled .Values.postgresql.enabled }}
+{{- if .Values.backup.enabled }}
+{{- if not .Values.postgresql.enabled }}{{- fail "backup.enabled: the backup CronJob dumps the bundled PostgreSQL (postgresql.enabled) only, so with externalDatabase no backup would run. Back the external database up with its own tooling and set backup.enabled=false." }}{{- end }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -31,14 +32,22 @@ spec:
               - sh
               - -c
               - |
+                # Without pipefail a failed pg_dump still left gzip's valid,
+                # empty archive, the job passed, and the prune below deleted
+                # the real backups. The dump is written as .partial and named
+                # only once it succeeds, so a failed try (OnFailure retries in
+                # the same pod) leaves no archive a restore would pick.
+                set -eo pipefail
                 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
                 FILENAME="/backups/kates-${TIMESTAMP}.sql.gz"
+                rm -f /backups/kates-*.sql.gz.partial
                 echo "Starting backup to ${FILENAME}..."
                 pg_dump -h {{ include "kates.postgresql.fullname" . }} \
                   -U "${PGUSER}" \
                   -d "${PGDATABASE}" \
                   --no-password \
-                  | gzip > "${FILENAME}"
+                  | gzip > "${FILENAME}.partial"
+                mv "${FILENAME}.partial" "${FILENAME}"
                 echo "Backup complete: $(du -sh ${FILENAME})"
                 echo "Pruning backups older than {{ .Values.backup.retention }} days..."
                 find /backups -name "kates-*.sql.gz" -mtime +{{ .Values.backup.retention }} -delete
