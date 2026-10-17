@@ -586,7 +586,7 @@ The share of time a broker's request-handler threads are free: 0.3 means they ar
 
 ### Resilience Run {#gl-resilience-run}
 
-A Kates test run with one fault injected after `steadyStateSec`, which reports the run's before-and-after impact and, for an INTEGRITY workload, lets the verifier measure RPO from the fault. Start one with `kates resilience run -f <file>` or `POST /api/resilience`, giving a `testRequest`, a `chaosSpec` and optional probes. Unlike a disruption plan, it sees what a client sees; it passes through no safety guard and has no rollback or SLA grade. See [Chaos Engineering in Practice](07-chaos-practice.md).
+A Kates test run with one fault injected after `steadyStateSec`, which reports the run's before-and-after impact and, for an INTEGRITY workload, lets the verifier measure RPO from the fault. Start one with `kates resilience run -f <file>` or `POST /api/resilience`, giving a `testRequest`, a `chaosSpec` and optional probes. Unlike a disruption plan, it sees what a client sees; the safety guard only counts the brokers its fault hits and refuses it while another disruption holds the cluster, and it has no rollback or SLA grade. See [Chaos Engineering in Practice](07-chaos-practice.md).
 
 ### Resilience Test {#gl-resilience-test}
 
@@ -608,7 +608,7 @@ Recovery time objective: how long recovery from a failure may take [@swanson2010
 
 ### Safety Guard {#gl-safety-guard}
 
-The check Kates runs on a disruption plan before any fault: it refuses the plan when no broker pod matches, when the steps would hit more brokers than `maxAffectedBrokers`, or when no broker would be left untouched. Before each step's fault it also requires every Kafka pod, controllers included, to be Running and Ready. It never counts controllers and doesn't check under-replicated partitions or the KRaft quorum, and a resilience run doesn't pass through it. See [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
+The check Kates runs on a disruption plan before any fault, and on a compound or resilience run before it starts: it refuses the run when no broker pod matches, when a plan's steps would hit more brokers than `maxAffectedBrokers`, or when no broker would be left untouched. Before each step's fault, a plan also requires every Kafka pod, controllers included, to be Running and Ready; a resilience run's fault gets no such check. It never counts controllers and doesn't check under-replicated partitions or the KRaft quorum. See [Chaos Engineering in Practice](07-chaos-practice.md#safety-guardrails).
 
 ### Saturation Point {#gl-saturation-point}
 
