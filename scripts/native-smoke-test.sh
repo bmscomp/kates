@@ -21,6 +21,13 @@
 #   /api/tests          a domain payload actually serialises, rather than coming
 #                       back as {} because nothing registered it for reflection
 #
+# Then it boots the binary again with API security on and a keys file of one
+# named key, the way a deployment issues MCP agent keys:
+#
+#   /api/tests          200 with that key and 401 without it: the binary read
+#                       the keys file (its YAML model needs reflection too)
+#                       and authenticates with it
+#
 # Usage:
 #   scripts/native-smoke-test.sh [image]     default: kates:native-local
 set -euo pipefail
@@ -40,6 +47,7 @@ require_cmd curl
 
 cleanup() {
     docker rm -f "${APP}" "${DB}" >/dev/null 2>&1 || true
+    rm -f "${KEYS_FILE:-}"
     docker network rm "${NET}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -144,29 +152,37 @@ step "🚀 Starting the native binary..."
 # warning, because SmallRye constructs those clients from a StartupEvent
 # observer. Say PLAINTEXT, and the channels fail to connect asynchronously the
 # way this test already assumes they will.
-docker run -d --name "${APP}" --network "${NET}" \
-    -p "${APP_PORT}:8080" \
-    -e QUARKUS_DATASOURCE_JDBC_URL="jdbc:postgresql://${DB}:5432/kates" \
-    -e QUARKUS_DATASOURCE_USERNAME=kates \
-    -e QUARKUS_DATASOURCE_PASSWORD=kates \
-    -e KATES_API_SECURITY_ENABLED=false \
-    -e KATES_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
-    -e KATES_HEALTH_KAFKA_REFRESH_INTERVAL=off \
-    -e KATES_KAFKA_SECURITY_PROTOCOL=PLAINTEXT \
-    "${IMAGE}" >/dev/null
+# Both boots take these, plus what each passes in "$@".
+start_app() {
+    docker run -d --name "${APP}" --network "${NET}" \
+        -p "${APP_PORT}:8080" \
+        -e QUARKUS_DATASOURCE_JDBC_URL="jdbc:postgresql://${DB}:5432/kates" \
+        -e QUARKUS_DATASOURCE_USERNAME=kates \
+        -e QUARKUS_DATASOURCE_PASSWORD=kates \
+        -e KATES_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+        -e KATES_HEALTH_KAFKA_REFRESH_INTERVAL=off \
+        -e KATES_KAFKA_SECURITY_PROTOCOL=PLAINTEXT \
+        "$@" \
+        "${IMAGE}" >/dev/null
+}
 
 BASE="http://localhost:${APP_PORT}"
-step "⏳ Waiting for liveness (up to ${BOOT_TIMEOUT}s)..."
-for _ in $(seq 1 "${BOOT_TIMEOUT}"); do
-    if curl -sf "${BASE}/q/health/live" >/dev/null 2>&1; then
-        break
-    fi
-    docker inspect -f '{{.State.Running}}' "${APP}" 2>/dev/null | grep -q true \
-        || fail "the container exited during startup"
-    sleep 1
-done
-curl -sf "${BASE}/q/health/live" >/dev/null 2>&1 || fail "never became live within ${BOOT_TIMEOUT}s"
-info "  ok   /q/health/live"
+wait_live() {
+    step "⏳ Waiting for liveness (up to ${BOOT_TIMEOUT}s)..."
+    for _ in $(seq 1 "${BOOT_TIMEOUT}"); do
+        if curl -sf "${BASE}/q/health/live" >/dev/null 2>&1; then
+            break
+        fi
+        docker inspect -f '{{.State.Running}}' "${APP}" 2>/dev/null | grep -q true \
+            || fail "the container exited during startup"
+        sleep 1
+    done
+    curl -sf "${BASE}/q/health/live" >/dev/null 2>&1 || fail "never became live within ${BOOT_TIMEOUT}s"
+    info "  ok   /q/health/live"
+}
+
+start_app -e KATES_API_SECURITY_ENABLED=false
+wait_live
 
 # Readiness gates on the database, so this passing means Flyway ran every
 # migration — including the non-transactional V20.
@@ -224,5 +240,33 @@ echo "${NOT_FOUND}" | grep -q '"message"' \
     || fail "404 body is empty — ApiError is not registered for reflection.
    Response was: ${NOT_FOUND}"
 info "  ok   error bodies serialise"
+
+# Every check above ran with API security off, and with it off the keys file is
+# never read. A keys file whose YAML model is not registered for reflection
+# parses on the JVM and throws in the native image, which stops the start.
+step "🔐 Restarting the native binary with API security on and a keys file..."
+docker rm -f "${APP}" >/dev/null
+KEY="kates_smoke001_native-smoke-only-$$"
+# Hashed in the Postgres container, so the host needs no sha256sum (macOS has none).
+KEY_SHA256="$(printf %s "${KEY}" | docker exec -i "${DB}" sha256sum | cut -d' ' -f1)"
+KEYS_FILE="$(mktemp)"
+cat >"${KEYS_FILE}" <<EOF
+keys:
+  - id: smoke001
+    name: native-smoke
+    type: human
+    scopes: [read]
+    sha256: ${KEY_SHA256}
+EOF
+# mktemp makes the file 0600, and the image runs as its own non-root user.
+chmod 0644 "${KEYS_FILE}"
+start_app -e KATES_API_KEYS_FILE=/etc/kates/keys.yaml -v "${KEYS_FILE}:/etc/kates/keys.yaml:ro"
+wait_live
+
+WITH_KEY="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${KEY}" "${BASE}/api/tests" || true)"
+[ "${WITH_KEY}" = "200" ] || fail "GET /api/tests with the named key answered ${WITH_KEY}, not 200"
+WITHOUT_KEY="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/tests" || true)"
+[ "${WITHOUT_KEY}" = "401" ] || fail "GET /api/tests without a key answered ${WITHOUT_KEY}, not 401"
+info "  ok   /api/tests (200 with the named key, 401 without one)"
 
 info "✅ Native image smoke test passed: ${IMAGE}"
