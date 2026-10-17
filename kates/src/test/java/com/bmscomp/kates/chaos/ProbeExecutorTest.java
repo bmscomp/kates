@@ -402,9 +402,12 @@ class ProbeExecutorTest {
     }
 
     /**
-     * Answers the exec of {@link #cmdProbe} with {@code messages} and then a status frame.
+     * Answers the exec of {@link #cmdProbe} with {@code messages} and then a status frame, and leaves
+     * the stream open: the client closes it once it has read the status.
      *
-     * <p>Exec status is emitted last; a small wait keeps websocket close from racing it.
+     * <p>The mock closes a stream as soon as no message is pending, and it queues the messages one at a
+     * time, so it could close after sending the first, before the status was queued (1 run in 1,000). A
+     * client message it waits for, which never comes, keeps it from closing.
      */
     private void execWithStatus(String pod, int exitCode, Object... messages) {
         server.expect()
@@ -412,8 +415,11 @@ class ProbeExecutorTest {
                 .withPath(execPath(pod))
                 .andUpgradeToWebSocket()
                 .open(messages)
-                .waitFor(50)
+                .immediately()
                 .andEmit(new StatusStreamMessage(exitCode))
+                .expect("never sent")
+                .andEmit("unused")
+                .always()
                 .done()
                 .always();
     }
