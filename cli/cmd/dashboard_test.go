@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -43,7 +44,7 @@ func TestDashClusterContentReadsTheCheckVerdict(t *testing.T) {
 			check: client.ClusterHealthReport{Status: "CRITICAL", Brokers: 3, ControllerID: 3,
 				KraftQuorum: &client.KraftQuorumHealth{LeaderID: -1, Voters: 3, Issue: "NO_LEADER"}},
 			want:  []string{g.Cross + " CRITICAL", g.Cross + " no KRaft leader"},
-			never: []string{"broker-3"},
+			never: []string{"Broker 3"},
 		},
 		{
 			name: "under-replicated partitions are a warning",
@@ -54,10 +55,17 @@ func TestDashClusterContentReadsTheCheckVerdict(t *testing.T) {
 		},
 		{
 			name: "healthy",
-			check: client.ClusterHealthReport{Status: "HEALTHY", Brokers: 3, Topics: 42, ControllerID: 3,
+			check: client.ClusterHealthReport{Status: "HEALTHY", Brokers: 3, Topics: 42, ControllerID: 4,
 				KraftQuorum: &client.KraftQuorumHealth{LeaderID: 3, Voters: 3, HasLeader: true}},
-			want:  []string{g.Check + " HEALTHY", g.Check + " all in sync", "broker-3", "42"},
-			never: []string{g.Cross, g.Warn},
+			want:  []string{g.Check + " HEALTHY", g.Check + " all in sync", "KRaft leader 3", "42"},
+			never: []string{g.Cross, g.Warn, "Broker 4"},
+		},
+		{
+			name: "the largest KRaft leader id still fits the panel",
+			check: client.ClusterHealthReport{Status: "HEALTHY", Brokers: 3,
+				KraftQuorum: &client.KraftQuorumHealth{LeaderID: math.MaxInt32, Voters: 3, HasLeader: true}},
+			want:  []string{"KRaft leader 2147483647"},
+			never: []string{"Broker 0"},
 		},
 	}
 	for _, tc := range cases {

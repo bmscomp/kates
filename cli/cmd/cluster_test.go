@@ -3,6 +3,9 @@ package cmd
 import (
 	"strings"
 	"testing"
+
+	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 func TestClusterInfoCmd_JSON(t *testing.T) {
@@ -27,6 +30,47 @@ func TestClusterInfoCmd_JSON(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "test-cluster-123") {
 		t.Errorf("Expected JSON output to contain clusterId, got:\n%s", out)
+	}
+}
+
+// On KRaft the check's controllerId is whichever broker answered
+// DescribeCluster; the active controller is the metadata quorum's leader.
+func TestClusterCheckCmdNamesTheKRaftLeader(t *testing.T) {
+	ts, buf := setupTest(t, "GET", "/api/cluster/check", 200, `{
+		"clusterId": "c1", "brokers": 3, "controllerId": 4, "topics": 2, "partitions": 6,
+		"consumerGroups": 1, "partitionHealth": {"underReplicated": 0, "offline": 0},
+		"kraftQuorum": {"leaderId": 1, "voters": 3, "observers": 0, "hasLeader": true},
+		"status": "HEALTHY"}`)
+	defer ts.Close()
+
+	if err := clusterCheckCmd.RunE(clusterCheckCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stripAnsi(buf.String())
+	if !tableHasRow(out, []string{"Controller", "KRaft leader 1"}) {
+		t.Errorf("want the quorum leader as the controller:\n%s", out)
+	}
+	if strings.Contains(out, "Broker 4") {
+		t.Errorf("broker 4 only answered DescribeCluster:\n%s", out)
+	}
+}
+
+func TestControllerLabel(t *testing.T) {
+	cases := []struct {
+		name   string
+		report client.ClusterHealthReport
+		want   string
+	}{
+		{"ZooKeeper", client.ClusterHealthReport{ControllerID: 4}, "Broker 4"},
+		{"KRaft", client.ClusterHealthReport{ControllerID: 4,
+			KraftQuorum: &client.KraftQuorumHealth{LeaderID: 1, Voters: 3, HasLeader: true}}, "KRaft leader 1"},
+		{"KRaft without a leader", client.ClusterHealthReport{ControllerID: 4,
+			KraftQuorum: &client.KraftQuorumHealth{LeaderID: -1, Voters: 3}}, output.Glyphs().Cross + " no KRaft leader"},
+	}
+	for _, tc := range cases {
+		if got := stripAnsi(controllerLabel(&tc.report)); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 

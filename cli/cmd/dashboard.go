@@ -310,11 +310,7 @@ func dashClusterContent(check *client.ClusterHealthReport, err error) string {
 		rows = append(rows, row("Partitions", output.SuccessStyle.Render(g.Check+" all in sync")))
 	}
 
-	controller := output.AccentStyle.Render(fmt.Sprintf("broker-%d", check.ControllerID))
-	if q := check.KraftQuorum; q != nil && !q.HasLeader {
-		controller = output.ErrorStyle.Render(g.Cross + " no KRaft leader")
-	}
-	return strings.Join(append(rows, row("Controller", controller)), "\n")
+	return strings.Join(append(rows, row("Controller", controllerLabel(check))), "\n")
 }
 
 // clusterVerdict is a /api/cluster/check status in the words kates cluster
