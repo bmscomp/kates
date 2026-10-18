@@ -1647,7 +1647,8 @@
   description: |
     Reads context definitions from a YAML file (or stdin) and
     merges them into ~/.kates.yaml. Existing contexts with the
-    same name are overwritten. A masked API key is never stored:
+    same name are overwritten, but keep their command profiles
+    when the file names none. A masked API key is never stored:
     an existing context keeps its key only while the file leaves
     its URL, proxy and insecure setting unchanged.
   flags:

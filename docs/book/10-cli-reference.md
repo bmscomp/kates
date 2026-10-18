@@ -233,7 +233,9 @@ kates ctx profiles set all              # every command again
     Run once:   KATES_PROFILES=all kates tune types …
 ```
 
-`KATES_PROFILES` replaces the context's profiles for one call or one shell: a comma- or space-separated list, or `all` for every command. An empty `KATES_PROFILES` enables every command too. A name kates does not know, in the file or in the variable, is ignored with a warning on stderr. `kates ctx set` keeps the profiles of a context it updates, and `kates ctx export` and `kates ctx import` carry them. `kates help <command>` and `kates <command> --help` show the help of any command.
+`KATES_PROFILES` replaces the context's profiles for one call or one shell: a comma- or space-separated list, or `all` for every command. An empty `KATES_PROFILES` enables every command too. A name kates does not know, in the file or in the variable, is warned about on stderr and enables nothing, so a context that names only unknown ones runs only the commands every profile enables. `kates ctx set` keeps the profiles of a context it updates, `kates ctx export` carries them, and `kates ctx import` keeps a context's profiles when the file names none. `kates help <command>` and `kates <command> --help` show the help of any command, with a note on stderr when the profiles do not enable it.
+
+Profiles shorten what `kates` lists and runs; they are not access control. `KATES_PROFILES=all` lifts them, and `kates mcp` ignores them. What an API key may do is set by its scopes, in [Scopes and Named Keys](11-api-reference.md#scopes-and-named-keys).
 
 ### Config File Format
 

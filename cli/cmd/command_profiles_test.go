@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -50,7 +51,8 @@ func TestActiveProfiles(t *testing.T) {
 	}{
 		{name: "none enables everything", wantFrom: `context "lab"`},
 		{name: "stored, in profile order", stored: []string{"deploy", "chaos"}, want: []string{"chaos", "deploy"}, wantFrom: `context "lab"`},
-		{name: "unknown dropped with a warning", stored: []string{"chaso", "chaos"}, want: []string{"chaos"}, wantErr: `Ignoring profile "chaso"`},
+		{name: "unknown kept, after the known, with a warning", stored: []string{"chaso", "chaos"}, want: []string{"chaos", "chaso"}, wantErr: `Unknown profile "chaso"`},
+		{name: "only unknown names enable nothing", stored: []string{"perf"}, want: []string{"perf"}, wantErr: `Unknown profile "perf"`},
 		{name: "all enables everything", stored: []string{"chaos", "all"}},
 		{name: "KATES_PROFILES overrides", stored: []string{"chaos"}, setEnv: true, env: "topology, security",
 			want: []string{"topology", "security"}, wantFrom: "KATES_PROFILES"},
@@ -115,7 +117,9 @@ func TestProfileRefusal(t *testing.T) {
 		{name: "several profiles named", cmd: []string{"kafka", "topics"}, profiles: []string{"chaos"},
 			wantRefer: []string{"kates kafka needs the topology or integrity profile"}},
 		{name: "--context is kept in the fix", cmd: []string{"security", "audit"}, profiles: []string{"chaos"}, flag: "lab",
-			wantRefer: []string{"kates ctx profiles set chaos security --context lab"}},
+			wantRefer: []string{"kates ctx profiles set chaos security --context lab", "KATES_PROFILES=all kates security audit --context lab"}},
+		{name: "only unknown profiles", cmd: []string{"tune", "types"}, profiles: []string{"perf"},
+			wantRefer: []string{"Enabled:    perf (context", "Enable it:  kates ctx profiles set performance\n"}},
 		{name: "from KATES_PROFILES", cmd: []string{"deploy"}, profiles: []string{"chaos"}, from: "KATES_PROFILES",
 			wantRefer: []string{"Enabled:    chaos (KATES_PROFILES)", "Enable it:  add deploy to KATES_PROFILES\n"}},
 	} {
@@ -124,6 +128,8 @@ func TestProfileRefusal(t *testing.T) {
 			t.Cleanup(func() { contextFlag, contextFromEnv, output.Out, output.Err = prevFlag, prevEnv, prevOut, prevErr })
 			contextFlag, contextFromEnv = tt.flag, false
 			buf := output.ResetForTesting()
+			var stdout bytes.Buffer
+			output.Out = &stdout
 			from := tt.from
 			if from == "" {
 				from = `context "lab"`
@@ -144,6 +150,9 @@ func TestProfileRefusal(t *testing.T) {
 					t.Errorf("output lacks %q:\n%s", want, out)
 				}
 			}
+			if stdout.Len() > 0 {
+				t.Errorf("a refusal wrote to stdout, which -o json reads: %q", stdout.String())
+			}
 		})
 	}
 }
@@ -153,18 +162,14 @@ func TestProfileHelp(t *testing.T) {
 	t.Cleanup(func() { contextFlag, contextFromEnv = prevFlag, prevEnv })
 	contextFlag, contextFromEnv = "", false
 	all := profileHelp(helpTemplate, "lab", nil, `context "lab"`)
-	if !strings.Contains(all, "Context: lab · Profiles: none, every command is enabled") {
-		t.Errorf("help without profiles does not say so:\n%s", all)
-	}
-	for _, line := range strings.Split(helpTemplate, "\n") {
-		if !strings.Contains(all, line) {
-			t.Errorf("help without profiles lost %q", line)
-		}
+	if all != helpTemplate {
+		t.Errorf("help without profiles is not the help as written:\n%s", all)
 	}
 
 	chaos := profileHelp(helpTemplate, "lab", []string{"chaos"}, `context "lab"`)
 	for _, want := range []string{
-		"Context: lab · Profiles: chaos", "trend analysis for Apache Kafka", "  disruption ", "  test create ",
+		"\n  Profiles:      chaos (context \"lab\")\n  Change them:   kates ctx profiles set\n  Every command: KATES_PROFILES=all kates\n",
+		"trend analysis for Apache Kafka", "  disruption ", "  test create ",
 		"  ctx profiles ", "  KATES_PROFILES ", "$ kates health", "Flags:",
 	} {
 		if !strings.Contains(chaos, want) {
@@ -178,8 +183,8 @@ func TestProfileHelp(t *testing.T) {
 	}
 
 	env := profileHelp(helpTemplate, "lab", []string{"deploy"}, "KATES_PROFILES")
-	if !strings.Contains(env, "Profiles: deploy (KATES_PROFILES)") || !strings.Contains(env, "edit or unset KATES_PROFILES") ||
-		strings.Contains(env, "Context: lab") {
+	if !strings.Contains(env, "Profiles:      deploy (KATES_PROFILES)") || !strings.Contains(env, "edit or unset KATES_PROFILES") ||
+		strings.Contains(env, `context "lab"`) {
 		t.Errorf("help credits KATES_PROFILES to the context:\n%s", env)
 	}
 
@@ -257,6 +262,20 @@ func TestProfilesRefuseAndHideEndToEnd(t *testing.T) {
 	out, code, requests = runKatesCLI(t, []string{"KATES_PROFILES=chaos"}, "tune", "types")
 	if code != 1 || requests != 0 || !strings.Contains(out, "kates tune needs the performance profile") {
 		t.Errorf("kates tune types under chaos: exit %d, %d requests\n%s", code, requests, out)
+	}
+
+	out, code, _ = runKatesCLI(t, []string{"KATES_PROFILES=chaos"}, "tune", "--help")
+	out = stripAnsi(out)
+	if code != 0 || !strings.Contains(out, "Available Commands:") || !strings.Contains(out, "! kates tune needs the performance profile") {
+		t.Errorf("kates tune --help under chaos: exit %d\n%s", code, out)
+	}
+
+	out, code, _ = runKatesCLI(t, []string{"KATES_PROFILES=performance"}, "tldr")
+	out = stripAnsi(out)
+	if code != 0 || strings.Contains(out, "kates kafka") || strings.Contains(out, "Kafka Operations") ||
+		!strings.Contains(out, "kates report diff") || !strings.Contains(out, "Profiles: performance (KATES_PROFILES)") ||
+		!strings.Contains(out, "\n  Quick Start\n") {
+		t.Errorf("kates tldr under performance: exit %d\n%s", code, out)
 	}
 
 	out, code, _ = runKatesCLI(t, []string{"KATES_PROFILES=topology"}, "__complete", "t")
@@ -354,6 +373,11 @@ func TestCtxProfilesLayout(t *testing.T) {
 			}
 		}
 	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "  Context ") && strings.Index(line, "lab") != profileIndent {
+			t.Errorf("the Context value starts at column %d, the grid at %d: %q", strings.Index(line, "lab"), profileIndent, line)
+		}
+	}
 	on, off := output.Glyphs().Bullet, output.Glyphs().Ring
 	for _, want := range []string{"  " + on + " chaos ", "  " + on + " topology ", "  " + off + " performance ", "    always "} {
 		if !strings.Contains(out, want) {
@@ -411,5 +435,59 @@ func TestCtxProfilesDetails(t *testing.T) {
 		got.Available[0].Commands[0].Name != "cluster" || !reflect.DeepEqual(got.Available[0].Commands[0].AlsoIn, []string{"chaos"}) ||
 		got.Available[0].Commands[0].Description != clusterCmd.Short {
 		t.Errorf("JSON = %+v", got)
+	}
+}
+
+func TestCompleteProfilesOffersAllAlone(t *testing.T) {
+	has := func(out []cobra.Completion, name string) bool {
+		return slices.ContainsFunc(out, func(c cobra.Completion) bool { return strings.SplitN(c, "\t", 2)[0] == name })
+	}
+	if out, _ := completeProfiles(nil, nil, ""); !has(out, "all") || !has(out, "chaos") {
+		t.Errorf("first word: %q", out)
+	}
+	if out, _ := completeProfiles(nil, []string{"chaos"}, ""); has(out, "all") || has(out, "chaos") || !has(out, "topology") {
+		t.Errorf("after chaos: %q", out)
+	}
+}
+
+func TestCtxImportKeepsProfilesTheFileLeavesOut(t *testing.T) {
+	old := Context{URL: "http://localhost:8080", Profiles: []string{"chaos"}}
+	if got, _ := importContext("lab", Context{URL: "http://localhost:8080"}, old, true); !reflect.DeepEqual(got.Profiles, []string{"chaos"}) {
+		t.Errorf("profiles = %q, want the context's own", got.Profiles)
+	}
+	if got, _ := importContext("lab", Context{URL: "http://localhost:8080", Profiles: []string{"deploy"}}, old, true); !reflect.DeepEqual(got.Profiles, []string{"deploy"}) {
+		t.Errorf("profiles = %q, want the file's", got.Profiles)
+	}
+	if got, _ := importContext("new", Context{URL: "http://x"}, Context{}, false); got.Profiles != nil {
+		t.Errorf("a new context got profiles %q", got.Profiles)
+	}
+}
+
+// A refused command's help still prints on stdout, with the note on stderr; an
+// enabled command's help has none.
+func TestRefusedCommandHelpNote(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KATES_PROFILES", "chaos")
+	prevErr, prevWarned := output.Err, profilesWarned
+	t.Cleanup(func() { output.Err, profilesWarned = prevErr, prevWarned })
+	for _, tt := range []struct {
+		name string
+		note bool
+	}{{"tune", true}, {"test", false}} {
+		c, _, err := rootCmd.Find([]string{tt.name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		c.SetOut(&stdout)
+		output.Err = &stderr
+		rootCmd.HelpFunc()(c, nil)
+		c.SetOut(nil)
+		if !strings.Contains(stdout.String(), "Available Commands:") || strings.Contains(stdout.String(), "needs the") {
+			t.Errorf("kates %s --help stdout:\n%s", tt.name, stdout.String())
+		}
+		if got := strings.Contains(stripAnsi(stderr.String()), "Run once:   KATES_PROFILES=all kates "+tt.name); got != tt.note {
+			t.Errorf("kates %s --help note on stderr = %v, want %v:\n%s", tt.name, got, tt.note, stderr.String())
+		}
 	}
 }

@@ -83,7 +83,8 @@ var commandProfiles = map[string][]string{
 
 // activeProfiles returns the profiles in force and where they come from:
 // KATES_PROFILES when it is set, else the context's. Unknown names are
-// warned about and dropped. None, or "all" among them, enables every command.
+// warned about and enable nothing. None, or "all" among them, enables every
+// command.
 func activeProfiles(ctxName string, ctx Context) (profiles []string, from string) {
 	names, from := ctx.Profiles, fmt.Sprintf("context %q", ctxName)
 	if env, ok := os.LookupEnv("KATES_PROFILES"); ok {
@@ -94,12 +95,28 @@ func activeProfiles(ctxName string, ctx Context) (profiles []string, from string
 	}
 	for _, n := range names {
 		if !slices.Contains(knownProfiles, n) && !profilesWarned {
-			fmt.Fprintf(output.Err, "  ! Ignoring profile %q from %s: kates knows %s\n", n, from, strings.Join(knownProfiles, ", "))
+			fmt.Fprintf(output.Err, "  ! Unknown profile %q from %s: kates knows %s\n", n, from, strings.Join(knownProfiles, ", "))
 		}
 	}
 	profilesWarned = true
-	return inProfileOrder(names), from
+	// Unknown names stay, so a typo shows wherever the profiles are listed, and
+	// enable nothing: a context naming only unknown ones runs the
+	// always-enabled commands alone, not every command.
+	profiles = inProfileOrder(names)
+	for _, n := range names {
+		if !slices.Contains(knownProfiles, n) && !slices.Contains(profiles, n) {
+			profiles = append(profiles, n)
+		}
+	}
+	return profiles, from
 }
+
+// activeProfileNames and activeProfilesFrom are what the pre-run's
+// activeProfiles returned, for commands that list other commands (kates tldr).
+var (
+	activeProfileNames []string
+	activeProfilesFrom string
+)
 
 // profilesWarned keeps activeProfiles' warnings to one round a process: the
 // help and kates ctx profiles read the profiles again after the pre-run.
@@ -144,17 +161,26 @@ func profileRefusal(cmd *cobra.Command, ctxName string, profiles []string, from 
 	if commandEnabled(top.Name(), profiles) {
 		return nil
 	}
-	needs := commandProfiles[top.Name()]
-	err := cmdErr(fmt.Sprintf("kates %s needs the %s profile", top.Name(), orList(needs)))
-	output.Hint(fmt.Sprintf("  Enabled:    %s (%s)", strings.Join(profiles, ", "), from))
-	if from == "KATES_PROFILES" {
-		output.Hint(fmt.Sprintf("  Enable it:  add %s to KATES_PROFILES", needs[0]))
-	} else {
-		output.Hint(fmt.Sprintf("  Enable it:  kates ctx profiles set %s%s",
-			strings.Join(inProfileOrder(append(slices.Clone(profiles), needs[0])), " "), contextArg(ctxName)))
-	}
-	output.Hint(fmt.Sprintf("  Run once:   KATES_PROFILES=all %s %s", cmd.CommandPath(), ellipsis()))
+	err := cmdErr(fmt.Sprintf("kates %s needs the %s profile", top.Name(), orList(commandProfiles[top.Name()])))
+	profileFix(cmd, ctxName, profiles, from)
 	return err
+}
+
+// profileFix prints on stderr, where the error goes, the profiles in force and
+// the two ways to run cmd, so that a refusal under -o json leaves stdout empty.
+func profileFix(cmd *cobra.Command, ctxName string, profiles []string, from string) {
+	needs := commandProfiles[topLevel(cmd).Name()]
+	enable := "kates ctx profiles set " + strings.Join(inProfileOrder(append(slices.Clone(profiles), needs[0])), " ") + contextArg(ctxName)
+	if from == "KATES_PROFILES" {
+		enable = "add " + needs[0] + " to KATES_PROFILES"
+	}
+	for _, line := range []string{
+		"Enabled:    " + strings.Join(profiles, ", ") + " (" + from + ")",
+		"Enable it:  " + enable,
+		"Run once:   KATES_PROFILES=all " + cmd.CommandPath() + contextArg(ctxName) + " " + ellipsis(),
+	} {
+		fmt.Fprintln(output.Err, output.DimStyle.Render("    "+line))
+	}
 }
 
 // contextArg is " --context <name>" when --context chose the context, so a
@@ -186,23 +212,19 @@ func hideDisabledCommands(root *cobra.Command, profiles []string) {
 
 // profileHelp is the root help: long with lines naming the profiles, and
 // where they come from, before Quick Start, and without the lines of commands
-// they do not enable, nor a section left with none.
+// they do not enable, nor a section left with none. With no profiles it is
+// long as written.
 func profileHelp(long, ctxName string, profiles []string, from string) string {
-	list := "none, every command is enabled"
-	if len(profiles) > 0 {
-		list = strings.Join(profiles, ", ")
+	if len(profiles) == 0 {
+		return long
 	}
-	var header string
-	switch {
-	case from == "KATES_PROFILES":
-		header = fmt.Sprintf("  Profiles: %s (KATES_PROFILES)\n  Change them:     edit or unset KATES_PROFILES\n\n", list)
-	case len(profiles) == 0:
-		header = fmt.Sprintf("  Context: %s · Profiles: %s\n  Narrow the list: kates ctx profiles set <profile>...%s\n\n",
-			ctxName, list, contextArg(ctxName))
-	default:
-		header = fmt.Sprintf("  Context: %s · Profiles: %s\n  Change them:     kates ctx profiles set%s\n  Every command:   KATES_PROFILES=all kates\n\n",
-			ctxName, list, contextArg(ctxName))
+	change := "kates ctx profiles set" + contextArg(ctxName)
+	if from == "KATES_PROFILES" {
+		change = "edit or unset KATES_PROFILES"
 	}
+	// The values start where the help's descriptions do.
+	header := fmt.Sprintf("  %-15s%s (%s)\n  %-15s%s\n  %-15s%s\n\n",
+		"Profiles:", strings.Join(profiles, ", "), from, "Change them:", change, "Every command:", "KATES_PROFILES=all kates")
 	var blocks []string
 	for _, block := range strings.Split(long, "\n\n") {
 		lines := strings.Split(block, "\n")
@@ -303,11 +325,15 @@ profiles for one call; KATES_PROFILES=all enables every command.`,
 		}
 
 		output.Header("Command Profiles")
-		output.KeyValue("Context", activeContext)
+		// The values start where the grid's commands do.
+		key := func(k, v string) {
+			fmt.Fprintf(output.Out, "  %s%s\n", output.KeyStyle.Width(profileIndent-2).Render(k), output.ValueStyle.Render(v))
+		}
+		key("Context", activeContext)
 		if len(active) == 0 {
-			output.KeyValue("Profiles", "none, every command is enabled")
+			key("Profiles", "none, every command is enabled")
 		} else {
-			output.KeyValue("Profiles", strings.Join(active, ", "))
+			key("Profiles", strings.Join(active, ", "))
 		}
 		if from == "KATES_PROFILES" {
 			output.Hint("  KATES_PROFILES is set, and overrides the context's profiles in this shell.")
@@ -574,7 +600,10 @@ func completeProfiles(cmd *cobra.Command, args []string, toComplete string) ([]c
 			out = append(out, cobra.CompletionWithDesc(p, strings.Join(profileCommands(p), ", ")))
 		}
 	}
-	return append(out, cobra.CompletionWithDesc("all", "every command")), cobra.ShellCompDirectiveNoFileComp
+	if len(args) == 0 { // all stands alone
+		out = append(out, cobra.CompletionWithDesc("all", "every command"))
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
 func init() {
