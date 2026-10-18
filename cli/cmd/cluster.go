@@ -31,25 +31,20 @@ var clusterInfoCmd = &cobra.Command{
 			return nil
 		}
 
+		controller, controllerID := activeController()
+
 		output.Banner("Kafka Cluster", "Cluster ID: "+result.ClusterID)
 
 		output.SubHeader("Overview")
 		output.KeyValue("Broker Count", fmt.Sprintf("%v", result.BrokerCount))
-
-		if ctrl := result.Controller; ctrl != nil {
-			output.SubHeader("Controller")
-			output.KeyValue("Node ID", fmt.Sprintf("%v", ctrl.ID))
-			output.KeyValue("Host", ctrl.Host)
-			output.KeyValue("Port", fmt.Sprintf("%v", ctrl.Port))
-			output.KeyValue("Rack / AZ", ctrl.Rack)
-		}
+		output.KeyValue("Controller", controller)
 
 		if len(result.Brokers) > 0 {
 			output.SubHeader(fmt.Sprintf("Brokers (%d)", len(result.Brokers)))
 			rows := make([][]string, 0, len(result.Brokers))
 			for _, b := range result.Brokers {
 				isCtrl := ""
-				if result.Controller != nil && fmt.Sprintf("%v", b.ID) == fmt.Sprintf("%v", result.Controller.ID) {
+				if fmt.Sprintf("%v", b.ID) == controllerID {
 					isCtrl = "★"
 				}
 				rows = append(rows, []string{

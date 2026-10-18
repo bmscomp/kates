@@ -40,20 +40,17 @@ var kafkaBrokersCmd = &cobra.Command{
 			return nil
 		}
 
+		controller, controllerID := activeController()
+
 		clusterLabel := "Kafka Cluster"
 		if info.ClusterID != "" {
 			clusterLabel += "  " + output.DimStyle.Render(info.ClusterID)
 		}
-		output.Banner(clusterLabel, fmt.Sprintf("%v brokers", info.BrokerCount))
+		output.Banner(clusterLabel, fmt.Sprintf("%v brokers  │  Controller: %s", info.BrokerCount, controller))
 
 		if len(info.Brokers) == 0 {
 			output.Hint("No brokers found.")
 			return nil
-		}
-
-		controllerID := ""
-		if info.Controller != nil {
-			controllerID = fmt.Sprintf("%v", info.Controller.ID)
 		}
 
 		rows := make([][]string, 0, len(info.Brokers))
@@ -63,7 +60,8 @@ var kafkaBrokersCmd = &cobra.Command{
 			if idStr == controllerID {
 				role = output.WarningStyle.Render("★ CONTROLLER")
 			} else {
-				role = output.DimStyle.Render("follower")
+				// Not "follower": that is a quorum voter, and a broker beside dedicated controllers has no vote.
+				role = output.DimStyle.Render("broker")
 			}
 			rack := fmt.Sprintf("%v", b.Rack)
 			if rack == "<nil>" || rack == "" {

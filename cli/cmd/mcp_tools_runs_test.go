@@ -1054,7 +1054,7 @@ func TestMCPAssessRun(t *testing.T) {
 	}
 
 	mcpWantCaveats(t, env, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks, mcpCaveatRegressionOneBaseline,
-		mcpCaveatBrokerSkewProjected, mcpCaveatAdvisorRulesOfThumb, mcpCaveatLoadSingleProducer)
+		mcpCaveatBrokerSkewProjected, mcpCaveatAdvisorRulesOfThumb, mcpCaveatControllerDescribed, mcpCaveatLoadSingleProducer)
 	mcpNoCaveat(t, env, mcpCaveatTrendsMixSpecs, mcpCaveatReaperDeadline)
 	if env.Truncated {
 		t.Error("nothing was cut")
