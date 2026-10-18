@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +32,7 @@ var clusterCheckCmd = &cobra.Command{
 			output.SubHeader("Overview")
 			rows := [][]string{
 				{"Brokers", fmt.Sprintf("%d", report.Brokers)},
-				{"Controller", fmt.Sprintf("Broker %d", report.ControllerID)},
+				{"Controller", controllerLabel(report)},
 				{"Topics", fmt.Sprintf("%d", report.Topics)},
 				{"Partitions", fmt.Sprintf("%d", report.Partitions)},
 				{"Consumer Groups", fmt.Sprintf("%d", report.ConsumerGroups)},
@@ -71,6 +72,20 @@ var clusterCheckCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// controllerLabel names a cluster's active controller. On KRaft that is the
+// metadata quorum's leader: the check's controllerId comes from
+// DescribeCluster, which a KRaft broker answers with any live broker.
+func controllerLabel(r *client.ClusterHealthReport) string {
+	switch q := r.KraftQuorum; {
+	case q == nil:
+		return fmt.Sprintf("Broker %d", r.ControllerID)
+	case !q.HasLeader:
+		return output.ErrorStyle.Render(output.Glyphs().Cross + " no KRaft leader")
+	default:
+		return fmt.Sprintf("KRaft leader %d", q.LeaderID)
+	}
 }
 
 func init() {

@@ -77,7 +77,7 @@ var clusterWatchCmd = &cobra.Command{
 			output.SubHeader("Cluster Overview")
 			overviewRows := [][]string{
 				{"Brokers", fmt.Sprintf("%d", report.Brokers)},
-				{"Controller", fmt.Sprintf("Broker %d", report.ControllerID)},
+				{"Controller", controllerLabel(report)},
 				{"Topics", fmt.Sprintf("%d", report.Topics)},
 				{"Partitions", fmt.Sprintf("%d", report.Partitions)},
 				{"Consumer Groups", fmt.Sprintf("%d", report.ConsumerGroups)},
