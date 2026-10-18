@@ -86,7 +86,7 @@ var ctxSetCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Example: `  kates ctx set local    --url http://localhost:30083
   kates ctx set staging  --url https://kates-staging.company.com
-  kates ctx set prod     --url https://kates.company.com --output json --api-key mykey`,
+  kates ctx set prod     --url https://kates.company.com --default-output json --api-key mykey`,
 	// RunE, not Run: this validates its input, and a command that rejects what
 	// you gave it must exit non-zero. With Run the errors below printed and then
 	// returned 0, so a script could not tell a stored context from a refused one.
@@ -110,6 +110,11 @@ var ctxSetCmd = &cobra.Command{
 			return cmdErr("--api-key was given but is empty")
 		}
 
+		// --output used to be this flag. A script still passing it now sets
+		// this command's output format, and the context keeps table.
+		if cmd.Flags().Changed("output") && !cmd.Flags().Changed("default-output") {
+			fmt.Fprintln(output.Err, "  ! --output is this command's output format. The context's default is --default-output.")
+		}
 		out := ctxSetOutput
 		if out == "" {
 			out = "table"
@@ -479,7 +484,9 @@ func importContext(name string, in, old Context, had bool) (Context, []string) {
 
 func init() {
 	ctxSetCmd.Flags().StringVar(&ctxSetURL, "url", "", "Kates API base URL (required)")
-	ctxSetCmd.Flags().StringVar(&ctxSetOutput, "output", "", "Default output format for this context")
+	// Not --output: that is the global output format, and this flag hid it,
+	// so `ctx set … -o json` failed with "unknown shorthand flag".
+	ctxSetCmd.Flags().StringVar(&ctxSetOutput, "default-output", "", "Default output format for this context")
 	ctxSetCmd.Flags().StringVar(&ctxSetAPIKey, "api-key", "", "API key for authentication")
 	ctxSetCmd.Flags().StringVar(&ctxSetProxy, "proxy", "", "Proxy server URL (e.g., http://proxy:8080)")
 	ctxSetCmd.Flags().BoolVar(&ctxSetInsecure, "insecure", false, "Skip TLS certificate verification (useful for SSL proxies)")
