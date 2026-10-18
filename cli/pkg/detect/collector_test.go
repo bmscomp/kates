@@ -165,6 +165,25 @@ func TestCollect_NoStrimzi(t *testing.T) {
 	}
 }
 
+// The lookup read any "error" in the JSON of every deployment as a failed
+// kubectl, so one --log-level=error argument anywhere sent it to namespace
+// kafka, and an operator in strimzi-system went unseen.
+func TestGetStrimziStatus_FindsTheOperatorBesideAnErrorLogLevel(t *testing.T) {
+	m := NewMockExecutor()
+	m.Set(`{"items":[
+	  {"metadata":{"name":"ingress-nginx-controller","namespace":"ingress"},
+	   "spec":{"template":{"spec":{"containers":[{"image":"ingress-nginx:1.12","args":["--log-level=error"]}]}}}},
+	  {"metadata":{"name":"strimzi-cluster-operator","namespace":"strimzi-system"},
+	   "spec":{"template":{"spec":{"containers":[{"image":"quay.io/strimzi/operator:0.48.0"}]}}},
+	   "status":{"readyReplicas":1,"replicas":1}}]}`,
+		"kubectl", "get", "deployment", "-A", "-o", "json")
+
+	info := NewCollector(m).getStrimziStatus()
+	if !info.Running || info.Namespace != "strimzi-system" || info.Image != "quay.io/strimzi/operator:0.48.0" {
+		t.Errorf("Running %v in %q with image %q, want the operator in strimzi-system", info.Running, info.Namespace, info.Image)
+	}
+}
+
 func TestCollect_SingleZone(t *testing.T) {
 	singleNodeJSON := `{
   "items": [
