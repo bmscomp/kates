@@ -882,9 +882,9 @@ spec:
 			// allows the resource creation call through even if webhook TLS is still
 			// not verifiable. BOTH configs must be bypassed — the validating webhook
 			// blocks the CREATE exactly like the mutating one, so patching only the
-			// mutating config leaves the failure in place. cert-manager reconciles
-			// the webhook configs back to its desired state shortly after.
+			// mutating config leaves the failure in place.
 			dl.Println("    ⚠ Webhook TLS not verifiable — temporarily setting failurePolicy: Ignore")
+			defer restoreCertMgrWebhookPolicy(gCtx, certMgrWebhookConfigs)
 			for _, kind := range certMgrWebhookConfigs {
 				runExecFn(gCtx, "kubectl", "patch",
 					kind, "cert-manager-webhook",
@@ -894,19 +894,10 @@ spec:
 			time.Sleep(2 * time.Second) // let the API server pick up the patch
 
 			applyErr := runExecStdinFn(gCtx, "kubectl", []string{"apply", "-f", "-"}, clusterIssuer)
-
-			// Always restore failurePolicy: Fail regardless of outcome.
-			for _, kind := range certMgrWebhookConfigs {
-				runExecFn(gCtx, "kubectl", "patch",
-					kind, "cert-manager-webhook",
-					"--type=json", "-p",
-					`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`)
-			}
-
 			if applyErr != nil {
 				return fmt.Errorf("failed to apply cert-manager ClusterIssuer: %w", applyErr)
 			}
-			dl.Println("    - ClusterIssuer created. Webhook policy restored.")
+			dl.Println("    - ClusterIssuer created. Restoring the webhook policy.")
 			return nil
 		})
 	}
@@ -1019,6 +1010,22 @@ spec:
 	}
 
 	return nil
+}
+
+// restoreCertMgrWebhookPolicy puts failurePolicy: Fail back on the cert-manager
+// webhook configs, on a context ctx's cancellation does not reach. When a
+// sibling branch of the deploy group failed, ctx was already done, the restore
+// patch never ran, and the webhook stayed fail-open for good: later deploys
+// skip an installed cert-manager, and cert-manager does not put the policy back.
+func restoreCertMgrWebhookPolicy(ctx context.Context, configs []string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	for _, kind := range configs {
+		if err := runExecFn(ctx, "kubectl", "patch", kind, "cert-manager-webhook", "--type=json", "-p",
+			`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Fail"}]`); err != nil {
+			dl.Printf("    ⚠ Could not restore failurePolicy: Fail on %s cert-manager-webhook: %v\n", kind, err)
+		}
+	}
 }
 
 // deployGroupB deploys Group B components (Core Infrastructure) in parallel:
