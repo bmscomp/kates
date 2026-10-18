@@ -148,7 +148,10 @@ var ctxUseCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Example: `  kates ctx use local
   kates ctx use prod`,
-	Run: func(cmd *cobra.Command, args []string) {
+	// RunE, as ctx set has: with Run a missing context exited 0, so in
+	// "kates ctx use lab && kates test create ..." the test went to whichever
+	// context was current.
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		var ctx Context
 		err := updateConfig(func(cfg *Config) error {
@@ -162,13 +165,12 @@ var ctxUseCmd = &cobra.Command{
 		})
 		switch {
 		case errors.Is(err, errContextNotFound):
-			output.Error(fmt.Sprintf("Context '%s' not found. Run: kates ctx show", name))
-			return
+			return cmdErr(fmt.Sprintf("Context '%s' not found. Run: kates ctx show", name))
 		case err != nil:
-			output.Error("Failed to save: " + err.Error())
-			return
+			return cmdErr("Failed to save: " + err.Error())
 		}
 		output.Success(fmt.Sprintf("Switched to '%s' → %s", name, ctx.URL))
+		return nil
 	},
 }
 
@@ -176,7 +178,7 @@ var ctxDeleteCmd = &cobra.Command{
 	Use:   "delete <name>",
 	Short: "Remove a context",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		var current string
 		err := updateConfig(func(cfg *Config) error {
@@ -196,36 +198,34 @@ var ctxDeleteCmd = &cobra.Command{
 		})
 		switch {
 		case errors.Is(err, errContextNotFound):
-			output.Error(fmt.Sprintf("Context '%s' not found", name))
-			return
+			return cmdErr(fmt.Sprintf("Context '%s' not found", name))
 		case err != nil:
-			output.Error("Failed to save: " + err.Error())
-			return
+			return cmdErr("Failed to save: " + err.Error())
 		}
 		output.Success(fmt.Sprintf("Context '%s' deleted", name))
 		if current != "" {
 			output.Hint(fmt.Sprintf("  Active context: %s", current))
 		}
+		return nil
 	},
 }
 
 var ctxCurrentCmd = &cobra.Command{
 	Use:   "current",
 	Short: "Print the active context name and URL",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := loadConfig()
 		if cfg.CurrentContext == "" && contextFlag == "" {
-			output.Warn("No active context. Run: kates ctx set <name> --url <url>")
-			return
+			return cmdErr("No active context. Run: kates ctx set <name> --url <url>")
 		}
 		// The name --context or KATES_CONTEXT gives, when it gives one: it
 		// used to print the file's current name beside the other one's URL.
 		name, ctx, err := resolveContext(cfg)
 		if err != nil {
-			output.Error(err.Error())
-			return
+			return cmdErr(err.Error())
 		}
 		output.Success(fmt.Sprintf("%s → %s", name, ctx.URL))
+		return nil
 	},
 }
 
@@ -317,7 +317,7 @@ key; otherwise the context arrives without a key.`,
   kates ctx export > team-contexts.yaml
   kates ctx export --name staging
   kates ctx export --reveal > my-contexts.yaml`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := loadConfig()
 		exportCfg := cfg
 		if ctxExportFlag != "" {
@@ -327,8 +327,7 @@ key; otherwise the context arrives without a key.`,
 					Contexts:       map[string]Context{ctxExportFlag: ctx},
 				}
 			} else {
-				output.Error(fmt.Sprintf("Context '%s' not found", ctxExportFlag))
-				return
+				return cmdErr(fmt.Sprintf("Context '%s' not found", ctxExportFlag))
 			}
 		}
 		// Keys used to go out in clear, so a file meant for a teammate, or a
@@ -354,14 +353,14 @@ key; otherwise the context arrives without a key.`,
 		}
 		data, err := yaml.Marshal(exportCfg)
 		if err != nil {
-			output.Error("Failed to marshal config: " + err.Error())
-			return
+			return cmdErr("Failed to marshal config: " + err.Error())
 		}
 		fmt.Print(string(data))
 		// On stderr, so the YAML on stdout stays exactly what import reads.
 		if masked {
 			fmt.Fprintln(output.Err, output.DimStyle.Render("  API keys and proxy passwords are masked; pass --reveal to include them"))
 		}
+		return nil
 	},
 }
 
@@ -372,7 +371,7 @@ var ctxImportCmd = &cobra.Command{
 	Short: "Import contexts from a YAML file (merges with existing)",
 	Example: `  kates ctx import --file team-contexts.yaml
   cat contexts.yaml | kates ctx import`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		var data []byte
 		var err error
 		if ctxImportFile != "" {
@@ -381,14 +380,12 @@ var ctxImportCmd = &cobra.Command{
 			data, err = io.ReadAll(os.Stdin)
 		}
 		if err != nil {
-			output.Error("Failed to read input: " + err.Error())
-			return
+			return cmdErr("Failed to read input: " + err.Error())
 		}
 
 		var incoming Config
 		if err := yaml.Unmarshal(data, &incoming); err != nil {
-			output.Error("Invalid YAML: " + err.Error())
-			return
+			return cmdErr("Invalid YAML: " + err.Error())
 		}
 
 		imported := 0
@@ -402,8 +399,7 @@ var ctxImportCmd = &cobra.Command{
 			return nil
 		})
 		if err != nil {
-			output.Error("Failed to save: " + err.Error())
-			return
+			return cmdErr("Failed to save: " + err.Error())
 		}
 		output.Success(fmt.Sprintf("Imported %d context(s)", imported))
 		names := make([]string, 0, len(incoming.Contexts))
@@ -417,6 +413,7 @@ var ctxImportCmd = &cobra.Command{
 				output.Warn(w)
 			}
 		}
+		return nil
 	},
 }
 

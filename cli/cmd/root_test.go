@@ -390,7 +390,9 @@ func TestCtxImport_ClearsKeySource(t *testing.T) {
 	t.Cleanup(func() { ctxImportFile, output.Out, output.Err = origFile, origOut, origErr })
 	ctxImportFile = file
 	output.ResetForTesting()
-	ctxImportCmd.Run(ctxImportCmd, nil)
+	if err := ctxImportCmd.RunE(ctxImportCmd, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	got := loadConfig().Contexts[portsContextName]
 	if got.APIKey != "imported-key" || got.KeySource != "" {
@@ -414,6 +416,7 @@ func TestCtxCommands(t *testing.T) {
 		wantNames   []string
 		wantOut     string
 		unchanged   bool // the file must be left byte for byte as it was
+		wantErr     bool // the command must fail, so its exit code is 1
 	}{
 		{
 			name: "set adds a context without switching to it",
@@ -426,28 +429,28 @@ func TestCtxCommands(t *testing.T) {
 		},
 		{
 			name:        "use switches the current context",
-			run:         func() error { ctxUseCmd.Run(ctxUseCmd, []string{"mcp"}); return nil },
+			run:         func() error { return ctxUseCmd.RunE(ctxUseCmd, []string{"mcp"}) },
 			wantCurrent: "mcp", wantNames: []string{"local", "mcp"},
 			wantOut: "Switched to 'mcp' → http://localhost:8080",
 		},
 		{
 			name:        "use of a missing context changes nothing",
-			run:         func() error { ctxUseCmd.Run(ctxUseCmd, []string{"nope"}); return nil },
+			run:         func() error { return ctxUseCmd.RunE(ctxUseCmd, []string{"nope"}) },
 			wantCurrent: "local", wantNames: []string{"local", "mcp"},
-			wantOut: "Context 'nope' not found", unchanged: true,
+			wantOut: "Context 'nope' not found", unchanged: true, wantErr: true,
 		},
 		{
 			name:        "delete of the current context picks another",
-			run:         func() error { ctxDeleteCmd.Run(ctxDeleteCmd, []string{"local"}); return nil },
+			run:         func() error { return ctxDeleteCmd.RunE(ctxDeleteCmd, []string{"local"}) },
 			wantNames:   []string{"mcp"},
 			wantOut:     "Context 'local' deleted",
 			wantCurrent: "", // any remaining context; checked below
 		},
 		{
 			name:        "delete of a missing context changes nothing",
-			run:         func() error { ctxDeleteCmd.Run(ctxDeleteCmd, []string{"nope"}); return nil },
+			run:         func() error { return ctxDeleteCmd.RunE(ctxDeleteCmd, []string{"nope"}) },
 			wantCurrent: "local", wantNames: []string{"local", "mcp"},
-			wantOut: "Context 'nope' not found", unchanged: true,
+			wantOut: "Context 'nope' not found", unchanged: true, wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -463,8 +466,8 @@ func TestCtxCommands(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := tt.run(); err != nil {
-				t.Fatalf("command: %v", err)
+			if err := tt.run(); (err != nil) != tt.wantErr {
+				t.Fatalf("command: err = %v, want an error: %v", err, tt.wantErr)
 			}
 
 			if out := stripAnsi(buf.String()); !strings.Contains(out, tt.wantOut) {

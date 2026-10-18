@@ -2477,7 +2477,7 @@ Consequences worth knowing in scripts:
 
 Some commands report a failure on screen and still exit `0`, so a script cannot rely on their status. Among them:
 
-- `kates ctx use`, `kates ctx delete` and `kates ctx export --name` with a context that does not exist, `kates ctx import` with a file it cannot read or parse, and a mistyped subcommand under a command group — `kates ctx list`, for instance — which prints the group's help.
+- A mistyped subcommand under a command group — `kates ctx list`, for instance — which prints the group's help.
 - `kates status` when the API does not answer or rejects the API key: it prints `unreachable`.
 - `kates ports` when it finds no Kates services, some forwards fail, or the API rejects a key it checks.
 - `kates snapshot create` when the API fails: it saves a snapshot of zeros.
