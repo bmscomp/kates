@@ -16,6 +16,9 @@ var topCmd = &cobra.Command{
 	Use:   "top",
 	Short: "Live view of running tests (like kubectl top)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := checkInterval(topInterval); err != nil {
+			return err
+		}
 		tick := 0
 
 		for {
@@ -119,4 +122,13 @@ var topCmd = &cobra.Command{
 func init() {
 	topCmd.Flags().IntVar(&topInterval, "interval", 2, "Refresh interval in seconds")
 	rootCmd.AddCommand(topCmd)
+}
+
+// checkInterval refuses a refresh interval under a second: at 0 or below the
+// refresh loops never slept, and sent thousands of requests a second.
+func checkInterval(seconds int) error {
+	if seconds < 1 {
+		return fmt.Errorf("--interval must be at least 1 second, got %d", seconds)
+	}
+	return nil
 }
