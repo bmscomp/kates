@@ -105,7 +105,7 @@ Tools and commands the agent may not use in that task, because they would leak t
 
 | Kind | Fields | What it does |
 | --- | --- | --- |
-| `kates` | `args`, optional `capture`, `expect`, `repeat`, `allow_fail`, `timeout_s` | Runs `kates <args> --context <context>` with `KATES_URL`, `KATES_API_KEY`, `KATES_CONTEXT` and `KATES_OUTPUT` removed from the environment. A step that captures or expects must pass `-o json`. A step may not pass `--context`, `--url` or `--api-key` |
+| `kates` | `args`, optional `capture`, `expect`, `repeat`, `allow_fail`, `timeout_s` | Runs `kates <args> --context <context>` with `KATES_URL`, `KATES_API_KEY`, `KATES_CONTEXT` and `KATES_OUTPUT` removed from the environment and `KATES_PROFILES` set to `all`. A step that captures or expects must pass `-o json`. A step may not pass `--context`, `--url` or `--api-key` |
 | `api` | `method`, `path`, `why`, optional `body`, `capture`, `expect`, `timeout_s` | A GET, or a POST to `/api/disruptions/templates/…` only (`taskfile.SETUP_API_POSTS`), with the human key (`run.py` reads it from the human context; `setup.py` on its own from `KATES_EVAL_API_KEY`). `why` says what no kates command does |
 | `wait` | `seconds`, optional `since` | Sleeps; with `since` (an epoch capture), only what is left of `seconds` after it |
 | `clock` | `capture` | Captures the time as `rfc3339`, `rfc3339_minute` (floored), `epoch` or `hhmm_utc` |

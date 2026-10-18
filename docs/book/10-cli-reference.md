@@ -198,6 +198,45 @@ kates ctx import --file my-contexts.yaml
 
 A command that changes the file first takes a lock on `~/.kates.yaml.lock`, which stays beside it, and then writes a complete new file in place of the old one. Two commands that change contexts at once therefore do not undo each other's changes, and a save that fails leaves the old file as it was.
 
+### Command Profiles
+
+A context can enable only the commands its user works with. Each profile enables a set of top-level commands, and a subcommand follows its top-level command:
+
+| Profile | Enables |
+|:--------|:--------|
+| `performance` | `advisor`, `badge`, `benchmark`, `cost`, `dashboard`, `explain`, `flow`, `gate`, `lab`, `profile`, `replay`, `report`, `scenario-diff`, `schedule`, `test`, `top`, `trend`, `tune`, `watch`, `webhook` |
+| `integrity` | `dashboard`, `explain`, `kafka`, `migrate`, `replay`, `report`, `scenario-diff`, `schedule`, `test`, `top`, `watch`, `webhook` |
+| `chaos` | `chaos`, `cluster`, `disruption`, `flow`, `report`, `resilience`, `test`, `watch` |
+| `topology` | `cluster`, `diff`, `doctor`, `kafka`, `snapshot` |
+| `security` | `kyverno`, `security` |
+| `deploy` | `auto`, `clean`, `deploy`, `detect`, `doctor`, `kyverno`, `migrate`, `operator`, `operators`, `versions` |
+
+Every profile also enables `audit`, `changelog`, `completion`, `ctx`, `docs`, `health`, `help`, `init`, `mcp`, `plugin`, `ports`, `status`, `theme`, `tldr`, `upgrade`, `version` and plugins. A context with no profiles enables every command, which is how every context starts.
+
+```bash
+kates ctx profiles                      # this context's profiles and their commands
+kates ctx profiles chaos                # each chaos command and what it does
+kates ctx profiles set chaos topology   # replace them
+kates ctx profiles set performance --context lab
+kates ctx profiles set                  # in a terminal, pick them from a list
+kates ctx profiles set all              # every command again
+```
+
+`kates ctx profiles` marks the context's profiles with `●`, lays each profile's commands out in columns, and dims the commands the profiles do not enable. Name one or more profiles, or `all`, to list their commands one a line with what each does and which other profiles enable it; `-o json` gives the same as data.
+
+`kates` names the context's profiles above Quick Start and lists only the commands they enable, and shell completion offers only those. A command they do not enable is refused before it calls the Kates API, and exits 1:
+
+```text
+  ✖ kates tune needs the performance profile
+    Enabled:    chaos, topology (context "lab")
+    Enable it:  kates ctx profiles set performance chaos topology
+    Run once:   KATES_PROFILES=all kates tune types …
+```
+
+`KATES_PROFILES` replaces the context's profiles for one call or one shell: a comma- or space-separated list, or `all` for every command. An empty `KATES_PROFILES` enables every command too. A name kates does not know, in the file or in the variable, is warned about on stderr and enables nothing, so a context that names only unknown ones runs only the commands every profile enables. `kates ctx set` keeps the profiles of a context it updates, `kates ctx export` carries them, and `kates ctx import` keeps a context's profiles when the file names none. `kates help <command>` and `kates <command> --help` show the help of any command, with a note on stderr when the profiles do not enable it.
+
+Profiles shorten what `kates` lists and runs; they are not access control. `KATES_PROFILES=all` lifts them, and `kates mcp` ignores them. What an API key may do is set by its scopes, in [Scopes and Named Keys](11-api-reference.md#scopes-and-named-keys).
+
 ### Config File Format
 
 ```yaml
@@ -210,6 +249,9 @@ contexts:
     url: http://localhost:30083
     output: table
     api-key: <api-key>
+    profiles:
+      - chaos
+      - topology
   staging:
     url: https://kates-staging.example.com
     output: table
@@ -241,7 +283,7 @@ Find your question in the table below, then follow its link to the family's comm
 
 | Family | Commands | The question it answers | What it talks to |
 |:-----|:--------|:--------|:---------|
-| [Context Management](#context-management) | `ctx set`, `use`, `show`, `export`, `import` | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
+| [Context Management](#context-management) | `ctx set`, `use`, `show`, `export`, `import`, `profiles` | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
 | [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno, and `doctor dns` and `doctor network` work through `kubectl` alone |
 | [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs` | What does the Kafka cluster look like, and is it healthy? | Kates API |
 | [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test scaffold` uses only templates built into the CLI |

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -17,10 +18,10 @@ import (
 var ctxCmd = &cobra.Command{
 	Use:     "ctx",
 	Aliases: []string{"context", "config"},
-	Short:   "Manage Kates server connection profiles (not Kubernetes contexts)",
-	Long: `Manage named connection profiles for the Kates API server: its URL,
-API key, and preferred output format. The --context global flag selects one of
-THESE profiles.
+	Short:   "Manage Kates server contexts (not Kubernetes contexts)",
+	Long: `Manage named contexts for the Kates API server: its URL, API key,
+preferred output format and command profiles. The --context global flag
+selects one of THESE contexts.
 
 Not to be confused with Kubernetes contexts. Which CLUSTER kates deploys to
 comes from your kubeconfig — kates deploy detects and lets you choose it, and
@@ -63,9 +64,13 @@ var ctxShowCmd = &cobra.Command{
 			if ctx.APIKey != "" {
 				key = maskAPIKey(ctx.APIKey)
 			}
-			rows = append(rows, []string{marker, name, ctx.URL, out, key})
+			profiles := "all"
+			if len(ctx.Profiles) > 0 {
+				profiles = ansi.Truncate(strings.Join(ctx.Profiles, ", "), 24, ellipsis())
+			}
+			rows = append(rows, []string{marker, name, ctx.URL, out, key, profiles})
 		}
-		output.Table([]string{"", "Name", "URL", "Output", "API Key"}, rows)
+		output.Table([]string{"", "Name", "URL", "Output", "API Key", "Profiles"}, rows)
 	},
 }
 
@@ -117,6 +122,8 @@ var ctxSetCmd = &cobra.Command{
 				APIKey:   ctxSetAPIKey,
 				ProxyURL: ctxSetProxy,
 				Insecure: ctxSetInsecure,
+				// Set only by kates ctx profiles set, so kept here.
+				Profiles: c.Contexts[name].Profiles,
 			}
 
 			// Auto-select if first context
@@ -430,6 +437,9 @@ var ctxImportCmd = &cobra.Command{
 // server on the next command.
 func importContext(name string, in, old Context, had bool) (Context, []string) {
 	var warnings []string
+	if had && len(in.Profiles) == 0 {
+		in.Profiles = old.Profiles // a file from before profiles, or a teammate's, names none
+	}
 	if isMaskedProxyURL(in.ProxyURL) {
 		if had && maskProxyURL(old.ProxyURL) == in.ProxyURL {
 			in.ProxyURL = old.ProxyURL // the same proxy and user

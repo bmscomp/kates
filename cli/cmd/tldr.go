@@ -26,6 +26,7 @@ var tldrGroups = []tldrGroup{
 			{"Set up a context", "kates ctx set local --url http://localhost:30083"},
 			{"Switch context", "kates ctx use local"},
 			{"Check system health", "kates health"},
+			{"Enable only chaos commands", "kates ctx profiles set chaos"},
 			{"Initialize a project", "kates init --name my-project"},
 		},
 	},
@@ -44,7 +45,7 @@ var tldrGroups = []tldrGroup{
 		Entries: []tldrEntry{
 			{"View report", "kates report show <id>"},
 			{"Export as HTML", "kates report export <id> --format html"},
-			{"Compare two runs", "kates diff <id1> <id2>"},
+			{"Compare two runs", "kates report diff <id1> <id2>"},
 			{"Performance trends", "kates trend --type LOAD --days 14"},
 			{"Get recommendations", "kates advisor <id>"},
 		},
@@ -92,8 +93,7 @@ var (
 
 	tldrCatStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(theme.Secondary).
-			MarginTop(1)
+			Foreground(theme.Secondary)
 )
 
 var tldrCmd = &cobra.Command{
@@ -110,26 +110,11 @@ organized by workflow. Like 'tldr' but for Kates.`,
 			filter = strings.ToLower(args[0])
 		}
 
-		fmt.Println()
-		fmt.Println("  " + tldrTitleStyle.Render("Kates Quick Reference"))
-		fmt.Println()
-
+		// The entries the filter matches and the profiles enable.
+		var shown []tldrGroup
+		hidden := false
 		for _, g := range tldrGroups {
-			if filter != "" && !strings.Contains(strings.ToLower(g.Category), filter) {
-				match := false
-				for _, e := range g.Entries {
-					if strings.Contains(strings.ToLower(e.Command), filter) ||
-						strings.Contains(strings.ToLower(e.Desc), filter) {
-						match = true
-						break
-					}
-				}
-				if !match {
-					continue
-				}
-			}
-
-			fmt.Println("  " + tldrCatStyle.Render(g.Category))
+			var entries []tldrEntry
 			for _, e := range g.Entries {
 				if filter != "" &&
 					!strings.Contains(strings.ToLower(e.Desc), filter) &&
@@ -137,6 +122,29 @@ organized by workflow. Like 'tldr' but for Kates.`,
 					!strings.Contains(strings.ToLower(g.Category), filter) {
 					continue
 				}
+				if !commandEnabled(strings.Fields(strings.TrimPrefix(e.Command, "kates "))[0], activeProfileNames) {
+					hidden = true
+					continue
+				}
+				entries = append(entries, e)
+			}
+			if len(entries) > 0 {
+				shown = append(shown, tldrGroup{Category: g.Category, Entries: entries})
+			}
+		}
+
+		fmt.Println()
+		fmt.Println("  " + tldrTitleStyle.Render("Kates Quick Reference"))
+		if hidden {
+			fmt.Println("  " + tldrDescStyle.Render(fmt.Sprintf("Profiles: %s (%s)", strings.Join(activeProfileNames, ", "), activeProfilesFrom)))
+		}
+		if hidden && len(shown) == 0 {
+			fmt.Println("  " + tldrDescStyle.Render(strings.TrimSpace("Every entry: KATES_PROFILES=all kates tldr "+filter)))
+		}
+		fmt.Println()
+		for _, g := range shown {
+			fmt.Println("  " + tldrCatStyle.Render(g.Category))
+			for _, e := range g.Entries {
 				fmt.Printf("    %s\n", tldrDescStyle.Render(e.Desc+":"))
 				fmt.Printf("      %s\n", tldrCmdStyle.Render("$ "+e.Command))
 			}

@@ -495,7 +495,7 @@ func TestCtxCommands(t *testing.T) {
 			case tt.wantCurrent == "" && cfg.Contexts[cfg.CurrentContext].URL == "":
 				t.Errorf("current context = %q, want one that exists", cfg.CurrentContext)
 			}
-			if got := cfg.Contexts["mcp"]; got != start.Contexts["mcp"] {
+			if got := cfg.Contexts["mcp"]; !reflect.DeepEqual(got, start.Contexts["mcp"]) {
 				t.Errorf("mcp context = %+v, want it unchanged", got)
 			}
 		})

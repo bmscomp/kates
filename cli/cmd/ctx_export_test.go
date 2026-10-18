@@ -143,7 +143,7 @@ func TestCtxImport_RoundTrip(t *testing.T) {
 		_, _, _ = commandOutput(t, func() error { return runCtxCommandLine(t, "ctx", "import", "--file", revealedFile) })
 		got := loadConfig().Contexts
 		for name, want := range exportTestConfig().Contexts {
-			if got[name] != want {
+			if !reflect.DeepEqual(got[name], want) {
 				t.Errorf("%s = %+v, want %+v", name, got[name], want)
 			}
 		}

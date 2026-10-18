@@ -1349,6 +1349,42 @@
     - ctx show
     - ctx use
 
+- name: ctx profiles
+  category: Config
+  synopsis: "kates ctx profiles [profile...|all]"
+  short: "Show the command profiles a context enables"
+  description: |
+    Shows which command profiles the current context enables, or the one
+    --context names, and the commands each profile enables. A context with
+    profiles enables only their commands, plus the ones every profile needs;
+    kates lists only those and refuses the others. A context with no
+    profiles enables every command. KATES_PROFILES overrides the context's
+    profiles; KATES_PROFILES=all enables every command. Name profiles, or
+    all, to list their commands with what each one does.
+  examples:
+    - "kates ctx profiles"
+    - "kates ctx profiles chaos topology"
+    - "kates ctx profiles --context lab -o json"
+  see_also:
+    - ctx profiles set
+    - ctx show
+
+- name: ctx profiles set
+  category: Config
+  synopsis: "kates ctx profiles set [profile...|all]"
+  short: "Choose the command profiles a context enables"
+  description: |
+    Replaces the command profiles of the current context, or of the one
+    --context names: performance, integrity, chaos, topology, security,
+    deploy. all enables every command. With no profile named, in a
+    terminal, it asks which ones to enable.
+  examples:
+    - "kates ctx profiles set chaos topology"
+    - "kates ctx profiles set performance --context lab"
+    - "kates ctx profiles set all"
+  see_also:
+    - ctx profiles
+
 - name: dashboard
   category: Observability
   synopsis: "kates dashboard [flags]"
@@ -1599,7 +1635,8 @@
   description: |
     Reads context definitions from a YAML file (or stdin) and
     merges them into ~/.kates.yaml. Existing contexts with the
-    same name are overwritten. A masked API key is never stored:
+    same name are overwritten, but keep their command profiles
+    when the file names none. A masked API key is never stored:
     an existing context keeps its key only while the file leaves
     its URL, proxy and insecure setting unchanged.
   flags:
