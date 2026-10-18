@@ -42,7 +42,7 @@ The STRESS test ramps load until the cluster can no longer keep up.
 
 ```bash
 # Export the built-in STRESS template
-kates test scaffold export stress-test -o stress.yaml
+kates test scaffold export stress-test -f stress.yaml
 
 # Quick stress test with 4 producers ramping up
 kates test create --type STRESS \
@@ -72,7 +72,7 @@ The SPIKE test hits the cluster with a sudden burst of traffic, then drops back 
 
 ```bash
 # Export the built-in SPIKE template
-kates test scaffold export spike-test -o spike.yaml
+kates test scaffold export spike-test -f spike.yaml
 
 # View the exported YAML
 cat spike.yaml
@@ -97,7 +97,7 @@ The ENDURANCE test runs at moderate load for an extended period to detect slow r
 
 ```bash
 # Export the built-in ENDURANCE template (a 1-hour soak at 5k msg/s)
-kates test scaffold export endurance-soak -o endurance.yaml
+kates test scaffold export endurance-soak -f endurance.yaml
 
 # Start a 30-minute endurance test
 kates test create --type ENDURANCE \
@@ -176,7 +176,7 @@ The ROUND_TRIP test measures the complete journey from producer to consumer.
 
 ```bash
 # Export the built-in ROUND_TRIP template (exactly-once, CRC-verified)
-kates test scaffold export exactly-once -o roundtrip.yaml
+kates test scaffold export exactly-once -f roundtrip.yaml
 
 # Run with 1 producer and 1 consumer
 kates test create --type ROUND_TRIP \
@@ -196,7 +196,7 @@ The INTEGRITY test verifies that every message is persisted and deliverable.
 
 ```bash
 # Export the built-in INTEGRITY template (transactional, zstd, CRC)
-kates test scaffold export integrity-tx -o integrity.yaml
+kates test scaffold export integrity-tx -f integrity.yaml
 
 # Run data integrity verification
 kates test create --type INTEGRITY \

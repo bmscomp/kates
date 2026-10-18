@@ -792,7 +792,7 @@ kates test scaffold                        # list all templates
 kates test scaffold --type LOAD           # filter by test type
 kates test scaffold show production-load  # preview a template
 kates test scaffold export ci-gate        # write ci-gate.yaml to current dir
-kates test scaffold export ci-gate -o my-gate.yaml
+kates test scaffold export ci-gate -f my-gate.yaml
 kates test scaffold export --all           # export every template
 ```
 

@@ -413,7 +413,7 @@ kates test scaffold show quick-load
 kates test scaffold export quick-load
 
 # Export with a custom filename or directory, or export everything
-kates test scaffold export production-load -o load-scenario.yaml
+kates test scaffold export production-load -f load-scenario.yaml
 kates test scaffold export --all --dir ./scenarios/
 ```
 
