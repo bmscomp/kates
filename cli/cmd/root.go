@@ -354,7 +354,7 @@ Tuning:
   profile        Save, compare, and assert performance profiles
   flow           Declarative multi-step pipeline orchestrator
   benchmark      Run full test battery with letter-grade scorecard
-  tune           Parameter sweep tests for optimal configuration
+  tune           Tuning tests, each measuring one configuration
 
 Analysis:
   report         View reports, export CSV/JUnit/Markdown/HTML

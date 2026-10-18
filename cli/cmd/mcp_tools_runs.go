@@ -1097,7 +1097,7 @@ var mcpBandMetrics = []struct {
 }
 
 // mcpCompareMetrics maps the deltas the backend's compare sends to the
-// summary value each is computed from (ReportResource.java:318-327).
+// summary value each is computed from (ReportResource.java:296-305).
 var mcpCompareMetrics = map[string]func(s *client.MCPRunSummary) float64{
 	"throughputRecPerSec": func(s *client.MCPRunSummary) float64 { return s.AvgThroughputRecPerSec },
 	"avgLatencyMs":        func(s *client.MCPRunSummary) float64 { return s.AvgLatencyMs },
@@ -1201,7 +1201,7 @@ type mcpAssessReads struct {
 // assess_run's reads may use. Every report the backend has not cached makes
 // it describe the cluster, with 30-second timeouts (ReportGenerator.java:
 // 251-261, ClusterHealthService.java:36,194-231), and the compare call
-// builds one per run, one after another (ReportResource.java:293-305). A
+// builds one per run, one after another (ReportResource.java:271-283). A
 // slow cluster must cost the parts that wait on it, not the whole call.
 const mcpAssessPartsShare = 0.75
 
@@ -1415,7 +1415,7 @@ func mcpScanBand(ctx context.Context, call *mcpCall, run *client.MCPRun, key str
 	}
 	// One compare call gives every summary. The previous run goes first and
 	// this run last, so the backend's deltas run from the one to the other
-	// (ReportResource.java:307-313).
+	// (ReportResource.java:285-291).
 	ids := append(append([]string(nil), scan.matches...), run.ID)
 	scan.comparison, scan.compareErr = call.Client().MCPRunsCompare(ctx, ids)
 	return scan
@@ -2140,7 +2140,7 @@ func mcpRunSpecHash(key string) string {
 
 // mcpRunReportErr maps the report endpoints' answer for a missing run. They
 // throw IllegalArgumentException("Test run not found: …"), which the
-// backend's exception mapper turns into a 400 (ReportResource.java:141-142;
+// backend's exception mapper turns into a 400 (ReportResource.java:119-120;
 // GlobalExceptionMapper.java:31-33), so a missing run would otherwise read
 // as a bad argument.
 func mcpRunReportErr(err error) error {

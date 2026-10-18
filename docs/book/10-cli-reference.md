@@ -260,7 +260,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Kyverno Policy Commands](#kyverno-policy-commands) | `kyverno status`, `violations`, `enforce`, `audit`, `detect`, `apply` | Which admission policies guard the cluster, and what do they catch? | Kubernetes, through `kubectl`; `kyverno apply` also runs `helm` |
 | [Kafka Client Commands](#kafka-client-commands) | `kafka brokers`, `topics`, `topic`, `groups`, `group`, `consume`, `produce`, `create-topic`, `alter-topic`, `delete-topic`, `tui`, `connect` | What is in a topic or consumer group, and how do you read, write or change it? | Kates API; `kafka connect` uses `kubectl` |
 | [Analysis & Optimization Commands](#analysis--optimization-commands) | `benchmark`, `advisor`, `explain`, `replay`, `gate`, `test baseline`, `report regression` | What do a run's results mean, and do they clear the grade or baseline you require? | Kates API |
-| [Tuning Commands](#tuning-commands) | `tune run`, `report`, `types` | Which setting of `acks`, batching, compression, partition count or replication factor performs best? | Kates API |
+| [Tuning Commands](#tuning-commands) | `tune run`, `types` | How does one setting of `acks`, batching, compression, partition count or replication factor perform? | Kates API |
 | [Profile Commands](#profile-commands) | `profile save`, `list`, `compare`, `assert` | Does a new run still perform like one you saved earlier? | Kates API for `save` and `assert`; profiles are files in `~/.kates/profiles` |
 | [Cost Estimation](#cost-estimation) | `cost estimate` | Roughly what would a workload cost to run with a cloud provider? | Nothing: the CLI computes the estimate itself |
 | [Snapshot Commands](#snapshot-commands) | `snapshot create`, `list`, `diff` | What changed in the cluster's brokers, topics and groups between two moments? | Kates API for `create`; snapshots are files in `~/.kates/snapshots` |
@@ -2000,7 +2000,7 @@ kates report regression <run-id>
 
 ### Tuning Commands
 
-Tuning commands automate the tedious process of testing different Kafka configurations. Instead of manually running five tests with different `acks` settings, `tune run TUNE_ACKS` does it for you and presents a comparison table. Each tuning type sweeps across a specific configuration dimension — replication factor, batch size, compression codec, or partition count — so you can find the optimal setting for your workload.
+Each tuning type names one configuration dimension — replication factor, `acks`, batching, compression codec or partition count — but a tuning run measures one setting of it: one produce run with the Kates API's defaults for the type. It compares none. `tune run` prints the run ID; read its numbers with `kates report show <id>`. To compare settings, use [`kates lab`](10b-lab.md), whose auto-sweep runs one test per value.
 
 #### tune
 
@@ -2025,25 +2025,13 @@ kates tune run TUNE_PARTITIONS
 
 | Type | Description |
 |------|-------------|
-| `TUNE_REPLICATION` | Test different replication factor settings |
-| `TUNE_ACKS` | Test different acks modes |
-| `TUNE_BATCHING` | Test different batch size configurations |
-| `TUNE_COMPRESSION` | Test different compression codecs |
-| `TUNE_PARTITIONS` | Test different partition counts |
+| `TUNE_REPLICATION` | Measures one replication factor, the default |
+| `TUNE_ACKS` | Measures one `acks` setting, the default |
+| `TUNE_BATCHING` | Measures one batch size and linger, the defaults |
+| `TUNE_COMPRESSION` | Measures one compression codec, the default |
+| `TUNE_PARTITIONS` | Measures one partition count, the default |
 
 With `-o json` it prints the run the Kates API created, as `kates test create -o json` does.
-
-#### tune report
-
-Show tuning comparison report.
-
-```bash
-kates tune report <run-id>
-kates tune report abc123
-kates tune report abc123 -o json
-```
-
-With `-o json` it prints the same rows: each step's `stepIndex`, `label`, average throughput, P99 and error rate (`null` where the step has no value), and a `verdict` of `BEST` or `WORST`, with the `bestStepIndex` and the `recommendation`.
 
 #### tune types
 

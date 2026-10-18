@@ -155,12 +155,11 @@ var mcpCaveatsCore = []mcpCaveat{
 	},
 	{
 		ID: mcpCaveatTuningOneMeasurement,
-		Text: "A TUNE_* run executes one produce task with the spec's single configuration. The tuning report copies " +
-			"that one summary into every step, so all steps show the same numbers and the best step is always step 0.",
+		Text: "A TUNE_* run executes one produce task with the spec's single configuration: it measures one setting " +
+			"and compares none.",
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1741-1742", "case TUNE_REPLICATION,", "-tune-0"),
 			mcpJava + "trogdor/SpecFactory.java:38-39",
-			mcpJava + "engine/TuningTestRunner.java:101-139",
 		},
 	},
 	{

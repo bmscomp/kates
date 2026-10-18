@@ -1,6 +1,6 @@
 # Test Types Deep Dive
 
-This chapter covers the eight core Kates test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` parameter-sweep types, covered in [CLI Reference](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
+This chapter covers the eight core Kates test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` types, covered in [CLI Reference](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
 
 Whether you're baselining a new cluster or gating a CI pipeline, after this chapter you can:
 
