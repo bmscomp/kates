@@ -75,6 +75,9 @@ type pollDoneMsg struct {
 const maxStaleRetries = 5
 const maxConnRetries = 10
 
+// sparklinePoints is how many polls the throughput sparkline shows.
+const sparklinePoints = 40
+
 type pollModel struct {
 	ctx            context.Context
 	id             string
@@ -188,6 +191,11 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.recordsSent = totalSent
 		m.throughputHist = append(m.throughputHist, maxThroughput)
+		// The whole run's history grew without bound: an hour in, the
+		// sparkline was 1,823 columns and the live number was cut off.
+		if len(m.throughputHist) > sparklinePoints {
+			m.throughputHist = m.throughputHist[len(m.throughputHist)-sparklinePoints:]
+		}
 
 		if test.Spec != nil && test.Spec.Records > 0 {
 			m.totalRecords = float64(test.Spec.Records)
