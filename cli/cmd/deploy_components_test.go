@@ -980,3 +980,36 @@ func sliceContainsPrefix(values []string, prefix string) bool {
 	}
 	return false
 }
+
+// A sibling branch that fails cancels the deploy group's context while the
+// ClusterIssuer goes in past the cert-manager webhook. The restore ran on that
+// context, so its patches never ran and the webhook stayed fail-open.
+func TestRestoreCertMgrWebhookPolicyOutlivesCancel(t *testing.T) {
+	origExec, origDL := runExecFn, dl
+	t.Cleanup(func() { runExecFn, dl = origExec, origDL })
+	dl = &DashboardController{}
+	var patched []string
+	runExecFn = func(ctx context.Context, name string, args ...string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			t.Errorf("restore %v runs with no deadline", args)
+		}
+		patched = append(patched, strings.Join(args, " "))
+		return nil
+	}
+
+	gCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	restoreCertMgrWebhookPolicy(gCtx, []string{"mutatingwebhookconfiguration", "validatingwebhookconfiguration"})
+
+	if len(patched) != 2 {
+		t.Fatalf("patched %d webhook configs, want both: %q", len(patched), patched)
+	}
+	for i, kind := range []string{"mutatingwebhookconfiguration", "validatingwebhookconfiguration"} {
+		if !strings.HasPrefix(patched[i], "patch "+kind+" cert-manager-webhook") || !strings.Contains(patched[i], `"value":"Fail"`) {
+			t.Errorf("patch %d = %q, want failurePolicy Fail on %s", i, patched[i], kind)
+		}
+	}
+}
