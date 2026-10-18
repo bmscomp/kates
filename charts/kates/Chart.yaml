@@ -2,15 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: a new chaos.provider value renders KATES_CHAOS_PROVIDER in the
-# configmap; empty by default, so a release that leaves it out renders as
-# before. appVersion is unchanged.
-version: 0.11.2
+# Patch: appVersion and the image tag move to 1.26.0, the tag the v1.26.0
+# release publishes. Templates are otherwise unchanged.
+version: 0.11.3
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.25.1"
+appVersion: "1.26.0"
 keywords:
   - kafka
   - testing
@@ -29,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.26.0 and the image tag move to 1.26.0. The backend changes since 1.25.1: the cluster health check reports a KRaft quorum it cannot describe instead of dropping it (#403); the security audit and pentest read each listener's protocol (#379); the tuning report endpoint is gone (#386); run retention keeps the run a baseline names (#378); a status poll writes only over the status it read (#377); each INTEGRITY run reads in a consumer group of its own (#376); compound runs and resilience faults go through the safety guard and the disruption lease (#375); orphan recovery undoes faults left from before the API started (#374); and the native image starts with a named API keys file (#371). Templates are otherwise unchanged."
     - kind: added
       description: "chaos.provider (KATES_CHAOS_PROVIDER, default empty: the backend's litmus-crd) picks the chaos provider every fault goes through: litmus-crd, kubernetes, hybrid or noop. It used to be set only through extraEnv. `kates deploy --with-chaos=false` sets noop when no chaos release is installed, so a stack without Litmus skips its faults by design instead of logging an ERROR and falling back to noop. values.schema.json refuses any other name"
     - kind: fixed
