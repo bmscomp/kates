@@ -69,8 +69,23 @@ var disruptionRunCmd = &cobra.Command{
 			return cmdErr("Disruption test failed: " + err.Error())
 		}
 
+		// Written ahead of the -o json branch, which returns: a CI job asking
+		// for both got no JUnit file. Its note goes to stderr there, so stdout
+		// stays the JSON alone.
+		junitNote := ""
+		if outputJUnit != "" {
+			if err := writeJUnitXML(&result.Report, outputJUnit); err != nil {
+				junitNote = "  ⚠ JUnit XML write failed: " + err.Error()
+			} else {
+				junitNote = "  ✓ JUnit XML written to " + outputJUnit
+			}
+		}
+
 		if outputMode == "json" {
 			output.JSON(result)
+			if junitNote != "" {
+				fmt.Fprintln(output.Err, junitNote)
+			}
 			return checkSlaExit(&result.Report)
 		}
 
@@ -112,12 +127,8 @@ var disruptionRunCmd = &cobra.Command{
 			renderStepReport(step)
 		}
 
-		if outputJUnit != "" {
-			if err := writeJUnitXML(&result.Report, outputJUnit); err != nil {
-				fmt.Println("  ⚠ JUnit XML write failed: " + err.Error())
-			} else {
-				fmt.Println("  ✓ JUnit XML written to " + outputJUnit)
-			}
+		if junitNote != "" {
+			fmt.Println(junitNote)
 		}
 
 		return checkSlaExit(&result.Report)
@@ -230,6 +241,9 @@ func renderSlaVerdict(verdict *client.SlaVerdict) {
 	}
 }
 
+// checkSlaExit fails the command when --fail-on-sla-breach is set and the
+// report breached its SLA. The verdict is already printed, so the error is
+// silent; it used to os.Exit(1) in the middle of RunE, past every defer.
 func checkSlaExit(report *client.DisruptionReport) error {
 	if !failOnSlaBreach {
 		return nil
@@ -237,11 +251,8 @@ func checkSlaExit(report *client.DisruptionReport) error {
 	if report == nil {
 		return nil
 	}
-	if report.SlaVerdict != nil && report.SlaVerdict.Violated {
-		os.Exit(1)
-	}
-	if report.Summary != nil && report.Summary.SlaViolated {
-		os.Exit(1)
+	if (report.SlaVerdict != nil && report.SlaVerdict.Violated) || (report.Summary != nil && report.Summary.SlaViolated) {
+		return &silentErr{msg: "the disruption plan breached its SLA"}
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -83,6 +84,7 @@ type playbookBackend struct {
 	plans        map[string]string
 	runs         bool
 	dryRunResult string
+	report       string
 
 	mu       sync.Mutex // the handler runs on the server's goroutines
 	dryRuns  [][]byte
@@ -111,7 +113,8 @@ func (b *playbookBackend) seen() (requests []string, dryRuns [][]byte) {
 // The options apply before the server starts: the handler reads them.
 func newPlaybookBackend(t *testing.T, plans map[string]string, opts ...func(*playbookBackend)) *playbookBackend {
 	t.Helper()
-	b := &playbookBackend{t: t, plans: plans, dryRunResult: leaderCascadeDryRunJSON}
+	b := &playbookBackend{t: t, plans: plans, dryRunResult: leaderCascadeDryRunJSON,
+		report: `{"planName":"playbook:leader-cascade","status":"COMPLETED"}`}
 	for _, opt := range opts {
 		opt(b)
 	}
@@ -124,6 +127,7 @@ func newPlaybookBackend(t *testing.T, plans map[string]string, opts ...func(*pla
 		outputMode = "table"
 		playbookRunDryRun = false
 		disruptionFile, dryRunMode = "", false
+		outputJUnit, failOnSlaBreach = "", false
 	}
 	reset()
 	t.Cleanup(reset)
@@ -157,7 +161,7 @@ func (b *playbookBackend) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = io.WriteString(w, `{"id":"d-42","status":"RUNNING","planName":"playbook:leader-cascade"}`)
 	case b.runs && r.Method == http.MethodGet && r.URL.Path == "/api/disruptions/d-42":
-		_, _ = io.WriteString(w, `{"planName":"playbook:leader-cascade","status":"COMPLETED"}`)
+		_, _ = io.WriteString(w, b.report)
 	default:
 		b.t.Errorf("unexpected request %s %s", r.Method, r.URL)
 		w.WriteHeader(http.StatusTeapot)
@@ -603,6 +607,55 @@ func TestDisruptionRun_JSONIsTheResultAlone(t *testing.T) {
 				t.Errorf("requests = %q, want %q", requests, tt.wantRequests)
 			}
 		})
+	}
+}
+
+// -o json returned before the JUnit report was written, so a CI job that asked
+// for both got no file. Its note goes to stderr, keeping stdout the JSON.
+func TestDisruptionRun_JSONWritesJUnit(t *testing.T) {
+	newPlaybookBackend(t, map[string]string{}, allowRuns)
+	dir := t.TempDir()
+	planFile, junitFile := filepath.Join(dir, "plan.json"), filepath.Join(dir, "results.xml")
+	if err := os.WriteFile(planFile, []byte(leaderCascadePlanJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := commandOutput(t, func() error {
+		return runCommandLine(t, "disruption", "run", "--config", planFile, "-o", "json", "--output-junit", junitFile)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v\n%s%s", err, stdout, stderr)
+	}
+	if err := json.Unmarshal(stdout, &client.DisruptionRunResponse{}); err != nil {
+		t.Errorf("-o json output is not the result alone: %v\n%s", err, stdout)
+	}
+	if xml, err := os.ReadFile(junitFile); err != nil || !strings.Contains(string(xml), "<testsuite") {
+		t.Errorf("JUnit report = %q, %v; want a test suite", xml, err)
+	}
+	if !strings.Contains(stderr, "JUnit XML written to "+junitFile) {
+		t.Errorf("stderr does not say where the report went:\n%s", stderr)
+	}
+}
+
+// --fail-on-sla-breach called os.Exit(1) in the middle of RunE, past every
+// defer; a test calling the command died with it. The breach is now a silent
+// error, which Execute ends with exit 1 and no second message.
+func TestDisruptionRun_SLABreachFailsThroughExecute(t *testing.T) {
+	b := newPlaybookBackend(t, map[string]string{}, allowRuns)
+	b.report = `{"planName":"playbook:leader-cascade","status":"COMPLETED","slaVerdict":{"violated":true}}`
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(planFile, []byte(leaderCascadePlanJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, mode := range []string{"table", "json"} {
+		_, _, err := commandOutput(t, func() error {
+			return runCommandLine(t, "disruption", "run", "--config", planFile, "-o", mode, "--fail-on-sla-breach")
+		})
+		var silent *silentErr
+		if !errors.As(err, &silent) {
+			t.Errorf("-o %s: err = %v, want the silent SLA failure", mode, err)
+		}
 	}
 }
 
