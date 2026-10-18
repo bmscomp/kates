@@ -72,6 +72,15 @@ func TestResolveContext(t *testing.T) {
 // the output, the exit code, and how many requests reached the API.
 func runKatesCLI(t *testing.T, env []string, args ...string) (out string, code int, requests int64) {
 	t.Helper()
+	return runKatesCLIConfig(t, func(apiURL string) string {
+		return "current-context: lab\ncontexts:\n  lab:\n    url: " + apiURL + "\n"
+	}, env, args...)
+}
+
+// runKatesCLIConfig is runKatesCLI with the config file config writes for the
+// fake API's URL.
+func runKatesCLIConfig(t *testing.T, config func(apiURL string) string, env []string, args ...string) (out string, code int, requests int64) {
+	t.Helper()
 	var hits atomic.Int64
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -81,8 +90,7 @@ func runKatesCLI(t *testing.T, env []string, args ...string) (out string, code i
 	t.Cleanup(api.Close)
 
 	home := t.TempDir()
-	config := "current-context: lab\ncontexts:\n  lab:\n    url: " + api.URL + "\n"
-	if err := os.WriteFile(filepath.Join(home, ".kates.yaml"), []byte(config), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".kates.yaml"), []byte(config(api.URL)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,6 +132,38 @@ func TestUnknownContextReachesNoServer(t *testing.T) {
 
 	if out, code, requests := runKatesCLI(t, nil, "--context", "lab", "test", "list"); code != 0 || requests == 0 {
 		t.Errorf("--context lab: exit %d after %d requests, want 0 after some:\n%s", code, requests, out)
+	}
+}
+
+// A config kates could not parse used to send every command to
+// http://localhost:8080, whatever answered there, without the API key of the
+// context the file names.
+func TestUnreadableConfigReachesNoServer(t *testing.T) {
+	broken := func(apiURL string) string {
+		return "current-context: lab\ncontexts:\n  lab:\n    url: " + apiURL + "\n  [unclosed\n"
+	}
+	out, code, requests := runKatesCLIConfig(t, broken, nil, "health")
+	if code != 1 || requests != 0 {
+		t.Errorf("exit %d after %d requests, want 1 after none:\n%s", code, requests, out)
+	}
+	if !strings.Contains(out, "could not load config") || !strings.Contains(out, ".kates.yaml") {
+		t.Errorf("the error does not name the config file:\n%s", out)
+	}
+
+	// --url and KATES_URL name the server themselves.
+	var hits atomic.Int64
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[],"page":0,"size":100,"total":0,"totalPages":0,"count":0}`))
+	}))
+	t.Cleanup(other.Close)
+	if out, code, _ := runKatesCLIConfig(t, broken, nil, "--url", other.URL, "test", "list"); code != 0 || hits.Load() == 0 {
+		t.Errorf("--url: exit %d after %d requests, want 0 after some:\n%s", code, hits.Load(), out)
+	}
+	hits.Store(0)
+	if out, code, _ := runKatesCLIConfig(t, broken, []string{"KATES_URL=" + other.URL}, "test", "list"); code != 0 || hits.Load() == 0 {
+		t.Errorf("KATES_URL: exit %d after %d requests, want 0 after some:\n%s", code, hits.Load(), out)
 	}
 }
 

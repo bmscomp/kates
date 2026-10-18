@@ -63,12 +63,18 @@ func configPath() string {
 }
 
 func loadConfig() Config {
+	cfg, _ := loadConfigErr()
+	return cfg
+}
+
+// loadConfigErr is loadConfig, also returning the error it warned about.
+func loadConfigErr() (Config, error) {
 	cfg, err := readConfig()
 	if err != nil && !configWarned {
 		fmt.Fprintf(os.Stderr, "Warning: could not load config %s: %v\n", configPath(), err)
 		configWarned = true
 	}
-	return cfg
+	return cfg, err
 }
 
 // configWarned keeps loadConfig's warning to one a process: the help function
@@ -492,7 +498,7 @@ var rootCmd = &cobra.Command{
 			}
 		}
 		readContextEnv()
-		cfg := loadConfig()
+		cfg, cfgErr := loadConfigErr()
 		ctxName, ctx, ctxErr := resolveContext(cfg)
 		profiles, profilesFrom := activeProfiles(ctxName, ctx)
 		urlOverridden := apiURL != ""
@@ -502,6 +508,12 @@ var rootCmd = &cobra.Command{
 			} else {
 				apiURL = ctx.URL
 			}
+		}
+		// A file kates could not read or parse used to leave it on the
+		// built-in http://localhost:8080, without the API key of the context
+		// the file names, so its requests went to whatever answered there.
+		if cfgErr != nil && !urlOverridden {
+			ctxErr = fmt.Errorf("could not load config %s: %w. Fix the file, or pass --url or set KATES_URL", configPath(), cfgErr)
 		}
 		activeContext = ctxName
 		activeProfileNames, activeProfilesFrom = profiles, profilesFrom
