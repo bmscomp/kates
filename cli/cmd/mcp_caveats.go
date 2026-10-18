@@ -235,7 +235,7 @@ var mcpCaveatsCore = []mcpCaveat{
 	{
 		ID:   mcpCaveatClusterDataCached,
 		Text: "The backend caches cluster info and the partition health check for 30 seconds, so those figures can be up to 30 seconds old.",
-		Refs: []string{mcpJava + "service/ClusterHealthService.java:45,72-89,233-236,367-368"},
+		Refs: []string{mcpJava + "service/ClusterHealthService.java:45,72-89,233-236,371-372"},
 	},
 	{
 		ID: mcpCaveatControllerDescribed,
@@ -245,7 +245,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			"about which node leads. The active controller is the KRaft quorum leader, health.kraftQuorum.leaderId " +
 			"in cluster_overview; a run's report does not record it.",
 		Refs: []string{
-			mcpAnchoredRef(mcpJava+"service/ClusterHealthService.java:81,200,247,294,351",
+			mcpAnchoredRef(mcpJava+"service/ClusterHealthService.java:81,200,247,304,380",
 				"cluster.controller()", `report.put("controllerId"`, `quorumHealth.put("leaderId"`),
 			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:336", "snapshot.controllerId()"),
 		},
