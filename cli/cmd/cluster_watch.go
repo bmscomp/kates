@@ -41,6 +41,9 @@ var clusterWatchCmd = &cobra.Command{
 	Use:   "watch",
 	Short: "Live-watch Kafka cluster health (refreshing dashboard)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := checkInterval(clusterWatchInterval); err != nil {
+			return err
+		}
 		tick := 0
 		hist := &healthHistory{}
 

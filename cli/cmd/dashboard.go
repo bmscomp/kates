@@ -18,6 +18,9 @@ var dashboardCmd = &cobra.Command{
 	Aliases: []string{"dash"},
 	Short:   "Full-screen monitoring dashboard with live metrics",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := checkInterval(dashInterval); err != nil {
+			return err
+		}
 		tick := 0
 		throughputHistory := make([]float64, 0, 30)
 		latencyHistory := make([]float64, 0, 30)
