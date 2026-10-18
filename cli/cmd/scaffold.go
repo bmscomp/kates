@@ -226,7 +226,9 @@ func findScenario(name string) *scenarioMeta {
 func init() {
 	testScaffoldCmd.PersistentFlags().StringVarP(&scaffoldTypeFilter, "type", "t", "", "Filter by test type (LOAD, STRESS, INTEGRITY, etc.)")
 	scaffoldExportCmd.Flags().StringVarP(&scaffoldExportDir, "dir", "d", "", "Output directory (default: current)")
-	scaffoldExportCmd.Flags().StringVarP(&scaffoldExportFile, "output", "o", "", "Output filename (overrides default)")
+	// Not -o/--output: that is the global output format, and this flag hid it,
+	// so `-o json` wrote the template to a file named json.
+	scaffoldExportCmd.Flags().StringVarP(&scaffoldExportFile, "file", "f", "", "Output filename (overrides default)")
 	scaffoldExportCmd.Flags().BoolVar(&scaffoldExportAll, "all", false, "Export all templates")
 
 	testScaffoldCmd.AddCommand(scaffoldListCmd)

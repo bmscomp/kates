@@ -1309,12 +1309,12 @@
     - name: "--url"
       type: string
       desc: "Kates API base URL (required)"
-    - name: "--output"
+    - name: "--default-output"
       type: string
       desc: "Default output format for this context"
   examples:
     - "kates ctx set local --url http://localhost:30083"
-    - "kates ctx set staging --url https://kates.staging.internal --output json"
+    - "kates ctx set staging --url https://kates.staging.internal --default-output json"
   see_also:
     - ctx use
     - ctx show
