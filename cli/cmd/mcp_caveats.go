@@ -30,6 +30,7 @@ const (
 	mcpCaveatChaosTimesApproximate mcpCaveatID = "chaos-times-approximate"
 	mcpCaveatAlertRulesNotFiring   mcpCaveatID = "alert-rules-not-firing"
 	mcpCaveatClusterDataCached     mcpCaveatID = "cluster-data-cached"
+	mcpCaveatControllerDescribed   mcpCaveatID = "controller-from-describe-cluster"
 )
 
 // mcpCaveat is one thing the data behind a tool cannot show. Refs are paths
@@ -235,6 +236,19 @@ var mcpCaveatsCore = []mcpCaveat{
 		ID:   mcpCaveatClusterDataCached,
 		Text: "The backend caches cluster info and the partition health check for 30 seconds, so those figures can be up to 30 seconds old.",
 		Refs: []string{mcpJava + "service/ClusterHealthService.java:45,72-89,233-236,371-372"},
+	},
+	{
+		ID: mcpCaveatControllerDescribed,
+		Text: "cluster_overview's controller and health.controllerId, and the controller flag on assess_run's " +
+			"brokers, come from Kafka's DescribeCluster answer. A KRaft broker answers it with an arbitrary live " +
+			"broker rather than the active controller, so that broker can change between calls and says nothing " +
+			"about which node leads. The active controller is the KRaft quorum leader, health.kraftQuorum.leaderId " +
+			"in cluster_overview; a run's report does not record it.",
+		Refs: []string{
+			mcpAnchoredRef(mcpJava+"service/ClusterHealthService.java:81,200,247,304,380",
+				"cluster.controller()", `report.put("controllerId"`, `quorumHealth.put("leaderId"`),
+			mcpAnchoredRef(mcpJava+"report/ReportGenerator.java:336", "snapshot.controllerId()"),
+		},
 	},
 }
 

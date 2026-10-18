@@ -42,6 +42,25 @@ func setupTest(t *testing.T, expectedMethod, expectedPath string, statusCode int
 	return ts, buf
 }
 
+// setupRoutes is setupTest for a command that calls more than one endpoint:
+// it answers a GET of each path in routes with its body, and anything else
+// with 404.
+func setupRoutes(t *testing.T, routes map[string]string) (*httptest.Server, *bytes.Buffer) {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := routes[r.URL.Path]
+		if r.Method != http.MethodGet || !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	apiClient = client.New(ts.URL)
+	outputMode = "table"
+	return ts, output.ResetForTesting()
+}
+
 // stripAnsi removes all ANSI escape codes from a string to simplify assertions.
 func stripAnsi(s string) string {
 	var result []byte

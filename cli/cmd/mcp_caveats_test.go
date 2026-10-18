@@ -44,6 +44,7 @@ var mcpCaveatIDsCore = []mcpCaveatID{
 	mcpCaveatChaosTimesApproximate,
 	mcpCaveatAlertRulesNotFiring,
 	mcpCaveatClusterDataCached,
+	mcpCaveatControllerDescribed,
 }
 
 func TestMCPCaveatCatalogue(t *testing.T) {

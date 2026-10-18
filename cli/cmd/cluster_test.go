@@ -74,8 +74,9 @@ func TestControllerLabel(t *testing.T) {
 	}
 }
 
-func TestClusterInfoCmd_Table(t *testing.T) {
-	mockResponse := `{
+// Broker 1 answered DescribeCluster; broker 2 leads the KRaft quorum.
+const (
+	describedClusterInfo = `{
 		"clusterId": "test-cluster-123",
 		"controller": {"id": 1, "host": "broker-1", "port": 9092, "rack": "us-east-1a"},
 		"brokers": [
@@ -84,7 +85,18 @@ func TestClusterInfoCmd_Table(t *testing.T) {
 		],
 		"brokerCount": 2
 	}`
-	ts, buf := setupTest(t, "GET", "/api/cluster/info", 200, mockResponse)
+	leaderTwoCheck = `{
+		"clusterId": "test-cluster-123", "brokers": 2, "controllerId": 1,
+		"partitionHealth": {"underReplicated": 0, "offline": 0},
+		"kraftQuorum": {"leaderId": 2, "voters": 2, "observers": 0, "hasLeader": true},
+		"status": "HEALTHY"}`
+)
+
+func TestClusterInfoCmd_Table(t *testing.T) {
+	ts, buf := setupRoutes(t, map[string]string{
+		"/api/cluster/info":  describedClusterInfo,
+		"/api/cluster/check": leaderTwoCheck,
+	})
 	defer ts.Close()
 
 	err := clusterInfoCmd.RunE(clusterInfoCmd, nil)
@@ -102,9 +114,24 @@ func TestClusterInfoCmd_Table(t *testing.T) {
 	if !strings.Contains(out, "us-east-1a") {
 		t.Errorf("missing rack info: %s", out)
 	}
-	// Broker 1 is controller, should have star
-	if !strings.Contains(out, "★") {
-		t.Errorf("missing controller star indicator: %s", out)
+	if !tableHasRow(out, []string{"Controller", "KRaft leader 2"}) {
+		t.Errorf("want the quorum leader as the controller:\n%s", out)
+	}
+	if !tableHasRow(out, []string{"broker-2", "us-east-1b", "★"}) || tableHasRow(out, []string{"broker-1", "★"}) {
+		t.Errorf("want the star on broker 2, the quorum leader, not broker 1:\n%s", out)
+	}
+}
+
+func TestClusterInfoCmdWithoutACheck(t *testing.T) {
+	ts, buf := setupRoutes(t, map[string]string{"/api/cluster/info": describedClusterInfo})
+	defer ts.Close()
+
+	if err := clusterInfoCmd.RunE(clusterInfoCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stripAnsi(buf.String())
+	if !tableHasRow(out, []string{"Controller", "unknown (cluster check failed)"}) || strings.Contains(out, "★") {
+		t.Errorf("without a check the controller is unknown, and no broker is starred:\n%s", out)
 	}
 }
 

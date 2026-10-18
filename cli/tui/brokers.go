@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,6 +14,7 @@ import (
 type brokersModel struct {
 	client  *client.Client
 	info    *client.ClusterInfo
+	check   *client.ClusterHealthReport // nil when the cluster check failed
 	cursor  int
 	width   int
 	height  int
@@ -21,8 +23,9 @@ type brokersModel struct {
 }
 
 type brokersLoadedMsg struct {
-	info *client.ClusterInfo
-	err  error
+	info  *client.ClusterInfo
+	check *client.ClusterHealthReport
+	err   error
 }
 
 func newBrokersModel(c *client.Client) brokersModel {
@@ -32,7 +35,13 @@ func newBrokersModel(c *client.Client) brokersModel {
 func (m brokersModel) loadBrokers() tea.Cmd {
 	return func() tea.Msg {
 		info, err := m.client.KafkaBrokers(context.Background())
-		return brokersLoadedMsg{info: info, err: err}
+		if err != nil {
+			return brokersLoadedMsg{err: err}
+		}
+		// info.Controller is whichever broker answered DescribeCluster; the
+		// check names the KRaft quorum leader.
+		check, _ := m.client.ClusterCheck(context.Background())
+		return brokersLoadedMsg{info: info, check: check}
 	}
 }
 
@@ -45,6 +54,7 @@ func (m brokersModel) Update(msg tea.Msg) (brokersModel, tea.Cmd) {
 	case brokersLoadedMsg:
 		m.loading = false
 		m.info = msg.info
+		m.check = msg.check
 		m.err = msg.err
 		// A broker gone since the last refresh left the cursor past the end,
 		// and View panicked indexing it.
@@ -85,8 +95,10 @@ func (m brokersModel) View() string {
 	}
 
 	controllerID := ""
-	if m.info.Controller != nil {
-		controllerID = fmt.Sprintf("%v", m.info.Controller.ID)
+	if m.check != nil {
+		if id, ok := m.check.ActiveController(); ok {
+			controllerID = strconv.Itoa(id)
+		}
 	}
 
 	listWidth := 32
@@ -120,7 +132,7 @@ func (m brokersModel) View() string {
 
 	b := m.info.Brokers[m.cursor]
 	isCtrl := fmt.Sprintf("%v", b.ID) == controllerID
-	role := dimStyle.Render("follower")
+	role := dimStyle.Render("broker")
 	if isCtrl {
 		role = healthyStyle.Render("★ CONTROLLER")
 	}
@@ -139,7 +151,7 @@ func (m brokersModel) View() string {
 		dimStyle.Render("Cluster") + "\n" +
 		detailKeyStyle.Render("  Cluster ID") + detailValueStyle.Render(m.info.ClusterID) + "\n" +
 		detailKeyStyle.Render("  Brokers") + detailValueStyle.Render(fmt.Sprintf("%v", m.info.BrokerCount)) + "\n" +
-		detailKeyStyle.Render("  Controller") + detailValueStyle.Render(controllerID)
+		detailKeyStyle.Render("  Controller") + detailValueStyle.Render(controllerText(m.check))
 
 	detailWidth := m.width - listWidth - 6
 	if detailWidth < 20 {
@@ -148,4 +160,20 @@ func (m brokersModel) View() string {
 	detailPane := detailBorderStyle.Width(detailWidth).Render(detail)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
+}
+
+// controllerText names the active controller as kates cluster check does.
+func controllerText(check *client.ClusterHealthReport) string {
+	if check == nil {
+		return dimStyle.Render("unknown (cluster check failed)")
+	}
+	id, ok := check.ActiveController()
+	switch {
+	case !ok:
+		return errorStyle.Render("✖ no KRaft leader")
+	case check.KraftQuorum == nil:
+		return fmt.Sprintf("Broker %d", id)
+	default:
+		return fmt.Sprintf("KRaft leader %d", id)
+	}
 }

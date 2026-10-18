@@ -444,7 +444,7 @@ kates cluster alerts
 
 #### cluster info
 
-Display cluster metadata including broker count, controller identity, cluster ID, and the broker list with rack/AZ placement. The controller broker is marked with ★ in the Role column.
+Display cluster metadata: the cluster ID, the broker count, the active controller, and the broker list with rack/AZ placement. The controller is the KRaft quorum leader, which the command reads from `GET /api/cluster/check`: the controller that [GET /api/cluster/info](11-api-reference.md#get-apiclusterinfo) reports is whichever broker answered Kafka's `DescribeCluster`. A broker that is also the leader is marked with ★ in the Role column; on `krafter` the controllers are nodes of their own, so no broker is. `-o json` prints the `/api/cluster/info` answer unchanged.
 
 ```bash
 kates cluster info
@@ -457,17 +457,12 @@ Expected output:
 
   Overview
   Broker Count:   3
-
-  Controller
-  Node ID:    0
-  Host:       krafter-broker-0.kafka.svc
-  Port:       9092
-  Rack / AZ:  alpha
+  Controller:     KRaft leader 3
 
   Brokers (3)
   ID   Host                         Port   Rack / AZ   Role
   ──   ────                         ────   ─────────   ────
-  0    krafter-broker-0.kafka.svc   9092   alpha       ★
+  0    krafter-broker-0.kafka.svc   9092   alpha
   1    krafter-broker-1.kafka.svc   9092   sigma
   2    krafter-broker-2.kafka.svc   9092   gamma
 ```
@@ -1784,7 +1779,7 @@ kates kafka
 
 #### kafka brokers
 
-List brokers with ID, host, port, rack, and controller status.
+List brokers with ID, host, port, rack, and controller status. As in `kates cluster info`, the controller is the KRaft quorum leader from `GET /api/cluster/check`: the banner names it, and the Role column marks it only on a broker that is also a controller.
 
 ```bash
 kates kafka brokers

@@ -560,7 +560,7 @@ The command prints one row per broker in the cluster, including a broker that le
 
 | Column | What it shows |
 |--------|---------------|
-| Broker | The broker's ID; a star marks the controller |
+| Broker | The broker's ID |
 | Host (Rack) | The broker's host, and its rack, or `-` when it has none |
 | Leaders / Total | The topic's partitions this broker leads, out of all of them |
 | Share | That count as a percentage |

@@ -34,7 +34,7 @@ func registerMCPClusterOverview(s *mcp.Server, deps *mcpDeps) {
 			"firing, and their text is third-party and fenced. Figures can be up to 30 seconds old. Counts are " +
 			"always whole; on a large or degraded cluster the lists are cut and long rule text is dropped to fit one " +
 			"result, and truncated says so. Takes no arguments and only reads.",
-	}, mcpClusterOverview, mcpCaveatAlertRulesNotFiring, mcpCaveatClusterDataCached)
+	}, mcpClusterOverview, mcpCaveatAlertRulesNotFiring, mcpCaveatClusterDataCached, mcpCaveatControllerDescribed)
 }
 
 // Caps on the lists cluster_overview returns. A lab cluster has a handful of

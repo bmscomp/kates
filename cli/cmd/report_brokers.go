@@ -66,10 +66,9 @@ var reportBrokersCmd = &cobra.Command{
 				rackLabel = "-"
 			}
 
+			// No ★ for isController: the snapshot keeps whichever broker answered
+			// DescribeCluster, which on KRaft is not the active controller.
 			brokerLabel := fmt.Sprintf("%d", b.BrokerID)
-			if b.IsController {
-				brokerLabel = fmt.Sprintf("%d ★", b.BrokerID)
-			}
 
 			skewLabel := renderSkew(b.SkewPercent, b.Skewed)
 
@@ -176,7 +175,8 @@ var reportSnapshotCmd = &cobra.Command{
 
 		output.SubHeader("Overview")
 		output.KeyValue("Broker Count", fmt.Sprintf("%d", snapshot.BrokerCount))
-		output.KeyValue("Controller ID", fmt.Sprintf("%d", snapshot.ControllerID))
+		// No controller: controllerId is whichever broker answered DescribeCluster,
+		// which on KRaft is not the active controller, and the snapshot keeps no quorum.
 
 		if len(snapshot.Brokers) > 0 {
 			output.SubHeader(fmt.Sprintf("Brokers (%d)", len(snapshot.Brokers)))
@@ -186,12 +186,8 @@ var reportSnapshotCmd = &cobra.Command{
 				if rack == "" {
 					rack = "-"
 				}
-				ctrlBadge := ""
-				if b.ID == snapshot.ControllerID {
-					ctrlBadge = " ★"
-				}
 				rows = append(rows, []string{
-					fmt.Sprintf("%d%s", b.ID, ctrlBadge),
+					fmt.Sprintf("%d", b.ID),
 					b.Host,
 					fmt.Sprintf("%d", b.Port),
 					rack,
