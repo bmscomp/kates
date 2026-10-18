@@ -234,7 +234,7 @@ var mcpCaveatsCore = []mcpCaveat{
 	{
 		ID:   mcpCaveatClusterDataCached,
 		Text: "The backend caches cluster info and the partition health check for 30 seconds, so those figures can be up to 30 seconds old.",
-		Refs: []string{mcpJava + "service/ClusterHealthService.java:45,72-89,233-236,367-368"},
+		Refs: []string{mcpJava + "service/ClusterHealthService.java:45,72-89,233-236,371-372"},
 	},
 }
 
