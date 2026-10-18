@@ -48,12 +48,14 @@ func init() {
 func runAuto(cmd *cobra.Command, args []string) error {
 	output.Header("Kates Auto-Deploy")
 
-	executor := detect.NewOSExecutor()
+	executor := defaultExecutor
 	collector := detect.NewCollector(executor)
+	// Introspection creates a namespace, a Secret and prober pods. A dry run
+	// collects without them, as kates deploy --dry-run does.
+	collector.ReadOnly = autoDryRun
 
 	if err := collector.Preflight(); err != nil {
-		output.Error(fmt.Sprintf("Preflight failed: %v", err))
-		os.Exit(1)
+		return cmdErr(fmt.Sprintf("Preflight failed: %v", err))
 	}
 
 	// 1. Detect Phase
@@ -62,6 +64,7 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	report, collectErr := collector.Collect(context.Background())
 	if collectErr != nil {
 		output.Error(fmt.Sprintf("Cluster introspection failed: %v", collectErr))
+		// The CLI reference documents exit 2 here; an error from RunE exits 1.
 		os.Exit(2)
 	}
 
