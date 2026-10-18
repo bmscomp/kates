@@ -287,14 +287,14 @@ class Subprocess(unittest.TestCase):
     def test_overrides_of_the_context_are_stripped(self) -> None:
         probe = [sys.executable, "-c",
                  "import json, os; print(json.dumps({k: os.environ.get(k) for k in "
-                 "('KATES_URL', 'KATES_API_KEY', 'KATES_CONTEXT', 'KATES_OUTPUT', 'KEEP_ME')}))"]
+                 "('KATES_URL', 'KATES_API_KEY', 'KATES_CONTEXT', 'KATES_OUTPUT', 'KATES_PROFILES', 'KEEP_ME')}))"]
         env = {"KATES_URL": "http://elsewhere", "KATES_API_KEY": "leak", "KATES_CONTEXT": "prod",
-               "KATES_OUTPUT": "table", "KEEP_ME": "1"}
+               "KATES_OUTPUT": "table", "KATES_PROFILES": "chaos", "KEEP_ME": "1"}
         with mock.patch.dict(os.environ, env):
             code, out, _ = setup.run_kates_subprocess(probe, 30)
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out), {"KATES_URL": None, "KATES_API_KEY": None, "KATES_CONTEXT": None,
-                                           "KATES_OUTPUT": None, "KEEP_ME": "1"})
+                                           "KATES_OUTPUT": None, "KATES_PROFILES": "all", "KEEP_ME": "1"})
 
     def test_a_missing_binary(self) -> None:
         code, _, err = setup.run_kates_subprocess(["/nonexistent/kates", "version"], 5)

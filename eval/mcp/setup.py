@@ -76,6 +76,7 @@ class HarnessAPI(oracle.KatesAPI):
 
 def run_kates_subprocess(argv: list[str], timeout: float) -> tuple[int, str, str]:
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
+    env["KATES_PROFILES"] = "all"  # setup is the human doing everything, whatever the context's profiles
     try:
         p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:

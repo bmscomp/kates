@@ -64,11 +64,16 @@ func configPath() string {
 
 func loadConfig() Config {
 	cfg, err := readConfig()
-	if err != nil {
+	if err != nil && !configWarned {
 		fmt.Fprintf(os.Stderr, "Warning: could not load config %s: %v\n", configPath(), err)
+		configWarned = true
 	}
 	return cfg
 }
+
+// configWarned keeps loadConfig's warning to one a process: the help function
+// and the pre-run both load the config.
+var configWarned bool
 
 // readConfig returns the config on disk, or the built-in default context when
 // there is no file. It reports a file it cannot read or parse, which
@@ -402,7 +407,7 @@ Toolbox:
   upgrade        Build and install a new version of the CLI
 
 Configuration:
-  ctx            Manage server contexts (like kubectl contexts)
+  ctx            Manage Kates server contexts (not kubectl contexts)
   ctx profiles   Show or choose the command profiles a context enables
   ports          Port-forward the Kates services to localhost
   completion     Shell auto-completion (bash, zsh, fish, powershell)
@@ -499,6 +504,7 @@ var rootCmd = &cobra.Command{
 			}
 		}
 		activeContext = ctxName
+		activeProfileNames, activeProfilesFrom = profiles, profilesFrom
 		apiURLOverridden = urlOverridden
 		// The context's API key, proxy and TLS setting belong to its server.
 		// They used to go with whatever URL --url or KATES_URL gave, so the
@@ -653,15 +659,25 @@ func init() {
 
 	defaultHelp := rootCmd.HelpFunc()
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		if cmd != rootCmd {
-			defaultHelp(cmd, args)
-			return
-		}
 		// Cobra prints help before PersistentPreRunE runs, so the profiles are
 		// read here too.
 		readContextEnv()
 		ctxName, ctx, _ := resolveContext(loadConfig())
 		profiles, from := activeProfiles(ctxName, ctx)
+		if v := os.Getenv("KATES_PLAIN"); plainOutput || v == "true" || v == "1" {
+			output.SetPlain(true)
+		}
+		if cmd != rootCmd {
+			defaultHelp(cmd, args)
+			// The help of a command the profiles refuse says so, and how to run it.
+			if top := topLevel(cmd); !commandEnabled(top.Name(), profiles) {
+				fmt.Fprintln(output.Err)
+				fmt.Fprintln(output.Err, output.WarningStyle.Render(
+					fmt.Sprintf("  ! kates %s needs the %s profile", top.Name(), orList(commandProfiles[top.Name()]))))
+				profileFix(cmd, ctxName, profiles, from)
+			}
+			return
+		}
 		fmt.Println(profileHelp(cmd.Long, ctxName, profiles, from))
 		fmt.Println()
 		fmt.Println("Usage:")
