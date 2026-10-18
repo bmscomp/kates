@@ -254,12 +254,22 @@ public class ClusterHealthService {
                             .all()
                             .toCompletionStage());
 
-            // Note: describeMetadataQuorum might not be supported on all versions, so we fall back gracefully.
-            Uni<org.apache.kafka.clients.admin.QuorumInfo> quorumUni = Uni.createFrom()
+            // A ZooKeeper broker does not support DescribeQuorum, so there is no quorum to report.
+            // On KRaft only the quorum leader answers it: any other failure leaves the leader unknown.
+            Uni<Map<String, Object>> quorumUni = Uni.createFrom()
                     .completionStage(
                             client.describeMetadataQuorum().quorumInfo().toCompletionStage())
+                    .map(ClusterHealthService::quorumHealth)
+                    .onFailure(org.apache.kafka.common.errors.UnsupportedVersionException.class)
+                    .recoverWithNull()
                     .onFailure()
-                    .recoverWithNull();
+                    .recoverWithItem(e -> {
+                        Map<String, Object> unknown = new LinkedHashMap<>();
+                        unknown.put("leaderId", -1);
+                        unknown.put("hasLeader", false);
+                        unknown.put("issue", "UNAVAILABLE: " + e.getClass().getSimpleName());
+                        return unknown;
+                    });
 
             return Uni.combine()
                     .all()
@@ -279,14 +289,14 @@ public class ClusterHealthService {
                             Collection<Node>,
                             Set<String>,
                             Collection<ConsumerGroupListing>,
-                            org.apache.kafka.clients.admin.QuorumInfo>
+                            Map<String, Object>>
                     tuple) {
         String clusterId = tuple.getItem1();
         Node controller = tuple.getItem2();
         Collection<Node> nodes = tuple.getItem3();
         Set<String> topics = tuple.getItem4();
         Collection<ConsumerGroupListing> groups = tuple.getItem5();
-        org.apache.kafka.clients.admin.QuorumInfo quorum = tuple.getItem6();
+        Map<String, Object> quorum = tuple.getItem6();
 
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("clusterId", clusterId);
@@ -347,19 +357,13 @@ public class ClusterHealthService {
             }
 
             if (quorum != null) {
-                Map<String, Object> quorumHealth = new LinkedHashMap<>();
-                quorumHealth.put("leaderId", quorum.leaderId());
-                quorumHealth.put("voters", quorum.voters().size());
-                quorumHealth.put("observers", quorum.observers().size());
-
-                boolean hasLeader = quorum.leaderId() >= 0;
-                quorumHealth.put("hasLeader", hasLeader);
-
-                if (!hasLeader) {
+                if ("NO_LEADER".equals(quorum.get("issue"))) {
                     status = "CRITICAL";
-                    quorumHealth.put("issue", "NO_LEADER");
+                } else if (quorum.containsKey("issue") && status.equals("HEALTHY")) {
+                    // Unverified, not proven leaderless: a quorum slow under load times out the same way.
+                    status = "WARNING";
                 }
-                report.put("kraftQuorum", quorumHealth);
+                report.put("kraftQuorum", quorum);
             }
 
             report.put("status", status);
@@ -369,5 +373,20 @@ public class ClusterHealthService {
 
             return report;
         });
+    }
+
+    private static Map<String, Object> quorumHealth(org.apache.kafka.clients.admin.QuorumInfo quorum) {
+        Map<String, Object> quorumHealth = new LinkedHashMap<>();
+        quorumHealth.put("leaderId", quorum.leaderId());
+        quorumHealth.put("voters", quorum.voters().size());
+        quorumHealth.put("observers", quorum.observers().size());
+
+        boolean hasLeader = quorum.leaderId() >= 0;
+        quorumHealth.put("hasLeader", hasLeader);
+
+        if (!hasLeader) {
+            quorumHealth.put("issue", "NO_LEADER");
+        }
+        return quorumHealth;
     }
 }

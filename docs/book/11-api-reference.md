@@ -580,7 +580,7 @@ Kafka cluster metadata: cluster ID, controller, and brokers.
 }
 ```
 
-Hosts and racks are what the brokers advertise: here the `krafter` cluster that `kates deploy` creates on the Kind cluster, with one broker pool per zone. `controller` is whatever Kafka's `DescribeCluster` answer names, and a KRaft broker answers with an arbitrary live broker rather than the active controller, so it can change between calls. The KRaft quorum leader is `kraftQuorum.leaderId` in the `GET /api/cluster/check` response.
+Hosts and racks are what the brokers advertise: here the `krafter` cluster that `kates deploy` creates on the Kind cluster, with one broker pool per zone. `controller` is whatever Kafka's `DescribeCluster` answer names, and a KRaft broker answers with an arbitrary live broker rather than the active controller, so it can change between calls. The KRaft quorum leader is `kraftQuorum.leaderId` in the `GET /api/cluster/check` response. `kraftQuorum` is absent on a ZooKeeper cluster, which does not support the quorum call. On KRaft only the quorum leader answers that call, so when the quorum has no leader, or Kates cannot reach it, `kraftQuorum` has `hasLeader: false`, `leaderId: -1` and an `issue` naming the failure, such as `UNAVAILABLE: TimeoutException`. That makes `status` `WARNING` unless it is already `CRITICAL`: a call that times out does not prove the quorum has no leader.
 
 #### GET /api/cluster/topics
 
