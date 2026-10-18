@@ -439,6 +439,15 @@
                 }
             }
         },
+        "chaos": {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "enum": [ "", "litmus-crd", "kubernetes", "hybrid", "noop" ]
+                }
+            }
+        },
         "faultTolerance": {
             "type": "object",
             "properties": {

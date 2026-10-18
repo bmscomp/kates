@@ -42,6 +42,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `engine.maxDurationMs` | `7200000` | Maximum planned duration accepted for one run |
 | `engine.reaperGraceMs` | `300000` | Grace after a `RUNNING` or `STOPPING` run's planned duration before the reaper fails it |
 | `engine.submissionTimeoutMs` | `120000` | Maximum time a run may stay `PENDING` before submission is considered stranded |
+| `chaos.provider` | `""` | Chaos provider every fault goes through: `litmus-crd`, `kubernetes`, `hybrid` or `noop`. Empty keeps the backend's default, `litmus-crd`. `kates deploy --with-chaos=false` sets `noop` when no chaos release is installed. See [Chaos permissions](#chaos-permissions) |
 | `prometheus.url` | `http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090` | Prometheus the backend queries for a disruption's Kafka metrics: kube-prometheus-stack's Service for `charts/monitoring` installed as release `monitoring` in namespace `monitoring`, as `kates deploy` does. After `make monitoring`, which uses namespace `kafka`, set `http://monitoring-kube-prometheus-prometheus.kafka.svc:9090` and `networkPolicy.prometheus.namespace=kafka` |
 
 ### Networking
@@ -120,12 +121,11 @@ With the default chaos provider, `litmus-crd`, Kates only creates and watches `C
 
 `ROLLING_RESTART` needs none of these, on either backend, and neither does `SCALE_DOWN` on a Strimzi cluster. On a Strimzi cluster `ROLLING_RESTART` annotates the Kafka pods for the Strimzi Cluster Operator to roll, and on a plain StatefulSet, such as `charts/legacy-kafka`, it restarts the StatefulSet. `SCALE_DOWN` lowers `spec.replicas` of a KafkaNodePool. Both run on either backend, so the default role grants `patch` on pods, on StatefulSets and on `kafkanodepools`. On a Kafka that Strimzi does not manage, `SCALE_DOWN` also patches the StatefulSet, to record its original replica count.
 
-These rules are cluster-wide, like the rest of the role, and `pods/ephemeralcontainers` lets Kates start a container in any pod. Leave them off unless you use the direct backend. It is selected with an environment variable:
+These rules are cluster-wide, like the rest of the role, and `pods/ephemeralcontainers` lets Kates start a container in any pod. Leave them off unless you use the direct backend. It is selected with `chaos.provider`:
 
 ```yaml
-extraEnv:
-  - name: KATES_CHAOS_PROVIDER
-    value: kubernetes
+chaos:
+  provider: kubernetes
 rbac:
   directChaos: true
 ```

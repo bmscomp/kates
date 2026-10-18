@@ -2,11 +2,10 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: the NetworkPolicy's Kafka egress follows networkPolicy.kafka.namespace
-# instead of always `kafka`, opens Trogdor's 8889 there instead of in
-# `monitoring`, and a new rule opens TCP 443/6443 for the Kubernetes API.
-# appVersion is unchanged.
-version: 0.11.1
+# Patch: a new chaos.provider value renders KATES_CHAOS_PROVIDER in the
+# configmap; empty by default, so a release that leaves it out renders as
+# before. appVersion is unchanged.
+version: 0.11.2
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -30,6 +29,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "chaos.provider (KATES_CHAOS_PROVIDER, default empty: the backend's litmus-crd) picks the chaos provider every fault goes through: litmus-crd, kubernetes, hybrid or noop. It used to be set only through extraEnv. `kates deploy --with-chaos=false` sets noop when no chaos release is installed, so a stack without Litmus skips its faults by design instead of logging an ERROR and falling back to noop. values.schema.json refuses any other name"
     - kind: fixed
       description: "On a CNI that enforces NetworkPolicy, the chart's NetworkPolicy cut the backend off from the Kubernetes API, so every chaos fault, pod listing, KafkaTopic CR and orphan recovery failed; its Kafka egress always named namespace kafka, whatever networkPolicy.kafka.namespace said; and it allowed Trogdor's 8889 only to namespace monitoring, where no coordinator runs. The Kafka egress now follows networkPolicy.kafka.namespace (default kafka), 8889 moves from monitoring to that namespace, and a new ports-only rule opens TCP 443 and 6443 to any address for the Kubernetes API. Upgrading: a release that set networkPolicy.kafka.namespace to anything but the namespace Kafka runs in loses Kafka, as the value now takes effect; a Trogdor coordinator outside that namespace needs a networkPolicy.egressRules entry"
     - kind: changed
