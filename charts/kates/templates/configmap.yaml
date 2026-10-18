@@ -176,6 +176,9 @@ data:
   KATES_TESTS_ROUNDTRIP_DURATION_MS: {{ .Values.tests.roundtrip.durationMs | default .Values.defaults.durationMs | quote }}
   KATES_TESTS_ROUNDTRIP_NUM_PRODUCERS: {{ .Values.tests.roundtrip.numProducers | default .Values.defaults.numProducers | quote }}
   KATES_TESTS_ROUNDTRIP_NUM_CONSUMERS: {{ .Values.tests.roundtrip.numConsumers | default .Values.defaults.numConsumers | quote }}
+  {{- with .Values.chaos.provider }}
+  KATES_CHAOS_PROVIDER: {{ . | quote }}
+  {{- end }}
 
   {{- with .Values.faultTolerance }}
   COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_CREATETOPIC_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}

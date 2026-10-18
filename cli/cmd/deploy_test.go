@@ -204,6 +204,9 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 			if !strings.Contains(cmd, "--set networkPolicy.kafka.namespace=kates-test") {
 				t.Errorf("Expected the Kates NetworkPolicy to allow Kafka in kates-test, got: %s", cmd)
 			}
+			if !strings.Contains(cmd, "--set chaos.provider=noop") {
+				t.Errorf("Expected Kates on the noop chaos provider without Litmus, got: %s", cmd)
+			}
 		}
 	}
 
@@ -282,6 +285,9 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 			if !strings.Contains(cmd, "--set networkPolicy.kafka.namespace=kafka-sys") {
 				t.Errorf("Expected the Kates NetworkPolicy to allow Kafka in kafka-sys, got: %s", cmd)
 			}
+			if strings.Contains(cmd, "chaos.provider") {
+				t.Errorf("Expected Kates on the chart's chaos provider with Litmus, got: %s", cmd)
+			}
 		}
 		if strings.Contains(cmd, "helm upgrade --install chaos") {
 			foundChaos = true
@@ -305,6 +311,32 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 
 	if !foundKafka || !foundKates || !foundChaos || !foundSchema || !foundPostgres || !foundKafkaConnect {
 		t.Errorf("Missing expected commands. Kafka: %v, Kates: %v, Chaos: %v, Schema: %v, Postgres: %v, Connect: %v", foundKafka, foundKates, foundChaos, foundSchema, foundPostgres, foundKafkaConnect)
+	}
+}
+
+func TestKatesChaosArgs(t *testing.T) {
+	origChaos, origDeployed := deployWithChaos, isHelmReleaseDeployedFn
+	t.Cleanup(func() { deployWithChaos, isHelmReleaseDeployedFn = origChaos, origDeployed })
+
+	for _, tc := range []struct {
+		name          string
+		withChaos     bool
+		chaosReleased bool
+		want          string
+	}{
+		{"with chaos", true, false, ""},
+		{"without chaos, none installed", false, false, "--set chaos.provider=noop"},
+		{"without chaos, an earlier release installed", false, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deployWithChaos = tc.withChaos
+			isHelmReleaseDeployedFn = func(_ context.Context, release, namespace string) bool {
+				return tc.chaosReleased && release == "chaos" && namespace == "chaos-sys"
+			}
+			if got := strings.Join(katesChaosArgs(context.Background(), "chaos-sys"), " "); got != tc.want {
+				t.Errorf("katesChaosArgs = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
