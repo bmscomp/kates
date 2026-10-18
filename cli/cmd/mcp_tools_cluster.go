@@ -236,7 +236,7 @@ func mcpHealthFrom(call *mcpCall, r *client.ClusterHealthReport) mcpClusterHealt
 		})
 	}
 	// The backend lists problems in the order it walks a map of topics, with
-	// OFFLINE and UNDER_REPLICATED mixed (ClusterHealthService.java:308-329).
+	// OFFLINE and UNDER_REPLICATED mixed (ClusterHealthService.java:318-339).
 	// Offline partitions first, so the cap never drops the ones that make the
 	// status CRITICAL; then by topic and partition, so a result is stable.
 	sort.SliceStable(problems, func(i, j int) bool {
