@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -213,16 +215,7 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Fire the server-side cancel as a command. It used to run
 					// synchronously HERE, inside Update — freezing the entire
 					// TUI for up to the 30s client timeout.
-					var cancelCmd tea.Cmd
-					if id := m.runTestID; id != "" {
-						c := m.client
-						cancelCmd = func() tea.Msg {
-							ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-							defer cancel()
-							_ = c.CancelTest(ctx, id)
-							return nil
-						}
-					}
+					cancelCmd := m.cancelRun(m.runTestID)
 					m.running = false
 					m.runTestID = ""
 					m.sweepActive = false
@@ -395,7 +388,9 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case labTestStartedMsg:
 		if !m.running {
-			return m, nil // cancelled while the test was being created
+			// Cancelled while the test was being created. The run the API
+			// started anyway used to be dropped here, and ran on unwatched.
+			return m, m.cancelRun(msg.run.ID)
 		}
 		m.runTestID = msg.run.ID
 		m.lastTestReq = msg.req
@@ -991,8 +986,9 @@ func (m LabModel) viewDiff(width int) string {
 			paramSepW = 10
 		}
 		sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", paramSepW)) + "\n")
-		for key, aVal := range a.Params {
-			bVal := b.Params[key]
+		// In key order: ranging over the map reordered the rows every frame.
+		for _, key := range slices.Sorted(maps.Keys(a.Params)) {
+			aVal, bVal := a.Params[key], b.Params[key]
 			if aVal != bVal {
 				sb.WriteString(fmt.Sprintf("  %-*s %s → %s\n",
 					colW,
@@ -1042,6 +1038,20 @@ func (m LabModel) currentParams() map[string]string {
 		params[p.Key] = p.Values[p.Current]
 	}
 	return params
+}
+
+// cancelRun cancels run id on the server, as a command: nil for no run.
+func (m LabModel) cancelRun(id string) tea.Cmd {
+	if id == "" {
+		return nil
+	}
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = c.CancelTest(ctx, id)
+		return nil
+	}
 }
 
 // runTest and retryTest run as tea.Cmd goroutines against a copy of the
@@ -1112,7 +1122,12 @@ func (m LabModel) pollTestOnce(testID string, deadline time.Time, maxWait time.D
 		}
 
 		status := strings.ToUpper(updated.Status)
-		if status == "DONE" || status == "COMPLETED" || status == "FAILED" || status == "ERROR" {
+		// A run that failed measured nothing. Taken as a result, it became a
+		// 0 rec/s iteration, and a sweep went on to its next, doomed step.
+		if status == "FAILED" || status == "ERROR" {
+			return labTestDoneMsg{testID: testID, err: fmt.Errorf("test %s ended %s", testID, status)}
+		}
+		if status == "DONE" || status == "COMPLETED" {
 			summary, _ := m.client.ReportSummary(context.Background(), testID)
 			return labTestDoneMsg{testID: testID, run: updated, summary: summary}
 		}

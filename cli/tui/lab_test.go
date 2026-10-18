@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bmscomp/kates/cli/client"
 	tea "github.com/charmbracelet/bubbletea"
@@ -312,8 +313,17 @@ func TestLabTestStartedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("dropped when the run was cancelled during creation", func(t *testing.T) {
-		m := NewLab(nil, "")
+	// x while CreateTest was in flight dropped the run the API then started,
+	// and it ran on with nothing watching it.
+	t.Run("cancelled on the server when the run was cancelled during creation", func(t *testing.T) {
+		var cancels []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cancels = append(cancels, r.Method+" "+r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		t.Cleanup(srv.Close)
+		m := NewLab(client.New(srv.URL), "")
 		m, cmd := updateLab(t, m, msg)
 		if m.runTestID != "" {
 			t.Errorf("runTestID = %q, want empty", m.runTestID)
@@ -321,10 +331,66 @@ func TestLabTestStartedMsg(t *testing.T) {
 		if m.lastTestReq != nil {
 			t.Error("lastTestReq set from a dropped message")
 		}
-		if cmd != nil {
-			t.Error("cmd = non-nil, want nil")
+		if cmd == nil {
+			t.Fatal("cmd = nil, want the server-side cancel of run-42")
+		}
+		cmd()
+		if strings.Join(cancels, ",") != "POST /api/tests/run-42/cancel" {
+			t.Errorf("requests = %q, want the cancel of run-42", cancels)
 		}
 	})
+}
+
+// A FAILED or ERROR run came back as a result: a sweep recorded a 0 rec/s
+// iteration and launched its next step against the same failure.
+func TestLabFailedRunStopsTheSweep(t *testing.T) {
+	for _, status := range []string{"FAILED", "ERROR"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			m := newRunningLab(t, newLabServerClient(t, `{"id":"t1","status":"`+status+`"}`))
+			m.sweepActive = true
+			m.sweepParam = 1
+			m.params[1].Current = 0
+
+			done := m.pollTestOnce("t1", time.Now().Add(time.Minute), time.Minute)()
+			if d, ok := done.(labTestDoneMsg); !ok || d.err == nil {
+				t.Fatalf("poll = %#v, want a labTestDoneMsg with an error", done)
+			}
+			m, cmd := updateLab(t, m, done)
+			if len(m.iterations) != 0 || m.sweepActive || m.running || cmd != nil {
+				t.Errorf("iterations %d, sweep %v, running %v, cmd %v: want no iteration and the sweep stopped",
+					len(m.iterations), m.sweepActive, m.running, cmd != nil)
+			}
+			if !strings.Contains(m.status, status) {
+				t.Errorf("status %q does not say the run ended %s", m.status, status)
+			}
+		})
+	}
+}
+
+// The parameter rows of the diff came from ranging over a map, so they changed
+// order from one frame to the next.
+func TestLabDiffParameterRowsKeepTheirOrder(t *testing.T) {
+	m := NewLab(nil, "")
+	m.width, m.height = 160, 50
+	m.iterations = []labIteration{
+		{Number: 1, Params: map[string]string{"acks": "1", "batchSize": "16384", "compression": "lz4", "lingerMs": "0", "producers": "4"}},
+		{Number: 2, Params: map[string]string{"acks": "all", "batchSize": "65536", "compression": "zstd", "lingerMs": "5", "producers": "8"}},
+	}
+	first := m.viewDiff(160)
+	for range 20 {
+		if got := m.viewDiff(160); got != first {
+			t.Fatalf("the diff changed between frames:\n%s\n---\n%s", first, got)
+		}
+	}
+	last := -1
+	for _, key := range []string{"acks", "batchSize", "compression", "lingerMs", "producers"} {
+		at := strings.Index(first, key)
+		if at < last {
+			t.Errorf("%s is not after the keys before it in sorted order:\n%s", key, first)
+		}
+		last = at
+	}
 }
 
 func TestLabTestDoneMsg(t *testing.T) {
