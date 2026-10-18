@@ -1666,9 +1666,11 @@ func (c *Collector) getWorkloadPressure() WorkloadPressure {
 		return wp
 	}
 
-	// Per-node accumulation
+	// Per-node accumulation. Memory adds up in MiB and becomes GiB once:
+	// converted per container, every request under 1Gi counted as nothing.
 	nodeCPU := make(map[string]int)
-	nodeMem := make(map[string]int)
+	nodeMemMiB := make(map[string]float64)
+	var totalMemMiB float64
 
 	for _, pod := range data.Items {
 		wp.TotalPods++
@@ -1677,7 +1679,7 @@ func (c *Collector) getWorkloadPressure() WorkloadPressure {
 		}
 		for _, c := range pod.Spec.Containers {
 			cpuStr := c.Resources.Requests.CPU
-			memStr := c.Resources.Requests.Memory
+			memMiB := memoryMiB(c.Resources.Requests.Memory)
 
 			// Parse CPU
 			cpuM := 0
@@ -1688,30 +1690,19 @@ func (c *Collector) getWorkloadPressure() WorkloadPressure {
 				cpuM = cores * 1000
 			}
 
-			// Parse Memory (to GiB, approximate)
-			memGi := 0
-			if strings.HasSuffix(memStr, "Gi") {
-				memGi, _ = strconv.Atoi(strings.TrimSuffix(memStr, "Gi"))
-			} else if strings.HasSuffix(memStr, "Mi") {
-				mi, _ := strconv.Atoi(strings.TrimSuffix(memStr, "Mi"))
-				memGi = mi / 1024 // rough conversion
-			} else if strings.HasSuffix(memStr, "Ki") {
-				ki, _ := strconv.Atoi(strings.TrimSuffix(memStr, "Ki"))
-				memGi = ki / 1048576
-			}
-
 			wp.TotalCPURequests += cpuM
-			wp.TotalMemRequests += memGi
+			totalMemMiB += memMiB
 			nodeCPU[pod.Spec.NodeName] += cpuM
-			nodeMem[pod.Spec.NodeName] += memGi
+			nodeMemMiB[pod.Spec.NodeName] += memMiB
 		}
 	}
+	wp.TotalMemRequests = int(totalMemMiB / 1024)
 
 	for node, cpu := range nodeCPU {
 		wp.PerNode = append(wp.PerNode, NodePressure{
 			Name:         node,
 			CPURequested: cpu,
-			MemRequested: nodeMem[node],
+			MemRequested: int(nodeMemMiB[node] / 1024),
 		})
 	}
 	sort.Slice(wp.PerNode, func(i, j int) bool {
@@ -1719,6 +1710,33 @@ func (c *Collector) getWorkloadPressure() WorkloadPressure {
 	})
 
 	return wp
+}
+
+// memUnits are the Kubernetes memory quantity suffixes, in bytes. "Mi" and "M"
+// cannot both match: a binary suffix ends in "i".
+var memUnits = []struct {
+	suffix string
+	bytes  float64
+}{
+	{"Ki", 1 << 10}, {"Mi", 1 << 20}, {"Gi", 1 << 30}, {"Ti", 1 << 40},
+	{"k", 1e3}, {"M", 1e6}, {"G", 1e9}, {"T", 1e12},
+}
+
+// memoryMiB reads a memory request as MiB: a number of bytes, with or without
+// one of memUnits. Anything else, a missing request included, reads as 0.
+func memoryMiB(quantity string) float64 {
+	bytes := 1.0
+	for _, u := range memUnits {
+		if n, ok := strings.CutSuffix(quantity, u.suffix); ok {
+			quantity, bytes = n, u.bytes
+			break
+		}
+	}
+	n, err := strconv.ParseFloat(quantity, 64)
+	if err != nil {
+		return 0
+	}
+	return n * bytes / (1 << 20)
 }
 
 func hydrateWorkloadPressure(nodes []NodeInfo, wp WorkloadPressure) WorkloadPressure {

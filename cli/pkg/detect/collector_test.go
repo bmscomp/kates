@@ -598,3 +598,50 @@ func TestCollect_ReadOnlyIssuesNoWrites(t *testing.T) {
 		t.Errorf("ClusterDomain = %q, want the cluster.local default", report.Network.ClusterDomain)
 	}
 }
+
+// Each container's request was cut to whole GiB, so 256Mi counted as 0, and
+// 100 pods of two 256Mi containers requested nothing: the capacity check said
+// Sufficient, and broker sizing took that memory as free.
+func TestGetWorkloadPressure_SumsMemoryBeforeRounding(t *testing.T) {
+	pod := func(node string) string {
+		return `{"metadata":{"namespace":"apps"},"spec":{"nodeName":"` + node + `","containers":[` +
+			`{"resources":{"requests":{"cpu":"100m","memory":"256Mi"}}},` +
+			`{"resources":{"requests":{"cpu":"100m","memory":"256Mi"}}}]}}`
+	}
+	pods := make([]string, 100)
+	for i := range pods {
+		pods[i] = pod(fmt.Sprintf("node-%d", i%2))
+	}
+	m := NewMockExecutor()
+	m.Set(`{"items":[`+strings.Join(pods, ",")+`]}`,
+		"kubectl", "get", "pods", "-A", "-o", "json", "--field-selector=status.phase=Running")
+
+	wp := NewCollector(m).getWorkloadPressure()
+	if wp.TotalPods != 100 || wp.TotalMemRequests != 50 {
+		t.Errorf("%d pods requesting %d GiB, want 100 pods requesting 50 GiB", wp.TotalPods, wp.TotalMemRequests)
+	}
+	for _, node := range wp.PerNode {
+		if node.MemRequested != 25 {
+			t.Errorf("%s requests %d GiB, want 25", node.Name, node.MemRequested)
+		}
+	}
+}
+
+func TestMemoryMiB(t *testing.T) {
+	for quantity, want := range map[string]float64{
+		"256Mi":     256,
+		"2Gi":       2048,
+		"0.5Gi":     512,
+		"524288Ki":  512,
+		"268435456": 256,
+		"1Ti":       1 << 20,
+		"1G":        1e9 / (1 << 20),
+		"500M":      500e6 / (1 << 20),
+		"":          0,
+		"lots":      0,
+	} {
+		if got := memoryMiB(quantity); got != want {
+			t.Errorf("memoryMiB(%q) = %v, want %v", quantity, got, want)
+		}
+	}
+}
