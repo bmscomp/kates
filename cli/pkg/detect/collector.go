@@ -551,9 +551,11 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 	info.CRDsPresent = len(missingCRDs) == 0
 	info.Health.MissingCRDs = missingCRDs
 
-	// Find the deployment for strimzi operator (with permission-friendly namespace fallback)
+	// Find the deployment for strimzi operator (with permission-friendly namespace fallback).
+	// A refusal is an error from kubectl; the JSON of every deployment in the
+	// cluster may say "error" anywhere, a --log-level=error argument included.
 	depOut, err := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
-	if err != nil || depOut == "" || strings.Contains(depOut, "Forbidden") || strings.Contains(depOut, "error") {
+	if err != nil || depOut == "" {
 		// Fallback: check in the kafka namespace
 		depOut, _ = c.exec.Exec("kubectl", "get", "deployment", "-n", "kafka", "-o", "json")
 	}
