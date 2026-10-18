@@ -46,6 +46,11 @@ func (m brokersModel) Update(msg tea.Msg) (brokersModel, tea.Cmd) {
 		m.loading = false
 		m.info = msg.info
 		m.err = msg.err
+		// A broker gone since the last refresh left the cursor past the end,
+		// and View panicked indexing it.
+		if m.info != nil && m.cursor >= len(m.info.Brokers) {
+			m.cursor = max(0, len(m.info.Brokers)-1)
+		}
 	case tea.KeyMsg:
 		if m.info == nil {
 			break
