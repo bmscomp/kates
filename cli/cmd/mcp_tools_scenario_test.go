@@ -455,7 +455,7 @@ validate:
 	if s := sc.Request.Spec; sc.Request.TestType != "STRESS" || s.Records != 0 || s.LingerMs == nil || *s.LingerMs != 0 {
 		t.Errorf("request = %+v", sc.Request.Spec)
 	}
-	mcpScnHasFinding(t, out, 0, "spec.records", mcpScnWarning, "reads as 0")
+	mcpScnHasFinding(t, out, 0, "spec.records", mcpScnInvalid, "kates test apply refuses it")
 	mcpScnHasFinding(t, out, 0, "spec.throughput", mcpScnWarning, "the scenario key for the producer rate is targetThroughput")
 	mcpScnHasFinding(t, out, 0, "spec.numRecords", mcpScnWarning, "the scenario key is records")
 	if f := mcpScnFindingsOn(out, 0, "spec.lingerMs"); len(f) != 0 {
@@ -767,6 +767,19 @@ func TestMCPDraftScenarioSpecKeysMatchScenarioToRequest(t *testing.T) {
 	slices.Sort(ours)
 	if !slices.Equal(read, ours) {
 		t.Errorf("scenarioToRequest reads %v; draft_scenario describes %v", read, ours)
+	}
+	// scenarioSpecProblems checks every number and true/false key, so a key
+	// added to scenarioToRequest cannot skip apply's refusal.
+	kinds := map[byte][]string{}
+	for key, k := range mcpScnSpecKeys {
+		kinds[k.kind] = append(kinds[k.kind], key)
+	}
+	for kind, checked := range map[byte][]string{'i': scenarioIntKeys, 'b': scenarioBoolKeys} {
+		checked = slices.Sorted(slices.Values(checked))
+		slices.Sort(kinds[kind])
+		if !slices.Equal(checked, kinds[kind]) {
+			t.Errorf("scenarioSpecProblems checks %v; the %c keys are %v", checked, kind, kinds[kind])
+		}
 	}
 	// Each key's wire name is the JSON name of the field it sets.
 	for key, k := range mcpScnSpecKeys {
