@@ -201,6 +201,9 @@ func TestDeployCommand_SingleTopology(t *testing.T) {
 			if !strings.Contains(cmd, "-n kates-test") {
 				t.Errorf("Expected Kates to be deployed in kates-test namespace, got: %s", cmd)
 			}
+			if !strings.Contains(cmd, "--set networkPolicy.kafka.namespace=kates-test") {
+				t.Errorf("Expected the Kates NetworkPolicy to allow Kafka in kates-test, got: %s", cmd)
+			}
 		}
 	}
 
@@ -275,6 +278,9 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 			foundKates = true
 			if !strings.Contains(cmd, "-n app-sys") {
 				t.Errorf("Expected Kates to be deployed in app-sys namespace, got: %s", cmd)
+			}
+			if !strings.Contains(cmd, "--set networkPolicy.kafka.namespace=kafka-sys") {
+				t.Errorf("Expected the Kates NetworkPolicy to allow Kafka in kafka-sys, got: %s", cmd)
 			}
 		}
 		if strings.Contains(cmd, "helm upgrade --install chaos") {

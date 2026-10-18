@@ -486,7 +486,7 @@ service:
   type: NodePort
   nodePort: "30083"
 networkPolicy:
-  enabled: false        # its egress rules leave out the Kubernetes API, which the chaos backend calls
+  enabled: false        # untested in the lab with it on; see below
 extraEnv:
   - name: KATES_CHAOS_PROVIDER                # simultaneous kills
     value: kubernetes
@@ -512,7 +512,7 @@ kates ctx set site-a --url http://localhost:30083 --api-key "$KEY_A"
 kates ctx set site-b --url http://localhost:30084 --api-key "$KEY_B"
 ```
 
-`POD_KILL` needs no extra RBAC; leave `rbac.directChaos` off. The chart's NetworkPolicy allows egress only to DNS, PostgreSQL, Kafka and the `monitoring` namespace, so on a CNI that enforces policies it cuts Kates off from the API server its chaos backend and pod watcher use: disable it in the lab, or add a `networkPolicy.egressRules` entry for the API servers on the target. The chart's default `resources` request 2 GiB; lower them on a laptop. Reach each Kates through a NodePort or load balancer in its own site, not `kubectl port-forward`, which needs the API server that T1 and T9 take down. Read the API keys before any test for the same reason.
+`POD_KILL` needs no extra RBAC; leave `rbac.directChaos` off. The lab values above leave the chart's NetworkPolicy off. Since chart 0.11.1 its egress allows TCP 443 and 6443 to any address, which covers the API server its chaos backend and pod watcher use, and Kafka in `networkPolicy.kafka.namespace` (`kafka` here); turning it on in the lab is untested. The chart's default `resources` request 2 GiB; lower them on a laptop. Reach each Kates through a NodePort or load balancer in its own site, not `kubectl port-forward`, which needs the API server that T1 and T9 take down. Read the API keys before any test for the same reason.
 
 ### Sustained Workloads
 

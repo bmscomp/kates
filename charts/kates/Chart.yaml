@@ -2,11 +2,11 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Minor: backup.enabled without the bundled PostgreSQL now fails rendering,
-# where it rendered no backup and said nothing, and values-prod.yaml drops its
-# backup block. A failed pg_dump fails the backup job before the prune and
-# leaves no archive. appVersion is unchanged.
-version: 0.11.0
+# Patch: the NetworkPolicy's Kafka egress follows networkPolicy.kafka.namespace
+# instead of always `kafka`, opens Trogdor's 8889 there instead of in
+# `monitoring`, and a new rule opens TCP 443/6443 for the Kubernetes API.
+# appVersion is unchanged.
+version: 0.11.1
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -31,7 +31,7 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
     - kind: fixed
-      description: "ACTION REQUIRED for values that set backup.enabled with externalDatabase — those backups never ran. The backup CronJob dumps the bundled PostgreSQL only and rendered only with postgresql.enabled, so values-prod.yaml's backup block (and the README's production example) rendered no CronJob and no PVC, while NOTES printed a backup schedule. backup.enabled without postgresql.enabled now fails rendering; back the external database up with its own tooling and set backup.enabled=false. values-prod.yaml no longer sets it. A pg_dump that failed also left a valid, empty gzip archive, the job passed, and the prune then deleted the real backups. The script runs with set -eo pipefail and dumps to a .partial file it renames only once the dump succeeds, so a failed dump fails the job before the prune and leaves no archive behind"
+      description: "On a CNI that enforces NetworkPolicy, the chart's NetworkPolicy cut the backend off from the Kubernetes API, so every chaos fault, pod listing, KafkaTopic CR and orphan recovery failed; its Kafka egress always named namespace kafka, whatever networkPolicy.kafka.namespace said; and it allowed Trogdor's 8889 only to namespace monitoring, where no coordinator runs. The Kafka egress now follows networkPolicy.kafka.namespace (default kafka), 8889 moves from monitoring to that namespace, and a new ports-only rule opens TCP 443 and 6443 to any address for the Kubernetes API. Upgrading: a release that set networkPolicy.kafka.namespace to anything but the namespace Kafka runs in loses Kafka, as the value now takes effect; a Trogdor coordinator outside that namespace needs a networkPolicy.egressRules entry"
     - kind: changed
       description: "appVersion 1.25.1 and the image tag move to 1.25.1, the release of the deployment hardening in #368: engine timeout and reaper tunables wired through values and the configmap, stranded runs recovered more robustly, and network policy updates. Templates are otherwise unchanged."
     - kind: fixed

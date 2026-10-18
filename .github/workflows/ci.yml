@@ -216,6 +216,26 @@ jobs:
           fi
           echo "OK: backup without the bundled database is refused"
 
+      # networkPolicy.kafka.namespace went unread for releases: the policy
+      # always allowed `kafka`, kept Trogdor's 8889 to `monitoring` and had no
+      # Kubernetes API rule, and nothing rendered it to notice.
+      - name: Assert kates NetworkPolicy egress follows its values
+        run: |
+          np=$(helm template kates charts/kates/ \
+                 --show-only templates/networkpolicy.yaml \
+                 --set networkPolicy.kafka.namespace=kates-stack)
+          fail() { echo "::error::kates NetworkPolicy: $1"; exit 1; }
+          grep -q 'kubernetes.io/metadata.name: "kates-stack"' <<<"${np}" \
+            || fail "no egress to networkPolicy.kafka.namespace"
+          if grep -qE 'kubernetes.io/metadata.name: "?kafka"?$' <<<"${np}"; then
+            fail "egress still names the kafka namespace"
+          fi
+          grep -q 'port: 6443' <<<"${np}" || fail "no Kubernetes API egress"
+          trogdor=$(awk '/kubernetes.io\/metadata.name:/ {ns=$2} /port: 8889/ {print ns}' <<<"${np}")
+          [ "${trogdor}" = '"kates-stack"' ] \
+            || fail "8889 must be open once, to the Kafka namespace (got: ${trogdor:-none})"
+          echo "OK: the egress follows networkPolicy.kafka.namespace"
+
       # The Strimzi version is declared in five places. If values.yaml's
       # strimziVersion drifts from the Chart.yaml dependency version, the CRD
       # hook applies CRDs for a different operator than the one installed —

@@ -1681,6 +1681,7 @@ data:
 		katesArgs = append(katesArgs,
 			"--set", "kafka.bootstrapServers="+katesBootstrap,
 			"--set", "kafka.topicNamespace="+kafkaNS,
+			"--set", "networkPolicy.kafka.namespace="+kafkaNS,
 			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring))
 		katesArgs = append(katesArgs, dc.scrapeArgs("charts/kates")...)
 		katesArgs = append(katesArgs, dc.prometheusArgs()...)
