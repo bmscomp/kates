@@ -96,31 +96,37 @@ public class SecurityService {
             Map<String, String> brokerConfig = helpers.fetchBrokerConfig(client, brokerId);
             List<AclBinding> acls = helpers.fetchAcls(client);
 
-            // 1. SASL/Authentication check
-            String saslEnabled = brokerConfig.getOrDefault("sasl.enabled.mechanisms", "");
-            boolean hasSasl = !saslEnabled.isEmpty();
+            // 1. SASL/Authentication check, by listener protocol: Kafka reports
+            // sasl.enabled.mechanisms=GSSAPI on a broker with no SASL listener
+            Map<String, String> protocols = SecurityKafkaHelpers.listenerProtocols(brokerConfig);
+            String saslListeners = SecurityKafkaHelpers.listeners(protocols, SecurityKafkaHelpers::sasl);
+            boolean hasSasl = SecurityKafkaHelpers.saslRequired(protocols);
             checks.add(check(
                     "SASL Authentication",
                     "auth",
                     hasSasl ? "PASS" : "FAIL",
                     hasSasl
-                            ? "SASL mechanisms: " + saslEnabled
-                            : "No SASL mechanisms configured — any client can connect",
+                            ? "SASL listeners: " + saslListeners
+                            : saslListeners.isEmpty()
+                                    ? "No SASL listener — any client can connect"
+                                    : "PLAINTEXT listeners: "
+                                            + SecurityKafkaHelpers.listeners(protocols, "PLAINTEXT"::equals)
+                                            + " — any client can connect there",
                     "HIGH",
                     "CIS-4.1",
                     "Set listener.security.protocol.map and sasl.enabled.mechanisms in broker config"));
 
-            // 2. Plaintext listener detection
-            String listeners = brokerConfig.getOrDefault("listeners", "");
-            String advertisedListeners = brokerConfig.getOrDefault("advertised.listeners", "");
-            boolean hasPlaintext = listeners.contains("PLAINTEXT://") || advertisedListeners.contains("PLAINTEXT://");
+            // 2. Plaintext listener detection, by protocol: a listener with a
+            // name of its own, such as Strimzi's PLAIN-9092, holds no PLAINTEXT://
+            String unencryptedListeners = SecurityKafkaHelpers.listeners(protocols, SecurityKafkaHelpers::unencrypted);
+            boolean hasPlaintext = !unencryptedListeners.isEmpty();
             checks.add(check(
                     "No Plaintext Listeners",
                     "transport",
                     hasPlaintext ? "WARN" : "PASS",
                     hasPlaintext
-                            ? "Plaintext listeners detected — credentials sent unencrypted"
-                            : "All listeners use TLS or SASL",
+                            ? "Unencrypted listeners: " + unencryptedListeners + " — traffic sent unencrypted"
+                            : "All listeners use TLS",
                     "HIGH",
                     "CIS-4.2",
                     "Change listener protocol to SASL_SSL in kafka.listeners configuration"));
@@ -323,18 +329,20 @@ public class SecurityService {
                     "CIS-5.6",
                     "Minimize super.users — use ACLs for fine-grained access instead"));
 
-            // 17. SASL mechanism strength
-            String saslMechanisms = brokerConfig.getOrDefault("sasl.enabled.mechanisms", "");
+            // 17. SASL mechanism strength, of the mechanisms the SASL listeners enable
+            String saslMechanisms = SecurityKafkaHelpers.saslMechanisms(brokerConfig, protocols);
             boolean weakSasl = saslMechanisms.contains("PLAIN") && !saslMechanisms.contains("SCRAM");
             checks.add(check(
                     "SASL Mechanism Strength",
                     "auth",
                     saslMechanisms.isEmpty() ? "WARN" : weakSasl ? "WARN" : "PASS",
-                    saslMechanisms.isEmpty()
-                            ? "No SASL mechanisms configured"
-                            : weakSasl
-                                    ? "PLAIN mechanism only — passwords sent in cleartext"
-                                    : "Mechanisms: " + saslMechanisms,
+                    saslListeners.isEmpty()
+                            ? "No SASL listener"
+                            : saslMechanisms.isEmpty()
+                                    ? "No SASL mechanisms configured"
+                                    : weakSasl
+                                            ? "PLAIN mechanism only — passwords sent in cleartext"
+                                            : "Mechanisms: " + saslMechanisms,
                     "HIGH",
                     "CIS-4.10",
                     "Use SCRAM-SHA-512 instead of PLAIN for password-based auth"));
@@ -682,18 +690,14 @@ public class SecurityService {
                     "CIS-6.6",
                     "Set num.io.threads >= 8 for production workloads"));
 
-            // 41. Listener security protocol map
-            String protocolMap = brokerConfig.getOrDefault("listener.security.protocol.map", "");
-            boolean hasPlaintextListener = protocolMap.contains("PLAINTEXT") && !protocolMap.contains("SASL_PLAINTEXT");
+            // 41. Listener security protocol map, for the listeners in use: Kafka's
+            // default map lists all four protocols, whatever the listeners use
+            String listenersInUse = SecurityKafkaHelpers.listeners(protocols, protocol -> true);
             checks.add(check(
                     "Listener Protocol Map",
                     "network",
-                    protocolMap.isEmpty() || !hasPlaintextListener ? "PASS" : "WARN",
-                    protocolMap.isEmpty()
-                            ? "Using default listener protocols"
-                            : hasPlaintextListener
-                                    ? "PLAINTEXT listeners in protocol map — unencrypted traffic allowed"
-                                    : "Protocol map: " + protocolMap,
+                    hasPlaintext ? "WARN" : "PASS",
+                    "Listeners: " + listenersInUse + (hasPlaintext ? " — unencrypted traffic allowed" : ""),
                     "HIGH",
                     "CIS-4.8",
                     "Map all listeners to SASL_SSL or SSL in listener.security.protocol.map"));

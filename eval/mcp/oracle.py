@@ -353,7 +353,7 @@ def expect_security_drift(drift: Mapping[str, Any]) -> dict:
         "improved_checks": sorted(d["check"] for d in changes if d.get("change") == "IMPROVED"),
         "degraded_checks": sorted(d["check"] for d in changes if d.get("change") == "DEGRADED"),
         # The grade history is an in-memory list of the last 100 explicit
-        # audits in the pod (SecurityService.java:42,1649-1689).
+        # audits in the pod (SecurityService.java:42,1653-1693).
         "grade_history_shows_trend": False,
     }
 

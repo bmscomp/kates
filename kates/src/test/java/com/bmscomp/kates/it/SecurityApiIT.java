@@ -78,6 +78,15 @@ class SecurityApiIT {
         // A PLAINTEXT container with no ACLs cannot be a clean bill of health;
         // if this ever passes, the audit has stopped auditing.
         assertTrue(failures + warnings > 0, "an unsecured broker must not grade clean");
+
+        // The container's listeners are all PLAINTEXT, while Kafka reports
+        // sasl.enabled.mechanisms=GSSAPI: the checks must read the listeners.
+        assertEquals("FAIL", fieldOf(checks, "name", "SASL Authentication", "status"));
+        assertEquals("WARN", fieldOf(checks, "name", "No Plaintext Listeners", "status"));
+        // An unread config also lands here as the default PLAINTEXT://:9092;
+        // only the container's real listeners and protocol map name BROKER.
+        assertTrue(
+                ((String) fieldOf(checks, "name", "No Plaintext Listeners", "detail")).contains("BROKER (PLAINTEXT)"));
     }
 
     @Test
@@ -128,6 +137,8 @@ class SecurityApiIT {
                 tests.size(),
                 all.getInt("summary.protected") + all.getInt("summary.vulnerable"),
                 "every probe is either protected or vulnerable");
+        assertEquals("VULNERABLE", fieldOf(tests, "id", "metadata-leak", "result"));
+        assertEquals("VULNERABLE", fieldOf(tests, "id", "unencrypted", "result"));
 
         given().when()
                 .get("/api/security/pentest?test=auto-create")
@@ -318,5 +329,14 @@ class SecurityApiIT {
 
     private static void assertNotBlank(Object value, String what) {
         assertTrue(value instanceof String s && !s.isBlank(), what + " must be present, got " + value);
+    }
+
+    /** The {@code field} of the entry whose {@code key} is {@code value}, or null when none is. */
+    private static Object fieldOf(List<Map<String, Object>> entries, String key, String value, String field) {
+        return entries.stream()
+                .filter(e -> value.equals(e.get(key)))
+                .findFirst()
+                .map(e -> e.get(field))
+                .orElse(null);
     }
 }

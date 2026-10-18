@@ -128,7 +128,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		ID: mcpCaveatPentestConfigOnly,
 		Text: "The security \"pentest\" attacks nothing. Its six checks read the configuration of the first broker " +
 			"listed and the ACL list; an ACL list it cannot read is reported as PROTECTED.",
-		Refs: []string{mcpJava + "service/SecurityPentestService.java:40-67,102-204"},
+		Refs: []string{mcpAnchoredRef(mcpJava+"service/SecurityPentestService.java:40-67,102-206",
+			"public Map<String, Object> pentest(String testName)", "private Map<String, Object> pentestResult(")},
 	},
 	{
 		ID: mcpCaveatCVEFixedList,
@@ -136,8 +137,8 @@ var mcpCaveatsCore = []mcpCaveat{
 			"learns the Kafka version: it reads kafkaVersion from the cluster description, which does not carry one, " +
 			"so the version is \"unknown\", the comparison fails, and every CVE is reported PATCHED with grade PASS.",
 		Refs: []string{
-			mcpJava + "service/SecurityService.java:1383-1474",
-			mcpJava + "service/SecurityService.java:1572-1586",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1387-1478", "public Map<String, Object> cveCheck()"),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1576-1590", "private int compareVersions(String v1, String v2)"),
 			mcpJava + "service/ClusterHealthService.java:72-93",
 		},
 	},
@@ -149,8 +150,8 @@ var mcpCaveatsCore = []mcpCaveat{
 			"too, so there it mostly reflects API traffic).",
 		Refs: []string{
 			mcpJava + "service/SecurityService.java:42,58-69",
-			mcpJava + "service/SecurityService.java:789,852,914,979",
-			mcpJava + "service/SecurityService.java:1649-1689",
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:793,856,918,983", "= runAudit();"),
+			mcpAnchoredRef(mcpJava+"service/SecurityService.java:1653-1693", "private void recordSnapshot("),
 		},
 	},
 	{
