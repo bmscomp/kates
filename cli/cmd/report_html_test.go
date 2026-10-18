@@ -118,8 +118,8 @@ func TestRenderHTMLReport_WithPhases(t *testing.T) {
 	report := &client.Report{
 		Summary: &client.ReportSummary{TotalRecords: 1},
 		Phases: []client.ReportPhase{
-			{Name: "warmup", Status: "DONE", RecordsSent: 500},
-			{Name: "burst", Status: "FAILED", RecordsSent: 200},
+			{Name: "warmup", Metrics: &client.ReportSummary{TotalRecords: 500}, SlaVerdict: &client.SlaVerdict{Passed: true}},
+			{Name: "<script>", Metrics: &client.ReportSummary{TotalRecords: 200}, SlaVerdict: &client.SlaVerdict{Passed: false}},
 		},
 	}
 
@@ -128,11 +128,12 @@ func TestRenderHTMLReport_WithPhases(t *testing.T) {
 	if !strings.Contains(html, "Phase Breakdown") {
 		t.Error("expected phase breakdown section")
 	}
-	if !strings.Contains(html, "warmup") {
-		t.Error("expected warmup phase")
+	if !strings.Contains(html, "<td>warmup</td>\n      <td><span class=\"badge badge-pass\">") {
+		t.Errorf("a phase whose SLA passed has no pass badge:\n%s", html)
 	}
-	if !strings.Contains(html, "burst") {
-		t.Error("expected burst phase")
+	// A phase name comes from the user's scenario file, not markup.
+	if strings.Contains(html, "<script>") || !strings.Contains(html, "<td>&lt;script&gt;</td>\n      <td><span class=\"badge badge-fail\">") {
+		t.Errorf("the phase name is not escaped, or a failed SLA has no fail badge:\n%s", html)
 	}
 }
 

@@ -62,17 +62,20 @@ func renderMarkdownPhases(b *strings.Builder, r *client.Report) {
 		return
 	}
 	b.WriteString("\n## Phase Breakdown\n\n")
-	b.WriteString("| Phase | Status | Records | Throughput | P99 (ms) | Errors |\n|---|---|---|---|---|---|\n")
+	b.WriteString("| Phase | SLA | Records | Throughput | P99 (ms) | Errors |\n|---|---|---|---|---|---|\n")
 	for _, p := range r.Phases {
-		name := p.Name
-		if name == "" {
-			name = "main"
+		m := client.ReportSummary{}
+		if p.Metrics != nil {
+			m = *p.Metrics
 		}
-		status := "✓ " + p.Status
-		if strings.EqualFold(p.Status, "FAILED") || strings.EqualFold(p.Status, "ERROR") {
-			status = "✖ " + p.Status
+		sla := "—"
+		if v := p.SlaVerdict; v != nil {
+			sla = "✓"
+			if !v.Passed {
+				sla = "✖"
+			}
 		}
 		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s rec/s | %.2f | %.4f%% |\n",
-			name, status, fmtNum(p.RecordsSent), fmtFloat(p.ThroughputRecPerSec, 1), p.P99LatencyMs, p.ErrorRate*100))
+			strings.ReplaceAll(p.Name, "|", `\|`), sla, fmtNum(m.TotalRecords), fmtFloat(m.AvgThroughputRecPerSec, 1), m.P99LatencyMs, m.ErrorRate*100))
 	}
 }
