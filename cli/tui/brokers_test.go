@@ -34,3 +34,26 @@ func TestBrokersRefreshWithFewerBrokers(t *testing.T) {
 		t.Errorf("cursor = %d with no brokers, want 0 and the empty view", m.cursor)
 	}
 }
+
+// Broker 0 answered DescribeCluster; broker 1 leads the KRaft quorum.
+func TestBrokersMarkTheKRaftLeader(t *testing.T) {
+	info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: 2, Controller: &client.BrokerNode{ID: 0},
+		Brokers: []client.BrokerNode{{ID: 0, Host: "kafka-0", Port: 9092}, {ID: 1, Host: "kafka-1", Port: 9092}}}
+	check := &client.ClusterHealthReport{ControllerID: 0,
+		KraftQuorum: &client.KraftQuorumHealth{LeaderID: 1, Voters: 3, HasLeader: true}}
+	m := brokersModel{width: 120, height: 40}
+
+	m, _ = m.Update(brokersLoadedMsg{info: info, check: check})
+	view := m.View()
+	if !strings.Contains(view, "Broker 1 · ? ★") || strings.Contains(view, "Broker 0 · ? ★") {
+		t.Errorf("want the star on broker 1, the quorum leader, not broker 0:\n%s", view)
+	}
+	if !strings.Contains(view, "KRaft leader 1") || strings.Contains(view, "CONTROLLER") {
+		t.Errorf("want broker 0's detail to name broker 1's quorum as the controller:\n%s", view)
+	}
+
+	m, _ = m.Update(brokersLoadedMsg{info: info})
+	if view := m.View(); strings.Contains(view, "★") || !strings.Contains(view, "unknown (cluster check failed)") {
+		t.Errorf("without a check the controller is unknown, and no broker is starred:\n%s", view)
+	}
+}

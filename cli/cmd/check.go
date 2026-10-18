@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
@@ -86,6 +87,21 @@ func controllerLabel(r *client.ClusterHealthReport) string {
 	default:
 		return fmt.Sprintf("KRaft leader %d", q.LeaderID)
 	}
+}
+
+// activeController asks the cluster check for the active controller, for the
+// views that read /api/cluster/info or /api/kafka/brokers: their controller is
+// whichever broker answered DescribeCluster. It returns controllerLabel's text
+// and the controller's id as the broker tables print ids, "" when none leads.
+func activeController() (label, id string) {
+	check, err := apiClient.ClusterCheck(context.Background())
+	if err != nil {
+		return output.DimStyle.Render("unknown (cluster check failed)"), ""
+	}
+	if n, ok := check.ActiveController(); ok {
+		id = strconv.Itoa(n)
+	}
+	return controllerLabel(check), id
 }
 
 func init() {

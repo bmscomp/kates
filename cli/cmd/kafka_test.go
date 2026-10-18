@@ -54,3 +54,23 @@ func TestKafkaTopicCmdWithoutConfigSources(t *testing.T) {
 		t.Errorf("want the config without a Source column: %s", out)
 	}
 }
+
+func TestKafkaBrokersCmdMarksTheKRaftLeader(t *testing.T) {
+	ts, buf := setupRoutes(t, map[string]string{
+		"/api/kafka/brokers": describedClusterInfo,
+		"/api/cluster/check": leaderTwoCheck,
+	})
+	defer ts.Close()
+
+	if err := kafkaBrokersCmd.RunE(kafkaBrokersCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stripAnsi(buf.String())
+	if !strings.Contains(out, "Controller: KRaft leader 2") {
+		t.Errorf("want the quorum leader as the controller:\n%s", out)
+	}
+	if !tableHasRow(out, []string{"broker-2", "★ CONTROLLER"}) || !tableHasRow(out, []string{"broker-1", "broker"}) ||
+		tableHasRow(out, []string{"broker-1", "CONTROLLER"}) {
+		t.Errorf("want broker 2, the quorum leader, as the controller, not broker 1:\n%s", out)
+	}
+}

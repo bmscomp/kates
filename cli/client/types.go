@@ -641,6 +641,20 @@ type KraftQuorumHealth struct {
 	Issue     string `json:"issue,omitempty"`
 }
 
+// ActiveController is the node id of the cluster's active controller: the
+// KRaft quorum leader, or controllerId when the check carries no quorum. ok is
+// false when the quorum has no leader.
+func (r *ClusterHealthReport) ActiveController() (id int, ok bool) {
+	switch q := r.KraftQuorum; {
+	case q == nil:
+		return r.ControllerID, true
+	case !q.HasLeader:
+		return 0, false
+	default:
+		return q.LeaderID, true
+	}
+}
+
 type PartitionHealthReport struct {
 	UnderReplicated int                      `json:"underReplicated"`
 	Offline         int                      `json:"offline"`

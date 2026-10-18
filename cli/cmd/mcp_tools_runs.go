@@ -81,7 +81,7 @@ func registerMCPRunTools(s *mcp.Server, deps *mcpDeps) {
 			"the runs read for the band; an unfinished run is refused. Advisor text and backend warnings are " +
 			"fenced. Otherwise only reads.",
 	}, mcpAssessRun, mcpCaveatMergedSpecOnly, mcpCaveatSummaryAveragesStartedTasks, mcpCaveatRegressionOneBaseline,
-		mcpCaveatBrokerSkewProjected, mcpCaveatAdvisorRulesOfThumb)
+		mcpCaveatBrokerSkewProjected, mcpCaveatAdvisorRulesOfThumb, mcpCaveatControllerDescribed)
 
 	addReadTool(s, deps, &mcp.Tool{
 		Name:        "kates_activity",

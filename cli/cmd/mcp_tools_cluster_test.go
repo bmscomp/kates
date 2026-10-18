@@ -49,7 +49,7 @@ func TestMCPClusterOverview(t *testing.T) {
 			for _, c := range env.Caveats {
 				caveats = append(caveats, c.ID)
 			}
-			if strings.Join(caveats, ",") != "alert-rules-not-firing,cluster-data-cached" {
+			if strings.Join(caveats, ",") != "alert-rules-not-firing,cluster-data-cached,controller-from-describe-cluster" {
 				t.Errorf("caveats = %v", caveats)
 			}
 

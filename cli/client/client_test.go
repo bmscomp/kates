@@ -290,6 +290,24 @@ func TestClusterCheck(t *testing.T) {
 	}
 }
 
+func TestActiveController(t *testing.T) {
+	cases := []struct {
+		name   string
+		report ClusterHealthReport
+		id     int
+		ok     bool
+	}{
+		{"ZooKeeper", ClusterHealthReport{ControllerID: 4}, 4, true},
+		{"KRaft", ClusterHealthReport{ControllerID: 4, KraftQuorum: &KraftQuorumHealth{LeaderID: 1, HasLeader: true}}, 1, true},
+		{"KRaft without a leader", ClusterHealthReport{ControllerID: 4, KraftQuorum: &KraftQuorumHealth{LeaderID: -1}}, 0, false},
+	}
+	for _, tc := range cases {
+		if id, ok := tc.report.ActiveController(); id != tc.id || ok != tc.ok {
+			t.Errorf("%s: got (%d, %v), want (%d, %v)", tc.name, id, ok, tc.id, tc.ok)
+		}
+	}
+}
+
 func TestListTests(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
