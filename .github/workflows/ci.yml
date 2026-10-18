@@ -236,6 +236,23 @@ jobs:
             || fail "8889 must be open once, to the Kafka namespace (got: ${trogdor:-none})"
           echo "OK: the egress follows networkPolicy.kafka.namespace"
 
+      # kates deploy --with-chaos=false sets chaos.provider=noop; empty must
+      # leave the backend on its own default, litmus-crd.
+      - name: Assert chaos.provider renders KATES_CHAOS_PROVIDER only when set
+        run: |
+          fail() { echo "::error::kates configmap: $1"; exit 1; }
+          cm=$(helm template kates charts/kates/ --show-only templates/configmap.yaml)
+          if grep -q 'KATES_CHAOS_PROVIDER' <<<"${cm}"; then
+            fail "KATES_CHAOS_PROVIDER rendered with chaos.provider empty"
+          fi
+          cm=$(helm template kates charts/kates/ --show-only templates/configmap.yaml \
+                 --set chaos.provider=noop)
+          grep -q 'KATES_CHAOS_PROVIDER: "noop"' <<<"${cm}" || fail "chaos.provider=noop not rendered"
+          if helm template kates charts/kates/ --set chaos.provider=litmus > /dev/null 2>&1; then
+            fail "values.schema.json accepted chaos.provider=litmus"
+          fi
+          echo "OK: chaos.provider renders KATES_CHAOS_PROVIDER only when set"
+
       # The Strimzi version is declared in five places. If values.yaml's
       # strimziVersion drifts from the Chart.yaml dependency version, the CRD
       # hook applies CRDs for a different operator than the one installed —

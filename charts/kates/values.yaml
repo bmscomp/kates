@@ -672,6 +672,15 @@ tests:
     numRecords: "500000"
     throughput: "10000"
 
+# -- Chaos provider
+chaos:
+  # -- The chaos provider every fault goes through (KATES_CHAOS_PROVIDER):
+  # litmus-crd, kubernetes, hybrid or noop. Empty keeps the backend's default,
+  # litmus-crd. kubernetes, and hybrid without Litmus, need rbac.directChaos.
+  # `kates deploy --with-chaos=false` sets noop when no Litmus release is
+  # installed.
+  provider: ""
+
 # -- PostgreSQL backup CronJob
 backup:
   # -- Enable backup CronJob. It dumps the bundled PostgreSQL only, so

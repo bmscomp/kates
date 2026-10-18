@@ -1573,6 +1573,17 @@ spec:
 	return nil
 }
 
+// katesChaosArgs puts the Kates API on the noop chaos provider when this
+// deploy installs no Litmus and no chaos release is there. Left on its
+// litmus-crd default, the API finds no Litmus, logs an ERROR and falls back to
+// noop anyway; set to noop, every fault is skipped by design.
+func katesChaosArgs(ctx context.Context, chaosNS string) []string {
+	if deployWithChaos || isHelmReleaseDeployedFn(ctx, "chaos", chaosNS) {
+		return nil
+	}
+	return []string{"--set", "chaos.provider=noop"}
+}
+
 // deployGroupC deploys Group C components (Apps / Sequential):
 // Apicurio Schema Registry, Kates Backend, Kafka UI, and Litmus Chaos.
 func deployGroupC(dc *deployContext) error {
@@ -1686,6 +1697,7 @@ data:
 		katesArgs = append(katesArgs, dc.scrapeArgs("charts/kates")...)
 		katesArgs = append(katesArgs, dc.prometheusArgs()...)
 		katesArgs = append(katesArgs, dc.cdcDatabaseAccessArgs()...)
+		katesArgs = append(katesArgs, katesChaosArgs(ctx, chaosNS)...)
 		katesArgs = append(katesArgs, "--timeout", "8m")
 
 		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")
