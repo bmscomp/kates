@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // stubPoll scripts a sequence of GetTest responses and restores the seams on
@@ -38,6 +39,21 @@ func run(status string, sent float64) func() (*client.TestRun, error) {
 				{RecordsSent: sent, ThroughputRecordsPerSec: 1000},
 			},
 		}, nil
+	}
+}
+
+// The throughput sparkline kept every poll of the run: an hour in it was 1,823
+// columns wide, and the renderer cut off the live number after it.
+func TestPollModel_SparklineKeepsTheLastPoints(t *testing.T) {
+	var m tea.Model = pollModel{id: "test-1234"}
+	for i := range 100 {
+		m, _ = m.Update(pollResultMsg{test: &client.TestRun{ID: "test-1234", Status: "RUNNING",
+			Results: []client.PhaseResult{{ThroughputRecordsPerSec: float64(i)}}}})
+	}
+	hist := m.(pollModel).throughputHist
+	if len(hist) != sparklinePoints || hist[0] != 100-sparklinePoints || hist[len(hist)-1] != 99 {
+		t.Errorf("history = %d points from %v to %v, want the last %d, 60 to 99",
+			len(hist), hist[0], hist[len(hist)-1], sparklinePoints)
 	}
 }
 
