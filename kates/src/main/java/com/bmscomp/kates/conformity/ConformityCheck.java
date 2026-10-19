@@ -5,12 +5,14 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -299,15 +301,21 @@ public class ConformityCheck {
             }
             if (spec.dedicated() != null) {
                 rule("controllers.dedicated", spec.dedicated(), meets(spec.dedicated()), pools.name, () -> {
-                    List<String> combined = pools.get().stream()
-                            .filter(pool -> at(pool, "spec", "roles") instanceof List<?> roles
-                                    && roles.contains("broker")
-                                    && roles.contains("controller"))
-                            .map(pool -> pool.getMetadata().getName())
-                            .toList();
+                    List<String> combined = new ArrayList<>();
+                    List<String> idle = new ArrayList<>();
+                    for (GenericKubernetesResource pool : pools.get()) {
+                        if (at(pool, "spec", "roles") instanceof List<?> roles
+                                && roles.contains("broker")
+                                && roles.contains("controller")) {
+                            (idle(pool) ? idle : combined)
+                                    .add(pool.getMetadata().getName());
+                        }
+                    }
                     return new Observation<>(
                             Map.of("", combined.isEmpty()),
-                            combined.isEmpty() ? null : "pools with both roles: " + String.join(", ", combined));
+                            detail(
+                                    combined.isEmpty() ? null : "pools with both roles: " + String.join(", ", combined),
+                                    notCounted(idle)));
                 });
             }
         }
@@ -349,12 +357,19 @@ public class ConformityCheck {
             }
             rule(role + ".storage.type", storage.type(), meets(storage.type()), pools.name, () -> {
                 Map<String, String> types = new LinkedHashMap<>();
+                List<String> idle = new ArrayList<>();
                 for (GenericKubernetesResource pool : pools.get()) {
                     if (at(pool, "spec", "roles") instanceof List<?> roles && roles.contains(poolRole)) {
-                        types.put(pool.getMetadata().getName(), (String) at(pool, "spec", "storage", "type"));
+                        if (idle(pool)) {
+                            idle.add(pool.getMetadata().getName());
+                        } else {
+                            types.put(pool.getMetadata().getName(), (String) at(pool, "spec", "storage", "type"));
+                        }
                     }
                 }
-                return new Observation<>(types, null);
+                return new Observation<>(
+                        types,
+                        detail(types.isEmpty() ? "no pool has the " + poolRole + " role" : null, notCounted(idle)));
             });
             rule(role + ".storage.size", storage.size(), meets(storage.size()), claims.name, () -> {
                 Map<String, PersistentVolumeClaim> byName = claims.get();
@@ -408,7 +423,7 @@ public class ConformityCheck {
                         perNode.merge(pod.getSpec().getNodeName(), 1, Integer::sum);
                     }
                 }
-                return new Observation<>(perNode, null);
+                return new Observation<>(perNode, null, true);
             });
             rule(
                     role + ".antiAffinity",
@@ -481,6 +496,9 @@ public class ConformityCheck {
                     return new Observation<>(Map.of("", false), "the PodMonitor CRD is not installed");
                 }
                 List<Pod> brokerPods = rolePods("strimzi.io/broker-role");
+                if (brokerPods.isEmpty()) {
+                    return new Observation<>(Map.of("", false), "no broker pod to select");
+                }
                 List<String> selecting = monitors.stream()
                         .filter(m -> watches(m, namespace)
                                 && brokerPods.stream()
@@ -677,7 +695,7 @@ public class ConformityCheck {
             for (Pod pod : rolePods(roleLabel)) {
                 values.put(pod.getMetadata().getName(), value.apply(pod));
             }
-            return new Observation<>(values, null);
+            return new Observation<>(values, values.isEmpty() ? "no pod has " + roleLabel + "=true" : null);
         }
 
         private List<Pod> rolePods(String roleLabel) {
@@ -688,7 +706,8 @@ public class ConformityCheck {
 
         /**
          * Evaluates one rule: it holds when every subject's value meets the
-         * constraint, and a subject with no value never does.
+         * constraint, and a subject with no value never does. With no subject
+         * at all it does not hold, unless the observation says that holds.
          */
         private <T> void rule(
                 String id,
@@ -721,19 +740,16 @@ public class ConformityCheck {
                     .filter(e -> e.getValue() == null || !meets.test(e.getValue()))
                     .map(Map.Entry::getKey)
                     .toList();
-            Status status = failing.isEmpty()
-                    ? Status.PASS
-                    : constraint.severity() == Severity.WARN ? Status.WARN : Status.FAIL;
+            boolean holds = failing.isEmpty() && (!values.isEmpty() || observation.emptyHolds());
+            Status status = holds ? Status.PASS : constraint.severity() == Severity.WARN ? Status.WARN : Status.FAIL;
             Collection<String> shown = failing.isEmpty() ? values.keySet() : failing;
             List<Object> observed = shown.stream()
                     .map(values::get)
                     .map(ConformityCheck::render)
                     .distinct()
                     .toList();
-            List<String> subjects = failing.stream()
-                    .filter(s -> !s.isEmpty())
-                    .limit(MAX_SUBJECTS)
-                    .toList();
+            List<String> named = failing.stream().filter(s -> !s.isEmpty()).toList();
+            List<String> subjects = named.stream().limit(MAX_SUBJECTS).toList();
             results.add(new Result(
                     id,
                     status,
@@ -741,7 +757,11 @@ public class ConformityCheck {
                     expected(constraint),
                     observed.isEmpty() ? null : observed.size() == 1 ? observed.get(0) : observed,
                     subjects.isEmpty() ? null : subjects,
-                    observation.detail(),
+                    detail(
+                            observation.detail(),
+                            named.size() > MAX_SUBJECTS
+                                    ? named.size() + " fall short; the first " + MAX_SUBJECTS + " are listed"
+                                    : null),
                     source,
                     null,
                     null));
@@ -1004,14 +1024,33 @@ public class ConformityCheck {
         }
     }
 
-    /** Whether a PodMonitor looks in the namespace: any, one it names, or its own when it names none. */
+    /**
+     * Whether a PodMonitor looks in the namespace: any, one it names, or its
+     * own when it names none, as prometheus-operator reads namespaceSelector.
+     */
     static boolean watches(GenericKubernetesResource monitor, String namespace) {
-        Object selector = at(monitor, "spec", "namespaceSelector");
-        if (!(selector instanceof Map<?, ?> map) || map.isEmpty()) {
-            return namespace.equals(monitor.getMetadata().getNamespace());
+        Map<?, ?> selector = at(monitor, "spec", "namespaceSelector") instanceof Map<?, ?> m ? m : Map.of();
+        if (Boolean.TRUE.equals(selector.get("any"))) {
+            return true;
         }
-        return Boolean.TRUE.equals(map.get("any"))
-                || (map.get("matchNames") instanceof List<?> names && names.contains(namespace));
+        return selector.get("matchNames") instanceof List<?> names && !names.isEmpty()
+                ? names.contains(namespace)
+                : namespace.equals(monitor.getMetadata().getNamespace());
+    }
+
+    /** A pool scaled to 0 replicas: it runs no node, so it decides no rule about the nodes. */
+    private static boolean idle(GenericKubernetesResource pool) {
+        return at(pool, "spec", "replicas") instanceof Number n && n.intValue() == 0;
+    }
+
+    private static String notCounted(List<String> idle) {
+        return idle.isEmpty() ? null : String.join(", ", idle) + ": 0 replicas, not counted";
+    }
+
+    /** The parts that are set, joined; null when none is. */
+    private static String detail(String... parts) {
+        String joined = Arrays.stream(parts).filter(Objects::nonNull).collect(Collectors.joining("; "));
+        return joined.isEmpty() ? null : joined;
     }
 
     /** A value under a custom resource's spec or status, or null. */
@@ -1026,8 +1065,16 @@ public class ConformityCheck {
         return node;
     }
 
-    /** The values a rule compares, by subject ("" for a rule about the cluster as a whole). */
-    private record Observation<T>(Map<String, T> values, String detail) {}
+    /**
+     * The values a rule compares, by subject ("" for a rule about the cluster
+     * as a whole). With no subject the rule does not hold, unless emptyHolds:
+     * no pod on any node is within perNode's limit.
+     */
+    private record Observation<T>(Map<String, T> values, String detail, boolean emptyHolds) {
+        Observation(Map<String, T> values, String detail) {
+            this(values, detail, false);
+        }
+    }
 
     /** A source that could not be read: the rules that need it are UNKNOWN. */
     private static final class Unreadable extends RuntimeException {
