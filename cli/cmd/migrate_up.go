@@ -230,7 +230,9 @@ func (r *labRun) phasePrerequisites(ctx context.Context, s *migrate.State) error
 // topic set overlaps this one's: under the identity policy two mirrors
 // writing one topic name is data corruption, not a test. written holds the
 // target-side names this lab's own KafkaMirrorMaker2, if there is one
-// already, writes: on a re-run those topics are the lab's own.
+// already, writes: on a re-run those topics are the lab's own. Another CR
+// under the same lab name (mirror deploy's --release) is checked like
+// another lab's.
 func (r *labRun) refuseOverlappingLab(ctx context.Context) (written map[string]bool, err error) {
 	l := r.lab
 	out, err := defaultRunner.Run(ctx, "kubectl", "-n", l.MirrorNamespace, "get", "kafkamirrormaker2", "-l", migrate.LabelLab, "-o", "json")
@@ -240,6 +242,7 @@ func (r *labRun) refuseOverlappingLab(ctx context.Context) (written map[string]b
 	var list struct {
 		Items []struct {
 			Metadata struct {
+				Name   string            `json:"name"`
 				Labels map[string]string `json:"labels"`
 			} `json:"metadata"`
 			Spec json.RawMessage `json:"spec"`
@@ -260,7 +263,7 @@ func (r *labRun) refuseOverlappingLab(ctx context.Context) (written map[string]b
 		}
 		d := &labDiscovery{}
 		d.readMirrorSpec(item.Spec)
-		if other == l.Name {
+		if other == l.Name && item.Metadata.Name == l.MirrorCR {
 			for _, leg := range d.legs {
 				for _, t := range leg.Topics {
 					written[d.replicatedTopicOf(leg.Alias, t)] = true

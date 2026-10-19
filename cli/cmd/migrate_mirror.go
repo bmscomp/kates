@@ -70,7 +70,13 @@ like kates clusters list), --from-bootstrap gives a raw address with
 (policy, minSourceVersion, preflight, the topic list, replication factors from
 the target's broker count) on top of the era preset; --read-only-source keeps
 every MirrorMaker write on the target, for a source you may only read;
---dry-run prints the helm command and the values file and stops.`,
+--dry-run prints the helm command and the values file and stops.
+
+The release carries the lab's label, so down deletes the topics it mirrored
+into. Like up, it installs nothing when another lab, or another --release
+under the same lab name, already mirrors one of its topics onto the target,
+or when the target already has one of its topic names after the policy;
+--dry-run checks neither.`,
 		Example: `  kates migrate mirror deploy --from m282-430-src
   kates migrate mirror deploy --from-bootstrap old.example:9092 --source-version 3.9.1 --policy default --dry-run
   kates migrate mirror deploy --from-bootstrap old.example:9092 --source-version 3.9.1 --read-only-source`,
@@ -274,14 +280,26 @@ func runMigrateMirrorDeploy(ctx context.Context, f *migrateMirrorFlags) error {
 		fmt.Fprint(output.Out, values)
 		return nil
 	}
+	res := &migrateResolution{Env: env, Lab: l, Opts: l.Options, SourceOperator: "external"}
+	pf := &migratePairFlags{Timeout: f.Timeout, ValuesMirror: f.Values}
+	r := newLabRun(res, pf)
+	// The mirror is labelled as a lab, so down deletes the topics it wrote:
+	// up's refusals apply before anything is installed.
+	if !env.Target.HasSecret {
+		return fmt.Errorf("secret %s not found in %s — the kafka-cluster chart provisions the KafkaUser %q", migrate.TargetUser, l.TargetNamespace, migrate.TargetUser)
+	}
+	written, err := r.refuseOverlappingLab(ctx)
+	if err != nil {
+		return err
+	}
+	if err := r.refuseExistingTopics(ctx, written); err != nil {
+		return err
+	}
 	migrateHint(fmt.Sprintf("mirror %s in %s: %s → %s (%s policy)", l.MirrorRelease, l.MirrorNamespace, l.SourceBootstrap, l.TargetCluster, l.Policy))
 	migrateHint("offset-syncs: " + offsetSyncsLine(l.ReadOnlySource))
 	if err := migrateConfirm(f.Yes, fmt.Sprintf("Install %s in %s?", l.MirrorRelease, l.MirrorNamespace)); err != nil {
 		return err
 	}
-	res := &migrateResolution{Env: env, Lab: l, Opts: l.Options, SourceOperator: "external"}
-	pf := &migratePairFlags{Timeout: f.Timeout, ValuesMirror: f.Values}
-	r := newLabRun(res, pf)
 	runErr := migrate.RunPhases(ctx, traced([]migrate.Phase{{Name: "mirror", Run: r.phaseMirror}}), r.state)
 	if runErr != nil {
 		output.Error(runErr.Error())
