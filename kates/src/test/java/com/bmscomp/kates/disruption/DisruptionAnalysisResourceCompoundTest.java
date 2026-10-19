@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import jakarta.ws.rs.core.Response;
 
+import io.fabric8.kubernetes.client.KubernetesClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -17,6 +18,7 @@ import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.chaos.CompoundChaosOrchestrator;
 import com.bmscomp.kates.chaos.CompoundChaosOrchestrator.CompoundOutcome;
 import com.bmscomp.kates.chaos.DisruptionType;
+import com.bmscomp.kates.chaos.FaultLimits;
 import com.bmscomp.kates.chaos.FaultSpec;
 
 /**
@@ -76,6 +78,41 @@ class DisruptionAnalysisResourceCompoundTest {
         assertEquals(
                 "No fault was triggered: Plan would affect ALL 3 brokers — cluster would lose availability",
                 ((ApiError) response.getEntity()).getMessage());
+        assertNoFault();
+    }
+
+    /**
+     * The guard refuses a fault outside the Kafka namespace and the Kates
+     * API's own in either mode, and says so even when it finds no broker.
+     */
+    @Test
+    void aFaultInAnyOtherNamespaceIsRefusedBeforeAnyFault() {
+        DisruptionSafetyGuard safetyGuard = new DisruptionSafetyGuard();
+        safetyGuard.kubeClient = mock(KubernetesClient.class);
+        when(safetyGuard.kubeClient.getNamespace()).thenReturn("kates");
+        safetyGuard.limits = new FaultLimits();
+        safetyGuard.kafkaNamespace = "kafka";
+        safetyGuard.kafkaLabel = "strimzi.io/component-type=kafka";
+        resource.safetyGuard = safetyGuard;
+        FaultSpec dns = FaultSpec.builder("dns")
+                .targetNamespace("kube-system")
+                .targetLabel("k8s-app=kube-dns")
+                .targetAll(true)
+                .disruptionType(DisruptionType.POD_DELETE)
+                .build();
+
+        for (boolean sequential : new boolean[] {true, false}) {
+            DisruptionDtos.CompoundChaosRequest request = request(dns);
+            request.sequential = sequential;
+            Response response = resource.executeCompound(request);
+
+            assertEquals(400, response.getStatus());
+            assertEquals(
+                    "No fault was triggered: Step 'faults[0]': targetNamespace kube-system is neither kafka, the Kafka"
+                            + " cluster's namespace (kates.chaos.kafka.namespace), nor the Kates API's own, kates; No"
+                            + " broker pods found matching label 'strimzi.io/component-type=kafka' in namespace 'kafka'",
+                    ((ApiError) response.getEntity()).getMessage());
+        }
         assertNoFault();
     }
 

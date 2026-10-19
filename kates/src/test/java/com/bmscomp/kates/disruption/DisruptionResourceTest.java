@@ -54,6 +54,30 @@ class DisruptionResourceTest {
     }
 
     /**
+     * Refused before the plan runs, even with no broker to count. The test
+     * reaches whatever cluster the kubeconfig names, so the namespace is one
+     * no cluster has: a launcher that let the step through would hit nothing.
+     */
+    @Test
+    void aPlanWithAStepInAnyOtherNamespaceIsRejectedNamingItsStep() {
+        given().contentType("application/json")
+                .body(
+                        "{\"name\":\"elsewhere\",\"steps\":[{\"name\":\"kill\",\"faultSpec\":{\"experimentName\":\"kill\","
+                                + "\"disruptionType\":\"POD_DELETE\",\"targetNamespace\":\"kates-no-such-namespace\","
+                                + "\"targetAll\":true}}]}")
+                .when()
+                .post("/api/disruptions")
+                .then()
+                .statusCode(422)
+                .body("status", is("REJECTED"))
+                .body(
+                        "validationWarnings",
+                        hasItem(startsWith("ERROR: Step 'kill': targetNamespace kates-no-such-namespace is neither"
+                                + " kafka, the Kafka cluster's namespace (kates.chaos.kafka.namespace), nor the Kates"
+                                + " API's own")));
+    }
+
+    /**
      * The compound endpoint calls the chaos providers itself, past the safety
      * guard, and its faults went in with any parameter. Now none goes in
      * while one is outside the chaos limits, the pod kill listed first included.

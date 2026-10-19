@@ -487,7 +487,7 @@ scenarios:
 
 ### Integrity + Chaos
 
-The real power of INTEGRITY tests emerges when combined with chaos engineering. An INTEGRITY run injects no [fault](appendix-a-glossary.md#gl-fault) by itself: `kates resilience run` pairs a test request with one fault, injected while the test runs. That pairing is a [resilience run](appendix-a-glossary.md#gl-resilience-run), one of the two ways Kates runs a [chaos experiment](appendix-a-glossary.md#gl-chaos-experiment), and it goes through only part of the [safety guard](appendix-a-glossary.md#gl-safety-guard) that checks a disruption plan: the broker count and the one-at-a-time rule before its test starts, with no Ready check before the fault and no rollback (see [Limits of the Guard](07-chaos-practice.md#limits-of-the-guard)):
+The real power of INTEGRITY tests emerges when combined with chaos engineering. An INTEGRITY run injects no [fault](appendix-a-glossary.md#gl-fault) by itself: `kates resilience run` pairs a test request with one fault, injected while the test runs. That pairing is a [resilience run](appendix-a-glossary.md#gl-resilience-run), one of the two ways Kates runs a [chaos experiment](appendix-a-glossary.md#gl-chaos-experiment), and it goes through only part of the [safety guard](appendix-a-glossary.md#gl-safety-guard) that checks a disruption plan: the namespace check, the broker count and the one-at-a-time rule before its test starts, with no Ready check before the fault and no rollback (see [Limits of the Guard](07-chaos-practice.md#limits-of-the-guard)):
 
 ```yaml
 # resilience-integrity.yaml

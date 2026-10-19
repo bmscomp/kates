@@ -186,6 +186,8 @@ The `hybrid` provider (selected with `kates.chaos.provider=hybrid`) picks its de
 
 A fault's `targetLabel` is a Kubernetes label selector, in the syntax `kubectl -l` takes: comma-separated requirements that must all hold, such as `strimzi.io/component-type=kafka,zone=alpha`, `zone in (alpha,sigma)`, `zone!=gamma` or `!zone`. A selector that doesn't parse is refused before anything is disrupted.
 
+A fault acts in its `targetNamespace`, `kafka` when the step leaves it out. Kates refuses a step in any namespace but two: the Kafka cluster's, `kates.chaos.kafka.namespace` (`kafka` by default), and the one the Kates API runs in (`kates` on a default install). The `kates` chart's ClusterRole lets the Kates API delete and patch pods in every namespace, so this refusal is what keeps a pod fault off the rest of the cluster, such as the CoreDNS pods in `kube-system`. A `NODE_DRAIN` still evicts every pod on its node, whatever its namespace.
+
 A pod-level fault hits one pod unless told otherwise. The first of these that applies decides which pods:
 
 1. `targetPod`, when set.
@@ -201,7 +203,7 @@ Both chaos providers resolve the pods the same way: `kubernetes` applies the fau
 
 A `NODE_DRAIN` drains the node that runs the pod these rules pick. On `litmus-crd`, Kates passes that node to the `node-drain` experiment as `TARGET_NODE`, with no `TARGET_PODS`; the `kubernetes` provider doesn't run `NODE_DRAIN`. The experiment drains one node, so with `targetAll` every pod the selector matches has to run on the same node. On the [`panda`](appendix-a-glossary.md#gl-panda) Kind cluster, a zone's broker pods all run on the node named after the zone. The step fails without draining anything when the pods run on several nodes, when the pod is gone, or when it isn't on a node yet.
 
-To drain a node you choose, name it in `envOverrides.TARGET_NODE`, or give `envOverrides.NODE_LABEL` for Litmus to pick a node with that label. Kates then picks no node itself. The drain evicts every pod on the node, not only the one picked, so the other Kafka pods there go down with it.
+To drain a node you choose, name it in `envOverrides.TARGET_NODE`, or give `envOverrides.NODE_LABEL` for Litmus to pick a node with that label. Kates then picks no node itself. The drain evicts every pod on the node, not only the one picked, in every namespace, so the other Kafka pods there go down with it.
 
 Litmus's own pods, the chaos runner and the experiment, are kept off the drained node, since the drain would evict them and end the experiment early. Kates pins both to another node through their `nodeSelector`: the first by name that is Ready and schedulable and has no `NoSchedule` or `NoExecute` taint. With `envOverrides.NODE_LABEL`, that node is one the label doesn't match. When no node qualifies, the step fails without draining.
 
@@ -398,7 +400,7 @@ A pod run by a StatefulSet, as in a Kafka that Strimzi does not manage, is rolle
 
 ### consumer-isolation
 
-Isolates consumer pods from Kafka brokers via network partition to test consumer group rebalancing behavior. It targets pods labelled `app=kafka-consumer` in the `kates` namespace, which Kates does not deploy — label your own consumer that way. Note that `maxAffectedBrokers: -1` because this playbook targets consumers, not brokers: the safety guard enforces the cap only when it is greater than zero, so `-1` (like `0`) switches it off. The guard's other checks still apply. On the `kubernetes` chaos provider it needs `rbac.directChaos`.
+Isolates consumer pods from Kafka brokers via network partition to test consumer group rebalancing behavior. It targets pods labelled `app=kafka-consumer` in the `kates` namespace, which Kates does not deploy — label your own consumer that way. Kates runs it only where the Kates API itself runs in `kates`, as `kates deploy` installs it, since a step may target no other namespace but the Kafka cluster's. Note that `maxAffectedBrokers: -1` because this playbook targets consumers, not brokers: the safety guard enforces the cap only when it is greater than zero, so `-1` (like `0`) switches it off. The guard's other checks still apply. On the `kubernetes` chaos provider it needs `rbac.directChaos`.
 
 ```yaml
 name: consumer-isolation
@@ -533,7 +535,7 @@ A disruption plan breaks the cluster on purpose, so Kates checks it before it br
 
 ### What Kates Checks Before a Plan Starts
 
-When you run a plan or a playbook, Kates checks each step's fault against the [fault parameter limits](#fault-parameter-limits), whatever the cluster holds. It also lists the pods in `kates.chaos.kafka.namespace` (`kafka`) that match `kates.chaos.kafka.label` (`strimzi.io/component-type=kafka`). It works out which brokers each step would hit, and refuses the plan at any of the checks in this diagram:
+When you run a plan or a playbook, Kates checks each step's fault against the [fault parameter limits](#fault-parameter-limits), and its namespace against the two a step may target (see [Targeting Pods](#targeting-pods)), whatever the cluster holds. It also lists the pods in `kates.chaos.kafka.namespace` (`kafka`) that match `kates.chaos.kafka.label` (`strimzi.io/component-type=kafka`). It works out which brokers each step would hit, and refuses the plan at any of the checks in this diagram:
 
 ```mermaid
 %%| label: fig-practice-safety-guard
@@ -561,6 +563,7 @@ A refused plan starts nothing. Over the API it returns `422` with status `REJECT
 | `Step '…': NODE_DRAIN with targetAll picks pods on N nodes (…)` | Narrow `targetLabel` to the pods of one node, or name the node in `envOverrides.TARGET_NODE` |
 | `Step '…': NODE_DRAIN: …, the node the Kates API runs on, and draining it would evict the Kates API …` | Aim the drain at a pod on another node, or name another node in `envOverrides.TARGET_NODE` |
 | `Step '…':`, then a fault parameter that `is below` its floor or `is above the limit of` its ceiling | Bring the parameter into its range, or raise the limit (see [Fault Parameter Limits](#fault-parameter-limits)) |
+| `Step '…': targetNamespace … is neither …, the Kafka cluster's namespace (kates.chaos.kafka.namespace), nor the Kates API's own, …` | Aim the step at the Kafka cluster's namespace or the Kates API's own. No setting adds another |
 | `Plan would affect N brokers but maxAffectedBrokers=M` | Narrow the selectors, or raise the limit if you mean it |
 | `Plan would affect ALL N brokers — cluster would lose availability` | Narrow the selectors: Kates never runs a plan that hits every broker |
 
@@ -570,7 +573,7 @@ The count covers the whole plan, not one step at a time: Kates adds up the disti
 
 The label matches the KRaft controllers as well, so Kates counts as brokers only the pods Strimzi labels `strimzi.io/broker-role=true`: a node with both roles is a broker, and a dedicated controller is not. On the default cluster, with brokers 0–2 and controllers 3–5, a plan that takes down all three brokers is refused. A pod without the role label, such as Kafka not run by Strimzi, counts as a broker.
 
-A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step whose selector looks in a namespace other than the brokers' counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts every broker on the node it drains, whatever namespace its pod is in. For a random pick, that's the node among the candidates' that runs the most brokers, and the same goes for a node Litmus picks by `envOverrides.NODE_LABEL`. Both leave out the node the Kates API runs on, which no drain takes, and a step that could drain only that node is refused. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker. For a `NODE_DRAIN`, it lists every Kafka pod on the node and names the node.
+A step's affected brokers are the broker pods its fault will hit, chosen by the rules in [Targeting Pods](#targeting-pods): a `targetAll` step counts every broker its selector matches, and a random pick counts as one. A `ROLLING_RESTART` step also counts as one, because the Cluster Operator takes its brokers down one at a time. A `SCALE_DOWN` step counts the broker each node pool it selects loses. A step in the Kates API's namespace counts none, but a pod named with `targetPod` counts as a broker wherever it runs, unless it's a dedicated KRaft controller. A `NODE_DRAIN` step counts every broker on the node it drains, whatever namespace its pod is in. For a random pick, that's the node among the candidates' that runs the most brokers, and the same goes for a node Litmus picks by `envOverrides.NODE_LABEL`. Both leave out the node the Kates API runs on, which no drain takes, and a step that could drain only that node is refused. The dry run lists every pod a step hits, controllers included, and warns when a step would hit none of the Kafka pods or when `targetBrokerId` names no broker. For a `NODE_DRAIN`, it lists every Kafka pod on the node and names the node.
 
 Kates runs the plan anyway, with a warning in `validationWarnings`, in three cases:
 
@@ -653,10 +656,10 @@ The guard counts brokers, reads pod readiness and, for a drain, where pods run, 
 
 - It doesn't count KRaft controllers, so a plan that takes down a majority of the controller quorum passes; the dry run lists the controllers a step hits.
 - It doesn't read the ISR or `min.insync.replicas`, so a plan that leaves one broker runs with only a warning. Yet on a topic that keeps the `kafka-cluster` chart's `min.insync.replicas: 2`, writes with [`acks=all`](appendix-a-glossary.md#gl-acks) then fail.
-- A step whose selector looks in another namespace, such as the consumers `consumer-isolation` isolates in `kates`, counts no broker, whatever it hits, unless it's a `NODE_DRAIN`.
+- A step in the Kates API's namespace, such as the consumers `consumer-isolation` isolates in `kates`, counts no broker, whatever it hits, unless it's a `NODE_DRAIN`.
 - Steps that pick one pod at random from the same selector count as one broker between them, although each can hit a different broker.
 - A `NODE_DRAIN` step counts the brokers on its node as the pods run when you submit the plan. A pod that moves to another node before the step runs takes the drain with it.
-- A resilience run (`kates resilience run`) gets the broker count before its test starts, with no `maxAffectedBrokers`, and the one-at-a-time rule then and again just before its fault. It gets no check of the Kafka pods before the fault and no rollback.
+- A resilience run (`kates resilience run`) gets the namespace check and the broker count before its test starts, with no `maxAffectedBrokers`, and the one-at-a-time rule then and again just before its fault. It gets no check of the Kafka pods before the fault and no rollback.
 - `make gameday` doesn't go through it either: it deletes a broker pod with `kubectl`.
 - The one-plan rule lives in the Kates API process, so it holds only while one Kates API pod runs. The `kates` chart refuses a second replica and rolls with `Recreate`, so it never runs two.
 - Orphan recovery deletes Kates NetworkPolicies in every namespace, but restores scale-downs in the Kafka namespace only. A StatefulSet that a Kates API left scaled down in another namespace when it died stays so until you scale it back to the count in its `kates.io/original-replicas` annotation.
