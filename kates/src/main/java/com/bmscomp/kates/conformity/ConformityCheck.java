@@ -18,7 +18,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -37,6 +36,7 @@ import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.common.KafkaFuture;
@@ -44,7 +44,6 @@ import org.apache.kafka.common.Node;
 import org.apache.kafka.common.config.ConfigResource;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.conformity.ConformityReport.ClusterState;
 import com.bmscomp.kates.conformity.ConformityReport.Result;
 import com.bmscomp.kates.conformity.ConformityReport.Status;
@@ -72,9 +71,12 @@ import com.bmscomp.kates.service.KafkaAdminService;
 public class ConformityCheck {
 
     /** The rules this version evaluates; a reference that declares another is refused until it can. */
-    private static final Pattern EVALUATED = Pattern.compile("versions\\..+|controllers\\.dedicated"
-            + "|(controllers|brokers)\\.(count|(requests|limits)\\.(cpu|memory)|storage\\.(type|size|class)"
-            + "|zones|skew|perNode|antiAffinity)|kafka\\..+");
+    static final CustomResourceDefinitionContext POD_MONITOR_CRD = new CustomResourceDefinitionContext.Builder()
+            .withGroup("monitoring.coreos.com")
+            .withVersion("v1")
+            .withPlural("podmonitors")
+            .withScope("Namespaced")
+            .build();
 
     private static final String DEFAULT_ZONE_LABEL = "topology.kubernetes.io/zone";
     private static final String HOSTNAME = "kubernetes.io/hostname";
@@ -105,22 +107,10 @@ public class ConformityCheck {
     }
 
     /**
-     * @throws InvalidReferenceException a 400 for a rule this version cannot evaluate yet
      * @throws ClientErrorException a 409 when the reference is for another cluster, or the Kafka is missing
      * @throws ServiceUnavailableException when the Kubernetes API does not answer
      */
     public ConformityReport check(KafkaReference reference) {
-        Map<String, String> notYet = KafkaReferenceReader.ruleIds(reference).stream()
-                .filter(id -> !EVALUATED.matcher(id).matches())
-                .collect(Collectors.toMap(
-                        id -> "spec." + id, id -> "not implemented yet", (a, b) -> a, LinkedHashMap::new));
-        if (!notYet.isEmpty()) {
-            throw new InvalidReferenceException(ApiError.validationFailed(
-                    notYet.keySet().stream()
-                            .map(path -> path + ": not implemented yet")
-                            .collect(Collectors.joining("; ")),
-                    notYet));
-        }
         return new Run(reference).report();
     }
 
@@ -189,6 +179,22 @@ public class ConformityCheck {
             return configs;
         });
 
+        /** Null when the PodMonitor CRD is not installed: then there is none, which is the answer. */
+        private final Source<List<GenericKubernetesResource>> podMonitors =
+                new Source<>("Kubernetes: PodMonitors in any namespace", () -> {
+                    try {
+                        return client.genericKubernetesResources(POD_MONITOR_CRD)
+                                .inAnyNamespace()
+                                .list()
+                                .getItems();
+                    } catch (KubernetesClientException e) {
+                        if (e.getCode() == 404) {
+                            return null;
+                        }
+                        throw e;
+                    }
+                });
+
         private final Source<String> kubernetesVersion = new Source<>(
                 "Kubernetes: /version", () -> client.getKubernetesVersion().getGitVersion());
 
@@ -247,6 +253,7 @@ public class ConformityCheck {
             role("controllers", spec.controllers(), "strimzi.io/controller-role", "controller");
             role("brokers", spec.brokers(), "strimzi.io/broker-role", "broker");
             kafka(spec.kafka());
+            monitoring(spec.monitoring());
 
             List<Result> waived = waive(results);
             waived.sort(Comparator.comparing((Result r) -> ORDER.indexOf(r.status()))
@@ -447,6 +454,54 @@ public class ConformityCheck {
         }
 
         /** The Kafka rules, read from the Kafka CR. */
+        /** Monitoring: read from the Kafka CR, and from the PodMonitors in any namespace. */
+        private void monitoring(KafkaReference.Monitoring rules) {
+            if (rules == null) {
+                return;
+            }
+            String crKafka = kafkaSource + " spec";
+            rule(
+                    "monitoring.metrics",
+                    rules.metrics(),
+                    meets(rules.metrics()),
+                    crKafka + ".kafka.metricsConfig",
+                    () -> {
+                        Object type = at(kafka, "spec", "kafka", "metricsConfig", "type");
+                        return scalar(type == null ? "none" : type.toString());
+                    });
+            rule(
+                    "monitoring.kafkaExporter",
+                    rules.kafkaExporter(),
+                    meets(rules.kafkaExporter()),
+                    crKafka + ".kafkaExporter",
+                    () -> scalar(at(kafka, "spec", "kafkaExporter") != null));
+            rule("monitoring.podMonitor", rules.podMonitor(), meets(rules.podMonitor()), podMonitors.name, () -> {
+                List<GenericKubernetesResource> monitors = podMonitors.get();
+                if (monitors == null) {
+                    return new Observation<>(Map.of("", false), "the PodMonitor CRD is not installed");
+                }
+                List<Pod> brokerPods = rolePods("strimzi.io/broker-role");
+                List<String> selecting = monitors.stream()
+                        .filter(m -> watches(m, namespace)
+                                && brokerPods.stream()
+                                        .allMatch(p -> matches(
+                                                selector(at(m, "spec", "selector")),
+                                                p.getMetadata().getLabels())))
+                        .map(m -> m.getMetadata().getNamespace() + "/"
+                                + m.getMetadata().getName())
+                        .toList();
+                return new Observation<>(
+                        Map.of("", !selecting.isEmpty()),
+                        selecting.isEmpty() ? "no PodMonitor selects every broker pod" : String.join(", ", selecting));
+            });
+        }
+
+        private LabelSelector selector(Object spec) {
+            return spec instanceof Map<?, ?> map
+                    ? client.getKubernetesSerialization().convertValue(map, LabelSelector.class)
+                    : null;
+        }
+
         private void kafka(KafkaReference.Kafka rules) {
             if (rules == null) {
                 return;
@@ -947,6 +1002,16 @@ public class ConformityCheck {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted", e);
         }
+    }
+
+    /** Whether a PodMonitor looks in the namespace: any, one it names, or its own when it names none. */
+    static boolean watches(GenericKubernetesResource monitor, String namespace) {
+        Object selector = at(monitor, "spec", "namespaceSelector");
+        if (!(selector instanceof Map<?, ?> map) || map.isEmpty()) {
+            return namespace.equals(monitor.getMetadata().getNamespace());
+        }
+        return Boolean.TRUE.equals(map.get("any"))
+                || (map.get("matchNames") instanceof List<?> names && names.contains(namespace));
     }
 
     /** A value under a custom resource's spec or status, or null. */
