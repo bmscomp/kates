@@ -647,6 +647,38 @@ Non-default configuration entries for a specific broker.
 
 ---
 
+### Conformity
+
+One endpoint holds the cluster to a reference architecture; `kates conformity check` wraps it.
+
+#### POST /api/conformity/check
+
+Check the cluster against a reference architecture (scope `read`). The body is a `KafkaReference` as JSON; `kates conformity check` converts the YAML file and sends it. The check reads Kubernetes and the Strimzi resources only, writes nothing and stores nothing: it is a POST because the reference is a body.
+
+The response is 200 whatever the verdict, with one result per declared rule. `verdict` is `FAIL` when a `fail` rule does not hold, `UNKNOWN` when a `fail` rule could not be read, and otherwise `PASS`.
+
+```json
+{
+  "reference": "prod-3az",
+  "target": {
+    "platform": "strimzi", "namespace": "kafka", "name": "krafter",
+    "clusterId": "4L6g3nShT-eMCtK--X86sw"
+  },
+  "cluster": { "ready": true, "generation": 7, "observedGeneration": 7 },
+  "verdict": "FAIL",
+  "summary": { "pass": 4, "fail": 1, "warn": 0, "waived": 0, "unknown": 0 },
+  "results": [
+    {
+      "rule": "brokers.count", "status": "FAIL", "severity": "fail",
+      "expected": { "min": 5 }, "observed": 3, "detail": "3 of 3 Ready",
+      "source": "Kubernetes: pods kafka/strimzi.io/cluster=krafter"
+    }
+  ]
+}
+```
+
+A reference the check cannot run is a 400 whose `fieldErrors` name each path, as `spec.brokers.cuont: unknown field`. A reference for another cluster than the one Kates watches, or a cluster without its Kafka resource, is a 409; a body over 256 KiB is a 413; an unreachable Kubernetes API is a 503.
+
 ### Disruption Testing
 
 A disruption plan injects faults into the Kafka cluster step by step, measures how the cluster recovers and, when the plan's `sla` block sets a threshold, grades the result against it; a playbook is a ready-made plan with no `sla` block, so it gets no grade. `kates disruption` wraps these endpoints, and [Chaos Engineering in Practice](07-chaos-practice.md) explains plans, the safety guard and the grades.

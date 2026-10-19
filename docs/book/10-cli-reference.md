@@ -603,6 +603,22 @@ kates cluster watch --interval 10
 
 ---
 
+### Conformity
+
+`kates conformity check` holds the cluster to a reference architecture: a `KafkaReference` file that declares how many brokers and controllers it runs, how big each one is, and how they spread over zones and nodes. The Kates API reads the cluster read-only and reports each declared rule. `cli/examples/conformity` holds the JSON Schema editors validate against, and two examples to copy.
+
+#### conformity check
+
+Check the cluster against a reference. The table lists every rule that is not `PASS`, with what the reference expects and what the cluster has; `-o json` prints the whole report. A waived rule still shows, as `WAIVED`, with its reason and date.
+
+```bash
+kates conformity check -f platform/prod-3az.yaml
+kates conformity check -f prod-3az.yaml --output-junit conformity.xml
+kates conformity check -f prod-3az.yaml -o json
+```
+
+It exits `0` when every `fail` rule holds, `1` when one does not, and `2` when it could not tell or could not run. A `warn` rule never fails it. `--output-junit` also writes one test case per rule for a CI report: a failure for `FAIL`, an error for `UNKNOWN`, and skipped for `WAIVED`.
+
 ### Test Commands
 
 Test commands are the core of Kates. They let you create, monitor, and manage performance test runs against your Kafka cluster. Whether you're running a quick load test to sanity-check throughput or a 25-minute endurance test to catch memory leaks and log-roll spikes, the workflow is always the same: create a test, optionally watch it in real time, then inspect the results. For repeatable, version-controlled test definitions, use `test apply` with YAML scenario files instead of inline flags.
@@ -2498,7 +2514,7 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 |------|---------|
 | `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
 | `1` | The operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), or a confirmation was declined or could not be asked |
-| `2` | `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`) |
+| `2` | `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`) |
 | `130` | Ctrl-C or SIGTERM stopped a command that starts work and waits for it, after it cancelled the test it started |
 
 Consequences worth knowing in scripts:
