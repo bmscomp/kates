@@ -1,5 +1,6 @@
 package com.bmscomp.kates.conformity;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -20,8 +21,10 @@ import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.ServiceUnavailableException;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -52,8 +55,8 @@ import com.bmscomp.kates.service.ClusterTopologyService;
 public class ConformityCheck {
 
     /** The rules this version evaluates; a reference that declares another is refused until it can. */
-    private static final Pattern EVALUATED =
-            Pattern.compile("versions\\..+|(controllers|brokers)\\.count|controllers\\.dedicated");
+    private static final Pattern EVALUATED = Pattern.compile("versions\\..+|controllers\\.dedicated"
+            + "|(controllers|brokers)\\.(count|(requests|limits)\\.(cpu|memory)|storage\\.(type|size|class))");
 
     private static final int MAX_SUBJECTS = 50;
 
@@ -127,6 +130,17 @@ public class ConformityCheck {
                         .list()
                         .getItems());
 
+        private final Source<Map<String, PersistentVolumeClaim>> claims = new Source<>(
+                "Kubernetes: PVCs " + namespace + "/strimzi.io/cluster=" + cluster,
+                () -> client
+                        .persistentVolumeClaims()
+                        .inNamespace(namespace)
+                        .withLabel("strimzi.io/cluster", cluster)
+                        .list()
+                        .getItems()
+                        .stream()
+                        .collect(Collectors.toMap(c -> c.getMetadata().getName(), Function.identity())));
+
         private final Source<String> kubernetesVersion = new Source<>(
                 "Kubernetes: /version", () -> client.getKubernetesVersion().getGitVersion());
 
@@ -182,8 +196,8 @@ public class ConformityCheck {
                 version("versions.kafka", versions.kafka(), kafkaSource + " status.kafkaVersion", () ->
                         (String) at(kafka, "status", "kafkaVersion"));
             }
-            role("controllers", spec.controllers(), "strimzi.io/controller-role");
-            role("brokers", spec.brokers(), "strimzi.io/broker-role");
+            role("controllers", spec.controllers(), "strimzi.io/controller-role", "controller");
+            role("brokers", spec.brokers(), "strimzi.io/broker-role", "broker");
 
             List<Result> waived = waive(results);
             waived.sort(Comparator.comparing((Result r) -> ORDER.indexOf(r.status()))
@@ -212,10 +226,13 @@ public class ConformityCheck {
             });
         }
 
-        private void role(String role, Role spec, String roleLabel) {
+        private void role(String role, Role spec, String roleLabel, String poolRole) {
             if (spec == null) {
                 return;
             }
+            resources(role + ".requests", spec.requests(), roleLabel, ResourceRequirements::getRequests);
+            resources(role + ".limits", spec.limits(), roleLabel, ResourceRequirements::getLimits);
+            storage(role, spec.storage(), roleLabel, poolRole);
             if (spec.count() != null) {
                 rule(role + ".count", spec.count(), meets(spec.count()), pods.name, () -> {
                     List<Pod> mine = rolePods(roleLabel);
@@ -236,6 +253,79 @@ public class ConformityCheck {
                             combined.isEmpty() ? null : "pools with both roles: " + String.join(", ", combined));
                 });
             }
+        }
+
+        /** Requests or limits of each pod's kafka container; one the container does not set is unset. */
+        private void resources(
+                String id,
+                KafkaReference.Resources resources,
+                String roleLabel,
+                Function<ResourceRequirements, Map<String, Quantity>> pick) {
+            if (resources == null) {
+                return;
+            }
+            Map<String, Constraint<Quantity>> byName = new LinkedHashMap<>();
+            byName.put("cpu", resources.cpu());
+            byName.put("memory", resources.memory());
+            byName.forEach((name, constraint) -> rule(
+                    id + "." + name,
+                    constraint,
+                    meets(constraint),
+                    pods.name + ", container kafka",
+                    () -> perPod(roleLabel, pod -> kafkaResource(pod, pick, name))));
+        }
+
+        private static Quantity kafkaResource(
+                Pod pod, Function<ResourceRequirements, Map<String, Quantity>> pick, String name) {
+            for (var container : pod.getSpec().getContainers()) {
+                if ("kafka".equals(container.getName()) && container.getResources() != null) {
+                    Map<String, Quantity> values = pick.apply(container.getResources());
+                    return values == null ? null : values.get(name);
+                }
+            }
+            return null;
+        }
+
+        private void storage(String role, KafkaReference.Storage storage, String roleLabel, String poolRole) {
+            if (storage == null) {
+                return;
+            }
+            rule(role + ".storage.type", storage.type(), meets(storage.type()), pools.name, () -> {
+                Map<String, String> types = new LinkedHashMap<>();
+                for (GenericKubernetesResource pool : pools.get()) {
+                    if (at(pool, "spec", "roles") instanceof List<?> roles && roles.contains(poolRole)) {
+                        types.put(pool.getMetadata().getName(), (String) at(pool, "spec", "storage", "type"));
+                    }
+                }
+                return new Observation<>(types, null);
+            });
+            rule(role + ".storage.size", storage.size(), meets(storage.size()), claims.name, () -> {
+                Map<String, PersistentVolumeClaim> byName = claims.get();
+                return perPod(
+                        roleLabel,
+                        pod -> boundCapacity(
+                                claimNames(pod).stream().map(byName::get).toList()));
+            });
+            rule(role + ".storage.class", storage.storageClass(), meets(storage.storageClass()), claims.name, () -> {
+                Map<String, PersistentVolumeClaim> byName = claims.get();
+                Map<String, String> classes = new LinkedHashMap<>();
+                for (Pod pod : rolePods(roleLabel)) {
+                    for (String claim : claimNames(pod)) {
+                        PersistentVolumeClaim pvc = byName.get(claim);
+                        classes.put(claim, pvc == null ? null : pvc.getSpec().getStorageClassName());
+                    }
+                }
+                return new Observation<>(classes, classes.isEmpty() ? "no PVCs: ephemeral storage" : null);
+            });
+        }
+
+        /** The value of each pod of a role, by pod name; null for a pod without one. */
+        private <T> Observation<T> perPod(String roleLabel, Function<Pod, T> value) {
+            Map<String, T> values = new LinkedHashMap<>();
+            for (Pod pod : rolePods(roleLabel)) {
+                values.put(pod.getMetadata().getName(), value.apply(pod));
+            }
+            return new Observation<>(values, null);
         }
 
         private List<Pod> rolePods(String roleLabel) {
@@ -407,6 +497,36 @@ public class ConformityCheck {
 
     private static <T extends Comparable<? super T>> Predicate<T> meets(Constraint<T> constraint) {
         return value -> constraint.holds(value, Comparator.naturalOrder());
+    }
+
+    private static List<String> claimNames(Pod pod) {
+        return pod.getSpec().getVolumes().stream()
+                .filter(v -> v.getPersistentVolumeClaim() != null)
+                .map(v -> v.getPersistentVolumeClaim().getClaimName())
+                .toList();
+    }
+
+    /** What the bound claims hold, added up: a claim that is missing or not Bound adds nothing. */
+    static Quantity boundCapacity(List<PersistentVolumeClaim> claims) {
+        BigDecimal bytes = BigDecimal.ZERO;
+        String format = null;
+        for (PersistentVolumeClaim pvc : claims) {
+            if (pvc == null
+                    || pvc.getStatus() == null
+                    || !"Bound".equals(pvc.getStatus().getPhase())) {
+                continue;
+            }
+            Quantity capacity = pvc.getStatus().getCapacity() == null
+                    ? null
+                    : pvc.getStatus().getCapacity().get("storage");
+            if (capacity != null) {
+                bytes = bytes.add(capacity.getNumericalAmount());
+                format = format == null ? capacity.getFormat() : format;
+            }
+        }
+        return format == null || format.isEmpty()
+                ? new Quantity(bytes.toPlainString())
+                : Quantity.fromNumericalAmount(bytes, format);
     }
 
     private static <T> Observation<T> scalar(T value) {

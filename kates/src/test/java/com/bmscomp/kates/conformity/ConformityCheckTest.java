@@ -14,8 +14,11 @@ import jakarta.ws.rs.ClientErrorException;
 
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.VolumeBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.VersionInfo;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
@@ -58,11 +61,15 @@ class ConformityCheckTest {
                         "operatorLastSuccessfulVersion", "1.2.0",
                         "observedGeneration", 1,
                         "conditions", List.of(Map.of("type", "Ready", "status", "True")))));
-        create(ClusterTopologyService.NODE_POOL_CRD, pool("controllers", "controller"));
-        create(ClusterTopologyService.NODE_POOL_CRD, pool("brokers", "broker"));
+        create(ClusterTopologyService.NODE_POOL_CRD, pool("controllers", "persistent-claim", "controller"));
+        create(ClusterTopologyService.NODE_POOL_CRD, pool("brokers", "jbod", "broker"));
         for (int i = 0; i < 3; i++) {
-            pod("krafter-controllers-" + i, false, true, true);
-            pod("krafter-brokers-" + (i + 3), true, false, i != 2);
+            pod("krafter-controllers-" + i, false, true, true, "data-krafter-controllers-" + i);
+            claim("data-krafter-controllers-" + i, "10Gi", "standard", true);
+            String broker = "krafter-brokers-" + (i + 3);
+            pod(broker, true, false, i != 2, "data-0-" + broker, "data-1-" + broker);
+            claim("data-0-" + broker, "100Gi", "gp3", true);
+            claim("data-1-" + broker, "100Gi", i == 0 ? "standard" : "gp3", i != 1);
         }
     }
 
@@ -79,7 +86,7 @@ class ConformityCheckTest {
                 .build();
     }
 
-    static GenericKubernetesResource pool(String name, String... roles) {
+    static GenericKubernetesResource pool(String name, String storageType, String... roles) {
         return new GenericKubernetesResourceBuilder()
                 .withApiVersion("kafka.strimzi.io/v1")
                 .withKind("KafkaNodePool")
@@ -88,7 +95,8 @@ class ConformityCheckTest {
                 .withNamespace("kafka")
                 .addToLabels("strimzi.io/cluster", "krafter")
                 .endMetadata()
-                .withAdditionalProperties(Map.of("spec", Map.of("roles", List.of(roles), "replicas", 3)))
+                .withAdditionalProperties(Map.of(
+                        "spec", Map.of("roles", List.of(roles), "replicas", 3, "storage", Map.of("type", storageType))))
                 .build();
     }
 
@@ -96,7 +104,25 @@ class ConformityCheckTest {
         client.genericKubernetesResources(crd).inNamespace("kafka").resource(r).create();
     }
 
-    Pod pod(String name, boolean broker, boolean controller, boolean ready) {
+    void claim(String name, String size, String storageClass, boolean bound) {
+        var pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata()
+                .withName(name)
+                .withNamespace("kafka")
+                .addToLabels("strimzi.io/cluster", "krafter")
+                .endMetadata()
+                .withNewSpec()
+                .withStorageClassName(storageClass)
+                .endSpec()
+                .withNewStatus()
+                .withPhase(bound ? "Bound" : "Pending")
+                .addToCapacity("storage", new Quantity(size))
+                .endStatus()
+                .build();
+        client.persistentVolumeClaims().inNamespace("kafka").resource(pvc).create();
+    }
+
+    Pod pod(String name, boolean broker, boolean controller, boolean ready, String... claims) {
         Pod pod = new PodBuilder()
                 .withNewMetadata()
                 .withName(name)
@@ -106,6 +132,24 @@ class ConformityCheckTest {
                 .addToLabels("strimzi.io/broker-role", String.valueOf(broker))
                 .addToLabels("strimzi.io/controller-role", String.valueOf(controller))
                 .endMetadata()
+                .withNewSpec()
+                .addNewContainer()
+                .withName("kafka")
+                .withNewResources()
+                .addToRequests("cpu", new Quantity(broker ? "1" : "500m"))
+                .addToRequests("memory", new Quantity(broker ? "4Gi" : "1Gi"))
+                .addToLimits("memory", new Quantity(broker ? "4Gi" : "1Gi"))
+                .endResources()
+                .endContainer()
+                .withVolumes(java.util.Arrays.stream(claims)
+                        .map(c -> new VolumeBuilder()
+                                .withName(c)
+                                .withNewPersistentVolumeClaim()
+                                .withClaimName(c)
+                                .endPersistentVolumeClaim()
+                                .build())
+                        .toList())
+                .endSpec()
                 .withNewStatus()
                 .addNewCondition()
                 .withType("Ready")
@@ -231,6 +275,36 @@ class ConformityCheckTest {
         ClientErrorException e = assertThrows(ClientErrorException.class, () -> run("{brokers: {count: 3}}"));
         assertEquals(409, e.getResponse().getStatus());
         assertEquals("No Kafka kafka/krafter in the cluster", e.getMessage());
+    }
+
+    @Test
+    void sizesEachPodsKafkaContainer() throws IOException {
+        ConformityReport report = run("{controllers: {requests: {cpu: {min: 500m}, memory: {min: 1Gi}}},"
+                + " brokers: {requests: {memory: {min: 8Gi}}, limits: {cpu: {min: 1}}}}");
+
+        assertEquals(Status.PASS, result(report, "controllers.requests.cpu").status());
+        Result memory = result(report, "brokers.requests.memory");
+        assertEquals(Status.FAIL, memory.status());
+        assertEquals("4Gi", memory.observed());
+        assertEquals(List.of("krafter-brokers-3", "krafter-brokers-4", "krafter-brokers-5"), memory.subjects());
+        assertEquals("unset", result(report, "brokers.limits.cpu").observed());
+    }
+
+    @Test
+    void addsUpTheBoundVolumesOfEachPod() throws IOException {
+        ConformityReport report = run("{controllers: {storage: {type: persistent-claim, size: {min: 10Gi}}},"
+                + " brokers: {storage: {type: jbod, size: {min: 200Gi}, class: gp3}}}");
+
+        assertEquals(Status.PASS, result(report, "controllers.storage.type").status());
+        assertEquals(Status.PASS, result(report, "controllers.storage.size").status());
+        assertEquals(Status.PASS, result(report, "brokers.storage.type").status());
+        Result size = result(report, "brokers.storage.size");
+        assertEquals(Status.FAIL, size.status(), size::toString);
+        assertEquals("100Gi", size.observed(), "the unbound volume adds nothing");
+        assertEquals(List.of("krafter-brokers-4"), size.subjects());
+        Result storageClass = result(report, "brokers.storage.class");
+        assertEquals("standard", storageClass.observed());
+        assertEquals(List.of("data-1-krafter-brokers-3"), storageClass.subjects());
     }
 
     @Test
