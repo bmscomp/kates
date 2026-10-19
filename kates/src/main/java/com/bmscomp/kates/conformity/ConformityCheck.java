@@ -12,6 +12,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -34,6 +37,11 @@ import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
+import org.apache.kafka.clients.admin.Config;
+import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.common.KafkaFuture;
+import org.apache.kafka.common.Node;
+import org.apache.kafka.common.config.ConfigResource;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.bmscomp.kates.api.ApiError;
@@ -49,10 +57,12 @@ import com.bmscomp.kates.conformity.KafkaReference.Target;
 import com.bmscomp.kates.conformity.KafkaReference.Versions;
 import com.bmscomp.kates.conformity.KafkaReference.Waiver;
 import com.bmscomp.kates.service.ClusterTopologyService;
+import com.bmscomp.kates.service.KafkaAdminService;
 
 /**
  * Checks the Strimzi cluster this Kates API watches against a KafkaReference,
- * read-only: Kubernetes get and list calls, nothing else.
+ * read-only: Kubernetes get and list calls, and with kafka.source brokers the
+ * Kafka Admin API's describeCluster and describeConfigs.
  *
  * <p>Each source is read once, when the first rule that needs it runs. A
  * source that cannot be read makes every rule that needs it UNKNOWN, never
@@ -75,6 +85,7 @@ public class ConformityCheck {
             List.of(Status.FAIL, Status.UNKNOWN, Status.WARN, Status.WAIVED, Status.PASS);
 
     private final KubernetesClient client;
+    private final KafkaAdminService admin;
     private final String namespace;
     private final String cluster;
 
@@ -84,9 +95,11 @@ public class ConformityCheck {
     @Inject
     public ConformityCheck(
             KubernetesClient client,
+            KafkaAdminService admin,
             @ConfigProperty(name = "kates.topology.kafka-namespace", defaultValue = "kafka") String namespace,
             @ConfigProperty(name = "kates.topology.kafka-cluster", defaultValue = "krafter") String cluster) {
         this.client = client;
+        this.admin = admin;
         this.namespace = namespace;
         this.cluster = cluster;
     }
@@ -101,10 +114,6 @@ public class ConformityCheck {
                 .filter(id -> !EVALUATED.matcher(id).matches())
                 .collect(Collectors.toMap(
                         id -> "spec." + id, id -> "not implemented yet", (a, b) -> a, LinkedHashMap::new));
-        if (reference.spec().kafka() != null
-                && "brokers".equals(reference.spec().kafka().source())) {
-            notYet.put("spec.kafka.source", "not implemented yet");
-        }
         if (!notYet.isEmpty()) {
             throw new InvalidReferenceException(ApiError.validationFailed(
                     notYet.keySet().stream()
@@ -164,6 +173,21 @@ public class ConformityCheck {
                                 n -> n.getMetadata().getLabels() == null
                                         ? Map.of()
                                         : n.getMetadata().getLabels())));
+
+        /** With kafka.source brokers only: the brokers Kafka reports, and their effective configs. */
+        private final Source<Collection<Node>> brokers = new Source<>(
+                "Kafka Admin: describeCluster",
+                () -> await(admin.sharedAdminClient().describeCluster().nodes()));
+
+        private final Source<Map<String, Config>> brokerConfigs = new Source<>("Kafka Admin: describeConfigs", () -> {
+            List<ConfigResource> resources = brokers.get().stream()
+                    .map(n -> new ConfigResource(ConfigResource.Type.BROKER, n.idString()))
+                    .toList();
+            Map<String, Config> configs = new TreeMap<>();
+            await(admin.sharedAdminClient().describeConfigs(resources).all())
+                    .forEach((resource, config) -> configs.put(resource.name(), config));
+            return configs;
+        });
 
         private final Source<String> kubernetesVersion = new Source<>(
                 "Kubernetes: /version", () -> client.getKubernetesVersion().getGitVersion());
@@ -428,6 +452,7 @@ public class ConformityCheck {
                 return;
             }
             String crKafka = kafkaSource + " spec.kafka";
+            boolean fromBrokers = "brokers".equals(rules.source());
             rule(
                     "kafka.authorization",
                     rules.authorization(),
@@ -441,8 +466,8 @@ public class ConformityCheck {
                     "kafka.rackAwareness",
                     rules.rackAwareness(),
                     meets(rules.rackAwareness()),
-                    crKafka + ".rack, nodes' labels",
-                    this::rackAwareness);
+                    crKafka + ".rack, " + (fromBrokers ? brokers.name + " racks" : "nodes' labels"),
+                    () -> rackAwareness(fromBrokers));
             if (rules.listeners() != null) {
                 listeners(rules.listeners(), crKafka + ".listeners");
             }
@@ -454,18 +479,39 @@ public class ConformityCheck {
                                 "kafka.config" + (key.contains(".") ? "[" + key + "]" : "." + key),
                                 constraint,
                                 value -> Constraint.configHolds(constraint, value),
-                                crKafka + ".config",
-                                () -> {
-                                    Object value = config.get(key);
-                                    return new Observation<>(
-                                            Collections.singletonMap("", value == null ? null : value.toString()),
-                                            value == null ? "not set in the Kafka CR" : null);
-                                }));
+                                fromBrokers ? brokerConfigs.name + ", every broker" : crKafka + ".config",
+                                () -> fromBrokers ? effectiveConfig(key) : declaredConfig(config, key)));
             }
         }
 
-        /** The rack key is the zone label, and every broker's node carries it: where Strimzi takes each rack from. */
-        private Observation<Boolean> rackAwareness() {
+        private Observation<String> declaredConfig(Map<?, ?> config, String key) {
+            Object value = config.get(key);
+            return new Observation<>(
+                    Collections.singletonMap("", value == null ? null : value.toString()),
+                    value == null ? "not set in the Kafka CR" : null);
+        }
+
+        /** The value each broker reports, defaults included; a sensitive one is never read. */
+        private Observation<String> effectiveConfig(String key) {
+            Map<String, String> values = new LinkedHashMap<>();
+            boolean reported = false;
+            for (Map.Entry<String, Config> broker : brokerConfigs.get().entrySet()) {
+                ConfigEntry entry = broker.getValue().get(key);
+                if (entry != null && entry.isSensitive()) {
+                    throw new Unreadable(key + " is sensitive: Kafka does not return its value");
+                }
+                reported |= entry != null;
+                values.put("broker " + broker.getKey(), entry == null ? null : entry.value());
+            }
+            return new Observation<>(values, reported ? null : "brokers do not report " + key);
+        }
+
+        /**
+         * The rack key is the zone label, and then, from the Kafka CR, every
+         * broker's node carries that label (where Strimzi takes each rack
+         * from) or, from the brokers, every broker reports a rack.
+         */
+        private Observation<Boolean> rackAwareness(boolean fromBrokers) {
             String zoneLabel = zoneLabel();
             Object key = at(kafka, "spec", "kafka", "rack", "topologyKey");
             if (!zoneLabel.equals(key)) {
@@ -475,16 +521,29 @@ public class ConformityCheck {
                                 ? "spec.kafka.rack is not set"
                                 : "spec.kafka.rack.topologyKey is " + key + ", not " + zoneLabel);
             }
-            Map<String, Map<String, String>> labels = nodeLabels.get();
-            List<String> bare = rolePods("strimzi.io/broker-role").stream()
-                    .filter(p -> p.getSpec().getNodeName() == null
-                            || !labels.getOrDefault(p.getSpec().getNodeName(), Map.of())
-                                    .containsKey(zoneLabel))
-                    .map(p -> p.getMetadata().getName())
-                    .toList();
+            List<String> without;
+            if (fromBrokers) {
+                without = brokers.get().stream()
+                        .filter(n -> n.rack() == null || n.rack().isEmpty())
+                        .map(n -> "broker " + n.idString())
+                        .toList();
+            } else {
+                Map<String, Map<String, String>> labels = nodeLabels.get();
+                without = rolePods("strimzi.io/broker-role").stream()
+                        .filter(p -> p.getSpec().getNodeName() == null
+                                || !labels.getOrDefault(p.getSpec().getNodeName(), Map.of())
+                                        .containsKey(zoneLabel))
+                        .map(p -> p.getMetadata().getName())
+                        .toList();
+            }
             return new Observation<>(
-                    Map.of("", bare.isEmpty()),
-                    bare.isEmpty() ? null : "brokers on no node with " + zoneLabel + ": " + String.join(", ", bare));
+                    Map.of("", without.isEmpty()),
+                    without.isEmpty()
+                            ? null
+                            : (fromBrokers
+                                            ? "brokers that report no rack: "
+                                            : "brokers on no node with " + zoneLabel + ": ")
+                                    + String.join(", ", without));
         }
 
         private void listeners(KafkaReference.Listeners rules, String source) {
@@ -874,6 +933,20 @@ public class ConformityCheck {
         return list.stream()
                 .anyMatch(c ->
                         c instanceof Map<?, ?> m && "Ready".equals(m.get("type")) && "True".equals(m.get("status")));
+    }
+
+    /** An Admin call's answer, within the 30 s the topology and health checks give one. */
+    private static <T> T await(KafkaFuture<T> future) {
+        try {
+            return future.get(30, TimeUnit.SECONDS);
+        } catch (ExecutionException e) {
+            throw new IllegalStateException(e.getCause() != null ? e.getCause().getMessage() : e.getMessage(), e);
+        } catch (TimeoutException e) {
+            throw new IllegalStateException("no answer within 30 s", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted", e);
+        }
     }
 
     /** A value under a custom resource's spec or status, or null. */

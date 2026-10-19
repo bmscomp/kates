@@ -2,6 +2,8 @@ package com.bmscomp.kates.conformity;
 
 import static com.bmscomp.kates.conformity.KafkaReferenceExamplesTest.json;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -29,6 +31,14 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.VersionInfo;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.Config;
+import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.clients.admin.DescribeClusterResult;
+import org.apache.kafka.clients.admin.DescribeConfigsResult;
+import org.apache.kafka.common.KafkaFuture;
+import org.apache.kafka.common.Node;
+import org.apache.kafka.common.config.ConfigResource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,6 +48,7 @@ import com.bmscomp.kates.conformity.ConformityReport.Result;
 import com.bmscomp.kates.conformity.ConformityReport.Status;
 import com.bmscomp.kates.conformity.ConformityReport.Verdict;
 import com.bmscomp.kates.service.ClusterTopologyService;
+import com.bmscomp.kates.service.KafkaAdminService;
 
 @EnableKubernetesMockClient(crud = true, kubernetesClientBuilderCustomizer = VertxPerMockClient.class)
 class ConformityCheckTest {
@@ -49,10 +60,12 @@ class ConformityCheckTest {
     KubernetesClient client;
 
     ConformityCheck check;
+    KafkaAdminService admin;
 
     @BeforeEach
     void cluster() {
-        check = new ConformityCheck(client, "kafka", "krafter");
+        admin = mock(KafkaAdminService.class);
+        check = new ConformityCheck(client, admin, "kafka", "krafter");
         check.clock = Clock.fixed(Instant.parse("2026-10-19T12:00:00Z"), ZoneOffset.UTC);
         server.setVersionInfo(new VersionInfo.Builder()
                 .withMajor("1")
@@ -518,21 +531,88 @@ class ConformityCheckTest {
                 "spec.kafka.rack.topologyKey is topology.kubernetes.io/zone, not example.com/rack", result.detail());
     }
 
+    /** Brokers 3 and 4 report a rack and min.insync.replicas 2; broker 5 reports neither a rack nor 2. */
+    AdminClient brokers() {
+        AdminClient kafka = mock(AdminClient.class);
+        when(admin.sharedAdminClient()).thenReturn(kafka);
+        DescribeClusterResult cluster = mock(DescribeClusterResult.class);
+        when(cluster.nodes())
+                .thenReturn(KafkaFuture.completedFuture(List.of(
+                        new Node(3, "b3", 9092, "alpha"), new Node(4, "b4", 9092, "sigma"), new Node(5, "b5", 9092))));
+        when(kafka.describeCluster()).thenReturn(cluster);
+        Map<ConfigResource, Config> configs = new java.util.LinkedHashMap<>();
+        for (int id = 3; id <= 5; id++) {
+            configs.put(
+                    new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(id)),
+                    new Config(List.of(
+                            new ConfigEntry("min.insync.replicas", id == 5 ? "1" : "2"),
+                            new ConfigEntry(
+                                    "ssl.keystore.password",
+                                    null,
+                                    ConfigEntry.ConfigSource.STATIC_BROKER_CONFIG,
+                                    true,
+                                    false,
+                                    List.of(),
+                                    ConfigEntry.ConfigType.PASSWORD,
+                                    null))));
+        }
+        DescribeConfigsResult described = mock(DescribeConfigsResult.class);
+        when(described.all()).thenReturn(KafkaFuture.completedFuture(configs));
+        when(kafka.describeConfigs(org.mockito.ArgumentMatchers.anyCollection()))
+                .thenReturn(described);
+        return kafka;
+    }
+
+    @Test
+    void readsEffectiveValuesFromTheBrokersWithSourceBrokers() throws IOException {
+        brokers();
+
+        ConformityReport report = run("{kafka: {source: brokers, rackAwareness: true, config: {"
+                + " min.insync.replicas: {min: 2}, auto.create.topics.enable: false, ssl.keystore.password: x}}}");
+
+        Result rack = result(report, "kafka.rackAwareness");
+        assertEquals(Status.FAIL, rack.status());
+        assertEquals("brokers that report no rack: broker 5", rack.detail());
+        Result minIsr = result(report, "kafka.config[min.insync.replicas]");
+        assertEquals(Status.FAIL, minIsr.status());
+        assertEquals("1", minIsr.observed());
+        assertEquals(List.of("broker 5"), minIsr.subjects());
+        assertEquals(
+                "brokers do not report auto.create.topics.enable",
+                result(report, "kafka.config[auto.create.topics.enable]").detail());
+        Result secret = result(report, "kafka.config[ssl.keystore.password]");
+        assertEquals(Status.UNKNOWN, secret.status());
+        assertNull(secret.observed());
+    }
+
+    @Test
+    void anAdminFailureIsUnknown() throws IOException {
+        AdminClient kafka = mock(AdminClient.class);
+        when(admin.sharedAdminClient()).thenReturn(kafka);
+        DescribeClusterResult cluster = mock(DescribeClusterResult.class);
+        org.apache.kafka.common.internals.KafkaFutureImpl<java.util.Collection<Node>> failed =
+                new org.apache.kafka.common.internals.KafkaFutureImpl<>();
+        failed.completeExceptionally(new org.apache.kafka.common.errors.TimeoutException("Timed out waiting"));
+        when(cluster.nodes()).thenReturn(failed);
+        when(kafka.describeCluster()).thenReturn(cluster);
+
+        ConformityReport report = run("{kafka: {source: brokers, config: {min.insync.replicas: {min: 2}}}}");
+
+        Result result = report.results().get(0);
+        assertEquals(Status.UNKNOWN, result.status());
+        assertTrue(result.detail().contains("Timed out waiting"), result.detail());
+        assertEquals(Verdict.UNKNOWN, report.verdict());
+    }
+
     @Test
     void refusesARuleItCannotEvaluateYet() {
         ApiError error = assertThrows(
                         InvalidReferenceException.class,
-                        () -> run("{kafka: {source: brokers, rackAwareness: true}, monitoring: {kafkaExporter: true}}"))
+                        () -> run("{kafka: {rackAwareness: true}, monitoring: {kafkaExporter: true}}"))
                 .getError();
 
         assertEquals(400, error.getStatus());
-        assertEquals(
-                Map.of(
-                        "spec.kafka.source",
-                        "not implemented yet",
-                        "spec.monitoring.kafkaExporter",
-                        "not implemented yet"),
-                error.getFieldErrors());
+        assertEquals(Map.of("spec.monitoring.kafkaExporter", "not implemented yet"), error.getFieldErrors());
     }
 
     @Test
