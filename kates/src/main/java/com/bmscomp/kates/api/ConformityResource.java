@@ -14,6 +14,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import com.bmscomp.kates.audit.NotAudited;
 import com.bmscomp.kates.conformity.ConformityCheck;
 import com.bmscomp.kates.conformity.InvalidReferenceException;
 import com.bmscomp.kates.conformity.KafkaReferenceReader;
@@ -39,6 +40,7 @@ public class ConformityResource {
         this.check = check;
     }
 
+    @NotAudited("reads the cluster and stores nothing")
     @POST
     @Path("/check")
     @Consumes(MediaType.APPLICATION_JSON)
