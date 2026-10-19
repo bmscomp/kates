@@ -113,6 +113,18 @@ public record Constraint<T>(T equalTo, T min, T max, List<T> oneOf, Severity sev
             return new Reader(ctxt.getContextualType().containedType(0));
         }
 
+        /** An explicit null, as a YAML key with no value, would otherwise drop its rule without a word. */
+        @Override
+        public Constraint<?> getNullValue(DeserializationContext ctxt) throws JsonMappingException {
+            throw new Refusal(ctxt.getParser(), "a value is required");
+        }
+
+        /** A field left out declares no rule. */
+        @Override
+        public Object getAbsentValue(DeserializationContext ctxt) {
+            return null;
+        }
+
         @Override
         public Constraint<?> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
             if (!p.isExpectedStartObjectToken()) {
@@ -150,7 +162,18 @@ public record Constraint<T>(T equalTo, T min, T max, List<T> oneOf, Severity sev
             if (oneOf != null && (min != null || max != null)) {
                 throw new Refusal(p, "oneOf stands alone: drop min and max");
             }
+            if (min != null && max != null && above(min, max)) {
+                throw new Refusal(p, "min is above max, so nothing can meet it");
+            }
             return new Constraint<>(equalTo, min, max, oneOf, severity);
+        }
+
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        private static boolean above(Object min, Object max) {
+            if (min instanceof JsonNode low && max instanceof JsonNode high) {
+                return low.decimalValue().compareTo(high.decimalValue()) > 0;
+            }
+            return ((Comparable) min).compareTo(max) > 0;
         }
 
         private Object value(JsonParser p, DeserializationContext ctxt) throws IOException {
