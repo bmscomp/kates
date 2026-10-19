@@ -71,10 +71,14 @@ public record KafkaReference(String apiVersion, String kind, Metadata metadata, 
             @JsonProperty("class") Constraint<String> storageClass) {}
 
     /**
+     * @param source where config and rackAwareness read from: cr, the Kafka CR
+     *     (the default, no Kafka access), or brokers, the Kafka Admin API
      * @param authorization none, simple, opa, keycloak or custom
-     * @param config broker config name to the effective value every broker must report
+     * @param config broker config name to the value the Kafka CR sets, or with
+     *     source brokers the effective value every broker reports
      */
     public record Kafka(
+            String source,
             Constraint<Boolean> rackAwareness,
             Constraint<String> authorization,
             Listeners listeners,

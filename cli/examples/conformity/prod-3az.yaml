@@ -51,7 +51,8 @@ spec:
     antiAffinity: {equals: required, severity: warn}
 
   kafka:
-    rackAwareness: true # spec.kafka.rack uses zoneLabel, and every broker reports a rack
+    # source: brokers   # read config and racks through the Kafka Admin API; the default, cr, reads the Kafka CR
+    rackAwareness: true # spec.kafka.rack uses zoneLabel, and every broker's node has that label
     authorization: {oneOf: [simple, custom]}
     listeners:
       require: # each must exist under this name, with these properties
@@ -62,7 +63,7 @@ spec:
       every: # every listener, whatever its name
         tls: true
         auth: {oneOf: [tls, scram-sha-512, custom]} # none means anonymous
-    config: # the effective value on every broker, defaults included
+    config: # what the Kafka CR declares; a key it leaves out fails
       default.replication.factor: {min: 3}
       min.insync.replicas: {min: 2}
       offsets.topic.replication.factor: {min: 3}

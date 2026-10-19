@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,7 +64,7 @@ public class ConformityCheck {
     /** The rules this version evaluates; a reference that declares another is refused until it can. */
     private static final Pattern EVALUATED = Pattern.compile("versions\\..+|controllers\\.dedicated"
             + "|(controllers|brokers)\\.(count|(requests|limits)\\.(cpu|memory)|storage\\.(type|size|class)"
-            + "|zones|skew|perNode|antiAffinity)");
+            + "|zones|skew|perNode|antiAffinity)|kafka\\..+");
 
     private static final String DEFAULT_ZONE_LABEL = "topology.kubernetes.io/zone";
     private static final String HOSTNAME = "kubernetes.io/hostname";
@@ -100,6 +101,10 @@ public class ConformityCheck {
                 .filter(id -> !EVALUATED.matcher(id).matches())
                 .collect(Collectors.toMap(
                         id -> "spec." + id, id -> "not implemented yet", (a, b) -> a, LinkedHashMap::new));
+        if (reference.spec().kafka() != null
+                && "brokers".equals(reference.spec().kafka().source())) {
+            notYet.put("spec.kafka.source", "not implemented yet");
+        }
         if (!notYet.isEmpty()) {
             throw new InvalidReferenceException(ApiError.validationFailed(
                     notYet.keySet().stream()
@@ -217,6 +222,7 @@ public class ConformityCheck {
             }
             role("controllers", spec.controllers(), "strimzi.io/controller-role", "controller");
             role("brokers", spec.brokers(), "strimzi.io/broker-role", "broker");
+            kafka(spec.kafka());
 
             List<Result> waived = waive(results);
             waived.sort(Comparator.comparing((Result r) -> ORDER.indexOf(r.status()))
@@ -345,7 +351,7 @@ public class ConformityCheck {
          * count: the spread cannot be shown.
          */
         private void placement(String role, Role spec, String roleLabel) {
-            String zoneLabel = this.spec.zoneLabel() != null ? this.spec.zoneLabel() : DEFAULT_ZONE_LABEL;
+            String zoneLabel = zoneLabel();
             String source = pods.name + ", nodes' " + zoneLabel;
             rule(
                     role + ".zones",
@@ -412,6 +418,145 @@ public class ConformityCheck {
             return new Observation<>(values, detail.isEmpty() ? null : detail);
         }
 
+        private String zoneLabel() {
+            return spec.zoneLabel() != null ? spec.zoneLabel() : DEFAULT_ZONE_LABEL;
+        }
+
+        /** The Kafka rules, read from the Kafka CR. */
+        private void kafka(KafkaReference.Kafka rules) {
+            if (rules == null) {
+                return;
+            }
+            String crKafka = kafkaSource + " spec.kafka";
+            rule(
+                    "kafka.authorization",
+                    rules.authorization(),
+                    meets(rules.authorization()),
+                    crKafka + ".authorization",
+                    () -> {
+                        Object type = at(kafka, "spec", "kafka", "authorization", "type");
+                        return scalar(type == null ? "none" : type.toString());
+                    });
+            rule(
+                    "kafka.rackAwareness",
+                    rules.rackAwareness(),
+                    meets(rules.rackAwareness()),
+                    crKafka + ".rack, nodes' labels",
+                    this::rackAwareness);
+            if (rules.listeners() != null) {
+                listeners(rules.listeners(), crKafka + ".listeners");
+            }
+            if (rules.config() != null) {
+                Object set = at(kafka, "spec", "kafka", "config");
+                Map<?, ?> config = set instanceof Map<?, ?> m ? m : Map.of();
+                rules.config()
+                        .forEach((key, constraint) -> rule(
+                                "kafka.config" + (key.contains(".") ? "[" + key + "]" : "." + key),
+                                constraint,
+                                value -> Constraint.configHolds(constraint, value),
+                                crKafka + ".config",
+                                () -> {
+                                    Object value = config.get(key);
+                                    return new Observation<>(
+                                            Collections.singletonMap("", value == null ? null : value.toString()),
+                                            value == null ? "not set in the Kafka CR" : null);
+                                }));
+            }
+        }
+
+        /** The rack key is the zone label, and every broker's node carries it: where Strimzi takes each rack from. */
+        private Observation<Boolean> rackAwareness() {
+            String zoneLabel = zoneLabel();
+            Object key = at(kafka, "spec", "kafka", "rack", "topologyKey");
+            if (!zoneLabel.equals(key)) {
+                return new Observation<>(
+                        Map.of("", false),
+                        key == null
+                                ? "spec.kafka.rack is not set"
+                                : "spec.kafka.rack.topologyKey is " + key + ", not " + zoneLabel);
+            }
+            Map<String, Map<String, String>> labels = nodeLabels.get();
+            List<String> bare = rolePods("strimzi.io/broker-role").stream()
+                    .filter(p -> p.getSpec().getNodeName() == null
+                            || !labels.getOrDefault(p.getSpec().getNodeName(), Map.of())
+                                    .containsKey(zoneLabel))
+                    .map(p -> p.getMetadata().getName())
+                    .toList();
+            return new Observation<>(
+                    Map.of("", bare.isEmpty()),
+                    bare.isEmpty() ? null : "brokers on no node with " + zoneLabel + ": " + String.join(", ", bare));
+        }
+
+        private void listeners(KafkaReference.Listeners rules, String source) {
+            Map<String, Map<String, Object>> listeners = new LinkedHashMap<>();
+            if (at(kafka, "spec", "kafka", "listeners") instanceof List<?> list) {
+                for (Object item : list) {
+                    if (item instanceof Map<?, ?> l && l.get("name") != null) {
+                        Map<String, Object> properties = new LinkedHashMap<>();
+                        properties.put(
+                                "type",
+                                l.get("type") == null ? null : l.get("type").toString());
+                        properties.put("port", l.get("port") instanceof Number n ? n.intValue() : null);
+                        properties.put("tls", Boolean.TRUE.equals(l.get("tls")));
+                        Object auth = l.get("authentication") instanceof Map<?, ?> a ? a.get("type") : null;
+                        properties.put("auth", auth == null ? "none" : auth.toString());
+                        listeners.put(l.get("name").toString(), properties);
+                    }
+                }
+            }
+            if (rules.require() != null) {
+                for (KafkaReference.RequiredListener required : rules.require()) {
+                    requiredListener(required, listeners.get(required.name()), source);
+                }
+            }
+            KafkaReference.ListenerProperties every = rules.every();
+            if (every != null) {
+                rule(
+                        "kafka.listeners.every.type",
+                        every.type(),
+                        meets(every.type()),
+                        source,
+                        () -> perListener(listeners, l -> (String) l.get("type")));
+                rule(
+                        "kafka.listeners.every.tls",
+                        every.tls(),
+                        meets(every.tls()),
+                        source,
+                        () -> perListener(listeners, l -> (Boolean) l.get("tls")));
+                rule(
+                        "kafka.listeners.every.auth",
+                        every.auth(),
+                        meets(every.auth()),
+                        source,
+                        () -> perListener(listeners, l -> (String) l.get("auth")));
+            }
+        }
+
+        /** One rule: the listener exists under its name with every property listed. */
+        private void requiredListener(
+                KafkaReference.RequiredListener required, Map<String, Object> found, String source) {
+            Map<String, Object> expected = new LinkedHashMap<>();
+            List<String> differ = new ArrayList<>();
+            property("type", required.type(), found, expected, differ);
+            property("port", required.port(), found, expected, differ);
+            property("tls", required.tls(), found, expected, differ);
+            property("auth", required.auth(), found, expected, differ);
+            boolean holds = found != null && differ.isEmpty();
+            results.add(new Result(
+                    "kafka.listeners.require[" + required.name() + "]",
+                    holds ? Status.PASS : required.severity() == Severity.WARN ? Status.WARN : Status.FAIL,
+                    required.severity(),
+                    expected,
+                    found == null ? "missing" : found,
+                    null,
+                    found == null
+                            ? "no listener named " + required.name()
+                            : differ.isEmpty() ? null : String.join("; ", differ),
+                    source,
+                    null,
+                    null));
+        }
+
         /** The value of each pod of a role, by pod name; null for a pod without one. */
         private <T> Observation<T> perPod(String roleLabel, Function<Pod, T> value) {
             Map<String, T> values = new LinkedHashMap<>();
@@ -433,7 +578,7 @@ public class ConformityCheck {
          */
         private <T> void rule(
                 String id,
-                Constraint<T> constraint,
+                Constraint<?> constraint,
                 Predicate<T> meets,
                 String source,
                 Supplier<Observation<T>> observe) {
@@ -689,6 +834,30 @@ public class ConformityCheck {
 
     private static <T> Observation<T> scalar(T value) {
         return new Observation<>(Map.of("", value), null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Comparable<? super T>> void property(
+            String name,
+            Constraint<T> constraint,
+            Map<String, Object> found,
+            Map<String, Object> expected,
+            List<String> differ) {
+        if (constraint == null) {
+            return;
+        }
+        expected.put(name, expected(constraint));
+        T value = found == null ? null : (T) found.get(name);
+        if (found != null && (value == null || !constraint.holds(value, Comparator.naturalOrder()))) {
+            differ.add(name + " is " + render(value));
+        }
+    }
+
+    private static <T> Observation<T> perListener(
+            Map<String, Map<String, Object>> listeners, Function<Map<String, Object>, T> value) {
+        Map<String, T> values = new LinkedHashMap<>();
+        listeners.forEach((name, properties) -> values.put(name, value.apply(properties)));
+        return new Observation<>(values, values.isEmpty() ? "the Kafka CR declares no listener" : null);
     }
 
     static boolean ready(Pod pod) {

@@ -62,6 +62,11 @@
           "additionalProperties": false,
           "minProperties": 1,
           "properties": {
+            "source": {
+              "description": "Where config and rackAwareness read from: cr, the Kafka CR (no Kafka access), or brokers, the Kafka Admin API (each broker's effective values). A setting, not a rule.",
+              "enum": ["cr", "brokers"],
+              "default": "cr"
+            },
             "rackAwareness": { "$ref": "#/$defs/boolConstraint" },
             "authorization": { "$ref": "#/$defs/authorizationConstraint" },
             "listeners": {
@@ -88,7 +93,7 @@
               }
             },
             "config": {
-              "description": "Broker config name to constraint, compared with the effective value on every broker.",
+              "description": "Broker config name to constraint. With source cr, compared with what the Kafka CR sets, and a key it leaves out fails; with brokers, with the effective value on every broker.",
               "type": "object",
               "minProperties": 1,
               "maxProperties": 200,
