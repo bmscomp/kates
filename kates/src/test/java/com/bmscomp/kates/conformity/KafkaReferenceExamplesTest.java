@@ -38,7 +38,11 @@ class KafkaReferenceExamplesTest {
         }
     }
 
-    /** The JSON the CLI sends for a YAML reference. */
+    /**
+     * The JSON the CLI sends for a YAML reference: a date stays the text it was
+     * written as, as conformityInstance in cli/cmd/conformity_examples_test.go
+     * converts it.
+     */
     static byte[] json(String yaml) throws IOException {
         return new ObjectMapper().writeValueAsBytes(new YAMLMapper().readTree(yaml));
     }
