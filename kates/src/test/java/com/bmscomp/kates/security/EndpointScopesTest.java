@@ -47,9 +47,12 @@ class EndpointScopesTest {
     private static final Set<Class<? extends Annotation>> WRITES =
             Set.of(POST.class, PUT.class, DELETE.class, PATCH.class);
 
-    /** Writes that read: the cost estimate computes, and the disruption POST checks chaos:run in code. */
+    /**
+     * Writes that read: the cost estimate computes, the conformity check reads
+     * the cluster, and the disruption POST checks chaos:run in code.
+     */
     private static final Set<String> WRITES_THAT_READ =
-            Set.of("CostResource.estimate", "DisruptionResource.executeDisruption");
+            Set.of("CostResource.estimate", "ConformityResource.check", "DisruptionResource.executeDisruption");
 
     private static List<Class<?>> resources() throws IOException, URISyntaxException {
         Path root = Path.of(HealthResource.class

@@ -147,6 +147,13 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.conformity.KafkaReference.Monitoring.class,
             com.bmscomp.kates.conformity.KafkaReference.Waiver.class,
             com.bmscomp.kates.conformity.Constraint.class,
-            com.bmscomp.kates.conformity.Version.class
+            com.bmscomp.kates.conformity.Version.class,
+            // Conformity report, returned in a Response
+            com.bmscomp.kates.conformity.ConformityReport.class,
+            com.bmscomp.kates.conformity.ConformityReport.Target.class,
+            com.bmscomp.kates.conformity.ConformityReport.ClusterState.class,
+            com.bmscomp.kates.conformity.ConformityReport.Summary.class,
+            com.bmscomp.kates.conformity.ConformityReport.Result.class,
+            com.bmscomp.kates.conformity.ConformityReport.Waived.class
         })
 public class NativePayloadReflectionConfig {}
