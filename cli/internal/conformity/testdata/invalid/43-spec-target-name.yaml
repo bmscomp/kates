@@ -1,0 +1,6 @@
+# expect: spec.target.name
+# the reader says: must be a DNS label: up to 63 lower-case letters, digits and -
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {target: {name: Krafter}, brokers: {count: 3}}

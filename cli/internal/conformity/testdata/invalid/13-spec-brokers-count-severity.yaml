@@ -1,0 +1,6 @@
+# expect: spec.brokers.count.severity
+# the reader says: expected fail or warn
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {count: {min: 1, severity: error}}}

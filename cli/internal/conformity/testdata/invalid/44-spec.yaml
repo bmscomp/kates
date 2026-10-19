@@ -1,0 +1,6 @@
+# expect: spec
+# the reader says: declares no rule
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {zoneLabel: topology.kubernetes.io/zone}

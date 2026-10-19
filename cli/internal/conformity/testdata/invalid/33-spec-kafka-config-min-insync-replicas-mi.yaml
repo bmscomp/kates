@@ -1,0 +1,6 @@
+# expect: spec.kafka.config[min.insync.replicas].min
+# the reader says: a broker config's min and max are numbers
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {config: {min.insync.replicas: {min: two}}}}

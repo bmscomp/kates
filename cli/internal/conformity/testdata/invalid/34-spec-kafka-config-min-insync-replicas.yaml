@@ -1,0 +1,6 @@
+# expect: spec.kafka.config[min.insync.replicas]
+# the reader says: expected text, a number, or true or false
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {config: {min.insync.replicas: [2]}}}

@@ -58,9 +58,10 @@
   synopsis: "kates conformity check -f <reference.yaml> [--output-junit <file>]"
   short: "Check the cluster against a reference architecture"
   description: |
-    Sends a KafkaReference file (cli/examples/conformity) to the Kates API,
-    which reads the cluster read-only and reports every declared rule:
-    PASS, FAIL, WARN, WAIVED or UNKNOWN. Exits 0 when every fail rule
+    Lints a KafkaReference file (cli/examples/conformity) first, and stops
+    with exit 2 on an error. Then it sends the file to the Kates API, which
+    reads the cluster read-only and reports every declared rule: PASS,
+    FAIL, WARN, WAIVED or UNKNOWN. Exits 0 when every fail rule
     holds, 1 when one does not, and 2 when the check could not tell or
     could not run. --output-junit also writes a JUnit report for CI.
   examples:
@@ -70,6 +71,41 @@
   see_also:
     - cluster check
     - cluster topology
+
+- name: conformity lint
+  category: Cluster
+  synopsis: "kates conformity lint <reference.yaml>..."
+  short: "Check reference files offline, as a compiler does"
+  description: |
+    Checks KafkaReference files without a Kates API or a cluster: YAML
+    syntax, duplicates, the JSON Schema, the API's own checks, then
+    incoherence between constraints. Prints file:line:col diagnostics
+    with the source line under each; -o json lists them instead.
+    Exits 1 on an error, 0 with warnings only, 2 on an unreadable file.
+  examples:
+    - "kates conformity lint prod-3az.yaml"
+    - "kates conformity lint platform/*.yaml"
+    - "kates conformity lint -o json platform/*.yaml"
+  see_also:
+    - conformity check
+    - conformity fmt
+
+- name: conformity fmt
+  category: Cluster
+  synopsis: "kates conformity fmt [-w | --check] <reference.yaml>..."
+  short: "Format reference files canonically, removing duplicates"
+  description: |
+    Writes KafkaReference files in one canonical form, each constraint in
+    its shortest form, without exact duplicates; comments stay. Refuses a
+    file that does not parse or sets a key to two values. -w writes back;
+    --check lists unformatted files and exits 1.
+  examples:
+    - "kates conformity fmt prod-3az.yaml"
+    - "kates conformity fmt -w platform/*.yaml"
+    - "kates conformity fmt --check platform/*.yaml"
+  see_also:
+    - conformity lint
+    - conformity check
 
 - name: cluster info
   category: Cluster

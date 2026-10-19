@@ -1,0 +1,6 @@
+# expect: spec.waivers[0].until
+# the reader says: required
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {count: 3}, waivers: [{rule: brokers.count, reason: r, by: me}]}

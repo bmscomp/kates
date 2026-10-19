@@ -1,0 +1,6 @@
+# expect: spec.brokers.requests.memory
+# the reader says: min is above max, so nothing can meet it
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {requests: {memory: {min: 8Gi, max: 4000Mi}}}}

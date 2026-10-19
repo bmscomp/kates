@@ -1,0 +1,6 @@
+# expect: spec.brokers.storage.type
+# the reader says: must be one of ephemeral, persistent-claim, jbod
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {storage: {type: nfs}}}

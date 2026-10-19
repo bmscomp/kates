@@ -1,0 +1,6 @@
+# expect: spec.kafka.listeners.require[0].tls
+# the reader says: set severity on the listener, not on its properties
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {listeners: {require: [{name: tls, tls: {equals: true, severity: warn}}]}}}

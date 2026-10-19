@@ -1,0 +1,6 @@
+# expect: spec.brokers.storage.class.oneOf[1]
+# the reader says: expected text
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {storage: {class: {oneOf: [gp3, 7]}}}}

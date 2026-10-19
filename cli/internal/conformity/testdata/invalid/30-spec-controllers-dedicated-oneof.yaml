@@ -1,0 +1,6 @@
+# expect: spec.controllers.dedicated.oneOf
+# the reader says: true or false takes equals, not oneOf
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {controllers: {dedicated: {oneOf: [true]}}}

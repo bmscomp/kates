@@ -1,0 +1,6 @@
+# expect: spec.brokers.requests.cpu
+# the reader says: expected a quantity such as 8Gi, 500m or 2
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {requests: {cpu: -1}}}

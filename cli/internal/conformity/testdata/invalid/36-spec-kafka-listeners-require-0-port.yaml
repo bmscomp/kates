@@ -1,0 +1,6 @@
+# expect: spec.kafka.listeners.require[0].port
+# the reader says: must be from 1 to 65535
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {listeners: {require: [{name: tls, port: 70000}]}}}

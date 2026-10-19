@@ -1,0 +1,6 @@
+# expect: spec.kafka.listeners.require[1].name
+# the reader says: names a listener listed before it
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {listeners: {require: [{name: tls, tls: true}, {name: tls, port: 9093}]}}}

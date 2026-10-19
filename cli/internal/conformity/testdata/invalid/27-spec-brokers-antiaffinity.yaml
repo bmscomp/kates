@@ -1,0 +1,6 @@
+# expect: spec.brokers.antiAffinity
+# the reader says: must be one of required, preferred, none
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {antiAffinity: always}}

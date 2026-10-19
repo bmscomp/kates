@@ -1,0 +1,6 @@
+# expect: spec.brokers.antiAffinity.min
+# the reader says: min and max need a number, a quantity or a version
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {antiAffinity: {min: required}}}

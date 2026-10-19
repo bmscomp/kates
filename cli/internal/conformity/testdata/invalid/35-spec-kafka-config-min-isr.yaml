@@ -1,0 +1,6 @@
+# expect: spec.kafka.config[Min.ISR]
+# the reader says: must be a broker config name, such as min.insync.replicas
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {config: {Min.ISR: 2}}}
