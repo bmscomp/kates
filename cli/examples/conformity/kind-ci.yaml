@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bmscomp/kates/main/cli/examples/conformity/kafkareference.v1alpha1.schema.json
+#
+# The cluster CI · Integration deploys on kind: the three-zone kind cluster
+# (config/cluster.yaml) with charts/kafka-cluster and values-ci.yaml, which
+# shrinks it to one controller and one broker so it fits a runner.
+# ConformityLiveTest holds that cluster to this reference: every rule must
+# pass, so a change to the check, or to what it reads from Strimzi, shows up.
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata:
+  name: kind-ci
+  description: The single-broker CI cluster, on the three-zone kind cluster.
+spec:
+  target:
+    namespace: kafka
+    name: krafter
+
+  versions:
+    kubernetes: {min: "1.32.0"}
+    strimzi: {min: "1.2.0"}
+    kafka: {min: "4.2.0"}
+
+  controllers:
+    count: 1
+    dedicated: true
+    requests:
+      cpu: {min: 250m}
+      memory: {min: 512Mi}
+    limits:
+      memory: 512Mi
+    storage:
+      type: jbod
+      size: {min: 1Gi}
+    zones: 1
+    perNode: {max: 1}
+
+  brokers:
+    count: 1
+    requests:
+      cpu: {min: 250m}
+      memory: {min: 1Gi}
+    limits:
+      memory: 1Gi
+    storage:
+      type: jbod
+      size: {min: 5Gi}
+    zones: 1
+    skew: 0
+    perNode: {max: 1}
+    antiAffinity: none # values-ci.yaml turns it off
+
+  kafka:
+    rackAwareness: true
+    authorization: simple
+    listeners:
+      require:
+        - name: plain
+          port: 9092
+          tls: false
+          auth: scram-sha-512
+        - name: tls
+          port: 9093
+          tls: true
+          auth: tls
+      every:
+        type: internal
+        auth: {oneOf: [tls, scram-sha-512]}
+    config:
+      default.replication.factor: 1
+      min.insync.replicas: 1
+      unclean.leader.election.enable: false
+      auto.create.topics.enable: false
+
+  monitoring:
+    metrics: jmxPrometheusExporter
+    kafkaExporter: false # deploy-kafka-generic.sh applies kates detect's values, which turn it off
+    podMonitor: false # the job installs no Prometheus Operator, so no PodMonitor CRD
