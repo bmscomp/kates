@@ -117,7 +117,7 @@ public class DisruptionSafetyGuard {
     /**
      * Validates a disruption plan against safety constraints before execution,
      * each step's fault parameters against the chaos limits ({@link FaultLimits})
-     * among them.
+     * and its namespace among them.
      */
     public ValidationResult validatePlan(DisruptionPlan plan) {
         return validatePlan(plan, targeted(plan));
@@ -134,10 +134,19 @@ public class DisruptionSafetyGuard {
 
         // Whatever the cluster holds. A NETWORK_PARTITION without a duration
         // used to be only a warning here, and the kubernetes provider then
-        // never removed it.
+        // never removed it. The Kates API may delete and patch pods in every
+        // namespace, so a step may aim only at the Kafka cluster's namespace
+        // or the Kates API's own.
+        String katesNamespace = kubeClient.getNamespace();
         for (TargetedStep t : targeted) {
             limits.violations(t.spec())
                     .forEach((field, why) -> errors.add("Step '" + t.step().name() + "': " + field + " " + why));
+            String namespace = t.spec().targetNamespace();
+            if (namespace != null && !namespace.equals(kafkaNamespace) && !namespace.equals(katesNamespace)) {
+                errors.add("Step '" + t.step().name() + "': targetNamespace " + namespace + " is neither "
+                        + kafkaNamespace + ", the Kafka cluster's namespace (kates.chaos.kafka.namespace), nor the"
+                        + " Kates API's own" + (katesNamespace != null ? ", " + katesNamespace : ""));
+            }
         }
 
         List<Pod> kafkaPods = listKafkaPods();

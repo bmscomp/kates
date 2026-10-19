@@ -19,6 +19,7 @@ import io.fabric8.kubernetes.api.model.authorization.v1.ResourceAttributes;
 import io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReview;
 import io.fabric8.kubernetes.api.model.authorization.v1.SelfSubjectAccessReviewBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,7 +52,8 @@ class DisruptionSafetyGuardTest {
     @BeforeEach
     void setup() {
         guard = new DisruptionSafetyGuard();
-        guard.kubeClient = client;
+        // The Kates API's own namespace, as on a default install.
+        guard.kubeClient = client.adapt(NamespacedKubernetesClient.class).inNamespace("kates");
         guard.limits = new FaultLimits();
         guard.kafkaNamespace = "kafka";
         guard.kafkaLabel = "strimzi.io/component-type=kafka";
@@ -262,7 +264,7 @@ class DisruptionSafetyGuardTest {
         createZonedBrokers();
 
         FaultSpec consumers = FaultSpec.builder("consumers")
-                .targetNamespace("default")
+                .targetNamespace("kates")
                 .targetLabel("strimzi.io/component-type=kafka")
                 .targetAll(true)
                 .disruptionType(DisruptionType.NETWORK_PARTITION)
@@ -270,6 +272,57 @@ class DisruptionSafetyGuardTest {
                 .build();
 
         assertTrue(guard.validatePlan(plan(1, consumers)).safe());
+    }
+
+    // ── Target namespaces ───────────────────────────────────────────────────
+
+    /**
+     * The Kates API may delete pods in every namespace, and a step outside the
+     * Kafka namespace counted no broker, so this passed and the step deleted
+     * every CoreDNS pod.
+     */
+    @Test
+    void aFaultInAnyOtherNamespaceIsRefused() {
+        createZonedBrokers();
+        FaultSpec dns = FaultSpec.builder("dns")
+                .targetNamespace("kube-system")
+                .targetLabel("k8s-app=kube-dns")
+                .targetAll(true)
+                .disruptionType(DisruptionType.POD_DELETE)
+                .build();
+        String refusal = "Step 'step-0': targetNamespace kube-system is neither kafka, the Kafka cluster's namespace"
+                + " (kates.chaos.kafka.namespace), nor the Kates API's own, kates";
+
+        assertEquals(List.of(refusal), guard.validatePlan(plan(1, dns)).errors());
+        var dryRun = guard.dryRun(plan(1, dns));
+        assertFalse(dryRun.wouldSucceed());
+        assertEquals(List.of(refusal), dryRun.errors());
+        // fabric8 adds no namespace to the path for a blank one, so the step would act in every namespace.
+        FaultSpec blank = dns.toBuilder().targetNamespace("").build();
+        assertFalse(guard.validatePlan(plan(1, blank)).safe());
+    }
+
+    @Test
+    void aFaultInTheKatesNamespaceOrInNoneIsAllowed() {
+        createZonedBrokers();
+        DisruptionPlaybookCatalog playbooks = new DisruptionPlaybookCatalog();
+        playbooks.loadPlaybooks();
+        // Isolates consumers in namespace kates.
+        DisruptionPlan consumerIsolation =
+                playbooks.toPlan(playbooks.findByName("consumer-isolation").orElseThrow());
+        FaultSpec noNamespace = FaultSpec.builder("kill")
+                .targetNamespace(null)
+                .targetBrokerId(0)
+                .disruptionType(DisruptionType.POD_KILL)
+                .build();
+
+        var isolation = guard.validatePlan(consumerIsolation);
+        assertTrue(isolation.safe(), isolation.errors().toString());
+        assertTrue(guard.validatePlan(plan(1, noNamespace)).safe());
+        assertEquals(
+                List.of("krafter-brokers-0"),
+                guard.dryRun(plan(1, noNamespace)).steps().getFirst().affectedPods(),
+                "a step without a namespace is in the Kafka namespace");
     }
 
     private static FaultSpec rollingRestart(String selector, int chaosDurationSec) {
