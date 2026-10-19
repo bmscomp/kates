@@ -73,5 +73,5 @@ spec:
 
   monitoring:
     metrics: jmxPrometheusExporter
-    kafkaExporter: true
+    kafkaExporter: false # deploy-kafka-generic.sh applies kates detect's values, which turn it off
     podMonitor: false # the job installs no Prometheus Operator, so no PodMonitor CRD
