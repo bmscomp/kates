@@ -32,14 +32,14 @@ public class ClusterTopologyService {
     private static final Logger LOG = Logger.getLogger(ClusterTopologyService.class);
     private static final int TIMEOUT_SECONDS = 30;
 
-    private static final CustomResourceDefinitionContext NODE_POOL_CRD = new CustomResourceDefinitionContext.Builder()
+    public static final CustomResourceDefinitionContext NODE_POOL_CRD = new CustomResourceDefinitionContext.Builder()
             .withGroup("kafka.strimzi.io")
             .withVersion("v1")
             .withPlural("kafkanodepools")
             .withScope("Namespaced")
             .build();
 
-    private static final CustomResourceDefinitionContext KAFKA_CRD = new CustomResourceDefinitionContext.Builder()
+    public static final CustomResourceDefinitionContext KAFKA_CRD = new CustomResourceDefinitionContext.Builder()
             .withGroup("kafka.strimzi.io")
             .withVersion("v1")
             .withPlural("kafkas")
