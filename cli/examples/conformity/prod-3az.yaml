@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bmscomp/kates/main/cli/examples/conformity/kafkareference.v1alpha1.schema.json
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata:
+  name: prod-3az
+  description: Production Kafka in three zones, dedicated controllers, TLS on every listener.
+spec:
+  # The cluster this reference is for. Kates checks the one cluster it is
+  # configured for; if these do not match it, the check stops (exit 2).
+  target:
+    platform: strimzi # the only platform in v1
+    namespace: kafka
+    name: krafter
+    # clusterId: 4L6g3nShT-eMCtK--X86sw   # optional: pin one cluster, not just a name
+
+  zoneLabel: topology.kubernetes.io/zone # the default
+
+  versions:
+    kubernetes: {min: "1.32.0"} # versions are strings: unquoted 1.32 is a number
+    strimzi: {min: "1.2.0"}
+    kafka: {min: "4.2.0"} # the kafka-cluster chart's own floor (kates.io/kafka-floor)
+
+  controllers:
+    count: 3 # exact: a quorum of three; five would be a gap too
+    dedicated: true # no node pool has both roles
+    requests:
+      cpu: {min: 500m}
+      memory: {min: 1Gi}
+    storage:
+      type: {oneOf: [jbod, persistent-claim]}
+      size: {min: 10Gi} # bound capacity per controller, all volumes added up
+    zones: {min: 3}
+    skew: {max: 0} # the same number of controllers in every zone
+    perNode: {max: 1}
+    antiAffinity: required # required anti-affinity on kubernetes.io/hostname
+
+  brokers:
+    count: {min: 3}
+    requests:
+      cpu: {min: "2"}
+      memory: {min: 8Gi}
+    limits:
+      memory: {min: 8Gi}
+    storage:
+      type: jbod
+      size: {min: 500Gi}
+      class: {oneOf: [gp3, premium-rwo]}
+    zones: {min: 3}
+    skew: {max: 1} # zones differ by one broker at most
+    perNode: {max: 1} # the gate; antiAffinity below only warns on the mechanism
+    antiAffinity: {equals: required, severity: warn}
+
+  kafka:
+    rackAwareness: true # spec.kafka.rack uses zoneLabel, and every broker reports a rack
+    authorization: {oneOf: [simple, custom]}
+    listeners:
+      require: # each must exist under this name, with these properties
+        - name: tls
+          port: 9093
+          tls: true
+          auth: tls
+      every: # every listener, whatever its name
+        tls: true
+        auth: {oneOf: [tls, scram-sha-512, custom]} # none means anonymous
+    config: # the effective value on every broker, defaults included
+      default.replication.factor: {min: 3}
+      min.insync.replicas: {min: 2}
+      offsets.topic.replication.factor: {min: 3}
+      transaction.state.log.min.isr: {min: 2}
+      unclean.leader.election.enable: false
+      auto.create.topics.enable: false
+
+  monitoring:
+    metrics: {oneOf: [jmxPrometheusExporter, strimziMetricsReporter]}
+    kafkaExporter: true
+    podMonitor: true # a PodMonitor whose selector matches the broker pods
+
+  # Known gaps: still reported, as WAIVED, but they stop failing the check
+  # until their date.
+  waivers:
+    - rule: kafka.listeners.every.tls
+      reason: In-cluster clients still use the SCRAM listener on 9092 without TLS; OPS-412 moves them to 9093.
+      by: platform-team
+      until: 2026-12-31
