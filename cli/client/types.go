@@ -625,14 +625,16 @@ type ClusterHealthReport struct {
 	Partitions      int                   `json:"partitions"`
 	ConsumerGroups  int                   `json:"consumerGroups"`
 	PartitionHealth PartitionHealthReport `json:"partitionHealth"`
-	// KraftQuorum is absent when the admin API cannot describe the metadata
-	// quorum (a ZooKeeper cluster, or an old broker).
+	// KraftQuorum is absent only on ZooKeeper, which does not support
+	// DescribeQuorum. A quorum the check cannot describe comes back with
+	// hasLeader false and issue "UNAVAILABLE: <exception>".
 	KraftQuorum *KraftQuorumHealth `json:"kraftQuorum,omitempty"`
 	Status      string             `json:"status"`
 }
 
 // KraftQuorumHealth is the KRaft metadata quorum as /api/cluster/check reports
-// it; no leader turns the check's status CRITICAL.
+// it. Issue NO_LEADER turns the check's status CRITICAL; an UNAVAILABLE issue,
+// a DescribeQuorum call that failed, turns it WARNING: the leader is unknown.
 type KraftQuorumHealth struct {
 	LeaderID  int    `json:"leaderId"`
 	Voters    int    `json:"voters"`
@@ -643,7 +645,7 @@ type KraftQuorumHealth struct {
 
 // ActiveController is the node id of the cluster's active controller: the
 // KRaft quorum leader, or controllerId when the check carries no quorum. ok is
-// false when the quorum has no leader.
+// false when the quorum has no leader or its leader is unknown.
 func (r *ClusterHealthReport) ActiveController() (id int, ok bool) {
 	switch q := r.KraftQuorum; {
 	case q == nil:
