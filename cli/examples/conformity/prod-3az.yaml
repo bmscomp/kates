@@ -71,6 +71,11 @@ spec:
       unclean.leader.election.enable: false
       auto.create.topics.enable: false
 
+  topics: # every topic's own settings, read through the Kafka Admin API even with source cr
+    replicationFactor: {min: 3} # the smallest replica set across the topic's partitions
+    minInsyncReplicas: {min: 2} # the topic's own value, or the broker default it inherits
+    exclude: [kates-] # name prefixes, not patterns: Kates' own events, probes and dead letters
+
   monitoring:
     metrics: {oneOf: [jmxPrometheusExporter, strimziMetricsReporter]}
     kafkaExporter: true
