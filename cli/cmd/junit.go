@@ -20,6 +20,7 @@ type junitTestSuite struct {
 	Tests    int             `xml:"tests,attr"`
 	Failures int             `xml:"failures,attr"`
 	Errors   int             `xml:"errors,attr"`
+	Skipped  int             `xml:"skipped,attr,omitempty"`
 	Time     string          `xml:"time,attr"`
 	Cases    []junitTestCase `xml:"testcase"`
 }
@@ -30,6 +31,13 @@ type junitTestCase struct {
 	ClassName string        `xml:"classname,attr"`
 	Time      string        `xml:"time,attr"`
 	Failure   *junitFailure `xml:"failure,omitempty"`
+	Error     *junitFailure `xml:"error,omitempty"`
+	Skipped   *junitSkipped `xml:"skipped,omitempty"`
+	SystemOut string        `xml:"system-out,omitempty"`
+}
+
+type junitSkipped struct {
+	Message string `xml:"message,attr"`
 }
 
 type junitFailure struct {

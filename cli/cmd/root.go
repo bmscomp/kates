@@ -357,6 +357,7 @@ Health & Status:
   version        CLI, API, and runtime version info
   cluster        Kafka cluster metadata and topic listing
   diff           Compare Kafka cluster state between two contexts
+  conformity     Check the cluster against a reference architecture
   test list      List test runs with optional filters
   test get       Show details of a specific test run
 
@@ -649,6 +650,13 @@ func Execute() {
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if errors.Is(err, errInterrupted) {
 			os.Exit(interruptedExitCode)
+		}
+		var exit *exitError
+		if errors.As(err, &exit) {
+			if exit.msg != "" {
+				output.Error(exit.msg)
+			}
+			os.Exit(exit.code)
 		}
 		// silentErr was already printed (styled) by cmdErr. Everything else
 		// goes through the same styled channel, so a plain fmt.Errorf from a
