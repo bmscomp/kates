@@ -10,15 +10,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// conformityInstance reads a reference as JSON, as the CLI sends it: numbers
-// as float64 and maps keyed by string.
+// conformityInstance reads a reference as JSON, as the CLI must send it:
+// from the node tree, so that a scalar keeps its text unless YAML tags it a
+// number, a boolean or null. Decoding into any would turn until: 2026-12-31
+// into "2026-12-31T00:00:00Z", which the Kates API refuses as a date.
 func conformityInstance(t *testing.T, data []byte) any {
 	t.Helper()
-	var doc any
+	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(doc)
+	raw, err := json.Marshal(conformityValue(t, &doc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,6 +29,37 @@ func conformityInstance(t *testing.T, data []byte) any {
 		t.Fatal(err)
 	}
 	return instance
+}
+
+func conformityValue(t *testing.T, n *yaml.Node) any {
+	t.Helper()
+	switch n.Kind {
+	case yaml.DocumentNode:
+		return conformityValue(t, n.Content[0])
+	case yaml.AliasNode:
+		return conformityValue(t, n.Alias)
+	case yaml.MappingNode:
+		m := make(map[string]any, len(n.Content)/2)
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			m[n.Content[i].Value] = conformityValue(t, n.Content[i+1])
+		}
+		return m
+	case yaml.SequenceNode:
+		s := make([]any, 0, len(n.Content))
+		for _, c := range n.Content {
+			s = append(s, conformityValue(t, c))
+		}
+		return s
+	}
+	switch n.ShortTag() {
+	case "!!int", "!!float", "!!bool", "!!null":
+		var v any
+		if err := n.Decode(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	return n.Value
 }
 
 // Every reference cli/examples/conformity ships is one the JSON Schema beside
@@ -65,6 +98,12 @@ func TestConformityExamplesMatchTheirSchema(t *testing.T) {
 				t.Error(err)
 			}
 		})
+	}
+
+	// A waiver's date arrives as the date it was written, not a timestamp.
+	until := conformityInstance(t, []byte("until: 2026-12-31\n")).(map[string]any)["until"]
+	if until != "2026-12-31" {
+		t.Errorf("until arrives as %v, want 2026-12-31", until)
 	}
 
 	// The schema refuses too: a typo is not an example.

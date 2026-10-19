@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -51,6 +52,12 @@ class KafkaReferenceReaderTest {
             {brokers: {count: {min: 1, at: 2}}}                     | spec.brokers.count.at                  | unknown field
             {brokers: {count: {min: 1, severity: error}}}           | spec.brokers.count.severity            | expected fail or warn
             {brokers: {count: {oneOf: []}}}                         | spec.brokers.count.oneOf               | lists no value
+            {brokers: {count: null, zones: 3}}                      | spec.brokers.count                     | a value is required
+            {kafka: {listeners: {every: {tls: null}}}}              | spec.kafka.listeners.every.tls         | a value is required
+            {brokers: {count: {min: 5, max: 3}}}                    | spec.brokers.count                     | min is above max, so nothing can meet it
+            {brokers: {requests: {memory: {min: 8Gi, max: 4000Mi}}}} | spec.brokers.requests.memory          | min is above max, so nothing can meet it
+            {versions: {kafka: {min: "4.10", max: "4.9"}}}          | spec.versions.kafka                    | min is above max, so nothing can meet it
+            {kafka: {config: {num.partitions: {min: 12, max: 6}}}}  | spec.kafka.config[num.partitions]      | min is above max, so nothing can meet it
             {brokers: {count: {oneOf: [3, x]}}}                     | spec.brokers.count.oneOf[1]            | expected a whole number
             {brokers: {count: "3"}}                                 | spec.brokers.count                     | expected a whole number
             {brokers: {count: 3.5}}                                 | spec.brokers.count                     | expected a whole number
@@ -89,6 +96,15 @@ class KafkaReferenceReaderTest {
                 error.getFieldErrors().get(path),
                 () -> error.getFieldErrors().toString());
         assertTrue(error.getMessage().contains(path + ": " + reason), error.getMessage());
+    }
+
+    /** A field left out declares no rule, and equal bounds are one exact value. */
+    @Test
+    void acceptsLeftOutFieldsAndEqualBounds() throws IOException {
+        KafkaReference reference = read("{brokers: {count: {min: 3, max: 3}}}");
+
+        assertNull(reference.spec().brokers().zones());
+        assertEquals(Set.of("brokers.count"), KafkaReferenceReader.ruleIds(reference));
     }
 
     /** A required listener's rule id is its name; a waiver names it so. */
