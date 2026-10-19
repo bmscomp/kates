@@ -53,6 +53,24 @@
     - health
     - cluster check
 
+- name: conformity check
+  category: Cluster
+  synopsis: "kates conformity check -f <reference.yaml> [--output-junit <file>]"
+  short: "Check the cluster against a reference architecture"
+  description: |
+    Sends a KafkaReference file (cli/examples/conformity) to the Kates API,
+    which reads the cluster read-only and reports every declared rule:
+    PASS, FAIL, WARN, WAIVED or UNKNOWN. Exits 0 when every fail rule
+    holds, 1 when one does not, and 2 when the check could not tell or
+    could not run. --output-junit also writes a JUnit report for CI.
+  examples:
+    - "kates conformity check -f prod-3az.yaml"
+    - "kates conformity check -f prod-3az.yaml --output-junit conformity.xml"
+    - "kates conformity check -f prod-3az.yaml -o json"
+  see_also:
+    - cluster check
+    - cluster topology
+
 - name: cluster info
   category: Cluster
   synopsis: "kates cluster info"
