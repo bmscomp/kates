@@ -42,7 +42,6 @@ import org.apache.kafka.common.config.ConfigResource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import com.bmscomp.kates.api.ApiError;
 import com.bmscomp.kates.chaos.VertxPerMockClient;
 import com.bmscomp.kates.conformity.ConformityReport.Result;
 import com.bmscomp.kates.conformity.ConformityReport.Status;
@@ -604,15 +603,79 @@ class ConformityCheckTest {
         assertEquals(Verdict.UNKNOWN, report.verdict());
     }
 
+    /** Every rule the full example declares is evaluated: none is refused, and each has one result. */
     @Test
-    void refusesARuleItCannotEvaluateYet() {
-        ApiError error = assertThrows(
-                        InvalidReferenceException.class,
-                        () -> run("{kafka: {rackAwareness: true}, monitoring: {kafkaExporter: true}}"))
-                .getError();
+    void evaluatesEveryRuleOfTheFullExample() throws IOException {
+        place();
+        KafkaReference reference = new KafkaReferenceReader()
+                .read(json(java.nio.file.Files.readString(
+                        java.nio.file.Path.of("..", "cli", "examples", "conformity", "prod-3az.yaml"))));
 
-        assertEquals(400, error.getStatus());
-        assertEquals(Map.of("spec.monitoring.kafkaExporter", "not implemented yet"), error.getFieldErrors());
+        ConformityReport report = check.check(reference);
+
+        assertEquals(
+                KafkaReferenceReader.ruleIds(reference).size(), report.results().size());
+        assertEquals(
+                KafkaReferenceReader.ruleIds(reference),
+                report.results().stream().map(Result::rule).collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test
+    void readsMonitoringFromTheKafkaCrAndThePodMonitors() throws IOException {
+        podMonitor("kafka", "brokers", Map.of("strimzi.io/cluster", "krafter"), null);
+        podMonitor("monitoring", "elsewhere", Map.of("strimzi.io/cluster", "krafter"), null);
+        podMonitor("monitoring", "anywhere", Map.of("strimzi.io/broker-role", "true"), Map.of("any", true));
+
+        ConformityReport report = run("{monitoring: {metrics: none, kafkaExporter: true, podMonitor: true}}");
+
+        assertEquals(Status.PASS, result(report, "monitoring.metrics").status());
+        assertEquals(Status.FAIL, result(report, "monitoring.kafkaExporter").status());
+        Result podMonitor = result(report, "monitoring.podMonitor");
+        assertEquals(Status.PASS, podMonitor.status());
+        assertEquals("kafka/brokers, monitoring/anywhere", podMonitor.detail());
+    }
+
+    @Test
+    void aPodMonitorThatSelectsNoBrokerDoesNotCount() throws IOException {
+        podMonitor("kafka", "controllers", Map.of("strimzi.io/controller-role", "true"), null);
+
+        Result result = result(run("{monitoring: {podMonitor: true}}"), "monitoring.podMonitor");
+
+        assertEquals(Status.FAIL, result.status());
+        assertEquals("no PodMonitor selects every broker pod", result.detail());
+    }
+
+    @Test
+    void withoutThePodMonitorCrdThereIsNone() throws IOException {
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1/podmonitors")
+                .andReturn(404, "")
+                .always();
+
+        Result result = result(run("{monitoring: {podMonitor: true}}"), "monitoring.podMonitor");
+
+        assertEquals(Status.FAIL, result.status());
+        assertEquals("the PodMonitor CRD is not installed", result.detail());
+    }
+
+    void podMonitor(String namespace, String name, Map<String, String> matchLabels, Map<String, Object> namespaces) {
+        Map<String, Object> spec = new java.util.HashMap<>(Map.of("selector", Map.of("matchLabels", matchLabels)));
+        if (namespaces != null) {
+            spec.put("namespaceSelector", namespaces);
+        }
+        client.genericKubernetesResources(ConformityCheck.POD_MONITOR_CRD)
+                .inNamespace(namespace)
+                .resource(new GenericKubernetesResourceBuilder()
+                        .withApiVersion("monitoring.coreos.com/v1")
+                        .withKind("PodMonitor")
+                        .withNewMetadata()
+                        .withName(name)
+                        .withNamespace(namespace)
+                        .endMetadata()
+                        .withAdditionalProperties(Map.of("spec", spec))
+                        .build())
+                .create();
     }
 
     @Test
