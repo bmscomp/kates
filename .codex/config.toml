@@ -1,0 +1,9 @@
+[mcp_servers.kates]
+command = "kates"
+args = [
+    "mcp",
+    "--context",
+    "ports",
+    "--allow-cluster",
+    "eR1qgzzCTh2wkWX8ASzwUA",
+]

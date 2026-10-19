@@ -605,6 +605,7 @@ func TestDeployGroupAAppliesLocalStrimziCRDsAndDisablesHook(t *testing.T) {
 	upgrade := helmCalls[0]
 	for _, want := range []string{
 		"upgrade --install strimzi-operator /cache/wrapper/1.2.0",
+		"--skip-crds", // CRDs were applied by kubectl; Helm must not re-apply them
 		"--set crdUpgrade.enabled=false",
 		"--set strimziVersion=1.2.0",
 		"--set strimzi-kafka-operator.kubernetesServiceDnsDomain=cluster.test",

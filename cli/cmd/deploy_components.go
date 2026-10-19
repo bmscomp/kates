@@ -746,8 +746,16 @@ func deployGroupA(dc *deployContext) error {
 			//
 			// --reset-values: pre-chart releases stored flat upstream keys that
 			// now live under the subchart key, and the schema rejects them.
+			//
+			// --skip-crds: applyLocalStrimziCRDs just applied the CRDs with
+			// kubectl server-side apply, so kubectl owns .spec.versions. On a
+			// first install Helm 4 applies the subchart's crds/ server-side as
+			// field manager "helm" without forcing conflicts, and fails with
+			// "conflict with kubectl: .spec.versions". Helm never touches crds/
+			// on upgrade, so skipping them only removes that duplicate apply.
 			opArgs := []string{"upgrade", "--install", "strimzi-operator", chartDir, "-n", "strimzi-operator",
 				"--reset-values",
+				"--skip-crds",
 				"-f", dc.chartOverlay("charts/strimzi-operator"),
 				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain=" + clusterDomain,
 				"--set", "crdUpgrade.enabled=false"}
