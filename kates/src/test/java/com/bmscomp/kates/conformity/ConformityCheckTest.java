@@ -12,10 +12,16 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import jakarta.ws.rs.ClientErrorException;
 
+import io.fabric8.kubernetes.api.model.AffinityBuilder;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResourceBuilder;
+import io.fabric8.kubernetes.api.model.LabelSelector;
+import io.fabric8.kubernetes.api.model.LabelSelectorBuilder;
+import io.fabric8.kubernetes.api.model.NodeBuilder;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.PodAffinityTerm;
+import io.fabric8.kubernetes.api.model.PodAffinityTermBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.VolumeBuilder;
@@ -307,13 +313,135 @@ class ConformityCheckTest {
         assertEquals(List.of("data-1-krafter-brokers-3"), storageClass.subjects());
     }
 
+    /** Three zones, one node each; controllers one per node, brokers crowded: two on alpha's node, none on gamma's. */
+    void place() {
+        for (String zone : List.of("alpha", "sigma", "gamma")) {
+            client.nodes()
+                    .resource(new NodeBuilder()
+                            .withNewMetadata()
+                            .withName("node-" + zone)
+                            .addToLabels("topology.kubernetes.io/zone", zone)
+                            .endMetadata()
+                            .build())
+                    .create();
+        }
+        client.nodes()
+                .resource(new NodeBuilder()
+                        .withNewMetadata()
+                        .withName("node-bare")
+                        .endMetadata()
+                        .build())
+                .create();
+        Map<String, String> nodes = Map.of(
+                "krafter-controllers-0", "node-alpha",
+                "krafter-controllers-1", "node-sigma",
+                "krafter-controllers-2", "node-gamma",
+                "krafter-brokers-3", "node-alpha",
+                "krafter-brokers-4", "node-alpha",
+                "krafter-brokers-5", "node-sigma");
+        nodes.forEach((pod, node) -> client.pods()
+                .inNamespace("kafka")
+                .withName(pod)
+                .edit(p -> new PodBuilder(p)
+                        .editSpec()
+                        .withNodeName(node)
+                        .withAffinity(new AffinityBuilder()
+                                .withNewPodAntiAffinity()
+                                .addToRequiredDuringSchedulingIgnoredDuringExecution(
+                                        pod.contains("controllers") ? term("strimzi.io/controller-role") : null)
+                                .addNewPreferredDuringSchedulingIgnoredDuringExecution()
+                                .withWeight(100)
+                                .withPodAffinityTerm(term("strimzi.io/broker-role"))
+                                .endPreferredDuringSchedulingIgnoredDuringExecution()
+                                .endPodAntiAffinity()
+                                .build())
+                        .endSpec()
+                        .build()));
+    }
+
+    static PodAffinityTerm term(String roleLabel) {
+        return new PodAffinityTermBuilder()
+                .withTopologyKey("kubernetes.io/hostname")
+                .withNewLabelSelector()
+                .addToMatchLabels(roleLabel, "true")
+                .endLabelSelector()
+                .build();
+    }
+
+    @Test
+    void measuresTheSpreadOverZonesAndNodes() throws IOException {
+        place();
+
+        ConformityReport report =
+                run("{controllers: {zones: 3, skew: {max: 0}, perNode: {max: 1}, antiAffinity: required},"
+                        + " brokers: {zones: {min: 3}, skew: {max: 0}, perNode: {max: 1}, antiAffinity: required}}");
+
+        for (String rule : List.of("zones", "skew", "perNode", "antiAffinity")) {
+            assertEquals(Status.PASS, result(report, "controllers." + rule).status(), rule);
+            assertEquals(Status.FAIL, result(report, "brokers." + rule).status(), rule);
+        }
+        assertEquals(2, result(report, "brokers.zones").observed());
+        assertEquals("alpha: 2, sigma: 1", result(report, "brokers.zones").detail());
+        assertEquals(1, result(report, "brokers.skew").observed());
+        assertEquals(List.of("node-alpha"), result(report, "brokers.perNode").subjects());
+        assertEquals("preferred", result(report, "brokers.antiAffinity").observed());
+    }
+
+    @Test
+    void aPodWithoutAZoneFailsTheSpread() throws IOException {
+        place();
+        client.pods()
+                .inNamespace("kafka")
+                .withName("krafter-brokers-4")
+                .edit(p -> new PodBuilder(p)
+                        .editSpec()
+                        .withNodeName("node-bare")
+                        .endSpec()
+                        .build());
+
+        Result zones = result(run("{brokers: {zones: {min: 1}}}"), "brokers.zones");
+
+        assertEquals(Status.FAIL, zones.status());
+        assertEquals(List.of("krafter-brokers-4"), zones.subjects());
+        assertEquals("alpha: 1, sigma: 1; 1 not scheduled on a node with topology.kubernetes.io/zone", zones.detail());
+    }
+
+    @Test
+    void matchesLabelSelectorsAsKubernetesDoes() {
+        Map<String, String> labels = Map.of("app", "kafka", "role", "broker");
+
+        assertTrue(ConformityCheck.matches(selector(Map.of("app", "kafka")), labels));
+        assertFalse(ConformityCheck.matches(selector(Map.of("app", "zk")), labels));
+        assertFalse(ConformityCheck.matches(null, labels), "no selector selects nothing");
+        assertTrue(ConformityCheck.matches(expression("role", "In", "broker", "controller"), labels));
+        assertFalse(ConformityCheck.matches(expression("role", "NotIn", "broker"), labels));
+        assertTrue(ConformityCheck.matches(expression("zone", "NotIn", "a"), labels));
+        assertTrue(ConformityCheck.matches(expression("app", "Exists"), labels));
+        assertFalse(ConformityCheck.matches(expression("app", "DoesNotExist"), labels));
+        assertFalse(ConformityCheck.matches(expression("app", "Gt", "1"), labels));
+    }
+
+    static LabelSelector selector(Map<String, String> matchLabels) {
+        return new LabelSelectorBuilder().withMatchLabels(matchLabels).build();
+    }
+
+    static LabelSelector expression(String key, String operator, String... values) {
+        return new LabelSelectorBuilder()
+                .addNewMatchExpression()
+                .withKey(key)
+                .withOperator(operator)
+                .withValues(values)
+                .endMatchExpression()
+                .build();
+    }
+
     @Test
     void refusesARuleItCannotEvaluateYet() {
-        ApiError error = assertThrows(InvalidReferenceException.class, () -> run("{brokers: {zones: 3}}"))
+        ApiError error = assertThrows(InvalidReferenceException.class, () -> run("{kafka: {rackAwareness: true}}"))
                 .getError();
 
         assertEquals(400, error.getStatus());
-        assertEquals(Map.of("spec.brokers.zones", "not implemented yet"), error.getFieldErrors());
+        assertEquals(Map.of("spec.kafka.rackAwareness", "not implemented yet"), error.getFieldErrors());
     }
 
     @Test
