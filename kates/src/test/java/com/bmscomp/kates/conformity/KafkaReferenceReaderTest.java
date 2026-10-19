@@ -78,6 +78,7 @@ class KafkaReferenceReaderTest {
             {kafka: {listeners: {require: [{name: tls, tls: {equals: true, severity: warn}}]}}} | spec.kafka.listeners.require[0].tls | set severity on the listener, not on its properties
             {kafka: {listeners: {require: [{name: TLS-1, tls: true}]}}} | spec.kafka.listeners.require[0].name | must be a Strimzi listener name: up to 11 lower-case letters and digits
             {kafka: {listeners: {every: {auth: anonymous}}}}        | spec.kafka.listeners.every.auth        | must be one of none, tls, scram-sha-512, oauth, custom
+            {kafka: {source: admin, rackAwareness: true}}           | spec.kafka.source                      | must be one of cr, brokers
             {target: {platform: confluent}, brokers: {count: 3}}    | spec.target.platform                   | must be strimzi, the only platform in v1alpha1
             {target: {name: Krafter}, brokers: {count: 3}}          | spec.target.name                       | must be a DNS label: up to 63 lower-case letters, digits and -
             {zoneLabel: topology.kubernetes.io/zone}                | spec                                   | declares no rule

@@ -82,6 +82,7 @@ public class KafkaReferenceReader {
 
     private static final String DNS_LABEL_RULE = "must be a DNS label: up to 63 lower-case letters, digits and -";
 
+    private static final List<String> SOURCES = List.of("cr", "brokers");
     private static final List<String> STORAGE_TYPES = List.of("ephemeral", "persistent-claim", "jbod");
     private static final List<String> ANTI_AFFINITY = List.of("required", "preferred", "none");
     private static final List<String> AUTH_TYPES = List.of("none", "tls", "scram-sha-512", "oauth", "custom");
@@ -322,6 +323,9 @@ public class KafkaReferenceReader {
         private void kafka(Kafka kafka) {
             if (kafka == null) {
                 return;
+            }
+            if (kafka.source() != null && !SOURCES.contains(kafka.source())) {
+                error("spec.kafka.source", "must be one of " + String.join(", ", SOURCES));
             }
             declare("kafka.rackAwareness", kafka.rackAwareness());
             choice("kafka.authorization", kafka.authorization(), AUTHORIZATION_TYPES);
