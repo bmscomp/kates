@@ -1,0 +1,6 @@
+# expect: spec.kafka.config[num.partitions]
+# the reader says: min is above max, so nothing can meet it
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {config: {num.partitions: {min: 12, max: 6}}}}

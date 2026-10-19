@@ -1,0 +1,6 @@
+# expect: spec.kafka.listeners.every.auth
+# the reader says: must be one of none, tls, scram-sha-512, oauth, custom
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {listeners: {every: {auth: anonymous}}}}

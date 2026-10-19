@@ -619,6 +619,40 @@ kates conformity check -f prod-3az.yaml -o json
 
 It exits `0` when every `fail` rule holds, `1` when one does not, and `2` when it could not tell or could not run. A `warn` rule never fails it. `--output-junit` also writes one test case per rule for a CI report: a failure for `FAIL`, an error for `UNKNOWN`, and skipped for `WAIVED`.
 
+Before it calls the API, it lints the file as `kates conformity lint` does and prints what lint finds to stderr. A warning, such as an expired waiver, does not stop it. An error stops it with exit `2`, and the API is never called. That includes a reference no cluster could pass, such as more zones required than brokers allowed.
+
+#### conformity lint
+
+Check reference files offline, as a compiler does: no Kates API and no cluster. It works phase by phase: YAML syntax, duplicates, the JSON Schema, the checks the Kates API makes beyond the schema, then incoherence between constraints, such as an expired waiver. It also warns when the file's `# yaml-language-server: $schema=` comment links to another schema than the one the check uses. Each finding is a line `file:line:col: severity: path: message [code]`, with the source line under it. A shared corpus keeps it refusing exactly what the API refuses.
+
+```text
+prod-3az.yaml:8:5: error: spec.brokers.cuont: unknown field (did you mean "count"?) [unknown-field]
+  8 |     cuont: 3
+    |     ^
+```
+
+`-o json` lists the findings instead, each with its `file`, `line`, `col`, `severity`, `code`, `path`, `message` and, when `kates conformity fmt` removes the cause, `fixable`.
+
+```bash
+kates conformity lint platform/prod-3az.yaml
+kates conformity lint platform/*.yaml
+kates conformity lint -o json platform/*.yaml
+```
+
+It exits `0` when no file has an error (warnings are printed), `1` when one does, and `2` when a file cannot be read.
+
+#### conformity fmt
+
+Write reference files in one canonical form. Keys follow the schema's order, a broker config's keys are alphabetical, and each constraint takes its shortest form: `{equals: 3}` becomes `3`, and `severity: fail`, the default, goes. Exact duplicates go too: a key set twice to the same value, a value repeated in a list, a waiver or listener listed twice. Comments stay with what they annotate.
+
+```bash
+kates conformity fmt prod-3az.yaml
+kates conformity fmt -w platform/*.yaml
+kates conformity fmt --check platform/*.yaml
+```
+
+Without `-w` it prints the result. `--check` lists the files that are not formatted and exits `1`, for CI. It refuses a file that does not parse, or one that sets a key to two different values, since only the author can say which one is meant.
+
 ### Test Commands
 
 Test commands are the core of Kates. They let you create, monitor, and manage performance test runs against your Kafka cluster. Whether you're running a quick load test to sanity-check throughput or a 25-minute endurance test to catch memory leaks and log-roll spikes, the workflow is always the same: create a test, optionally watch it in real time, then inspect the results. For repeatable, version-controlled test definitions, use `test apply` with YAML scenario files instead of inline flags.

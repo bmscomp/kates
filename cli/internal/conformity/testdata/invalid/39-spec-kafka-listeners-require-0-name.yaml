@@ -1,0 +1,6 @@
+# expect: spec.kafka.listeners.require[0].name
+# the reader says: must be a Strimzi listener name: up to 11 lower-case letters and digits
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {listeners: {require: [{name: TLS-1, tls: true}]}}}

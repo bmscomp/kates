@@ -1,0 +1,6 @@
+# expect: spec.kafka.source
+# the reader says: must be one of cr, brokers
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {source: admin, rackAwareness: true}}

@@ -1,0 +1,6 @@
+# expect: spec.target.platform
+# the reader says: must be strimzi, the only platform in v1alpha1
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {target: {platform: confluent}, brokers: {count: 3}}
