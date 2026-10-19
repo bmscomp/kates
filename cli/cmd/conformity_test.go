@@ -96,6 +96,26 @@ func TestConformityCheckSendsDatesAndVersionsAsWritten(t *testing.T) {
 	}
 }
 
+// Each file the API's strict reader would refuse, but a node walk would send
+// with a rule missing, is refused before it is sent.
+func TestConformityJSONRefusesWhatItWouldDrop(t *testing.T) {
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"repeated key", "spec:\n  brokers: {count: {min: 3}}\n  brokers: {zones: {min: 3}}\n", `line 3: mapping key "brokers" already defined at line 2`},
+		{"second document", "kind: KafkaReference\n---\nkind: KafkaReference\n", "line 2: a second document; one KafkaReference per file"},
+		{"merge key", "role: &role {count: {min: 3}}\nspec: {brokers: {<<: *role}}\n", "line 2: merge keys (<<) are not read"},
+		{"anchor in itself", "x: &a [1, *a]\n", "anchor 'a' value contains itself"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := conformityJSON([]byte(tc.yaml)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want %q", err, tc.want)
+			}
+		})
+	}
+	if v, err := conformityJSON([]byte("kind: KafkaReference\n---\n")); err != nil || v.(map[string]any)["kind"] != "KafkaReference" {
+		t.Errorf("a trailing --- gives %v, %v", v, err)
+	}
+}
+
 func TestConformityCheckShowsTheGaps(t *testing.T) {
 	conformityStub(t, 200, conformityFailing)
 
