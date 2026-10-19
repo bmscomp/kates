@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -20,9 +21,14 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.ServiceUnavailableException;
 
+import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+import io.fabric8.kubernetes.api.model.LabelSelector;
+import io.fabric8.kubernetes.api.model.LabelSelectorRequirement;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.PodAffinityTerm;
+import io.fabric8.kubernetes.api.model.PodAntiAffinity;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -56,7 +62,11 @@ public class ConformityCheck {
 
     /** The rules this version evaluates; a reference that declares another is refused until it can. */
     private static final Pattern EVALUATED = Pattern.compile("versions\\..+|controllers\\.dedicated"
-            + "|(controllers|brokers)\\.(count|(requests|limits)\\.(cpu|memory)|storage\\.(type|size|class))");
+            + "|(controllers|brokers)\\.(count|(requests|limits)\\.(cpu|memory)|storage\\.(type|size|class)"
+            + "|zones|skew|perNode|antiAffinity)");
+
+    private static final String DEFAULT_ZONE_LABEL = "topology.kubernetes.io/zone";
+    private static final String HOSTNAME = "kubernetes.io/hostname";
 
     private static final int MAX_SUBJECTS = 50;
 
@@ -140,6 +150,15 @@ public class ConformityCheck {
                         .getItems()
                         .stream()
                         .collect(Collectors.toMap(c -> c.getMetadata().getName(), Function.identity())));
+
+        private final Source<Map<String, Map<String, String>>> nodeLabels = new Source<>(
+                "Kubernetes: nodes",
+                () -> client.nodes().list().getItems().stream()
+                        .collect(Collectors.toMap(
+                                n -> n.getMetadata().getName(),
+                                n -> n.getMetadata().getLabels() == null
+                                        ? Map.of()
+                                        : n.getMetadata().getLabels())));
 
         private final Source<String> kubernetesVersion = new Source<>(
                 "Kubernetes: /version", () -> client.getKubernetesVersion().getGitVersion());
@@ -233,6 +252,7 @@ public class ConformityCheck {
             resources(role + ".requests", spec.requests(), roleLabel, ResourceRequirements::getRequests);
             resources(role + ".limits", spec.limits(), roleLabel, ResourceRequirements::getLimits);
             storage(role, spec.storage(), roleLabel, poolRole);
+            placement(role, spec, roleLabel);
             if (spec.count() != null) {
                 rule(role + ".count", spec.count(), meets(spec.count()), pods.name, () -> {
                     List<Pod> mine = rolePods(roleLabel);
@@ -317,6 +337,79 @@ public class ConformityCheck {
                 }
                 return new Observation<>(classes, classes.isEmpty() ? "no PVCs: ephemeral storage" : null);
             });
+        }
+
+        /**
+         * Where the pods of a role run. A pod that is not scheduled, or runs on
+         * a node without the zone label, fails zones and skew whatever the
+         * count: the spread cannot be shown.
+         */
+        private void placement(String role, Role spec, String roleLabel) {
+            String zoneLabel = this.spec.zoneLabel() != null ? this.spec.zoneLabel() : DEFAULT_ZONE_LABEL;
+            String source = pods.name + ", nodes' " + zoneLabel;
+            rule(
+                    role + ".zones",
+                    spec.zones(),
+                    meets(spec.zones()),
+                    source,
+                    () -> zoned(roleLabel, zoneLabel, Map::size));
+            rule(
+                    role + ".skew",
+                    spec.skew(),
+                    meets(spec.skew()),
+                    source,
+                    () -> zoned(roleLabel, zoneLabel, perZone -> {
+                        var counts = perZone.values().stream()
+                                .mapToInt(Integer::intValue)
+                                .summaryStatistics();
+                        return perZone.isEmpty() ? 0 : counts.getMax() - counts.getMin();
+                    }));
+            rule(role + ".perNode", spec.perNode(), meets(spec.perNode()), pods.name, () -> {
+                Map<String, Integer> perNode = new LinkedHashMap<>();
+                for (Pod pod : rolePods(roleLabel)) {
+                    if (pod.getSpec().getNodeName() != null) {
+                        perNode.merge(pod.getSpec().getNodeName(), 1, Integer::sum);
+                    }
+                }
+                return new Observation<>(perNode, null);
+            });
+            rule(
+                    role + ".antiAffinity",
+                    spec.antiAffinity(),
+                    meets(spec.antiAffinity()),
+                    pods.name + " affinity",
+                    () -> perPod(roleLabel, ConformityCheck::antiAffinity));
+        }
+
+        /**
+         * The pods of a role by zone, measured: under "" the measure, and each
+         * pod that has no zone with a null, so that the rule fails and names it.
+         */
+        private Observation<Integer> zoned(
+                String roleLabel, String zoneLabel, Function<Map<String, Integer>, Integer> measure) {
+            Map<String, Map<String, String>> labels = nodeLabels.get();
+            Map<String, Integer> perZone = new TreeMap<>();
+            Map<String, Integer> values = new LinkedHashMap<>();
+            for (Pod pod : rolePods(roleLabel)) {
+                String node = pod.getSpec().getNodeName();
+                String zone = node == null
+                        ? null
+                        : labels.getOrDefault(node, Map.of()).get(zoneLabel);
+                if (zone == null) {
+                    values.put(pod.getMetadata().getName(), null);
+                } else {
+                    perZone.merge(zone, 1, Integer::sum);
+                }
+            }
+            values.put("", measure.apply(perZone));
+            String detail = perZone.entrySet().stream()
+                    .map(e -> e.getKey() + ": " + e.getValue())
+                    .collect(Collectors.joining(", "));
+            if (values.size() > 1) {
+                detail = (detail.isEmpty() ? "" : detail + "; ") + (values.size() - 1)
+                        + " not scheduled on a node with " + zoneLabel;
+            }
+            return new Observation<>(values, detail.isEmpty() ? null : detail);
         }
 
         /** The value of each pod of a role, by pod name; null for a pod without one. */
@@ -497,6 +590,71 @@ public class ConformityCheck {
 
     private static <T extends Comparable<? super T>> Predicate<T> meets(Constraint<T> constraint) {
         return value -> constraint.holds(value, Comparator.naturalOrder());
+    }
+
+    /**
+     * required when a required anti-affinity term on kubernetes.io/hostname
+     * repels the pod's own labels, preferred when only a preferred term does,
+     * otherwise none.
+     */
+    static String antiAffinity(Pod pod) {
+        Affinity affinity = pod.getSpec().getAffinity();
+        PodAntiAffinity anti = affinity == null ? null : affinity.getPodAntiAffinity();
+        if (anti == null) {
+            return "none";
+        }
+        Map<String, String> own = pod.getMetadata().getLabels();
+        if (anti.getRequiredDuringSchedulingIgnoredDuringExecution() != null
+                && anti.getRequiredDuringSchedulingIgnoredDuringExecution().stream()
+                        .anyMatch(t -> repels(t, own))) {
+            return "required";
+        }
+        if (anti.getPreferredDuringSchedulingIgnoredDuringExecution() != null
+                && anti.getPreferredDuringSchedulingIgnoredDuringExecution().stream()
+                        .anyMatch(t -> repels(t.getPodAffinityTerm(), own))) {
+            return "preferred";
+        }
+        return "none";
+    }
+
+    private static boolean repels(PodAffinityTerm term, Map<String, String> labels) {
+        return term != null && HOSTNAME.equals(term.getTopologyKey()) && matches(term.getLabelSelector(), labels);
+    }
+
+    /**
+     * Whether a label selector selects these labels: every matchLabels pair,
+     * and every In, NotIn, Exists or DoesNotExist expression. A missing
+     * selector selects nothing, as Kubernetes reads one in an affinity term.
+     */
+    static boolean matches(LabelSelector selector, Map<String, String> labels) {
+        if (selector == null) {
+            return false;
+        }
+        Map<String, String> have = labels == null ? Map.of() : labels;
+        if (selector.getMatchLabels() != null
+                && !selector.getMatchLabels().entrySet().stream()
+                        .allMatch(e -> e.getValue().equals(have.get(e.getKey())))) {
+            return false;
+        }
+        if (selector.getMatchExpressions() == null) {
+            return true;
+        }
+        for (LabelSelectorRequirement r : selector.getMatchExpressions()) {
+            String value = have.get(r.getKey());
+            List<String> values = r.getValues() == null ? List.of() : r.getValues();
+            boolean ok =
+                    switch (r.getOperator()) {
+                        case "In" -> value != null && values.contains(value);
+                        case "NotIn" -> value == null || !values.contains(value);
+                        case "Exists" -> have.containsKey(r.getKey());
+                        case "DoesNotExist" -> !have.containsKey(r.getKey());
+                        default -> false;
+                    };
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static List<String> claimNames(Pod pod) {
