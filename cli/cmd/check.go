@@ -77,11 +77,15 @@ var clusterCheckCmd = &cobra.Command{
 
 // controllerLabel names a cluster's active controller. On KRaft that is the
 // metadata quorum's leader: the check's controllerId comes from
-// DescribeCluster, which a KRaft broker answers with any live broker.
+// DescribeCluster, which a KRaft broker answers with any live broker. Only a
+// NO_LEADER issue proves the quorum leaderless; an UNAVAILABLE one means the
+// check could not describe it, so the leader is unknown.
 func controllerLabel(r *client.ClusterHealthReport) string {
 	switch q := r.KraftQuorum; {
 	case q == nil:
 		return fmt.Sprintf("Broker %d", r.ControllerID)
+	case !q.HasLeader && q.Issue != "NO_LEADER":
+		return output.WarningStyle.Render(output.Glyphs().Warn + " KRaft leader unknown")
 	case !q.HasLeader:
 		return output.ErrorStyle.Render(output.Glyphs().Cross + " no KRaft leader")
 	default:
@@ -92,7 +96,8 @@ func controllerLabel(r *client.ClusterHealthReport) string {
 // activeController asks the cluster check for the active controller, for the
 // views that read /api/cluster/info or /api/kafka/brokers: their controller is
 // whichever broker answered DescribeCluster. It returns controllerLabel's text
-// and the controller's id as the broker tables print ids, "" when none leads.
+// and the controller's id as the broker tables print ids, "" when none leads or
+// the leader is unknown.
 func activeController() (label, id string) {
 	check, err := apiClient.ClusterCheck(context.Background())
 	if err != nil {

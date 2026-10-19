@@ -57,3 +57,15 @@ func TestBrokersMarkTheKRaftLeader(t *testing.T) {
 		t.Errorf("without a check the controller is unknown, and no broker is starred:\n%s", view)
 	}
 }
+
+func TestControllerTextTellsAnUnknownLeaderFromNone(t *testing.T) {
+	for issue, want := range map[string]string{
+		"NO_LEADER":                     "✖ no KRaft leader",
+		"UNAVAILABLE: TimeoutException": "⚠ KRaft leader unknown",
+	} {
+		check := &client.ClusterHealthReport{KraftQuorum: &client.KraftQuorumHealth{LeaderID: -1, Issue: issue}}
+		if got := controllerText(check); !strings.Contains(got, want) {
+			t.Errorf("issue %q: got %q, want %q", issue, got, want)
+		}
+	}
+}

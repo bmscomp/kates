@@ -67,7 +67,7 @@ type mcpBroker struct {
 }
 
 type mcpClusterHealth struct {
-	Status          string                `json:"status" jsonschema:"HEALTHY; WARNING when partitions are under-replicated; CRITICAL when partitions are offline or the KRaft quorum has no leader"`
+	Status          string                `json:"status" jsonschema:"HEALTHY; WARNING when partitions are under-replicated or the KRaft quorum cannot be described; CRITICAL when partitions are offline or the KRaft quorum has no leader"`
 	Brokers         int                   `json:"brokers"`
 	ControllerID    int                   `json:"controllerId"`
 	Topics          int                   `json:"topics"`
@@ -76,7 +76,7 @@ type mcpClusterHealth struct {
 	UnderReplicated int                   `json:"underReplicated"`
 	Offline         int                   `json:"offline"`
 	Problems        []mcpPartitionProblem `json:"problems" jsonschema:"the partitions counted in underReplicated and offline"`
-	KraftQuorum     *mcpQuorum            `json:"kraftQuorum,omitempty" jsonschema:"absent when the admin API cannot describe the metadata quorum"`
+	KraftQuorum     *mcpQuorum            `json:"kraftQuorum,omitempty" jsonschema:"absent only on ZooKeeper"`
 }
 
 type mcpPartitionProblem struct {
@@ -88,10 +88,11 @@ type mcpPartitionProblem struct {
 }
 
 type mcpQuorum struct {
-	LeaderID  int  `json:"leaderId"`
-	Voters    int  `json:"voters"`
-	Observers int  `json:"observers"`
-	HasLeader bool `json:"hasLeader"`
+	LeaderID  int    `json:"leaderId"`
+	Voters    int    `json:"voters"`
+	Observers int    `json:"observers"`
+	HasLeader bool   `json:"hasLeader"`
+	Issue     string `json:"issue,omitempty" jsonschema:"NO_LEADER when the quorum answered without a leader; UNAVAILABLE: <exception> when the check could not describe it, so hasLeader false leaves the leader unknown"`
 }
 
 type mcpAlertRules struct {
@@ -251,7 +252,7 @@ func mcpHealthFrom(call *mcpCall, r *client.ClusterHealthReport) mcpClusterHealt
 	})
 	h.Problems = mcpCap(call, problems, mcpOverviewMaxProblems)
 	if q := r.KraftQuorum; q != nil {
-		h.KraftQuorum = &mcpQuorum{LeaderID: q.LeaderID, Voters: q.Voters, Observers: q.Observers, HasLeader: q.HasLeader}
+		h.KraftQuorum = &mcpQuorum{LeaderID: q.LeaderID, Voters: q.Voters, Observers: q.Observers, HasLeader: q.HasLeader, Issue: mcpSanitizeLine(q.Issue, 64)}
 	}
 	return h
 }
