@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bmscomp/kates/main/cli/examples/conformity/kafkareference.v1alpha1.schema.json
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata:
+  name: minimal
+spec:
+  brokers:
+    count: {min: 3}
+    zones: {min: 3}
+    perNode: {max: 1}

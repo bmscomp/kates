@@ -129,6 +129,24 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.chaos.litmus.ChaosResultStatus.class,
             com.bmscomp.kates.chaos.litmus.ChaosResultStatus.ExperimentStatus.class,
             // Outbox event payload (serialized to JSON, read back by the poller)
-            com.bmscomp.kates.domain.events.TestEvent.class
+            com.bmscomp.kates.domain.events.TestEvent.class,
+            // Conformity reference, read by KafkaReferenceReader's own mapper,
+            // so no resource signature names it
+            com.bmscomp.kates.conformity.KafkaReference.class,
+            com.bmscomp.kates.conformity.KafkaReference.Metadata.class,
+            com.bmscomp.kates.conformity.KafkaReference.Spec.class,
+            com.bmscomp.kates.conformity.KafkaReference.Target.class,
+            com.bmscomp.kates.conformity.KafkaReference.Versions.class,
+            com.bmscomp.kates.conformity.KafkaReference.Role.class,
+            com.bmscomp.kates.conformity.KafkaReference.Resources.class,
+            com.bmscomp.kates.conformity.KafkaReference.Storage.class,
+            com.bmscomp.kates.conformity.KafkaReference.Kafka.class,
+            com.bmscomp.kates.conformity.KafkaReference.Listeners.class,
+            com.bmscomp.kates.conformity.KafkaReference.RequiredListener.class,
+            com.bmscomp.kates.conformity.KafkaReference.ListenerProperties.class,
+            com.bmscomp.kates.conformity.KafkaReference.Monitoring.class,
+            com.bmscomp.kates.conformity.KafkaReference.Waiver.class,
+            com.bmscomp.kates.conformity.Constraint.class,
+            com.bmscomp.kates.conformity.Version.class
         })
 public class NativePayloadReflectionConfig {}

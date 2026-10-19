@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bmscomp/kates/main/cli/examples/conformity/kafkareference.v1alpha1.schema.json",
+  "title": "Kates KafkaReference v1alpha1",
+  "description": "A reference architecture for a Kafka platform on Kubernetes. kates conformity check reports every declared constraint the live cluster does not meet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "conformity.kates.io/v1alpha1" },
+    "kind": { "const": "KafkaReference" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" },
+        "description": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "platform": { "enum": ["strimzi"], "default": "strimzi" },
+            "namespace": { "$ref": "#/$defs/dnsLabel" },
+            "name": { "$ref": "#/$defs/dnsLabel" },
+            "clusterId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" }
+          }
+        },
+        "zoneLabel": {
+          "type": "string",
+          "default": "topology.kubernetes.io/zone",
+          "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+        },
+        "versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "kubernetes": { "$ref": "#/$defs/versionConstraint" },
+            "strimzi": { "$ref": "#/$defs/versionConstraint" },
+            "kafka": { "$ref": "#/$defs/versionConstraint" }
+          }
+        },
+        "controllers": {
+          "allOf": [{ "$ref": "#/$defs/role" }],
+          "properties": { "dedicated": { "$ref": "#/$defs/boolConstraint" } },
+          "unevaluatedProperties": false
+        },
+        "brokers": {
+          "allOf": [{ "$ref": "#/$defs/role" }],
+          "unevaluatedProperties": false
+        },
+        "kafka": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "rackAwareness": { "$ref": "#/$defs/boolConstraint" },
+            "authorization": { "$ref": "#/$defs/authorizationConstraint" },
+            "listeners": {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "require": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": { "$ref": "#/$defs/requiredListener" }
+                },
+                "every": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "properties": {
+                    "type": { "$ref": "#/$defs/listenerTypeConstraint" },
+                    "tls": { "$ref": "#/$defs/boolConstraint" },
+                    "auth": { "$ref": "#/$defs/authConstraint" }
+                  }
+                }
+              }
+            },
+            "config": {
+              "description": "Broker config name to constraint, compared with the effective value on every broker.",
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 200,
+              "propertyNames": { "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$", "maxLength": 128 },
+              "additionalProperties": { "$ref": "#/$defs/configConstraint" }
+            }
+          }
+        },
+        "monitoring": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "metrics": { "$ref": "#/$defs/metricsConstraint" },
+            "kafkaExporter": { "$ref": "#/$defs/boolConstraint" },
+            "podMonitor": { "$ref": "#/$defs/boolConstraint" }
+          }
+        },
+        "waivers": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/waiver" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dnsLabel": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" },
+    "severity": { "enum": ["fail", "warn"], "default": "fail" },
+    "operatorShape": {
+      "description": "equals and oneOf stand alone; min and max combine. A map without an operator is refused.",
+      "anyOf": [
+        { "required": ["equals"] },
+        { "required": ["min"] },
+        { "required": ["max"] },
+        { "required": ["oneOf"] }
+      ],
+      "dependentSchemas": {
+        "equals": { "not": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }, { "required": ["oneOf"] }] } },
+        "oneOf": { "not": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }] } }
+      }
+    },
+    "count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "intConstraint": {
+      "oneOf": [
+        { "$ref": "#/$defs/count" },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "$ref": "#/$defs/count" },
+            "min": { "$ref": "#/$defs/count" },
+            "max": { "$ref": "#/$defs/count" },
+            "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/count" } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "portConstraint": {
+      "oneOf": [
+        { "$ref": "#/$defs/port" },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "$ref": "#/$defs/port" },
+            "min": { "$ref": "#/$defs/port" },
+            "max": { "$ref": "#/$defs/port" },
+            "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/port" } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "quantity": {
+      "description": "A Kubernetes quantity: 500m, 2, 8Gi, 1.5T.",
+      "oneOf": [
+        { "type": "number", "minimum": 0 },
+        { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$" }
+      ]
+    },
+    "quantityConstraint": {
+      "oneOf": [
+        { "$ref": "#/$defs/quantity" },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "$ref": "#/$defs/quantity" },
+            "min": { "$ref": "#/$defs/quantity" },
+            "max": { "$ref": "#/$defs/quantity" },
+            "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/quantity" } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "version": {
+      "description": "A dotted version, as a string. Missing parts count as 0: 4.2 is 4.2.0.",
+      "type": "string",
+      "pattern": "^v?[0-9]+(\\.[0-9]+){0,3}$"
+    },
+    "versionConstraint": {
+      "oneOf": [
+        { "$ref": "#/$defs/version" },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "$ref": "#/$defs/version" },
+            "min": { "$ref": "#/$defs/version" },
+            "max": { "$ref": "#/$defs/version" },
+            "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/version" } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "stringConstraint": {
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 253 },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "type": "string", "minLength": 1, "maxLength": 253 },
+            "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string", "minLength": 1, "maxLength": 253 } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "boolConstraint": {
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["equals"],
+          "properties": {
+            "equals": { "type": "boolean" },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "storageType": { "enum": ["ephemeral", "persistent-claim", "jbod"] },
+    "antiAffinityLevel": { "enum": ["required", "preferred", "none"] },
+    "authType": { "enum": ["none", "tls", "scram-sha-512", "oauth", "custom"] },
+    "authorizationType": { "enum": ["none", "simple", "opa", "keycloak", "custom"] },
+    "listenerType": { "enum": ["internal", "cluster-ip", "route", "loadbalancer", "nodeport", "ingress"] },
+    "metricsType": { "enum": ["none", "jmxPrometheusExporter", "strimziMetricsReporter"] },
+    "storageTypeConstraint": { "oneOf": [{ "$ref": "#/$defs/storageType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/storageType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/storageType" } }, "severity": { "$ref": "#/$defs/severity" } } }] },
+    "antiAffinityConstraint": { "oneOf": [{ "$ref": "#/$defs/antiAffinityLevel" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/antiAffinityLevel" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/antiAffinityLevel" } }, "severity": { "$ref": "#/$defs/severity" } } }] },
+    "authConstraint": { "oneOf": [{ "$ref": "#/$defs/authType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/authType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/authType" } }, "severity": { "$ref": "#/$defs/severity" } } }] },
+    "authorizationConstraint": { "oneOf": [{ "$ref": "#/$defs/authorizationType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/authorizationType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/authorizationType" } }, "severity": { "$ref": "#/$defs/severity" } } }] },
+    "listenerTypeConstraint": { "oneOf": [{ "$ref": "#/$defs/listenerType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/listenerType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/listenerType" } }, "severity": { "$ref": "#/$defs/severity" } } }] },
+    "metricsConstraint": { "oneOf": [{ "$ref": "#/$defs/metricsType" }, { "type": "object", "allOf": [{ "$ref": "#/$defs/operatorShape" }], "additionalProperties": false, "properties": { "equals": { "$ref": "#/$defs/metricsType" }, "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/metricsType" } }, "severity": { "$ref": "#/$defs/severity" } } }] },
+    "configConstraint": {
+      "description": "min and max compare numbers; equals and oneOf compare the value's text, so false matches \"false\".",
+      "oneOf": [
+        { "type": ["string", "number", "boolean"] },
+        {
+          "type": "object",
+          "allOf": [{ "$ref": "#/$defs/operatorShape" }],
+          "additionalProperties": false,
+          "properties": {
+            "equals": { "type": ["string", "number", "boolean"] },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "oneOf": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": ["string", "number", "boolean"] } },
+            "severity": { "$ref": "#/$defs/severity" }
+          }
+        }
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "cpu": { "$ref": "#/$defs/quantityConstraint" },
+        "memory": { "$ref": "#/$defs/quantityConstraint" }
+      }
+    },
+    "role": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "count": { "$ref": "#/$defs/intConstraint" },
+        "requests": { "$ref": "#/$defs/resources" },
+        "limits": { "$ref": "#/$defs/resources" },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "type": { "$ref": "#/$defs/storageTypeConstraint" },
+            "size": { "$ref": "#/$defs/quantityConstraint" },
+            "class": { "$ref": "#/$defs/stringConstraint" }
+          }
+        },
+        "zones": { "$ref": "#/$defs/intConstraint" },
+        "skew": { "$ref": "#/$defs/intConstraint" },
+        "perNode": { "$ref": "#/$defs/intConstraint" },
+        "antiAffinity": { "$ref": "#/$defs/antiAffinityConstraint" }
+      }
+    },
+    "requiredListener": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One rule: the listener exists with every property listed. Its severity is the rule's, so its properties take no warn of their own.",
+      "required": ["name"],
+      "anyOf": [{ "required": ["type"] }, { "required": ["port"] }, { "required": ["tls"] }, { "required": ["auth"] }],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9]{1,11}$" },
+        "type": { "allOf": [{ "$ref": "#/$defs/listenerTypeConstraint" }, { "$ref": "#/$defs/noWarn" }] },
+        "port": { "allOf": [{ "$ref": "#/$defs/portConstraint" }, { "$ref": "#/$defs/noWarn" }] },
+        "tls": { "allOf": [{ "$ref": "#/$defs/boolConstraint" }, { "$ref": "#/$defs/noWarn" }] },
+        "auth": { "allOf": [{ "$ref": "#/$defs/authConstraint" }, { "$ref": "#/$defs/noWarn" }] },
+        "severity": { "$ref": "#/$defs/severity" }
+      }
+    },
+    "noWarn": { "not": { "type": "object", "required": ["severity"], "properties": { "severity": { "const": "warn" } } } },
+    "waiver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "reason", "by", "until"],
+      "properties": {
+        "rule": { "type": "string", "maxLength": 200, "pattern": "^[a-z][A-Za-z]*(\\.[a-z][A-Za-z]*|\\[[^\\]]+\\])*$" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "by": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "until": { "type": "string", "format": "date" }
+      }
+    }
+  }
+}
