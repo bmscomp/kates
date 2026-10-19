@@ -48,11 +48,12 @@ spec:
       containers:
       - name: migrate
         image: {{ .Values.migration.image | default (printf "%s:%s" .Values.image.repository .Values.image.tag) | quote }}
+        env:
+        {{- include "kates.dbEnv" . | nindent 8 }}
         {{- if .Values.migration.command }}
         command:
           {{- toYaml .Values.migration.command | nindent 10 }}
         {{- else }}
-        env:
         - name: QUARKUS_FLYWAY_MIGRATE_AT_START
           value: "true"
         - name: QUARKUS_FLYWAY_BASELINE_ON_MIGRATE
@@ -78,10 +79,6 @@ spec:
         envFrom:
         - configMapRef:
             name: {{ include "kates.fullname" . }}-config
-        {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
-        - secretRef:
-            name: {{ include "kates.dbSecretName" . }}
-        {{- end }}
         {{- with .Values.containerSecurityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}

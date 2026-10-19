@@ -67,6 +67,42 @@ jdbc:postgresql://{{ .Values.externalDatabase.host }}:{{ .Values.externalDatabas
 {{- end }}
 
 {{/*
+The key that holds the database password in kates.dbSecretName: passwordKey
+in a Secret you bring (existingSecret), QUARKUS_DATASOURCE_PASSWORD in the
+one the chart creates. The username is never read from the Secret: it is
+postgresql.auth.username or externalDatabase.username.
+*/}}
+{{- define "kates.dbPasswordKey" -}}
+{{- $db := ternary .Values.postgresql.auth .Values.externalDatabase .Values.postgresql.enabled -}}
+{{- if $db.existingSecret -}}
+  {{- $db.passwordKey | default "password" -}}
+{{- else -}}
+  QUARKUS_DATASOURCE_PASSWORD
+{{- end -}}
+{{- end }}
+
+{{- define "kates.dbUsername" -}}
+{{- (ternary .Values.postgresql.auth .Values.externalDatabase .Values.postgresql.enabled).username -}}
+{{- end }}
+
+{{/*
+The database credentials as env entries, for the Kates API and the
+migration Job. The Secret is required: a wrong name or key stops the pod
+with CreateContainerConfigError instead of logging in with no password.
+*/}}
+{{- define "kates.dbEnv" -}}
+{{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled -}}
+- name: QUARKUS_DATASOURCE_USERNAME
+  value: {{ include "kates.dbUsername" . | quote }}
+- name: QUARKUS_DATASOURCE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kates.dbSecretName" . }}
+      key: {{ include "kates.dbPasswordKey" . }}
+{{- end }}
+{{- end }}
+
+{{/*
 Resolve the full image reference, prepending global.imageRegistry if set.
 Usage: {{ include "kates.image" . }}
 */}}
