@@ -47,6 +47,13 @@ func TestDashClusterContentReadsTheCheckVerdict(t *testing.T) {
 			never: []string{"Broker 3"},
 		},
 		{
+			name: "a KRaft quorum the check could not describe has an unknown leader",
+			check: client.ClusterHealthReport{Status: "WARNING", Brokers: 3, ControllerID: 3,
+				KraftQuorum: &client.KraftQuorumHealth{LeaderID: -1, Issue: "UNAVAILABLE: TimeoutException"}},
+			want:  []string{g.Warn + " WARNING", g.Warn + " KRaft leader unknown"},
+			never: []string{g.Cross, "Broker 3"},
+		},
+		{
 			name: "under-replicated partitions are a warning",
 			check: client.ClusterHealthReport{Status: "WARNING", Brokers: 3,
 				PartitionHealth: client.PartitionHealthReport{UnderReplicated: 4}},

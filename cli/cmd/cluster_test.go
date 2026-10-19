@@ -65,7 +65,9 @@ func TestControllerLabel(t *testing.T) {
 		{"KRaft", client.ClusterHealthReport{ControllerID: 4,
 			KraftQuorum: &client.KraftQuorumHealth{LeaderID: 1, Voters: 3, HasLeader: true}}, "KRaft leader 1"},
 		{"KRaft without a leader", client.ClusterHealthReport{ControllerID: 4,
-			KraftQuorum: &client.KraftQuorumHealth{LeaderID: -1, Voters: 3}}, output.Glyphs().Cross + " no KRaft leader"},
+			KraftQuorum: &client.KraftQuorumHealth{LeaderID: -1, Voters: 3, Issue: "NO_LEADER"}}, output.Glyphs().Cross + " no KRaft leader"},
+		{"KRaft quorum not described", client.ClusterHealthReport{ControllerID: 4,
+			KraftQuorum: &client.KraftQuorumHealth{LeaderID: -1, Issue: "UNAVAILABLE: TimeoutException"}}, output.Glyphs().Warn + " KRaft leader unknown"},
 	}
 	for _, tc := range cases {
 		if got := stripAnsi(controllerLabel(&tc.report)); got != tc.want {

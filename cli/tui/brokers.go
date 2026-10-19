@@ -169,6 +169,8 @@ func controllerText(check *client.ClusterHealthReport) string {
 	}
 	id, ok := check.ActiveController()
 	switch {
+	case !ok && check.KraftQuorum.Issue != "NO_LEADER":
+		return warnStyle.Render("⚠ KRaft leader unknown")
 	case !ok:
 		return errorStyle.Render("✖ no KRaft leader")
 	case check.KraftQuorum == nil:

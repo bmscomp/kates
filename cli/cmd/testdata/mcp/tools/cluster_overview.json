@@ -225,10 +225,14 @@
               },
               "kraftQuorum": {
                 "additionalProperties": false,
-                "description": "absent when the admin API cannot describe the metadata quorum",
+                "description": "absent only on ZooKeeper",
                 "properties": {
                   "hasLeader": {
                     "type": "boolean"
+                  },
+                  "issue": {
+                    "description": "NO_LEADER when the quorum answered without a leader; UNAVAILABLE: <exception> when the check could not describe it, so hasLeader false leaves the leader unknown",
+                    "type": "string"
                   },
                   "leaderId": {
                     "type": "integer"
@@ -294,7 +298,7 @@
                 ]
               },
               "status": {
-                "description": "HEALTHY; WARNING when partitions are under-replicated; CRITICAL when partitions are offline or the KRaft quorum has no leader",
+                "description": "HEALTHY; WARNING when partitions are under-replicated or the KRaft quorum cannot be described; CRITICAL when partitions are offline or the KRaft quorum has no leader",
                 "type": "string"
               },
               "topics": {
