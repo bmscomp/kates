@@ -261,3 +261,5 @@ charts/*/tmpcharts-*/
 
 # scratch the desktop app drops into a connected folder
 Claude outputs/
+graphify-out/
+
