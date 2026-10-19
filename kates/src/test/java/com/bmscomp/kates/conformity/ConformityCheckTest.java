@@ -61,12 +61,14 @@ class ConformityCheckTest {
                 .build());
         create(
                 ClusterTopologyService.KAFKA_CRD,
-                kafka(Map.of(
-                        "clusterId", "4L6g3nShT-eMCtK--X86sw",
-                        "kafkaVersion", "4.3.1",
-                        "operatorLastSuccessfulVersion", "1.2.0",
-                        "observedGeneration", 1,
-                        "conditions", List.of(Map.of("type", "Ready", "status", "True")))));
+                kafka(
+                        KAFKA_SPEC,
+                        Map.of(
+                                "clusterId", "4L6g3nShT-eMCtK--X86sw",
+                                "kafkaVersion", "4.3.1",
+                                "operatorLastSuccessfulVersion", "1.2.0",
+                                "observedGeneration", 1,
+                                "conditions", List.of(Map.of("type", "Ready", "status", "True")))));
         create(ClusterTopologyService.NODE_POOL_CRD, pool("controllers", "persistent-claim", "controller"));
         create(ClusterTopologyService.NODE_POOL_CRD, pool("brokers", "jbod", "broker"));
         for (int i = 0; i < 3; i++) {
@@ -79,7 +81,45 @@ class ConformityCheckTest {
         }
     }
 
-    static GenericKubernetesResource kafka(Map<String, Object> status) {
+    /** As the kafka-cluster chart renders it: a plain SCRAM listener and a TLS one, zone racks, simple authorization. */
+    static final Map<String, Object> KAFKA_SPEC = Map.of(
+            "kafka",
+            Map.of(
+                    "rack",
+                    Map.of("topologyKey", "topology.kubernetes.io/zone"),
+                    "authorization",
+                    Map.of("type", "simple"),
+                    "listeners",
+                    List.of(
+                            Map.of(
+                                    "name",
+                                    "plain",
+                                    "port",
+                                    9092,
+                                    "type",
+                                    "internal",
+                                    "tls",
+                                    false,
+                                    "authentication",
+                                    Map.of("type", "scram-sha-512")),
+                            Map.of(
+                                    "name",
+                                    "tls",
+                                    "port",
+                                    9093,
+                                    "type",
+                                    "internal",
+                                    "tls",
+                                    true,
+                                    "authentication",
+                                    Map.of("type", "tls"))),
+                    "config",
+                    Map.of(
+                            "min.insync.replicas", 2,
+                            "default.replication.factor", 3,
+                            "unclean.leader.election.enable", false)));
+
+    static GenericKubernetesResource kafka(Map<String, Object> spec, Map<String, Object> status) {
         return new GenericKubernetesResourceBuilder()
                 .withApiVersion("kafka.strimzi.io/v1")
                 .withKind("Kafka")
@@ -88,7 +128,7 @@ class ConformityCheckTest {
                 .withNamespace("kafka")
                 .withGeneration(1L)
                 .endMetadata()
-                .withAdditionalProperties(Map.of("spec", Map.of(), "status", status))
+                .withAdditionalProperties(Map.of("spec", spec, "status", status))
                 .build();
     }
 
@@ -217,7 +257,7 @@ class ConformityCheckTest {
                 .inNamespace("kafka")
                 .withName("krafter")
                 .delete();
-        create(ClusterTopologyService.KAFKA_CRD, kafka(Map.of("kafkaVersion", "unknown")));
+        create(ClusterTopologyService.KAFKA_CRD, kafka(KAFKA_SPEC, Map.of("kafkaVersion", "unknown")));
 
         ConformityReport report =
                 run("{versions: {kafka: {min: '4.2.0'}, strimzi: {min: '1.2.0'}}, brokers: {count: 3}}");
@@ -436,12 +476,63 @@ class ConformityCheckTest {
     }
 
     @Test
+    void readsTheKafkaRulesFromTheKafkaCr() throws IOException {
+        place();
+
+        ConformityReport report = run("{kafka: {rackAwareness: true, authorization: {oneOf: [simple, custom]},"
+                + " listeners: {require: [{name: tls, port: 9093, tls: true, auth: tls},"
+                + " {name: plain, tls: true}, {name: external, type: route, severity: warn}],"
+                + " every: {tls: true, auth: {oneOf: [tls, scram-sha-512]}}},"
+                + " config: {min.insync.replicas: {min: 2}, unclean.leader.election.enable: false,"
+                + " auto.create.topics.enable: false}}}");
+
+        assertEquals(Status.PASS, result(report, "kafka.rackAwareness").status());
+        assertEquals(Status.PASS, result(report, "kafka.authorization").status());
+        assertEquals(Status.PASS, result(report, "kafka.listeners.require[tls]").status());
+        Result plain = result(report, "kafka.listeners.require[plain]");
+        assertEquals(Status.FAIL, plain.status());
+        assertEquals("tls is false", plain.detail());
+        Result external = result(report, "kafka.listeners.require[external]");
+        assertEquals(Status.WARN, external.status());
+        assertEquals("missing", external.observed());
+        assertEquals(
+                List.of("plain"), result(report, "kafka.listeners.every.tls").subjects());
+        assertEquals(Status.PASS, result(report, "kafka.listeners.every.auth").status());
+        assertEquals(
+                Status.PASS, result(report, "kafka.config[min.insync.replicas]").status());
+        assertEquals(
+                Status.PASS,
+                result(report, "kafka.config[unclean.leader.election.enable]").status());
+        Result unset = result(report, "kafka.config[auto.create.topics.enable]");
+        assertEquals(Status.FAIL, unset.status());
+        assertEquals("not set in the Kafka CR", unset.detail());
+    }
+
+    @Test
+    void rackAwarenessNeedsTheZoneKeyAndLabelledNodes() throws IOException {
+        Result result =
+                result(run("{zoneLabel: example.com/rack, kafka: {rackAwareness: true}}"), "kafka.rackAwareness");
+
+        assertEquals(Status.FAIL, result.status());
+        assertEquals(
+                "spec.kafka.rack.topologyKey is topology.kubernetes.io/zone, not example.com/rack", result.detail());
+    }
+
+    @Test
     void refusesARuleItCannotEvaluateYet() {
-        ApiError error = assertThrows(InvalidReferenceException.class, () -> run("{kafka: {rackAwareness: true}}"))
+        ApiError error = assertThrows(
+                        InvalidReferenceException.class,
+                        () -> run("{kafka: {source: brokers, rackAwareness: true}, monitoring: {kafkaExporter: true}}"))
                 .getError();
 
         assertEquals(400, error.getStatus());
-        assertEquals(Map.of("spec.kafka.rackAwareness", "not implemented yet"), error.getFieldErrors());
+        assertEquals(
+                Map.of(
+                        "spec.kafka.source",
+                        "not implemented yet",
+                        "spec.monitoring.kafkaExporter",
+                        "not implemented yet"),
+                error.getFieldErrors());
     }
 
     @Test
