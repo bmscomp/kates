@@ -39,9 +39,12 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.clients.admin.ListTopicsOptions;
+import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.config.TopicConfig;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import com.bmscomp.kates.conformity.ConformityReport.ClusterState;
@@ -60,8 +63,9 @@ import com.bmscomp.kates.service.KafkaAdminService;
 
 /**
  * Checks the Strimzi cluster this Kates API watches against a KafkaReference,
- * read-only: Kubernetes get and list calls, and with kafka.source brokers the
- * Kafka Admin API's describeCluster and describeConfigs.
+ * read-only: Kubernetes get and list calls, with kafka.source brokers the
+ * Kafka Admin API's describeCluster and describeConfigs, and with topics its
+ * listTopics, describeTopics and describeConfigs.
  *
  * <p>Each source is read once, when the first rule that needs it runs. A
  * source that cannot be read makes every rule that needs it UNKNOWN, never
@@ -179,6 +183,35 @@ public class ConformityCheck {
             return configs;
         });
 
+        /** With topics only: every topic, internal ones included, but those an exclude prefix names. */
+        private final Source<List<String>> topicNames =
+                new Source<>(
+                        "Kafka Admin: listTopics",
+                        () -> await(admin.sharedAdminClient()
+                                        .listTopics(new ListTopicsOptions().listInternal(true))
+                                        .names())
+                                .stream()
+                                .filter(this::checked)
+                                .sorted()
+                                .toList());
+
+        private final Source<Map<String, TopicDescription>> topicDescriptions = new Source<>(
+                "Kafka Admin: describeTopics",
+                () -> await(admin.sharedAdminClient()
+                        .describeTopics(topicNames.get())
+                        .allTopicNames()));
+
+        private final Source<Map<String, Config>> topicConfigs =
+                new Source<>("Kafka Admin: describeConfigs, topics", () -> {
+                    List<ConfigResource> resources = topicNames.get().stream()
+                            .map(name -> new ConfigResource(ConfigResource.Type.TOPIC, name))
+                            .toList();
+                    Map<String, Config> configs = new TreeMap<>();
+                    await(admin.sharedAdminClient().describeConfigs(resources).all())
+                            .forEach((resource, config) -> configs.put(resource.name(), config));
+                    return configs;
+                });
+
         /** Null when the PodMonitor CRD is not installed: then there is none, which is the answer. */
         private final Source<List<GenericKubernetesResource>> podMonitors =
                 new Source<>("Kubernetes: PodMonitors in any namespace", () -> {
@@ -253,6 +286,7 @@ public class ConformityCheck {
             role("controllers", spec.controllers(), "strimzi.io/controller-role", "controller");
             role("brokers", spec.brokers(), "strimzi.io/broker-role", "broker");
             kafka(spec.kafka());
+            topics(spec.topics());
             monitoring(spec.monitoring());
 
             List<Result> waived = waive(results);
@@ -537,6 +571,31 @@ public class ConformityCheck {
                                 fromBrokers ? brokerConfigs.name + ", every broker" : crKafka + ".config",
                                 () -> fromBrokers ? effectiveConfig(key) : declaredConfig(config, key)));
             }
+        }
+
+        /** Each topic's own durability, read through the Kafka Admin API whatever kafka.source says. */
+        private void topics(KafkaReference.Topics rules) {
+            if (rules == null) {
+                return;
+            }
+            rule(
+                    "topics.replicationFactor",
+                    rules.replicationFactor(),
+                    meets(rules.replicationFactor()),
+                    topicNames.name + ", describeTopics",
+                    () -> perTopic(
+                            topicDescriptions.get(), ConformityCheck::replicationFactor, rules.replicationFactor()));
+            rule(
+                    "topics.minInsyncReplicas",
+                    rules.minInsyncReplicas(),
+                    meets(rules.minInsyncReplicas()),
+                    topicNames.name + ", describeConfigs",
+                    () -> perTopic(topicConfigs.get(), ConformityCheck::minInsyncReplicas, rules.minInsyncReplicas()));
+        }
+
+        private boolean checked(String topic) {
+            List<String> exclude = spec.topics().exclude();
+            return exclude == null || exclude.stream().noneMatch(topic::startsWith);
         }
 
         private Observation<String> declaredConfig(Map<?, ?> config, String key) {
@@ -972,6 +1031,35 @@ public class ConformityCheck {
         Map<String, T> values = new LinkedHashMap<>();
         listeners.forEach((name, properties) -> values.put(name, value.apply(properties)));
         return new Observation<>(values, values.isEmpty() ? "the Kafka CR declares no listener" : null);
+    }
+
+    /** Each topic's value by name; the detail counts the topics that miss it, as the subjects stop at 50. */
+    private static <V> Observation<Integer> perTopic(
+            Map<String, V> topics, Function<V, Integer> value, Constraint<Integer> constraint) {
+        Map<String, Integer> values = new TreeMap<>();
+        topics.forEach((name, topic) -> values.put(name, value.apply(topic)));
+        long missing = values.values().stream()
+                .filter(v -> v == null || !meets(constraint).test(v))
+                .count();
+        return new Observation<>(
+                values,
+                values.isEmpty()
+                        ? "no topic to check"
+                        : missing == 0 ? null : missing + " of " + values.size() + " topics");
+    }
+
+    /** The smallest replica set across the topic's partitions. */
+    static Integer replicationFactor(TopicDescription topic) {
+        return topic.partitions().stream()
+                .mapToInt(p -> p.replicas().size())
+                .min()
+                .orElse(0);
+    }
+
+    /** The effective value: the topic's own, or the broker default Kafka reports for it. */
+    static Integer minInsyncReplicas(Config config) {
+        ConfigEntry entry = config.get(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG);
+        return entry == null || entry.value() == null ? null : Integer.valueOf(entry.value());
     }
 
     static boolean ready(Pod pod) {
