@@ -54,15 +54,12 @@ spec:
                 echo "Done."
             env:
               - name: PGUSER
-                valueFrom:
-                  secretKeyRef:
-                    name: {{ include "kates.dbSecretName" . }}
-                    key: QUARKUS_DATASOURCE_USERNAME
+                value: {{ include "kates.dbUsername" . | quote }}
               - name: PGPASSWORD
                 valueFrom:
                   secretKeyRef:
                     name: {{ include "kates.dbSecretName" . }}
-                    key: QUARKUS_DATASOURCE_PASSWORD
+                    key: {{ include "kates.dbPasswordKey" . }}
               - name: PGDATABASE
                 value: {{ .Values.postgresql.auth.database | quote }}
             volumeMounts:

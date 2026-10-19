@@ -172,9 +172,11 @@ Upgrading from 0.10.7 or earlier: `values-prod.yaml` there ran an autoscaler of 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `postgresql.enabled` | `true` | Deploy bundled PostgreSQL |
-| `postgresql.auth.existingSecret` | `""` | Use pre-created secret for DB credentials |
+| `postgresql.auth.existingSecret` | `""` | Pre-created Secret holding the DB password (the username is `postgresql.auth.username`) |
+| `postgresql.auth.passwordKey` | `password` | Key in that Secret holding the password |
 | `externalDatabase.enabled` | `false` | Use an external PostgreSQL |
-| `externalDatabase.existingSecret` | `""` | Use pre-created secret for external DB |
+| `externalDatabase.existingSecret` | `""` | Pre-created Secret holding the external DB password (the username is `externalDatabase.username`) |
+| `externalDatabase.passwordKey` | `password` | Key in that Secret holding the password |
 
 ### Monitoring
 

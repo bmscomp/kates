@@ -103,11 +103,6 @@ spec:
         envFrom:
         - configMapRef:
             name: {{ include "kates.fullname" . }}-config
-        {{- if or .Values.postgresql.enabled .Values.externalDatabase.enabled }}
-        - secretRef:
-            name: {{ include "kates.dbSecretName" . }}
-            optional: true
-        {{- end }}
         {{- with .Values.containerArgs }}
         {{- /*
           Replaces the image's CMD. Its one current use is the native image,
@@ -118,6 +113,7 @@ spec:
           {{- toYaml . | nindent 8 }}
         {{- end }}
         env:
+        {{- include "kates.dbEnv" . | nindent 8 }}
         {{- if .Values.kafka.clientRack }}
         - name: KATES_KAFKA_CLIENT_RACK
           value: {{ .Values.kafka.clientRack | quote }}

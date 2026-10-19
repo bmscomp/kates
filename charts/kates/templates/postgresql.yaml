@@ -58,7 +58,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ include "kates.dbSecretName" . }}
-              key: QUARKUS_DATASOURCE_PASSWORD
+              key: {{ include "kates.dbPasswordKey" . }}
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
         volumeMounts:

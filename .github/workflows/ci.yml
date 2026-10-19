@@ -216,6 +216,39 @@ jobs:
           fi
           echo "OK: backup without the bundled database is refused"
 
+      # An existingSecret used to be loaded with envFrom, so its documented
+      # key, password, became a variable named password that Quarkus never
+      # reads, and optional: true hid a wrong Secret name: the API crash-looped
+      # on the default credentials. Assert both credentials are explicit and
+      # the Secret is required.
+      - name: Assert an existing database Secret reaches the Kates API
+        run: |
+          dep=$(helm template kates charts/kates/ \
+                  -f charts/kates/values-prod.yaml \
+                  --set externalDatabase.host=db \
+                  --set externalDatabase.username=app \
+                  --set externalDatabase.existingSecret=my-db \
+                  --show-only templates/deployment.yaml)
+          want=$'- name: QUARKUS_DATASOURCE_USERNAME\n          value: "app"\n        - name: QUARKUS_DATASOURCE_PASSWORD\n          valueFrom:\n            secretKeyRef:\n              name: my-db\n              key: password'
+          if [[ "$dep" != *"$want"* ]]; then
+            echo "::error::the API does not read the password from my-db/password and the username from values"
+            exit 1
+          fi
+          if grep -q 'optional: true' <<< "$(grep -A3 'secretKeyRef:' <<< "$dep" | grep -A2 'name: my-db')"; then
+            echo "::error::the database Secret is optional"
+            exit 1
+          fi
+          pg=$(helm template kates charts/kates/ \
+                 --set postgresql.auth.existingSecret=pg \
+                 --set postgresql.auth.passwordKey=pw \
+                 --set backup.enabled=true \
+                 --show-only templates/postgresql.yaml --show-only templates/backup-cronjob.yaml)
+          if [ "$(grep -c 'key: pw' <<< "$pg")" != 2 ] || grep -q 'QUARKUS_DATASOURCE' <<< "$pg"; then
+            echo "::error::PostgreSQL and the backup do not read passwordKey from the existing Secret"
+            exit 1
+          fi
+          echo "OK: an existing database Secret reaches the API, PostgreSQL and the backup"
+
       # networkPolicy.kafka.namespace went unread for releases: the policy
       # always allowed `kafka`, kept Trogdor's 8889 to `monitoring` and had no
       # Kubernetes API rule, and nothing rendered it to notice.
