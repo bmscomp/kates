@@ -286,6 +286,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Context Management](#context-management) | `ctx set`, `use`, `show`, `export`, `import`, `profiles` | Which Kates API do your commands call, and with which key? | Local files: `~/.kates.yaml` |
 | [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno, and `doctor dns` and `doctor network` work through `kubectl` alone |
 | [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs` | What does the Kafka cluster look like, and is it healthy? | Kates API |
+| [Conformity](#conformity) | `conformity check`, `lint`, `fmt` | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
 | [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test scaffold` uses only templates built into the CLI |
 | [Report Commands](#report-commands) | `report show`, `summary`, `export`, `diff`, `compare`, `brokers` | What did a run measure, and how does it compare with another run? | Kates API |
 | [Trend Analysis](#trend-analysis) | `trend` | How has one metric moved across a test type's runs over recent days? | Kates API |
@@ -605,7 +606,7 @@ kates cluster watch --interval 10
 
 ### Conformity
 
-`kates conformity check` holds the cluster to a reference architecture: a `KafkaReference` file that declares how many brokers and controllers it runs, how big each one is, and how they spread over zones and nodes. The Kates API reads the cluster read-only and reports each declared rule. A `topics` section holds every topic, Kafka's internal ones included, to a replication factor (its smallest replica set across partitions) and a `min.insync.replicas`, so a topic created with two replicas fails even when the broker defaults pass; `exclude` leaves out topics by name prefix. Declaring `topics` makes the Kates API list and describe the topics through the Kafka Admin API, even with `kafka.source: cr`. `cli/examples/conformity` holds the JSON Schema editors validate against, and two examples to copy.
+`kates conformity check` holds the cluster to a reference architecture: a `KafkaReference` file that declares how many brokers and controllers it runs, how big each one is, and how they spread over zones and nodes. The Kates API reads the cluster read-only and reports each declared rule. A `topics` section holds every topic, Kafka's internal ones included, to a replication factor (its smallest replica set across partitions) and a `min.insync.replicas`, so a topic created with two replicas fails even when the broker defaults pass; `exclude` leaves out topics by name prefix. Declaring `topics` makes the Kates API list and describe the topics through the Kafka Admin API, even with `kafka.source: cr`. `cli/examples/conformity` holds the JSON Schema editors validate against, and examples to copy. [Conformity Checks](conformity.md) teaches the language step by step.
 
 #### conformity check
 
