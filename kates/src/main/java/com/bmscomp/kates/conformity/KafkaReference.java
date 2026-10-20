@@ -33,6 +33,7 @@ public record KafkaReference(String apiVersion, String kind, Metadata metadata, 
             Role controllers,
             Role brokers,
             Kafka kafka,
+            Topics topics,
             Monitoring monitoring,
             List<Waiver> waivers) {}
 
@@ -113,6 +114,17 @@ public record KafkaReference(String apiVersion, String kind, Metadata metadata, 
      * @param auth none, tls, scram-sha-512, oauth or custom
      */
     public record ListenerProperties(Constraint<String> type, Constraint<Boolean> tls, Constraint<String> auth) {}
+
+    /**
+     * Each topic's own durability, internal topics included, read through the
+     * Kafka Admin API whatever kafka.source says.
+     *
+     * @param replicationFactor the smallest replica set across the topic's partitions
+     * @param minInsyncReplicas the topic's effective min.insync.replicas
+     * @param exclude topic-name prefixes left out, such as __ for Kafka's internal topics
+     */
+    public record Topics(
+            Constraint<Integer> replicationFactor, Constraint<Integer> minInsyncReplicas, List<String> exclude) {}
 
     /** @param metrics none, jmxPrometheusExporter or strimziMetricsReporter */
     public record Monitoring(
