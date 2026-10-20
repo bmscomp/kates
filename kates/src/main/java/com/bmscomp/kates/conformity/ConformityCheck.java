@@ -39,6 +39,7 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.clients.admin.DescribeClusterResult;
 import org.apache.kafka.clients.admin.ListTopicsOptions;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.KafkaFuture;
@@ -169,18 +170,24 @@ public class ConformityCheck {
                                         : n.getMetadata().getLabels())));
 
         /** With kafka.source brokers only: the brokers Kafka reports, and their effective configs. */
-        private final Source<Collection<Node>> brokers = new Source<>(
-                "Kafka Admin: describeCluster",
-                () -> await(admin.sharedAdminClient().describeCluster().nodes()));
+        private final Source<Collection<Node>> brokers =
+                new Source<>("Kafka Admin: describeCluster", this::describeBrokers);
 
-        private final Source<Map<String, Config>> brokerConfigs = new Source<>("Kafka Admin: describeConfigs", () -> {
+        private final Source<BrokerConfigs> brokerConfigs = new Source<>("Kafka Admin: describeConfigs", () -> {
             List<ConfigResource> resources = brokers.get().stream()
                     .map(n -> new ConfigResource(ConfigResource.Type.BROKER, n.idString()))
                     .toList();
             Map<String, Config> configs = new TreeMap<>();
-            await(admin.sharedAdminClient().describeConfigs(resources).all())
-                    .forEach((resource, config) -> configs.put(resource.name(), config));
-            return configs;
+            List<String> unread = new ArrayList<>();
+            admin.sharedAdminClient().describeConfigs(resources).values().forEach((resource, config) -> {
+                try {
+                    configs.put(resource.name(), await(config));
+                } catch (IllegalStateException e) {
+                    unread.add("broker " + resource.name() + ": " + e.getMessage());
+                }
+            });
+            unread.sort(null);
+            return new BrokerConfigs(configs, unread);
         });
 
         /** With topics only: every topic, internal ones included, but those an exclude prefix names. */
@@ -563,13 +570,15 @@ public class ConformityCheck {
             if (rules.config() != null) {
                 Object set = at(kafka, "spec", "kafka", "config");
                 Map<?, ?> config = set instanceof Map<?, ?> m ? m : Map.of();
-                rules.config()
-                        .forEach((key, constraint) -> rule(
-                                "kafka.config" + (key.contains(".") ? "[" + key + "]" : "." + key),
-                                constraint,
-                                value -> Constraint.configHolds(constraint, value),
-                                fromBrokers ? brokerConfigs.name + ", every broker" : crKafka + ".config",
-                                () -> fromBrokers ? effectiveConfig(key) : declaredConfig(config, key)));
+                rules.config().forEach((key, constraint) -> {
+                    Predicate<String> meets = value -> Constraint.configHolds(constraint, value);
+                    rule(
+                            "kafka.config" + (key.contains(".") ? "[" + key + "]" : "." + key),
+                            constraint,
+                            meets,
+                            fromBrokers ? brokerConfigs.name + ", every broker" : crKafka + ".config",
+                            () -> fromBrokers ? effectiveConfig(key, meets) : declaredConfig(config, key));
+                });
             }
         }
 
@@ -605,19 +614,74 @@ public class ConformityCheck {
                     value == null ? "not set in the Kafka CR" : null);
         }
 
-        /** The value each broker reports, defaults included; a sensitive one is never read. */
-        private Observation<String> effectiveConfig(String key) {
+        /**
+         * The value each broker reports, defaults included; a sensitive one is
+         * never read. A broker that could not be read, or reports no value
+         * (log.retention.ms, which Kafka derives from log.retention.hours),
+         * hides no gap the others show, and when they show none, the rule is
+         * UNKNOWN.
+         */
+        private Observation<String> effectiveConfig(String key, Predicate<String> meets) {
+            BrokerConfigs read = brokerConfigs.get();
+            List<String> unread = new ArrayList<>(unreported());
+            unread.addAll(read.unread());
             Map<String, String> values = new LinkedHashMap<>();
+            List<String> valueless = new ArrayList<>();
             boolean reported = false;
-            for (Map.Entry<String, Config> broker : brokerConfigs.get().entrySet()) {
+            for (Map.Entry<String, Config> broker : read.configs().entrySet()) {
                 ConfigEntry entry = broker.getValue().get(key);
                 if (entry != null && entry.isSensitive()) {
                     throw new Unreadable(key + " is sensitive: Kafka does not return its value");
                 }
                 reported |= entry != null;
-                values.put("broker " + broker.getKey(), entry == null ? null : entry.value());
+                if (entry != null && entry.value() == null) {
+                    valueless.add("broker " + broker.getKey());
+                } else {
+                    values.put("broker " + broker.getKey(), entry == null ? null : entry.value());
+                }
             }
-            return new Observation<>(values, reported ? null : "brokers do not report " + key);
+            if (!valueless.isEmpty()) {
+                unread.add(String.join(", ", valueless) + " report no value: Kafka derives " + key
+                        + " from another setting");
+            }
+            if (!unread.isEmpty() && values.values().stream().allMatch(v -> v != null && meets.test(v))) {
+                throw new Unreadable(String.join("; ", unread));
+            }
+            if (!reported) {
+                unread.add(0, "brokers do not report " + key);
+            }
+            return new Observation<>(values, unread.isEmpty() ? null : String.join("; ", unread));
+        }
+
+        /** The brokers Kafka reports, once the cluster the Admin client reaches is the Kafka CR's. */
+        private Collection<Node> describeBrokers() {
+            DescribeClusterResult described = admin.sharedAdminClient().describeCluster();
+            String reached = await(described.clusterId());
+            Object clusterId = at(kafka, "status", "clusterId");
+            if (clusterId != null && !clusterId.equals(reached)) {
+                throw new IllegalStateException(
+                        "the Kafka Admin client (kates.kafka.bootstrap-servers) reaches cluster " + reached + "; Kafka "
+                                + namespace + "/" + cluster + " is cluster " + clusterId);
+            }
+            return await(described.nodes());
+        }
+
+        /** The broker pools' status.nodeIds that Kafka does not report: fenced, or not started. */
+        private List<String> unreported() {
+            List<String> reported = brokers.get().stream().map(Node::idString).toList();
+            List<String> missing = new ArrayList<>();
+            for (GenericKubernetesResource pool : pools.get()) {
+                if (at(pool, "spec", "roles") instanceof List<?> roles
+                        && roles.contains("broker")
+                        && at(pool, "status", "nodeIds") instanceof List<?> ids) {
+                    for (Object id : ids) {
+                        if (!reported.contains(id.toString())) {
+                            missing.add("broker " + id + ": not reported by Kafka");
+                        }
+                    }
+                }
+            }
+            return missing;
         }
 
         /**
@@ -641,6 +705,10 @@ public class ConformityCheck {
                         .filter(n -> n.rack() == null || n.rack().isEmpty())
                         .map(n -> "broker " + n.idString())
                         .toList();
+                List<String> unread = unreported();
+                if (without.isEmpty() && !unread.isEmpty()) {
+                    throw new Unreadable(String.join("; ", unread));
+                }
             } else {
                 Map<String, Map<String, String>> labels = nodeLabels.get();
                 without = rolePods("strimzi.io/broker-role").stream()
@@ -1116,6 +1184,9 @@ public class ConformityCheck {
 
     /** The values a rule compares, by subject ("" for a rule about the cluster as a whole). */
     private record Observation<T>(Map<String, T> values, String detail) {}
+
+    /** Each broker's config by id, and each broker whose config could not be read, with why. */
+    private record BrokerConfigs(Map<String, Config> configs, List<String> unread) {}
 
     /** A source that could not be read: the rules that need it are UNKNOWN. */
     private static final class Unreadable extends RuntimeException {

@@ -53,6 +53,7 @@ import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -548,21 +549,28 @@ class ConformityCheckTest {
                 "spec.kafka.rack.topologyKey is topology.kubernetes.io/zone, not example.com/rack", result.detail());
     }
 
-    /** Brokers 3 and 4 report a rack and min.insync.replicas 2; broker 5 reports neither a rack nor 2. */
+    /** Each broker's describeConfigs answer, by id; a broker asked for that is not here never answers. */
+    Map<String, KafkaFuture<Config>> brokerConfigs = new java.util.HashMap<>();
+
+    /**
+     * Brokers 3 and 4 report a rack and min.insync.replicas 2; broker 5 reports neither a rack nor 2. The
+     * cluster is the Kafka CR's.
+     */
     AdminClient brokers() {
         AdminClient kafka = mock(AdminClient.class);
         when(admin.sharedAdminClient()).thenReturn(kafka);
         DescribeClusterResult cluster = mock(DescribeClusterResult.class);
+        when(cluster.clusterId()).thenReturn(KafkaFuture.completedFuture("4L6g3nShT-eMCtK--X86sw"));
         when(cluster.nodes())
                 .thenReturn(KafkaFuture.completedFuture(List.of(
                         new Node(3, "b3", 9092, "alpha"), new Node(4, "b4", 9092, "sigma"), new Node(5, "b5", 9092))));
         when(kafka.describeCluster()).thenReturn(cluster);
-        Map<ConfigResource, Config> configs = new java.util.LinkedHashMap<>();
         for (int id = 3; id <= 5; id++) {
-            configs.put(
-                    new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(id)),
-                    new Config(List.of(
+            brokerConfigs.put(
+                    String.valueOf(id),
+                    KafkaFuture.completedFuture(new Config(List.of(
                             new ConfigEntry("min.insync.replicas", id == 5 ? "1" : "2"),
+                            new ConfigEntry("log.retention.ms", null),
                             new ConfigEntry(
                                     "ssl.keystore.password",
                                     null,
@@ -571,13 +579,25 @@ class ConformityCheckTest {
                                     false,
                                     List.of(),
                                     ConfigEntry.ConfigType.PASSWORD,
-                                    null))));
+                                    null)))));
         }
-        DescribeConfigsResult described = mock(DescribeConfigsResult.class);
-        when(described.all()).thenReturn(KafkaFuture.completedFuture(configs));
         when(kafka.describeConfigs(org.mockito.ArgumentMatchers.anyCollection()))
-                .thenReturn(described);
+                .thenAnswer(call -> {
+                    Map<ConfigResource, KafkaFuture<Config>> values = new java.util.HashMap<>();
+                    for (ConfigResource asked : call.<java.util.Collection<ConfigResource>>getArgument(0)) {
+                        values.put(asked, brokerConfigs.getOrDefault(asked.name(), new KafkaFutureImpl<>()));
+                    }
+                    DescribeConfigsResult described = mock(DescribeConfigsResult.class);
+                    when(described.values()).thenReturn(values);
+                    return described;
+                });
         return kafka;
+    }
+
+    static <T> KafkaFuture<T> failed(Exception e) {
+        KafkaFutureImpl<T> future = new KafkaFutureImpl<>();
+        future.completeExceptionally(e);
+        return future;
     }
 
     @Test
@@ -607,10 +627,7 @@ class ConformityCheckTest {
         AdminClient kafka = mock(AdminClient.class);
         when(admin.sharedAdminClient()).thenReturn(kafka);
         DescribeClusterResult cluster = mock(DescribeClusterResult.class);
-        org.apache.kafka.common.internals.KafkaFutureImpl<java.util.Collection<Node>> failed =
-                new org.apache.kafka.common.internals.KafkaFutureImpl<>();
-        failed.completeExceptionally(new org.apache.kafka.common.errors.TimeoutException("Timed out waiting"));
-        when(cluster.nodes()).thenReturn(failed);
+        when(cluster.clusterId()).thenReturn(failed(new TimeoutException("Timed out waiting")));
         when(kafka.describeCluster()).thenReturn(cluster);
 
         ConformityReport report = run("{kafka: {source: brokers, config: {min.insync.replicas: {min: 2}}}}");
@@ -619,6 +636,87 @@ class ConformityCheckTest {
         assertEquals(Status.UNKNOWN, result.status());
         assertTrue(result.detail().contains("Timed out waiting"), result.detail());
         assertEquals(Verdict.UNKNOWN, report.verdict());
+    }
+
+    @Test
+    void brokersOfAnotherClusterAreUnknown() throws IOException {
+        brokers();
+        when(admin.sharedAdminClient().describeCluster().clusterId())
+                .thenReturn(KafkaFuture.completedFuture("other-cluster-id-00000"));
+
+        ConformityReport report = run("{kafka: {source: brokers, authorization: simple, rackAwareness: true,"
+                + " config: {min.insync.replicas: {min: 2}}}}");
+
+        for (String rule : List.of("kafka.rackAwareness", "kafka.config[min.insync.replicas]")) {
+            Result result = result(report, rule);
+            assertEquals(Status.UNKNOWN, result.status(), rule);
+            assertTrue(
+                    result.detail()
+                            .endsWith("the Kafka Admin client (kates.kafka.bootstrap-servers) reaches cluster"
+                                    + " other-cluster-id-00000; Kafka kafka/krafter is cluster 4L6g3nShT-eMCtK--X86sw"),
+                    result.detail());
+        }
+        assertEquals(Status.PASS, result(report, "kafka.authorization").status(), "the Kafka CR is still read");
+        assertEquals(Verdict.UNKNOWN, report.verdict());
+    }
+
+    /** Brokers 5 and 6 are in the pool, but Kafka reports only 3 and 4: fenced, or not started. */
+    @Test
+    void aBrokerKafkaDoesNotReportIsUnknownNotPass() throws IOException {
+        brokers();
+        when(admin.sharedAdminClient().describeCluster().nodes())
+                .thenReturn(KafkaFuture.completedFuture(
+                        List.of(new Node(3, "b3", 9092, "alpha"), new Node(4, "b4", 9092, "sigma"))));
+        client.genericKubernetesResources(ClusterTopologyService.NODE_POOL_CRD)
+                .inNamespace("kafka")
+                .withName("brokers")
+                .edit(p -> new GenericKubernetesResourceBuilder(p)
+                        .addToAdditionalProperties("status", Map.of("nodeIds", List.of(3, 4, 5, 6)))
+                        .build());
+
+        ConformityReport report =
+                run("{kafka: {source: brokers, rackAwareness: true, config: {min.insync.replicas: {min: 2}}}}");
+
+        for (String rule : List.of("kafka.rackAwareness", "kafka.config[min.insync.replicas]")) {
+            Result result = result(report, rule);
+            assertEquals(Status.UNKNOWN, result.status(), rule);
+            assertEquals("broker 5: not reported by Kafka; broker 6: not reported by Kafka", result.detail());
+        }
+    }
+
+    /** Broker 4 does not answer: broker 5's gap is still a FAIL, and with no gap the rule is UNKNOWN. */
+    @Test
+    void aBrokerThatDoesNotAnswerHidesNoGap() throws IOException {
+        brokers();
+        brokerConfigs.put("4", failed(new TimeoutException("Timed out waiting for a node assignment")));
+
+        Result strict = result(
+                run("{kafka: {source: brokers, config: {min.insync.replicas: {min: 2}}}}"),
+                "kafka.config[min.insync.replicas]");
+        Result lax = result(
+                run("{kafka: {source: brokers, config: {min.insync.replicas: {min: 1}}}}"),
+                "kafka.config[min.insync.replicas]");
+
+        assertEquals(Status.FAIL, strict.status());
+        assertEquals(List.of("broker 5"), strict.subjects());
+        assertEquals("broker 4: Timed out waiting for a node assignment", strict.detail());
+        assertEquals(Status.UNKNOWN, lax.status());
+        assertEquals("broker 4: Timed out waiting for a node assignment", lax.detail());
+    }
+
+    /** Kafka reports log.retention.ms with no value and derives it from log.retention.hours. */
+    @Test
+    void aConfigBrokersReportWithNoValueIsUnknownNotFail() throws IOException {
+        brokers();
+
+        Result retention = result(
+                run("{kafka: {source: brokers, config: {log.retention.ms: {min: 604800000}}}}"),
+                "kafka.config[log.retention.ms]");
+
+        assertEquals(Status.UNKNOWN, retention.status());
+        assertEquals(
+                "broker 3, broker 4, broker 5 report no value: Kafka derives log.retention.ms from another setting",
+                retention.detail());
     }
 
     /**
