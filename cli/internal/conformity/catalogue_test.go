@@ -64,11 +64,15 @@ func TestCatalogue(t *testing.T) {
 }
 
 // The catalogue and the registered checks are the same set, so a check
-// ships with its trigger and near miss.
+// ships with its trigger and near miss; a two-pass check brings
+// rule-never-passes, which the engine reports for it.
 func TestEveryCatalogueRuleIsRegistered(t *testing.T) {
 	registered := map[string]bool{}
 	for _, c := range incoherenceChecks {
 		registered[c.code] = true
+		if c.twoPass {
+			registered["rule-never-passes"] = true
+		}
 	}
 	for _, r := range catalogue(t) {
 		if !registered[r.Code] {
