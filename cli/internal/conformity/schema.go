@@ -119,6 +119,7 @@ var patternMessages = map[string]string{
 	`^[a-z0-9]{1,11}$`:                                                                  "must be a Strimzi listener name: up to 11 lower-case letters and digits",
 	`^[a-z][A-Za-z]*(\.[a-z][A-Za-z]*|\[[^\]]+\])*$`:                                    "must be a rule id, such as brokers.count or kafka.config[min.insync.replicas]",
 	`^[a-z0-9]+([._-][a-z0-9]+)*$`:                                                      "must be a broker config name, such as min.insync.replicas",
+	`^[a-zA-Z0-9._-]{1,249}$`:                                                           "must be the start of a topic name: up to 249 letters, digits, ., _ and -",
 }
 
 var (

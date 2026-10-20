@@ -128,3 +128,19 @@ func unfixable(ds []Diagnostic) int {
 	}
 	return n
 }
+
+// A comment on a key's line stays on that line, whether fmt writes the
+// value on one line or over several.
+func TestFormatKeepsTheCommentOnTheKeyLine(t *testing.T) {
+	src := header + "spec:\n  brokers:\n    count: # quorum\n      min: 3\n    zones: 3\n" +
+		"  topics:\n    replicationFactor: 3\n    exclude: [kates-] # Kates' own\n  monitoring:\n    podMonitor: true\n"
+	out, ds := Format([]byte(src))
+	if ds != nil {
+		t.Fatalf("refused: %v", ds)
+	}
+	for _, want := range []string{"    count: {min: 3} # quorum\n    zones: 3\n", "    exclude: # Kates' own\n      - kates-\n", "  monitoring:\n"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("no %q in\n%s", want, out)
+		}
+	}
+}

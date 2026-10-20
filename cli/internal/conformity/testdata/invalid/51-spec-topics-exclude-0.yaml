@@ -1,0 +1,6 @@
+# expect: spec.topics.exclude[0]
+# the reader says: must be the start of a topic name: up to 249 letters, digits, ., _ and -
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {topics: {replicationFactor: 3, exclude: [kates*]}}
