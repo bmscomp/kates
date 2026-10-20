@@ -59,11 +59,38 @@ Read it from the top:
 
 The trimmed banner names the reference and the cluster, with the cluster's Kafka cluster id, and says whether the `Kafka` resource is Ready. When it isn't, the banner warns that results may change while the cluster settles.
 
+::: {.callout-tip title="Try it: what does a gap look like?"}
+Raise `zones` to `{min: 4}` in a copy of `minimal.yaml` and run the check again. Read the failing row: what does Expected say, and which zones does `-o json` list in the rule's detail?
+:::
+
 ## Why Conformity
 
-An architecture is a set of promises a cluster keeps for its clients, and three places hold it: the design, the configuration that should produce it, and the running cluster. Only the running cluster serves traffic, and it changes without consulting the other two. A node pool is scaled down to save money. A pool is added with both the broker and controller roles. Kubernetes reschedules a broker onto a node that already runs one, because the pods only prefer to stay apart. New nodes join without a zone label. A chart upgrade changes a default. Someone creates a topic with two replicas while the broker default is three.
+An architecture is a set of promises a cluster keeps for its clients. A write acknowledged with `acks=all` survives the loss of a broker. A zone can fail without taking a partition offline. No client connects without authenticating. Three places hold those promises, and only one of them serves traffic:
 
-None of these breaks the cluster on the day it happens, so every health check stays green. The cost arrives later, when a zone fails and the cluster turns out to be less redundant than the design promised.
+```mermaid
+%%| label: fig-conformity-drift
+%%| fig-cap: "The architecture lives in three places, and only the running cluster serves traffic; everyday changes reach it without passing through the design."
+%%| fig-alt: "Flowchart. A design review leads to values files, which Helm and the Strimzi operator turn into the running cluster. Four kinds of change reach the running cluster directly: a node pool scaled or added, a pod rescheduled by Kubernetes, a chart or operator upgrade, and a topic created by a client. The design also leads to a reference file, which a conformity check compares with the running cluster."
+flowchart TB
+    design["Design review"] --> values["Values files"]
+    design --> ref["Reference file"]
+    values -->|"Helm, the operator"| cluster["Running cluster"]
+    ref -->|"conformity check"| cluster
+    subgraph drift["Changes that skip the design"]
+        direction LR
+        scale["Pool scaled<br/>or added"]
+        move["Pod<br/>rescheduled"]
+        upgrade["Chart or<br/>operator upgrade"]
+        topic["Topic created<br/>by a client"]
+    end
+    drift --> cluster
+```
+
+The design is where you decided, the values files are one way to carry the decision out, and the running cluster is what Helm, the Strimzi operator and Kubernetes made of them, plus everything that happened since. The changes on the right of the figure never pass through the design. A node pool is scaled down to save money, or a pool is added with both the broker and controller roles. Kubernetes reschedules a broker onto a node that already runs one, because the pods only prefer to stay apart. New nodes join without a zone label. A chart upgrade changes a default. A client creates a topic with two replicas while the broker default is three.
+
+None of these breaks the cluster on the day it happens, so every health check stays green. The cost arrives on the day a promise is called in. Two brokers that share a node look fine until that node fails. Then every partition with replicas on both loses two of its three, and with `min.insync.replicas` at 2, `acks=all` writes to those partitions are refused until a broker returns. A drifted cluster isn't broken. It is less redundant than the design promised, and you find out during the outage the design was meant to survive.
+
+A reference file is the design in a form a machine can check, and it says something different from a values file. A values file says how to build one cluster, with exact numbers. A reference says what any acceptable cluster must satisfy, often with bounds: at least three brokers, at least 8Gi of memory each. A cluster can then grow, or change its sizing, without failing the check, as long as it keeps its promises. If you write tests for code, the analogy is close: the values file is the implementation, and the reference is the test suite it must pass.
 
 Kates already asks several questions about a cluster, and a conformity check is the one that compares it with something you wrote down:
 
@@ -95,11 +122,31 @@ flowchart TB
     report --> exit["Exit code 0, 1 or 2"]
 ```
 
-`kates conformity check` lints the file again before it sends anything, and stops on an error. The Kates API then reads what the rules need: the [Strimzi](appendix-a-glossary.md#gl-strimzi) `Kafka` and [`KafkaNodePool`](appendix-a-glossary.md#gl-kafkanodepool) resources, the Kafka pods and the nodes they run on, their [PersistentVolumeClaims](appendix-a-glossary.md#gl-persistentvolumeclaim) and the Kubernetes version. It talks to the Kafka Admin API only when a rule needs a broker's or a topic's own answer, which the dotted edge shows. The API key needs only the `read` scope. Nothing is stored: the report goes back to the CLI, and your pipeline's log keeps it.
+`kates conformity check` lints the file again before it sends anything, and stops on an error. The Kates API then reads what the rules need: the [Strimzi](appendix-a-glossary.md#gl-strimzi) `Kafka` and [`KafkaNodePool`](appendix-a-glossary.md#gl-kafkanodepool) resources, the Kafka pods and the nodes they run on, their [PersistentVolumeClaims](appendix-a-glossary.md#gl-persistentvolumeclaim) and the Kubernetes version. It talks to the Kafka Admin API only when a rule needs a broker's or a topic's own answer, which the dotted edge shows. The API key needs only the `read` scope.
+
+Two properties follow from that shape. Because the check only reads, you can run it against a production cluster at any hour, as often as you like, with nothing to roll back. Because nothing is stored, every run stands alone: the report goes back to the CLI, and your pipeline's log is the history.
 
 ### Statuses and the Overall Result
 
-Every rule ends in one of five statuses, and the status decides whether the rule can fail the check:
+Kates decides each rule's status in two steps. First it reads and compares: a rule it can't read is UNKNOWN, a rule that holds is PASS, and a rule that doesn't is FAIL or WARN by its severity. Then it applies the file's waivers, which turn any result but PASS into WAIVED while they last:
+
+```mermaid
+%%| label: fig-conformity-status
+%%| fig-cap: "A rule's status comes from whether Kates could read it, whether it holds and its severity; an active waiver then turns any result but PASS into WAIVED."
+%%| fig-alt: "Decision flowchart. If Kates could not read what the rule needs, the rule is UNKNOWN. If it could and the rule holds, the rule is PASS. If the rule does not hold, its severity decides: fail gives FAIL and warn gives WARN. Dotted arrows lead from UNKNOWN, FAIL and WARN to WAIVED when an active waiver covers the rule."
+flowchart TB
+    read{"Could Kates read<br/>what the rule needs?"} -->|"yes"| holds{"Does the<br/>rule hold?"}
+    read -->|"no"| unknown["UNKNOWN"]
+    holds -->|"yes"| pass["PASS"]
+    holds -->|"no"| sev{"Its severity?"}
+    sev -->|"fail"| fail["FAIL"]
+    sev -->|"warn"| warn["WARN"]
+    unknown -.->|"active waiver"| waived["WAIVED"]
+    fail -.->|"active waiver"| waived
+    warn -.->|"active waiver"| waived
+```
+
+The status then decides whether the rule can fail the check:
 
 | Status | When | Can it fail the check? |
 |:---------|:----------------------------------------------------|:--------------------|
@@ -107,7 +154,7 @@ Every rule ends in one of five statuses, and the status decides whether the rule
 | FAIL | The rule doesn't hold, and its severity is `fail`, the default | Yes |
 | WARN | The rule doesn't hold, and its severity is `warn` | No |
 | UNKNOWN | Kates couldn't read what the rule needs, such as a broker that doesn't answer | Yes, when its severity is `fail` |
-| WAIVED | The rule doesn't hold, but a waiver in the file covers it today | No |
+| WAIVED | The rule isn't PASS, but an active waiver in the file covers it | No |
 
 A rule Kates can't read is UNKNOWN, never FAIL, so a report never claims a gap it didn't see.
 
@@ -133,6 +180,8 @@ Every rule is a constraint on one value, written either bare or as a map. The ba
 | `{equals: required, severity: warn}` | Exactly that value; the map form exists to carry a severity |
 
 `equals` and `oneOf` stand alone, while `min` and `max` combine. A severity of `fail` is the default, so you write `severity` only to make a rule a warning.
+
+Pick the form that says what you actually require, because the form is the requirement. A broker count is a floor: three brokers are the fewest that can hold three replicas of a partition, and a fourth broker should never fail the check, so write `{min: 3}`. A controller count is a decision: a quorum of three tolerates one failed controller and a quorum of four tolerates no more, so write `3` exactly. A storage type is a set of acceptable answers, so write `oneOf`. A reference full of exact values describes one cluster on one day, and fails the first time anyone resizes it for good reason.
 
 The language knows what kind of value each field holds, and compares it that way. Counts are whole numbers. CPU, memory and storage are Kubernetes quantities, so `8Gi` is more than `8000Mi` and `500m` is less than `1`. Versions compare part by part, so `4.10` is newer than `4.9`. That last rule is why a version must be quoted: unquoted, YAML reads `4.10` as the number 4.1. Lint catches the mistake, together with a misspelled field, in a file whose `spec` reads:
 
@@ -189,7 +238,7 @@ spec:
       size: {min: 100Gi}
 ```
 
-`controllers.count: 3` is exact on purpose: a KRaft [quorum](appendix-a-glossary.md#gl-quorum) of three tolerates one failed [controller](appendix-a-glossary.md#gl-controller), and a fourth would tolerate no more. `dedicated: true` requires that no node pool combines the broker and controller roles. The check finds one gap on `panda`:
+The controllers form the KRaft [quorum](appendix-a-glossary.md#gl-quorum) that keeps the cluster's metadata, so they get rules of their own. `dedicated: true` requires that no node pool combines the broker and [controller](appendix-a-glossary.md#gl-controller) roles, which keeps a broker's load and restarts away from the quorum. The check finds one gap on `panda`:
 
 ```bash
 kates conformity check -f payments-sizing.yaml
@@ -217,17 +266,41 @@ Storage size has a detail of its own. `brokers.storage.size` adds up the capacit
 
 ## Placing Pods Across Zones and Nodes
 
-Placement rules are the ones a working cluster breaks most quietly. Each one reads the pods of a role, brokers or controllers, and the nodes they run on:
+Placement rules are the ones a working cluster breaks most quietly, because a misplaced pod serves traffic exactly as well as a well-placed one until its node or zone fails. Each rule reads the pods of a role, brokers or controllers, and the nodes they run on, and each one guards against a different failure:
 
-| Field | What it reads |
-|:--------------|:------------------------------------------------------------------|
-| `zones` | How many distinct zones host the role's pods, by the nodes' zone label |
-| `skew` | Most pods in one zone minus fewest pods in another |
-| `perNode` | The most pods of the role on any one node |
-| `antiAffinity` | Whether each pod's anti-affinity rule on the node hostname is `required`, `preferred` or `none` |
-| `dedicated` | For controllers only: whether any node pool also has the broker role |
+| Field | What it reads | What it protects against |
+|:--------------|:--------------------------------------|:--------------------------------------|
+| `zones` | How many distinct zones host the role's pods, by the nodes' zone label | One zone's outage taking every replica, or most of the quorum |
+| `skew` | Most pods in one zone minus fewest pods in another | One zone carrying more of the cluster than the others |
+| `perNode` | The most pods of the role on any one node | One node's failure taking two brokers, or two controllers, at once |
+| `antiAffinity` | Whether each pod's anti-affinity rule on the node hostname is `required`, `preferred` or `none` | Kubernetes placing two pods together when it runs short of nodes |
+| `dedicated` | For controllers only: whether any node pool also has the broker role | A broker's load and restarts reaching the quorum |
 
 The zone label is `topology.kubernetes.io/zone` unless `spec.zoneLabel` names another one. A pod that isn't scheduled, or runs on a node without the label, fails `zones` and `skew` by name, because its zone can't be shown.
+
+The rules count what the figure below shows for `krafter` on `panda`. Each of the three nodes carries the zone label with its own name, and each zone's two node pools, `brokers-<zone>` and `controllers-<zone>`, put one broker and one controller on it:
+
+```mermaid
+%%| label: fig-conformity-placement
+%%| fig-cap: "On panda each zone holds one node, and each node one broker and one controller, so for both roles zones is 3, skew is 0 and perNode is 1."
+%%| fig-alt: "Three zones, alpha, sigma and gamma, each holding one Kubernetes node of the same name. Node alpha runs broker 0 and controller 3, node sigma runs broker 2 and controller 5, and node gamma runs broker 1 and controller 4."
+flowchart LR
+    subgraph za["zone alpha"]
+        na["node alpha<br/>broker 0<br/>controller 3"]
+    end
+    subgraph zs["zone sigma"]
+        ns["node sigma<br/>broker 2<br/>controller 5"]
+    end
+    subgraph zg["zone gamma"]
+        ng["node gamma<br/>broker 1<br/>controller 4"]
+    end
+    na ~~~ ns ~~~ ng
+    style za fill:#16a34a24,stroke:#16a34a
+    style zs fill:#0284c724,stroke:#0284c7
+    style zg fill:#c026d324,stroke:#c026d3
+```
+
+Read the rules off the figure. `zones` counts the zones a role's pods appear in: three for brokers and three for controllers. `skew` compares the busiest zone with the quietest, one pod against one, so it is 0. `perNode` counts the pods of one role on one node, which is 1. If a broker moved onto node sigma, `brokers.zones` would drop to 2, and `brokers.perNode` would rise to 2 and name node sigma.
 
 This file holds both roles to one pod per zone and per node, and asks Kubernetes to keep the brokers apart:
 
@@ -292,7 +365,9 @@ The source lines and carets are trimmed. The error stops a check, because two br
 
 ## Kafka Settings and Monitoring
 
-The pods can be placed perfectly and the cluster can still lose data, so the next rules read Kafka's own settings. The payments workload writes with [`acks=all`](appendix-a-glossary.md#gl-acks), a [replication factor](appendix-a-glossary.md#gl-replication-factor) of 3 and a [`min.insync.replicas`](appendix-a-glossary.md#gl-min-insync-replicas) of 2. The payments topics get those values when Kates creates them, but every other topic takes the brokers' defaults, so the defaults should agree, and no broker may elect an out-of-sync leader:
+The pods can be placed perfectly and the cluster can still lose data, so the next rules read Kafka's own settings. The payments workload writes with [`acks=all`](appendix-a-glossary.md#gl-acks), a [replication factor](appendix-a-glossary.md#gl-replication-factor) of 3 and a [`min.insync.replicas`](appendix-a-glossary.md#gl-min-insync-replicas) of 2. Those three settings work as one promise: a write is acknowledged only once two replicas hold it, so losing any one broker loses no acknowledged write and refuses no new one. A fourth setting keeps the promise honest. With [unclean leader election](appendix-a-glossary.md#gl-unclean-leader-election) off, a replica that fell behind can never become leader and silently discard writes the old leader acknowledged.
+
+The payments topics get their values when Kates creates them, but every other topic takes the brokers' defaults, so the defaults should agree:
 
 ```yaml
 apiVersion: conformity.kates.io/v1alpha1
@@ -378,15 +453,22 @@ A failing rule leaves you three moves: change the cluster, change the reference,
 
 A waiver goes in `spec.waivers`, and all four of its fields are required: the `rule` it covers, a `reason`, who it is `by`, and the date it lasts `until`. That date is inclusive and read in UTC. A waiver must name a rule the file declares, and each rule takes at most one waiver. The report keeps the rule's real status and observed value next to the waiver, so the gap stays visible while it is waived.
 
-The waiver's date decides what happens to the rule:
+The end date is the point of a waiver. A gap accepted without one is a decision nobody revisits; with one, the next review happens on its own, because the rule starts counting again. A waiver moves a rule through these states:
 
-| Situation | What the check does |
-|:----------------------------------------|:------------------------------------------------------------|
-| Before the date, and the rule fails | Shows WAIVED, and the rule doesn't fail the check |
-| Before the date, and the rule passes | Shows PASS, with a note that the waiver can go |
-| After the date | Counts the rule again, as if the waiver weren't there |
+```mermaid
+%%| label: fig-conformity-waiver
+%%| fig-cap: "A waiver holds a failing rule as WAIVED until its date passes, when the rule counts again; fixing the cluster first turns the rule to PASS, with a note that the waiver can go."
+%%| fig-alt: "State diagram. A rule that fails is FAIL. Adding a waiver makes it WAIVED. From WAIVED, the waiver's date passing returns it to FAIL. Fixing the cluster instead makes it PASS with a note that the waiver can go, and removing the waiver then leaves it plain PASS."
+stateDiagram-v2
+    state "PASS, waiver can go" as noted
+    [*] --> FAIL: the rule fails
+    FAIL --> WAIVED: you add a waiver
+    WAIVED --> FAIL: its date passes
+    WAIVED --> noted: the cluster is fixed
+    noted --> PASS: you remove the waiver
+```
 
-Lint warns about a waiver whose date has passed, so the expiry shows in review before it fails a pipeline. Output, wrapped, without the source line:
+Both ways out of WAIVED end with someone looking at the file. If the date passes first, the rule fails the check again, and you either fix the cluster or renew the waiver with a new reason. If the cluster is fixed first, the report says the waiver can go, so stale waivers don't pile up. Lint warns about a waiver whose date has passed, so the expiry shows in review before it fails a pipeline. Output, wrapped, without the source line:
 
 ```text
 payments-expired.yaml:58:14: warning: spec.waivers[0].until: the waiver expired on
@@ -480,7 +562,9 @@ Read it from the top:
 
 ## Running It in a Pipeline
 
-A reference earns its keep when every change to the cluster, or to the file, is checked against it. Three commands cover a pipeline, cheapest first:
+A reference earns its keep when every change to the cluster, or to the file, is checked against it. Three moments call for a check. A pull request that changes a reference gets the offline commands, so a broken file never merges. A deploy or an upgrade gets a full check right after it, because that is when the cluster changes on purpose. A schedule, nightly for example, catches the changes that happen between deploys, which is where drift lives.
+
+Three commands cover a pipeline, cheapest first:
 
 ```bash
 kates conformity fmt --check platform/*.yaml
