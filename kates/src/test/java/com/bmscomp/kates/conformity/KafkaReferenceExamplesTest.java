@@ -97,6 +97,8 @@ class KafkaReferenceExamplesTest {
                         "kafka.config[transaction.state.log.min.isr]",
                         "kafka.config[unclean.leader.election.enable]",
                         "kafka.config[auto.create.topics.enable]",
+                        "topics.replicationFactor",
+                        "topics.minInsyncReplicas",
                         "monitoring.metrics",
                         "monitoring.kafkaExporter",
                         "monitoring.podMonitor"),
