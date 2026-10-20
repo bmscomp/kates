@@ -207,9 +207,9 @@ A context can enable only the commands its user works with. Each profile enables
 | `performance` | `advisor`, `badge`, `benchmark`, `cost`, `dashboard`, `explain`, `flow`, `gate`, `lab`, `profile`, `replay`, `report`, `scenario-diff`, `schedule`, `test`, `top`, `trend`, `tune`, `watch`, `webhook` |
 | `integrity` | `dashboard`, `explain`, `kafka`, `migrate`, `replay`, `report`, `scenario-diff`, `schedule`, `test`, `top`, `watch`, `webhook` |
 | `chaos` | `chaos`, `cluster`, `disruption`, `flow`, `report`, `resilience`, `test`, `watch` |
-| `topology` | `cluster`, `diff`, `doctor`, `kafka`, `snapshot` |
+| `topology` | `cluster`, `conformity`, `diff`, `doctor`, `kafka`, `snapshot` |
 | `security` | `kyverno`, `security` |
-| `deploy` | `auto`, `clean`, `deploy`, `detect`, `doctor`, `kyverno`, `migrate`, `operator`, `operators`, `versions` |
+| `deploy` | `auto`, `clean`, `conformity`, `deploy`, `detect`, `doctor`, `kyverno`, `migrate`, `operator`, `operators`, `versions` |
 
 Every profile also enables `audit`, `changelog`, `completion`, `ctx`, `docs`, `health`, `help`, `init`, `mcp`, `plugin`, `ports`, `status`, `theme`, `tldr`, `upgrade`, `version` and plugins. A context with no profiles enables every command, which is how every context starts.
 
