@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -43,6 +44,7 @@ func scriptDown(f *fakeProc, namespaceOwned bool) {
 	f.on("helm uninstall mm2-m282-430 -n kafka", "release \"mm2-m282-430\" uninstalled")
 	f.on("kubectl -n kafka delete kafkamirrormaker2 mm2-m282-430-mirror-maker2 --ignore-not-found --timeout=60s", "")
 	f.on("helm uninstall m282-430-src -n kafka-m282-430-src", "release \"m282-430-src\" uninstalled")
+	f.on("kubectl get kafkamirrormaker2 -A -o json", `{"items":[]}`)
 	f.on("kubectl -n kafka apply -f -", "kafkatopic.kafka.strimzi.io/m282-430-kates-orders created")
 	f.on("kubectl -n kafka delete kafkatopic -l kates.io/lab=m282-430 --ignore-not-found --timeout=120s", "")
 	f.on("kubectl -n kafka delete secret -l kates.io/lab=m282-430 --ignore-not-found", "")
@@ -98,6 +100,101 @@ func TestMigrateDownTouchesOnlyTheLabelledLab(t *testing.T) {
 	}
 	if strings.Contains(manifest, "kates-events") {
 		t.Error("down must not adopt the primary's own topics")
+	}
+}
+
+// mirrorItem is a KafkaMirrorMaker2 as kubectl lists it across namespaces.
+func mirrorItem(namespace, name, targetBootstrap, groupID string, aliases ...string) string {
+	var mirrors []string
+	for _, a := range aliases {
+		mirrors = append(mirrors, fmt.Sprintf(`{"source":{"alias":%q,"bootstrapServers":"src:9092"},"topicsPattern":"other"}`, a))
+	}
+	return fmt.Sprintf(`{"kind":"KafkaMirrorMaker2","metadata":{"name":%q,"namespace":%q},
+	  "spec":{"target":{"alias":"target","bootstrapServers":%q,"groupId":%q},"mirrors":[%s]}}`,
+		name, namespace, targetBootstrap, groupID, strings.Join(mirrors, ","))
+}
+
+// Every single-source lab, and the loopback mirror kates deploy installs,
+// checkpoints under the alias source: down deleted source.checkpoints.internal
+// while another mirror on the same target still wrote it.
+func TestMigrateDownKeepsTheTopicsAnotherMirrorWrites(t *testing.T) {
+	const krafter = "krafter-kafka-bootstrap.kafka.svc.cluster.local:9092"
+	own := mirrorItem("kafka", "mm2-m282-430-mirror-maker2", krafter, "mm2-m282-430", "source") // still terminating
+	for _, tc := range []struct {
+		name    string
+		others  []string
+		kept    []string
+		deleted []string
+	}{
+		{
+			// A short bootstrap names no namespace, so the loopback counts as
+			// writing here; a mirror on another cluster shares nothing.
+			name: "the loopback's checkpoints",
+			others: []string{
+				mirrorItem("kafka", "mirror-maker2", "krafter-kafka-bootstrap:9092", "mirror-maker2", "source"),
+				mirrorItem("other", "elsewhere", "other-kafka-bootstrap.other.svc:9092", "mm2-m282-430", "source"),
+			},
+			kept:    []string{"source.checkpoints.internal"},
+			deleted: []string{"kates.orders", "mm2-m282-430-configs", "mm2-m282-430-offsets", "mm2-m282-430-status"},
+		},
+		{
+			name:    "another mirror's group",
+			others:  []string{mirrorItem("dr", "mm2-dr-mirror-maker2", krafter, "mm2-m282-430", "east")},
+			kept:    []string{"mm2-m282-430-configs", "mm2-m282-430-offsets", "mm2-m282-430-status"},
+			deleted: []string{"kates.orders", "source.checkpoints.internal"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			migrateTestRepo(t)
+			f := newFakeProc(t)
+			scriptDown(f, true)
+			f.on("kubectl get kafkamirrormaker2 -A -o json", `{"items":[`+strings.Join(append([]string{own}, tc.others...), ",")+`]}`)
+			captureOutput(t, "table")
+
+			migrateDownName, migrateDownYes = "m282-430", true
+			t.Cleanup(func() { migrateDownName, migrateDownYes = "", false })
+			if err := runMigrateDown(context.Background()); err != nil {
+				t.Fatalf("down: %v", err)
+			}
+			manifest := f.find("kubectl -n kafka apply -f -")[0].stdin
+			for _, topic := range tc.kept {
+				if strings.Contains(manifest, "topicName: "+topic+"\n") {
+					t.Errorf("down deleted %s, which another mirror writes:\n%s", topic, manifest)
+				}
+			}
+			for _, topic := range tc.deleted {
+				if !strings.Contains(manifest, "topicName: "+topic+"\n") {
+					t.Errorf("KafkaTopic manifests lack %s:\n%s", topic, manifest)
+				}
+			}
+		})
+	}
+}
+
+// Listing the other mirrors fails closed: down keeps every topic of the
+// mirror's own, deletes the mirrored ones, and says the lab was not fully
+// removed.
+func TestMigrateDownKeepsTheMirrorsTopicsWhenMirrorsCannotBeListed(t *testing.T) {
+	migrateTestRepo(t)
+	f := newFakeProc(t)
+	scriptDown(f, true)
+	f.fail("kubectl get kafkamirrormaker2 -A -o json", "forbidden")
+	captureOutput(t, "table")
+
+	migrateDownName, migrateDownYes = "m282-430", true
+	t.Cleanup(func() { migrateDownName, migrateDownYes = "", false })
+	err := runMigrateDown(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "kept the mirror's own topics") {
+		t.Fatalf("want down to report the kept topics, got %v", err)
+	}
+	manifest := f.find("kubectl -n kafka apply -f -")[0].stdin
+	if !strings.Contains(manifest, "topicName: kates.orders") {
+		t.Errorf("the mirrored topic must still be deleted:\n%s", manifest)
+	}
+	for _, kept := range []string{"mm2-m282-430-configs", "source.checkpoints.internal"} {
+		if strings.Contains(manifest, kept) {
+			t.Errorf("down deleted %s although the other mirrors were not listed", kept)
+		}
 	}
 }
 
@@ -222,6 +319,7 @@ func TestMigrateDownAndStatusAcrossSeveralSources(t *testing.T) {
 	f.on("kubectl delete pod -A -l kates.io/lab="+lab, "")
 	f.on("helm uninstall mm2-"+lab+" -n kafka", "uninstalled")
 	f.on("kubectl -n kafka delete kafkamirrormaker2 mm2-"+lab+"-mirror-maker2 --ignore-not-found --timeout=60s", "")
+	f.on("kubectl get kafkamirrormaker2 -A -o json", `{"items":[]}`)
 	f.on("kubectl -n kafka apply -f -", "created")
 	f.on("kubectl -n kafka delete kafkatopic -l kates.io/lab="+lab+" --ignore-not-found --timeout=120s", "")
 	f.on("kubectl -n kafka delete secret -l kates.io/lab="+lab+" --ignore-not-found", "")
