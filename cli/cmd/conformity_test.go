@@ -75,8 +75,11 @@ func exitCode(err error) int {
 
 const conformityFailing = `{"reference":"prod","target":{"namespace":"kafka","name":"krafter"},
 "cluster":{"ready":true,"generation":2,"observedGeneration":1},"verdict":"FAIL",
-"summary":{"pass":1,"fail":1,"warn":0,"waived":1,"unknown":0},"results":[
+"summary":{"pass":1,"fail":2,"warn":0,"waived":1,"unknown":0},"results":[
 {"rule":"versions.kafka","status":"FAIL","severity":"fail","expected":{"min":"4.10"},"observed":"4.3.1"},
+{"rule":"kafka.listeners.require[plain]","status":"FAIL","severity":"fail",
+ "expected":{"port":{"equals":9092},"tls":{"equals":true},"auth":{"oneOf":["tls","scram-sha-512"]}},
+ "observed":{"type":"internal","port":9092,"tls":false,"auth":"scram-sha-512"},"detail":"tls is false"},
 {"rule":"brokers.count","status":"WAIVED","severity":"fail","expected":{"min":3},"observed":2,
  "waiver":{"status":"FAIL","reason":"OPS-1","by":"me","until":"2026-12-31"}},
 {"rule":"controllers.count","status":"PASS","severity":"fail","expected":{"equals":3},"observed":3}]}`
@@ -120,7 +123,10 @@ func TestConformityCheckShowsTheGaps(t *testing.T) {
 	conformityStub(t, 200, conformityFailing)
 
 	out, _ := conformityRun(t)
-	for _, want := range []string{"versions.kafka", "min 4.10", "4.3.1", "waived until 2026-12-31 by me: OPS-1", "reconcile pending", "1 passing rules not shown"} {
+	for _, want := range []string{
+		"versions.kafka", "min 4.10", "4.3.1", "waived until 2026-12-31 by me: OPS-1", "reconcile pending", "1 passing rules not shown",
+		"port 9092, tls true, auth one of tls, scram-sha-512", "type internal, port 9092, tls false, auth scram-sha-512",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table lacks %q:\n%s", want, out)
 		}
@@ -150,6 +156,7 @@ func TestConformityCheckJUnit(t *testing.T) {
 		`<testsuite name="conformity.brokers" tests="1" failures="0" errors="0" skipped="1"`,
 		`<skipped message="FAIL, waived until 2026-12-31 by me: OPS-1">`,
 		`<failure message="expected min 4.10, observed 4.3.1" type="fail">`,
+		`<failure message="expected port 9092, tls true, auth one of tls, scram-sha-512, observed type internal, port 9092, tls false, auth scram-sha-512" type="fail">`,
 	} {
 		if !strings.Contains(xml, want) {
 			t.Errorf("JUnit lacks %s:\n%s", want, xml)

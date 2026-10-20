@@ -224,8 +224,13 @@ func conformityStatusLabel(status string) string {
 	}
 }
 
+// conformityListenerProperties is the order a required listener's properties
+// are written in, expected and observed.
+var conformityListenerProperties = []string{"type", "port", "tls", "auth"}
+
 // conformityExpected writes a constraint as the reference reads: 3, min 8Gi,
-// min 4.2.0, max 4.3.9, one of tls, scram-sha-512.
+// min 4.2.0, max 4.3.9, one of tls, scram-sha-512. A required listener's is one
+// constraint per property: port 9092, tls true.
 func conformityExpected(e map[string]any) string {
 	if v, ok := e["equals"]; ok {
 		return fmt.Sprint(v)
@@ -240,6 +245,11 @@ func conformityExpected(e map[string]any) string {
 	if v, ok := e["max"]; ok {
 		parts = append(parts, fmt.Sprint("max ", v))
 	}
+	for _, name := range conformityListenerProperties {
+		if c, ok := e[name].(map[string]any); ok {
+			parts = append(parts, name+" "+conformityExpected(c))
+		}
+	}
 	return strings.Join(parts, ", ")
 }
 
@@ -249,6 +259,14 @@ func conformityObserved(r client.ConformityResult) string {
 	case nil:
 	case []any:
 		text = conformityJoin(v)
+	case map[string]any:
+		var parts []string
+		for _, name := range conformityListenerProperties {
+			if p, ok := v[name]; ok {
+				parts = append(parts, fmt.Sprint(name, " ", p))
+			}
+		}
+		text = strings.Join(parts, ", ")
 	default:
 		text = fmt.Sprint(v)
 	}
