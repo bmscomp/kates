@@ -144,6 +144,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
             com.bmscomp.kates.conformity.KafkaReference.Listeners.class,
             com.bmscomp.kates.conformity.KafkaReference.RequiredListener.class,
             com.bmscomp.kates.conformity.KafkaReference.ListenerProperties.class,
+            com.bmscomp.kates.conformity.KafkaReference.Topics.class,
             com.bmscomp.kates.conformity.KafkaReference.Monitoring.class,
             com.bmscomp.kates.conformity.KafkaReference.Waiver.class,
             com.bmscomp.kates.conformity.Constraint.class,

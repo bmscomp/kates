@@ -102,6 +102,22 @@
             }
           }
         },
+        "topics": {
+          "description": "Each topic's own durability, internal topics included. Read through the Kafka Admin API whatever kafka.source says, so declaring it opens a Kafka connection.",
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [{ "required": ["replicationFactor"] }, { "required": ["minInsyncReplicas"] }],
+          "properties": {
+            "replicationFactor": { "description": "The smallest replica set across the topic's partitions.", "$ref": "#/$defs/intConstraint" },
+            "minInsyncReplicas": { "description": "The topic's effective min.insync.replicas: its own, or the broker default.", "$ref": "#/$defs/intConstraint" },
+            "exclude": {
+              "description": "Topic-name prefixes left out, such as __ for Kafka's internal topics. Prefixes, not patterns.",
+              "type": "array",
+              "maxItems": 50,
+              "items": { "type": "string", "pattern": "^[a-zA-Z0-9._-]{1,249}$" }
+            }
+          }
+        },
         "monitoring": {
           "type": "object",
           "additionalProperties": false,
