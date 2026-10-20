@@ -538,9 +538,9 @@ postgresql:
     username: kates
     # -- Database password (ignored if existingSecret is set)
     password: kates
-    # -- Use an existing Secret for DB credentials
+    # -- Use an existing Secret for the DB password (the username stays above)
     existingSecret: ""
-    # -- Key in the existing Secret
+    # -- Key in existingSecret that holds the password
     passwordKey: "password"
   # -- Node selector for the embedded PostgreSQL pod (dev/test only)
   nodeSelector: {}
@@ -597,9 +597,9 @@ externalDatabase:
   username: kates
   # -- Database password (ignored if existingSecret is set)
   password: ""
-  # -- Use an existing Secret for DB credentials
+  # -- Use an existing Secret for the DB password (the username stays above)
   existingSecret: ""
-  # -- Key in the existing Secret
+  # -- Key in existingSecret that holds the password
   passwordKey: "password"
 
 # -- Default benchmark parameters (fallback for all test types)

@@ -4,7 +4,7 @@ description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Patch: appVersion and the image tag move to 1.26.0, the tag the v1.26.0
 # release publishes. Templates are otherwise unchanged.
-version: 0.11.3
+version: 0.11.4
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
