@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -86,12 +88,31 @@ func runConformityCheck(_ *cobra.Command, _ []string) error {
 // boolean or null. Decoding into any would turn until: 2026-12-31 into a
 // timestamp, which the API refuses as a date.
 func conformityJSON(data []byte) (any, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
+		return nil, errors.New("the file is empty")
+	} else if err != nil {
 		return nil, err
 	}
-	if len(doc.Content) == 0 {
-		return nil, errors.New("the file is empty")
+	// yaml.v3 refuses a repeated key, an anchor that holds itself and runaway
+	// aliasing only when it decodes into a value, never into a node tree.
+	var probe any
+	if err := doc.Decode(&probe); err != nil {
+		return nil, err
+	}
+	for {
+		var next yaml.Node
+		err := dec.Decode(&next)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(next.Content) > 0 && next.Content[0].ShortTag() != "!!null" {
+			return nil, fmt.Errorf("line %d: a second document; one KafkaReference per file", next.Line)
+		}
 	}
 	return conformityValue(&doc)
 }
@@ -105,6 +126,9 @@ func conformityValue(n *yaml.Node) (any, error) {
 	case yaml.MappingNode:
 		m := make(map[string]any, len(n.Content)/2)
 		for i := 0; i+1 < len(n.Content); i += 2 {
+			if k := n.Content[i]; k.ShortTag() == "!!merge" {
+				return nil, fmt.Errorf("line %d: merge keys (<<) are not read; write the fields out", k.Line)
+			}
 			v, err := conformityValue(n.Content[i+1])
 			if err != nil {
 				return nil, err
