@@ -68,7 +68,7 @@ Every endpoint needs a scope. A key whose principal lacks it gets `403` with the
 
 | Scope | Allows |
 |-------|--------|
-| `read` | Every `GET` but those below, `POST /api/cost/estimate`, and the dry run `POST /api/disruptions?dryRun=true` |
+| `read` | Every `GET` but those below, `POST /api/conformity/check`, `POST /api/cost/estimate`, and the dry run `POST /api/disruptions?dryRun=true` |
 | `read:sensitive` | `GET /api/security/secrets`, `/acl-map` and `/auth-test` |
 | `test:run` | Creating a test run and cancelling one |
 | `chaos:run` | Running a disruption, playbook, template, compound plan or resilience test |
