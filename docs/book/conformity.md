@@ -244,11 +244,13 @@ The controllers form the KRaft [quorum](appendix-a-glossary.md#gl-quorum) that k
 kates conformity check -f payments-sizing.yaml
 ```
 
-Output on `panda`, with the banner and the empty Detail column trimmed:
+Output on `panda`, with the banner trimmed:
 
 ```text
   Status  Rule                     Expected  Observed
-  ✖ FAIL  brokers.requests.memory  min 16Gi  11Gi (krafter-brokers-alpha-0, …)
+  ──────  ───────────────────────  ────────  ────────
+  ✖ FAIL  brokers.requests.memory  min 16Gi  11Gi
+          krafter-brokers-alpha-0, krafter-brokers-gamma-1, krafter-brokers-sigma-2
 
 ✖ FAIL: 1 fail, 0 warn, 0 waived, 8 pass, 0 unknown
   8 passing rules not shown; -o json lists them
@@ -256,8 +258,8 @@ Output on `panda`, with the banner and the empty Detail column trimmed:
 
 Read the failing row like this:
 
-1. Expected is the constraint as you wrote it.
-2. Observed is what Kates found, followed by the subjects that fall short. Here every broker pod requests 11Gi for its `kafka` container, and the report lists all three pods, trimmed here after the first.
+1. Expected is the constraint as you wrote it, and Observed is what Kates found.
+2. The line under the row names the subjects that fall short: here every broker pod requests 11Gi for its `kafka` container, so all three are listed. A row's waiver, detail and note follow on lines of their own, each cut to the terminal's width, and `-o json` keeps them whole.
 3. The command exits 1.
 
 A failure is a question rather than a verdict: either the cluster is short of what you need, or the file asks for more than you need. If the payments load runs of Part II met their targets on these brokers, the file asks too much. Change the rule to `memory: {min: 8Gi}`, and the same check on `panda` passes all nine rules.
@@ -323,11 +325,13 @@ spec:
     antiAffinity: required
 ```
 
-Output on `panda`, trimmed the same way:
+Output on `panda`, with the banner trimmed:
 
 ```text
   Status  Rule                  Expected  Observed
-  ✖ FAIL  brokers.antiAffinity  required  preferred (krafter-brokers-alpha-0, …)
+  ──────  ────────────────────  ────────  ─────────
+  ✖ FAIL  brokers.antiAffinity  required  preferred
+          krafter-brokers-alpha-0, krafter-brokers-gamma-1, krafter-brokers-sigma-2
 
 ✖ FAIL: 1 fail, 0 warn, 0 waived, 7 pass, 0 unknown
   7 passing rules not shown; -o json lists them
@@ -409,6 +413,7 @@ The check finds one gap on `panda`:
 
 ```text
   Status  Rule                      Expected  Observed
+  ──────  ────────────────────────  ────────  ────────
   ✖ FAIL  monitoring.kafkaExporter  true      false
 
 ✖ FAIL: 1 fail, 0 warn, 0 waived, 8 pass, 0 unknown
@@ -543,12 +548,15 @@ spec:
 
 `target` pins the file to `krafter` in the `kafka` namespace. One Kates API checks one Kafka cluster, and a file written for another one is refused with exit 2 before any rule runs. To also catch a cluster rebuilt under the same name, add `target.clusterId`, which must match the `Kafka` resource's cluster id.
 
-Output on `panda`, with the banner, the Detail column and the pod list trimmed:
+Output on `panda`, with the banner trimmed and the waiver's line cut to fit the page:
 
 ```text
   Status    Rule                      Expected  Observed
-  ▲ WARN    brokers.antiAffinity      required  preferred (krafter-brokers-alpha-0, …)
+  ────────  ────────────────────────  ────────  ─────────
+  ▲ WARN    brokers.antiAffinity      required  preferred
+            krafter-brokers-alpha-0, krafter-brokers-gamma-1, krafter-brokers-sigma-2
   ○ WAIVED  monitoring.kafkaExporter  true      false
+            FAIL, waived until 2027-03-31 by platform-team: The Kind overlay turns…
 
 ✓ PASS: 0 fail, 1 warn, 1 waived, 22 pass, 0 unknown
   22 passing rules not shown; -o json lists them
@@ -557,7 +565,7 @@ Output on `panda`, with the banner, the Detail column and the pod list trimmed:
 Read it from the top:
 
 1. The warning row keeps the anti-affinity gap on every report without failing the check.
-2. The waived row still shows Expected `true` and Observed `false`. Its trimmed Detail cell reads `FAIL, waived until 2027-03-31 by platform-team`, followed by the reason.
+2. The waived row still shows Expected `true` and Observed `false`, and the line under it gives the waiver: the rule's own status, FAIL, then the end date, the owner and the reason.
 3. The summary counts 24 rules, and the check exits 0.
 
 ## Running It in a Pipeline

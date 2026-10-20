@@ -14,6 +14,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -166,6 +167,7 @@ func renderConformity(r *client.ConformityReport) {
 	output.Banner("Conformity: "+r.Reference, target+"  │  "+conformityClusterLine(r.Cluster))
 
 	var rows [][]string
+	var notes []string
 	passed := 0
 	for _, res := range r.Results {
 		if res.Status == "PASS" && res.Note == "" {
@@ -177,11 +179,12 @@ func renderConformity(r *client.ConformityReport) {
 			res.Rule,
 			conformityExpected(res.Expected),
 			conformityObserved(res),
-			conformityDetail(res),
 		})
+		notes = append(notes, conformityNote(res))
 	}
 	if len(rows) > 0 {
-		output.Table([]string{"Status", "Rule", "Expected", "Observed", "Detail"}, rows)
+		conformityFit(rows, notes)
+		output.TableNotes([]string{"Status", "Rule", "Expected", "Observed"}, rows, notes)
 	}
 	s := r.Summary
 	fmt.Fprintf(output.Out, "%s: %d fail, %d warn, %d waived, %d pass, %d unknown\n",
@@ -191,13 +194,38 @@ func renderConformity(r *client.ConformityReport) {
 	}
 }
 
+// conformityFit cuts Expected and Observed so a row fits the terminal: they
+// share what Status and Rule leave, and the rule id is never cut. A cut value
+// gets a note line of its own under the row, whole.
+func conformityFit(rows [][]string, notes []string) {
+	used := 2 * 4 // the two spaces before each column
+	for _, col := range []int{0, 1} {
+		widest := len("Status")
+		for _, row := range rows {
+			widest = max(widest, ansi.StringWidth(row[col]))
+		}
+		used += widest
+	}
+	cell := max((output.TermWidth()-used)/2, 12)
+	for i, row := range rows {
+		for _, col := range []int{2, 3} {
+			if ansi.StringWidth(row[col]) <= cell {
+				continue
+			}
+			whole := []string{"", "", "expected ", "observed "}[col] + row[col]
+			notes[i] = strings.TrimPrefix(notes[i]+"\n"+whole, "\n")
+			row[col] = ansi.Truncate(row[col], cell, ellipsis())
+		}
+	}
+}
+
 func conformityClusterLine(c client.ConformityClusterState) string {
 	var parts []string
 	if c.Ready != nil {
 		if *c.Ready {
 			parts = append(parts, "Ready")
 		} else {
-			parts = append(parts, output.WarningStyle.Render("not Ready: results may change while it settles"))
+			parts = append(parts, output.WarningStyle.Render("not Ready, results may change"))
 		}
 	}
 	if c.Generation != nil && c.ObservedGeneration != nil && *c.Generation != *c.ObservedGeneration {
@@ -270,18 +298,40 @@ func conformityObserved(r client.ConformityResult) string {
 	default:
 		text = fmt.Sprint(v)
 	}
-	if len(r.Subjects) > 0 {
-		shown := r.Subjects
-		more := ""
-		if len(shown) > 3 {
-			shown, more = shown[:3], fmt.Sprintf(" +%d", len(r.Subjects)-3)
-		}
-		text += " (" + strings.Join(shown, ", ") + more + ")"
-	}
-	return strings.TrimSpace(text)
+	return text
 }
 
+// conformitySubjects names the first three subjects that fall short, and how
+// many more there are: (a, b, c +2).
+func conformitySubjects(r client.ConformityResult) string {
+	if len(r.Subjects) == 0 {
+		return ""
+	}
+	shown, more := r.Subjects, ""
+	if len(shown) > 3 {
+		shown, more = shown[:3], fmt.Sprintf(" +%d", len(r.Subjects)-3)
+	}
+	return " (" + strings.Join(shown, ", ") + more + ")"
+}
+
+// conformityNote is what goes under a row, one fact a line: the subjects that
+// fall short, then the waiver, the detail and the note. The table cuts each
+// line to the terminal width.
+func conformityNote(r client.ConformityResult) string {
+	parts := conformityDetailParts(r)
+	if len(r.Subjects) > 0 {
+		parts = append([]string{strings.Join(r.Subjects, ", ")}, parts...)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// conformityDetail is the waiver, detail and note on one line, as JUnit
+// shows a waived rule.
 func conformityDetail(r client.ConformityResult) string {
+	return strings.Join(conformityDetailParts(r), " · ")
+}
+
+func conformityDetailParts(r client.ConformityResult) []string {
 	var parts []string
 	if r.Waiver != nil {
 		parts = append(parts, fmt.Sprintf("%s, waived until %s by %s: %s", r.Waiver.Status, r.Waiver.Until, r.Waiver.By, r.Waiver.Reason))
@@ -292,7 +342,7 @@ func conformityDetail(r client.ConformityResult) string {
 	if r.Note != "" {
 		parts = append(parts, r.Note)
 	}
-	return strings.Join(parts, "; ")
+	return parts
 }
 
 func conformityJoin(values []any) string {
@@ -317,7 +367,7 @@ func writeConformityJUnit(r *client.ConformityReport, path string, took time.Dur
 			bySection[section] = suite
 		}
 		tc := junitTestCase{Name: res.Rule, ClassName: "conformity." + section, Time: "0.000"}
-		message := fmt.Sprintf("expected %s, observed %s", conformityExpected(res.Expected), conformityObserved(res))
+		message := fmt.Sprintf("expected %s, observed %s%s", conformityExpected(res.Expected), conformityObserved(res), conformitySubjects(res))
 		switch res.Status {
 		case "FAIL":
 			tc.Failure = &junitFailure{Message: message, Type: "fail", Content: res.Detail}

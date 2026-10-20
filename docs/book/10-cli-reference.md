@@ -610,7 +610,7 @@ kates cluster watch --interval 10
 
 #### conformity check
 
-Check the cluster against a reference. The table lists every rule that is not `PASS`, with what the reference expects and what the cluster has; `-o json` prints the whole report. A waived rule still shows, as `WAIVED`, with its reason and date.
+Check the cluster against a reference. The table lists every rule that is not `PASS`, with what the reference expects and what the cluster has. The pods, nodes or topics that fall short, the waiver and the detail go on lines under the row, each cut to the terminal's width; `-o json` prints the whole report. A waived rule still shows, as `WAIVED`, with its reason and date.
 
 ```bash
 kates conformity check -f platform/prod-3az.yaml

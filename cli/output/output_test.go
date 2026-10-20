@@ -3,6 +3,8 @@ package output
 import (
 	"strings"
 	"testing"
+
+	"github.com/mattn/go-runewidth"
 )
 
 func TestSparkline_Empty(t *testing.T) {
@@ -92,4 +94,26 @@ func TestConfigList_WithEntries(t *testing.T) {
 		{Key: "very.long.value", Value: strings.Repeat("x", 100)},
 	}
 	ConfigList("STATIC_BROKER_CONFIG", entries)
+}
+
+func TestTableNotes(t *testing.T) {
+	buf := ResetForTesting()
+	long := strings.Repeat("pod-name, ", 40)
+	TableNotes([]string{"Status", "Rule"}, [][]string{{"FAIL", "brokers.count"}, {"WARN", "brokers.zones"}}, []string{"", long})
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	// header, separator, row, row, its note
+	if len(lines) != 5 {
+		t.Fatalf("want 5 lines, got %d:\n%s", len(lines), buf.String())
+	}
+	note := stripAnsi(lines[4])
+	if !strings.HasPrefix(note, strings.Repeat(" ", 2+len("Status")+2)+"pod-name") {
+		t.Errorf("note does not start under the second column: %q", note)
+	}
+	if w := runewidth.StringWidth(note); w > TermWidth() {
+		t.Errorf("note is %d wide, wider than the terminal's %d", w, TermWidth())
+	}
+	if !strings.HasSuffix(note, "…") && !strings.HasSuffix(note, "...") {
+		t.Errorf("a cut note ends with an ellipsis: %q", note)
+	}
 }
