@@ -1,0 +1,6 @@
+# expect: spec.brokers.dedicated
+# the reader says: unknown field: only controllers take dedicated
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {count: 3, dedicated: true}}

@@ -32,6 +32,9 @@ var conformityCheckCmd = &cobra.Command{
 	Long: `Sends a KafkaReference file to the Kates API, which reads the cluster
 read-only and reports every declared rule: PASS, FAIL, WARN, WAIVED or UNKNOWN.
 
+It lints the file first, offline (kates conformity lint), and stops on an
+error before calling the API; warnings are printed to stderr.
+
 Exit codes: 0 when every fail rule holds, 1 when one does not, 2 when the check
 could not tell (a fail rule it could not read) or could not run (an invalid
 reference, another cluster, an unreachable API). Warn rules never fail it.`,
@@ -49,6 +52,9 @@ func runConformityCheck(_ *cobra.Command, _ []string) error {
 	data, err := os.ReadFile(conformityFile)
 	if err != nil {
 		return &exitError{code: 2, msg: err.Error()}
+	}
+	if err := lintBeforeCheck(conformityFile, data); err != nil {
+		return err
 	}
 	reference, err := conformityJSON(data)
 	if err != nil {

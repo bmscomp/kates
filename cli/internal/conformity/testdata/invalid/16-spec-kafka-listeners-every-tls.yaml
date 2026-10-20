@@ -1,0 +1,6 @@
+# expect: spec.kafka.listeners.every.tls
+# the reader says: a value is required
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {listeners: {every: {tls: null}}}}

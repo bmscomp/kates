@@ -1,0 +1,9 @@
+[
+  {
+    "code": "waiver-expired",
+    "severity": "warning",
+    "title": "A waiver whose date has passed",
+    "triggers": "# lint date 2026-10-19\nbrokers:\n  count: {min: 3}\nwaivers:\n  - {rule: brokers.count, reason: OPS-1, by: platform-team, until: 2026-01-31}",
+    "nearMiss": "# lint date 2026-10-19\nbrokers:\n  count: {min: 3}\nwaivers:\n  - {rule: brokers.count, reason: OPS-1, by: platform-team, until: 2026-10-19}"
+  }
+]

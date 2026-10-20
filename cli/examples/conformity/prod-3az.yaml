@@ -22,7 +22,6 @@ spec:
 
   controllers:
     count: 3 # exact: a quorum of three; five would be a gap too
-    dedicated: true # no node pool has both roles
     requests:
       cpu: {min: 500m}
       memory: {min: 1Gi}
@@ -33,6 +32,7 @@ spec:
     skew: {max: 0} # the same number of controllers in every zone
     perNode: {max: 1}
     antiAffinity: required # required anti-affinity on kubernetes.io/hostname
+    dedicated: true # no node pool has both roles
 
   brokers:
     count: {min: 3}
@@ -64,17 +64,18 @@ spec:
         tls: true
         auth: {oneOf: [tls, scram-sha-512, custom]} # none means anonymous
     config: # what the Kafka CR declares; a key it leaves out fails
+      auto.create.topics.enable: false
       default.replication.factor: {min: 3}
       min.insync.replicas: {min: 2}
       offsets.topic.replication.factor: {min: 3}
       transaction.state.log.min.isr: {min: 2}
       unclean.leader.election.enable: false
-      auto.create.topics.enable: false
 
   topics: # every topic's own settings, read through the Kafka Admin API even with source cr
     replicationFactor: {min: 3} # the smallest replica set across the topic's partitions
     minInsyncReplicas: {min: 2} # the topic's own value, or the broker default it inherits
-    exclude: [kates-] # name prefixes, not patterns: Kates' own events, probes and dead letters
+    exclude: # name prefixes, not patterns: Kates' own events, probes and dead letters
+      - kates-
 
   monitoring:
     metrics: {oneOf: [jmxPrometheusExporter, strimziMetricsReporter]}

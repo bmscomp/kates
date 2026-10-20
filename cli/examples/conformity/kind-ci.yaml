@@ -22,7 +22,6 @@ spec:
 
   controllers:
     count: 1
-    dedicated: true
     requests:
       cpu: {min: 250m}
       memory: {min: 512Mi}
@@ -33,6 +32,7 @@ spec:
       size: {min: 1Gi}
     zones: 1
     perNode: {max: 1}
+    dedicated: true
 
   brokers:
     count: 1
@@ -66,10 +66,10 @@ spec:
         type: internal
         auth: {oneOf: [tls, scram-sha-512]}
     config:
+      auto.create.topics.enable: false
       default.replication.factor: 1
       min.insync.replicas: 1
       unclean.leader.election.enable: false
-      auto.create.topics.enable: false
 
   monitoring:
     metrics: jmxPrometheusExporter

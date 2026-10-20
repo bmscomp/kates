@@ -1,0 +1,6 @@
+# expect: spec.versions.kafka
+# the reader says: min is above max, so nothing can meet it
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {versions: {kafka: {min: "4.10", max: "4.9"}}}

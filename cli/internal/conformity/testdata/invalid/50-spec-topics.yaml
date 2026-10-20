@@ -1,0 +1,6 @@
+# expect: spec.topics
+# the reader says: declares no rule: replicationFactor or minInsyncReplicas
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {count: 3}, topics: {exclude: [kates-]}}

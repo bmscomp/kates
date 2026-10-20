@@ -1,0 +1,6 @@
+# expect: spec.brokers.count
+# the reader says: equals stands alone: drop min, max and oneOf
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {count: {equals: 3, min: 1}}}

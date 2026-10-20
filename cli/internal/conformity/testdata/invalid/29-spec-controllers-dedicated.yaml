@@ -1,0 +1,6 @@
+# expect: spec.controllers.dedicated
+# the reader says: expected true or false
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {controllers: {dedicated: "true"}}

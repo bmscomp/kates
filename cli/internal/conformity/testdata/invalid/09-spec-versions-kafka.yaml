@@ -1,0 +1,6 @@
+# expect: spec.versions.kafka
+# the reader says: quote the version ("4"): unquoted, it is a number
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {versions: {kafka: 4}}

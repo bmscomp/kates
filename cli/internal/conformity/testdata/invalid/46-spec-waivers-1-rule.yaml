@@ -1,0 +1,6 @@
+# expect: spec.waivers[1].rule
+# the reader says: waives the rule spec.waivers[0] waives
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {count: 3}, waivers: [{rule: brokers.count, reason: r, by: me, until: 2026-12-31}, {rule: brokers.count, reason: r, by: you, until: 2027-01-31}]}

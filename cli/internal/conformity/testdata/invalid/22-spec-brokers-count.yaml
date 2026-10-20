@@ -1,0 +1,6 @@
+# expect: spec.brokers.count
+# the reader says: expected a whole number
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {brokers: {count: "3"}}

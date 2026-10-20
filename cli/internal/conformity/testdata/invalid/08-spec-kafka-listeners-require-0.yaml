@@ -1,0 +1,6 @@
+# expect: spec.kafka.listeners.require[0]
+# the reader says: lists no property to check: type, port, tls or auth
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata: {name: t}
+spec: {kafka: {listeners: {require: [{name: tls}]}}}
