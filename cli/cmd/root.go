@@ -357,7 +357,6 @@ Health & Status:
   version        CLI, API, and runtime version info
   cluster        Kafka cluster metadata and topic listing
   diff           Compare Kafka cluster state between two contexts
-  conformity     Check the cluster against a reference architecture
   test list      List test runs with optional filters
   test get       Show details of a specific test run
 
@@ -444,6 +443,7 @@ Policy Engine (Kyverno):
 Deployment:
   deploy         Deploy the Kates stack (Kafka, Kates, chaos, monitoring)
   deploy status  Health of the deployed components
+  conformity     Check the cluster against a reference architecture
   detect         Deep cluster compatibility report for Kafka
   auto           Auto-detect cluster config and deploy Kafka
   operators      Strimzi operators on this cluster
