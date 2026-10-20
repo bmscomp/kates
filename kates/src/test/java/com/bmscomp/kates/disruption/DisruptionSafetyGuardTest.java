@@ -328,21 +328,24 @@ class DisruptionSafetyGuardTest {
     /**
      * Litmus applies an override after the namespace and pods Kates sets, and
      * litmus-admin may delete pods in every namespace, so this passed and the
-     * experiment ran in kube-system.
+     * experiment ran in kube-system. LIB_IMAGE picks the image of Litmus's
+     * helper pods, which run privileged as root.
      */
     @Test
-    void aLitmusOverrideThatPicksTheNamespaceIsRefused() {
+    void aLitmusOverrideOtherThanTheDrainNodeIsRefused() {
         createZonedBrokers();
         FaultSpec dns = FaultSpec.builder("dns")
                 .targetBrokerId(0)
                 .disruptionType(DisruptionType.POD_KILL)
-                .envOverrides(Map.of("APP_NAMESPACE", "kube-system"))
+                .envOverrides(Map.of("APP_NAMESPACE", "kube-system", "LIB_IMAGE", "example.com/any:1"))
                 .build();
+        String allowed = " isn't one of the two envOverrides may set, TARGET_NODE and NODE_LABEL, which pick the"
+                + " node a NODE_DRAIN drains; set the fault's own fields instead";
 
         assertEquals(
-                List.of("Step 'step-0': envOverrides.APP_NAMESPACE would aim the Litmus experiment at a namespace or"
-                        + " pods the safety guard doesn't check; set targetNamespace, targetPod, targetLabel or"
-                        + " targetBrokerId instead"),
+                List.of(
+                        "Step 'step-0': envOverrides.APP_NAMESPACE" + allowed,
+                        "Step 'step-0': envOverrides.LIB_IMAGE" + allowed),
                 guard.validatePlan(plan(1, dns)).errors());
     }
 
