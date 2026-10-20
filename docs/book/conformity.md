@@ -605,7 +605,7 @@ WARN brokers.antiAffinity
 WAIVED monitoring.kafkaExporter
 ```
 
-`kates conformity` belongs to the `topology` [command profile](10-cli-reference.md#command-profiles). A context whose profiles leave it out refuses all three subcommands, `lint` and `fmt` included, so a pipeline's context needs that profile or none. The [Conformity](10-cli-reference.md#conformity) entries in the CLI Reference list every flag, and [POST /api/conformity/check](11-api-reference.md#post-apiconformitycheck) documents the report's JSON for callers that skip the CLI.
+`kates conformity` belongs to the `topology` and `deploy` [command profiles](10-cli-reference.md#command-profiles). A context whose profiles leave both out refuses all three subcommands, `lint` and `fmt` included, so a pipeline's context needs one of them or none. The [Conformity](10-cli-reference.md#conformity) entries in the CLI Reference list every flag, and [POST /api/conformity/check](11-api-reference.md#post-apiconformitycheck) documents the report's JSON for callers that skip the CLI.
 
 ## The Language at a Glance
 
