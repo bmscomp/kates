@@ -84,7 +84,7 @@ func TestDuplicates(t *testing.T) {
 		"  waivers:\n    - {rule: brokers.count, reason: r, by: me, until: 2026-12-31}\n"+
 		"    - {rule: brokers.count, reason: r, by: me, until: 2026-12-31}\n")
 
-	if d := find(ds, "duplicate-key"); d == nil || d.Severity != Warning || !d.Fixable || d.Path != "spec.brokers.count" {
+	if d := find(ds, "duplicate-key"); d == nil || d.Severity != Error || !d.Fixable || d.Path != "spec.brokers.count" {
 		t.Errorf("same key, same value: %+v", d)
 	}
 	if d := find(ds, "conflicting-key"); d == nil || d.Severity != Error || d.Fixable {

@@ -69,13 +69,13 @@ func TestConformityLintJSON(t *testing.T) {
 }
 
 func TestConformityLintPassesWithWarningsOnly(t *testing.T) {
-	file := writeReference(t, "dup.yaml", lintHeader+"spec:\n  brokers:\n    count: 3\n    count: 3\n")
+	file := writeReference(t, "dup.yaml", lintHeader+"spec:\n  brokers:\n    count: {oneOf: [3, 3]}\n")
 	buf := output.ResetForTesting()
 
 	if err := runConformityLint(nil, []string{file}); err != nil {
 		t.Errorf("exit %d, want 0 for a warning", exitCode(err))
 	}
-	if !strings.Contains(buf.String(), "[duplicate-key]") {
+	if !strings.Contains(buf.String(), "[duplicate-value]") {
 		t.Errorf("the warning is not printed:\n%s", buf.String())
 	}
 	if exitCode(runConformityLint(nil, []string{filepath.Join(t.TempDir(), "missing.yaml")})) != 2 {
@@ -116,18 +116,28 @@ func TestConformityFmt(t *testing.T) {
 	}
 }
 
+// A key set twice to the same value is among them: the API refuses it, so
+// lint does too, and fmt removes it.
 func TestConformityCheckStopsOnALintErrorBeforeTheAPI(t *testing.T) {
 	called := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	defer ts.Close()
 	apiClient = client.New(ts.URL)
-	output.ResetForTesting()
-	conformityFile = writeReference(t, "bad.yaml", lintHeader+"spec:\n  brokers:\n    count: {min: 5, max: 3}\n")
 	defer func() { conformityFile = "" }()
 
-	err := runConformityCheck(nil, nil)
+	for _, spec := range []string{"count: {min: 5, max: 3}", "count: 3\n    count: 3"} {
+		file := writeReference(t, "bad.yaml", lintHeader+"spec:\n  brokers:\n    "+spec+"\n")
+		output.ResetForTesting()
+		if exitCode(runConformityLint(nil, []string{file})) != 1 {
+			t.Errorf("%s: lint does not exit 1", spec)
+		}
+		conformityFile = file
+		buf := output.ResetForTesting()
 
-	if exitCode(err) != 2 || called {
-		t.Errorf("exit %d, API called %v; want 2 and no call", exitCode(err), called)
+		err := runConformityCheck(nil, nil)
+
+		if exitCode(err) != 2 || called || !strings.Contains(err.Error(), "kates conformity lint lists them") {
+			t.Errorf("%s: exit %d (%v), API called %v; want 2 from lint and no call\n%s", spec, exitCode(err), err, called, buf.String())
+		}
 	}
 }

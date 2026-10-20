@@ -161,8 +161,9 @@ func equalNodes(a, b *yaml.Node) bool {
 
 // duplicates finds what a reference says twice. The same key with the same
 // value, a value repeated in a list, and an item listed twice are fixable:
-// kates conformity fmt keeps the first. The same key with different values
-// is an error, since only the author can say which one is meant.
+// kates conformity fmt keeps the first. A key set twice is an error either
+// way, since the check and the API refuse it; with different values fmt
+// cannot fix it, since only the author can say which one is meant.
 func duplicates(n *yaml.Node, path string) []Diagnostic {
 	n = resolveAlias(n)
 	var ds []Diagnostic
@@ -174,7 +175,7 @@ func duplicates(n *yaml.Node, path string) []Diagnostic {
 			p := childPath(path, key.Value)
 			if prev, ok := first[key.Value]; ok {
 				if equalNodes(prev, val) {
-					d := at(key, Warning, "duplicate-key", p, fmt.Sprintf("the key is already set, to the same value, at %d:%d", prev.Line, prev.Column))
+					d := at(key, Error, "duplicate-key", p, fmt.Sprintf("the key is already set, to the same value, at %d:%d", prev.Line, prev.Column))
 					d.Fixable = true
 					ds = append(ds, d)
 				} else {
