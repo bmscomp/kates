@@ -84,6 +84,69 @@
     "nearMiss": "brokers:\n  count: 1\nkafka:\n  config:\n    unclean.leader.election.enable: true"
   },
   {
+    "code": "request-above-limit",
+    "severity": "error",
+    "title": "Request above its limit",
+    "triggers": "brokers:\n  count: 3\n  requests: {memory: {min: 8Gi}}\n  limits: {memory: {max: 8G}}",
+    "nearMiss": "brokers:\n  count: 3\n  requests: {memory: {min: 8Gi}}\n  limits: {memory: {max: 8192Mi}}"
+  },
+  {
+    "code": "byte-quantity-too-small",
+    "severity": "warning",
+    "title": "Memory or storage size missing its unit",
+    "triggers": "brokers:\n  limits: {memory: 512m}",
+    "nearMiss": "brokers:\n  requests: {memory: {min: 1}}"
+  },
+  {
+    "code": "ephemeral-single-node",
+    "severity": "warning",
+    "title": "Single node on ephemeral storage",
+    "triggers": "brokers:\n  count: 1\n  storage: {type: ephemeral}",
+    "nearMiss": "brokers:\n  count: 1\n  storage: {type: jbod}"
+  },
+  {
+    "code": "strimzi-1-with-pre-kraft-kafka",
+    "severity": "error",
+    "title": "Strimzi 1.x with Kafka before 3.0",
+    "triggers": "versions:\n  strimzi: {min: \"1.0.0\"}\n  kafka: {max: \"2.8.2\"}",
+    "nearMiss": "versions:\n  strimzi: {min: \"0.28.0\"}\n  kafka: {max: \"2.8.2\"}"
+  },
+  {
+    "code": "listener-contradicts-every",
+    "severity": "error",
+    "title": "A required listener contradicts kafka.listeners.every",
+    "triggers": "kafka:\n  listeners:\n    require:\n      - name: plain\n        port: 9092\n        tls: false\n    every:\n      tls: true",
+    "nearMiss": "kafka:\n  listeners:\n    require:\n      - name: plain\n        port: 9092\n        auth: {oneOf: [tls, scram-sha-512]}\n    every:\n      auth: {oneOf: [scram-sha-512, oauth]}"
+  },
+  {
+    "code": "listener-port-below-9092",
+    "severity": "error",
+    "title": "A required listener's port is below Strimzi's minimum",
+    "triggers": "kafka:\n  listeners:\n    require:\n      - name: ext\n        type: route\n        port: 443\n        tls: true",
+    "nearMiss": "kafka:\n  listeners:\n    require:\n      - name: ext\n        type: route\n        port: {min: 443, max: 9094}\n        tls: true"
+  },
+  {
+    "code": "podmonitor-without-metrics",
+    "severity": "warning",
+    "title": "A PodMonitor required on brokers that expose no metrics",
+    "triggers": "monitoring:\n  metrics: none\n  podMonitor: true",
+    "nearMiss": "monitoring:\n  metrics: none\n  kafkaExporter: true\n  podMonitor: true"
+  },
+  {
+    "code": "authorization-without-authentication",
+    "severity": "warning",
+    "title": "A principal-based authorizer with every listener anonymous",
+    "triggers": "kafka:\n  authorization: simple\n  listeners:\n    every:\n      auth: none",
+    "nearMiss": "kafka:\n  authorization: opa\n  listeners:\n    every:\n      auth: none"
+  },
+  {
+    "code": "setting-without-effect",
+    "severity": "warning",
+    "title": "zoneLabel or kafka.source with no rule that reads it",
+    "triggers": "zoneLabel: example.com/zone\nbrokers:\n  count: 3",
+    "nearMiss": "zoneLabel: topology.kubernetes.io/zone\nbrokers:\n  count: 3"
+  },
+  {
     "code": "rule-never-passes",
     "severity": "warning",
     "title": "A tolerated rule that can never pass",
