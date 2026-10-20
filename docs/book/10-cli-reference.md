@@ -605,7 +605,7 @@ kates cluster watch --interval 10
 
 ### Conformity
 
-`kates conformity check` holds the cluster to a reference architecture: a `KafkaReference` file that declares how many brokers and controllers it runs, how big each one is, and how they spread over zones and nodes. The Kates API reads the cluster read-only and reports each declared rule. `cli/examples/conformity` holds the JSON Schema editors validate against, and two examples to copy.
+`kates conformity check` holds the cluster to a reference architecture: a `KafkaReference` file that declares how many brokers and controllers it runs, how big each one is, and how they spread over zones and nodes. The Kates API reads the cluster read-only and reports each declared rule. A `topics` section holds every topic, Kafka's internal ones included, to a replication factor (its smallest replica set across partitions) and a `min.insync.replicas`, so a topic created with two replicas fails even when the broker defaults pass; `exclude` leaves out topics by name prefix. Declaring `topics` makes the Kates API list and describe the topics through the Kafka Admin API, even with `kafka.source: cr`. `cli/examples/conformity` holds the JSON Schema editors validate against, and two examples to copy.
 
 #### conformity check
 

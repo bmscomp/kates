@@ -2,15 +2,24 @@ package com.bmscomp.kates.conformity;
 
 import static com.bmscomp.kates.conformity.KafkaReferenceExamplesTest.json;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import jakarta.ws.rs.ClientErrorException;
 
@@ -36,11 +45,20 @@ import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.clients.admin.DescribeClusterResult;
 import org.apache.kafka.clients.admin.DescribeConfigsResult;
+import org.apache.kafka.clients.admin.DescribeTopicsResult;
+import org.apache.kafka.clients.admin.ListTopicsOptions;
+import org.apache.kafka.clients.admin.ListTopicsResult;
+import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.Node;
+import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.ArgumentCaptor;
 
 import com.bmscomp.kates.chaos.VertxPerMockClient;
 import com.bmscomp.kates.conformity.ConformityReport.Result;
@@ -600,6 +618,121 @@ class ConformityCheckTest {
         Result result = report.results().get(0);
         assertEquals(Status.UNKNOWN, result.status());
         assertTrue(result.detail().contains("Timed out waiting"), result.detail());
+        assertEquals(Verdict.UNKNOWN, report.verdict());
+    }
+
+    /**
+     * Four topics as Kafka describes them: one partition of payments has two
+     * replicas and its min.insync.replicas is 1; Kates' probe topic has one
+     * replica. Admin describes whichever of them it is asked about.
+     */
+    AdminClient topics() {
+        Map<String, List<Integer>> replicas = Map.of(
+                "__consumer_offsets", List.of(3),
+                "orders", List.of(3, 3),
+                "payments", List.of(3, 3, 2),
+                "kates-probe-topic", List.of(1));
+        Map<String, String> minIsr =
+                Map.of("__consumer_offsets", "2", "orders", "2", "payments", "1", "kates-probe-topic", "1");
+        AdminClient kafka = mock(AdminClient.class);
+        when(admin.sharedAdminClient()).thenReturn(kafka);
+        ListTopicsResult listed = mock(ListTopicsResult.class);
+        when(listed.names()).thenReturn(KafkaFuture.completedFuture(replicas.keySet()));
+        when(kafka.listTopics(any(ListTopicsOptions.class))).thenReturn(listed);
+        when(kafka.describeTopics(anyCollection())).thenAnswer(call -> {
+            Map<String, TopicDescription> described = new LinkedHashMap<>();
+            for (String name : call.<Collection<String>>getArgument(0)) {
+                List<TopicPartitionInfo> partitions = new ArrayList<>();
+                for (int size : replicas.get(name)) {
+                    List<Node> nodes = java.util.stream.IntStream.range(0, size)
+                            .mapToObj(id -> new Node(id, "b" + id, 9092))
+                            .toList();
+                    partitions.add(new TopicPartitionInfo(partitions.size(), nodes.get(0), nodes, nodes));
+                }
+                described.put(name, new TopicDescription(name, name.startsWith("__"), partitions));
+            }
+            DescribeTopicsResult result = mock(DescribeTopicsResult.class);
+            when(result.allTopicNames()).thenReturn(KafkaFuture.completedFuture(described));
+            return result;
+        });
+        when(kafka.describeConfigs(anyCollection())).thenAnswer(call -> {
+            Map<ConfigResource, Config> configs = new LinkedHashMap<>();
+            for (ConfigResource topic : call.<Collection<ConfigResource>>getArgument(0)) {
+                configs.put(
+                        topic, new Config(List.of(new ConfigEntry("min.insync.replicas", minIsr.get(topic.name())))));
+            }
+            DescribeConfigsResult result = mock(DescribeConfigsResult.class);
+            when(result.all()).thenReturn(KafkaFuture.completedFuture(configs));
+            return result;
+        });
+        return kafka;
+    }
+
+    /** A topic's replication factor is its smallest replica set, so payments has 2. */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', nullValues = "-", textBlock = """
+            {replicationFactor: {min: 3}}                                    | topics.replicationFactor | FAIL | [1, 2]    | kates-probe-topic, payments | 2 of 4 topics
+            {replicationFactor: {min: 3}, exclude: [kates-]}                 | topics.replicationFactor | FAIL | 2         | payments                    | 1 of 3 topics
+            {replicationFactor: {min: 3, severity: warn}, exclude: [kates-]} | topics.replicationFactor | WARN | 2         | payments                    | 1 of 3 topics
+            {replicationFactor: {min: 1}}                                    | topics.replicationFactor | PASS | [3, 1, 2] | -                           | -
+            {minInsyncReplicas: {min: 2}, exclude: [kates-]}                 | topics.minInsyncReplicas | FAIL | 1         | payments                    | 1 of 3 topics
+            {minInsyncReplicas: {min: 2}, exclude: [kates-, pay]}            | topics.minInsyncReplicas | PASS | 2         | -                           | -
+            {minInsyncReplicas: 2, exclude: [_, k, o, p]}                    | topics.minInsyncReplicas | PASS | -         | -                           | no topic to check
+            """)
+    void holdsEveryTopicToTheConstraint(
+            String topics, String rule, Status status, String observed, String subjects, String detail)
+            throws IOException {
+        topics();
+
+        Result result = result(run("{topics: " + topics + "}"), rule);
+
+        assertEquals(status, result.status());
+        assertEquals(
+                observed, result.observed() == null ? null : result.observed().toString());
+        assertEquals(subjects == null ? null : List.of(subjects.split(", ")), result.subjects());
+        assertEquals(detail, result.detail());
+    }
+
+    /** listTopics with internal topics, describeTopics on those not excluded, one describeConfigs over them. */
+    @Test
+    void readsTopicsThroughAdminOnlyWhenDeclared() throws IOException {
+        AdminClient kafka = topics();
+
+        run("{brokers: {count: 3}, kafka: {config: {min.insync.replicas: {min: 2}}}}");
+        verifyNoInteractions(kafka);
+
+        run("{topics: {replicationFactor: {min: 3}, exclude: [kates-]}}");
+        ArgumentCaptor<ListTopicsOptions> options = ArgumentCaptor.forClass(ListTopicsOptions.class);
+        verify(kafka).listTopics(options.capture());
+        assertTrue(options.getValue().shouldListInternal());
+        verify(kafka).describeTopics(List.of("__consumer_offsets", "orders", "payments"));
+        verify(kafka, never()).describeConfigs(anyCollection());
+
+        run("{topics: {minInsyncReplicas: {min: 2}, exclude: [kates-]}}");
+        verify(kafka)
+                .describeConfigs(List.of(
+                        new ConfigResource(ConfigResource.Type.TOPIC, "__consumer_offsets"),
+                        new ConfigResource(ConfigResource.Type.TOPIC, "orders"),
+                        new ConfigResource(ConfigResource.Type.TOPIC, "payments")));
+    }
+
+    @Test
+    void anUnreachableAdminMakesTopicRulesUnknown() throws IOException {
+        AdminClient kafka = mock(AdminClient.class);
+        when(admin.sharedAdminClient()).thenReturn(kafka);
+        KafkaFutureImpl<Set<String>> failed = new KafkaFutureImpl<>();
+        failed.completeExceptionally(new org.apache.kafka.common.errors.TimeoutException("Timed out waiting"));
+        ListTopicsResult listed = mock(ListTopicsResult.class);
+        when(listed.names()).thenReturn(failed);
+        when(kafka.listTopics(any(ListTopicsOptions.class))).thenReturn(listed);
+
+        ConformityReport report = run("{topics: {replicationFactor: {min: 3}, minInsyncReplicas: {min: 2}}}");
+
+        for (String rule : List.of("topics.replicationFactor", "topics.minInsyncReplicas")) {
+            Result result = result(report, rule);
+            assertEquals(Status.UNKNOWN, result.status(), rule);
+            assertTrue(result.detail().contains("Timed out waiting"), result.detail());
+        }
         assertEquals(Verdict.UNKNOWN, report.verdict());
     }
 

@@ -41,6 +41,7 @@ import com.bmscomp.kates.conformity.KafkaReference.Role;
 import com.bmscomp.kates.conformity.KafkaReference.Spec;
 import com.bmscomp.kates.conformity.KafkaReference.Storage;
 import com.bmscomp.kates.conformity.KafkaReference.Target;
+import com.bmscomp.kates.conformity.KafkaReference.Topics;
 import com.bmscomp.kates.conformity.KafkaReference.Versions;
 import com.bmscomp.kates.conformity.KafkaReference.Waiver;
 
@@ -68,6 +69,7 @@ public class KafkaReferenceReader {
     static final int MAX_ONE_OF = 50;
     static final int MAX_CONFIG_KEYS = 200;
     static final int MAX_REQUIRED_LISTENERS = 50;
+    static final int MAX_EXCLUDES = 50;
     static final int MAX_WAIVERS = 200;
     static final int MAX_COUNT = 10_000;
 
@@ -79,6 +81,7 @@ public class KafkaReferenceReader {
             Pattern.compile("([a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?");
     private static final Pattern CONFIG_KEY = Pattern.compile("[a-z0-9]+([._-][a-z0-9]+)*");
     private static final Pattern LISTENER_NAME = Pattern.compile("[a-z0-9]{1,11}");
+    private static final Pattern TOPIC_PREFIX = Pattern.compile("[a-zA-Z0-9._-]{1,249}");
 
     private static final String DNS_LABEL_RULE = "must be a DNS label: up to 63 lower-case letters, digits and -";
 
@@ -273,6 +276,7 @@ public class KafkaReferenceReader {
             role("controllers", spec.controllers());
             role("brokers", spec.brokers());
             kafka(spec.kafka());
+            topics(spec.topics());
             Monitoring monitoring = spec.monitoring();
             if (monitoring != null) {
                 choice("monitoring.metrics", monitoring.metrics(), METRICS_TYPES);
@@ -351,6 +355,32 @@ public class KafkaReferenceReader {
                         declare(id, constraint);
                     }
                 });
+            }
+        }
+
+        private void topics(Topics topics) {
+            if (topics == null) {
+                return;
+            }
+            count("topics.replicationFactor", topics.replicationFactor());
+            count("topics.minInsyncReplicas", topics.minInsyncReplicas());
+            if (topics.replicationFactor() == null && topics.minInsyncReplicas() == null) {
+                error("spec.topics", "declares no rule: replicationFactor or minInsyncReplicas");
+            }
+            List<String> exclude = topics.exclude();
+            if (exclude != null && exclude.size() > MAX_EXCLUDES) {
+                error("spec.topics.exclude", "lists more than " + MAX_EXCLUDES + " prefixes");
+                return;
+            }
+            for (int i = 0; exclude != null && i < exclude.size(); i++) {
+                String path = "spec.topics.exclude[" + i + "]";
+                if (present(path, exclude.get(i))) {
+                    matches(
+                            path,
+                            exclude.get(i),
+                            TOPIC_PREFIX,
+                            "must be the start of a topic name: up to 249 letters, digits, ., _ and -");
+                }
             }
         }
 
