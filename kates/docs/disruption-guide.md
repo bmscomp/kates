@@ -154,7 +154,7 @@ The `FaultSpec` is deliberately backend-agnostic. Whether you are using Litmus C
 | `networkLatencyMs` | `int` | `100` | Delay in milliseconds (NETWORK_LATENCY only) |
 | `fillPercentage` | `int` | `80` | Disk fill target (DISK_FILL only) |
 | `cpuCores` | `int` | `1` | CPU cores to stress (CPU_STRESS only) |
-| `envOverrides` | `Map<String,String>` | `{}` | Additional env vars for the chaos engine |
+| `envOverrides` | `Map<String,String>` | `{}` | `TARGET_NODE` or `NODE_LABEL` for a Litmus `NODE_DRAIN`; any other variable is refused |
 
 The defaults apply to a `faultSpec` posted as JSON as well as to a playbook step: a field the JSON leaves out gets the value in this table, and a field it sets, `0` included, keeps that value. So an omitted `targetBrokerId` means one random matching pod, and `"targetBrokerId": 0` means the broker pod whose name ends in `-0`. The same holds for each entry of `probes`.
 
@@ -361,7 +361,7 @@ This prevents a common mistake: using a broad label selector like `strimzi.io/co
 
 A typo in a number does as much damage as one in a selector: a stress meant for 60 seconds that runs for 60,000, or `cpuCores: 0`, which Litmus reads as every core. So every fault's parameters are checked against the `kates.chaos.limits.*` ceilings before anything is injected, whichever way the fault comes in: a plan, a playbook, a template, a schedule, a compound run or a resilience run. A plan with a fault outside them is rejected like any other unsafe plan; a compound or resilience run gets a `400` naming each parameter.
 
-With the defaults, `chaosDurationSec` runs from 0 to 3,600 seconds, `delayBeforeSec` from 0 to 600, `gracePeriodSec` from 0 to 300, `networkLatencyMs` from 1 to 30,000, `fillPercentage` from 1 to 100, `cpuCores` and `ioWorkers` from 1 to 64, and `memoryMb` from 1 to 32,768. The [configuration reference](overview.md#chaos-limits) names the setting for each ceiling. A fault undone when its duration ends needs a `chaosDurationSec` of at least 1: `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL` and `NODE_DRAIN`. `envOverrides` may not set `TOTAL_CHAOS_DURATION` or `RAMP_TIME`, which would run a Litmus experiment past the limits, nor `CHAOS_NAMESPACE`, `TARGETS`, `APP_NAMESPACE`, `APP_LABEL`, `APP_KIND` or `TARGET_PODS`, which would aim it at a namespace or pods the safety guard doesn't check.
+With the defaults, `chaosDurationSec` runs from 0 to 3,600 seconds, `delayBeforeSec` from 0 to 600, `gracePeriodSec` from 0 to 300, `networkLatencyMs` from 1 to 30,000, `fillPercentage` from 1 to 100, `cpuCores` and `ioWorkers` from 1 to 64, and `memoryMb` from 1 to 32,768. The [configuration reference](overview.md#chaos-limits) names the setting for each ceiling. A fault undone when its duration ends needs a `chaosDurationSec` of at least 1: `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL` and `NODE_DRAIN`. `envOverrides` may set only `TARGET_NODE` and `NODE_LABEL`, which pick the node a `NODE_DRAIN` drains: Litmus applies an override after the env Kates sets, and its helper pods run privileged as root and paste some values into a shell. A `targetTopic` has to be a Kafka topic name, 1 to 249 letters, digits, `.`, `_` or `-`.
 
 ### RBAC Permission Verification
 
