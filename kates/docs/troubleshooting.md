@@ -138,7 +138,7 @@ Or use leader-aware targeting, which always resolves to exactly one pod:
 
 **Root cause:** This typically indicates a problem with the chaos provider backend:
 
-1. **Litmus is not installed.** If the `HybridChaosProvider` selected the Litmus path for a complex fault (network partition, CPU stress), but Litmus CRDs are not installed in the cluster, the CRD creation fails and the provider hangs waiting for a response.
+1. **Litmus is not installed.** If the `HybridChaosProvider` selected the Litmus path for a fault only Litmus runs (memory stress, DNS error), but Litmus CRDs are not installed in the cluster, the CRD creation fails and the provider hangs waiting for a response.
 
 2. **RBAC permissions are missing.** Even though the safety guard checks permissions, there are edge cases where the permission check passes but the actual operation fails (e.g., cluster-scoped vs. namespace-scoped permissions).
 
