@@ -363,38 +363,9 @@ public class LitmusChaosProvider implements ChaosProvider {
         ChaosEngineSpec.ExperimentSpec expSpec = new ChaosEngineSpec.ExperimentSpec();
         expSpec.components = components;
 
-        if (spec.probes() != null && !spec.probes().isEmpty()) {
-            List<ChaosEngineSpec.Probe> litmusProbes = new ArrayList<>();
-            for (ProbeSpec p : spec.probes()) {
-                // Only a cmdProbe gets inputs below. Litmus has no kafkaProbe,
-                // and the k8sProbe "kafka Ready" is Kates' own query; Kates
-                // evaluates both itself, and Litmus would fail them empty.
-                if (!"cmdProbe".equals(p.type())) {
-                    continue;
-                }
-                ChaosEngineSpec.Probe lp = new ChaosEngineSpec.Probe();
-                lp.name = p.name();
-                lp.type = p.type();
-
-                if ("cmdProbe".equals(p.type()) && p.command() != null) {
-                    ChaosEngineSpec.CmdProbe cmd = new ChaosEngineSpec.CmdProbe();
-                    cmd.inputs = new ChaosEngineSpec.CmdProbeInputs();
-                    cmd.inputs.command = p.command();
-                    cmd.inputs.comparator = new ChaosEngineSpec.Comparator();
-                    if (p.expectedOutput() != null) {
-                        cmd.inputs.comparator.value = p.expectedOutput();
-                    }
-                    lp.cmdProbe = cmd;
-                }
-
-                lp.runProperties = new ChaosEngineSpec.RunProperties();
-                litmusProbes.add(lp);
-            }
-            if (!litmusProbes.isEmpty()) {
-                expSpec.probe = litmusProbes;
-            }
-        }
-
+        // No probe: Litmus runs a cmdProbe inline, as litmus-admin, which may
+        // delete pods in every namespace (FaultLimits refuses one in a fault).
+        // Kates evaluates probes itself, in a resilience run.
         experiment.spec = expSpec;
 
         engineSpec.experiments = List.of(experiment);

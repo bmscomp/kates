@@ -27,7 +27,6 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import com.bmscomp.kates.chaos.litmus.ChaosEngine;
-import com.bmscomp.kates.chaos.litmus.ChaosEngineSpec;
 import com.bmscomp.kates.chaos.litmus.ChaosResult;
 import com.bmscomp.kates.chaos.litmus.ChaosResultStatus;
 
@@ -615,12 +614,13 @@ class LitmusChaosProviderTest {
     }
 
     /**
-     * Only a cmdProbe becomes a Litmus probe, the one type the provider gives
-     * inputs. Litmus has no kafkaProbe, and the k8sProbe "kafka Ready" is
-     * Kates' own query: Kates evaluates both, and Litmus would fail them empty.
+     * Litmus ran a cmdProbe inline, with sh -c in the experiment pod, as
+     * litmus-admin, which may delete pods in every namespace. Litmus has no
+     * kafkaProbe, and the k8sProbe "kafka Ready" is Kates' own query. Kates
+     * evaluates probes itself, in a resilience run.
      */
     @Test
-    void onlyCmdProbesBecomeLitmusProbes() {
+    void noProbeReachesLitmus() {
         FaultSpec spec = FaultSpec.builder("probed")
                 .targetBrokerId(2)
                 .disruptionType(DisruptionType.POD_KILL)
@@ -631,20 +631,6 @@ class LitmusChaosProviderTest {
                                 .command("echo 0")
                                 .expectedOutput("0")
                                 .build()))
-                .build();
-
-        List<ChaosEngineSpec.Probe> probes = build(spec).getSpec().experiments.getFirst().spec.probe;
-
-        assertEquals(List.of("custom"), probes.stream().map(p -> p.name).toList());
-        assertEquals("echo 0", probes.getFirst().cmdProbe.inputs.command);
-    }
-
-    @Test
-    void aFaultWhoseProbesKatesEvaluatesSendsLitmusNone() {
-        FaultSpec spec = FaultSpec.builder("probed")
-                .targetBrokerId(2)
-                .disruptionType(DisruptionType.POD_KILL)
-                .probes(List.of(KafkaProbes.isrHealth(), KafkaProbes.clusterReady()))
                 .build();
 
         assertNull(build(spec).getSpec().experiments.getFirst().spec.probe);

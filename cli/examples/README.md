@@ -162,6 +162,8 @@ that sets a field its run doesn't read, or that the API would refuse.
 
 Every probe runs before the fault and after it, until all pass or
 `maxRecoveryWaitSec` is up; a `Continuous` one runs while the fault lasts too.
+A `cmdProbe` belongs here, not in `chaosSpec.probes`: Kates refuses a fault that
+carries one, since on `litmus-crd` Litmus ran it as `litmus-admin`.
 
 | YAML key | Type | Notes |
 |---|---|---|
