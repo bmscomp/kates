@@ -13,6 +13,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/mattn/go-runewidth"
 )
 
 const conformityReference = `apiVersion: conformity.kates.io/v1alpha1
@@ -75,13 +76,16 @@ func exitCode(err error) int {
 
 const conformityFailing = `{"reference":"prod","target":{"namespace":"kafka","name":"krafter"},
 "cluster":{"ready":true,"generation":2,"observedGeneration":1},"verdict":"FAIL",
-"summary":{"pass":1,"fail":2,"warn":0,"waived":1,"unknown":0},"results":[
+"summary":{"pass":1,"fail":3,"warn":0,"waived":1,"unknown":0},"results":[
 {"rule":"versions.kafka","status":"FAIL","severity":"fail","expected":{"min":"4.10"},"observed":"4.3.1"},
 {"rule":"kafka.listeners.require[plain]","status":"FAIL","severity":"fail",
  "expected":{"port":{"equals":9092},"tls":{"equals":true},"auth":{"oneOf":["tls","scram-sha-512"]}},
  "observed":{"type":"internal","port":9092,"tls":false,"auth":"scram-sha-512"},"detail":"tls is false"},
 {"rule":"brokers.count","status":"WAIVED","severity":"fail","expected":{"min":3},"observed":2,
  "waiver":{"status":"FAIL","reason":"OPS-1","by":"me","until":"2026-12-31"}},
+{"rule":"controllers.requests.memory","status":"FAIL","severity":"fail","expected":{"min":"16Gi"},"observed":"11Gi",
+ "subjects":["krafter-controllers-alpha-3","krafter-controllers-gamma-4","krafter-controllers-sigma-5","krafter-controllers-delta-6"],
+ "detail":"the memory request of the kafka container in each pod, which the KafkaNodePool sets under spec.resources.requests"},
 {"rule":"controllers.count","status":"PASS","severity":"fail","expected":{"equals":3},"observed":3}]}`
 
 func TestConformityCheckSendsDatesAndVersionsAsWritten(t *testing.T) {
@@ -134,6 +138,20 @@ func TestConformityCheckShowsTheGaps(t *testing.T) {
 	if strings.Contains(out, "controllers.count") {
 		t.Error("a passing rule is listed")
 	}
+	// The subjects and detail go on a line of their own under the row, and no
+	// line runs past the terminal, so a long pod list cannot widen the table.
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if w := runewidth.StringWidth(line); w > output.TermWidth() {
+			t.Errorf("line %d is %d wide, past the terminal's %d: %q", i, w, output.TermWidth(), line)
+		}
+		if strings.Contains(line, "controllers.requests.memory") && strings.Contains(line, "krafter-controllers") {
+			t.Errorf("the pods share the rule's row: %q", line)
+		}
+	}
+	if !strings.Contains(out, "krafter-controllers-alpha-3, krafter-controllers-gamma-4") {
+		t.Errorf("the note under the row lacks the pods:\n%s", out)
+	}
 }
 
 func TestConformityCheckJUnit(t *testing.T) {
@@ -156,6 +174,7 @@ func TestConformityCheckJUnit(t *testing.T) {
 		`<testsuite name="conformity.brokers" tests="1" failures="0" errors="0" skipped="1"`,
 		`<skipped message="FAIL, waived until 2026-12-31 by me: OPS-1">`,
 		`<failure message="expected min 4.10, observed 4.3.1" type="fail">`,
+		`<failure message="expected min 16Gi, observed 11Gi (krafter-controllers-alpha-3, krafter-controllers-gamma-4, krafter-controllers-sigma-5 +1)" type="fail">`,
 		`<failure message="expected port 9092, tls true, auth one of tls, scram-sha-512, observed type internal, port 9092, tls false, auth scram-sha-512" type="fail">`,
 	} {
 		if !strings.Contains(xml, want) {
