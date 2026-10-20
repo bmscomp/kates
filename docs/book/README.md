@@ -47,6 +47,7 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 | [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) | Step-by-step Kafka deployment with prerequisites and verification |
 | [Kafka Deployment Engineering](15-kafka-deployment.md) | The engineering rationale: Strimzi, KRaft, broker tuning, and operations |
 | [Deployment Guide](12-deployment.md) | Deploying the Kates stack: topology decisions, sizing, and cloud guidance |
+| [Conformity Checks](conformity.md) | A reference architecture as a file, and checks that hold the live cluster to it |
 | [Security & Compliance](17-security.md) | Authentication, authorization, certificates, network policies, and Kyverno |
 | [Multi-Tenancy](19-multi-tenancy.md) | Topic naming, service onboarding, quotas, and tenant isolation |
 | [Upgrade Playbook](18-upgrade-playbook.md) | Step-by-step procedures for upgrading Kafka, Strimzi, and Kates |

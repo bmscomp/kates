@@ -1110,4 +1110,4 @@ kates test list
 - `make all` drives the whole deployment through `kates deploy`; the per-component targets build the pieces one by one, and put LitmusChaos and monitoring in `kafka`.
 - The JVM image runs ZGC because a benchmarking tool's own GC pauses must not pollute its measurements, with the heap at no more than about 70% of the memory limit. The native image starts in ~0.05s but runs Serial GC, so it suits CI and laptops rather than measurement.
 
-Your stack is running — now lock it down: [Security & Compliance](17-security.md) covers authentication, authorization, network policies, and certificate management in depth.
+Your stack is running, so check that it is the cluster you meant to build: [Conformity Checks](conformity.md) writes that architecture down as a file and holds `krafter` to it.

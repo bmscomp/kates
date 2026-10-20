@@ -80,6 +80,7 @@ book:
         - 20-installation-guide.md
         - 15-kafka-deployment.md
         - 12-deployment.md
+        - conformity.md
         - 17-security.md
         - 19-multi-tenancy.md
         - 18-upgrade-playbook.md

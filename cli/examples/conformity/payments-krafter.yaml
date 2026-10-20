@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bmscomp/kates/main/cli/examples/conformity/kafkareference.v1alpha1.schema.json
+apiVersion: conformity.kates.io/v1alpha1
+kind: KafkaReference
+metadata:
+  name: payments-krafter
+  description: What the payments workload needs from krafter, the Kafka cluster under test
+spec:
+  target:
+    namespace: kafka
+    name: krafter
+
+  versions:
+    kubernetes: {min: "1.32.0"}
+    strimzi: {min: "1.2.0"}
+    kafka: {min: "4.2.0"}
+
+  controllers:
+    count: 3
+    zones: {min: 3}
+    perNode: {max: 1}
+    dedicated: true
+
+  brokers:
+    count: {min: 3}
+    requests:
+      memory: {min: 8Gi}
+    storage:
+      type: {oneOf: [jbod, persistent-claim]}
+      size: {min: 100Gi}
+    zones: {min: 3}
+    skew: {max: 1}
+    perNode: {max: 1}
+    antiAffinity: {equals: required, severity: warn}
+
+  kafka:
+    rackAwareness: true
+    authorization: simple
+    listeners:
+      require:
+        - name: tls
+          port: 9093
+          tls: true
+          auth: tls
+      every:
+        auth: {oneOf: [tls, scram-sha-512]}
+    config:
+      default.replication.factor: {min: 3}
+      min.insync.replicas: {min: 2}
+      unclean.leader.election.enable: false
+
+  monitoring:
+    metrics: jmxPrometheusExporter
+    kafkaExporter: true
+
+  waivers:
+    - rule: monitoring.kafkaExporter
+      reason: The Kind overlay turns Kafka Exporter off; enable it before payments traffic
+      by: platform-team
+      until: 2027-03-31
