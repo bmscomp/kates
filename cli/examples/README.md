@@ -156,7 +156,7 @@ that sets a field its run doesn't read, or that the API would refuse.
 | `networkLatencyMs` | int | Added latency ms (`NETWORK_LATENCY`) |
 | `targetTopic` | string | A disruption plan aims a fault at the leader of this topic's `targetPartition`. A resilience run doesn't, but a `DNS_ERROR` on `litmus-crd` takes it as `TARGET_HOSTNAMES` |
 | `targetPartition` | int | Partition of `targetTopic`, in a disruption plan only |
-| `envOverrides` | map | Env vars for the Litmus experiment (`litmus-crd` only). For a `NODE_DRAIN`, `TARGET_NODE` or `NODE_LABEL` picks the node instead of the pod `targetLabel` picks |
+| `envOverrides` | map | Env vars for the Litmus experiment (`litmus-crd` only). For a `NODE_DRAIN`, `TARGET_NODE` or `NODE_LABEL` picks the node instead of the pod `targetLabel` picks. None may pick the experiment's namespace or pods (`CHAOS_NAMESPACE`, `TARGETS`, `APP_NAMESPACE`, `APP_LABEL`, `APP_KIND`, `TARGET_PODS`) |
 
 ### `probes` field reference
 

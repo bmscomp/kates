@@ -188,6 +188,8 @@ A fault's `targetLabel` is a Kubernetes label selector, in the syntax `kubectl -
 
 A fault acts in its `targetNamespace`, `kafka` when the step leaves it out. Kates refuses a step in any namespace but two: the Kafka cluster's, `kates.chaos.kafka.namespace` (`kafka` by default), and the one the Kates API runs in (`kates` on a default install). The `kates` chart's ClusterRole lets the Kates API delete and patch pods in every namespace, so this refusal is what keeps a pod fault off the rest of the cluster, such as the CoreDNS pods in `kube-system`. A `NODE_DRAIN` still evicts every pod on its node, whatever its namespace.
 
+On `litmus-crd`, `envOverrides` may not set the Litmus variables that pick the experiment's namespace or pods: `CHAOS_NAMESPACE`, `TARGETS`, `APP_NAMESPACE`, `APP_LABEL`, `APP_KIND` and `TARGET_PODS`. Litmus applies an override after the namespace and pods Kates sets, and by default the `kates-chaos` chart lets `litmus-admin` delete pods in every namespace (`rbac.nodeChaos.enabled`), so an override could aim a step past both the namespace check and the broker count. Kates refuses such a step before any fault. `TARGET_NODE` and `NODE_LABEL` still pick the node a `NODE_DRAIN` drains.
+
 A pod-level fault hits one pod unless told otherwise. The first of these that applies decides which pods:
 
 1. `targetPod`, when set.
@@ -563,6 +565,7 @@ A refused plan starts nothing. Over the API it returns `422` with status `REJECT
 | `Step '…': NODE_DRAIN with targetAll picks pods on N nodes (…)` | Narrow `targetLabel` to the pods of one node, or name the node in `envOverrides.TARGET_NODE` |
 | `Step '…': NODE_DRAIN: …, the node the Kates API runs on, and draining it would evict the Kates API …` | Aim the drain at a pod on another node, or name another node in `envOverrides.TARGET_NODE` |
 | `Step '…':`, then a fault parameter that `is below` its floor or `is above the limit of` its ceiling | Bring the parameter into its range, or raise the limit (see [Fault Parameter Limits](#fault-parameter-limits)) |
+| `Step '…': envOverrides.… would aim the Litmus experiment at a namespace or pods the safety guard doesn't check; …` | Drop the override, and pick the pods with `targetNamespace`, `targetPod`, `targetLabel` or `targetBrokerId` |
 | `Step '…': targetNamespace … is neither …, the Kafka cluster's namespace (kates.chaos.kafka.namespace), nor the Kates API's own, …` | Aim the step at the Kafka cluster's namespace or the Kates API's own. No setting adds another |
 | `Plan would affect N brokers but maxAffectedBrokers=M` | Narrow the selectors, or raise the limit if you mean it |
 | `Plan would affect ALL N brokers — cluster would lose availability` | Narrow the selectors: Kates never runs a plan that hits every broker |
@@ -606,7 +609,7 @@ Every number in a fault spec has a range, and Kates refuses a fault with one out
 
 Kates checks every parameter whatever the fault's type, so a value no provider reads has to be in range too. A field you leave out gets its default, which is always in range.
 
-Two rules go beyond the table. First, a fault that ends only when its duration does needs a `chaosDurationSec` of at least 1: `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL` and `NODE_DRAIN`. The others may set `0`, because a deleted pod comes back by itself, and a `ROLLING_RESTART` or `SCALE_DOWN` with `0` doesn't wait. Second, `envOverrides` may not set `TOTAL_CHAOS_DURATION` or `RAMP_TIME`, which would run a Litmus experiment past the limits.
+Two rules go beyond the table. First, a fault that ends only when its duration does needs a `chaosDurationSec` of at least 1: `NETWORK_PARTITION`, `NETWORK_LATENCY`, `CPU_STRESS`, `MEMORY_STRESS`, `IO_STRESS`, `DNS_ERROR`, `DISK_FILL` and `NODE_DRAIN`. The others may set `0`, because a deleted pod comes back by itself, and a `ROLLING_RESTART` or `SCALE_DOWN` with `0` doesn't wait. Second, `envOverrides` may not set `TOTAL_CHAOS_DURATION` or `RAMP_TIME`, which would run a Litmus experiment past the limits, nor the variables that pick its namespace or pods (see [Targeting Pods](#targeting-pods)).
 
 The duration ceiling matters most on `kubernetes`, where a CPU or IO stress runs in an ephemeral container that Kubernetes can't remove: its duration is all that stops it. A `ROLLING_RESTART`'s `chaosDurationSec` is its wait for the Cluster Operator to roll every pod, so on a cluster whose roll takes over an hour, raise `kates.chaos.limits.max-duration-sec`.
 
