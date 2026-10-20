@@ -854,7 +854,9 @@ var (
 the mirror release and its kept CR, the source release, the source namespace
 when the lab created it (it carries the label), the lab's topics on the
 target (the mirrored topics and the mirror's own), the credential Secrets and
-the client pods. Nothing without the label is touched.`,
+the client pods. Nothing without the label is touched, and a topic of the
+mirror's own that another mirror on the target also writes, such as the
+source.checkpoints.internal every single-source lab shares, is kept.`,
 		Example: `  kates migrate down --name m282-430 --yes
   kates migrate down`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -914,7 +916,7 @@ func describeLabTeardown(d *labDiscovery) []string {
 		lines = append(lines, fmt.Sprintf("additional target %s in %s", d.Target.Name, d.Target.Namespace))
 	}
 	if topics := append(d.ReplicatedTopics(), d.internalTopics()...); len(topics) > 0 && d.TargetNamespace != "" {
-		lines = append(lines, fmt.Sprintf("topics on %s: %s", d.TargetCluster, strings.Join(topics, ", ")))
+		lines = append(lines, fmt.Sprintf("topics on %s: %s (an internal one another mirror there also writes is kept)", d.TargetCluster, strings.Join(topics, ", ")))
 	}
 	if d.MirrorNamespace != "" {
 		lines = append(lines, fmt.Sprintf("secrets and client pods labelled %s=%s", migrate.LabelLab, d.Name))
@@ -997,23 +999,66 @@ func isNotFound(err error) bool {
 // deleteLabTopics removes the lab's topics on the target through the Topic
 // Operator: a KafkaTopic carrying the lab's labels is created for each (the
 // operator adopts the existing topic) and deleted, which deletes the topic.
-// No credential is needed and nothing but the named topics is touched.
+// No credential is needed and nothing but the named topics is touched. An
+// internal topic another mirror on the target also writes is kept, and all
+// of them are when the other mirrors cannot be listed.
 func deleteLabTopics(ctx context.Context, d *labDiscovery) error {
-	topics := append(d.ReplicatedTopics(), d.internalTopics()...)
-	if len(topics) == 0 {
-		return nil
+	shared, sharedErr := sharedInternalTopics(ctx, d)
+	topics := d.ReplicatedTopics()
+	for _, t := range d.internalTopics() {
+		if sharedErr == nil && !shared[t] {
+			topics = append(topics, t)
+		}
 	}
-	manifest, err := kafkaTopicManifests(d, topics)
-	if err != nil {
-		return err
+	if len(topics) > 0 {
+		manifest, err := kafkaTopicManifests(d, topics)
+		if err != nil {
+			return err
+		}
+		if _, err := defaultRunner.RunInput(ctx, manifest, "kubectl", "-n", d.TargetNamespace, "apply", "-f", "-"); err != nil {
+			return fmt.Errorf("adopt the topics as KafkaTopics: %w", err)
+		}
+		if _, err := defaultRunner.Run(ctx, "kubectl", "-n", d.TargetNamespace, "delete", "kafkatopic", "-l", migrate.LabelLab+"="+d.Name, "--ignore-not-found", "--timeout=120s"); err != nil {
+			return fmt.Errorf("delete the KafkaTopics: %w", err)
+		}
 	}
-	if _, err := defaultRunner.RunInput(ctx, manifest, "kubectl", "-n", d.TargetNamespace, "apply", "-f", "-"); err != nil {
-		return fmt.Errorf("adopt the topics as KafkaTopics: %w", err)
-	}
-	if _, err := defaultRunner.Run(ctx, "kubectl", "-n", d.TargetNamespace, "delete", "kafkatopic", "-l", migrate.LabelLab+"="+d.Name, "--ignore-not-found", "--timeout=120s"); err != nil {
-		return fmt.Errorf("delete the KafkaTopics: %w", err)
+	if sharedErr != nil {
+		return fmt.Errorf("kept the mirror's own topics (%s), since the other mirrors could not be listed: %w", strings.Join(d.internalTopics(), ", "), sharedErr)
 	}
 	return nil
+}
+
+// sharedInternalTopics lists the internal topics another KafkaMirrorMaker2
+// on the lab's target also writes: every single-source lab, and the
+// loopback mirror kates deploy installs, checkpoint under the alias source.
+// A mirror whose target cannot be read is taken to write there.
+func sharedInternalTopics(ctx context.Context, d *labDiscovery) (map[string]bool, error) {
+	out, err := defaultRunner.Run(ctx, "kubectl", "get", "kafkamirrormaker2", "-A", "-o", "json")
+	if err != nil {
+		return nil, err
+	}
+	items, err := parseLabelledItems(out)
+	if err != nil {
+		return nil, err
+	}
+	shared := map[string]bool{}
+	for _, it := range items {
+		if it.Metadata.Namespace == d.MirrorNamespace && it.Metadata.Name == d.MirrorCR {
+			continue
+		}
+		other := &labDiscovery{}
+		other.readMirrorSpec(it.Spec)
+		if other.TargetCluster != "" && (other.TargetCluster != d.TargetCluster || other.TargetNamespace != d.TargetNamespace) {
+			continue
+		}
+		if other.GroupID != "" {
+			shared[other.GroupID+"-configs"], shared[other.GroupID+"-offsets"], shared[other.GroupID+"-status"] = true, true, true
+		}
+		for _, leg := range other.legs {
+			shared[leg.Alias+".checkpoints.internal"] = true
+		}
+	}
+	return shared, nil
 }
 
 // kafkaTopicManifests renders one KafkaTopic per topic, for kubectl apply

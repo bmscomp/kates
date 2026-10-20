@@ -2040,8 +2040,10 @@
     source namespace when the lab created it (it carries the label), the
     lab's topics on the target (the mirrored topics and the mirror's own,
     through KafkaTopic resources), the credential Secrets and the client
-    pods. Nothing without the label is touched. Needs --yes or a
-    confirmation.
+    pods. Nothing without the label is touched, and a topic of the
+    mirror's own that another mirror on the target also writes, such as
+    the source.checkpoints.internal every single-source lab shares, is
+    kept. Needs --yes or a confirmation.
   flags:
     - name: "--name"
       type: string
