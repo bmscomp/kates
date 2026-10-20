@@ -164,6 +164,10 @@ class ConformityCheckTest {
     }
 
     static GenericKubernetesResource pool(String name, String storageType, String... roles) {
+        return pool(name, 3, storageType, roles);
+    }
+
+    static GenericKubernetesResource pool(String name, int replicas, String storageType, String... roles) {
         return new GenericKubernetesResourceBuilder()
                 .withApiVersion("kafka.strimzi.io/v1")
                 .withKind("KafkaNodePool")
@@ -173,7 +177,8 @@ class ConformityCheckTest {
                 .addToLabels("strimzi.io/cluster", "krafter")
                 .endMetadata()
                 .withAdditionalProperties(Map.of(
-                        "spec", Map.of("roles", List.of(roles), "replicas", 3, "storage", Map.of("type", storageType))))
+                        "spec",
+                        Map.of("roles", List.of(roles), "replicas", replicas, "storage", Map.of("type", storageType))))
                 .build();
     }
 
@@ -382,6 +387,72 @@ class ConformityCheckTest {
         Result storageClass = result(report, "brokers.storage.class");
         assertEquals("standard", storageClass.observed());
         assertEquals(List.of("data-1-krafter-brokers-3"), storageClass.subjects());
+    }
+
+    @Test
+    void storageClassFailsOnEphemeralStorage() throws IOException {
+        for (int i = 3; i <= 5; i++) {
+            client.pods()
+                    .inNamespace("kafka")
+                    .withName("krafter-brokers-" + i)
+                    .edit(p ->
+                            new PodBuilder(p).editSpec().withVolumes().endSpec().build());
+        }
+
+        Result storageClass = result(run("{brokers: {storage: {class: gp3}}}"), "brokers.storage.class");
+
+        assertEquals(Status.FAIL, storageClass.status());
+        assertNull(storageClass.observed());
+        assertEquals("no PVCs: ephemeral storage", storageClass.detail());
+    }
+
+    /** A per-pod rule on a role with no pod has nothing to check, and does not pass; perNode's limit still holds. */
+    @Test
+    void aRoleWithNoPodHasNothingToPass() throws IOException {
+        client.pods()
+                .inNamespace("kafka")
+                .withLabel("strimzi.io/broker-role", "true")
+                .delete();
+        podMonitor("kafka", "brokers", Map.of("strimzi.io/cluster", "krafter"), null);
+
+        ConformityReport report = run(
+                "{brokers: {requests: {memory: {min: 1Gi}}, perNode: {max: 1}}," + " monitoring: {podMonitor: true}}");
+
+        Result memory = result(report, "brokers.requests.memory");
+        assertEquals(Status.FAIL, memory.status());
+        assertEquals("no pod has strimzi.io/broker-role=true", memory.detail());
+        assertEquals(Status.PASS, result(report, "brokers.perNode").status());
+        Result podMonitor = result(report, "monitoring.podMonitor");
+        assertEquals(Status.FAIL, podMonitor.status());
+        assertEquals("no broker pod to select", podMonitor.detail());
+    }
+
+    /** An old pool scaled to 0, as Strimzi's storage and role changes leave one: it runs no node. */
+    @Test
+    void aPoolAtZeroReplicasDecidesNothing() throws IOException {
+        create(ClusterTopologyService.NODE_POOL_CRD, pool("combined", 0, "jbod", "broker", "controller"));
+        create(ClusterTopologyService.NODE_POOL_CRD, pool("old", 0, "persistent-claim", "broker"));
+
+        ConformityReport report = run("{controllers: {dedicated: true}, brokers: {storage: {type: jbod}}}");
+
+        Result type = result(report, "brokers.storage.type");
+        assertEquals(Status.PASS, type.status(), type::toString);
+        assertEquals("combined, old: 0 replicas, not counted", type.detail());
+        Result dedicated = result(report, "controllers.dedicated");
+        assertEquals(Status.PASS, dedicated.status());
+        assertEquals("combined: 0 replicas, not counted", dedicated.detail());
+    }
+
+    @Test
+    void failingSubjectsPastTheCapAreCounted() throws IOException {
+        for (int i = 6; i < 56; i++) {
+            pod("krafter-brokers-" + i, true, false, true);
+        }
+
+        Result memory = result(run("{brokers: {requests: {memory: {min: 8Gi}}}}"), "brokers.requests.memory");
+
+        assertEquals(50, memory.subjects().size());
+        assertEquals("53 fall short; the first 50 are listed", memory.detail());
     }
 
     /** Three zones, one node each; controllers one per node, brokers crowded: two on alpha's node, none on gamma's. */
@@ -874,6 +945,18 @@ class ConformityCheckTest {
 
         assertEquals(Status.FAIL, result.status());
         assertEquals("no PodMonitor selects every broker pod", result.detail());
+    }
+
+    /** prometheus-operator reads {any: false} and an empty matchNames as the PodMonitor's own namespace. */
+    @Test
+    void aPodMonitorThatNamesNoNamespaceWatchesItsOwn() throws IOException {
+        podMonitor("kafka", "any-false", Map.of("strimzi.io/cluster", "krafter"), Map.of("any", false));
+        podMonitor("monitoring", "no-names", Map.of("strimzi.io/cluster", "krafter"), Map.of("matchNames", List.of()));
+
+        Result result = result(run("{monitoring: {podMonitor: true}}"), "monitoring.podMonitor");
+
+        assertEquals(Status.PASS, result.status());
+        assertEquals("kafka/any-false", result.detail());
     }
 
     @Test

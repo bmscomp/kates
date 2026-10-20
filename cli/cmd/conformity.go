@@ -305,7 +305,8 @@ func conformityJoin(values []any) string {
 
 // writeConformityJUnit writes one testsuite per top-level section and one
 // testcase per rule: FAIL a failure, UNKNOWN an error, WAIVED skipped, and WARN
-// a pass with its detail in system-out.
+// a pass with its detail in system-out. An UNKNOWN warn rule passes too, as it
+// cannot fail the check.
 func writeConformityJUnit(r *client.ConformityReport, path string, took time.Duration) error {
 	bySection := map[string]*junitTestSuite{}
 	for _, res := range r.Results {
@@ -322,8 +323,12 @@ func writeConformityJUnit(r *client.ConformityReport, path string, took time.Dur
 			tc.Failure = &junitFailure{Message: message, Type: "fail", Content: res.Detail}
 			suite.Failures++
 		case "UNKNOWN":
-			tc.Error = &junitFailure{Message: res.Detail, Type: "unknown"}
-			suite.Errors++
+			if res.Severity == "warn" {
+				tc.SystemOut = "UNKNOWN (warn): " + res.Detail
+			} else {
+				tc.Error = &junitFailure{Message: res.Detail, Type: "unknown"}
+				suite.Errors++
+			}
 		case "WAIVED":
 			tc.Skipped = &junitSkipped{Message: conformityDetail(res)}
 			suite.Skipped++

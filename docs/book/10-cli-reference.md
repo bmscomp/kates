@@ -617,7 +617,7 @@ kates conformity check -f prod-3az.yaml --output-junit conformity.xml
 kates conformity check -f prod-3az.yaml -o json
 ```
 
-It exits `0` when every `fail` rule holds, `1` when one does not, and `2` when it could not tell or could not run. A `warn` rule never fails it. `--output-junit` also writes one test case per rule for a CI report: a failure for `FAIL`, an error for `UNKNOWN`, and skipped for `WAIVED`.
+It exits `0` when every `fail` rule holds, `1` when one does not, and `2` when it could not tell or could not run. A `warn` rule never fails it. `--output-junit` also writes one test case per rule for a CI report: a failure for `FAIL`, an error for a `fail` rule that is `UNKNOWN`, and skipped for `WAIVED`. A `warn` rule's test case passes, with what it found in the output.
 
 Before it calls the API, it lints the file as `kates conformity lint` does and prints what lint finds to stderr. A warning, such as an expired waiver, does not stop it. An error stops it with exit `2`, and the API is never called. That includes a reference no cluster could pass, such as more zones required than brokers allowed.
 

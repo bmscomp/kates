@@ -164,6 +164,33 @@ func TestConformityCheckJUnit(t *testing.T) {
 	}
 }
 
+// A warn rule cannot fail the check, so a CI report must not count it as an
+// error when it could not be read.
+func TestConformityJUnitPassesAnUnknownWarnRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conformity.xml")
+	report := &client.ConformityReport{Verdict: "UNKNOWN", Results: []client.ConformityResult{
+		{Rule: "monitoring.podMonitor", Status: "UNKNOWN", Severity: "warn", Detail: "podmonitors is forbidden"},
+		{Rule: "kafka.authorization", Status: "UNKNOWN", Severity: "fail", Detail: "Kubernetes API not available"},
+	}}
+	if err := writeConformityJUnit(report, path, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`<testsuite name="conformity.monitoring" tests="1" failures="0" errors="0"`,
+		`<system-out>UNKNOWN (warn): podmonitors is forbidden</system-out>`,
+		`<testsuite name="conformity.kafka" tests="1" failures="0" errors="1"`,
+		`<error message="Kubernetes API not available" type="unknown"></error>`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("JUnit lacks %s:\n%s", want, data)
+		}
+	}
+}
+
 func TestConformityCheckExitCodes(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
