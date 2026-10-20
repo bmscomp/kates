@@ -1053,7 +1053,10 @@ public class ConformityCheck {
         return new Observation<>(values, values.isEmpty() ? "the Kafka CR declares no listener" : null);
     }
 
-    /** Each topic's value by name; the detail counts the topics that miss it, as the subjects stop at 50. */
+    /**
+     * Each topic's value by name; the detail counts the topics that miss it, as the subjects stop at 50. With
+     * every topic excluded, every topic left holds.
+     */
     private static <V> Observation<Integer> perTopic(
             Map<String, V> topics, Function<V, Integer> value, Constraint<Integer> constraint) {
         Map<String, Integer> values = new TreeMap<>();
@@ -1065,7 +1068,8 @@ public class ConformityCheck {
                 values,
                 values.isEmpty()
                         ? "no topic to check"
-                        : missing == 0 ? null : missing + " of " + values.size() + " topics");
+                        : missing == 0 ? null : missing + " of " + values.size() + " topics",
+                true);
     }
 
     /** The smallest replica set across the topic's partitions. */
@@ -1156,7 +1160,8 @@ public class ConformityCheck {
     /**
      * The values a rule compares, by subject ("" for a rule about the cluster
      * as a whole). With no subject the rule does not hold, unless emptyHolds:
-     * no pod on any node is within perNode's limit.
+     * no pod on any node is within perNode's limit, and no topic left after
+     * exclude misses a topics rule.
      */
     private record Observation<T>(Map<String, T> values, String detail, boolean emptyHolds) {
         Observation(Map<String, T> values, String detail) {
