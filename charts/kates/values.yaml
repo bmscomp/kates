@@ -58,8 +58,8 @@ rbac:
   # -- Create ClusterRole and ClusterRoleBinding
   create: true
   # -- Grant the writes the direct Kubernetes chaos backend makes itself
-  # (KATES_CHAOS_PROVIDER=kubernetes, or hybrid without Litmus): NetworkPolicies,
-  # StatefulSet scaling, and pod ephemeral containers. Litmus runs its
+  # (KATES_CHAOS_PROVIDER=kubernetes, or hybrid without Litmus): StatefulSet
+  # scaling and pod ephemeral containers. Litmus runs its
   # experiments as litmus-admin and needs none of this.
   directChaos: false
   # -- Namespaces where the INTEGRATION_CDC test may read its database's

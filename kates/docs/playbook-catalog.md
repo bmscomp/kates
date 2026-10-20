@@ -179,7 +179,7 @@ steps:
 
 The playbook does not look up the active controller. `targetBrokerId: 0` aims the fault at the broker whose pod name ends in `-0` among the pods labelled `strimzi.io/component-type=kafka`. `targetBrokerId` picks among brokers only, so it never picks a dedicated KRaft controller (`strimzi.io/broker-role=false`): if node 0 is one, the step falls back to the first broker, and the dry run warns about it. Node 0 is the active controller only if it also has the controller role and leads the metadata quorum when the step runs; `kafka-metadata-quorum.sh --bootstrap-server <broker>:9092 describe --status` prints the quorum's `LeaderId`, so check it before you run the playbook.
 
-With the direct Kubernetes backend, the partition is a NetworkPolicy that denies all ingress and egress for that pod, held for `chaosDurationSec: 60` and then deleted; the Litmus backend runs `pod-network-partition` instead. To isolate a different broker, post the same step to `POST /api/disruptions` with `targetBrokerId` changed. To isolate a dedicated controller, name its pod in `targetPod` instead, such as `krafter-controllers-alpha-3` on the default cluster. Built-in playbooks take no parameters.
+On either chaos backend, the partition is a NetworkPolicy that denies all ingress and egress for that pod, held for `chaosDurationSec: 60` and then deleted. To isolate a different broker, post the same step to `POST /api/disruptions` with `targetBrokerId` changed. To isolate a dedicated controller, name its pod in `targetPod` instead, such as `krafter-controllers-alpha-3` on the default cluster. Built-in playbooks take no parameters.
 
 ### What to Look For
 

@@ -676,6 +676,35 @@ class LitmusChaosProviderTest {
                 .isEmpty());
     }
 
+    @Test
+    void networkPartitionCutsOffThePodWithAKatesNetworkPolicy() throws Exception {
+        // Used to run pod-network-partition, which in litmus-go 3.28 needs
+        // TARGETS from an appinfo Kates leaves out: it failed with "provide the
+        // appLabel" before cutting anything off, and it ignores TARGET_PODS.
+        FaultSpec spec = FaultSpec.builder("split")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(1)
+                .build();
+
+        CompletableFuture<ChaosOutcome> fault = provider.triggerFault(spec);
+        var policy = client.network().networkPolicies().inNamespace("kafka").withName("kates-netpol-krafter-brokers-2");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (policy.get() == null && !fault.isDone() && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertNotNull(policy.get(), "broker 2 was never cut off");
+        ChaosOutcome outcome = fault.get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertNull(policy.get(), "the partition outlasted chaosDurationSec");
+        assertTrue(client.resources(ChaosEngine.class)
+                .inNamespace("kafka")
+                .list()
+                .getItems()
+                .isEmpty());
+    }
+
     @ParameterizedTest
     @EnumSource(
             value = DisruptionType.class,

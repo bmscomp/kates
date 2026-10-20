@@ -33,7 +33,6 @@ public class LitmusChaosProvider implements ChaosProvider {
             Map.entry(DisruptionType.IO_STRESS, "pod-io-stress"),
             Map.entry(DisruptionType.DNS_ERROR, "pod-dns-error"),
             Map.entry(DisruptionType.DISK_FILL, "disk-fill"),
-            Map.entry(DisruptionType.NETWORK_PARTITION, "pod-network-partition"),
             Map.entry(DisruptionType.NETWORK_LATENCY, "pod-network-latency"),
             Map.entry(DisruptionType.NODE_DRAIN, "node-drain"),
             // Leader election is triggered by deleting the current partition leader pod
@@ -48,10 +47,16 @@ public class LitmusChaosProvider implements ChaosProvider {
      * does it take a grace period: it deletes with none under FORCE=true,
      * which pods of a StrimziPodSet need (see buildChaosEngine), and with the
      * pod's own otherwise. A POD_DELETE is deleted with gracePeriodSec, so the
-     * broker gets the controlled shutdown the fault is meant to test.
+     * broker gets the controlled shutdown the fault is meant to test. Nor does
+     * pod-network-partition (litmus-go 3.28) cut off the pods Kates picks: it
+     * ignores TARGET_PODS, selects by the label in TARGETS, which comes from
+     * the appinfo Kates leaves out, and without it fails before any change.
      */
-    private static final Set<DisruptionType> ON_KUBERNETES_API =
-            EnumSet.of(DisruptionType.ROLLING_RESTART, DisruptionType.SCALE_DOWN, DisruptionType.POD_DELETE);
+    private static final Set<DisruptionType> ON_KUBERNETES_API = EnumSet.of(
+            DisruptionType.ROLLING_RESTART,
+            DisruptionType.SCALE_DOWN,
+            DisruptionType.POD_DELETE,
+            DisruptionType.NETWORK_PARTITION);
 
     /** How often the ChaosResult is read until it has a verdict. */
     int resultPollIntervalMs = 5_000;

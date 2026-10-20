@@ -68,7 +68,7 @@ The difference between `POD_KILL` and `POD_DELETE` is the difference between "yo
 
 A network partition is the most insidious failure mode in distributed systems. The broker is still running — it still has all its data, its processes are healthy, its disk is fine — but it cannot communicate with the rest of the cluster. From the partitioned broker's perspective, the rest of the cluster has disappeared. From the cluster's perspective, the partitioned broker has disappeared. Both sides continue operating independently, which is exactly the definition of a split brain.
 
-Kates implements network partitions by creating firewall rules (via Litmus ChaosEngine CRDs) that drop all traffic to and from the target pod. This means the partitioned broker can still receive Kubernetes health probes (if configured separately), but cannot communicate with other brokers or clients.
+Kates implements a network partition as a NetworkPolicy with no allow rules on the target pod, on either chaos provider, so it drops all traffic to and from that pod. This means the partitioned broker can still receive Kubernetes health probes (if configured separately), but cannot communicate with other brokers or clients.
 
 The consequences of a network partition depend on which broker is partitioned:
 

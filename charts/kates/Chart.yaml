@@ -2,9 +2,10 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.26.0, the tag the v1.26.0
-# release publishes. Templates are otherwise unchanged.
-version: 0.11.4
+# Patch: the default ClusterRole grants create, delete and deletecollection
+# on networkpolicies, which only rbac.directChaos granted before.
+# appVersion is unchanged.
+version: 0.11.5
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +29,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The default ClusterRole grants create, delete and deletecollection on networkpolicies, which only rbac.directChaos granted before. On the default litmus-crd provider, NETWORK_PARTITION ran the Litmus pod-network-partition experiment, which fails before cutting anything off without the appinfo Kates leaves out; the Kates API now applies its own deny-all NetworkPolicy to each target pod on both chaos providers, as the kubernetes provider did, and removes it when the duration ends. rbac.directChaos still grants statefulsets/scale and pods/ephemeralcontainers"
     - kind: changed
       description: "appVersion 1.26.0 and the image tag move to 1.26.0. The backend changes since 1.25.1: the cluster health check reports a KRaft quorum it cannot describe instead of dropping it (#403); the security audit and pentest read each listener's protocol (#379); the tuning report endpoint is gone (#386); run retention keeps the run a baseline names (#378); a status poll writes only over the status it read (#377); each INTEGRITY run reads in a consumer group of its own (#376); compound runs and resilience faults go through the safety guard and the disruption lease (#375); orphan recovery undoes faults left from before the API started (#374); and the native image starts with a named API keys file (#371). Templates are otherwise unchanged."
     - kind: added
