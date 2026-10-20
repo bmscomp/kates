@@ -5,5 +5,89 @@
     "title": "A waiver whose date has passed",
     "triggers": "# lint date 2026-10-19\nbrokers:\n  count: {min: 3}\nwaivers:\n  - {rule: brokers.count, reason: OPS-1, by: platform-team, until: 2026-01-31}",
     "nearMiss": "# lint date 2026-10-19\nbrokers:\n  count: {min: 3}\nwaivers:\n  - {rule: brokers.count, reason: OPS-1, by: platform-team, until: 2026-10-19}"
+  },
+  {
+    "code": "zones-unreachable",
+    "severity": "error",
+    "title": "Zones required that the pod count cannot reach",
+    "triggers": "brokers:\n  count: 2\n  zones: {min: 3}",
+    "nearMiss": "brokers:\n  count: {min: 2}\n  zones: {min: 3}"
+  },
+  {
+    "code": "skew-unreachable",
+    "severity": "error",
+    "title": "Skew impossible for the allowed count and zones",
+    "triggers": "brokers:\n  count: 4\n  zones: 3\n  skew: 0",
+    "nearMiss": "brokers:\n  count: 4\n  zones: {min: 3}\n  skew: 0"
+  },
+  {
+    "code": "pernode-cannot-place-count",
+    "severity": "error",
+    "title": "perNode cannot place the pods that must be scheduled",
+    "triggers": "brokers:\n  count: 3\n  zones: {min: 1}\n  perNode: {max: 0}",
+    "nearMiss": "brokers:\n  count: 3\n  perNode: {max: 0}"
+  },
+  {
+    "code": "controller-quorum-zone-loss",
+    "severity": "warning",
+    "title": "KRaft quorum cannot survive losing one zone",
+    "triggers": "controllers:\n  count: 3\n  zones: 2",
+    "nearMiss": "controllers:\n  count: 3\n  zones: {min: 2}"
+  },
+  {
+    "code": "controller-quorum-even",
+    "severity": "warning",
+    "title": "Even KRaft controller count",
+    "triggers": "controllers:\n  count: 4",
+    "nearMiss": "controllers:\n  count: {min: 4, max: 5}"
+  },
+  {
+    "code": "config-value-kafka-refuses",
+    "severity": "error",
+    "title": "Broker setting admits only values Kafka refuses",
+    "triggers": "kafka:\n  source: brokers\n  config:\n    min.insync.replicas: {max: 0}",
+    "nearMiss": "kafka:\n  source: brokers\n  config:\n    min.insync.replicas: 2.0"
+  },
+  {
+    "code": "sensitive-config-from-brokers",
+    "severity": "error",
+    "title": "With source brokers, a config key Kafka never returns",
+    "triggers": "kafka:\n  source: brokers\n  config:\n    ssl.keystore.password: changeit",
+    "nearMiss": "kafka:\n  source: brokers\n  config:\n    ssl.keystore.type: PKCS12"
+  },
+  {
+    "code": "replication-factor-exceeds-brokers",
+    "severity": "warning",
+    "title": "Replication factor above the most brokers the reference allows",
+    "triggers": "brokers:\n  count: 3\nkafka:\n  config:\n    offsets.topic.replication.factor: 4",
+    "nearMiss": "brokers:\n  count: {oneOf: [3, 5]}\nkafka:\n  config:\n    offsets.topic.replication.factor: 4"
+  },
+  {
+    "code": "min-isr-not-below-rf",
+    "severity": "warning",
+    "title": "min.insync.replicas not below the replication factor or broker count",
+    "triggers": "kafka:\n  config:\n    default.replication.factor: 3\n    min.insync.replicas: 3",
+    "nearMiss": "kafka:\n  config:\n    default.replication.factor: 3\n    min.insync.replicas: 2"
+  },
+  {
+    "code": "isr-lost-with-one-zone",
+    "severity": "warning",
+    "title": "Losing one zone drops partitions below min.insync.replicas",
+    "triggers": "brokers:\n  zones: 2\nkafka:\n  config:\n    default.replication.factor: 3\n    min.insync.replicas: 2",
+    "nearMiss": "brokers:\n  zones: 3\nkafka:\n  config:\n    default.replication.factor: 3\n    min.insync.replicas: 2"
+  },
+  {
+    "code": "unclean-election-required",
+    "severity": "warning",
+    "title": "Reference requires unclean leader election",
+    "triggers": "kafka:\n  config:\n    unclean.leader.election.enable: true",
+    "nearMiss": "brokers:\n  count: 1\nkafka:\n  config:\n    unclean.leader.election.enable: true"
+  },
+  {
+    "code": "rule-never-passes",
+    "severity": "warning",
+    "title": "A tolerated rule that can never pass",
+    "triggers": "# lint date 2026-10-19\nbrokers:\n  count: 2\n  zones: {min: 3}\nwaivers:\n  - {rule: brokers.zones, reason: OPS-412, by: platform-team, until: 2026-12-31}",
+    "nearMiss": "# lint date 2026-10-19\nbrokers:\n  count: 2\n  zones: {min: 3}\nwaivers:\n  - {rule: brokers.zones, reason: OPS-412, by: platform-team, until: 2026-01-31}"
   }
 ]
