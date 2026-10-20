@@ -141,7 +141,7 @@ that sets a field its run doesn't read, or that the API would refuse.
 |---|---|---|
 | `experimentName` | string | Unique name for this experiment |
 | `disruptionType` | string | See table above |
-| `targetNamespace` | string | Kubernetes namespace |
+| `targetNamespace` | string | Kubernetes namespace: the Kafka cluster's (`kafka`, the default) or the Kates API's own. Kates refuses any other |
 | `targetLabel` | string | Pod label selector. A pod fault hits one pod it matches, at random, unless `targetPod`, `targetAll` or `targetBrokerId` picks. `strimzi.io/cluster=krafter` alone matches the KRaft controllers too: add `strimzi.io/broker-role=true` to hit brokers only |
 | `targetAll` | bool | Hit every pod `targetLabel` matches |
 | `targetBrokerId` | int | Hit this broker, by node ID, among the brokers `targetLabel` matches |

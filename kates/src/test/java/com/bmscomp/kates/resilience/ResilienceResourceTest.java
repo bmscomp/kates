@@ -22,6 +22,7 @@ import org.mockito.ArgumentCaptor;
 
 import com.bmscomp.kates.chaos.DisruptionType;
 import com.bmscomp.kates.disruption.DisruptionConcurrencyGuard;
+import com.bmscomp.kates.disruption.DisruptionPlan;
 import com.bmscomp.kates.disruption.DisruptionSafetyGuard;
 import com.bmscomp.kates.domain.TestType;
 
@@ -492,6 +493,35 @@ class ResilienceResourceTest {
                 .then()
                 .statusCode(400)
                 .body("message", is("No fault was injected: " + EVERY_BROKER));
+        verify(orchestrator, never()).execute(any());
+    }
+
+    /**
+     * The guard gets the fault's namespace, and its refusal stops the run
+     * before the stream starts. The guard is a mock here, so
+     * DisruptionSafetyGuardTest is what checks the refusal itself.
+     */
+    @Test
+    void aChaosSpecNamespaceReachesTheGuardAndItsRefusalStopsTheRun() {
+        String refusal = "Step 'chaosSpec': targetNamespace kube-system is neither kafka, the Kafka cluster's namespace"
+                + " (kates.chaos.kafka.namespace), nor the Kates API's own, kates";
+        when(safetyGuard.validatePlan(any()))
+                .thenReturn(DisruptionSafetyGuard.ValidationResult.rejected(List.of(), List.of(refusal)));
+
+        given().contentType("application/json")
+                .body("{\"testRequest\":{\"type\":\"LOAD\"},\"chaosSpec\":{\"experimentName\":\"dns\","
+                        + "\"disruptionType\":\"POD_DELETE\",\"targetNamespace\":\"kube-system\","
+                        + "\"targetLabel\":\"k8s-app=kube-dns\",\"targetAll\":true}}")
+                .when()
+                .post("/api/resilience")
+                .then()
+                .statusCode(400)
+                .body("message", is("No fault was injected: " + refusal));
+        ArgumentCaptor<DisruptionPlan> checked = ArgumentCaptor.forClass(DisruptionPlan.class);
+        verify(safetyGuard).validatePlan(checked.capture());
+        assertEquals(
+                "kube-system",
+                checked.getValue().getSteps().getFirst().faultSpec().targetNamespace());
         verify(orchestrator, never()).execute(any());
     }
 
