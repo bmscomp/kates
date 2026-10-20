@@ -127,14 +127,14 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"create NetworkPolicies or scale node pools, and only for the fault types that need one of those; every " +
 			"other type, and any check that fails with an error, counts as permitted, and a denied check is a step " +
 			"warning, never an error that makes wouldSucceed false. On the default litmus-crd provider Litmus " +
-			"injects every fault except POD_DELETE, ROLLING_RESTART and SCALE_DOWN as its own litmus-admin service " +
-			"account, so for those the check does not show whether the fault can run.",
+			"injects every fault except POD_DELETE, NETWORK_PARTITION, ROLLING_RESTART and SCALE_DOWN as its own " +
+			"litmus-admin service account, so for those the check does not show whether the fault can run.",
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:275-278,772-841",
 				"boolean canExecute = checkRbacPermissions(spec);", `"Insufficient RBAC permissions for "`,
 				"boolean checkRbacPermissions(FaultSpec spec)", `"RBAC check failed, assuming permitted"`),
-			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:42-54,81-83,265",
-				"EnumSet.of(DisruptionType.ROLLING_RESTART, DisruptionType.SCALE_DOWN, DisruptionType.POD_DELETE)",
+			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:41-59,86-88,270",
+				"ON_KUBERNETES_API = EnumSet.of(", "DisruptionType.POD_DELETE,", "DisruptionType.NETWORK_PARTITION);",
 				"return kubernetes.triggerFault(spec, onInject);", `engineSpec.chaosServiceAccount = "litmus-admin";`),
 			mcpAnchoredRef("kates/src/main/resources/application.properties:274-275",
 				"# Chaos coordination (noop | kubernetes | litmus-crd | hybrid)", "kates.chaos.provider=litmus-crd"),
@@ -228,7 +228,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"count from the moment the chaos provider reported the fault going in: after the step's delayBeforeSec, " +
 			"before the provider changed the cluster. On the default litmus-crd provider that moment comes before it " +
 			"picks the pods and creates the ChaosEngine, so the times include however long Litmus took to start the " +
-			"experiment. The kubernetes provider, which litmus-crd hands POD_DELETE, ROLLING_RESTART and SCALE_DOWN, " +
+			"experiment. The kubernetes provider, which litmus-crd hands POD_DELETE, NETWORK_PARTITION, ROLLING_RESTART " +
+			"and SCALE_DOWN, " +
 			"reports before it looks up what to hit, so a fault that then finds nothing to hit fails with recovery " +
 			"times all the same. Time to first ready is the first Ready event from any watched Kafka pod after that " +
 			"moment, which need not be a pod the fault hit. A step whose fault never went in, a Skipped one or one that " +
@@ -248,7 +249,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"disruption/KafkaIntelligenceService.java:125-127,198-217,241-246,310-324",
 				"public void markDisruptionStart(Instant at)", "private Duration computeTimeToFullIsr()",
 				"this.baselineLag = timeline.getLast().totalLag();", "private Duration computeTimeToLagRecovery(long baseLag)"),
-			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:81-93,102-121",
+			mcpAnchoredRef(mcpJava+"chaos/LitmusChaosProvider.java:86-98,107-126",
 				"return kubernetes.triggerFault(spec, onInject);",
 				"CompletableFuture.delayedExecutor(spec.delayBeforeSec(), TimeUnit.SECONDS, executor.get());",
 				"long startNanos = System.nanoTime();", "buildChaosEngine(spec, engineName, experimentName)",

@@ -154,14 +154,16 @@ that sets a field its run doesn't read, or that the API would refuse.
 | `fillPercentage` | int | Disk fill % (`IO_STRESS`) |
 | `ioWorkers` | int | Parallel I/O workers (`IO_STRESS`) |
 | `networkLatencyMs` | int | Added latency ms (`NETWORK_LATENCY`) |
-| `targetTopic` | string | A disruption plan aims a fault at the leader of this topic's `targetPartition`. A resilience run doesn't, but a `DNS_ERROR` on `litmus-crd` takes it as `TARGET_HOSTNAMES` |
+| `targetTopic` | string | A disruption plan aims a fault at the leader of this topic's `targetPartition`. A resilience run doesn't, but a `DNS_ERROR` on `litmus-crd` takes it as `TARGET_HOSTNAMES`. It has to be a Kafka topic name: letters, digits, `.`, `_` or `-` |
 | `targetPartition` | int | Partition of `targetTopic`, in a disruption plan only |
-| `envOverrides` | map | Env vars for the Litmus experiment (`litmus-crd` only). For a `NODE_DRAIN`, `TARGET_NODE` or `NODE_LABEL` picks the node instead of the pod `targetLabel` picks |
+| `envOverrides` | map | Env vars for the Litmus experiment (`litmus-crd` only). Only `TARGET_NODE` or `NODE_LABEL`, which pick the node a `NODE_DRAIN` drains instead of the pod `targetLabel` picks; any other variable is refused |
 
 ### `probes` field reference
 
 Every probe runs before the fault and after it, until all pass or
 `maxRecoveryWaitSec` is up; a `Continuous` one runs while the fault lasts too.
+A `cmdProbe` belongs here, not in `chaosSpec.probes`: Kates refuses a fault that
+carries one, since on `litmus-crd` Litmus ran it as `litmus-admin`.
 
 | YAML key | Type | Notes |
 |---|---|---|

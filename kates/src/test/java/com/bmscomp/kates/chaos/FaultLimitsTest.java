@@ -105,16 +105,90 @@ class FaultLimitsTest {
                         .build()));
     }
 
-    /** Litmus applies an override after the duration Kates sets, so it would undo the limit. */
     @Test
-    void anOverrideMayNotSetTheLitmusDurationOrRampTime() throws Exception {
+    void refusedOverridesAreNamedInKeyOrder() throws Exception {
         FaultSpec spec = posted("{\"experimentName\":\"probe\",\"disruptionType\":\"NETWORK_LATENCY\","
                 + "\"envOverrides\":{\"TOTAL_CHAOS_DURATION\":\"86400\",\"RAMP_TIME\":\"3600\","
                 + "\"NETWORK_INTERFACE\":\"eth0\"}}");
 
         assertEquals(
-                List.of("envOverrides.RAMP_TIME", "envOverrides.TOTAL_CHAOS_DURATION"),
+                List.of(
+                        "envOverrides.NETWORK_INTERFACE",
+                        "envOverrides.RAMP_TIME",
+                        "envOverrides.TOTAL_CHAOS_DURATION"),
                 List.copyOf(limits.violations(spec).keySet()));
+    }
+
+    /**
+     * Litmus applies an override after the env Kates sets: its duration, the
+     * namespace and pods (litmus-go and chaos-runner 3.28). Others reach its
+     * helper pods, which run privileged as root: their image, their service
+     * account, and values the helpers paste into a shell.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "TOTAL_CHAOS_DURATION",
+        "RAMP_TIME",
+        "CHAOS_NAMESPACE",
+        "TARGETS",
+        "APP_NAMESPACE",
+        "APP_LABEL",
+        "APP_KIND",
+        "TARGET_PODS",
+        "LIB_IMAGE",
+        "CHAOS_SERVICE_ACCOUNT",
+        "SOCKET_PATH",
+        "CHAOS_TYPE",
+        "NETWORK_INTERFACE"
+    })
+    void anOverrideMaySetOnlyTheNodeADrainTakes(String key) {
+        FaultSpec spec = FaultSpec.builder("probe")
+                .envOverrides(Map.of(key, "kube-system", "TARGET_NODE", "gamma", "NODE_LABEL", "drainable=true"))
+                .build();
+
+        assertEquals(
+                List.of("envOverrides." + key),
+                List.copyOf(limits.violations(spec).keySet()));
+    }
+
+    /** On litmus-crd, a DNS_ERROR's targetTopic goes into a shell command in Litmus's root helper pod. */
+    @Test
+    void aTargetTopicMustBeAKafkaTopicName() {
+        FaultSpec.Builder dns = FaultSpec.builder("dns").disruptionType(DisruptionType.DNS_ERROR);
+
+        assertEquals(
+                List.of("targetTopic"),
+                List.copyOf(
+                        limits.violations(dns.targetTopic("x'; reboot -f; '").build())
+                                .keySet()));
+        assertEquals(
+                List.of("targetTopic"),
+                List.copyOf(limits.violations(dns.targetTopic("a".repeat(250)).build())
+                        .keySet()));
+        assertEquals(
+                Map.of(),
+                limits.violations(dns.targetTopic("__consumer_offsets").build()));
+        assertEquals(
+                Map.of(),
+                limits.violations(
+                        dns.targetTopic("krafter-kafka-bootstrap.kafka.svc").build()));
+        assertEquals(Map.of(), limits.violations(dns.targetTopic("").build()));
+        assertEquals(Map.of(), limits.violations(dns.targetTopic(null).build()));
+    }
+
+    /** On litmus-crd a fault's cmdProbe ran in Litmus's experiment pod as litmus-admin. */
+    @Test
+    void aFaultMayCarryNoCmdProbe() {
+        FaultSpec spec = FaultSpec.builder("probed")
+                .probes(List.of(
+                        KafkaProbes.isrHealth(),
+                        ProbeSpec.builder("shell")
+                                .command("kubectl delete pods -n kube-system --all")
+                                .build(),
+                        KafkaProbes.clusterReady()))
+                .build();
+
+        assertEquals(List.of("probes[1]"), List.copyOf(limits.violations(spec).keySet()));
     }
 
     @Test

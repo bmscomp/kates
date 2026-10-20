@@ -117,7 +117,7 @@ Kates uses a pluggable backend architecture for both performance testing and cha
 
 | Provider | Description | When to Use |
 |----------|-------------|-------------|
-| `litmus-crd` | Creates Litmus ChaosEngine custom resources in Kubernetes. Litmus handles the actual fault injection lifecycle, including experiment pods, probes, and cleanup. | Full chaos engineering with Litmus installed |
+| `litmus-crd` | Creates Litmus ChaosEngine custom resources in Kubernetes. Litmus handles the actual fault injection lifecycle, including experiment pods and cleanup; Kates sends it no probes. | Full chaos engineering with Litmus installed |
 | `kubernetes` | Uses the Kubernetes API directly (e.g., `kubectl delete pod`, scale deployments, apply network policies). No external chaos framework required. | Lightweight chaos, no CRD dependencies |
 | `noop` | Simulates fault injection without actually doing anything. Returns synthetic outcomes for testing the orchestration logic. | Unit testing, dry-runs |
 | `hybrid` | Routes faults to the best available provider automatically. Prefers Litmus for supported experiment types, falls back to direct Kubernetes API for others. | Production with partial Litmus coverage |

@@ -27,7 +27,6 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import com.bmscomp.kates.chaos.litmus.ChaosEngine;
-import com.bmscomp.kates.chaos.litmus.ChaosEngineSpec;
 import com.bmscomp.kates.chaos.litmus.ChaosResult;
 import com.bmscomp.kates.chaos.litmus.ChaosResultStatus;
 
@@ -615,12 +614,13 @@ class LitmusChaosProviderTest {
     }
 
     /**
-     * Only a cmdProbe becomes a Litmus probe, the one type the provider gives
-     * inputs. Litmus has no kafkaProbe, and the k8sProbe "kafka Ready" is
-     * Kates' own query: Kates evaluates both, and Litmus would fail them empty.
+     * Litmus ran a cmdProbe inline, with sh -c in the experiment pod, as
+     * litmus-admin, which may delete pods in every namespace. Litmus has no
+     * kafkaProbe, and the k8sProbe "kafka Ready" is Kates' own query. Kates
+     * evaluates probes itself, in a resilience run.
      */
     @Test
-    void onlyCmdProbesBecomeLitmusProbes() {
+    void noProbeReachesLitmus() {
         FaultSpec spec = FaultSpec.builder("probed")
                 .targetBrokerId(2)
                 .disruptionType(DisruptionType.POD_KILL)
@@ -631,20 +631,6 @@ class LitmusChaosProviderTest {
                                 .command("echo 0")
                                 .expectedOutput("0")
                                 .build()))
-                .build();
-
-        List<ChaosEngineSpec.Probe> probes = build(spec).getSpec().experiments.getFirst().spec.probe;
-
-        assertEquals(List.of("custom"), probes.stream().map(p -> p.name).toList());
-        assertEquals("echo 0", probes.getFirst().cmdProbe.inputs.command);
-    }
-
-    @Test
-    void aFaultWhoseProbesKatesEvaluatesSendsLitmusNone() {
-        FaultSpec spec = FaultSpec.builder("probed")
-                .targetBrokerId(2)
-                .disruptionType(DisruptionType.POD_KILL)
-                .probes(List.of(KafkaProbes.isrHealth(), KafkaProbes.clusterReady()))
                 .build();
 
         assertNull(build(spec).getSpec().experiments.getFirst().spec.probe);
@@ -669,6 +655,35 @@ class LitmusChaosProviderTest {
         DeleteOptions options =
                 client.getKubernetesSerialization().unmarshal(delete.getUtf8Body(), DeleteOptions.class);
         assertEquals(45L, options.getGracePeriodSeconds());
+        assertTrue(client.resources(ChaosEngine.class)
+                .inNamespace("kafka")
+                .list()
+                .getItems()
+                .isEmpty());
+    }
+
+    @Test
+    void networkPartitionCutsOffThePodWithAKatesNetworkPolicy() throws Exception {
+        // Used to run pod-network-partition, which in litmus-go 3.28 needs
+        // TARGETS from an appinfo Kates leaves out: it failed with "provide the
+        // appLabel" before cutting anything off, and it ignores TARGET_PODS.
+        FaultSpec spec = FaultSpec.builder("split")
+                .targetBrokerId(2)
+                .disruptionType(DisruptionType.NETWORK_PARTITION)
+                .chaosDurationSec(1)
+                .build();
+
+        CompletableFuture<ChaosOutcome> fault = provider.triggerFault(spec);
+        var policy = client.network().networkPolicies().inNamespace("kafka").withName("kates-netpol-krafter-brokers-2");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (policy.get() == null && !fault.isDone() && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertNotNull(policy.get(), "broker 2 was never cut off");
+        ChaosOutcome outcome = fault.get(5, TimeUnit.SECONDS);
+
+        assertTrue(outcome.isPass(), outcome.failureReason());
+        assertNull(policy.get(), "the partition outlasted chaosDurationSec");
         assertTrue(client.resources(ChaosEngine.class)
                 .inNamespace("kafka")
                 .list()

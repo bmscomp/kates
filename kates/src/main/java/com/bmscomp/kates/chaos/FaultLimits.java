@@ -4,6 +4,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -55,14 +56,22 @@ public class FaultLimits {
             DisruptionType.NODE_DRAIN);
 
     /**
-     * Litmus settings an override would take past the limits. Kates sets
-     * TOTAL_CHAOS_DURATION from chaosDurationSec, and an override comes after
-     * it; RAMP_TIME makes Litmus wait before the fault and after it, longer
-     * than Kates waits for the result.
+     * The only Litmus variables an override may set: they pick the node a
+     * NODE_DRAIN drains, and the safety guard checks that node. Each of the
+     * rest takes a fault past what Kates checks (litmus-go and chaos-runner
+     * 3.28). The chaos-runner applies an override after the env it and Kates
+     * set: TOTAL_CHAOS_DURATION, RAMP_TIME, and the namespace and pods
+     * (CHAOS_NAMESPACE, TARGETS, TARGET_PODS). The helper pods
+     * run privileged as root with the host's PIDs: LIB_IMAGE is their image,
+     * CHAOS_SERVICE_ACCOUNT their account, SOCKET_PATH a host path they mount,
+     * and they paste values such as CHAOS_TYPE, CPU_LOAD or NETWORK_INTERFACE
+     * into a shell. Settings of the cluster, such as CONTAINER_RUNTIME, belong
+     * in the kates-chaos chart's experiment definitions.
      */
-    private static final Map<String, String> UNBOUNDED_LITMUS_ENV = Map.of(
-            "RAMP_TIME", "would delay the Litmus fault, with no limit, past the time Kates waits for it",
-            "TOTAL_CHAOS_DURATION", "would set the fault's duration past its limit; set chaosDurationSec instead");
+    private static final Set<String> LITMUS_ENV_OVERRIDES = Set.of("TARGET_NODE", "NODE_LABEL");
+
+    /** A legal Kafka topic name; on litmus-crd a DNS_ERROR's goes into a shell as TARGET_HOSTNAMES. */
+    private static final Pattern TOPIC_NAME = Pattern.compile("[a-zA-Z0-9._-]{1,249}");
 
     // Each default is written twice: in the annotation, for the application,
     // and as the field's value, for a FaultLimits made with new, as tests make it.
@@ -109,10 +118,13 @@ public class FaultLimits {
         }
         range(found, "delayBeforeSec", spec.delayBeforeSec(), 0, maxDelaySec, MAX_DELAY_SEC);
         if (spec.envOverrides() != null) {
-            UNBOUNDED_LITMUS_ENV.entrySet().stream()
-                    .filter(e -> spec.envOverrides().containsKey(e.getKey()))
-                    .sorted(Map.Entry.comparingByKey())
-                    .forEach(e -> found.put("envOverrides." + e.getKey(), e.getValue()));
+            spec.envOverrides().keySet().stream()
+                    .filter(key -> !LITMUS_ENV_OVERRIDES.contains(key))
+                    .sorted()
+                    .forEach(key -> found.put(
+                            "envOverrides." + key,
+                            "isn't one of the two envOverrides may set, TARGET_NODE and NODE_LABEL, which pick the"
+                                    + " node a NODE_DRAIN drains; set the fault's own fields instead"));
         }
         range(found, "networkLatencyMs", spec.networkLatencyMs(), 1, maxNetworkLatencyMs, MAX_NETWORK_LATENCY_MS);
         range(found, "fillPercentage", spec.fillPercentage(), 1, maxFillPercentage, MAX_FILL_PERCENTAGE);
@@ -120,6 +132,22 @@ public class FaultLimits {
         range(found, "memoryMb", spec.memoryMb(), 1, maxMemoryMb, MAX_MEMORY_MB);
         range(found, "ioWorkers", spec.ioWorkers(), 1, maxIoWorkers, MAX_IO_WORKERS);
         range(found, "gracePeriodSec", spec.gracePeriodSec(), 0, maxGracePeriodSec, MAX_GRACE_PERIOD_SEC);
+        if (spec.targetTopic() != null
+                && !spec.targetTopic().isEmpty()
+                && !TOPIC_NAME.matcher(spec.targetTopic()).matches()) {
+            found.put("targetTopic", "isn't a Kafka topic name: 1 to 249 letters, digits, '.', '_' or '-'");
+        }
+        // On litmus-crd a fault's cmdProbe ran with sh -c in Litmus's experiment
+        // pod, as litmus-admin, which may delete pods in every namespace.
+        for (int i = 0; spec.probes() != null && i < spec.probes().size(); i++) {
+            ProbeSpec probe = spec.probes().get(i);
+            if (probe != null && "cmdProbe".equals(probe.type())) {
+                found.put(
+                        "probes[" + i + "]",
+                        "is a cmdProbe, which a fault may not carry; give it to a resilience run's top-level probes,"
+                                + " which Kates runs in a broker pod");
+            }
+        }
         return found;
     }
 

@@ -86,9 +86,9 @@ var mcpAdHocBounds = map[string]mcpAdHocBound{
 // field descriptions say so: the kubernetes provider sizes IO_STRESS by
 // ioWorkers alone (KubernetesChaosProvider.java:525-538), while litmus-crd
 // sizes it by fillPercentage as well as ioWorkers
-// (LitmusChaosProvider.java:314-318). Both honour gracePeriodSec: litmus-crd
+// (LitmusChaosProvider.java:319-323). Both honour gracePeriodSec: litmus-crd
 // hands a POD_DELETE to the kubernetes provider, which deletes the pod with it
-// (LitmusChaosProvider.java:42-54,81-83; KubernetesChaosProvider.java:205-213).
+// (LitmusChaosProvider.java:41-59,86-88; KubernetesChaosProvider.java:205-213).
 // fillPercentage stays out of ad-hoc plans with DISK_FILL, the one type it is
 // meant for.
 var mcpAdHocTypeParam = map[string]string{
@@ -344,7 +344,7 @@ func mcpCheckAdHocTargets(at string, s *mcpAdHocStep) error {
 	if targets > 1 {
 		return mcpInvalidArgument(at+" sets more than one of targetBrokerId, targetPod and targetTopic; give at most one.", "")
 	}
-	// LitmusChaosProvider.java:319-323 makes a DNS_ERROR step's topic the
+	// LitmusChaosProvider.java:324-328 makes a DNS_ERROR step's topic the
 	// hostname whose lookups fail, so the fault would break only a hostname
 	// named after the topic.
 	if s.DisruptionType == "DNS_ERROR" && s.TargetTopic != "" {
@@ -761,11 +761,11 @@ func mcpTargetingOf(fs *mcpFaultSpecView) string {
 // reading of plan §5.2 than its text ("no experimentName in the resolved
 // plan"). Every playbook sets experimentName on every step
 // (kates/src/main/resources/playbooks/*.yaml), so the literal rule would flag
-// them all, while the Litmus provider maps every type but three to its own
-// experiment and routes those three, POD_DELETE, ROLLING_RESTART and
-// SCALE_DOWN, to the kubernetes provider: experimentName picks the experiment
-// only for a step without a type
-// (LitmusChaosProvider.java:29-54,81-83,228-255), and otherwise only names
+// them all, while the Litmus provider maps every type but four to its own
+// experiment and routes those four, POD_DELETE, NETWORK_PARTITION,
+// ROLLING_RESTART and SCALE_DOWN, to the kubernetes provider: experimentName
+// picks the experiment only for a step without a type
+// (LitmusChaosProvider.java:29-59,86-88,233-260), and otherwise only names
 // the fault. The plan's wording is a follow-up.
 func mcpAgentLimitFindings(v *mcpPlanView) []mcpAgentLimitFinding {
 	findings := []mcpAgentLimitFinding{}
