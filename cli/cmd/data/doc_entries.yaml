@@ -2277,6 +2277,12 @@
     on kind; --read-only-source keeps every MirrorMaker write on the target,
     which is what a source you may only read needs; --dry-run prints the helm
     command and the values file and stops.
+
+    The release carries the lab's label, so down deletes the topics it
+    mirrored into. Like up, it installs nothing when another lab, or another
+    --release under the same lab name, already mirrors one of its topics onto
+    the target, or when the target already has one of its topic names after
+    the policy; --dry-run checks neither.
   flags:
     - name: "--from"
       type: string

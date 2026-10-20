@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -200,6 +201,46 @@ func TestMigrateMirrorDeployDryRunFromSource(t *testing.T) {
 	}
 	if f.hasLine("helm upgrade") {
 		t.Fatal("--dry-run installs nothing")
+	}
+}
+
+// mirror deploy labels its release as a lab, so down would delete payments
+// with it: it refuses what up refuses, before it asks to install. No --yes,
+// so a refusal that came after the prompt would fail on the prompt instead.
+func TestMigrateMirrorDeployRefusesWhatUpRefuses(t *testing.T) {
+	for _, tc := range []struct {
+		name, release, secret, mirrors, topics, want string
+	}{
+		{name: "a topic the target has", secret: "kates-mm2", mirrors: `{"items":[]}`, topics: "__consumer_offsets\npayments", want: "topic(s) payments already exist"},
+		{name: "a topic another lab mirrors", secret: "kates-mm2", mirrors: `{"items":[{"metadata":{"name":"mm2-other-mirror-maker2","labels":{"kates.io/lab":"other"}},
+		  "spec":{"mirrors":[{"topicsPattern":"payments"}]}}]}`, topics: "__consumer_offsets", want: "lab other already mirrors topic payments"},
+		// The same lab name with another release is a second mirror, not a re-run.
+		{name: "a topic another release of the lab mirrors", release: "mm2-b", secret: "kates-mm2", mirrors: `{"items":[{"metadata":{"name":"mm2-m391-430-mirror-maker2","labels":{"kates.io/lab":"m391-430"}},
+		  "spec":{"mirrors":[{"topicsPattern":"payments"}]}}]}`, topics: "__consumer_offsets\npayments", want: "lab m391-430 already mirrors topic payments"},
+		{name: "no target credential", mirrors: `{"items":[]}`, topics: "__consumer_offsets", want: "secret kates-mm2 not found in kafka"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			migrateTestRepo(t)
+			f := newFakeProc(t)
+			scriptCluster(f, true)
+			scriptPods(f)
+			f.on("kubectl -n kafka get secret kates-mm2 --ignore-not-found -o jsonpath={.metadata.name}", tc.secret)
+			f.on("kubectl -n kafka get kafkamirrormaker2 -l kates.io/lab -o json", tc.mirrors)
+			f.on(targetTopicsList, tc.topics)
+			captureOutput(t, "table")
+
+			flags := &migrateMirrorFlags{FromBootstrap: "old.example:9092", SourceVersion: "3.9.1", Policy: "identity", Topics: "payments", Namespace: "kafka", TargetCluster: "krafter", Release: tc.release, Timeout: 600, SourceMechanism: "plain"}
+			err := runMigrateMirrorDeploy(context.Background(), flags)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+			if f.hasLine("helm upgrade") || f.hasLine("helm install") {
+				t.Fatalf("nothing may be installed after the refusal:\n  %s", strings.Join(f.lines(), "\n  "))
+			}
+			if f.hasLine("kubectl -n kafka apply -f -") && !f.hasLine("kubectl -n kafka delete pod kates-migrate-target") {
+				t.Fatal("the check's client pod was left behind")
+			}
+		})
 	}
 }
 
