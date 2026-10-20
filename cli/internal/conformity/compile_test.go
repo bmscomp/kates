@@ -203,3 +203,13 @@ func TestWaiverExpired(t *testing.T) {
 		t.Errorf("expired waiver: %+v", ds)
 	}
 }
+
+// topics declares rules of its own: a reference with no other compiles,
+// and a waiver can name them.
+func TestTopicsRules(t *testing.T) {
+	ds := diagnose(t, "  topics:\n    replicationFactor: {min: 3}\n    exclude: [__]\n"+
+		"  waivers:\n    - {rule: topics.replicationFactor, reason: r, by: me, until: 2026-12-31}\n")
+	for _, d := range ds {
+		t.Errorf("%s", d.Format("topics.yaml"))
+	}
+}

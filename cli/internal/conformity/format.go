@@ -198,7 +198,9 @@ func (w *walker) format(n *yaml.Node, schemas []map[string]any) *yaml.Node {
 			if _, dup := pairs[key.Value]; dup {
 				continue // an exact duplicate: Format refused the others
 			}
-			pairs[key.Value] = [2]*yaml.Node{key, w.format(val, child(eff, key.Value))}
+			formatted := w.format(val, child(eff, key.Value))
+			keepOnKeyLine(key, formatted)
+			pairs[key.Value] = [2]*yaml.Node{key, formatted}
 			original = append(original, key.Value)
 		}
 		keys, free := order(eff)
@@ -229,6 +231,18 @@ func (w *walker) format(n *yaml.Node, schemas []map[string]any) *yaml.Node {
 		}
 	}
 	return n
+}
+
+// keepOnKeyLine puts the comment written on a key's line where yaml.v3
+// prints it on that line: on a value written on one line, or on the key of
+// a value that spans lines. Anywhere else it prints after the next key.
+func keepOnKeyLine(key, val *yaml.Node) {
+	comment := strings.TrimSpace(key.LineComment + " " + val.LineComment)
+	if val.Kind == yaml.ScalarNode || val.Style&yaml.FlowStyle != 0 {
+		key.LineComment, val.LineComment = "", comment
+	} else {
+		key.LineComment, val.LineComment = comment, ""
+	}
 }
 
 func contains(list []string, s string) bool {

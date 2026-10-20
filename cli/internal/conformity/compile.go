@@ -294,6 +294,10 @@ func declaredRules(spec *yaml.Node) []rule {
 			add(childPath("kafka.config", config.Content[i].Value), config.Content[i+1], "config")
 		}
 	}
+	topics := get(spec, "topics")
+	for _, t := range []string{"replicationFactor", "minInsyncReplicas"} {
+		add("topics."+t, get(topics, t), "integer")
+	}
 	monitoring := get(spec, "monitoring")
 	for _, m := range []string{"metrics", "kafkaExporter", "podMonitor"} {
 		add("monitoring."+m, get(monitoring, m), "text")
