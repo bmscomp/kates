@@ -137,6 +137,17 @@ public class FaultLimits {
                 && !TOPIC_NAME.matcher(spec.targetTopic()).matches()) {
             found.put("targetTopic", "isn't a Kafka topic name: 1 to 249 letters, digits, '.', '_' or '-'");
         }
+        // On litmus-crd a fault's cmdProbe ran with sh -c in Litmus's experiment
+        // pod, as litmus-admin, which may delete pods in every namespace.
+        for (int i = 0; spec.probes() != null && i < spec.probes().size(); i++) {
+            ProbeSpec probe = spec.probes().get(i);
+            if (probe != null && "cmdProbe".equals(probe.type())) {
+                found.put(
+                        "probes[" + i + "]",
+                        "is a cmdProbe, which a fault may not carry; give it to a resilience run's top-level probes,"
+                                + " which Kates runs in a broker pod");
+            }
+        }
         return found;
     }
 

@@ -176,6 +176,21 @@ class FaultLimitsTest {
         assertEquals(Map.of(), limits.violations(dns.targetTopic(null).build()));
     }
 
+    /** On litmus-crd a fault's cmdProbe ran in Litmus's experiment pod as litmus-admin. */
+    @Test
+    void aFaultMayCarryNoCmdProbe() {
+        FaultSpec spec = FaultSpec.builder("probed")
+                .probes(List.of(
+                        KafkaProbes.isrHealth(),
+                        ProbeSpec.builder("shell")
+                                .command("kubectl delete pods -n kube-system --all")
+                                .build(),
+                        KafkaProbes.clusterReady()))
+                .build();
+
+        assertEquals(List.of("probes[1]"), List.copyOf(limits.violations(spec).keySet()));
+    }
+
     @Test
     void checkRefusesNamingEveryParameterInFieldOrder() throws Exception {
         FaultSpec spec = posted("{\"experimentName\":\"runaway\",\"disruptionType\":\"CPU_STRESS\","
