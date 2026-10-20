@@ -117,6 +117,19 @@ class FaultLimitsTest {
                 List.copyOf(limits.violations(spec).keySet()));
     }
 
+    /** What litmus-go 3.28 and its chaos-runner read to pick the experiment's namespace or pods. */
+    @ParameterizedTest
+    @CsvSource({"CHAOS_NAMESPACE", "TARGETS", "APP_NAMESPACE", "APP_LABEL", "APP_KIND", "TARGET_PODS"})
+    void anOverrideMayNotPickTheLitmusNamespaceOrPods(String key) {
+        FaultSpec spec = FaultSpec.builder("probe")
+                .envOverrides(Map.of(key, "kube-system", "TARGET_NODE", "gamma", "NODE_LABEL", "drainable=true"))
+                .build();
+
+        assertEquals(
+                List.of("envOverrides." + key),
+                List.copyOf(limits.violations(spec).keySet()));
+    }
+
     @Test
     void checkRefusesNamingEveryParameterInFieldOrder() throws Exception {
         FaultSpec spec = posted("{\"experimentName\":\"runaway\",\"disruptionType\":\"CPU_STRESS\","

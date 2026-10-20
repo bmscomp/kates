@@ -325,6 +325,27 @@ class DisruptionSafetyGuardTest {
                 "a step without a namespace is in the Kafka namespace");
     }
 
+    /**
+     * Litmus applies an override after the namespace and pods Kates sets, and
+     * litmus-admin may delete pods in every namespace, so this passed and the
+     * experiment ran in kube-system.
+     */
+    @Test
+    void aLitmusOverrideThatPicksTheNamespaceIsRefused() {
+        createZonedBrokers();
+        FaultSpec dns = FaultSpec.builder("dns")
+                .targetBrokerId(0)
+                .disruptionType(DisruptionType.POD_KILL)
+                .envOverrides(Map.of("APP_NAMESPACE", "kube-system"))
+                .build();
+
+        assertEquals(
+                List.of("Step 'step-0': envOverrides.APP_NAMESPACE would aim the Litmus experiment at a namespace or"
+                        + " pods the safety guard doesn't check; set targetNamespace, targetPod, targetLabel or"
+                        + " targetBrokerId instead"),
+                guard.validatePlan(plan(1, dns)).errors());
+    }
+
     private static FaultSpec rollingRestart(String selector, int chaosDurationSec) {
         return FaultSpec.builder("roll")
                 .targetLabel(selector)

@@ -54,15 +54,33 @@ public class FaultLimits {
             DisruptionType.DISK_FILL,
             DisruptionType.NODE_DRAIN);
 
+    private static final String UNCHECKED_TARGET = "would aim the Litmus experiment at a namespace or pods the safety"
+            + " guard doesn't check; set targetNamespace, targetPod, targetLabel or targetBrokerId instead";
+
     /**
      * Litmus settings an override would take past the limits. Kates sets
      * TOTAL_CHAOS_DURATION from chaosDurationSec, and an override comes after
      * it; RAMP_TIME makes Litmus wait before the fault and after it, longer
      * than Kates waits for the result.
+     *
+     * <p>The rest pick the experiment's namespace or pods (litmus-go and
+     * chaos-runner 3.28), past the namespaces and the blast radius the safety
+     * guard checks, and by the kates-chaos chart's defaults litmus-admin may
+     * delete pods in every namespace. The
+     * chaos-runner applies an override after the CHAOS_NAMESPACE and TARGETS
+     * it sets itself; pod experiments look up TARGET_PODS in either, and
+     * pod-network-partition cuts off APP_LABEL's pods in APP_NAMESPACE.
+     * TARGET_NODE and NODE_LABEL stay: the guard checks the node they drain.
      */
     private static final Map<String, String> UNBOUNDED_LITMUS_ENV = Map.of(
             "RAMP_TIME", "would delay the Litmus fault, with no limit, past the time Kates waits for it",
-            "TOTAL_CHAOS_DURATION", "would set the fault's duration past its limit; set chaosDurationSec instead");
+            "TOTAL_CHAOS_DURATION", "would set the fault's duration past its limit; set chaosDurationSec instead",
+            "CHAOS_NAMESPACE", UNCHECKED_TARGET,
+            "TARGETS", UNCHECKED_TARGET,
+            "APP_NAMESPACE", UNCHECKED_TARGET,
+            "APP_LABEL", UNCHECKED_TARGET,
+            "APP_KIND", UNCHECKED_TARGET,
+            "TARGET_PODS", UNCHECKED_TARGET);
 
     // Each default is written twice: in the annotation, for the application,
     // and as the field's value, for a FaultLimits made with new, as tests make it.
