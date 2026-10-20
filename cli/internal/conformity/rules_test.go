@@ -73,3 +73,22 @@ func TestTwoPassJudgesEachFindingAlone(t *testing.T) {
 		t.Errorf("rule-never-passes: %q", tolerated)
 	}
 }
+
+// Quantities compare exactly, and only a fractional min below a mebibyte
+// is a lost unit: a whole one is a deliberate "must be set".
+func TestQuantityEdges(t *testing.T) {
+	for _, tc := range []struct{ spec, code string }{
+		{"  brokers:\n    count: 3\n    requests: {cpu: 700m}\n    limits: {cpu: {max: \"0.7\"}}\n", ""},
+		{"  brokers:\n    count: 3\n    requests: {cpu: 701m}\n    limits: {cpu: {max: \"0.7\"}}\n", "request-above-limit"},
+		{"  brokers:\n    count: {min: 0}\n    requests: {cpu: 2}\n    limits: {cpu: 1}\n", ""},
+		{"  brokers:\n    requests: {memory: {min: 0.5}}\n", "byte-quantity-too-small"},
+		{"  brokers:\n    requests: {memory: {min: 1Ki}}\n", ""},
+	} {
+		ds := diagnose(t, tc.spec)
+		for _, code := range []string{"request-above-limit", "byte-quantity-too-small"} {
+			if got := find(ds, code) != nil; got != (code == tc.code) {
+				t.Errorf("%s: %s fires %v; got %v", tc.spec, code, got, codes(ds))
+			}
+		}
+	}
+}
