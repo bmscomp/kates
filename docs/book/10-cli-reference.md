@@ -624,7 +624,7 @@ Before it calls the API, it lints the file as `kates conformity lint` does and p
 
 #### conformity lint
 
-Check reference files offline, as a compiler does: no Kates API and no cluster. It works phase by phase: YAML syntax, duplicates, the JSON Schema, the checks the Kates API makes beyond the schema, then incoherence between constraints, such as an expired waiver. It also warns when the file's `# yaml-language-server: $schema=` comment links to another schema than the one the check uses. Each finding is a line `file:line:col: severity: path: message [code]`, with the source line under it. A shared corpus keeps it refusing exactly what the API refuses.
+Check reference files offline, as a compiler does: no Kates API and no cluster. It works phase by phase: YAML syntax, duplicates, the JSON Schema, the checks the Kates API makes beyond the schema, then incoherence between constraints, such as an expired waiver. It also warns when the file's `# yaml-language-server: $schema=` comment links to another schema than the one the check uses. A key set twice is an error, `duplicate-key` when both values are the same and `conflicting-key` when they differ, because the check and the Kates API refuse it. Each finding is a line `file:line:col: severity: path: message [code]`, with the source line under it. A shared corpus keeps it refusing exactly what the API refuses.
 
 ```text
 prod-3az.yaml:8:5: error: spec.brokers.cuont: unknown field (did you mean "count"?) [unknown-field]
@@ -644,7 +644,7 @@ It exits `0` when no file has an error (warnings are printed), `1` when one does
 
 #### conformity fmt
 
-Write reference files in one canonical form. Keys follow the schema's order, a broker config's keys are alphabetical, and each constraint takes its shortest form: `{equals: 3}` becomes `3`, and `severity: fail`, the default, goes. Exact duplicates go too: a key set twice to the same value, a value repeated in a list, a waiver or listener listed twice. Comments stay with what they annotate.
+Write reference files in one canonical form. Keys follow the schema's order, a broker config's keys are alphabetical, and each constraint takes its shortest form: `{equals: 3}` becomes `3`, and `severity: fail`, the default, goes. Exact duplicates go too: a key set twice to the same value, a value repeated in a list, a waiver or listener listed twice. That fixes lint's `duplicate-key` and `duplicate-item` errors, and its `duplicate-value` warning. Comments stay with what they annotate.
 
 ```bash
 kates conformity fmt prod-3az.yaml
