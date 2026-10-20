@@ -217,6 +217,18 @@ func RawJSON(data []byte) {
 }
 
 func Table(headers []string, rows [][]string) {
+	table(headers, rows, nil)
+}
+
+// TableNotes is Table with a note under each row that has one: dimmed lines,
+// one per line of the note, starting at the second column and cut to the
+// terminal width, so long detail stays out of the columns and the table fits
+// the screen.
+func TableNotes(headers []string, rows [][]string, notes []string) {
+	table(headers, rows, notes)
+}
+
+func table(headers []string, rows [][]string, notes []string) {
 	if len(rows) == 0 {
 		Hint("No data to display.")
 		return
@@ -252,7 +264,11 @@ func Table(headers []string, rows [][]string) {
 	fmt.Fprintln(Out, headerLine)
 	fmt.Fprintln(Out, sepLine)
 
-	for _, row := range rows {
+	indent := 2
+	if len(widths) > 1 {
+		indent += widths[0] + 2
+	}
+	for r, row := range rows {
 		var line string
 		for i, cell := range row {
 			if i >= len(widths) {
@@ -284,8 +300,27 @@ func Table(headers []string, rows [][]string) {
 			line += "  " + rendered
 		}
 		fmt.Fprintln(Out, line)
+		if r < len(notes) {
+			printNote(notes[r], indent)
+		}
 	}
 	fmt.Fprintln(Out)
+}
+
+// printNote writes each line of a row's note, dimmed, from column indent, cut
+// to the terminal width.
+func printNote(note string, indent int) {
+	if note == "" {
+		return
+	}
+	tail := "…"
+	if ASCII() {
+		tail = "..."
+	}
+	for _, line := range strings.Split(note, "\n") {
+		line = runewidth.Truncate(stripAnsi(line), max(TermWidth()-indent, 20), tail)
+		fmt.Fprintln(Out, strings.Repeat(" ", indent)+DimStyle.Render(line))
+	}
 }
 
 func Divider() {
