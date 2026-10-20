@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -79,6 +81,12 @@ class KafkaReferenceReaderTest {
             {kafka: {listeners: {require: [{name: TLS-1, tls: true}]}}} | spec.kafka.listeners.require[0].name | must be a Strimzi listener name: up to 11 lower-case letters and digits
             {kafka: {listeners: {every: {auth: anonymous}}}}        | spec.kafka.listeners.every.auth        | must be one of none, tls, scram-sha-512, oauth, custom
             {kafka: {source: admin, rackAwareness: true}}           | spec.kafka.source                      | must be one of cr, brokers
+            {topics: {exclude: [kates-]}}                           | spec.topics                            | declares no rule: replicationFactor or minInsyncReplicas
+            {topics: {replicationFactor: "3"}}                      | spec.topics.replicationFactor          | expected a whole number
+            {topics: {minInsyncReplicas: 10001}}                    | spec.topics.minInsyncReplicas          | must be from 0 to 10000
+            {topics: {replicationFactor: 3, exclude: kates-}}       | spec.topics.exclude                    | expected a list
+            {topics: {replicationFactor: 3, exclude: [kates*]}}     | spec.topics.exclude[0]                 | must be the start of a topic name: up to 249 letters, digits, ., _ and -
+            {topics: {replicationFactor: 3, exclude: [null]}}       | spec.topics.exclude[0]                 | required
             {target: {platform: confluent}, brokers: {count: 3}}    | spec.target.platform                   | must be strimzi, the only platform in v1alpha1
             {target: {name: Krafter}, brokers: {count: 3}}          | spec.target.name                       | must be a DNS label: up to 63 lower-case letters, digits and -
             {zoneLabel: topology.kubernetes.io/zone}                | spec                                   | declares no rule
@@ -97,6 +105,15 @@ class KafkaReferenceReaderTest {
                 error.getFieldErrors().get(path),
                 () -> error.getFieldErrors().toString());
         assertTrue(error.getMessage().contains(path + ": " + reason), error.getMessage());
+    }
+
+    @Test
+    void refusesMoreThanFiftyExcludedPrefixes() {
+        String prefixes = IntStream.rangeClosed(0, 50).mapToObj(i -> "t" + i).collect(Collectors.joining(", "));
+
+        ApiError error = refusal("{topics: {replicationFactor: 3, exclude: [" + prefixes + "]}}");
+
+        assertEquals(Map.of("spec.topics.exclude", "lists more than 50 prefixes"), error.getFieldErrors());
     }
 
     /** A field left out declares no rule, and equal bounds are one exact value. */
