@@ -52,7 +52,9 @@ public class ConformityResource {
     @APIResponse(responseCode = "400", description = "A reference the check cannot run, each field's reason by path")
     @APIResponse(responseCode = "409", description = "The reference is for another cluster, or its Kafka is missing")
     @APIResponse(responseCode = "413", description = "A reference over 256 KiB")
-    @APIResponse(responseCode = "503", description = "The Kubernetes API does not answer")
+    @APIResponse(
+            responseCode = "503",
+            description = "The Kubernetes API does not answer, or refuses the Kates API the Kafka CR's get")
     public Response check(byte[] body) {
         try {
             return Response.ok(check.check(reader.read(body))).build();

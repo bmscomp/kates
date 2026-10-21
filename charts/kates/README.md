@@ -99,7 +99,7 @@ that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
 
 ### Namespace-only install
 
-`rbac.scope=namespace` installs Kates with no cluster-scoped object, so an account with the built-in `edit` role in the release namespace can install it. Performance and `INTEGRITY` tests make no Kubernetes call. Chaos is off: `KATES_CHAOS_PROVIDER` is `noop` unless `chaos.provider` is set, and startup orphan recovery is skipped. A conformity check reads the Kafka namespace (`networkPolicy.kafka.namespace`) through one read-only Role:
+`rbac.scope=namespace` installs Kates with no cluster-scoped object. Performance and `INTEGRITY` tests make no Kubernetes call. Chaos is off: `KATES_CHAOS_PROVIDER` is `noop` unless `chaos.provider` is set. A conformity check reads the Kafka namespace, `networkPolicy.kafka.namespace` (the chart sets `KATES_TOPOLOGY_KAFKA_NAMESPACE` from it), through one read-only Role:
 
 | Resource | Verbs |
 |----------|-------|
@@ -108,11 +108,11 @@ that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
 | `pods`, `persistentvolumeclaims` | `list` |
 | `monitoring.coreos.com` `podmonitors` | `list` |
 
-When the installer can't create Roles in the Kafka namespace, install with `rbac.kafkaNamespaceRole=false`, and have that namespace's admin apply the Role from the same release name and namespace:
+An installer with only `edit` in the release namespace can't create that Role, so it installs with `rbac.kafkaNamespaceRole=false` as well. Kubernetes lets an account create a Role only for permissions it holds itself, so an account with Strimzi's and the Prometheus Operator's reads in the Kafka namespace, a cluster admin where those operators don't add them to `admin`, renders it from the same release name, namespace and values, and applies it:
 
 ```bash
-helm template kates charts/kates -n team --set rbac.scope=namespace \
-  --show-only templates/rbac.yaml | kubectl apply -f -
+helm template kates charts/kates -n team -f team-values.yaml \
+  --set rbac.kafkaNamespaceRole=true --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
 Without node access, a conformity check reports `zones`, `skew` and `kafka.rackAwareness` (source `cr`) as `UNKNOWN`, and finds PodMonitors only in the Kafka namespace.

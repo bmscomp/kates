@@ -903,13 +903,25 @@ func discoverServices(ctx context.Context) map[string]bool {
 		}
 		return nil
 	}
-	if list("-A") == nil {
+	if err := list("-A"); err == nil || !forbidden(err) {
 		return result
 	}
 	for _, ns := range uniqueStrings([]string{portsAppNS, portsKafkaNS}) {
 		_ = list("-n", ns) // a namespace it may not read adds nothing
 	}
 	return result
+}
+
+// forbidden says whether kubectl failed because RBAC refused the request, as
+// it says on stderr ("services is forbidden: User ..."), rather than because
+// the cluster is unreachable, where trying other namespaces only waits longer.
+func forbidden(err error) bool {
+	text := err.Error()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		text += " " + string(exitErr.Stderr)
+	}
+	return strings.Contains(strings.ToLower(text), "forbidden")
 }
 
 // matchSpecs matches discovered services against the well-known port map

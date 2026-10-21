@@ -928,6 +928,16 @@ func TestDiscoverServices_FallsBackToTheAppAndKafkaNamespaces(t *testing.T) {
 	if specs := matchSpecs(got); len(specs) == 0 || specs[0].Namespace != "team" {
 		t.Errorf("matchSpecs(%v) = %+v, want the Kates API in team", got, specs)
 	}
+
+	// An unreachable cluster refuses nothing: other namespaces would only wait as long again.
+	calls = nil
+	runExecOutputFn = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return nil, errors.New("Unable to connect to the server: dial tcp 127.0.0.1:6443: connect: connection refused")
+	}
+	if got := discoverServices(context.Background()); len(got) != 0 || len(calls) != 1 {
+		t.Errorf("unreachable cluster: discovered %v after %d kubectl calls, want nothing after 1", got, len(calls))
+	}
 }
 
 func TestRepairLocalAPIPortForward_SkipsNonPortsContext(t *testing.T) {

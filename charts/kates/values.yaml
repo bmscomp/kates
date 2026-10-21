@@ -58,14 +58,14 @@ rbac:
   # -- Create the RBAC objects rbac.scope calls for
   create: true
   # -- cluster: a ClusterRole and ClusterRoleBinding for every feature, chaos
-  # included. namespace: nothing cluster-scoped, so an account with only edit
-  # in the release namespace can install; tests and conformity checks run,
-  # chaos is off (KATES_CHAOS_PROVIDER=noop unless chaos.provider is set).
+  # included. namespace: nothing cluster-scoped; tests and conformity checks
+  # run, chaos is off (KATES_CHAOS_PROVIDER=noop unless chaos.provider is set).
   scope: cluster
   # -- With scope namespace: render the read-only Role and RoleBinding a
-  # conformity check needs in the Kafka namespace (networkPolicy.kafka.namespace).
-  # Set false when the installer can't create Roles there; that namespace's
-  # admin applies them from `helm template ... --show-only templates/rbac.yaml`.
+  # conformity check needs in the Kafka namespace (networkPolicy.kafka.namespace,
+  # which the check then reads). An installer with only edit sets it false, and
+  # an account that may grant those reads applies them from
+  # `helm template ... --show-only templates/rbac.yaml`.
   kafkaNamespaceRole: true
   # -- Grant the writes the direct Kubernetes chaos backend makes itself
   # (KATES_CHAOS_PROVIDER=kubernetes, or hybrid without Litmus): StatefulSet

@@ -181,8 +181,8 @@ data:
   KATES_CHAOS_PROVIDER: {{ . | quote }}
   {{- end }}
   {{- if $namespaced }}
-  {{- /* Startup orphan recovery lists NetworkPolicies in every namespace. */}}
-  KATES_CHAOS_ORPHAN_RECOVERY_ENABLED: "false"
+  {{- /* The namespace the conformity check reads is the one its Role is granted in. */}}
+  KATES_TOPOLOGY_KAFKA_NAMESPACE: {{ .Values.networkPolicy.kafka.namespace | quote }}
   {{- end }}
 
   {{- with .Values.faultTolerance }}

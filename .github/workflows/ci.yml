@@ -305,17 +305,22 @@ jobs:
                       'resources: \["pods", "persistentvolumeclaims"\]' 'resources: \["podmonitors"\]'; do
             grep -q "${rule}" <<<"${rbac}" || fail "missing rule ${rule}"
           done
-          if grep -qE 'verbs: .*"(create|update|patch|delete|watch)"' <<<"${rbac}"; then
+          [ "$(grep -c -- '- apiGroups:' <<<"${rbac}")" = 4 ] || fail "the Kafka-namespace Role has other than its 4 rules"
+          if grep -E '^ +verbs:' <<<"${rbac}" | grep -vqE 'verbs: \["(get|list)"\]$'; then
             fail "the Kafka-namespace Role grants more than get and list"
           fi
-          if helm template kates charts/kates/ --set rbac.scope=namespace \
-               --set rbac.kafkaNamespaceRole=false --show-only templates/rbac.yaml > /dev/null 2>&1; then
-            fail "rbac.kafkaNamespaceRole=false still renders the Role"
-          fi
+          out=$(helm template kates charts/kates/ --set rbac.scope=namespace \
+                  --set rbac.kafkaNamespaceRole=false --show-only templates/rbac.yaml 2>&1) || true
+          grep -q 'could not find template' <<<"${out}" || fail "rbac.kafkaNamespaceRole=false still renders the Role"
+          # helm upgrade --reuse-values from 0.11.6 has neither value: that is scope cluster.
+          helm template kates charts/kates/ --set rbac.scope=null --set rbac.kafkaNamespaceRole=null \
+              --show-only templates/rbac.yaml | grep -q '^kind: ClusterRole$' \
+            || fail "a missing rbac.scope does not render the ClusterRole"
           cm=$(helm template kates charts/kates/ --set rbac.scope=namespace \
-                 --show-only templates/configmap.yaml)
+                 --set networkPolicy.kafka.namespace=kafka-ns --show-only templates/configmap.yaml)
           grep -q 'KATES_CHAOS_PROVIDER: "noop"' <<<"${cm}" || fail "chaos not off by default"
-          grep -q 'KATES_CHAOS_ORPHAN_RECOVERY_ENABLED: "false"' <<<"${cm}" || fail "orphan recovery not off"
+          grep -q 'KATES_TOPOLOGY_KAFKA_NAMESPACE: "kafka-ns"' <<<"${cm}" \
+            || fail "the check does not read the namespace its Role is in"
           cm=$(helm template kates charts/kates/ --set rbac.scope=namespace \
                  --set chaos.provider=kubernetes --show-only templates/configmap.yaml)
           grep -q 'KATES_CHAOS_PROVIDER: "kubernetes"' <<<"${cm}" || fail "chaos.provider not honoured"

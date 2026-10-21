@@ -1,6 +1,7 @@
 {{- if .Values.serviceAccount.create }}
 {{- if .Values.rbac.create }}
-{{- if eq .Values.rbac.scope "cluster" }}
+{{- /* Anything but namespace, a missing value too (helm upgrade --reuse-values from 0.11.6), is cluster. */}}
+{{- if ne .Values.rbac.scope "namespace" }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -93,7 +94,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kates.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
-{{- else if .Values.rbac.kafkaNamespaceRole }}
+{{- else if or (not (hasKey .Values.rbac "kafkaNamespaceRole")) .Values.rbac.kafkaNamespaceRole }}
 {{- /*
   rbac.scope=namespace: nothing cluster-scoped. Performance and INTEGRITY runs
   make no Kubernetes call; a conformity check reads these in the Kafka
