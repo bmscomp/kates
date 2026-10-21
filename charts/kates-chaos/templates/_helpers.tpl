@@ -95,6 +95,15 @@ experiments.image (string), then the images.kubectl dict.
 {{- end }}
 
 {{/*
+Image GameDay and the Helm tests run: kates-tester, which has the shell their
+scripts need, with global.imageRegistry prepended.
+*/}}
+{{- define "kates-chaos.testerImage" -}}
+{{- $registry := (.Values.global | default dict).imageRegistry | default "" -}}
+{{- if $registry -}}{{- printf "%s/%s" $registry .Values.images.tester -}}{{- else -}}{{- .Values.images.tester -}}{{- end -}}
+{{- end }}
+
+{{/*
 go-runner image used as the default for ChaosExperiment definitions.
 */}}
 {{- define "kates-chaos.goRunnerImage" -}}

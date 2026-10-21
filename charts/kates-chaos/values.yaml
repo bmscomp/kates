@@ -40,11 +40,15 @@ global:
 # Single source of truth for the images this chart manages directly. Set
 # `digest` to pin by content (takes precedence over `tag`).
 images:
-  # kubectl — used by the experiment installer Job, GameDay, and Helm tests
+  # kubectl — used by the experiment installer Job
   kubectl:
     repository: registry.k8s.io/kubectl
     tag: "v1.33.0"
     digest: ""
+  # tester — kates-tester, for GameDay and the Helm tests, whose scripts need
+  # the shell the kubectl image lacks. Runs as uid 1000. Pinned to the kates
+  # appVersion, like every chart's test image (scripts/check-versions.sh).
+  tester: "ghcr.io/bmscomp/kates-tester:1.28.0"
   # go-runner — default runtime for ChaosExperiment definitions
   goRunner:
     repository: litmuschaos/go-runner
@@ -296,7 +300,7 @@ kyvernoPolicy:
 # template). Override to add your own.
 gameday:
   enabled: false
-  image: ""               # empty = images.kubectl
+  image: ""               # empty = images.tester
   backoffLimit: 1
   ttlSecondsAfterFinished: 600
   checks: []
@@ -307,12 +311,12 @@ gameday:
       memory: 64Mi
     limits:
       memory: 128Mi
-  # -- GameDay pod securityContext (PSS restricted; the kubectl image runs as
-  # root unless told otherwise)
+  # -- GameDay pod securityContext (PSS restricted; uid 1000 is kates-tester's
+  # own user)
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 65534
-    runAsGroup: 65534
+    runAsUser: 1000
+    runAsGroup: 1000
     seccompProfile:
       type: RuntimeDefault
   # -- GameDay container securityContext (PSS restricted)
@@ -322,7 +326,7 @@ gameday:
       drop: [ALL]
 
 # ── Helm tests (`helm test`) ─────────────────────────────────────────────────
-# The two test pods run images.kubectl, PSS restricted by default.
+# The two test pods run images.tester, PSS restricted by default.
 tests:
   # -- Test container resources
   resources:
@@ -331,12 +335,11 @@ tests:
       memory: 64Mi
     limits:
       memory: 128Mi
-  # -- Test pod securityContext (the kubectl image runs as root unless told
-  # otherwise)
+  # -- Test pod securityContext (uid 1000 is kates-tester's own user)
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 65534
-    runAsGroup: 65534
+    runAsUser: 1000
+    runAsGroup: 1000
     seccompProfile:
       type: RuntimeDefault
   # -- Test container securityContext

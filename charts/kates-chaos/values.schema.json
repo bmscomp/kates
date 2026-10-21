@@ -40,6 +40,7 @@
       "type": "object",
       "properties": {
         "kubectl": { "$ref": "#/definitions/image" },
+        "tester": { "type": "string", "minLength": 1 },
         "goRunner": { "$ref": "#/definitions/image" }
       }
     },

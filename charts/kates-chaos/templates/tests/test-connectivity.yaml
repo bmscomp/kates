@@ -1,4 +1,4 @@
-{{- $kubectl := include "kates-chaos.kubectlImage" . }}
+{{- $image := include "kates-chaos.testerImage" . }}
 {{- $pullPolicy := .Values.global.imagePullPolicy | default "IfNotPresent" }}
 {{- $kafkaNamespace := include "kates-chaos.kafkaNamespace" . }}
 {{- $testSA := printf "%s-test" (include "kates-chaos.fullname" .) }}
@@ -80,7 +80,7 @@ spec:
   {{- end }}
   containers:
     - name: test
-      image: {{ $kubectl }}
+      image: {{ $image }}
       imagePullPolicy: {{ $pullPolicy }}
       {{- with .Values.tests.securityContext }}
       securityContext:
@@ -126,7 +126,7 @@ spec:
   {{- end }}
   containers:
     - name: test
-      image: {{ $kubectl }}
+      image: {{ $image }}
       imagePullPolicy: {{ $pullPolicy }}
       {{- with .Values.tests.securityContext }}
       securityContext:

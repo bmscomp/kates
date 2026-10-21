@@ -618,7 +618,8 @@ fi
 
 # ---------------------------------------------------------------------------
 # The tester image the Strimzi charts' Helm tests, hooks and secret-sync jobs
-# run, and the Litmus experiments' probes and jobs. ghcr.io/bmscomp/kates-tester
+# run, kates-chaos's GameDay and Helm tests, and the Litmus experiments'
+# probes and jobs. ghcr.io/bmscomp/kates-tester
 # is published with each Kates release, so every pin carries the same tag, and
 # it is the kates chart's appVersion (docs/kafka-charts-refactor-plan.md, M4).
 # A file left behind runs tooling a release older than the rest.
@@ -640,6 +641,7 @@ while IFS= read -r hit; do
 done < <(grep -HE '^[[:space:]]*[A-Za-z]+:[[:space:]]*"?ghcr.io/bmscomp/kates-tester:' \
            charts/strimzi-operator/values*.yaml charts/kafka-cluster/values*.yaml \
            charts/connect-cluster/values*.yaml charts/mirror-maker2/values*.yaml \
+           charts/kates-chaos/values*.yaml \
            config/litmus/experiments/*.yaml 2>/dev/null)
 if [[ -z "$kates_app_version" ]]; then
   echo "ERROR: could not read charts/kates/Chart.yaml appVersion" >&2

@@ -1,7 +1,7 @@
 {{- if .Values.gameday.enabled }}
 {{- $ns := .Release.Namespace }}
 {{- $kafkaNamespace := include "kates-chaos.kafkaNamespace" . }}
-{{- $image := .Values.gameday.image | default (include "kates-chaos.kubectlImage" .) }}
+{{- $image := .Values.gameday.image | default (include "kates-chaos.testerImage" .) }}
 {{- $pullPolicy := .Values.global.imagePullPolicy | default "IfNotPresent" }}
 {{- $checks := .Values.gameday.checks }}
 {{- if not $checks }}
