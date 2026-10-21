@@ -2,11 +2,10 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Minor bump: kafka-cluster 1.x (the platform's topics, users and client grants
-# are its `platform` profile, which the umbrella selects), mirror-maker2 0.8 and
-# connect-cluster 2.x (both built on the kafka-common library; Connect is new
-# here, off by default). The ranges are tightened to those lines.
-version: 0.7.0
+# Minor bump: each range's floor is the subchart version this umbrella was
+# rendered and linted with, and templates/subchart-versions.yaml refuses to
+# render a subchart in charts/ outside its range.
+version: 0.8.0
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -17,27 +16,33 @@ maintainers:
   - name: Platform Team
 dependencies:
   - name: kafka-cluster
-    version: ">=1.0.0 <2.0.0"
+    version: ">=1.0.10 <2.0.0"
     repository: "file://../kafka-cluster"
     condition: kafka-cluster.enabled
   - name: kates
-    version: ">=0.5.0 <1.0.0"
+    version: ">=0.11.6 <1.0.0"
     repository: "file://../kates"
     condition: kates.enabled
   - name: apicurio-registry
-    version: ">=0.2.0 <1.0.0"
+    version: ">=0.4.0 <1.0.0"
     repository: "file://../apicurio-registry"
     condition: apicurio-registry.enabled
   # Off by default: a mirror needs a second cluster to mean anything, and the
   # chart's own defaults are a loopback on krafter for smoke-testing. Enable it
   # with a real mirrors[].source — see charts/mirror-maker2/README.md.
   - name: mirror-maker2
-    version: ">=0.8.0 <1.0.0"
+    version: ">=0.11.6 <1.0.0"
     repository: "file://../mirror-maker2"
     condition: mirror-maker2.enabled
   # Off by default: `kates deploy` installs Connect as its own release, in its
   # own namespace, and the platform runs without it.
   - name: connect-cluster
-    version: ">=2.0.0 <3.0.0"
+    version: ">=2.1.8 <3.0.0"
     repository: "file://../connect-cluster"
     condition: connect-cluster.enabled
+annotations:
+  artifacthub.io/changes: |
+    - kind: fixed
+      description: "ACTION REQUIRED for a platform built before this version — the umbrella installed whatever subcharts sat in its gitignored charts/ directory, and Helm never holds those to the ranges in Chart.yaml. A charts/ left from an earlier `helm dependency update` kept installing kates 0.9.1, whose ClusterRole granted get, list and watch on every Secret in the cluster, so the Kates API's service account could read every SCRAM password, CA key and token there; kates 0.10.8 dropped that rule. Each range's floor is now the version this umbrella was rendered with (kafka-cluster 1.0.10, kates 0.11.6, apicurio-registry 0.4.0, mirror-maker2 0.11.6, connect-cluster 2.1.8), and rendering fails, naming the subchart, while charts/ holds an enabled one outside its range. Run `make platform-chart-deps` (or `helm dependency update charts/kates-platform`) before installing or upgrading"
+    - kind: changed
+      description: "ACTION REQUIRED for INTEGRATION_CDC and for copied kates values — the kates subchart moves from 0.9.1 to 0.11.6. Its ClusterRole grants nothing on Secrets: a platform that runs INTEGRATION_CDC sets kates.rbac.cdcSecretNamespaces to the CDC database's namespace, or the run fails at DB_SETUP with Forbidden. Kates runs one pod: kates.replicaCount above 1, kates.autoscaling.enabled, a RollingUpdate kates.strategy and kates.podDisruptionBudget.minAvailable are refused by the kates schema, and an upgrade leaves the API unreachable until the new pod is Ready. The umbrella's own values are unchanged: kafka-cluster 1.0.10 still takes profile: platform, and the other subcharts take only enabled"

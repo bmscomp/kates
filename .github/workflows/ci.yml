@@ -362,6 +362,22 @@ jobs:
           done
           exit ${rc}
 
+      # Helm installs whatever sits in charts/; the umbrella's own guard holds
+      # it to Chart.yaml's ranges. kates 0.10.7 is the last chart whose
+      # ClusterRole read every Secret in the cluster.
+      - name: Check kates-platform refuses a stale subchart
+        run: |
+          tmp=$(mktemp -d)
+          cp -R charts/kates-platform "${tmp}/"
+          rm "${tmp}"/kates-platform/charts/kates-*.tgz
+          helm package charts/kates --version 0.10.7 --destination "${tmp}/kates-platform/charts" > /dev/null
+          if out=$(helm template p "${tmp}/kates-platform" 2>&1); then
+            echo "::error::kates-platform rendered with kates 0.10.7 in charts/"
+            exit 1
+          fi
+          echo "${out}" | grep -q 'charts/ holds kates 0.10.7' || { echo "${out}"; exit 1; }
+          echo "OK: kates-platform refused kates 0.10.7"
+
       - name: Install kubeconform
         uses: ./.github/actions/install-tools
         with:

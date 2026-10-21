@@ -24,6 +24,7 @@ The Strimzi operator must be running (see `charts/strimzi-operator`) before the 
 | `kafka-cluster.*` | subchart defaults | Full pass-through — see `charts/kafka-cluster/values.yaml` |
 | `kates.enabled` | `true` | Deploy the Kates application subchart |
 | `kates.*` | subchart defaults | Full pass-through — see `charts/kates/values.yaml` |
+| `kates.rbac.cdcSecretNamespaces` | `[]` | Namespaces where the Kates API may read the `postgresql` Secret; INTEGRATION_CDC needs its database's namespace here, since the kates ClusterRole grants nothing on Secrets |
 | `apicurio-registry.enabled` | `false` | Deploy Apicurio Registry (KafkaSQL storage against the `kafka-cluster` subchart) |
 | `mirror-maker2.enabled` | `false` | Deploy MirrorMaker 2 (needs a real `mirrors[].source`) |
 | `connect-cluster.enabled` | `false` | Deploy Kafka Connect next to Kafka (`kates deploy` installs it as its own release instead) |
@@ -32,4 +33,6 @@ Subchart values are validated by each subchart's own `values.schema.json`.
 
 ## Version pinning
 
-`Chart.yaml` pins the subcharts with ranges (`>=1.0.0 <2.0.0` for kafka-cluster, `>=0.8.0 <1.0.0` for mirror-maker2, `>=2.0.0 <3.0.0` for connect-cluster, `>=0.5.0 <1.0.0` for kates, `>=0.2.0 <1.0.0` for apicurio-registry); the `file://` repository always resolves to the local working tree, and `Chart.lock` records the exact version at build time.
+`Chart.yaml` pins the subcharts with ranges (`>=1.0.10 <2.0.0` for kafka-cluster, `>=0.11.6 <1.0.0` for mirror-maker2, `>=2.1.8 <3.0.0` for connect-cluster, `>=0.11.6 <1.0.0` for kates, `>=0.4.0 <1.0.0` for apicurio-registry); each floor is the version the umbrella was last rendered with. The `file://` repository always resolves to the local working tree, and `Chart.lock` records the exact version at build time.
+
+Helm installs whatever sits in `charts/` without checking it against those ranges, so the umbrella checks itself: rendering fails, naming the subchart, while `charts/` holds an enabled subchart outside its range. A `charts/` left from an older build would otherwise install its old subcharts, such as kates 0.9.1, whose ClusterRole read every Secret in the cluster. Run `make platform-chart-deps` to refresh it.
