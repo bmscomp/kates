@@ -825,7 +825,7 @@ kates test create --type INTEGRITY --records 50000 --acks all --wait
 kates conformity check -f team-reference.yaml
 ```
 
-On [`panda`](appendix-a-glossary.md#gl-panda), the lab's three-node Kind cluster, both runs end `DONE` and the INTEGRITY verdict is PASS. A reference whose `spec` is `brokers: {count: {min: 3}, perNode: {max: 1}, zones: {min: 3, severity: warn}}` passes there and exits 0, with `brokers.zones` UNKNOWN.
+On [`panda`](appendix-a-glossary.md#gl-panda), the lab's three-node Kind cluster, both runs end `DONE` and the INTEGRITY verdict is PASS. A reference whose `spec` is `brokers: {count: {min: 3}, perNode: {max: 1}, zones: {min: 3}}` passes there and exits 0. Its `-o json` report gives `brokers.zones` the detail `alpha: 1, gamma: 1, sigma: 1; zones from the EndpointSlices of kafka/krafter-kafka-brokers`, since the Kates API may not list nodes.
 
 ### Limits
 
