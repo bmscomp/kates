@@ -2,15 +2,14 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: the backend's chaos, topology and conformity settings follow
-# networkPolicy.kafka.namespace and the new kafka.clusterName, whose defaults
-# are the backend's own (kafka, krafter).
-version: 0.12.1
+# Patch: appVersion and the image tag move to 1.28.0, the tag the v1.28.0
+# release publishes. Templates are otherwise unchanged.
+version: 0.12.2
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.27.0"
+appVersion: "1.28.0"
 keywords:
   - kafka
   - testing
@@ -29,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.28.0 and the image tag move to 1.28.0. The Kates API changes since 1.27.0: a conformity check runs with only the namespace-scoped Role that rbac.scope=namespace grants, taking the zones from the EndpointSlices of Strimzi's headless Service when it may not read nodes, and answers 503 when Kubernetes refuses it the Kafka CR (#439); a fault that names no targetNamespace is aimed at kates.chaos.kafka.namespace instead of the literal kafka, so the safety guard no longer refuses every such step with Kafka elsewhere (#442). Templates are otherwise unchanged."
     - kind: fixed
       description: "With Kafka outside namespace kafka, or named other than krafter, chaos, the cluster topology, cluster alerts and conformity checks looked for Kafka in kafka/krafter: the configmap never set kates.chaos.kafka.namespace, kates.chaos.kafka.cluster or kates.topology.kafka-cluster, and set kates.topology.kafka-namespace only with rbac.scope=namespace. Chaos refused every plan with No broker pods found, and every conformity check returned 409. The configmap now sets KATES_CHAOS_KAFKA_NAMESPACE and KATES_TOPOLOGY_KAFKA_NAMESPACE from networkPolicy.kafka.namespace (through tpl, with the policy on or off), whatever rbac.scope says, and KATES_CHAOS_KAFKA_CLUSTER and KATES_TOPOLOGY_KAFKA_CLUSTER from kafka.clusterName (new, default krafter). The defaults are the backend's own, so a release that keeps them renders the same settings; an extraEnv entry for these variables still wins. Upgrading: a release that set networkPolicy.kafka.namespace to anything but the namespace Kafka runs in now points chaos and topology there too"
     - kind: added
