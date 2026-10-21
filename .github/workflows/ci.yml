@@ -286,6 +286,44 @@ jobs:
           fi
           echo "OK: chaos.provider renders KATES_CHAOS_PROVIDER only when set"
 
+      # rbac.scope=namespace is for an account with only edit in the release
+      # namespace: anything cluster-scoped would fail its install.
+      - name: Assert rbac.scope=namespace renders nothing cluster-scoped
+        run: |
+          fail() { echo "::error::kates rbac.scope=namespace: $1"; exit 1; }
+          all=$(helm template kates charts/kates/ -n team --set rbac.scope=namespace \
+                  --set networkPolicy.kafka.namespace=kafka-ns)
+          if grep -qE '^kind: (ClusterRole|ClusterRoleBinding)$' <<<"${all}"; then
+            fail "a ClusterRole or ClusterRoleBinding is rendered"
+          fi
+          rbac=$(helm template kates charts/kates/ -n team --set rbac.scope=namespace \
+                   --set networkPolicy.kafka.namespace=kafka-ns --show-only templates/rbac.yaml)
+          [ "$(grep -c '^  namespace: kafka-ns$' <<<"${rbac}")" = 2 ] \
+            || fail "the Role and RoleBinding are not both in networkPolicy.kafka.namespace"
+          grep -q 'name: kates-kafka-reader-team' <<<"${rbac}" || fail "Role not named after the release namespace"
+          for rule in 'resources: \["kafkas"\]' 'resources: \["kafkanodepools"\]' \
+                      'resources: \["pods", "persistentvolumeclaims"\]' 'resources: \["podmonitors"\]'; do
+            grep -q "${rule}" <<<"${rbac}" || fail "missing rule ${rule}"
+          done
+          if grep -qE 'verbs: .*"(create|update|patch|delete|watch)"' <<<"${rbac}"; then
+            fail "the Kafka-namespace Role grants more than get and list"
+          fi
+          if helm template kates charts/kates/ --set rbac.scope=namespace \
+               --set rbac.kafkaNamespaceRole=false --show-only templates/rbac.yaml > /dev/null 2>&1; then
+            fail "rbac.kafkaNamespaceRole=false still renders the Role"
+          fi
+          cm=$(helm template kates charts/kates/ --set rbac.scope=namespace \
+                 --show-only templates/configmap.yaml)
+          grep -q 'KATES_CHAOS_PROVIDER: "noop"' <<<"${cm}" || fail "chaos not off by default"
+          grep -q 'KATES_CHAOS_ORPHAN_RECOVERY_ENABLED: "false"' <<<"${cm}" || fail "orphan recovery not off"
+          cm=$(helm template kates charts/kates/ --set rbac.scope=namespace \
+                 --set chaos.provider=kubernetes --show-only templates/configmap.yaml)
+          grep -q 'KATES_CHAOS_PROVIDER: "kubernetes"' <<<"${cm}" || fail "chaos.provider not honoured"
+          if helm template kates charts/kates/ --set rbac.scope=team > /dev/null 2>&1; then
+            fail "values.schema.json accepted rbac.scope=team"
+          fi
+          echo "OK: rbac.scope=namespace renders only namespaced RBAC, with chaos off"
+
       # The Strimzi version is declared in five places. If values.yaml's
       # strimziVersion drifts from the Chart.yaml dependency version, the CRD
       # hook applies CRDs for a different operator than the one installed —

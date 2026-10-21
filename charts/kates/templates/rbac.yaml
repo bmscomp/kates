@@ -1,5 +1,6 @@
 {{- if .Values.serviceAccount.create }}
 {{- if .Values.rbac.create }}
+{{- if eq .Values.rbac.scope "cluster" }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -92,6 +93,54 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kates.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- else if .Values.rbac.kafkaNamespaceRole }}
+{{- /*
+  rbac.scope=namespace: nothing cluster-scoped. Performance and INTEGRITY runs
+  make no Kubernetes call; a conformity check reads these in the Kafka
+  namespace (ConformityCheck). It lists PodMonitors across namespaces first,
+  then here when that is refused. Nodes stay unread, so zones, skew and
+  kafka.rackAwareness with source cr are UNKNOWN. The release namespace ends
+  the name, as for the CDC Role below, so two teams' releases don't collide.
+*/}}
+{{- $name := printf "%s-kafka-reader-%s" (include "kates.fullname" .) .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.networkPolicy.kafka.namespace }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas"]
+    verbs: ["get"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkanodepools"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods", "persistentvolumeclaims"]
+    verbs: ["list"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["podmonitors"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Values.networkPolicy.kafka.namespace }}
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kates.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- /*
   The INTEGRATION_CDC test reads its database's password from the Secret
   `postgresql` (key postgres-password) in the namespace of the first Service

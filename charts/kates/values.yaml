@@ -55,8 +55,18 @@ serviceAccount:
 
 # -- RBAC configuration
 rbac:
-  # -- Create ClusterRole and ClusterRoleBinding
+  # -- Create the RBAC objects rbac.scope calls for
   create: true
+  # -- cluster: a ClusterRole and ClusterRoleBinding for every feature, chaos
+  # included. namespace: nothing cluster-scoped, so an account with only edit
+  # in the release namespace can install; tests and conformity checks run,
+  # chaos is off (KATES_CHAOS_PROVIDER=noop unless chaos.provider is set).
+  scope: cluster
+  # -- With scope namespace: render the read-only Role and RoleBinding a
+  # conformity check needs in the Kafka namespace (networkPolicy.kafka.namespace).
+  # Set false when the installer can't create Roles there; that namespace's
+  # admin applies them from `helm template ... --show-only templates/rbac.yaml`.
+  kafkaNamespaceRole: true
   # -- Grant the writes the direct Kubernetes chaos backend makes itself
   # (KATES_CHAOS_PROVIDER=kubernetes, or hybrid without Litmus): StatefulSet
   # scaling and pod ephemeral containers. Litmus runs its
@@ -71,7 +81,8 @@ rbac:
   # sets this to that namespace. Each one must exist before the install.
   # Empty grants nothing, and an INTEGRATION_CDC run then fails at DB_SETUP.
   cdcSecretNamespaces: []
-  # -- Extra RBAC rules (e.g. for Litmus Chaos integration)
+  # -- Extra RBAC rules (e.g. for Litmus Chaos integration), added to the
+  # ClusterRole: scope cluster only
   extraRules: []
 
 # -- Extra annotations to add to pods

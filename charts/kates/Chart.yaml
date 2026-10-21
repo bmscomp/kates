@@ -2,9 +2,9 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.27.0, the tag the v1.27.0
-# release publishes. Templates are otherwise unchanged.
-version: 0.11.6
+# Minor: rbac.scope=namespace installs with nothing cluster-scoped. The
+# default, rbac.scope=cluster, renders what 0.11.6 rendered.
+version: 0.12.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +28,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "rbac.scope (default cluster, unchanged) and rbac.kafkaNamespaceRole (default true). rbac.scope=namespace creates no ClusterRole or ClusterRoleBinding, so an account with only edit in the release namespace can install the chart; performance and INTEGRITY runs make no Kubernetes call. It renders one read-only Role and RoleBinding in networkPolicy.kafka.namespace for conformity checks (get kafkas; list kafkanodepools, pods, persistentvolumeclaims and podmonitors), sets KATES_CHAOS_PROVIDER=noop unless chaos.provider is set, and turns startup orphan recovery off (KATES_CHAOS_ORPHAN_RECOVERY_ENABLED=false). With rbac.kafkaNamespaceRole=false that Role is left out, for the Kafka namespace's admin to apply from helm template --show-only templates/rbac.yaml. Without node access a conformity check reports zones, skew and kafka.rackAwareness with source cr as UNKNOWN"
     - kind: changed
       description: "appVersion 1.27.0 and the image tag move to 1.27.0. The Kates API changes since 1.26.0: POST /api/conformity/check holds the Kafka cluster to a KafkaReference, read-only, with rules for counts, versions, sizing, placement, Kafka settings, listeners, per-topic durability and monitoring, and waivers (#407 to #415, #419, #422, #424); a chaos step may target only the Kafka namespace or the Kates API's own, Litmus paths included (#427, #429). Templates are otherwise unchanged."
     - kind: fixed

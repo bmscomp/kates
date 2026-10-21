@@ -176,8 +176,13 @@ data:
   KATES_TESTS_ROUNDTRIP_DURATION_MS: {{ .Values.tests.roundtrip.durationMs | default .Values.defaults.durationMs | quote }}
   KATES_TESTS_ROUNDTRIP_NUM_PRODUCERS: {{ .Values.tests.roundtrip.numProducers | default .Values.defaults.numProducers | quote }}
   KATES_TESTS_ROUNDTRIP_NUM_CONSUMERS: {{ .Values.tests.roundtrip.numConsumers | default .Values.defaults.numConsumers | quote }}
-  {{- with .Values.chaos.provider }}
+  {{- $namespaced := eq .Values.rbac.scope "namespace" }}
+  {{- with .Values.chaos.provider | default (ternary "noop" "" $namespaced) }}
   KATES_CHAOS_PROVIDER: {{ . | quote }}
+  {{- end }}
+  {{- if $namespaced }}
+  {{- /* Startup orphan recovery lists NetworkPolicies in every namespace. */}}
+  KATES_CHAOS_ORPHAN_RECOVERY_ENABLED: "false"
   {{- end }}
 
   {{- with .Values.faultTolerance }}
