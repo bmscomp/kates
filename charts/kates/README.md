@@ -107,6 +107,7 @@ that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
 | `kafka.strimzi.io` `kafkanodepools` | `list` |
 | `pods`, `persistentvolumeclaims` | `list` |
 | `monitoring.coreos.com` `podmonitors` | `list` |
+| `discovery.k8s.io` `endpointslices` | `list` |
 
 An installer with only `edit` in the release namespace can't create that Role, so it installs with `rbac.kafkaNamespaceRole=false` as well. Kubernetes lets an account create a Role only for permissions it holds itself, so an account with Strimzi's and the Prometheus Operator's reads in the Kafka namespace, a cluster admin where those operators don't add them to `admin`, renders it from the same release name, namespace and values, and applies it:
 
@@ -115,7 +116,7 @@ helm template kates charts/kates -n team -f team-values.yaml \
   --set rbac.kafkaNamespaceRole=true --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
-Without node access, a conformity check reports `zones`, `skew` and `kafka.rackAwareness` (source `cr`) as `UNKNOWN`, and finds PodMonitors only in the Kafka namespace.
+Without node access, a conformity check takes each Kafka pod's zone for `zones`, `skew` and `kafka.rackAwareness` (source `cr`) from the EndpointSlices of Strimzi's headless Service, which carry only `topology.kubernetes.io/zone`; with another `zoneLabel` those rules are `UNKNOWN`. It finds PodMonitors only in the Kafka namespace.
 
 ### Secret access
 

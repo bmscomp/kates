@@ -302,10 +302,11 @@ jobs:
             || fail "the Role and RoleBinding are not both in networkPolicy.kafka.namespace"
           grep -q 'name: kates-kafka-reader-team' <<<"${rbac}" || fail "Role not named after the release namespace"
           for rule in 'resources: \["kafkas"\]' 'resources: \["kafkanodepools"\]' \
-                      'resources: \["pods", "persistentvolumeclaims"\]' 'resources: \["podmonitors"\]'; do
+                      'resources: \["pods", "persistentvolumeclaims"\]' 'resources: \["podmonitors"\]' \
+                      'resources: \["endpointslices"\]'; do
             grep -q "${rule}" <<<"${rbac}" || fail "missing rule ${rule}"
           done
-          [ "$(grep -c -- '- apiGroups:' <<<"${rbac}")" = 4 ] || fail "the Kafka-namespace Role has other than its 4 rules"
+          [ "$(grep -c -- '- apiGroups:' <<<"${rbac}")" = 5 ] || fail "the Kafka-namespace Role has other than its 5 rules"
           if grep -E '^ +verbs:' <<<"${rbac}" | grep -vqE 'verbs: \["(get|list)"\]$'; then
             fail "the Kafka-namespace Role grants more than get and list"
           fi

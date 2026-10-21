@@ -99,8 +99,9 @@ subjects:
   rbac.scope=namespace: nothing cluster-scoped. Performance and INTEGRITY runs
   make no Kubernetes call; a conformity check reads these in the Kafka
   namespace (ConformityCheck). It lists PodMonitors across namespaces first,
-  then here when that is refused. Nodes stay unread, so zones, skew and
-  kafka.rackAwareness with source cr are UNKNOWN. The release namespace ends
+  then here when that is refused. Nodes stay unread: zones, skew and
+  kafka.rackAwareness with source cr take each pod's zone from the
+  EndpointSlices of Strimzi's headless Service. The release namespace ends
   the name, as for the CDC Role below, so two teams' releases don't collide.
 */}}
 {{- $name := printf "%s-kafka-reader-%s" (include "kates.fullname" .) .Release.Namespace }}
@@ -124,6 +125,9 @@ rules:
     verbs: ["list"]
   - apiGroups: ["monitoring.coreos.com"]
     resources: ["podmonitors"]
+    verbs: ["list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
     verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

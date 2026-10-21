@@ -791,6 +791,7 @@ The Role is `kates-kafka-reader-team` in the `kafka` namespace, and it only read
 | `kafkanodepools` | list | Storage types and whether controllers are dedicated |
 | `pods`, `persistentvolumeclaims` | list | Counts, requests, limits, placement and storage sizes |
 | `podmonitors` | list | Whether a PodMonitor selects the brokers |
+| `endpointslices` | list | Each Kafka pod's zone, since nodes are cluster-scoped |
 
 Without the Role, a conformity check stops before its first rule: the Kates API answers 503 and says which grant is missing.
 
@@ -816,7 +817,7 @@ The scope also turns chaos off: the chaos provider is `noop` unless `chaos.provi
 kates ports --app-ns team
 ```
 
-Then run a LOAD test, an INTEGRITY test and a conformity check. In the check, the `zones` rule is a warning, for the reason the limits below give:
+Then run a LOAD test, an INTEGRITY test and a conformity check:
 
 ```bash
 kates test create --type LOAD --records 100000 --wait
@@ -831,7 +832,7 @@ On [`panda`](appendix-a-glossary.md#gl-panda), the lab's three-node Kind cluster
 The namespace scope trades these away:
 
 - Chaos: disruptions and resilience runs inject no fault while the provider is `noop`.
-- `zones`, `skew` and `kafka.rackAwareness` with `kafka.source: cr` read node labels, and nodes are cluster-scoped, so a check reports them UNKNOWN. An admin can grant `list` on nodes with a ClusterRole of its own.
+- `zones`, `skew` and `kafka.rackAwareness` with `kafka.source: cr` read the zone label of each pod's node, and nodes are cluster-scoped. The check takes the zone from the EndpointSlices of Strimzi's headless Service instead, which the Role lets it list. They carry only `topology.kubernetes.io/zone`, so with another `zoneLabel` the three rules are UNKNOWN, and a pod with no address yet counts as in no zone. An admin can grant `list` on nodes with a ClusterRole of its own.
 - `monitoring.podMonitor` sees only the Kafka namespace's PodMonitors, and is UNKNOWN when none there selects every broker pod.
 - `kates cluster alerts` reports no alert rules, because the Role doesn't grant reading PrometheusRules.
 - INTEGRATION_CDC creates KafkaTopic and KafkaConnector resources, and stays an admin's test.

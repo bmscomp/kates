@@ -37,6 +37,9 @@ import io.fabric8.kubernetes.api.model.PodAffinityTermBuilder;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.VolumeBuilder;
+import io.fabric8.kubernetes.api.model.discovery.v1.Endpoint;
+import io.fabric8.kubernetes.api.model.discovery.v1.EndpointBuilder;
+import io.fabric8.kubernetes.api.model.discovery.v1.EndpointSliceBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.VersionInfo;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
@@ -1000,8 +1003,34 @@ class ConformityCheckTest {
         assertEquals("kafka/brokers", found.detail());
     }
 
+    /** A namespace-scoped role may not list nodes; Strimzi's headless Service lists each Kafka pod's zone. */
     @Test
-    void withoutAccessToNodesTheZonesAreUnknown() throws IOException {
+    void withoutAccessToNodesTheZonesComeFromEndpointSlices() throws IOException {
+        place();
+        server.expect().get().withPath("/api/v1/nodes").andReturn(403, "").always();
+        endpointSlice(Map.of(
+                "krafter-controllers-0", "alpha",
+                "krafter-controllers-1", "sigma",
+                "krafter-controllers-2", "gamma",
+                "krafter-brokers-3", "alpha",
+                "krafter-brokers-4", "alpha",
+                "krafter-brokers-5", "sigma"));
+
+        ConformityReport report =
+                run("{controllers: {zones: 3, skew: {max: 0}}, brokers: {zones: {min: 3}, skew: {max: 0}}}");
+
+        assertEquals(Status.PASS, result(report, "controllers.zones").status());
+        assertEquals(Status.PASS, result(report, "controllers.skew").status());
+        Result zones = result(report, "brokers.zones");
+        assertEquals(Status.FAIL, zones.status());
+        assertEquals(2, zones.observed());
+        assertEquals(
+                "alpha: 2, sigma: 1; zones from the EndpointSlices of kafka/krafter-kafka-brokers", zones.detail());
+        assertEquals(1, result(report, "brokers.skew").observed());
+    }
+
+    @Test
+    void withoutAccessToNodesOrTheirEndpointsTheZonesAreUnknown() throws IOException {
         server.expect().get().withPath("/api/v1/nodes").andReturn(403, "").always();
 
         Result zones = result(run("{brokers: {zones: {min: 3}}}"), "brokers.zones");
@@ -1009,8 +1038,55 @@ class ConformityCheckTest {
         assertEquals(Status.UNKNOWN, zones.status());
         assertEquals(
                 "Kubernetes: nodes: Forbidden: the Kates API's service account may not list nodes,"
-                        + " which are cluster-scoped",
+                        + " which are cluster-scoped, and no EndpointSlice of kafka/krafter-kafka-brokers names a node",
                 zones.detail());
+    }
+
+    /** An endpoint carries only the default zone label, so another one still needs the nodes. */
+    @Test
+    void withoutAccessToNodesAnotherZoneLabelIsUnknown() throws IOException {
+        place();
+        server.expect().get().withPath("/api/v1/nodes").andReturn(403, "").always();
+        endpointSlice(Map.of("krafter-brokers-3", "alpha"));
+
+        Result zones = result(run("{zoneLabel: example.com/zone, brokers: {zones: {min: 3}}}"), "brokers.zones");
+
+        assertEquals(Status.UNKNOWN, zones.status());
+        assertEquals(
+                "Kubernetes: nodes: Forbidden: the Kates API's service account may not list nodes,"
+                        + " which are cluster-scoped, and only nodes carry example.com/zone",
+                zones.detail());
+    }
+
+    /** Strimzi's headless Service's EndpointSlice: each pod's endpoint on the node place() put it on. */
+    void endpointSlice(Map<String, String> zoneByPod) {
+        Map<String, String> nodeByZone = Map.of("alpha", "node-alpha", "sigma", "node-sigma", "gamma", "node-gamma");
+        List<Endpoint> endpoints = zoneByPod.entrySet().stream()
+                .map(e -> new EndpointBuilder()
+                        .withAddresses("10.244.0.10")
+                        .withNodeName(nodeByZone.get(e.getValue()))
+                        .withZone(e.getValue())
+                        .withNewTargetRef()
+                        .withKind("Pod")
+                        .withNamespace("kafka")
+                        .withName(e.getKey())
+                        .endTargetRef()
+                        .build())
+                .toList();
+        client.discovery()
+                .v1()
+                .endpointSlices()
+                .inNamespace("kafka")
+                .resource(new EndpointSliceBuilder()
+                        .withNewMetadata()
+                        .withName("krafter-kafka-brokers-x1y2z")
+                        .withNamespace("kafka")
+                        .addToLabels("kubernetes.io/service-name", "krafter-kafka-brokers")
+                        .endMetadata()
+                        .withAddressType("IPv4")
+                        .withEndpoints(endpoints)
+                        .build())
+                .create();
     }
 
     @Test
