@@ -540,8 +540,10 @@ jobs:
             yq 'select(.kind == "ClusterPolicy" or .kind == "Policy")' "${out}.yaml" > "${out}-policies.yaml"
             NS="${chart}" yq 'select(.kind == "Pod" or .kind == "Deployment" or .kind == "StatefulSet" or .kind == "DaemonSet" or .kind == "Job" or .kind == "CronJob")
               | .metadata.namespace |= (. // strenv(NS))' "${out}.yaml" > "${out}-workloads.yaml"
+            # A directory: with more than one mutated resource the CLI writes one file each.
+            mkdir -p "${out}-mutated"
             kyverno apply "${out}-policies.yaml" --resource "${out}-workloads.yaml" \
-              -o "${out}-mutated.yaml" > "${out}.log" 2>&1 || rc=1
+              -o "${out}-mutated" > "${out}.log" 2>&1 || rc=1
             cat "${out}.log"
             if grep -q '^pass: 0, fail: 0,' "${out}.log"; then
               echo "::error::${chart}: its own policies matched none of its workloads"; rc=1
