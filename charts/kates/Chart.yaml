@@ -3,7 +3,7 @@ name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Minor: rbac.scope=namespace installs with nothing cluster-scoped. The
-# default, rbac.scope=cluster, renders what 0.11.6 rendered.
+# default, rbac.scope=cluster, renders what 0.11.7 rendered.
 version: 0.12.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
@@ -30,6 +30,8 @@ annotations:
   artifacthub.io/changes: |
     - kind: added
       description: "rbac.scope (default cluster, unchanged) and rbac.kafkaNamespaceRole (default true). rbac.scope=namespace creates no ClusterRole or ClusterRoleBinding; with rbac.kafkaNamespaceRole=false as well, an account with only edit in the release namespace can install the chart. Performance and INTEGRITY runs make no Kubernetes call. It renders one read-only Role and RoleBinding in networkPolicy.kafka.namespace for conformity checks (get kafkas; list kafkanodepools, pods, persistentvolumeclaims, podmonitors and endpointslices), points the check at that namespace (KATES_TOPOLOGY_KAFKA_NAMESPACE), and sets KATES_CHAOS_PROVIDER=noop unless chaos.provider is set. With rbac.kafkaNamespaceRole=false that Role is left out, for an account that may grant those reads to apply from helm template --show-only templates/rbac.yaml. Without node access a conformity check takes the zones for zones, skew and kafka.rackAwareness with source cr from the EndpointSlices of Strimzi's headless Service, so only another zoneLabel leaves them UNKNOWN. A release that sets neither value, as after helm upgrade --reuse-values, keeps scope cluster"
+    - kind: changed
+      description: "kafka.bootstrapServers, kafka.topicNamespace, trogdor.coordinatorUrl and networkPolicy.kafka.namespace are rendered with tpl, so a value may name {{ .Release.Namespace }}. kates-platform needs it: it installs Kafka in its own release namespace, and these defaults name namespace kafka. A value without {{ renders as before"
     - kind: changed
       description: "appVersion 1.27.0 and the image tag move to 1.27.0. The Kates API changes since 1.26.0: POST /api/conformity/check holds the Kafka cluster to a KafkaReference, read-only, with rules for counts, versions, sizing, placement, Kafka settings, listeners, per-topic durability and monitoring, and waivers (#407 to #415, #419, #422, #424); a chaos step may target only the Kafka namespace or the Kates API's own, Litmus paths included (#427, #429). Templates are otherwise unchanged."
     - kind: fixed

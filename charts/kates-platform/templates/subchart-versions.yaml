@@ -1,0 +1,12 @@
+{{- /*
+Renders nothing. Helm installs whatever sits in charts/ and never holds it to
+the ranges in Chart.yaml, so a charts/ directory left from an older build
+installed its old subcharts: kates 0.9.1's ClusterRole read every Secret in
+the cluster. Refuse each enabled subchart outside its range instead.
+*/}}
+{{- range .Chart.Dependencies }}
+{{- $sub := index $.Subcharts .Name }}
+{{- if and $sub (not (semverCompare .Version $sub.Chart.Version)) }}
+{{- fail (printf "charts/ holds %s %s, outside %q in Chart.yaml: run `make platform-chart-deps` (helm dependency update charts/kates-platform)" .Name $sub.Chart.Version .Version) }}
+{{- end }}
+{{- end }}

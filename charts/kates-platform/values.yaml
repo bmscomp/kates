@@ -3,9 +3,26 @@ kafka-cluster:
   # The kates platform's topics, users (kates-backend, kafka-ui, …) and client
   # NetworkPolicy grants — kafka-cluster's profiles/platform.yaml.
   profile: platform
+  networkPolicy:
+    clients:
+      # The profile admits Kates from namespace kates, where `kates deploy`
+      # puts it; here it runs next to Kafka, in the release namespace ("").
+      - name: kates
+        namespace: ""
 
+# Kates reaches the kafka-cluster subchart in this release's namespace; the
+# kates chart's own defaults name namespace kafka. Rename krafter here too if
+# kafka-cluster.clusterName changes.
 kates:
   enabled: true
+  kafka:
+    bootstrapServers: "krafter-kafka-bootstrap.{{ .Release.Namespace }}.svc:9092"
+    topicNamespace: "{{ .Release.Namespace }}"
+  trogdor:
+    coordinatorUrl: "http://trogdor-coordinator.{{ .Release.Namespace }}.svc:8889"
+  networkPolicy:
+    kafka:
+      namespace: "{{ .Release.Namespace }}"
 
 # Apicurio Registry (KafkaSQL storage against the kafka-cluster subchart).
 # Disabled by default — enable to include the schema registry in the platform.

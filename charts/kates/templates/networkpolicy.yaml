@@ -73,7 +73,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.kafka.namespace | default "kafka" | quote }}
+              kubernetes.io/metadata.name: {{ tpl (.Values.networkPolicy.kafka.namespace | default "kafka") . | quote }}
       ports:
         - port: {{ .Values.networkPolicy.kafka.port | default 9092 }}
           protocol: TCP

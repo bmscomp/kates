@@ -105,12 +105,13 @@ subjects:
   the name, as for the CDC Role below, so two teams' releases don't collide.
 */}}
 {{- $name := printf "%s-kafka-reader-%s" (include "kates.fullname" .) .Release.Namespace }}
+{{- $kafkaNamespace := tpl (.Values.networkPolicy.kafka.namespace | default "kafka") . }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ $name }}
-  namespace: {{ .Values.networkPolicy.kafka.namespace }}
+  namespace: {{ $kafkaNamespace }}
   labels:
     {{- include "kates.labels" . | nindent 4 }}
 rules:
@@ -134,7 +135,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ $name }}
-  namespace: {{ .Values.networkPolicy.kafka.namespace }}
+  namespace: {{ $kafkaNamespace }}
   labels:
     {{- include "kates.labels" . | nindent 4 }}
 roleRef:
