@@ -47,13 +47,15 @@ func TestWithKubeContext(t *testing.T) {
 			[]string{"exec", "pod", "--context=kind-panda", "--", "tool", "--context=x"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			in := append([]string(nil), tt.args...)
+			// Spare capacity, so an append into the caller's array would show.
+			in := make([]string, len(tt.args), len(tt.args)+4)
+			copy(in, tt.args)
 			got := withKubeContext(tt.kubeContext, tt.cmd, in)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("withKubeContext(%q, %q, %q)\n got %q\nwant %q", tt.kubeContext, tt.cmd, tt.args, got, tt.want)
 			}
-			if !reflect.DeepEqual(in, tt.args) {
-				t.Errorf("withKubeContext modified its input: %q", in)
+			if !reflect.DeepEqual(in, tt.args) || in[:cap(in)][len(in)] != "" {
+				t.Errorf("withKubeContext modified its input: %q", in[:cap(in)])
 			}
 		})
 	}

@@ -63,9 +63,9 @@ func withKubeContext(kubeContext, name string, args []string) []string {
 		}
 	}
 
-	pinned := make([]string, 0, len(args)+1)
-	pinned = append(pinned, args[:end]...)
-	pinned = append(pinned, flag+"="+kubeContext)
+	// The three-index slice caps the capacity at end, so append copies into a
+	// new array instead of writing over args.
+	pinned := append(args[:end:end], flag+"="+kubeContext)
 	return append(pinned, args[end:]...)
 }
 
