@@ -4,7 +4,7 @@ description: A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to mig
 type: application
 # Minor bump: mode and image derive from kafka.version when left empty, so any
 # version from 2.1 up deploys with no overlay.
-version: 0.2.0
+version: 0.2.1
 # Tracks the default kafka.version — the newest 3.x line, whose official image
 # needs no build. Any other version is `--set kafka.version=<v>`; the mode and
 # the image follow (2.x is ZooKeeper on the built image, see values-kafka-2x.yaml).
@@ -28,6 +28,12 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The Helm test pod has CPU and memory requests and a memory limit, testResources (100m/256Mi requests, 1000m/768Mi limits, what the topics Job gets: it runs two Kafka CLI JVMs), and uses imagePullSecrets like every other pod"
+    - kind: added
+      description: "global.imageRegistry (default empty) is prepended to the derived official image, apache/kafka:<version>, for clusters that pull from a mirror; the built image keeps legacyImageRegistry, and an explicit kafka.image or testImage is used as written"
+    - kind: added
+      description: "podLabels (default empty) adds labels to the broker, ZooKeeper, topics Job and Helm test pods; the chart's own labels and extraLabels win on a clash, so selectors never change"
     - kind: changed
       description: mode defaults from kafka.version (zookeeper below 3.3.0, kraft from 3.3.0) and kafka.image from the version too (apache/kafka:<v> from 3.7.0, <legacyImageRegistry>/kates-legacy-kafka:<v> below), so `--set kafka.version=3.5.2` needs no overlay; explicit values still win
     - kind: added

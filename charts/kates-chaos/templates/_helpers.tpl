@@ -43,6 +43,15 @@ helm.sh/chart: {{ include "kates-chaos.chart" . }}
 {{- end }}
 
 {{/*
+Pod template labels: the chart's own labels (a YAML string) plus podLabels.
+The chart's own win on a clash, so a selector never changes.
+Usage: include "kates-chaos.podLabels" (list . (include "kates-chaos.selectorLabels" .))
+*/}}
+{{- define "kates-chaos.podLabels" -}}
+{{- toYaml (merge (index . 1 | fromYaml) ((index . 0).Values.podLabels | default dict)) -}}
+{{- end }}
+
+{{/*
 Common annotations (empty unless commonAnnotations is set).
 */}}
 {{- define "kates-chaos.annotations" -}}

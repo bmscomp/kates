@@ -35,8 +35,43 @@ Grafana is exposed as a NodePort on `30080` by default (dev convenience).
 | `kube-prometheus-stack.grafana.sidecar.dashboards.searchNamespace` | `ALL` | Which namespaces the sidecar watches for boards |
 | `kube-prometheus-stack.kube-state-metrics.customResourceState` | ChaosEngine `status.engineStatus` as a state set | What makes `kube_customresource_chaosengine_status_engine_status` exist — see [below](#kube-state-metrics-and-the-chaosengine). `enabled: false` switches it off |
 | `kube-prometheus-stack.kube-state-metrics.rbac.extraRules` | `list`/`watch` on `chaosengines.litmuschaos.io` | The read access that state set needs |
+| `global.imageRegistry` | `""` | Registry prefixed to every image, the wrapped stack's and the test pod's |
+| `global.imagePullSecrets` | `[]` | Pull secrets for every pod (`- name: s` or `- s`) |
+| `podLabels` | `{}` | Extra labels on the Helm test pod; the stack's pods take theirs from each component's `podLabels` (`podMetadata.labels` for Prometheus and Alertmanager), and the admission-create and admission-patch Jobs only from `kube-prometheus-stack.commonLabels`, which labels every resource kube-prometheus-stack's own templates render |
+| `test.image` | `curlimages/curl:8.7.1` | The Helm test image |
+| `test.podSecurityContext` / `test.securityContext` | non-root 65534, `RuntimeDefault` seccomp / no privilege escalation, all capabilities dropped | The test pod's security contexts |
+| `test.resources` | requests `25m`/`32Mi`, limits `100m`/`64Mi` | The test pod's resources |
+| `kube-prometheus-stack.*.resources` | requests and a memory limit on every container | See [Pod security](#pod-security-and-resources) |
+| `kube-prometheus-stack.nodeExporter.enabled` | `true` | node-exporter; host-level, see [Pod security](#pod-security-and-resources) |
 
 Own keys are validated by `values.schema.json`; subchart keys are validated by kube-prometheus-stack itself.
+
+## Pod security and resources
+
+Every pod this chart and the wrapped stack render passes the Restricted Pod
+Security Standard, and every container has CPU and memory requests and a
+memory limit, the Prometheus and Alertmanager pods the operator creates
+included. The defaults are in `values.yaml`; Prometheus is limited to 2Gi,
+which a busy cluster outgrows (`values-generic.yaml` sets 4Gi).
+
+One workload cannot pass: the **node-exporter** DaemonSet reads the host (host
+network, PID namespace and root filesystem), so no namespace that enforces
+`baseline` or `restricted` admits it. Every other Restricted setting is on
+(non-root, `RuntimeDefault` seccomp, no privilege escalation, all capabilities
+dropped), so only those host controls need a namespace that allows them. It
+stays on by default. Switch it off with
+
+```bash
+--set kube-prometheus-stack.nodeExporter.enabled=false
+```
+
+`kates deploy` does this itself when the monitoring namespace enforces
+`baseline` or `restricted`. The node panels and node alerts go with it.
+
+Grafana's `initChownData` init container (root, `CAP_CHOWN`) is off: with
+persistence on, Grafana's fsGroup makes the volume writable on storage that
+honours fsGroup. Turn it back on only for storage that does not, in a
+namespace that allows it.
 
 ## kube-state-metrics and the ChaosEngine
 

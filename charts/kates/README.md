@@ -35,6 +35,8 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `image.repository` | `ghcr.io/bmscomp/kates` | Container image name |
 | `image.tag` | `1.28.0` | Container image tag, pinned in `values.yaml` to match the chart's `appVersion`. Keep it at 1.22.0 or newer: the probes use health endpoints older images lack |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy |
+| `global.imageRegistry` | `""` | Prepended, with a slash, to every image the chart renders: the API, PostgreSQL, the init container, the jobs, the helm test pods and `chaos.stressImage` |
+| `imagePullSecrets`, `global.imagePullSecrets` | `[]` | Pull secrets, both lists, on every pod the chart renders. An entry is a Secret name (`regcred`) or `{name: regcred}` |
 | `replicaCount` | `1` | Number of Kates API pods. Must be 1; see [One replica](#one-replica) |
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address. This, `kafka.topicNamespace`, `trogdor.coordinatorUrl` and `networkPolicy.kafka.namespace` go through `tpl`, so a value may name `{{ .Release.Namespace }}`, as kates-platform does |
 | `kafka.topicNamespace` | `""` | Namespace for CDC test `KafkaTopic` CRs (`""` = auto-detect) |
@@ -44,6 +46,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `engine.reaperGraceMs` | `300000` | Grace after a `RUNNING` or `STOPPING` run's planned duration before the reaper fails it |
 | `engine.submissionTimeoutMs` | `120000` | Maximum time a run may stay `PENDING` before submission is considered stranded |
 | `chaos.provider` | `""` | Chaos provider every fault goes through: `litmus-crd`, `kubernetes`, `hybrid` or `noop`. Empty keeps the backend's default, `litmus-crd`. `kates deploy --with-chaos=false` sets `noop` when no chaos release is installed. See [Chaos permissions](#chaos-permissions) |
+| `chaos.stressImage` | `docker.io/polinux/stress:1.0.4` | Image `CPU_STRESS` and `IO_STRESS` run in the target pod (`KATES_CHAOS_STRESS_IMAGE`), with `global.imageRegistry` prepended. Needs a Kates API image newer than 1.28.0 |
 | `prometheus.url` | `http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090` | Prometheus the backend queries for a disruption's Kafka metrics: kube-prometheus-stack's Service for `charts/monitoring` installed as release `monitoring` in namespace `monitoring`, as `kates deploy` does. After `make monitoring`, which uses namespace `kafka`, set `http://monitoring-kube-prometheus-prometheus.kafka.svc:9090` and `networkPolicy.prometheus.namespace=kafka` |
 
 ### Networking
@@ -86,10 +89,13 @@ that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `securityContext.runAsNonRoot` | `true` | Run pod as non-root |
-| `securityContext.runAsUser` | `1000` | Pod UID |
+| `securityContext.runAsNonRoot` | `true` | Run pod as non-root. `securityContext` and `containerSecurityContext` apply to the API pod, the jobs and the helm test pods |
+| `securityContext.runAsUser` | `100` | Pod UID |
+| `securityContext.seccompProfile.type` | `RuntimeDefault` | Seccomp profile, which Pod Security Standards restricted requires |
 | `containerSecurityContext.readOnlyRootFilesystem` | `true` | Read-only root FS |
 | `containerSecurityContext.allowPrivilegeEscalation` | `false` | Block privilege escalation |
+| `postgresql.securityContext` | UID and `fsGroup` 999, seccomp `RuntimeDefault` | PostgreSQL pod security context |
+| `kyvernoPolicy.exceptions` | `[]` | `{policyName, ruleNames}` entries: one Kyverno `PolicyException` in the release namespace exempts this release's pods and controllers from those rules of any policy, `autogen-` and `autogen-cronjob-` variants included. Needs no `kyvernoPolicy.enabled`, and Kyverno must accept exceptions from the namespace |
 | `serviceAccount.create` | `true` | Create a ServiceAccount |
 | `rbac.create` | `true` | Create the RBAC objects `rbac.scope` calls for |
 | `rbac.scope` | `cluster` | `cluster`: the backend's ClusterRole/ClusterRoleBinding (Litmus CRDs, Strimzi resources, cluster reads; no Secrets). `namespace`: nothing cluster-scoped; see [Namespace-only install](#namespace-only-install) |
@@ -100,7 +106,7 @@ that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
 
 ### Namespace-only install
 
-`rbac.scope=namespace` installs Kates with no cluster-scoped object. Performance and `INTEGRITY` tests make no Kubernetes call. Chaos is off: `KATES_CHAOS_PROVIDER` is `noop` unless `chaos.provider` is set. A conformity check reads the Kafka namespace, `networkPolicy.kafka.namespace` (the chart sets `KATES_TOPOLOGY_KAFKA_NAMESPACE` from it), through one read-only Role:
+`rbac.scope=namespace` installs Kates with no cluster-scoped object: the chart's Kyverno ClusterPolicies and `kyvernoPolicy.policyExceptions` render nothing, while `kyvernoPolicy.exceptions` renders in the release namespace. Performance and `INTEGRITY` tests make no Kubernetes call. Chaos is off: `KATES_CHAOS_PROVIDER` is `noop` unless `chaos.provider` is set. A conformity check reads the Kafka namespace, `networkPolicy.kafka.namespace` (the chart sets `KATES_TOPOLOGY_KAFKA_NAMESPACE` from it), through one read-only Role:
 
 | Resource | Verbs |
 |----------|-------|
@@ -242,6 +248,9 @@ that — `image.tag` does.
 | `cleanup.retentionDays` | `30` | Delete finished runs created more than this many days ago |
 | `cleanup.statuses` | `[DONE, FAILED]` | Which finished runs to delete: `DONE`, `FAILED` or both. A cancelled run is stored `FAILED` |
 | `cleanup.image` | `curlimages/curl:8.7.1` | Image the job runs `curl` from |
+| `cleanup.resources` | `25m`/`32Mi`, limit `64Mi` | Cleanup job resources |
+| `helmTests.image` | `curlimages/curl:8.7.1` | Image the `helm test` pods run `curl` from |
+| `helmTests.resources` | `25m`/`32Mi`, limit `64Mi` | Resources of each `helm test` pod |
 
 ### Test run cleanup
 
@@ -258,9 +267,11 @@ Upgrading from 0.10.9 or earlier: the job there never deleted a run. It asked fo
 | `extraEnv` | `[]` | Extra environment variables |
 | `extraVolumes` | `[]` | Extra volumes |
 | `extraVolumeMounts` | `[]` | Extra volume mounts |
-| `podLabels` | `{}` | Extra pod labels |
+| `podLabels` | `{}` | Extra labels on every pod the chart renders, jobs and test pods included; the chart's own labels win a clash |
 | `podAnnotations` | `{}` | Extra pod annotations |
 | `initContainers.waitForPostgres.image` | `busybox:1.36` | Init container image |
+| `initContainers.waitForPostgres.securityContext` | UID 65534, no privilege escalation, `ALL` dropped | Init container security context (`null`: `containerSecurityContext`; `{}` keeps these defaults) |
+| `initContainers.waitForPostgres.resources` | `10m`/`16Mi`, limit `32Mi` | Init container resources, in the API pod and the migration Job |
 
 ## Example: Local Kind Cluster
 

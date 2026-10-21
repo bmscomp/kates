@@ -14,4 +14,14 @@ maintainers:
 name: velero
 sources:
 - https://github.com/vmware-tanzu/velero
-version: 11.3.3
+version: 11.3.4
+annotations:
+  artifacthub.io/changes: |
+    - kind: changed
+      description: "Kates defaults (upstream ships these empty): podSecurityContext runs as 65534:65534, non-root, with the RuntimeDefault seccomp profile; containerSecurityContext and kubectl.containerSecurityContext forbid privilege escalation and drop every capability; resources (100m/128Mi, limit 512Mi), upgradeJobResources (50m/128Mi, limit 256Mi) and kubectl.resources (10m/32Mi, limit 128Mi) are set. The Deployment and the upgrade-crds and cleanup-crds Jobs pass the Restricted Pod Security Standard. Plugin initContainers are written by the installer and need the same securityContext and resources"
+    - kind: changed
+      description: "The Helm test pod (a Kates addition) sets the RuntimeDefault seccomp profile, takes its image, security contexts and resources from tests.*, and carries image.imagePullSecrets and podLabels (the chart's own labels win on a clash)"
+    - kind: changed
+      description: "deployNodeAgent stays false and is documented as host-level: the node-agent mounts the kubelet's pod and plugin directories from the host and runs as root with the default capabilities, which the Baseline and Restricted standards refuse, so it runs only in a namespace that enforces privileged. nodeAgent.podSecurityContext adds the RuntimeDefault seccomp profile (privileged containers run unconfined regardless) and nodeAgent.resources requests 100m/512Mi with a 1024Mi memory limit. nodeAgent.containerSecurityContext stays empty, allowPrivilegeEscalation unset: a default of false would be merged into a privileged true setting, which the API server refuses"
+    - kind: changed
+      description: "namespace.labels (empty by default) is documented as the one switch whose Job cannot pass the Restricted standard: upstream's label-namespace Job takes no security context or resources from any value. Label the namespace yourself instead"

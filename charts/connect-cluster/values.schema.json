@@ -13,7 +13,13 @@
       "description": "The library dependency (no values)"
     },
     "global": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "imageRegistry": {
+          "type": "string",
+          "description": "Registry put in front of every image this chart names (empty: as written)"
+        }
+      }
     },
     "nameOverride": {
       "type": "string"
@@ -35,6 +41,13 @@
     },
     "extraLabels": {
       "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "podLabels": {
+      "type": "object",
+      "description": "Labels added to every pod: the workers, the test pods and the Jobs; the chart labels win on a clash",
       "additionalProperties": {
         "type": "string"
       }
@@ -1726,6 +1739,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "resources": {
+          "type": "object",
+          "description": "Kubernetes resource requirements of the test pods"
         }
       },
       "additionalProperties": false

@@ -25,7 +25,7 @@
 {{- if include "mirror-maker2.testAuthUnsupported" (dict "c" $target) }}
 {{- fail "tests.offsetTranslation.enabled: the target uses TLS, mTLS or custom authentication, which this test cannot configure. Disable it or use scripts/test-mm2-migration.sh." }}
 {{- end }}
-{{- $image := $t.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version) }}
+{{- $image := include "mirror-maker2.image" (list . ($t.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version))) }}
 {{- /*
 Offset translation is the half of a migration that people discover they skipped
 on the morning of the cutover: all the data is on the target, and no consumer
@@ -54,16 +54,19 @@ metadata:
   name: {{ $fullname }}-test-offsets
   namespace: {{ include "mirror-maker2.namespace" . }}
   labels:
-    {{- include "mirror-maker2.componentLabels" (dict "component" "test" "ctx" .) | nindent 4 }}
-    # The selector the kafka-cluster broker NetworkPolicy admits. Without it
+    # kates.io/test-pod is the selector the kafka-cluster broker NetworkPolicy admits. Without it
     # this pod is denied at the network layer and reports a replication failure.
-    kates.io/test-pod: "true"
+    {{- include "kafka-common.podLabels" (dict "labels" (include "mirror-maker2.componentLabels" (dict "component" "test" "ctx" .)) "podLabels" .Values.podLabels "testPod" true) | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-weight": "30"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  {{- with $.Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   securityContext:
     runAsNonRoot: true
     seccompProfile:

@@ -9,6 +9,16 @@
     "fullnameOverride": { "type": "string" },
     "namespaceOverride": { "type": "string" },
     "extraLabels": { "type": "object" },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "global": {
+      "type": "object",
+      "properties": {
+        "imageRegistry": {
+          "type": "string",
+          "description": "Prepended to the derived official image (apache/kafka:<version>, 3.7.0 and up) only"
+        }
+      }
+    },
     "clusterDomain": { "type": "string" },
     "mode": {
       "description": "zookeeper for Kafka 2.x; kraft for Kafka 3.3+; empty derives it from kafka.version (zookeeper below 3.3.0, kraft from 3.3.0)",
@@ -136,6 +146,7 @@
         "extraEgress": { "type": "array" }
       }
     },
-    "testImage": { "type": "string" }
+    "testImage": { "type": "string" },
+    "testResources": { "type": "object" }
   }
 }

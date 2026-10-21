@@ -41,6 +41,22 @@
     "extraLabels": {
       "type": "object"
     },
+    "podLabels": {
+      "type": "object",
+      "description": "Labels added to every pod: the workers, the test pods and the Jobs; the chart labels win on a clash",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "global": {
+      "type": "object",
+      "properties": {
+        "imageRegistry": {
+          "type": "string",
+          "description": "Registry put in front of every image this chart names (empty: as written)"
+        }
+      }
+    },
     "clusterDomain": {
       "type": "string"
     },
@@ -322,6 +338,10 @@
               "minimum": 1
             }
           }
+        },
+        "resources": {
+          "type": "object",
+          "description": "Kubernetes resource requirements of test-mm2 and test-connectors"
         }
       }
     },

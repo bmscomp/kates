@@ -1,0 +1,36 @@
+# Why: the node exporter reports the node, not itself. It reads the host's
+# /proc, /sys and root filesystem through hostPath volumes and joins the host's
+# network and PID namespaces, and a pod on the host network gets its container
+# port as a host port. No value of the chart makes that pass the restricted
+# profile, so exactly those four controls are excepted; every other control of
+# pss-restricted, and the other policies, still apply to it.
+# Removed by: kube-prometheus-stack.nodeExporter.enabled=false on charts/monitoring
+# (the cluster then has no node metrics).
+# Names the DaemonSet and its pods as scripts/check-chart-policies.sh renders
+# them: release monitoring in namespace monitoring. On a cluster, install it
+# where the release runs and edit the names if the release is called otherwise.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: monitoring-node-exporter
+  namespace: monitoring
+spec:
+  exceptions:
+    - policyName: pss-restricted
+      ruleNames: [restricted, autogen-restricted]
+  match:
+    any:
+      - resources:
+          kinds: [DaemonSet]
+          namespaces: [monitoring]
+          names: [monitoring-prometheus-node-exporter]
+      - resources:
+          kinds: [Pod]
+          namespaces: [monitoring]
+          names: ["monitoring-prometheus-node-exporter-?????"]
+  podSecurity:
+    - controlName: Host Namespaces
+    - controlName: HostPath Volumes
+    - controlName: Volume Types
+    - controlName: Host Ports
+      images: ["*prometheus/node-exporter:*"]

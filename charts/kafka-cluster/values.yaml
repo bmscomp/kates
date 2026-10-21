@@ -60,7 +60,7 @@ global:
   imageRegistry: "quay.io"
   # -- Repository of that image
   imageRepository: "strimzi"
-  # -- Pull secrets for the pods this chart owns (tests)
+  # -- Pull secrets of the pods this chart owns (tests): names or {name: …}
   imagePullSecrets: []
   # -- Kubernetes DNS domain
   clusterDomain: "cluster.local"
@@ -68,8 +68,8 @@ global:
   # nodePools (a class change on an existing volume is refused by Strimzi).
   storageClass: ""
 
-# -- Images of the Helm-test pods. Pinned: scripts/check-versions.sh keeps
-# them aligned with the other charts.
+# -- Images of the Helm-test pods (tests.imageRegistry mirrors them). Pinned:
+# scripts/check-versions.sh keeps them aligned with the other charts.
 testImages:
   kafka: "ghcr.io/bmscomp/kates-tester:1.28.0"
   kubectl: "ghcr.io/bmscomp/kates-tester:1.28.0"
@@ -170,8 +170,8 @@ kafka:
   livenessProbe: {}
   readinessProbe: {}
 
-  # -- spec.kafka.template, deep-merged over the chart's (PDB and a hardened
-  # kafkaContainer security context). Node pools render their own pod,
+  # -- spec.kafka.template, deep-merged over the chart's (PDB, hardened kafkaContainer
+  # and initContainer security contexts). Node pools render their own pod,
   # kafkaContainer and persistentVolumeClaim templates, which Strimzi uses
   # instead of these: set per-pool pod settings under nodePools.
   template:
@@ -290,6 +290,12 @@ nodePools:
     #     volumes:
     #       - { id: 0, size: 200Gi, class: gp3-az1 }
 
+# -- Labels added to every pod: the Helm test pods, and the pod template of
+# every Strimzi component (brokers and controllers, entity operator, Cruise
+# Control, Kafka Exporter), so the operator's pods carry them too. The chart's
+# own labels win on a clash, so no selector changes.
+podLabels: {}
+
 # ── Operands ─────────────────────────────────────────────────────────────────
 entityOperator:
   topicOperator:
@@ -315,7 +321,11 @@ entityOperator:
     jvmOptions:
       -Xms: 128m
       -Xmx: 256m
-  # -- spec.entityOperator.template
+  # -- spec.entityOperator.template, deep-merged over the chart's: podLabels,
+  # and the Pod Security "restricted" pod and container security contexts
+  # (runAsNonRoot, RuntimeDefault seccomp, no privilege escalation, every
+  # capability dropped), which an operator without the restricted security
+  # provider does not set
   template: {}
 
 # -- Kafka Exporter (consumer lag and topic/partition metrics)
@@ -332,6 +342,8 @@ kafkaExporter:
     limits:
       memory: 256Mi
       cpu: 200m
+  # -- spec.kafkaExporter.template, deep-merged over the chart's (podLabels and
+  # the restricted security contexts, as for entityOperator.template)
   template: {}
 
 # -- Cruise Control
@@ -356,7 +368,8 @@ cruiseControl:
       cpu: 500m
   # -- spec.cruiseControl.apiUsers (hashLoginService Secret)
   apiUsers: {}
-  # -- spec.cruiseControl.template
+  # -- spec.cruiseControl.template, deep-merged over the chart's (podLabels and
+  # the restricted security contexts, as for entityOperator.template)
   template: {}
 
 # -- KafkaRebalance templates used by cruiseControl.autoRebalance, and an
@@ -661,6 +674,26 @@ tests:
   # helm-test-* topics and groups. Off: the tests use the first managed user.
   user:
     create: true
+  # -- Registry put in front of testImages.kafka and testImages.kubectl, for a
+  # mirror (`mirror.example.com` gives mirror.example.com/ghcr.io/bmscomp/…).
+  # Empty: the references as written. The Strimzi client image used when
+  # testImages.kafka is empty takes global.imageRegistry instead.
+  imageRegistry: ""
+  # -- Requests and limits of the test pods that run kubectl and a shell
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  # -- Requests and limits of the test pods that run the Kafka CLI, a JVM
+  # (produce-consume, performance, tiered storage)
+  jvmResources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      memory: 1Gi
 
 # -- external-secrets SecretStore/PushSecret/ExternalSecret wiring
 externalSecrets:

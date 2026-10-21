@@ -2,9 +2,9 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.28.0, the tag the v1.28.0
-# release publishes. Templates are otherwise unchanged.
-version: 0.12.2
+# Minor: global.imageRegistry now reaches every image the chart renders, so an
+# image value that already names the mirror gets it twice.
+version: 0.13.0
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -30,6 +30,18 @@ annotations:
   artifacthub.io/changes: |
     - kind: changed
       description: "appVersion 1.28.0 and the image tag move to 1.28.0. The Kates API changes since 1.27.0: a conformity check runs with only the namespace-scoped Role that rbac.scope=namespace grants, taking the zones from the EndpointSlices of Strimzi's headless Service when it may not read nodes, and answers 503 when Kubernetes refuses it the Kafka CR (#439); a fault that names no targetNamespace is aimed at kates.chaos.kafka.namespace instead of the literal kafka, so the safety guard no longer refuses every such step with Kafka elsewhere (#442). Templates are otherwise unchanged."
+    - kind: fixed
+      description: "Under Pod Security Standards restricted, enforced by a namespace label or a Kyverno policy, the helm test pods and PostgreSQL were refused (no seccomp profile), and the Kates API pod's wait-for-postgres init container had no CPU or memory requests or memory limit. With default values, and with backup, cleanup and migration enabled, every pod the chart renders now passes PSS restricted with requests and a memory limit on every container. The test pods run with securityContext and containerSecurityContext, as the API pod does, and the backup job's container takes containerSecurityContext, which it lacked. New values: helmTests.image and helmTests.resources (not tests, which holds the benchmark defaults), cleanup.resources, initContainers.waitForPostgres.securityContext and initContainers.waitForPostgres.resources, the init container's in the migration Job too; postgresql.securityContext gains seccompProfile RuntimeDefault"
+    - kind: changed
+      description: "ACTION REQUIRED for a release that sets global.imageRegistry — it is now prepended to every image the chart renders, not only the Kates API's: PostgreSQL, the wait-for-postgres init container, the backup, cleanup and migration jobs, the helm test pods and chaos.stressImage. An image value that already names the mirror gets it twice: drop the mirror from it. global.imagePullSecrets, which nothing read, and imagePullSecrets now reach every pod the chart renders, jobs and tests included. An entry of either list may be a Secret name or {name: ...}, as kafka-cluster takes global.imagePullSecrets, so a kates-platform global of [regcred] reaches the Kates pods as {name: regcred}"
+    - kind: added
+      description: "chaos.stressImage (default docker.io/polinux/stress:1.0.4, the backend's own) sets KATES_CHAOS_STRESS_IMAGE, the image CPU_STRESS and IO_STRESS run in the target pod, with global.imageRegistry prepended, so a cluster that pulls through a mirror pulls it there too. It needs a Kates API image newer than 1.28.0: 1.28.0 and earlier ignore it and pull from Docker Hub"
+    - kind: added
+      description: "podLabels reach every pod the chart renders: the Kates API, PostgreSQL, the backup, cleanup and migration jobs and the helm test pods. The chart's own labels win a clash, so no selector changes. The PostgreSQL pod also carries app.kubernetes.io/instance now, so it restarts once on upgrade"
+    - kind: added
+      description: "kyvernoPolicy.exceptions, a list of {policyName, ruleNames}, renders one kyverno.io/v2 PolicyException in the release namespace exempting this release's pods, Deployment, ReplicaSets, StatefulSet, Jobs and CronJobs from those rules of any Kyverno policy, the cluster's own included, along with the autogen-<rule> and autogen-cronjob-<rule> rules Kyverno generates from each. It is namespaced, so rbac.scope=namespace renders it, and it does not need kyvernoPolicy.enabled. The CronJobs' Jobs now carry the chart's labels so it matches them. Kyverno must accept exceptions from the release namespace"
+    - kind: fixed
+      description: "With rbac.scope=namespace, kyvernoPolicy.enabled still rendered the chart's ClusterPolicies, and kyvernoPolicy.policyExceptions PolicyExceptions in other namespaces, which an account with edit in the release namespace cannot create. Under scope namespace they render nothing; kyvernoPolicy.exceptions covers the release's own pods there. Under scope cluster they are unchanged"
     - kind: fixed
       description: "With Kafka outside namespace kafka, or named other than krafter, chaos, the cluster topology, cluster alerts and conformity checks looked for Kafka in kafka/krafter: the configmap never set kates.chaos.kafka.namespace, kates.chaos.kafka.cluster or kates.topology.kafka-cluster, and set kates.topology.kafka-namespace only with rbac.scope=namespace. Chaos refused every plan with No broker pods found, and every conformity check returned 409. The configmap now sets KATES_CHAOS_KAFKA_NAMESPACE and KATES_TOPOLOGY_KAFKA_NAMESPACE from networkPolicy.kafka.namespace (through tpl, with the policy on or off), whatever rbac.scope says, and KATES_CHAOS_KAFKA_CLUSTER and KATES_TOPOLOGY_KAFKA_CLUSTER from kafka.clusterName (new, default krafter). The defaults are the backend's own, so a release that keeps them renders the same settings; an extraEnv entry for these variables still wins. Upgrading: a release that set networkPolicy.kafka.namespace to anything but the namespace Kafka runs in now points chaos and topology there too"
     - kind: added

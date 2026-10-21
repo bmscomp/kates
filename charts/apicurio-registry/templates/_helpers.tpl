@@ -87,6 +87,15 @@ a separate image in Registry 3.x; it tracks the same appVersion by default.
 {{- end }}
 
 {{/*
+Labels for a pod template: the chart's own labels (pass them as .labels)
+plus podLabels. The chart's own win on a clash, so a selector never changes.
+Usage: include "apicurio-registry.podLabels" (dict "ctx" . "labels" (include "apicurio-registry.selectorLabels" .))
+*/}}
+{{- define "apicurio-registry.podLabels" -}}
+{{- toYaml (merge (fromYaml .labels) .ctx.Values.podLabels) }}
+{{- end }}
+
+{{/*
 Browser-facing REST API URL injected into the UI SPA. Falls back to the
 backend Service (works under port-forward); override ui.registryApiUrl when
 serving the UI through an Ingress.

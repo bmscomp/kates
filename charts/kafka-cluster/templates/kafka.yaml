@@ -5,9 +5,24 @@
 {{- $cc := include "kafka-common.enabled" (list $v.cruiseControl.enabled true) -}}
 {{- $rebalance := and $cc (include "kafka-common.enabled" (list $v.rebalance.enabled true)) -}}
 
-{{- /* spec.kafka.template: the chart's defaults, then kafka.template. */ -}}
-{{- $ktpl := dict "kafkaContainer" (dict "securityContext" (include "kafka-cluster.containerSecurityContext" . | fromYaml)) -}}
+{{- /* spec.kafka.template: the chart's defaults, then kafka.template. The
+       init container (rack awareness, NodePort listeners) is set here rather
+       than in the node pools, so kafka.template.initContainer still reaches it. */ -}}
+{{- $rc := include "kafka-common.restricted.container" . | fromYaml -}}
+{{- $ktpl := dict "kafkaContainer" (dict "securityContext" (include "kafka-cluster.containerSecurityContext" . | fromYaml)) "initContainer" (dict "securityContext" (deepCopy $rc)) -}}
 {{- include "kafka-cluster.merge" (dict "dst" $ktpl "src" ($v.kafka.template | default dict)) -}}
+
+{{- /* The other operands' templates: podLabels and the restricted pod and
+       container security contexts — which an operator without the restricted
+       provider leaves empty — then each component's own `template`. */ -}}
+{{- $pod := dict "securityContext" (include "kafka-common.restricted.pod" . | fromYaml) -}}
+{{- with $v.podLabels }}{{- $_ := set $pod "metadata" (dict "labels" .) }}{{- end -}}
+{{- $eoTpl := dict "pod" (deepCopy $pod) "topicOperatorContainer" (dict "securityContext" (deepCopy $rc)) "userOperatorContainer" (dict "securityContext" (deepCopy $rc)) -}}
+{{- include "kafka-cluster.merge" (dict "dst" $eoTpl "src" ($v.entityOperator.template | default dict)) -}}
+{{- $keTpl := dict "pod" (deepCopy $pod) "container" (dict "securityContext" (deepCopy $rc)) -}}
+{{- include "kafka-cluster.merge" (dict "dst" $keTpl "src" ($v.kafkaExporter.template | default dict)) -}}
+{{- $ccTpl := dict "pod" (deepCopy $pod) "cruiseControlContainer" (dict "securityContext" (deepCopy $rc)) -}}
+{{- include "kafka-cluster.merge" (dict "dst" $ccTpl "src" ($v.cruiseControl.template | default dict)) -}}
 
 {{- /* Tiered storage: the RSM config, with the SeaweedFS endpoint filled in. */ -}}
 {{- $rsmConfig := dict -}}
@@ -116,14 +131,13 @@ spec:
       {{- toYaml ($v.entityOperator.topicOperator | default dict) | nindent 6 }}
     userOperator:
       {{- toYaml ($v.entityOperator.userOperator | default dict) | nindent 6 }}
-    {{- with $v.entityOperator.template }}
     template:
-      {{- toYaml . | nindent 6 }}
-    {{- end }}
+      {{- toYaml $eoTpl | nindent 6 }}
   {{- if include "kafka-common.enabled" (list $v.kafkaExporter.enabled true) }}
   kafkaExporter:
     {{- $ke := omit $v.kafkaExporter "enabled" }}
     {{- range $k, $val := $ke }}{{- if not $val }}{{- $_ := unset $ke $k }}{{- end }}{{- end }}
+    {{- $_ := set $ke "template" $keTpl }}
     {{- toYaml $ke | nindent 4 }}
   {{- end }}
   {{- if $cc }}
@@ -149,12 +163,14 @@ spec:
     config:
       {{- toYaml . | nindent 6 }}
     {{- end }}
-    {{- range $key := (list "resources" "apiUsers" "template" "image" "jvmOptions" "logging" "livenessProbe" "readinessProbe") }}
+    {{- range $key := (list "resources" "apiUsers" "image" "jvmOptions" "logging" "livenessProbe" "readinessProbe") }}
     {{- with (index $v.cruiseControl $key) }}
     {{ $key }}:
       {{- toYaml . | nindent 6 }}
     {{- end }}
     {{- end }}
+    template:
+      {{- toYaml $ccTpl | nindent 6 }}
     {{- if $r.metrics.enabled }}
     {{- /* Cruise Control keeps the JMX exporter and its own rule set. */}}
     metricsConfig:

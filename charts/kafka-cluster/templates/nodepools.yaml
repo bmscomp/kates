@@ -20,7 +20,10 @@ rendered here and not on the Kafka CR.
 
 {{- $pod := dict -}}
 {{- $podMeta := dict -}}
-{{- with $p.zone }}{{- $_ := set $podMeta "labels" (dict "zone" .) }}{{- end -}}
+{{- /* podLabels, under the chart's own zone label. */ -}}
+{{- $podLabels := deepCopy ($v.podLabels | default dict) -}}
+{{- with $p.zone }}{{- $_ := set $podLabels "zone" . }}{{- end -}}
+{{- with $podLabels }}{{- $_ := set $podMeta "labels" . }}{{- end -}}
 {{- /*
   With tiered storage active, a broker-only pool's log segments live in
   object storage, so a file-level backup of its volumes is redundant.

@@ -23,6 +23,24 @@ tests:
       - equal: {path: spec.metricsConfig.type, value: jmxPrometheusExporter}
       - equal: {path: spec.metricsConfig.valueFrom.configMapKeyRef.name, value: harness-metrics}
 
+  - it: hardens the rack init container and puts a mirror registry in front of the images
+    set:
+      worker.image: quay.io/strimzi/kafka:1.2.0-kafka-4.3.1
+      worker.imageRegistry: mirror.example.com
+      worker.rack: {enabled: true, clientRackInitImage: "r/i:1"}
+      worker.template.container: {harden: true}
+    asserts:
+      - equal: {path: spec.image, value: "mirror.example.com/quay.io/strimzi/kafka:1.2.0-kafka-4.3.1"}
+      - equal: {path: spec.clientRackInitImage, value: "mirror.example.com/r/i:1"}
+      - equal: {path: spec.template.initContainer.securityContext.allowPrivilegeEscalation, value: false}
+      - equal: {path: 'spec.template.initContainer.securityContext.capabilities.drop', value: [ALL]}
+
+  - it: leaves the init container alone without rack awareness
+    set:
+      worker.template.container: {harden: true}
+    asserts:
+      - notExists: {path: spec.template.initContainer}
+
   - it: seeds replicas from minReplicas under an HPA (v1 requires the field)
     set:
       worker.autoscaling: {enabled: true, minReplicas: 4}

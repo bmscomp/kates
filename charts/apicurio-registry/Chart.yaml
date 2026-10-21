@@ -5,4 +5,12 @@ description: A Helm chart for Kubernetes of Apicurio Registry, backed by the
 icon: https://design.jboss.org/apicurio/logo/logofiles/apicurio_icon_lightbkg_color.svg
 name: apicurio-registry
 type: application
-version: 0.4.0
+version: 0.4.1
+annotations:
+  artifacthub.io/changes: |
+    - kind: fixed
+      description: "The Helm test pod passes Pod Security Standards restricted with requests and a limit: 10m/32Mi requests, 64Mi limit, a pod security context with seccompProfile RuntimeDefault, all as tests.resources, tests.podSecurityContext and tests.securityContext"
+    - kind: changed
+      description: "The Helm test pod pulls its image from image.registry, as the registry and the UI do, so one mirror serves every pod: it is quay.io/curl/curl:8.7.1 (tests.image), running as the image's own uid 100, instead of busybox:1.36 from Docker Hub. It uses imagePullSecrets too. A mirror set through image.registry needs curl/curl:8.7.1 for helm test"
+    - kind: added
+      description: "podLabels (default empty) adds labels to the registry, UI and Helm test pods; the chart's own labels win on a clash, so selectors never change"

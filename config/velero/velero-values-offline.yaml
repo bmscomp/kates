@@ -11,6 +11,18 @@ initContainers:
     volumeMounts:
       - mountPath: /target
         name: plugins
+    # The chart's defaults cover its own containers only: without these the
+    # Restricted Pod Security Standard refuses the Velero pod.
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
 
 configuration:
   backupStorageLocation:

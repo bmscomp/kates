@@ -1,4 +1,4 @@
-{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.networkPolicyGeneration.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.networkPolicyGeneration.enabled (ne .Values.rbac.scope "namespace") (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:

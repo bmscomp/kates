@@ -19,8 +19,7 @@ metadata:
   name: "{{ include "kafka-cluster.clusterName" . }}-test-tiered-storage"
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
-    {{- include "kafka-cluster.componentLabels" (dict "ctx" . "component" "helm-test") | nindent 4 }}
-    kates.io/test-pod: "true"
+    {{- include "kafka-common.podLabels" (dict "labels" (include "kafka-cluster.componentLabels" (dict "ctx" . "component" "helm-test")) "podLabels" .Values.podLabels "testPod" true) | nindent 4 }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "11"
@@ -102,6 +101,8 @@ spec:
             echo "  ✗ offset 0 could not be read" && exit 1
           fi
           echo "✓ Tier 11 complete"
+      resources:
+        {{- toYaml $.Values.tests.jvmResources | nindent 8 }}
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: false

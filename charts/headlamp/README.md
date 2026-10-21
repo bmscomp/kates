@@ -27,6 +27,14 @@ helm test headlamp -n headlamp
 | `rbac.rules` | see values | Full read-only rule set (core, apps, batch, networking, RBAC, Strimzi, Litmus, monitoring) |
 | `service.type` / `service.port` | `ClusterIP` / `80` | Service exposure |
 | `securityContext` / `containerSecurityContext` | hardened | Non-root, read-only rootfs, all capabilities dropped |
+| `global.imageRegistry` | `""` | Registry prepended to every image (Headlamp and the Helm test) |
+| `imagePullSecrets` | `[]` | Pull secrets for every pod, the Helm test included |
+| `podLabels` | `{}` | Extra labels on every pod (the chart's own labels win on a clash) |
+| `test.image` | `curlimages/curl:8.7.1` | Helm test image |
+| `test.podSecurityContext` / `test.securityContext` | uid 100, seccomp `RuntimeDefault`, all capabilities dropped | Helm test pod security |
+| `test.resources` | `25m`/`32Mi` requests, `100m`/`64Mi` limits | Helm test pod resources |
+
+Every pod, the Helm test included, passes Pod Security Standards `restricted` with the defaults.
 
 The full value reference is `values.yaml`; every key is validated by `values.schema.json`.
 

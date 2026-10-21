@@ -465,7 +465,7 @@ The chart runs hardened by default:
 
 - Dedicated `ServiceAccount` with `automountServiceAccountToken: false` — Kafka UI does not call the Kubernetes API.
 - `readOnlyRootFilesystem: true` with an `emptyDir` mounted at `/tmp`.
-- Non-root, all capabilities dropped, no privilege escalation.
+- Non-root, seccomp `RuntimeDefault`, all capabilities dropped, no privilege escalation: the Kafka UI pod and the Helm test pod pass Pod Security Standards `restricted`.
 - A default-scoped `NetworkPolicy` (no Kubernetes API-server egress unless `networkPolicy.apiServerEgress=true`).
 - The web login password is randomly generated on first install and preserved across upgrades (never a well-known default).
 
@@ -487,7 +487,9 @@ extraVolumeMounts: []
 | `image.tag` | `""` (Chart.appVersion) | Image tag |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy |
 | `image.digest` | `""` | Image digest (overrides tag) |
-| `imagePullSecrets` | `[]` | Registry pull secrets |
+| `global.imageRegistry` | `""` | Registry prepended to every image (Kafka UI and the Helm test) |
+| `imagePullSecrets` | `[]` | Registry pull secrets (the Helm test pod too) |
+| `tests.image.repository` / `tests.image.tag` | `busybox` / `1.36` | Helm test image |
 
 ### Kafka
 
@@ -543,7 +545,11 @@ extraVolumeMounts: []
 | `serviceAccount.create` | `true` | Create a dedicated ServiceAccount |
 | `serviceAccount.name` | `""` (fullname) | ServiceAccount name |
 | `serviceAccount.automountServiceAccountToken` | `false` | Mount the API token (not needed) |
+| `podSecurityContext` | non-root 1001, seccomp `RuntimeDefault` | Pod security context (passes PSS restricted) |
 | `securityContext.readOnlyRootFilesystem` | `true` | Read-only root FS (chart mounts `/tmp` emptyDir) |
+| `podLabels` | `{}` | Extra labels on every pod (the chart's own labels win on a clash) |
+| `tests.podSecurityContext` / `tests.securityContext` | nobody (65534), seccomp `RuntimeDefault`, all capabilities dropped | Helm test pod security |
+| `tests.resources` | `10m`/`32Mi` requests, `64Mi` limit | Helm test pod resources |
 | `extraVolumes` / `extraVolumeMounts` | `[]` | Extra volumes/mounts (custom truststores, serdes) |
 
 ### NetworkPolicy

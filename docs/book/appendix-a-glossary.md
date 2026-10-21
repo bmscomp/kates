@@ -506,7 +506,7 @@ See [PDB](#gl-pdb).
 
 ### PolicyException {#gl-policyexception}
 
-A Kyverno resource that exempts named resources or namespaces from specific policy rules without disabling the policy. See [Security & Compliance](17-security.md#policy-exceptions).
+A Kyverno resource that exempts named resources or namespaces from specific policy rules without disabling the policy. In Kates, the `kates` and `kates-chaos` charts render one from `kyvernoPolicy.exceptions` for some of their own pods, the Litmus operator among them, against any policy the cluster runs. See [Security & Compliance](17-security.md#policy-exceptions).
 
 ### PolicyReport {#gl-policyreport}
 

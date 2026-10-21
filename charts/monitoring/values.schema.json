@@ -48,8 +48,27 @@
         "test": {
             "type": "object",
             "properties": {
-                "image": { "type": "string" }
+                "image": { "type": "string" },
+                "podSecurityContext": { "type": "object" },
+                "securityContext": { "type": "object" },
+                "resources": { "type": "object" }
             }
+        },
+        "global": {
+            "type": "object",
+            "description": "Passed down to kube-prometheus-stack and its subcharts; also used by this chart's test pod",
+            "properties": {
+                "imageRegistry": { "type": "string" },
+                "imagePullSecrets": {
+                    "type": "array",
+                    "items": { "type": ["string", "object"] }
+                }
+            }
+        },
+        "podLabels": {
+            "type": "object",
+            "description": "Extra labels on this chart's own pod (the Helm test); the chart's labels win on a clash",
+            "additionalProperties": { "type": "string" }
         }
     }
 }

@@ -9,8 +9,11 @@ global:
   imagePullSecrets: []
 
 # ── Security (OpenShift / PSA restricted) ─────────────────────────────────────
-# Let the platform assign UIDs (required for OpenShift SCCs)
+# On OpenShift, uncomment the two nulls so its SCCs assign the UID; left out,
+# values.yaml's runAsUser and fsGroup (100) stay, as Helm merges this file.
 securityContext:
+  # runAsUser: null
+  # fsGroup: null
   runAsNonRoot: true
   seccompProfile:
     type: RuntimeDefault

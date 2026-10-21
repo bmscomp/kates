@@ -1,4 +1,4 @@
-{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.cosign.enabled (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
+{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.cosign.enabled (ne .Values.rbac.scope "namespace") (.Capabilities.APIVersions.Has "kyverno.io/v1") }}
 {{- if .Values.kyvernoPolicy.cosign.publicKey }}
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy

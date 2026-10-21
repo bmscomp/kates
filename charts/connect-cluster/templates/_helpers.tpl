@@ -71,6 +71,11 @@ capabilities:
 {{- include "kafka-common.imagePullPolicy" .Values.imagePullPolicy }}
 {{- end }}
 
+{{/* An image this chart names, behind global.imageRegistry. Call with (list $ <ref>). */}}
+{{- define "connect-cluster.image" -}}
+{{- include "kafka-common.image" (dict "image" (index . 1) "registry" ((index . 0).Values.global).imageRegistry) }}
+{{- end }}
+
 {{/* Namespace of the Kafka cluster (default: the release namespace). */}}
 {{- define "connect-cluster.kafkaNamespace" -}}
 {{- .Values.kafka.namespace | default (include "connect-cluster.namespace" .) -}}
@@ -166,6 +171,7 @@ connectWorker.spec reads (shared with mirror-maker2).
       "namespace" (include "connect-cluster.namespace" .)
       "version" .Values.version
       "image" .Values.image
+      "imageRegistry" (.Values.global).imageRegistry
       "replicas" .Values.replicas
       "minReplicasDefault" 3
       "autoscaling" .Values.autoscaling
@@ -187,7 +193,7 @@ connectWorker.spec reads (shared with mirror-maker2).
       "podSelector" (include "connect-cluster.podSelectorLabels" . | fromYaml)
       "template" (dict
           "pdb" .Values.podDisruptionBudget
-          "podMetadata" (dict "annotations" $annotations)
+          "podMetadata" (dict "labels" .Values.podLabels "annotations" $annotations)
           "podSecurityContext" $r.podSecurityContext
           "imagePullSecrets" .Values.imagePullSecrets
           "priorityClassName" .Values.priorityClassName

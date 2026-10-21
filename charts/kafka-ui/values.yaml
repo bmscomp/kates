@@ -1,3 +1,10 @@
+# -- Global configuration
+global:
+  # -- Registry prepended to every image the chart renders (Kafka UI and the
+  # Helm test), for clusters that pull from a mirror: ghcr.io/kafbat/kafka-ui
+  # becomes <imageRegistry>/ghcr.io/kafbat/kafka-ui. Empty pulls as written.
+  imageRegistry: ""
+
 # -- Image configuration
 image:
   # -- Container image repository (migrated from deprecated provectuslabs/kafka-ui)
@@ -10,7 +17,7 @@ image:
   # digest: "sha256:abc123..."
   digest: ""
 
-# -- Image pull secrets for private registries
+# -- Image pull secrets for private registries (the Helm test pod uses them too)
 imagePullSecrets: []
 #  - name: ghcr-credentials
 
@@ -211,6 +218,10 @@ podAnnotations: {}
 #  prometheus.io/scrape: "true"
 #  prometheus.io/port: "8080"
 
+# -- Extra labels for every pod the chart renders (Kafka UI and the Helm test).
+# The chart's own labels win on a clash, so a selector never changes.
+podLabels: {}
+
 # -- Pod resource requests and limits
 resources:
   requests:
@@ -247,6 +258,8 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1001
   fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
 
 # -- Container-level security context. readOnlyRootFilesystem is on; the chart
 # mounts an emptyDir at /tmp for the app's scratch space.
@@ -302,6 +315,31 @@ metrics:
     labels: {}
     relabelings: []
     metricRelabelings: []
+
+# -- Helm test pod (`helm test`): wget against the Kafka UI health endpoint
+tests:
+  image:
+    # -- Test image repository (global.imageRegistry is prepended when set)
+    repository: busybox
+    tag: "1.36"
+  # -- busybox runs as root unless told otherwise; the test runs as nobody
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
 
 # -- Extra volumes / mounts (e.g. custom truststores, serde descriptors)
 extraVolumes: []

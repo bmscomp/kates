@@ -17,6 +17,17 @@ fullnameOverride: ""
 namespaceOverride: ""
 # -- Extra labels added to every resource
 extraLabels: {}
+# -- Extra labels for every pod the chart renders (brokers, ZooKeeper, the
+# topics Job and the Helm test). The chart's own labels win on a clash, so a
+# selector never changes.
+podLabels: {}
+
+global:
+  # -- Registry prepended to the derived official image, apache/kafka:<version>
+  # (Kafka 3.7.0 and up), for clusters that pull from a mirror. The built image
+  # below 3.7.0 takes legacyImageRegistry instead, and an explicit kafka.image
+  # or testImage is used as written.
+  imageRegistry: ""
 # -- Kubernetes cluster domain (advertised-listener FQDNs)
 clusterDomain: cluster.local
 
@@ -157,6 +168,7 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 priorityClassName: ""
+# -- Pull secrets for every pod, the topics Job and the Helm test included
 imagePullSecrets: []
 
 serviceAccount:
@@ -176,3 +188,9 @@ networkPolicy:
 # -- Image used by the Helm test pod. Defaults to the broker image, which is the
 # only client guaranteed to speak to a 2.x broker.
 testImage: ""
+# -- Resources of the Helm test pod. It runs two Kafka CLI tools, each a JVM,
+# so it gets what the topics Job gets. The pod runs with podSecurityContext
+# and containerSecurityContext, like every other pod here.
+testResources:
+  requests: { memory: 256Mi, cpu: 100m }
+  limits: { memory: 768Mi, cpu: 1000m }

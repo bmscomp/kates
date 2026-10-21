@@ -1,0 +1,41 @@
+# Why: litmus-core, the upstream LitmusChaos chart kates-chaos wraps, renders
+# its chaos operator (and, with litmus-core.exporter.enabled, its exporter)
+# with no securityContext and takes none from values, so neither pod can set
+# seccomp, runAsNonRoot, allowPrivilegeEscalation or drop capabilities. Exactly
+# those four controls are excepted, for those two images only; every other
+# control of pss-restricted, and the other policies, still apply to them.
+# Removed by: litmus-core.enabled=false on charts/kates-chaos (no chaos
+# operator: Kates then cannot run Litmus faults), or by a litmus-core release
+# that takes a securityContext. A cluster that enforces the profile exempts
+# them with the chart's own kyvernoPolicy.exceptions instead.
+# Names the Deployments and their pods as scripts/check-chart-policies.sh
+# renders them: release kates-chaos in namespace kates-chaos (the operator's
+# name is litmus-core's fullname, litmus, whatever the release is called).
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: kates-chaos-litmus
+  namespace: kates-chaos
+spec:
+  exceptions:
+    - policyName: pss-restricted
+      ruleNames: [restricted, autogen-restricted]
+  match:
+    any:
+      - resources:
+          kinds: [Deployment]
+          namespaces: [kates-chaos]
+          names: [litmus, litmus-monitor]
+      - resources:
+          kinds: [Pod]
+          namespaces: [kates-chaos]
+          names: ["litmus-*-?????", "litmus-monitor-*-?????"]
+  podSecurity:
+    - controlName: Privilege Escalation
+      images: ["*litmuschaos/chaos-operator:*", "*litmuschaos/chaos-exporter:*"]
+    - controlName: Capabilities
+      images: ["*litmuschaos/chaos-operator:*", "*litmuschaos/chaos-exporter:*"]
+    - controlName: Running as Non-root
+      images: ["*litmuschaos/chaos-operator:*", "*litmuschaos/chaos-exporter:*"]
+    - controlName: Seccomp
+      images: ["*litmuschaos/chaos-operator:*", "*litmuschaos/chaos-exporter:*"]

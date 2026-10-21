@@ -18,6 +18,22 @@ tests:
       - equal:
           path: 'metadata.labels["app.kubernetes.io/component"]'
           value: overridden
+  - it: adds podLabels to a pod's labels, never over the chart's own
+    release: {name: h}
+    set:
+      podLabels: {team: payments, app.kubernetes.io/instance: hijack, kates.io/test-pod: "false"}
+    asserts:
+      - matchRegex: {path: data.podLabels, pattern: "(?m)^team: payments$"}
+      - matchRegex: {path: data.podLabels, pattern: "(?m)^app.kubernetes.io/instance: h$"}
+      - matchRegex: {path: data.podLabels, pattern: "(?m)^kates.io/test-pod: \"true\"$"}
+  - it: leaves an image alone without a mirror registry
+    asserts:
+      - equal: {path: data.image, value: "ghcr.io/x/y:1"}
+  - it: prefixes the registry once, without a doubled slash
+    set:
+      registry: mirror.example.com/
+    asserts:
+      - equal: {path: data.image, value: "mirror.example.com/ghcr.io/x/y:1"}
   - it: normalises versions
     asserts:
       - equal: {path: data.semver, value: "4.2.0"}

@@ -33,6 +33,9 @@ kafkaUser:
 secretSync:
   secrets: []
   watch: false
+  imagePullSecrets: []
+podLabels: {}
+registry: ""
 netpol:
   dns: {}
 bootstrapPorts:

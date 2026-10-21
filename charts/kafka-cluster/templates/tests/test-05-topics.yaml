@@ -9,8 +9,7 @@ metadata:
   namespace: {{ include "kafka-cluster.namespace" . }}
   labels:
     {{- /* strimzi.io/cluster comes from kafka-cluster.labels — do not repeat it */}}
-    {{- include "kafka-cluster.labels" . | nindent 4 }}
-    kates.io/test-pod: "true"
+    {{- include "kafka-common.podLabels" (dict "labels" (include "kafka-cluster.labels" .) "podLabels" .Values.podLabels "testPod" true) | nindent 4 }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "5"
@@ -75,6 +74,8 @@ spec:
             echo "✗ Topic validation failed" && exit 1
           fi
           echo "✓ Tier 5 complete"
+      resources:
+        {{- toYaml $.Values.tests.resources | nindent 8 }}
       securityContext:
         {{- include "kafka-cluster.containerSecurityContext" . | nindent 8 }}
       volumeMounts:

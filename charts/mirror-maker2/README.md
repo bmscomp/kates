@@ -853,7 +853,8 @@ The blocks this chart adds on top of the `connect-cluster` worker surface:
 | Scheduling | Where the workers run | `nodeSelector` (rendered as required node affinity — Strimzi's pod template has no nodeSelector), `nodeAffinity`, `tolerations`, `podAntiAffinity`, `topologySpreadConstraints`, `priorityClassName` (empty by default; prod sets it), `terminationGracePeriodSeconds` |
 | `*.authentication` | Target and per-source credentials | `type: scram-sha-512\|scram-sha-256\|plain\|tls\|custom`. **`custom`** is the Strimzi v1 form of OAuth and other SASL mechanisms: `custom.sasl: true` plus `custom.config` (`sasl.mechanism`, `sasl.jaas.config`, … — or `ssl.keystore.*` for a client certificate). The preflight probe and the Helm tests report a custom-authenticated cluster as not verifiable |
 | `logging` | Worker log levels | `type: inline\|external`, `mirrorLevel`, `rootLevel`, `extraLoggers` |
-| `tests` | The data-moving Helm tests | `replication.topic`, **`replication.topicByAlias`**, `replication.group`, `replication.sourceAlias`, `offsetTranslation.group`, **`failover.{group,messages,commitAfter}`** |
+| `tests` | The data-moving Helm tests | `replication.topic`, **`replication.topicByAlias`**, `replication.group`, `replication.sourceAlias`, `offsetTranslation.group`, **`failover.{group,messages,commitAfter}`**; `resources` sizes test-mm2 and test-connectors (10m and 64Mi, a 128Mi limit) |
+| `podLabels` / `global.imageRegistry` | Labels and a mirror registry | `podLabels` go on the workers' pod template, the test pods and the Jobs, under the chart's own labels; `global.imageRegistry` goes in front of every image the chart names (`image`, `rack.clientRackInitImage`, `testImages.kubectl`, `secretSync.image`, the preflight and data-test images) |
 
 **Bold** keys are new in 0.4.0; the scheduling row and `custom` authentication in 0.8.0.
 

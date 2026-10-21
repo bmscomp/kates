@@ -16,10 +16,11 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "kates.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: migration
+        {{- $own := printf "%s\napp.kubernetes.io/component: migration" (include "kates.selectorLabels" .) }}
+        {{- include "kates.podLabels" (dict "labels" $own "ctx" .) | nindent 8 }}
     spec:
       restartPolicy: OnFailure
+      {{- with include "kates.imagePullSecrets" . }}{{ . | nindent 6 }}{{ end }}
       {{- with .Values.securityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -27,27 +28,24 @@ spec:
       {{- if .Values.postgresql.enabled }}
       initContainers:
       - name: wait-for-postgres
-        image: {{ .Values.initContainers.waitForPostgres.image | quote }}
+        image: {{ include "kates.imageRef" (dict "image" .Values.initContainers.waitForPostgres.image "ctx" .) | quote }}
         imagePullPolicy: {{ .Values.initContainers.waitForPostgres.pullPolicy | default "IfNotPresent" }}
         command: ['sh', '-c', 'until nc -z {{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }} 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
-        {{- with .Values.containerSecurityContext }}
+        {{- with .Values.initContainers.waitForPostgres.securityContext | default .Values.containerSecurityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
+        {{- with .Values.initContainers.waitForPostgres.resources }}
         resources:
-          requests:
-            memory: "16Mi"
-            cpu: "10m"
-          limits:
-            memory: "32Mi"
-            cpu: "50m"
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         volumeMounts:
         - name: tmp
           mountPath: /tmp
       {{- end }}
       containers:
       - name: migrate
-        image: {{ .Values.migration.image | default (printf "%s:%s" .Values.image.repository .Values.image.tag) | quote }}
+        image: {{ include "kates.imageRef" (dict "image" (.Values.migration.image | default (printf "%s:%s" .Values.image.repository .Values.image.tag)) "ctx" .) | quote }}
         env:
         {{- include "kates.dbEnv" . | nindent 8 }}
         {{- if .Values.migration.command }}

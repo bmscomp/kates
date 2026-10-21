@@ -28,6 +28,20 @@ productionMode: false
 
 # -- Extra labels added to every resource
 extraLabels: {}
+# -- Labels added to every pod: the workers (through the KafkaConnect's pod
+# template), the Helm test pods and the secret-sync and preflight Jobs. The
+# chart's own labels win on a clash, so no selector changes.
+podLabels: {}
+
+# -- Settings shared with a parent chart
+global:
+  # -- Registry put in front of every image this chart names, for a mirror:
+  # `image`, rack.clientRackInitImage, testImages.kubectl, secretSync.image and
+  # the preflight image (`mirror.example.com` gives
+  # mirror.example.com/ghcr.io/bmscomp/connect:…). Empty: as written. An empty
+  # `image` or clientRackInitImage is the operator's own, which the operator's
+  # registry setting redirects.
+  imageRegistry: ""
 
 # -- Kubernetes cluster domain (bootstrap and Schema Registry FQDNs)
 clusterDomain: cluster.local
@@ -182,7 +196,9 @@ plugins: []
 imageVolumes:
   acknowledged: false
 
-# -- spec.build passthrough (output + plugins); rendered when output is set
+# -- spec.build passthrough (output + plugins); rendered when output is set.
+# The operator's build pod runs as root, so Pod Security "restricted" refuses
+# it: prefer `image` in a restricted namespace.
 build: {}
   # output:
   #   type: docker
@@ -698,3 +714,10 @@ tests:
     - io.aiven.connect.jdbc.JdbcSourceConnector
     - io.aiven.kafka.connect.s3.AivenKafkaConnectS3SinkConnector
     - io.aiven.kafka.connect.s3.source.S3SourceConnector
+  # -- Requests and limits of the test pods (kubectl and a shell)
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

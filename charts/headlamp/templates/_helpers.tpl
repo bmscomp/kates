@@ -58,3 +58,20 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Labels for a pod template: the chart's own labels (pass them as .labels)
+plus podLabels. The chart's own win on a clash, so a selector never changes.
+Usage: include "headlamp.podLabels" (dict "ctx" . "labels" (include "headlamp.selectorLabels" .))
+*/}}
+{{- define "headlamp.podLabels" -}}
+{{- toYaml (merge (fromYaml .labels) .ctx.Values.podLabels) }}
+{{- end }}
+
+{{/*
+An image reference behind global.imageRegistry when that is set.
+Usage: include "headlamp.image" (dict "ctx" . "image" "repository:tag")
+*/}}
+{{- define "headlamp.image" -}}
+{{- with .ctx.Values.global.imageRegistry }}{{ . }}/{{ end }}{{ .image }}
+{{- end }}

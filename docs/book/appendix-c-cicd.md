@@ -73,7 +73,7 @@ The filters used to be workflow-level `paths:` blocks, and the move is not cosme
 
 | Workflow | Filtered on |
 |----------|-------------|
-| `ci.yml` | `code` (`kates/**`, `cli/**`, `images.env`, `versions.env`, the workflow and composite actions), `helm` (`charts/**`, `versions.env`, `scripts/check-versions.sh`, `config/cluster.yaml`), `yaml` (`config/**`) |
+| `ci.yml` | `code` (`kates/**`, `cli/**`, `images.env`, `versions.env`, the workflow and composite actions), `helm` (`charts/**`, `versions.env`, `.github/kyverno/**`, `scripts/check-chart-policies.sh`, `scripts/check-versions.sh`, `config/cluster.yaml`, `tester/**`), `yaml` (`config/**`) |
 | `ci-kafka-charts.yml` | `charts/kafka-cluster/**`, `charts/connect-cluster/**`, `charts/mirror-maker2/**`, `charts/kafka-common/**`, `charts/strimzi-operator/**`, `charts/monitoring/**`, `charts/kates/**`, `charts/kates-chaos/**`, the checker scripts (`scripts/check-strimzi-crs.py`, `check-strimzi-metrics.sh`, `check-chart-matrix.py`, `check-metric-contract.sh`), `scripts/chart-matrix/**`, `scripts/metric-contract/**`, `dashboards/**`, `images.env`, `versions.env` |
 | `ci-mirror-maker2.yml` | `charts/mirror-maker2/**`, `charts/kafka-common/**`, `charts/legacy-kafka/**`, `charts/kafka-cluster/**` (the migration e2e stands a real source cluster up), `Dockerfile.legacy-kafka`, the migration scripts, `scripts/metric-contract/**`, `cli/cmd/migrate*.go`, `cli/pkg/migrate/**`, `cli/internal/podrun/**`, `docs/mirror-maker2-runbook.md` |
 | `ci-docker.yml` | `kates/**`, `cli/**`, `images.env`, `versions.env` |
@@ -102,12 +102,12 @@ Every workflow also shares three conventions: a `concurrency` group per branch (
 
 | Job | Runtime | Description |
 |-----|---------|-------------|
-| **Detect Changes** | `dorny/paths-filter` | Splits the run into `code`, `helm` and `yaml` categories. Every job below keys its `if:` off one of them, except Kyverno Policy Validation, which always runs |
+| **Detect Changes** | `dorny/paths-filter` | Splits the run into `code`, `helm` and `yaml` categories. Every job below keys its `if:` off one of them; Kyverno Policy Validation runs on `helm` or `code` |
 | **Build & Test** | Java 21 (Temurin) | Compiles the Kates API, a Quarkus application, and runs the test suite with `./mvnw verify`, publishes the surefire *and* failsafe JUnit reports as a check, uploads the JaCoCo report and writes its totals to the run summary |
 | **Dependency CVE scan** | — | Trivy over the Maven tree and `govulncheck` over the Go module, as its own job so a new CVE and a failing test are two different red checks |
 | **CLI Tests** | Go 1.25 | Runs `go test -race` across all CLI packages, then the terminal-compatibility and CLI style harnesses |
 | **Helm Lint** | Helm v3.17.0 | Lints, renders and schema-validates every chart under `charts/`, and runs the repository's cross-file consistency checks |
-| **Kyverno Policy Validation** | Kyverno CLI v1.13.0 | Renders the Kyverno policy templates from the `kates`, `kafka-cluster`, and `kates-chaos` charts and validates them with `kyverno apply` |
+| **Kyverno Policy Validation** | Kyverno CLI v1.13.0 | Holds every chart to the cluster policies in `.github/kyverno/`, then applies the `kates`, `kafka-cluster` and `kates-chaos` charts' own policies to their workloads |
 | **YAML Validation** | Python + PyYAML | Parses every YAML file under `config/` to catch syntax errors |
 
 ### Key Details
@@ -132,6 +132,18 @@ This job grew well past `helm lint charts/kates`. In order:
 | `helm lint` and `helm template` over `charts/*/` | Every chart renders. A library chart is linted but not templated — `kafka-common` is not installable, and `ci-kafka-charts.yml` renders its harness instead |
 | kubeconform against each render | Rendered manifests satisfy the Kubernetes OpenAPI schemas and, for custom resources, the community CRD catalog. `-ignore-missing-schemas` keeps kinds with no published schema from failing the build |
 | `scripts/gen-chart-table.sh --check` | The chart table in the root `README.md` still matches `charts/*/Chart.yaml` |
+
+### What Kyverno Policy Validation Checks
+
+The job holds every chart to the policies a cluster that enforces Pod Security would apply, in three steps:
+
+| Step | What it asserts |
+|------|-----------------|
+| Fetch chart dependencies (`.github/actions/helm-deps`) | `connect-cluster`, `kafka-cluster`, `kates-chaos`, `mirror-maker2`, `monitoring` and `strimzi-operator` build their dependencies; `kates-platform` updates its own in a copy |
+| `scripts/check-chart-policies.sh` | Every render, with defaults and with optional workloads on, passes PSS restricted, requests with a memory limit, a tag that isn't `latest`, and a `team` label on every pod |
+| Each chart's own policies | `kates`, `kafka-cluster` and `kates-chaos`, rendered with `kyvernoPolicy.enabled=true`, pass their own `ClusterPolicy`, and a run that matches no workload fails |
+
+Each render sets the `team` label through the chart's `podLabels` and every other label key that [Pod Labels](17-security.md#pod-labels) lists for it, so the label policy fails wherever those keys miss a pod. SeaweedFS, which can't pass with the values the chart ships, and Velero's namespace-label job, which can't pass at all, are never switched on. The only exceptions are the named ones in `.github/kyverno/exceptions/`, one file per workload, each lifting single Pod Security controls: node-exporter, Velero's node agent, and the Litmus operator and exporter. [Workloads That Cannot Pass](17-security.md#workloads-that-cannot-pass) explains each, and [Checking the Charts Against the Policies](17-security.md#checking-the-charts-against-the-policies) runs the script on your machine.
 
 ---
 

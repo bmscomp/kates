@@ -2,7 +2,7 @@ apiVersion: v2
 name: kafka-ui
 description: A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication
 type: application
-version: 0.3.0
+version: 0.3.1
 appVersion: "v1.5.0"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
@@ -23,6 +23,12 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Every pod the chart renders passes Pod Security Standards restricted: podSecurityContext sets seccompProfile RuntimeDefault, and the Helm test pod, which had no security context or resources, runs as nobody (65534) with no privilege escalation, all capabilities dropped and 10m/32Mi requests with a 64Mi limit (tests.podSecurityContext, tests.securityContext, tests.resources)"
+    - kind: added
+      description: "global.imageRegistry (default empty) is prepended to the Kafka UI and Helm test images, for clusters that pull from a mirror; the test image is tests.image (busybox:1.36, as before) and the test pod gets imagePullSecrets too"
+    - kind: added
+      description: "podLabels (default empty) adds labels to the Kafka UI pod and the Helm test pod; the chart's own labels win on a clash, so the selector never changes"
     - kind: fixed
       description: Wire the Kafka TLS truststore (mount trustedCertificateSecret + set ssl.truststore.location) so SASL_SSL actually works
     - kind: fixed

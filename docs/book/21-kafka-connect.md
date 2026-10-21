@@ -345,7 +345,7 @@ While the pre-built image contains the most common CDC connectors, you may need 
 | Way | How | When |
 |-----|-----|------|
 | `image` | A Connect image with the plugins inside | Recommended — bake them in (`make connect-build`) or layer your own image |
-| `build` | The operator builds and pushes an image (`spec.build`) | A registry the operator can push to |
+| `build` | The operator builds and pushes an image (`spec.build`) | A registry the operator can push to, and a namespace and operator that allow its root build pod ([Workloads That Cannot Pass](17-security.md#workloads-that-cannot-pass)) |
 | `plugins` | OCI images mounted as volumes at start-up (`spec.plugins`) | No custom image, and every node has the Kubernetes ImageVolume feature |
 
 The last two add plugins without you rebuilding the Docker image:

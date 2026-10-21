@@ -4,15 +4,31 @@ metadata:
   name: {{ include "kafka-ui.fullname" . }}-test-connection
   namespace: {{ include "kafka-ui.namespace" . }}
   labels:
-    {{- include "kafka-ui.labels" . | nindent 4 }}
+    {{- include "kafka-ui.podLabels" (dict "ctx" . "labels" (include "kafka-ui.labels" .)) | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tests.podSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   containers:
     - name: test
-      image: busybox:1.36
+      image: "{{ with .Values.global.imageRegistry }}{{ . }}/{{ end }}{{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag }}"
+      {{- with .Values.tests.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tests.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       command: ['sh', '-c']
       args:
         - |

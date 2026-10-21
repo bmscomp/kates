@@ -10,7 +10,7 @@ A Helm **library** chart: the templates the Strimzi charts in this repository sh
 # Chart.yaml
 dependencies:
   - name: kafka-common
-    version: 0.1.0
+    version: 0.1.1
     repository: file://../kafka-common
 ```
 
@@ -24,6 +24,9 @@ Every template takes the calling chart's context or explicit arguments, so names
 |:---|:---|:---|
 | `kafka-common.name` · `.fullname` · `.namespace` · `.chart` · `.clusterDomain` | Names. `namespaceOverride` is honoured, and the domain is `global.clusterDomain`, then `clusterDomain`, then `cluster.local`. | These used to be three copies with different defaults. |
 | `kafka-common.labels` · `.selectorLabels` | Standard labels, built as a map. | A map cannot hold a duplicate key; YAML silently keeps the last one. |
+| `kafka-common.podLabels` | The labels of a pod the chart renders: the chart's own over the user's `podLabels`, plus `kates.io/test-pod` for a test pod. | A `podLabels` key can add a label but never move a selector. |
+| `kafka-common.image` | `<registry>/<image>` when a mirror registry is set, the image unchanged otherwise. | The `global.imageRegistry` convention of `charts/kates`, in one place. |
+| `kafka-common.restricted.pod` · `.restricted.container` | The pod and container security contexts Pod Security Standards "restricted" asks for. | Strimzi sets them only when its operator runs the restricted provider; the charts set them in the CR templates so the pods pass on any operator. |
 | `kafka-common.enabled` | `"true"` or nothing, for `(list <value> <default>)`. | `false \| default true` is `true` in Helm, which is how a switch documented as "set false to disable" stays on. |
 | `kafka-common.semver` | `4.2-IV1` → `4.2.0`, `2.8` → `2.8.0`. | `semverCompare` rejects the short forms. |
 | `kafka-common.rails.noFloatingTag` | Refuses `:latest` and untagged images. | What runs should not depend on when a pod last restarted. |
@@ -53,7 +56,7 @@ This template covers the whole worker surface:
   - a PDB only when more than one worker will run;
   - `nodeSelector` rendered as required node affinity, because Strimzi's pod template has no `nodeSelector` field;
   - pod anti-affinity and topology spread on the worker selector;
-  - a hardened container security context that the chart's pass-through can override one field at a time.
+  - a hardened container security context that the chart's pass-through can override one field at a time, and, with rack awareness, the restricted security context on the operator's init container.
 
   The caller's `extra` is **deep-merged** into that map last. mirror-maker2 0.7 wrote its pass-through next to its own keys instead, and lost its entire pod template to a duplicate `pod:` key.
 

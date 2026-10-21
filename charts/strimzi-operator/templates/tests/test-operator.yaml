@@ -8,6 +8,7 @@ releases (the primary plus an additional operator) are both named
 be deleted from under each other's `helm test`.
 */}}
 {{- $testRole := printf "%s-%s" $testSA .Release.Namespace }}
+{{- $podLabels := include "strimzi-operator.podLabels" (dict "ctx" . "labels" (include "strimzi-operator.labels" .)) }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -68,13 +69,14 @@ metadata:
   name: {{ include "strimzi-operator.fullname" . }}-test-operator
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "strimzi-operator.labels" . | nindent 4 }}
+    {{- $podLabels | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
   serviceAccountName: {{ $testSA }}
+  {{- include "strimzi-operator.imagePullSecrets" . | nindent 2 }}
   securityContext:
     {{- include "strimzi-operator.podSecurityContext" . | nindent 4 }}
   containers:
@@ -82,6 +84,8 @@ spec:
       image: {{ $kubectl }}
       securityContext:
         {{- include "strimzi-operator.containerSecurityContext" . | nindent 8 }}
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
       command: ['sh', '-c']
       args:
         - |
@@ -104,13 +108,14 @@ metadata:
   name: {{ include "strimzi-operator.fullname" . }}-test-crds
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "strimzi-operator.labels" . | nindent 4 }}
+    {{- $podLabels | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
   serviceAccountName: {{ $testSA }}
+  {{- include "strimzi-operator.imagePullSecrets" . | nindent 2 }}
   securityContext:
     {{- include "strimzi-operator.podSecurityContext" . | nindent 4 }}
   containers:
@@ -118,6 +123,8 @@ spec:
       image: {{ $kubectl }}
       securityContext:
         {{- include "strimzi-operator.containerSecurityContext" . | nindent 8 }}
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
       command: ['sh', '-c']
       args:
         - |
@@ -154,13 +161,14 @@ metadata:
   name: {{ include "strimzi-operator.fullname" . }}-test-watch-scope
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "strimzi-operator.labels" . | nindent 4 }}
+    {{- $podLabels | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
   serviceAccountName: {{ $testSA }}
+  {{- include "strimzi-operator.imagePullSecrets" . | nindent 2 }}
   securityContext:
     {{- include "strimzi-operator.podSecurityContext" . | nindent 4 }}
   containers:
@@ -168,6 +176,8 @@ spec:
       image: {{ $kubectl }}
       securityContext:
         {{- include "strimzi-operator.containerSecurityContext" . | nindent 8 }}
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
       command: ['sh', '-c']
       args:
         - |

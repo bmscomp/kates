@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.fabric8.kubernetes.api.model.EphemeralContainer;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
@@ -117,9 +118,23 @@ public class KubernetesChaosProviderTest {
         assertEquals(subresource, write.getPath());
         Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
         assertEquals(1, sent.getSpec().getEphemeralContainers().size());
-        assertEquals(
-                "chaos-cpu-stress",
-                sent.getSpec().getEphemeralContainers().get(0).getName());
+        EphemeralContainer stress = sent.getSpec().getEphemeralContainers().get(0);
+        assertEquals("chaos-cpu-stress", stress.getName());
+        assertEquals("docker.io/polinux/stress:1.0.4", stress.getImage());
+        // The pod names no user: stress runs as nobody.
+        assertRestricted(stress, 65534L, 65534L);
+    }
+
+    /** What Pod Security "restricted" asks of a container, and the uid and gid it runs as. */
+    private static void assertRestricted(EphemeralContainer stress, long uid, long gid) {
+        var sc = stress.getSecurityContext();
+        assertNotNull(sc);
+        assertEquals(Boolean.TRUE, sc.getRunAsNonRoot());
+        assertEquals(uid, sc.getRunAsUser());
+        assertEquals(gid, sc.getRunAsGroup());
+        assertEquals(Boolean.FALSE, sc.getAllowPrivilegeEscalation());
+        assertEquals(List.of("ALL"), sc.getCapabilities().getDrop());
+        assertEquals("RuntimeDefault", sc.getSeccompProfile().getType());
     }
 
     @Test
@@ -131,6 +146,11 @@ public class KubernetesChaosProviderTest {
                 .addToLabels("app", "kafka2")
                 .endMetadata()
                 .withNewSpec()
+                // As kafka-cluster's pools set it; OpenShift admits only the namespace's uid range.
+                .withNewSecurityContext()
+                .withRunAsUser(1001L)
+                .withRunAsGroup(1001L)
+                .endSecurityContext()
                 .addNewContainer()
                 .withName("kafka")
                 .withImage("kafka")
@@ -141,6 +161,8 @@ public class KubernetesChaosProviderTest {
 
         String subresource = "/api/v1/namespaces/default/pods/broker-1/ephemeralcontainers";
         server.expect().put().withPath(subresource).andReturn(200, pod).once();
+        // kates.chaos.stress-image, as a cluster without Docker Hub sets it.
+        provider.stressImage = "registry.example.com/mirror/stress:1.0.4";
 
         FaultSpec spec = FaultSpec.builder("test-io-stress")
                 .targetNamespace("default")
@@ -160,9 +182,94 @@ public class KubernetesChaosProviderTest {
         assertEquals(subresource, write.getPath());
         Pod sent = client.getKubernetesSerialization().unmarshal(write.getUtf8Body(), Pod.class);
         assertEquals(1, sent.getSpec().getEphemeralContainers().size());
-        assertEquals(
-                "chaos-io-stress",
-                sent.getSpec().getEphemeralContainers().get(0).getName());
+        EphemeralContainer stress = sent.getSpec().getEphemeralContainers().get(0);
+        assertEquals("chaos-io-stress", stress.getName());
+        assertEquals("registry.example.com/mirror/stress:1.0.4", stress.getImage());
+        // The pod's own user and group, which its namespace already admits.
+        assertRestricted(stress, 1001L, 1001L);
+    }
+
+    @Test
+    void stressNeverRunsAsRootEvenWhenThePodDoes() throws Exception {
+        Pod pod = new PodBuilder()
+                .withNewMetadata()
+                .withName("broker-2")
+                .withNamespace("default")
+                .addToLabels("app", "kafka3")
+                .endMetadata()
+                .withNewSpec()
+                .withNewSecurityContext()
+                .withRunAsUser(0L)
+                .withRunAsGroup(0L)
+                .endSecurityContext()
+                .addNewContainer()
+                .withName("kafka")
+                .withImage("kafka")
+                .endContainer()
+                .endSpec()
+                .build();
+        client.pods().inNamespace("default").resource(pod).create();
+        server.expect()
+                .put()
+                .withPath("/api/v1/namespaces/default/pods/broker-2/ephemeralcontainers")
+                .andReturn(200, pod)
+                .once();
+
+        FaultSpec spec = FaultSpec.builder("test-cpu-stress-root")
+                .targetNamespace("default")
+                .targetLabel("app=kafka3")
+                .disruptionType(DisruptionType.CPU_STRESS)
+                .cpuCores(1)
+                .chaosDurationSec(10)
+                .build();
+
+        assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
+
+        Pod sent = client.getKubernetesSerialization()
+                .unmarshal(server.getLastRequest().getUtf8Body(), Pod.class);
+        // runAsNonRoot refuses uid 0, so stress falls back to nobody and keeps the pod's group.
+        assertRestricted(sent.getSpec().getEphemeralContainers().get(0), 65534L, 0L);
+    }
+
+    @Test
+    void stressTakesTheContainersUserWhereOnlyTheContainerSetsIt() throws Exception {
+        // OpenShift's restricted-v2 writes the namespace's uid on each container, not the pod.
+        Pod pod = new PodBuilder()
+                .withNewMetadata()
+                .withName("broker-3")
+                .withNamespace("default")
+                .addToLabels("app", "kafka4")
+                .endMetadata()
+                .withNewSpec()
+                .addNewContainer()
+                .withName("kafka")
+                .withImage("kafka")
+                .withNewSecurityContext()
+                .withRunAsUser(1000650000L)
+                .endSecurityContext()
+                .endContainer()
+                .endSpec()
+                .build();
+        client.pods().inNamespace("default").resource(pod).create();
+        server.expect()
+                .put()
+                .withPath("/api/v1/namespaces/default/pods/broker-3/ephemeralcontainers")
+                .andReturn(200, pod)
+                .once();
+
+        FaultSpec spec = FaultSpec.builder("test-cpu-stress-container-uid")
+                .targetNamespace("default")
+                .targetLabel("app=kafka4")
+                .disruptionType(DisruptionType.CPU_STRESS)
+                .cpuCores(1)
+                .chaosDurationSec(10)
+                .build();
+
+        assertTrue(provider.triggerFault(spec).get(5, TimeUnit.SECONDS).isPass());
+
+        Pod sent = client.getKubernetesSerialization()
+                .unmarshal(server.getLastRequest().getUtf8Body(), Pod.class);
+        assertRestricted(sent.getSpec().getEphemeralContainers().get(0), 1000650000L, 65534L);
     }
 
     @Test

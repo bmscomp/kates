@@ -1,0 +1,25 @@
+# A sample of a cluster's own labelling rule: every Pod carries a team label.
+# The charts set no such label; a cluster that requires one sets it through
+# each chart's podLabels value (and a wrapped subchart's own label keys), and
+# scripts/check-chart-policies.sh sets team=ci through them in every render it
+# makes to prove they reach every pod the chart renders, helm tests and jobs
+# included.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-pod-labels
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-team-label
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "Every Pod needs the label team (set it through the chart's podLabels value)."
+        pattern:
+          metadata:
+            labels:
+              team: "?*"

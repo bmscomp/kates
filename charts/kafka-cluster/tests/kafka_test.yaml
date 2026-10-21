@@ -46,6 +46,14 @@ tests:
       - equal: {path: 'spec.kafka.tieredStorage.remoteStorageManager.config["storage.s3.endpoint.url"]', value: http://seaweedfs-filer.NAMESPACE.svc.cluster.local:8333}
       - equal: {path: 'spec.kafka.tieredStorage.remoteStorageManager.config["chunk.size"]', value: "4194304"}
 
+  - it: takes pull secrets as plain names or as references
+    templates: [templates/rbac.yaml]
+    set:
+      global: {imagePullSecrets: [regcred, {name: mirror}]}
+    asserts:
+      - equal: {path: imagePullSecrets, value: [{name: regcred}, {name: mirror}]}
+        documentIndex: 0
+
   - it: derives topic replication from the broker count
     templates: [templates/topics.yaml]
     set:

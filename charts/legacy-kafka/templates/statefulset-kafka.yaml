@@ -20,8 +20,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "legacy-kafka.labels" . | nindent 8 }}
-        app.kubernetes.io/component: broker
+        {{- include "legacy-kafka.podLabels" (dict "ctx" . "labels" (printf "%s\napp.kubernetes.io/component: broker" (include "legacy-kafka.labels" .))) | nindent 8 }}
       annotations:
         # Roll the brokers when the generated config changes — otherwise a
         # values edit produces a ConfigMap nobody re-reads.

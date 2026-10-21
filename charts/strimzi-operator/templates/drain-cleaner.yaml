@@ -129,9 +129,10 @@ spec:
   template:
     metadata:
       labels:
-        {{- toYaml $labels | nindent 8 }}
+        {{- include "strimzi-operator.podLabels" (dict "ctx" . "labels" (toYaml $labels)) | nindent 8 }}
     spec:
       serviceAccountName: {{ $name }}
+      {{- include "strimzi-operator.imagePullSecrets" . | nindent 6 }}
       {{- with $dc.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}

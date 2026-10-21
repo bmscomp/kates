@@ -142,8 +142,8 @@ The `kubernetes` provider implements these disruptions against the Kubernetes AP
 | `LEADER_ELECTION` | Force-delete the target pod; a step that names `targetTopic` targets that partition's leader | Forces [leader election](appendix-a-glossary.md#gl-leader-election) for targeted partition |
 | `SCALE_DOWN` | Lower `spec.replicas` by one on the [KafkaNodePool](appendix-a-glossary.md#gl-kafkanodepool) of each matching broker, then wait for the Strimzi Cluster Operator to remove a broker; on a Kafka that Strimzi doesn't run, scale its StatefulSet down by one | One broker fewer per node pool, until rollback puts it back |
 | `NETWORK_PARTITION` | Create a NetworkPolicy with no allow rules that selects the target pod | Adds a NetworkPolicy with no allow rules to the pod, removed after `chaosDurationSec` |
-| `CPU_STRESS` | Stress ephemeral container injected into the pod | Saturates CPU on the broker pod |
-| `IO_STRESS` | Stress ephemeral container injected into the pod | Injects disk I/O pressure on broker storage |
+| `CPU_STRESS` | A non-root stress ephemeral container, `chaos.stressImage`, injected into the pod | Saturates CPU on the broker pod |
+| `IO_STRESS` | The same container, with I/O workers | Injects disk I/O pressure on broker storage |
 
 The provider injects each fault once, and doesn't try it again when a call fails. The API server may have carried out the call and lost only its answer. A second try would then act on what the first changed: it would kill another pod picked at random, or scale a StatefulSet down from the count the first try left. The step fails instead. A partition that fails or is interrupted removes its NetworkPolicies all the same, as at the end of its duration, and a failed node pool scale-down gives the pools their replicas back. Removing a partition is the one call the provider retries, up to three more times, because doing it again removes nothing more.
 

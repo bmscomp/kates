@@ -127,10 +127,10 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "strimzi-operator.selectorLabels" . | nindent 8 }}
-        app: crd-upgrade
+        {{- include "strimzi-operator.podLabels" (dict "ctx" . "labels" (printf "%s\napp: crd-upgrade" (include "strimzi-operator.selectorLabels" .))) | nindent 8 }}
     spec:
       serviceAccountName: {{ include "strimzi-operator.fullname" . }}-crd-upgrade
+      {{- include "strimzi-operator.imagePullSecrets" . | nindent 6 }}
       restartPolicy: OnFailure
       securityContext:
         {{- include "strimzi-operator.podSecurityContext" . | nindent 8 }}

@@ -107,9 +107,40 @@ Resolve the full image reference, prepending global.imageRegistry if set.
 Usage: {{ include "kates.image" . }}
 */}}
 {{- define "kates.image" -}}
-{{- if and .Values.global .Values.global.imageRegistry -}}
-{{ .Values.global.imageRegistry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
-{{- else -}}
-{{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{- include "kates.imageRef" (dict "image" (printf "%s:%s" .Values.image.repository .Values.image.tag) "ctx" .) -}}
+{{- end }}
+
+{{/*
+Any image the chart renders, with global.imageRegistry prepended if set.
+Usage: {{ include "kates.imageRef" (dict "image" .Values.backup.image "ctx" .) }}
+*/}}
+{{- define "kates.imageRef" -}}
+{{- with (.ctx.Values.global | default dict).imageRegistry }}{{ . }}/{{ end }}{{ .image }}
+{{- end }}
+
+{{/*
+imagePullSecrets for every pod: global.imagePullSecrets and imagePullSecrets.
+Each entry may be a name (regcred) or {name: regcred}, as kafka-cluster takes
+global.imagePullSecrets; kates-platform hands the same global to both.
+*/}}
+{{- define "kates.imagePullSecrets" -}}
+{{- $names := list -}}
+{{- range concat ((.Values.global | default dict).imagePullSecrets | default list) (.Values.imagePullSecrets | default list) -}}
+{{- if kindIs "map" . }}{{ $names = append $names .name }}{{ else }}{{ $names = append $names . }}{{ end -}}
 {{- end -}}
+{{- with $names | uniq -}}
+imagePullSecrets:
+{{- range . }}
+  - name: {{ . | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+A pod template's labels: the chart's own (.labels, as YAML) plus podLabels.
+The chart's own win a clash, so no selector changes.
+Usage: {{ include "kates.podLabels" (dict "labels" (include "kates.selectorLabels" .) "ctx" .) }}
+*/}}
+{{- define "kates.podLabels" -}}
+{{- toYaml (merge (fromYaml .labels) (.ctx.Values.podLabels | default dict)) }}
 {{- end }}

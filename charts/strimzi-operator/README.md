@@ -93,6 +93,8 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
 | `alerts.enabled` | `true` | `StrimziOperatorDown`, `StrimziReconciliationsFailing`, `KafkaCertificateExpiringSoon` and `KafkaCertificateExpiryCritical` (on `strimzi_certificate_expiration_timestamp_ms`, for every cluster the operator manages). Thresholds: `alerts.thresholds.certificate{Warning,Critical}Days` (30, 7). Runbook: `docs/kafka-cluster-runbook.md`. |
 | `nameOverride` / `fullnameOverride` | `""` | Standard name overrides |
 | `commonLabels` / `commonAnnotations` | `{}` | Applied to chart-owned resources |
+| `podLabels` | `{}` | Extra labels on the pods this chart renders itself (CRD-upgrade Job, drain cleaner, Helm tests); the chart's own labels win on a clash. The operator's pod takes upstream's `strimzi-kafka-operator.labels`. |
+| `tests.resources` | requests `10m`/`64Mi`, memory limit `128Mi` | Resources of each Helm test pod |
 
 ### Operator keys (`strimzi-kafka-operator.*`)
 
@@ -110,8 +112,9 @@ Only these deviate from stock upstream. Everything else in the [upstream values]
 | `strimzi-kafka-operator.createGlobalResources` | `true` | `false` is the additional-operator shape: the fixed-name ClusterRoles and bindings come from the primary's release. On its own it leaves the ServiceAccount unbound from three of them — pair it with `globalBindings.enabled: true`. |
 | `strimzi-kafka-operator.watchNamespaces` | `[]` | With `watchAnyNamespace: false`, the namespaces to watch. The release namespace is always included, so `[]` means "only my own namespace". |
 | `strimzi-kafka-operator.dashboards.enabled` | `true` | The operator's nine Grafana dashboards (Kafka, KRaft, Cruise Control, Kafka Exporter, Connect, MirrorMaker 2, Kafka Bridge, Kafka OAuth, operators). They read exactly the series kafka-cluster's vendored exporter rules produce; kafka-cluster 1.0 has no dashboards of its own. Names are fixed: enable on one operator release. |
+| `strimzi-kafka-operator.extraEnvs` | `STRIMZI_POD_SECURITY_PROVIDER_CLASS=restricted` | Every pod the operator creates gets the Restricted Pod Security Standard's settings, so Kafka starts in a namespace that enforces `restricted`. Helm replaces the list whole: keep this entry when adding your own. Leave it out for upstream's baseline provider, which a KafkaConnect `build` with Kaniko (root) needs. |
 
-> **There is no `global` block.** Upstream contains zero `.Values.global` references and ignores `global.imageRegistry` entirely. Declaring it to satisfy the schema would convert a loud failure into a silent one, so `--set global.*` is rejected. For registry redirection use `strimzi-kafka-operator.defaultImageRegistry`.
+> **There is no `global` block.** Upstream contains zero `.Values.global` references and ignores `global.imageRegistry` entirely. Declaring it to satisfy the schema would convert a loud failure into a silent one, so `--set global.*` is rejected. For registry redirection use `strimzi-kafka-operator.defaultImageRegistry`. This chart's own images are `testImages.kubectl` and `drainCleaner.image`; set them to your mirror too. `strimzi-kafka-operator.image.imagePullSecrets` (a name or a list, as upstream reads it) also reaches this chart's own pods.
 
 ## Examples
 

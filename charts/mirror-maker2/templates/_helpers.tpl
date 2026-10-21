@@ -549,3 +549,8 @@ workers would be worse than none.
 {{- define "mirror-maker2.imagePullPolicy" -}}
 {{- include "kafka-common.imagePullPolicy" .Values.imagePullPolicy }}
 {{- end }}
+
+{{/* An image this chart names, behind global.imageRegistry. Call with (list $ <ref>). */}}
+{{- define "mirror-maker2.image" -}}
+{{- include "kafka-common.image" (dict "image" (index . 1) "registry" ((index . 0).Values.global).imageRegistry) }}
+{{- end }}

@@ -88,8 +88,7 @@ spec:
   template:
     metadata:
       labels:
-        app: experiment-installer
-        {{- include "kates-chaos.selectorLabels" . | nindent 8 }}
+        {{- include "kates-chaos.podLabels" (list . (printf "app: experiment-installer\n%s" (include "kates-chaos.selectorLabels" .))) | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ include "kates-chaos.fullname" . }}-experiment-installer
@@ -126,6 +125,10 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with $installer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - "kubectl"
             - "wait"
@@ -141,6 +144,10 @@ spec:
           imagePullPolicy: {{ $pullPolicy }}
           {{- with $installer.securityContext }}
           securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $installer.resources }}
+          resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           command:

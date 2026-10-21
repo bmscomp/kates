@@ -186,6 +186,9 @@ data:
   {{- with .Values.chaos.provider | default (ternary "noop" "" $namespaced) }}
   KATES_CHAOS_PROVIDER: {{ . | quote }}
   {{- end }}
+  {{- with .Values.chaos.stressImage }}
+  KATES_CHAOS_STRESS_IMAGE: {{ include "kates.imageRef" (dict "image" . "ctx" $) | quote }}
+  {{- end }}
 
   {{- with .Values.faultTolerance }}
   COM_BMSCOMP_KATES_SERVICE_TOPICSERVICE_CREATETOPIC_TIMEOUT_VALUE: {{ .topicService.timeoutMs | default "35000" | quote }}

@@ -513,7 +513,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     spec.targetNamespace(),
                     podName,
                     "chaos-cpu-stress",
-                    "polinux/stress",
+                    stressImage,
                     "stress",
                     "--cpu",
                     String.valueOf(spec.cpuCores()),
@@ -529,7 +529,7 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     spec.targetNamespace(),
                     podName,
                     "chaos-io-stress",
-                    "polinux/stress",
+                    stressImage,
                     "stress",
                     "--io",
                     String.valueOf(spec.ioWorkers()),
@@ -537,6 +537,18 @@ public class KubernetesChaosProvider implements ChaosProvider {
                     spec.chaosDurationSec() + "s");
         }
     }
+
+    static final String DEFAULT_STRESS_IMAGE = "docker.io/polinux/stress:1.0.4";
+
+    /**
+     * The image CPU_STRESS and IO_STRESS run as an ephemeral container. Written
+     * twice, like FaultLimits: in the annotation for the application, and as
+     * the field's value for a provider made with new, as tests make it.
+     */
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "kates.chaos.stress-image",
+            defaultValue = DEFAULT_STRESS_IMAGE)
+    String stressImage = DEFAULT_STRESS_IMAGE;
 
     private void injectEphemeralContainer(
             String namespace, String podName, String containerName, String image, String... command) {
@@ -546,10 +558,44 @@ public class KubernetesChaosProvider implements ChaosProvider {
             throw new IllegalStateException("Pod not found: " + podName);
         }
 
+        // stress needs no privileges: run as the target's own non-root user and group, which its
+        // namespace already admits (OpenShift's restricted-v2 allows only the namespace's uid range
+        // and writes it on each container, not the pod), else as nobody, which polinux/stress is
+        // not by default. Either way the container passes Pod Security "restricted" there.
+        var podSc = pod.getSpec().getSecurityContext();
+        Long uid = podSc == null || podSc.getRunAsUser() == null || podSc.getRunAsUser() == 0
+                ? null
+                : podSc.getRunAsUser();
+        Long gid = podSc == null ? null : podSc.getRunAsGroup();
+        for (var container : pod.getSpec().getContainers()) {
+            var sc = container.getSecurityContext();
+            if (sc == null) {
+                continue;
+            }
+            if (uid == null && sc.getRunAsUser() != null && sc.getRunAsUser() != 0) {
+                uid = sc.getRunAsUser();
+            }
+            if (gid == null && sc.getRunAsGroup() != null) {
+                gid = sc.getRunAsGroup();
+            }
+        }
+
         EphemeralContainer ec = new EphemeralContainerBuilder()
                 .withName(containerName)
                 .withImage(image)
                 .withCommand(command)
+                .withNewSecurityContext()
+                .withRunAsNonRoot(true)
+                .withRunAsUser(uid == null ? 65534L : uid)
+                .withRunAsGroup(gid == null ? 65534L : gid)
+                .withAllowPrivilegeEscalation(false)
+                .withNewCapabilities()
+                .withDrop("ALL")
+                .endCapabilities()
+                .withNewSeccompProfile()
+                .withType("RuntimeDefault")
+                .endSeccompProfile()
+                .endSecurityContext()
                 .build();
 
         pod.getSpec().getEphemeralContainers().add(ec);

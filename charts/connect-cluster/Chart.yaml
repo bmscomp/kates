@@ -2,10 +2,11 @@ apiVersion: v2
 name: connect-cluster
 description: A Helm chart for deploying Strimzi Kafka Connect clusters
 type: application
-# Patch: the Helm-test image moves to kates-tester 1.28.0, the tag the
-# v1.28.0 release publishes; every Strimzi chart pins the same one.
-# Templates and defaults are otherwise unchanged.
-version: 2.1.9
+# Patch: with default values every pod passes Pod Security "restricted"
+# (the Helm test pods get requests and limits, the rack init container the
+# restricted security context); podLabels reach every pod and
+# global.imageRegistry every image.
+version: 2.1.10
 # Tracks the Kafka line the workers run, as mirror-maker2's does. The plugin
 # set is in the image; its pin is the kates.io/connect-image annotation.
 appVersion: "4.3.1"
@@ -25,13 +26,21 @@ keywords:
 icon: https://raw.githubusercontent.com/bmscomp/kates/main/docs/icon.png
 dependencies:
   - name: kafka-common
-    version: 0.1.0
+    version: 0.1.1
     repository: file://../kafka-common
 annotations:
   kates.io/connect-image: "ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1"
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "The Helm test pods had no requests or limits, so a namespace that enforces a requests-and-limits policy refused them. They get tests.resources (10m and 64Mi, a 128Mi limit); the test-connectors pod also gets imagePullSecrets, which only the test-connect pod had"
+    - kind: changed
+      description: "With rack awareness (on by default) the operator adds an init container to every worker, and an operator without Strimzi's restricted security provider leaves its security context empty, which Pod Security \"restricted\" refuses. The KafkaConnect's spec.template.initContainer now gets no privilege escalation and no capabilities; templateExtra.initContainer still merges over it. The workers roll once on upgrade"
+    - kind: added
+      description: "podLabels: labels added to the workers' pod template, the Helm test pods and the secret-sync and preflight Jobs. The chart's own labels win on a clash, so no selector changes"
+    - kind: added
+      description: "global.imageRegistry: a mirror registry put in front of every image the chart names (image, rack.clientRackInitImage, testImages.kubectl, secretSync.image, the preflight image), as charts/kates does. The secret-sync Job also takes imagePullSecrets now"
     - kind: changed
       description: "testImages.kubectl (and testImages.kafka where present) move to kates-tester 1.28.0, the tag the v1.28.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.27.0 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: changed

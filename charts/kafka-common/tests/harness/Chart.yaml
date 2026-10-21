@@ -6,5 +6,5 @@ version: 0.0.0
 appVersion: "0.0.0"
 dependencies:
   - name: kafka-common
-    version: 0.1.0
+    version: 0.1.1
     repository: file://../..

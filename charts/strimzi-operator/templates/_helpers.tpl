@@ -158,6 +158,30 @@ watchNamespaces plus the release namespace. Returns "*" or a comma list.
 {{- end -}}
 {{- end }}
 
+{{/*
+Labels for a pod this chart renders itself: podLabels under the given labels,
+which win on a clash so no selector moves. Call with (dict "ctx" $ "labels" <yaml>).
+*/}}
+{{- define "strimzi-operator.podLabels" -}}
+{{- toYaml (merge (.labels | fromYaml) (.ctx.Values.podLabels | default dict)) -}}
+{{- end }}
+
+{{/*
+imagePullSecrets for this chart's own pods, from the operator's
+strimzi-kafka-operator.image.imagePullSecrets read as upstream reads it: a
+string names one Secret, a list is used as given.
+*/}}
+{{- define "strimzi-operator.imagePullSecrets" -}}
+{{- $s := ((index .Values "strimzi-kafka-operator").image | default dict).imagePullSecrets -}}
+{{- if and $s (kindIs "string" $s) }}
+imagePullSecrets:
+  - name: {{ $s }}
+{{- else if and $s (kindIs "slice" $s) }}
+imagePullSecrets:
+  {{- toYaml $s | nindent 2 }}
+{{- end }}
+{{- end }}
+
 {{/* Labels for a component other than the operator itself. */}}
 {{- define "strimzi-operator.componentLabels" -}}
 {{- $l := include "strimzi-operator.labels" .ctx | fromYaml -}}

@@ -78,15 +78,27 @@ the same image). An explicit `kafka.image` wins; otherwise: the official
 multi-arch apache/kafka:<version> exists from 3.7.0 (KIP-975), and below that
 the image Dockerfile.legacy-kafka builds, <legacyImageRegistry>/kates-legacy-
 kafka:<version> — `scripts/build-legacy-kafka-image.sh --version <v> --load`.
+global.imageRegistry, when set, is prepended to the official image only: the
+built one has legacyImageRegistry, and an explicit kafka.image is used as written.
 */}}
 {{- define "legacy-kafka.image" -}}
 {{- if .Values.kafka.image -}}
 {{- .Values.kafka.image -}}
 {{- else if semverCompare ">=3.7.0" (include "legacy-kafka.semver" .Values.kafka.version) -}}
+{{- with .Values.global.imageRegistry }}{{ trimSuffix "/" . }}/{{ end -}}
 {{- printf "apache/kafka:%s" (toString .Values.kafka.version) -}}
 {{- else -}}
 {{- printf "%s/kates-legacy-kafka:%s" (.Values.legacyImageRegistry | default "ghcr.io/bmscomp" | trimSuffix "/") (toString .Values.kafka.version) -}}
 {{- end -}}
+{{- end }}
+
+{{/*
+Labels for a pod template: the chart's own labels (pass them as .labels)
+plus podLabels. The chart's own win on a clash, so a selector never changes.
+Usage: include "legacy-kafka.podLabels" (dict "ctx" . "labels" (include "legacy-kafka.labels" .))
+*/}}
+{{- define "legacy-kafka.podLabels" -}}
+{{- toYaml (merge (fromYaml .labels) .ctx.Values.podLabels) }}
 {{- end }}
 
 {{- define "legacy-kafka.brokerSelectorLabels" -}}

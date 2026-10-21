@@ -54,5 +54,17 @@ global:
 Production journal topics need `kafkaTopics.replicas: 3` and
 `minInsyncReplicas: 2` (defaults are sized for single-broker kind clusters).
 
+## Pod security, images and labels
+
+Every pod the chart renders (registry, UI, Helm test) passes Pod Security
+Standards `restricted` with the defaults, with CPU and memory requests and a
+memory limit. `image.registry` is the registry of every image, the Helm test's
+`tests.image` (`curl/curl:8.7.1`) included, so a mirror needs
+`apicurio/apicurio-registry`, `apicurio/apicurio-registry-ui` (with
+`ui.enabled`) and `curl/curl`. `imagePullSecrets` reach every pod.
+`podLabels` adds labels to every pod; the chart's own labels win on a clash.
+The Helm test pod is tuned with `tests.podSecurityContext`,
+`tests.securityContext` and `tests.resources`.
+
 Values are validated by `values.schema.json` — unknown keys fail loudly at
 install time rather than being silently ignored.

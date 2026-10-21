@@ -61,6 +61,13 @@
         "type": "string"
       }
     },
+    "podLabels": {
+      "type": "object",
+      "description": "Labels added to every pod the chart renders and to every Strimzi component pod template; the chart labels win on a clash",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "profile": {
       "type": "string",
       "enum": [
@@ -2134,6 +2141,18 @@
             }
           },
           "additionalProperties": false
+        },
+        "imageRegistry": {
+          "type": "string",
+          "description": "Registry put in front of testImages.kafka and testImages.kubectl (empty: as written)"
+        },
+        "resources": {
+          "type": "object",
+          "description": "Kubernetes resource requirements of the kubectl test pods"
+        },
+        "jvmResources": {
+          "type": "object",
+          "description": "Kubernetes resource requirements of the Kafka CLI test pods"
         }
       },
       "additionalProperties": false

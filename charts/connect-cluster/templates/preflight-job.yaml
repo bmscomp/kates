@@ -1,7 +1,7 @@
 {{- if (.Values.preflight).enabled }}
 {{- $fullname := include "connect-cluster.fullname" . }}
 {{- $pf := .Values.preflight }}
-{{- $image := $pf.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" .Values.strimziVersion .Values.version) }}
+{{- $image := include "connect-cluster.image" (list . ($pf.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" .Values.strimziVersion .Values.version))) }}
 {{- $k := include "connect-cluster.kafka" . | fromYaml }}
 {{- $auth := $k.authentication | default dict }}
 {{- $t := $auth.type | default "" }}
@@ -38,7 +38,7 @@ spec:
                tests' egress policy, whose rules are DNS, the API server and
                the workers' REST port — none of them Kafka, which is the one
                thing this Job dials. */}}
-        {{- include "connect-cluster.componentLabels" (dict "ctx" . "component" "preflight") | nindent 8 }}
+        {{- include "kafka-common.podLabels" (dict "labels" (include "connect-cluster.componentLabels" (dict "ctx" . "component" "preflight")) "podLabels" .Values.podLabels) | nindent 8 }}
     spec:
       restartPolicy: Never
       # Not the chart's ServiceAccount: it does not exist yet when a

@@ -114,12 +114,12 @@ Each pool is `defaults`, then `roleDefaults` for each of its roles, then the poo
 | `kafka.quotas` | `{}` | `spec.kafka.quotas`; prod sets `type: strimzi` with `minAvailableRatioPerVolume: 0.1` |
 | `kafka.rack.topologyKey` | `topology.kubernetes.io/zone` | Rack awareness |
 | `kafka.logging`, `jmxOptions`, `livenessProbe`, `readinessProbe` | `{}` | Passed through |
-| `kafka.template` | PDB `maxUnavailable: 1` | Merged over a hardened `kafkaContainer` security context |
+| `kafka.template` | PDB `maxUnavailable: 1` | Merged over a hardened `kafkaContainer` security context and the restricted context on the init container |
 | `kafka.clusterCa`, `kafka.clientsCa` | generated, 5 years, renew 180 days before | |
 | `maintenanceTimeWindows` | `[]` | Cron windows for certificate renewal |
-| `entityOperator.{topicOperator,userOperator,template}` | sized for production | |
-| `kafkaExporter.*` | enabled, all topics and groups | |
-| `cruiseControl.*` | enabled, capacity, `autoRebalance` add/remove | `apiUsers`, `template`, `config`, `resources` pass through; Cruise Control keeps the JMX exporter and its own rule set |
+| `entityOperator.{topicOperator,userOperator,template}` | sized for production | `template` is merged over the restricted pod and container security contexts |
+| `kafkaExporter.*` | enabled, all topics and groups | `template` as for the entity operator |
+| `cruiseControl.*` | enabled, capacity, `autoRebalance` add/remove | `apiUsers`, `config`, `resources` pass through, `template` as for the entity operator; Cruise Control keeps the JMX exporter and its own rule set |
 
 ## Topics and users
 
@@ -351,7 +351,7 @@ The chart refuses, with the reason and the fix:
 
 ## Helm tests
 
-`helm test <release>` runs, in order: a profiler, connectivity (CR readiness, pods, DNS, listeners), produce/consume, authorization, the KRaft quorum, topics, listeners and TLS, node pools, Cruise Control, metrics, a producer benchmark, and — with tiered storage — offload and remote reads. They authenticate as `<clusterName>-helm-test` (SCRAM, `helm-test-*` topics and groups only); `tests.user.create: false` uses the first managed user instead. The test pods use the chart's `<clusterName>-admin` ServiceAccount and the `<clusterName>-test-egress` NetworkPolicy.
+`helm test <release>` runs, in order: a profiler, connectivity (CR readiness, pods, DNS, listeners), produce/consume, authorization, the KRaft quorum, topics, listeners and TLS, node pools, Cruise Control, metrics, a producer benchmark, and — with tiered storage — offload and remote reads. They authenticate as `<clusterName>-helm-test` (SCRAM, `helm-test-*` topics and groups only); `tests.user.create: false` uses the first managed user instead. The test pods use the chart's `<clusterName>-admin` ServiceAccount (and its `global.imagePullSecrets`) and the `<clusterName>-test-egress` NetworkPolicy; their requests, limits and mirror registry are in [Pod Security and pod labels](#pod-security-and-pod-labels).
 
 ## Policy and access
 
@@ -386,4 +386,18 @@ mTLS on 9093 uses the user's certificate Secret and the cluster CA (`krafter-clu
 - **SASL failures.** The listener's `authentication.type` and the client's `security.protocol` / `sasl.mechanism` must match; SCRAM passwords are in the user's Secret.
 - **`helm dependency build` fails.** A `Chart.lock` from 0.4 lists only seaweedfs; run `helm dependency update charts/kafka-cluster`.
 - **Brokers rolled on upgrade to 1.0.** Expected unless `compatibility.legacyResourceNames` was set: the metrics ConfigMap's name is part of the Kafka CR. Strimzi rolls one broker at a time. The new exporter rules take effect as each broker restarts.
+
+## Pod Security and pod labels
+
+With default values every pod passes Pod Security Standards "restricted" and carries CPU and memory requests and a memory limit, the operator's pods included. Strimzi sets the restricted security contexts only when its operator runs the restricted security provider, so the chart puts them in each component's CR template: `runAsNonRoot` and a `RuntimeDefault` seccomp profile on the pod, no privilege escalation and no capabilities on every container, the rack-awareness init container included. `kafka.template`, `entityOperator.template`, `cruiseControl.template`, `kafkaExporter.template` and each pool's `template` are deep-merged over them.
+
+| Key | Default | |
+|:---|:---|:---|
+| `podLabels` | `{}` | Labels on every Helm test pod and on every component's pod template (pools, entity operator, Cruise Control, Kafka Exporter). The chart's own labels win on a clash, so no selector changes |
+| `tests.resources`, `tests.jvmResources` | 10m and 64Mi with a 128Mi limit; 100m and 384Mi with a 1Gi limit | The kubectl test pods, and the Kafka CLI ones |
+| `tests.imageRegistry` | `""` | A mirror registry put in front of `testImages.kafka` and `testImages.kubectl`. `global.imageRegistry` stays the registry of the Strimzi client image used when `testImages.kafka` is empty |
+
+The SeaweedFS subchart (`seaweedfs.enabled`, off by default) cannot pass restricted: its master, volume and filer StatefulSets mount the nodes' hostPath directories for their data (and the master's and filer's logs) and run as root with no requests or limits, as upstream ships them. In a namespace that enforces restricted, keep `seaweedfs.enabled: false` and point [tiered storage](#tiered-storage) at an object store outside the namespace: its endpoint, bucket and region in `tieredStorage.remoteStorageManager.config` (`storage.s3.endpoint.url`, `storage.s3.bucket.name`, `storage.s3.region`), and its credentials in `tieredStorage.credentials.existingSecret`. The post-install bucket Job that `seaweedfs.filer.s3.createBuckets` adds takes neither resources nor pod labels from any value.
+
+SeaweedFS reads `global.imagePullSecrets` too, but only plain names; this chart takes both `[regcred]` and `[{name: regcred}]`, so give the list as `[regcred]` when SeaweedFS is on. Its pods take labels from `seaweedfs.podLabels` and their image registry from `seaweedfs.image.registry`, not from `podLabels` or `global.imageRegistry`.
 

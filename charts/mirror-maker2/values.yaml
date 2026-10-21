@@ -18,6 +18,20 @@ keepOnDelete: true
 
 # -- Extra labels added to every resource
 extraLabels: {}
+# -- Labels added to every pod: the workers (through the KafkaMirrorMaker2's
+# pod template), the Helm test pods and the secret-sync and preflight Jobs.
+# The chart's own labels win on a clash, so no selector changes.
+podLabels: {}
+
+# -- Settings shared with a parent chart
+global:
+  # -- Registry put in front of every image this chart names, for a mirror:
+  # `image`, rack.clientRackInitImage, testImages.kubectl, secretSync.image,
+  # the preflight image and tests.replication.image (`mirror.example.com`
+  # gives mirror.example.com/quay.io/strimzi/kafka:…). Empty: as written. An
+  # empty `image` or clientRackInitImage is the operator's own, which the
+  # operator's registry setting redirects.
+  imageRegistry: ""
 
 # -- Images used by the Helm test pods
 testImages:
@@ -638,6 +652,14 @@ alerts:
 # or target uses either REFUSES TO RENDER them rather than shipping a test that
 # fails on its own configuration.
 tests:
+  # -- Requests and limits of test-mm2 and test-connectors (kubectl and a
+  # shell). The data tests below size their own Kafka-client pods.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
   # -- End-to-end round trip, once per mirror: produce a corpus to that source,
   # consume it back from the target under the policy-correct replicated name,
   # and diff the corpus against what arrived (a count would let a duplicated

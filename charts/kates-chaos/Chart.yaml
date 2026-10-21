@@ -1,13 +1,9 @@
 apiVersion: v2
 name: kates-chaos
-# Minor bump: the Grafana board moves out of the template into
-# dashboards/kates-chaos-infra/ and four of the series it read are corrected,
-# so the same board shows different — and for the first time non-empty — data
-# after upgrade. docs/grafana-dashboards-refactor-plan.md.
-# Patch: the exporter the infrastructure board reads gets a values block of
-# its own, and the chart's ServiceMonitor stops scraping the operator pod by
-# mistake. Defaults are unchanged.
-version: 2.2.1
+# Minor bump: the installer, GameDay and test pods now run as uid 65534 with
+# a PSS restricted securityContext and resources by default, so an installer
+# or GameDay image that needs root stops starting.
+version: 2.3.0
 # Tracks the LitmusChaos execution-plane version this chart deploys.
 appVersion: "3.28.0"
 description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
@@ -31,6 +27,18 @@ annotations:
   artifacthub.io/category: skip-prediction
   artifacthub.io/prerelease: "false"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The experiment installer Job, the GameDay Job and both helm test pods pass Pod Security Standards restricted by default: seccompProfile RuntimeDefault, runAsNonRoot as uid/gid 65534 (registry.k8s.io/kubectl runs as root otherwise), allowPrivilegeEscalation false, every capability dropped, and CPU and memory requests with a memory limit (10m/64Mi, limit 128Mi). Set through experiments.installer.podSecurityContext/securityContext/resources (resources now reach the installer's two init containers too), the new gameday.podSecurityContext/securityContext/resources and the new tests block. An installer or GameDay image that must run as root needs its podSecurityContext set back"
+    - kind: changed
+      description: "With values-generic.yaml, whose kyvernoPolicy ClusterPolicy (still on, mutate true) patches a pod with no securityContext to uid 1001 at admission, the installer, GameDay and test pods now run as the uid 65534 they set themselves. litmus-core's operator and exporter take no securityContext from values: they are restricted only through that mutate policy or a kyvernoPolicy.exceptions PolicyException, so a release that turns kyvernoPolicy off on a cluster enforcing restricted needs the exception"
+    - kind: added
+      description: "kyvernoPolicy.exceptions, a list of {policyName, ruleNames}: one kyverno.io/v2 PolicyException (<fullname>-exceptions, rendered where that API exists) in the release namespace exempting litmus-core's operator and exporter (app.kubernetes.io/instance=<release> and app.kubernetes.io/name=litmus-core's nameOverride, litmus; the chart's own pods pass on their own, and chaos runner and experiment pods are not matched) from those rules of any Kyverno policy, the cluster's own included, each rule's autogen- and autogen-cronjob- variants too. litmus-core takes no securityContext from values, so its operator (and exporter) Deployment fails PSS restricted unless kyvernoPolicy's mutate rules patch it; this is how a cluster that enforces restricted without them exempts them"
+    - kind: added
+      description: "podLabels, added to the labels of the installer Job, GameDay Job and helm test pods; the chart's own labels win on a clash. litmus-core's pods take labels from litmus-core.customLabels instead"
+    - kind: added
+      description: "litmus-core.exporter.resources defaults to requests 50m/64Mi and a 128Mi memory limit; the subchart's own default is none"
+    - kind: fixed
+      description: "The helm test pods ignored global.imagePullSecrets"
     - kind: added
       description: "litmus-core.exporter — the chaos exporter the Kates — Chaos infrastructure board reads (litmuschaos_* series), off upstream and still off by default here, with its image pinned to docker.io like the operator and runner rather than pulled through the scarf.sh redirector. kates deploy --with-monitoring turns it on together with monitoring.serviceMonitor"
     - kind: fixed

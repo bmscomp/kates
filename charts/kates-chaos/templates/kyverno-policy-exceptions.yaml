@@ -1,0 +1,47 @@
+{{- /* kyvernoPolicy.exceptions: this release's litmus-core operator and
+       exporter, in its own namespace, exempt from rules of any policy, the
+       cluster's included (litmus-core takes no securityContext from values).
+       Not tied to kyvernoPolicy.enabled. */}}
+{{- with .Values.kyvernoPolicy.exceptions }}
+{{- if $.Capabilities.APIVersions.Has "kyverno.io/v2" }}
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: {{ printf "%s-exceptions" (include "kates-chaos.fullname" $) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "kates-chaos.labels" $ | nindent 4 }}
+  {{- with include "kates-chaos.annotations" $ }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  exceptions:
+    {{- range . }}
+    - policyName: {{ .policyName | quote }}
+      ruleNames:
+        {{- range .ruleNames }}
+        {{- /* with the rules Kyverno generates from it for controllers and CronJobs */}}
+        - {{ . | quote }}
+        - {{ printf "autogen-%s" . | quote }}
+        - {{ printf "autogen-cronjob-%s" . | quote }}
+        {{- end }}
+    {{- end }}
+  match:
+    any:
+      - resources:
+          kinds: [Pod, Deployment, ReplicaSet, StatefulSet, Job, CronJob]
+          namespaces: [{{ $.Release.Namespace | quote }}]
+          {{- /* litmus-core's operator and exporter only: both carry the
+                 release and litmus-core's name (its nameOverride, litmus).
+                 This chart's own pods pass on their own; chaos runner and
+                 experiment pods carry no instance label */}}
+          selector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ $.Release.Name | quote }}
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [{{ (index $.Values "litmus-core").nameOverride | default "litmus" | quote }}]
+{{- end }}
+{{- end }}

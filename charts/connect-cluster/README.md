@@ -117,7 +117,7 @@ The workers resolve `${secrets:<namespace>/<name>:<key>}` with Strimzi's `Kubern
 |:---|:---|:---|
 | `image` | a Connect image with the plugins inside (default: `ghcr.io/bmscomp/connect`, Debezium and Aiven connectors) | recommended |
 | `plugins` | OCI images mounted as volumes at start-up (`spec.plugins`) | no custom image, and every node has the ImageVolume feature (alpha in Kubernetes 1.31, beta from 1.33) |
-| `build` | the operator builds and pushes an image (`spec.build`) | a registry the operator can push to |
+| `build` | the operator builds and pushes an image (`spec.build`) | a registry the operator can push to, and a namespace that admits the operator's build pod: it runs as root, so Pod Security "restricted" refuses it |
 
 `plugins` renders only with `imageVolumes.acknowledged: true` — the chart cannot see a feature gate — and on Kubernetes 1.31 or later. `plugins[].expect` adds connector classes to the Helm test's list.
 
@@ -252,6 +252,9 @@ The test connectors expect the platform's demo PostgreSQL; `values-prod.yaml` tu
 | `dashboards.*` | on, folder `Kafka` | |
 | `preflight.*` | off | |
 | `tests.expectedPlugins` | the image's connectors | |
+| `tests.resources` | 10m and 64Mi, a 128Mi limit | the test pods |
+| `podLabels` | `{}` | labels on every pod: the workers, the test pods and the Jobs (the chart's own labels win) |
+| `global.imageRegistry` | `""` | a mirror registry put in front of every image the chart names |
 | `imagePullSecrets`, `imagePullPolicy`, `testImages.kubectl`, `clusterDomain`, `extraLabels` | | |
 
 1.x keys still read in 2.x, listed as `DEPRECATED` in NOTES: `podMonitors`, `monitoring.{enabled,interval,…}`, `metricsConfig`, `autoRestart`, `template`, `databaseEgress`, `kafkaUser.secretSync`, `networkPolicy.{kafkaPorts,monitoringNamespace,restApiClients}`, `alerts.thresholds.sourceLagMinutes`, a `connectors` list.

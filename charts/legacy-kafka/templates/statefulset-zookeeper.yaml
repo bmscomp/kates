@@ -20,8 +20,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "legacy-kafka.labels" . | nindent 8 }}
-        app.kubernetes.io/component: zookeeper
+        {{- include "legacy-kafka.podLabels" (dict "ctx" . "labels" (printf "%s\napp.kubernetes.io/component: zookeeper" (include "legacy-kafka.labels" .))) | nindent 8 }}
       annotations:
         checksum/scripts: {{ include (print $.Template.BasePath "/configmap-scripts.yaml") . | sha256sum }}
     spec:

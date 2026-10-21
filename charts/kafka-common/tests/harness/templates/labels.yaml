@@ -11,6 +11,9 @@ data:
   semver: {{ include "kafka-common.semver" "4.2-IV1" | quote }}
   semverShort: {{ include "kafka-common.semver" "2.8" | quote }}
   domain: {{ include "kafka-common.clusterDomain" . | quote }}
+  podLabels: |
+    {{- include "kafka-common.podLabels" (dict "labels" (include "kafka-common.selectorLabels" .) "podLabels" .Values.podLabels "testPod" true) | nindent 4 }}
+  image: {{ include "kafka-common.image" (dict "image" "ghcr.io/x/y:1" "registry" .Values.registry) | quote }}
   {{- range $k, $v := .Values.toggles }}
   toggle-{{ $k }}: {{ include "kafka-common.enabled" (list $v.value $v.default) | quote }}
   {{- end }}

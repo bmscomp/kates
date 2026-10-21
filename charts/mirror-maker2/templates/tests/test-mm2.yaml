@@ -1,4 +1,4 @@
-{{- $kubectl := .Values.testImages.kubectl }}
+{{- $kubectl := include "mirror-maker2.image" (list . .Values.testImages.kubectl) }}
 {{- $sa := printf "%s-test" (include "mirror-maker2.fullname" .) }}
 apiVersion: v1
 kind: ServiceAccount
@@ -54,12 +54,16 @@ metadata:
   name: {{ include "mirror-maker2.fullname" . }}-test-ready
   namespace: {{ include "mirror-maker2.namespace" . }}
   labels:
-    {{- include "mirror-maker2.labels" . | nindent 4 }}
+    {{- include "kafka-common.podLabels" (dict "labels" (include "mirror-maker2.labels" .) "podLabels" .Values.podLabels) | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  {{- with $.Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   serviceAccountName: {{ $sa }}
   securityContext:
     runAsNonRoot: true
@@ -75,6 +79,8 @@ spec:
         readOnlyRootFilesystem: true
         capabilities:
           drop: ["ALL"]
+      resources:
+        {{- toYaml $.Values.tests.resources | nindent 8 }}
       command: ['sh', '-c']
       args:
         - |

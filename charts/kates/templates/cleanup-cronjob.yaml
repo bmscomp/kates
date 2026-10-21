@@ -18,6 +18,10 @@ spec:
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
+    metadata:
+      labels:
+        {{- include "kates.labels" . | nindent 8 }}
+        app.kubernetes.io/component: cleanup
     spec:
       # A missing or wrong key, or an API without DELETE /api/tests, fails
       # every attempt the same way. Two retries cover a restarting API; the
@@ -31,17 +35,18 @@ spec:
             # egress to port 8080, so a job pod carrying them could not reach
             # the API at all. The Service and the PodDisruptionBudget select
             # on them too.
-            {{- include "kates.labels" . | nindent 12 }}
-            app.kubernetes.io/component: cleanup
+            {{- $own := printf "%s\napp.kubernetes.io/component: cleanup" (include "kates.labels" .) }}
+            {{- include "kates.podLabels" (dict "labels" $own "ctx" .) | nindent 12 }}
         spec:
           restartPolicy: OnFailure
+          {{- with include "kates.imagePullSecrets" . }}{{ . | nindent 10 }}{{ end }}
           {{- with .Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           containers:
           - name: cleanup
-            image: {{ .Values.cleanup.image | quote }}
+            image: {{ include "kates.imageRef" (dict "image" .Values.cleanup.image "ctx" .) | quote }}
             {{- with .Values.containerSecurityContext }}
             securityContext:
               {{- toYaml . | nindent 14 }}
@@ -55,13 +60,10 @@ spec:
                   key: {{ $keyName }}
                   optional: true
             {{- end }}
+            {{- with .Values.cleanup.resources }}
             resources:
-              requests:
-                memory: "32Mi"
-                cpu: "25m"
-              limits:
-                memory: "64Mi"
-                cpu: "100m"
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
             command:
               - sh
               - -c

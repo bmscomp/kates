@@ -15,7 +15,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "kafka-ui.selectorLabels" . | nindent 8 }}
+        {{- include "kafka-ui.podLabels" (dict "ctx" . "labels" (include "kafka-ui.selectorLabels" .)) | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}

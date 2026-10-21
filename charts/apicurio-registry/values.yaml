@@ -36,6 +36,10 @@ serviceAccount:
 # -- Pod annotations
 podAnnotations: {}
 
+# -- Extra labels for every pod the chart renders (registry, UI and the Helm
+# test). The chart's own labels win on a clash, so a selector never changes.
+podLabels: {}
+
 # -- Pod-level security context. The quay.io image runs as UID 185 (Quarkus).
 podSecurityContext:
   runAsNonRoot: true
@@ -162,6 +166,32 @@ networkPolicy:
 
 # -- Extra environment variables appended to the registry container
 env: []
+
+# -- Helm test pod (`helm test`): curl against the v3 REST API. Its image comes
+# from image.registry like the registry's (quay.io/curl/curl by default), and
+# it uses imagePullSecrets.
+tests:
+  image:
+    repository: curl/curl
+    tag: "8.7.1"
+  # -- The curl image's own user (curl_user, uid 100)
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
 
 # -- Web console (separate image in Registry 3.x). Off by default; the chart
 # deploys the backend only unless ui.enabled is set.

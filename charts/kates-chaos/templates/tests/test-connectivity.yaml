@@ -63,17 +63,33 @@ metadata:
   name: {{ include "kates-chaos.fullname" . }}-test-operator
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- include "kates-chaos.podLabels" (list . (include "kates-chaos.labels" .)) | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
   serviceAccountName: {{ $testSA }}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tests.podSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   containers:
     - name: test
       image: {{ $kubectl }}
       imagePullPolicy: {{ $pullPolicy }}
+      {{- with .Values.tests.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tests.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       command: ['sh', '-c']
       args:
         - |
@@ -93,17 +109,33 @@ metadata:
   name: {{ include "kates-chaos.fullname" . }}-test-crds
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "kates-chaos.labels" . | nindent 4 }}
+    {{- include "kates-chaos.podLabels" (list . (include "kates-chaos.labels" .)) | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
   serviceAccountName: {{ $testSA }}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tests.podSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   containers:
     - name: test
       image: {{ $kubectl }}
       imagePullPolicy: {{ $pullPolicy }}
+      {{- with .Values.tests.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tests.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       command: ['sh', '-c']
       args:
         - |

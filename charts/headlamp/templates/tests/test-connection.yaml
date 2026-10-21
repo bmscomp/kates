@@ -3,32 +3,31 @@ kind: Pod
 metadata:
   name: {{ include "headlamp.fullname" . }}-test
   labels:
-    {{- include "headlamp.labels" . | nindent 4 }}
+    {{- include "headlamp.podLabels" (dict "ctx" . "labels" (include "headlamp.labels" .)) | nindent 4 }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.test.podSecurityContext }}
   securityContext:
-    runAsNonRoot: true
-    runAsUser: 100
-    fsGroup: 100
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   containers:
   - name: connection-test
-    image: {{ .Values.test.image }}
+    image: {{ include "headlamp.image" (dict "ctx" . "image" .Values.test.image) | quote }}
+    {{- with .Values.test.securityContext }}
     securityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      capabilities:
-        drop:
-          - ALL
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.test.resources }}
     resources:
-      requests:
-        memory: "32Mi"
-        cpu: "25m"
-      limits:
-        memory: "64Mi"
-        cpu: "100m"
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     command:
       - sh
       - -c

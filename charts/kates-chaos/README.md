@@ -60,6 +60,7 @@ helm upgrade --install chaos charts/kates-chaos \
 | `fullnameOverride` | Override full release name | `""` |
 | `commonLabels` | Labels added to every resource | `{}` |
 | `commonAnnotations` | Annotations added to every resource | `{}` |
+| `podLabels` | Labels added to the installer, GameDay and test pods; the chart's own labels win on a clash. litmus-core's pods use `litmus-core.customLabels` | `{}` |
 | `serviceAccount.name` | Chaos service account (shared by RBAC + engines) | `litmus-admin` |
 
 ### Global & Images
@@ -76,7 +77,7 @@ helm upgrade --install chaos charts/kates-chaos \
 | `images.goRunner.repository` | Default runtime for experiments | `litmuschaos/go-runner` |
 | `images.goRunner.tag` | go-runner image tag | `3.28.0` |
 
-The `litmus-core` subchart images (operator/runner) are set under the `litmus-core:` key.
+The `litmus-core` subchart images (operator/runner/exporter) are set under the `litmus-core:` key; `global.imageRegistry` and `global.imagePullSecrets` do not reach them (the subchart has no such knobs).
 
 ### RBAC
 
@@ -97,7 +98,10 @@ The `litmus-core` subchart images (operator/runner) are set under the `litmus-co
 | `experiments.targetNamespaces` | Namespaces to install into (empty = every `target` namespace) | `[]` |
 | `experiments.installer.backoffLimit` | Installer Job retries | `3` |
 | `experiments.installer.ttlSecondsAfterFinished` | Installer Job TTL | `300` |
-| `experiments.installer.resources` / `securityContext` / `nodeSelector` / `tolerations` | Installer pod tuning | `{}` / `[]` |
+| `experiments.installer.resources` | Resources of the installer's container and two init containers | requests `10m`/`64Mi`, limit `128Mi` |
+| `experiments.installer.podSecurityContext` | Installer pod securityContext | PSS restricted, uid/gid `65534` |
+| `experiments.installer.securityContext` | Installer containers' securityContext | no privilege escalation, drop `ALL` |
+| `experiments.installer.nodeSelector` / `tolerations` / `affinity` | Installer pod scheduling | `{}` / `[]` / `{}` |
 | `experiments.definitions[].name` | Experiment name | — |
 | `experiments.definitions[].scope` | `Namespaced` or `Cluster` | `Namespaced` |
 | `experiments.definitions[].env` | Default env baked into the ChaosExperiment | — |
@@ -166,10 +170,13 @@ Each key under `engines:` renders a `ChaosEngine`. Probes and pod `components` a
 | `kyvernoPolicy.action` | `Audit` / `Enforce` | `Audit` |
 | `kyvernoPolicy.namespaces` | Namespaces the policy applies to (empty = release ns) | `[]` |
 | `kyvernoPolicy.excludeSelector` | Pods skipped (need privileges) | `chaosUID Exists` |
+| `kyvernoPolicy.exceptions` | `[{policyName, ruleNames}]` — one `kyverno.io/v2` PolicyException in the release namespace, matching litmus-core's operator and exporter (`app.kubernetes.io/instance` and `app.kubernetes.io/name: litmus`, litmus-core's `nameOverride`), for any policy, the cluster's own included, each rule's `autogen-` and `autogen-cronjob-` variants too. Rendered whenever non-empty and the API exists, regardless of `kyvernoPolicy.enabled`; Kyverno must accept exceptions from the release namespace | `[]` |
 | `pdb.enabled` | PodDisruptionBudget (requires `selector`) | `false` |
 | `pdb.minAvailable` / `maxUnavailable` / `selector` | PDB config | `1` / `""` / `{}` |
 | `gameday.enabled` | Run the validation Job | `false` |
 | `gameday.checks` | Data-driven `{name, command}` checks (empty = default set) | `[]` |
+| `gameday.resources` / `podSecurityContext` / `securityContext` | GameDay pod tuning | as `experiments.installer.*` |
+| `tests.resources` / `podSecurityContext` / `securityContext` | Helm test pods tuning | as `experiments.installer.*` |
 
 ## Examples
 
@@ -228,7 +235,20 @@ gameday:
 helm test chaos -n litmus
 ```
 
-Runs two hooks: the chaos **operator** is `Available`, and the Litmus **CRDs** are established with experiments installed. Both use a scoped, ephemeral test ServiceAccount.
+Runs two hooks: the chaos **operator** is `Available`, and the Litmus **CRDs** are established with experiments installed. Both use a scoped, ephemeral test ServiceAccount, and `tests.*` sets their securityContext and resources.
+
+## Pod Security
+
+The installer Job, GameDay Job and test pods pass Pod Security Standards **restricted** with default values. The litmus-core subchart exposes no securityContext, so its operator Deployment (`litmus`) and, when `litmus-core.exporter.enabled`, its exporter (`litmus-monitor`) do not on their own. On a cluster with Kyverno, `kyvernoPolicy` with `mutate: true` (`values-generic.yaml` turns it on) patches them to restricted at admission. On a cluster that enforces restricted through its own Kyverno policy without that, exempt them (the exception matches only those two, by `app.kubernetes.io/name: litmus`):
+
+```yaml
+kyvernoPolicy:
+  exceptions:
+    - policyName: <your PSS policy>
+      ruleNames: [<its rule>]
+```
+
+A namespace labelled `pod-security.kubernetes.io/enforce: restricted` rejects them unless the mutate rules patched them first; they pass `baseline`.
 
 ## Upgrading
 

@@ -2,7 +2,7 @@
 {{- $fullname := include "mirror-maker2.fullname" . }}
 {{- $ns := include "mirror-maker2.namespace" . }}
 {{- $pf := .Values.preflight }}
-{{- $image := $pf.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version) }}
+{{- $image := include "mirror-maker2.image" (list . ($pf.image | default (printf "quay.io/strimzi/kafka:%s-kafka-%s" (.Values.strimziVersion | default "1.1.0") .Values.version))) }}
 {{- /*
 Preflight: probe every source with the SAME client the workers will use.
 
@@ -39,7 +39,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "mirror-maker2.componentLabels" (dict "component" "preflight" "ctx" .) | nindent 8 }}
+        {{- include "kafka-common.podLabels" (dict "labels" (include "mirror-maker2.componentLabels" (dict "component" "preflight" "ctx" .)) "podLabels" .Values.podLabels) | nindent 8 }}
     spec:
       restartPolicy: Never
       {{- /* Deliberately NOT the chart's ServiceAccount. That SA is an ordinary

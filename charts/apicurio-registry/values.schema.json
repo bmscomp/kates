@@ -30,6 +30,24 @@
       }
     },
     "podAnnotations": { "type": "object" },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1 }
+          }
+        },
+        "podSecurityContext": { "type": "object" },
+        "securityContext": { "type": "object" },
+        "resources": { "type": "object" }
+      }
+    },
     "podSecurityContext": { "type": "object" },
     "securityContext": { "type": "object" },
     "service": {

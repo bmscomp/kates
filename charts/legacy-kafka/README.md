@@ -36,7 +36,11 @@ helm upgrade --install legacy charts/legacy-kafka -n kafka-legacy --create-names
 ```
 
 Explicit `mode` and `kafka.image` values still win, which is what the two era
-overlays below do.
+overlays below do. To pull from a mirror, `global.imageRegistry` is prepended
+to the derived official image (`<registry>/apache/kafka:<version>`); the built
+image takes `legacyImageRegistry`, and an explicit `kafka.image` is used as
+written. `imagePullSecrets` reach every pod, the topics Job and the Helm test
+included.
 
 ZooKeeper runs from the **same image** as the broker — the Kafka tarball ships
 ZooKeeper, so there is no second version pin that can drift away from the
@@ -171,6 +175,12 @@ The chart refuses to render, rather than failing later inside a broker, when:
 See [`values.yaml`](values.yaml) — every key is commented — and
 [`values.schema.json`](values.schema.json), which is strict (`additionalProperties: false`),
 so a typo fails the install instead of being silently ignored.
+
+Every pod (brokers, ZooKeeper, the topics Job, the Helm test) passes Pod
+Security Standards `restricted` with the defaults (`podSecurityContext`,
+`containerSecurityContext`) and has CPU and memory requests and a memory limit;
+the Helm test's are `testResources`. `podLabels` adds labels to every pod, and
+the chart's own labels win on a clash.
 
 | Overlay | For |
 |:---|:---|

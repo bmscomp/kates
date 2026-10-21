@@ -36,11 +36,15 @@ Any namespace works: Kafka and Kates both run in the release namespace, and the 
 | `apicurio-registry.enabled` | `false` | Deploy Apicurio Registry (KafkaSQL storage against the `kafka-cluster` subchart) |
 | `mirror-maker2.enabled` | `false` | Deploy MirrorMaker 2 (needs a real `mirrors[].source`) |
 | `connect-cluster.enabled` | `false` | Deploy Kafka Connect next to Kafka (`kates deploy` installs it as its own release instead) |
+| `test.image` | `busybox:1.37` | Image of the umbrella's Helm test pod (needs `nc`; runs as uid 65534, Pod Security "restricted"); `global.imageRegistry`, when set, is prepended with a slash |
+| `test.resources` | 25m/32Mi requests, 100m/64Mi limits | Resources of the Helm test pod |
+| `podLabels` | `{}` | Labels added to the Helm test pod; its own labels win a clash. Each subchart's pods take theirs from its own `podLabels` (`kates.podLabels`, `kafka-cluster.podLabels`, …) |
+| `imagePullSecrets` | `[]` | Pull secrets of the Helm test pod, after `global.imagePullSecrets` (which kafka-cluster and kates read too; the other subcharts take their own imagePullSecrets); an entry is a name or `{name: …}` |
 
 Subchart values are validated by each subchart's own `values.schema.json`.
 
 ## Version pinning
 
-`Chart.yaml` pins the subcharts with ranges (`>=1.0.10 <2.0.0` for kafka-cluster, `>=0.11.6 <1.0.0` for mirror-maker2, `>=2.1.8 <3.0.0` for connect-cluster, `>=0.12.1 <1.0.0` for kates, `>=0.4.0 <1.0.0` for apicurio-registry); each floor is the version the umbrella was last rendered with. The `file://` repository always resolves to the local working tree, and `Chart.lock` records the exact version at build time.
+`Chart.yaml` pins the subcharts with ranges (`>=1.0.12 <2.0.0` for kafka-cluster, `>=0.11.8 <1.0.0` for mirror-maker2, `>=2.1.10 <3.0.0` for connect-cluster, `>=0.13.0 <1.0.0` for kates, `>=0.4.1 <1.0.0` for apicurio-registry); each floor is the version the umbrella was last rendered with. The `file://` repository always resolves to the local working tree, and `Chart.lock` records the exact version at build time.
 
 Helm installs whatever sits in `charts/` without checking it against those ranges, so the umbrella checks itself: rendering fails, naming the subchart, while `charts/` holds an enabled subchart outside its range. A `charts/` left from an older build would otherwise install its old subcharts, such as kates 0.9.1, whose ClusterRole read every Secret in the cluster. Run `make platform-chart-deps` to refresh it.

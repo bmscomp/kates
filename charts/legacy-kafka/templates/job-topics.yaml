@@ -21,8 +21,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "legacy-kafka.labels" . | nindent 8 }}
-        app.kubernetes.io/component: topics
+        {{- include "legacy-kafka.podLabels" (dict "ctx" . "labels" (printf "%s\napp.kubernetes.io/component: topics" (include "legacy-kafka.labels" .))) | nindent 8 }}
     spec:
       restartPolicy: Never
       serviceAccountName: {{ include "legacy-kafka.serviceAccountName" . }}

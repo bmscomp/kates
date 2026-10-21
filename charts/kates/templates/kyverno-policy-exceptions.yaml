@@ -1,4 +1,6 @@
-{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.policyExceptions.enabled (.Capabilities.APIVersions.Has "kyverno.io/v2") }}
+{{- /* Exceptions to this chart's own ClusterPolicy, in other namespaces: like
+       the policy, nothing under rbac.scope=namespace. */}}
+{{- if and .Values.kyvernoPolicy.enabled .Values.kyvernoPolicy.policyExceptions.enabled (ne .Values.rbac.scope "namespace") (.Capabilities.APIVersions.Has "kyverno.io/v2") }}
 {{- range $ns := .Values.kyvernoPolicy.policyExceptions.namespaces }}
 {{- range $policy := $.Values.kyvernoPolicy.policyExceptions.exemptPolicies }}
 ---
@@ -33,5 +35,43 @@ spec:
             - StatefulSet
             - ReplicaSet
 {{- end }}
+{{- end }}
+{{- end }}
+{{- /* kyvernoPolicy.exceptions: this release's own workloads, in its own
+       namespace, exempt from rules of any policy, the cluster's included. */}}
+{{- with .Values.kyvernoPolicy.exceptions }}
+{{- if $.Capabilities.APIVersions.Has "kyverno.io/v2" }}
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: {{ printf "%s-exceptions" (include "kates.fullname" $) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "kates.labels" $ | nindent 4 }}
+spec:
+  exceptions:
+    {{- range . }}
+    - policyName: {{ .policyName | quote }}
+      ruleNames:
+        {{- range .ruleNames }}
+        {{- /* with the rules Kyverno generates from it for controllers and CronJobs */}}
+        - {{ . | quote }}
+        - {{ printf "autogen-%s" . | quote }}
+        - {{ printf "autogen-cronjob-%s" . | quote }}
+        {{- end }}
+    {{- end }}
+  match:
+    any:
+      - resources:
+          kinds: [Pod, Deployment, ReplicaSet, StatefulSet, Job, CronJob]
+          namespaces: [{{ $.Release.Namespace | quote }}]
+          selector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ $.Release.Name | quote }}
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [{{ include "kates.name" $ | quote }}, {{ include "kates.postgresql.fullname" $ | quote }}]
 {{- end }}
 {{- end }}

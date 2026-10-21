@@ -640,34 +640,149 @@ kubectl run np-probe -n default --rm -i --restart=Never --image="$IMAGE" -- bash
 
 ## Container Security
 
-The `kafka-cluster` chart hardens the broker and controller pods by default: every `KafkaNodePool` it renders carries the security contexts below in its pod template, and a pool's `podSecurityContext` and `containerSecurityContext` values merge over them.
+The Kates charts hold their pods to the Kubernetes Pod Security Standards (PSS) at the **restricted** level. With default values, every pod they render passes it, Helm test pods and jobs included, and every container carries CPU and memory requests and a memory limit. The pods the Strimzi operator creates from the charts' custom resources get the restricted settings too, from the operator and from the resources' templates. The exceptions are a handful of host-level agents and upstream subcharts that take no security context from values, which [Workloads That Cannot Pass](#workloads-that-cannot-pass) names with their switches.
 
 ### Security Contexts
 
-Every container in the Kates platform runs with a hardened security context. These settings follow the Kubernetes Pod Security Standards (PSS) at the **restricted** level:
+Beyond the baseline level's bans on host namespaces, privileged containers and `hostPath` volumes, the restricted level asks four settings of every pod and container. The charts set those four, and some also make the root filesystem read-only, which the standard doesn't ask for. Each setting takes away one thing an attacker who gets into the container could use:
+
+| Setting | Value | What it takes away |
+|---------|-------|--------------------|
+| `runAsNonRoot` | `true` | UID 0, even when the image's `USER` is root |
+| `seccompProfile.type` | `RuntimeDefault` | System calls outside the container runtime's default allow list |
+| `allowPrivilegeEscalation` | `false` | `setuid` and `setgid` binaries that raise privileges inside the container |
+| `capabilities.drop` | `["ALL"]` | Every Linux capability: no raw sockets, no network admin, no mounts |
+| `readOnlyRootFilesystem` | `true`, where a chart sets it | Writes outside mounted volumes, such as a dropped binary |
+
+The `kafka-cluster` chart writes these into the pod template of every [`KafkaNodePool`](appendix-a-glossary.md#gl-kafkanodepool) it renders, with a fixed user ID and `fsGroup` besides. A pool's `podSecurityContext` and `containerSecurityContext` values merge over them:
 
 ```yaml
 template:
+  pod:
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+      fsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault
   kafkaContainer:
     securityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
       capabilities:
         drop: ["ALL"]
-  pod:
-    securityContext:
-      runAsNonRoot: true
-      fsGroup: 1001
 ```
 
-Each setting takes away one thing an attacker who gets into the container could use:
+### What Each Chart Sets
 
-| Setting | Value | Purpose |
-|---------|-------|---------|
-| `runAsNonRoot` | true | Prevents running as UID 0 — even if the container image specifies `USER root` |
-| `readOnlyRootFilesystem` | true | No writes outside mounted volumes — prevents attackers from dropping malware |
-| `allowPrivilegeEscalation` | false | Blocks `setuid` / `setgid` binaries — prevents privilege escalation within the container |
-| `drop: ALL` | — | Removes all Linux capabilities — no raw sockets, no network admin, no filesystem mounts |
+Each chart puts the restricted settings, with requests and a memory limit, on the pods this table names. The last column gives the values that hold their settings, and each chart's README lists the defaults:
+
+| Chart | Pods it renders | Values that hold the settings |
+|-------|-----------------|-------------------------------|
+| `kates` | The Kates API, PostgreSQL, the backup, cleanup and migration jobs, the Helm test pods | `securityContext` and `containerSecurityContext`; PostgreSQL's under `postgresql`, the init container's under `initContainers.waitForPostgres` |
+| `kafka-cluster` | The Helm test pods; through Strimzi, every Kafka component | Each component's `template` and each pool's contexts; `tests.resources`, `tests.jvmResources` |
+| `connect-cluster`, `mirror-maker2` | The test pods and the secret-sync and pre-flight jobs; through Strimzi, the workers | `podSecurityContext`; `connectContainer` for the worker container; `tests.resources` |
+| `strimzi-operator` | The operator, the CRD-upgrade job, the Drain Cleaner, the Helm test pods | `strimzi-kafka-operator.extraEnvs` for the pods the operator creates; `tests.resources` |
+| `kates-chaos` | The experiment installer job, the Game Day job, the Helm test pods | `podSecurityContext`, `securityContext` and `resources` under `experiments.installer`, `gameday` and `tests` |
+| `monitoring` | The kube-prometheus-stack pods but node-exporter, the Prometheus and Alertmanager pods its operator creates, the Helm test pod | Each component's keys under `kube-prometheus-stack`; `test.*` |
+| `velero` | The Velero server, the upgrade-crds and cleanup-crds jobs, the Helm test pod | `podSecurityContext`, `containerSecurityContext`, `kubectl.containerSecurityContext`, `tests.*` |
+| `apicurio-registry`, `headlamp`, `kafka-ui`, `legacy-kafka` | The application, its UI, brokers or jobs, and the Helm test pod | Each chart's pod and container contexts; `tests.*` (`test.*` in `headlamp`, `testResources` in `legacy-kafka`) |
+| `kates-platform` | Its Helm test pod; each subchart's pods as that chart's row says | `test.resources`, beside fixed security contexts; each subchart's keys under its name, such as `kates.securityContext` |
+
+A key the table names merges over the chart's defaults, so setting one field of a security context keeps the others.
+
+### The Strimzi Restricted Provider
+
+Strimzi, not Helm, creates the pods of a Kafka cluster, a Connect cluster and a MirrorMaker 2, so their security contexts come from the operator's pod security provider. The `strimzi-operator` chart turns on Strimzi's restricted provider with one environment variable:
+
+```yaml
+strimzi-kafka-operator:
+  extraEnvs:
+    - name: STRIMZI_POD_SECURITY_PROVIDER_CLASS
+      value: restricted
+```
+
+The operator then gives every pod it creates the restricted settings. Helm replaces a list whole, so keep this entry when you add environment variables of your own.
+
+An operator you share with other teams may run Strimzi's default baseline provider instead. So the `kafka-cluster`, `connect-cluster` and `mirror-maker2` charts write the restricted settings into their custom resources' templates as well, and their pods pass on either provider. The templates cover every component's pod and containers, and the init container that rack awareness adds. In `kafka-cluster`, `kafka.template`, `entityOperator.template`, `cruiseControl.template`, `kafkaExporter.template` and each pool's `template` merge over them.
+
+### Chaos Stress Containers
+
+A `CPU_STRESS` or `IO_STRESS` fault on the `kubernetes` chaos provider adds an ephemeral container to the target pod (see [Direct Kubernetes API](07-chaos-practice.md#direct-kubernetes-api)). The container joins the target, usually a broker, so the target namespace's admission rules apply to it, not the Kates API's. It runs as the user and group the target pod sets, at pod level or else on one of its containers, as OpenShift does, which that namespace already admits. Where neither sets a user other than 0, the container runs as user 65534 (nobody), and where neither sets a group, as group 65534. It has no privilege escalation, every capability dropped and the `RuntimeDefault` seccomp profile, so it passes restricted.
+
+Its image is pinned, too. The `kates` chart's `chaos.stressImage`, `docker.io/polinux/stress:1.0.4` by default, reaches the Kates API as `KATES_CHAOS_STRESS_IMAGE`, with `global.imageRegistry` put in front of it. The setting and that security context need a Kates API image newer than 1.28.0. Version 1.28.0 and earlier pull an untagged `polinux/stress` from Docker Hub and add it with no security context of its own. A namespace that enforces restricted refuses it, and it runs as root wherever the target pod sets no user.
+
+### Workloads That Cannot Pass
+
+A few workloads can't pass restricted, or carry no requests and limits, with the values the charts ship. They read the host, or they come from an upstream template that takes no security context or resources from values. Each is off by default or has a switch:
+
+| Chart | Workload | Why it fails | Switch |
+|-------|----------|--------------|--------|
+| `kates-chaos` | Deployment `litmus`, the [LitmusChaos](appendix-a-glossary.md#gl-litmuschaos) operator, and `litmus-monitor`, its exporter, with `litmus-core.exporter.enabled` | The litmus-core subchart sets no security context and reads none from values | `kyvernoPolicy.enabled` with `mutate`, as `values-generic.yaml` sets them; `kyvernoPolicy.exceptions`; or `litmus-core.enabled=false` to bring your own Litmus |
+| `monitoring` | DaemonSet `monitoring-prometheus-node-exporter`, on by default | Host network and PID namespace, `hostPath` mounts of `/proc`, `/sys` and `/`, a host port | `kube-prometheus-stack.nodeExporter.enabled=false`; the node panels and alerts go with it |
+| `velero` | DaemonSet `node-agent`, with `deployNodeAgent=true`; off by default | `hostPath` mounts of the kubelet's pod and plugin directories; root with the runtime's default capabilities; no `allowPrivilegeEscalation: false` | Keep `deployNodeAgent=false`, or run it in a namespace that enforces `privileged` |
+| `velero` | Job `velero-label-namespace`, when `namespace.labels` isn't empty; `{}` by default | Upstream's template sets no security context and no resources, and no value reaches them | Keep `namespace.labels` empty and label the namespace yourself |
+| `connect-cluster` | The operator's build pod, with `build` mode | Strimzi's Kaniko build runs as root | `image`, the default, or `plugins` |
+| `kafka-cluster` | SeaweedFS's master, volume and filer StatefulSets, and with `createBuckets` Job `<release>-bucket-hook`; `seaweedfs.enabled` is off by default | With the values this chart ships: `hostPath` data and log volumes, root, no requests or limits. The bucket hook takes no resources, labels or pull secrets from any value | Keep `seaweedfs.enabled: false` and use an object store outside the namespace, or install SeaweedFS from the start with the subchart's own security contexts, resources and claim-backed storage ([SeaweedFS](20-installation-guide.md#seaweedfs)) |
+
+The two Litmus pods pass the baseline level. Kyverno can exempt them through a [`PolicyException`](appendix-a-glossary.md#gl-policyexception), which `kyvernoPolicy.exceptions` renders (see [Policy Exceptions](#policy-exceptions)). It can also patch them to restricted at admission: the chart's own `kyvernoPolicy`, enabled with `mutate: true` as `values-generic.yaml` sets it, gives them a non-root user, the `RuntimeDefault` seccomp profile, no privilege escalation and no capabilities. Pod Security Admission, the controller built into Kubernetes that reads a namespace's `pod-security.kubernetes.io/enforce` label, has no exception for a single workload, so a namespace labelled `restricted` refuses them unless those mutate rules patched them first.
+
+`kates deploy` sets `kube-prometheus-stack.nodeExporter.enabled=false` itself when the monitoring namespace enforces baseline or restricted. The [Velero](appendix-a-glossary.md#gl-velero) node agent is what file-system backups and the data mover need, so the `kafka-cluster` chart's `backup.volumes: fs-backup` needs a `velero` namespace that admits it. Velero's plugins are `initContainers` you write in its values, and restricted refuses the Velero pod unless each has `allowPrivilegeEscalation: false`, `capabilities.drop: ["ALL"]`, and CPU and memory requests with a memory limit. `config/velero/velero-values.yaml`, the file `make velero` installs with, and its offline twin `velero-values-offline.yaml` give the AWS plugin all three; give a plugin you add the same.
+
+Two more settings trade restricted away. A Connect `build` needs an operator without the restricted provider's `extraEnvs` entry, besides a namespace that admits a root pod. SeaweedFS, which the `kafka-cluster` chart's `values-prod.yaml` turns on, keeps its data in `hostPath` directories, as [SeaweedFS](20-installation-guide.md#seaweedfs) describes. In a namespace that enforces restricted, point tiered storage and Velero at an object store outside it instead.
+
+### Pod Labels
+
+A cluster that requires a label on every pod, such as a team or a cost center, sets it through each chart's `podLabels` value. The value reaches every pod the chart renders, Helm test pods and jobs included, and the pod templates of the Strimzi resources. The chart's own labels win a clash, so no selector changes, except in `velero`'s server Deployment, where the vendored chart puts `podLabels` after its own labels, so a key that clashes with one of them breaks the Deployment. The pods in this table take their labels from a key of their own instead:
+
+| Chart | Pods | Their key |
+|-------|------|-----------|
+| `kates-chaos` | The chaos operator and exporter | `litmus-core.customLabels`, which labels every other resource the subchart renders too |
+| `kafka-cluster` | SeaweedFS's master, volume and filer; its bucket hook takes no labels from any value | `seaweedfs.podLabels` |
+| `monitoring` | Every pod but the Helm test | Each component's `podLabels` under `kube-prometheus-stack`; `podMetadata.labels` for Prometheus and Alertmanager; `kube-prometheus-stack.commonLabels` for the admission-create and admission-patch jobs |
+| `strimzi-operator` | The operator | `strimzi-kafka-operator.labels` |
+| `velero` | The server and Helm test; the CRD jobs; the node agent | `podLabels`; `kubectl.labels`; `nodeAgent.podLabels` |
+| `kates-platform` | Every subchart's pods; the umbrella's `podLabels` reaches only its Helm test pod | Each subchart's own keys, such as `kates.podLabels` and `kafka-cluster.podLabels` |
+
+`kube-prometheus-stack.commonLabels` labels every resource that kube-prometheus-stack's own templates render, not only the two jobs.
+
+### Registries and Pull Secrets
+
+On a cluster that pulls through a mirror, each chart can put a registry in front of the images it names and attach pull secrets to every pod it renders. The keys differ where a chart wraps an upstream one:
+
+| Chart | Mirror registry | Pull secrets |
+|-------|-----------------|--------------|
+| `kates`, `connect-cluster`, `mirror-maker2`, `headlamp`, `kafka-ui` | `global.imageRegistry`, in front of every image the chart names; in `kates`, `chaos.stressImage` too | `imagePullSecrets`; `kates` also reads `global.imagePullSecrets`, and takes names or `{name: …}` in both |
+| `legacy-kafka` | `global.imageRegistry` for the official Kafka image; `legacyImageRegistry` for the built one | `imagePullSecrets` |
+| `kafka-cluster` | `tests.imageRegistry` for the test images; `seaweedfs.image.registry`, with a trailing slash | `global.imagePullSecrets`, as names or `{name: …}`; plain names such as `[regcred]` when SeaweedFS is on, which reach its master, volume and filer but not its bucket hook |
+| `kates-platform` | `global.imageRegistry`, in front of the Helm test's image; each subchart reads it as its own row says | `global.imagePullSecrets`, which the `kates` and `kafka-cluster` subcharts read; `imagePullSecrets` for the Helm test pod alone |
+| `kates-chaos` | `global.imageRegistry`, except the litmus-core images, which you set under `litmus-core.operator`, `.runner` and `.exporter` | `global.imagePullSecrets`, which litmus-core's pods don't read |
+| `monitoring` | `global.imageRegistry`, the wrapped stack's images included | `global.imagePullSecrets` |
+| `strimzi-operator` | `strimzi-kafka-operator.defaultImageRegistry`; write the mirror into `testImages.kubectl` and `drainCleaner.image` | `strimzi-kafka-operator.image.imagePullSecrets` |
+| `apicurio-registry` | `image.registry`, the Helm test's image included | `imagePullSecrets` |
+| `velero` | None: set `image.repository`, `kubectl.image.repository` and `tests.image.repository` | `image.imagePullSecrets` |
+
+The Strimzi pods of `kafka-cluster`, `connect-cluster` and `mirror-maker2` run the operator's images, so `strimzi-kafka-operator.defaultImageRegistry` mirrors them. In `kafka-cluster`, `global.imageRegistry` is the registry of the Strimzi client image the tests use when `testImages.kafka` is empty.
+
+### Checking the Charts Against the Policies
+
+`scripts/check-chart-policies.sh` holds every chart to four sample cluster policies, kept in `.github/kyverno/policies/`: PSS restricted, CPU and memory requests with a memory limit, an image tag or digest that isn't `latest`, and a `team` label on every pod. It renders each chart with its defaults, and once more for each set of values that turns its optional workloads on, SeaweedFS and Velero's namespace-label job aside. Every render sets `team=ci` through the chart's `podLabels` and the other label keys [Pod Labels](#pod-labels) lists, so the label policy proves those keys reach every pod. The Kyverno CLI applies all four policies to each render, together with the exceptions in `.github/kyverno/exceptions/`. Those cover node-exporter, the Velero node agent and the Litmus pods from [Workloads That Cannot Pass](#workloads-that-cannot-pass), one control at a time.
+
+The script needs `helm`, the Kyverno CLI and the Helm repositories the charts depend on. Run it from the repository root, with no argument for every chart or with the charts to check:
+
+```bash
+helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
+helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+# Every chart
+scripts/check-chart-policies.sh
+# Only the charts you name
+scripts/check-chart-policies.sh kates kates-chaos
+```
+
+It prints one `PASS` or `FAIL` line per chart, with the failing resources and rules under it, and exits 1 on any failure. The exceptions in `.github/kyverno/exceptions/` are a template for your own cluster's: each names the workload, the policy and the controls it lifts, and says why.
 
 ### Quotas as Security
 
@@ -713,6 +828,8 @@ The kates chart ships four `ClusterPolicy` resources. It renders them only when 
 | `kates-workload-standards` | Best Practices | Medium | Requires standard labels, health probes, and pinned image tags on workloads |
 | `kates-image-verification` | Supply Chain | Critical | Verifies Cosign image signatures from trusted registries. Off by default: needs `kyvernoPolicy.cosign.enabled` and a `publicKey` |
 | `kates-generate-network-policies` | Network Security | Medium | Generates default-deny NetworkPolicies in namespaces created after it. Off by default: needs `kyvernoPolicy.networkPolicyGeneration.enabled`, which `kates kyverno apply --with-netpol` sets |
+
+A `ClusterPolicy` is cluster-scoped, so with `rbac.scope=namespace` the chart renders none of the four, nor the exceptions of `kyvernoPolicy.policyExceptions`, which live in other namespaces. An account with edit rights in the release namespace alone could create neither. `kyvernoPolicy.exceptions` still renders under that scope, because its `PolicyException` lives in the release namespace (see [Policy Exceptions](#policy-exceptions)).
 
 ### Pod Security Standards (Mutate + Validate)
 
@@ -790,7 +907,67 @@ Certain system and infrastructure namespaces are excluded from automatic Network
 
 ### Policy Exceptions
 
-For development environments where strict enforcement would impede workflows, Kates supports `PolicyException` CRDs (Kyverno `v2` API). These temporarily relax specific validation rules for designated namespaces without disabling the entire policy:
+A `PolicyException` (Kyverno `v2` API) exempts named resources from named rules without turning the whole policy off. The charts render two kinds, from two values.
+
+The first, `kyvernoPolicy.exceptions` on the `kates` and `kates-chaos` charts, exempts some of the release's own workloads from rules of any Kyverno policy, the cluster's own included. In `kates` those are every pod whose name label is `kates` or `kates-postgresql`: the API, PostgreSQL, the backup, cleanup and migration jobs and the Helm test pods. In `kates-chaos` they are the Litmus operator and exporter. The value is a list of `{policyName, ruleNames}` entries and needs no `kyvernoPolicy.enabled`. No other chart has it: to exempt another chart's pod, write a `PolicyException` of your own, like those in `.github/kyverno/exceptions/`. A cluster that enforces restricted through a policy named `pss-restricted` admits the Litmus operator with these values on the `kates-chaos` release:
+
+```yaml
+kyvernoPolicy:
+  exceptions:
+    - policyName: pss-restricted   # your cluster's PSS policy
+      ruleNames: [restricted]      # the rule to exempt from
+```
+
+For the `chaos` release that `kates deploy` installs in `litmus`, the chart renders one `PolicyException` in the release namespace, here with its labels left out:
+
+```yaml
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: chaos-kates-chaos-exceptions
+  namespace: litmus
+spec:
+  exceptions:
+    - policyName: "pss-restricted"
+      ruleNames:
+        - "restricted"
+        - "autogen-restricted"
+        - "autogen-cronjob-restricted"
+  match:
+    any:
+      - resources:
+          kinds: [Pod, Deployment, ReplicaSet, StatefulSet, Job, CronJob]
+          namespaces: ["litmus"]
+          selector:
+            matchLabels:
+              app.kubernetes.io/instance: "chaos"
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["litmus"]
+```
+
+Reading the render:
+
+1. Each rule comes with the `autogen-` and `autogen-cronjob-` rules Kyverno generates from it for controllers and CronJobs, so the Deployment is exempt as well as its pods.
+2. The selector matches the release's Litmus operator and exporter, which carry the release and litmus-core's name, `litmus`. The chart's own jobs and test pods pass on their own and stay under the policy, and so do the Litmus runner and experiment pods, which carry no `app.kubernetes.io/instance` label. In the `kates` chart the selector matches every pod whose `app.kubernetes.io/name` is `kates` or `kates-postgresql` instead, its jobs and Helm test pods included.
+3. A namespaced `Policy` is named `<namespace>/<name>` in `policyName`.
+
+Kyverno must accept exceptions from the release namespace, which its `exceptionNamespace` setting decides.
+
+The second kind relaxes the `kates` chart's own `kates-pod-security-standards` policy for whole namespaces, such as development ones. It comes from `kyvernoPolicy.policyExceptions`, needs `kyvernoPolicy.enabled` and `policyExceptions.enabled`, and renders nothing under `rbac.scope=namespace`. These values exempt the `litmus` namespace from two of the policy's rules:
+
+```yaml
+kyvernoPolicy:
+  enabled: true
+  policyExceptions:
+    enabled: true
+    namespaces: [litmus]
+    exemptPolicies: [kates-pod-security-standards]
+    exemptRules: [validate-readonly-rootfs, validate-drop-capabilities]
+```
+
+The chart renders one `PolicyException` per namespace and policy, in that namespace, again shown without its labels and annotations:
 
 ```yaml
 apiVersion: kyverno.io/v2
@@ -810,8 +987,6 @@ spec:
           namespaces: [litmus]
           kinds: [Pod, Deployment, StatefulSet, ReplicaSet]
 ```
-
-Exceptions are configured via Helm values under `kyvernoPolicy.policyExceptions` and deployed only when `policyExceptions.enabled=true`.
 
 ### Enforce vs Audit Modes
 
@@ -871,7 +1046,7 @@ Use this checklist when auditing your deployment. Each item links to the section
 - [ ] `superUsers` list contains only `kates-backend`, the Kates API's principal — see [User Permissions Matrix](#user-permissions-matrix)
 - [ ] Each service has its own `KafkaUser` with minimum required ACLs — see [Adding a New Service](#adding-a-new-service)
 - [ ] Every listener carries `networkPolicyPeers` (an external one declared in `kafka.listeners`, since the `externalAccess` preset cannot carry them), and a pod with no grant times out on the listener ports — see [Closing the Listeners](#closing-the-listeners)
-- [ ] Containers run as non-root with read-only root filesystem — see [Container Security](#container-security)
+- [ ] Every pod passes Pod Security restricted, and each one that can't is off or exempt by name — see [Container Security](#container-security)
 - [ ] The operator's certificate-expiry alerts are loaded (`kubectl get prometheusrule -n strimzi-operator`) — see [Rotation Monitoring](#rotation-monitoring)
 - [ ] Per-user quotas limit blast radius from runaway clients — see [Quotas as Security](#quotas-as-security)
 - [ ] `deleteClaim: false` on all PVCs (data survives pod deletion) — see [Kafka Deployment Engineering](15-kafka-deployment.md)
@@ -921,7 +1096,7 @@ Expect a graded report organized by category — authentication, transport secur
 - Every listener authenticates, but only some encrypt: `plain` (9092) uses SCRAM-SHA-512 without TLS so performance baselines isolate Kafka throughput from encryption cost — production traffic belongs on `tls` (9093) or `external` (9094).
 - Authorization is deny-by-default: each service gets its own `KafkaUser` with `patternType: prefix` ACLs and quotas, and only `kates-backend`, the Kates API's user, holds superUser status.
 - SCRAM passwords live in base64-encoded — not encrypted — Kubernetes Secrets, so RBAC on Secrets in the `kafka` and `kates` namespaces is the wall around your credentials. Kates reads its copy of the `kates-backend` password once, at startup, and nothing keeps that copy in step, so a rotation is rotate, re-copy, restart.
-- Kyverno enforces restricted Pod Security Standards in two phases — mutation silently patches missing settings, validation rejects what mutation can't fix — and starts in `Audit` mode so you can review violations before switching to `Enforce`.
+- The charts' pods pass restricted Pod Security Standards by default, bar a few named host-level and upstream workloads; Kyverno patches, then validates, and starts in `Audit` mode.
 - As shipped, every pod can reach the client listeners; giving each listener `networkPolicyPeers` makes `networkPolicy.clients` the allow list wherever the chart's policies render.
 - `kates security audit` grades the whole posture A–F against CIS-mapped checks, while `make kafka-verify-policies` checks Kyverno, the Strimzi operator and the Kafka CR, and probes whether a pod with no grant can reach the brokers.
 

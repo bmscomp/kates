@@ -123,6 +123,8 @@ The `kates` chart (`charts/kates`), which installs the Kates API, ships addition
 | `kates-image-verification` | Verifies Cosign container image signatures from trusted registries |
 | `kates-generate-network-policies` | Automatically generates default-deny NetworkPolicies in new namespaces |
 
+The charts' own pods pass restricted PSS with default values, apart from a few host-level and upstream workloads. [Container Security](17-security.md#container-security) lists what each chart sets and those workloads' switches, and [Policy Exceptions](17-security.md#policy-exceptions) shows how `kyvernoPolicy.exceptions` exempts the Litmus operator from your cluster's own policy.
+
 ::: {.callout-tip}
 Start with `kyvernoPolicy.action: Audit` (the default) to observe policy violations without blocking deployments. Switch to `Enforce` once you're confident all workloads comply. See [Security & Compliance](17-security.md) for details on each policy.
 :::
@@ -135,7 +137,7 @@ Start with `kyvernoPolicy.action: Audit` (the default) to observe policy violati
 |---|---|---|
 | Velero with its CRDs, running in the `velero` namespace | `backup.enabled` renders a `velero.io/v1` `Schedule` in `backup.veleroNamespace` (`velero`), and a pre-upgrade `Backup` hook | `helm upgrade --install` fails with `no matches for kind "Schedule" in version "velero.io/v1"` — the chart does not check for the API first |
 | A `BackupStorageLocation` named `seaweedfs` in `velero`, whose bucket exists and whose credentials the store accepts | `backup.storageLocation: seaweedfs` | the install succeeds and every backup ends `FailedValidation` |
-| Velero's node agent | `backup.volumes: fs-backup` | the backups keep the objects but not the broker and controller volume data |
+| Velero's node agent, in a `velero` namespace that admits privileged pods ([it can't pass restricted](17-security.md#workloads-that-cannot-pass)) | `backup.volumes: fs-backup` | the backups keep the objects but not the broker and controller volume data |
 | A Secret `kafka-seaweedfs-credentials` in `kafka`, with keys `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` | `seaweedfs.s3.existingSecret`, so the chart renders no credentials Secret of its own | nothing reads it while tiered storage is off; with tiered storage on, the brokers cannot start |
 | amd64 nodes, or the subchart's pin to them cleared | the SeaweedFS subchart, which gives its master, volume and filer pods `nodeSelector: kubernetes.io/arch: amd64` | on a cluster with no amd64 nodes the SeaweedFS pods stay `Pending` and the `--wait` of [Step 5 — Install the Chart](#step-5--install-the-chart) times out. The SeaweedFS image is multi-arch, so setting `seaweedfs.master.nodeSelector`, `seaweedfs.volume.nodeSelector` and `seaweedfs.filer.nodeSelector` to `""` lets them run on arm64 too |
 | Kyverno (see [Kyverno (Optional)](#kyverno-optional)) | `kyvernoPolicy.enabled` with `action: Enforce` | no error: the chart renders its `ClusterPolicy` only where the `kyverno.io/v1` API exists, and the release notes report it `not rendered`. With Kyverno present, read the warning below first |
@@ -146,15 +148,11 @@ Nothing in the repository creates the storage location for you, and `make velero
 
 `helm dependency build` downloads the SeaweedFS subchart, so the machine that installs needs the `helm repo add seaweedfs` of [Step 3 — Build the Chart Dependencies](#step-3--build-the-chart-dependencies) and a route to `https://seaweedfs.github.io/seaweedfs/helm`.
 
-::: {.callout-warning}
-With Kyverno installed, the `Enforce` policy of `values-prod.yaml` — and of `values-staging.yaml` — refuses pods that the same release depends on. Its checks are patterns on the Pod spec, and only pods labelled `strimzi.io/kind` are exempt from some of them:
-
-- The SeaweedFS pods `values-prod.yaml` enables — master, volume and filer, and the bucket hook of [SeaweedFS](#seaweedfs) — set no security context at all, so they fail the non-root, capabilities, seccomp and privilege-escalation checks. Their StatefulSets never get a pod, and the `--wait` of [Step 5 — Install the Chart](#step-5--install-the-chart) times out.
-- `require-seccomp` exempts no pod and wants a pod-level `seccompProfile`. Of the Strimzi pods, the chart gives one to the node pools only, so the Entity Operator, Cruise Control and Kafka Exporter pods are refused — and without the Entity Operator no topic or user is ever created.
-- Two `helm test` pods, `krafter-test-produce-consume` and `krafter-test-performance`, drop no capabilities and fail `restrict-capabilities`.
-
-Until the chart's own workloads satisfy the policy, layer a file with `kyvernoPolicy.action: Audit` after the overlay, and read `kubectl get policyreport -n kafka` for what `Enforce` would refuse.
+::: {.callout-warning title="Enforce refuses the SeaweedFS pods"}
+With Kyverno installed, the `Enforce` policy of `values-prod.yaml` refuses the SeaweedFS pods that overlay turns on: master, volume and filer, and the bucket hook of [SeaweedFS](#seaweedfs), which set no security context. Their StatefulSets never get a pod, and the `--wait` of [Step 5 — Install the Chart](#step-5--install-the-chart) times out. Set `seaweedfs.enabled: false` and point Velero at an object store outside the namespace, or layer a file with `kyvernoPolicy.action: Audit` after the overlay.
 :::
+
+Every other pod of `values-prod.yaml` and `values-staging.yaml` passes their `Enforce` policy: the Helm test pods, and the Entity Operator, Cruise Control and Kafka Exporter, which carry the restricted settings in their custom resources' templates. [Container Security](17-security.md#container-security) lists what the chart sets.
 
 ---
 
@@ -1632,12 +1630,19 @@ seaweedfs:
       existingConfigSecret: seaweedfs-s3-identities  # identities that include the brokers' keys
 ```
 
+The hook's Job takes no resources, pod labels or pull secrets from any value, so a policy that requires resources or labels refuses it, and a mirror that needs a pull secret leaves it unable to pull. On such a cluster, leave `createBuckets` unset and create the buckets another way.
+
 ::: {.callout-warning}
 With `filer.s3.enableAuth: true`, as in `values-prod.yaml`, the SeaweedFS S3 gateway accepts only the identities in the subchart's `seaweedfs-s3-secret`, whose keys it generates at random on install — not the keys in `seaweedfs.s3.existingSecret`, which is what the brokers and the object-store ConfigMap use. The chart does not connect the two. Give the gateway identities that include those keys with `seaweedfs.filer.s3.existingConfigSecret` (a Secret whose `seaweedfs_s3_config` key holds SeaweedFS's identities JSON), or hand the keys from `seaweedfs-s3-secret` to whatever writes to the store.
 :::
 
-::: {.callout-caution}
-The SeaweedFS subchart keeps its data in `hostPath` directories — under `/ssd` for the master and volume servers, `/storage` for the filer — on whichever node each pod runs, and nothing reads `seaweedfs.volume.storage`. A pod rescheduled onto another node starts empty there, and a lost node takes its share of the offloaded segments and backups with it. For data you intend to keep, put the data directories on PersistentVolumeClaims:
+With the values this chart ships, SeaweedFS fails Pod Security restricted: its master, volume and filer mount `hostPath` directories for their data and logs and run as root with no requests or limits, as upstream ships them. The subchart's own keys can make them pass: `podSecurityContext` and `containerSecurityContext` with `enabled: true`, `resources`, `data.type: persistentVolumeClaim` (`dataDirs` for the volume server) and `logs.type: emptyDir` under each of `seaweedfs.master`, `seaweedfs.volume` and `seaweedfs.filer`. Choose them before the first install, because Kubernetes refuses to give an existing StatefulSet claim templates. Otherwise, in a namespace that enforces restricted, keep `seaweedfs.enabled: false` and point tiered storage and Velero at an object store outside the namespace ([Workloads That Cannot Pass](17-security.md#workloads-that-cannot-pass)).
+
+::: {.callout-caution title="SeaweedFS keeps its data on the node"}
+The SeaweedFS subchart keeps its data in `hostPath` directories — under `/ssd` for the master and volume servers, `/storage` for the filer — on whichever node each pod runs, and nothing reads `seaweedfs.volume.storage`. A pod rescheduled onto another node starts empty there, and a lost node takes its share of the offloaded segments and backups with it. For data you intend to keep, put the data directories on PersistentVolumeClaims with the values below.
+:::
+
+These values give each component a claim. Kubernetes doesn't let an existing StatefulSet gain a claim template, so choose before the first install:
 
 ```yaml
 seaweedfs:
@@ -1656,9 +1661,6 @@ seaweedfs:
       type: persistentVolumeClaim
       size: 20Gi
 ```
-
-Kubernetes does not let an existing StatefulSet gain a claim template, so choose before the first install.
-:::
 
 ### Velero Backup
 
@@ -1741,7 +1743,7 @@ kyvernoPolicy:
   excludeStrimziPods: true  # Don't mutate Strimzi-managed pods (operator handles them)
 ```
 
-`values-staging.yaml` and `values-prod.yaml` set `action: Enforce`, which some of the chart's own pods do not pass; [Production Prerequisites](#production-prerequisites) names them.
+`values-staging.yaml` and `values-prod.yaml` set `action: Enforce`, which every pod those overlays render passes, except the SeaweedFS pods `values-prod.yaml` turns on; [Production Prerequisites](#production-prerequisites) says what to do about them. A cluster that requires a label on every pod sets it through `podLabels`, which reaches every pod the chart renders, the Strimzi components' pod templates included ([Pod Labels](17-security.md#pod-labels)). SeaweedFS's master, volume and filer take theirs from `seaweedfs.podLabels`, and its bucket hook takes none.
 
 ::: {.callout-tip}
 Always start with `action: Audit`. Run `kubectl get policyreport -A` to see which pods would be blocked, then fix them before switching to `Enforce`.

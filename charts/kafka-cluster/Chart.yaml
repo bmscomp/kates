@@ -2,10 +2,12 @@ apiVersion: v2
 name: kafka-cluster
 description: A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability
 type: application
-# Patch: the Helm-test images move to kates-tester 1.28.0, the tag the
-# v1.28.0 release publishes; every Strimzi chart pins the same one.
-# Templates and defaults are otherwise unchanged.
-version: 1.0.11
+# Patch: with default values every pod passes Pod Security "restricted" —
+# the Helm test pods get requests and limits, the operator's pods get the
+# restricted security contexts through their CR templates — podLabels reach
+# every pod, and global.imagePullSecrets also takes plain names. SeaweedFS
+# (off by default) is unchanged and cannot pass restricted.
+version: 1.0.12
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -21,7 +23,7 @@ sources:
   - https://github.com/strimzi/strimzi-kafka-operator
 dependencies:
   - name: kafka-common
-    version: 0.1.0
+    version: 0.1.1
     repository: file://../kafka-common
   - name: seaweedfs
     version: "3.68.0"
@@ -39,6 +41,16 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "global.imagePullSecrets takes plain names ([regcred]) as well as references ([{name: regcred}]). A plain name rendered an invalid ServiceAccount, so no single list served both this chart and a subchart that reads the same global as names only, as SeaweedFS does (it rendered [{name: regcred}] as a secret named map[name:regcred])"
+    - kind: changed
+      description: "With default values the operator's pods pass Pod Security \"restricted\" on an operator that is not configured with Strimzi's restricted security provider: the entity operator, Cruise Control and the Kafka Exporter get runAsNonRoot and a RuntimeDefault seccomp profile on the pod and no privilege escalation and no capabilities on every container, and the init container that rack awareness adds (on by default) gets the same container context. entityOperator.template, cruiseControl.template and kafkaExporter.template are deep-merged over these, as kafka.template already was. The pod templates change, so on upgrade the operator rolls these pods once, brokers and controllers included (one at a time, as for any template change)"
+    - kind: fixed
+      description: "The Helm test pods had no requests or limits, and test-produce-consume and test-performance kept every capability, so a namespace that enforces Pod Security \"restricted\" or a requests-and-limits policy refused them. They get tests.resources (kubectl pods: 10m and 64Mi, a 128Mi limit) or tests.jvmResources (Kafka CLI pods: 100m and 384Mi, a 1Gi limit), and drop every capability"
+    - kind: added
+      description: "podLabels: labels added to every Helm test pod and to the pod template of every Strimzi component (node pools, entity operator, Cruise Control, Kafka Exporter). The chart's own labels win on a clash, so no selector changes"
+    - kind: added
+      description: "tests.imageRegistry: a mirror registry put in front of testImages.kafka and testImages.kubectl. global.imageRegistry keeps its meaning: the registry of the Strimzi client image used when testImages.kafka is empty"
     - kind: changed
       description: "testImages.kubectl (and testImages.kafka where present) move to kates-tester 1.28.0, the tag the v1.28.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.27.0 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: changed

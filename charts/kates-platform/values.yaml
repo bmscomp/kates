@@ -46,6 +46,25 @@ mirror-maker2:
 connect-cluster:
   enabled: false
 
-# Image used by the helm test connectivity pod (needs `nc`)
+# The umbrella's own pod is the helm test connectivity pod below. Its pull
+# secrets are global.imagePullSecrets, which kafka-cluster and kates read too
+# (the other subcharts take their own imagePullSecrets), then imagePullSecrets;
+# an entry is a name (regcred) or {name: regcred}.
+# global.imageRegistry, when set, is prepended to its image with a slash.
+imagePullSecrets: []
+# Labels added to the helm test pod. Its own labels win a clash. The
+# subcharts' pods take theirs from kates.podLabels, kafka-cluster.podLabels
+# and so on.
+podLabels: {}
+
 test:
+  # Image of the helm test connectivity pod (needs `nc`). It runs as busybox's
+  # nobody user (65534).
   image: busybox:1.37
+  resources:
+    requests:
+      memory: 32Mi
+      cpu: 25m
+    limits:
+      memory: 64Mi
+      cpu: 100m

@@ -29,3 +29,18 @@ Call with (dict "ctx" $ "component" "connect" "partOf" "kates" "extra" (dict …
 {{- $l = mustMergeOverwrite $l (deepCopy (.extra | default dict)) (deepCopy ($ctx.Values.extraLabels | default dict)) -}}
 {{- toYaml $l }}
 {{- end }}
+
+{{/*
+The labels of a pod the chart renders (a test pod, a Job's pod template): the
+chart's own `labels` (YAML, as the helpers above emit it) over the user's
+`podLabels` map. A podLabels key adds a label and never replaces one of the
+chart's, so no selector changes. `testPod` adds kates.io/test-pod: "true",
+which the Helm tests' NetworkPolicies select.
+
+Call with (dict "labels" <YAML> "podLabels" <map> "testPod" <bool>).
+*/}}
+{{- define "kafka-common.podLabels" -}}
+{{- $own := .labels | fromYaml -}}
+{{- if .testPod }}{{- $_ := set $own "kates.io/test-pod" "true" }}{{- end -}}
+{{- toYaml (merge $own (.podLabels | default dict)) }}
+{{- end }}

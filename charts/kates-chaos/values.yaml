@@ -16,6 +16,11 @@ fullnameOverride: ""
 commonLabels: {}
 # -- Extra annotations added to every resource this chart renders
 commonAnnotations: {}
+# -- Extra labels on every pod this chart renders (installer Job, GameDay Job,
+# helm test pods). The chart's own labels win on a clash. litmus-core's
+# operator and exporter pods take theirs from litmus-core.customLabels, which
+# labels every resource that subchart renders.
+podLabels: {}
 
 # ── Global settings ──────────────────────────────────────────────────────────
 global:
@@ -67,6 +72,13 @@ litmus-core:
     image:
       repository: docker.io/litmuschaos/chaos-exporter
       tag: "3.28.0"
+    # The subchart sets none; the operator's (litmus-core.resources) it does.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
 
 # ── Chaos service account ────────────────────────────────────────────────────
 # The identity ChaosEngines and experiment pods run as. Created by the RBAC
@@ -143,9 +155,27 @@ experiments:
     image: ""
     backoffLimit: 3
     ttlSecondsAfterFinished: 300
-    resources: {}
-    podSecurityContext: {}
-    securityContext: {}
+    # -- Resources of the installer Job's containers, its two init containers
+    # included
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+    # -- Pod securityContext (PSS restricted). registry.k8s.io/kubectl runs as
+    # root unless told otherwise, so it runs as nobody (65534).
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      runAsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    # -- Container securityContext of every installer container (PSS restricted)
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
     nodeSelector: {}
     tolerations: []
     affinity: {}
@@ -241,6 +271,23 @@ kyvernoPolicy:
     matchExpressions:
       - key: chaosUID
         operator: Exists
+  # -- Exceptions for this release's litmus-core operator and exporter, in its
+  # namespace, to rules of any Kyverno policy (the cluster's own included),
+  # whatever enabled says: a list of {policyName, ruleNames}. Rendered, where
+  # the kyverno.io/v2 API exists, as one PolicyException matching the
+  # workloads labelled app.kubernetes.io/instance=<release> and
+  # app.kubernetes.io/name=<litmus-core.nameOverride, litmus> (the chart's
+  # own pods pass on their own; chaos runner and experiment pods carry no
+  # instance label) as Pod, Deployment, ReplicaSet, StatefulSet, Job and
+  # CronJob, each rule with the autogen-<rule> and autogen-cronjob-<rule>
+  # Kyverno generates from it. A namespaced Policy is named <namespace>/<name>.
+  # Kyverno must accept exceptions from this namespace (its exceptionNamespace
+  # setting). The litmus-core operator takes no securityContext from values,
+  # so it is restricted only through the mutate rules above (enabled, mutate)
+  # or this; a cluster enforcing PSS restricted without them needs e.g.
+  #   - policyName: pss-restricted
+  #     ruleNames: [restricted]
+  exceptions: []
 
 # ── GameDay validation ───────────────────────────────────────────────────────
 # Runs a Job of read-only checks against the chaos infra. Checks are
@@ -253,3 +300,47 @@ gameday:
   backoffLimit: 1
   ttlSecondsAfterFinished: 600
   checks: []
+  # -- GameDay container resources
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  # -- GameDay pod securityContext (PSS restricted; the kubectl image runs as
+  # root unless told otherwise)
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  # -- GameDay container securityContext (PSS restricted)
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+
+# ── Helm tests (`helm test`) ─────────────────────────────────────────────────
+# The two test pods run images.kubectl, PSS restricted by default.
+tests:
+  # -- Test container resources
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  # -- Test pod securityContext (the kubectl image runs as root unless told
+  # otherwise)
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Test container securityContext
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]

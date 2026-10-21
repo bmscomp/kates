@@ -39,10 +39,15 @@
         "imagePullSecrets": {
             "type": "array",
             "items": {
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string" }
-                }
+                "anyOf": [
+                    { "type": "string" },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" }
+                        }
+                    }
+                ]
             }
         },
         "nameOverride": { "type": "string" },
@@ -328,7 +333,9 @@
                         "pullPolicy": {
                             "type": "string",
                             "enum": [ "Always", "Never", "IfNotPresent" ]
-                        }
+                        },
+                        "securityContext": { "type": "object" },
+                        "resources": { "type": "object" }
                     }
                 }
             }
@@ -448,7 +455,8 @@
                 "provider": {
                     "type": "string",
                     "enum": [ "", "litmus-crd", "kubernetes", "hybrid", "noop" ]
-                }
+                },
+                "stressImage": { "type": "string" }
             }
         },
         "faultTolerance": {
@@ -748,7 +756,37 @@
                     "uniqueItems": true,
                     "items": { "type": "string", "enum": [ "DONE", "FAILED" ] }
                 },
-                "image": { "type": "string", "minLength": 1 }
+                "image": { "type": "string", "minLength": 1 },
+                "resources": { "type": "object" }
+            }
+        },
+        "helmTests": {
+            "type": "object",
+            "properties": {
+                "image": { "type": "string", "minLength": 1 },
+                "resources": { "type": "object" }
+            }
+        },
+        "kyvernoPolicy": {
+            "type": "object",
+            "properties": {
+                "exceptions": {
+                    "type": "array",
+                    "description": "PolicyException entries for this release's pods: a Kyverno policy and rule names",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "policyName": { "type": "string", "minLength": 1 },
+                            "ruleNames": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": { "type": "string", "minLength": 1 }
+                            }
+                        },
+                        "required": [ "policyName", "ruleNames" ],
+                        "additionalProperties": false
+                    }
+                }
             }
         }
     },

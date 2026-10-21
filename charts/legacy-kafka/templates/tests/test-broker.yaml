@@ -6,13 +6,16 @@ metadata:
   name: {{ $fullname }}-test-broker
   namespace: {{ include "legacy-kafka.namespace" . }}
   labels:
-    {{- include "legacy-kafka.labels" . | nindent 4 }}
-    app.kubernetes.io/component: test
+    {{- include "legacy-kafka.podLabels" (dict "ctx" . "labels" (printf "%s\napp.kubernetes.io/component: test" (include "legacy-kafka.labels" .))) | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   securityContext:
     {{- toYaml .Values.podSecurityContext | nindent 4 }}
   containers:
@@ -23,6 +26,8 @@ spec:
       image: {{ .Values.testImage | default (include "legacy-kafka.image" .) | quote }}
       securityContext:
         {{- toYaml .Values.containerSecurityContext | nindent 8 }}
+      resources:
+        {{- toYaml .Values.testResources | nindent 8 }}
       command: ["/bin/sh", "-c"]
       env:
         - name: LOG_DIR

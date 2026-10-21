@@ -15,8 +15,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "apicurio-registry.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: ui
+        {{- include "apicurio-registry.podLabels" (dict "ctx" . "labels" (printf "%s\napp.kubernetes.io/component: ui" (include "apicurio-registry.selectorLabels" .))) | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:

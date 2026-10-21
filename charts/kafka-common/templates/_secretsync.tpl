@@ -12,7 +12,9 @@ read grant, so it is opt-in.
 
 Call with (dict "ctx" $ "fullname" … "namespace" <destination ns>
 "labels" <labels YAML> "secrets" (list (dict "name" "fromNamespace" "as")) "image" …
-"pullPolicy" … "timeoutSeconds" 300 "watch" false "schedule" <cron>).
+"pullPolicy" … "timeoutSeconds" 300 "watch" false "schedule" <cron>
+"imagePullSecrets" <list> "podLabels" <map>). podLabels go on the Job's pod
+under the chart's labels (kafka-common.podLabels).
 Entries whose source namespace and name equal the destination are skipped.
 Renders nothing when no entry is left.
 */}}
@@ -31,7 +33,7 @@ Renders nothing when no entry is left.
 {{- $names := list }}{{- range $secrets }}{{- $names = append $names .as }}{{- end }}
 {{- $srcNamespaces := list }}{{- range $secrets }}{{- $srcNamespaces = append $srcNamespaces .fromNamespace }}{{- end }}
 {{- $srcNamespaces = $srcNamespaces | uniq }}
-{{- $args := dict "dstNs" $dstNs "secrets" $secrets "image" .image "pullPolicy" .pullPolicy "timeoutSeconds" (.timeoutSeconds | default 300) "fullname" $fullname "labels" $labels }}
+{{- $args := dict "dstNs" $dstNs "secrets" $secrets "image" .image "pullPolicy" .pullPolicy "timeoutSeconds" (.timeoutSeconds | default 300) "fullname" $fullname "labels" $labels "imagePullSecrets" .imagePullSecrets "podLabels" .podLabels }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -147,10 +149,14 @@ activeDeadlineSeconds: {{ .timeoutSeconds }}
 template:
   metadata:
     labels:
-      {{- .labels | nindent 6 }}
+      {{- include "kafka-common.podLabels" (dict "labels" .labels "podLabels" .podLabels) | nindent 6 }}
   spec:
     serviceAccountName: {{ .fullname }}-secret-sync
     restartPolicy: Never
+    {{- with .imagePullSecrets }}
+    imagePullSecrets:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     securityContext:
       runAsNonRoot: true
       runAsUser: 65534

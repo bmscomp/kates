@@ -1,9 +1,9 @@
 apiVersion: v2
 name: strimzi-operator
-# Patch: the CRD-hook and Helm-test image moves to kates-tester 1.28.0, the
-# tag the v1.28.0 release publishes; every Strimzi chart pins the same one.
-# Templates and defaults are otherwise unchanged.
-version: 0.3.7
+# Minor: the operator runs Strimzi's restricted pod security provider by
+# default, which rolls every Kafka pod it manages once and refuses a Kaniko
+# Connect build; the Helm tests get resources, and podLabels is new.
+version: 0.4.0
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
@@ -30,6 +30,12 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "strimzi-kafka-operator.extraEnvs sets STRIMZI_POD_SECURITY_PROVIDER_CLASS=restricted, so every pod the operator creates (brokers, controllers, Connect, MirrorMaker 2, the Entity Operator, Cruise Control, the exporter) carries the Restricted Pod Security Standard's settings and starts in a namespace that enforces restricted. The operator rolls the pods it manages once after the upgrade. A KafkaConnect build with Kaniko needs root and is refused under this provider: set strimzi-kafka-operator.extraEnvs to a list without the entry to go back to upstream's baseline. Helm replaces the list whole, so keep the entry when adding env of your own"
+    - kind: added
+      description: "tests.resources: each Helm test pod requests 10m CPU and 64Mi and is limited to 128Mi, so the tests run where a policy requires requests and a memory limit"
+    - kind: added
+      description: "podLabels, added to the labels of the pods this chart renders itself (the CRD-upgrade Job, the drain cleaner, the Helm tests); the chart's own labels win on a clash. strimzi-kafka-operator.image.imagePullSecrets now reaches those pods too"
     - kind: changed
       description: "testImages.kubectl (and testImages.kafka where present) move to kates-tester 1.28.0, the tag the v1.28.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.27.0 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: changed

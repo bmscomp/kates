@@ -3,25 +3,25 @@ kind: Pod
 metadata:
   name: {{ include "kates.fullname" . }}-test-kafka
   labels:
-    {{- include "kates.labels" . | nindent 4 }}
+    {{- include "kates.podLabels" (dict "labels" (include "kates.labels" .) "ctx" .) | nindent 4 }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  {{- with include "kates.imagePullSecrets" . }}{{ . | nindent 2 }}{{ end }}
+  {{- with .Values.securityContext }}
   securityContext:
-    runAsNonRoot: true
-    runAsUser: 100
-    fsGroup: 100
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   containers:
   - name: kafka-check
-    image: curlimages/curl:8.7.1
+    {{- $t := .Values.helmTests | default dict }}
+    image: {{ include "kates.imageRef" (dict "image" ($t.image | default "curlimages/curl:8.7.1") "ctx" .) | quote }}
+    {{- with .Values.containerSecurityContext }}
     securityContext:
-      allowPrivilegeEscalation: false
-      readOnlyRootFilesystem: true
-      capabilities:
-        drop:
-          - ALL
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     {{- if .Values.apiKey.enabled }}
     env:
     - name: KATES_API_KEY
@@ -31,13 +31,10 @@ spec:
           key: {{ .Values.apiKey.secretKey | default "api-key" }}
           optional: true
     {{- end }}
+    {{- with $t.resources }}
     resources:
-      requests:
-        memory: "32Mi"
-        cpu: "25m"
-      limits:
-        memory: "64Mi"
-        cpu: "100m"
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     volumeMounts:
     - name: tmp
       mountPath: /tmp

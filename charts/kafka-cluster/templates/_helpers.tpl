@@ -154,17 +154,17 @@ capabilities:
   drop: ["ALL"]
 {{- end }}
 
-{{/* Test images. */}}
+{{/* Test images; tests.imageRegistry goes in front of the two testImages. */}}
 {{- define "kafka-cluster.kafkaImage" -}}
 {{- if .Values.testImages.kafka -}}
-{{- .Values.testImages.kafka -}}
+{{- include "kafka-common.image" (dict "image" .Values.testImages.kafka "registry" .Values.tests.imageRegistry) -}}
 {{- else -}}
 {{- printf "%s/%s/kafka:%s-kafka-%s" .Values.global.imageRegistry .Values.global.imageRepository .Values.strimziVersion .Values.kafkaVersion -}}
 {{- end -}}
 {{- end }}
 
 {{- define "kafka-cluster.kubectlImage" -}}
-{{- .Values.testImages.kubectl -}}
+{{- include "kafka-common.image" (dict "image" .Values.testImages.kubectl "registry" .Values.tests.imageRegistry) -}}
 {{- end }}
 
 {{/* <service>.<namespace>.svc.<domain>; call with (dict "service" "namespace" "root"). */}}

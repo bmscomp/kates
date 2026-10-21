@@ -201,7 +201,7 @@ var mcpCaveatsCore = []mcpCaveat{
 			mcpAnchoredRef("kates/src/main/resources/application.properties:329-334",
 				"# Prometheus server (for disruption metrics capture)",
 				"kates.prometheus.url=http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"),
-			mcpAnchoredRef("charts/kates/values.yaml:411-421",
+			mcpAnchoredRef("charts/kates/values.yaml:437-447",
 				"# -- Prometheus the backend queries for a disruption's Kafka metrics",
 				`url: "http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090"`),
 			mcpAnchoredRef("charts/kates/templates/configmap.yaml:43-45",
@@ -211,7 +211,7 @@ var mcpCaveatsCore = []mcpCaveat{
 				`KATES_PROMETHEUS_URL: "http://monitoring-kube-prometheus-prometheus.kafka.svc:9090"`),
 			mcpJava + "disruption/PrometheusMetricsCapture.java:31-34",
 			mcpJava + "disruption/SlaGrader.java:26,140,153,170-178,183,191-192",
-			"charts/monitoring/Chart.yaml:18",
+			"charts/monitoring/Chart.yaml:17",
 		},
 	},
 	{

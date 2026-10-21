@@ -9,6 +9,8 @@ from its own values:
 
   kind, name, namespace         the CR this spec belongs to
   version, image
+  imageRegistry                 prefixed to image and rack.clientRackInitImage
+                                when both are set (kafka-common.image)
   replicas, minReplicasDefault
   autoscaling                   {enabled, minReplicas}
   resources, jvmOptions, livenessProbe, readinessProbe, jmxOptions
@@ -27,7 +29,9 @@ from its own values:
     nodeSelector, nodeAffinity
     podAntiAffinity             {enabled, topologyKey}
     topologySpread              {enabled, maxSkew, topologyKey, whenUnsatisfiable, additional}
-    container                   {env, securityContext, volumeMounts, harden, extra}
+    container                   {env, securityContext, volumeMounts, harden, extra};
+                                harden also gives the rack init container the
+                                restricted security context
     serviceAccount              ServiceAccount template (metadata)
     extra                       raw spec.template, deep-merged last
 
@@ -55,7 +59,7 @@ templateExtra.pod. Everything below is merged, then emitted once.
 {{- end -}}
 version: {{ $w.version | quote }}
 {{- with $w.image }}
-image: {{ . | quote }}
+image: {{ include "kafka-common.image" (dict "image" . "registry" $w.imageRegistry) | quote }}
 {{- end }}
 replicas: {{ $replicas }}
 {{- with $w.resources }}
@@ -111,7 +115,7 @@ rack:
 {{- /* The operator reads the node's topology label with an init container;
        on a mirrored or air-gapped registry its image needs naming. */}}
 {{- with $rack.clientRackInitImage }}
-clientRackInitImage: {{ . | quote }}
+clientRackInitImage: {{ include "kafka-common.image" (dict "image" . "registry" $w.imageRegistry) | quote }}
 {{- end }}
 {{- end }}
 {{- with $w.jmxOptions }}
@@ -222,6 +226,12 @@ spec.template for a Connect worker group, as YAML — see connectWorker.spec.
 {{- with $sc }}{{- $_ := set $cont "securityContext" . }}{{- end -}}
 {{- $cont = mustMergeOverwrite $cont (deepCopy ($c.extra | default dict)) -}}
 {{- with $cont }}{{- $_ := set $tpl "connectContainer" . }}{{- end -}}
+{{- /* Rack awareness adds the operator's init container, whose security
+       context an operator without the restricted provider leaves empty —
+       which Pod Security "restricted" refuses. */ -}}
+{{- if and $c.harden ($w.rack | default dict).enabled -}}
+{{- $_ := set $tpl "initContainer" (dict "securityContext" (include "kafka-common.restricted.container" . | fromYaml)) -}}
+{{- end -}}
 {{- with $t.serviceAccount }}{{- $_ := set $tpl "serviceAccount" . }}{{- end -}}
 {{- $tpl = mustMergeOverwrite $tpl (deepCopy ($t.extra | default dict)) -}}
 {{- if $tpl }}{{ toYaml $tpl }}{{ end -}}

@@ -1,5 +1,35 @@
 # Kates Monitoring — Default Values
 # Wraps kube-prometheus-stack with Kates-specific dashboards and config
+#
+# Every pod this chart and the wrapped stack render passes the Restricted Pod
+# Security Standard and carries CPU and memory requests and a memory limit,
+# except one: the node-exporter DaemonSet reads the host (host network, PID
+# namespace and root filesystem) and cannot run where a namespace enforces
+# baseline or restricted. It stays on by default; switch it off with
+# `kube-prometheus-stack.nodeExporter.enabled=false`, which `kates deploy`
+# already does when the monitoring namespace enforces baseline or restricted.
+# The node-level panels and alerts go with it.
+
+# -- Global settings, passed down to kube-prometheus-stack and its subcharts
+# as well as used by this chart's own test pod
+global:
+  # -- Registry prefixed to every image (empty: each image's own registry)
+  imageRegistry: ""
+  # -- Pull secrets for every pod; `- name: secret` or `- secret`
+  imagePullSecrets: []
+
+# -- Extra labels on this chart's own pod (the Helm test). The chart's labels
+# win on a clash. The wrapped stack's pods take theirs from each component's
+# key: kube-prometheus-stack.grafana.podLabels,
+# kube-prometheus-stack.prometheusOperator.podLabels,
+# kube-prometheus-stack.kube-state-metrics.podLabels,
+# kube-prometheus-stack.prometheus-node-exporter.podLabels, and
+# podMetadata.labels under prometheus.prometheusSpec and
+# alertmanager.alertmanagerSpec. The admission-create and admission-patch
+# Jobs take no pod label value: kube-prometheus-stack.commonLabels labels
+# them, with every other resource kube-prometheus-stack's own templates
+# render (not the grafana, kube-state-metrics or node-exporter subcharts).
+podLabels: {}
 
 kube-prometheus-stack:
   enabled: true
@@ -12,11 +42,32 @@ kube-prometheus-stack:
     service:
       type: NodePort
       nodePort: 30080
+    # -- Grafana's own container
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+    # -- The init container that chowns the data volume runs as root with
+    # CAP_CHOWN, which the Restricted standard refuses. Off: Grafana's pod
+    # fsGroup (472) already makes a persistent volume writable on storage that
+    # honours fsGroup. Turn it back on only for storage that does not, in a
+    # namespace that allows it.
+    initChownData:
+      enabled: false
     sidecar:
       image:
         tag: "2.2.3"
         pullPolicy: IfNotPresent
       imagePullPolicy: IfNotPresent
+      # -- Each sidecar (dashboards, datasources)
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
       dashboards:
         enabled: true
         # -- The annotation the sidecar reads to file a board into a Grafana
@@ -93,6 +144,13 @@ kube-prometheus-stack:
       image:
         tag: v3.9.1
         pullPolicy: IfNotPresent
+      # -- Prometheus's container in the StatefulSet the operator creates
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
       storageSpec:
         volumeClaimTemplate:
           spec:
@@ -108,10 +166,23 @@ kube-prometheus-stack:
     image:
       tag: v0.79.2
       pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
     prometheusConfigReloader:
       image:
         tag: v0.79.2
         pullPolicy: IfNotPresent
+      # -- The config-reloader the operator adds to Prometheus and Alertmanager
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi
     # kube-prometheus-stack reads this under prometheusOperator, not at the top
     # level of the subchart — a second copy used to sit beside kube-state-metrics
     # where the chart never looked at it, so its enabled and tag settings did
@@ -127,17 +198,37 @@ kube-prometheus-stack:
         image:
           tag: 1.7.8
           pullPolicy: IfNotPresent
+        # -- The admission-create and admission-patch hook Jobs
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
 
   alertmanager:
     alertmanagerSpec:
       image:
         tag: v0.28.1
         pullPolicy: IfNotPresent
+      # -- Alertmanager's container in the StatefulSet the operator creates
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
 
   kube-state-metrics:
     image:
       tag: v2.14.0
       pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
     # The chaos board and the chaos rules below read
     # kube_customresource_chaosengine_status_engine_status — is an experiment
     # in progress? kube-state-metrics publishes nothing about a custom
@@ -181,10 +272,28 @@ kube-prometheus-stack:
                       path: [status, engineStatus]
                       list: [initialized, completed, stopped]
 
+  # Host-level: cannot pass the Restricted (or Baseline) standard. See the
+  # header for the switch, kube-prometheus-stack.nodeExporter.enabled=false.
   prometheus-node-exporter:
     image:
       tag: v1.8.2
       pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    # -- Merged into the subchart's own (non-root 65534, read-only root
+    # filesystem), so only the host controls stay outside Restricted.
+    securityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
 
   defaultRules:
     create: true
@@ -253,3 +362,24 @@ dashboards:
 # Image used by the helm test connectivity pod
 test:
   image: curlimages/curl:8.7.1
+  # -- The test pod's security context (Restricted Pod Security Standard)
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  # -- The test container's security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  resources:
+    requests:
+      memory: 32Mi
+      cpu: 25m
+    limits:
+      memory: 64Mi
+      cpu: 100m

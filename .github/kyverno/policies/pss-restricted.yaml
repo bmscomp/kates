@@ -1,0 +1,20 @@
+# The Pod Security Standards "restricted" profile, as Kyverno evaluates it.
+# scripts/check-chart-policies.sh holds every chart under charts/ to it; the
+# workloads that cannot pass are named one by one in ../exceptions/.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: pss-restricted
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: restricted
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        podSecurity:
+          level: restricted
+          version: latest

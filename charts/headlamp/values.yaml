@@ -1,3 +1,10 @@
+global:
+  # -- Registry prepended to every image the chart renders (Headlamp and the
+  # Helm test), for clusters that pull from a mirror:
+  # ghcr.io/headlamp-k8s/headlamp becomes <imageRegistry>/ghcr.io/headlamp-k8s/headlamp.
+  # Empty pulls as written.
+  imageRegistry: ""
+
 replicaCount: 1
 
 image:
@@ -149,10 +156,34 @@ networkPolicy:
     port: 6443
 
 podAnnotations: {}
+# -- Extra labels for every pod the chart renders (Headlamp and the Helm test).
+# The chart's own labels win on a clash, so a selector never changes.
 podLabels: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
 
+# -- Helm test pod (`helm test`). It uses imagePullSecrets, and
+# global.imageRegistry is prepended to its image.
 test:
   image: curlimages/curl:8.7.1
+  # -- The curl image's own user (curl_user, uid 100)
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    fsGroup: 100
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  resources:
+    requests:
+      memory: "32Mi"
+      cpu: "25m"
+    limits:
+      memory: "64Mi"
+      cpu: "100m"

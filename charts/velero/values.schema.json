@@ -173,6 +173,22 @@
             "type": "array",
             "items": {}
         },
+        "tests": {
+            "type": "object",
+            "description": "Kates addition: the Helm test pod",
+            "properties": {
+                "image": {
+                    "type": "object",
+                    "properties": {
+                        "repository": { "type": "string" },
+                        "tag": { "type": "string" }
+                    }
+                },
+                "podSecurityContext": { "type": "object" },
+                "containerSecurityContext": { "type": "object" },
+                "resources": { "type": "object" }
+            }
+        },
         "metrics": {
             "type": "object",
             "properties": {

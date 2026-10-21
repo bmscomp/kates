@@ -2,7 +2,7 @@ apiVersion: v2
 name: headlamp
 description: Headlamp — Kubernetes Dashboard for cluster visualization and management
 type: application
-version: 0.2.0
+version: 0.2.1
 appVersion: "0.40.1"
 keywords:
   - kubernetes
@@ -18,3 +18,10 @@ maintainers:
 annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: fixed
+      description: "The Helm test pod passes Pod Security Standards restricted: it sets seccompProfile RuntimeDefault. Its security context and resources, hardcoded before with the same settings, are values now: test.podSecurityContext, test.securityContext and test.resources"
+    - kind: added
+      description: "global.imageRegistry (default empty) is prepended to the Headlamp and Helm test images, for clusters that pull from a mirror; the test pod gets imagePullSecrets too"
+    - kind: changed
+      description: "podLabels also reach the Helm test pod, and the chart's own labels win on a clash: a podLabels key the chart sets itself, such as app.kubernetes.io/name, is dropped instead of rendered a second time next to the selector label"

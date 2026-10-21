@@ -2,10 +2,10 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: the kates floor moves to 0.12.1, whose configmap points the Kates
-# API's chaos, topology and conformity at networkPolicy.kafka.namespace, which
-# this umbrella sets to the release namespace.
-version: 0.8.2
+# Patch: the umbrella's Helm test pod passes Pod Security "restricted" and
+# takes podLabels, test.resources, global.imageRegistry and pull secrets; the
+# subchart floors move to the versions that pass restricted too.
+version: 0.8.3
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -16,32 +16,40 @@ maintainers:
   - name: Platform Team
 dependencies:
   - name: kafka-cluster
-    version: ">=1.0.10 <2.0.0"
+    version: ">=1.0.12 <2.0.0"
     repository: "file://../kafka-cluster"
     condition: kafka-cluster.enabled
   - name: kates
-    version: ">=0.12.1 <1.0.0"
+    version: ">=0.13.0 <1.0.0"
     repository: "file://../kates"
     condition: kates.enabled
   - name: apicurio-registry
-    version: ">=0.4.0 <1.0.0"
+    version: ">=0.4.1 <1.0.0"
     repository: "file://../apicurio-registry"
     condition: apicurio-registry.enabled
   # Off by default: a mirror needs a second cluster to mean anything, and the
   # chart's own defaults are a loopback on krafter for smoke-testing. Enable it
   # with a real mirrors[].source — see charts/mirror-maker2/README.md.
   - name: mirror-maker2
-    version: ">=0.11.6 <1.0.0"
+    version: ">=0.11.8 <1.0.0"
     repository: "file://../mirror-maker2"
     condition: mirror-maker2.enabled
   # Off by default: `kates deploy` installs Connect as its own release, in its
   # own namespace, and the platform runs without it.
   - name: connect-cluster
-    version: ">=2.1.8 <3.0.0"
+    version: ">=2.1.10 <3.0.0"
     repository: "file://../connect-cluster"
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "ACTION REQUIRED — the subchart floors move to the versions this umbrella is rendered with: kafka-cluster 1.0.12, kates 0.13.0, apicurio-registry 0.4.1, mirror-maker2 0.11.8 and connect-cluster 2.1.10, whose pods pass Pod Security restricted and take podLabels, and of which kafka-cluster and kates read global.imagePullSecrets as plain names or {name: ...}. Rendering fails, naming the subchart, until charts/ holds them: run make platform-chart-deps before upgrading"
+    - kind: fixed
+      description: "Under Pod Security Standards restricted, enforced by a namespace label or a Kyverno policy, the umbrella's Helm test pod was refused: it set no seccomp profile. It now runs with seccompProfile RuntimeDefault, still as busybox's nobody user (65534) with no privilege escalation and no capabilities. Its requests and limits, the same as before, are a value now: test.resources"
+    - kind: added
+      description: "podLabels (default empty) reach the umbrella's Helm test pod, under its own labels, which win a clash; each subchart's pods take theirs from its own podLabels, such as kates.podLabels and kafka-cluster.podLabels. imagePullSecrets (default empty) are the test pod's pull secrets, after global.imagePullSecrets; an entry of either is a Secret name or {name: ...}"
+    - kind: changed
+      description: "A release that sets global.imageRegistry or global.imagePullSecrets for the subcharts now has them on the Helm test pod too: the registry is prepended to test.image (busybox:1.37 becomes <imageRegistry>/busybox:1.37), so a mirror has to carry busybox; a test.image that already names the mirror gets it twice, so drop it there"
     - kind: fixed
       description: "In any namespace but kafka, the platform's Kates API reached the brokers but its chaos, cluster topology, cluster alerts and conformity checks still looked for Kafka in namespace kafka: chaos refused every plan with No broker pods found, and every conformity check returned 409. The kates floor moves to 0.12.1, which sets those settings from kates.networkPolicy.kafka.namespace, already the release namespace here, and their cluster name from kates.kafka.clusterName (krafter). kafka-cluster.clusterName other than krafter needs kates.kafka.clusterName and kates.kafka.bootstrapServers set to match. Run `make platform-chart-deps` before upgrading"
     - kind: fixed

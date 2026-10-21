@@ -4,6 +4,45 @@ Velero is an open source tool to safely backup and restore, perform disaster rec
 
 Velero has two main components: a CLI, and a server-side Kubernetes deployment.
 
+## Kates defaults
+
+This copy of the upstream chart changes defaults in `values.yaml` only, plus
+the Helm test pod (`templates/tests/test-connection.yaml`, configured by
+`tests.*`). With them, the Velero Deployment, the upgrade-crds and
+cleanup-crds Jobs and the test pod pass the Restricted Pod Security Standard
+and carry CPU and memory requests and a memory limit:
+
+| Key | Kates default |
+|-----|---------------|
+| `podSecurityContext` | `runAsNonRoot`, `runAsUser`/`runAsGroup` 65534, seccomp `RuntimeDefault` |
+| `containerSecurityContext`, `kubectl.containerSecurityContext` | `allowPrivilegeEscalation: false`, capabilities drop `ALL` |
+| `resources` | requests `100m`/`128Mi`, memory limit `512Mi` |
+| `upgradeJobResources` | requests `50m`/`128Mi`, memory limit `256Mi` |
+| `kubectl.resources` | requests `10m`/`32Mi`, memory limit `128Mi` |
+| `tests.image` | `curlimages/curl:8.7.1` |
+| `tests.podSecurityContext` / `tests.containerSecurityContext` / `tests.resources` | the test pod's, Restricted |
+
+Plugin `initContainers` are yours to write: give each
+`allowPrivilegeEscalation: false`, capabilities drop `ALL` and resources, or
+the pod is refused where `restricted` is enforced.
+
+The **node-agent** (`deployNodeAgent`, off) cannot pass: it mounts the
+kubelet's pod and plugin directories from the host and runs as root with the
+runtime's default capabilities, which the Baseline and Restricted standards
+refuse. Turn it on only in a namespace labelled
+`pod-security.kubernetes.io/enforce: privileged`. `nodeAgent.podSecurityContext`
+adds the `RuntimeDefault` seccomp profile (a privileged container runs
+unconfined regardless), and `nodeAgent.resources` requests `100m`/`512Mi` with
+a `1024Mi` memory limit. `nodeAgent.containerSecurityContext` stays empty, as
+upstream ships it: `allowPrivilegeEscalation` is not set, because a default of
+`false` would be merged into a `privileged: true` setting, a pair the API
+server refuses.
+
+The **label-namespace** Job (rendered when `namespace.labels` is not empty;
+`{}` by default) cannot pass either: upstream's template gives it no security
+context and no resources, and no value reaches them. Leave `namespace.labels`
+empty and label the namespace yourself (`kubectl label namespace ...`).
+
 ## Installing the Velero CLI
 
 See the different options for installing the [Velero CLI](https://velero.io/docs/v1.13/basic-install/#install-the-cli).

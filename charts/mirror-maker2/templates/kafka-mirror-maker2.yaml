@@ -152,6 +152,7 @@ built as one map and merged with templateExtra, never written beside it.
       "namespace" (include "mirror-maker2.namespace" .)
       "version" .Values.version
       "image" .Values.image
+      "imageRegistry" (.Values.global).imageRegistry
       "replicas" .Values.replicas
       "minReplicasDefault" 2
       "autoscaling" .Values.autoscaling
@@ -173,6 +174,7 @@ built as one map and merged with templateExtra, never written beside it.
       "podSelector" (include "mirror-maker2.podSelectorLabels" . | fromYaml)
       "template" (dict
           "pdb" .Values.podDisruptionBudget
+          "podMetadata" (dict "labels" .Values.podLabels)
           "podSecurityContext" .Values.podSecurityContext
           "imagePullSecrets" .Values.imagePullSecrets
           "priorityClassName" .Values.priorityClassName

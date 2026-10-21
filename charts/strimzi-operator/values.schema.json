@@ -9,6 +9,18 @@
     "fullnameOverride": { "type": "string" },
     "commonLabels": { "type": "object" },
     "commonAnnotations": { "type": "object" },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Extra labels on the pods this chart renders itself (CRD-upgrade Job, drain cleaner, Helm tests). The chart's own labels win on a clash."
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resources": { "type": "object", "description": "Resources of each Helm test pod." }
+      }
+    },
     "strimziVersion": {
       "type": "string",
       "minLength": 1,
@@ -330,7 +342,12 @@
           }
         },
         "podSecurityContext": { "type": "object" },
-        "securityContext": { "type": "object" }
+        "securityContext": { "type": "object" },
+        "extraEnvs": {
+          "type": "array",
+          "description": "Extra operator env. The default sets STRIMZI_POD_SECURITY_PROVIDER_CLASS=restricted; Helm replaces the list whole.",
+          "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "minLength": 1 } } }
+        }
       }
     }
   }

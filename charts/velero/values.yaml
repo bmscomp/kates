@@ -4,6 +4,10 @@
 
 # Labels settings in namespace
 namespace:
+  # Kates: a non-empty map renders the label-namespace Job, which takes no
+  # securityContext or resources from any value and so cannot pass the
+  # Restricted Pod Security Standard. Keep it empty and label the namespace
+  # yourself where restricted is enforced.
   labels: {}
     # Enforce Pod Security Standards with Namespace Labels
     # https://kubernetes.io/docs/tasks/configure-pod-container/enforce-standards-namespace-labels/
@@ -67,13 +71,14 @@ podLabels: {}
 
 # Resource requests/limits to specify for the Velero deployment.
 # https://velero.io/docs/v1.6/customize-installation/#customize-resource-requests-and-limits
-resources: {}
-  # requests:
-  #   cpu: 500m
-  #   memory: 128Mi
-  # limits:
-  #   cpu: 1000m
-  #   memory: 512Mi
+# Kates: set by default (upstream: {}), so the pod passes a policy that
+# requires requests and a memory limit.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
 
 # Container resize policy for the Velero deployment.
 # See: https://kubernetes.io/docs/tasks/configure-pod-container/resize-container-resources/
@@ -92,13 +97,13 @@ hostAliases: []
   #     - "bar.local"
 
 # Resource requests/limits to specify for the upgradeCRDs job pod. Need to be adjusted by user accordingly.
-upgradeJobResources: {}
-# requests:
-#     cpu: 50m
-#     memory: 128Mi
-#   limits:
-#     cpu: 100m
-#     memory: 256Mi
+# Kates: set by default (upstream: {}).
+upgradeJobResources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
 upgradeCRDsJob:
   # Extra volumes for the Upgrade CRDs Job. Optional.
   extraVolumes: []
@@ -139,16 +144,27 @@ initContainers:
 # SecurityContext to use for the Velero deployment. Optional.
 # Set fsGroup for `AWS IAM Roles for Service Accounts`
 # see more informations at: https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html
-podSecurityContext: {}
+# Kates: the Restricted Pod Security Standard by default (upstream: {}), for
+# the Deployment and the upgrade-crds/cleanup-crds Jobs. The image's user is
+# named, not numbered, so runAsNonRoot needs a numeric runAsUser; Velero
+# writes only to its emptyDirs (/plugins, /scratch).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
   # fsGroup: 1337
 
 # Container Level Security Context for the 'velero' container of the Velero deployment. Optional.
 # See: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
-containerSecurityContext: {}
-  # allowPrivilegeEscalation: false
-  # capabilities:
-  #   drop: ["ALL"]
-  #   add: []
+# Kates: set by default (upstream: {}). Plugin initContainers are yours to
+# write: give each the same securityContext and resources, or the pod is
+# refused where restricted is enforced.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
   # readOnlyRootFilesystem: true
 
 # Container Lifecycle Hooks to use for the Velero deployment. Optional.
@@ -230,6 +246,32 @@ extraObjects: []
   #           objectName: client-secret
   #         secretName: velero-secrets-store
   #         type: Opaque
+
+# Kates addition (not upstream): the Helm test pod
+# (templates/tests/test-connection.yaml), rendered with metrics.enabled. It
+# takes image.imagePullSecrets and podLabels like the Velero pod.
+tests:
+  image:
+    repository: curlimages/curl
+    tag: 8.7.1
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      memory: 32Mi
+      cpu: 25m
+    limits:
+      memory: 64Mi
+      cpu: 100m
 
 # Settings for Velero's prometheus metrics. Enabled by default.
 metrics:
@@ -351,9 +393,19 @@ kubectl:
     # tag: 1.16.15
   # Container Level Security Context for the 'kubectl' container of the crd jobs. Optional.
   # See: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
-  containerSecurityContext: {}
+  # Kates: set by default (upstream: {}).
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
   # Resource requests/limits to specify for the upgrade/cleanup job. Optional
-  resources: {}
+  # Kates: set by default (upstream: {}).
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
   # Annotations to set for the upgrade/cleanup job. Optional.
   annotations: {}
   # Labels to set for the upgrade/cleanup job. Optional.
@@ -651,6 +703,10 @@ backupsEnabled: true
 snapshotsEnabled: true
 
 # Whether to deploy the node-agent daemonset.
+# Kates: the node-agent is host-level (hostPath mounts of the kubelet's pod and
+# plugin directories) and cannot pass the Baseline or Restricted Pod Security
+# Standard. Leave it off where the namespace enforces either; turn it on only
+# in a namespace labelled pod-security.kubernetes.io/enforce: privileged.
 deployNodeAgent: false
 
 nodeAgent:
@@ -664,13 +720,14 @@ nodeAgent:
   runtimeClassName: ""
   # Resource requests/limits to specify for the node-agent daemonset deployment. Optional.
   # https://velero.io/docs/v1.6/customize-installation/#customize-resource-requests-and-limits
-  resources: {}
-    # requests:
-    #   cpu: 500m
-    #   memory: 512Mi
-    # limits:
-    #   cpu: 1000m
-    #   memory: 1024Mi
+  # Kates: set by default (upstream: {}), upstream's suggested memory with a
+  # smaller CPU request.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1024Mi
   # Container resize policy for the node-agent daemonset.
   # See: https://kubernetes.io/docs/tasks/configure-pod-container/resize-container-resources/
   resizePolicy: []
@@ -736,10 +793,17 @@ nodeAgent:
   # see more informations at: https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html
   podSecurityContext:
     runAsUser: 0
+    # Kates: added (upstream: unset).
+    seccompProfile:
+      type: RuntimeDefault
     # fsGroup: 1337
 
   # Container Level Security Context for the 'node-agent' container of the node-agent daemonset. Optional.
   # See: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  # Kates: left empty like upstream, allowPrivilegeEscalation included. The
+  # node-agent cannot pass Restricted anyway, and a default of false would be
+  # merged into a privileged: true set here or in nodeAgent.securityContext,
+  # a pair the API server refuses.
   containerSecurityContext: {}
 
   # Container Lifecycle Hooks to use for the node-agent daemonset. Optional.

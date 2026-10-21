@@ -31,6 +31,11 @@ fullnameOverride: ""
 commonLabels: {}
 # -- Extra annotations added to every resource this chart renders
 commonAnnotations: {}
+# -- Extra labels on every pod this chart renders itself: the CRD-upgrade Job,
+# the drain cleaner and the Helm tests. The chart's own labels win on a clash,
+# so no selector moves. The operator's pod is upstream's: use
+# `strimzi-kafka-operator.labels` for it.
+podLabels: {}
 
 # ── Strimzi version ──────────────────────────────────────────────────────────
 # -- Strimzi version used to build the CRD bundle URL for the crdUpgrade hook.
@@ -45,6 +50,16 @@ strimziVersion: "1.2.0"
 testImages:
   # -- kubectl image used by the CRD-upgrade hook Job and the Helm tests
   kubectl: "ghcr.io/bmscomp/kates-tester:1.28.0"
+
+# ── Helm tests ───────────────────────────────────────────────────────────────
+tests:
+  # -- Resources for each Helm test pod (a kubectl client)
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
 
 # ── CRD lifecycle ────────────────────────────────────────────────────────────
 # Closes the gap Helm leaves: crds/ is applied on install and never on upgrade.
@@ -200,7 +215,7 @@ alerts:
 # The ONLY place operator settings take effect. Full key reference:
 #   https://github.com/strimzi/strimzi-kafka-operator/blob/main/helm-charts/helm3/strimzi-kafka-operator/values.yaml
 #
-# Only FOUR keys below deviate from stock upstream; everything else is pinned
+# Only FIVE keys below deviate from stock upstream; everything else is pinned
 # for safety or is an explicit restatement of an upstream default.
 strimzi-kafka-operator:
   # -- Operator replicas. All three previous call sites set 1.
@@ -223,6 +238,17 @@ strimzi-kafka-operator:
   # -- Full reconciliation interval. Upstream default; verified live. NOT the
   # 60000 in config/kafka/strimzi-values.yaml, which was never applied.
   fullReconciliationIntervalMs: 120000
+
+  # -- Extra operator env. STRIMZI_POD_SECURITY_PROVIDER_CLASS=restricted
+  # gives every pod the operator creates (brokers, controllers, Connect,
+  # MirrorMaker 2, the Entity Operator, Cruise Control, the exporter) the
+  # Restricted Pod Security Standard's settings, so they start in a namespace
+  # that enforces it. Helm replaces a list whole: keep this entry when you add
+  # your own, or leave it out for upstream's baseline provider (which a
+  # KafkaConnect `build` with Kaniko needs: Kaniko runs as root).
+  extraEnvs:
+    - name: STRIMZI_POD_SECURITY_PROVIDER_CLASS
+      value: restricted
 
   # -- Operator resources. MEMORY ONLY: 768Mi is what runs live (upstream
   # default is 384Mi). cpu is deliberately NOT set — upstream already defaults

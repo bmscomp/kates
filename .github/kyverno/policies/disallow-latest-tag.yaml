@@ -1,0 +1,35 @@
+# Every image names a tag or a digest, and the tag is not latest.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "Every image needs an explicit tag or digest."
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "*:* | *@*"
+            containers:
+              - image: "*:* | *@*"
+    - name: no-latest
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "The latest tag is not allowed."
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "!*:latest"
+            containers:
+              - image: "!*:latest"

@@ -27,10 +27,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "kates.selectorLabels" . | nindent 8 }}
-        {{- with .Values.podLabels }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
+        {{- include "kates.podLabels" (dict "labels" (include "kates.selectorLabels" .) "ctx" .) | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
@@ -43,10 +40,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "kates.serviceAccountName" . }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 60 }}
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- with include "kates.imagePullSecrets" . }}{{ . | nindent 6 }}{{ end }}
       {{- if .Values.dnsPolicy }}
       dnsPolicy: {{ .Values.dnsPolicy }}
       {{- end }}
@@ -66,17 +60,17 @@ spec:
       initContainers:
       {{- if .Values.postgresql.enabled }}
       - name: wait-for-postgres
-        image: {{ .Values.initContainers.waitForPostgres.image | quote }}
+        image: {{ include "kates.imageRef" (dict "image" .Values.initContainers.waitForPostgres.image "ctx" .) | quote }}
         imagePullPolicy: {{ .Values.initContainers.waitForPostgres.pullPolicy | default "IfNotPresent" }}
         command: ['sh', '-c', 'until nc -z {{ include "kates.postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }} 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done']
+        {{- with .Values.initContainers.waitForPostgres.securityContext | default .Values.containerSecurityContext }}
         securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          runAsUser: 65534
-          capabilities:
-            drop:
-              - ALL
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.initContainers.waitForPostgres.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         volumeMounts:
         - name: tmp
           mountPath: /tmp

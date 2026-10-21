@@ -96,14 +96,26 @@ Kafka bootstrap servers FQDN.
 
 {{/*
 Container image reference.
-Returns repository@digest when digest is set, repository:tag otherwise.
+Returns repository@digest when digest is set, repository:tag otherwise,
+behind global.imageRegistry when that is set.
 */}}
 {{- define "kafka-ui.image" -}}
+{{- $repo := .Values.image.repository -}}
+{{- with .Values.global.imageRegistry }}{{ $repo = printf "%s/%s" . $repo }}{{ end -}}
 {{- if .Values.image.digest -}}
-{{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- printf "%s@%s" $repo .Values.image.digest -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) -}}
+{{- printf "%s:%s" $repo (.Values.image.tag | default .Chart.AppVersion) -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Labels for a pod template: the chart's own labels (pass them as .labels)
+plus podLabels. The chart's own win on a clash, so a selector never changes.
+Usage: include "kafka-ui.podLabels" (dict "ctx" . "labels" (include "kafka-ui.selectorLabels" .))
+*/}}
+{{- define "kafka-ui.podLabels" -}}
+{{- toYaml (merge (fromYaml .labels) .ctx.Values.podLabels) }}
 {{- end -}}
 
 {{/*

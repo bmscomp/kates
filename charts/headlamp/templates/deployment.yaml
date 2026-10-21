@@ -12,10 +12,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "headlamp.selectorLabels" . | nindent 8 }}
-        {{- with .Values.podLabels }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
+        {{- include "headlamp.podLabels" (dict "ctx" . "labels" (include "headlamp.selectorLabels" .)) | nindent 8 }}
       {{- with .Values.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
@@ -33,7 +30,7 @@ spec:
       {{- end }}
       containers:
       - name: headlamp
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: {{ include "headlamp.image" (dict "ctx" . "image" (printf "%s:%s" .Values.image.repository .Values.image.tag)) | quote }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         {{- with .Values.containerSecurityContext }}
         securityContext:

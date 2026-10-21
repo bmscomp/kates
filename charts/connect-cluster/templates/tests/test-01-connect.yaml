@@ -7,8 +7,7 @@ metadata:
   name: {{ $name }}-test-connect
   namespace: {{ include "connect-cluster.namespace" . }}
   labels:
-    {{- include "connect-cluster.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
-    kates.io/test-pod: "true"
+    {{- include "kafka-common.podLabels" (dict "labels" (include "connect-cluster.componentLabels" (dict "ctx" . "component" "test")) "podLabels" .Values.podLabels "testPod" true) | nindent 4 }}
   annotations:
     helm.sh/hook: test
     helm.sh/hook-weight: "1"
@@ -28,7 +27,7 @@ spec:
       type: RuntimeDefault
   containers:
     - name: connect
-      image: {{ .Values.testImages.kubectl }}
+      image: {{ include "connect-cluster.image" (list . .Values.testImages.kubectl) }}
       {{- include "connect-cluster.imagePullPolicy" . | nindent 6 }}
       command: ["sh", "-c"]
       args:
@@ -124,6 +123,8 @@ spec:
           echo ""
           echo "Connect: $PASS passed, $FAIL failed"
           [ "$FAIL" -eq 0 ]
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
       securityContext:
         {{- include "connect-cluster.containerSecurityContext" . | nindent 8 }}
       volumeMounts:

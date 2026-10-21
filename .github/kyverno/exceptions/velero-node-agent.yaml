@@ -1,0 +1,44 @@
+# Why: the node agent backs pod volumes up from the node itself. It reads them
+# through hostPath mounts of /var/lib/kubelet/pods and /var/lib/kubelet/plugins,
+# and runs as root (uid 0) with the runtime's default capabilities, which it
+# needs to read, and on restore write and chown, files whatever user owns
+# them: dropping ALL would leave it a root that cannot. Its container security
+# context is empty, as upstream ships it, so it does not forbid privilege
+# escalation either (a default of false would clash with privileged: true).
+# No value of the chart makes that pass the restricted profile, so exactly
+# those controls are excepted; every other control of pss-restricted
+# (seccomp, ...), and the other policies, still apply to it.
+# Removed by: deployNodeAgent=false on charts/velero, the default (file-system
+# backups and the CSI data mover then do not run).
+# Names the DaemonSet and its pods as scripts/check-chart-policies.sh renders
+# them: release velero in namespace velero. On a cluster, install it where the
+# release runs.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: velero-node-agent
+  namespace: velero
+spec:
+  exceptions:
+    - policyName: pss-restricted
+      ruleNames: [restricted, autogen-restricted]
+  match:
+    any:
+      - resources:
+          kinds: [DaemonSet]
+          namespaces: [velero]
+          names: [node-agent]
+      - resources:
+          kinds: [Pod]
+          namespaces: [velero]
+          names: ["node-agent-?????"]
+  podSecurity:
+    - controlName: HostPath Volumes
+    - controlName: Volume Types
+    - controlName: Running as Non-root
+      images: ["*velero/velero:*"]
+    - controlName: Running as Non-root user
+    - controlName: Capabilities
+      images: ["*velero/velero:*"]
+    - controlName: Privilege Escalation
+      images: ["*velero/velero:*"]

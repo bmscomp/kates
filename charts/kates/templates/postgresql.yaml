@@ -19,9 +19,11 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ include "kates.postgresql.fullname" . }}
-        app.kubernetes.io/component: database
+        {{- /* instance is not in the selector: it lets kyvernoPolicy.exceptions match this pod */}}
+        {{- $own := printf "app.kubernetes.io/name: %s\napp.kubernetes.io/component: database\napp.kubernetes.io/instance: %s" (include "kates.postgresql.fullname" .) .Release.Name }}
+        {{- include "kates.podLabels" (dict "labels" $own "ctx" .) | nindent 8 }}
     spec:
+      {{- with include "kates.imagePullSecrets" . }}{{ . | nindent 6 }}{{ end }}
       {{- with .Values.postgresql.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -40,7 +42,7 @@ spec:
       {{- end }}
       containers:
       - name: postgresql
-        image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+        image: {{ include "kates.imageRef" (dict "image" (printf "%s:%s" .Values.postgresql.image.repository .Values.postgresql.image.tag) "ctx" .) | quote }}
         {{- with .Values.postgresql.containerSecurityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}

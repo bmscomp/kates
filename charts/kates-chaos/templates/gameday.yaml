@@ -83,8 +83,7 @@ spec:
   template:
     metadata:
       labels:
-        app: gameday-runner
-        {{- include "kates-chaos.selectorLabels" . | nindent 8 }}
+        {{- include "kates-chaos.podLabels" (list . (printf "app: gameday-runner\n%s" (include "kates-chaos.selectorLabels" .))) | nindent 8 }}
     spec:
       restartPolicy: Never
       serviceAccountName: {{ include "kates-chaos.fullname" . }}-gameday
@@ -92,10 +91,22 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.gameday.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: gameday
           image: {{ $image }}
           imagePullPolicy: {{ $pullPolicy }}
+          {{- with .Values.gameday.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.gameday.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["/bin/sh"]
           args:
             - -c

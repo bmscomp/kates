@@ -42,3 +42,36 @@ nothing and leaves Kubernetes' own rule. Call with the policy string.
 imagePullPolicy: {{ . }}
 {{- end }}
 {{- end }}
+
+{{/*
+An image reference behind a mirror registry: <registry>/<image> when registry
+is set, as charts/kates does with global.imageRegistry; the image unchanged
+otherwise, and an empty image stays empty. Call with (dict "image" <ref>
+"registry" <registry>).
+*/}}
+{{- define "kafka-common.image" -}}
+{{- if and .registry .image -}}
+{{- printf "%s/%s" (trimSuffix "/" .registry) .image -}}
+{{- else -}}
+{{- .image -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The security contexts Pod Security Standards "restricted" asks for, and no
+more — what Strimzi's restricted security provider sets. Strimzi operands get
+them through their CR templates, so the pods pass on a shared operator that
+is not configured with that provider. readOnlyRootFilesystem is not part of
+the standard and is left to the caller. YAML.
+*/}}
+{{- define "kafka-common.restricted.pod" -}}
+runAsNonRoot: true
+seccompProfile:
+  type: RuntimeDefault
+{{- end }}
+
+{{- define "kafka-common.restricted.container" -}}
+allowPrivilegeEscalation: false
+capabilities:
+  drop: ["ALL"]
+{{- end }}

@@ -2,7 +2,7 @@ apiVersion: v2
 name: kafka-common
 description: Library chart — the templates the Strimzi charts share (names and labels, rails, Kafka client authentication, the Connect worker spec, KafkaUser, secret sync, NetworkPolicy and monitoring fragments, the Grafana grid, the preflight probe)
 type: library
-version: 0.1.0
+version: 0.1.1
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
 sources:
@@ -19,5 +19,11 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: added
+      description: "kafka-common.podLabels (the chart's labels over a user's podLabels map, so a selector never changes), kafka-common.image (a mirror registry in front of an image reference, as charts/kates does with global.imageRegistry) and kafka-common.restricted.pod / .restricted.container (the Pod Security Standards restricted contexts Strimzi's restricted provider sets)"
+    - kind: added
+      description: "kafka-common.secretSync takes imagePullSecrets and podLabels for the sync Job's pod"
+    - kind: changed
+      description: "connectWorker.spec: with rack awareness and a hardened container, the operator's rack init container gets the restricted security context (allowPrivilegeEscalation false, every capability dropped), so the workers pass Pod Security restricted on an operator without the restricted provider. A worker `imageRegistry` goes in front of image and clientRackInitImage"
     - kind: added
       description: First release — the templates mirror-maker2 0.8.0, kafka-cluster 1.0.0 and connect-cluster 2.0.0 are built on, lifted from mirror-maker2 0.7 (docs/kafka-charts-refactor-plan.md §3.3), plus the Grafana grid layout and the preflight probe

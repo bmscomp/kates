@@ -2,6 +2,12 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
+        "global": {
+            "type": "object",
+            "properties": {
+                "imageRegistry": { "type": "string" }
+            }
+        },
         "replicaCount": { "type": "integer", "minimum": 1 },
         "image": {
             "type": "object",
@@ -51,14 +57,17 @@
         "containerSecurityContext": { "type": "object" },
         "resources": { "type": "object" },
         "podAnnotations": { "type": "object" },
-        "podLabels": { "type": "object" },
+        "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
         "nodeSelector": { "type": "object" },
         "tolerations": { "type": "array" },
         "affinity": { "type": "object" },
         "test": {
             "type": "object",
             "properties": {
-                "image": { "type": "string" }
+                "image": { "type": "string", "minLength": 1 },
+                "podSecurityContext": { "type": "object" },
+                "securityContext": { "type": "object" },
+                "resources": { "type": "object" }
             }
         }
     }

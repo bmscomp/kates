@@ -17,6 +17,15 @@
     "fullnameOverride": { "type": "string" },
     "commonLabels": { "type": "object" },
     "commonAnnotations": { "type": "object" },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "tests": {
+      "type": "object",
+      "properties": {
+        "resources": { "type": "object" },
+        "podSecurityContext": { "type": "object" },
+        "securityContext": { "type": "object" }
+      }
+    },
     "global": {
       "type": "object",
       "properties": {
@@ -183,7 +192,18 @@
         "action": { "type": "string", "enum": ["Audit", "Enforce"] },
         "mutate": { "type": "boolean" },
         "namespaces": { "type": "array", "items": { "type": "string" } },
-        "excludeSelector": { "type": "object" }
+        "excludeSelector": { "type": "object" },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["policyName", "ruleNames"],
+            "properties": {
+              "policyName": { "type": "string", "minLength": 1 },
+              "ruleNames": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
       }
     },
     "gameday": {
@@ -193,6 +213,9 @@
         "image": { "type": "string" },
         "backoffLimit": { "type": "integer", "minimum": 0 },
         "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 },
+        "resources": { "type": "object" },
+        "podSecurityContext": { "type": "object" },
+        "securityContext": { "type": "object" },
         "checks": {
           "type": "array",
           "items": {
