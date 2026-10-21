@@ -881,22 +881,33 @@ func waitForLocalPort(ctx context.Context, port int, wait time.Duration) bool {
 }
 
 // discoverServices returns a set of "namespace/service-name" strings for all
-// services currently in the cluster.
+// services currently in the cluster. An account that may not list Services
+// in every namespace, such as one with edit in its own, gets those of
+// --app-ns and --kafka-ns instead.
+// shortcut: the repair path (watch.go) sees only those flags' defaults, kates
+// and kafka; save --app-ns in the ports context if a team needs repair elsewhere.
 func discoverServices(ctx context.Context) map[string]bool {
-	out, err := runExecOutputFn(ctx, "kubectl", withKubeContext(portsKubeContext, "kubectl", []string{"get", "svc", "-A",
-		"--no-headers",
-		"-o", "custom-columns=NS:.metadata.namespace,NAME:.metadata.name",
-	})...)
-	if err != nil {
+	result := make(map[string]bool)
+	list := func(scope ...string) error {
+		args := append(append([]string{"get", "svc"}, scope...),
+			"--no-headers", "-o", "custom-columns=NS:.metadata.namespace,NAME:.metadata.name")
+		out, err := runExecOutputFn(ctx, "kubectl", withKubeContext(portsKubeContext, "kubectl", args)...)
+		if err != nil {
+			return err
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				result[fields[0]+"/"+fields[1]] = true
+			}
+		}
 		return nil
 	}
-
-	result := make(map[string]bool)
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			result[fields[0]+"/"+fields[1]] = true
-		}
+	if list("-A") == nil {
+		return result
+	}
+	for _, ns := range uniqueStrings([]string{portsAppNS, portsKafkaNS}) {
+		_ = list("-n", ns) // a namespace it may not read adds nothing
 	}
 	return result
 }

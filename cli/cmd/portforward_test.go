@@ -893,6 +893,43 @@ func TestRepairLocalAPIPortForward_StartsOnlyKatesAPI(t *testing.T) {
 	}
 }
 
+// An account with edit in its own namespace may not list Services in every
+// namespace (the kates chart's rbac.scope=namespace is made for one).
+func TestDiscoverServices_FallsBackToTheAppAndKafkaNamespaces(t *testing.T) {
+	origExec, origKubeContext := runExecOutputFn, portsKubeContext
+	origKafkaNS, origAppNS := portsKafkaNS, portsAppNS
+	t.Cleanup(func() {
+		runExecOutputFn, portsKubeContext = origExec, origKubeContext
+		portsKafkaNS, portsAppNS = origKafkaNS, origAppNS
+	})
+	portsKubeContext = ""
+	portsKafkaNS, portsAppNS = "kafka", "team"
+
+	const columns = " --no-headers -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name"
+	var calls []string
+	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		call := strings.Join(args, " ")
+		calls = append(calls, call)
+		if call == "get svc -n team"+columns {
+			return []byte("team kates\n"), nil
+		}
+		return nil, errors.New(`services is forbidden: User "alice" cannot list resource "services"`)
+	}
+
+	got := discoverServices(context.Background())
+
+	if len(got) != 1 || !got["team/kates"] {
+		t.Errorf("discovered %v, want only team/kates", got)
+	}
+	want := []string{"get svc -A" + columns, "get svc -n team" + columns, "get svc -n kafka" + columns}
+	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
+		t.Errorf("kubectl calls:\n%s\nwant:\n%s", strings.Join(calls, "\n"), strings.Join(want, "\n"))
+	}
+	if specs := matchSpecs(got); len(specs) == 0 || specs[0].Namespace != "team" {
+		t.Errorf("matchSpecs(%v) = %+v, want the Kates API in team", got, specs)
+	}
+}
+
 func TestRepairLocalAPIPortForward_SkipsNonPortsContext(t *testing.T) {
 	port := freeLocalPort(t)
 	origClient, origContext, origOverride := apiClient, activeContext, apiURLOverridden
