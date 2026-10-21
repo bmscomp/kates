@@ -6,8 +6,9 @@ Practical, ready-to-use recipes for common Kates workflows. Each recipe is a sel
 - Schedule a nightly regression suite with `kates schedule create` and spot anomalies with `kates trend`
 - Certify a cluster's resilience with disruption playbooks and a combined `kates resilience run`
 - Diagnose a latency regression, and find the cluster's sustainable capacity by comparing CAPACITY runs at rising producer counts
+- Gate a CI pipeline on Kafka's performance, integrity and architecture, whether Kates is installed cluster-wide or in one namespace
 
-Pick a recipe by the question you need answered. Two of them disrupt the cluster on purpose, so check the Disrupts the cluster column before you run one where other people depend on the cluster:
+Pick a recipe by the question you need answered. Two of them disrupt the cluster on purpose, and Recipe 7 does with its optional chaos gate, so check the Disrupts the cluster column before you run one where other people depend on the cluster:
 
 | Recipe | Question it answers | Run time | Disrupts the cluster | Prerequisites |
 |--------|---------------------|----------|----------------------|---------------|
@@ -17,6 +18,7 @@ Pick a recipe by the question you need answered. Two of them disrupt the cluster
 | [Recipe 4: Investigate a Latency Regression](#recipe-4-investigate-a-latency-regression) | Why did P99 latency rise between two runs? | No new runs: it reads results you already have | No | Two finished runs to compare |
 | [Recipe 5: Capacity Planning](#recipe-5-capacity-planning) | What throughput can the cluster sustain? | Five CAPACITY runs of up to five minutes each, one after another | Yes: it drives the brokers to their limit | A cluster nothing else depends on, `jq`, and your P99 SLA threshold |
 | [Recipe 6: Producer Tuning](#recipe-6-producer-tuning) | Which producer settings suit your workload? | Four LOAD runs of 100,000 records each | No | The recipe's scenario file |
+| [Recipe 7: Gate a CI Pipeline on Kafka](#recipe-7-gate-a-ci-pipeline-on-kafka) | Does a change regress Kafka's performance, integrity or architecture? | A LOAD and an INTEGRITY run each pipeline run | Only its optional chaos gate | A route from the runner to the Kates API, and its API key |
 
 ## Recipe 1: Validate a Kafka Upgrade {#recipe-1-validate-a-kafka-upgrade}
 
@@ -561,6 +563,170 @@ Expected output:
 If all four runs show nearly identical throughput, the bottleneck is likely not the producer configuration. Check network bandwidth between producers and brokers with `kubectl exec <broker-pod> -n kafka -- cat /proc/net/dev` and verify the cluster isn't network-bound.
 :::
 
+## Recipe 7: Gate a CI Pipeline on Kafka {#recipe-7-gate-a-ci-pipeline-on-kafka}
+
+A pipeline step can fail the build when Kafka regresses. Every install can run a performance [gate](appendix-a-glossary.md#gl-gate), an integrity gate and a [conformity check](appendix-a-glossary.md#gl-conformity-check) against the architecture you wrote down. Where a cluster admin installed Kates cluster-wide with a chaos provider, a chaos [SLA](appendix-a-glossary.md#gl-sla) can gate it too. The runner needs a route to the Kates API, its [API key](appendix-a-glossary.md#gl-api-key) and the `kates` CLI. The gates below run a LOAD test of 100,000 records and an INTEGRITY test of 50,000, so a pipeline run takes a few minutes.
+
+Which gates a pipeline can run depends on how Kates was installed. The cluster-wide install is the chart's default, or `kates deploy`; the namespace-only install is `rbac.scope=namespace`, which [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) sets up for a team with only `edit` rights:
+
+| Gate | Command | Cluster-wide install | Namespace-only install |
+|:--------------------|:------------------------------------------|:--------------|:-------------------------------|
+| Performance and integrity | `kates test apply -f <file> --wait` | Yes | Yes |
+| Performance grade | `kates gate --min-grade <grade>` | Yes | Yes |
+| Conformity | `kates conformity check -f <file>` | Yes | Yes, with zones read from EndpointSlices |
+| Chaos SLA | `kates disruption run --fail-on-sla-breach` | Yes, with a chaos provider, such as the Litmus `kates deploy` installs | No: the chaos provider is `noop` |
+
+### Step 1 — Reach the Kates API
+
+The CLI talks to the Kates API over HTTP, on port 8080 of the release's Service, which is named `kates` for a release named `kates`. The chart's NetworkPolicy admits that port from pods in any namespace. Pick the route by where the runner runs:
+
+| Runner | `KATES_URL` | It needs |
+|:---------------------|:------------------------------------|:-----------------------------------------|
+| A pod in the cluster, such as a self-hosted runner | `http://kates.<namespace>.svc:8080` | Nothing more |
+| Outside, through an Ingress | `https://<host>` | `ingress.enabled=true`, a host in `ingress.hosts` and TLS in `ingress.tls` |
+| Outside, with a kubeconfig | `http://localhost:8080` | `kubectl port-forward` to the Service, which the built-in `edit` role allows in the release namespace |
+
+### Step 2 — Hand the Runner the API Key
+
+The chart generates the key into the Secret `kates-api-key`, under the key `api-key`, in the release namespace. Read it once, with an account that may read Secrets there, as `edit` may, and store it as a CI secret:
+
+```bash
+kubectl get secret kates-api-key -n team -o jsonpath='{.data.api-key}' | base64 -d
+```
+
+To manage the key yourself, so that a reinstall keeps it, create the Secret and name it in `apiKey.existingSecret`. The CLI reads `KATES_URL` and `KATES_API_KEY` before any [CLI context](appendix-a-glossary.md#gl-cli-context), so the runner needs no configuration file. Keep the key in the environment rather than on the command line with `--api-key`, where the process list shows it.
+
+### Step 3 — Write the Gates
+
+A scenario file in the repository holds the gates, so a change to a threshold goes through review like any other change. This one runs a LOAD test and an INTEGRITY test, one after the other:
+
+```yaml
+# ci/kafka-gates.yaml
+scenarios:
+  - name: Load gate
+    type: LOAD
+    spec:
+      records: 100000
+    validate:
+      maxP99LatencyMs: 500
+      minThroughputRecPerSec: 5000
+  - name: Integrity gate
+    type: INTEGRITY
+    spec:
+      records: 50000
+      acks: all
+    validate:
+      maxDataLossPercent: 0
+      maxOutOfOrder: 0
+      maxCrcFailures: 0
+```
+
+A run that finishes `DONE` passes unless it breaks a gate. So the INTEGRITY scenario needs its three integrity gates to fail the pipeline on a lost, reordered or corrupted record. Each command below turns its result into an [exit code](appendix-a-glossary.md#gl-exit-code) the pipeline reads:
+
+| Command | Exits 0 when | Exits non-zero when |
+|:----------------------------------------------|:--------------------------------|:----------------------------------------------|
+| `kates test apply -f ci/kafka-gates.yaml --wait` | Every run finishes `DONE` within its gates | 1: a run fails or breaks a gate. 130: the job is cancelled, which cancels the run |
+| `kates gate --min-grade B --type LOAD` | Its own LOAD run grades B or better | 1: the grade is lower, the run fails, or it outlasts `--timeout` (180 s) |
+| `kates conformity check -f ci/reference.yaml` | Every rule with severity `fail` holds | 1: a rule fails. 2: the check can't tell or can't run |
+| `kates disruption run --config ci/plan.json --fail-on-sla-breach` | The plan doesn't breach its `sla`, or has none | 1: the plan's `sla` is breached |
+
+The chaos gate fails only on a breached `sla` block: a plan without one, or one that ends `PARTIAL` or `FAILED`, exits 0. So give `ci/plan.json` an `sla` block, as the tip in [Pre-Production Chaos Certification](#recipe-3-pre-production-chaos-certification) shows.
+
+On [`panda`](appendix-a-glossary.md#gl-panda), the lab's three-node Kind cluster, the LOAD run of this file broke its P99 gate, `p99=1484ms > 500ms`, while the INTEGRITY run met all three of its gates, so `kates test apply` exited 1. Set the thresholds from your own cluster's runs, not from these.
+
+`ci/reference.yaml` is a `KafkaReference`, the file [Conformity Checks](conformity.md) teaches you to write.
+
+For a CI system's test report, `kates test apply -o json` prints a summary with each scenario's `runId`, and `kates report export <id> --format junit` writes one run's report as JUnit XML. `kates conformity check --output-junit <file>` and `kates disruption run --output-junit <file>` write theirs directly.
+
+### Step 4 — Wire It Into GitHub Actions
+
+This workflow runs the gates on every pull request and every night, from a GitHub-hosted runner that reaches the Kates API through a port-forward. It needs two repository secrets, `KUBECONFIG` for an account with `edit` in the release namespace and `KATES_API_KEY`. The repository variable `KATES_CHAOS` is set to `true` only where Kates runs cluster-wide with a chaos provider:
+
+```yaml
+name: Kafka gates
+on:
+  pull_request:
+  schedule:
+    - cron: "0 2 * * *"
+
+jobs:
+  kafka-gates:
+    runs-on: ubuntu-latest
+    env:
+      KATES_VERSION: v1.27.0
+      KATES_NAMESPACE: team
+      KATES_URL: http://localhost:8080
+      KATES_API_KEY: ${{ secrets.KATES_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the kates CLI
+        run: |
+          base="https://github.com/bmscomp/kates/releases/download/${KATES_VERSION}"
+          curl -fsSLO "${base}/kates-linux-amd64.tar.gz"
+          curl -fsSL "${base}/checksums.txt" \
+            | grep ' kates-linux-amd64.tar.gz$' | sha256sum -c -
+          mkdir -p "${HOME}/.local/bin"
+          tar -xzf kates-linux-amd64.tar.gz -C "${HOME}/.local/bin" kates
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Reach the Kates API
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+        run: |
+          echo "${KUBECONFIG_DATA}" > "${RUNNER_TEMP}/kubeconfig"
+          KUBECONFIG="${RUNNER_TEMP}/kubeconfig" kubectl port-forward \
+            -n "${KATES_NAMESPACE}" svc/kates 8080:8080 \
+            > "${RUNNER_TEMP}/port-forward.log" 2>&1 &
+          for _ in $(seq 30); do
+            curl -sf http://localhost:8080/api/health > /dev/null && exit 0
+            sleep 1
+          done
+          cat "${RUNNER_TEMP}/port-forward.log"; exit 1
+
+      - name: Performance and integrity
+        run: exec kates test apply -f ci/kafka-gates.yaml --wait -o json > gates.json
+
+      - name: Conformity
+        run: kates conformity check -f ci/reference.yaml --output-junit conformity.xml
+
+      - name: Chaos SLA (cluster-wide installs only)
+        if: vars.KATES_CHAOS == 'true'
+        run: |
+          kates disruption run --config ci/plan.json \
+            --fail-on-sla-breach --output-junit chaos.xml
+
+      - name: JUnit reports
+        if: always()
+        run: |
+          for id in $(jq -r '.scenarios[] | select(.runId) | .runId' gates.json); do
+            kates report export "${id}" --format junit > "run-${id}.xml"
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kafka-gates
+          path: "*.xml"
+```
+
+Read the workflow from the top:
+
+1. The CLI comes from a pinned release, and `sha256sum -c` checks it against the release's `checksums.txt` before it runs. `gh attestation verify kates-linux-amd64.tar.gz --repo bmscomp/kates` also checks where it was built.
+2. The port-forward runs in the background and outlives its step, so the later steps reach the API on `localhost:8080`. A self-hosted runner inside the cluster skips this step and sets `KATES_URL` to the Service instead.
+3. `exec` makes `kates test apply` the step's own process, so cancelling the job signals it directly and it cancels the run it waits for.
+4. Each gate is its own step, so the job's page shows which one failed. The last two steps run even after a failure, so the reports still upload.
+
+### Limits
+
+The recipe leans on the install's own limits:
+
+- A namespace-only install runs no chaos, so its pipeline leaves `KATES_CHAOS` unset.
+- Under a namespace-only install, a conformity rule that reads a custom `zoneLabel` is UNKNOWN. So is `monitoring.podMonitor` when no PodMonitor in the Kafka namespace selects every broker pod. Each exits 2, so give such a rule `severity: warn` in the reference.
+- The conformity check needs a Kates API of 1.27.0 or later. An older one answers it with a 404, and the CLI exits 2.
+- Cancelling the job cancels a run `kates test apply` waits for, but not a disruption plan, which keeps running in the Kates API.
+- On a cluster that enforces Kafka ACLs, the Kates API's Kafka user needs the grants that [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) lists.
+
 ## Summary
 
 - Upgrade validation is a baseline-upgrade-retest-diff loop: run the same scenario file before and after, then compare with `kates report diff` against your tolerance.
@@ -569,5 +735,6 @@ If all four runs show nearly identical throughput, the bottleneck is likely not 
 - Latency investigations move from `kates report diff` to `kates report brokers` to heatmap export — vertical stripes suggest GC pauses or leader elections, horizontal bands bimodal paths, upward drift saturation.
 - Capacity planning compares CAPACITY runs at rising producer counts: total throughput levels off at the ceiling, and your P99 SLA picks the sustainable point.
 - Producer tuning is a multi-scenario suite compared with `kates report compare` — batching and linger buy throughput at a latency cost, while compression often improves both.
+- A CI pipeline gates on exit codes: scenario gates, a performance grade and a conformity check on any install, a chaos SLA on a cluster-wide one.
 
 Every command these recipes lean on has more flags and output formats than shown here — the [CLI Reference](10-cli-reference.md) documents the full command surface.
