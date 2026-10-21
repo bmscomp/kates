@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -31,6 +32,16 @@ func TestMain(m *testing.M) {
 	// runKates' kates, the binary keeps the one the test passes.
 	if os.Getenv("KATES_TEST_RUN_AS_CLI") != "1" {
 		os.Unsetenv("KATES_PROFILES")
+	}
+	// Namespace labels come from ./.labels and KATES_NAMESPACE_LABELS: a
+	// stray file in cli/cmd or the developer's variable would label what the
+	// tests expect bare. An empty labels file stands in for ./.labels; the
+	// tests of the default path set namespaceLabelsFile back to "".
+	os.Unsetenv(namespaceLabelsEnv)
+	namespaceLabelsFile = filepath.Join(home, "empty.labels")
+	if err := os.WriteFile(namespaceLabelsFile, nil, 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "TestMain:", err)
+		os.Exit(1)
 	}
 	code := m.Run()
 	os.RemoveAll(home)

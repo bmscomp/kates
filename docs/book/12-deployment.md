@@ -752,6 +752,115 @@ kates test list
 
 `kates ports` is the one-step alternative: it forwards the API to `localhost:8080` instead, writes that address and the key into a context of its own, `ports`, and makes it the current context, leaving every other context as it was. The Quick Start in [Introduction](01-introduction.md#quick-start) describes it, along with the commands for the single-namespace topology.
 
+## Namespace Labels
+
+Many shared clusters admit a namespace only when it carries the labels their policies ask for, such as an owning team or a cost center, and `kates deploy` deploys into namespaces of its own. You list those labels once, in a `.labels` file, and the namespaces Kates creates or deploys into carry them. You need the directory you run `kates` from, usually the repository root, and an account that may create and label namespaces; the setup takes a few minutes.
+
+### Step 1 — Write the Labels File
+
+The repository root holds a commented `.labels.example`, and `.gitignore` lists `.labels`, so your copy stays on your machine. Copy the example where you run `kates`, which is the repository root for `make all`:
+
+```bash
+cp .labels.example .labels
+```
+
+Then uncomment or add one `key=value` per line. This file gives every namespace an owning team and a cost center:
+
+```properties
+# Read by the cluster's admission policies
+team=payments
+cost-center=4711
+```
+
+Kates trims the spaces around each key and value, skips blank lines and lines whose first non-space character is `#`, and accepts Windows line endings. There are no inline comments and no quoting, so a `#` or a quote inside a value makes the label invalid. A line without `=` is an error, and so is a key that appears twice, which the error reports with both line numbers. Every error from the file starts with its path and line, such as `.labels:3:`.
+
+A missing `.labels` in the current directory means no labels from a file. `--labels-file <path>` reads another file instead, and that one must exist.
+
+### Step 2 — Check the Labels
+
+Labels come from three sources. For a key that more than one sets, the later source in this table wins:
+
+| Source | Form | Order |
+|:--------------------------------|:------------------------------------|:-----------------|
+| `.labels`, or the `--labels-file` file | One `key=value` per line | First |
+| `KATES_NAMESPACE_LABELS` | Comma-separated `key=value` entries | Second |
+| `--namespace-label` | One `key=value` per flag, repeatable | Last |
+
+A key given twice inside the variable, or in two flags, takes its last value. Every source follows the same rules, which are the Kubernetes label syntax plus a set of reserved prefixes:
+
+| Part | Rule |
+|:------------------|:----------------------------------------------------------------|
+| Key name | 1–63 letters, digits, `-`, `_` or `.`, starting and ending with a letter or digit |
+| Key prefix | Optional, before a `/`: a lowercase DNS subdomain of at most 253 characters, never empty |
+| Value | Empty, or up to 63 characters under the key name's rule |
+| Reserved prefixes | `kubernetes.io`, `k8s.io`, `helm.sh`, `strimzi.io`, `kates.io` and their subdomains are refused; `pod-security.kubernetes.io` itself is allowed |
+
+So `app.kubernetes.io/part-of` is refused and `pod-security.kubernetes.io/enforce` is accepted. Each error names its source: the file and line, `KATES_NAMESPACE_LABELS` or `--namespace-label`. `kates deploy` resolves and checks the labels before its pre-flight checks, so a bad label stops it before it inspects the cluster.
+
+A dry run shows what the deploy would apply:
+
+```bash
+kates deploy --dry-run
+```
+
+When there is at least one label, the plan has a Namespace labels block. It lists each label as `key=value` with where it came from, such as `.labels:3`, `KATES_NAMESPACE_LABELS` or `--namespace-label`. A line under it says that `app.kubernetes.io/managed-by=kates` goes only onto the namespaces the deploy creates. The [deploy](10-cli-reference.md#deploy) entry says what else a dry run reads and writes.
+
+### Step 3 — Deploy
+
+Run the deploy as usual, with `make all` or directly:
+
+```bash
+kates deploy
+```
+
+What Kates does with each namespace depends on whether it exists and on the `kates.io/namespace-labels` annotation, which lists the keys of the labels Kates put there:
+
+| The namespace | What Kates does |
+|:--------------------------------------|:----------------------------------------------------------|
+| Doesn't exist | Creates it with your labels, `app.kubernetes.io/managed-by=kates`, and the annotation listing your keys |
+| Exists, carries every label of yours at your value, and has no label to remove | Nothing: it makes no call at all |
+| Exists, and a label of yours is missing or has another value | One patch sets it and adds its key to the annotation |
+| Exists, and carries a label whose key the annotation lists and your labels leave out | The same patch removes that label and drops its key from the annotation |
+
+The managed-by label goes only onto a namespace Kates creates, and Kates never adds, changes or removes it on one that exists. With no labels of yours, a new namespace gets only the managed-by label and no annotation.
+
+Because a namespace whose labels are already right gets no call, an account that may not change namespaces still deploys there. When the account may not create a namespace, the deploy stops with kubectl's error and the Namespace manifest, labels and annotation included. A cluster admin applies it with `kubectl create -f`, and you run the deploy again. When the account may not change a namespace whose labels differ, the error prints a `kubectl label namespace <ns> … --overwrite` command instead, with the labels to set and the keys to remove as `key-`. Both instructions follow only a refusal by the account's permissions. When an admission policy refuses the namespace, for example because a label it requires is missing, the error is the policy's own message and nothing more, because a cluster admin would be refused the same way: add the label it names to `.labels` and run again.
+
+Before it installs anything, `kates deploy` inspects the cluster, and some of its probes create the `kates-detect-secrets-<id>` and `kates-detect-latency-<id>` namespaces to measure it. Kates creates them with your labels and their own `kates-detect` labels, which win on a clash. Your `pod-security.kubernetes.io` labels stay off them, because the probes' pods would not pass a restricted namespace. Where the account may not create namespaces, or a policy refuses them, `--no-write-probes` skips the probes that create anything, as `--dry-run` does.
+
+### Step 4 — Verify the Labels
+
+Read the labels and the annotation back from one of the deploy's namespaces, `kafka` in the isolated topology:
+
+```bash
+kubectl get namespace kafka --show-labels
+kubectl get namespace kafka \
+  -o jsonpath='{.metadata.annotations.kates\.io/namespace-labels}'
+```
+
+The first command shows your labels, and `app.kubernetes.io/managed-by=kates` when the deploy created the namespace. The second prints the comma-separated keys Kates manages there, in sorted order, and nothing when Kates has set no label there.
+
+### Remove a Label
+
+Delete its line from `.labels` and run `kates deploy` again. In each namespace the run deploys into, Kates removes the labels whose keys the annotation lists and your labels leave out. The annotation lists only the labels Kates created or changed, so a label someone else set stays. So does a label of yours that an existing namespace already carried with your value, because Kates never had to set it; `kubectl label namespace <ns> <key>-` removes it.
+
+### Where Else the Labels Apply
+
+Other commands that create namespaces read the labels file and `KATES_NAMESPACE_LABELS` too, and take `--labels-file`; `--namespace-label` is the deploy's alone. This table lists what each one labels:
+
+| Command | Namespaces it labels |
+|:------------------------------------|:--------------------------------------------------------------|
+| `kates deploy` | Each component's namespace; `cert-manager`, `kyverno` and `strimzi-operator` only on a run that installs them, so a run that finds them installed leaves their labels as they are |
+| `kates auto` | Its namespace, before its Helm installs; nothing under `--dry-run` |
+| `kates kyverno apply` | `kyverno` before it installs Kyverno and `kates` before the `kates` chart; nothing under `--dry-run` |
+| `kates migrate up`, `kates migrate run`, `kates migrate source deploy` | A lab namespace it creates, where the lab's own labels win on a clash; an existing one is left alone |
+| The probes of `kates deploy`, `kates auto` and `kates detect` | The `kates-detect-*-<id>` namespaces they create: secrets and latency, and with `kates detect --bench-*` the bench, bandwidth and dns ones; never your `pod-security.kubernetes.io` labels |
+| `ensure_namespace` in `scripts/common.sh` | Every namespace the deploy scripts ensure, new or existing |
+
+`kates auto` and `kates kyverno apply` label their namespaces the way `kates deploy` does. The scripts are simpler. `ensure_namespace` reads only `.labels` in the directory you run the script from, not `--labels-file` or `KATES_NAMESPACE_LABELS`, and applies its lines with `kubectl label namespace <ns> … --overwrite`. It adds no managed-by label and no annotation, so a label whose line you delete stays on the namespace. It checks only that each line starts with a letter or digit and holds a `=`, and stops on any other line; kubectl checks the rest of the syntax, and nothing refuses the reserved prefixes. Without a `.labels`, or with one that has no labels, it labels nothing.
+
+Where your account may not create namespaces at all, [Running Without Cluster Admin](#running-without-cluster-admin) installs the `kates` chart into a namespace the team already has.
+
 ## Running Without Cluster Admin
 
 On a shared cluster, a team usually gets a namespace and the built-in `edit` role in it, not cluster-admin. That is enough to run performance tests, INTEGRITY tests and [conformity checks](appendix-a-glossary.md#gl-conformity-check) with Kates, once an admin has installed [Strimzi](appendix-a-glossary.md#gl-strimzi) and the Kafka cluster. Performance and INTEGRITY runs make no Kubernetes API call: the [Kates API](appendix-a-glossary.md#gl-kates-api) talks only to Kafka. Two things need care, and the `kates` chart's `rbac.scope=namespace` handles both. The default install creates a ClusterRole, which `edit` can't do, and a conformity check reads the Kafka namespace, where the team has no rights. `kates deploy` stays an admin's tool, because it installs Strimzi, cert-manager, monitoring and Litmus.

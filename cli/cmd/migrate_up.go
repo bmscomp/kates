@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +14,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/internal/podrun"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/detect"
 	"github.com/bmscomp/kates/cli/pkg/kafkaversion"
 	"github.com/bmscomp/kates/cli/pkg/migrate"
 )
@@ -50,6 +51,7 @@ cutover and down find the lab again.`,
 func init() {
 	addMigratePairFlags(migrateUpCmd, &migrateUpFlags)
 	migrateUpCmd.Flags().BoolVar(&migrateUpFlags.SkipBuild, "skip-build", false, "Do not build/load the source image (assume it is present)")
+	addLabelsFileFlag(migrateUpCmd)
 	migrateCmd.AddCommand(migrateUpCmd)
 }
 
@@ -448,8 +450,10 @@ func (r *labRun) deploySource(ctx context.Context, s *migrate.State, src *migrat
 }
 
 // ensureLabNamespace creates a namespace labelled as the lab's when it does
-// not exist, and reports whether it did. An existing namespace is somebody's
-// and is left as it is.
+// not exist, and reports whether it did. It carries the user's namespace
+// labels too, set in the one create call so a policy requiring them admits
+// it; the lab's labels win a clash. An existing namespace is somebody's and
+// is left as it is.
 func ensureLabNamespace(ctx context.Context, namespace string, labels map[string]string) (created bool, err error) {
 	out, err := defaultRunner.Run(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found", "-o", "jsonpath={.metadata.name}")
 	if err != nil {
@@ -458,29 +462,15 @@ func ensureLabNamespace(ctx context.Context, namespace string, labels map[string
 	if strings.TrimSpace(out) != "" {
 		return false, nil
 	}
-	if _, err := defaultRunner.Run(ctx, "kubectl", "create", "namespace", namespace); err != nil {
+	all, _, err := namespaceUserLabels()
+	if err != nil {
+		return false, err
+	}
+	maps.Copy(all, labels)
+	if _, err := defaultRunner.RunInput(ctx, detect.NamespaceManifest(namespace, all, nil), "kubectl", "create", "-f", "-"); err != nil {
 		return false, fmt.Errorf("create namespace %s: %w", namespace, err)
 	}
-	args := []string{"label", "namespace", namespace, "--overwrite"}
-	args = append(args, labelPairs(labels)...)
-	if _, err := defaultRunner.Run(ctx, "kubectl", args...); err != nil {
-		return true, fmt.Errorf("label namespace %s: %w", namespace, err)
-	}
 	return true, nil
-}
-
-// labelPairs renders labels as key=value arguments, sorted.
-func labelPairs(labels map[string]string) []string {
-	keys := make([]string, 0, len(labels))
-	for k := range labels {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, k+"="+labels[k])
-	}
-	return out
 }
 
 // sourceDiagnostics prints a source's pods and broker log after a failed

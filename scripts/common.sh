@@ -43,10 +43,29 @@ require_chart() {
     fi
 }
 
+# Also applies ./.labels (git-ignored, see .labels.example), created or not. Unlike
+# kates, no managed-by label and no tracking: a line you delete leaves its label.
 ensure_namespace() {
+    # A read error inside the process substitution below would go unseen.
+    if [ -f .labels ] && [ ! -r .labels ]; then
+        error ".labels: not readable"
+        return 1
+    fi
     if ! kubectl get namespace "$1" > /dev/null 2>&1; then
         kubectl create namespace "$1"
     fi
+    [ -f .labels ] || return 0
+    local labels=() line
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Anything else would reach kubectl as a namespace name, a removal (key-) or a flag.
+        case "$line" in
+            [A-Za-z0-9]*=*) labels+=("$line") ;;
+            *) error ".labels: '${line}' is not key=value"; return 1 ;;
+        esac
+    done < <(tr -d '\r' < .labels | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+        -e '/^#/d' -e '/^$/d' -e 's/[[:space:]]*=[[:space:]]*/=/')
+    [ ${#labels[@]} -gt 0 ] || return 0
+    kubectl label namespace "$1" "${labels[@]}" --overwrite
 }
 
 svc_exists() {

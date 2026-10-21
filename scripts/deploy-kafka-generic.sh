@@ -73,7 +73,8 @@ elif [ -x "${ROOT_DIR}/build/kates" ]; then
     "${ROOT_DIR}/build/kates" detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
 else
     info "  kates binary not found. Building it now..."
-    cd "${ROOT_DIR}" && make cli-build >/dev/null
+    # A subshell, so ensure_namespace still reads .labels where the script was run.
+    (cd "${ROOT_DIR}" && make cli-build >/dev/null)
     "${ROOT_DIR}/cli/dist/kates" detect --generate-values --values-output "${DETECTED_VALUES}" --quiet
 fi
 

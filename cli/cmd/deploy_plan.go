@@ -389,7 +389,7 @@ func registerDashboardComponents(dashboard *deployDashboardModel, ns resolvedNam
 }
 
 // runDeployDryRun shows the deployment preview and exits without deploying.
-func runDeployDryRun(sharedEntries []DeploySummaryEntry) error {
+func runDeployDryRun(sharedEntries []DeploySummaryEntry, labels, labelSources map[string]string) error {
 	dryCtx, dryCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer dryCancel()
 	existingReleases := make(map[string]bool)
@@ -399,7 +399,7 @@ func runDeployDryRun(sharedEntries []DeploySummaryEntry) error {
 			existingReleases[key] = true
 		}
 	}
-	renderDeployPreview(sharedEntries, existingReleases)
+	renderDeployPreview(sharedEntries, existingReleases, labels, labelSources)
 	return nil
 }
 

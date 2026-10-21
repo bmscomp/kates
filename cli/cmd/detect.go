@@ -65,12 +65,18 @@ func init() {
 	detectCmd.Flags().BoolVar(&benchStorage, "bench-storage", false, "Run active live storage benchmarking using ephemeral fio pods (takes ~30s)")
 	detectCmd.Flags().BoolVar(&benchNetwork, "bench-network", false, "Run active network throughput sweeps between AZs using iperf3 (~10s)")
 	detectCmd.Flags().BoolVar(&benchDNS, "bench-dns", false, "Run active CoreDNS latency and throttling sweeps using parallel DNS queries (~5s)")
+	addLabelsFileFlag(detectCmd)
 	rootCmd.AddCommand(detectCmd)
 }
 
 func runDetect(cmd *cobra.Command, args []string) error {
+	namespaceLabels, _, err := namespaceUserLabels()
+	if err != nil {
+		return err
+	}
 	executor := detect.NewOSExecutor()
 	collector := detect.NewCollector(executor)
+	collector.NamespaceLabels = namespaceLabels
 	collector.BenchStorage = benchStorage
 	collector.BenchNetwork = benchNetwork
 	collector.BenchDNS = benchDNS

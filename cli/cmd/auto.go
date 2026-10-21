@@ -42,17 +42,24 @@ func init() {
 	autoCmd.Flags().BoolVar(&autoDryRun, "dry-run", false, "Preview the Helm installation without executing it")
 	autoCmd.Flags().StringVarP(&autoBaseValues, "values", "f", "", "Path to base values.yaml to merge with detected values")
 	autoCmd.Flags().BoolVar(&autoSkipMonitoring, "skip-monitoring", false, "Skip deploying the monitoring stack (Prometheus + Grafana)")
+	addLabelsFileFlag(autoCmd)
 	rootCmd.AddCommand(autoCmd)
 }
 
 func runAuto(cmd *cobra.Command, args []string) error {
 	output.Header("Kates Auto-Deploy")
 
+	namespaceLabels, _, err := namespaceUserLabels()
+	if err != nil {
+		return err
+	}
+
 	executor := defaultExecutor
 	collector := detect.NewCollector(executor)
 	// Introspection creates a namespace, a Secret and prober pods. A dry run
 	// collects without them, as kates deploy --dry-run does.
 	collector.ReadOnly = autoDryRun
+	collector.NamespaceLabels = namespaceLabels
 
 	if err := collector.Preflight(); err != nil {
 		return cmdErr(fmt.Sprintf("Preflight failed: %v", err))
@@ -118,6 +125,13 @@ func runAuto(cmd *cobra.Command, args []string) error {
 
 	// 4. Helm Deploy Phase
 	output.Hint(fmt.Sprintf("📌 Target namespace: %s", autoNamespace))
+	// Created with the namespace labels before Helm's --create-namespace
+	// could make it bare; the monitoring release shares it.
+	if !autoDryRun {
+		if err := ensureConfiguredDeployNamespace(context.Background(), autoNamespace); err != nil {
+			return err
+		}
+	}
 	helmArgs := []string{
 		"upgrade", "--install", autoReleaseName, autoChartDir,
 		"--namespace", autoNamespace, "--create-namespace",

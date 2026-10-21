@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -101,6 +103,7 @@ func setupHealthyMock() *MockExecutor {
 	m.Set(`{"items": []}`, "kubectl", "get", "pods", "-n", "kafka", "-l", "name=strimzi-cluster-operator", "-o", "json")
 
 	// Secrets check mocks
+	m.Set("namespace created", "kubectl create -f")
 	m.Set("namespace created", "kubectl create ns")
 	m.Set("namespace labeled", "kubectl label ns")
 	m.Set("namespace deleted", "kubectl delete ns")
@@ -360,8 +363,7 @@ func TestCheckKafkaCapacity(t *testing.T) {
 
 func TestCheckSecretCreation_KyvernoDenial(t *testing.T) {
 	m := NewMockExecutor()
-	m.Set("namespace created", "kubectl create ns")
-	m.Set("namespace labeled", "kubectl label ns")
+	m.Set("namespace created", "kubectl create -f")
 	m.Set("namespace deleted", "kubectl delete ns")
 
 	// Kyverno denial response output
@@ -539,12 +541,12 @@ func TestCollect_WriteProbesCreateThings(t *testing.T) {
 		probe string
 		parts []string
 	}{
-		{"secret audit namespace", []string{"kubectl create ns kates-detect-secrets-"}},
+		{"secret audit namespace", []string{"kubectl delete ns kates-detect-secrets-"}},
 		{"secret audit Secret", []string{"kubectl create secret generic kates-detect-test-sec"}},
-		{"latency namespace", []string{"kubectl create ns kates-detect-latency-"}},
+		{"latency namespace", []string{"kubectl delete ns kates-detect-latency-"}},
+		{"probe namespace manifests", []string{"kubectl create -f ", "kates-detect-namespace-"}},
 		{"latency prober pods", []string{"kubectl run prober-"}},
 		{"dns-detect fallback pod", []string{"kubectl run", "dns-detect"}},
-		{"namespace labels", []string{"kubectl label ns"}},
 		{"namespace cleanup", []string{"kubectl delete ns"}},
 	} {
 		if !containsCall(writes, want.parts...) {
@@ -552,16 +554,95 @@ func TestCollect_WriteProbesCreateThings(t *testing.T) {
 				want.probe, want.parts, strings.Join(writes, "\n  "))
 		}
 	}
-	// Each Bench* probe starts by creating its namespace, so four more than
-	// the two the secret and latency probes create.
+	// Every probe creates its namespace from a manifest: secret, latency and
+	// the three benches.
 	var namespaces int
 	for _, w := range writes {
-		if strings.HasPrefix(w, "kubectl create ns ") {
+		if strings.HasPrefix(w, "kubectl create -f ") {
 			namespaces++
 		}
 	}
 	if namespaces != 5 {
 		t.Errorf("created %d namespaces, want 5 (secret, latency and three benches)", namespaces)
+	}
+}
+
+// manifestExecutor answers as its MockExecutor does, and keeps every file
+// `kubectl create -f` is given, read before the probe removes it.
+type manifestExecutor struct {
+	*MockExecutor
+	lock      sync.Mutex
+	manifests map[string]string
+}
+
+func (e *manifestExecutor) Exec(name string, args ...string) (string, error) {
+	if name == "kubectl" && len(args) == 3 && args[0] == "create" && args[1] == "-f" {
+		data, err := os.ReadFile(args[2])
+		if err != nil {
+			return "", err
+		}
+		e.lock.Lock()
+		e.manifests[args[2]] = string(data)
+		e.lock.Unlock()
+	}
+	return e.MockExecutor.Exec(name, args...)
+}
+
+// A policy that requires labels on every namespace refuses a bare one, so
+// the secret and latency probes create theirs in one call that already
+// carries the user's labels, under the probe's own, which win a clash.
+func TestCollect_ProbeNamespacesCarryTheUserLabels(t *testing.T) {
+	m := &manifestExecutor{MockExecutor: setupWriteProbeMock(), manifests: map[string]string{}}
+	c := NewCollector(m)
+	c.BenchStorage, c.BenchNetwork, c.BenchDNS = true, true, true
+	c.NamespaceLabels = map[string]string{
+		"gov.example.com/product-id":         "KATES1",
+		"kates-detect-experimental":          "no",
+		"pod-security.kubernetes.io/enforce": "restricted",
+	}
+	if _, err := c.Collect(context.Background()); err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	if len(m.manifests) != 5 {
+		t.Fatalf("want one manifest per probe namespace, got %d: %v", len(m.manifests), m.manifests)
+	}
+	for _, prefix := range []string{"kates-detect-secrets-", "kates-detect-latency-", "kates-detect-bench-", "kates-detect-bandwidth-", "kates-detect-dns-"} {
+		var manifest string
+		for _, mf := range m.manifests {
+			if strings.Contains(mf, "name: "+prefix) {
+				manifest = mf
+			}
+		}
+		if manifest == "" {
+			t.Errorf("no manifest creates a %s namespace: %v", prefix, m.manifests)
+			continue
+		}
+		for _, want := range []string{
+			"kind: Namespace",
+			`"gov.example.com/product-id": "KATES1"`,
+			`"kates-detect-experimental": "true"`,
+			`"kates-detect-run": "`,
+		} {
+			if !strings.Contains(manifest, want) {
+				t.Errorf("the %s manifest lacks %q:\n%s", prefix, want, manifest)
+			}
+		}
+		// The probes' pods are not restricted-ready; a Pod Security label
+		// would have them refused.
+		if strings.Contains(manifest, "pod-security.kubernetes.io") {
+			t.Errorf("the %s manifest carries a Pod Security label:\n%s", prefix, manifest)
+		}
+	}
+	for _, call := range m.Calls() {
+		if strings.HasPrefix(call, "kubectl label ns kates-detect-") || strings.HasPrefix(call, "kubectl create ns ") {
+			t.Errorf("a probe namespace was created bare or labelled after its creation: %s", call)
+		}
+	}
+	for path := range m.manifests {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("the manifest %s was left behind: %v", path, err)
+		}
 	}
 }
 

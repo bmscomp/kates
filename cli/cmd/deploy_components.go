@@ -6,16 +6,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/detect"
 	"github.com/bmscomp/kates/cli/pkg/strimzi"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
@@ -198,20 +200,15 @@ func ensureKubernetesNoProxy(noProxy, clusterDomain string) string {
 	)
 }
 
+// deployNamespaceLabelMap is the user's namespace labels plus the built-in
+// managed-by label, which ensureDeployNamespace sets only on a namespace it
+// creates.
 func deployNamespaceLabelMap() (map[string]string, error) {
-	labels := map[string]string{
-		"app.kubernetes.io/managed-by": "kates",
+	labels, _, err := namespaceUserLabels()
+	if err != nil {
+		return nil, err
 	}
-	if raw := strings.TrimSpace(os.Getenv("KATES_NAMESPACE_LABELS")); raw != "" {
-		if err := addDeployNamespaceLabelSpecs(labels, raw); err != nil {
-			return nil, err
-		}
-	}
-	for _, raw := range deployNamespaceLabels {
-		if err := addDeployNamespaceLabelSpecs(labels, raw); err != nil {
-			return nil, err
-		}
-	}
+	labels[managedByLabel] = "kates"
 	return labels, nil
 }
 
@@ -250,81 +247,120 @@ func monitoringNodeExporterDaemonSetScheduled(ctx context.Context, namespace str
 	return err == nil && desired > 0
 }
 
-func addDeployNamespaceLabelSpecs(labels map[string]string, raw string) error {
-	for _, spec := range strings.Split(raw, ",") {
-		spec = strings.TrimSpace(spec)
-		if spec == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(spec, "=")
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if !ok || key == "" || value == "" {
-			return fmt.Errorf("invalid namespace label %q: expected key=value", spec)
-		}
-		labels[key] = value
-	}
-	return nil
-}
-
+// deployNamespaceManifest is a Namespace carrying labels, and the annotation
+// that records which of them are the user's (every key but managed-by).
 func deployNamespaceManifest(name string, labels map[string]string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n", name)
-	if len(labels) > 0 {
-		b.WriteString("  labels:\n")
-		keys := make([]string, 0, len(labels))
-		for key := range labels {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			fmt.Fprintf(&b, "    %s: %s\n", key, strconv.Quote(labels[key]))
-		}
+	var annotations map[string]string
+	if user := userNamespaceLabels(labels); len(user) > 0 {
+		annotations = map[string]string{namespaceLabelsAnnotation: strings.Join(slices.Sorted(maps.Keys(user)), ",")}
 	}
-	return b.String()
+	return detect.NamespaceManifest(name, labels, annotations)
 }
 
+func userNamespaceLabels(labels map[string]string) map[string]string {
+	user := maps.Clone(labels)
+	delete(user, managedByLabel)
+	return user
+}
+
+// ensureDeployNamespace creates a missing namespace with labels, or brings an
+// existing one's user labels in line with them. On an existing namespace it
+// never touches managed-by (the namespace is not Kates'), and removes only
+// keys its annotation says Kates set.
 func ensureDeployNamespace(ctx context.Context, namespace string, labels map[string]string) error {
 	namespace = strings.TrimSpace(namespace)
 	if namespace == "" {
 		return nil
 	}
-	exists, err := deployNamespaceExists(ctx, namespace)
+	out, err := runExecOutputFn(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found", "-o", "json")
 	if err != nil {
 		return fmt.Errorf("check namespace %s: %w", namespace, err)
 	}
-	if !exists {
-		if err := runExecStdinFn(ctx, "kubectl", []string{"create", "-f", "-"}, deployNamespaceManifest(namespace, labels)); err != nil {
+	if strings.TrimSpace(string(out)) == "" {
+		manifest := deployNamespaceManifest(namespace, labels)
+		if err := runExecStdinFn(ctx, "kubectl", []string{"create", "-f", "-"}, manifest); err != nil {
+			if rbacRefused(err, "create") {
+				return fmt.Errorf("create namespace %s: %w\n\nThis account may not create namespaces. Ask a cluster admin to apply this manifest (kubectl create -f <file>), then run again:\n\n%s", namespace, err, manifest)
+			}
 			return fmt.Errorf("create namespace %s: %w", namespace, err)
 		}
 		return nil
 	}
-	if len(labels) == 0 {
+
+	var current struct {
+		Metadata struct{ Labels, Annotations map[string]string }
+	}
+	if err := json.Unmarshal(out, &current); err != nil {
+		return fmt.Errorf("check namespace %s: %w", namespace, err)
+	}
+	user, have := userNamespaceLabels(labels), current.Metadata.Labels
+	set := map[string]string{}
+	for key, value := range user {
+		if old, ok := have[key]; !ok || old != value {
+			set[key] = value
+		}
+	}
+	var remove, tracked []string
+	for _, key := range strings.Split(current.Metadata.Annotations[namespaceLabelsAnnotation], ",") {
+		key = strings.TrimSpace(key)
+		if _, wanted := user[key]; wanted {
+			tracked = append(tracked, key)
+		} else if _, present := have[key]; key != "" && present {
+			remove = append(remove, key)
+		}
+	}
+	// No call when nothing changes, so an account that may not patch
+	// namespaces still passes once the labels are right.
+	if len(set) == 0 && len(remove) == 0 {
 		return nil
 	}
 
-	labelArgs := []string{"label", "namespace", namespace}
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		keys = append(keys, key)
+	labelPatch := map[string]any{}
+	for key, value := range set {
+		labelPatch[key] = value
+		if !slices.Contains(tracked, key) {
+			tracked = append(tracked, key)
+		}
 	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		labelArgs = append(labelArgs, key+"="+labels[key])
+	for _, key := range remove {
+		labelPatch[key] = nil
 	}
-	labelArgs = append(labelArgs, "--overwrite")
-	if out, err := runExecCombinedFn(ctx, "kubectl", labelArgs...); err != nil {
-		return commandErrorWithOutput("label namespace "+namespace, err, out)
+	var annotation any // null removes it
+	if len(tracked) > 0 {
+		slices.Sort(tracked)
+		annotation = strings.Join(tracked, ",")
+	}
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{
+		"labels":      labelPatch,
+		"annotations": map[string]any{namespaceLabelsAnnotation: annotation},
+	}})
+	if err != nil {
+		return err
+	}
+	if out, err := runExecCombinedFn(ctx, "kubectl", "patch", "namespace", namespace, "--type", "merge", "-p", string(patch)); err != nil {
+		err = commandErrorWithOutput("patch namespace "+namespace, err, out)
+		if !rbacRefused(err, "patch") {
+			return err
+		}
+		args := []string{"kubectl", "label", "namespace", namespace}
+		for _, key := range slices.Sorted(maps.Keys(set)) {
+			args = append(args, key+"="+set[key])
+		}
+		slices.Sort(remove)
+		for _, key := range remove {
+			args = append(args, key+"-")
+		}
+		return fmt.Errorf("%w\n\nThis account may not change the labels of namespace %s. Ask a cluster admin to run this, then run again:\n\n  %s", err, namespace, strings.Join(append(args, "--overwrite"), " "))
 	}
 	return nil
 }
 
-func deployNamespaceExists(ctx context.Context, namespace string) (bool, error) {
-	out, err := runExecOutputFn(ctx, "kubectl", "get", "namespace", namespace, "--ignore-not-found", "-o", "jsonpath={.metadata.name}")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(out)) == namespace, nil
+// rbacRefused says whether RBAC refused verb on a resource, as the API
+// server words it ("User ... cannot create resource ..."). An admission
+// webhook or policy denial also says Forbidden, but an admin running the same
+// request is refused the same way, so it gets no admin instruction.
+func rbacRefused(err error, verb string) bool {
+	return strings.Contains(err.Error(), "cannot "+verb+" resource")
 }
 
 func ensureConfiguredDeployNamespace(ctx context.Context, namespace string) error {
@@ -772,6 +808,11 @@ func deployGroupA(dc *deployContext) error {
 			dl.Printf("\n📦 Deploying Cert-Manager (Namespace: %s)...\n", "cert-manager")
 			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
 			runHelmFn(gCtx, "repo", "update", "jetstack")
+			// Created here with the namespace labels; --create-namespace
+			// would make it bare.
+			if err := ensureConfiguredDeployNamespace(gCtx, "cert-manager"); err != nil {
+				return err
+			}
 			// global.clusterDomain ensures cert-manager generates webhook TLS certificates
 			// and service references using the actual cluster DNS domain (not always cluster.local).
 			// report.Network.ClusterDomain is detected from the live cluster by kates detect.
@@ -914,6 +955,9 @@ spec:
 			dl.Println("\n📦 Deploying Kyverno (Namespace: kyverno)...")
 			runHelmFn(gCtx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
 			runHelmFn(gCtx, "repo", "update", "kyverno")
+			if err := ensureConfiguredDeployNamespace(gCtx, "kyverno"); err != nil {
+				return err
+			}
 
 			// Kyverno v3.x splits into 4 controllers; replicaCount=1 is a v2.x flag.
 			// global.clusterDomain ensures Kyverno webhook certificates use the

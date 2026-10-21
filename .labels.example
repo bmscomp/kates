@@ -1,0 +1,27 @@
+# Labels for the namespaces Kates creates or deploys into.
+#
+# Copy this file to .labels (git-ignored) in the directory you run kates in,
+# and uncomment or add lines. kates deploy, kates auto, kates detect, kates
+# kyverno apply and the kates migrate commands that create lab namespaces read
+# ./.labels, or the file --labels-file names; scripts/common.sh's
+# ensure_namespace reads ./.labels.
+#
+# Format: one key=value per line. Spaces around the key and the value are
+# trimmed; blank lines and lines whose first non-space character is # are
+# skipped. There are no inline comments and no quotes: a # or a quote inside
+# a value is invalid. A repeated key is an error.
+#
+# Precedence, per key, later wins: .labels, then KATES_NAMESPACE_LABELS
+# (comma-separated key=value), then each --namespace-label flag.
+#
+# Keys: an optional DNS-subdomain prefix and a /, then a name of 1-63
+# characters [A-Za-z0-9-_.] that starts and ends alphanumeric. Values: empty,
+# or 1-63 characters under the same rule.
+# Reserved prefixes are refused: kubernetes.io, k8s.io, helm.sh, strimzi.io,
+# kates.io and their subdomains (app.kubernetes.io/... too), except
+# pod-security.kubernetes.io exactly.
+
+# team=payments
+# segment=payments
+# cost-center=4711
+# pod-security.kubernetes.io/enforce=restricted

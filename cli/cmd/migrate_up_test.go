@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,8 +14,7 @@ import (
 // prerequisites: the namespace, the two helm installs, the waits.
 func scriptUp(f *fakeProc) {
 	f.on("kubectl get namespace kafka-m282-430-src --ignore-not-found -o jsonpath={.metadata.name}", "")
-	f.on("kubectl create namespace kafka-m282-430-src", "namespace/kafka-m282-430-src created")
-	f.on("kubectl label namespace kafka-m282-430-src", "namespace/kafka-m282-430-src labeled")
+	f.on("kubectl create -f -", "namespace/kafka-m282-430-src created")
 	f.on("helm upgrade --install m282-430-src charts/legacy-kafka", "")
 	f.on("helm test m282-430-src -n kafka-m282-430-src", "")
 	f.on("helm upgrade --install mm2-m282-430 charts/mirror-maker2", "")
@@ -43,8 +43,7 @@ func TestMigrateUpPhasesAndHelmArgv(t *testing.T) {
 		"kubectl -n kafka wait kafka/krafter --for=condition=Ready --timeout=300s",
 		"kubectl -n kafka get secret kates-mm2 --ignore-not-found",
 		targetTopicsList,
-		"kubectl create namespace kafka-m282-430-src",
-		"kubectl label namespace kafka-m282-430-src --overwrite kates.io/lab=m282-430 kates.io/lab-role=source",
+		"kubectl create -f -",
 		"helm upgrade --install m282-430-src charts/legacy-kafka -n kafka-m282-430-src -f .build/migrate/m282-430/source-values.yaml --wait --timeout 600s",
 		"helm test m282-430-src -n kafka-m282-430-src --timeout 600s",
 		"helm upgrade --install mm2-m282-430 charts/mirror-maker2 -n kafka -f charts/mirror-maker2/values-kind.yaml -f charts/mirror-maker2/values-migrate-2x.yaml -f .build/migrate/m282-430/mirror-values.yaml --timeout 10m",
@@ -58,6 +57,13 @@ func TestMigrateUpPhasesAndHelmArgv(t *testing.T) {
 			t.Fatalf("command %q was not run after position %d; ran:\n  %s", prefix, last, strings.Join(f.lines(), "\n  "))
 		}
 		last = i
+	}
+	// The namespace is created labelled, in that one call.
+	ns := f.find("kubectl create -f -")[0].stdin
+	for _, want := range []string{"kind: Namespace", "name: kafka-m282-430-src", `"kates.io/lab": "m282-430"`, `"kates.io/lab-role": "source"`} {
+		if !strings.Contains(ns, want) {
+			t.Errorf("the namespace manifest lacks %q:\n%s", want, ns)
+		}
 	}
 	// --skip-build: no docker, no kind load.
 	for _, l := range f.lines() {
@@ -100,14 +106,53 @@ func TestMigrateUpPhasesAndHelmArgv(t *testing.T) {
 	}
 }
 
+// A lab namespace carries the user's namespace labels beside the lab's own,
+// set in the create call, so a cluster that requires labels admits it.
+func TestMigrateUpLabNamespaceCarriesTheUserLabels(t *testing.T) {
+	migrateTestRepo(t)
+	useLabelsFile(t, "")
+	if err := os.WriteFile(".labels", []byte("gov.example.com/product-id=KATES1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(namespaceLabelsEnv, "cyber.example.com/sensitivity=2")
+	f := newFakeProc(t)
+	scriptCluster(f, true)
+	scriptPrerequisites(f)
+	scriptUp(f)
+	out := captureOutput(t, "table")
+
+	flags := newPairFlags("2.8.2")
+	flags.SkipBuild = true
+	if err := runMigrateUp(context.Background(), flags); err != nil {
+		t.Fatalf("up: %v\n%s", err, out.String())
+	}
+	creates := f.find("kubectl create -f -")
+	if len(creates) != 1 {
+		t.Fatalf("want the namespace created in one call, got %d", len(creates))
+	}
+	for _, want := range []string{
+		"name: kafka-m282-430-src",
+		`"cyber.example.com/sensitivity": "2"`,
+		`"gov.example.com/product-id": "KATES1"`,
+		`"kates.io/lab": "m282-430"`,
+		`"kates.io/lab-role": "source"`,
+	} {
+		if !strings.Contains(creates[0].stdin, want) {
+			t.Errorf("the namespace manifest lacks %q:\n%s", want, creates[0].stdin)
+		}
+	}
+	if f.hasLine("kubectl label namespace") {
+		t.Error("the namespace was labelled after its creation")
+	}
+}
+
 // scriptUpFanIn scripts the two-source lab m282-391-430.
 func scriptUpFanIn(f *fakeProc) {
 	const lab = "m282-391-430"
 	for _, alias := range []string{"src282", "src391"} {
 		ns := "kafka-" + lab + "-" + alias
 		f.on("kubectl get namespace "+ns+" --ignore-not-found -o jsonpath={.metadata.name}", "")
-		f.on("kubectl create namespace "+ns, "namespace/"+ns+" created")
-		f.on("kubectl label namespace "+ns, "labeled")
+		f.on("kubectl create -f -", "namespace/"+ns+" created")
 		f.on("helm upgrade --install "+lab+"-"+alias+" charts/legacy-kafka", "")
 		f.on("helm test "+lab+"-"+alias+" -n "+ns, "")
 	}
@@ -131,9 +176,21 @@ func TestMigrateUpFanIn(t *testing.T) {
 	}
 	// One namespace, one release and one Helm test per source, then the one
 	// mirror release.
+	var manifests []string
+	for _, c := range f.find("kubectl create -f -") {
+		manifests = append(manifests, c.stdin)
+	}
+	for _, alias := range []string{"src282", "src391"} {
+		want := "name: kafka-m282-391-430-" + alias + "\n" +
+			"  labels:\n" +
+			`    "kates.io/lab": "m282-391-430"` + "\n" +
+			`    "kates.io/lab-role": "source"` + "\n" +
+			`    "kates.io/lab-source": "` + alias + `"` + "\n"
+		if !slices.ContainsFunc(manifests, func(m string) bool { return strings.Contains(m, want) }) {
+			t.Errorf("no namespace manifest carries\n%s\namong:\n%s", want, strings.Join(manifests, "---\n"))
+		}
+	}
 	for _, want := range []string{
-		"kubectl label namespace kafka-m282-391-430-src282 --overwrite kates.io/lab=m282-391-430 kates.io/lab-role=source kates.io/lab-source=src282",
-		"kubectl label namespace kafka-m282-391-430-src391 --overwrite kates.io/lab=m282-391-430 kates.io/lab-role=source kates.io/lab-source=src391",
 		"helm upgrade --install m282-391-430-src282 charts/legacy-kafka -n kafka-m282-391-430-src282 -f .build/migrate/m282-391-430/source-values-src282.yaml --wait --timeout 600s",
 		"helm upgrade --install m282-391-430-src391 charts/legacy-kafka -n kafka-m282-391-430-src391 -f .build/migrate/m282-391-430/source-values-src391.yaml --wait --timeout 600s",
 		"helm upgrade --install mm2-m282-391-430 charts/mirror-maker2 -n kafka -f charts/mirror-maker2/values-kind.yaml -f charts/mirror-maker2/values-migrate-2x.yaml -f .build/migrate/m282-391-430/mirror-values.yaml --timeout 10m",
@@ -282,7 +339,7 @@ func TestMigrateUpFailsFastOnPrerequisites(t *testing.T) {
 	if err == nil {
 		t.Fatal("want a failure")
 	}
-	if f.hasLine("helm upgrade") || f.hasLine("kubectl create namespace") {
+	if f.hasLine("helm upgrade") || f.hasLine("kubectl create") {
 		t.Fatalf("nothing may be created after a failed prerequisite:\n  %s", strings.Join(f.lines(), "\n  "))
 	}
 	text := stripAnsi(out.String())
@@ -306,7 +363,7 @@ func TestMigrateUpRefusesOverlappingLab(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--topics") || !strings.Contains(err.Error(), "lab other") {
 		t.Fatalf("want the overlap refusal naming --topics, got %v", err)
 	}
-	if f.hasLine("kubectl create namespace") {
+	if f.hasLine("kubectl create") {
 		t.Fatal("nothing may be created after the refusal")
 	}
 }
@@ -326,7 +383,7 @@ func TestMigrateUpRefusesATopicTheTargetHas(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "kates.orders") || !strings.Contains(err.Error(), "--topics") {
 		t.Fatalf("want the refusal naming kates.orders and --topics, got %v", err)
 	}
-	if f.hasLine("kubectl create namespace") {
+	if f.hasLine("kubectl create") {
 		t.Fatal("nothing may be created after the refusal")
 	}
 	if !f.hasLine("kubectl -n kafka delete pod kates-migrate-target") {
@@ -404,7 +461,7 @@ func TestMigrateUpRefusesWhenTheTargetCannotBeListed(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "cannot list the topics") {
 				t.Fatalf("want a refusal when the target cannot be listed, got %v", err)
 			}
-			if f.hasLine("kubectl create namespace") {
+			if f.hasLine("kubectl create") {
 				t.Fatal("nothing may be created when the check cannot run")
 			}
 		})

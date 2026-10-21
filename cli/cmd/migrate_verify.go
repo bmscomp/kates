@@ -823,6 +823,7 @@ func init() {
 	migrateRunCmd.Flags().BoolVar(&migrateRunFlags.SkipBuild, "skip-build", false, "Do not build/load the source image (assume it is present)")
 	migrateRunCmd.Flags().StringVar(&migrateRunFlags.SourceVersion, "source-version", "", "Alias of --from (the scripts' spelling)")
 	_ = migrateRunCmd.Flags().MarkDeprecated("source-version", "use --from")
+	addLabelsFileFlag(migrateRunCmd)
 
 	migrateCmd.AddCommand(migrateVerifyCmd, migrateCutoverCmd, migrateRollbackCmd, migrateRunCmd)
 }

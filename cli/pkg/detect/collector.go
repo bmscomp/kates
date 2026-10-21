@@ -8,7 +8,10 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"maps"
+	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,8 +35,13 @@ type Collector struct {
 	// dns-detect pod the cluster-domain lookup falls back to, and the Bench*
 	// probes whatever their flags say. Their parts of the report stay empty.
 	// kates deploy --dry-run sets it: a plan preview must not write.
-	ReadOnly   bool
-	OnProgress func(string)
+	ReadOnly bool
+	// NamespaceLabels go onto the namespaces the Secret-creation audit and
+	// the latency matrix create, under the probes' own labels, so a policy
+	// that requires labels on every namespace admits them. kates deploy and
+	// kates auto set them to the user's namespace labels.
+	NamespaceLabels map[string]string
+	OnProgress      func(string)
 }
 
 func NewCollector(exec CommandExecutor) *Collector {
@@ -932,15 +940,64 @@ func (c *Collector) checkKafkaCapacity(report *DetectReport, reservePct float64)
 	return "Insufficient: missing " + strings.Join(deficits, ", ")
 }
 
+// createProbeNamespace creates a probe's namespace in one call, already
+// carrying NamespaceLabels and the probe's labels (which win a clash): a
+// policy that requires labels refuses a bare namespace before any label call.
+// Pod Security labels stay off: the probes' pods are plain busybox, fio and
+// iperf3 pods that a restricted namespace refuses.
+// The executor has no stdin, so the manifest goes through a file.
+func (c *Collector) createProbeNamespace(ns, runID string) error {
+	labels := map[string]string{}
+	for key, value := range c.NamespaceLabels {
+		if !strings.HasPrefix(key, "pod-security.kubernetes.io/") {
+			labels[key] = value
+		}
+	}
+	labels["kates-detect-experimental"] = "true"
+	labels["kates-detect-run"] = runID
+	f, err := os.CreateTemp("", "kates-detect-namespace-*.yaml")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, err = f.WriteString(NamespaceManifest(ns, labels, nil))
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	_, err = c.exec.Exec("kubectl", "create", "-f", f.Name())
+	return err
+}
+
+// NamespaceManifest renders a Namespace for kubectl create -f, every label
+// and annotation key and value quoted.
+func NamespaceManifest(name string, labels, annotations map[string]string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n", name)
+	for _, field := range []struct {
+		name   string
+		values map[string]string
+	}{{"annotations", annotations}, {"labels", labels}} {
+		if len(field.values) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "  %s:\n", field.name)
+		for _, key := range slices.Sorted(maps.Keys(field.values)) {
+			fmt.Fprintf(&b, "    %s: %s\n", strconv.Quote(key), strconv.Quote(field.values[key]))
+		}
+	}
+	return b.String()
+}
+
 func (c *Collector) checkSecretCreation(ctx context.Context) SecretCreationAudit {
 	audit := SecretCreationAudit{}
 
 	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
 	ns := fmt.Sprintf("kates-detect-secrets-%s", runID)
 
-	// Create namespace
-	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
-	if err != nil {
+	if err := c.createProbeNamespace(ns, runID); err != nil {
 		audit.NamespaceCreated = false
 		audit.SecretCreated = false
 		audit.ErrorMsg = fmt.Sprintf("failed to create namespace: %v", err)
@@ -953,12 +1010,9 @@ func (c *Collector) checkSecretCreation(ctx context.Context) SecretCreationAudit
 		c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
 	}()
 
-	// Label the namespace
-	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
-
 	// Try to create the secret. A refusal (an admission webhook's included)
 	// is on kubectl's stderr, which the executor returns in the error.
-	_, err = c.exec.Exec("kubectl", "create", "secret", "generic", "kates-detect-test-sec",
+	_, err := c.exec.Exec("kubectl", "create", "secret", "generic", "kates-detect-test-sec",
 		"--from-literal=test-key=test-val", "-n", ns)
 
 	if err != nil {
@@ -1032,9 +1086,7 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 	ns := fmt.Sprintf("kates-detect-latency-%s", runID)
 
 	c.progress("Auditing inter-AZ network latency: setting up temporary namespace...")
-	// Create namespace
-	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
-	if err != nil {
+	if err := c.createProbeNamespace(ns, runID); err != nil {
 		return nil
 	}
 
@@ -1043,9 +1095,6 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 		c.progress("Auditing inter-AZ network latency: cleaning up resources...")
 		c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
 	}()
-
-	// Label the namespace
-	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
 
 	c.progress("Auditing inter-AZ network latency: creating prober pods...")
 
@@ -1834,9 +1883,7 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 	ns := fmt.Sprintf("kates-detect-bench-%s", runID)
 
 	c.progress("Storage benchmarking: setting up temporary namespace...")
-	// Create namespace
-	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
-	if err != nil {
+	if err := c.createProbeNamespace(ns, runID); err != nil {
 		return
 	}
 
@@ -1845,9 +1892,6 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 		c.progress("Storage benchmarking: cleaning up ephemeral resources...")
 		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
 	}()
-
-	// Label the namespace
-	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
 
 	// Benchmark each StorageClass sequentially to avoid disk self-contention
 	for idx, sc := range report.Storage {
@@ -1977,8 +2021,7 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 	ns := fmt.Sprintf("kates-detect-bandwidth-%s", runID)
 
 	c.progress("Auditing inter-AZ network bandwidth: setting up temporary namespace...")
-	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
-	if err != nil {
+	if err := c.createProbeNamespace(ns, runID); err != nil {
 		return
 	}
 
@@ -1986,9 +2029,6 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 		c.progress("Auditing inter-AZ network bandwidth: cleaning up ephemeral resources...")
 		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
 	}()
-
-	// Label the namespace
-	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
 
 	c.progress("Auditing inter-AZ network bandwidth: creating iperf3 prober pods...")
 
@@ -2140,8 +2180,7 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 	ns := fmt.Sprintf("kates-detect-dns-%s", runID)
 
 	c.progress("Auditing CoreDNS performance: setting up temporary namespace...")
-	_, err := c.exec.Exec("kubectl", "create", "ns", ns)
-	if err != nil {
+	if err := c.createProbeNamespace(ns, runID); err != nil {
 		return
 	}
 
@@ -2149,9 +2188,6 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 		c.progress("Auditing CoreDNS performance: cleaning up ephemeral resources...")
 		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
 	}()
-
-	// Label the namespace
-	_, _ = c.exec.Exec("kubectl", "label", "ns", ns, "kates-detect-experimental=true", fmt.Sprintf("kates-detect-run=%s", runID))
 
 	c.progress("Auditing CoreDNS performance: creating prober pod...")
 

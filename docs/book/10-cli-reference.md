@@ -1316,6 +1316,11 @@ kates deploy --yes
 | `--kafka-name` | Name of the primary Kafka cluster (default: `krafter`) |
 | `--with-mirror-maker2` | Deploy MirrorMaker 2 as a loopback mirror of the primary — the chart's shipped shape, enough to exercise connectors, offset syncs, checkpoints and the `kates-mm2` ACLs without a second cluster (default: `false`). Real sources are `kates migrate up --from …` |
 | `--mm2-ns` | Namespace for MirrorMaker 2 in the isolated topology (default: `kafka`, where the `kates-mm2` credential lives; elsewhere the credential is copied) |
+| `--labels-file` | Labels for the namespaces deploy uses, one `key=value` per line (default: `.labels` in the current directory, skipped when missing; a named file must exist) |
+| `--namespace-label` | One `key=value` label for those namespaces, repeatable; it wins over `KATES_NAMESPACE_LABELS` and the labels file |
+| `--no-write-probes` | Skip the introspection probes that create a namespace, a Secret or pods, as `--dry-run` does |
+
+**Namespace labels.** `KATES_NAMESPACE_LABELS` takes comma-separated `key=value` entries, which win over the labels file and lose to `--namespace-label`. `kates deploy` checks all three before pre-flight, and `--dry-run` lists the merged labels with their sources. [Namespace Labels](12-deployment.md#namespace-labels) gives the rules and what happens to a namespace that exists.
 
 **The API key.** When the deploy succeeds, `kates deploy` stores the key from the `kates-api-key` Secret in the active CLI context, the current one or the one `--context` names, if that context has no key or holds one that kates copied from the Secret before. A key you set there yourself stays, and `kates deploy` says so; the [Config File Format](#config-file-format) shows how it tells the two apart.
 
@@ -1430,6 +1435,8 @@ kates cluster-check
 
 It exits `0` whatever it finds unless you ask otherwise: `--fail-on-error` exits `2` when compatibility checks fail or the cluster cannot be inspected, and `--fail-on-warning` exits `1` on warnings.
 
+Some of its probes create short-lived `kates-detect-*` namespaces. `--labels-file` (default: `.labels` in the current directory) and `KATES_NAMESPACE_LABELS` label them, as [Namespace Labels](12-deployment.md#namespace-labels) describes, except for `pod-security.kubernetes.io` labels.
+
 #### ports
 
 Port-forward all Kates services to localhost.
@@ -1455,6 +1462,8 @@ Auto-detect cluster configuration and deploy Kafka.
 ```bash
 kates auto
 ```
+
+`--labels-file` (default: `.labels` in the current directory) and `KATES_NAMESPACE_LABELS` label the namespace it installs into, as [Namespace Labels](12-deployment.md#namespace-labels) describes for `kates deploy`.
 
 #### operator
 
@@ -1553,6 +1562,8 @@ Two combinations the chart refuses at render time are refused by the CLI first, 
 `plan` prints both lines under **offset-syncs**, and the `run` report header carries the same sentence. The lab's own `legacy-kafka` source is a cluster the CLI owns both ends of, so the default stands there; the flag is for `--from-bootstrap` against a cluster you do not own. Flipping it on a **running** mirror restarts translation from scratch: the new offset-syncs topic starts empty, so checkpoints regress until it catches up.
 
 The building blocks the front door is made of are commands too: `migrate image build`, `migrate source deploy|status|remove`, `migrate mirror deploy|status|cutover|rollback|remove`, `migrate target topics|offsets <topic>|groups|group <id>`.
+
+`up`, `run` and `migrate source deploy` take `--labels-file` (default: `.labels` in the current directory). A source namespace they create carries those labels and `KATES_NAMESPACE_LABELS`, with the lab's own labels winning on a clash; one that exists is left as it is. [Namespace Labels](12-deployment.md#namespace-labels) gives the format.
 
 ::: {.callout-note}
 In this version every source is `legacy-kafka`: a Strimzi-operated source (an in-window version, or a dropped line under its own operator with `--operator-scope namespace`) is described by `plan` and refused by `up` with "not yet implemented — use --source-provider legacy". That is true of a `--from` in a set as much as on its own: a fan-in that includes a Strimzi source stays `plan`-only. `--to` other than the primary's version is `plan`-only for the same reason.
@@ -1813,6 +1824,7 @@ kates kyverno apply --mode Enforce --yes --with-netpol
 | `--with-netpol` | Enable NetworkPolicy generation |
 | `--yes`, `-y` | Skip confirmation prompt |
 | `--dry-run` | Show what would be applied without executing |
+| `--labels-file` | Labels for the `kyverno` and `kates` namespaces (default: `.labels` in the current directory); see [Namespace Labels](12-deployment.md#namespace-labels) |
 
 **See also:** [Security & Compliance](17-security.md) for Kyverno policy deep dive and custom policy authoring.
 

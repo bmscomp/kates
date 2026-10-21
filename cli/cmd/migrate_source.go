@@ -98,6 +98,7 @@ func init() {
 	d.BoolVarP(&migrateSourceDeployFlags.Yes, "yes", "y", false, "Assume yes and never prompt (fails instead of asking)")
 	d.IntVar(&migrateSourceDeployFlags.Timeout, "timeout", migrateDefaultTimeout, "Install and test budget in seconds")
 	d.StringVar(&migrateSourceDeployFlags.Registry, "registry", kafkaversion.DefaultLegacyRegistry, "Registry of the built legacy images")
+	addLabelsFileFlag(migrateSourceDeployCmd)
 	d.StringVar(&migrateSourceDeployFlags.TargetCluster, "target-cluster", migrate.DefaultTargetCluster, "Name of the target Kafka the source will be mirrored to")
 	d.StringVar(&migrateSourceDeployFlags.TargetNS, "target-namespace", migrate.DefaultTargetNamespace, "Namespace of the target Kafka")
 

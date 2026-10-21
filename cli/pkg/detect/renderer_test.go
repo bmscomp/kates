@@ -190,7 +190,7 @@ func TestRenderHTML(t *testing.T) {
 
 func TestLiveStorageBench_Success(t *testing.T) {
 	m := NewMockExecutor()
-	m.Responses["kubectl create ns"] = ""
+	m.Responses["kubectl create -f"] = ""
 	m.Responses["kubectl label ns"] = ""
 	m.Responses["kubectl delete ns"] = ""
 	m.Responses["sh -c cat <<EOF | kubectl apply -f -"] = ""
@@ -269,7 +269,7 @@ func TestLiveStorageBench_Success(t *testing.T) {
 
 func TestLiveStorageBench_Fallback(t *testing.T) {
 	m := NewMockExecutor()
-	m.Responses["kubectl create ns"] = ""
+	m.Responses["kubectl create -f"] = ""
 	m.Responses["kubectl label ns"] = ""
 	m.Responses["kubectl delete ns"] = ""
 	m.Responses["sh -c cat <<EOF | kubectl apply -f -"] = ""
@@ -299,7 +299,7 @@ func TestLiveStorageBench_Fallback(t *testing.T) {
 
 func TestAZBandwidthBench_Success(t *testing.T) {
 	m := NewMockExecutor()
-	m.Responses["kubectl create ns"] = ""
+	m.Responses["kubectl create -f"] = ""
 	m.Responses["kubectl label ns"] = ""
 	m.Responses["kubectl delete ns"] = ""
 	m.Responses["kubectl run prober-"] = ""
@@ -394,7 +394,7 @@ func TestAZBandwidthBench_Success(t *testing.T) {
 
 func TestDNSResolutionProbe_Success(t *testing.T) {
 	m := NewMockExecutor()
-	m.Responses["kubectl create ns"] = ""
+	m.Responses["kubectl create -f"] = ""
 	m.Responses["kubectl label ns"] = ""
 	m.Responses["kubectl delete ns"] = ""
 	m.Responses["kubectl run dns-prober"] = ""

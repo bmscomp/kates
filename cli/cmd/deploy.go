@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -70,6 +71,7 @@ var (
 	deployWithMirrorMaker2   bool
 	deployMM2NS              string
 	deployNamespaceLabels    []string
+	deployNoWriteProbes      bool
 	deployYes                bool
 
 	// Versions and scope (multi-version plan §3.1–3.3).
@@ -104,7 +106,9 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithKafkaUI, "with-kafka-ui", true, "Deploy Kafka UI for browser-based cluster monitoring")
 	deployCmd.Flags().BoolVar(&deployWithMirrorMaker2, "with-mirror-maker2", false, "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)")
 	deployCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
-	deployCmd.Flags().StringArrayVar(&deployNamespaceLabels, "namespace-label", nil, "Label to apply to namespaces created by deploy (key=value, repeatable; KATES_NAMESPACE_LABELS also accepts comma-separated key=value entries)")
+	deployCmd.Flags().StringArrayVar(&deployNamespaceLabels, "namespace-label", nil, "Label to apply to the namespaces deploy ensures (key=value, repeatable; overrides KATES_NAMESPACE_LABELS, which overrides the labels file)")
+	addLabelsFileFlag(deployCmd)
+	deployCmd.Flags().BoolVar(&deployNoWriteProbes, "no-write-probes", false, "Skip the introspection probes that create a namespace, a Secret or pods (as --dry-run does)")
 	deployCmd.Flags().BoolVarP(&deployInteractive, "interactive", "i", false, "Use interactive UI to configure deployment")
 	deployCmd.Flags().BoolVar(&deployVerbose, "verbose", false, "Show every kubectl/helm command as it runs")
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, run kates ports: forward every service in the background and make the ports context current")
@@ -124,6 +128,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	resetDeployPhases()
 
 	dl = &DashboardController{}
+
+	// A bad namespace label fails before anything asks the cluster.
+	namespaceLabels, namespaceLabelSources, err := namespaceUserLabels()
+	if err != nil {
+		return err
+	}
 
 	// ── Target cluster ───────────────────────────────────────────────────
 	// This runs FIRST, before the banner and the wizard. There is no point
@@ -170,8 +180,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Secret to audit Secret creation, prober pods to measure inter-AZ
 	// latency, and a dns-detect pod when no running pod can be read. The
 	// preview uses none of that, so a dry run collects without it.
-	collector.ReadOnly = deployDryRun
+	collector.ReadOnly = deployDryRun || deployNoWriteProbes
 	collector.KubeContext = target
+	collector.NamespaceLabels = namespaceLabels
 	if err := collector.Preflight(); err != nil {
 		output.Error(fmt.Sprintf("Preflight failed: %v", err))
 		return err
@@ -253,7 +264,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// ── Dry-run: show preview and exit ──
 	if deployDryRun {
-		return runDeployDryRun(sharedEntries)
+		return runDeployDryRun(sharedEntries, namespaceLabels, namespaceLabelSources)
 	}
 
 	// An operator upgrade or a scope change rolls things; say so and ask.
@@ -477,9 +488,18 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 
 	if deployVerbose {
 		dl.Printf("    %s\n", output.DimStyle.Render("$ "+name+" "+strings.Join(args, " ")))
+		// stderr is also kept for the error, so a caller can still tell why
+		// kubectl failed (ensureDeployNamespace looks for an RBAC refusal).
+		var errBuf bytes.Buffer
 		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+		cmd.Stderr = io.MultiWriter(os.Stderr, &errBuf)
+		if runErr := cmd.Run(); runErr != nil {
+			if errMsg := strings.TrimSpace(errBuf.String()); errMsg != "" {
+				return fmt.Errorf("%w: %s", runErr, errMsg)
+			}
+			return runErr
+		}
+		return nil
 	}
 
 	var outBuf, errBuf bytes.Buffer

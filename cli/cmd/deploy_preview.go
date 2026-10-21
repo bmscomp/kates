@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
@@ -12,7 +14,7 @@ import (
 // happens afterwards. It shares its column layout with the final summary
 // (deploy_ui.go) on purpose: the preview and the result should be readable as
 // the same table, so a component that moved between them is obvious.
-func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[string]bool) {
+func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[string]bool, labels, labelSources map[string]string) {
 	g := output.Glyphs()
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrAccent).Render("  Deployment plan") +
@@ -60,6 +62,19 @@ func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[stri
 		fmt.Printf("  %s %s\n",
 			lipgloss.NewStyle().Foreground(clrDim).Render("namespaces:"),
 			strings.Join(namespaces, "  "))
+	}
+
+	// Each label with where it came from: with three sources overriding one
+	// another, the value alone does not say which file or flag to fix.
+	if len(labels) > 0 {
+		fmt.Println()
+		fmt.Printf("  %s\n", lipgloss.NewStyle().Bold(true).Render("Namespace labels"))
+		for _, key := range slices.Sorted(maps.Keys(labels)) {
+			fmt.Printf("    %s=%s  %s\n", key, labels[key],
+				lipgloss.NewStyle().Foreground(clrDim).Render(labelSources[key]))
+		}
+		fmt.Printf("  %s\n", lipgloss.NewStyle().Foreground(clrDim).
+			Render(managedByLabel+"=kates is added only to the namespaces deploy creates."))
 	}
 
 	fmt.Println()

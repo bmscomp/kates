@@ -50,6 +50,9 @@ It uses Helm to apply the exact configuration needed.`,
 				hc := helm.New("")
 				hc.Run(ctx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
 				hc.Run(ctx, "repo", "update", "kyverno")
+				if err := ensureConfiguredDeployNamespace(ctx, "kyverno"); err != nil {
+					return err
+				}
 				out, err := hc.Run(ctx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
 					"--version", "3.6.4", "-n", "kyverno", "--create-namespace",
 					"--set", "admissionController.replicas=1",
@@ -134,6 +137,9 @@ It uses Helm to apply the exact configuration needed.`,
 		}
 
 		// 2. Apply via Helm
+		if err := ensureConfiguredDeployNamespace(ctx, "kates"); err != nil {
+			return err
+		}
 		output.Hint("Applying policies...")
 		hc := helm.New("")
 		hc.Verbose = true
@@ -166,6 +172,7 @@ func init() {
 	kyvernoApplyCmd.Flags().BoolVar(&kyvernoApplyKafka, "with-kafka", false, "Enable Kafka-specific policies (Strimzi)")
 	kyvernoApplyCmd.Flags().BoolVarP(&kyvernoApplyYes, "yes", "y", false, "Skip confirmation prompt")
 	kyvernoApplyCmd.Flags().BoolVar(&kyvernoApplyDryRun, "dry-run", false, "Show what would be applied without executing")
+	addLabelsFileFlag(kyvernoApplyCmd)
 
 	kyvernoCmd.AddCommand(kyvernoApplyCmd)
 }
