@@ -677,7 +677,7 @@ The response is 200 whatever the verdict, with one result per declared rule. `ve
 }
 ```
 
-A reference the check cannot run is a 400 whose `fieldErrors` name each path, as `spec.brokers.cuont: unknown field`. A reference for another cluster than the one Kates watches, or a cluster without its Kafka resource, is a 409; a body over 256 KiB is a 413; an unreachable Kubernetes API is a 503.
+A reference the check cannot run is a 400 whose `fieldErrors` name each path, as `spec.brokers.cuont: unknown field`. A reference for another cluster than the one Kates watches, or a cluster without its Kafka resource, is a 409; a body over 256 KiB is a 413; an unreachable Kubernetes API, or one that refuses the Kates API the Kafka resource, is a 503.
 
 ### Disruption Testing
 

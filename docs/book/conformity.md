@@ -365,7 +365,7 @@ payments-quorum.yaml:11:12: error: spec.brokers.zones: allows at least 3, but
 1 error, 1 warning in 1 file
 ```
 
-The source lines and carets are trimmed. The error stops a check, because two brokers can't run in three zones. The warning doesn't: an even quorum works, it just buys nothing over one controller fewer. Lint runs these cross-rule checks only on a file with no other errors. They cover placement, quorum and durability, such as a replication factor above the broker count or a `min.insync.replicas` that `acks=all` writes can never meet. The [conformity lint](10-cli-reference.md#conformity-lint) entry lists every code.
+The source lines and carets are trimmed. The error stops a check, because two brokers can't run in three zones. The warning doesn't: an even quorum works, it just buys nothing over one controller fewer. Lint runs these cross-rule checks only on a file with no other errors. They cover placement, quorum and durability, such as a replication factor above the broker count or a `min.insync.replicas` that `acks=all` writes can never meet. [Lint Findings](appendix-conformity-language.md#lint-findings), in the Conformity Language Reference, lists every code.
 
 ## Kafka Settings and Monitoring
 
@@ -609,7 +609,7 @@ WAIVED monitoring.kafkaExporter
 
 ## The Language at a Glance
 
-A reference holds two kinds of field. Settings say which cluster to check and how to read it; they aren't rules, and a waiver can't name one. Every other field is a rule, named by its path under `spec`.
+A reference holds two kinds of field. Settings say which cluster to check and how to read it; they aren't rules, and a waiver can't name one. Every other field is a rule, named by its path under `spec`. The tables below are a summary; the [Conformity Language Reference](appendix-conformity-language.md) gives every field's values, what the check reads for it, and when it's UNKNOWN.
 
 ### Settings
 

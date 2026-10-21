@@ -73,6 +73,7 @@ Reading order is defined by [`_quarto.yml`](_quarto.yml) — filenames are stabl
 | [Troubleshooting Index](appendix-b-troubleshooting.md) | Consolidated troubleshooting procedures from across the book |
 | [CI/CD Pipeline](appendix-c-cicd.md) | GitHub Actions workflows, build validation, and release automation |
 | [Version & Compatibility Matrix](appendix-d-versions.md) | Every pinned version, generated from the repo's own pins |
+| [Conformity Language Reference](appendix-conformity-language.md) | Every field, value, rule and lint finding of a `KafkaReference` file |
 | [References](references.md) | The works the book cites, numbered alphabetically by first author |
 
 ## Tutorials

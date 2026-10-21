@@ -105,6 +105,7 @@ book:
     - appendix-b-troubleshooting.md
     - appendix-c-cicd.md
     - appendix-d-versions.md
+    - appendix-conformity-language.md
     # Unnumbered, after the appendices: the list of works cited.
     - references.md
 
