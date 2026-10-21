@@ -2,10 +2,10 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Minor bump: each range's floor is the subchart version this umbrella was
-# rendered and linted with, and templates/subchart-versions.yaml refuses to
-# render a subchart in charts/ outside its range.
-version: 0.8.0
+# Patch: Kates reaches the Kafka this release installs, in the release
+# namespace (kates 0.11.7 renders those values with tpl), and the Helm test pod
+# carries the label the brokers admit test pods by.
+version: 0.8.1
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -20,7 +20,7 @@ dependencies:
     repository: "file://../kafka-cluster"
     condition: kafka-cluster.enabled
   - name: kates
-    version: ">=0.11.6 <1.0.0"
+    version: ">=0.11.7 <1.0.0"
     repository: "file://../kates"
     condition: kates.enabled
   - name: apicurio-registry
@@ -42,6 +42,10 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Kates could not reach the Kafka the platform installs. The umbrella installs kafka-cluster in its release namespace, but the kates subchart kept its own defaults: bootstrap servers and the Trogdor coordinator in namespace kafka, and NetworkPolicy egress to namespace kafka only; and the platform profile admitted Kates to the brokers only from namespace kates. Installed in kates, as this README does, Kates looked up krafter-kafka-bootstrap.kafka.svc; installed in kafka, the brokers refused it. The umbrella now sets kates.kafka.bootstrapServers, kates.kafka.topicNamespace, kates.trogdor.coordinatorUrl and kates.networkPolicy.kafka.namespace from the release namespace (kates 0.11.7 renders them with tpl), and admits Kates to the brokers from the release namespace, so the platform works in any namespace. A release that set these keys keeps its own values. kafka-cluster.clusterName other than krafter needs kates.kafka.bootstrapServers set to match"
+    - kind: fixed
+      description: "helm test could not reach Kafka: the test pod lacked kates.io/test-pod=true, the label kafka-cluster's broker NetworkPolicy admits test pods by"
     - kind: fixed
       description: "ACTION REQUIRED for a platform built before this version — the umbrella installed whatever subcharts sat in its gitignored charts/ directory, and Helm never holds those to the ranges in Chart.yaml. A charts/ left from an earlier `helm dependency update` kept installing kates 0.9.1, whose ClusterRole granted get, list and watch on every Secret in the cluster, so the Kates API's service account could read every SCRAM password, CA key and token there; kates 0.10.8 dropped that rule. Each range's floor is now the version this umbrella was rendered with (kafka-cluster 1.0.10, kates 0.11.6, apicurio-registry 0.4.0, mirror-maker2 0.11.6, connect-cluster 2.1.8), and rendering fails, naming the subchart, while charts/ holds an enabled one outside its range. Run `make platform-chart-deps` (or `helm dependency update charts/kates-platform`) before installing or upgrading"
     - kind: changed

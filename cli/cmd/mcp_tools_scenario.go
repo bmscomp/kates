@@ -1258,7 +1258,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1045-1091", "TestSpec applyTypeDefaults(", "return merged;"),
 			mcpAnchoredRef("kates/src/main/resources/application.properties:73-114",
 				"# Per-type overrides: STRESS", "kates.tests.roundtrip.throughput=10000"),
-			mcpAnchoredRef("charts/kates/values.yaml:605-673", "defaults:", "tests:", `throughput: "10000"`),
+			mcpAnchoredRef("charts/kates/values.yaml:607-675", "defaults:", "tests:", `throughput: "10000"`),
 			mcpAnchoredRef("charts/kates/templates/configmap.yaml:82-178",
 				"KATES_TESTS_LOAD_REPLICATION_FACTOR:", "KATES_TESTS_ROUNDTRIP_NUM_CONSUMERS:"),
 		},

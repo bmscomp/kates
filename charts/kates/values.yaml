@@ -340,7 +340,9 @@ initContainers:
 
 # -- Kafka connection configuration
 kafka:
-  # -- Kafka bootstrap servers
+  # -- Kafka bootstrap servers. This, kafka.topicNamespace,
+  # trogdor.coordinatorUrl and networkPolicy.kafka.namespace go through tpl,
+  # so a value may name {{ .Release.Namespace }}, as kates-platform does.
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
   # -- Namespace where CDC integration test KafkaTopic CRs are managed (empty = auto-detect)
   topicNamespace: ""

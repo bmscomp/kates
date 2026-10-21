@@ -378,6 +378,24 @@ jobs:
           echo "${out}" | grep -q 'charts/ holds kates 0.10.7' || { echo "${out}"; exit 1; }
           echo "OK: kates-platform refused kates 0.10.7"
 
+      # The umbrella installs Kafka in its release namespace, while the kates
+      # chart's defaults and the platform profile's kates grant name namespaces
+      # kafka and kates. Render it in a third one.
+      - name: Check kates-platform wires Kates to its own Kafka
+        run: |
+          fail() { echo "::error::kates-platform in namespace platform: $1"; exit 1; }
+          show() { helm template p charts/kates-platform -n platform --show-only "charts/$1"; }
+          grep -q 'KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.platform.svc:9092"' \
+            <<<"$(show kates/templates/configmap.yaml)" || fail "Kates bootstraps from another namespace"
+          np=$(show kates/templates/networkpolicy.yaml)
+          grep -q 'kubernetes.io/metadata.name: "platform"' <<<"${np}" || fail "no Kates egress to the release namespace"
+          if grep -q 'kubernetes.io/metadata.name: "kafka"' <<<"${np}"; then fail "Kates egress still names kafka"; fi
+          if grep -B3 'app.kubernetes.io/name: kates$' <<<"$(show kafka-cluster/templates/networkpolicies.yaml)" \
+               | grep -q kubernetes.io/metadata.name; then
+            fail "the brokers admit Kates only from another namespace"
+          fi
+          echo "OK: Kates reaches the Kafka in its own release namespace"
+
       - name: Install kubeconform
         uses: ./.github/actions/install-tools
         with:

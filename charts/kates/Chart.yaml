@@ -2,9 +2,10 @@ apiVersion: v2
 name: kates
 description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
-# Patch: appVersion and the image tag move to 1.27.0, the tag the v1.27.0
-# release publishes. Templates are otherwise unchanged.
-version: 0.11.6
+# Patch: kafka.bootstrapServers, kafka.topicNamespace, trogdor.coordinatorUrl
+# and networkPolicy.kafka.namespace go through tpl, so kates-platform can point
+# them at its own release namespace. Plain values render as before.
+version: 0.11.7
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +29,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "kafka.bootstrapServers, kafka.topicNamespace, trogdor.coordinatorUrl and networkPolicy.kafka.namespace are rendered with tpl, so a value may name {{ .Release.Namespace }}. kates-platform needs it: it installs Kafka in its own release namespace, and these defaults name namespace kafka. A value without {{ renders as before"
     - kind: changed
       description: "appVersion 1.27.0 and the image tag move to 1.27.0. The Kates API changes since 1.26.0: POST /api/conformity/check holds the Kafka cluster to a KafkaReference, read-only, with rules for counts, versions, sizing, placement, Kafka settings, listeners, per-topic durability and monitoring, and waivers (#407 to #415, #419, #422, #424); a chaos step may target only the Kafka namespace or the Kates API's own, Litmus paths included (#427, #429). Templates are otherwise unchanged."
     - kind: fixed

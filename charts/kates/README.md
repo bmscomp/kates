@@ -36,7 +36,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `image.tag` | `1.27.0` | Container image tag, pinned in `values.yaml` to match the chart's `appVersion`. Keep it at 1.22.0 or newer: the probes use health endpoints older images lack |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy |
 | `replicaCount` | `1` | Number of Kates API pods. Must be 1; see [One replica](#one-replica) |
-| `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address |
+| `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address. This, `kafka.topicNamespace`, `trogdor.coordinatorUrl` and `networkPolicy.kafka.namespace` go through `tpl`, so a value may name `{{ .Release.Namespace }}`, as kates-platform does |
 | `kafka.topicNamespace` | `""` | Namespace for CDC test `KafkaTopic` CRs (`""` = auto-detect) |
 | `engine.defaultBackend` | `native` | Benchmark engine (`native` or `trogdor`) |
 | `engine.maxDurationMs` | `7200000` | Maximum planned duration accepted for one run |

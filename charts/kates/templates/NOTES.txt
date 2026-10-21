@@ -64,7 +64,7 @@
 {{- if .Values.networkPolicy.enabled }}
 
   Network Policy:
-    Ingress/egress restricted. Kafka egress → {{ .Values.networkPolicy.kafka.namespace }}:{{ .Values.networkPolicy.kafka.port }}
+    Ingress/egress restricted. Kafka egress → {{ tpl (.Values.networkPolicy.kafka.namespace | default "kafka") . }}:{{ .Values.networkPolicy.kafka.port }}
 {{- end }}
 
 {{- if .Values.backup.enabled }}
