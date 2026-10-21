@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.ServiceUnavailableException;
 
 import io.fabric8.kubernetes.api.model.AffinityBuilder;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
@@ -971,6 +972,62 @@ class ConformityCheckTest {
 
         assertEquals(Status.FAIL, result.status());
         assertEquals("the PodMonitor CRD is not installed", result.detail());
+    }
+
+    /** A namespace-scoped role, such as the chart's rbac.scope=namespace, lists the Kafka namespace's only. */
+    @Test
+    void withoutAccessToOtherNamespacesItReadsTheKafkaNamespacesPodMonitors() throws IOException {
+        server.expect()
+                .get()
+                .withPath("/apis/monitoring.coreos.com/v1/podmonitors")
+                .andReturn(403, "")
+                .always();
+        podMonitor("monitoring", "anywhere", Map.of("strimzi.io/broker-role", "true"), Map.of("any", true));
+
+        Result unseen = result(run("{monitoring: {podMonitor: true}}"), "monitoring.podMonitor");
+
+        assertEquals(Status.UNKNOWN, unseen.status());
+        assertEquals(
+                "Forbidden: the Kates API's service account may not list PodMonitors outside kafka,"
+                        + " and none in kafka selects every broker pod",
+                unseen.detail());
+
+        podMonitor("kafka", "brokers", Map.of("strimzi.io/cluster", "krafter"), null);
+
+        Result found = result(run("{monitoring: {podMonitor: true}}"), "monitoring.podMonitor");
+
+        assertEquals(Status.PASS, found.status());
+        assertEquals("kafka/brokers", found.detail());
+    }
+
+    @Test
+    void withoutAccessToNodesTheZonesAreUnknown() throws IOException {
+        server.expect().get().withPath("/api/v1/nodes").andReturn(403, "").always();
+
+        Result zones = result(run("{brokers: {zones: {min: 3}}}"), "brokers.zones");
+
+        assertEquals(Status.UNKNOWN, zones.status());
+        assertEquals(
+                "Kubernetes: nodes: Forbidden: the Kates API's service account may not list nodes,"
+                        + " which are cluster-scoped",
+                zones.detail());
+    }
+
+    @Test
+    void namesTheGrantWhenTheKafkaCannotBeRead() {
+        server.expect()
+                .get()
+                .withPath("/apis/kafka.strimzi.io/v1/namespaces/kafka/kafkas/krafter")
+                .andReturn(403, "")
+                .always();
+
+        ServiceUnavailableException e =
+                assertThrows(ServiceUnavailableException.class, () -> run("{brokers: {count: 3}}"));
+
+        assertEquals(
+                "The Kates API's service account may not get kafkas.kafka.strimzi.io in kafka: bind it a Role"
+                        + " there that grants it, such as the kates chart's with rbac.scope=namespace",
+                e.getMessage());
     }
 
     void podMonitor(String namespace, String name, Map<String, String> matchLabels, Map<String, Object> namespaces) {
