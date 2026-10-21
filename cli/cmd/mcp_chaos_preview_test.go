@@ -822,13 +822,14 @@ func TestMCPPreviewPlanNotFullyReadable(t *testing.T) {
 	}
 }
 
-// TestMCPPreviewOtherNamespace: the namespace the dry run reads is the one
-// its warning names, and a step that leaves targetNamespace out is in kafka.
+// TestMCPPreviewOtherNamespace: a step that leaves targetNamespace out is in
+// the namespace the dry run reads, kates.chaos.kafka.namespace, whatever its
+// warning names. It was taken for kafka, so kafka-prod drew the caveat.
 func TestMCPPreviewOtherNamespace(t *testing.T) {
 	for _, tt := range []struct {
 		ns     string
 		caveat bool
-	}{{"kafka-prod", true}, {"kafka", false}} {
+	}{{"kafka-prod", false}, {"kafka", false}} {
 		t.Run(tt.ns, func(t *testing.T) {
 			fb := mcpChaosBackend(t)
 			var dry mcpDryRunRecorder
@@ -838,6 +839,37 @@ func TestMCPPreviewOtherNamespace(t *testing.T) {
 			env := h.callOK("preview_disruption", map[string]any{"plan": map[string]any{"steps": []map[string]any{{"name": "a", "disruptionType": "POD_KILL"}}}})
 			if got := mcpChaosHasCaveat(env, mcpCaveatDryRunOtherNamespace); got != tt.caveat {
 				t.Errorf("caveat %s = %v, want %v", mcpCaveatDryRunOtherNamespace, got, tt.caveat)
+			}
+		})
+	}
+}
+
+// TestMCPPreviewAgentLimitsKafkaNamespace: a playbook step in the Kafka
+// namespace the topology names is within the agent limits, wherever that is;
+// one in kafka, when Kafka is elsewhere, is not.
+func TestMCPPreviewAgentLimitsKafkaNamespace(t *testing.T) {
+	for _, tt := range []struct {
+		stepNS  string
+		finding bool
+	}{{"kafka-prod", false}, {"kafka", true}} {
+		t.Run(tt.stepNS, func(t *testing.T) {
+			fb := mcpChaosBackend(t)
+			topo := mcpChaosTopology("cluster-a")
+			topo["cluster"].(map[string]any)["namespace"] = "kafka-prod"
+			fb.JSON("GET", "/api/cluster/topology", http.StatusOK, topo)
+			mcpServePlaybook(fb, "az-failure", strings.Replace(mcpAZFailurePlan,
+				`"targetNamespace":"kafka"`, `"targetNamespace":"`+tt.stepNS+`"`, 1))
+			var dry mcpDryRunRecorder
+			dry.handle(fb, http.StatusOK, azFailureDryRun())
+			h := newMCPHarness(t, fb)
+
+			got := mcpData[mcpPreviewOut](t, h.callOK("preview_disruption", map[string]any{"playbook": "az-failure"}))
+			found := false
+			for _, f := range got.OutsideAgentLimits {
+				found = found || f.Field == "targetNamespace"
+			}
+			if found != tt.finding {
+				t.Errorf("targetNamespace finding = %v, want %v: %+v", found, tt.finding, got.OutsideAgentLimits)
 			}
 		})
 	}

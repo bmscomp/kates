@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
+import org.eclipse.microprofile.config.ConfigProvider;
 
 /**
  * Immutable descriptor for a fault injection experiment.
@@ -80,7 +81,11 @@ public record FaultSpec(
     @JsonPOJOBuilder(withPrefix = "")
     public static class Builder {
         private final String experimentName;
-        private String targetNamespace = "kafka";
+        // The Kafka cluster's namespace, the one the safety guard lets every step
+        // target. Read from config here: Jackson and plain callers build specs alike.
+        private String targetNamespace = ConfigProvider.getConfig()
+                .getOptionalValue("kates.chaos.kafka.namespace", String.class)
+                .orElse("kafka");
         private String targetLabel = "strimzi.io/component-type=kafka";
         private String targetPod = "";
         private boolean targetAll = false;

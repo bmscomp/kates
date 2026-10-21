@@ -45,7 +45,9 @@ const (
 	mcpAdHocDefaultPlanName    = "mcp-adhoc-plan"
 
 	// The FaultSpec defaults an ad-hoc plan inherits by leaving the fields
-	// out (chaos/FaultSpec.java:83-84).
+	// out (chaos/FaultSpec.java:86-89). The namespace is the backend's
+	// kates.chaos.kafka.namespace; this is that setting's default, used when
+	// the topology does not name the Kafka namespace.
 	mcpDefaultFaultNamespace = "kafka"
 	mcpDefaultFaultLabel     = "strimzi.io/component-type=kafka"
 
@@ -65,7 +67,7 @@ type mcpAdHocBound struct{ Min, Max, Default int }
 
 // mcpAdHocBounds are the bounds and defaults of every number an ad-hoc step
 // may set. The defaults are the backend's where it has one (the FaultSpec
-// builder, chaos/FaultSpec.java:91-99); the step timings default to what the
+// builder, chaos/FaultSpec.java:96-104); the step timings default to what the
 // playbooks use.
 var mcpAdHocBounds = map[string]mcpAdHocBound{
 	"targetBrokerId":       {0, 100_000, -1},
@@ -476,7 +478,7 @@ func mcpPreviewDisruption(ctx context.Context, call *mcpCall, in mcpPreviewIn) (
 
 	ctrl := mcpKRaftControllersFrom(call, r.topo, r.topoErr)
 	out.Steps, out.KRaftControllers = mcpPreviewSteps(call, r.dry.Steps, &view, &ctrl)
-	findings := mcpAgentLimitFindings(&view)
+	findings := mcpAgentLimitFindings(&view, ctrl.namespace)
 	if viewErr != nil {
 		findings = append([]mcpAgentLimitFinding{{Field: "plan", Value: "not fully readable"}}, findings...)
 	}
@@ -603,20 +605,18 @@ var mcpDryRunNamespaceRE = regexp.MustCompile(`no broker(?: pod)? in namespace '
 // in a namespace other than the one the dry run reads Kafka pods from, so
 // that it hits nothing there but, in the Kates API's namespace, the only
 // other one the guard lets it target, acts there when it runs. A step that
-// leaves targetNamespace out is in kafka, the FaultSpec default. A named pod
-// is previewed whatever its namespace (DisruptionSafetyGuard.java:417-423).
+// leaves targetNamespace out is in kates.chaos.kafka.namespace, the FaultSpec
+// default and the namespace the dry run reads, so never in another. A named
+// pod is previewed whatever its namespace (DisruptionSafetyGuard.java:417-423).
 // The dry run names its namespace in its warning; when that text cannot be
 // read, the topology's namespace (kates.topology.kafka-namespace) stands in:
 // a setting apart from the dry run's, but "kafka" by default for both, and the
 // kates chart sets both from networkPolicy.kafka.namespace.
 func mcpInOtherNamespace(ds client.StepPreview, fs *mcpFaultSpecView, ctrl *mcpKRaftControllerIndex) bool {
-	if fs == nil || fs.TargetPod != "" || len(ds.AffectedPods) > 0 {
+	if fs == nil || fs.TargetNamespace == "" || fs.TargetPod != "" || len(ds.AffectedPods) > 0 {
 		return false
 	}
 	ns := fs.TargetNamespace
-	if ns == "" {
-		ns = mcpDefaultFaultNamespace
-	}
 	for _, w := range ds.Warnings {
 		if m := mcpDryRunNamespaceRE.FindAllStringSubmatch(w, -1); m != nil {
 			return ns != m[len(m)-1][1]
@@ -768,7 +768,12 @@ func mcpTargetingOf(fs *mcpFaultSpecView) string {
 // picks the experiment only for a step without a type
 // (LitmusChaosProvider.java:29-59,86-88,233-260), and otherwise only names
 // the fault. The plan's wording is a follow-up.
-func mcpAgentLimitFindings(v *mcpPlanView) []mcpAgentLimitFinding {
+//
+// A targetNamespace is within them when it is kafkaNamespace, the one the
+// topology reads: a playbook lists its steps as the backend built them, so a
+// step that left the namespace out names kates.chaos.kafka.namespace, which
+// the kates chart sets from the same value.
+func mcpAgentLimitFindings(v *mcpPlanView, kafkaNamespace string) []mcpAgentLimitFinding {
 	findings := []mcpAgentLimitFinding{}
 	add := func(step, field, value string) {
 		findings = append(findings, mcpAgentLimitFinding{Step: mcpSanitizeLine(step, 128), Field: field, Value: mcpSanitizeLine(value, 253)})
@@ -797,7 +802,7 @@ func mcpAgentLimitFindings(v *mcpPlanView) []mcpAgentLimitFinding {
 		if fs.TargetAll {
 			add(s.Name, "targetAll", "true")
 		}
-		if fs.TargetNamespace != "" && fs.TargetNamespace != mcpDefaultFaultNamespace {
+		if fs.TargetNamespace != "" && fs.TargetNamespace != kafkaNamespace {
 			add(s.Name, "targetNamespace", fs.TargetNamespace)
 		}
 		if fs.TargetLabel != "" && fs.TargetLabel != mcpDefaultFaultLabel {

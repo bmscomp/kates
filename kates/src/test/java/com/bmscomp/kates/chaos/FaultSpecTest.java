@@ -3,10 +3,16 @@ package com.bmscomp.kates.chaos;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.lang.reflect.RecordComponent;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.smallrye.config.PropertiesConfigSource;
+import io.smallrye.config.SmallRyeConfigBuilder;
+import org.eclipse.microprofile.config.Config;
+import org.eclipse.microprofile.config.spi.ConfigProviderResolver;
 import org.junit.jupiter.api.Test;
 
 class FaultSpecTest {
@@ -34,6 +40,37 @@ class FaultSpecTest {
         assertEquals("", spec.targetTopic());
         assertEquals(0, spec.targetPartition());
         assertTrue(spec.probes().isEmpty());
+    }
+
+    /**
+     * A spec that names no namespace is in kates.chaos.kafka.namespace, the
+     * Kafka cluster's, wherever it is: the safety guard refuses any other but
+     * the Kates API's own. It was "kafka" whatever the setting said.
+     */
+    @Test
+    void absentNamespaceIsTheConfiguredKafkaNamespace() throws Exception {
+        Config config = new SmallRyeConfigBuilder()
+                .withSources(
+                        new PropertiesConfigSource(Map.of("kates.chaos.kafka.namespace", "streaming"), "test", 100))
+                .build();
+        Thread thread = Thread.currentThread();
+        ClassLoader previous = thread.getContextClassLoader();
+        try (URLClassLoader loader = new URLClassLoader(new URL[0], previous)) {
+            ConfigProviderResolver.instance().registerConfig(config, loader);
+            thread.setContextClassLoader(loader);
+            assertEquals("streaming", FaultSpec.builder("x").build().targetNamespace());
+            assertEquals(
+                    "streaming",
+                    new ObjectMapper()
+                            .readValue("{\"experimentName\":\"x\"}", FaultSpec.class)
+                            .targetNamespace());
+            assertEquals(
+                    "kates",
+                    FaultSpec.builder("x").targetNamespace("kates").build().targetNamespace());
+        } finally {
+            thread.setContextClassLoader(previous);
+            ConfigProviderResolver.instance().releaseConfig(config);
+        }
     }
 
     @Test

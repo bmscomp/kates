@@ -153,7 +153,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 				"Selects the cluster's Kafka pods", `defaultValue = "strimzi.io/component-type=kafka"`,
 				"private List<TargetedStep> targeted(DisruptionPlan plan)", "return targeted;",
 				"if (mode == PodTargets.Mode.ONE_RANDOM)", `" (random selection)"`),
-			mcpJava + "chaos/FaultSpec.java:84",
+			mcpAnchoredRef(mcpJava+"chaos/FaultSpec.java:89", `private String targetLabel = "strimzi.io/component-type=kafka";`),
 		},
 	},
 	{
@@ -164,7 +164,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 			"namespace that names no targetPod is previewed as hitting nothing: no pods, a warning that it disrupts " +
 			"no broker, and nothing added to the blast radius. When it runs, it acts in that namespace: on the pod " +
 			"its targetBrokerId names, on every pod its targetLabel matches with targetAll, or else on one of them " +
-			"picked at random. A step that leaves targetNamespace out is in namespace kafka.",
+			"picked at random. A step that leaves targetNamespace out is in kates.chaos.kafka.namespace.",
 		Refs: []string{
 			mcpAnchoredRef(mcpJava+"disruption/DisruptionSafetyGuard.java:40-41,140-149,237-253,403-426",
 				`name = "kates.chaos.kafka.namespace", defaultValue = "kafka"`,
@@ -174,7 +174,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 			mcpAnchoredRef("charts/kates/templates/configmap.yaml:11-12",
 				"$kafkaNamespace := tpl (.Values.networkPolicy.kafka.namespace", "KATES_CHAOS_KAFKA_NAMESPACE:"),
 			mcpJava + "chaos/PodTargets.java:40-51,58-77,83-105",
-			mcpJava + "chaos/FaultSpec.java:83",
+			mcpAnchoredRef(mcpJava+"chaos/FaultSpec.java:86-88",
+				`.getOptionalValue("kates.chaos.kafka.namespace", String.class)`),
 			"kates/src/main/resources/playbooks/consumer-isolation.yaml:10-12",
 		},
 	},
