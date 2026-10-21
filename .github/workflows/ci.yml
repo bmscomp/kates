@@ -293,8 +293,8 @@ jobs:
           fail() { echo "::error::kates rbac.scope=namespace: $1"; exit 1; }
           all=$(helm template kates charts/kates/ -n team --set rbac.scope=namespace \
                   --set networkPolicy.kafka.namespace=kafka-ns)
-          if grep -qE '^kind: (ClusterRole|ClusterRoleBinding)$' <<<"${all}"; then
-            fail "a ClusterRole or ClusterRoleBinding is rendered"
+          if grep -E '^kind: (Cluster[A-Za-z]*|Namespace|PriorityClass|CustomResourceDefinition|StorageClass)$' <<<"${all}"; then
+            fail "a cluster-scoped object is rendered"
           fi
           rbac=$(helm template kates charts/kates/ -n team --set rbac.scope=namespace \
                    --set networkPolicy.kafka.namespace=kafka-ns --show-only templates/rbac.yaml)

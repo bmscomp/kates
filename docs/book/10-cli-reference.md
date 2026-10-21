@@ -1440,6 +1440,8 @@ kates ports
 
 It first stops every `kubectl port-forward` you are running, including ones it did not start, such as those from `make ports`. It then forwards the API to `localhost:8080`, points the CLI context `ports` at that address, creating it the first time, and makes it the current context. No other context changes. The forwards keep running in the background after the command returns.
 
+It finds the services by listing them in every namespace. An account that may not, such as one with `edit` in its own namespace only, gets the services of `--app-ns` and `--kafka-ns` instead, so pass the namespace the Kates API runs in: `kates ports --app-ns team`. [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) in the Deployment Guide sets such an install up.
+
 A local port that another program already listens on is not forwarded, and the table marks it `[IN USE]`. When that port is the API's, `kates ports` leaves the `ports` context as it is and sends no key, since the program on the port, not the API, would receive it.
 
 It reads the API key from the `kates-api-key` Secret in the namespace where it found the API's Service, and nowhere else, and checks it with a request to `/api/tests/types`, which needs the key; `/api/health` would accept any key. A key the API accepts goes into `ports`, and so does one it cannot check because the API does not answer or fails with a status other than 401 or 403. A key the API rejects does not: `kates ports` says so and leaves the key that `ports` already had. A key you put in `ports` yourself, with `kates ctx set`, `kates ctx import` or an editor, stays whatever the Secret holds; `kates ports` reports whether the API accepts it.

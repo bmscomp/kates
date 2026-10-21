@@ -752,6 +752,85 @@ kates test list
 
 `kates ports` is the one-step alternative: it forwards the API to `localhost:8080` instead, writes that address and the key into a context of its own, `ports`, and makes it the current context, leaving every other context as it was. The Quick Start in [Introduction](01-introduction.md#quick-start) describes it, along with the commands for the single-namespace topology.
 
+## Running Without Cluster Admin
+
+On a shared cluster, a team usually gets a namespace and the built-in `edit` role in it, not cluster-admin. That is enough to run performance tests, INTEGRITY tests and [conformity checks](appendix-a-glossary.md#gl-conformity-check) with Kates, once an admin has installed [Strimzi](appendix-a-glossary.md#gl-strimzi) and the Kafka cluster. Performance and INTEGRITY runs make no Kubernetes API call: the [Kates API](appendix-a-glossary.md#gl-kates-api) talks only to Kafka. Two things need care, and the `kates` chart's `rbac.scope=namespace` handles both. The default install creates a ClusterRole, which `edit` can't do, and a conformity check reads the Kafka namespace, where the team has no rights. `kates deploy` stays an admin's tool, because it installs Strimzi, cert-manager, monitoring and Litmus.
+
+The work splits between three accounts, and only the team's is used day to day:
+
+| Who | Does what, and how often | Rights |
+|:---------------------|:-------------------------------------------------------------|:---------------------|
+| A cluster admin | Installs Strimzi and the Kafka cluster, once | cluster-admin |
+| The Kafka namespace's admin | Creates the team's Kafka credentials and applies one read-only Role, once per team | `admin` in the Kafka namespace |
+| The team | Installs the `kates` chart, then runs tests and checks | `edit` in the team's namespace |
+
+### Step 1 — Install the Chart in the Team's Namespace
+
+The team installs with plain Helm. `rbac.scope=namespace` renders nothing cluster-scoped, and `rbac.kafkaNamespaceRole=false` leaves out the Role in the Kafka namespace, which the team can't create:
+
+```bash
+helm upgrade --install kates charts/kates -n team \
+  --set rbac.scope=namespace \
+  --set rbac.kafkaNamespaceRole=false
+```
+
+The scope also turns chaos off: the chaos provider is `noop` unless `chaos.provider` names another, and the Kates API skips its startup orphan recovery, which lists NetworkPolicies in every namespace. The chart's Kafka settings stay as they are: the bootstrap address in `kafka.bootstrapServers`, and SCRAM as `kates-backend` with the password from the Secret `kates-backend` in the release namespace (`kafka.sasl.*`). Leave `metrics.serviceMonitor` off: `edit` covers ServiceMonitors only where the Prometheus Operator adds its roles to it, and the repository's `monitoring` chart doesn't.
+
+### Step 2 — Grant the Kafka Namespace's Reads
+
+The Kafka namespace's admin renders the Role from the same release name, namespace and values as the team's install, so that it binds the right ServiceAccount, and applies it:
+
+```bash
+helm template kates charts/kates -n team --set rbac.scope=namespace \
+  --show-only templates/rbac.yaml | kubectl apply -f -
+```
+
+The Role is `kates-kafka-reader-team` in the `kafka` namespace, and it only reads. Each grant serves part of a conformity check:
+
+| Resource | Verbs | What a conformity check reads |
+|:-------------------------------------|:-----|:----------------------------------------------------|
+| `kafkas` | get | The `Kafka` resource every check starts from |
+| `kafkanodepools` | list | Storage types and whether controllers are dedicated |
+| `pods`, `persistentvolumeclaims` | list | Counts, requests, limits, placement and storage sizes |
+| `podmonitors` | list | Whether a PodMonitor selects the brokers |
+
+Without the Role, a conformity check stops before its first rule: the Kates API answers 503 and says which grant is missing.
+
+The same admin creates a [KafkaUser](appendix-a-glossary.md#gl-kafkauser) for the team's Kates and copies its Secret into the team's namespace as `kates-backend`, the name `kafka.sasl.secretName` gives. [Adding a New Service](17-security.md#adding-a-new-service) in Security & Compliance shows a KafkaUser with ACLs. On a cluster that enforces them, Kates needs:
+
+- Create, Describe, Write and Read on each test topic: `<type>-test`, such as `load-test`, unless the test sets `--topic`.
+- Read on the consumer groups `*`, because the group names Kates picks start with the run's random id, unless the test sets `--consumer-group`.
+- Write and Describe on the transactional ids that start with `kates-`, for tests with transactions on.
+- Create, Describe, Write and Read on the topic `kates-test-events`, and Read on the group `kates-webhooks`, which carry run events to webhooks.
+
+### Step 3 — Reach the API and Verify
+
+`kates ports` lists Services in every namespace, and when the team's account may not, it looks in `--app-ns` and `--kafka-ns` instead. It forwards the API and writes its address and key into the `ports` [CLI context](appendix-a-glossary.md#gl-cli-context):
+
+```bash
+kates ports --app-ns team
+```
+
+Then run a LOAD test, an INTEGRITY test and a conformity check. In the check, the `zones` rule is a warning, for the reason the limits below give:
+
+```bash
+kates test create --type LOAD --records 100000 --wait
+kates test create --type INTEGRITY --records 50000 --acks all --wait
+kates conformity check -f team-reference.yaml
+```
+
+Both runs end `DONE`. A reference whose `spec` is `brokers: {count: {min: 3}, perNode: {max: 1}, zones: {min: 3, severity: warn}}` passes on a three-broker cluster, with `brokers.zones` UNKNOWN.
+
+### Limits
+
+The namespace scope trades these away:
+
+- Chaos: disruptions and resilience runs inject no fault while the provider is `noop`.
+- `zones`, `skew` and `kafka.rackAwareness` with `kafka.source: cr` read node labels, and nodes are cluster-scoped, so a check reports them UNKNOWN. An admin can grant `list` on nodes with a ClusterRole of its own.
+- `monitoring.podMonitor` sees only the Kafka namespace's PodMonitors, and is UNKNOWN when none there selects every broker pod.
+- `kates cluster alerts` reports no alert rules, because the Role doesn't grant reading PrometheusRules.
+- INTEGRATION_CDC creates KafkaTopic and KafkaConnector resources, and stays an admin's test.
+
 ## Makefile Reference
 
 ```mermaid
