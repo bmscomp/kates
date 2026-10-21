@@ -606,8 +606,9 @@ var mcpDryRunNamespaceRE = regexp.MustCompile(`no broker(?: pod)? in namespace '
 // leaves targetNamespace out is in kafka, the FaultSpec default. A named pod
 // is previewed whatever its namespace (DisruptionSafetyGuard.java:417-423).
 // The dry run names its namespace in its warning; when that text cannot be
-// read, the topology's namespace (kates.topology.kafka-namespace, set apart
-// from the dry run's but "kafka" by default for both) stands in.
+// read, the topology's namespace (kates.topology.kafka-namespace) stands in:
+// a setting apart from the dry run's, but "kafka" by default for both, and the
+// kates chart sets both from networkPolicy.kafka.namespace.
 func mcpInOtherNamespace(ds client.StepPreview, fs *mcpFaultSpecView, ctrl *mcpKRaftControllerIndex) bool {
 	if fs == nil || fs.TargetPod != "" || len(ds.AffectedPods) > 0 {
 		return false

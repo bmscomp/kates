@@ -7,6 +7,12 @@ metadata:
 data:
   KATES_KAFKA_BOOTSTRAP_SERVERS: {{ tpl .Values.kafka.bootstrapServers . | quote }}
   KATES_CDC_TOPIC_NAMESPACE: {{ tpl .Values.kafka.topicNamespace . | quote }}
+  {{- /* Also the namespace rbac.scope=namespace grants the conformity check's Role in. */}}
+  {{- $kafkaNamespace := tpl (.Values.networkPolicy.kafka.namespace | default "kafka") . }}
+  KATES_CHAOS_KAFKA_NAMESPACE: {{ $kafkaNamespace | quote }}
+  KATES_TOPOLOGY_KAFKA_NAMESPACE: {{ $kafkaNamespace | quote }}
+  KATES_CHAOS_KAFKA_CLUSTER: {{ .Values.kafka.clusterName | default "krafter" | quote }}
+  KATES_TOPOLOGY_KAFKA_CLUSTER: {{ .Values.kafka.clusterName | default "krafter" | quote }}
   KATES_KAFKA_SECURITY_PROTOCOL: {{ .Values.kafka.security.protocol | quote }}
   {{- if .Values.kafka.sasl.enabled }}
   KATES_KAFKA_SASL_MECHANISM: {{ .Values.kafka.sasl.mechanism | quote }}
@@ -179,10 +185,6 @@ data:
   {{- $namespaced := eq .Values.rbac.scope "namespace" }}
   {{- with .Values.chaos.provider | default (ternary "noop" "" $namespaced) }}
   KATES_CHAOS_PROVIDER: {{ . | quote }}
-  {{- end }}
-  {{- if $namespaced }}
-  {{- /* The namespace the conformity check reads is the one its Role is granted in. */}}
-  KATES_TOPOLOGY_KAFKA_NAMESPACE: {{ tpl (.Values.networkPolicy.kafka.namespace | default "kafka") . | quote }}
   {{- end }}
 
   {{- with .Values.faultTolerance }}

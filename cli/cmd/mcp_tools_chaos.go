@@ -159,7 +159,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 	{
 		ID: mcpCaveatDryRunOtherNamespace,
 		Text: "The safety guard refuses a step in any namespace but the one the dry run reads Kafka pods from " +
-			"(kates.chaos.kafka.namespace, kafka by default) and the Kates API's own. A step in the Kates API's " +
+			"(kates.chaos.kafka.namespace, kafka by default; the kates chart sets it from networkPolicy.kafka.namespace) " +
+			"and the Kates API's own. A step in the Kates API's " +
 			"namespace that names no targetPod is previewed as hitting nothing: no pods, a warning that it disrupts " +
 			"no broker, and nothing added to the blast radius. When it runs, it acts in that namespace: on the pod " +
 			"its targetBrokerId names, on every pod its targetLabel matches with targetAll, or else on one of them " +
@@ -170,6 +171,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 				"String katesNamespace = kubeClient.getNamespace();", `"': targetNamespace "`,
 				"impact(spec, kafkaPods).pods()", "this step disrupts no broker",
 				"Impact impact(FaultSpec spec, List<Pod> kafkaPods)", "return new Impact(List.of(spec.targetPod())"),
+			mcpAnchoredRef("charts/kates/templates/configmap.yaml:11-12",
+				"$kafkaNamespace := tpl (.Values.networkPolicy.kafka.namespace", "KATES_CHAOS_KAFKA_NAMESPACE:"),
 			mcpJava + "chaos/PodTargets.java:40-51,58-77,83-105",
 			mcpJava + "chaos/FaultSpec.java:83",
 			"kates/src/main/resources/playbooks/consumer-isolation.yaml:10-12",

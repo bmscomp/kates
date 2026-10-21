@@ -2,10 +2,10 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: Kates reaches the Kafka this release installs, in the release
-# namespace (kates 0.11.7 renders those values with tpl), and the Helm test pod
-# carries the label the brokers admit test pods by.
-version: 0.8.1
+# Patch: the kates floor moves to 0.12.1, whose configmap points the Kates
+# API's chaos, topology and conformity at networkPolicy.kafka.namespace, which
+# this umbrella sets to the release namespace.
+version: 0.8.2
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -20,7 +20,7 @@ dependencies:
     repository: "file://../kafka-cluster"
     condition: kafka-cluster.enabled
   - name: kates
-    version: ">=0.11.7 <1.0.0"
+    version: ">=0.12.1 <1.0.0"
     repository: "file://../kates"
     condition: kates.enabled
   - name: apicurio-registry
@@ -42,6 +42,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "In any namespace but kafka, the platform's Kates API reached the brokers but its chaos, cluster topology, cluster alerts and conformity checks still looked for Kafka in namespace kafka: chaos refused every plan with No broker pods found, and every conformity check returned 409. The kates floor moves to 0.12.1, which sets those settings from kates.networkPolicy.kafka.namespace, already the release namespace here, and their cluster name from kates.kafka.clusterName (krafter). kafka-cluster.clusterName other than krafter needs kates.kafka.clusterName and kates.kafka.bootstrapServers set to match. Run `make platform-chart-deps` before upgrading"
     - kind: fixed
       description: "Kates could not reach the Kafka the platform installs. The umbrella installs kafka-cluster in its release namespace, but the kates subchart kept its own defaults: bootstrap servers and the Trogdor coordinator in namespace kafka, and NetworkPolicy egress to namespace kafka only; and the platform profile admitted Kates to the brokers only from namespace kates. Installed in kates, as this README does, Kates looked up krafter-kafka-bootstrap.kafka.svc; installed in kafka, the brokers refused it. The umbrella now sets kates.kafka.bootstrapServers, kates.kafka.topicNamespace, kates.trogdor.coordinatorUrl and kates.networkPolicy.kafka.namespace from the release namespace (kates 0.11.7 renders them with tpl), and admits Kates to the brokers from the release namespace, so the platform works in any namespace. A release that set these keys keeps its own values. kafka-cluster.clusterName other than krafter needs kates.kafka.bootstrapServers set to match"
     - kind: fixed

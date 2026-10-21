@@ -17,6 +17,7 @@ kates:
   enabled: true
   kafka:
     bootstrapServers: "krafter-kafka-bootstrap.{{ .Release.Namespace }}.svc:9092"
+    clusterName: krafter
     topicNamespace: "{{ .Release.Namespace }}"
   trogdor:
     coordinatorUrl: "http://trogdor-coordinator.{{ .Release.Namespace }}.svc:8889"

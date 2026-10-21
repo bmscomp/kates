@@ -355,6 +355,9 @@ kafka:
   # trogdor.coordinatorUrl and networkPolicy.kafka.namespace go through tpl,
   # so a value may name {{ .Release.Namespace }}, as kates-platform does.
   bootstrapServers: "krafter-kafka-bootstrap.kafka.svc:9092"
+  # -- Name of the Strimzi Kafka cluster in networkPolicy.kafka.namespace that
+  # chaos, topology, cluster alerts and conformity act on (kates deploy sets it)
+  clusterName: krafter
   # -- Namespace where CDC integration test KafkaTopic CRs are managed (empty = auto-detect)
   topicNamespace: ""
   # -- Client rack ID for rack-aware consumption
@@ -460,7 +463,10 @@ networkPolicy:
       ports:
         - port: 8080
           protocol: TCP
-  # -- Kafka egress: the brokers on port and Trogdor on 8889 (kates deploy sets namespace)
+  # -- The namespace Kafka runs in: egress to the brokers on port and Trogdor
+  # on 8889, and the namespace the backend's chaos, topology, cluster alerts
+  # and conformity act in, whether or not the policy is enabled (kates deploy
+  # sets namespace)
   kafka:
     namespace: kafka
     port: 9092

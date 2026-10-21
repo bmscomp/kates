@@ -341,6 +341,7 @@
                     "minLength": 0
                 },
                 "topicNamespace": { "type": "string" },
+                "clusterName": { "type": "string" },
                 "clientRack": { "type": "string" },
                 "security": {
                     "type": "object",

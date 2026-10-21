@@ -38,6 +38,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `replicaCount` | `1` | Number of Kates API pods. Must be 1; see [One replica](#one-replica) |
 | `kafka.bootstrapServers` | `krafter-kafka-bootstrap.kafka.svc:9092` | Kafka bootstrap address. This, `kafka.topicNamespace`, `trogdor.coordinatorUrl` and `networkPolicy.kafka.namespace` go through `tpl`, so a value may name `{{ .Release.Namespace }}`, as kates-platform does |
 | `kafka.topicNamespace` | `""` | Namespace for CDC test `KafkaTopic` CRs (`""` = auto-detect) |
+| `kafka.clusterName` | `krafter` | Strimzi Kafka cluster, in `networkPolicy.kafka.namespace`, that chaos, topology, cluster alerts and conformity act on; `kates deploy` sets it |
 | `engine.defaultBackend` | `native` | Benchmark engine (`native` or `trogdor`) |
 | `engine.maxDurationMs` | `7200000` | Maximum planned duration accepted for one run |
 | `engine.reaperGraceMs` | `300000` | Grace after a `RUNNING` or `STOPPING` run's planned duration before the reaper fails it |
@@ -58,7 +59,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | `ingress.certManager.issuerName` | `""` | cert-manager issuer name |
 | `ingress.certManager.issuerKind` | `ClusterIssuer` | Issuer kind |
 | `networkPolicy.enabled` | `true` | Enable NetworkPolicy |
-| `networkPolicy.kafka.namespace` | `kafka` | Namespace the brokers (`networkPolicy.kafka.port`) and the Trogdor coordinator (8889) run in; `kates deploy` sets it |
+| `networkPolicy.kafka.namespace` | `kafka` | Namespace the brokers (`networkPolicy.kafka.port`) and the Trogdor coordinator (8889) run in; `kates deploy` sets it. The backend's chaos, topology, cluster alerts and conformity act in it too, with the policy on or off |
 | `networkPolicy.kafka.port` | `9092` | Kafka egress target port |
 | `networkPolicy.prometheus.namespace` | `monitoring` | Prometheus egress target namespace: the one `prometheus.url` points into |
 | `networkPolicy.prometheus.port` | `9090` | Prometheus egress target port |

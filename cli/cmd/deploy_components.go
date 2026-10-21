@@ -1700,7 +1700,9 @@ data:
 		katesArgs = append(katesArgs,
 			"--set", "kafka.bootstrapServers="+katesBootstrap,
 			"--set", "kafka.topicNamespace="+kafkaNS,
+			// Also the namespace and cluster the API's chaos, topology and conformity act on.
 			"--set", "networkPolicy.kafka.namespace="+kafkaNS,
+			"--set", "kafka.clusterName="+dc.primary.Name,
 			"--set", fmt.Sprintf("monitoring.enabled=%t", deployWithMonitoring))
 		katesArgs = append(katesArgs, dc.scrapeArgs("charts/kates")...)
 		katesArgs = append(katesArgs, dc.prometheusArgs()...)

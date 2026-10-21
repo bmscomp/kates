@@ -329,12 +329,17 @@ var mcpCaveatsCluster = []mcpCaveat{
 	{
 		ID: mcpCaveatTopologyUnreadLooksEmpty,
 		Text: "Node pools and controllers come from the Strimzi KafkaNodePool resources, and their pods, labelled " +
-			"with the cluster name the backend is configured with (kates.topology.kafka-cluster, default krafter) in " +
-			"its namespace (kates.topology.kafka-namespace, default kafka). A Kafka cluster with another name matches " +
+			"with the cluster name the backend is configured with (kates.topology.kafka-cluster, default krafter; the " +
+			"kates chart sets it from kafka.clusterName) in its namespace (kates.topology.kafka-namespace, default " +
+			"kafka; the chart sets it from networkPolicy.kafka.namespace). A Kafka cluster with another name matches " +
 			"nothing. The backend reads the pods pool by pool and stops at the first read that fails, logging it and " +
 			"keeping the pods it had, so a pool can show fewer pods than it has, or none. An empty list, or a pool " +
 			"with fewer pods than replicas, is therefore not evidence that controllers or brokers are missing.",
-		Refs: []string{mcpJava + "service/ClusterTopologyService.java:108-112,523-596,599-688"},
+		Refs: []string{
+			mcpJava + "service/ClusterTopologyService.java:108-112,523-596,599-688",
+			mcpAnchoredRef("charts/kates/templates/configmap.yaml:11,13,15", "$kafkaNamespace := tpl",
+				"KATES_TOPOLOGY_KAFKA_NAMESPACE:", "KATES_TOPOLOGY_KAFKA_CLUSTER:"),
+		},
 	},
 	{
 		ID: mcpCaveatGroupLagCommitted,

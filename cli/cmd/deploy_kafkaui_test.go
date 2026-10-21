@@ -7,11 +7,12 @@ import (
 	"testing"
 )
 
-// TestDeployCommand_KafkaUIFollowsKafkaName checks that Kafka UI is pointed
-// at the primary that --kafka-name names. It read kates detect's
-// --cluster-name instead, whose default is krafter, so a primary under any
-// other name got a Kafka UI whose KafkaUser and bootstrap address named a
-// cluster that does not exist.
+// TestDeployCommand_KafkaUIFollowsKafkaName checks that Kafka UI and the
+// Kates API are pointed at the primary that --kafka-name names. Kafka UI read
+// kates detect's --cluster-name instead, whose default is krafter, so a
+// primary under any other name got a Kafka UI whose KafkaUser and bootstrap
+// address named a cluster that does not exist; the Kates API's chaos,
+// topology and conformity stayed on krafter.
 func TestDeployCommand_KafkaUIFollowsKafkaName(t *testing.T) {
 	defer func() {
 		deployTopology = "isolated"
@@ -58,11 +59,17 @@ func TestDeployCommand_KafkaUIFollowsKafkaName(t *testing.T) {
 		t.Fatalf("runDeploy failed: %v", err)
 	}
 
-	var ui string
+	var ui, kates string
 	for _, c := range helmCommands {
 		if strings.Contains(c, "helm upgrade --install kafka-ui charts/kafka-ui") {
 			ui = c
 		}
+		if strings.Contains(c, "helm upgrade --install kates charts/kates") {
+			kates = c
+		}
+	}
+	if !strings.Contains(kates, "--set kafka.clusterName=orders ") {
+		t.Errorf("the Kates API is not pointed at the primary, orders:\n%s", kates)
 	}
 	if ui == "" {
 		t.Fatalf("Kafka UI was not installed; helm calls:\n%s", strings.Join(helmCommands, "\n"))

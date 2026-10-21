@@ -437,8 +437,12 @@ jobs:
         run: |
           fail() { echo "::error::kates-platform in namespace platform: $1"; exit 1; }
           show() { helm template p charts/kates-platform -n platform --show-only "charts/$1"; }
-          grep -q 'KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.platform.svc:9092"' \
-            <<<"$(show kates/templates/configmap.yaml)" || fail "Kates bootstraps from another namespace"
+          cm=$(show kates/templates/configmap.yaml)
+          grep -q 'KATES_KAFKA_BOOTSTRAP_SERVERS: "krafter-kafka-bootstrap.platform.svc:9092"' <<<"${cm}" \
+            || fail "Kates bootstraps from another namespace"
+          for v in CHAOS_KAFKA_NAMESPACE TOPOLOGY_KAFKA_NAMESPACE; do
+            grep -q "KATES_${v}: \"platform\"" <<<"${cm}" || fail "KATES_${v} names another namespace"
+          done
           np=$(show kates/templates/networkpolicy.yaml)
           grep -q 'kubernetes.io/metadata.name: "platform"' <<<"${np}" || fail "no Kates egress to the release namespace"
           if grep -q 'kubernetes.io/metadata.name: "kafka"' <<<"${np}"; then fail "Kates egress still names kafka"; fi
