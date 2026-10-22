@@ -1452,9 +1452,11 @@ stringData:
 		dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", connectNS)
 
 		// connect-cluster 2.0 is built on the kafka-common library, a file://
-		// dependency Helm refuses to render until it is built.
-		if err := runHelmFn(ctx, "dependency", "build", "charts/connect-cluster"); err != nil {
-			dl.Printf("    ✗ helm dependency build charts/connect-cluster: %v\n", err)
+		// dependency Helm refuses to render until it is built. `update`, not
+		// `build`: the git-ignored Chart.lock goes stale whenever kafka-common's
+		// version moves, and a file://-only lock cannot drift.
+		if err := runHelmFn(ctx, "dependency", "update", "--skip-refresh", "charts/connect-cluster"); err != nil {
+			dl.Printf("    ✗ helm dependency update charts/connect-cluster: %v\n", err)
 			return err
 		}
 
@@ -1858,9 +1860,9 @@ data:
 			}
 
 			// The chart depends on the kafka-common library (file://), which a
-			// checkout does not carry built.
-			if err := runHelmFn(ctx, "dependency", "build", "charts/mirror-maker2"); err != nil {
-				dl.Printf("    ✗ helm dependency build charts/mirror-maker2: %v\n", err)
+			// checkout does not carry built; `update` as for connect-cluster.
+			if err := runHelmFn(ctx, "dependency", "update", "--skip-refresh", "charts/mirror-maker2"); err != nil {
+				dl.Printf("    ✗ helm dependency update charts/mirror-maker2: %v\n", err)
 				dl.FinishComponent("mirror-maker2", false)
 				return err
 			}

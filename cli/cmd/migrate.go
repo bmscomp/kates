@@ -841,9 +841,11 @@ func helmSourceArgs(s *migrate.Source, valuesPath, userValues string, timeout ti
 // (the kafka-common library chart) before any helm command renders it. Helm
 // refuses a chart whose dependencies are declared but not built, and a
 // checkout does not carry them (charts/*/charts/ is gitignored). The build is
-// offline — the dependency is a file:// reference — and idempotent.
+// offline — the dependency is a file:// reference — and idempotent. `update`,
+// not `build`: the git-ignored Chart.lock goes stale whenever kafka-common's
+// version moves, and a file://-only lock cannot drift.
 func ensureMirrorChartDeps(ctx context.Context) error {
-	if _, err := defaultRunner.Run(ctx, "helm", "dependency", "build", migrate.MirrorChartPath); err != nil {
+	if _, err := defaultRunner.Run(ctx, "helm", "dependency", "update", "--skip-refresh", migrate.MirrorChartPath); err != nil {
 		return fmt.Errorf("build the %s dependencies: %w", migrate.MirrorChartPath, err)
 	}
 	return nil

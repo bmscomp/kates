@@ -718,7 +718,7 @@ func TestDeployKafkaConnectStackReconcilesExistingReleaseWhenKafkaConnectNotRead
 		t.Fatalf("deployKafkaConnectStack returned error: %v", err)
 	}
 
-	if !sliceContainsPrefix(helmCalls, "dependency build charts/connect-cluster") {
+	if !sliceContainsPrefix(helmCalls, "dependency update --skip-refresh charts/connect-cluster") {
 		t.Fatalf("Connect chart dependencies were not built; helm calls = %v", helmCalls)
 	}
 	var upgrade string
