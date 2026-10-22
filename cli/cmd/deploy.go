@@ -193,6 +193,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		if err := checkAdminlessPrerequisites(context.Background(), resolveNamespaces()); err != nil {
 			return err
 		}
+		adminlessConformityMissing = missingConformityGrants(context.Background(), resolveNamespaces().kafka)
+		if len(adminlessConformityMissing) > 0 {
+			output.Warn(conformityRoleHandoff(resolveNamespaces(), adminlessConformityMissing))
+		}
 	}
 
 	// ── Interactive Forms ────────────────────────────────────────────────
@@ -442,6 +446,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	if deployErr == nil && len(finalEntries) > 0 {
 		RenderDeployDashboard(ctx, finalEntries, deployElapsed)
+		// Said again here, where the deploy ends, so it isn't lost above the dashboard.
+		if deployAdminless && len(adminlessConformityMissing) > 0 {
+			output.Warn(conformityRoleHandoff(ns, adminlessConformityMissing))
+		}
 
 		// Store the key from Secret kates-api-key in the active context,
 		// unless that context holds a key kates did not put there.

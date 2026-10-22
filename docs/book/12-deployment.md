@@ -960,6 +960,13 @@ Before installing, it checks two things and stops with what is missing:
 - A Strimzi operator is installed (the `kafka.strimzi.io` resources exist). A cluster admin installs it once, watching the Kafka, Connect and MirrorMaker 2 namespaces.
 - The account may create what the stack needs in each namespace: Strimzi's resources where each is made (the Kafka cluster, its topics and users in the Kafka namespace, Connect's in the Connect namespace, MirrorMaker 2's in its own), and everywhere Deployments, StatefulSets, Services, Secrets, ConfigMaps, ServiceAccounts, NetworkPolicies, Roles and RoleBindings. The built-in `admin` role covers all but Strimzi's. A cluster admin adds those by setting `strimzi-kafka-operator.createAggregateRoles=true` on the Strimzi release, which adds them to `admin` and `edit`.
 
+Conformity checks need the read-only Role the `kates` chart creates in the Kafka namespace ([Step 1](#step-1--grant-the-teams-kates-access-to-kafka) lists its grants). Kubernetes lets an account create a Role only for permissions it holds, so `kates deploy --adminless` first asks whether the account holds each of them there. When it does, the Role is installed and conformity checks work. When it lacks any (PodMonitors are the usual one: the built-in `admin` role doesn't include them), Kates installs without it (`rbac.kafkaNamespaceRole=false`), everything else works, and deploy names the missing reads and prints the command an account that holds them runs to turn conformity checks on:
+
+```bash
+helm template kates charts/kates -n team-kates --set rbac.scope=namespace \
+  --set networkPolicy.kafka.namespace=team-kafka --show-only templates/rbac.yaml | kubectl apply -f -
+```
+
 The operator's version can't be read without cluster-wide reads, so the Kafka version follows the repository's Strimzi pin. Where the admin's operator is another release, pass `--strimzi-version` to match it. The DNS domain is taken to be `cluster.local`.
 
 ### Limits

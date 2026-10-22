@@ -1755,6 +1755,9 @@ data:
 		if deployAdminless {
 			// No ClusterRole: a Role in the namespace, chaos off.
 			katesArgs = append(katesArgs, "--set", "rbac.scope=namespace")
+			if len(adminlessConformityMissing) > 0 {
+				katesArgs = append(katesArgs, "--set", "rbac.kafkaNamespaceRole=false")
+			}
 		}
 		katesArgs = append(katesArgs, "--timeout", "8m")
 

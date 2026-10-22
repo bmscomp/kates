@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/pflag"
 )
 
@@ -56,7 +58,7 @@ func adminlessClusterRead(refuse string) func(context.Context, string, ...string
 		switch {
 		case strings.Contains(joined, "auth can-i * *"):
 			return []byte("no\n"), nil
-		case strings.Contains(joined, "auth can-i create"):
+		case strings.Contains(joined, "auth can-i "):
 			if refuse != "" && strings.Contains(joined, refuse) {
 				return []byte("no\n"), nil
 			}
@@ -214,5 +216,65 @@ func TestApplyAdminlessProfile_RefusesClusterScopedFlags(t *testing.T) {
 	_ = deployCmd.Flags().Set("with-chaos", "true")
 	if err := applyAdminlessProfile(context.Background(), deployCmd); err == nil || !strings.Contains(err.Error(), "--with-chaos") {
 		t.Errorf("want --with-chaos refused, got %v", err)
+	}
+}
+
+func TestRunDeploy_AdminlessConformityRoleFollowsTheGrants(t *testing.T) {
+	for _, tc := range []struct {
+		name, refuse string
+		withRole     bool
+	}{
+		{"all reads held", "", true},
+		{"no PodMonitor reads", "podmonitors", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origOutput, origCombined, origHelm, origExec := runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn
+			origStdin, origDeployed := runExecStdinFn, isHelmReleaseDeployedFn
+			t.Cleanup(func() {
+				runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn = origOutput, origCombined, origHelm, origExec
+				runExecStdinFn, isHelmReleaseDeployedFn = origStdin, origDeployed
+			})
+			setDeployFlags(t, func() {
+				deployAdminless, deployDryRun, deployTopology = true, false, "isolated"
+				deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI = false, false, false
+			})
+			setAdminlessNamespaces(t)
+			resetDeployFlagsChanged(t)
+			t.Chdir(t.TempDir())
+
+			runExecOutputFn, runExecCombinedFn = adminlessClusterRead(tc.refuse), adminlessClusterRead(tc.refuse)
+			var mu sync.Mutex
+			var kates string
+			runHelmFn = func(_ context.Context, args ...string) error {
+				if len(args) > 2 && args[0] == "upgrade" && args[2] == "kates" {
+					mu.Lock()
+					kates = strings.Join(args, " ")
+					mu.Unlock()
+				}
+				return nil
+			}
+			runExecFn = func(context.Context, string, ...string) error { return nil }
+			runExecStdinFn = func(context.Context, string, []string, string) error { return nil }
+			isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+
+			var buf bytes.Buffer
+			origOut := output.Out
+			output.Out = &buf
+			t.Cleanup(func() { output.Out = origOut })
+			if err := runDeploy(deployCmd, nil); err != nil {
+				t.Fatalf("runDeploy: %v", err)
+			}
+			out := buf.String()
+			if got := !strings.Contains(kates, "rbac.kafkaNamespaceRole=false"); got != tc.withRole {
+				t.Errorf("Role installed = %v, want %v: %s", got, tc.withRole, kates)
+			}
+			handoff := "--set networkPolicy.kafka.namespace=team-kafka --show-only templates/rbac.yaml | kubectl apply -f -"
+			if printed := strings.Contains(out, handoff); printed == tc.withRole {
+				t.Errorf("admin command printed = %v, want %v:\n%s", printed, !tc.withRole, out)
+			}
+			if !tc.withRole && !strings.Contains(out, "list podmonitors.monitoring.coreos.com") {
+				t.Errorf("the missing read is not named:\n%s", out)
+			}
+		})
 	}
 }

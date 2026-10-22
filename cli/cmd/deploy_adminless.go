@@ -186,3 +186,44 @@ The built-in admin role in a namespace covers the core resources. For Strimzi's,
 admin either sets strimzi-kafka-operator.createAggregateRoles=true on the Strimzi release
 (it adds them to admin and edit), or binds a ClusterRole that grants them there`, strings.Join(missing, "\n  "))
 }
+
+// The reads the kates chart's Kafka-reader Role grants in the Kafka namespace
+// (charts/kates/templates/rbac.yaml), which a conformity check needs. RBAC lets
+// an account create a Role only for permissions it holds, so the install
+// creates it only when the account holds all of them.
+var conformityReaderGrants = [][2]string{
+	{"get", "kafkas.kafka.strimzi.io"},
+	{"list", "kafkanodepools.kafka.strimzi.io"},
+	{"list", "pods"},
+	{"list", "persistentvolumeclaims"},
+	{"list", "podmonitors.monitoring.coreos.com"},
+	{"list", "endpointslices.discovery.k8s.io"},
+}
+
+// adminlessConformityMissing holds the reads the account lacks in the Kafka
+// namespace; when it is not empty Kates installs without the Role.
+var adminlessConformityMissing []string
+
+func missingConformityGrants(ctx context.Context, kafkaNS string) []string {
+	var missing []string
+	for _, g := range conformityReaderGrants {
+		answer, _ := runExecOutputFn(ctx, "kubectl", "auth", "can-i", g[0], g[1], "-n", kafkaNS)
+		if strings.TrimSpace(string(answer)) != "yes" {
+			missing = append(missing, g[0]+" "+g[1])
+		}
+	}
+	return missing
+}
+
+// conformityRoleHandoff tells the user how an admin turns conformity checks on
+// when the install had to leave the Role out.
+func conformityRoleHandoff(ns resolvedNamespaces, missing []string) string {
+	return fmt.Sprintf(`Conformity checks are off: Kates needs a read-only Role in namespace %s, and this account
+may not create it because it lacks: %s.
+Everything else works. To turn conformity checks on, an account that holds those reads there
+(a cluster admin) runs, from this repository:
+
+  helm template kates charts/kates -n %s --set rbac.scope=namespace \
+    --set networkPolicy.kafka.namespace=%s --show-only templates/rbac.yaml | kubectl apply -f -`,
+		ns.kafka, strings.Join(missing, ", "), ns.app, ns.kafka)
+}
