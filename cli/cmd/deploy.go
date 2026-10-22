@@ -43,9 +43,10 @@ Examples:
   # One operator per Kafka namespace, so older lines can run beside the primary
   kates deploy --operator-scope namespace
 
-  # Without cluster admin: the Kafka stack and Kates in one namespace you have,
+  # Without cluster admin: the Kafka stack and Kates in namespaces you have,
   # on a Strimzi operator a cluster admin installed
-  kates deploy --adminless --namespace team
+  kates deploy --adminless --kafka-ns team-kafka --connect-ns team-connect --db-ns team-db --app-ns team-kates
+  kates deploy --adminless --topology single --namespace team
 
 A cluster admin gets the full profile. For any other account, deploy says so
 and offers the admin-less profile instead.`,
@@ -127,7 +128,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployStrimziChart, "strimzi-chart", "", "Local strimzi-kafka-operator chart tarball to install from (air-gapped mirrors)")
 	deployCmd.Flags().StringVar(&deployKafkaVersion, "kafka-version", "", "Kafka version for the primary cluster (default: the newest the operator supports; 'latest' spells the default)")
 	deployCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
-	deployCmd.Flags().BoolVar(&deployAdminless, "adminless", false, "Install without cluster admin: Kafka, Kafka Connect, MirrorMaker 2, Apicurio, Kafka UI and Kates in one existing namespace (--namespace, default the kube context's), on a Strimzi operator already watching it")
+	deployCmd.Flags().BoolVar(&deployAdminless, "adminless", false, "Install without cluster admin: Kafka, Kafka Connect, MirrorMaker 2, Apicurio, Kafka UI and Kates into existing namespaces placed by --topology and the --*-ns flags (single: --namespace, default the kube context's), on a Strimzi operator already watching them")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -189,7 +190,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		if err := applyAdminlessProfile(context.Background(), cmd); err != nil {
 			return err
 		}
-		if err := checkAdminlessPrerequisites(context.Background(), deployNamespace); err != nil {
+		if err := checkAdminlessPrerequisites(context.Background(), resolveNamespaces()); err != nil {
 			return err
 		}
 	}

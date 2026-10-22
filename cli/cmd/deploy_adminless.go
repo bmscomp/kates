@@ -2,8 +2,8 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -11,12 +11,13 @@ import (
 )
 
 // The admin-less profile: what kates deploy installs for an account that is
-// not cluster-admin. Everything goes into one namespace the account already
-// has — Kafka, Kafka Connect with its PostgreSQL, MirrorMaker 2, Apicurio,
-// Kafka UI and the Kates backend (rbac.scope=namespace) — and every step that
+// not cluster-admin. Kafka, Kafka Connect with its PostgreSQL, MirrorMaker 2,
+// Apicurio, Kafka UI and the Kates backend (rbac.scope=namespace) go into
+// namespaces the account already has, as --topology and the --*-ns flags place
+// them — one per component by default, or one for all — and every step that
 // needs the cluster (Strimzi, cert-manager, Kyverno, monitoring, Litmus,
 // node introspection, StorageClasses, namespace creation) is left out. A
-// cluster admin must already run a Strimzi operator that watches the namespace.
+// cluster admin must already run a Strimzi operator that watches the namespaces.
 
 var deployAdminless bool
 
@@ -51,10 +52,6 @@ func applyAdminlessProfile(ctx context.Context, cmd *cobra.Command) error {
 			return fmt.Errorf("--%s needs cluster admin, so it cannot go with the admin-less profile", name)
 		}
 	}
-	if f := cmd.Flags().Lookup("topology"); f != nil && f.Changed && f.Value.String() != "single" {
-		return errors.New("the admin-less profile installs into one namespace; drop --topology or set it to single")
-	}
-
 	deployAdminless = true
 	deployWithStrimzi, deployWithCertManager, deployWithKyverno, deployWithSecretManager = false, false, false, false
 	deployWithChaos, deployWithMonitoring = false, false
@@ -68,14 +65,17 @@ func applyAdminlessProfile(ctx context.Context, cmd *cobra.Command) error {
 		}
 	}
 
-	deployTopology = "single"
-	if !cmd.Flags().Changed("namespace") {
-		if ns := kubeContextNamespace(ctx); ns != "" {
-			deployNamespace = ns
+	if deployTopology == "single" {
+		if !cmd.Flags().Changed("namespace") {
+			if ns := kubeContextNamespace(ctx); ns != "" {
+				deployNamespace = ns
+			}
+		}
+		// PostgreSQL has its own namespace flag even in single topology.
+		if !cmd.Flags().Changed("db-ns") {
+			deployDbNS = deployNamespace
 		}
 	}
-	// PostgreSQL has its own namespace flag even in single topology.
-	deployDbNS = deployNamespace
 	return nil
 }
 
@@ -101,22 +101,20 @@ func adminlessSuggestion(kubeContext string) string {
 monitoring, Litmus, several namespaces) cannot be installed.
 
 The admin-less profile installs Kafka, Kafka Connect, MirrorMaker 2, Apicurio, Kafka UI
-and the Kates backend into one namespace you already have:
+and the Kates backend into namespaces you already have, one per component:
 
-  kates deploy --adminless --namespace %s
+  kates deploy --adminless --kafka-ns <ns> --connect-ns <ns> --db-ns <ns> --app-ns <ns>
 
-It needs a Strimzi operator, installed by a cluster admin, that watches that namespace.`, kubeContext, ns)
+or all in one:
+
+  kates deploy --adminless --topology single --namespace %s
+
+It needs a Strimzi operator, installed by a cluster admin, that watches the Kafka,
+Connect and MirrorMaker 2 namespaces.`, kubeContext, ns)
 }
 
-// The resources the admin-less stack creates in its namespace.
-var adminlessRequiredGrants = []string{
-	"kafkas.kafka.strimzi.io",
-	"kafkanodepools.kafka.strimzi.io",
-	"kafkatopics.kafka.strimzi.io",
-	"kafkausers.kafka.strimzi.io",
-	"kafkaconnects.kafka.strimzi.io",
-	"kafkaconnectors.kafka.strimzi.io",
-	"kafkamirrormaker2s.kafka.strimzi.io",
+// The resources every admin-less component creates in its namespace.
+var adminlessCoreGrants = []string{
 	"deployments.apps",
 	"statefulsets.apps",
 	"services",
@@ -128,32 +126,63 @@ var adminlessRequiredGrants = []string{
 	"rolebindings.rbac.authorization.k8s.io",
 }
 
+// adminlessGrants is what the account must be able to create, per namespace:
+// the core resources everywhere, and Strimzi's where each one is made.
+func adminlessGrants(ns resolvedNamespaces) map[string][]string {
+	grants := map[string][]string{}
+	add := func(namespace string, resources ...string) {
+		grants[namespace] = append(grants[namespace], resources...)
+	}
+	for _, namespace := range selectedDeployNamespaces(&deployContext{ns: ns}) {
+		add(namespace, adminlessCoreGrants...)
+	}
+	add(ns.kafka, "kafkas.kafka.strimzi.io", "kafkanodepools.kafka.strimzi.io", "kafkatopics.kafka.strimzi.io", "kafkausers.kafka.strimzi.io")
+	if deployWithKafkaConnect {
+		add(ns.connect, "kafkaconnects.kafka.strimzi.io", "kafkaconnectors.kafka.strimzi.io", "kafkatopics.kafka.strimzi.io")
+	}
+	if deployWithMirrorMaker2 {
+		add(ns.mm2, "kafkamirrormaker2s.kafka.strimzi.io")
+	}
+	for namespace, resources := range grants {
+		slices.Sort(resources)
+		grants[namespace] = slices.Compact(resources)
+	}
+	return grants
+}
+
 // checkAdminlessPrerequisites fails before anything is installed when Strimzi
 // is missing or the account may not create what the stack needs.
-func checkAdminlessPrerequisites(ctx context.Context, namespace string) error {
+func checkAdminlessPrerequisites(ctx context.Context, ns resolvedNamespaces) error {
 	out, _ := runExecOutputFn(ctx, "kubectl", "api-resources", "--api-group=kafka.strimzi.io", "-o", "name")
 	if !slices.Contains(strings.Fields(string(out)), "kafkas.kafka.strimzi.io") {
 		return fmt.Errorf(`no Strimzi operator is installed on this cluster, and installing it needs cluster admin.
 Ask a cluster admin to install the operator watching namespace %s, for example:
 
   helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator --create-namespace \
-    --set strimzi-kafka-operator.createAggregateRoles=true`, namespace)
+    --set strimzi-kafka-operator.createAggregateRoles=true`, ns.kafka)
 	}
 
+	grants := adminlessGrants(ns)
 	var missing []string
-	for _, resource := range adminlessRequiredGrants {
-		answer, _ := runExecOutputFn(ctx, "kubectl", "auth", "can-i", "create", resource, "-n", namespace)
-		if strings.TrimSpace(string(answer)) != "yes" {
-			missing = append(missing, resource)
+	for _, namespace := range slices.Sorted(maps.Keys(grants)) {
+		var refused []string
+		for _, resource := range grants[namespace] {
+			answer, _ := runExecOutputFn(ctx, "kubectl", "auth", "can-i", "create", resource, "-n", namespace)
+			if strings.TrimSpace(string(answer)) != "yes" {
+				refused = append(refused, resource)
+			}
+		}
+		if len(refused) > 0 {
+			missing = append(missing, namespace+": "+strings.Join(refused, ", "))
 		}
 	}
 	if len(missing) == 0 {
 		return nil
 	}
-	return fmt.Errorf(`this account may not create these in namespace %s:
+	return fmt.Errorf(`this account may not create what the admin-less stack needs (or the namespace does not exist):
   %s
 
-The built-in admin role covers the core ones. For Strimzi's, a cluster admin either sets
-strimzi-kafka-operator.createAggregateRoles=true on the Strimzi release (it adds them to
-admin and edit), or binds a ClusterRole that grants them in %s`, namespace, strings.Join(missing, "\n  "), namespace)
+The built-in admin role in a namespace covers the core resources. For Strimzi's, a cluster
+admin either sets strimzi-kafka-operator.createAggregateRoles=true on the Strimzi release
+(it adds them to admin and edit), or binds a ClusterRole that grants them there`, strings.Join(missing, "\n  "))
 }

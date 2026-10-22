@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -69,82 +70,139 @@ func adminlessClusterRead(refuse string) func(context.Context, string, ...string
 	}
 }
 
-func TestRunDeploy_AdminlessInstallsTheStackInOneNamespace(t *testing.T) {
-	origOutput, origCombined, origHelm, origExec := runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn
-	origStdin, origDeployed := runExecStdinFn, isHelmReleaseDeployedFn
+// setAdminlessNamespaces points the isolated topology at a team's namespaces.
+func setAdminlessNamespaces(t *testing.T) {
+	t.Helper()
+	kafka, connect, db, app, ui, mm2 := deployKafkaNS, deployConnectNS, deployDbNS, deployAppNS, deployKafkaUINS, deployMM2NS
 	t.Cleanup(func() {
-		runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn = origOutput, origCombined, origHelm, origExec
-		runExecStdinFn, isHelmReleaseDeployedFn = origStdin, origDeployed
+		deployKafkaNS, deployConnectNS, deployDbNS, deployAppNS, deployKafkaUINS, deployMM2NS = kafka, connect, db, app, ui, mm2
 	})
-	setDeployFlags(t, func() {
-		deployAdminless, deployWithSchemaRegistry, deployDryRun = true, "apicurio", false
-		deployWithChaos, deployWithMonitoring, deployWithCertManager, deployWithStrimzi = true, true, true, true
-		deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI = false, false, false
-	})
-	resetDeployFlagsChanged(t)
-	t.Chdir(t.TempDir())
+	deployKafkaNS, deployConnectNS, deployDbNS, deployAppNS = "team-kafka", "team-connect", "team-db", "team-kates"
+	deployKafkaUINS, deployMM2NS = "team-kafka", "team-mm2"
+}
 
-	runExecOutputFn, runExecCombinedFn = adminlessClusterRead(""), adminlessClusterRead("")
-	var mu sync.Mutex
-	var installs []string
-	runHelmFn = func(_ context.Context, args ...string) error {
-		if len(args) > 2 && args[0] == "upgrade" {
-			mu.Lock()
-			installs = append(installs, strings.Join(args, " "))
-			mu.Unlock()
-		}
-		return nil
-	}
-	runExecFn = func(context.Context, string, ...string) error { return nil }
-	runExecStdinFn = func(context.Context, string, []string, string) error { return nil }
-	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+func TestRunDeploy_AdminlessInstallsTheStack(t *testing.T) {
+	for _, tc := range []struct {
+		topology string
+		want     map[string]string // release → namespace
+	}{
+		{"isolated", map[string]string{
+			"krafter": "team-kafka", "apicurio": "team-kafka", "kafka-ui": "team-kafka",
+			"postgresql": "team-db", "connect-cluster": "team-connect", "mm2": "team-mm2", "kates": "team-kates",
+		}},
+		// One namespace, the kube context's.
+		{"single", map[string]string{
+			"krafter": "team", "apicurio": "team", "kafka-ui": "team",
+			"postgresql": "team", "connect-cluster": "team", "mm2": "team", "kates": "team",
+		}},
+	} {
+		t.Run(tc.topology, func(t *testing.T) {
+			origOutput, origCombined, origHelm, origExec := runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn
+			origStdin, origDeployed := runExecStdinFn, isHelmReleaseDeployedFn
+			t.Cleanup(func() {
+				runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn = origOutput, origCombined, origHelm, origExec
+				runExecStdinFn, isHelmReleaseDeployedFn = origStdin, origDeployed
+			})
+			setDeployFlags(t, func() {
+				deployAdminless, deployWithSchemaRegistry, deployDryRun = true, "apicurio", false
+				deployWithChaos, deployWithMonitoring, deployWithCertManager, deployWithStrimzi = true, true, true, true
+				deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI = false, false, false
+				deployTopology = tc.topology
+			})
+			setAdminlessNamespaces(t)
+			resetDeployFlagsChanged(t)
+			t.Chdir(t.TempDir())
 
-	if err := runDeploy(deployCmd, nil); err != nil {
-		t.Fatalf("runDeploy: %v", err)
-	}
+			runExecOutputFn, runExecCombinedFn = adminlessClusterRead(""), adminlessClusterRead("")
+			var mu sync.Mutex
+			var installs []string
+			runHelmFn = func(_ context.Context, args ...string) error {
+				if len(args) > 2 && args[0] == "upgrade" {
+					mu.Lock()
+					installs = append(installs, strings.Join(args, " "))
+					mu.Unlock()
+				}
+				return nil
+			}
+			runExecFn = func(context.Context, string, ...string) error { return nil }
+			runExecStdinFn = func(context.Context, string, []string, string) error { return nil }
+			isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
 
-	installed := map[string]string{}
-	for _, c := range installs {
-		installed[strings.Fields(c)[2]] = c
-	}
-	for _, release := range []string{"krafter", "postgresql", "connect-cluster", "mm2", "apicurio", "kafka-ui", "kates"} {
-		c, ok := installed[release]
-		if !ok {
-			t.Errorf("release %s not installed; installs: %v", release, installs)
-			continue
-		}
-		if !strings.Contains(c, "-n team") {
-			t.Errorf("release %s not in namespace team: %s", release, c)
-		}
-	}
-	for _, release := range []string{"strimzi-operator", "cert-manager", "kyverno", "monitoring", "chaos"} {
-		if _, ok := installed[release]; ok {
-			t.Errorf("cluster-scoped release %s installed admin-less", release)
-		}
-	}
-	if !strings.Contains(installed["kates"], "--set rbac.scope=namespace") {
-		t.Errorf("kates without rbac.scope=namespace: %s", installed["kates"])
+			if err := runDeploy(deployCmd, nil); err != nil {
+				t.Fatalf("runDeploy: %v", err)
+			}
+
+			installed := map[string]string{}
+			for _, c := range installs {
+				installed[strings.Fields(c)[2]] = c
+			}
+			for release, namespace := range tc.want {
+				c, ok := installed[release]
+				if !ok {
+					t.Errorf("release %s not installed; installs: %v", release, installs)
+					continue
+				}
+				if !strings.Contains(c, "-n "+namespace+" ") {
+					t.Errorf("release %s not in namespace %s: %s", release, namespace, c)
+				}
+			}
+			for _, release := range []string{"strimzi-operator", "cert-manager", "kyverno", "monitoring", "chaos"} {
+				if _, ok := installed[release]; ok {
+					t.Errorf("cluster-scoped release %s installed admin-less", release)
+				}
+			}
+			if !strings.Contains(installed["kates"], "--set rbac.scope=namespace") {
+				t.Errorf("kates without rbac.scope=namespace: %s", installed["kates"])
+			}
+		})
 	}
 }
 
 func TestCheckAdminlessPrerequisites(t *testing.T) {
 	orig := runExecOutputFn
 	t.Cleanup(func() { runExecOutputFn = orig })
+	setDeployFlags(t, func() {
+		deployTopology, deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI = "isolated", true, true, true
+		deployWithMonitoring, deployWithChaos = false, false
+	})
+	setAdminlessNamespaces(t)
+	ns := resolveNamespaces()
 
 	runExecOutputFn = adminlessClusterRead("")
-	if err := checkAdminlessPrerequisites(context.Background(), "team"); err != nil {
+	if err := checkAdminlessPrerequisites(context.Background(), ns); err != nil {
 		t.Errorf("everything granted: %v", err)
 	}
 
 	runExecOutputFn = adminlessClusterRead("kafkamirrormaker2s")
-	err := checkAdminlessPrerequisites(context.Background(), "team")
-	if err == nil || !strings.Contains(err.Error(), "kafkamirrormaker2s.kafka.strimzi.io") || strings.Contains(err.Error(), "kafkas.kafka") {
-		t.Errorf("want only the refused grant named, got %v", err)
+	err := checkAdminlessPrerequisites(context.Background(), ns)
+	if err == nil || !strings.Contains(err.Error(), "team-mm2: kafkamirrormaker2s.kafka.strimzi.io") || strings.Contains(err.Error(), "team-kafka") {
+		t.Errorf("want only the refused grant named, in its namespace, got %v", err)
 	}
 
 	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return nil, nil }
-	if err := checkAdminlessPrerequisites(context.Background(), "team"); err == nil || !strings.Contains(err.Error(), "no Strimzi operator is installed") {
+	if err := checkAdminlessPrerequisites(context.Background(), ns); err == nil || !strings.Contains(err.Error(), "no Strimzi operator is installed") {
 		t.Errorf("want the missing operator named, got %v", err)
+	}
+}
+
+func TestAdminlessGrants_StrimziWhereEachIsMade(t *testing.T) {
+	setDeployFlags(t, func() {
+		deployTopology, deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI = "isolated", true, true, true
+		deployWithMonitoring, deployWithChaos = false, false
+	})
+	setAdminlessNamespaces(t)
+	grants := adminlessGrants(resolveNamespaces())
+
+	for namespace, want := range map[string]string{
+		"team-kafka": "kafkas.kafka.strimzi.io", "team-connect": "kafkaconnects.kafka.strimzi.io",
+		"team-mm2": "kafkamirrormaker2s.kafka.strimzi.io", "team-db": "statefulsets.apps", "team-kates": "roles.rbac.authorization.k8s.io",
+	} {
+		if !slices.Contains(grants[namespace], want) {
+			t.Errorf("%s: want %s in %v", namespace, want, grants[namespace])
+		}
+	}
+	if slices.Contains(grants["team-kates"], "kafkas.kafka.strimzi.io") {
+		t.Errorf("team-kates asked for Kafka resources it never creates: %v", grants["team-kates"])
 	}
 }
 
