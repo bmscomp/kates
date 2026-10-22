@@ -875,7 +875,7 @@ The work splits between three accounts, and only the team's is used day to day:
 
 Kubernetes lets an account create a Role only for permissions it holds itself, unless it may escalate. The built-in `admin` role holds Strimzi's resources and PodMonitors only where those operators add their own roles to it, and on this repository's stack they don't, so there the middle row is a cluster admin too.
 
-### Step 1 — Grant the Team's Kates Access to Kafka
+### Step 1 — Grant the Team's Kates Access to Kafka {#step-1--grant-the-teams-kates-access-to-kafka}
 
 The granting account creates a [KafkaUser](appendix-a-glossary.md#gl-kafkauser) for the team's Kates, here `team-kates`, and hands its password to the team. [Adding a New Service](17-security.md#adding-a-new-service) in Security & Compliance shows a KafkaUser with ACLs. On a cluster that enforces them, Kates needs:
 
