@@ -4,7 +4,9 @@ name: kates-chaos
 # PSS restricted securityContext and resources by default, so an installer or
 # GameDay image that needs root stops starting; GameDay and the tests move to
 # kates-tester, which has the shell they need.
-version: 2.3.0
+# Patch: images.tester moves to kates-tester 1.29.0, the tag the v1.29.0
+# release publishes; check-versions.sh holds it to the kates appVersion.
+version: 2.3.1
 # Tracks the LitmusChaos execution-plane version this chart deploys.
 appVersion: "3.28.0"
 description: Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring
@@ -28,6 +30,8 @@ annotations:
   artifacthub.io/category: skip-prediction
   artifacthub.io/prerelease: "false"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "images.tester moves to kates-tester 1.29.0, the tag the v1.29.0 release publishes (scripts/check-versions.sh holds it to the kates chart's appVersion). The image is unchanged since 1.28.0 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: fixed
       description: "The GameDay Job and both helm test pods never started: they run their checks with sh, and registry.k8s.io/kubectl has no shell (StartError: exec: \"sh\": executable file not found in $PATH), so helm test and gameday.enabled always failed. They now run images.tester, ghcr.io/bmscomp/kates-tester:1.28.0 (a shell and kubectl, pinned to the kates appVersion like every chart's test image), as its own uid and gid 1000. images.kubectl is now the installer Job's image only; a gameday.image override still wins"
     - kind: changed
