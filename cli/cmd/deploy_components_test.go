@@ -478,6 +478,7 @@ func TestDeployGroupAAppliesLocalStrimziCRDsAndDisablesHook(t *testing.T) {
 	for _, want := range []string{
 		"upgrade --install strimzi-operator /cache/wrapper/1.2.0",
 		"--set crdUpgrade.enabled=false",
+		"--skip-crds",
 		"--set strimziVersion=1.2.0",
 		"--set strimzi-kafka-operator.kubernetesServiceDnsDomain=cluster.test",
 	} {
