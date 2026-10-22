@@ -964,7 +964,8 @@ Conformity checks need the read-only Role the `kates` chart creates in the Kafka
 
 ```bash
 helm template kates charts/kates -n team-kates --set rbac.scope=namespace \
-  --set networkPolicy.kafka.namespace=team-kafka --show-only templates/rbac.yaml | kubectl apply -f -
+  --set networkPolicy.kafka.namespace=team-kafka \
+  --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
 The operator's version can't be read without cluster-wide reads, so the Kafka version follows the repository's Strimzi pin. Where the admin's operator is another release, pass `--strimzi-version` to match it. The DNS domain is taken to be `cluster.local`.
