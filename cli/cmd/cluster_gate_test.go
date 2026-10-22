@@ -265,7 +265,9 @@ func setDeployFlags(t *testing.T, set func()) {
 	kyverno, strimzi, connect := deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect
 	ui, mm2, dry := deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun
 	namespaceLabels := append([]string(nil), deployNamespaceLabels...)
+	adminless, dbNS := deployAdminless, deployDbNS
 	t.Cleanup(func() {
+		deployAdminless, deployDbNS = adminless, dbNS
 		deployTopology, deployNamespace, deployWithSchemaRegistry = topology, namespace, registry
 		deployWithChaos, deployWithMonitoring, deployWithCertManager = chaos, monitoring, certManager
 		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = kyverno, strimzi, connect

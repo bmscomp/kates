@@ -97,6 +97,9 @@ func stubClusterRead(_ context.Context, name string, args ...string) ([]byte, er
 	// The context the stubbed cluster gate returns: already current.
 	case joined == "kubectl config current-context":
 		return []byte("test-context\n"), nil
+	// A cluster admin: the full profile.
+	case strings.HasPrefix(joined, "kubectl auth can-i"):
+		return []byte("yes\n"), nil
 	// Secrets are read for their base64 data field; a non-empty value ends the
 	// wait loops immediately.
 	case strings.Contains(joined, "get secret"):

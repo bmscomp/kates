@@ -1319,6 +1319,9 @@ kates deploy --yes
 | `--labels-file` | Labels for the namespaces deploy uses, one `key=value` per line (default: `.labels` in the current directory, skipped when missing; a named file must exist) |
 | `--namespace-label` | One `key=value` label for those namespaces, repeatable; it wins over `KATES_NAMESPACE_LABELS` and the labels file |
 | `--no-write-probes` | Skip the introspection probes that create a namespace, a Secret or pods, as `--dry-run` does |
+| `--adminless` | Install without cluster admin: Kafka, Kafka Connect with its PostgreSQL, MirrorMaker 2, Apicurio, Kafka UI and Kates in one namespace that exists (`--namespace`, default the kube context's), on a Strimzi operator a cluster admin installed. [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) has the details |
+
+**Profiles.** Before anything else, `kates deploy` asks the API server whether the account may do everything everywhere (`kubectl auth can-i '*' '*' --all-namespaces`). A cluster admin gets the full profile. For any other account it explains why and, on a terminal, offers the admin-less profile; with `--yes` or without a terminal it stops and prints the `--adminless` command.
 
 **Namespace labels.** `KATES_NAMESPACE_LABELS` takes comma-separated `key=value` entries, which win over the labels file and lose to `--namespace-label`. `kates deploy` checks all three before pre-flight, and `--dry-run` lists the merged labels with their sources. [Namespace Labels](12-deployment.md#namespace-labels) gives the rules and what happens to a namespace that exists.
 

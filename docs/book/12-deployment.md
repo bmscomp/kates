@@ -863,7 +863,7 @@ Where your account may not create namespaces at all, [Running Without Cluster Ad
 
 ## Running Without Cluster Admin
 
-On a shared cluster, a team usually gets a namespace and the built-in `edit` role in it, not cluster-admin. That is enough to run performance tests, INTEGRITY tests and [conformity checks](appendix-a-glossary.md#gl-conformity-check) with Kates, once an admin has installed [Strimzi](appendix-a-glossary.md#gl-strimzi) and the Kafka cluster. Performance and INTEGRITY runs make no Kubernetes API call: the [Kates API](appendix-a-glossary.md#gl-kates-api) talks only to Kafka. Two things need care, and the `kates` chart's `rbac.scope=namespace` handles both. The default install creates a ClusterRole, which `edit` can't do, and a conformity check reads the Kafka namespace, where the team has no rights. `kates deploy` stays an admin's tool, because it installs Strimzi, cert-manager, monitoring and Litmus.
+On a shared cluster, a team usually gets a namespace and the built-in `edit` role in it, not cluster-admin. That is enough to run performance tests, INTEGRITY tests and [conformity checks](appendix-a-glossary.md#gl-conformity-check) with Kates, once an admin has installed [Strimzi](appendix-a-glossary.md#gl-strimzi) and the Kafka cluster. Performance and INTEGRITY runs make no Kubernetes API call: the [Kates API](appendix-a-glossary.md#gl-kates-api) talks only to Kafka. Two things need care, and the `kates` chart's `rbac.scope=namespace` handles both. The default install creates a ClusterRole, which `edit` can't do, and a conformity check reads the Kafka namespace, where the team has no rights. The full `kates deploy` stays an admin's tool, because it installs Strimzi, cert-manager, monitoring and Litmus; its [admin-less profile](#deploying-without-cluster-admin) installs a whole Kafka stack into the team's namespace instead.
 
 The work splits between three accounts, and only the team's is used day to day:
 
@@ -935,6 +935,23 @@ kates conformity check -f team-reference.yaml
 ```
 
 On [`panda`](appendix-a-glossary.md#gl-panda), the lab's three-node Kind cluster, both runs end `DONE` and the INTEGRITY verdict is PASS. A reference whose `spec` is `brokers: {count: {min: 3}, perNode: {max: 1}, zones: {min: 3}}` passes there and exits 0. Its `-o json` report gives `brokers.zones` the detail `alpha: 1, gamma: 1, sigma: 1; zones from the EndpointSlices of kafka/krafter-kafka-brokers`, since the Kates API may not list nodes.
+
+### Deploying Without Cluster Admin
+
+Where the team should run its own Kafka rather than share one, `kates deploy --adminless` installs the stack into one namespace the account already has: a Kafka cluster, Kafka Connect with its PostgreSQL, MirrorMaker 2 as a loopback mirror, Apicurio, Kafka UI, and the Kates API with `rbac.scope=namespace`. `kates deploy` offers it on its own when the account isn't cluster-admin.
+
+```bash
+kates deploy --adminless --namespace team
+```
+
+Without `--namespace`, it uses the namespace the kube context names. It installs nothing cluster-scoped and skips the steps that need the cluster: Strimzi, cert-manager, Kyverno, monitoring, Litmus, node introspection and namespace creation. `--with-chaos`, `--with-monitoring` and the other cluster-scoped toggles are refused with it.
+
+Before installing, it checks two things and stops with what is missing:
+
+- A Strimzi operator is installed (the `kafka.strimzi.io` resources exist). A cluster admin installs it once, watching the team's namespace.
+- The account may create everything the stack needs in the namespace: Strimzi's resources, Deployments, StatefulSets, Services, Secrets, ConfigMaps, ServiceAccounts, NetworkPolicies, Roles and RoleBindings. The built-in `admin` role covers all but Strimzi's. A cluster admin adds those by setting `strimzi-kafka-operator.createAggregateRoles=true` on the Strimzi release, which adds them to `admin` and `edit`.
+
+The operator's version can't be read without cluster-wide reads, so the Kafka version follows the repository's Strimzi pin. Where the admin's operator is another release, pass `--strimzi-version` to match it. The DNS domain is taken to be `cluster.local`.
 
 ### Limits
 

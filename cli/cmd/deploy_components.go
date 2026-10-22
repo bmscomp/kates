@@ -1752,6 +1752,10 @@ data:
 		katesArgs = append(katesArgs, dc.prometheusArgs()...)
 		katesArgs = append(katesArgs, dc.cdcDatabaseAccessArgs()...)
 		katesArgs = append(katesArgs, katesChaosArgs(ctx, chaosNS)...)
+		if deployAdminless {
+			// No ClusterRole: a Role in the namespace, chaos off.
+			katesArgs = append(katesArgs, "--set", "rbac.scope=namespace")
+		}
 		katesArgs = append(katesArgs, "--timeout", "8m")
 
 		dl.Println("    - Waiting for Kates backend pods to become ready (this may take 2-3 minutes)...")

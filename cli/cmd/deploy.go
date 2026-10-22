@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,7 +41,14 @@ Examples:
   kates deploy --strimzi-version 1.0.1 --kafka-version 4.2.0
 
   # One operator per Kafka namespace, so older lines can run beside the primary
-  kates deploy --operator-scope namespace`,
+  kates deploy --operator-scope namespace
+
+  # Without cluster admin: the Kafka stack and Kates in one namespace you have,
+  # on a Strimzi operator a cluster admin installed
+  kates deploy --adminless --namespace team
+
+A cluster admin gets the full profile. For any other account, deploy says so
+and offers the admin-less profile instead.`,
 	RunE: runDeploy,
 }
 
@@ -119,6 +127,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployStrimziChart, "strimzi-chart", "", "Local strimzi-kafka-operator chart tarball to install from (air-gapped mirrors)")
 	deployCmd.Flags().StringVar(&deployKafkaVersion, "kafka-version", "", "Kafka version for the primary cluster (default: the newest the operator supports; 'latest' spells the default)")
 	deployCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
+	deployCmd.Flags().BoolVar(&deployAdminless, "adminless", false, "Install without cluster admin: Kafka, Kafka Connect, MirrorMaker 2, Apicurio, Kafka UI and Kates in one existing namespace (--namespace, default the kube context's), on a Strimzi operator already watching it")
 
 	rootCmd.AddCommand(deployCmd)
 }
@@ -156,12 +165,41 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	defer pinKubeContext(target)()
 	PrintDeployBanner(target)
 
+	// ── Profile ──────────────────────────────────────────────────────────
+	// Full for a cluster admin. Anyone else is offered the admin-less stack
+	// (deploy_adminless.go) rather than walked into a refusal halfway through.
+	if !deployAdminless {
+		if admin, ok := clusterAdminFn(context.Background()); ok && !admin {
+			suggestion := adminlessSuggestion(target)
+			if deployYes || !IsInteractive() {
+				return errors.New(suggestion)
+			}
+			output.Warn(suggestion)
+			yes, err := confirmFn("Install the admin-less stack instead?")
+			if err != nil {
+				return err
+			}
+			if !yes {
+				return errors.New("deploy cancelled: the full profile needs cluster admin")
+			}
+			deployAdminless = true
+		}
+	}
+	if deployAdminless {
+		if err := applyAdminlessProfile(context.Background(), cmd); err != nil {
+			return err
+		}
+		if err := checkAdminlessPrerequisites(context.Background(), deployNamespace); err != nil {
+			return err
+		}
+	}
+
 	// ── Interactive Forms ────────────────────────────────────────────────
 	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
 	// terminal they fail with "could not open a new TTY" rather than falling
 	// back to the flag defaults. Piped or scripted runs should just use the
 	// defaults.
-	if (deployInteractive || cmd.Flags().NFlag() == 0) && IsInteractive() {
+	if !deployAdminless && (deployInteractive || cmd.Flags().NFlag() == 0) && IsInteractive() {
 		if err := runInteractiveForms(); err != nil {
 			return err
 		}
@@ -174,38 +212,47 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	printComponentSelection()
 
 	executor := defaultExecutor
-	PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")
-	collector := detect.NewCollector(executor)
-	// Introspection is not read-only on its own: it creates a namespace and a
-	// Secret to audit Secret creation, prober pods to measure inter-AZ
-	// latency, and a dns-detect pod when no running pod can be read. The
-	// preview uses none of that, so a dry run collects without it.
-	collector.ReadOnly = deployDryRun || deployNoWriteProbes
-	collector.KubeContext = target
-	collector.NamespaceLabels = namespaceLabels
-	if err := collector.Preflight(); err != nil {
-		output.Error(fmt.Sprintf("Preflight failed: %v", err))
-		return err
-	}
-
-	// ── Kind storage bootstrap ────────────────────────────────────────────────
-	// Create zone-specific StorageClasses (local-storage-alpha, etc.) BEFORE
-	// collector.Collect() runs. This ensures detect's matchStorageClass() finds
-	// them and writes the correct storageClass names into values-detected.yaml,
-	// so no hardcoded pool overrides are needed in values-kind.yaml.
-	// A dry run must not write StorageClasses into the cluster, so it skips
-	// this, as it skips the introspection probes that create things.
-	if quickDetectKind() && !deployDryRun {
-		PrintPhaseItem("Kind cluster detected — bootstrapping zone StorageClasses...")
-		if err := setupKindStorageClasses(context.Background()); err != nil {
-			output.Warn(fmt.Sprintf("StorageClass bootstrap warning: %v", err))
+	var report *detect.DetectReport
+	if deployAdminless {
+		// Introspection reads nodes and kube-system, and its probes create
+		// namespaces and pods: nothing a namespace account may do. The charts'
+		// own defaults stand in for what it would have sized.
+		// shortcut: assumes the cluster.local DNS domain; read it from a pod in the namespace if a cluster needs another.
+		report = &detect.DetectReport{Context: target, Provider: "unknown"}
+		report.Network.ClusterDomain = "cluster.local"
+	} else {
+		PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")
+		collector := detect.NewCollector(executor)
+		// Introspection is not read-only on its own: it creates a namespace and a
+		// Secret to audit Secret creation, prober pods to measure inter-AZ
+		// latency, and a dns-detect pod when no running pod can be read. The
+		// preview uses none of that, so a dry run collects without it.
+		collector.ReadOnly = deployDryRun || deployNoWriteProbes
+		collector.KubeContext = target
+		collector.NamespaceLabels = namespaceLabels
+		if err := collector.Preflight(); err != nil {
+			output.Error(fmt.Sprintf("Preflight failed: %v", err))
+			return err
 		}
-	}
 
-	report, err := collector.Collect(context.Background())
-	if err != nil {
-		output.Error(fmt.Sprintf("Introspection failed: %v", err))
-		return err
+		// ── Kind storage bootstrap ────────────────────────────────────────────────
+		// Create zone-specific StorageClasses (local-storage-alpha, etc.) BEFORE
+		// collector.Collect() runs. This ensures detect's matchStorageClass() finds
+		// them and writes the correct storageClass names into values-detected.yaml,
+		// so no hardcoded pool overrides are needed in values-kind.yaml.
+		// A dry run must not write StorageClasses into the cluster, so it skips
+		// this, as it skips the introspection probes that create things.
+		if quickDetectKind() && !deployDryRun {
+			PrintPhaseItem("Kind cluster detected — bootstrapping zone StorageClasses...")
+			if err := setupKindStorageClasses(context.Background()); err != nil {
+				output.Warn(fmt.Sprintf("StorageClass bootstrap warning: %v", err))
+			}
+		}
+
+		if report, err = collector.Collect(context.Background()); err != nil {
+			output.Error(fmt.Sprintf("Introspection failed: %v", err))
+			return err
+		}
 	}
 
 	// ── Versions and scope ───────────────────────────────────────────────
@@ -222,10 +269,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	vp.describe(PrintPhaseItem)
 	primary := primaryCluster{Name: deployKafkaName, Namespace: resolveNamespaces().kafka, Version: vp.kafka}
 
-	analyzer := detect.NewAnalyzer(executor)
-	analyzer.Analyze(report, detect.ParsedReqs{})
-
-	PrintPhaseItem("Generating values-detected.yaml...")
 	valuesFile := ".build/values-detected.yaml"
 	os.MkdirAll(".build", 0755)
 
@@ -235,7 +278,16 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	defer f.Close()
 
-	detect.RenderValuesWithReserve(report, primary.Name, 0.30, f)
+	// Admin-less, nothing was introspected, so the file stays empty.
+	if !deployAdminless {
+		analyzer := detect.NewAnalyzer(executor)
+		analyzer.Analyze(report, detect.ParsedReqs{})
+
+		PrintPhaseItem("Generating values-detected.yaml...")
+		if err := detect.RenderValuesWithReserve(report, primary.Name, 0.30, f); err != nil {
+			return fmt.Errorf("failed to write values file: %v", err)
+		}
+	}
 
 	// Detect cluster type once — used by every Helm call below to pick the
 	// right values overlay (values-kind.yaml vs values-generic.yaml).
