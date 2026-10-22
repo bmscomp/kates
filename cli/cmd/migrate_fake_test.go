@@ -175,7 +175,7 @@ func scriptCluster(f *fakeProc, kind bool) {
 	f.on("kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json", fakeOperatorDeployment)
 	f.on("helm list -A -o json", fakeHelmList)
 	// The mirror chart's kafka-common dependency is built before every render.
-	f.on("helm dependency build charts/mirror-maker2", "Saving 1 charts")
+	f.on("helm dependency update --skip-refresh charts/mirror-maker2", "Saving 1 charts")
 	f.on("kubectl -n kafka get kafka krafter --ignore-not-found -o json", fakeKafkaCR)
 	f.on("kubectl -n kafka get kafkanodepool -l strimzi.io/cluster=krafter -o json", fakeNodePools)
 	f.on("kubectl -n kafka get secret kates-mm2 --ignore-not-found -o jsonpath={.metadata.name}", "kates-mm2")

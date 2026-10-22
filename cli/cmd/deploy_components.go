@@ -782,8 +782,12 @@ func deployGroupA(dc *deployContext) error {
 			//
 			// --reset-values: pre-chart releases stored flat upstream keys that
 			// now live under the subchart key, and the schema rejects them.
+			//
+			// --skip-crds: applyLocalStrimziCRDs already applied them as the
+			// "kubectl" field manager; Helm 4 re-applying crds/ on a fresh
+			// install conflicts with it over .spec.versions.
 			opArgs := []string{"upgrade", "--install", "strimzi-operator", chartDir, "-n", "strimzi-operator",
-				"--reset-values",
+				"--reset-values", "--skip-crds",
 				"-f", dc.chartOverlay("charts/strimzi-operator"),
 				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain=" + clusterDomain,
 				"--set", "crdUpgrade.enabled=false"}
@@ -1452,9 +1456,11 @@ stringData:
 		dl.Printf("\n📦 Deploying Kafka Connect (Namespace: %s)...\n", connectNS)
 
 		// connect-cluster 2.0 is built on the kafka-common library, a file://
-		// dependency Helm refuses to render until it is built.
-		if err := runHelmFn(ctx, "dependency", "build", "charts/connect-cluster"); err != nil {
-			dl.Printf("    ✗ helm dependency build charts/connect-cluster: %v\n", err)
+		// dependency Helm refuses to render until it is built. `update`, not
+		// `build`: the git-ignored Chart.lock goes stale whenever kafka-common's
+		// version moves, and a file://-only lock cannot drift.
+		if err := runHelmFn(ctx, "dependency", "update", "--skip-refresh", "charts/connect-cluster"); err != nil {
+			dl.Printf("    ✗ helm dependency update charts/connect-cluster: %v\n", err)
 			return err
 		}
 
@@ -1865,9 +1871,9 @@ data:
 			}
 
 			// The chart depends on the kafka-common library (file://), which a
-			// checkout does not carry built.
-			if err := runHelmFn(ctx, "dependency", "build", "charts/mirror-maker2"); err != nil {
-				dl.Printf("    ✗ helm dependency build charts/mirror-maker2: %v\n", err)
+			// checkout does not carry built; `update` as for connect-cluster.
+			if err := runHelmFn(ctx, "dependency", "update", "--skip-refresh", "charts/mirror-maker2"); err != nil {
+				dl.Printf("    ✗ helm dependency update charts/mirror-maker2: %v\n", err)
 				dl.FinishComponent("mirror-maker2", false)
 				return err
 			}

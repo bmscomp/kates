@@ -478,6 +478,7 @@ func TestDeployGroupAAppliesLocalStrimziCRDsAndDisablesHook(t *testing.T) {
 	for _, want := range []string{
 		"upgrade --install strimzi-operator /cache/wrapper/1.2.0",
 		"--set crdUpgrade.enabled=false",
+		"--skip-crds",
 		"--set strimziVersion=1.2.0",
 		"--set strimzi-kafka-operator.kubernetesServiceDnsDomain=cluster.test",
 	} {
@@ -718,7 +719,7 @@ func TestDeployKafkaConnectStackReconcilesExistingReleaseWhenKafkaConnectNotRead
 		t.Fatalf("deployKafkaConnectStack returned error: %v", err)
 	}
 
-	if !sliceContainsPrefix(helmCalls, "dependency build charts/connect-cluster") {
+	if !sliceContainsPrefix(helmCalls, "dependency update --skip-refresh charts/connect-cluster") {
 		t.Fatalf("Connect chart dependencies were not built; helm calls = %v", helmCalls)
 	}
 	var upgrade string
