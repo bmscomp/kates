@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/strimzi"
 	"github.com/spf13/pflag"
 )
 
@@ -335,5 +336,95 @@ func TestCheckAdminlessStrimzi(t *testing.T) {
 	runExecOutputFn = adminlessClusterRead("")
 	if err := checkAdminlessStrimzi(context.Background(), ns); err != nil {
 		t.Errorf("operator not visible: %v", err)
+	}
+}
+
+func TestRunDeploy_AdminlessMonitoringIsTheScrapeOnly(t *testing.T) {
+	origOutput, origCombined, origHelm, origExec := runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn
+	origStdin, origDeployed := runExecStdinFn, isHelmReleaseDeployedFn
+	t.Cleanup(func() {
+		runExecOutputFn, runExecCombinedFn, runHelmFn, runExecFn = origOutput, origCombined, origHelm, origExec
+		runExecStdinFn, isHelmReleaseDeployedFn = origStdin, origDeployed
+		deployAdminlessScrape = false
+	})
+	setDeployFlags(t, func() {
+		deployAdminless, deployDryRun, deployTopology = true, false, "isolated"
+		deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI = false, true, false
+	})
+	setAdminlessNamespaces(t)
+	resetDeployFlagsChanged(t)
+	deployAdminlessScrape = true // the wizard's monitoring choice
+	t.Chdir(t.TempDir())
+
+	runExecOutputFn, runExecCombinedFn = adminlessClusterRead(""), adminlessClusterRead("")
+	var mu sync.Mutex
+	installs := map[string]string{}
+	runHelmFn = func(_ context.Context, args ...string) error {
+		if len(args) > 2 && args[0] == "upgrade" {
+			mu.Lock()
+			installs[args[2]] = strings.Join(args, " ")
+			mu.Unlock()
+		}
+		return nil
+	}
+	runExecFn = func(context.Context, string, ...string) error { return nil }
+	runExecStdinFn = func(context.Context, string, []string, string) error { return nil }
+	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+
+	if err := runDeploy(deployCmd, nil); err != nil {
+		t.Fatalf("runDeploy: %v", err)
+	}
+	if _, ok := installs["monitoring"]; ok {
+		t.Error("the monitoring stack installed admin-less")
+	}
+	for release, want := range map[string]string{
+		"krafter": "--set monitoring.podMonitor.enabled=true",
+		"mm2":     "--set podMonitors.enabled=true",
+		"kates":   "--set metrics.serviceMonitor.enabled=true",
+	} {
+		if !strings.Contains(installs[release], want) {
+			t.Errorf("%s without %s: %s", release, want, installs[release])
+		}
+	}
+	if strings.Contains(installs["kates"], "prometheus.url=") {
+		t.Errorf("kates pointed at a Prometheus this deploy did not install: %s", installs["kates"])
+	}
+}
+
+func TestAdminlessGrants_MonitoringWhereEachScrapeIsMade(t *testing.T) {
+	setDeployFlags(t, func() {
+		deployTopology, deployWithKafkaConnect, deployWithMirrorMaker2 = "isolated", true, true
+	})
+	t.Cleanup(func() { deployAdminlessScrape = false })
+	deployAdminlessScrape = true
+	setAdminlessNamespaces(t)
+	grants := adminlessGrants(resolveNamespaces())
+
+	for namespace, want := range map[string]string{
+		"team-kafka": "podmonitors.monitoring.coreos.com", "team-connect": "prometheusrules.monitoring.coreos.com",
+		"team-mm2": "podmonitors.monitoring.coreos.com", "team-kates": "servicemonitors.monitoring.coreos.com",
+	} {
+		if !slices.Contains(grants[namespace], want) {
+			t.Errorf("%s: want %s in %v", namespace, want, grants[namespace])
+		}
+	}
+	if slices.Contains(grants["team-db"], "podmonitors.monitoring.coreos.com") {
+		t.Errorf("team-db asked for PodMonitors nothing makes there: %v", grants["team-db"])
+	}
+}
+
+func TestAdminlessOperatorAdvice(t *testing.T) {
+	kates := strimzi.Operator{Namespace: "strimzi-operator", Version: "1.1.0", Release: "strimzi-operator"}
+	if got := adminlessOperatorAdvice(kates, "1.2.0", nil); !strings.Contains(got, "helm upgrade strimzi-operator charts/strimzi-operator -n strimzi-operator --reuse-values --set strimziVersion=1.2.0") {
+		t.Errorf("an older kates operator: want the upgrade command, got %q", got)
+	}
+	foreign := strimzi.Operator{Namespace: "operators", Version: "1.1.0"}
+	if got := adminlessOperatorAdvice(foreign, "1.2.0", []string{"team-kafka"}); !strings.Contains(got, "not installed by kates") || !strings.Contains(got, "watchNamespaces={team-kafka}") {
+		t.Errorf("an older foreign operator: want the replacement install, got %q", got)
+	}
+	for version, want := range map[string]string{"1.2.0": "pins", "1.3.0": "Newer than"} {
+		if got := adminlessOperatorAdvice(strimzi.Operator{Version: version}, "1.2.0", nil); !strings.Contains(got, want) || strings.Contains(got, "helm") {
+			t.Errorf("%s: want %q and no command, got %q", version, want, got)
+		}
 	}
 }

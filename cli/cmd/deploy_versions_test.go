@@ -584,3 +584,41 @@ func TestVersionPlanDescribe(t *testing.T) {
 		}
 	}
 }
+
+// Admin-less, the operator is a cluster admin's: the plan takes the version
+// and scope it runs, older than the pin or not, rather than an upgrade this
+// deploy will never make.
+func TestResolveVersionPlan_AdminlessFollowsInstalled(t *testing.T) {
+	root := versionsRepo(t, "1.1.0", "4.2.0")
+	cache := t.TempDir()
+	writeOperatorTgz(t, filepath.Join(cache, strimzi.ChartFileName("1.0.1")), "1.0.1",
+		[]string{"4.1.0", "4.1.1", "4.1.2", "4.2.0"}, []string{"v1"}, "v1")
+
+	pods, dep := operatorPodsJSON("strimzi-operator", "1.0.1", "strimzi-operator,team-kafka")
+	r := &scriptedRunner{answers: map[string]string{
+		"get pods -A -l strimzi.io/kind=cluster-operator": pods,
+		"get deployment -n strimzi-operator":              dep,
+		"helm list -A -o json":                            `[]`,
+		"get kafka -A -o json":                            kafkaListJSON(),
+	}}
+	o := versionOptions{RepoRoot: root, CacheDir: cache, Offline: true, KafkaNS: "team-kafka", StrimziVersion: "1.1.0", FollowInstalled: true}
+	vp, err := resolveVersionPlan(context.Background(), r, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vp.StrimziVersion != "1.0.1" || vp.OperatorAction != "same" || vp.KafkaVersion != "4.2.0" {
+		t.Errorf("want the installed 1.0.1 and its window, got %+v", vp)
+	}
+	if vp.Scope != scopeNamespace || vp.ScopeChange != "" {
+		t.Errorf("want the installed operator's namespace scope and no change, got %q / %q", vp.Scope, vp.ScopeChange)
+	}
+	if !hasNote(vp, "follows the installed Strimzi 1.0.1") {
+		t.Errorf("the choice must be explained in the notes: %v", vp.Notes)
+	}
+
+	// The full profile still upgrades it to what was asked for.
+	o.FollowInstalled = false
+	if vp, err = resolveVersionPlan(context.Background(), r, o); err != nil || vp.OperatorAction != "upgrade" {
+		t.Errorf("full profile: want an upgrade, got %+v, %v", vp, err)
+	}
+}

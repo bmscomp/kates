@@ -356,7 +356,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// "deployed", producing eight Skipped rows above "8 components deployed
 	// successfully!".
 	markEntryStatuses(sharedEntries, func(release, namespace string) bool {
-		return isHelmReleaseDeployedFn(context.Background(), release, namespace)
+		return releaseKept(context.Background(), release, namespace)
 	})
 
 	// 4. Execution Plan (Helm)

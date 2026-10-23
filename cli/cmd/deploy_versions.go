@@ -102,6 +102,9 @@ type versionOptions struct {
 	CacheDir       string
 	RepoRoot       string
 	Offline        bool // never touch the network (tests, kates versions on a laptop without it)
+	// FollowInstalled is the admin-less profile: the operator is a cluster
+	// admin's, so the plan takes whatever version it runs.
+	FollowInstalled bool
 }
 
 func (o versionOptions) watchList() []string {
@@ -119,17 +122,18 @@ func (o versionOptions) watchList() []string {
 // deployVersionOptions builds the options from the deploy flags.
 func deployVersionOptions() versionOptions {
 	return versionOptions{
-		Scope:          deployOperatorScope,
-		StrimziVersion: deployStrimziVersion,
-		StrimziChart:   deployStrimziChart,
-		KafkaVersion:   deployKafkaVersion,
-		KafkaName:      deployKafkaName,
-		KafkaNS:        deployKafkaNS,
-		ConnectNS:      deployConnectNS,
-		WithConnect:    deployWithKafkaConnect,
-		Topology:       deployTopology,
-		SingleNS:       deployNamespace,
-		RepoRoot:       ".",
+		Scope:           deployOperatorScope,
+		StrimziVersion:  deployStrimziVersion,
+		StrimziChart:    deployStrimziChart,
+		KafkaVersion:    deployKafkaVersion,
+		KafkaName:       deployKafkaName,
+		KafkaNS:         deployKafkaNS,
+		ConnectNS:       deployConnectNS,
+		WithConnect:     deployWithKafkaConnect,
+		Topology:        deployTopology,
+		SingleNS:        deployNamespace,
+		RepoRoot:        ".",
+		FollowInstalled: deployAdminless,
 	}
 }
 
@@ -242,10 +246,21 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 			return nil, err
 		}
 	}
-	if requested == "" && o.StrimziChart == "" && vp.primaryOp != nil {
+	if !o.FollowInstalled && requested == "" && o.StrimziChart == "" && vp.primaryOp != nil {
 		if newer, cerr := compareVersions(vp.primaryOp.Version, pin); cerr == nil && newer > 0 {
 			requested = vp.primaryOp.Version
 			vp.Adopted = true
+		}
+	}
+	// Admin-less, this deploy never touches the operator, older than the pin
+	// or not: the Kafka resources must fit the one that runs, at its scope.
+	if o.FollowInstalled && vp.primaryOp != nil {
+		requested, vp.Scope, vp.Watch = vp.primaryOp.Version, scopeCluster, nil
+		if vp.primaryOp.Scope == strimzi.ScopeNamespaces {
+			vp.Scope, vp.Watch = scopeNamespace, o.watchList()
+		}
+		if requested != pin {
+			vp.Notes = append(vp.Notes, fmt.Sprintf("admin-less: Kafka follows the installed Strimzi %s, which only a cluster admin can change", requested))
 		}
 	}
 

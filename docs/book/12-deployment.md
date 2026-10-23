@@ -953,7 +953,9 @@ With `--topology single`, everything goes into `--namespace`, or the namespace t
 kates deploy --adminless --topology single --namespace team
 ```
 
-It creates no namespace: each must exist, and the checks below name one the account can't use. It installs nothing cluster-scoped and skips the steps that need the cluster: Strimzi, cert-manager, Kyverno, monitoring, Litmus, node introspection and namespace creation. `--with-chaos`, `--with-monitoring` and the other cluster-scoped toggles are refused with it.
+It creates no namespace: each must exist, and the checks below name one the account can't use. It installs nothing cluster-scoped and skips the steps that need the cluster: Strimzi, cert-manager, Kyverno, the monitoring stack, Litmus, node introspection and namespace creation. `--with-chaos`, `--with-monitoring` and the other cluster-scoped toggles are refused with it.
+
+Where the cluster serves the `monitoring.coreos.com` API, the wizard offers monitoring as the scrape alone: the Kafka, Connect, MirrorMaker 2 and Kates charts get their PodMonitors, ServiceMonitor and alert rules, for a Prometheus already on the cluster, whose selectors decide whether it reads these namespaces. The checks below then include the right to create PodMonitors, ServiceMonitors and PrometheusRules there.
 
 Before installing, it checks two things and stops with what is missing:
 
@@ -968,7 +970,7 @@ helm template kates charts/kates -n team-kates --set rbac.scope=namespace \
   --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
-The operator's version can't be read without cluster-wide reads, so the Kafka version follows the repository's Strimzi pin. Where the admin's operator is another release, pass `--strimzi-version` to match it. The DNS domain is taken to be `cluster.local`.
+When the account can see the operator, which takes listing pods in every namespace, the Kafka version follows the operator's window, whatever `--strimzi-version` says, and the wizard shows the operator with what a cluster admin would run to upgrade it to the pin, or to replace one kates did not install. When it can't, the Kafka version follows the repository's Strimzi pin; where the admin's operator is another release, pass `--strimzi-version` to match it. The DNS domain is taken to be `cluster.local`.
 
 ### Limits
 

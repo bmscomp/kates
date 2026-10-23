@@ -18,11 +18,18 @@ import (
 // Apicurio, Kafka UI and the Kates backend (rbac.scope=namespace) go into
 // namespaces the account already has, as --topology and the --*-ns flags place
 // them — one per component by default, or one for all — and every step that
-// needs the cluster (Strimzi, cert-manager, Kyverno, monitoring, Litmus,
-// node introspection, StorageClasses, namespace creation) is left out. A
-// cluster admin must already run a Strimzi operator that watches the namespaces.
+// needs the cluster (Strimzi, cert-manager, Kyverno, the monitoring stack,
+// Litmus, node introspection, StorageClasses, namespace creation) is left out.
+// A cluster admin must already run a Strimzi operator that watches the
+// namespaces; its version is the one the Kafka resources follow.
 
 var deployAdminless bool
+
+// deployAdminlessScrape is admin-less monitoring, a wizard choice offered
+// only where the monitoring.coreos.com API exists: the charts' PodMonitors,
+// ServiceMonitors and rules, for a Prometheus already on the cluster. Its
+// selectors decide whether it scrapes these namespaces.
+var deployAdminlessScrape bool
 
 // clusterAdminFn says whether the account may do everything everywhere, which
 // is what the full profile needs. Tests stub the kubectl read it makes.
@@ -163,6 +170,12 @@ func adminlessGrants(ns resolvedNamespaces) map[string][]string {
 	if deployWithMirrorMaker2 {
 		add(ns.mm2, "kafkamirrormaker2s.kafka.strimzi.io")
 	}
+	if deployAdminlessScrape {
+		for _, namespace := range adminlessStrimziNamespaces(ns) {
+			add(namespace, "podmonitors.monitoring.coreos.com", "prometheusrules.monitoring.coreos.com")
+		}
+		add(ns.app, "servicemonitors.monitoring.coreos.com", "prometheusrules.monitoring.coreos.com")
+	}
 	for namespace, resources := range grants {
 		slices.Sort(resources)
 		grants[namespace] = slices.Compact(resources)
@@ -208,6 +221,35 @@ watching %s:
     --set strimzi-kafka-operator.createAggregateRoles=true \
     --set strimzi-kafka-operator.watchAnyNamespace=false \
     --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, pin, strings.Join(watch, ", "), strings.Join(watch, ","))
+}
+
+// adminlessOperatorAdvice says what a cluster admin could do with the
+// installed operator, which this account cannot change: upgrade it to the
+// pin, or replace one kates did not install with kates' own.
+func adminlessOperatorAdvice(op strimzi.Operator, pin string, watch []string) string {
+	cmp, err := compareVersions(op.Version, pin)
+	switch {
+	case err != nil:
+		return "Kafka follows its window."
+	case cmp > 0:
+		return fmt.Sprintf("Newer than this platform's pin (%s); Kafka follows its window.", pin)
+	case cmp == 0:
+		return "The version this platform pins."
+	case op.Release != "":
+		return fmt.Sprintf(`Older than this platform's pin (%s); Kafka follows its window. A cluster admin upgrades it with:
+
+  helm upgrade %s charts/strimzi-operator -n %s --reuse-values --set strimziVersion=%s`, pin, op.Release, op.Namespace, pin)
+	}
+	return fmt.Sprintf(`Older than this platform's pin (%s) and not installed by kates; Kafka follows its window.
+A cluster admin upgrades it with the tool that installed it, or removes it and installs kates' own.
+%s`, pin, strimziInstallSuggestion(watch))
+}
+
+// prometheusOperatorAPI says whether the cluster serves PodMonitors, which
+// admin-less monitoring creates for a Prometheus already there.
+func prometheusOperatorAPI(ctx context.Context) bool {
+	out, _ := runExecOutputFn(ctx, "kubectl", "api-resources", "--api-group=monitoring.coreos.com", "-o", "name")
+	return slices.Contains(strings.Fields(string(out)), "podmonitors.monitoring.coreos.com")
 }
 
 // describeStrimziOperator is one operator as the prerequisites list it.

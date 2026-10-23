@@ -26,9 +26,15 @@ func runInteractiveForms() error {
 		huh.NewOption("🚦 Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
 	}
 	if deployAdminless {
-		// Only what installs into a namespace: no operators, no chaos engineering.
+		// Only what installs into a namespace: no operators, no chaos
+		// engineering, and monitoring only as the scrape of a Prometheus
+		// already on the cluster.
 		isolated = "Isolated Namespaces (existing ones: kafka, connect, db, kates)"
 		componentOptions = []huh.Option[string]{componentOptions[1], componentOptions[2], componentOptions[3]}
+		if prometheusOperatorAPI(context.Background()) {
+			componentOptions = append(componentOptions,
+				huh.NewOption("📊 Monitoring (PodMonitors and rules for the cluster's Prometheus)", "monitoring").Selected(deployAdminlessScrape))
+		}
 	}
 
 	form1 := huh.NewForm(
@@ -75,14 +81,6 @@ func runInteractiveForms() error {
 		return err
 	}
 
-	// ── Form: Versions and scope ─────────────────────────────────────────
-	// The Kafka options are a function of the operator chosen above them:
-	// pick 1.0.1 and the list is its window, pick 1.1.0 and it is 1.1.0's.
-	// Nothing here is a table in Go — the options come from the charts.
-	if err := runVersionPickerForm(); err != nil {
-		return err
-	}
-
 	// ── Form 2: Namespace configuration ──────────────────────────────────
 	// Built after Form 1 completes so that `components` is fully populated.
 	// This avoids a huh library issue where MultiSelect values from a
@@ -115,7 +113,7 @@ func runInteractiveForms() error {
 		))
 
 		// Conditional namespace groups based on selected components
-		if sliceContains(components, "monitoring") {
+		if sliceContains(components, "monitoring") && !deployAdminless {
 			nsGroups = append(nsGroups, huh.NewGroup(
 				huh.NewInput().
 					Title("Monitoring Namespace").
@@ -178,6 +176,7 @@ func runInteractiveForms() error {
 	deployWithStrimzi = false
 	deployWithKafkaUI = false
 	deployWithMirrorMaker2 = false
+	deployAdminlessScrape = false
 
 	for _, c := range components {
 		switch c {
@@ -192,12 +191,31 @@ func runInteractiveForms() error {
 		case "chaos":
 			deployWithChaos = true
 		case "monitoring":
-			deployWithMonitoring = true
+			if deployAdminless {
+				deployAdminlessScrape = true
+			} else {
+				deployWithMonitoring = true
+			}
 		case "cert-manager":
 			deployWithCertManager = true
 		case "kyverno":
 			deployWithKyverno = true
 		}
+	}
+
+	// ── Form: Versions and scope ─────────────────────────────────────────
+	// The Kafka options are a function of the operator chosen above them:
+	// pick 1.0.1 and the list is its window, pick 1.1.0 and it is 1.1.0's.
+	// Nothing here is a table in Go — the options come from the charts.
+	// After the namespaces: the installed operator it offers to keep is the
+	// one watching the Kafka namespace chosen there.
+	if err := runVersionPickerForm(); err != nil {
+		return err
+	}
+
+	// ── Form: Already installed ──────────────────────────────────────────
+	if err := runInstalledReleasesForm(); err != nil {
+		return err
 	}
 
 	// ── Review ───────────────────────────────────────────────────────────
@@ -417,7 +435,7 @@ func runDeployDryRun(sharedEntries []DeploySummaryEntry, labels, labelSources ma
 	existingReleases := make(map[string]bool)
 	for _, e := range sharedEntries {
 		key := e.Release + "/" + e.Namespace
-		if isHelmReleaseDeployedFn(dryCtx, e.Release, e.Namespace) {
+		if releaseKept(dryCtx, e.Release, e.Namespace) {
 			existingReleases[key] = true
 		}
 	}

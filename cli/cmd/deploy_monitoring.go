@@ -20,7 +20,8 @@ import (
 // The rule: with --with-monitoring, this deploy owns that wiring and states it
 // with --set on every component it installs. Without it nothing is passed;
 // the charts render their monitors only where the monitoring.coreos.com API
-// exists, so their defaults are safe on a bare cluster either way.
+// exists, so their defaults are safe on a bare cluster either way. Admin-less,
+// the wizard's monitoring choice is that wiring alone, for a Prometheus already there.
 //
 // Order matters as much as the flags. Helm decides at render time whether the
 // API exists and never revisits a release when a CRD turns up later, so the
@@ -44,7 +45,7 @@ var scrapeValues = map[string][]string{
 // scrapeArgs is the --set list that switches a chart's scrape and rules on,
 // or nothing when this deploy is not installing monitoring.
 func (dc *deployContext) scrapeArgs(chart string) []string {
-	if !deployWithMonitoring {
+	if !deployWithMonitoring && !deployAdminlessScrape {
 		return nil
 	}
 	keys, ok := scrapeValues[chart]

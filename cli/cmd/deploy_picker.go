@@ -53,6 +53,12 @@ func runVersionPickerForm() error {
 	if err != nil {
 		return err
 	}
+	// The operator already watching the Kafka namespace is the default, and
+	// admin-less the only choice: this deploy cannot change a cluster admin's.
+	installed := installedPrimaryOperator()
+	if installed != nil && (deployAdminless || deployStrimziVersion == "") {
+		deployStrimziVersion = installed.Version
+	}
 	if deployStrimziVersion == "" {
 		deployStrimziVersion = pin
 	}
@@ -69,13 +75,33 @@ func runVersionPickerForm() error {
 	// Strimzi; older than that is a migration rather than a deploy, since it
 	// falls outside the Kafka window this platform's primary needs and would
 	// only be refused later in resolution.
-	opOptions := []huh.Option[string]{huh.NewOption(pin+"  (pinned — tested with this release)", pin)}
-	seen := map[string]bool{pin: true}
+	//
+	// The installed operator leads: keeping it is the safe answer, a newer
+	// release upgrades it, and an older one is left out.
+	var opOptions []huh.Option[string]
+	seen := map[string]bool{}
+	opDesc := fmt.Sprintf("The %d newest published releases; the Kafka window follows from this choice. --strimzi-version takes any other.", operatorPickerLimit)
+	if installed != nil {
+		label := installed.Version + "  (installed — keep)"
+		if installed.Version == pin {
+			label = installed.Version + "  (installed, pinned — keep)"
+		}
+		opOptions = append(opOptions, huh.NewOption(label, installed.Version))
+		seen[installed.Version] = true
+		opDesc += "\nInstalled: " + describeStrimziOperator(*installed) + ". Older releases are left out: Strimzi cannot downgrade, so going back needs kates clean first."
+	}
+	if !seen[pin] && !olderThan(pin, installed) {
+		opOptions = append(opOptions, huh.NewOption(againstInstalled(pin, pin+"  (pinned — tested with this release)", installed), pin))
+		seen[pin] = true
+	}
 	if cacheDir, cerr := strimzi.DefaultCacheDir(); cerr == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		if cat, ferr := strimzi.FetchCatalogue(ctx, defaultRunner, cacheDir, false); ferr == nil {
 			for _, e := range recentCatalogueEntries(cat.Entries, seen, operatorPickerLimit) {
+				if olderThan(e.Version, installed) {
+					break // newest first: the rest are older too
+				}
 				label := e.Version
 				if cmp, _ := compareVersions(e.Version, pin); cmp > 0 {
 					label += "  (newer than pinned — untested)"
@@ -83,7 +109,7 @@ func runVersionPickerForm() error {
 					label += "  (stores v1beta2)"
 				}
 				seen[e.Version] = true
-				opOptions = append(opOptions, huh.NewOption(label, e.Version))
+				opOptions = append(opOptions, huh.NewOption(againstInstalled(e.Version, label, installed), e.Version))
 			}
 		}
 	}
@@ -112,32 +138,40 @@ func runVersionPickerForm() error {
 		return opts
 	}
 
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Strimzi operator scope").
-				Description("Cluster: one operator watching every namespace; only its Kafka versions can run under Strimzi here.\nNamespace: one operator per Kafka namespace; older lines can run beside the primary under their own operator.").
-				Options(
-					huh.NewOption("Mono cluster — one Strimzi, one Kafka version, the operator watching every namespace", scopeCluster),
-					huh.NewOption("Namespace-scoped — one operator per Kafka namespace, several Kafka lines side by side", scopeNamespace),
-				).
-				Value(&deployOperatorScope),
+	kafkaSelect := huh.NewSelect[string]().
+		Title("Kafka version for the primary cluster").
+		DescriptionFunc(func() string {
+			return fmt.Sprintf("The %d newest Strimzi %s can run. Older ones are additional clusters (kates migrate up --from …), or --kafka-version.", kafkaPickerLimit, deployStrimziVersion)
+		}, &deployStrimziVersion).
+		OptionsFunc(kafkaOptions, &deployStrimziVersion).
+		Value(&deployKafkaVersion)
+	fields := []huh.Field{
+		huh.NewSelect[string]().
+			Title("Strimzi operator scope").
+			Description("Cluster: one operator watching every namespace; only its Kafka versions can run under Strimzi here.\nNamespace: one operator per Kafka namespace; older lines can run beside the primary under their own operator.").
+			Options(
+				huh.NewOption("Mono cluster — one Strimzi, one Kafka version, the operator watching every namespace", scopeCluster),
+				huh.NewOption("Namespace-scoped — one operator per Kafka namespace, several Kafka lines side by side", scopeNamespace),
+			).
+			Value(&deployOperatorScope),
 
-			huh.NewSelect[string]().
-				Title("Strimzi operator version").
-				Description(fmt.Sprintf("The %d newest published releases; the Kafka window follows from this choice. --strimzi-version takes any other.", operatorPickerLimit)).
-				Options(opOptions...).
-				Value(&deployStrimziVersion),
+		huh.NewSelect[string]().
+			Title("Strimzi operator version").
+			Description(opDesc).
+			Options(opOptions...).
+			Value(&deployStrimziVersion),
 
-			huh.NewSelect[string]().
-				Title("Kafka version for the primary cluster").
-				DescriptionFunc(func() string {
-					return fmt.Sprintf("The %d newest Strimzi %s can run. Older ones are additional clusters (kates migrate up --from …), or --kafka-version.", kafkaPickerLimit, deployStrimziVersion)
-				}, &deployStrimziVersion).
-				OptionsFunc(kafkaOptions, &deployStrimziVersion).
-				Value(&deployKafkaVersion),
-		),
-	).WithTheme(ThemeKates())
+		kafkaSelect,
+	}
+	if deployAdminless && installed != nil {
+		fields = []huh.Field{
+			huh.NewNote().
+				Title("Strimzi operator (a cluster admin's)").
+				Description(describeStrimziOperator(*installed) + ".\n" + adminlessOperatorAdvice(*installed, pin, adminlessStrimziNamespaces(resolveNamespaces()))),
+			kafkaSelect,
+		}
+	}
+	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(ThemeKates())
 
 	if err := form.Run(); err != nil {
 		return err
@@ -147,6 +181,40 @@ func runVersionPickerForm() error {
 		deployStrimziVersion = "" // the pin is the default; keep the flag empty so "pinned" is reported
 	}
 	return nil
+}
+
+// installedPrimaryOperator is the Strimzi operator watching the Kafka
+// namespace, or nil when there is none or this account cannot see it.
+func installedPrimaryOperator() *strimzi.Operator {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ops, err := strimzi.InstalledOperators(ctx, execOutputRunner{})
+	if err != nil {
+		return nil
+	}
+	return primaryOperator(ops, resolveNamespaces().kafka)
+}
+
+// againstInstalled marks a release newer than the installed operator as an
+// upgrade from it.
+func againstInstalled(version, label string, installed *strimzi.Operator) string {
+	if installed == nil {
+		return label
+	}
+	if cmp, err := compareVersions(version, installed.Version); err == nil && cmp > 0 {
+		return label + "  (upgrade from " + installed.Version + ")"
+	}
+	return label
+}
+
+// olderThan says whether version is older than the installed operator, which
+// Strimzi cannot move to in place.
+func olderThan(version string, installed *strimzi.Operator) bool {
+	if installed == nil {
+		return false
+	}
+	cmp, err := compareVersions(version, installed.Version)
+	return err == nil && cmp < 0
 }
 
 // deployReviewSummary renders the wizard's choices as they will be applied:

@@ -1102,7 +1102,7 @@ func deployGroupB(dc *deployContext) error {
 		if err != nil {
 			return err
 		}
-		deployMon = !isHelmReleaseDeployedFn(ctx, "monitoring", jaegerNS)
+		deployMon = !releaseKept(ctx, "monitoring", jaegerNS)
 		if !deployMon && monitoringRejectsNodeExporter && monitoringNodeExporterDaemonSetScheduled(ctx, jaegerNS) {
 			dl.Println("    - Monitoring Helm release exists but node-exporter cannot run under namespace PodSecurity; reconciling release...")
 			deployMon = true
@@ -1444,7 +1444,7 @@ stringData:
   username: debezium`, connectNS)
 	runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
 
-	connectDeployed := isHelmReleaseDeployedFn(ctx, "connect-cluster", connectNS)
+	connectDeployed := releaseKept(ctx, "connect-cluster", connectNS)
 	if connectDeployed && !isTesting {
 		needsReconcile, reason := kafkaConnectNeedsReconcile(ctx, connectNS, "connect-cluster", bootstrap, kafkaSvcDomain)
 		if needsReconcile {
@@ -1656,7 +1656,7 @@ func deployGroupC(dc *deployContext) error {
 	// ---------------------------------------------------------
 	// Deploy Schema Registry (if requested)
 	if deployWithSchemaRegistry == "apicurio" {
-		if !isHelmReleaseDeployedFn(ctx, "apicurio", kafkaNS) {
+		if !releaseKept(ctx, "apicurio", kafkaNS) {
 			dl.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", kafkaNS)
 			dl.StartComponent("apicurio", 5*time.Minute)
 			if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m"); err != nil {
@@ -1779,7 +1779,7 @@ data:
 
 	// Deploy Kafka UI
 	if deployWithKafkaUI {
-		if !isHelmReleaseDeployedFn(ctx, "kafka-ui", kafkaUINS) {
+		if !releaseKept(ctx, "kafka-ui", kafkaUINS) {
 			dl.Printf("\n💻 Deploying Kafka UI (Namespace: %s)...\n", kafkaUINS)
 			dl.StartComponent("kafka-ui", 5*time.Minute)
 
@@ -1842,7 +1842,7 @@ data:
 	// migrate up --from …`.
 	if deployWithMirrorMaker2 {
 		mm2NS := dc.ns.mm2
-		if !isHelmReleaseDeployedFn(ctx, "mm2", mm2NS) {
+		if !releaseKept(ctx, "mm2", mm2NS) {
 			dl.Printf("\n🔁 Deploying MirrorMaker 2 (Namespace: %s)...\n", mm2NS)
 			dl.StartComponent("mirror-maker2", 10*time.Minute)
 
