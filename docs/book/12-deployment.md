@@ -162,7 +162,7 @@ The following table shows resource requirements per component. Use this to right
 | Strimzi Operator | 1 | 200m / 500m | 384Mi / 384Mi | — | Watches CRs, low steady-state usage |
 | Cruise Control | 1 | 500m / 1000m | 512Mi / 1Gi | — | Spikes during rebalance calculations |
 | Kafka Exporter | 1 | 100m / 200m | 128Mi / 256Mi | — | Consumer lag metrics |
-| Kates API (plain `helm install`) | 1 | 500m / 2000m | 2Gi / 4Gi | — | JVM: `-Xms512m -Xmx2560m` with ZGC, 62.5% of the limit; `kates deploy` runs it at 1 CPU / 512Mi, see [JVM Tuning](#jvm-tuning) |
+| Kates API (plain `helm install`) | 1 | 500m / 2000m | 2Gi / 4Gi | — | JVM: `-Xms512m -Xmx2560m` with ZGC, 62.5% of the limit; `kates deploy` runs it at 1 CPU / 1Gi, see [JVM Tuning](#jvm-tuning) |
 | PostgreSQL | 1 | 100m / 250m | 128Mi / 256Mi | 1Gi | Test results and metadata |
 | Prometheus | 1 | 500m / 1000m | 1Gi / 2Gi | 50Gi | 30d retention in the generic overlay |
 | Grafana | 1 | 100m / 200m | 128Mi / 256Mi | — | The repository's dashboards, which [Observability & Monitoring](09-observability.md) lists |
@@ -692,7 +692,7 @@ jvm:
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 ```
 
-These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` sizes the Kates API differently: on any cluster other than Kind it applies `charts/kates/values-generic.yaml`, a 512Mi limit with `-Xms128m -Xmx256m`, and on Kind it runs the native image, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)).
+These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` sizes the Kates API differently: on any cluster other than Kind it applies `charts/kates/values-generic.yaml`, a 1Gi limit with `-Xms256m -Xmx512m`, as does every admin-less install, and on Kind it runs the native image, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)).
 
 | GC | Max Pause | Throughput Overhead | Best For |
 |----|:-:|:-:|----------|

@@ -8,18 +8,21 @@ image:
   repository: ghcr.io/bmscomp/kates
   pullPolicy: IfNotPresent
 
+# A 512Mi limit under a 256m heap was OOMKilled as Quarkus finished starting:
+# ZGC, metaspace, the code cache and Kafka's and Netty's buffers sit outside
+# the heap. The heap stays at half the limit, as in values-staging.yaml.
 resources:
   requests:
-    memory: "256Mi"
+    memory: "512Mi"
     cpu: "250m"
   limits:
-    memory: "512Mi"
+    memory: "1Gi"
     cpu: "1000m"
 
 # ZGenerational: on the JDK 21 image, -XX:+UseZGC alone runs the single-
 # generation mode; values.yaml and values-prod.yaml run the generational one.
 jvm:
-  options: "-Xms128m -Xmx256m -XX:+UseZGC -XX:+ZGenerational"
+  options: "-Xms256m -Xmx512m -XX:+UseZGC -XX:+ZGenerational"
 
 networkPolicy:
   enabled: true
