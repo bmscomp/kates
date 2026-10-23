@@ -278,3 +278,62 @@ func TestRunDeploy_AdminlessConformityRoleFollowsTheGrants(t *testing.T) {
 		})
 	}
 }
+
+// adminlessOperatorRead is adminlessClusterRead with a Strimzi operator in
+// strimzi-operator watching watches, installed by the kates wrapper chart.
+func adminlessOperatorRead(watches string) func(context.Context, string, ...string) ([]byte, error) {
+	pods, deployment := operatorPodsJSON("strimzi-operator", "1.3.0", watches)
+	read := adminlessClusterRead("")
+	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		joined := name + " " + strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "get pods -A -l strimzi.io/kind=cluster-operator"):
+			return []byte(pods), nil
+		case strings.Contains(joined, "get deployment -n strimzi-operator"):
+			return []byte(deployment), nil
+		case strings.Contains(joined, "helm list -A"):
+			return []byte(`[{"name":"strimzi-operator","namespace":"strimzi-operator","chart":"strimzi-operator-0.9.0","app_version":"1.3.0"}]`), nil
+		}
+		return read(ctx, name, args...)
+	}
+}
+
+func TestCheckAdminlessStrimzi(t *testing.T) {
+	orig := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = orig })
+	setDeployFlags(t, func() {
+		deployTopology, deployWithKafkaConnect, deployWithMirrorMaker2, deployWithKafkaUI = "isolated", true, true, true
+	})
+	setAdminlessNamespaces(t)
+	ns := resolveNamespaces()
+
+	// Missing: the install names the operator's namespace and what it must watch.
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+	err := checkAdminlessStrimzi(context.Background(), ns)
+	if err == nil || !strings.Contains(err.Error(), "-n strimzi-operator") ||
+		!strings.Contains(err.Error(), "watchNamespaces={team-connect,team-kafka,team-mm2}") {
+		t.Errorf("want the install suggested in strimzi-operator, watching the namespaces, got %v", err)
+	}
+
+	for _, watches := range []string{"*", "strimzi-operator,team-kafka,team-connect,team-mm2"} {
+		runExecOutputFn = adminlessOperatorRead(watches)
+		if err := checkAdminlessStrimzi(context.Background(), ns); err != nil {
+			t.Errorf("operator watching %s: %v", watches, err)
+		}
+	}
+
+	// Installed but not watching team-mm2: refused, with the watch list to set.
+	runExecOutputFn = adminlessOperatorRead("strimzi-operator,team-kafka,team-connect")
+	err = checkAdminlessStrimzi(context.Background(), ns)
+	if err == nil || !strings.Contains(err.Error(), "does not watch team-mm2") ||
+		!strings.Contains(err.Error(), "Strimzi 1.3.0 in namespace strimzi-operator") ||
+		!strings.Contains(err.Error(), "watchNamespaces={team-connect,team-kafka,team-mm2}") {
+		t.Errorf("want the unwatched namespace, the operator and the fix named, got %v", err)
+	}
+
+	// The account cannot list operator pods: the CRDs are enough to go on.
+	runExecOutputFn = adminlessClusterRead("")
+	if err := checkAdminlessStrimzi(context.Background(), ns); err != nil {
+		t.Errorf("operator not visible: %v", err)
+	}
+}

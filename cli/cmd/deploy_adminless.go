@@ -9,6 +9,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
+
+	"github.com/bmscomp/kates/cli/pkg/strimzi"
 )
 
 // The admin-less profile: what kates deploy installs for an account that is
@@ -168,16 +170,108 @@ func adminlessGrants(ns resolvedNamespaces) map[string][]string {
 	return grants
 }
 
-// checkAdminlessPrerequisites fails before anything is installed when Strimzi
-// is missing or the account may not create what the stack needs.
-func checkAdminlessPrerequisites(ctx context.Context, ns resolvedNamespaces) error {
-	out, _ := runExecOutputFn(ctx, "kubectl", "api-resources", "--api-group=kafka.strimzi.io", "-o", "name")
-	if !slices.Contains(strings.Fields(string(out)), "kafkas.kafka.strimzi.io") {
-		return fmt.Errorf(`no Strimzi operator is installed on this cluster, and installing it needs cluster admin.
-Ask a cluster admin to install the operator watching namespace %s, for example:
+// execOutputRunner runs strimzi's reads through runExecOutputFn, so the deploy
+// tests' cluster stubs answer them too.
+type execOutputRunner struct{}
+
+func (execOutputRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := runExecOutputFn(ctx, name, args...)
+	return strings.TrimSpace(string(out)), err
+}
+
+// adminlessStrimziNamespaces are the namespaces a Strimzi operator must watch:
+// where the Kafka, Kafka Connect and MirrorMaker 2 resources are made.
+func adminlessStrimziNamespaces(ns resolvedNamespaces) []string {
+	names := []string{ns.kafka}
+	if deployWithKafkaConnect {
+		names = append(names, ns.connect)
+	}
+	if deployWithMirrorMaker2 {
+		names = append(names, ns.mm2)
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
+// strimziInstallSuggestion is what a cluster admin runs, from this repository,
+// to install the platform's pinned Strimzi in its own namespace watching
+// exactly the admin-less namespaces.
+func strimziInstallSuggestion(watch []string) string {
+	pin := "the version charts/strimzi-operator pins"
+	if v, err := pinnedStrimziVersion("."); err == nil {
+		pin = "Strimzi " + v + ", the version charts/strimzi-operator pins"
+	}
+	return fmt.Sprintf(`Ask a cluster admin to install %s, in its own namespace strimzi-operator,
+watching %s:
 
   helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator --create-namespace \
-    --set strimzi-kafka-operator.createAggregateRoles=true`, ns.kafka)
+    --set strimzi-kafka-operator.createAggregateRoles=true \
+    --set strimzi-kafka-operator.watchAnyNamespace=false \
+    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, pin, strings.Join(watch, ", "), strings.Join(watch, ","))
+}
+
+// describeStrimziOperator is one operator as the prerequisites list it.
+func describeStrimziOperator(op strimzi.Operator) string {
+	watches := "cluster-wide"
+	if op.Scope != strimzi.ScopeCluster {
+		watches = "watching " + strings.Join(op.Watches, ", ")
+	}
+	return fmt.Sprintf("Strimzi %s in namespace %s, %s", op.Version, op.Namespace, watches)
+}
+
+// checkAdminlessStrimzi fails when Strimzi is missing, with the install a
+// cluster admin runs, or when the operators the account can see leave one of
+// the namespaces unwatched: its Kafka resources would never be reconciled.
+func checkAdminlessStrimzi(ctx context.Context, ns resolvedNamespaces) error {
+	watch := adminlessStrimziNamespaces(ns)
+	out, _ := runExecOutputFn(ctx, "kubectl", "api-resources", "--api-group=kafka.strimzi.io", "-o", "name")
+	if !slices.Contains(strings.Fields(string(out)), "kafkas.kafka.strimzi.io") {
+		return fmt.Errorf("no Strimzi operator is installed on this cluster, and installing it needs cluster admin.\n%s", strimziInstallSuggestion(watch))
+	}
+
+	// A namespace account may not list pods everywhere: the CRDs are then all
+	// it can see, and the operator's watch list stays the admin's to confirm.
+	ops, err := strimzi.InstalledOperators(ctx, execOutputRunner{})
+	if err != nil || len(ops) == 0 {
+		PrintPhaseItem(fmt.Sprintf("Strimzi: installed, but this account cannot see its operator; it must watch %s", strings.Join(watch, ", ")))
+		return nil
+	}
+	for _, op := range ops {
+		PrintPhaseItem(describeStrimziOperator(op))
+	}
+	var unwatched []string
+	for _, namespace := range watch {
+		if !slices.ContainsFunc(ops, func(op strimzi.Operator) bool { return operatorWatches(&op, namespace) }) {
+			unwatched = append(unwatched, namespace)
+		}
+	}
+	if len(unwatched) == 0 {
+		return nil
+	}
+	op := ops[0]
+	if p := primaryOperator(ops, ns.kafka); p != nil {
+		op = *p
+	}
+	fix := fmt.Sprintf("Ask a cluster admin to add %s to STRIMZI_NAMESPACE on Deployment %s/%s.", strings.Join(unwatched, ", "), op.Namespace, op.Name)
+	if op.Release != "" {
+		// The release namespace is always watched, so the list leaves it out.
+		list := slices.DeleteFunc(append(slices.Clone(op.Watches), unwatched...), func(n string) bool { return n == op.Namespace })
+		slices.Sort(list)
+		fix = fmt.Sprintf(`Ask a cluster admin to add them to its watched namespaces:
+
+  helm upgrade %s charts/strimzi-operator -n %s --reuse-values \
+    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, op.Release, op.Namespace, strings.Join(slices.Compact(list), ","))
+	}
+	return fmt.Errorf("the installed Strimzi operator does not watch %s, so its Kafka resources there would never be reconciled.\nInstalled: %s.\n%s",
+		strings.Join(unwatched, ", "), describeStrimziOperator(op), fix)
+}
+
+// checkAdminlessPrerequisites fails before anything is installed when Strimzi
+// is missing or does not watch the namespaces, or the account may not create
+// what the stack needs.
+func checkAdminlessPrerequisites(ctx context.Context, ns resolvedNamespaces) error {
+	if err := checkAdminlessStrimzi(ctx, ns); err != nil {
+		return err
 	}
 
 	grants := adminlessGrants(ns)
