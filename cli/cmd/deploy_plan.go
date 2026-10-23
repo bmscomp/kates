@@ -14,6 +14,23 @@ import (
 func runInteractiveForms() error {
 	var components []string
 
+	isolated := "Isolated Namespaces (kafka, kates, monitoring, litmus)"
+	componentOptions := []huh.Option[string]{
+		huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
+		huh.NewOption("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect").Selected(deployWithKafkaConnect),
+		huh.NewOption("💻 Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
+		huh.NewOption("🔁 MirrorMaker 2 (loopback mirror of the primary)", "mirror-maker2").Selected(deployWithMirrorMaker2),
+		huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
+		huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
+		huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
+		huh.NewOption("🚦 Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
+	}
+	if deployAdminless {
+		// Only what installs into a namespace: no operators, no chaos engineering.
+		isolated = "Isolated Namespaces (existing ones: kafka, connect, db, kates)"
+		componentOptions = []huh.Option[string]{componentOptions[1], componentOptions[2], componentOptions[3]}
+	}
+
 	form1 := huh.NewForm(
 		// ── Group 1: What to deploy ──────────────────────────────────────────
 		huh.NewGroup(
@@ -21,7 +38,7 @@ func runInteractiveForms() error {
 				Title("Choose Namespace Topology").
 				Description("Isolated creates logical boundaries. Single is great for simple local dev.").
 				Options(
-					huh.NewOption("Isolated Namespaces (kafka, kates, monitoring, litmus)", "isolated"),
+					huh.NewOption(isolated, "isolated"),
 					huh.NewOption("Single Namespace (kates-stack)", "single"),
 				).
 				Value(&deployTopology),
@@ -49,16 +66,7 @@ func runInteractiveForms() error {
 			huh.NewMultiSelect[string]().
 				Title("Select Components").
 				Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed.").
-				Options(
-					huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
-					huh.NewOption("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect").Selected(deployWithKafkaConnect),
-					huh.NewOption("💻 Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
-					huh.NewOption("🔁 MirrorMaker 2 (loopback mirror of the primary)", "mirror-maker2").Selected(deployWithMirrorMaker2),
-					huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
-					huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
-					huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
-					huh.NewOption("🚦 Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
-				).
+				Options(componentOptions...).
 				Value(&components),
 		),
 	).WithTheme(ThemeKates())
@@ -80,6 +88,17 @@ func runInteractiveForms() error {
 	// This avoids a huh library issue where MultiSelect values from a
 	// previous group aren't reliably available in WithHideFunc closures
 	// of subsequent groups within the same form.
+	if deployTopology == "single" && deployAdminless {
+		form2 := huh.NewForm(huh.NewGroup(
+			huh.NewInput().
+				Title("Namespace").
+				Description("An existing namespace this account may write to; everything goes there").
+				Value(&deployNamespace),
+		)).WithTheme(ThemeKates())
+		if err := form2.Run(); err != nil {
+			return err
+		}
+	}
 	if deployTopology != "single" {
 		var nsGroups []*huh.Group
 
@@ -151,6 +170,7 @@ func runInteractiveForms() error {
 		}
 	}
 
+	deployWithKafkaConnect = false
 	deployWithChaos = false
 	deployWithMonitoring = false
 	deployWithCertManager = false
@@ -204,7 +224,9 @@ func printTopologyResolution() {
 		if deployWithMonitoring {
 			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Monitoring", deployMonitoringNS))
 		}
-		PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Chaos", deployChaosNS))
+		if deployWithChaos {
+			PrintPhaseItem(fmt.Sprintf("%-14s → %s", "Chaos", deployChaosNS))
+		}
 	}
 }
 

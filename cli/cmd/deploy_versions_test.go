@@ -556,6 +556,19 @@ func TestResolveVersionPlan_ReplacesEmptyPreV1CRDsWithoutOperator(t *testing.T) 
 	}
 }
 
+// The wizard and kates versions read the chart only: the CRD storage check,
+// which needs kubectl, must not fail them and hide the Kafka version.
+func TestResolveVersionPlanChartOnly_ShowsKafkaVersion(t *testing.T) {
+	root := versionsRepo(t, "1.1.0", "4.2.0")
+	vp, err := resolveVersionPlanChartOnly(context.Background(), nil, versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true, KafkaNS: "kafka"})
+	if err != nil {
+		t.Fatalf("chart-only resolve: %v", err)
+	}
+	if vp.KafkaVersion != "4.3.0" || !vp.KafkaDefaulted {
+		t.Errorf("kafka version: got %q (defaulted %v)", vp.KafkaVersion, vp.KafkaDefaulted)
+	}
+}
+
 func TestVersionPlanDescribe(t *testing.T) {
 	root := versionsRepo(t, "1.1.0", "4.2.0")
 	vp, err := resolveVersionPlan(context.Background(), nil, versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true})

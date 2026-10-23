@@ -317,8 +317,12 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 		if err := vp.compareInstalled(ctx, r, o); err != nil {
 			return nil, err
 		}
-		if err := vp.checkStrimziCRDStorage(ctx, r); err != nil {
-			return nil, err
+		// A chart-only read (the wizard, kates versions) refuses kubectl, so
+		// this check would fail it and hide the Kafka version; deploy runs it.
+		if _, chartOnly := r.(chartOnlyRunner); !chartOnly {
+			if err := vp.checkStrimziCRDStorage(ctx, r); err != nil {
+				return nil, err
+			}
 		}
 	}
 

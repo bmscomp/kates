@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 )
 
@@ -40,6 +41,22 @@ func isClusterAdmin(ctx context.Context) (admin, ok bool) {
 	return false, false
 }
 
+// profileFormFn asks a cluster admin, in the wizard, which profile to install.
+var profileFormFn = runProfileForm
+
+func runProfileForm() error {
+	return huh.NewForm(huh.NewGroup(
+		huh.NewSelect[bool]().
+			Title("Install profile").
+			Description("Admin-less installs into namespaces that already exist, on a Strimzi operator already watching them.").
+			Options(
+				huh.NewOption("Full — operators, CRDs, Litmus Chaos, monitoring (cluster admin)", false),
+				huh.NewOption("Admin-less — Kafka, Connect, MirrorMaker 2, Apicurio, Kafka UI, Kates; no chaos engineering", true),
+			).
+			Value(&deployAdminless),
+	)).WithTheme(ThemeKates()).Run()
+}
+
 // The flags the profile leaves out: each installs something cluster-scoped.
 var adminOnlyDeployFlags = []string{"with-strimzi", "with-cert-manager", "with-kyverno", "with-secret-manager", "with-chaos", "with-monitoring"}
 
@@ -65,12 +82,13 @@ func applyAdminlessProfile(ctx context.Context, cmd *cobra.Command) error {
 		}
 	}
 
-	if deployTopology == "single" {
-		if !cmd.Flags().Changed("namespace") {
-			if ns := kubeContextNamespace(ctx); ns != "" {
-				deployNamespace = ns
-			}
+	// Set whatever the topology: the wizard may still switch to single.
+	if !cmd.Flags().Changed("namespace") {
+		if ns := kubeContextNamespace(ctx); ns != "" {
+			deployNamespace = ns
 		}
+	}
+	if deployTopology == "single" {
 		// PostgreSQL has its own namespace flag even in single topology.
 		if !cmd.Flags().Changed("db-ns") {
 			deployDbNS = deployNamespace

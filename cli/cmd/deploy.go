@@ -166,11 +166,24 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	defer pinKubeContext(target)()
 	PrintDeployBanner(target)
 
+	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
+	// terminal they fail with "could not open a new TTY" rather than falling
+	// back to the flag defaults. Piped or scripted runs should just use the
+	// defaults.
+	wizard := (deployInteractive || cmd.Flags().NFlag() == 0) && IsInteractive()
+
 	// ── Profile ──────────────────────────────────────────────────────────
-	// Full for a cluster admin. Anyone else is offered the admin-less stack
-	// (deploy_adminless.go) rather than walked into a refusal halfway through.
+	// Full for a cluster admin, who the wizard also lets pick admin-less.
+	// Anyone else is offered the admin-less stack (deploy_adminless.go)
+	// rather than walked into a refusal halfway through.
 	if !deployAdminless {
-		if admin, ok := clusterAdminFn(context.Background()); ok && !admin {
+		admin, ok := clusterAdminFn(context.Background())
+		if ok && admin && wizard {
+			if err := profileFormFn(); err != nil {
+				return err
+			}
+		}
+		if ok && !admin {
 			suggestion := adminlessSuggestion(target)
 			if deployYes || !IsInteractive() {
 				return errors.New(suggestion)
@@ -190,23 +203,27 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		if err := applyAdminlessProfile(context.Background(), cmd); err != nil {
 			return err
 		}
+	}
+
+	// ── Interactive Forms ────────────────────────────────────────────────
+	// Admin-less, they offer only the namespaced components and run before
+	// the prerequisites check so it checks the namespaces chosen here.
+	if wizard {
+		if err := runInteractiveForms(); err != nil {
+			return err
+		}
+		if deployAdminless && deployTopology == "single" && !cmd.Flags().Changed("db-ns") {
+			deployDbNS = deployNamespace
+		}
+	}
+
+	if deployAdminless {
 		if err := checkAdminlessPrerequisites(context.Background(), resolveNamespaces()); err != nil {
 			return err
 		}
 		adminlessConformityMissing = missingConformityGrants(context.Background(), resolveNamespaces().kafka)
 		if len(adminlessConformityMissing) > 0 {
 			output.Warn(conformityRoleHandoff(resolveNamespaces(), adminlessConformityMissing))
-		}
-	}
-
-	// ── Interactive Forms ────────────────────────────────────────────────
-	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
-	// terminal they fail with "could not open a new TTY" rather than falling
-	// back to the flag defaults. Piped or scripted runs should just use the
-	// defaults.
-	if !deployAdminless && (deployInteractive || cmd.Flags().NFlag() == 0) && IsInteractive() {
-		if err := runInteractiveForms(); err != nil {
-			return err
 		}
 	}
 
