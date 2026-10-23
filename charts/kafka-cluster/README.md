@@ -16,7 +16,7 @@ Upgrading from 0.4? Read [docs/kafka-cluster-1.0-upgrade.md](../../docs/kafka-cl
 | `ConfigMap` | `<clusterName>-kafka-metrics`, `<clusterName>-cruise-control-metrics` | Strimzi's exporter rules, vendored |
 | `PodMonitor` | `<clusterName>-{kafka,cruise-control,kafka-exporter,entity-operator}` | Where the `monitoring.coreos.com` API exists |
 | `PrometheusRule` | `<clusterName>-alerts` | Same condition |
-| `NetworkPolicy` | `<clusterName>-{default-deny,allow-dns,kafka,cruise-control,entity-operator,kafka-exporter}`, `<clusterName>-test-egress` | |
+| `NetworkPolicy` | `<clusterName>-{default-deny,allow-dns,kafka,cruise-control,entity-operator-egress,kafka-exporter-egress}`, `<clusterName>-test-egress` | |
 | Velero `Schedule`, pre-upgrade `Backup` | `<clusterName>-daily-backup`, `<clusterName>-pre-upgrade-r<revision>` | In `backup.veleroNamespace` |
 | SeaweedFS subchart, `Secret`, `ConfigMap` | `<clusterName>-seaweedfs-credentials`, `<clusterName>-object-store` | With `seaweedfs.enabled` |
 | Kyverno `ClusterPolicy` | `kafka-pod-security-<namespace>-<clusterName>` | With `kyvernoPolicy.enabled` |

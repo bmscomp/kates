@@ -6,7 +6,8 @@ NetworkPolicies for THIS cluster's pods.
   <cluster>-kafka             brokers and controllers: the quorum, the
                               operator, the declared clients, external
                               listeners, metrics
-  <cluster>-cruise-control    <cluster>-entity-operator    <cluster>-kafka-exporter
+  <cluster>-cruise-control    <cluster>-entity-operator-egress
+  <cluster>-kafka-exporter-egress
 
 Broker ports come from kafka.listeners, by listener name, so a custom listener
 is reachable by the clients that name it. Policies are additive: Strimzi's own
@@ -134,14 +135,15 @@ spec:
 {{- $operands = append $operands (dict "name" "cruise-control" "legacy" "cruise-control" "ingress" (list (dict "from" (list $operator) "ports" (include "kafka-cluster.tcpPorts" (list 9090) | fromYamlArray)) (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 9404) | fromYamlArray)))) -}}
 {{- end -}}
 {{- if include "kafka-common.enabled" (list .Values.kafkaExporter.enabled true) -}}
-{{- $operands = append $operands (dict "name" "kafka-exporter" "legacy" "kafka-exporter" "ingress" (list (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 9404) | fromYamlArray)))) -}}
+{{- /* Strimzi 1.3 owns <cluster>-kafka-exporter, so ours takes another name. */ -}}
+{{- $operands = append $operands (dict "name" "kafka-exporter" "policy" "kafka-exporter-egress" "legacy" "kafka-exporter" "ingress" (list (dict "from" (list $monitoring) "ports" (include "kafka-cluster.tcpPorts" (list 9404) | fromYamlArray)))) -}}
 {{- end -}}
 {{- range $operands }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "kafka-cluster.resourceName" (list $ .name .legacy) }}
+  name: {{ include "kafka-cluster.resourceName" (list $ (.policy | default .name) .legacy) }}
   namespace: {{ $ns }}
   labels:
     {{- include "kafka-cluster.labels" $ | nindent 4 }}
