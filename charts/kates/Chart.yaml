@@ -4,14 +4,14 @@ description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Minor: global.imageRegistry now reaches every image the chart renders, so an
 # image value that already names the mirror gets it twice.
-# Patch: appVersion and the image tag move to 1.29.0, the tag the v1.29.0
+# Patch: appVersion and the image tag move to 1.29.1, the tag the v1.29.1
 # release publishes. Templates are otherwise unchanged.
-version: 0.13.1
+version: 0.13.2
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.29.0"
+appVersion: "1.29.1"
 keywords:
   - kafka
   - testing
@@ -30,6 +30,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.29.1 and the image tag move to 1.29.1. No Kates API change since 1.29.0: the release carries CLI fixes only (#450, #451, #452). Templates are otherwise unchanged."
     - kind: changed
       description: "appVersion 1.29.0 and the image tag move to 1.29.0. The Kates API changes since 1.28.0 (#447): CPU_STRESS and IO_STRESS run a pinned, configurable image (kates.chaos.stress-image, set from chaos.stressImage, default docker.io/polinux/stress:1.0.4) as the target's own non-root user, else 65534, under a restricted security context, so the ephemeral container passes Pod Security restricted. Templates are otherwise unchanged."
     - kind: changed

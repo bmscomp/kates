@@ -16,9 +16,9 @@ type: application
 # Patch: test-mm2 and test-connectors get requests and limits, so every pod
 # passes Pod Security "restricted" with default values; podLabels reach every
 # pod and global.imageRegistry every image.
-# Patch: the pre-flight, data-test and secret-sync image moves to kates-tester 1.29.0, the tag the
-# v1.29.0 release publishes; every Strimzi chart pins the same one.
-version: 0.11.9
+# Patch: the pre-flight, data-test and secret-sync image moves to kates-tester 1.29.1, the tag the
+# v1.29.1 release publishes; every Strimzi chart pins the same one.
+version: 0.11.10
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -45,6 +45,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.29.1, the tag the v1.29.1 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.29.0 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: changed
       description: "testImages.kubectl (and testImages.kafka where present) move to kates-tester 1.29.0, the tag the v1.29.0 release publishes; every Strimzi chart in the repository pins the same one (scripts/check-versions.sh holds them to the kates chart's appVersion). The image is unchanged since 1.28.0 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: fixed
