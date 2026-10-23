@@ -133,7 +133,7 @@ In Kafka, tail latency is caused by:
 - **[Controller](appendix-a-glossary.md#gl-controller) elections** — [KRaft](appendix-a-glossary.md#gl-kraft) metadata operations can cause brief pauses
 
 ::: {.callout-tip}
-GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size [@jep439]. Kates's JVM image runs generational ZGC (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default [@jep474]), both under the chart's defaults and under the [values overlay](appendix-a-glossary.md#gl-values-overlay) `kates deploy` applies on any cluster other than Kind. On Kind, `kates deploy` runs the [native image](appendix-a-glossary.md#gl-graalvm-native-image) instead, which runs the Serial GC, so the tail latencies of a local run include its pauses — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
+GC pauses are the most common source of tail latency in Kates benchmarks. Switching to **ZGC** reduces GC pauses to under 1ms regardless of heap size [@jep439]. Kates's JVM image runs generational ZGC (`-XX:+UseZGC -XX:+ZGenerational` on its JDK 21 base image; newer JDKs make generational mode the default [@jep474]), under the chart's defaults, which a plain `helm install` runs. `kates deploy` runs the [native image](appendix-a-glossary.md#gl-graalvm-native-image) on every cluster instead, which runs the Serial GC, so the tail latencies of a run it deployed include its pauses — see [Deployment Guide](12-deployment.md#jvm-tuning) for details.
 :::
 
 ## Coordinated Omission

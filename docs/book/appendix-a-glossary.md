@@ -228,7 +228,7 @@ A pass/fail threshold in a scenario's `validate` block, such as `maxP99LatencyMs
 
 ### GraalVM Native Image {#gl-graalvm-native-image}
 
-A Java application compiled ahead of time by GraalVM into a standalone binary, which starts without a JVM and uses GraalVM's own garbage collector (the Serial GC unless the build picks another). On a Kind cluster `kates deploy` runs the Kates API as a native image built from your checkout, and other clusters get the JVM image with generational ZGC. A local run's P99 and Max therefore include Serial GC pauses. See [Deployment Guide](12-deployment.md#native-image-build).
+A Java application compiled ahead of time by GraalVM into a standalone binary, which starts without a JVM and uses GraalVM's own garbage collector (the Serial GC unless the build picks another). `kates deploy` runs the Kates API as a native image on every cluster, built from your checkout on Kind and the published `-native` tag elsewhere; a plain `helm install` gets the JVM image with generational ZGC. The P99 and Max of a run `kates deploy` set up therefore include Serial GC pauses. See [Deployment Guide](12-deployment.md#native-image-build).
 
 ### Grade {#gl-grade}
 

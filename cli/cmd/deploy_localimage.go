@@ -19,7 +19,7 @@ import (
 // So a local deploy runs the native image built from the working tree, which
 // the chart already describes: values-native-local.yaml pins kates:native-local
 // with pullPolicy Never, sized for a laptop. This applies ONLY to kind (see
-// isKind in deploy.go); every other cluster keeps the published image.
+// isKind in deploy.go); every other cluster runs the published native image.
 const (
 	// localNativeImage is the tag `make kates-image-native-local` builds and
 	// loads onto the kind node, and the one values-native-local.yaml names.
@@ -31,8 +31,8 @@ const (
 	// `make kates-image-native-local` is not a silent failure.
 	localNativeValues = "charts/kates/values-native-local.yaml"
 	// publishedNativeValues keeps the native runtime but uses the published image
-	// tag and normal image pulling, which is what a proxied kind cluster needs
-	// when no local backend image has been built.
+	// tag and normal image pulling: what every cluster but kind runs, and what a
+	// proxied kind cluster needs when no local backend image has been built.
 	publishedNativeValues = "charts/kates/values-native.yaml"
 )
 

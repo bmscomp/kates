@@ -692,7 +692,7 @@ jvm:
   options: "-Xms512m -Xmx2560m -XX:+UseZGC -XX:+ZGenerational"
 ```
 
-These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` sizes the Kates API differently: on any cluster other than Kind it applies `charts/kates/values-generic.yaml`, a 1Gi limit with `-Xms256m -Xmx512m`, as does every admin-less install, and on Kind it runs the native image, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)).
+These are the chart defaults, which a plain `helm install` runs with; `values-prod.yaml` sets the same memory and `jvm.options`, with a CPU limit of `1000m`. `kates deploy` runs the native image on every cluster, which `jvm.options` does not reach (see [Native Image Build](#native-image-build)): on any cluster other than Kind, admin-less installs included, it applies `charts/kates/values-generic.yaml` and then `charts/kates/values-native.yaml`, whose 768Mi request and 1Gi limit replace the generic overlay's JVM sizing.
 
 | GC | Max Pause | Throughput Overhead | Best For |
 |----|:-:|:-:|----------|
@@ -1085,7 +1085,7 @@ graph TB
 
 The native image does not run ZGC. It is built with Mandrel, whose only collector apart from Epsilon (which never collects) is the Serial GC, and the build selects no other. Every collection stops the application, and those pauses land in the latencies Kates records. `jvm.options` cannot change that: a native binary does not read `JAVA_TOOL_OPTIONS`. Its maximum heap is `-XX:MaximumHeapSizePercent=75` of the memory limit, passed as container args (`containerArgs` in `charts/kates/values-native.yaml`). That is above the 70% rule for the JVM image, and safely so: a native binary has no metaspace, JIT or code cache to hold beside its heap.
 
-So the two images do different jobs. Run the JVM image wherever Kates's own numbers are the product — continuous benchmarking, gates, capacity planning. Run the native image where startup and footprint matter more than pause consistency: CI jobs, smoke tests, laptops. `kates deploy` on a Kind cluster runs a local native image (`kates:native-local`, else `kates:native`), so a local run measures with Serial GC. On other clusters `kates deploy` runs the published JVM image; to run the published `-native` tag there, install the chart with `charts/kates/values-native.yaml`.
+So the two images do different jobs. Run the JVM image wherever Kates's own numbers are the product — continuous benchmarking, gates, capacity planning. Run the native image where startup and footprint matter more than pause consistency: CI jobs, smoke tests, laptops. `kates deploy` runs the native image everywhere, so every run it deployed measures with Serial GC: on a Kind cluster a local one (`kates:native-local`, else `kates:native`), on other clusters the published `-native` tag through `charts/kates/values-native.yaml`. To measure with ZGC, install the chart without that overlay.
 
 `make kates-native-local` is the target that deploys: it compiles the working tree into `kates:native-local`, loads it into Kind, installs the chart pinned to it and waits for the rollout, so the check below reads the pod it started.
 

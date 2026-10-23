@@ -182,7 +182,7 @@ After the sweep completes, the iteration history shows results for all values si
 
 ## Warmup Mode (`W`)
 
-The brokers run on JVMs, and a JVM needs time to JIT-compile its hot code paths. On a [Kind](appendix-a-glossary.md#gl-kind) cluster the Kates API is a [GraalVM native image](appendix-a-glossary.md#gl-graalvm-native-image), compiled ahead of time, so only the brokers warm up; elsewhere `kates deploy` runs the Kates API's JVM image, which warms up too. The first 1–3 runs in a fresh session are typically slower and noisier than subsequent runs. Warmup mode discards a configurable number of iterations before recording the measured one.
+The brokers run on JVMs, and a JVM needs time to JIT-compile its hot code paths. `kates deploy` runs the Kates API as a [GraalVM native image](appendix-a-glossary.md#gl-graalvm-native-image), compiled ahead of time, so only the brokers warm up; a Kates API installed from the chart's defaults runs the JVM image, which warms up too. The first 1–3 runs in a fresh session are typically slower and noisier than subsequent runs. Warmup mode discards a configurable number of iterations before recording the measured one.
 
 Press `W` to cycle the warmup count (1 → 2 → 3 → 4 → 5 → off):
 

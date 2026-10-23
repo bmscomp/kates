@@ -1725,18 +1725,18 @@ data:
 
 		katesBootstrap := dc.primary.Bootstrap(dc.report.Network.ClusterDomain)
 
-		// On kind, prefer a real local backend image when one is available on
-		// every node; otherwise use the published native image and let the
-		// cluster pull it through its configured proxy.
-		var kindBackendArgs []string
+		// Every install runs the native image. On kind, prefer a real local
+		// backend image when one is available on every node; otherwise, and on
+		// every other cluster, use the published native image.
+		backendArgs := []string{"-f", publishedNativeValues}
 		if dc.isKind {
 			args, err := kindBackendImageArgs(ctx, dc.report.Context)
 			if err != nil {
 				return err
 			}
-			kindBackendArgs = args
+			backendArgs = args
 		} else {
-			dl.Println("    - Backend image: the chart's published image (not a kind cluster)")
+			dl.Println("    - Backend image: published native image (not a kind cluster)")
 		}
 
 		if err := cleanupStaleKatesChartDependencies("charts/kates"); err != nil {
@@ -1746,7 +1746,7 @@ data:
 		katesArgs := []string{"upgrade", "--install", "kates", "charts/kates",
 			"-n", appNS, "--create-namespace"}
 		katesArgs = append(katesArgs, dc.katesChartValues()...)
-		katesArgs = append(katesArgs, kindBackendArgs...)
+		katesArgs = append(katesArgs, backendArgs...)
 		katesArgs = append(katesArgs,
 			"--set", "kafka.bootstrapServers="+katesBootstrap,
 			"--set", "kafka.topicNamespace="+kafkaNS,
