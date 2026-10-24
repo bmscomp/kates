@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,8 @@ type stubGate struct {
 	configMissing bool
 
 	createCalled  bool
+	createConfig  string // what the topology file held when kind ran
+	createConfigP string
 	createErr     error
 	pickCalled    bool
 	confirmCalled bool
@@ -51,6 +54,10 @@ func (s *stubGate) install(t *testing.T) {
 	probeEnvironmentFn = func(detect.CommandExecutor) cluster.Environment { return s.env }
 	createKindFn = func(_ detect.CommandExecutor, o cluster.KindOptions) error {
 		s.createCalled = true
+		s.createConfigP = o.ConfigPath
+		if data, err := os.ReadFile(o.ConfigPath); err == nil {
+			s.createConfig = string(data)
+		}
 		if o.Progress != nil {
 			o.Progress("stub")
 		}
@@ -613,25 +620,41 @@ func TestResolveCluster_DryRunNeverCreatesACluster(t *testing.T) {
 	}
 }
 
-// The kind topology config is repo-relative, so an installed binary run from
-// elsewhere cannot read it. Offering anyway fails inside `kind create` with a
-// bare "no such file".
-func TestResolveCluster_MissingTopologyConfigIsExplained(t *testing.T) {
+// Outside a checkout, such as a kates from Homebrew, the repo-relative
+// topology is not there: the gate creates from the copy built into the
+// binary, and removes the temporary file afterwards.
+func TestResolveCluster_OutsideACheckoutUsesTheBuiltInTopology(t *testing.T) {
 	s := &stubGate{
 		contexts: nil, env: dockerReady, tty: true, confirm: true,
 		configMissing: true,
 	}
 	s.install(t)
 
-	_, err := resolveCluster()
-	if err == nil {
-		t.Fatal("want an error when the topology config is unreadable")
+	got, err := resolveCluster()
+	if err != nil {
+		t.Fatalf("resolveCluster: %v", err)
 	}
-	if s.createCalled {
-		t.Error("must not attempt creation without the topology config")
+	if !s.createCalled || got != "kind-"+cluster.DefaultKindClusterName {
+		t.Fatalf("created %v, context %q; want the kind cluster built", s.createCalled, got)
 	}
-	if !strings.Contains(err.Error(), cluster.DefaultKindConfig) {
-		t.Errorf("error should name the missing config, got: %v", err)
+	if s.createConfig != string(cluster.KindConfig) {
+		t.Errorf("kind ran from %s, which does not hold the built-in topology", s.createConfigP)
+	}
+	if _, err := os.Stat(s.createConfigP); !os.IsNotExist(err) {
+		t.Errorf("the temporary topology %s was left behind: %v", s.createConfigP, err)
+	}
+}
+
+// From a checkout, kind reads the checkout's own topology file.
+func TestResolveCluster_InACheckoutUsesItsTopology(t *testing.T) {
+	s := &stubGate{contexts: nil, env: dockerReady, tty: true, confirm: true}
+	s.install(t)
+
+	if _, err := resolveCluster(); err != nil {
+		t.Fatalf("resolveCluster: %v", err)
+	}
+	if s.createConfigP != cluster.DefaultKindConfig {
+		t.Errorf("kind ran from %q, want %s", s.createConfigP, cluster.DefaultKindConfig)
 	}
 }
 

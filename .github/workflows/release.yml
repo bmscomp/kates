@@ -190,6 +190,9 @@ jobs:
             version "__VERSION__"
             license "Apache-2.0"
 
+            # kates deploy checks the cosign signature of every chart it pulls.
+            depends_on "cosign"
+
             on_macos do
               if Hardware::CPU.arm?
                 url "https://github.com/__REPO__/releases/download/__TAG__/kates-darwin-arm64.tar.gz"

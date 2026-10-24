@@ -2,11 +2,16 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/bmscomp/kates/cli/output"
 )
 
 // withChartBuild sets the build's published chart versions for one test and
@@ -15,19 +20,40 @@ func withChartBuild(t *testing.T, versions string) {
 	t.Helper()
 	oldVersions, oldVersion := ChartVersions, Version
 	oldRoot, oldPublished := chartRoot, chartsPublished
-	oldCombined, oldHelm := runExecCombinedFn, runHelmFn
+	oldCombined, oldHelm, oldLatest, oldCosign := runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn
+	oldOut, oldErr := output.Out, output.Err
 	t.Cleanup(func() {
 		ChartVersions, Version = oldVersions, oldVersion
 		chartRoot, chartsPublished = oldRoot, oldPublished
-		runExecCombinedFn, runHelmFn = oldCombined, oldHelm
+		runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn = oldCombined, oldHelm, oldLatest, oldCosign
+		output.Out, output.Err = oldOut, oldErr
 	})
 	ChartVersions, Version = versions, "v9.9.9"
+	cosignPathFn = func() (string, error) { return "cosign", nil }
 	t.Setenv("KATES_CHECKOUT", "")
+	t.Setenv("KATES_REQUIRE_SIGNED_CHARTS", "")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 }
 
+// fakeDigest is the digest the fake registry serves for a chart at a version.
+func fakeDigest(name, version string) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(name+"@"+version)))
+}
+
+// callsOf are the calls among calls that start with prefix ("helm pull").
+func callsOf(calls [][]string, prefix string) [][]string {
+	var out [][]string
+	for _, c := range calls {
+		if strings.HasPrefix(strings.Join(c, " "), prefix) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // fakeHelmPull stands in for `helm pull --untar` and `helm package`, writing
-// what they would, and records every call.
+// what they would, and for a `cosign verify` that passes, and records every
+// call.
 func fakeHelmPull(t *testing.T) *[][]string {
 	t.Helper()
 	var calls [][]string
@@ -41,6 +67,9 @@ func fakeHelmPull(t *testing.T) *[][]string {
 				t.Fatal(err)
 			}
 		}
+		if name == "cosign" {
+			return []byte("Verification for ... --\n"), nil
+		}
 		switch args[0] {
 		case "pull": // pull <ref> --version <v> --untar --untardir <dir>
 			chart := filepath.Join(args[6], filepath.Base(args[1]))
@@ -48,6 +77,7 @@ func fakeHelmPull(t *testing.T) *[][]string {
 			if filepath.Base(args[1]) == "strimzi-operator" {
 				write(filepath.Join(chart, "charts", "strimzi-kafka-operator", "Chart.yaml"), "name: strimzi-kafka-operator\nversion: 1.2.0\n")
 			}
+			return []byte("Pulled: " + args[1] + ":" + args[3] + "\nDigest: " + fakeDigest(filepath.Base(args[1]), args[3]) + "\n"), nil
 		case "package": // package <dir> --destination <dir>
 			write(filepath.Join(args[3], "strimzi-kafka-operator-1.2.0.tgz"), "tgz")
 		}
@@ -99,7 +129,7 @@ func TestResolveChartRootCheckoutBeatsPublished(t *testing.T) {
 	}
 }
 
-func TestResolveChartRootPullsThePublishedVersionsOnce(t *testing.T) {
+func TestResolveChartRootPullsThePublishedVersionsFreshEachRun(t *testing.T) {
 	withChartBuild(t, "kates=0.14.1,kates-monitoring=1.7.1,strimzi-operator=0.4.5,velero=11.3.4")
 	calls := fakeHelmPull(t)
 	dirs := []string{"kates", "monitoring", "strimzi-operator"}
@@ -135,18 +165,109 @@ func TestResolveChartRootPullsThePublishedVersionsOnce(t *testing.T) {
 		t.Fatalf("cached, offline: %v", err)
 	}
 	if len(*calls) != n {
-		t.Fatalf("a cached version was pulled again: %v", (*calls)[n:])
+		t.Fatalf("offline, the cache was pulled again: %v", (*calls)[n:])
 	}
 
-	ChartVersions = "kates=0.14.2,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
+	// Online, every run pulls fresh copies. The digests are the ones already
+	// verified, so cosign is not asked again.
 	if err := resolveChartRoot(context.Background(), "", false, dirs...); err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != n+1 || !slices.Contains((*calls)[n], "0.14.2") {
-		t.Fatalf("a new kates version should pull kates alone: %v", (*calls)[n:])
+	if again := (*calls)[n:]; len(callsOf(again, "helm pull")) != 3 || len(callsOf(again, "cosign")) != 0 {
+		t.Fatalf("a second run made %v; want three pulls and no cosign call", again)
+	}
+
+	ChartVersions = "kates=0.14.2,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
+	if err := resolveChartRoot(context.Background(), "", false, "kates"); err != nil {
+		t.Fatal(err)
+	}
+	pulls := callsOf(*calls, "helm pull")
+	if last := pulls[len(pulls)-1]; !slices.Contains(last, "0.14.2") {
+		t.Fatalf("a new kates version was not pulled: %v", last)
 	}
 	if _, v, _ := localChart(chartRootPath("charts/kates")); v != "0.14.2" {
 		t.Fatalf("charts/kates is %q after the re-pull", v)
+	}
+}
+
+func TestResolveChartRootKeepsTheCacheWhenTheRegistryFails(t *testing.T) {
+	withChartBuild(t, "kates=0.14.1,kafka-ui=0.3.2")
+	fakeHelmPull(t)
+	if err := resolveChartRoot(context.Background(), "", false, "kafka-ui", "kates"); err != nil {
+		t.Fatal(err)
+	}
+	stderr := output.ResetForTesting()
+	attempts := 0
+	runExecCombinedFn = func(context.Context, string, ...string) ([]byte, error) {
+		attempts++
+		return []byte("dial tcp: lookup ghcr.io: no such host"), errors.New("exit status 1")
+	}
+	if err := resolveChartRoot(context.Background(), "", false, "kafka-ui", "kates"); err != nil {
+		t.Fatalf("the cached copies should carry the run: %v", err)
+	}
+	// One failed refresh: the registry is unreachable, so kates is not tried.
+	if attempts != 1 || strings.Count(stderr.String(), "Could not refresh") != 1 {
+		t.Errorf("%d pulls, warnings %q; want one of each", attempts, stderr.String())
+	}
+	for dir, want := range map[string]string{"kafka-ui": "0.3.2", "kates": "0.14.1"} {
+		if _, v, err := localChart(chartRootPath("charts/" + dir)); err != nil || v != want {
+			t.Fatalf("the cached %s is gone after a failed refresh: %q %v", dir, v, err)
+		}
+	}
+
+	ChartVersions = "kates=0.14.2,kafka-ui=0.3.2"
+	if err := resolveChartRoot(context.Background(), "", false, "kafka-ui", "kates"); err == nil || !strings.Contains(err.Error(), "no such host") {
+		t.Fatalf("with no copy of that version cached, the failure must stop the run: %v", err)
+	}
+}
+
+func TestResolveChartRootRemovesOtherVersionsCaches(t *testing.T) {
+	withChartBuild(t, "kates=0.14.1")
+	fakeHelmPull(t)
+	charts := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "kates", "charts")
+	stale := filepath.Join(charts, "v9.9.8", "charts", "kates")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolveChartRoot(context.Background(), "", false, "kates"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(charts, "v9.9.8")); !os.IsNotExist(err) {
+		t.Errorf("v9.9.8's cache is still there: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(charts, "v9.9.9", "charts", "kates", "Chart.yaml")); err != nil {
+		t.Errorf("this version's cache: %v", err)
+	}
+}
+
+func TestWarnIfNewerRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name, versions, latest string
+		err                    error
+		want                   bool
+	}{
+		{"newer release", "kates=0.14.1", "v9.10.0", nil, true},
+		{"this release", "kates=0.14.1", "v9.9.9", nil, false},
+		{"older tag", "kates=0.14.1", "v9.9.8", nil, false},
+		{"unreachable", "kates=0.14.1", "", errors.New("timeout"), false},
+		{"dev build", "", "v9.10.0", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withChartBuild(t, tc.versions)
+			asked := false
+			latestReleaseFn = func(context.Context) (string, error) {
+				asked = true
+				return tc.latest, tc.err
+			}
+			out := output.ResetForTesting()
+			warnIfNewerRelease(context.Background())
+			if got := strings.Contains(out.String(), "upgrade first"); got != tc.want {
+				t.Fatalf("warned %v, want %v: %q", got, tc.want, out.String())
+			}
+			if tc.versions == "" && asked {
+				t.Fatal("a dev build asked GitHub for the latest release")
+			}
+		})
 	}
 }
 
