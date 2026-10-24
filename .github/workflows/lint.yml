@@ -36,6 +36,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       java: ${{ steps.filter.outputs.java }}
       makefile: ${{ steps.filter.outputs.makefile }}
+      charts: ${{ steps.filter.outputs.charts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -64,6 +65,11 @@ jobs:
               - '.github/workflows/lint.yml'
             makefile:
               - 'Makefile'
+              - '.github/workflows/lint.yml'
+            charts:
+              - 'charts/**'
+              - 'scripts/chart_bumps.py'
+              - 'scripts/test_chart_bumps.py'
               - '.github/workflows/lint.yml'
 
   workflows:
@@ -227,10 +233,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: make check-help
 
+  # publish-charts.yml never pushes a published version again, so a chart
+  # merged without a new version is never published, and nothing says so.
+  chart-versions:
+    name: Chart versions
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.charts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the PR's merge base
+      - name: Unit tests
+        run: python3 -m unittest discover -s scripts -p 'test_chart_bumps.py'
+      - name: Every changed chart carries a new version
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 scripts/chart_bumps.py "origin/${BASE_REF}"
+
   gate:
     name: Gate · Lint
     if: always()
-    needs: [changes, workflows, scripts, dockerfiles, yaml, go, java, makefile]
+    needs: [changes, workflows, scripts, dockerfiles, yaml, go, java, makefile, chart-versions]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
