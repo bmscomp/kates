@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -334,8 +335,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	vp.describe(PrintPhaseItem)
 	primary := primaryCluster{Name: deployKafkaName, Namespace: resolveNamespaces().kafka, Version: vp.kafka}
 
-	valuesFile := ".build/values-detected.yaml"
-	os.MkdirAll(".build", 0755)
+	valuesFile, errorLog, err := deployFiles()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(valuesFile), 0o755); err != nil {
+		return fmt.Errorf("failed to create values file: %v", err)
+	}
 
 	f, err := os.Create(valuesFile)
 	if err != nil {
@@ -348,7 +354,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		analyzer := detect.NewAnalyzer(executor)
 		analyzer.Analyze(report, detect.ParsedReqs{})
 
-		PrintPhaseItem("Generating values-detected.yaml...")
+		PrintPhaseItem("Generating " + valuesFile + "...")
 		if err := detect.RenderValuesWithReserve(report, primary.Name, 0.30, f); err != nil {
 			return fmt.Errorf("failed to write values file: %v", err)
 		}
@@ -501,7 +507,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	<-doneCh // Wait for deployment goroutine to fully exit
 
 	if deployErr != nil {
-		os.WriteFile("deploy-error.log", []byte(deployErr.Error()), 0644)
+		saveDeployError(errorLog, deployErr)
 	}
 
 	if deployErr == nil && len(finalEntries) > 0 {
