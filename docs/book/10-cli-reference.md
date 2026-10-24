@@ -296,7 +296,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Schedule Commands](#schedule-commands) | `schedule list`, `get`, `create`, `delete` | How do you run the same test on a cron schedule? | Kates API |
 | [Observability & Monitoring](#observability--monitoring) | `dashboard`, `top` | What is running right now, and how is it doing? | Kates API |
 | [Interactive Lab](#interactive-lab) | `lab` | Which settings work best, when you try them one run at a time? | Kates API |
-| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `charts pull`, `clean`, `detect`, `ports`, `auto`, `operator`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
+| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `charts pull`, `charts push`, `clean`, `detect`, `ports`, `auto`, `operator`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
 | [Versions and Operators](#versions-and-operators) | `versions`, `operators list` | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
 | [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes, through `kubectl` and `helm`; when a source has no upstream image, `up` and `run` build one with `docker` and, on a Kind cluster, load it there, unless you pass `--skip-build` |
 | [Security Commands](#security-commands) | `security audit`, `tls-inspect`, `auth-test`, `pentest`, `compliance`, `baseline`, `drift`, `gate`, `certs`, `cve`, `secrets`, `netpol`, `acl-map`, `config-diff`, `trend` | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl`, and `security audit` also asks it about Kyverno |
@@ -1395,8 +1395,25 @@ It takes these flags:
 | `--to` | Directory to write the bundle into, created if missing; run the command again to refresh it |
 | `--images` | Also pull every container image the stack runs and save them into `images.tar`, listed in `images.txt`; deploy loads them into kind's nodes. Needs Docker and several GB |
 | `--platform` | Platform of those images, such as `linux/amd64` (default: this machine's) |
+| `--legacy-kafka` | Kafka versions whose images `kates migrate` runs for its sources, such as `2.8.2,3.5.2`, added to the archive. Below 3.7.0 they are built from `Dockerfile.legacy-kafka`. Needs `--images` |
 
 Each chart's cosign signature is checked as deploy checks it, and the bundle records the result, so `KATES_REQUIRE_SIGNED_CHARTS=1` accepts it offline. `KATES_CHART_REGISTRY` pulls from a mirror. The command needs a release build, which knows its chart versions. [Deploying Without GHCR](12-deployment.md#deploying-without-ghcr) covers what a bundle doesn't hold.
+
+#### charts push {#charts-push}
+
+Push the images a bundle holds to the registry a cluster without internet access pulls from.
+
+```bash
+kates charts push --from ./kates-charts --to registry.internal/kates
+KATES_IMAGE_REGISTRY=registry.internal/kates kates deploy --chart-bundle ./kates-charts
+```
+
+It loads `images.tar` into Docker and pushes each image under two names: the registry followed by the image as written, and the registry followed by the image without its own registry host. After pushing, it renders every chart pointed at the registry, as deploy and migrate do when `KATES_IMAGE_REGISTRY` names it, and fails if an image would come from anywhere else. It takes these flags:
+
+| Flag | Description |
+|---|---|
+| `--from` | Bundle directory that `kates charts pull --images` wrote |
+| `--to` | Registry, with any path, to push the images to; log Docker in to it first |
 
 #### deploy status
 

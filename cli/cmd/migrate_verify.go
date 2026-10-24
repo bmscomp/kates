@@ -879,6 +879,7 @@ func openExternalRun(ctx context.Context, f *migrateLabFlags) (*labRun, error) {
 		Policy: f.Policy, Topics: splitTopics(f.Topics), Messages: f.Messages,
 		SASL: f.SourceSecret != "", SourcePassword: "external", StrimziVersion: env.StrimziVersion, Scope: env.Scope,
 	}
+	opts.ImageMirror = imageRegistry()
 	l, err := migrate.New(opts)
 	if err != nil {
 		return nil, err

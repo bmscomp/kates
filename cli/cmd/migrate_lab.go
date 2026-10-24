@@ -510,6 +510,7 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 		opts.SASL = true
 		opts.SourcePassword = "existing" // the Secret exists; the lab never rewrites it
 	}
+	opts.ImageMirror = imageRegistry()
 	l, err := migrate.New(opts)
 	if err != nil {
 		return nil, fmt.Errorf("lab %s: %w", d.Name, err)

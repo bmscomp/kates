@@ -1106,8 +1106,8 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 		podName := fmt.Sprintf("prober-%s", sanitizeDNSLabel(zone))
 
 		g.Go(func() error {
-			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"busybox","image":"busybox:1.37","command":["sleep","3600"]}]}}`, nodeName)
-			_, runErr := c.exec.Exec("kubectl", "run", podName, "--image=busybox:1.37", "-n", ns,
+			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"busybox","image":"`+probeImage("busybox:1.37")+`","command":["sleep","3600"]}]}}`, nodeName)
+			_, runErr := c.exec.Exec("kubectl", "run", podName, "--image="+probeImage("busybox:1.37"), "-n", ns,
 				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
 				"--overrides", overrides, "--restart=Never")
 			return runErr
@@ -1382,7 +1382,7 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		// Attempt 2: If no running pods, spin up a temporary pod. A read-only
 		// collection keeps the cluster.local default instead.
 		if resolvContent == "" && !c.ReadOnly {
-			resolvContent, _ = c.exec.Exec("kubectl", "run", "--rm", "-i", "--image=busybox:1.36", "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
+			resolvContent, _ = c.exec.Exec("kubectl", "run", "--rm", "-i", "--image="+probeImage("busybox:1.36"), "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
 		}
 
 		if domain := parseResolvConfClusterDomain(resolvContent); domain != "" {
@@ -1924,10 +1924,10 @@ EOF`, pvcName, ns, scName)
 
 		c.progress(fmt.Sprintf("Storage benchmarking: launching ephemeral FIO pod for %q...", scName))
 		// 2. Create the Benchmark Pod pinned to target node to resolve WaitForFirstConsumer immediately
-		podOverrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","volumes":[{"name":"bench-volume","persistentVolumeClaim":{"claimName":"%s"}}],"containers":[{"name":"fio-bench","image":"alpine:3.19","volumeMounts":[{"name":"bench-volume","mountPath":"/data"}],"command":["sh","-c","apk add --no-cache fio && fio --name=bench-test --filename=/data/testfile --size=64M --rw=randrw --rwmixwrite=50 --bs=4k --direct=1 --numjobs=1 --time_based --runtime=15 --group_reporting --output-format=json"]}]}}`, nodeName, pvcName)
+		podOverrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","volumes":[{"name":"bench-volume","persistentVolumeClaim":{"claimName":"%s"}}],"containers":[{"name":"fio-bench","image":"`+probeImage("alpine:3.19")+`","volumeMounts":[{"name":"bench-volume","mountPath":"/data"}],"command":["sh","-c","apk add --no-cache fio && fio --name=bench-test --filename=/data/testfile --size=64M --rw=randrw --rwmixwrite=50 --bs=4k --direct=1 --numjobs=1 --time_based --runtime=15 --group_reporting --output-format=json"]}]}}`, nodeName, pvcName)
 
 		_, runErr := c.exec.Exec("kubectl", "run", podName,
-			"--image=alpine:3.19", "-n", ns,
+			"--image="+probeImage("alpine:3.19"), "-n", ns,
 			"--overrides", podOverrides,
 			"--restart=Never")
 		if runErr != nil {
@@ -2042,8 +2042,8 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 		podNames[zone] = podName
 
 		g.Go(func() error {
-			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"alpine:3.19","command":["sleep","3600"]}]}}`, nodeName)
-			_, runErr := c.exec.Exec("kubectl", "run", podName, "--image=alpine:3.19", "-n", ns,
+			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"`+probeImage("alpine:3.19")+`","command":["sleep","3600"]}]}}`, nodeName)
+			_, runErr := c.exec.Exec("kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
 				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
 				"--overrides", overrides, "--restart=Never")
 			return runErr
@@ -2193,8 +2193,8 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 
 	nodeName := report.Nodes[0].Name
 	podName := "dns-prober"
-	overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"alpine:3.19","command":["sleep","3600"]}]}}`, nodeName)
-	_, runErr := c.exec.Exec("kubectl", "run", podName, "--image=alpine:3.19", "-n", ns,
+	overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"`+probeImage("alpine:3.19")+`","command":["sleep","3600"]}]}}`, nodeName)
+	_, runErr := c.exec.Exec("kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
 		"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
 		"--overrides", overrides, "--restart=Never")
 	if runErr != nil {

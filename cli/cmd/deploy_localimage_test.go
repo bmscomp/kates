@@ -174,3 +174,16 @@ func TestLocalImageArgs(t *testing.T) {
 		}
 	}
 }
+
+// Behind a mirror the local build is not used: global.imageRegistry would
+// rename it, and the nodes hold it under its bare name only.
+func TestKindBackendImageArgsUsesThePublishedImageBehindAMirror(t *testing.T) {
+	loaded, setOutput := installKindExecSpies(t)
+	setOutput(hostHasImage(localNativeImage))
+	t.Setenv("KATES_IMAGE_REGISTRY", "registry.internal/kates")
+
+	got, err := kindBackendImageArgs(context.Background(), "kind-panda")
+	if err != nil || strings.Join(got, " ") != "-f "+chartRootPath(publishedNativeValues) || len(*loaded) != 0 {
+		t.Fatalf("args %v, %v, loads %v; want the published native image and no load", got, err, *loaded)
+	}
+}

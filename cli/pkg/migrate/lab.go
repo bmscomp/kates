@@ -140,6 +140,9 @@ type Options struct {
 	// Registry holds the built legacy images; kafkaversion's default when
 	// empty.
 	Registry string
+	// ImageMirror, when set, is the registry every image is pulled from,
+	// under <mirror>/<image as written> (KATES_IMAGE_REGISTRY).
+	ImageMirror string
 	// StrimziVersion is the target's operator version, written into the
 	// mirror's values.
 	StrimziVersion string
@@ -503,6 +506,9 @@ func deriveSources(l *Lab, specs []SourceSpec) ([]*Source, error) {
 		}
 		if spec.Provider == kafkaversion.ProviderLegacy {
 			s.Image = kafkaversion.LegacyImageFor(spec.From, o.Registry)
+			if o.ImageMirror != "" {
+				s.Image = o.ImageMirror + "/" + s.Image
+			}
 			// The chart's fullname is <release>-legacy-kafka; its bootstrap
 			// Service is <fullname>-bootstrap (templates/services.yaml).
 			port := 9092

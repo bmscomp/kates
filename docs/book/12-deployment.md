@@ -568,7 +568,16 @@ kates deploy --chart-bundle ./kates-charts --with-cert-manager=false
 
 Besides the Kates charts, Kafka Connect's PostgreSQL (`cdc-postgresql`) and the `kates-platform` umbrella among them, a bundle carries the cert-manager and Kyverno charts deploy installs, at its pinned versions, under `third-party/`. They have no signature to check, so the pull records their checksums, and deploy refuses a tarball that changed on its way across.
 
-With `--images`, the pull also saves every container image the stack runs, for this machine's platform or the one `--platform` names, into `images.tar`, and lists them in `images.txt`. It finds them by rendering each chart the ways deploy installs it, taking the Kafka image of the platform's Kafka version. It needs Docker and several GB. On a kind cluster, deploy loads the archive into the nodes before it installs anything. Any other cluster pulls from its registries, so copy the images in `images.txt` to the registry its nodes use, keeping their names.
+With `--images`, the pull also saves every container image the stack runs, for this machine's platform or the one `--platform` names, into `images.tar`, and lists them in `images.txt`. It finds them by rendering each chart the ways deploy installs it, taking the Kafka image of the platform's Kafka version. It needs Docker and several GB. On a kind cluster, deploy loads the archive into the nodes before it installs anything. `--legacy-kafka 2.8.2,3.5.2` adds the Kafka images `kates migrate` runs for those source versions: below 3.7.0 it builds them from `Dockerfile.legacy-kafka`, as `kates migrate image build` does, and above it pulls `apache/kafka`. `kates migrate up` then takes them from the bundle instead of building them.
+
+Any other cluster pulls its images from a registry. `kates charts push` copies a bundle's images into one the nodes can reach, and `KATES_IMAGE_REGISTRY` points deploy and migrate at it:
+
+```bash
+kates charts push --from ./kates-charts --to registry.internal/kates
+KATES_IMAGE_REGISTRY=registry.internal/kates kates deploy --chart-bundle ./kates-charts
+```
+
+Our charts and most others put a registry in front of an image's name, while kube-prometheus-stack replaces the registry the name starts with. So the push stores each image under two names, `registry.internal/kates/quay.io/strimzi/operator:1.2.0` and `registry.internal/kates/strimzi/operator:1.2.0`. The layers are the same, so the second name costs no space. Each chart takes the registry through a key of its own, such as `global.imageRegistry`, `strimzi-kafka-operator.defaultImageRegistry` or `cert-manager`'s per-component `image.registry`, and deploy sets the right ones on every install. That covers the pre-flight's probe pods, and the legacy Kafka images too. After pushing, the command renders every chart as deploy would against that registry and fails if any image would still come from somewhere else. Log Docker in to the registry first. A registry served over plain HTTP must be in the Docker daemon's `insecure-registries`, and the cluster's container runtime must trust it the same way.
 
 ## Component-by-Component Deployment
 

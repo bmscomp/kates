@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/detect"
 	"gopkg.in/yaml.v3"
 )
 
@@ -204,11 +205,25 @@ func imagesInManifests(manifests []byte, kafkaVersion string) ([]string, error) 
 	}), nil
 }
 
+// imageArgs are container flags that name an image an operator starts:
+// the Prometheus Operator's config reloader, a sidecar of every Prometheus
+// and Alertmanager pod. Thanos's base image is left out; deploy runs none.
+var imageArgs = []string{"--prometheus-config-reloader="}
+
 func walkImages(node any, kafkaVersion string, add func(string)) {
 	switch n := node.(type) {
 	case map[string]any:
 		if image, ok := n["image"].(string); ok {
 			add(image)
+		}
+		if args, ok := n["args"].([]any); ok {
+			for _, a := range args {
+				for _, flag := range imageArgs {
+					if s, ok := a.(string); ok && strings.HasPrefix(s, flag) {
+						add(strings.TrimPrefix(s, flag))
+					}
+				}
+			}
 		}
 		// ConfigMap keys that name an image, such as KATES_CHAOS_STRESS_IMAGE.
 		for k, v := range n {
@@ -272,15 +287,17 @@ func bundleRenders(root, dir string) [][]string {
 }
 
 // harvestImages renders every chart in the bundle at root the ways deploy
-// installs it, the third-party charts included, and lists the images.
-func harvestImages(ctx context.Context, root string) ([]string, error) {
+// installs it, the third-party charts included, pointed at mirror when it is
+// set (withImageMirror), and lists the images, the pre-flight's probe
+// images among them.
+func harvestImages(ctx context.Context, root, mirror string) ([]string, error) {
 	_, kafkaVersion, err := chartAppVersion(filepath.Join(root, "charts", "kafka-cluster"))
 	if err != nil {
 		return nil, err
 	}
 	var manifests bytes.Buffer
 	render := func(chart string, args ...string) error {
-		out, err := runExecOutputFn(ctx, "helm", append([]string{"template", "kates-bundle", chart}, args...)...)
+		out, err := runExecOutputFn(ctx, "helm", withImageMirror(mirror, append([]string{"template", "kates-bundle", chart}, args...))...)
 		if err != nil {
 			return fmt.Errorf("rendering %s %s to list its images: %w", chart, strings.Join(args, " "), err)
 		}
@@ -289,11 +306,24 @@ func harvestImages(ctx context.Context, root string) ([]string, error) {
 		return nil
 	}
 	for _, dir := range publishedChartDirs() {
+		if dir == "kates-platform" {
+			continue // installed by neither deploy nor migrate; its subcharts are rendered on their own
+		}
 		chart := filepath.Join(root, "charts", dir)
 		for _, overlays := range bundleRenders(root, dir) {
 			var args []string
 			for _, o := range overlays {
 				args = append(args, "-f", filepath.Join(chart, o))
+			}
+			if err := render(chart, args...); err != nil {
+				return nil, err
+			}
+		}
+		// --with-monitoring switches on exporters, such as Litmus's.
+		if keys, ok := scrapeValues["charts/"+dir]; ok {
+			var args []string
+			for _, k := range keys {
+				args = append(args, "--set", k+"=true")
 			}
 			if err := render(chart, args...); err != nil {
 				return nil, err
@@ -305,7 +335,20 @@ func harvestImages(ctx context.Context, root string) ([]string, error) {
 			return nil, err
 		}
 	}
-	return imagesInManifests(manifests.Bytes(), kafkaVersion)
+	images, err := imagesInManifests(manifests.Bytes(), kafkaVersion)
+	if err != nil {
+		return nil, err
+	}
+	for _, probe := range detect.ProbeImages {
+		if mirror != "" {
+			probe = mirror + "/" + probe
+		}
+		if !slices.Contains(images, probe) {
+			images = append(images, probe)
+		}
+	}
+	slices.Sort(images)
+	return images, nil
 }
 
 // chartAppVersion is a chart directory's name and appVersion.
@@ -325,12 +368,13 @@ func chartAppVersion(dir string) (name, appVersion string, err error) {
 }
 
 // saveBundleImages pulls images for one platform, platform else the Docker
-// server's own, and saves them into root/images.tar, with their list in
+// server's own, except the ones in built, which this machine built and holds
+// already, and saves them into root/images.tar, with their list in
 // root/images.txt. The archive names every platform an image publishes but
 // holds only that one's content, so it is imported per platform
 // (loadBundleImages); docker save --platform refuses some multi-platform
 // images that do hold it.
-func saveBundleImages(ctx context.Context, root string, images []string, platform string) error {
+func saveBundleImages(ctx context.Context, root string, images, built []string, platform string) error {
 	if platform == "" {
 		out, err := runExecOutputFn(ctx, "docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
 		if err != nil {
@@ -346,6 +390,9 @@ func saveBundleImages(ctx context.Context, root string, images []string, platfor
 		return err
 	}
 	for i, image := range images {
+		if slices.Contains(built, image) {
+			continue
+		}
 		fmt.Fprintln(output.Err, output.DimStyle.Render(fmt.Sprintf("  Pulling image %d/%d %s...", i+1, len(images), image)))
 		if out, err := runExecCombinedFn(ctx, "docker", "pull", "--quiet", "--platform", platform, image); err != nil {
 			return fmt.Errorf("docker pull %s: %w: %s", image, err, strings.TrimSpace(string(out)))
@@ -385,7 +432,9 @@ func loadBundleImages(ctx context.Context, kubeContext string, isKind bool) erro
 		return nil
 	}
 	if !isKind {
-		output.Warn("The chart bundle's images are for kind clusters. This cluster pulls from its registries, so mirror the images in " + chartRootPath("images.txt") + " there first.")
+		if imageRegistry() == "" {
+			output.Warn("The chart bundle's images are for kind clusters. This cluster pulls from registries: push them to one it reaches (kates charts push --from " + chartRoot + " --to REGISTRY) and deploy with KATES_IMAGE_REGISTRY=REGISTRY.")
+		}
 		return nil
 	}
 	cluster := kindClusterName(kubeContext)

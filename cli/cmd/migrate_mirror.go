@@ -245,6 +245,7 @@ func runMigrateMirrorDeploy(ctx context.Context, f *migrateMirrorFlags) error {
 	if opts.SASL {
 		opts.SourcePassword = "external" // the Secret already exists; the lab never writes it
 	}
+	opts.ImageMirror = imageRegistry()
 	l, err := migrate.New(opts)
 	if err != nil {
 		return err

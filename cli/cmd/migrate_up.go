@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -367,8 +368,24 @@ func (r *labRun) phaseImage(ctx context.Context, s *migrate.State) error {
 	if r.skipBuild {
 		return nil
 	}
+	loaded := false
 	for _, src := range r.lab.Sources() {
 		if !needsBuiltImage(src) {
+			continue
+		}
+		if mirror := imageRegistry(); mirror != "" {
+			migrateHint(fmt.Sprintf("%s comes from %s (KATES_IMAGE_REGISTRY), which kates charts push fills from a bundle", src.Image, mirror))
+			continue
+		}
+		// A bundle pulled with --legacy-kafka holds it already built.
+		if bundled, _ := readLines(chartRootPath("images.txt")); chartBundle() != "" && slices.Contains(bundled, src.Image) {
+			if r.env.IsKind && !loaded {
+				if err := loadBundleImages(ctx, "kind-"+defaultKindClusterName(), true); err != nil {
+					return err
+				}
+				loaded = true
+			}
+			migrateHint(src.Image + " is in the chart bundle; not building it")
 			continue
 		}
 		migrateHint(fmt.Sprintf("Building %s (no upstream image exists for the %s line)...", src.Image, src.From.MajorMinor()))

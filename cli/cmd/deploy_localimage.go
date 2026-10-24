@@ -69,6 +69,12 @@ func kindBackendImageArgs(ctx context.Context, kubeContext string) ([]string, er
 	if cluster == "" {
 		return nil, fmt.Errorf("cannot tell which kind cluster %q refers to", kubeContext)
 	}
+	// A mirror's global.imageRegistry would put its name in front of a local
+	// build's, which the nodes hold under the bare name only.
+	if mirror := imageRegistry(); mirror != "" {
+		dl.Printf("    - Backend image: published native image, from %s (KATES_IMAGE_REGISTRY)\n", mirror)
+		return []string{"-f", chartRootPath(publishedNativeValues)}, nil
+	}
 
 	for _, image := range localNativeCandidates {
 		if !localImageOnHost(ctx, image) {

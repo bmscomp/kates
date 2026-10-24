@@ -59,7 +59,8 @@ reached), so no checkout of the repository is needed, and it says when a newer
 kates release is out. Each chart's cosign signature is checked before it is
 used; KATES_REQUIRE_SIGNED_CHARTS=1 refuses charts it could not check.
 Without GHCR, KATES_CHART_REGISTRY names a mirror, and --chart-bundle reads a
-bundle that kates charts pull --to wrote, with no network. With no reachable cluster, and Docker and kind on the
+bundle that kates charts pull --to wrote, with no network. KATES_IMAGE_REGISTRY
+pulls every image from a registry that kates charts push filled. With no reachable cluster, and Docker and kind on the
 machine, it offers to create the local 3-zone kind cluster; behind a proxy, its
 nodes get HTTP_PROXY, HTTPS_PROXY, NO_PROXY and the CA in PROXY_CA_FILE. A dev build installs
 the charts of the checkout it runs in. --checkout (or KATES_CHECKOUT) makes any

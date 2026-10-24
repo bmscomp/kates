@@ -131,6 +131,13 @@ func TestNewLegacySASLAndOptions(t *testing.T) {
 	if built.SourceMode != kafkaversion.LegacyKRaftBuilt || built.SourceImage != "ghcr.io/bmscomp/kates-legacy-kafka:3.5.2" {
 		t.Errorf("3.5.2: mode %q image %q", built.SourceMode, built.SourceImage)
 	}
+	mirrored, err := New(Options{From: v("3.5.2"), To: v("4.3.0"), TargetIsPrimary: true, ImageMirror: "registry.internal:5000/kates"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mirrored.SourceImage != "registry.internal:5000/kates/ghcr.io/bmscomp/kates-legacy-kafka:3.5.2" {
+		t.Errorf("behind a mirror: image %q", mirrored.SourceImage)
+	}
 }
 
 func TestNewStrimziSource(t *testing.T) {

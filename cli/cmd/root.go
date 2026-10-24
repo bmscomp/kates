@@ -499,6 +499,7 @@ var rootCmd = &cobra.Command{
 			}
 		}
 		readContextEnv()
+		pinImageMirrorOnce.Do(func() { pinImageMirror(imageRegistry()) })
 		cfg, cfgErr := loadConfigErr()
 		ctxName, ctx, ctxErr := resolveContext(cfg)
 		profiles, profilesFrom := activeProfiles(ctxName, ctx)

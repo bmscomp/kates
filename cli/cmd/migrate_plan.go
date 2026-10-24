@@ -245,12 +245,12 @@ func buildMigratePlan(res *migrateResolution, f *migratePairFlags) (*migratePlan
 			if i == 0 {
 				p.Values.Source, p.Values.SourcePath = sourceValues, row.Values
 			}
-			p.Helm = append(p.Helm, "helm "+strings.Join(helmSourceArgs(src, row.Values, f.ValuesSource, f.timeout()), " "))
+			p.Helm = append(p.Helm, "helm "+strings.Join(withImageMirror(imageRegistry(), helmSourceArgs(src, row.Values, f.ValuesSource, f.timeout())), " "))
 		}
 		p.Sources = append(p.Sources, row)
 	}
 	p.Source = p.Sources[0]
-	p.Helm = append(p.Helm, "helm "+strings.Join(helmMirrorArgs(l, env.IsKind, p.Values.MirrorPath, f.ValuesMirror), " "))
+	p.Helm = append(p.Helm, "helm "+strings.Join(withImageMirror(imageRegistry(), helmMirrorArgs(l, env.IsKind, p.Values.MirrorPath, f.ValuesMirror)), " "))
 	return p, nil
 }
 

@@ -607,6 +607,7 @@ func resolveMigratePair(env *migrateEnv, f *migratePairFlags) (*migrateResolutio
 		}
 		opts.AlsoFrom = append(opts.AlsoFrom, spec)
 	}
+	opts.ImageMirror = imageRegistry()
 	lab, err := migrate.New(opts)
 	if err != nil {
 		return nil, err

@@ -23,6 +23,11 @@ spec:
         - name: init
           image: busybox:1.36
       containers:
+        - name: prometheus-operator
+          image: quay.io/prometheus-operator/prometheus-operator:v0.79.2
+          args:
+            - --prometheus-config-reloader=quay.io/prometheus-operator/prometheus-config-reloader:v0.79.2
+            - --thanos-default-base-image=quay.io/thanos/thanos:v0.41.0
         - name: operator
           image: quay.io/strimzi/operator:1.2.0
           env:
@@ -61,11 +66,13 @@ spec:
 		"docker.io/polinux/stress:1.0.4",
 		"ghcr.io/bmscomp/kates:1.29.3-native@sha256:" + strings.Repeat("a", 64),
 		"litmuschaos/go-runner:3.28.0",
+		"quay.io/prometheus-operator/prometheus-config-reloader:v0.79.2",
+		"quay.io/prometheus-operator/prometheus-operator:v0.79.2",
 		"quay.io/strimzi/kafka:1.2.0-kafka-4.3.1",
 		"quay.io/strimzi/operator:1.2.0",
 	}
 	if !slices.Equal(got, want) {
-		t.Fatalf("images:\n got %v\nwant %v\n(the Kafka image of the platform's version only, no Kaniko, no template leftovers)", got, want)
+		t.Fatalf("images:\n got %v\nwant %v\n(the Kafka image of the platform's version only, the config reloader, no Kaniko, no Thanos, no template leftovers)", got, want)
 	}
 }
 
@@ -78,7 +85,7 @@ func TestABundleCarriesTheThirdPartyChartsWithTheirChecksums(t *testing.T) {
 		return nil
 	}
 	bundle := filepath.Join(t.TempDir(), "kates-charts")
-	if err := runChartsPull(context.Background(), bundle, false, ""); err != nil {
+	if err := runChartsPull(context.Background(), bundle, false, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := callsOf(*calls, "helm pull cert-manager --repo https://charts.jetstack.io --version v1.13.3"); len(got) != 1 {
@@ -129,7 +136,7 @@ func TestSaveAndLoadBundleImages(t *testing.T) {
 	}
 	root := t.TempDir()
 	stderr := output.ResetForTesting()
-	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36", "docker.io/polinux/stress:1.0.4", "postgres:16"}, "linux/amd64"); err != nil {
+	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36", "docker.io/polinux/stress:1.0.4", "postgres:16"}, nil, "linux/amd64"); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(callsOf(*calls, "docker pull")[2], " "); got != "docker pull --quiet --platform linux/amd64 postgres:16" {
@@ -173,8 +180,8 @@ func TestSaveAndLoadBundleImages(t *testing.T) {
 		t.Fatalf("imports %v, want each node's own platform, as %q", imports, want)
 	}
 	out := output.ResetForTesting()
-	if err := loadBundleImages(context.Background(), "prod", false); err != nil || !strings.Contains(out.String(), "images.txt") || len(imports) != 2 {
-		t.Fatalf("another cluster: %v %q; it must say which images to mirror and load nothing", err, out.String())
+	if err := loadBundleImages(context.Background(), "prod", false); err != nil || !strings.Contains(out.String(), "kates charts push") || len(imports) != 2 {
+		t.Fatalf("another cluster: %v %q; it must say how to fill a registry and load nothing", err, out.String())
 	}
 }
 
@@ -182,7 +189,7 @@ func TestHarvestImagesRendersEveryWayDeployInstalls(t *testing.T) {
 	withChartBuild(t, allChartVersions)
 	fakeHelmPull(t)
 	bundle := filepath.Join(t.TempDir(), "b")
-	if err := runChartsPull(context.Background(), bundle, false, ""); err != nil {
+	if err := runChartsPull(context.Background(), bundle, false, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range []string{"charts/kates/values-native.yaml", "charts/kates/values-kind.yaml", "charts/kafka-cluster/Chart.yaml"} {
@@ -197,8 +204,8 @@ func TestHarvestImagesRendersEveryWayDeployInstalls(t *testing.T) {
 		renders = append(renders, strings.Join(args, " "))
 		return []byte("spec:\n  containers:\n    - image: busybox:1.36\n"), nil
 	}
-	images, err := harvestImages(context.Background(), bundle)
-	if err != nil || !slices.Equal(images, []string{"busybox:1.36"}) {
+	images, err := harvestImages(context.Background(), bundle, "")
+	if err != nil || !slices.Equal(images, []string{"alpine:3.19", "busybox:1.36", "busybox:1.37"}) { // the probe images too
 		t.Fatalf("images %v, %v", images, err)
 	}
 	all := strings.Join(renders, "\n")
@@ -207,6 +214,7 @@ func TestHarvestImagesRendersEveryWayDeployInstalls(t *testing.T) {
 		"template kates-bundle " + filepath.Join(bundle, "charts", "kates") + " -f " + filepath.Join(bundle, "charts", "kates", "values-kind.yaml"),
 		"template kates-bundle " + filepath.Join(bundle, "third-party", "cert-manager-v1.13.3.tgz") + " --set installCRDs=true",
 		"template kates-bundle " + filepath.Join(bundle, "charts", "cdc-postgresql"),
+		"template kates-bundle " + filepath.Join(bundle, "charts", "kates-chaos") + " --set litmus-core.exporter.enabled=true --set monitoring.serviceMonitor.enabled=true",
 	} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no render %q in:\n%s", want, all)
@@ -223,7 +231,7 @@ func TestSaveBundleImagesDefaultsToTheDockerServersPlatform(t *testing.T) {
 	t.Cleanup(func() { runExecOutputFn = origOutput })
 	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte("linux/arm64\n"), nil } // docker version and inspect
 	root := t.TempDir()
-	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36"}, ""); err != nil {
+	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36"}, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(callsOf(*calls, "docker pull")[0], " "); got != "docker pull --quiet --platform linux/arm64 busybox:1.36" {
