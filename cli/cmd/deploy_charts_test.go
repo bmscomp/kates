@@ -21,15 +21,20 @@ func withChartBuild(t *testing.T, versions string) {
 	oldVersions, oldVersion, oldPins := ChartVersions, Version, MigratePins
 	oldRoot, oldPublished, oldBundle := chartRoot, chartsPublished, deployChartBundle
 	oldCombined, oldHelm, oldLatest, oldCosign := runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn
+	oldAttestations, oldUnchecked := attestationsFn, provenanceUnchecked
 	oldOut, oldErr := output.Out, output.Err
 	t.Cleanup(func() {
 		ChartVersions, Version, MigratePins = oldVersions, oldVersion, oldPins
 		chartRoot, chartsPublished, deployChartBundle = oldRoot, oldPublished, oldBundle
 		runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn = oldCombined, oldHelm, oldLatest, oldCosign
+		attestationsFn, provenanceUnchecked = oldAttestations, oldUnchecked
 		output.Out, output.Err = oldOut, oldErr
 	})
 	ChartVersions, Version = versions, "v9.9.9"
 	cosignPathFn = func() (string, error) { return "cosign", nil }
+	// One attestation per digest, which the fake cosign accepts.
+	attestationsFn = func(context.Context, string) ([][]byte, error) { return [][]byte{[]byte(`{}`)}, nil }
+	provenanceUnchecked = nil
 	t.Setenv("KATES_CHECKOUT", "")
 	t.Setenv("KATES_REQUIRE_SIGNED_CHARTS", "")
 	t.Setenv("KATES_CHART_BUNDLE", "")

@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -36,11 +35,19 @@ func TestPublishedChartsAreSignatureChecked(t *testing.T) {
 	want := "cosign verify ghcr.io/bmscomp/charts/kates@" + digest +
 		" --certificate-identity-regexp " + chartSignerIdentity +
 		" --certificate-oidc-issuer https://token.actions.githubusercontent.com"
-	if got := callsOf(*calls, "cosign"); len(got) != 1 || strings.Join(got[0], " ") != want {
-		t.Fatalf("cosign calls %v, want [%s]", got, want)
+	got := callsOf(*calls, "cosign")
+	if len(got) != 2 || strings.Join(got[0], " ") != want {
+		t.Fatalf("cosign calls %v, want [%s] and the provenance check", got, want)
 	}
-	if data, err := os.ReadFile(verifiedMarker(chartRootPath("charts/kates"))); err != nil || strings.TrimSpace(string(data)) != digest {
-		t.Fatalf("verified marker %q, %v; want %s", data, err, digest)
+	// The provenance: a SLSA attestation from the same signer, about this digest.
+	prov := strings.Join(got[1], " ")
+	for _, part := range []string{"cosign verify-blob-attestation --bundle ", "--certificate-identity-regexp " + chartSignerIdentity, "--type slsaprovenance1", "--digest " + strings.TrimPrefix(digest, "sha256:") + " --digestAlg sha256"} {
+		if !strings.Contains(prov, part) {
+			t.Errorf("provenance check %q lacks %q", prov, part)
+		}
+	}
+	if d, provenance := readMarker(chartRootPath("charts/kates")); d != digest || !provenance {
+		t.Fatalf("verified marker records %q, provenance %v; want %s and provenance", d, provenance, digest)
 	}
 }
 
@@ -64,8 +71,8 @@ func TestABadSignatureStopsTheRunEvenWithACache(t *testing.T) {
 	if !errors.As(err, &sigErr) || !strings.Contains(err.Error(), "no matching signatures") {
 		t.Fatalf("a chart that fails its signature must stop the run, got %v", err)
 	}
-	if data, _ := os.ReadFile(verifiedMarker(chartRootPath("charts/kates"))); strings.TrimSpace(string(data)) != fakeDigest("kates", "0.14.1") {
-		t.Fatalf("the refused chart replaced the verified one: marker %q", data)
+	if d, _ := readMarker(chartRootPath("charts/kates")); d != fakeDigest("kates", "0.14.1") {
+		t.Fatalf("the refused chart replaced the verified one: marker records %q", d)
 	}
 }
 
@@ -104,8 +111,8 @@ func TestAVerifiedDigestNeedsNoCosignToStayVerified(t *testing.T) {
 	if strings.Contains(stderr.String(), "not signature-checked") || !chartVerified(chartRootPath("charts/kates")) {
 		t.Fatalf("the same digest as the verified one is still verified; got %q", stderr.String())
 	}
-	if len(callsOf(*calls, "cosign")) != 1 {
-		t.Fatalf("cosign ran %d times, want once", len(callsOf(*calls, "cosign")))
+	if n := len(callsOf(*calls, "cosign verify ghcr.io")); n != 1 {
+		t.Fatalf("the signature was checked %d times, want once", n)
 	}
 }
 

@@ -566,7 +566,7 @@ kates deploy --chart-bundle ./kates-charts --with-cert-manager=false
 
 `KATES_CHART_BUNDLE` does the same for every command. A bundle serves only the `kates` release that wrote it, and refuses any other with the command that rebuilds it.
 
-Besides the Kates charts, Kafka Connect's PostgreSQL (`cdc-postgresql`) among them, a bundle carries the cert-manager and Kyverno charts deploy installs, at its pinned versions, under `third-party/`. They have no signature to check, so the pull records their checksums, and deploy refuses a tarball that changed on its way across.
+Besides the Kates charts, Kafka Connect's PostgreSQL (`cdc-postgresql`) and the `kates-platform` umbrella among them, a bundle carries the cert-manager and Kyverno charts deploy installs, at its pinned versions, under `third-party/`. They have no signature to check, so the pull records their checksums, and deploy refuses a tarball that changed on its way across.
 
 With `--images`, the pull also saves every container image the stack runs, for this machine's platform or the one `--platform` names, into `images.tar`, and lists them in `images.txt`. It finds them by rendering each chart the ways deploy installs it, taking the Kafka image of the platform's Kafka version. It needs Docker and several GB. On a kind cluster, deploy loads the archive into the nodes before it installs anything. Any other cluster pulls from its registries, so copy the images in `images.txt` to the registry its nodes use, keeping their names.
 

@@ -67,6 +67,7 @@ var deployChartNames = map[string]string{
 	"kafka-ui":          "kafka-ui",
 	"kates":             "kates",
 	"kates-chaos":       "kates-chaos",
+	"kates-platform":    "kates-platform",
 	"mirror-maker2":     "mirror-maker2",
 	"monitoring":        "kates-monitoring",
 	"strimzi-operator":  "strimzi-operator",
@@ -221,7 +222,8 @@ func pullPublishedChart(ctx context.Context, root, dir string, versions map[stri
 	}
 	err = fetchPublishedChart(ctx, ref, name, version, dir, dest)
 	var sigErr *chartSignatureError
-	if err != nil && cached && !errors.As(err, &sigErr) {
+	var provErr *chartProvenanceError
+	if err != nil && cached && !errors.As(err, &sigErr) && !errors.As(err, &provErr) {
 		return err, nil
 	}
 	return nil, err
@@ -264,7 +266,8 @@ func fetchPublishedChart(ctx context.Context, ref, name, version, dir, dest stri
 		return fmt.Errorf("helm pull printed no digest for %s %s, so its signature cannot be checked", ref, version)
 	}
 	signed := true
-	if err := verifyChart(ctx, ref, m[1], dest); errors.Is(err, errNoCosign) {
+	provenance, err := verifyChart(ctx, ref, m[1], dest)
+	if errors.Is(err, errNoCosign) {
 		signed = false
 	} else if err != nil {
 		return err
@@ -300,7 +303,7 @@ func fetchPublishedChart(ctx context.Context, ref, name, version, dir, dest stri
 		return fmt.Errorf("unpacking %s %s into %s: %w", ref, version, dest, err)
 	}
 	if signed {
-		return os.WriteFile(marker, []byte(m[1]+"\n"), 0o644)
+		return os.WriteFile(marker, markerContent(m[1], provenance), 0o644)
 	}
 	return nil
 }
@@ -340,9 +343,11 @@ func chartSource() string {
 }
 
 // deployChartDirs lists every chart deploy may install, for resolveChartRoot:
-// all of them but legacy-kafka, which only kates migrate installs.
+// all of them but legacy-kafka, which only kates migrate installs, and the
+// kates-platform umbrella, which deploy never installs but a bundle carries,
+// verified, for a helm install of it without network.
 func deployChartDirs() []string {
-	return slices.DeleteFunc(publishedChartDirs(), func(dir string) bool { return dir == "legacy-kafka" })
+	return slices.DeleteFunc(publishedChartDirs(), func(dir string) bool { return dir == "legacy-kafka" || dir == "kates-platform" })
 }
 
 // publishedChartDirs lists every chart the CLI pulls, deploy's and migrate's.

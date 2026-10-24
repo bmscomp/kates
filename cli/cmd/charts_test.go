@@ -57,7 +57,7 @@ func TestAPlainHTTPMirrorIsVerifiedOverHTTP(t *testing.T) {
 }
 
 // allChartVersions names every chart deploy installs, as a release build does.
-const allChartVersions = "cdc-postgresql=0.1.0,legacy-kafka=0.2.1,apicurio-registry=0.4.1,connect-cluster=2.1.14,kafka-cluster=1.0.18,kafka-ui=0.3.2,kates=0.14.1,kates-chaos=2.3.4,mirror-maker2=0.11.12,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
+const allChartVersions = "kates-platform=0.8.7,cdc-postgresql=0.1.0,legacy-kafka=0.2.1,apicurio-registry=0.4.1,connect-cluster=2.1.14,kafka-cluster=1.0.18,kafka-ui=0.3.2,kates=0.14.1,kates-chaos=2.3.4,mirror-maker2=0.11.12,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
 
 func TestAChartBundleIsPulledThenReadWithNoNetwork(t *testing.T) {
 	withChartBuild(t, allChartVersions)

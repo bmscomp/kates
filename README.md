@@ -202,7 +202,7 @@ When you install charts with Helm directly:
 
 [Deploying the Strimzi Operator](docs/book/deploying-strimzi-operator.md) and [Installing Kafka with the kafka-cluster Helm Chart](docs/book/20-installation-guide.md) walk through both releases. `make readme-check` verifies the Version and App Version columns below against each `Chart.yaml`.
 
-Every published chart is signed with cosign and carries a build provenance attestation. `kates deploy` runs the first check below on every chart it pulls. Check both before you install one yourself:
+Every published chart is signed with cosign and carries a build provenance attestation. `kates deploy` runs both checks below on every chart it pulls, with cosign and no GitHub login. Check both before you install one yourself:
 
 ```bash
 cosign verify ghcr.io/bmscomp/charts/kates:<version> \
