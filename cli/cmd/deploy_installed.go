@@ -105,7 +105,7 @@ func installedReleaseChoices(ctx context.Context, entries []DeploySummaryEntry) 
 		case e.Release == "kates":
 			notes = append(notes, describeInstalled(e, chart, chartRootPath("charts/kates"))+": always upgraded")
 		case e.Release == "postgresql":
-			notes = append(notes, fmt.Sprintf("%s %s in %s: kept (bitnami/postgresql is not pinned here, and a new major version needs a data migration)", e.Name, chart, e.Namespace))
+			notes = append(notes, fmt.Sprintf("%s %s in %s: kept (its data would need migrating to another chart or PostgreSQL major version; one an older kates installed from bitnami/postgresql stays as it is)", e.Name, chart, e.Namespace))
 		default:
 			options = append(options, huh.NewOption(describeInstalled(e, chart, chartRootPath(dir)), e.Release))
 		}

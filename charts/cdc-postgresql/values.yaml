@@ -1,0 +1,67 @@
+# The PostgreSQL that Kafka Connect's change-data-capture demo reads. It is
+# lab-grade: one pod, no replication, and passwords from values. Name the
+# release "postgresql", as kates deploy does: the Service, StatefulSet and
+# Secret take the release name, and Kafka Connect and the Kates API look for
+# postgresql in the database namespace.
+
+global:
+  # -- Registry prepended to the image, with a slash, for clusters that pull
+  # from a mirror: postgres:16 becomes <imageRegistry>/postgres:16.
+  imageRegistry: ""
+  # -- Pull secrets for that registry.
+  imagePullSecrets: []
+
+# -- The official PostgreSQL image.
+image:
+  repository: postgres
+  tag: "16"
+  pullPolicy: IfNotPresent
+
+auth:
+  # -- Password of the postgres superuser (Secret key postgres-password).
+  postgresPassword: postgres
+  # -- The user Debezium connects as: LOGIN and REPLICATION, owner of database.
+  username: debezium
+  # -- Its password (Secret key password).
+  password: debezium
+  # -- The database the connectors read and write.
+  database: orders
+
+# -- Logical decoding settings Debezium needs, passed to postgres as -c flags.
+replication:
+  maxWalSenders: 10
+  maxReplicationSlots: 10
+
+persistence:
+  # -- Size of the data volume.
+  size: 8Gi
+  # -- Storage class (empty for the cluster default).
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# -- Labels added to the pod; the chart's own win on a clash.
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

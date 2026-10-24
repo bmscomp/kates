@@ -493,7 +493,7 @@ For the database password, what matters is when the tasks restart. A connector's
 # 1. Change the password in PostgreSQL. A role may change its own password,
 #    so this logs in as debezium with the password it has now
 kubectl exec -n database postgresql-0 -- /bin/bash -lc \
-  "PGPASSWORD=OLD_PASSWORD /opt/bitnami/postgresql/bin/psql \
+  "PGPASSWORD=OLD_PASSWORD psql \
   -h 127.0.0.1 -U debezium -d orders \
   -c \"ALTER ROLE debezium PASSWORD 'NEW_PASSWORD';\""
 

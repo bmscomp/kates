@@ -29,8 +29,8 @@ a machine without network access, and deploy from it there:
 
 KATES_CHART_REGISTRY pulls from a mirror instead of GHCR. Run it again to
 refresh the bundle. The bundle holds the Kates charts only: cert-manager,
-Kyverno and the PostgreSQL of Kafka Connect still come from their own
-repositories, so turn them off where there is no network.`,
+and Kyverno still come from their own repositories, so turn them off where
+there is no network.`,
 	Example: `  kates charts pull --to ./kates-charts`,
 	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,7 +78,6 @@ func chartsOutsideBundle() []string {
 	}{
 		{deployWithCertManager, "cert-manager (--with-cert-manager, charts.jetstack.io)"},
 		{deployWithKyverno, "Kyverno (--with-kyverno, kyverno.github.io)"},
-		{deployWithKafkaConnect, "the PostgreSQL of Kafka Connect (--with-kafka-connect, charts.bitnami.com)"},
 	} {
 		if c.on {
 			outside = append(outside, c.name)

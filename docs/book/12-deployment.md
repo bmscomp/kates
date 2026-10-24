@@ -564,7 +564,7 @@ It pulls every chart `kates deploy` installs, at this release's versions, and ch
 kates deploy --chart-bundle ./kates-charts --with-cert-manager=false
 ```
 
-`KATES_CHART_BUNDLE` does the same for every command. A bundle serves only the `kates` release that wrote it, and refuses any other with the command that rebuilds it. It holds the Kates charts only. cert-manager, Kyverno and the PostgreSQL of Kafka Connect still come from their own repositories, and deploy warns when one of them is on. The container images come from their registries as well, so the cluster needs a mirror for those.
+`KATES_CHART_BUNDLE` does the same for every command. A bundle serves only the `kates` release that wrote it, and refuses any other with the command that rebuilds it. It holds the Kates charts only, Kafka Connect's PostgreSQL (`cdc-postgresql`) among them. cert-manager and Kyverno still come from their own repositories, and deploy warns when one of them is on. The container images come from their registries as well, so the cluster needs a mirror for those.
 
 ## Component-by-Component Deployment
 

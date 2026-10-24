@@ -225,6 +225,7 @@ A published version is never pushed again, so its digest does not change.
 | Chart | Version | App Version | Description |
 |:------|:--------|:------------|:------------|
 | [`apicurio-registry`](charts/apicurio-registry/) | 0.4.1 | 3.3.0 | Apicurio Registry, backed by the kafka-cluster chart (Strimzi) in this repository |
+| [`cdc-postgresql`](charts/cdc-postgresql/) | 0.1.0 | 16 | The PostgreSQL that Kafka Connect's change-data-capture demo reads, on the official postgres image with logical replication on |
 | [`connect-cluster`](charts/connect-cluster/) | 2.1.14 | 4.3.1 | A Helm chart for deploying Strimzi Kafka Connect clusters |
 | [`headlamp`](charts/headlamp/) | 0.2.1 | 0.40.1 | Headlamp — Kubernetes Dashboard for cluster visualization and management |
 | [`kafka-cluster`](charts/kafka-cluster/) | 1.0.18 | 4.3.1 | A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability |

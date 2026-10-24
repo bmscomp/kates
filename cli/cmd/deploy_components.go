@@ -1190,16 +1190,11 @@ func deployGroupB(dc *deployContext) error {
 				return err
 			}
 
-			runHelmFn(g2Ctx, "repo", "add", "bitnami", "https://charts.bitnami.com/bitnami")
-			runHelmFn(g2Ctx, "repo", "update", "bitnami")
-
-			if err := runHelmFn(g2Ctx, "upgrade", "--install", "postgresql", "bitnami/postgresql",
+			// This repository's chart, on the official postgres image: its
+			// defaults are the demo's (debezium/debezium, database orders,
+			// wal_level=logical), and it keeps bitnami/postgresql's names.
+			if err := runHelmFn(g2Ctx, "upgrade", "--install", "postgresql", chartRootPath("charts/cdc-postgresql"),
 				"-n", dbNS, "--create-namespace",
-				"--set", "auth.postgresPassword=postgres",
-				"--set", "auth.username=debezium",
-				"--set", "auth.password=debezium",
-				"--set", "auth.database=orders",
-				"--set", "primary.extendedConfiguration=wal_level = logical\nmax_wal_senders = 10\nmax_replication_slots = 10",
 				"--timeout", "5m"); err != nil {
 				return err
 			}

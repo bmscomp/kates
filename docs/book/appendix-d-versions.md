@@ -15,6 +15,7 @@ Every version the platform pins, in one place. This table is generated from the 
 | Quarkus | 3.20.6 | `kates/pom.xml` |
 | Go (CLI) | 1.26.0 | `cli/go.mod` |
 | `apicurio-registry` chart | 0.4.1 (app 3.3.0) | `charts/apicurio-registry/Chart.yaml` |
+| `cdc-postgresql` chart | 0.1.0 (app 16) | `charts/cdc-postgresql/Chart.yaml` |
 | `connect-cluster` chart | 2.1.14 (app 4.3.1) | `charts/connect-cluster/Chart.yaml` |
 | `headlamp` chart | 0.2.1 (app 0.40.1) | `charts/headlamp/Chart.yaml` |
 | `kafka-cluster` chart | 1.0.18 (app 4.3.1) | `charts/kafka-cluster/Chart.yaml` |

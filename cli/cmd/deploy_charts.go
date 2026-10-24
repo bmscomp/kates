@@ -60,6 +60,7 @@ func chartRegistryPlainHTTP() bool {
 // install from, with the name each is published under (its Chart.yaml name).
 var deployChartNames = map[string]string{
 	"apicurio-registry": "apicurio-registry",
+	"cdc-postgresql":    "cdc-postgresql",
 	"legacy-kafka":      "legacy-kafka",
 	"connect-cluster":   "connect-cluster",
 	"kafka-cluster":     "kafka-cluster",

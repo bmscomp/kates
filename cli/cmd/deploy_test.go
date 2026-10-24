@@ -304,7 +304,7 @@ func TestDeployCommand_IsolatedTopology(t *testing.T) {
 				t.Errorf("Expected Apicurio to be deployed in kafka-sys namespace, got: %s", cmd)
 			}
 		}
-		if strings.Contains(cmd, "helm upgrade --install postgresql bitnami/postgresql") {
+		if strings.Contains(cmd, "helm upgrade --install postgresql charts/cdc-postgresql") {
 			foundPostgres = true
 			if !strings.Contains(cmd, "-n database") {
 				t.Errorf("Expected Postgres to be deployed in database namespace, got: %s", cmd)
@@ -520,7 +520,7 @@ func TestDeployCommand_KafkaConnectParameters(t *testing.T) {
 	// 2. Verify PostgreSQL is deployed with the correct namespace (database)
 	foundPostgres := false
 	for _, cmd := range executedCommands {
-		if strings.Contains(cmd, "helm upgrade --install postgresql bitnami/postgresql") {
+		if strings.Contains(cmd, "helm upgrade --install postgresql charts/cdc-postgresql") {
 			foundPostgres = true
 			if !strings.Contains(cmd, "-n database") {
 				t.Errorf("Expected PostgreSQL to be deployed in 'database' namespace, got: %s", cmd)

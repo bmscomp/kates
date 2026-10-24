@@ -1002,12 +1002,12 @@ kubectl wait -n connect --for=condition=Ready kafkaconnector/jdbc-sink-from-cdc-
 
 # Insert a row into the watched table ...
 kubectl exec -n database postgresql-0 -- /bin/bash -lc \
-  "PGPASSWORD=debezium /opt/bitnami/postgresql/bin/psql -h 127.0.0.1 -U debezium -d orders -c \
+  "PGPASSWORD=debezium psql -h 127.0.0.1 -U debezium -d orders -c \
   \"INSERT INTO public.demo_orders (id, customer_name, amount) VALUES (1001, 'alice', 42.50) ON CONFLICT (id) DO UPDATE SET customer_name = EXCLUDED.customer_name, amount = EXCLUDED.amount;\""
 
 # ... and read it back from the replica table
 kubectl exec -n database postgresql-0 -- /bin/bash -lc \
-  "PGPASSWORD=debezium /opt/bitnami/postgresql/bin/psql -h 127.0.0.1 -U debezium -d orders -c \
+  "PGPASSWORD=debezium psql -h 127.0.0.1 -U debezium -d orders -c \
   \"SELECT id, customer_name, amount FROM public.demo_orders_replica WHERE id = 1001;\""
 ```
 

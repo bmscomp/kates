@@ -1,0 +1,24 @@
+apiVersion: v2
+name: cdc-postgresql
+description: The PostgreSQL that Kafka Connect's change-data-capture demo reads, on the official postgres image with logical replication on
+type: application
+version: 0.1.0
+appVersion: "16"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/bmscomp/kates
+sources:
+  - https://github.com/bmscomp/kates
+  - https://hub.docker.com/_/postgres
+maintainers:
+  - name: bmscomp
+    url: https://github.com/bmscomp
+keywords:
+  - postgresql
+  - debezium
+  - cdc
+annotations:
+  artifacthub.io/category: database
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: added
+      description: "First version: one PostgreSQL 16 pod from the official postgres image, wal_level=logical, a REPLICATION user that owns the CDC database, and the Secret keys (postgres-password, password) kates deploy and the Kates API's INTEGRATION_CDC test read. It replaces bitnami/postgresql in kates deploy --with-kafka-connect"

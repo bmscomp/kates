@@ -57,7 +57,7 @@ func TestAPlainHTTPMirrorIsVerifiedOverHTTP(t *testing.T) {
 }
 
 // allChartVersions names every chart deploy installs, as a release build does.
-const allChartVersions = "legacy-kafka=0.2.1,apicurio-registry=0.4.1,connect-cluster=2.1.14,kafka-cluster=1.0.18,kafka-ui=0.3.2,kates=0.14.1,kates-chaos=2.3.4,mirror-maker2=0.11.12,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
+const allChartVersions = "cdc-postgresql=0.1.0,legacy-kafka=0.2.1,apicurio-registry=0.4.1,connect-cluster=2.1.14,kafka-cluster=1.0.18,kafka-ui=0.3.2,kates=0.14.1,kates-chaos=2.3.4,mirror-maker2=0.11.12,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
 
 func TestAChartBundleIsPulledThenReadWithNoNetwork(t *testing.T) {
 	withChartBuild(t, allChartVersions)
@@ -128,7 +128,8 @@ func TestChartsOutsideBundle(t *testing.T) {
 		deployWithCertManager, deployWithKyverno, deployWithKafkaConnect = true, false, true
 	})
 	got := strings.Join(chartsOutsideBundle(), "; ")
-	if !strings.Contains(got, "cert-manager") || strings.Contains(got, "Kyverno") || !strings.Contains(got, "PostgreSQL") {
+	// Kafka Connect's PostgreSQL is this repository's chart, so it is bundled.
+	if !strings.Contains(got, "cert-manager") || strings.Contains(got, "Kyverno") || strings.Contains(got, "PostgreSQL") {
 		t.Fatalf("chartsOutsideBundle = %q", got)
 	}
 }
