@@ -4,7 +4,8 @@ description: >-
   `helm dependency build` for each requested chart, in the order given, with
   the repository's retry wrapper. Order matters for the umbrella: kates-platform
   packages its file:// subcharts as they are on disk, so their own dependencies
-  have to be built first.
+  have to be built first. Every archive fetched from outside this repository
+  must match its checksum in charts/dependencies.sha256.
 inputs:
   charts:
     description: Space-separated chart directory names under charts/, built in this order
@@ -24,4 +25,28 @@ runs:
         for chart in ${CHARTS}; do
           echo "==> helm dependency build charts/${chart}/"
           scripts/retry.sh 5 helm dependency build "charts/${chart}/"
+        done
+
+        # A repository that serves different bytes under a version we pinned
+        # fails here, before anything renders or publishes them. Subcharts
+        # packed from charts/ (file://) are rebuilt on every run and are not
+        # pinned; every other archive must be.
+        pins=charts/dependencies.sha256
+        for chart in ${CHARTS}; do
+          local_deps=$(sed -nE 's|^[[:space:]]*repository:[[:space:]]*"?file://\.\./([^"/[:space:]]+).*|\1|p' "charts/${chart}/Chart.yaml")
+          for tgz in "charts/${chart}"/charts/*.tgz; do
+            [[ -e "${tgz}" ]] || continue
+            for dep in ${local_deps}; do
+              [[ "$(basename "${tgz}")" == "${dep}-"[0-9]*.tgz ]] && continue 2
+            done
+            if ! awk -v f="${tgz}" '$2 == f {found = 1} END {exit !found}' "${pins}"; then
+              echo "::error::${tgz} is not pinned. Check it against its repository's index digest, then add the line \`sha256sum ${tgz}\` prints to ${pins}"
+              exit 1
+            fi
+          done
+          lines=$(awk -v p="charts/${chart}/charts/" 'index($2, p) == 1' "${pins}")
+          if [[ -n "${lines}" ]] && ! sha256sum -c - <<< "${lines}"; then
+            echo "::error::charts/${chart}: a fetched archive does not match ${pins}. Either its repository served different bytes under the same version, or the dependency moved without its pin. Check the new archive against the repository's index digest before changing the pin"
+            exit 1
+          fi
         done
