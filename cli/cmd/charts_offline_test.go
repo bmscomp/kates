@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -118,17 +119,29 @@ func TestABundleCarriesTheThirdPartyChartsWithTheirChecksums(t *testing.T) {
 func TestSaveAndLoadBundleImages(t *testing.T) {
 	withChartBuild(t, allChartVersions)
 	calls := fakeHelmPull(t)
+	origOutput := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = origOutput })
+	runExecOutputFn = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[len(args)-1] == "docker.io/polinux/stress:1.0.4" {
+			return []byte("linux/arm64\n"), nil // published for another platform only
+		}
+		return []byte("linux/amd64\n"), nil
+	}
 	root := t.TempDir()
-	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36", "postgres:16"}, "linux/amd64"); err != nil {
+	stderr := output.ResetForTesting()
+	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36", "docker.io/polinux/stress:1.0.4", "postgres:16"}, "linux/amd64"); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(callsOf(*calls, "docker pull")[1], " "); got != "docker pull --quiet --platform linux/amd64 postgres:16" {
+	if got := strings.Join(callsOf(*calls, "docker pull")[2], " "); got != "docker pull --quiet --platform linux/amd64 postgres:16" {
 		t.Fatalf("pull: %s", got)
+	}
+	if !strings.Contains(stderr.String(), "polinux/stress:1.0.4 (linux/arm64)") {
+		t.Errorf("the image of another platform is not named: %q", stderr.String())
 	}
 	if got := strings.Join(callsOf(*calls, "docker save")[0], " "); got != "docker save -o "+filepath.Join(root, "images.tar")+" busybox:1.36 postgres:16" {
 		t.Fatalf("save: %s", got)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "images.txt")); string(data) != "busybox:1.36\npostgres:16\n" {
+	if data, _ := os.ReadFile(filepath.Join(root, "images.txt")); string(data) != "busybox:1.36\ndocker.io/polinux/stress:1.0.4\npostgres:16\n" {
 		t.Fatalf("images.txt: %q", data)
 	}
 
@@ -136,15 +149,31 @@ func TestSaveAndLoadBundleImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	chartRoot, chartsPublished, deployChartBundle = root, true, root
-	n := len(*calls)
+	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		switch strings.Join(append([]string{name}, args...), " ") {
+		case "kind get nodes --name panda":
+			return []byte("panda-control-plane\npanda-worker\n"), nil
+		case "docker exec panda-control-plane uname -m", "docker exec panda-worker uname -m":
+			return []byte("aarch64\n"), nil
+		}
+		return nil, errors.New("unexpected")
+	}
+	origImport := importImagesFn
+	t.Cleanup(func() { importImagesFn = origImport })
+	var imports []string
+	importImagesFn = func(_ context.Context, archive, name string, args ...string) ([]byte, error) {
+		imports = append(imports, archive+" | "+name+" "+strings.Join(args, " "))
+		return nil, nil
+	}
 	if err := loadBundleImages(context.Background(), "kind-panda", true); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join((*calls)[n], " "); got != "kind load image-archive "+filepath.Join(root, "images.tar")+" --name panda" {
-		t.Fatalf("load: %s", got)
+	want := filepath.Join(root, "images.tar") + " | docker exec --privileged -i panda-worker ctr --namespace=k8s.io images import --platform linux/arm64 --digests --snapshotter=overlayfs -"
+	if len(imports) != 2 || imports[1] != want {
+		t.Fatalf("imports %v, want each node's own platform, as %q", imports, want)
 	}
 	out := output.ResetForTesting()
-	if err := loadBundleImages(context.Background(), "prod", false); err != nil || !strings.Contains(out.String(), "images.txt") || len(*calls) != n+1 {
+	if err := loadBundleImages(context.Background(), "prod", false); err != nil || !strings.Contains(out.String(), "images.txt") || len(imports) != 2 {
 		t.Fatalf("another cluster: %v %q; it must say which images to mirror and load nothing", err, out.String())
 	}
 }
@@ -182,5 +211,22 @@ func TestHarvestImagesRendersEveryWayDeployInstalls(t *testing.T) {
 		if !strings.Contains(all, want) {
 			t.Errorf("no render %q in:\n%s", want, all)
 		}
+	}
+}
+
+// Without --platform, the images are the Docker server's platform, pulled
+// and saved for that one platform only.
+func TestSaveBundleImagesDefaultsToTheDockerServersPlatform(t *testing.T) {
+	withChartBuild(t, allChartVersions)
+	calls := fakeHelmPull(t)
+	origOutput := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = origOutput })
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte("linux/arm64\n"), nil } // docker version and inspect
+	root := t.TempDir()
+	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(callsOf(*calls, "docker pull")[0], " "); got != "docker pull --quiet --platform linux/arm64 busybox:1.36" {
+		t.Fatalf("pull: %s", got)
 	}
 }

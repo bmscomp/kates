@@ -266,6 +266,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Component Selection
 	printComponentSelection()
 
+	// Offline, the nodes have no registry to pull from: the bundle's images
+	// go in before any pod, the pre-flight probes' included. A dry run loads
+	// nothing.
+	if !deployDryRun {
+		if err := loadBundleImages(context.Background(), target, quickDetectKind()); err != nil {
+			return err
+		}
+	}
+
 	executor := defaultExecutor
 	var report *detect.DetectReport
 	if deployAdminless {
@@ -380,12 +389,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		if err := vp.confirmOperatorChange(); err != nil {
 			return err
 		}
-	}
-
-	// Offline, the nodes have no registry to pull from: load the bundle's
-	// images into them first.
-	if err := loadBundleImages(context.Background(), target, isKind); err != nil {
-		return err
 	}
 
 	// Record each component's outcome BEFORE the pipeline runs, from the same
