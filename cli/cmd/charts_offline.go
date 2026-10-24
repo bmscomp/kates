@@ -236,6 +236,21 @@ func walkImages(node any, kafkaVersion string, add func(string)) {
 		for _, v := range n {
 			walkImages(v, kafkaVersion, add)
 		}
+	case string:
+		// Manifests carried as text, such as the ChaosExperiments a
+		// ConfigMap holds for kates-chaos, name images too.
+		if strings.Contains(n, "image:") {
+			dec := yaml.NewDecoder(strings.NewReader(n))
+			for {
+				var doc any
+				if dec.Decode(&doc) != nil {
+					break
+				}
+				if _, isText := doc.(string); !isText {
+					walkImages(doc, kafkaVersion, add)
+				}
+			}
+		}
 	}
 }
 

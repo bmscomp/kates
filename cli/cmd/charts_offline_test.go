@@ -38,6 +38,12 @@ apiVersion: v1
 kind: ConfigMap
 data:
   KATES_CHAOS_STRESS_IMAGE: "docker.io/polinux/stress:1.0.4"
+  pod-delete.yaml: |
+    apiVersion: litmuschaos.io/v1alpha1
+    kind: ChaosExperiment
+    spec:
+      definition:
+        image: litmuschaos/go-runner:3.28.0
   NOT_AN_IMAGE: "hello world"
 ---
 spec:
@@ -53,6 +59,7 @@ spec:
 		"busybox:1.36",
 		"docker.io/polinux/stress:1.0.4",
 		"ghcr.io/bmscomp/kates:1.29.3-native@sha256:" + strings.Repeat("a", 64),
+		"litmuschaos/go-runner:3.28.0",
 		"quay.io/strimzi/kafka:1.2.0-kafka-4.3.1",
 		"quay.io/strimzi/operator:1.2.0",
 	}
