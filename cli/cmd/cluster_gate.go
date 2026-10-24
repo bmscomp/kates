@@ -25,6 +25,7 @@ var (
 	createKindFn        = cluster.CreateKind
 	kindClusterExistsFn = cluster.KindClusterExists
 	configExistsFn      = cluster.ConfigExists
+	proxyFromEnvFn      = cluster.ProxyFromEnv
 
 	// interactiveFn reports whether we may prompt. Overridden in tests.
 	interactiveFn = IsInteractive
@@ -237,10 +238,23 @@ func offerKind(d cluster.Decision) (string, error) {
 			cluster.DefaultKindClusterName, cluster.DefaultKindClusterName, cluster.DefaultKindClusterName)
 	}
 
+	// Read before asking, so a bad PROXY_CA_FILE stops here, not after the
+	// cluster exists.
+	proxy, warnings, err := proxyFromEnvFn(os.Getenv)
+	if err != nil {
+		return "", err
+	}
+	for _, w := range warnings {
+		fmt.Println("  " + gateWarn.Render("!") + " " + w)
+	}
+
 	fmt.Println()
 	fmt.Println("  " + gateTitle.Render("Create a local Kubernetes cluster?"))
 	fmt.Println("  " + gateDim.Render(fmt.Sprintf("kind · %s · zones %s · takes a few minutes",
 		cluster.DefaultKindClusterName, strings.Join(cluster.KindZones, "/"))))
+	if proxy.Configures() {
+		fmt.Println("  " + gateDim.Render(describeProxy(proxy)))
+	}
 	fmt.Println()
 
 	ok, err := confirmFn("Create it now?")
@@ -264,6 +278,7 @@ func offerKind(d cluster.Decision) (string, error) {
 	fmt.Println()
 	err = createKindFn(kubeContextExecutor{inner: defaultExecutor, kubeContext: ctxName}, cluster.KindOptions{
 		ConfigPath: configPath,
+		Proxy:      proxy,
 		Progress: func(step string) {
 			fmt.Println("  " + gateAccent.Render("→") + " " + step)
 		},
@@ -274,6 +289,19 @@ func offerKind(d cluster.Decision) (string, error) {
 
 	fmt.Println("  " + gateOK.Render("✓") + " Cluster ready: " + gateAccent.Render(ctxName))
 	return ctxName, nil
+}
+
+// describeProxy says what the nodes will pull images through.
+func describeProxy(p cluster.KindProxy) string {
+	var bits []string
+	for _, v := range []struct{ label, value string }{
+		{"HTTPS proxy", p.HTTPS}, {"HTTP proxy", p.HTTP}, {"NO_PROXY", p.NoProxy}, {"CA", p.CAFile},
+	} {
+		if v.value != "" {
+			bits = append(bits, v.label+" "+v.value)
+		}
+	}
+	return "nodes: " + strings.Join(bits, " · ")
 }
 
 // kindConfigPath is the topology kind creates from: a checkout's own file, or
