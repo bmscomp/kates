@@ -529,6 +529,14 @@ elif [[ -n "$env_node_version" && "${cluster_node_versions[0]}" != "$env_node_ve
   fail=1
 fi
 
+# The CLI builds the same cluster outside a checkout from a copy it embeds.
+CLI_CLUSTER_YAML="cli/pkg/cluster/kind-cluster.yaml"
+if ! cmp -s "$CLUSTER_YAML" "$CLI_CLUSTER_YAML"; then
+  echo "DRIFT: ${CLI_CLUSTER_YAML} differs from ${CLUSTER_YAML}." >&2
+  echo "  kates deploy creates its kind cluster from that copy: cp ${CLUSTER_YAML} ${CLI_CLUSTER_YAML}" >&2
+  fail=1
+fi
+
 # kind chooses the kubeadm API version from the NODE IMAGE, not from its own
 # release: below Kubernetes 1.36 it renders v1beta3, from 1.36 up it renders
 # v1beta4 (kind/pkg/cluster/internal/kubeadm/config.go). The two are not

@@ -567,7 +567,7 @@ The per-zone StorageClasses the Kafka chart binds to (`local-storage-alpha` and 
 
 You do not have to run this first. `kates deploy` resolves the target cluster before it configures anything: with one reachable cluster it proceeds, with several it asks which, and with none it offers to build this same three-zone cluster for you. Reach for `make cluster` when you want the cluster on its own, or when you are behind a proxy — it reconciles the container runtime's proxy settings and CA trust, which `kates deploy` does not.
 
-Both paths build from `config/cluster.yaml` and untaint the control-plane afterwards, so the topology is identical either way: three schedulable zones, not two. One difference worth knowing — `make cluster` resolves the config relative to itself and works from anywhere, while `kates deploy` looks for `config/cluster.yaml` relative to the working directory, so its offer only stands from the repo root. It says so rather than failing inside `kind`.
+Both paths build from `config/cluster.yaml` and untaint the control-plane afterwards, so the topology is identical either way: three schedulable zones, not two. `kates deploy` reads `config/cluster.yaml` from the working directory when there is one, as in a checkout, and anywhere else uses the copy built into the CLI, which a test holds equal to the file. So a `kates` from Homebrew builds the same cluster from any directory.
 
 ### Image Management
 

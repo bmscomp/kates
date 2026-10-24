@@ -37,7 +37,7 @@ It has three parts: the `kates` CLI (Go), a backend service (Quarkus) that runs 
 
 This path builds the whole stack on a local Kind cluster. You need:
 
-- a clone of this repository, for the `make` targets and the Kind cluster definition, which are read relative to the working directory, so run every command from the repository root. The Homebrew `kates` installs the charts its release published, the same versions as the tag you check out; a `kates` built from source installs the checkout's charts;
+- a clone of this repository, for the `make` targets, which are read relative to the working directory, so run every command from the repository root. The Homebrew `kates` installs the charts its release published, the same versions as the tag you check out; a `kates` built from source installs the checkout's charts;
 - Docker (any daemon the `docker` CLI talks to), [Kind](https://kind.sigs.k8s.io/), `kubectl` and Helm, at the minimum versions in the book's [Prerequisites](docs/book/12-deployment.md#prerequisites);
 - about 16 GB of RAM, with at least 10 GB of it available to Docker, on macOS or Linux (amd64 or arm64).
 
@@ -202,7 +202,7 @@ When you install charts with Helm directly:
 
 [Deploying the Strimzi Operator](docs/book/deploying-strimzi-operator.md) and [Installing Kafka with the kafka-cluster Helm Chart](docs/book/20-installation-guide.md) walk through both releases. `make readme-check` verifies the Version and App Version columns below against each `Chart.yaml`.
 
-Every published chart is signed with cosign and carries a build provenance attestation. Check both before you install one:
+Every published chart is signed with cosign and carries a build provenance attestation. `kates deploy` runs the first check below on every chart it pulls. Check both before you install one yourself:
 
 ```bash
 cosign verify ghcr.io/bmscomp/charts/kates:<version> \

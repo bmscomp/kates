@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -217,22 +218,14 @@ func offerKind(d cluster.Decision) (string, error) {
 	}
 
 	if !interactiveFn() {
+		how := "Re-run kates deploy in a terminal to be asked."
+		if configExistsFn(cluster.DefaultKindConfig) {
+			how = fmt.Sprintf("Re-run in a terminal to be prompted, or create it directly:\n"+
+				"    kind create cluster --config %s --name %s", cluster.DefaultKindConfig, cluster.DefaultKindClusterName)
+		}
 		return "", fmt.Errorf("no reachable Kubernetes cluster.\n"+
-			"  Docker and kind are available — a local %d-zone cluster can be created.\n"+
-			"  Re-run in a terminal to be prompted, or create it directly:\n"+
-			"    kind create cluster --config %s --name %s",
-			len(cluster.KindZones), cluster.DefaultKindConfig, cluster.DefaultKindClusterName)
-	}
-
-	// The topology config is repo-relative. Offering to build a cluster we
-	// cannot describe would fail inside `kind create` with a bare "no such
-	// file"; say so now instead.
-	if !configExistsFn(cluster.DefaultKindConfig) {
-		return "", fmt.Errorf("no reachable Kubernetes cluster, and the kind topology %s is not readable from here.\n"+
-			"  The %d-zone config lives in the kates repo — run from the repo root, or create the cluster yourself:\n"+
-			"    kind create cluster --config <path-to>/%s --name %s",
-			cluster.DefaultKindConfig, len(cluster.KindZones),
-			cluster.DefaultKindConfig, cluster.DefaultKindClusterName)
+			"  Docker and kind are available — a local %d-zone cluster can be created.\n  %s",
+			len(cluster.KindZones), how)
 	}
 
 	if kindClusterExistsFn(defaultExecutor, cluster.DefaultKindClusterName) {
@@ -258,12 +251,19 @@ func offerKind(d cluster.Decision) (string, error) {
 		return "", fmt.Errorf("no cluster to deploy to, and kind cluster creation was declined")
 	}
 
+	configPath, removeConfig, err := kindConfigPath()
+	if err != nil {
+		return "", err
+	}
+	defer removeConfig()
+
 	// kind names the context kind-<cluster>. The waits and the untaint that
 	// follow creation go to it by name, not to whatever is current by then.
 	ctxName := "kind-" + cluster.DefaultKindClusterName
 
 	fmt.Println()
 	err = createKindFn(kubeContextExecutor{inner: defaultExecutor, kubeContext: ctxName}, cluster.KindOptions{
+		ConfigPath: configPath,
 		Progress: func(step string) {
 			fmt.Println("  " + gateAccent.Render("→") + " " + step)
 		},
@@ -274,6 +274,29 @@ func offerKind(d cluster.Decision) (string, error) {
 
 	fmt.Println("  " + gateOK.Render("✓") + " Cluster ready: " + gateAccent.Render(ctxName))
 	return ctxName, nil
+}
+
+// kindConfigPath is the topology kind creates from: a checkout's own file, or
+// a temporary copy of the one built into this binary, which the returned
+// function removes.
+func kindConfigPath() (string, func(), error) {
+	if configExistsFn(cluster.DefaultKindConfig) {
+		return cluster.DefaultKindConfig, func() {}, nil
+	}
+	f, err := os.CreateTemp("", "kates-kind-*.yaml")
+	if err != nil {
+		return "", nil, fmt.Errorf("writing the kind topology: %w", err)
+	}
+	remove := func() { _ = os.Remove(f.Name()) }
+	_, werr := f.Write(cluster.KindConfig)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		remove()
+		return "", nil, fmt.Errorf("writing the kind topology: %w", werr)
+	}
+	return f.Name(), remove, nil
 }
 
 // printNoCluster explains what was found. It distinguishes "no contexts at all"
