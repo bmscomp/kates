@@ -86,8 +86,8 @@ func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[stri
 	// What a dry run did before this printed: the cluster gate and pre-flight
 	// introspection, both reading only. It skipped the kind StorageClass
 	// bootstrap and the introspection probes that create a namespace, a
-	// Secret or pods (detect.Collector.ReadOnly). Its writes are local:
-	// .build/values-detected.yaml, and any Strimzi chart it caches.
+	// Secret or pods (detect.Collector.ReadOnly). Its writes are local: the
+	// values file (deployFiles), and the charts it caches.
 	fmt.Printf("  %s\n\n",
 		lipgloss.NewStyle().Foreground(clrDim).Italic(true).
 			Render("Nothing was created in the cluster and no Helm release was touched."))

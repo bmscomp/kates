@@ -1350,7 +1350,7 @@ kates deploy --dry-run --strimzi-version latest          # shows the resolution,
 ```
 
 ::: {.callout-warning}
-`--dry-run` creates nothing in the cluster, but it is not inert. The cluster gate, pre-flight introspection and version resolution all run and read the cluster; the Kind StorageClass bootstrap and the introspection probes that create a namespace, a Secret or pods to measure the cluster are skipped. It will not create a Kind cluster or switch `kubectl`'s context. On your machine it writes `.build/values-detected.yaml` in the current directory, replacing the one a previous deploy left there, and caches the published charts and any Strimzi chart it fetches.
+`--dry-run` creates nothing in the cluster, but it is not inert. The cluster gate, pre-flight introspection and version resolution all run and read the cluster; the Kind StorageClass bootstrap and the introspection probes that create a namespace, a Secret or pods to measure the cluster are skipped. It will not create a Kind cluster or switch `kubectl`'s context. On your machine it writes the values it detected, replacing the ones a previous deploy left, and caches the published charts and any Strimzi chart it fetches. Run from a Kates checkout, deploy keeps `.build/values-detected.yaml` and, after a failure, `deploy-error.log` in the working directory, where the Makefile reads them. Anywhere else both go to `kates/deploy` under the user state directory (`$XDG_STATE_HOME`, else `~/.local/state`), so a run from your home directory leaves nothing there. The run prints the path of each.
 :::
 
 `deploy` works out which cluster it is deploying to before it asks you anything else — there is no point configuring a deployment that has nowhere to go. What happens next depends on what it finds:
