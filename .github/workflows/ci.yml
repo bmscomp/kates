@@ -300,11 +300,13 @@ jobs:
           pol=$(helm template kates charts/kates/ "${on[@]}" "${ivp[@]}" --set kyvernoPolicy.action=Enforce)
           grep -q '^kind: ImageValidatingPolicy$' <<<"${pol}" || fail "no ImageValidatingPolicy without publicKey"
           grep -q 'validationActions: \[Deny\]' <<<"${pol}" || fail "action Enforce is not Deny"
-          grep -qF ".filter(i, i.matches(r'^ghcr\.io/bmscomp/.*\$') || i.matches(r'^docker\.io/bmscomp/.*\$'))" <<<"${pol}" \
+          grep -qF ".filter(i, i.matches(r'^ghcr\.io/bmscomp/.*\$'))" <<<"${pol}" \
             || fail "the check does not filter on the anchored imagePatterns"
+          helm template kates charts/kates/ "${on[@]}" "${ivp[@]}" --set 'kyvernoPolicy.cosign.imagePatterns={a/*,b/*}' \
+            | grep -qF "i.matches(r'^a/.*\$') || i.matches(r'^b/.*\$')" || fail "patterns are not joined with ||"
           grep -qF "expression: \"ref.matches(r'^ghcr\\\\.io/bmscomp/.*\$')\"" <<<"${pol}" \
             || fail "matchImageReferences does not use the same expression"
-          grep -qF 'publish-(docker|connect)\\.yml@refs/tags/v.+$' <<<"${pol}" || fail "the release identity is not the default subject"
+          grep -qF 'publish-(docker|connect)\.yml@refs/tags/v.+$' <<<"${pol}" || fail "the subject is not the release workflows"
           helm template kates charts/kates/ "${on[@]}" "${ivp[@]}" | grep -q 'validationActions: \[Audit\]' \
             || fail "the default action is not Audit"
           helm template kates charts/kates/ "${on[@]}" "${ivp[@]}" --set 'kyvernoPolicy.cosign.imagePatterns={reg.example/k?tes*}' \

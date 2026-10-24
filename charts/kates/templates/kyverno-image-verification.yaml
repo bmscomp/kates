@@ -70,9 +70,8 @@ metadata:
     policies.kyverno.io/description: >-
       Verifies that the release namespace's images matching
       kyvernoPolicy.cosign.imagePatterns carry a keyless Cosign signature from
-      the identity in kyvernoPolicy.cosign.keyless, by default the Kates
-      release workflows. Unsigned or tampered images are rejected to prevent
-      supply chain attacks.
+      the Kates release workflows. Unsigned or tampered images are rejected
+      to prevent supply chain attacks.
 spec:
   validationActions: [{{ eq .Values.kyvernoPolicy.action "Enforce" | ternary "Deny" "Audit" }}]
   webhookConfiguration:
@@ -102,8 +101,9 @@ spec:
       cosign:
         keyless:
           identities:
-            - subjectRegExp: {{ .Values.kyvernoPolicy.cosign.keyless.subjectRegExp | quote }}
-              issuer: {{ .Values.kyvernoPolicy.cosign.keyless.issuer | quote }}
+            # The workflows that sign the Kates and Connect images on a v* tag.
+            - subjectRegExp: '^https://github\.com/bmscomp/kates/\.github/workflows/publish-(docker|connect)\.yml@refs/tags/v.+$'
+              issuer: https://token.actions.githubusercontent.com
         ctlog:
           url: https://rekor.sigstore.dev
   validations:
@@ -113,6 +113,6 @@ spec:
         .all(i, verifyImageSignatures(i, [attestors.release]) > 0)
       message: >-
         An image matching kyvernoPolicy.cosign.imagePatterns has no keyless
-        signature from the identity in kyvernoPolicy.cosign.keyless.
+        signature from the Kates release workflows.
 {{- end }}
 {{- end }}

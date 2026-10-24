@@ -874,11 +874,11 @@ kyvernoPolicy:
     enabled: true
 ```
 
-By default `kyvernoPolicy.cosign.imagePatterns` lists `ghcr.io/bmscomp/*` and `docker.io/bmscomp/*`. `kyvernoPolicy.cosign.keyless` names the signer: `subjectRegExp` matches the `publish-docker.yml` and `publish-connect.yml` workflows on a `v*` tag, and `issuer` is GitHub's OIDC issuer, `https://token.actions.githubusercontent.com`.
+The signer it expects is the `publish-docker.yml` or `publish-connect.yml` workflow on a `v*` tag, with GitHub's OIDC issuer, `https://token.actions.githubusercontent.com`. `kyvernoPolicy.cosign.imagePatterns` names the images it checks, by default `ghcr.io/bmscomp/*`. The images are signed on Docker Hub too: add `docker.io/bmscomp/*` to check those.
 
 The check needs Kyverno 1.17 or newer. cosign 3 stores Sigstore bundle signatures, and a `ClusterPolicy` can't verify them on GHCR: its Cosign attestor looks for the legacy `.sig` tag, and its `SigstoreBundle` type misses GHCR's referrer tag ([kyverno/kyverno#16664](https://github.com/kyverno/kyverno/issues/16664)). So the check is an `ImageValidatingPolicy` (`policies.kyverno.io/v1`), which reads them from Kyverno 1.17 on. On an older Kyverno the chart refuses to render rather than leave the check out. `kates kyverno apply --with-cosign` installs Kyverno 1.16 when none is present, so upgrade Kyverno first.
 
-Every container, init container and ephemeral container whose image matches `imagePatterns` must be signed by that identity. Other images, such as PostgreSQL, are left alone; allow only the registries you trust with `restrictRegistries`. `*` and `?` are the only wildcards, matched against the image as the pod names it, so `bmscomp/kates` doesn't match `docker.io/bmscomp/*`. On Kyverno 1.19 the policy also pins each verified image to its digest; Kyverno 1.17 verifies without pinning. The tester image, `kates-tester`, isn't signed, so don't run it in a namespace the check covers.
+Every container, init container and ephemeral container whose image matches `imagePatterns` must be signed by that identity. Other images, such as PostgreSQL, are left alone; allow only the registries you trust with `restrictRegistries`. `*` and `?` are the only wildcards, matched against the image as the pod names it, so `bmscomp/kates` would not match `docker.io/bmscomp/*`. On Kyverno 1.19 the policy also pins each verified image to its digest; Kyverno 1.17 verifies without pinning. The tester image, `kates-tester`, isn't signed, so don't run it in a namespace the check covers.
 
 Check an image yourself, with the same identity:
 

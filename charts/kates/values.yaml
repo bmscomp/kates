@@ -870,13 +870,6 @@ kyvernoPolicy:
     # -- Image patterns requiring valid signatures (* and ? are wildcards)
     imagePatterns:
       - "ghcr.io/bmscomp/*"
-      - "docker.io/bmscomp/*"
-    # -- The keyless signer an image must be signed by: the certificate
-    # identity and its OIDC issuer. By default, the workflows that sign the
-    # Kates and Connect images on a v* tag
-    keyless:
-      subjectRegExp: '^https://github\.com/bmscomp/kates/\.github/workflows/publish-(docker|connect)\.yml@refs/tags/v.+$'
-      issuer: https://token.actions.githubusercontent.com
     # -- Cosign public key (PEM format) — set via --set-file or Secrets. Set,
     # it replaces the keyless check with a ClusterPolicy that verifies images
     # signed with this key in the legacy .sig format (cosign 2, or cosign 3
