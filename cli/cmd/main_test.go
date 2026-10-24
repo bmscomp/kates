@@ -28,6 +28,10 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv("HOME", home)
+	// Deploy writes under XDG_STATE_HOME outside a checkout, and KATES_CHECKOUT
+	// moves the chart root: neither may come from the developer's shell.
+	os.Unsetenv("XDG_STATE_HOME")
+	os.Unsetenv("KATES_CHECKOUT")
 	// A developer's own KATES_PROFILES would refuse the commands tests run. As
 	// runKates' kates, the binary keeps the one the test passes.
 	if os.Getenv("KATES_TEST_RUN_AS_CLI") != "1" {
