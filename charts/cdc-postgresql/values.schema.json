@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cdc-postgresql values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image", "auth", "replication", "persistence"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "imageRegistry": { "type": "string", "description": "Prepended to the image, with a slash" },
+        "imagePullSecrets": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              { "type": "string", "minLength": 1 },
+              { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "minLength": 1 } } }
+            ]
+          }
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string", "minLength": 1, "not": { "const": "latest" } },
+        "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["postgresPassword", "username", "password", "database"],
+      "properties": {
+        "postgresPassword": { "type": "string", "minLength": 1 },
+        "username": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]{0,62}$",
+          "not": { "const": "postgres" },
+          "description": "The CDC role; not postgres, the superuser the image creates"
+        },
+        "password": { "type": "string", "minLength": 1 },
+        "database": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$" }
+      }
+    },
+    "replication": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxWalSenders": { "type": "integer", "minimum": 1 },
+        "maxReplicationSlots": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Extra -c name=value server settings; the replication ones are the chart's",
+      "propertyNames": {
+        "pattern": "^[a-z_][a-z0-9_.]*$",
+        "not": { "enum": ["wal_level", "max_wal_senders", "max_replication_slots"] }
+      },
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "size": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$" },
+        "storageClass": { "type": "string" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "allowNamespaces": { "type": "array", "items": { "type": "object", "minProperties": 1 } },
+        "allowPods": { "type": "array", "items": { "type": "object", "minProperties": 1 } }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "resources": { "type": "object" } }
+    },
+    "resources": { "type": "object" },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "podSecurityContext": { "type": "object" },
+    "securityContext": { "type": "object" },
+    "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" }
+  }
+}

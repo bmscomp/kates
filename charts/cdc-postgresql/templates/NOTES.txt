@@ -1,0 +1,13 @@
+PostgreSQL {{ .Values.image.tag }} for change-data-capture, with wal_level=logical.
+
+  Service:  {{ include "cdc-postgresql.fullname" . }}.{{ .Release.Namespace }}.svc:5432
+  Database: {{ .Values.auth.database }}, owned by {{ .Values.auth.username }} (LOGIN, REPLICATION)
+  Secret:   {{ include "cdc-postgresql.fullname" . }} (keys postgres-password, password)
+{{- if not .Values.persistence.enabled }}
+
+  The data is in an emptyDir: it goes with the pod.
+{{- end }}
+
+Check what Debezium needs:
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

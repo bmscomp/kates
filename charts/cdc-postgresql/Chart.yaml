@@ -2,8 +2,12 @@ apiVersion: v2
 name: cdc-postgresql
 description: The PostgreSQL that Kafka Connect's change-data-capture demo reads, on the official postgres image with logical replication on
 type: application
-version: 0.1.0
-appVersion: "16"
+# Minor: the image is pinned to 16.15 (digest optional), values are checked
+# against values.schema.json, a Helm test checks what Debezium needs, the root
+# filesystem is read-only, and an opt-in NetworkPolicy, extra server
+# parameters and an emptyDir mode are added.
+version: 0.2.0
+appVersion: "16.15"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
 sources:
@@ -20,5 +24,15 @@ annotations:
   artifacthub.io/category: database
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The image is pinned to postgres 16.15 instead of the moving 16 tag, so a reinstall runs the same server; image.digest pins it by content"
+    - kind: added
+      description: "values.schema.json: refuses unknown keys, a latest tag, a malformed digest, the postgres superuser as the CDC user, and parameters that would override the chart's replication settings"
+    - kind: added
+      description: "helm test connects through the Service as the CDC user and checks wal_level=logical, its REPLICATION attribute and its ownership of the database"
+    - kind: added
+      description: "parameters passes extra server settings as -c flags; persistence.enabled=false keeps the data in an emptyDir; networkPolicy.enabled admits 5432 only from listed namespaces and pods"
+    - kind: changed
+      description: "A startup probe covers the first start's initdb, and the probes check the TCP listener rather than the socket; the root filesystem is read-only"
     - kind: added
       description: "First version: one PostgreSQL 16 pod from the official postgres image, wal_level=logical, a REPLICATION user that owns the CDC database, and the Secret keys (postgres-password, password) kates deploy and the Kates API's INTEGRATION_CDC test read. It replaces bitnami/postgresql in kates deploy --with-kafka-connect"

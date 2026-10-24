@@ -1,0 +1,60 @@
+{{- /*
+helm test: connects through the Service as the CDC user, the way Debezium
+does, and checks what the connectors need: wal_level=logical, the user's
+REPLICATION attribute, and its ownership of the database.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cdc-postgresql.fullname" . }}-test-cdc
+  labels:
+    {{- toYaml (merge (include "cdc-postgresql.testLabels" . | fromYaml) .Values.podLabels) | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  {{- include "cdc-postgresql.imagePullSecrets" . | nindent 2 }}
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: test
+      image: {{ include "cdc-postgresql.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      env:
+        - name: PGHOST
+          value: {{ include "cdc-postgresql.fullname" . }}
+        - name: PGDATABASE
+          value: {{ .Values.auth.database | quote }}
+        - name: PGUSER
+          value: {{ .Values.auth.username | quote }}
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "cdc-postgresql.fullname" . }}
+              key: password
+        - name: PGCONNECT_TIMEOUT
+          value: "10"
+      command:
+        - bash
+        - -ec
+        - |
+          q() { psql -XAtqc "$1"; }
+          wal=$(q "SHOW wal_level")
+          [ "$wal" = logical ] || { echo "wal_level is $wal, not logical"; exit 1; }
+          [ "$(q "SELECT rolreplication FROM pg_roles WHERE rolname = current_user")" = t ] \
+            || { echo "$PGUSER lacks REPLICATION"; exit 1; }
+          [ "$(q "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()")" = "$PGUSER" ] \
+            || { echo "$PGUSER does not own $PGDATABASE"; exit 1; }
+          echo "ok: wal_level=logical, $PGUSER has REPLICATION and owns $PGDATABASE"
+      resources:
+        {{- toYaml .Values.tests.resources | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

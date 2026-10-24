@@ -6,15 +6,17 @@
 
 global:
   # -- Registry prepended to the image, with a slash, for clusters that pull
-  # from a mirror: postgres:16 becomes <imageRegistry>/postgres:16.
+  # from a mirror: postgres:16.15 becomes <imageRegistry>/postgres:16.15.
   imageRegistry: ""
   # -- Pull secrets for that registry.
   imagePullSecrets: []
 
-# -- The official PostgreSQL image.
+# -- The official PostgreSQL image, pinned to a patch release so a reinstall
+# runs the same server. `digest` (sha256:…) pins by content and wins over tag.
 image:
   repository: postgres
-  tag: "16"
+  tag: "16.15"
+  digest: ""
   pullPolicy: IfNotPresent
 
 auth:
@@ -32,11 +34,39 @@ replication:
   maxWalSenders: 10
   maxReplicationSlots: 10
 
+# -- More server settings, each passed as -c name=value, such as
+# {max_connections: "200", log_min_duration_statement: "500"}. wal_level and
+# the two replication settings above are the chart's.
+parameters: {}
+
 persistence:
+  # -- Keep the data on a PersistentVolumeClaim. false puts it in an emptyDir,
+  # for CI and throwaway labs: the database is recreated with the pod.
+  enabled: true
   # -- Size of the data volume.
   size: 8Gi
   # -- Storage class (empty for the cluster default).
   storageClass: ""
+
+# -- A NetworkPolicy that admits connections on 5432 only from the pods and
+# namespaces listed. Off by default: kates deploy puts Kafka Connect and the
+# Kates API in other namespaces, and Connect's own policy allows the egress.
+networkPolicy:
+  enabled: false
+  # -- Namespace label selectors whose pods may connect, such as
+  # [{kubernetes.io/metadata.name: kafka}].
+  allowNamespaces: []
+  # -- Pod label selectors, in this namespace, whose pods may connect.
+  allowPods: []
+
+tests:
+  # -- Resources of the Helm test pod, which checks what Debezium needs.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
 
 resources:
   requests:
@@ -58,6 +88,8 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
+  # Postgres writes only to the data, socket and /tmp volumes.
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL

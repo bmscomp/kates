@@ -17,12 +17,7 @@ spec:
       annotations:
         checksum/init: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
-      {{- with .Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- range . }}
-        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
-        {{- end }}
-      {{- end }}
+      {{- include "cdc-postgresql.imagePullSecrets" . | nindent 6 }}
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -49,6 +44,10 @@ spec:
             - max_wal_senders={{ .Values.replication.maxWalSenders }}
             - -c
             - max_replication_slots={{ .Values.replication.maxReplicationSlots }}
+            {{- range $name, $value := .Values.parameters }}
+            - -c
+            - {{ printf "%s=%v" $name $value | quote }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
@@ -72,15 +71,20 @@ spec:
                   key: password
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+          # The first start runs initdb and the init script; up to five
+          # minutes before liveness takes over.
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "postgres", "-d", {{ .Values.auth.database | quote }}]
-            initialDelaySeconds: 5
+              command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1", "-d", {{ .Values.auth.database | quote }}]
             periodSeconds: 10
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "postgres"]
-            initialDelaySeconds: 30
+              command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
             periodSeconds: 30
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -103,6 +107,11 @@ spec:
           emptyDir: {}
         - name: tmp
           emptyDir: {}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -114,3 +123,4 @@ spec:
         resources:
           requests:
             storage: {{ .Values.persistence.size }}
+  {{- end }}
