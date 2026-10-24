@@ -7,9 +7,9 @@ type: application
 # restricted security contexts through their CR templates — podLabels reach
 # every pod, and global.imagePullSecrets also takes plain names. SeaweedFS
 # (off by default) is unchanged and cannot pass restricted.
-# Patch: the Helm-test images moves to kates-tester 1.29.1, the tag the
-# v1.29.1 release publishes; every Strimzi chart pins the same one.
-version: 1.0.14
+# Patch: the Helm-test images moves to kates-tester 1.29.2, the tag the
+# v1.29.2 release publishes; every Strimzi chart pins the same one.
+version: 1.0.15
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -43,6 +43,10 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl and testImages.kafka move to kates-tester 1.29.2, the tag the v1.29.2 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.29.1 — nothing under tester/ moved — so this is the pin, not the tooling."
+    - kind: fixed
+      description: "Strimzi 1.3.0 generates its own <cluster>-kafka-exporter NetworkPolicy, so helm refused to install this chart beside it (cannot be imported into the current release). Ours is now <cluster>-kafka-exporter-egress, as the entity operator's already is; its rules are unchanged (#456). The README lists the real policy names."
     - kind: changed
       description: "testImages.kubectl and testImages.kafka move to kates-tester 1.29.1, the tag the v1.29.1 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.29.0 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: changed

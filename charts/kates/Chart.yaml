@@ -4,14 +4,14 @@ description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Minor: global.imageRegistry now reaches every image the chart renders, so an
 # image value that already names the mirror gets it twice.
-# Patch: values-generic.yaml, which kates deploy applies on every cluster that
-# is not kind and on every admin-less install, runs 512Mi/1Gi with -Xmx512m.
-version: 0.13.3
+# Patch: appVersion and the image tag move to 1.29.2, the tag the v1.29.2
+# release publishes; values-generic.yaml runs 512Mi/1Gi with -Xmx512m.
+version: 0.13.4
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.29.1"
+appVersion: "1.29.2"
 keywords:
   - kafka
   - testing
@@ -30,6 +30,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.29.2 and the image tag move to 1.29.2. No Kates API change since 1.29.1: the release carries CLI changes (#454, #455, #457, #458) and a kafka-cluster NetworkPolicy fix (#456). The values-generic.yaml sizing fix below is this chart's only other change."
     - kind: fixed
       description: "values-generic.yaml, which kates deploy applies on every cluster that is not kind and on every admin-less install, gave the Kates API a 512Mi limit under -Xmx256m, and the pod was OOMKilled as Quarkus finished starting. It now requests 512Mi with a 1Gi limit and runs -Xms256m -Xmx512m, as values-staging.yaml does."
     - kind: changed

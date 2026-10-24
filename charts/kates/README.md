@@ -33,7 +33,7 @@ All configuration is in [values.yaml](values.yaml). Key sections:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `image.repository` | `ghcr.io/bmscomp/kates` | Container image name |
-| `image.tag` | `1.29.1` | Container image tag, pinned in `values.yaml` to match the chart's `appVersion`. Keep it at 1.22.0 or newer: the probes use health endpoints older images lack |
+| `image.tag` | `1.29.2` | Container image tag, pinned in `values.yaml` to match the chart's `appVersion`. Keep it at 1.22.0 or newer: the probes use health endpoints older images lack |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy |
 | `global.imageRegistry` | `""` | Prepended, with a slash, to every image the chart renders: the API, PostgreSQL, the init container, the jobs, the helm test pods and `chaos.stressImage` |
 | `imagePullSecrets`, `global.imagePullSecrets` | `[]` | Pull secrets, both lists, on every pod the chart renders. An entry is a Secret name (`regcred`) or `{name: regcred}` |
