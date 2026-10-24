@@ -183,7 +183,13 @@ COPY --from=download /plugins/ /opt/kafka/plugins/
 # Strimzi's own image, never this one, and a Connect worker never starts the
 # exporter; its binary is built with Go 1.24.0 (CVE-2025-68121, CRITICAL,
 # crypto/tls). Removing it takes the CVE out of the image.
-RUN rm -rf /opt/kafka-exporter
+#
+# Its packages also lag Red Hat's errata, and the release gate fails on any
+# CRITICAL CVE that already has a fix (v1.29.2 shipped ca-certificates without
+# the eMudhra distrust, CVE-2026-114406), so they are upgraded here.
+RUN rm -rf /opt/kafka-exporter \
+  && microdnf upgrade -y \
+  && microdnf clean all
 USER 1001
 
 # ─── OCI Image Labels (https://github.com/opencontainers/image-spec) ─────────

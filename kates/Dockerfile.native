@@ -126,8 +126,13 @@ COPY --from=cli-builder /kates-cli /usr/local/bin/kates
 # build outright rather than upgrading. The HEALTHCHECK below only needs a curl
 # binary, and curl-minimal provides one, so this installs only if the base image
 # ever stops shipping either.
+#
+# `microdnf upgrade` first: the base image's packages lag Red Hat's errata, and
+# the release gate fails on any CRITICAL CVE that already has a fix (v1.29.2
+# shipped ca-certificates without the eMudhra distrust, CVE-2026-114406).
 RUN set -eu; \
   chmod +x kates; \
+  microdnf upgrade -y; \
   microdnf install -y shadow-utils; \
   if command -v curl >/dev/null 2>&1; then \
     echo "curl already present: $(command -v curl)"; \
