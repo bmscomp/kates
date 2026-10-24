@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -323,11 +324,12 @@ func chartAppVersion(dir string) (name, appVersion string, err error) {
 	return c.Name, c.AppVersion, nil
 }
 
-// saveBundleImages pulls images and saves them into root/images.tar, with
-// their list in root/images.txt, for one platform: platform, else the Docker
-// server's own. A save without one can name platforms that were never
-// pulled, and kind's import of every platform then fails on the missing
-// content.
+// saveBundleImages pulls images for one platform, platform else the Docker
+// server's own, and saves them into root/images.tar, with their list in
+// root/images.txt. The archive names every platform an image publishes but
+// holds only that one's content, so it is imported per platform
+// (loadBundleImages); docker save --platform refuses some multi-platform
+// images that do hold it.
 func saveBundleImages(ctx context.Context, root string, images []string, platform string) error {
 	if platform == "" {
 		out, err := runExecOutputFn(ctx, "docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
@@ -368,7 +370,7 @@ func saveBundleImages(ctx context.Context, root string, images []string, platfor
 		warnStderr(fmt.Sprintf("Not published for %s, so not in images.tar (images.txt still lists them): %s", platform, strings.Join(foreign, ", ")))
 	}
 	fmt.Fprintln(output.Err, output.DimStyle.Render(fmt.Sprintf("  Saving %d images for %s into %s...", len(saved), platform, filepath.Join(root, "images.tar"))))
-	if out, err := runExecCombinedFn(ctx, "docker", append([]string{"save", "--platform", platform, "-o", filepath.Join(root, "images.tar")}, saved...)...); err != nil {
+	if out, err := runExecCombinedFn(ctx, "docker", append([]string{"save", "-o", filepath.Join(root, "images.tar")}, saved...)...); err != nil {
 		return fmt.Errorf("docker save: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -388,8 +390,37 @@ func loadBundleImages(ctx context.Context, kubeContext string, isKind bool) erro
 	}
 	cluster := kindClusterName(kubeContext)
 	PrintPhaseItem(fmt.Sprintf("Loading the chart bundle's images into kind cluster %q...", cluster))
-	if out, err := runExecCombinedFn(ctx, "kind", "load", "image-archive", archive, "--name", cluster); err != nil {
-		return fmt.Errorf("kind load image-archive %s: %w: %s", archive, err, strings.TrimSpace(string(out)))
+	out, err := runExecOutputFn(ctx, "kind", "get", "nodes", "--name", cluster)
+	if err != nil {
+		return fmt.Errorf("listing the nodes of kind cluster %q: %w", cluster, err)
+	}
+	for _, node := range strings.Fields(string(out)) {
+		// kind load image-archive imports every platform the archive names,
+		// and it names some it holds no content for; import the node's own.
+		arch, err := runExecOutputFn(ctx, "docker", "exec", node, "uname", "-m")
+		if err != nil {
+			return fmt.Errorf("reading the architecture of %s: %w", node, err)
+		}
+		platform := "linux/" + map[string]string{"x86_64": "amd64", "aarch64": "arm64"}[strings.TrimSpace(string(arch))]
+		if platform == "linux/" {
+			return fmt.Errorf("kind node %s runs %s, which kates does not know", node, strings.TrimSpace(string(arch)))
+		}
+		if out, err := importImagesFn(ctx, archive, "docker", "exec", "--privileged", "-i", node,
+			"ctr", "--namespace=k8s.io", "images", "import", "--platform", platform, "--digests", "--snapshotter=overlayfs", "-"); err != nil {
+			return fmt.Errorf("importing %s into %s: %w: %s", archive, node, err, lastLine(string(out)))
+		}
 	}
 	return nil
+}
+
+// importImagesFn runs a command with archive as its stdin; tests replace it.
+var importImagesFn = func(ctx context.Context, archive, name string, args ...string) ([]byte, error) {
+	f, err := os.Open(archive)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = f
+	return cmd.CombinedOutput()
 }
