@@ -31,6 +31,10 @@ type stubGate struct {
 	// config is not readable.
 	configMissing bool
 
+	proxy    cluster.KindProxy
+	proxyErr error
+	proxyGot cluster.KindProxy // what createKindFn was given
+
 	createCalled  bool
 	createConfig  string // what the topology file held when kind ran
 	createConfigP string
@@ -54,6 +58,7 @@ func (s *stubGate) install(t *testing.T) {
 	probeEnvironmentFn = func(detect.CommandExecutor) cluster.Environment { return s.env }
 	createKindFn = func(_ detect.CommandExecutor, o cluster.KindOptions) error {
 		s.createCalled = true
+		s.proxyGot = o.Proxy
 		s.createConfigP = o.ConfigPath
 		if data, err := os.ReadFile(o.ConfigPath); err == nil {
 			s.createConfig = string(data)
@@ -73,14 +78,17 @@ func (s *stubGate) install(t *testing.T) {
 		return s.picked, s.pickErr
 	}
 	kindClusterExistsFn = func(detect.CommandExecutor, string) bool { return s.kindExists }
-	origConfig := configExistsFn
+	origConfig, origProxy := configExistsFn, proxyFromEnvFn
 	configExistsFn = func(string) bool { return !s.configMissing }
+	proxyFromEnvFn = func(func(string) string) (cluster.KindProxy, []string, error) {
+		return s.proxy, nil, s.proxyErr
+	}
 
 	t.Cleanup(func() {
 		listContextsFn, checkAllReachableFn, probeEnvironmentFn, createKindFn = origList, origReach, origProbe, origCreate
 		interactiveFn, confirmFn, pickContextFn = origInteractive, origConfirm, origPick
 		kindClusterExistsFn = origExists
-		configExistsFn = origConfig
+		configExistsFn, proxyFromEnvFn = origConfig, origProxy
 	})
 }
 
@@ -751,5 +759,34 @@ func TestDeployPhaseCounter(t *testing.T) {
 	resetDeployPhases()
 	if got := nextDeployPhase(); got != 1 {
 		t.Fatalf("after reset, phase = %d, want 1", got)
+	}
+}
+
+// The proxy the environment names reaches kind creation.
+func TestResolveCluster_HandsTheProxyToKind(t *testing.T) {
+	proxy := cluster.KindProxy{HTTPS: "http://proxy.corp:3128", CAFile: "/etc/corp-ca.pem", Set: true}
+	s := &stubGate{contexts: nil, env: dockerReady, tty: true, confirm: true, proxy: proxy}
+	s.install(t)
+
+	if _, err := resolveCluster(); err != nil {
+		t.Fatalf("resolveCluster: %v", err)
+	}
+	if s.proxyGot != proxy {
+		t.Errorf("kind got proxy %+v, want %+v", s.proxyGot, proxy)
+	}
+}
+
+// A PROXY_CA_FILE that cannot be read stops the offer before it is made:
+// the cluster must not be built and then fail to pull.
+func TestResolveCluster_BadProxyCAStopsBeforeAsking(t *testing.T) {
+	s := &stubGate{contexts: nil, env: dockerReady, tty: true, confirm: true,
+		proxyErr: errors.New("PROXY_CA_FILE /nope: no such file")}
+	s.install(t)
+
+	if _, err := resolveCluster(); err == nil || !strings.Contains(err.Error(), "PROXY_CA_FILE") {
+		t.Fatalf("want the CA error, got %v", err)
+	}
+	if s.confirmCalled || s.createCalled {
+		t.Error("asked or created despite an unusable proxy CA")
 	}
 }

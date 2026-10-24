@@ -31,6 +31,8 @@ var KindZones = []string{"alpha", "sigma", "gamma"}
 type KindOptions struct {
 	Name       string
 	ConfigPath string
+	// Proxy is what the nodes pull images through (ProxyFromEnv).
+	Proxy KindProxy
 	// Progress, if set, is called with human-readable step descriptions.
 	Progress func(string)
 }
@@ -90,10 +92,16 @@ func CreateKind(exec detect.CommandExecutor, opts KindOptions) error {
 	opts.withDefaults()
 
 	opts.Progress(fmt.Sprintf("Creating Kind cluster %q with zones %s", opts.Name, strings.Join(KindZones, ", ")))
-	if out, err := exec.Exec("kind", "create", "cluster",
-		"--config", opts.ConfigPath,
-		"--name", opts.Name); err != nil {
+	name, args := kindCreateCommand(opts.Proxy, []string{"create", "cluster", "--config", opts.ConfigPath, "--name", opts.Name})
+	if out, err := exec.Exec(name, args...); err != nil {
 		return fmt.Errorf("kind create cluster: %w: %s", err, strings.TrimSpace(out))
+	}
+
+	if opts.Proxy.Configures() {
+		opts.Progress("Configuring containerd's proxy and CA trust on every node")
+		if err := configureNodeProxy(exec, opts.Name, opts.Proxy); err != nil {
+			return err
+		}
 	}
 
 	opts.Progress("Waiting for all nodes to become Ready")
