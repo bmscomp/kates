@@ -2,9 +2,9 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: the umbrella packs kafka-cluster 1.0.17, whose performance Helm test
-# reports MB/sec rather than max latency.
-version: 0.8.6
+# Patch: the umbrella packs kates 0.14.1 and kafka-cluster 1.0.18, whose
+# packages ship their environment overlays.
+version: 0.8.7
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -41,6 +41,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "Packs kates 0.14.1 and kafka-cluster 1.0.18, whose packages ship their environment overlays (values-*.yaml)"
     - kind: changed
       description: "The umbrella packs kafka-cluster 1.0.17, whose Helm test 10 (performance) reports the producer's MB/sec instead of its max latency. Its own templates are unchanged."
     - kind: changed

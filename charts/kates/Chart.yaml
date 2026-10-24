@@ -4,7 +4,9 @@ description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Minor: kyvernoPolicy.cosign verifies the release's keyless signatures with an
 # ImageValidatingPolicy, which needs Kyverno 1.17, and gains keyless values.
-version: 0.14.0
+# Patch: the package ships the environment overlays (values-*.yaml), which
+# kates deploy passes with -f when it installs the published chart.
+version: 0.14.1
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
@@ -28,6 +30,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The package ships the environment overlays (values-*.yaml), which .helmignore used to leave out, so kates deploy installs the published chart with the same -f overlays as a checkout, and helm pull --untar hands them to anyone else"
     - kind: fixed
       description: "kyvernoPolicy.cosign could not verify a Kates image. Its ClusterPolicy took only a public key, and the release signs keyless: without a key nothing rendered, so kates kyverno apply --with-cosign turned on no check at all, and with any key every ghcr.io/bmscomp image failed. Without publicKey it now renders an ImageValidatingPolicy (policies.kyverno.io/v1) that verifies keyless signatures from kyvernoPolicy.cosign.keyless, by default the publish-docker.yml and publish-connect.yml workflows on a v* tag with GitHub's OIDC issuer. A ClusterPolicy cannot do this: cosign 3 writes Sigstore bundle signatures, which its Cosign attestor does not read and its SigstoreBundle type does not find on GHCR (kyverno/kyverno#16664). It checks containers, init containers and ephemeral containers matching kyvernoPolicy.cosign.imagePatterns, which now also lists docker.io/bmscomp/*, leaves other images alone, and maps kyvernoPolicy.action Enforce to Deny and anything else to Audit. It needs Kyverno 1.17 or newer: on an older Kyverno, rendering fails with that named, rather than leaving the check out. Kyverno 1.19 also pins each verified image to its digest; 1.17 verifies without pinning. publicKey keeps the ClusterPolicy, unchanged, for images signed with your own key in the legacy .sig format"
     - kind: changed

@@ -2,7 +2,9 @@ apiVersion: v2
 name: kafka-ui
 description: A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication
 type: application
-version: 0.3.1
+# Patch: the package ships the environment overlays (values-*.yaml), which
+# kates deploy passes with -f when it installs the published chart.
+version: 0.3.2
 appVersion: "v1.5.0"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/bmscomp/kates
@@ -23,6 +25,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The package ships the environment overlays (values-*.yaml), which .helmignore used to leave out, so kates deploy installs the published chart with the same -f overlays as a checkout, and helm pull --untar hands them to anyone else"
     - kind: fixed
       description: "Every pod the chart renders passes Pod Security Standards restricted: podSecurityContext sets seccompProfile RuntimeDefault, and the Helm test pod, which had no security context or resources, runs as nobody (65534) with no privilege escalation, all capabilities dropped and 10m/32Mi requests with a 64Mi limit (tests.podSecurityContext, tests.securityContext, tests.resources)"
     - kind: added

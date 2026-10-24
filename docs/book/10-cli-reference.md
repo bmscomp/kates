@@ -1319,7 +1319,10 @@ kates deploy --yes
 | `--labels-file` | Labels for the namespaces deploy uses, one `key=value` per line (default: `.labels` in the current directory, skipped when missing; a named file must exist) |
 | `--namespace-label` | One `key=value` label for those namespaces, repeatable; it wins over `KATES_NAMESPACE_LABELS` and the labels file |
 | `--no-write-probes` | Skip the introspection probes that create a namespace, a Secret or pods, as `--dry-run` does |
+| `--checkout` | Install the charts of the Kates checkout in this directory instead of the published ones; `KATES_CHECKOUT` does the same for every command |
 | `--adminless` | Install without cluster admin: Kafka, Kafka Connect with its PostgreSQL, MirrorMaker 2, Apicurio, Kafka UI and Kates into namespaces that exist, placed by `--topology` and the `--*-ns` flags as in a full deploy (`--topology single` takes `--namespace`, default the kube context's), on a Strimzi operator a cluster admin installed. [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) has the details |
+
+**Where the charts come from.** A release build of the CLI, from Homebrew or the GitHub Release, installs the charts its release published to `oci://ghcr.io/bmscomp/charts`, at the versions of its tag, so it needs no checkout of the repository. It pulls each chart once into `kates/charts/<version>` under the user cache directory (`$XDG_CACHE_HOME`, else the system's), and the version-resolution phase names the source. A CLI built from source has no published versions to match, so it installs the charts of the checkout it runs in, as `make all` expects. `--checkout <dir>` or `KATES_CHECKOUT` makes any build install a checkout's charts, and `kates versions` and `kates kyverno apply` read the same variable.
 
 **Profiles.** Before anything else, `kates deploy` asks the API server whether the account may do everything everywhere (`kubectl auth can-i '*' '*' --all-namespaces`). A cluster admin gets the full profile. For any other account it explains why and, on a terminal, offers the admin-less profile; with `--yes` or without a terminal it stops and prints the `--adminless` command.
 
@@ -1347,7 +1350,7 @@ kates deploy --dry-run --strimzi-version latest          # shows the resolution,
 ```
 
 ::: {.callout-warning}
-`--dry-run` creates nothing in the cluster, but it is not inert. The cluster gate, pre-flight introspection and version resolution all run and read the cluster; the Kind StorageClass bootstrap and the introspection probes that create a namespace, a Secret or pods to measure the cluster are skipped. It will not create a Kind cluster or switch `kubectl`'s context. On your machine it writes `.build/values-detected.yaml` in the current directory, replacing the one a previous deploy left there, and caches any Strimzi chart it fetches.
+`--dry-run` creates nothing in the cluster, but it is not inert. The cluster gate, pre-flight introspection and version resolution all run and read the cluster; the Kind StorageClass bootstrap and the introspection probes that create a namespace, a Secret or pods to measure the cluster are skipped. It will not create a Kind cluster or switch `kubectl`'s context. On your machine it writes `.build/values-detected.yaml` in the current directory, replacing the one a previous deploy left there, and caches the published charts and any Strimzi chart it fetches.
 :::
 
 `deploy` works out which cluster it is deploying to before it asks you anything else — there is no point configuring a deployment that has nowhere to go. What happens next depends on what it finds:

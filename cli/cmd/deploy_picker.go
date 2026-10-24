@@ -49,7 +49,7 @@ func recentCatalogueEntries(entries []strimzi.CatalogueEntry, skip map[string]bo
 // (multi-version plan §3.4): scope, operator version, then a Kafka version
 // whose options are exactly the chosen operator's window.
 func runVersionPickerForm() error {
-	pin, err := pinnedStrimziVersion(".")
+	pin, err := pinnedStrimziVersion(chartRoot)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func runVersionPickerForm() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		vp, err := resolveVersionPlanChartOnly(ctx, defaultRunner, versionOptions{
-			RepoRoot: ".", StrimziVersion: deployStrimziVersion, Scope: deployOperatorScope,
+			RepoRoot: chartRoot, StrimziVersion: deployStrimziVersion, Scope: deployOperatorScope,
 		})
 		if err != nil {
 			return []huh.Option[string]{huh.NewOption("latest  (could not read the window: "+firstLine(err.Error())+")", "latest")}
@@ -130,7 +130,7 @@ func runVersionPickerForm() error {
 		for i := len(vp.chart.Window) - 2; i >= 0 && len(opts) < kafkaPickerLimit; i-- {
 			v := vp.chart.Window[i]
 			label := v.String()
-			if fl, ferr := kafkaFloor("."); ferr == nil && fl != (kafkaversion.Version{}) && v.Less(fl) {
+			if fl, ferr := kafkaFloor(chartRoot); ferr == nil && fl != (kafkaversion.Version{}) && v.Less(fl) {
 				label += "  (below this platform's floor — additional clusters only)"
 			}
 			opts = append(opts, huh.NewOption(label, v.String()))
@@ -234,7 +234,7 @@ func deployReviewSummary() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	vp, err := resolveVersionPlanChartOnly(ctx, defaultRunner, versionOptions{
-		RepoRoot: ".", StrimziVersion: deployStrimziVersion, KafkaVersion: deployKafkaVersion,
+		RepoRoot: chartRoot, StrimziVersion: deployStrimziVersion, KafkaVersion: deployKafkaVersion,
 		Scope: deployOperatorScope, KafkaNS: ns.kafka, ConnectNS: ns.connect, WithConnect: deployWithKafkaConnect,
 		Topology: deployTopology, SingleNS: deployNamespace,
 	})

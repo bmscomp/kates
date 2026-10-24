@@ -22,9 +22,8 @@ const (
 	scopeNamespace = "namespace"
 )
 
-// Chart paths the resolution reads. They are relative to the repo root like
-// every other chart reference in cmd/ (see cluster_gate.go: "run from the
-// repo root").
+// Chart paths the resolution reads, relative to the chart root
+// (deploy_charts.go) like every other chart reference in cmd/.
 const (
 	operatorChartDir = "charts/strimzi-operator"
 	kafkaChartDir    = "charts/kafka-cluster"
@@ -132,7 +131,7 @@ func deployVersionOptions() versionOptions {
 		WithConnect:     deployWithKafkaConnect,
 		Topology:        deployTopology,
 		SingleNS:        deployNamespace,
-		RepoRoot:        ".",
+		RepoRoot:        chartRoot,
 		FollowInstalled: deployAdminless,
 	}
 }
@@ -144,7 +143,7 @@ func pinnedStrimziVersion(repoRoot string) (string, error) {
 	}
 	data, err := os.ReadFile(filepath.Join(repoRoot, operatorChartDir, "Chart.yaml"))
 	if err != nil {
-		return "", fmt.Errorf("reading the operator chart pin: %w (run from the repo root)", err)
+		return "", fmt.Errorf("reading the operator chart pin: %w (run from a Kates checkout, or set KATES_CHECKOUT to one)", err)
 	}
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return "", fmt.Errorf("parsing %s/Chart.yaml: %w", operatorChartDir, err)

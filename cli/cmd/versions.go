@@ -85,7 +85,10 @@ func runVersions(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	pin, err := pinnedStrimziVersion(".")
+	if err := resolveChartRoot(ctx, "", versionsOffline, "strimzi-operator", "kafka-cluster"); err != nil {
+		return err
+	}
+	pin, err := pinnedStrimziVersion(chartRoot)
 	if err != nil {
 		return err
 	}
@@ -107,7 +110,7 @@ func runVersions(ctx context.Context) error {
 			})
 		}
 	} else {
-		vp, err := resolveVersionPlan(ctx, nil, versionOptions{RepoRoot: ".", Offline: versionsOffline})
+		vp, err := resolveVersionPlan(ctx, nil, versionOptions{RepoRoot: chartRoot, Offline: versionsOffline})
 		if err != nil {
 			return err
 		}
@@ -165,11 +168,14 @@ func runVersionsStrimzi(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	pin, err := pinnedStrimziVersion(".")
+	if err := resolveChartRoot(ctx, "", versionsOffline, "strimzi-operator", "kafka-cluster"); err != nil {
+		return err
+	}
+	pin, err := pinnedStrimziVersion(chartRoot)
 	if err != nil {
 		return err
 	}
-	floor, err := kafkaFloor(".")
+	floor, err := kafkaFloor(chartRoot)
 	if err != nil {
 		return err
 	}
@@ -209,7 +215,7 @@ func runVersionsStrimzi(ctx context.Context) error {
 		// here, pull it when asked.
 		path := filepath.Join(cacheDir, strimzi.ChartFileName(e.Version))
 		if e.Version == pin {
-			if p, perr := strimzi.VendoredChartPath("."); perr == nil {
+			if p, perr := strimzi.VendoredChartPath(chartRoot); perr == nil {
 				path = p
 			}
 		}
@@ -278,7 +284,10 @@ func runVersionsKafka(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	opts := versionOptions{RepoRoot: ".", StrimziVersion: versionsStrimzi, Offline: versionsOffline}
+	if err := resolveChartRoot(ctx, "", versionsOffline, "strimzi-operator", "kafka-cluster"); err != nil {
+		return err
+	}
+	opts := versionOptions{RepoRoot: chartRoot, StrimziVersion: versionsStrimzi, Offline: versionsOffline}
 	var r strimzi.Runner
 	if !versionsOffline {
 		r = defaultRunner

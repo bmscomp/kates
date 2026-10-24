@@ -108,11 +108,12 @@ all: check-prerequisites  ## Complete setup (cluster, all services)
 	@echo "Select Deployment Topology:"
 	@echo "  1) Single Namespace (dev mode, everything in 'kates-stack')"
 	@echo "  2) Isolated Namespaces (production mode, separate namespaces for kafka/kates/chaos)"
+	@# KATES_CHECKOUT: an installed release build would deploy its published charts, not this checkout's.
 	@read -p "Enter choice [1/2]: " choice; \
 	if [ "$$choice" = "1" ]; then \
-		$(KATES_BIN) deploy --topology single --namespace kates-stack --with-schema-registry apicurio; \
+		KATES_CHECKOUT=$(CURDIR) $(KATES_BIN) deploy --topology single --namespace kates-stack --with-schema-registry apicurio; \
 	else \
-		$(KATES_BIN) deploy --topology isolated --with-schema-registry apicurio; \
+		KATES_CHECKOUT=$(CURDIR) $(KATES_BIN) deploy --topology isolated --with-schema-registry apicurio; \
 	fi
 	@echo ""
 	@echo "Step: Exposing service ports..."

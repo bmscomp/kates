@@ -756,7 +756,7 @@ func deployGroupA(dc *deployContext) error {
 			// Strimzi version cannot drift. A non-pinned version installs
 			// from the generated wrapper under the cache, whose charts/
 			// already holds the pulled tarball (deploy_versions.go).
-			chartDir := "charts/strimzi-operator"
+			chartDir := chartRootPath(operatorChartDir)
 			var versionArgs []string
 			if dc.versions != nil {
 				if !dc.versions.Pinned {
@@ -765,7 +765,7 @@ func deployGroupA(dc *deployContext) error {
 				versionArgs = dc.versions.operatorHelmArgs()
 			}
 			if dc.versions == nil || dc.versions.Pinned {
-				if err := runHelmFn(gCtx, "dependency", "build", "charts/strimzi-operator"); err != nil {
+				if err := helmDependency(gCtx, "build", chartRootPath(operatorChartDir)); err != nil {
 					return err
 				}
 			}
@@ -788,7 +788,7 @@ func deployGroupA(dc *deployContext) error {
 			// install conflicts with it over .spec.versions.
 			opArgs := []string{"upgrade", "--install", "strimzi-operator", chartDir, "-n", "strimzi-operator",
 				"--reset-values", "--skip-crds",
-				"-f", dc.chartOverlay("charts/strimzi-operator"),
+				"-f", dc.chartOverlay(chartRootPath(operatorChartDir)),
 				"--set", "strimzi-kafka-operator.kubernetesServiceDnsDomain=" + clusterDomain,
 				"--set", "crdUpgrade.enabled=false"}
 			opArgs = append(opArgs, versionArgs...)
@@ -1156,12 +1156,12 @@ func deployGroupB(dc *deployContext) error {
 	// kafka:chaos:* recording series the chaos board is drawn from.
 	if deployWithMonitoring && deployMon {
 		// Update chart dependencies (kube-prometheus-stack subchart).
-		runHelmFn(ctx, "dependency", "update", "charts/monitoring")
+		_ = helmDependency(ctx, "update", chartRootPath("charts/monitoring"))
 
 		monitoringArgs := []string{"upgrade", "--install", "monitoring",
-			"charts/monitoring",
+			chartRootPath("charts/monitoring"),
 			"-n", jaegerNS, "--create-namespace",
-			"-f", dc.chartOverlay("charts/monitoring"),
+			"-f", dc.chartOverlay(chartRootPath("charts/monitoring")),
 			"--set", "kube-prometheus-stack.global.clusterDomain=" + dc.report.Network.ClusterDomain,
 			"--set", fmt.Sprintf("chaosAlerts.enabled=%t", deployWithChaos),
 			"--timeout", "10m"}
@@ -1212,12 +1212,12 @@ func deployGroupB(dc *deployContext) error {
 	if deployKafka {
 		g2.Go(func() error {
 
-			runHelmFn(g2Ctx, "dependency", "update", "charts/kafka-cluster")
+			_ = helmDependency(g2Ctx, "update", chartRootPath(kafkaChartDir))
 			// No --wait: Helm only needs to submit the manifests; the Strimzi
 			// operator drives reconciliation asynchronously. waitKafkaReady()
 			// below is the real readiness gate.
 			clusterDomain := dc.resolveClusterDomain()
-			kafkaArgs := []string{"upgrade", "--install", dc.primary.Name, "charts/kafka-cluster", "-n", kafkaNS, "--create-namespace"}
+			kafkaArgs := []string{"upgrade", "--install", dc.primary.Name, chartRootPath(kafkaChartDir), "-n", kafkaNS, "--create-namespace"}
 
 			// values-platform.yaml selects the chart's platform profile: the
 			// kates topics, users (kates-backend, kafka-ui, kates-connect,
@@ -1226,14 +1226,14 @@ func deployGroupB(dc *deployContext) error {
 			// defaults.
 			kafkaArgs = append(kafkaArgs,
 				"-f", dc.valuesFile,
-				"-f", "charts/kafka-cluster/values-platform.yaml",
+				"-f", chartRootPath("charts/kafka-cluster/values-platform.yaml"),
 				"--set", "global.clusterDomain="+clusterDomain,
 				"--set", "networkPolicy.clients[0].name=connect",
 				"--set", "networkPolicy.clients[0].namespace="+connectNS,
 				"--timeout", "10m",
 			)
 			if dc.isKind {
-				kafkaArgs = append(kafkaArgs, "-f", "charts/kafka-cluster/values-kind.yaml")
+				kafkaArgs = append(kafkaArgs, "-f", chartRootPath("charts/kafka-cluster/values-kind.yaml"))
 			}
 			// The resolved versions and the cluster name go last so they win
 			// over every values file above (§3.3: derived settings travel
@@ -1459,7 +1459,7 @@ stringData:
 		// dependency Helm refuses to render until it is built. `update`, not
 		// `build`: the git-ignored Chart.lock goes stale whenever kafka-common's
 		// version moves, and a file://-only lock cannot drift.
-		if err := runHelmFn(ctx, "dependency", "update", "--skip-refresh", "charts/connect-cluster"); err != nil {
+		if err := helmDependency(ctx, "update", "--skip-refresh", chartRootPath("charts/connect-cluster")); err != nil {
 			dl.Printf("    ✗ helm dependency update charts/connect-cluster: %v\n", err)
 			return err
 		}
@@ -1467,10 +1467,10 @@ stringData:
 		registryFQDN := fmt.Sprintf("http://apicurio-apicurio-registry.%s.svc.%s:80/apis/ccompat/v7",
 			kafkaNS, connectDomain)
 
-		connectArgs := []string{"upgrade", "--install", "connect-cluster", "charts/connect-cluster",
+		connectArgs := []string{"upgrade", "--install", "connect-cluster", chartRootPath("charts/connect-cluster"),
 			"-n", connectNS, "--create-namespace",
 			"--reset-values",
-			"-f", dc.chartOverlay("charts/connect-cluster"),
+			"-f", dc.chartOverlay(chartRootPath("charts/connect-cluster")),
 			"--set-string", "clusterDomain=" + connectDomain,
 			"--set", "kafka.namespace=" + kafkaNS,
 			"--set-string", "kafka.bootstrapServers=" + bootstrap,
@@ -1659,7 +1659,7 @@ func deployGroupC(dc *deployContext) error {
 		if !releaseKept(ctx, "apicurio", kafkaNS) {
 			dl.Printf("\n📦 Deploying Apicurio Schema Registry (Namespace: %s)...\n", kafkaNS)
 			dl.StartComponent("apicurio", 5*time.Minute)
-			if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", "charts/apicurio-registry", "-n", kafkaNS, "--create-namespace", "--timeout", "5m"); err != nil {
+			if err := runHelmFn(ctx, "upgrade", "--install", "apicurio", chartRootPath("charts/apicurio-registry"), "-n", kafkaNS, "--create-namespace", "--timeout", "5m"); err != nil {
 				dl.FinishComponent("apicurio", false)
 				return err
 			}
@@ -1728,7 +1728,7 @@ data:
 		// Every install runs the native image. On kind, prefer a real local
 		// backend image when one is available on every node; otherwise, and on
 		// every other cluster, use the published native image.
-		backendArgs := []string{"-f", publishedNativeValues}
+		backendArgs := []string{"-f", chartRootPath(publishedNativeValues)}
 		if dc.isKind {
 			args, err := kindBackendImageArgs(ctx, dc.report.Context)
 			if err != nil {
@@ -1739,11 +1739,11 @@ data:
 			dl.Println("    - Backend image: published native image (not a kind cluster)")
 		}
 
-		if err := cleanupStaleKatesChartDependencies("charts/kates"); err != nil {
+		if err := cleanupStaleKatesChartDependencies(chartRootPath("charts/kates")); err != nil {
 			return err
 		}
 
-		katesArgs := []string{"upgrade", "--install", "kates", "charts/kates",
+		katesArgs := []string{"upgrade", "--install", "kates", chartRootPath("charts/kates"),
 			"-n", appNS, "--create-namespace"}
 		katesArgs = append(katesArgs, dc.katesChartValues()...)
 		katesArgs = append(katesArgs, backendArgs...)
@@ -1808,7 +1808,7 @@ data:
 			}
 
 			helmArgs := []string{
-				"upgrade", "--install", "kafka-ui", "charts/kafka-ui",
+				"upgrade", "--install", "kafka-ui", chartRootPath("charts/kafka-ui"),
 				"-n", kafkaUINS, "--create-namespace",
 				// The primary's name, as for MirrorMaker 2 below. This read
 				// clusterName, the --cluster-name flag of kates detect, so
@@ -1819,7 +1819,7 @@ data:
 				"--set", "kafkaUser.enabled=false",
 				"--timeout", "5m",
 			}
-			if overlay := dc.chartOverlay("charts/kafka-ui"); dc.fileExists(overlay) {
+			if overlay := dc.chartOverlay(chartRootPath("charts/kafka-ui")); dc.fileExists(overlay) {
 				helmArgs = append(helmArgs, "-f", overlay)
 			}
 			if err := runHelmFn(ctx, helmArgs...); err != nil {
@@ -1872,16 +1872,16 @@ data:
 
 			// The chart depends on the kafka-common library (file://), which a
 			// checkout does not carry built; `update` as for connect-cluster.
-			if err := runHelmFn(ctx, "dependency", "update", "--skip-refresh", "charts/mirror-maker2"); err != nil {
+			if err := helmDependency(ctx, "update", "--skip-refresh", chartRootPath("charts/mirror-maker2")); err != nil {
 				dl.Printf("    ✗ helm dependency update charts/mirror-maker2: %v\n", err)
 				dl.FinishComponent("mirror-maker2", false)
 				return err
 			}
 			helmArgs := []string{
-				"upgrade", "--install", "mm2", "charts/mirror-maker2",
+				"upgrade", "--install", "mm2", chartRootPath("charts/mirror-maker2"),
 				"-n", mm2NS, "--create-namespace",
 			}
-			if overlay := dc.chartOverlay("charts/mirror-maker2"); dc.fileExists(overlay) {
+			if overlay := dc.chartOverlay(chartRootPath("charts/mirror-maker2")); dc.fileExists(overlay) {
 				helmArgs = append(helmArgs, "-f", overlay)
 			}
 			// Both ends are the primary; the versions follow the resolved
@@ -1919,12 +1919,12 @@ data:
 			dl.Printf("\n📦 Deploying Litmus Chaos (Namespace: %s)...\n", chaosNS)
 			cleanupStaleClusterResource(ctx, "clusterrole", "litmus", chaosNS)
 			cleanupStaleClusterResource(ctx, "clusterrolebinding", "litmus", chaosNS)
-			runHelmFn(ctx, "dependency", "update", "charts/kates-chaos")
+			_ = helmDependency(ctx, "update", chartRootPath("charts/kates-chaos"))
 			dl.Println("    - Waiting for Litmus Chaos pods to become ready (this may take a few minutes)...")
-			chaosArgs := []string{"upgrade", "--install", "chaos", "charts/kates-chaos",
+			chaosArgs := []string{"upgrade", "--install", "chaos", chartRootPath("charts/kates-chaos"),
 				"-n", chaosNS, "--create-namespace",
 				"-f", dc.valuesFile,
-				"-f", dc.chartOverlay("charts/kates-chaos"),
+				"-f", dc.chartOverlay(chartRootPath("charts/kates-chaos")),
 				"--set", "rbac.kafkaNamespace=" + kafkaNS}
 			chaosArgs = append(chaosArgs, dc.scrapeArgs("charts/kates-chaos")...)
 			chaosArgs = append(chaosArgs, "--timeout", "5m")

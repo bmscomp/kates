@@ -542,6 +542,8 @@ graph TD
     S6 --> S7["Print access points<br/>(Apicurio 30082, Kates 30083;<br/>chaos is execution plane only)"]
 ```
 
+`make all` sets `KATES_CHECKOUT` to the checkout, so a `kates` installed from Homebrew deploys this checkout's charts rather than the ones its release published.
+
 On Kind, `kates deploy` needs a native image of the Kates API, `kates:native-local` or `kates:native`, in local Docker or on the node, and stops at the Kates API step without one. `make kates-native` pulls the published image or builds it and loads it into the cluster; then run `make all` again.
 
 ## Component-by-Component Deployment

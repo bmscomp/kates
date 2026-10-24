@@ -8,8 +8,7 @@
 .idea/
 *.tmproj
 .vscode/
-# Environment overlays are deploy-time inputs (passed with -f), not chart
-# content — keep them out of the packaged chart.
-values-*.yaml
+# Environment overlays (values-*.yaml) ship in the package: kates deploy
+# installs a pulled chart with them, as from a checkout.
 
 /tests/

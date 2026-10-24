@@ -432,6 +432,7 @@ kates deploy --topology isolated --with-kafka-connect
 ```
 
 The CLI automatically:
+- Installs the charts its release published to `oci://ghcr.io/bmscomp/charts`, so a CLI from Homebrew needs no checkout; a CLI built from source installs the checkout it runs in, and `--checkout <dir>` picks a checkout for any build
 - Detects your cluster zones (via `kates detect`)
 - Selects the Kind overlay when running on Kind clusters
 - Installs the Strimzi operator with readiness wait

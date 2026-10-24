@@ -35,8 +35,12 @@ It uses Helm to apply the exact configuration needed.`,
 
 		output.Banner("Kyverno Policy Application", "Deploying Cluster Policies")
 
+		if err := resolveChartRoot(ctx, "", false, "kates"); err != nil {
+			return err
+		}
+
 		// 1. Detect and build Helm args
-		helmArgs := []string{"upgrade", "--install", "kates", "./charts/kates",
+		helmArgs := []string{"upgrade", "--install", "kates", chartRootPath("charts/kates"),
 			"-n", "kates", "--create-namespace",
 			"--set", "kyvernoPolicy.enabled=true",
 			"--set", "kyvernoPolicy.action=" + kyvernoApplyMode}

@@ -7,8 +7,9 @@ type: application
 # restricted security contexts through their CR templates — podLabels reach
 # every pod, and global.imagePullSecrets also takes plain names. SeaweedFS
 # (off by default) is unchanged and cannot pass restricted.
-# Patch: Helm test 10 reports the producer's MB/sec, not its max latency.
-version: 1.0.17
+# Patch: the package ships the environment overlays (values-*.yaml), which
+# kates deploy passes with -f when it installs the published chart.
+version: 1.0.18
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -42,6 +43,8 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The package ships the environment overlays (values-*.yaml), which .helmignore used to leave out, so kates deploy installs the published chart with the same -f overlays as a checkout, and helm pull --untar hands them to anyone else"
     - kind: fixed
       description: "Helm test 10 (performance) printed the producer's max latency as its throughput: it took the fourth comma-separated field of kafka-producer-perf-test.sh's summary line, \"W ms max latency\", and labelled it MB/s. It now reads Y from the second field, \"X records/sec (Y MB/sec)\". Nothing compares the value to a threshold, so the test still passes or fails as before"
     - kind: changed

@@ -65,11 +65,22 @@ jobs:
           COMMIT="$(git rev-parse --short HEAD)"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+          # name=version of every chart at this tag, read as publish-charts.yml
+          # reads them: the versions this release publishes, which `kates
+          # deploy` pulls (cli/cmd/deploy_charts.go).
+          CHART_VERSIONS=""
+          for chart in $(git -C .. ls-files ':(glob)charts/*/Chart.yaml'); do
+            name=$(sed -nE 's/^name:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/p' "../${chart}")
+            version=$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/p' "../${chart}")
+            CHART_VERSIONS="${CHART_VERSIONS:+${CHART_VERSIONS},}${name}=${version}"
+          done
+
           go build -trimpath \
             -ldflags="-s -w \
               -X ${MODULE}.Version=${VERSION} \
               -X ${MODULE}.Commit=${COMMIT} \
-              -X ${MODULE}.BuildDate=${BUILD_DATE}" \
+              -X ${MODULE}.BuildDate=${BUILD_DATE} \
+              -X ${MODULE}.ChartVersions=${CHART_VERSIONS}" \
             -o kates .
 
       # scripts/install-kates.sh unpacks this layout, and

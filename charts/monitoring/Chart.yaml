@@ -3,7 +3,9 @@ name: kates-monitoring
 # Minor: every container of the stack gets requests and a memory limit,
 # Prometheus included (2Gi), and a limit is a new way for a busy install to
 # be OOM-killed; Grafana's root chown init container is off.
-version: 1.7.0
+# Patch: the package ships the environment overlays (values-*.yaml), which
+# kates deploy passes with -f when it installs the published chart.
+version: 1.7.1
 appVersion: "82.4.3"
 description: Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration
 home: https://github.com/bmscomp/kates
@@ -22,6 +24,8 @@ annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The package ships the environment overlays (values-*.yaml), which .helmignore used to leave out, so kates deploy installs the published chart with the same -f overlays as a checkout, and helm pull --untar hands them to anyone else"
     - kind: changed
       description: "Every container the stack renders or the Prometheus operator creates has CPU and memory requests and a memory limit, set through the subchart's values: Grafana (100m/128Mi, limit 512Mi) and its sidecars (10m/64Mi, 256Mi), the Prometheus operator (50m/128Mi, 512Mi), kube-state-metrics (50m/128Mi, 512Mi), the admission create and patch Jobs (10m/32Mi, 64Mi), node-exporter (10m/32Mi, 128Mi), Prometheus (200m/512Mi, 2Gi), Alertmanager (20m/64Mi, 256Mi) and the config reloader (10m/32Mi, 128Mi). A Prometheus that needs more than 2Gi is OOM-killed: raise kube-prometheus-stack.prometheus.prometheusSpec.resources.limits.memory (values-generic.yaml sets 4Gi)"
     - kind: changed

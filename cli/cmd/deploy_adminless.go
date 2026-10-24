@@ -206,21 +206,21 @@ func adminlessStrimziNamespaces(ns resolvedNamespaces) []string {
 	return slices.Compact(names)
 }
 
-// strimziInstallSuggestion is what a cluster admin runs, from this repository,
-// to install the platform's pinned Strimzi in its own namespace watching
-// exactly the admin-less namespaces.
+// strimziInstallSuggestion is what a cluster admin runs to install the
+// platform's pinned Strimzi in its own namespace watching exactly the
+// admin-less namespaces.
 func strimziInstallSuggestion(watch []string) string {
 	pin := "the version charts/strimzi-operator pins"
-	if v, err := pinnedStrimziVersion("."); err == nil {
+	if v, err := pinnedStrimziVersion(chartRoot); err == nil {
 		pin = "Strimzi " + v + ", the version charts/strimzi-operator pins"
 	}
 	return fmt.Sprintf(`Ask a cluster admin to install %s, in its own namespace strimzi-operator,
 watching %s:
 
-  helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator --create-namespace \
+  helm upgrade --install strimzi-operator %s -n strimzi-operator --create-namespace \
     --set strimzi-kafka-operator.createAggregateRoles=true \
     --set strimzi-kafka-operator.watchAnyNamespace=false \
-    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, pin, strings.Join(watch, ", "), strings.Join(watch, ","))
+    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, pin, strings.Join(watch, ", "), chartRef("strimzi-operator"), strings.Join(watch, ","))
 }
 
 // adminlessOperatorAdvice says what a cluster admin could do with the
@@ -238,7 +238,7 @@ func adminlessOperatorAdvice(op strimzi.Operator, pin string, watch []string) st
 	case op.Release != "":
 		return fmt.Sprintf(`Older than this platform's pin (%s); Kafka follows its window. A cluster admin upgrades it with:
 
-  helm upgrade %s charts/strimzi-operator -n %s --reuse-values --set strimziVersion=%s`, pin, op.Release, op.Namespace, pin)
+  helm upgrade %s %s -n %s --reuse-values --set strimziVersion=%s`, pin, op.Release, chartRef("strimzi-operator"), op.Namespace, pin)
 	}
 	return fmt.Sprintf(`Older than this platform's pin (%s) and not installed by kates; Kafka follows its window.
 A cluster admin upgrades it with the tool that installed it, or removes it and installs kates' own.
@@ -301,8 +301,8 @@ func checkAdminlessStrimzi(ctx context.Context, ns resolvedNamespaces) error {
 		slices.Sort(list)
 		fix = fmt.Sprintf(`Ask a cluster admin to add them to its watched namespaces:
 
-  helm upgrade %s charts/strimzi-operator -n %s --reuse-values \
-    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, op.Release, op.Namespace, strings.Join(slices.Compact(list), ","))
+  helm upgrade %s %s -n %s --reuse-values \
+    --set 'strimzi-kafka-operator.watchNamespaces={%s}'`, op.Release, chartRef("strimzi-operator"), op.Namespace, strings.Join(slices.Compact(list), ","))
 	}
 	return fmt.Errorf("the installed Strimzi operator does not watch %s, so its Kafka resources there would never be reconciled.\nInstalled: %s.\n%s",
 		strings.Join(unwatched, ", "), describeStrimziOperator(op), fix)
@@ -375,9 +375,9 @@ func conformityRoleHandoff(ns resolvedNamespaces, missing []string) string {
 	return fmt.Sprintf(`Conformity checks are off: Kates needs a read-only Role in namespace %s, and this account
 may not create it because it lacks: %s.
 Everything else works. To turn conformity checks on, an account that holds those reads there
-(a cluster admin) runs, from this repository:
+(a cluster admin) runs:
 
-  helm template kates charts/kates -n %s --set rbac.scope=namespace \
+  helm template kates %s -n %s --set rbac.scope=namespace \
     --set networkPolicy.kafka.namespace=%s --show-only templates/rbac.yaml | kubectl apply -f -`,
-		ns.kafka, strings.Join(missing, ", "), ns.app, ns.kafka)
+		ns.kafka, strings.Join(missing, ", "), chartRef("kates"), ns.app, ns.kafka)
 }

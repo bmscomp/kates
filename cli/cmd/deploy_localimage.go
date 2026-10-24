@@ -78,7 +78,7 @@ func kindBackendImageArgs(ctx context.Context, kubeContext string) ([]string, er
 		if err := runExecFn(ctx, "kind", "load", "docker-image", image, "--name", cluster); err != nil {
 			return nil, fmt.Errorf("loading %s into kind cluster %q: %w", image, cluster, err)
 		}
-		return append([]string{"-f", localNativeValues}, localImageArgs(image)...), nil
+		return append([]string{"-f", chartRootPath(localNativeValues)}, localImageArgs(image)...), nil
 	}
 
 	nodes, err := kindNodeContainers(ctx, cluster)
@@ -86,13 +86,13 @@ func kindBackendImageArgs(ctx context.Context, kubeContext string) ([]string, er
 		for _, image := range localNativeCandidates {
 			if localImageOnAllNodes(ctx, nodes, image) {
 				dl.Printf("    - Backend image: %s (already on every kind node, not in local Docker)\n", image)
-				return append([]string{"-f", localNativeValues}, localImageArgs(image)...), nil
+				return append([]string{"-f", chartRootPath(localNativeValues)}, localImageArgs(image)...), nil
 			}
 		}
 	}
 
 	dl.Println("    - Backend image: published native image (cluster will pull it)")
-	return []string{"-f", publishedNativeValues}, nil
+	return []string{"-f", chartRootPath(publishedNativeValues)}, nil
 }
 
 // localImageOnHost reports whether the local Docker daemon has the image.
@@ -150,6 +150,6 @@ func localImageArgs(image string) []string {
 // with. The kind-specific backend image overlay is chosen later, after checking
 // whether a real local image exists.
 func (dc *deployContext) katesChartValues() []string {
-	args := []string{"-f", dc.valuesFile, "-f", dc.chartOverlay("charts/kates")}
+	args := []string{"-f", dc.valuesFile, "-f", dc.chartOverlay(chartRootPath("charts/kates"))}
 	return args
 }

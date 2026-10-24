@@ -53,7 +53,7 @@ func installedChart(ctx context.Context, release, namespace string) string {
 	return rows[0].Chart
 }
 
-// localChart is the name and version of a chart in this repository.
+// localChart is the name and version of the chart in dir.
 func localChart(dir string) (name, version string, err error) {
 	data, err := os.ReadFile(filepath.Join(dir, "Chart.yaml"))
 	if err != nil {
@@ -69,8 +69,8 @@ func localChart(dir string) (name, version string, err error) {
 	return c.Name, c.Version, nil
 }
 
-// describeInstalled sets an installed release's chart beside this
-// repository's: "Kafka UI 0.3.0 → 0.3.1 in team-ui (upgrade)".
+// describeInstalled sets an installed release's chart beside the one this
+// deploy installs: "Kafka UI 0.3.0 → 0.3.1 in team-ui (upgrade)".
 func describeInstalled(e DeploySummaryEntry, chart, dir string) string {
 	name, ours, err := localChart(dir)
 	if err != nil {
@@ -103,18 +103,18 @@ func installedReleaseChoices(ctx context.Context, entries []DeploySummaryEntry) 
 		switch {
 		case chart == "":
 		case e.Release == "kates":
-			notes = append(notes, describeInstalled(e, chart, "charts/kates")+": always upgraded")
+			notes = append(notes, describeInstalled(e, chart, chartRootPath("charts/kates"))+": always upgraded")
 		case e.Release == "postgresql":
 			notes = append(notes, fmt.Sprintf("%s %s in %s: kept (bitnami/postgresql is not pinned here, and a new major version needs a data migration)", e.Name, chart, e.Namespace))
 		default:
-			options = append(options, huh.NewOption(describeInstalled(e, chart, dir), e.Release))
+			options = append(options, huh.NewOption(describeInstalled(e, chart, chartRootPath(dir)), e.Release))
 		}
 	}
 	return options, notes
 }
 
 // runInstalledReleasesForm lists the components already installed and asks
-// which to upgrade to this repository's charts; the rest are kept.
+// which to upgrade to this deploy's charts; the rest are kept.
 func runInstalledReleasesForm() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -130,7 +130,7 @@ func runInstalledReleasesForm() error {
 	if len(options) > 0 {
 		fields = append(fields, huh.NewMultiSelect[string]().
 			Title("Upgrade installed components?").
-			Description("Space ticks one to upgrade to this repository's chart; the rest are kept as they are.").
+			Description("Space ticks one to upgrade to this deploy's chart; the rest are kept as they are.").
 			Options(options...).
 			Value(&picked))
 	}

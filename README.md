@@ -37,12 +37,12 @@ It has three parts: the `kates` CLI (Go), a backend service (Quarkus) that runs 
 
 This path builds the whole stack on a local Kind cluster. You need:
 
-- a clone of this repository. `kates deploy` reads the charts, the version pins and the Kind cluster definition relative to the working directory, so run every command from the repository root;
+- a clone of this repository, for the `make` targets and the Kind cluster definition, which are read relative to the working directory, so run every command from the repository root. The Homebrew `kates` installs the charts its release published, the same versions as the tag you check out; a `kates` built from source installs the checkout's charts;
 - Docker (any daemon the `docker` CLI talks to), [Kind](https://kind.sigs.k8s.io/), `kubectl` and Helm, at the minimum versions in the book's [Prerequisites](docs/book/12-deployment.md#prerequisites);
 - about 16 GB of RAM, with at least 10 GB of it available to Docker, on macOS or Linux (amd64 or arm64).
 
 ```bash
-# 1. The CLI (macOS or Linux), and a checkout of the same release to run it from
+# 1. The CLI (macOS or Linux), and a checkout of the same release for the make targets
 brew install bmscomp/tap/kates
 git clone https://github.com/bmscomp/kates && cd kates
 git checkout "$(git describe --tags --abbrev=0 --match 'v*')"
@@ -112,7 +112,7 @@ Kafka UI can only read: its Kafka user has Describe and Read ACLs, so the broker
 | Symptom | What to do |
 |:--|:--|
 | `kates deploy` stops at the backend: "no local backend image" | Run `make kates-native` or `make kates-image-native-local`, then `kates deploy` again. |
-| `kates deploy` fails with "(run from the repo root)" | Run it from the root of the checkout. |
+| `kates deploy` fails with "run from a Kates checkout" | A CLI built from source installs the charts of the checkout it runs in: run it from the root of the checkout, or pass `--checkout <dir>`. A release build installs the published charts. |
 | `kates deploy` fails anywhere else | The error is also in `deploy-error.log`. `kates deploy status` checks each component; `kates deploy --verbose` prints every `helm` and `kubectl` command. |
 | `kates health` reports connection refused | No port-forward is running: run `kates ports`. |
 | `[401] Missing API key` or `[403] Invalid API key` while `kates health` works | If the active context has no key or a stale one, run `kates ports`: it makes the `ports` context current with the key from the Secret, and says when the API rejects that key. An exported `KATES_API_KEY` wins over the context, so if it is stale, `unset KATES_API_KEY` (or export the current key, read as shown above). |
@@ -134,7 +134,7 @@ make destroy          # delete the Kind cluster panda (FORCE=1 skips the prompt)
 
 ## Other clusters
 
-`kates deploy` also installs on any cluster your kubeconfig reaches; run it from the checkout as on Kind. There the backend runs the published `ghcr.io/bmscomp/kates` image and the charts use their generic overlays, so Grafana gets a random password, stored in Secret `monitoring-grafana` under `admin-password`. The generated Kafka values also add an external listener on port 9094 with TLS and SCRAM-SHA-512. It sits behind a load balancer with no internal-only annotation on EKS and GKE, an internal load balancer on AKS, and a NodePort elsewhere. `kates deploy --dry-run` writes those values to `.build/values-detected.yaml` without installing anything, so you can review the listener first. The book's [Deployment](docs/book/12-deployment.md#cloud-deployment) chapter covers the EKS, GKE and AKS overlays.
+`kates deploy` also installs on any cluster your kubeconfig reaches, and there the Homebrew `kates` needs no checkout: it pulls the charts its release published. There the backend runs the published `ghcr.io/bmscomp/kates` image and the charts use their generic overlays, so Grafana gets a random password, stored in Secret `monitoring-grafana` under `admin-password`. The generated Kafka values also add an external listener on port 9094 with TLS and SCRAM-SHA-512. It sits behind a load balancer with no internal-only annotation on EKS and GKE, an internal load balancer on AKS, and a NodePort elsewhere. `kates deploy --dry-run` writes those values to `.build/values-detected.yaml` without installing anything, so you can review the listener first. The book's [Deployment](docs/book/12-deployment.md#cloud-deployment) chapter covers the EKS, GKE and AKS overlays.
 
 ## Architecture
 
@@ -192,7 +192,7 @@ kates mcp --context ports --allow-cluster <clusterId>       # Read-only MCP serv
 
 ## Helm charts
 
-Each chart carries its own version. A release publishes every chart to `oci://ghcr.io/bmscomp/charts`, at the versions in the table below; the `monitoring` chart is published as `kates-monitoring`. `kates deploy` installs the charts from a checkout, as separate releases. The `kates-platform` umbrella combines `kafka-cluster` and `kates`, with Apicurio, MirrorMaker 2 and Kafka Connect as options, and expects the Strimzi operator to be installed first.
+Each chart carries its own version. A release publishes every chart to `oci://ghcr.io/bmscomp/charts`, at the versions in the table below; the `monitoring` chart is published as `kates-monitoring`. `kates deploy` installs them as separate releases: a release build of the CLI pulls them at the versions of its tag, and one built from source, or given `--checkout <dir>` or `KATES_CHECKOUT`, installs a checkout's. The `kates-platform` umbrella combines `kafka-cluster` and `kates`, with Apicurio, MirrorMaker 2 and Kafka Connect as options, and expects the Strimzi operator to be installed first.
 
 When you install charts with Helm directly:
 
@@ -227,16 +227,16 @@ A published version is never pushed again, so its digest does not change.
 | [`apicurio-registry`](charts/apicurio-registry/) | 0.4.1 | 3.3.0 | Apicurio Registry, backed by the kafka-cluster chart (Strimzi) in this repository |
 | [`connect-cluster`](charts/connect-cluster/) | 2.1.14 | 4.3.1 | A Helm chart for deploying Strimzi Kafka Connect clusters |
 | [`headlamp`](charts/headlamp/) | 0.2.1 | 0.40.1 | Headlamp — Kubernetes Dashboard for cluster visualization and management |
-| [`kafka-cluster`](charts/kafka-cluster/) | 1.0.17 | 4.3.1 | A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability |
+| [`kafka-cluster`](charts/kafka-cluster/) | 1.0.18 | 4.3.1 | A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability |
 | [`kafka-common`](charts/kafka-common/) | 0.1.1 |  | Library chart — the templates the Strimzi charts share (names and labels, rails, Kafka client authentication, the Connect worker spec, KafkaUser, secret sync, NetworkPolicy and monitoring fragments, the Grafana grid, the preflight probe) |
-| [`kafka-ui`](charts/kafka-ui/) | 0.3.1 | v1.5.0 | A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication |
+| [`kafka-ui`](charts/kafka-ui/) | 0.3.2 | v1.5.0 | A Helm chart for deploying Kafka UI (Kafbat) with Strimzi SCRAM-SHA-512 authentication |
 | [`kates-chaos`](charts/kates-chaos/) | 2.3.4 | 3.28.0 | Kates Chaos Engineering — wraps the LitmusChaos execution plane (operator, exporter, CRDs) with Kafka-specific RBAC, experiment/engine templating, and monitoring |
-| [`kates-platform`](charts/kates-platform/) | 0.8.6 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
-| [`kates`](charts/kates/) | 0.14.0 | 1.29.3 | Kates — Kafka Advanced Testing & Engineering Suite |
+| [`kates-platform`](charts/kates-platform/) | 0.8.7 | 1.0.0 | Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure |
+| [`kates`](charts/kates/) | 0.14.1 | 1.29.3 | Kates — Kafka Advanced Testing & Engineering Suite |
 | [`legacy-kafka`](charts/legacy-kafka/) | 0.2.1 | 3.9.1 | A deliberately old Kafka (2.x on ZooKeeper, or 3.x on KRaft) to migrate FROM — the replication source that the pinned Strimzi release cannot deploy |
 | [`mirror-maker2`](charts/mirror-maker2/) | 0.11.12 | 4.3.1 | Strimzi KafkaMirrorMaker2 — cross-cluster replication, DR, and cross-version migration (2.x/3.x → 4.x) |
-| [`monitoring`](charts/monitoring/) | 1.7.0 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
-| [`strimzi-operator`](charts/strimzi-operator/) | 0.4.4 | 1.2.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
+| [`monitoring`](charts/monitoring/) | 1.7.1 | 82.4.3 | Kates Monitoring — wraps kube-prometheus-stack with Kates-specific dashboards and configuration |
+| [`strimzi-operator`](charts/strimzi-operator/) | 0.4.5 | 1.2.0 | The Strimzi Kafka Operator — wraps the upstream chart with pinned kates defaults, an owned CRD-upgrade hook, and a strict values schema |
 | [`velero`](charts/velero/) | 11.3.4 | 1.17.1 | A Helm chart for velero |
 <!-- chart-table:end -->
 

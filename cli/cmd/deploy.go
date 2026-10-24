@@ -49,7 +49,15 @@ Examples:
   kates deploy --adminless --topology single --namespace team
 
 A cluster admin gets the full profile. For any other account, deploy says so
-and offers the admin-less profile instead.`,
+and offers the admin-less profile instead.
+
+A release build installs the charts its release published to
+oci://ghcr.io/bmscomp/charts, at the versions of its tag, pulled once into the
+user cache, so no checkout of the repository is needed. A dev build installs
+the charts of the checkout it runs in. --checkout (or KATES_CHECKOUT) makes any
+build install a checkout's charts:
+
+  kates deploy --checkout ~/src/kates`,
 	RunE: runDeploy,
 }
 
@@ -128,6 +136,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployStrimziChart, "strimzi-chart", "", "Local strimzi-kafka-operator chart tarball to install from (air-gapped mirrors)")
 	deployCmd.Flags().StringVar(&deployKafkaVersion, "kafka-version", "", "Kafka version for the primary cluster (default: the newest the operator supports; 'latest' spells the default)")
 	deployCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
+	deployCmd.Flags().StringVar(&deployCheckout, "checkout", "", "Install the charts of the Kates checkout in this directory instead of the published ones (env KATES_CHECKOUT)")
 	deployCmd.Flags().BoolVar(&deployAdminless, "adminless", false, "Install without cluster admin: Kafka, Kafka Connect, MirrorMaker 2, Apicurio, Kafka UI and Kates into existing namespaces placed by --topology and the --*-ns flags (single: --namespace, default the kube context's), on a Strimzi operator already watching them")
 
 	rootCmd.AddCommand(deployCmd)
@@ -165,6 +174,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	defer pinKubeContext(target)()
 	PrintDeployBanner(target)
+
+	// Before the wizard: its version screen reads the operator chart.
+	if err := resolveChartRoot(context.Background(), deployCheckout, false, deployChartDirs()...); err != nil {
+		return err
+	}
 
 	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
 	// terminal they fail with "could not open a new TTY" rather than falling
@@ -284,6 +298,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// refusal here costs seconds; the same refusal from Strimzi would come
 	// after a ten-minute Helm timeout.
 	PrintPhaseHeader(nextDeployPhase(), "Resolving Versions")
+	PrintPhaseItem("Charts: " + chartSource())
 	vp, err := resolveVersionPlanFn(context.Background(), defaultRunner, deployVersionOptions())
 	if err != nil {
 		return err

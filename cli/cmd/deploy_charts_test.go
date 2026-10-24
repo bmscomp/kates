@@ -1,0 +1,185 @@
+package cmd
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// withChartBuild sets the build's published chart versions for one test and
+// restores everything resolveChartRoot touches.
+func withChartBuild(t *testing.T, versions string) {
+	t.Helper()
+	oldVersions, oldVersion := ChartVersions, Version
+	oldRoot, oldPublished := chartRoot, chartsPublished
+	oldCombined, oldHelm := runExecCombinedFn, runHelmFn
+	t.Cleanup(func() {
+		ChartVersions, Version = oldVersions, oldVersion
+		chartRoot, chartsPublished = oldRoot, oldPublished
+		runExecCombinedFn, runHelmFn = oldCombined, oldHelm
+	})
+	ChartVersions, Version = versions, "v9.9.9"
+	t.Setenv("KATES_CHECKOUT", "")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+}
+
+// fakeHelmPull stands in for `helm pull --untar` and `helm package`, writing
+// what they would, and records every call.
+func fakeHelmPull(t *testing.T) *[][]string {
+	t.Helper()
+	var calls [][]string
+	runExecCombinedFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string{name}, args...))
+		write := func(path, data string) {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		switch args[0] {
+		case "pull": // pull <ref> --version <v> --untar --untardir <dir>
+			chart := filepath.Join(args[6], filepath.Base(args[1]))
+			write(filepath.Join(chart, "Chart.yaml"), "name: "+filepath.Base(args[1])+"\nversion: "+args[3]+"\n")
+			if filepath.Base(args[1]) == "strimzi-operator" {
+				write(filepath.Join(chart, "charts", "strimzi-kafka-operator", "Chart.yaml"), "name: strimzi-kafka-operator\nversion: 1.2.0\n")
+			}
+		case "package": // package <dir> --destination <dir>
+			write(filepath.Join(args[3], "strimzi-kafka-operator-1.2.0.tgz"), "tgz")
+		}
+		return nil, nil
+	}
+	return &calls
+}
+
+func TestParseChartVersions(t *testing.T) {
+	got := parseChartVersions("kates=0.14.1, kates-monitoring=1.7.1,bad,=1.0.0,empty=,")
+	want := map[string]string{"kates": "0.14.1", "kates-monitoring": "1.7.1"}
+	if len(got) != len(want) || got["kates"] != "0.14.1" || got["kates-monitoring"] != "1.7.1" {
+		t.Fatalf("parseChartVersions = %v, want %v", got, want)
+	}
+}
+
+func TestResolveChartRootDevBuildReadsWorkingDirectory(t *testing.T) {
+	withChartBuild(t, "")
+	calls := fakeHelmPull(t)
+	if err := resolveChartRoot(context.Background(), "", false, deployChartDirs()...); err != nil {
+		t.Fatal(err)
+	}
+	if chartRoot != "." || chartsPublished || len(*calls) != 0 {
+		t.Fatalf("dev build: root %q published %v calls %v; want the working directory, nothing pulled", chartRoot, chartsPublished, *calls)
+	}
+	if got := chartRootPath("charts/kafka-cluster"); got != "charts/kafka-cluster" {
+		t.Fatalf("chartRootPath = %q, want the path deploy always used", got)
+	}
+}
+
+func TestResolveChartRootCheckoutBeatsPublished(t *testing.T) {
+	withChartBuild(t, "kates=0.14.1")
+	calls := fakeHelmPull(t)
+	t.Setenv("KATES_CHECKOUT", "/env/kates")
+	if err := resolveChartRoot(context.Background(), "", false, "kates"); err != nil {
+		t.Fatal(err)
+	}
+	if chartRoot != "/env/kates" || chartsPublished {
+		t.Fatalf("KATES_CHECKOUT: root %q published %v", chartRoot, chartsPublished)
+	}
+	if err := resolveChartRoot(context.Background(), "/flag/kates", false, "kates"); err != nil {
+		t.Fatal(err)
+	}
+	if chartRoot != "/flag/kates" || len(*calls) != 0 {
+		t.Fatalf("--checkout: root %q calls %v; the flag wins over the env and nothing is pulled", chartRoot, *calls)
+	}
+	if got := chartRef("kates"); got != "/flag/kates/charts/kates" {
+		t.Fatalf("chartRef = %q, want the checkout's path", got)
+	}
+}
+
+func TestResolveChartRootPullsThePublishedVersionsOnce(t *testing.T) {
+	withChartBuild(t, "kates=0.14.1,kates-monitoring=1.7.1,strimzi-operator=0.4.5,velero=11.3.4")
+	calls := fakeHelmPull(t)
+	dirs := []string{"kates", "monitoring", "strimzi-operator"}
+	if err := resolveChartRoot(context.Background(), "", false, dirs...); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "kates", "charts", "v9.9.9")
+	if chartRoot != want || !chartsPublished {
+		t.Fatalf("root %q published %v, want %q published", chartRoot, chartsPublished, want)
+	}
+	pull := strings.Join((*calls)[0][:6], " ")
+	if pull != "helm pull oci://ghcr.io/bmscomp/charts/kates --version 0.14.1 --untar" {
+		t.Fatalf("first call %q, want the published kates chart at the build's version", pull)
+	}
+	// Published as kates-monitoring, unpacked where a checkout has it.
+	if _, v, err := localChart(chartRootPath("charts/monitoring")); err != nil || v != "1.7.1" {
+		t.Fatalf("charts/monitoring: version %q, %v", v, err)
+	}
+	// The operator subchart is a tarball again, as pkg/strimzi reads it.
+	sub := chartRootPath("charts/strimzi-operator/charts")
+	if _, err := os.Stat(filepath.Join(sub, "strimzi-kafka-operator-1.2.0.tgz")); err != nil {
+		t.Fatalf("operator tarball: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sub, "strimzi-kafka-operator")); !os.IsNotExist(err) {
+		t.Fatalf("the unpacked operator subchart is still there: %v", err)
+	}
+	if got := chartRef("monitoring"); got != "oci://ghcr.io/bmscomp/charts/kates-monitoring --version 1.7.1" {
+		t.Fatalf("chartRef = %q", got)
+	}
+
+	n := len(*calls)
+	if err := resolveChartRoot(context.Background(), "", true, dirs...); err != nil {
+		t.Fatalf("cached, offline: %v", err)
+	}
+	if len(*calls) != n {
+		t.Fatalf("a cached version was pulled again: %v", (*calls)[n:])
+	}
+
+	ChartVersions = "kates=0.14.2,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
+	if err := resolveChartRoot(context.Background(), "", false, dirs...); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != n+1 || !slices.Contains((*calls)[n], "0.14.2") {
+		t.Fatalf("a new kates version should pull kates alone: %v", (*calls)[n:])
+	}
+	if _, v, _ := localChart(chartRootPath("charts/kates")); v != "0.14.2" {
+		t.Fatalf("charts/kates is %q after the re-pull", v)
+	}
+}
+
+func TestResolveChartRootRefusals(t *testing.T) {
+	withChartBuild(t, "kates=0.14.1")
+	calls := fakeHelmPull(t)
+	if err := resolveChartRoot(context.Background(), "", true, "kates"); err == nil || !strings.Contains(err.Error(), "network is off") {
+		t.Fatalf("offline with nothing cached: %v", err)
+	}
+	if err := resolveChartRoot(context.Background(), "", false, "kafka-ui"); err == nil || !strings.Contains(err.Error(), `"kafka-ui"`) {
+		t.Fatalf("a chart the build names no version for: %v", err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("refusals pulled: %v", *calls)
+	}
+}
+
+func TestHelmDependencySkipsPublishedPackages(t *testing.T) {
+	withChartBuild(t, "")
+	var ran [][]string
+	runHelmFn = func(_ context.Context, args ...string) error {
+		ran = append(ran, args)
+		return nil
+	}
+	chartsPublished = true
+	if err := helmDependency(context.Background(), "update", "x"); err != nil || len(ran) != 0 {
+		t.Fatalf("published: err %v ran %v; a package carries its subcharts", err, ran)
+	}
+	chartsPublished = false
+	if err := helmDependency(context.Background(), "update", "--skip-refresh", "charts/x"); err != nil {
+		t.Fatal(err)
+	}
+	if len(ran) != 1 || strings.Join(ran[0], " ") != "dependency update --skip-refresh charts/x" {
+		t.Fatalf("checkout: ran %v", ran)
+	}
+}

@@ -8,4 +8,5 @@
 .idea/
 *.tmproj
 .vscode/
-values-*.yaml
+# Environment overlays (values-*.yaml) ship in the package: kates deploy
+# installs a pulled chart with them, as from a checkout.
