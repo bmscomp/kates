@@ -324,23 +324,29 @@ func chartAppVersion(dir string) (name, appVersion string, err error) {
 }
 
 // saveBundleImages pulls images and saves them into root/images.tar, with
-// their list in root/images.txt.
+// their list in root/images.txt, for one platform: platform, else the Docker
+// server's own. A save without one can name platforms that were never
+// pulled, and kind's import of every platform then fails on the missing
+// content.
 func saveBundleImages(ctx context.Context, root string, images []string, platform string) error {
+	if platform == "" {
+		out, err := runExecOutputFn(ctx, "docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}")
+		if err != nil {
+			return fmt.Errorf("reading the Docker server's platform: %w", err)
+		}
+		platform = strings.TrimSpace(string(out))
+	}
 	if err := os.WriteFile(filepath.Join(root, "images.txt"), []byte(strings.Join(images, "\n")+"\n"), 0o644); err != nil {
 		return err
 	}
 	for i, image := range images {
 		fmt.Fprintln(output.Err, output.DimStyle.Render(fmt.Sprintf("  Pulling image %d/%d %s...", i+1, len(images), image)))
-		args := []string{"pull", "--quiet"}
-		if platform != "" {
-			args = append(args, "--platform", platform)
-		}
-		if out, err := runExecCombinedFn(ctx, "docker", append(args, image)...); err != nil {
+		if out, err := runExecCombinedFn(ctx, "docker", "pull", "--quiet", "--platform", platform, image); err != nil {
 			return fmt.Errorf("docker pull %s: %w: %s", image, err, strings.TrimSpace(string(out)))
 		}
 	}
-	fmt.Fprintln(output.Err, output.DimStyle.Render(fmt.Sprintf("  Saving %d images into %s...", len(images), filepath.Join(root, "images.tar"))))
-	if out, err := runExecCombinedFn(ctx, "docker", append([]string{"save", "-o", filepath.Join(root, "images.tar")}, images...)...); err != nil {
+	fmt.Fprintln(output.Err, output.DimStyle.Render(fmt.Sprintf("  Saving %d images for %s into %s...", len(images), platform, filepath.Join(root, "images.tar"))))
+	if out, err := runExecCombinedFn(ctx, "docker", append([]string{"save", "--platform", platform, "-o", filepath.Join(root, "images.tar")}, images...)...); err != nil {
 		return fmt.Errorf("docker save: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil

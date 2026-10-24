@@ -125,7 +125,7 @@ func TestSaveAndLoadBundleImages(t *testing.T) {
 	if got := strings.Join(callsOf(*calls, "docker pull")[1], " "); got != "docker pull --quiet --platform linux/amd64 postgres:16" {
 		t.Fatalf("pull: %s", got)
 	}
-	if got := strings.Join(callsOf(*calls, "docker save")[0], " "); got != "docker save -o "+filepath.Join(root, "images.tar")+" busybox:1.36 postgres:16" {
+	if got := strings.Join(callsOf(*calls, "docker save")[0], " "); got != "docker save --platform linux/amd64 -o "+filepath.Join(root, "images.tar")+" busybox:1.36 postgres:16" {
 		t.Fatalf("save: %s", got)
 	}
 	if data, _ := os.ReadFile(filepath.Join(root, "images.txt")); string(data) != "busybox:1.36\npostgres:16\n" {
@@ -182,5 +182,22 @@ func TestHarvestImagesRendersEveryWayDeployInstalls(t *testing.T) {
 		if !strings.Contains(all, want) {
 			t.Errorf("no render %q in:\n%s", want, all)
 		}
+	}
+}
+
+// Without --platform, the images are the Docker server's platform, pulled
+// and saved for that one platform only.
+func TestSaveBundleImagesDefaultsToTheDockerServersPlatform(t *testing.T) {
+	withChartBuild(t, allChartVersions)
+	calls := fakeHelmPull(t)
+	origOutput := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = origOutput })
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte("linux/arm64\n"), nil }
+	root := t.TempDir()
+	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(callsOf(*calls, "docker save")[0], " "); !strings.HasPrefix(got, "docker save --platform linux/arm64 ") {
+		t.Fatalf("save: %s", got)
 	}
 }
