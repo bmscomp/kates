@@ -565,7 +565,7 @@ Creates a Kind cluster named `panda` with:
 
 The per-zone StorageClasses the Kafka chart binds to (`local-storage-alpha` and friends) are not created here — `kates deploy` applies them during pre-flight, from the zone labels above. A cluster built this way has the labels but not the classes until you deploy.
 
-You do not have to run this first. `kates deploy` resolves the target cluster before it configures anything: with one reachable cluster it proceeds, with several it asks which, and with none it offers to build this same three-zone cluster for you. Reach for `make cluster` when you want the cluster on its own, or when you are behind a proxy — it reconciles the container runtime's proxy settings and CA trust, which `kates deploy` does not.
+You do not have to run this first. `kates deploy` resolves the target cluster before it configures anything: with one reachable cluster it proceeds, with several it asks which, and with none it offers to build this same three-zone cluster for you. Reach for `make cluster` when you want the cluster on its own, or to fix the proxy of a cluster that exists. Behind a proxy, both paths give the new nodes the same containerd proxy settings and CA trust, from `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and `PROXY_CA_FILE` (a PEM certificate, for a proxy that intercepts TLS). The upper-case name wins. A proxy on `localhost` is left out, because the nodes' localhost isn't your machine's: name `host.docker.internal` instead. `kates deploy` reads only the environment, while `make cluster` also reads `proxy/proxy.conf` and `proxy/ca.crt` from the checkout.
 
 Both paths build from `config/cluster.yaml` and untaint the control-plane afterwards, so the topology is identical either way: three schedulable zones, not two. `kates deploy` reads `config/cluster.yaml` from the working directory when there is one, as in a checkout, and anywhere else uses the copy built into the CLI, which a test holds equal to the file. So a `kates` from Homebrew builds the same cluster from any directory.
 
@@ -1237,6 +1237,8 @@ If you're behind an HTTP/HTTPS proxy, set `HTTP_PROXY`, `HTTPS_PROXY`, and
 If you are not using `load-images-to-kind.sh`, run `./scripts/start-cluster.sh`
 (or `make cluster`) after setting proxy variables. This reconciles containerd
 proxy settings on Kind nodes so regular Kubernetes image pulls use the proxy.
+A cluster that `kates deploy` creates gets the same settings from the same
+variables, plus `PROXY_CA_FILE`, when it is built.
 
 Direct proxy flags are supported too:
 
