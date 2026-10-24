@@ -192,7 +192,7 @@ kates mcp --context ports --allow-cluster <clusterId>       # Read-only MCP serv
 
 ## Helm charts
 
-Each chart carries its own version. A release publishes every chart to `oci://ghcr.io/bmscomp/charts`, at the versions in the table below; the `monitoring` chart is published as `kates-monitoring`. `kates deploy` installs them as separate releases: a release build of the CLI pulls them at the versions of its tag, and one built from source, or given `--checkout <dir>` or `KATES_CHECKOUT`, installs a checkout's. The `kates-platform` umbrella combines `kafka-cluster` and `kates`, with Apicurio, MirrorMaker 2 and Kafka Connect as options, and expects the Strimzi operator to be installed first.
+Each chart carries its own version. A release publishes every chart to `oci://ghcr.io/bmscomp/charts`, at the versions in the table below; the `monitoring` chart is published as `kates-monitoring`. `kates deploy` installs them as separate releases: a release build of the CLI pulls them at the versions of its tag, and one built from source, or given `--checkout <dir>` or `KATES_CHECKOUT`, installs a checkout's. The `kates-platform` umbrella combines `kafka-cluster` and `kates`, with Apicurio, MirrorMaker 2 and Kafka Connect as options, and expects the Strimzi operator to be installed first. Without access to GHCR, deploy pulls from a mirror (`KATES_CHART_REGISTRY`) or reads a bundle that `kates charts pull --to DIR` wrote, as [Deploying Without GHCR](docs/book/12-deployment.md#deploying-without-ghcr) describes.
 
 When you install charts with Helm directly:
 

@@ -19,12 +19,12 @@ import (
 func withChartBuild(t *testing.T, versions string) {
 	t.Helper()
 	oldVersions, oldVersion := ChartVersions, Version
-	oldRoot, oldPublished := chartRoot, chartsPublished
+	oldRoot, oldPublished, oldBundle := chartRoot, chartsPublished, deployChartBundle
 	oldCombined, oldHelm, oldLatest, oldCosign := runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn
 	oldOut, oldErr := output.Out, output.Err
 	t.Cleanup(func() {
 		ChartVersions, Version = oldVersions, oldVersion
-		chartRoot, chartsPublished = oldRoot, oldPublished
+		chartRoot, chartsPublished, deployChartBundle = oldRoot, oldPublished, oldBundle
 		runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn = oldCombined, oldHelm, oldLatest, oldCosign
 		output.Out, output.Err = oldOut, oldErr
 	})
@@ -32,6 +32,9 @@ func withChartBuild(t *testing.T, versions string) {
 	cosignPathFn = func() (string, error) { return "cosign", nil }
 	t.Setenv("KATES_CHECKOUT", "")
 	t.Setenv("KATES_REQUIRE_SIGNED_CHARTS", "")
+	t.Setenv("KATES_CHART_BUNDLE", "")
+	t.Setenv("KATES_CHART_REGISTRY", "")
+	t.Setenv("KATES_CHART_REGISTRY_PLAIN_HTTP", "")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 }
 

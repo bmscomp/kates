@@ -29,13 +29,32 @@ import (
 // A dev build knows no published versions, so it installs the charts of the
 // checkout it runs in, as deploy always did. --checkout or KATES_CHECKOUT
 // makes any build do that, from the checkout it names.
+//
+// Without GHCR, KATES_CHART_REGISTRY names a mirror to pull from instead, and
+// a bundle that `kates charts pull --to DIR` wrote (--chart-bundle,
+// KATES_CHART_BUNDLE) is read as it is, with no network at all.
 
 // ChartVersions is "name=version,…" for every chart at this build's tag; empty
 // in a dev build.
 var ChartVersions = ""
 
-// chartRegistry is where publish-charts.yml pushes every chart.
-const chartRegistry = "oci://ghcr.io/bmscomp/charts"
+// defaultChartRegistry is where publish-charts.yml pushes every chart.
+const defaultChartRegistry = "oci://ghcr.io/bmscomp/charts"
+
+// chartRegistry is where the charts are pulled from: KATES_CHART_REGISTRY, a
+// mirror holding the same packages and their signatures, else GHCR.
+func chartRegistry() string {
+	if r := strings.TrimSuffix(os.Getenv("KATES_CHART_REGISTRY"), "/"); r != "" {
+		return r
+	}
+	return defaultChartRegistry
+}
+
+// chartRegistryPlainHTTP is KATES_CHART_REGISTRY_PLAIN_HTTP=1: the mirror
+// speaks HTTP, like kind's local registry on localhost:5001.
+func chartRegistryPlainHTTP() bool {
+	return os.Getenv("KATES_CHART_REGISTRY_PLAIN_HTTP") == "1"
+}
 
 // deployChartNames are the chart directories deploy installs from, with the
 // name each is published under (its Chart.yaml name).
@@ -56,9 +75,19 @@ var (
 	// packages are unpacked into.
 	chartRoot = "."
 	// chartsPublished is true when chartRoot holds published packages.
-	chartsPublished bool
-	deployCheckout  string
+	chartsPublished   bool
+	deployCheckout    string
+	deployChartBundle string
 )
+
+// chartBundle is the bundle this run reads: --chart-bundle, else
+// KATES_CHART_BUNDLE.
+func chartBundle() string {
+	if deployChartBundle != "" {
+		return deployChartBundle
+	}
+	return os.Getenv("KATES_CHART_BUNDLE")
+}
 
 // chartRootPath is a checkout-relative path ("charts/kates") under chartRoot.
 func chartRootPath(rel string) string {
@@ -67,20 +96,39 @@ func chartRootPath(rel string) string {
 
 // resolveChartRoot points chartRoot at the charts this run installs: a
 // checkout (checkout, else KATES_CHECKOUT, else a dev build's working
-// directory), or this release's published charts. Those dirs are pulled
-// fresh on every run, so a cache left damaged or half-written never reaches a
-// deploy; offline, or when the registry cannot be reached, the copy already
-// cached is used. The caches of other kates versions are removed.
+// directory), a bundle, or this release's published charts. Those dirs are
+// pulled fresh on every run, so a cache left damaged or half-written never
+// reaches a deploy; offline, or when the registry cannot be reached, the copy
+// already cached is used. The caches of other kates versions are removed.
 func resolveChartRoot(ctx context.Context, checkout string, offline bool, dirs ...string) error {
 	if checkout == "" {
 		checkout = os.Getenv("KATES_CHECKOUT")
 	}
-	if checkout != "" || ChartVersions == "" {
+	bundle := chartBundle()
+	switch {
+	case checkout != "" && bundle != "":
+		return fmt.Errorf("a checkout (%s) and a chart bundle (%s) were both named: choose one", checkout, bundle)
+	case bundle != "" && ChartVersions == "":
+		return fmt.Errorf("the chart bundle %s needs a release build of kates, which knows its chart versions; this is %s, so use --checkout instead", bundle, Version)
+	case checkout != "" || ChartVersions == "":
 		if checkout == "" {
 			checkout = "."
 		}
 		chartRoot, chartsPublished = checkout, false
 		return nil
+	case bundle != "":
+		// Read as it is: nothing pulled, nothing beside it touched.
+		root, err := filepath.Abs(bundle)
+		if err != nil {
+			return err
+		}
+		if err := fillChartRoot(ctx, root, true, dirs); err != nil {
+			return fmt.Errorf("the chart bundle %s does not serve kates %s: %w\n  Make it with this kates: kates charts pull --to %s", root, Version, err, bundle)
+		}
+		return nil
+	}
+	if !strings.HasPrefix(chartRegistry(), "oci://") {
+		return fmt.Errorf("KATES_CHART_REGISTRY=%s: expected an oci:// reference, such as oci://registry.example.com/charts", chartRegistry())
 	}
 	cache, err := strimzi.DefaultCacheDir()
 	if err != nil {
@@ -88,6 +136,12 @@ func resolveChartRoot(ctx context.Context, checkout string, offline bool, dirs .
 	}
 	root := filepath.Join(filepath.Dir(cache), "charts", Version)
 	pruneOtherChartCaches(root)
+	return fillChartRoot(ctx, root, offline, dirs)
+}
+
+// fillChartRoot pulls dirs into root, or only checks them there offline,
+// checks their signatures, and makes root the chart root.
+func fillChartRoot(ctx context.Context, root string, offline bool, dirs []string) error {
 	versions := parseChartVersions(ChartVersions)
 	// After one failed refresh the registry is taken as unreachable for this
 	// run: the other cached charts are used as they are, rather than each
@@ -154,7 +208,7 @@ func pullPublishedChart(ctx context.Context, root, dir string, versions map[stri
 		return nil, fmt.Errorf("this kates build (%s) names no published version of chart %q; set KATES_CHECKOUT to a Kates checkout to deploy its charts", Version, name)
 	}
 	dest := filepath.Join(root, "charts", dir)
-	ref := chartRegistry + "/" + name
+	ref := chartRegistry() + "/" + name
 	_, have, lerr := localChart(dest)
 	cached := lerr == nil && have == version
 	switch {
@@ -191,7 +245,11 @@ func fetchPublishedChart(ctx context.Context, ref, name, version, dir, dest stri
 	// The largest package is a few MB; a stalled network must not hold the run.
 	pullCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	out, err := runExecCombinedFn(pullCtx, "helm", "pull", ref, "--version", version, "--untar", "--untardir", pullDir)
+	pullArgs := []string{"pull", ref, "--version", version, "--untar", "--untardir", pullDir}
+	if chartRegistryPlainHTTP() {
+		pullArgs = append(pullArgs, "--plain-http")
+	}
+	out, err := runExecCombinedFn(pullCtx, "helm", pullArgs...)
 	if err != nil {
 		return fmt.Errorf("pulling %s %s: %w: %s", ref, version, err, strings.TrimSpace(string(out)))
 	}
@@ -259,7 +317,7 @@ func helmDependency(ctx context.Context, args ...string) error {
 func chartRef(dir string) string {
 	if chartsPublished {
 		name := deployChartNames[dir]
-		return fmt.Sprintf("%s/%s --version %s", chartRegistry, name, parseChartVersions(ChartVersions)[name])
+		return fmt.Sprintf("%s/%s --version %s", chartRegistry(), name, parseChartVersions(ChartVersions)[name])
 	}
 	return chartRootPath(filepath.Join("charts", dir))
 }
@@ -267,7 +325,10 @@ func chartRef(dir string) string {
 // chartSource says where this run's charts come from.
 func chartSource() string {
 	if chartsPublished {
-		return fmt.Sprintf("%s, as published with kates %s", chartRegistry, Version)
+		if bundle := chartBundle(); bundle != "" {
+			return fmt.Sprintf("the bundle at %s, for kates %s", chartRoot, Version)
+		}
+		return fmt.Sprintf("%s, as published with kates %s", chartRegistry(), Version)
 	}
 	dir, err := filepath.Abs(chartRoot)
 	if err != nil {
@@ -317,8 +378,8 @@ func latestRelease(ctx context.Context) (string, error) {
 // so the newer charts come with the newer kates. The check never stops a run:
 // offline, or on any error, it says nothing.
 func warnIfNewerRelease(ctx context.Context) {
-	if ChartVersions == "" {
-		return // a dev build installs its checkout
+	if ChartVersions == "" || chartBundle() != "" {
+		return // a dev build installs its checkout; a bundle is read offline
 	}
 	latest, err := latestReleaseFn(ctx)
 	if err != nil {

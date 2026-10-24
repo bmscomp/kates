@@ -56,7 +56,9 @@ oci://ghcr.io/bmscomp/charts, at the versions of its tag, pulled fresh into the
 user cache on every run (the cached copy serves when the registry cannot be
 reached), so no checkout of the repository is needed, and it says when a newer
 kates release is out. Each chart's cosign signature is checked before it is
-used; KATES_REQUIRE_SIGNED_CHARTS=1 refuses charts it could not check. With no reachable cluster, and Docker and kind on the
+used; KATES_REQUIRE_SIGNED_CHARTS=1 refuses charts it could not check.
+Without GHCR, KATES_CHART_REGISTRY names a mirror, and --chart-bundle reads a
+bundle that kates charts pull --to wrote, with no network. With no reachable cluster, and Docker and kind on the
 machine, it offers to create the local 3-zone kind cluster. A dev build installs
 the charts of the checkout it runs in. --checkout (or KATES_CHECKOUT) makes any
 build install a checkout's charts:
@@ -141,6 +143,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployKafkaVersion, "kafka-version", "", "Kafka version for the primary cluster (default: the newest the operator supports; 'latest' spells the default)")
 	deployCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
 	deployCmd.Flags().StringVar(&deployCheckout, "checkout", "", "Install the charts of the Kates checkout in this directory instead of the published ones (env KATES_CHECKOUT)")
+	deployCmd.Flags().StringVar(&deployChartBundle, "chart-bundle", "", "Install from the bundle `kates charts pull --to` wrote in this directory, with no network (env KATES_CHART_BUNDLE)")
 	deployCmd.Flags().BoolVar(&deployAdminless, "adminless", false, "Install without cluster admin: Kafka, Kafka Connect, MirrorMaker 2, Apicurio, Kafka UI and Kates into existing namespaces placed by --topology and the --*-ns flags (single: --namespace, default the kube context's), on a Strimzi operator already watching them")
 
 	rootCmd.AddCommand(deployCmd)
@@ -246,6 +249,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		adminlessConformityMissing = missingConformityGrants(context.Background(), resolveNamespaces().kafka)
 		if len(adminlessConformityMissing) > 0 {
 			output.Warn(conformityRoleHandoff(resolveNamespaces(), adminlessConformityMissing))
+		}
+	}
+
+	// After the wizard, which can turn these on.
+	if chartBundle() != "" {
+		if outside := chartsOutsideBundle(); len(outside) > 0 {
+			output.Warn("Not in the chart bundle, and pulled from their own repositories unless already installed: " + strings.Join(outside, ", ") + ". Without network, turn them off.")
 		}
 	}
 

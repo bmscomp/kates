@@ -209,7 +209,7 @@ A context can enable only the commands its user works with. Each profile enables
 | `chaos` | `chaos`, `cluster`, `disruption`, `flow`, `report`, `resilience`, `test`, `watch` |
 | `topology` | `cluster`, `conformity`, `diff`, `doctor`, `kafka`, `snapshot` |
 | `security` | `kyverno`, `security` |
-| `deploy` | `auto`, `clean`, `conformity`, `deploy`, `detect`, `doctor`, `kyverno`, `migrate`, `operator`, `operators`, `versions` |
+| `deploy` | `auto`, `charts`, `clean`, `conformity`, `deploy`, `detect`, `doctor`, `kyverno`, `migrate`, `operator`, `operators`, `versions` |
 
 Every profile also enables `audit`, `changelog`, `completion`, `ctx`, `docs`, `health`, `help`, `init`, `mcp`, `plugin`, `ports`, `status`, `theme`, `tldr`, `upgrade`, `version` and plugins. A context with no profiles enables every command, which is how every context starts.
 
@@ -296,7 +296,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Schedule Commands](#schedule-commands) | `schedule list`, `get`, `create`, `delete` | How do you run the same test on a cron schedule? | Kates API |
 | [Observability & Monitoring](#observability--monitoring) | `dashboard`, `top` | What is running right now, and how is it doing? | Kates API |
 | [Interactive Lab](#interactive-lab) | `lab` | Which settings work best, when you try them one run at a time? | Kates API |
-| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `clean`, `detect`, `ports`, `auto`, `operator`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
+| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `charts pull`, `clean`, `detect`, `ports`, `auto`, `operator`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
 | [Versions and Operators](#versions-and-operators) | `versions`, `operators list` | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
 | [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes, through `kubectl` and `helm`; when a source has no upstream image, `up` and `run` build one with `docker` and, on a Kind cluster, load it there, unless you pass `--skip-build` |
 | [Security Commands](#security-commands) | `security audit`, `tls-inspect`, `auth-test`, `pentest`, `compliance`, `baseline`, `drift`, `gate`, `certs`, `cve`, `secrets`, `netpol`, `acl-map`, `config-diff`, `trend` | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl`, and `security audit` also asks it about Kyverno |
@@ -1320,9 +1320,10 @@ kates deploy --yes
 | `--namespace-label` | One `key=value` label for those namespaces, repeatable; it wins over `KATES_NAMESPACE_LABELS` and the labels file |
 | `--no-write-probes` | Skip the introspection probes that create a namespace, a Secret or pods, as `--dry-run` does |
 | `--checkout` | Install the charts of the Kates checkout in this directory instead of the published ones; `KATES_CHECKOUT` does the same for every command |
+| `--chart-bundle` | Install from the bundle that [`kates charts pull --to`](#charts-pull) wrote in this directory, with no network; `KATES_CHART_BUNDLE` does the same for every command |
 | `--adminless` | Install without cluster admin: Kafka, Kafka Connect with its PostgreSQL, MirrorMaker 2, Apicurio, Kafka UI and Kates into namespaces that exist, placed by `--topology` and the `--*-ns` flags as in a full deploy (`--topology single` takes `--namespace`, default the kube context's), on a Strimzi operator a cluster admin installed. [Deploying Without Cluster Admin](12-deployment.md#deploying-without-cluster-admin) has the details |
 
-**Where the charts come from.** A release build of the CLI, from Homebrew or the GitHub Release, installs the charts its release published to `oci://ghcr.io/bmscomp/charts`, at the versions of its tag, so it needs no checkout of the repository. Every run pulls fresh copies into `kates/charts/<version>` under the user cache directory (`$XDG_CACHE_HOME`, else the system's), so a damaged or half-written cache never reaches a deploy, and it removes the caches of other kates versions. Each pulled chart is checked against its cosign signature before deploy uses it. The signature must come from `publish-charts.yml` in this repository, on `main` or a release tag, as the README's verify command checks. A chart that fails stops the run, even when a copy is cached. A digest already verified isn't checked again, because it names the same bytes. Without cosign on the `PATH` the charts go in unchecked, with one warning, and `KATES_REQUIRE_SIGNED_CHARTS=1` refuses them instead. The Homebrew formula installs cosign. When the registry can't be reached it uses the copy already cached and says so, and `kates versions --offline` reads only the cache. The version-resolution phase names the source. Before the cluster gate, a release build also asks GitHub for the newest kates release, and when it is newer it says so: this run still installs its own release's charts, and `brew upgrade bmscomp/tap/kates` brings the new ones. That check gives up silently after three seconds. A CLI built from source has no published versions to match, so it installs the charts of the checkout it runs in, as `make all` expects. `--checkout <dir>` or `KATES_CHECKOUT` makes any build install a checkout's charts, and `kates versions` and `kates kyverno apply` read the same variable.
+**Where the charts come from.** A release build of the CLI, from Homebrew or the GitHub Release, installs the charts its release published to `oci://ghcr.io/bmscomp/charts`, at the versions of its tag, so it needs no checkout of the repository. Every run pulls fresh copies into `kates/charts/<version>` under the user cache directory (`$XDG_CACHE_HOME`, else the system's), so a damaged or half-written cache never reaches a deploy, and it removes the caches of other kates versions. Each pulled chart is checked against its cosign signature before deploy uses it. The signature must come from `publish-charts.yml` in this repository, on `main` or a release tag, as the README's verify command checks. A chart that fails stops the run, even when a copy is cached. A digest already verified isn't checked again, because it names the same bytes. Without cosign on the `PATH` the charts go in unchecked, with one warning, and `KATES_REQUIRE_SIGNED_CHARTS=1` refuses them instead. The Homebrew formula installs cosign. `KATES_CHART_REGISTRY` pulls from a mirror instead of GHCR, and [Deploying Without GHCR](12-deployment.md#deploying-without-ghcr) covers mirrors and bundles. When the registry can't be reached it uses the copy already cached and says so, and `kates versions --offline` reads only the cache. The version-resolution phase names the source. Before the cluster gate, a release build also asks GitHub for the newest kates release, and when it is newer it says so: this run still installs its own release's charts, and `brew upgrade bmscomp/tap/kates` brings the new ones. That check gives up silently after three seconds. A CLI built from source has no published versions to match, so it installs the charts of the checkout it runs in, as `make all` expects. `--checkout <dir>` or `KATES_CHECKOUT` makes any build install a checkout's charts, and `kates versions` and `kates kyverno apply` read the same variable.
 
 **Profiles.** Before anything else, `kates deploy` asks the API server whether the account may do everything everywhere (`kubectl auth can-i '*' '*' --all-namespaces`). A cluster admin gets the full profile. For any other account it explains why and, on a terminal, offers the admin-less profile; with `--yes` or without a terminal it stops and prints the `--adminless` command.
 
@@ -1377,6 +1378,23 @@ The kind offer has three further conditions. It is skipped under `--dry-run`, an
 The same applies without a terminal. Piped or scripted runs take the flag defaults instead of opening the wizard, and any state that needs an answer becomes an error carrying the command that resolves it.
 
 **See also:** [Installing Kafka with the kafka-cluster Helm Chart](20-installation-guide.md) for first-time setup, and [Deployment Guide](12-deployment.md) for what the stack looks like once it is up.
+
+#### charts pull {#charts-pull}
+
+Pull every chart `kates deploy` installs, at this release's versions, into a bundle that deploy reads on a machine without network access.
+
+```bash
+kates charts pull --to ./kates-charts
+kates deploy --chart-bundle ./kates-charts --with-cert-manager=false
+```
+
+It takes one flag:
+
+| Flag | Description |
+|---|---|
+| `--to` | Directory to write the bundle into, created if missing; run the command again to refresh it |
+
+Each chart's cosign signature is checked as deploy checks it, and the bundle records the result, so `KATES_REQUIRE_SIGNED_CHARTS=1` accepts it offline. `KATES_CHART_REGISTRY` pulls from a mirror. The command needs a release build, which knows its chart versions. [Deploying Without GHCR](12-deployment.md#deploying-without-ghcr) covers what a bundle doesn't hold.
 
 #### deploy status
 

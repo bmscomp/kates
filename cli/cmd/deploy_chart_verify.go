@@ -75,9 +75,13 @@ func verifyChart(ctx context.Context, ref, digest, dest string) error {
 	image := strings.TrimPrefix(ref, "oci://") + "@" + digest
 	vctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	out, err := runExecCombinedFn(vctx, cosign, "verify", image,
+	args := []string{"verify", image,
 		"--certificate-identity-regexp", chartSignerIdentity,
-		"--certificate-oidc-issuer", chartSignerIssuer)
+		"--certificate-oidc-issuer", chartSignerIssuer}
+	if chartRegistryPlainHTTP() {
+		args = append(args, "--allow-http-registry")
+	}
+	out, err := runExecCombinedFn(vctx, cosign, args...)
 	if err != nil {
 		return &chartSignatureError{image: image, err: fmt.Errorf("%w: %s", err, lastLine(string(out)))}
 	}

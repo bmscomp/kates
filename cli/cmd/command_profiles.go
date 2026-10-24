@@ -52,6 +52,7 @@ var commandProfiles = map[string][]string{
 	"help":          nil,
 	"init":          nil,
 	"kafka":         {"topology", "integrity"},
+	"charts":        {"deploy"},
 	"kyverno":       {"security", "deploy"},
 	"lab":           {"performance"},
 	"mcp":           nil,

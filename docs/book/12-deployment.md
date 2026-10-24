@@ -546,6 +546,26 @@ graph TD
 
 On Kind, `kates deploy` needs a native image of the Kates API, `kates:native-local` or `kates:native`, in local Docker or on the node, and stops at the Kates API step without one. `make kates-native` pulls the published image or builds it and loads it into the cluster; then run `make all` again.
 
+## Deploying Without GHCR {#deploying-without-ghcr}
+
+A release build of `kates` pulls its charts from `oci://ghcr.io/bmscomp/charts`. Where that registry can't be reached, point it at a mirror, or carry the charts in on disk.
+
+**A mirror.** `KATES_CHART_REGISTRY` names the registry to pull from instead, such as `oci://registry.example.com/kates/charts`. Deploy still checks each chart's cosign signature there, against the same `publish-charts.yml` signer, so the mirror must hold the signatures too. They are stored as OCI referrers, so copy them with a tool that copies referrers, such as `oras copy -r`, into a registry that serves the referrers API. `cosign copy` and a plain `helm push` don't carry them. For a mirror that speaks plain HTTP, such as kind's local registry on `localhost:5001`, also set `KATES_CHART_REGISTRY_PLAIN_HTTP=1`.
+
+**A bundle.** On a machine with network access, the same release of `kates` writes a directory to carry across:
+
+```bash
+kates charts pull --to ./kates-charts
+```
+
+It pulls every chart `kates deploy` installs, at this release's versions, and checks each signature as deploy would, so it needs cosign there. On the machine without network, deploy reads the directory as it is, pulling nothing and skipping the newer-release check:
+
+```bash
+kates deploy --chart-bundle ./kates-charts --with-cert-manager=false
+```
+
+`KATES_CHART_BUNDLE` does the same for every command. A bundle serves only the `kates` release that wrote it, and refuses any other with the command that rebuilds it. It holds the Kates charts only. cert-manager, Kyverno and the PostgreSQL of Kafka Connect still come from their own repositories, and deploy warns when one of them is on. The container images come from their registries as well, so the cluster needs a mirror for those.
+
 ## Component-by-Component Deployment
 
 If you need to deploy components individually:
