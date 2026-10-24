@@ -336,6 +336,10 @@ func saveBundleImages(ctx context.Context, root string, images []string, platfor
 		}
 		platform = strings.TrimSpace(string(out))
 	}
+	// A failed save must not leave an older archive for deploy to load.
+	if err := os.Remove(filepath.Join(root, "images.tar")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(root, "images.txt"), []byte(strings.Join(images, "\n")+"\n"), 0o644); err != nil {
 		return err
 	}
@@ -345,8 +349,26 @@ func saveBundleImages(ctx context.Context, root string, images []string, platfor
 			return fmt.Errorf("docker pull %s: %w: %s", image, err, strings.TrimSpace(string(out)))
 		}
 	}
-	fmt.Fprintln(output.Err, output.DimStyle.Render(fmt.Sprintf("  Saving %d images for %s into %s...", len(images), platform, filepath.Join(root, "images.tar"))))
-	if out, err := runExecCombinedFn(ctx, "docker", append([]string{"save", "--platform", platform, "-o", filepath.Join(root, "images.tar")}, images...)...); err != nil {
+	// An image published for other platforms only is pulled for one of them
+	// anyway; it could not run on these nodes, so it stays out of the archive
+	// and is named.
+	var saved, foreign []string
+	for _, image := range images {
+		out, err := runExecOutputFn(ctx, "docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image)
+		if err != nil {
+			return fmt.Errorf("docker image inspect %s: %w", image, err)
+		}
+		if got := strings.TrimSpace(string(out)); got != platform {
+			foreign = append(foreign, image+" ("+got+")")
+			continue
+		}
+		saved = append(saved, image)
+	}
+	if len(foreign) > 0 {
+		warnStderr(fmt.Sprintf("Not published for %s, so not in images.tar (images.txt still lists them): %s", platform, strings.Join(foreign, ", ")))
+	}
+	fmt.Fprintln(output.Err, output.DimStyle.Render(fmt.Sprintf("  Saving %d images for %s into %s...", len(saved), platform, filepath.Join(root, "images.tar"))))
+	if out, err := runExecCombinedFn(ctx, "docker", append([]string{"save", "--platform", platform, "-o", filepath.Join(root, "images.tar")}, saved...)...); err != nil {
 		return fmt.Errorf("docker save: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil

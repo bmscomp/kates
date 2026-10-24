@@ -118,17 +118,29 @@ func TestABundleCarriesTheThirdPartyChartsWithTheirChecksums(t *testing.T) {
 func TestSaveAndLoadBundleImages(t *testing.T) {
 	withChartBuild(t, allChartVersions)
 	calls := fakeHelmPull(t)
+	origOutput := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = origOutput })
+	runExecOutputFn = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[len(args)-1] == "docker.io/polinux/stress:1.0.4" {
+			return []byte("linux/arm64\n"), nil // published for another platform only
+		}
+		return []byte("linux/amd64\n"), nil
+	}
 	root := t.TempDir()
-	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36", "postgres:16"}, "linux/amd64"); err != nil {
+	stderr := output.ResetForTesting()
+	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36", "docker.io/polinux/stress:1.0.4", "postgres:16"}, "linux/amd64"); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(callsOf(*calls, "docker pull")[1], " "); got != "docker pull --quiet --platform linux/amd64 postgres:16" {
+	if got := strings.Join(callsOf(*calls, "docker pull")[2], " "); got != "docker pull --quiet --platform linux/amd64 postgres:16" {
 		t.Fatalf("pull: %s", got)
+	}
+	if !strings.Contains(stderr.String(), "polinux/stress:1.0.4 (linux/arm64)") {
+		t.Errorf("the image of another platform is not named: %q", stderr.String())
 	}
 	if got := strings.Join(callsOf(*calls, "docker save")[0], " "); got != "docker save --platform linux/amd64 -o "+filepath.Join(root, "images.tar")+" busybox:1.36 postgres:16" {
 		t.Fatalf("save: %s", got)
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "images.txt")); string(data) != "busybox:1.36\npostgres:16\n" {
+	if data, _ := os.ReadFile(filepath.Join(root, "images.txt")); string(data) != "busybox:1.36\ndocker.io/polinux/stress:1.0.4\npostgres:16\n" {
 		t.Fatalf("images.txt: %q", data)
 	}
 
@@ -192,7 +204,7 @@ func TestSaveBundleImagesDefaultsToTheDockerServersPlatform(t *testing.T) {
 	calls := fakeHelmPull(t)
 	origOutput := runExecOutputFn
 	t.Cleanup(func() { runExecOutputFn = origOutput })
-	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte("linux/arm64\n"), nil }
+	runExecOutputFn = func(context.Context, string, ...string) ([]byte, error) { return []byte("linux/arm64\n"), nil } // docker version and inspect
 	root := t.TempDir()
 	if err := saveBundleImages(context.Background(), root, []string{"busybox:1.36"}, ""); err != nil {
 		t.Fatal(err)
