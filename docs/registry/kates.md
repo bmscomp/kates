@@ -85,7 +85,6 @@ PostgreSQL, probes, RBAC and monitoring:
 
 ```
 helm install kates oci://ghcr.io/bmscomp/charts/kates \
-  --version 0.7.0 \
   --namespace kates --create-namespace \
   --set kafka.bootstrapServers=my-kafka-bootstrap.kafka.svc:9092
 ```

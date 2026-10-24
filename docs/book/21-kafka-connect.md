@@ -616,7 +616,6 @@ For chart development and CI pipelines, Makefile targets are also available:
 | `make connect-chart-unittest` | Run the `helm unittest` suites (connectors, secret scoping, KafkaConnect, KafkaUser, alerts) |
 | `make connect-chart-template` | Render templates → `.build/connect-rendered.yaml` |
 | `make connect-chart-package` | Package → `.build/connect-cluster-<version>.tgz` |
-| `make connect-chart-push` | Push to OCI registry |
 | `make connect-chart-all` | lint + unit tests + template + package |
 
 ## Exactly-Once Semantics

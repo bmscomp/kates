@@ -192,15 +192,34 @@ kates mcp --context ports --allow-cluster <clusterId>       # Read-only MCP serv
 
 ## Helm charts
 
-Each chart carries its own version. Install them from a checkout: they are not published to a chart registry yet. `kates deploy` installs the charts as separate releases. The `kates-platform` umbrella combines `kafka-cluster` and `kates`, with Apicurio, MirrorMaker 2 and Kafka Connect as options, and expects the Strimzi operator to be installed first.
+Each chart carries its own version. A release publishes every chart to `oci://ghcr.io/bmscomp/charts`, at the versions in the table below; the `monitoring` chart is published as `kates-monitoring`. `kates deploy` installs the charts from a checkout, as separate releases. The `kates-platform` umbrella combines `kafka-cluster` and `kates`, with Apicurio, MirrorMaker 2 and Kafka Connect as options, and expects the Strimzi operator to be installed first.
 
 When you install charts with Helm directly:
 
 - Install `charts/strimzi-operator` first, as its own release. It owns the Strimzi CRDs through a pre-install/pre-upgrade hook Job that downloads the CRD bundle from the Strimzi GitHub release, so the cluster needs egress to GitHub, or `crdUpgrade.url` must point at a mirror.
-- Run `helm dependency build charts/<chart>` before rendering or installing a chart. `kafka-cluster` also pulls SeaweedFS from an HTTPS repository; after the first build, later builds fail unless you have run `helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm`.
+- From a checkout, run `helm dependency build charts/<chart>` before rendering or installing a chart; a published chart carries its dependencies. `kafka-cluster` also pulls SeaweedFS from an HTTPS repository; after the first build, later builds fail unless you have run `helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm`.
 - Use one install path per cluster. `kates deploy` names the Kafka release `krafter`, `make kafka` names it `kafka-cluster`, and both create the Kafka resource `krafter` in namespace `kafka`.
 
 [Deploying the Strimzi Operator](docs/book/deploying-strimzi-operator.md) and [Installing Kafka with the kafka-cluster Helm Chart](docs/book/20-installation-guide.md) walk through both releases. `make readme-check` verifies the Version and App Version columns below against each `Chart.yaml`.
+
+Every published chart is signed with cosign and carries a build provenance attestation. Check both before you install one:
+
+```bash
+cosign verify ghcr.io/bmscomp/charts/kates:<version> \
+  --certificate-identity-regexp '^https://github\.com/bmscomp/kates/\.github/workflows/publish-charts\.yml@refs/(heads/main|tags/v.+)$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+```bash
+gh attestation verify oci://ghcr.io/bmscomp/charts/kates:<version> \
+  --repo bmscomp/kates --signer-workflow bmscomp/kates/.github/workflows/publish-charts.yml
+```
+
+```bash
+helm install kates oci://ghcr.io/bmscomp/charts/kates --version <version> --namespace kates --create-namespace
+```
+
+A published version is never pushed again, so its digest does not change.
 
 <!-- chart-table:start -->
 | Chart | Version | App Version | Description |

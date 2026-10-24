@@ -1,13 +1,15 @@
 name: Release
 
 # The one workflow a `v*` tag starts. Everything a release consists of — the
-# CLI binaries, the three images, the GitHub Release, the Homebrew tap — is a
-# job on this run, in dependency order, so a failure anywhere is one red run
-# rather than one of four green-looking workflows quietly missing. The image
-# pipelines are the publish-*.yml workflows, called rather than triggered.
+# CLI binaries, the three images, the Helm charts, the GitHub Release, the
+# Homebrew tap — is a job on this run, in dependency order, so a failure
+# anywhere is one red run rather than one of five green-looking workflows
+# quietly missing. The image and chart pipelines are the publish-*.yml
+# workflows, called rather than triggered.
 #
-# Order: the Release and the tap are only published once every image is up
-# and verified, so `brew install` can never hand out a version whose image
+# Order: the charts publish only once every image is up and verified, since
+# they pin those images; the Release and the tap only once the charts are
+# out, so `brew install` can never hand out a version whose image or chart
 # does not exist.
 
 on:
@@ -110,9 +112,20 @@ jobs:
     uses: ./.github/workflows/publish-tester.yml
     secrets: inherit
 
+  # No `secrets: inherit`: the chart job needs only its own GITHUB_TOKEN.
+  charts:
+    name: Helm charts
+    needs: [kates-image, connect-image, tester-image]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/publish-charts.yml
+
   release:
     name: Create GitHub Release
-    needs: [build, kates-image, connect-image, tester-image]
+    needs: [build, kates-image, connect-image, tester-image, charts]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

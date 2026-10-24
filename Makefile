@@ -32,7 +32,6 @@ VALUES_FILE            ?=
 # Kind cluster and image registry
 CLUSTER_NAME           ?= panda
 REGISTRY               ?= ghcr.io/bmscomp
-CHART_REGISTRY         ?= oci://ghcr.io/bmscomp/charts
 
 # Kates release. KATES_RELEASE is the Helm release name and therefore the
 # prefix of every resource the chart creates, so the local targets derive
@@ -829,11 +828,6 @@ chart-package:  ## Package the Helm chart
 	helm package $(CHART_DIR) --destination .build/
 	@echo "✅ Chart packaged: .build/kates-$(CHART_VERSION).tgz"
 
-chart-push: chart-package  ## Push the chart to OCI registry
-	@echo "🚀 Pushing to $(CHART_REGISTRY)..."
-	helm push .build/kates-$(CHART_VERSION).tgz $(CHART_REGISTRY)
-	@echo "✅ Chart pushed: $(CHART_REGISTRY)/kates:$(CHART_VERSION)"
-
 # `update`, not `build`: a Chart.lock left by kafka-cluster 0.4 (seaweedfs
 # only) makes `build` refuse the kafka-common dependency 1.0 added.
 kafka-chart-deps:  ## Fetch kafka-cluster chart dependencies
@@ -866,10 +860,6 @@ kafka-chart-package: kafka-chart-deps  ## Package the kafka-cluster chart into .
 	@mkdir -p .build
 	helm package $(KAFKA_CHART_DIR) --destination .build/
 	@echo "✅ Kafka chart packaged: .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz"
-
-kafka-chart-push: kafka-chart-package  ## Push the packaged kafka-cluster chart to the registry
-	helm push .build/kafka-cluster-$(KAFKA_CHART_VERSION).tgz $(CHART_REGISTRY)
-	@echo "✅ Kafka chart pushed: $(CHART_REGISTRY)/kafka-cluster:$(KAFKA_CHART_VERSION)"
 
 ##@ Helm Test Suite
 kafka-chart-test:  ## Run Helm tests for Kafka cluster (KAFKA_RELEASE=... KAFKA_NAMESPACE=...)
@@ -1096,18 +1086,10 @@ connect-chart-package: connect-chart-deps  ## Package the connect-cluster chart
 	helm package $(CONNECT_CHART_DIR) --destination .build/
 	@echo "✅ Connect chart packaged: .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz"
 
-connect-chart-push: connect-chart-package  ## Push connect-cluster to OCI registry
-	helm push .build/connect-cluster-$(CONNECT_CHART_VERSION).tgz $(CHART_REGISTRY)
-	@echo "✅ Connect chart pushed: $(CHART_REGISTRY)/connect-cluster:$(CONNECT_CHART_VERSION)"
-
 chaos-chart-package:  ## Package the kates-chaos chart into .build/
 	@mkdir -p .build
 	helm package $(CHAOS_CHART_DIR) --destination .build/
 	@echo "✅ Chaos chart packaged: .build/kates-chaos-$(CHAOS_CHART_VERSION).tgz"
-
-chaos-chart-push: chaos-chart-package  ## Push the packaged kates-chaos chart to the registry
-	helm push .build/kates-chaos-$(CHAOS_CHART_VERSION).tgz $(CHART_REGISTRY)
-	@echo "✅ Chaos chart pushed: $(CHART_REGISTRY)/kates-chaos:$(CHAOS_CHART_VERSION)"
 
 # The operator chart vendors upstream strimzi-kafka-operator as a dependency
 # tarball, and charts/*/charts/ is generated and gitignored. Two checks read
@@ -1121,10 +1103,6 @@ strimzi-chart-package: strimzi-chart-deps  ## Package the strimzi-operator chart
 	@mkdir -p .build
 	helm package $(STRIMZI_CHART_DIR) --destination .build/
 	@echo "✅ Strimzi operator chart packaged: .build/strimzi-operator-$(STRIMZI_CHART_VERSION).tgz"
-
-strimzi-chart-push: strimzi-chart-package  ## Push the packaged strimzi-operator chart to the registry
-	helm push .build/strimzi-operator-$(STRIMZI_CHART_VERSION).tgz $(CHART_REGISTRY)
-	@echo "✅ Strimzi operator chart pushed: $(CHART_REGISTRY)/strimzi-operator:$(STRIMZI_CHART_VERSION)"
 
 platform-chart-deps: kafka-chart-deps connect-chart-deps  ## Fetch kates-platform chart dependencies
 	@# The umbrella packages its file:// subcharts as they are on disk, so their
@@ -1141,10 +1119,6 @@ platform-chart-package: platform-chart-deps  ## Package the kates-platform chart
 	@mkdir -p .build
 	helm package $(PLATFORM_CHART_DIR) --destination .build/
 	@echo "✅ Platform chart packaged: .build/kates-platform-$(PLATFORM_CHART_VERSION).tgz"
-
-platform-chart-push: platform-chart-package  ## Push the packaged kates-platform chart to the registry
-	helm push .build/kates-platform-$(PLATFORM_CHART_VERSION).tgz $(CHART_REGISTRY)
-	@echo "✅ Platform chart pushed: $(CHART_REGISTRY)/kates-platform:$(PLATFORM_CHART_VERSION)"
 
 connect-chart-test:  ## Run Helm tests for connect-cluster
 	@echo ""

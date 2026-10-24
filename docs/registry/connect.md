@@ -126,7 +126,6 @@ fully qualified tag (also recorded in its `kates.io/connect-image` annotation); 
 
 ```
 helm install connect oci://ghcr.io/bmscomp/charts/connect-cluster \
-  --version 2.0.0 \
   --namespace kafka \
   --set kafka.clusterName=krafter
 ```
