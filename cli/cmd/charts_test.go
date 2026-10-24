@@ -68,7 +68,7 @@ func TestAChartBundleIsPulledThenReadWithNoNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundle := filepath.Join(parent, "kates-charts")
-	if err := runChartsPull(context.Background(), bundle); err != nil {
+	if err := runChartsPull(context.Background(), bundle, false, ""); err != nil {
 		t.Fatalf("charts pull: %v", err)
 	}
 	for _, dir := range publishedChartDirs() {
@@ -118,7 +118,7 @@ func TestChartBundleRefusals(t *testing.T) {
 	if err := resolveChartRoot(context.Background(), "", false, "kates"); err == nil || !strings.Contains(err.Error(), "release build") {
 		t.Fatalf("a dev build cannot read a bundle: %v", err)
 	}
-	if err := runChartsPull(context.Background(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "release build") {
+	if err := runChartsPull(context.Background(), t.TempDir(), false, ""); err == nil || !strings.Contains(err.Error(), "release build") {
 		t.Fatalf("a dev build cannot pull a bundle: %v", err)
 	}
 }

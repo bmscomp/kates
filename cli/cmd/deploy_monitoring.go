@@ -94,12 +94,15 @@ func wireKyvernoScrape(dc *deployContext) error {
 	}
 	ctx := dc.ctx
 	dl.Println("    - Wiring Kyverno into Prometheus (ServiceMonitors)...")
-	if err := runHelmFn(ctx, "upgrade", "kyverno", "kyverno/kyverno",
-		"--version", kyvernoChartVersion,
+	kyvernoChart, err := thirdPartyChartArgs(ctx, "kyverno", false) // added at install
+	if err != nil {
+		return err
+	}
+	if err := runHelmFn(ctx, append(append([]string{"upgrade", "kyverno"}, kyvernoChart...),
 		"-n", "kyverno", "--reuse-values",
 		"--set", "admissionController.serviceMonitor.enabled=true",
 		"--set", "backgroundController.serviceMonitor.enabled=true",
-		"--timeout", "5m"); err != nil {
+		"--timeout", "5m")...); err != nil {
 		return fmt.Errorf("enabling the Kyverno ServiceMonitors: %w", err)
 	}
 	dl.Printf("    %s Kyverno metrics scraped\n", output.AccentStyle.Render("✔"))

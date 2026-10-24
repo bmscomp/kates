@@ -1388,11 +1388,13 @@ kates charts pull --to ./kates-charts
 kates deploy --chart-bundle ./kates-charts --with-cert-manager=false
 ```
 
-It takes one flag:
+It takes these flags:
 
 | Flag | Description |
 |---|---|
 | `--to` | Directory to write the bundle into, created if missing; run the command again to refresh it |
+| `--images` | Also pull every container image the stack runs and save them into `images.tar`, listed in `images.txt`; deploy loads them into kind's nodes. Needs Docker and several GB |
+| `--platform` | Platform of those images, such as `linux/amd64` (default: this machine's) |
 
 Each chart's cosign signature is checked as deploy checks it, and the bundle records the result, so `KATES_REQUIRE_SIGNED_CHARTS=1` accepts it offline. `KATES_CHART_REGISTRY` pulls from a mirror. The command needs a release build, which knows its chart versions. [Deploying Without GHCR](12-deployment.md#deploying-without-ghcr) covers what a bundle doesn't hold.
 

@@ -810,8 +810,10 @@ func deployGroupA(dc *deployContext) error {
 				return nil
 			}
 			dl.Printf("\n📦 Deploying Cert-Manager (Namespace: %s)...\n", "cert-manager")
-			runHelmFn(gCtx, "repo", "add", "jetstack", "https://charts.jetstack.io")
-			runHelmFn(gCtx, "repo", "update", "jetstack")
+			certManagerChart, err := thirdPartyChartArgs(gCtx, "cert-manager", true)
+			if err != nil {
+				return err
+			}
 			// Created here with the namespace labels; --create-namespace
 			// would make it bare.
 			if err := ensureConfiguredDeployNamespace(gCtx, "cert-manager"); err != nil {
@@ -821,13 +823,12 @@ func deployGroupA(dc *deployContext) error {
 			// and service references using the actual cluster DNS domain (not always cluster.local).
 			// report.Network.ClusterDomain is detected from the live cluster by kates detect.
 			clusterDomain := dc.resolveClusterDomain()
-			err := runHelmFn(gCtx, "upgrade", "--install", "cert-manager", "jetstack/cert-manager",
-				"--version", "v1.13.3",
+			err = runHelmFn(gCtx, append(append([]string{"upgrade", "--install", "cert-manager"}, certManagerChart...),
 				"-n", "cert-manager", "--create-namespace",
 				"--set", "installCRDs=true",
 				"--set", "startupapicheck.enabled=false",
 				"--set", "global.clusterDomain="+clusterDomain,
-				"--timeout", "10m")
+				"--timeout", "10m")...)
 			if err != nil {
 				return err
 			}
@@ -957,8 +958,10 @@ spec:
 				return nil
 			}
 			dl.Println("\n📦 Deploying Kyverno (Namespace: kyverno)...")
-			runHelmFn(gCtx, "repo", "add", "kyverno", "https://kyverno.github.io/kyverno/")
-			runHelmFn(gCtx, "repo", "update", "kyverno")
+			kyvernoChart, err := thirdPartyChartArgs(gCtx, "kyverno", true)
+			if err != nil {
+				return err
+			}
 			if err := ensureConfiguredDeployNamespace(gCtx, "kyverno"); err != nil {
 				return err
 			}
@@ -967,15 +970,14 @@ spec:
 			// global.clusterDomain ensures Kyverno webhook certificates use the
 			// correct cluster DNS domain — same value detected for all other components.
 			kyvernoDomain := dc.resolveClusterDomain()
-			err := runHelmFn(gCtx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
-				"--version", kyvernoChartVersion,
+			err = runHelmFn(gCtx, append(append([]string{"upgrade", "--install", "kyverno"}, kyvernoChart...),
 				"-n", "kyverno", "--create-namespace",
 				"--set", "admissionController.replicas=1",
 				"--set", "backgroundController.replicas=1",
 				"--set", "cleanupController.replicas=1",
 				"--set", "reportsController.replicas=1",
 				"--set", "global.clusterDomain="+kyvernoDomain,
-				"--timeout", "5m")
+				"--timeout", "5m")...)
 			if err != nil {
 				return err
 			}

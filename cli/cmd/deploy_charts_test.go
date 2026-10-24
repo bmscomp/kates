@@ -73,8 +73,16 @@ func fakeHelmPull(t *testing.T) *[][]string {
 		if name == "cosign" {
 			return []byte("Verification for ... --\n"), nil
 		}
+		if name != "helm" {
+			return nil, nil
+		}
 		switch args[0] {
-		case "pull": // pull <ref> --version <v> --untar --untardir <dir>
+		case "pull":
+			if args[2] == "--repo" { // pull <name> --repo <url> --version <v> --destination <dir>
+				write(filepath.Join(args[7], args[1]+"-"+args[5]+".tgz"), args[1]+" "+args[5])
+				return nil, nil
+			}
+			// pull <ref> --version <v> --untar --untardir <dir>
 			chart := filepath.Join(args[6], filepath.Base(args[1]))
 			write(filepath.Join(chart, "Chart.yaml"), "name: "+filepath.Base(args[1])+"\nversion: "+args[3]+"\n")
 			if filepath.Base(args[1]) == "strimzi-operator" {
