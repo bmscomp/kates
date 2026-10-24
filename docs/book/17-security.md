@@ -826,10 +826,10 @@ The kates chart ships four `ClusterPolicy` resources. It renders them only when 
 |--------|----------|----------|-------------|
 | `kates-pod-security-standards` | Pod Security | High | Mutates and validates restricted PSS: non-root, drop ALL capabilities, seccomp, read-only rootfs, no privilege escalation |
 | `kates-workload-standards` | Best Practices | Medium | Requires standard labels, health probes, and pinned image tags on workloads |
-| `kates-image-verification` | Supply Chain | Critical | Verifies Cosign image signatures from trusted registries. Off by default: needs `kyvernoPolicy.cosign.enabled` and a `publicKey` |
+| `kates-image-verification` | Supply Chain | Critical | Verifies the Kates release's keyless Cosign signatures, as an `ImageValidatingPolicy` (Kyverno 1.17 or newer), or your own key's with a `publicKey`. Off by default: needs `kyvernoPolicy.cosign.enabled` |
 | `kates-generate-network-policies` | Network Security | Medium | Generates default-deny NetworkPolicies in namespaces created after it. Off by default: needs `kyvernoPolicy.networkPolicyGeneration.enabled`, which `kates kyverno apply --with-netpol` sets |
 
-A `ClusterPolicy` is cluster-scoped, so with `rbac.scope=namespace` the chart renders none of the four, nor the exceptions of `kyvernoPolicy.policyExceptions`, which live in other namespaces. An account with edit rights in the release namespace alone could create neither. `kyvernoPolicy.exceptions` still renders under that scope, because its `PolicyException` lives in the release namespace (see [Policy Exceptions](#policy-exceptions)).
+These policies are cluster-scoped, so with `rbac.scope=namespace` the chart renders none of the four, nor the exceptions of `kyvernoPolicy.policyExceptions`, which live in other namespaces. An account with edit rights in the release namespace alone could create neither. `kyvernoPolicy.exceptions` still renders under that scope, because its `PolicyException` lives in the release namespace (see [Policy Exceptions](#policy-exceptions)).
 
 ### Pod Security Standards (Mutate + Validate)
 
@@ -862,7 +862,35 @@ Mutation uses the `+(key)` conditional anchor syntax — values are injected onl
 
 ### Cosign Image Verification
 
-The `kates-image-verification` policy enforces **supply chain security** by verifying container image signatures before admission. This protects against tampered images — even if an attacker pushes a malicious image to your registry, it won't be admitted unless it carries a valid Cosign signature from your trusted key.
+The `kates-image-verification` policy enforces **supply chain security** by verifying container image signatures before admission. This protects against tampered images: even if an attacker pushes a malicious image to the registry, it won't be admitted unless it carries a valid Cosign signature from the expected signer.
+
+The release signs the Kates and Connect images keyless, on every `v*` tag: the certificate names the workflow that signed the image, and no key exists. Enabling the check verifies that identity:
+
+```yaml
+kyvernoPolicy:
+  enabled: true
+  action: Enforce
+  cosign:
+    enabled: true
+```
+
+By default `kyvernoPolicy.cosign.imagePatterns` lists `ghcr.io/bmscomp/*` and `docker.io/bmscomp/*`. `kyvernoPolicy.cosign.keyless` names the signer: `subjectRegExp` matches the `publish-docker.yml` and `publish-connect.yml` workflows on a `v*` tag, and `issuer` is GitHub's OIDC issuer, `https://token.actions.githubusercontent.com`.
+
+The check needs Kyverno 1.17 or newer. cosign 3 stores Sigstore bundle signatures, and a `ClusterPolicy` can't verify them on GHCR: its Cosign attestor looks for the legacy `.sig` tag, and its `SigstoreBundle` type misses GHCR's referrer tag ([kyverno/kyverno#16664](https://github.com/kyverno/kyverno/issues/16664)). So the check is an `ImageValidatingPolicy` (`policies.kyverno.io/v1`), which reads them from Kyverno 1.17 on. On an older Kyverno the chart refuses to render rather than leave the check out. `kates kyverno apply --with-cosign` installs Kyverno 1.16 when none is present, so upgrade Kyverno first.
+
+Every container, init container and ephemeral container whose image matches `imagePatterns` must be signed by that identity. Other images, such as PostgreSQL, are left alone; allow only the registries you trust with `restrictRegistries`. `*` and `?` are the only wildcards, matched against the image as the pod names it, so `bmscomp/kates` doesn't match `docker.io/bmscomp/*`. On Kyverno 1.19 the policy also pins each verified image to its digest; Kyverno 1.17 verifies without pinning. The tester image, `kates-tester`, isn't signed, so don't run it in a namespace the check covers.
+
+Check an image yourself, with the same identity:
+
+```bash
+id='^https://github\.com/bmscomp/kates/'
+id+='\.github/workflows/publish-docker\.yml@refs/tags/v.+$'
+cosign verify ghcr.io/bmscomp/kates:<version> \
+  --certificate-identity-regexp "$id" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+To verify images you sign yourself, for example in a mirror, set `publicKey`. The chart then renders a `ClusterPolicy` for that key instead. Like any `ClusterPolicy` check, it reads the legacy `.sig` format only: sign with cosign 2, or with cosign 3 and `--new-bundle-format=false`.
 
 ```yaml
 kyvernoPolicy:
@@ -873,10 +901,8 @@ kyvernoPolicy:
       MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
       -----END PUBLIC KEY-----
     imagePatterns:
-      - "ghcr.io/bmscomp/*"
+      - "registry.example.com/kates/*"
 ```
-
-When enabled, unsigned or tampered images from the specified registries are rejected at admission time. The policy also mutates image references to use digests (`mutateDigest: true`) for immutable deployments.
 
 ### Automatic NetworkPolicy Generation
 

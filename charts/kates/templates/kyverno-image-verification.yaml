@@ -38,5 +38,81 @@ spec:
           verifyDigest: true
           required: true
         {{- end }}
+{{- else }}
+{{- /* cosign 3 writes bundle signatures, which a ClusterPolicy cannot read
+  on GHCR (kyverno/kyverno#16664) and an ImageValidatingPolicy reads from
+  Kyverno 1.17 on. Refused rather than skipped, so an enabled check is never
+  silently absent. */}}
+{{- if not (.Capabilities.APIVersions.Has "policies.kyverno.io/v1/ImageValidatingPolicy") }}
+{{- fail "kyvernoPolicy.cosign verifies the Kates release's keyless signatures with an ImageValidatingPolicy (policies.kyverno.io/v1), which needs Kyverno 1.17 or newer, and this cluster's Kyverno does not serve it. Upgrade Kyverno, or set kyvernoPolicy.cosign.publicKey to verify images signed with your own key" }}
+{{- end }}
+{{- /* The patterns become anchored regular expressions (* and ? are the only
+  wildcards, as before) used both to pick the images and to filter them in the
+  check: verifyImageSignatures counts 0 for an image the policy does not match,
+  so an unfiltered check would refuse every pod that also runs, say, postgres. */}}
+{{- $res := list }}
+{{- range .Values.kyvernoPolicy.cosign.imagePatterns }}
+{{- $res = append $res (printf "^%s$" (regexQuoteMeta . | replace "\\*" ".*" | replace "\\?" ".")) }}
+{{- end }}
+{{- if not $res }}
+{{- fail "kyvernoPolicy.cosign.imagePatterns is empty: name the images whose signatures the check verifies" }}
+{{- end }}
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: kates-image-verification
+  labels:
+    {{- include "kates.labels" . | nindent 4 }}
+  annotations:
+    policies.kyverno.io/title: Kates Image Signature Verification
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/description: >-
+      Verifies that the release namespace's images matching
+      kyvernoPolicy.cosign.imagePatterns carry a keyless Cosign signature from
+      the identity in kyvernoPolicy.cosign.keyless, by default the Kates
+      release workflows. Unsigned or tampered images are rejected to prevent
+      supply chain attacks.
+spec:
+  validationActions: [{{ eq .Values.kyvernoPolicy.action "Enforce" | ternary "Deny" "Audit" }}]
+  webhookConfiguration:
+    timeoutSeconds: 30
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchImageReferences:
+    {{- range $res }}
+    - expression: {{ printf "ref.matches(r'%s')" . | quote }}
+    {{- end }}
+  validationConfigurations:
+    mutateDigest: true
+    verifyDigest: true
+    required: true
+  attestors:
+    - name: release
+      cosign:
+        keyless:
+          identities:
+            - subjectRegExp: {{ .Values.kyvernoPolicy.cosign.keyless.subjectRegExp | quote }}
+              issuer: {{ .Values.kyvernoPolicy.cosign.keyless.issuer | quote }}
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        (images.containers + images.initContainers + images.ephemeralContainers)
+        .filter(i, {{ range $i, $re := $res }}{{ if $i }} || {{ end }}i.matches(r'{{ $re }}'){{ end }})
+        .all(i, verifyImageSignatures(i, [attestors.release]) > 0)
+      message: >-
+        An image matching kyvernoPolicy.cosign.imagePatterns has no keyless
+        signature from the identity in kyvernoPolicy.cosign.keyless.
 {{- end }}
 {{- end }}

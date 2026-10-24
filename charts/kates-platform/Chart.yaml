@@ -2,9 +2,9 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: the umbrella packs the subcharts the v1.29.3 release pins: kates
-# 0.13.5, kafka-cluster 1.0.16, connect-cluster 2.1.14, mirror-maker2 0.11.12.
-version: 0.8.4
+# Patch: the umbrella packs kates 0.14.0, whose kyvernoPolicy.cosign verifies
+# the release's keyless signatures.
+version: 0.8.5
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -41,6 +41,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The umbrella packs kates 0.14.0, whose kyvernoPolicy.cosign now verifies the keyless signatures the Kates release makes, with an ImageValidatingPolicy that needs Kyverno 1.17 or newer. Its own templates are unchanged."
     - kind: changed
       description: "The umbrella moves with the v1.29.3 release: it packs kates 0.13.5, kafka-cluster 1.0.16, connect-cluster 2.1.14 and mirror-maker2 0.11.12 as they are on disk. A published umbrella keeps the subcharts it was packed with, so scripts/chart_bumps.py (#462) fails a subchart version change that the umbrella does not follow. Templates are unchanged."
     - kind: changed

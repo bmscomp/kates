@@ -132,7 +132,7 @@ A measurement bias: when the system stalls, a tool that waits for each response 
 
 ### Cosign {#gl-cosign}
 
-A tool that signs container images and verifies their signatures; Kyverno uses Cosign public keys to admit only signed images. See [Security & Compliance](17-security.md#cosign-image-verification).
+A tool that signs container images and verifies their signatures. The Kates release signs its images keyless, through the workflow's GitHub identity, and Kyverno admits only images signed by that identity. See [Security & Compliance](17-security.md#cosign-image-verification).
 
 ### CRC32 {#gl-crc32}
 

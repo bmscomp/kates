@@ -288,6 +288,35 @@ jobs:
           fi
           echo "OK: chaos.provider renders KATES_CHAOS_PROVIDER only when set"
 
+      # The release signs keyless with cosign 3, which only an
+      # ImageValidatingPolicy reads on GHCR; an enabled check is refused,
+      # never skipped, on a Kyverno without one.
+      - name: Assert kyvernoPolicy.cosign renders the keyless check or refuses
+        run: |
+          fail() { echo "::error::kates kyvernoPolicy.cosign: $1"; exit 1; }
+          on=(--set kyvernoPolicy.enabled=true --set kyvernoPolicy.cosign.enabled=true
+              --api-versions kyverno.io/v1 --show-only templates/kyverno-image-verification.yaml)
+          ivp=(--api-versions policies.kyverno.io/v1/ImageValidatingPolicy)
+          pol=$(helm template kates charts/kates/ "${on[@]}" "${ivp[@]}" --set kyvernoPolicy.action=Enforce)
+          grep -q '^kind: ImageValidatingPolicy$' <<<"${pol}" || fail "no ImageValidatingPolicy without publicKey"
+          grep -q 'validationActions: \[Deny\]' <<<"${pol}" || fail "action Enforce is not Deny"
+          grep -qF ".filter(i, i.matches(r'^ghcr\.io/bmscomp/.*\$') || i.matches(r'^docker\.io/bmscomp/.*\$'))" <<<"${pol}" \
+            || fail "the check does not filter on the anchored imagePatterns"
+          grep -qF "expression: \"ref.matches(r'^ghcr\\\\.io/bmscomp/.*\$')\"" <<<"${pol}" \
+            || fail "matchImageReferences does not use the same expression"
+          grep -qF 'publish-(docker|connect)\\.yml@refs/tags/v.+$' <<<"${pol}" || fail "the release identity is not the default subject"
+          helm template kates charts/kates/ "${on[@]}" "${ivp[@]}" | grep -q 'validationActions: \[Audit\]' \
+            || fail "the default action is not Audit"
+          helm template kates charts/kates/ "${on[@]}" "${ivp[@]}" --set 'kyvernoPolicy.cosign.imagePatterns={reg.example/k?tes*}' \
+            | grep -qF "i.matches(r'^reg\.example/k.tes.*\$')" || fail "? and * are not the wildcards"
+          out=$(helm template kates charts/kates/ "${on[@]}" 2>&1) && fail "rendered without policies.kyverno.io/v1"
+          grep -q 'needs Kyverno 1.17 or newer' <<<"${out}" || fail "the refusal on an old Kyverno does not say why"
+          out=$(helm template kates charts/kates/ "${on[@]}" "${ivp[@]}" --set 'kyvernoPolicy.cosign.imagePatterns=null' 2>&1) \
+            && fail "rendered with no imagePatterns"
+          helm template kates charts/kates/ "${on[@]}" --set kyvernoPolicy.cosign.publicKey=key \
+            | grep -q '^kind: ClusterPolicy$' || fail "publicKey does not render the key ClusterPolicy"
+          echo "OK: kyvernoPolicy.cosign renders the keyless check, or refuses"
+
       # rbac.scope=namespace is for an account with only edit in the release
       # namespace: anything cluster-scoped would fail its install.
       - name: Assert rbac.scope=namespace renders nothing cluster-scoped

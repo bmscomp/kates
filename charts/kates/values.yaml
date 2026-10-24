@@ -862,12 +862,25 @@ kyvernoPolicy:
   # set, with the new location named.
   # -- Cosign image signature verification
   cosign:
-    # -- Enable image signature verification via Cosign
+    # -- Enable image signature verification via Cosign. Without publicKey it
+    # verifies the keyless signatures the Kates release workflows make, with an
+    # ImageValidatingPolicy: that needs Kyverno 1.17 or newer, and rendering
+    # fails on an older one
     enabled: false
-    # -- Image patterns requiring valid signatures
+    # -- Image patterns requiring valid signatures (* and ? are wildcards)
     imagePatterns:
       - "ghcr.io/bmscomp/*"
-    # -- Cosign public key (PEM format) — set via --set-file or Secrets
+      - "docker.io/bmscomp/*"
+    # -- The keyless signer an image must be signed by: the certificate
+    # identity and its OIDC issuer. By default, the workflows that sign the
+    # Kates and Connect images on a v* tag
+    keyless:
+      subjectRegExp: '^https://github\.com/bmscomp/kates/\.github/workflows/publish-(docker|connect)\.yml@refs/tags/v.+$'
+      issuer: https://token.actions.githubusercontent.com
+    # -- Cosign public key (PEM format) — set via --set-file or Secrets. Set,
+    # it replaces the keyless check with a ClusterPolicy that verifies images
+    # signed with this key in the legacy .sig format (cosign 2, or cosign 3
+    # with --new-bundle-format=false)
     publicKey: ""
   # -- Auto-generate default-deny NetworkPolicies for new namespaces
   networkPolicyGeneration:
