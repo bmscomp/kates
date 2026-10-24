@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -814,9 +815,11 @@ func TestDeployDryRun_WritesNothingToTheCluster(t *testing.T) {
 		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = false, true, false
 		deployWithKafkaUI, deployWithMirrorMaker2, deployDryRun = true, false, true
 	})
-	// The dry run still writes .build/values-detected.yaml; keep it out of
-	// the package directory.
+	// The dry run still writes its values file: outside a checkout, under
+	// the user state directory.
 	t.Chdir(t.TempDir())
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
 
 	var err error
 	out := captureStdout(t, func() { err = runDeploy(deployCmd, []string{}) })
@@ -837,8 +840,11 @@ func TestDeployDryRun_WritesNothingToTheCluster(t *testing.T) {
 			t.Errorf("a dry run wrote to the cluster: %s", c)
 		}
 	}
-	if _, err := os.Stat(".build/values-detected.yaml"); err != nil {
+	if _, err := os.Stat(filepath.Join(state, "kates", "deploy", "values-detected.yaml")); err != nil {
 		t.Errorf("the dry run should still write its values file: %v", err)
+	}
+	if _, err := os.Stat(".build"); !os.IsNotExist(err) {
+		t.Errorf("outside a checkout the dry run wrote .build in the working directory: %v", err)
 	}
 	if !strings.Contains(out, "Deployment plan") {
 		t.Errorf("no preview was printed:\n%s", out)
