@@ -4,14 +4,14 @@ description: Kates — Kafka Advanced Testing & Engineering Suite
 type: application
 # Minor: global.imageRegistry now reaches every image the chart renders, so an
 # image value that already names the mirror gets it twice.
-# Patch: appVersion and the image tag move to 1.29.2, the tag the v1.29.2
-# release publishes; values-generic.yaml runs 512Mi/1Gi with -Xmx512m.
-version: 0.13.4
+# Patch: appVersion and the image tag move to 1.29.3, the tag the v1.29.3
+# release publishes.
+version: 0.13.5
 # The non-blocking health endpoints this chart's probes now point at come from
 # a BUILD-TIME property (quarkus.messaging.health.enabled=false), so they only
 # exist in the image built from this branch. Keep appVersion and
 # image.tag in values.yaml pinned to that release.
-appVersion: "1.29.2"
+appVersion: "1.29.3"
 keywords:
   - kafka
   - testing
@@ -30,6 +30,8 @@ annotations:
   artifacthub.io/category: integration-delivery
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "appVersion 1.29.3 and the image tag move to 1.29.3. No Kates API change since 1.29.2: the release rebuilds the native image with its base packages upgraded, since 1.29.2's failed the release gate on a CRITICAL ca-certificates CVE (#460), and it is the first release to publish the charts, signed and attested (#461). Templates are unchanged."
     - kind: changed
       description: "appVersion 1.29.2 and the image tag move to 1.29.2. No Kates API change since 1.29.1: the release carries CLI changes (#454, #455, #457, #458) and a kafka-cluster NetworkPolicy fix (#456). The values-generic.yaml sizing fix below is this chart's only other change."
     - kind: fixed

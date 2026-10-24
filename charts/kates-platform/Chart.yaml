@@ -2,10 +2,9 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: the umbrella's Helm test pod passes Pod Security "restricted" and
-# takes podLabels, test.resources, global.imageRegistry and pull secrets; the
-# subchart floors move to the versions that pass restricted too.
-version: 0.8.3
+# Patch: the umbrella packs the subcharts the v1.29.3 release pins: kates
+# 0.13.5, kafka-cluster 1.0.16, connect-cluster 2.1.14, mirror-maker2 0.11.12.
+version: 0.8.4
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -42,6 +41,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The umbrella moves with the v1.29.3 release: it packs kates 0.13.5, kafka-cluster 1.0.16, connect-cluster 2.1.14 and mirror-maker2 0.11.12 as they are on disk. A published umbrella keeps the subcharts it was packed with, so scripts/chart_bumps.py (#462) fails a subchart version change that the umbrella does not follow. Templates are unchanged."
     - kind: changed
       description: "ACTION REQUIRED — the subchart floors move to the versions this umbrella is rendered with: kafka-cluster 1.0.12, kates 0.13.0, apicurio-registry 0.4.1, mirror-maker2 0.11.8 and connect-cluster 2.1.10, whose pods pass Pod Security restricted and take podLabels, and of which kafka-cluster and kates read global.imagePullSecrets as plain names or {name: ...}. Rendering fails, naming the subchart, until charts/ holds them: run make platform-chart-deps before upgrading"
     - kind: fixed

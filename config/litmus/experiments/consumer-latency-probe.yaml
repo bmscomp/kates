@@ -83,7 +83,7 @@ spec:
                 criteria: contains
                 value: "PASS"
               source:
-                image: ghcr.io/bmscomp/kates-tester:1.29.2
+                image: ghcr.io/bmscomp/kates-tester:1.29.3
                 hostNetwork: false
 ---
 # Consumer latency monitoring ConfigMap
