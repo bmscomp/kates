@@ -7,9 +7,8 @@ type: application
 # restricted security contexts through their CR templates — podLabels reach
 # every pod, and global.imagePullSecrets also takes plain names. SeaweedFS
 # (off by default) is unchanged and cannot pass restricted.
-# Patch: the Helm-test images moves to kates-tester 1.29.3, the tag the
-# v1.29.3 release publishes; every Strimzi chart pins the same one.
-version: 1.0.16
+# Patch: Helm test 10 reports the producer's MB/sec, not its max latency.
+version: 1.0.17
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -43,6 +42,8 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: fixed
+      description: "Helm test 10 (performance) printed the producer's max latency as its throughput: it took the fourth comma-separated field of kafka-producer-perf-test.sh's summary line, \"W ms max latency\", and labelled it MB/s. It now reads Y from the second field, \"X records/sec (Y MB/sec)\". Nothing compares the value to a threshold, so the test still passes or fails as before"
     - kind: changed
       description: "testImages.kubectl and testImages.kafka move to kates-tester 1.29.3, the tag the v1.29.3 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.29.2 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: changed

@@ -105,7 +105,8 @@ spec:
             --producer.config /tmp/client.properties \
             --producer-props bootstrap.servers=${BOOTSTRAP} acks=1 linger.ms=5 2>&1 | tee /tmp/perf_output.txt || true
 
-          MB_S=$(cat /tmp/perf_output.txt | tail -n 1 | awk -F',' '{print $4}' | awk '{print $1}')
+          # Summary line: "N records sent, X records/sec (Y MB/sec), Z ms avg latency, W ms max latency, ..."
+          MB_S=$(tail -n 1 /tmp/perf_output.txt | sed -n 's/.* records\/sec (\([0-9.]*\) MB\/sec).*/\1/p')
           echo "  Measured Throughput: $MB_S MB/s"
 
           echo "Cleaning up..."

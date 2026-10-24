@@ -2,9 +2,9 @@ apiVersion: v2
 name: kates-platform
 description: Umbrella chart for the full Kates platform — Kafka, Kates, and supporting infrastructure
 type: application
-# Patch: the umbrella packs kates 0.14.0, whose kyvernoPolicy.cosign verifies
-# the release's keyless signatures.
-version: 0.8.5
+# Patch: the umbrella packs kafka-cluster 1.0.17, whose performance Helm test
+# reports MB/sec rather than max latency.
+version: 0.8.6
 appVersion: "1.0.0"
 keywords:
   - kafka
@@ -41,6 +41,8 @@ dependencies:
     condition: connect-cluster.enabled
 annotations:
   artifacthub.io/changes: |
+    - kind: changed
+      description: "The umbrella packs kafka-cluster 1.0.17, whose Helm test 10 (performance) reports the producer's MB/sec instead of its max latency. Its own templates are unchanged."
     - kind: changed
       description: "The umbrella packs kates 0.14.0, whose kyvernoPolicy.cosign now verifies the keyless signatures the Kates release makes, with an ImageValidatingPolicy that needs Kyverno 1.17 or newer. Its own templates are unchanged."
     - kind: changed
