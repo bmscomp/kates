@@ -427,9 +427,11 @@ The image workflows are *called* (`workflow_call`) rather than triggered by the 
 2. **Compress** — each binary is compressed with `tar.gz`
 3. **Checksum and attest** — a SHA-256 checksum is generated per artifact, plus an aggregated `checksums.txt`; each tarball also gets a SLSA build-provenance attestation (`gh attestation verify kates-darwin-arm64.tar.gz --repo bmscomp/kates`)
 4. **Publish the images** — `publish-docker.yml`, `publish-connect.yml` and `publish-tester.yml` run as called workflows, in parallel with the CLI build
-5. **Create GitHub Release** — once the binaries and all three images are done: uses the tag as the release, with auto-generated release notes; all tarballs and checksums are attached
-6. **Update Homebrew tap** — regenerates `Formula/kates.rb` in the `bmscomp/homebrew-tap` repository so `brew install bmscomp/tap/kates` resolves to the new release
-7. **Smoke test** — a macOS runner installs from the tap and checks `kates version` reports the tag
+5. Once the images are out, `publish-charts.yml` publishes the charts: it pushes, signs and attests every chart version that isn't published yet
+6. Then the release deploys the published charts: on a three-zone Kind cluster, its own Linux CLI, run outside any checkout, deploys the stack from the charts just published. It runs `--dry-run` first, then a real deploy of the Strimzi operator, Kafka and the Kates API with its PostgreSQL. `KATES_REQUIRE_SIGNED_CHARTS=1` makes every pulled chart's signature a requirement. A chart, an overlay or an image pin that can't install stops the run here, before anything points users at it. The charts are already pushed by then, so the fix ships as new chart versions
+7. **Create GitHub Release** — once the binaries, all three images and the chart deploy are done: uses the tag as the release, with auto-generated release notes; all tarballs and checksums are attached
+8. **Update Homebrew tap** — regenerates `Formula/kates.rb` in the `bmscomp/homebrew-tap` repository so `brew install bmscomp/tap/kates` resolves to the new release
+9. **Smoke test** — a macOS runner installs from the tap and checks `kates version` reports the tag
 
 ### Installation
 

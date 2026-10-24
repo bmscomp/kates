@@ -225,7 +225,7 @@ A scheduled run that fails opens an issue labelled `ci-failure` rather than goin
 
 Tool versions CI uses (Helm, kubeconform, the linters, Java, Node) are pinned in `versions.env`; Go's is `cli/go.mod`. A workflow that hardcodes one fails `scripts/check-versions.sh --workflows`.
 
-Releases are one workflow: pushing a `v*` tag runs **Release**, which builds the CLI, publishes and signs the three images, creates the GitHub Release, updates the Homebrew tap and `brew install`s the result on macOS.
+Releases are one workflow: pushing a `v*` tag runs **Release**, which builds the CLI, publishes and signs the three images and the charts, deploys the published charts on Kind with the new CLI, creates the GitHub Release, updates the Homebrew tap and `brew install`s the result on macOS.
 
 ## Testing
 

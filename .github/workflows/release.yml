@@ -134,9 +134,81 @@ jobs:
       attestations: write
     uses: ./.github/workflows/publish-charts.yml
 
+  # This release's own CLI, run outside any checkout, deploys the charts this
+  # run just published, as a Homebrew user would: pulled from GHCR, their
+  # signatures required. A chart, an overlay or an image pin that cannot
+  # install fails here, before the GitHub Release and the tap point anyone at
+  # it. The charts are already pushed by then, and a published version is
+  # never pushed again, so the fix ships as new chart versions.
+  published-smoke:
+    name: Deploy the published charts
+    needs: [build, charts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      # For versions.env and the kind topology only: the deploy runs elsewhere.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/load-versions
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: ${{ env.KIND_VERSION }}
+          kubectl_version: ${{ env.KUBECTL_VERSION }}
+          cluster_name: ci-smoke
+          config: config/cluster.yaml
+          wait: 120s
+
+      # As make cluster and kates deploy's own cluster build do: alpha is the
+      # control plane and one of the three zones.
+      - name: Make every zone schedulable
+        run: |
+          kubectl wait --for=condition=Ready nodes --all --timeout=180s
+          kubectl taint nodes --all node-role.kubernetes.io/control-plane:NoSchedule- || true
+
+      - name: Download the CLI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kates-linux-amd64
+          path: ${{ runner.temp }}/cli
+
+      - name: Deploy from the published charts, outside any checkout
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KATES_REQUIRE_SIGNED_CHARTS: "1"
+        run: |
+          set -euo pipefail
+          tar -xzf "${RUNNER_TEMP}/cli/kates-linux-amd64.tar.gz" -C "${RUNNER_TEMP}/cli"
+          kates="${RUNNER_TEMP}/cli/kates"
+          mkdir -p "${RUNNER_TEMP}/elsewhere" && cd "${RUNNER_TEMP}/elsewhere"
+          "${kates}" version
+          flags=(--yes --with-monitoring=false --with-chaos=false --with-kafka-ui=false
+                 --with-schema-registry none --with-cert-manager=false)
+          "${kates}" deploy --dry-run "${flags[@]}"
+          "${kates}" deploy "${flags[@]}"
+          helm list -A
+          kubectl get pods -A
+
+      - name: Show what failed
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -60 || true
+          cat "${RUNNER_TEMP}/elsewhere/deploy-error.log" ~/.local/state/kates/deploy/deploy-error.log 2>/dev/null || true
+
   release:
     name: Create GitHub Release
-    needs: [build, kates-image, connect-image, tester-image, charts]
+    needs: [build, kates-image, connect-image, tester-image, charts, published-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
