@@ -18,12 +18,12 @@ import (
 // restores everything resolveChartRoot touches.
 func withChartBuild(t *testing.T, versions string) {
 	t.Helper()
-	oldVersions, oldVersion := ChartVersions, Version
+	oldVersions, oldVersion, oldPins := ChartVersions, Version, MigratePins
 	oldRoot, oldPublished, oldBundle := chartRoot, chartsPublished, deployChartBundle
 	oldCombined, oldHelm, oldLatest, oldCosign := runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn
 	oldOut, oldErr := output.Out, output.Err
 	t.Cleanup(func() {
-		ChartVersions, Version = oldVersions, oldVersion
+		ChartVersions, Version, MigratePins = oldVersions, oldVersion, oldPins
 		chartRoot, chartsPublished, deployChartBundle = oldRoot, oldPublished, oldBundle
 		runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn = oldCombined, oldHelm, oldLatest, oldCosign
 		output.Out, output.Err = oldOut, oldErr

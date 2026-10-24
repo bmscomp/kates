@@ -180,7 +180,7 @@ func buildMigratePlan(res *migrateResolution, f *migratePairFlags) (*migratePlan
 		Mirror: migratePlanMirror{
 			Policy: l.Policy, MinSourceVersion: kafkaversion.MinMirrorSource.String(), Preflight: true,
 			TopicsPattern: migrate.TopicsPattern(l.Topics), GroupID: l.GroupID, Alias: l.SourceAlias,
-			EraOverlay: migrate.EraOverlayPath(l.From), Version: l.To.String(), StrimziVersion: env.StrimziVersion,
+			EraOverlay: chartRootPath(migrate.EraOverlayPath(l.From)), Version: l.To.String(), StrimziVersion: env.StrimziVersion,
 		},
 		Notes: append(append([]string{}, env.Notes...), res.Notes...), Warnings: res.Warnings, NotYet: res.Unimplemented,
 		Labels:   l.RoleLabels(migrate.RoleSource),
@@ -317,7 +317,7 @@ func printMigratePlan(p *migratePlan) {
 		}
 		output.KeyValue("operator", src.Operator)
 		output.KeyValue("namespace", src.Namespace+"  (created by up, labelled "+migrate.LabelLab+"="+p.Lab.Name+")")
-		output.KeyValue("release", src.Release+"  "+migrate.SourceChartPath)
+		output.KeyValue("release", src.Release+"  "+chartRef("legacy-kafka"))
 		output.KeyValue("bootstrap", src.Bootstrap)
 		auth := src.Auth
 		if src.User != "" {
@@ -348,7 +348,7 @@ func printMigratePlan(p *migratePlan) {
 	output.KeyValue("credential", secret)
 
 	output.SubHeader("mirror")
-	output.KeyValue("release", p.Lab.MirrorRelease+" in "+p.Lab.MirrorNamespace+"  "+migrate.MirrorChartPath)
+	output.KeyValue("release", p.Lab.MirrorRelease+" in "+p.Lab.MirrorNamespace+"  "+chartRef("mirror-maker2"))
 	output.KeyValue("CR", p.Lab.MirrorCR)
 	aliases := make([]string, 0, len(p.Sources))
 	for _, src := range p.Sources {
@@ -637,7 +637,7 @@ func migrateInteractivePick(env *migrateEnv, f *migratePairFlags) error {
 func migratePickCandidates(env *migrateEnv) []huh.Option[string] {
 	var opts []huh.Option[string]
 	for _, overlay := range []string{"values-kafka-2x.yaml", "values-kafka-3x.yaml"} {
-		v, ok := legacyOverlayVersion(migrate.SourceChartPath + "/" + overlay)
+		v, ok := legacyOverlayVersion(chartRootPath(migrate.SourceChartPath + "/" + overlay))
 		if !ok {
 			continue
 		}

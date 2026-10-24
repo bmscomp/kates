@@ -56,10 +56,11 @@ func chartRegistryPlainHTTP() bool {
 	return os.Getenv("KATES_CHART_REGISTRY_PLAIN_HTTP") == "1"
 }
 
-// deployChartNames are the chart directories deploy installs from, with the
-// name each is published under (its Chart.yaml name).
+// deployChartNames are the chart directories deploy and kates migrate
+// install from, with the name each is published under (its Chart.yaml name).
 var deployChartNames = map[string]string{
 	"apicurio-registry": "apicurio-registry",
+	"legacy-kafka":      "legacy-kafka",
 	"connect-cluster":   "connect-cluster",
 	"kafka-cluster":     "kafka-cluster",
 	"kafka-ui":          "kafka-ui",
@@ -337,8 +338,14 @@ func chartSource() string {
 	return "the checkout at " + dir
 }
 
-// deployChartDirs lists every chart deploy may install, for resolveChartRoot.
+// deployChartDirs lists every chart deploy may install, for resolveChartRoot:
+// all of them but legacy-kafka, which only kates migrate installs.
 func deployChartDirs() []string {
+	return slices.DeleteFunc(publishedChartDirs(), func(dir string) bool { return dir == "legacy-kafka" })
+}
+
+// publishedChartDirs lists every chart the CLI pulls, deploy's and migrate's.
+func publishedChartDirs() []string {
 	return slices.Sorted(maps.Keys(deployChartNames))
 }
 

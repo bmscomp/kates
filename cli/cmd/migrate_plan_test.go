@@ -164,6 +164,7 @@ func TestMigrateResolvePairFindsInstalledAdditionalOperator(t *testing.T) {
 }
 
 func TestMigratePlanDocument(t *testing.T) {
+	migrateTestRepo(t) // the plan names a checkout's paths
 	env := fakeMigrateEnv("")
 	f := newPairFlags("2.8.2")
 	f.SASL = true
@@ -252,6 +253,7 @@ func TestMigratePlanStrimziSourceIsPlanOnly(t *testing.T) {
 }
 
 func TestMigratePlanFanInDocument(t *testing.T) {
+	migrateTestRepo(t) // the plan names a checkout's paths
 	env := fakeMigrateEnv("")
 	f := newPairFlags("2.8.2", "3.9.1")
 	res, err := resolveMigratePair(env, f)

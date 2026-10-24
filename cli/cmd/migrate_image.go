@@ -26,7 +26,6 @@ const (
 	defaultScalaVersion = "2.13"
 	defaultOSRelease    = "jammy"
 	legacyImageName     = "kates-legacy-kafka"
-	legacyDockerfile    = "Dockerfile.legacy-kafka"
 )
 
 // migrateImageOptions are the flags of image build.
@@ -59,13 +58,13 @@ func (o migrateImageOptions) jre() string {
 }
 
 // buildArgs are the docker build arguments shared by build and buildx.
-func (o migrateImageOptions) buildArgs() []string {
+func (o migrateImageOptions) buildArgs(dockerfile string) []string {
 	args := []string{
 		"--build-arg", "KAFKA_VERSION=" + o.Version,
 		"--build-arg", "SCALA_VERSION=" + o.Scala,
 		"--build-arg", "JRE_VERSION=" + o.jre(),
 		"--build-arg", "UBUNTU_RELEASE=" + o.OSRelease,
-		"-f", legacyDockerfile,
+		"-f", dockerfile,
 		"-t", o.image(),
 	}
 	if o.Platform != "" {
@@ -151,13 +150,18 @@ func runMigrateImageBuild(ctx context.Context, o migrateImageOptions) error {
 			return fmt.Errorf("--push needs docker buildx: %w", err)
 		}
 	}
+	dockerfile, buildContext, removeDockerfile, err := legacyDockerfile()
+	if err != nil {
+		return err
+	}
+	defer removeDockerfile()
 	image := o.image()
 	output.SubHeader("Building " + image)
 	migrateHint(fmt.Sprintf("Kafka %s (scala %s) on Temurin JRE %s, %s", o.Version, o.Scala, o.jre(), o.OSRelease))
 
 	if o.Push {
-		args := append([]string{"buildx", "build"}, o.buildArgs()...)
-		args = append(args, "--push", ".")
+		args := append([]string{"buildx", "build"}, o.buildArgs(dockerfile)...)
+		args = append(args, "--push", buildContext)
 		if _, err := defaultRunner.Run(ctx, "docker", args...); err != nil {
 			return fmt.Errorf("docker buildx build --push: %w", err)
 		}
@@ -168,8 +172,8 @@ func runMigrateImageBuild(ctx context.Context, o migrateImageOptions) error {
 			return fmt.Errorf("pull %s back for verification: %w", image, err)
 		}
 	} else {
-		args := append([]string{"build"}, o.buildArgs()...)
-		args = append(args, ".")
+		args := append([]string{"build"}, o.buildArgs(dockerfile)...)
+		args = append(args, buildContext)
 		if _, err := defaultRunner.Run(ctx, "docker", args...); err != nil {
 			return fmt.Errorf("docker build: %w", err)
 		}

@@ -102,10 +102,7 @@ type targetClient struct {
 // written into it. The image is the pinned Strimzi Kafka image, the one
 // the workers run; the tools are those of its Kafka line.
 func openTargetClient(ctx context.Context, o migrateTargetOptions) (*targetClient, error) {
-	if err := requireMigrateRepoRoot(); err != nil {
-		return nil, err
-	}
-	pins, err := migrate.ReadPins(".")
+	pins, err := migrateChartsAndPins(ctx)
 	if err != nil {
 		return nil, err
 	}

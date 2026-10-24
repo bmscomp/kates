@@ -59,8 +59,10 @@ The building blocks it is made of:
   kates migrate mirror deploy|status|cutover|rollback|remove
   kates migrate target topics|offsets <topic>|groups|group <id>
 
-Run it from the repository root: the charts are addressed as charts/…, the
-client image comes from versions.env.`,
+A release build pulls legacy-kafka and mirror-maker2 from the published
+charts and carries the versions.env pins it needs, so no checkout is needed;
+its generated values go under the user state directory. From a checkout (or
+KATES_CHECKOUT) it reads that checkout's charts and versions.env, as before.`,
 }
 
 func init() {
@@ -114,23 +116,6 @@ var (
 
 func migrateSleep(ctx context.Context, d time.Duration) error { return migrateSleepFn(ctx, d) }
 func migrateNow() time.Time                                   { return migrateNowFn() }
-
-// requireMigrateRepoRoot checks that the charts and the pins the migration
-// needs are where the CLI expects them — relative to the working directory,
-// the same convention as kates deploy (see cluster_gate.go).
-func requireMigrateRepoRoot() error {
-	for _, p := range []string{
-		filepath.Join(migrate.MirrorChartPath, "Chart.yaml"),
-		filepath.Join(migrate.SourceChartPath, "Chart.yaml"),
-		migrate.PinsFile,
-	} {
-		if _, err := os.Stat(p); err != nil {
-			return fmt.Errorf("%s is not readable from here.\n"+
-				"  kates migrate needs the charts and versions.env of the kates repo — run from the repo root.", p)
-		}
-	}
-	return nil
-}
 
 // migrateTarget is what the cluster says about the target Kafka.
 type migrateTarget struct {
@@ -212,10 +197,7 @@ func (e *migrateEnv) clientImage() string {
 // vendored chart's window instead of failing — for plan and pairs, which
 // create nothing.
 func discoverMigrateEnv(ctx context.Context, targetCluster, targetNamespace string, allowPin bool) (*migrateEnv, error) {
-	if err := requireMigrateRepoRoot(); err != nil {
-		return nil, err
-	}
-	pins, err := migrate.ReadPins(".")
+	pins, err := migrateChartsAndPins(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +258,7 @@ func discoverMigrateEnv(ctx context.Context, targetCluster, targetNamespace stri
 // planAgainstPin fills the window from the vendored operator chart when the
 // cluster has no operator to ask.
 func (e *migrateEnv) planAgainstPin(cause error) error {
-	tgz, err := strimzi.VendoredChartPath(".")
+	tgz, err := strimzi.VendoredChartPath(chartRoot)
 	if err != nil {
 		return fmt.Errorf("no Strimzi operator on the cluster and no vendored chart to plan against: %w", err)
 	}
@@ -803,7 +785,7 @@ func needsBuiltImage(s *migrate.Source) bool {
 
 // labBuildDir is where a lab's generated files live.
 func labBuildDir(name string) string {
-	return filepath.Join(migrateBuildDir, name)
+	return filepath.Join(migrateBuildRoot(), name)
 }
 
 // sourceValuesPath and mirrorValuesPath are the generated values files.
@@ -830,7 +812,7 @@ func rollbackValuesPath(name string) string {
 // upgrade --install <release> charts/legacy-kafka -n <ns> -f <generated>
 // [-f <user overlay>] --wait --timeout <T>s.
 func helmSourceArgs(s *migrate.Source, valuesPath, userValues string, timeout time.Duration) []string {
-	args := []string{"upgrade", "--install", s.Release, migrate.SourceChartPath, "-n", s.Namespace, "-f", valuesPath}
+	args := []string{"upgrade", "--install", s.Release, chartRootPath(migrate.SourceChartPath), "-n", s.Namespace, "-f", valuesPath}
 	if userValues != "" {
 		args = append(args, "-f", userValues)
 	}
@@ -845,8 +827,11 @@ func helmSourceArgs(s *migrate.Source, valuesPath, userValues string, timeout ti
 // not `build`: the git-ignored Chart.lock goes stale whenever kafka-common's
 // version moves, and a file://-only lock cannot drift.
 func ensureMirrorChartDeps(ctx context.Context) error {
-	if _, err := defaultRunner.Run(ctx, "helm", "dependency", "update", "--skip-refresh", migrate.MirrorChartPath); err != nil {
-		return fmt.Errorf("build the %s dependencies: %w", migrate.MirrorChartPath, err)
+	if chartsPublished {
+		return nil // a published package carries its subcharts
+	}
+	if _, err := defaultRunner.Run(ctx, "helm", "dependency", "update", "--skip-refresh", chartRootPath(migrate.MirrorChartPath)); err != nil {
+		return fmt.Errorf("build the %s dependencies: %w", chartRootPath(migrate.MirrorChartPath), err)
 	}
 	return nil
 }
@@ -856,11 +841,11 @@ func ensureMirrorChartDeps(ctx context.Context) error {
 // overlay's mirrors: is a loopback the era preset must override), then the
 // era preset, then the generated values, then the user's overlay.
 func helmMirrorArgs(l *migrate.Lab, isKind bool, valuesPath, userValues string) []string {
-	args := []string{"upgrade", "--install", l.MirrorRelease, migrate.MirrorChartPath, "-n", l.MirrorNamespace}
+	args := []string{"upgrade", "--install", l.MirrorRelease, chartRootPath(migrate.MirrorChartPath), "-n", l.MirrorNamespace}
 	if isKind {
-		args = append(args, "-f", migrate.MirrorChartPath+"/values-kind.yaml")
+		args = append(args, "-f", chartRootPath(migrate.MirrorChartPath+"/values-kind.yaml"))
 	}
-	args = append(args, "-f", migrate.EraOverlayPath(l.From), "-f", valuesPath)
+	args = append(args, "-f", chartRootPath(migrate.EraOverlayPath(l.From)), "-f", valuesPath)
 	if userValues != "" {
 		args = append(args, "-f", userValues)
 	}
@@ -870,14 +855,14 @@ func helmMirrorArgs(l *migrate.Lab, isKind bool, valuesPath, userValues string) 
 // helmCutoverArgs applies the cutover overlay on top of whatever the
 // release was installed with (--reuse-values keeps every file's values).
 func helmCutoverArgs(release, namespace string, timeout time.Duration) []string {
-	return []string{"upgrade", release, migrate.MirrorChartPath, "-n", namespace, "--reuse-values",
-		"-f", migrate.CutoverValues(), "--timeout", formatSeconds(timeout)}
+	return []string{"upgrade", release, chartRootPath(migrate.MirrorChartPath), "-n", namespace, "--reuse-values",
+		"-f", chartRootPath(migrate.CutoverValues()), "--timeout", formatSeconds(timeout)}
 }
 
 // helmRollbackArgs reverses a cutover with a generated overlay that turns
 // the cutover block off again.
 func helmRollbackArgs(release, namespace, rollbackValues string, timeout time.Duration) []string {
-	return []string{"upgrade", release, migrate.MirrorChartPath, "-n", namespace, "--reuse-values",
+	return []string{"upgrade", release, chartRootPath(migrate.MirrorChartPath), "-n", namespace, "--reuse-values",
 		"-f", rollbackValues, "--timeout", formatSeconds(timeout)}
 }
 

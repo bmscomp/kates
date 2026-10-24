@@ -537,6 +537,14 @@ if ! cmp -s "$CLUSTER_YAML" "$CLI_CLUSTER_YAML"; then
   fail=1
 fi
 
+# ...and the legacy Kafka images from a copy of their Dockerfile.
+CLI_LEGACY_DOCKERFILE="cli/pkg/migrate/legacy-kafka.Dockerfile"
+if ! cmp -s Dockerfile.legacy-kafka "$CLI_LEGACY_DOCKERFILE"; then
+  echo "DRIFT: ${CLI_LEGACY_DOCKERFILE} differs from Dockerfile.legacy-kafka." >&2
+  echo "  kates migrate builds legacy images from that copy: cp Dockerfile.legacy-kafka ${CLI_LEGACY_DOCKERFILE}" >&2
+  fail=1
+fi
+
 # kind chooses the kubeadm API version from the NODE IMAGE, not from its own
 # release: below Kubernetes 1.36 it renders v1beta3, from 1.36 up it renders
 # v1beta4 (kind/pkg/cluster/internal/kubeadm/config.go). The two are not

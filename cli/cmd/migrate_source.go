@@ -169,7 +169,7 @@ func runMigrateSourceDeploy(ctx context.Context, f *migrateSourceFlags) error {
 	if outputMode != "json" {
 		output.KeyValue("source", res.Lab.Describe())
 		output.KeyValue("namespace", res.Lab.SourceNamespace)
-		output.KeyValue("release", res.Lab.SourceRelease+"  "+migrate.SourceChartPath)
+		output.KeyValue("release", res.Lab.SourceRelease+"  "+chartRef("legacy-kafka"))
 		output.KeyValue("image", res.Lab.SourceImage)
 	}
 	if err := migrateConfirm(f.Yes, fmt.Sprintf("Deploy Kafka %s as %s in %s?", res.Lab.From, res.Lab.SourceRelease, res.Lab.SourceNamespace)); err != nil {

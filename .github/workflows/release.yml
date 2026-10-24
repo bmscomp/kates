@@ -74,13 +74,18 @@ jobs:
             version=$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/p' "../${chart}")
             CHART_VERSIONS="${CHART_VERSIONS:+${CHART_VERSIONS},}${name}=${version}"
           done
+          # The versions.env pins kates migrate reads (cli/cmd/migrate_charts.go),
+          # resolved as a shell sourcing the file resolves them.
+          MIGRATE_PINS=$(set -a && . ../versions.env && printf 'STRIMZI_VERSION=%s,STRIMZI_KAFKA_VERSION=%s,KAFKA_IMAGE=%s' \
+            "${STRIMZI_VERSION}" "${STRIMZI_KAFKA_VERSION}" "${KAFKA_IMAGE}")
 
           go build -trimpath \
             -ldflags="-s -w \
               -X ${MODULE}.Version=${VERSION} \
               -X ${MODULE}.Commit=${COMMIT} \
               -X ${MODULE}.BuildDate=${BUILD_DATE} \
-              -X ${MODULE}.ChartVersions=${CHART_VERSIONS}" \
+              -X ${MODULE}.ChartVersions=${CHART_VERSIONS} \
+              -X ${MODULE}.MigratePins=${MIGRATE_PINS}" \
             -o kates .
 
       # scripts/install-kates.sh unpacks this layout, and

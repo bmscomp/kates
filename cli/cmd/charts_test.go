@@ -57,7 +57,7 @@ func TestAPlainHTTPMirrorIsVerifiedOverHTTP(t *testing.T) {
 }
 
 // allChartVersions names every chart deploy installs, as a release build does.
-const allChartVersions = "apicurio-registry=0.4.1,connect-cluster=2.1.14,kafka-cluster=1.0.18,kafka-ui=0.3.2,kates=0.14.1,kates-chaos=2.3.4,mirror-maker2=0.11.12,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
+const allChartVersions = "legacy-kafka=0.2.1,apicurio-registry=0.4.1,connect-cluster=2.1.14,kafka-cluster=1.0.18,kafka-ui=0.3.2,kates=0.14.1,kates-chaos=2.3.4,mirror-maker2=0.11.12,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
 
 func TestAChartBundleIsPulledThenReadWithNoNetwork(t *testing.T) {
 	withChartBuild(t, allChartVersions)
@@ -71,7 +71,7 @@ func TestAChartBundleIsPulledThenReadWithNoNetwork(t *testing.T) {
 	if err := runChartsPull(context.Background(), bundle); err != nil {
 		t.Fatalf("charts pull: %v", err)
 	}
-	for _, dir := range deployChartDirs() {
+	for _, dir := range publishedChartDirs() {
 		if !chartVerified(filepath.Join(bundle, "charts", dir)) {
 			t.Errorf("%s is not in the bundle with its signature check", dir)
 		}

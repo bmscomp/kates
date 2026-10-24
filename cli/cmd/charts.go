@@ -20,7 +20,7 @@ var chartsCmd = &cobra.Command{
 var chartsPullCmd = &cobra.Command{
 	Use:   "pull --to DIR",
 	Short: "Pull this release's charts into a bundle kates deploy reads offline",
-	Long: `Pulls every chart kates deploy installs, at the versions of this release,
+	Long: `Pulls every chart kates deploy and kates migrate install, at the versions of this release,
 into DIR, and checks each one's cosign signature as deploy does. Copy DIR to
 a machine without network access, and deploy from it there:
 
@@ -59,7 +59,7 @@ func runChartsPull(ctx context.Context, to string) error {
 	if err != nil {
 		return err
 	}
-	dirs := deployChartDirs()
+	dirs := publishedChartDirs()
 	if err := fillChartRoot(ctx, root, false, dirs); err != nil {
 		return err
 	}
