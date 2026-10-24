@@ -1,0 +1,4 @@
+af52bb05f0e63285477f9f0c3df0d8e8d353409d9de240058369d9f9267106e0  charts/kafka-cluster/charts/seaweedfs-3.68.0.tgz
+09a0532275f45c4c5593f0a5d0317a6864e9884090eb1a8b2169f69be0f7616a  charts/kates-chaos/charts/litmus-core-3.28.1.tgz
+62d2fc381eeda4fb2bb8e63104d5cc1d192a3eaa53e7d0cc43fa3da97bfdb0b9  charts/monitoring/charts/kube-prometheus-stack-82.4.3.tgz
+0f8a50b2f19bd99482f9fd6e17cf42902f72f9e594a136813ac3f0b7af422efd  charts/strimzi-operator/charts/strimzi-kafka-operator-1.2.0.tgz

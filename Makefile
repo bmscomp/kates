@@ -138,6 +138,7 @@ check: check-help check-versions check-chart-tests ## Run every cheap CI gate lo
 	@if command -v golangci-lint >/dev/null 2>&1; then (cd cli && go vet ./... && golangci-lint run --new-from-merge-base=main ./...) && echo "OK: go vet, golangci-lint (new issues)"; else echo "⚠️  golangci-lint not installed — skipping"; fi
 	@(cd kates && ./mvnw -B -ntp -q spotless:check) && echo "OK: spotless"
 	@./scripts/check-versions.sh --workflows
+	@python3 scripts/chart_bumps.py
 
 # Assert the Strimzi pins agree across all five places that declare one, and the
 # kind toolchain pins between versions.env and config/cluster.yaml.

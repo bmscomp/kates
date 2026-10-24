@@ -209,7 +209,7 @@ Every PR runs the `CI ·` workflows in `.github/workflows/`. Each one path-filte
 
 | Workflow | What it gates |
 |----------|---------------|
-| CI · Lint | actionlint + shellcheck over the workflows, shellcheck over `scripts/`, hadolint, yamllint, `go vet` + golangci-lint (new issues only), `spotless:check`, `make check-help` |
+| CI · Lint | actionlint + shellcheck over the workflows, shellcheck over `scripts/`, hadolint, yamllint, `go vet` + golangci-lint (new issues only), `spotless:check`, `make check-help`, and that a chart whose packaged files changed carries a new version (`scripts/chart_bumps.py`; a subchart's new version needs a new `kates-platform` too) |
 | CI · Backend | `./mvnw verify`, Trivy/govulncheck dependency scans, Helm lint + kubeconform for every chart, Kyverno policies, config YAML, Go tests |
 | CI · Kafka charts, CI · MirrorMaker 2 | The Strimzi charts rendered across every overlay and checked against the pinned CRDs, metric contracts, dashboards |
 | CI · Docker, CI · Connect | The images build (and the Connect image boots and moves a record) |
