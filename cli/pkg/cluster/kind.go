@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"strings"
@@ -14,6 +15,13 @@ const DefaultKindClusterName = "panda"
 // DefaultKindConfig is the 3-availability-zone topology: alpha (control-plane),
 // sigma and gamma (workers), each labelled topology.kubernetes.io/zone.
 const DefaultKindConfig = "config/cluster.yaml"
+
+// KindConfig is DefaultKindConfig built into the binary, so a kates run
+// outside a checkout creates the same cluster. kind_test.go holds it equal to
+// the repository's file.
+//
+//go:embed kind-cluster.yaml
+var KindConfig []byte
 
 // KindZones are the zones DefaultKindConfig creates. Exported so the UI can
 // state what it is about to build without re-parsing the YAML.

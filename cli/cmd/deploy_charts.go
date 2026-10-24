@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/strimzi"
@@ -62,8 +66,10 @@ func chartRootPath(rel string) string {
 
 // resolveChartRoot points chartRoot at the charts this run installs: a
 // checkout (checkout, else KATES_CHECKOUT, else a dev build's working
-// directory), or this release's published charts, of which it pulls the dirs
-// not cached yet.
+// directory), or this release's published charts. Those dirs are pulled
+// fresh on every run, so a cache left damaged or half-written never reaches a
+// deploy; offline, or when the registry cannot be reached, the copy already
+// cached is used. The caches of other kates versions are removed.
 func resolveChartRoot(ctx context.Context, checkout string, offline bool, dirs ...string) error {
 	if checkout == "" {
 		checkout = os.Getenv("KATES_CHECKOUT")
@@ -80,14 +86,40 @@ func resolveChartRoot(ctx context.Context, checkout string, offline bool, dirs .
 		return err
 	}
 	root := filepath.Join(filepath.Dir(cache), "charts", Version)
+	pruneOtherChartCaches(root)
 	versions := parseChartVersions(ChartVersions)
+	// After one failed refresh the registry is taken as unreachable for this
+	// run: the other cached charts are used as they are, rather than each
+	// waiting out a pull of its own.
+	var refreshErr error
 	for _, dir := range dirs {
-		if err := pullPublishedChart(ctx, root, dir, versions, offline); err != nil {
+		failed, err := pullPublishedChart(ctx, root, dir, versions, offline, refreshErr != nil)
+		if err != nil {
 			return err
 		}
+		if refreshErr == nil {
+			refreshErr = failed
+		}
+	}
+	if refreshErr != nil {
+		fmt.Fprintln(output.Err, output.WarningStyle.Render(fmt.Sprintf("  %s Could not refresh the published charts, so the copies cached in %s are used: %v", output.Glyphs().Warn, root, refreshErr)))
 	}
 	chartRoot, chartsPublished = root, true
 	return nil
+}
+
+// pruneOtherChartCaches removes the charts cached for other kates versions,
+// beside root. Only this build's versions are ever installed.
+func pruneOtherChartCaches(root string) {
+	entries, err := os.ReadDir(filepath.Dir(root))
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() && e.Name() != filepath.Base(root) {
+			_ = os.RemoveAll(filepath.Join(filepath.Dir(root), e.Name()))
+		}
+	}
 }
 
 // parseChartVersions reads ChartVersions into name → version.
@@ -101,22 +133,37 @@ func parseChartVersions(s string) map[string]string {
 	return versions
 }
 
-// pullPublishedChart unpacks one published chart into root/charts/dir unless
-// that version is there already.
-func pullPublishedChart(ctx context.Context, root, dir string, versions map[string]string, offline bool) error {
+// pullPublishedChart unpacks a fresh copy of one published chart into
+// root/charts/dir. Offline, or with keepCached, a cached copy of the same
+// version is used as it is. When the pull fails and such a copy is cached,
+// it is kept and the failure comes back as failed rather than err.
+func pullPublishedChart(ctx context.Context, root, dir string, versions map[string]string, offline, keepCached bool) (failed, err error) {
 	name := deployChartNames[dir]
 	version := versions[name]
 	if version == "" {
-		return fmt.Errorf("this kates build (%s) names no published version of chart %q; set KATES_CHECKOUT to a Kates checkout to deploy its charts", Version, name)
+		return nil, fmt.Errorf("this kates build (%s) names no published version of chart %q; set KATES_CHECKOUT to a Kates checkout to deploy its charts", Version, name)
 	}
 	dest := filepath.Join(root, "charts", dir)
-	if _, have, err := localChart(dest); err == nil && have == version {
-		return nil
-	}
 	ref := chartRegistry + "/" + name
-	if offline {
-		return fmt.Errorf("chart %s %s is not cached in %s and the network is off", ref, version, dest)
+	_, have, lerr := localChart(dest)
+	cached := lerr == nil && have == version
+	switch {
+	case cached && (offline || keepCached):
+		return nil, nil
+	case offline:
+		return nil, fmt.Errorf("chart %s %s is not cached in %s and the network is off", ref, version, dest)
 	}
+	err = fetchPublishedChart(ctx, ref, name, version, dir, dest)
+	if err != nil && cached {
+		return err, nil
+	}
+	return nil, err
+}
+
+// fetchPublishedChart pulls ref at version and swaps it in for dest. dest is
+// set aside first and put back if the swap fails, so a failed refresh leaves
+// the cached copy in place.
+func fetchPublishedChart(ctx context.Context, ref, name, version, dir, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("creating the chart cache: %w", err)
 	}
@@ -128,10 +175,17 @@ func pullPublishedChart(ctx context.Context, root, dir string, versions map[stri
 
 	// On stderr, so a first `kates versions -o json` still prints only JSON.
 	fmt.Fprintln(output.Err, output.DimStyle.Render(fmt.Sprintf("  Pulling %s %s...", ref, version)))
-	if out, err := runExecCombinedFn(ctx, "helm", "pull", ref, "--version", version, "--untar", "--untardir", tmp); err != nil {
+	pullDir := filepath.Join(tmp, "pull")
+	// The largest package is a few MB; a stalled network must not hold the run.
+	pullCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if out, err := runExecCombinedFn(pullCtx, "helm", "pull", ref, "--version", version, "--untar", "--untardir", pullDir); err != nil {
 		return fmt.Errorf("pulling %s %s: %w: %s", ref, version, err, strings.TrimSpace(string(out)))
 	}
-	pulled := filepath.Join(tmp, name)
+	pulled := filepath.Join(pullDir, name)
+	if _, got, err := localChart(pulled); err != nil || got != version {
+		return fmt.Errorf("pulling %s %s gave %q: %v", ref, version, got, err)
+	}
 	if dir == "strimzi-operator" {
 		// A package carries its subcharts unpacked; pkg/strimzi reads the
 		// operator chart as the tarball `helm dependency build` leaves in a
@@ -144,14 +198,17 @@ func pullPublishedChart(ctx context.Context, root, dir string, versions map[stri
 			return err
 		}
 	}
-	if err := os.RemoveAll(dest); err != nil {
-		return fmt.Errorf("removing the stale %s: %w", dest, err)
+	old := filepath.Join(tmp, "old")
+	if err := os.Rename(dest, old); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("setting aside the cached %s: %w", dest, err)
 	}
-	// Another kates may have unpacked the same version first.
 	if err := os.Rename(pulled, dest); err != nil {
-		if _, have, rerr := localChart(dest); rerr != nil || have != version {
-			return fmt.Errorf("unpacking %s %s into %s: %w", ref, version, dest, err)
+		// Another kates may have unpacked the same version first.
+		if _, have, rerr := localChart(dest); rerr == nil && have == version {
+			return nil
 		}
+		_ = os.Rename(old, dest)
+		return fmt.Errorf("unpacking %s %s into %s: %w", ref, version, dest, err)
 	}
 	return nil
 }
@@ -190,4 +247,52 @@ func chartSource() string {
 // deployChartDirs lists every chart deploy may install, for resolveChartRoot.
 func deployChartDirs() []string {
 	return slices.Sorted(maps.Keys(deployChartNames))
+}
+
+// latestReleaseURL answers with the newest kates release.
+const latestReleaseURL = "https://api.github.com/repos/bmscomp/kates/releases/latest"
+
+// latestReleaseFn reads the newest kates release's tag; tests replace it.
+var latestReleaseFn = latestRelease
+
+func latestRelease(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("%s: %s", latestReleaseURL, resp.Status)
+	}
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil {
+		return "", err
+	}
+	return release.TagName, nil
+}
+
+// warnIfNewerRelease says when a kates release newer than this build is out.
+// This build installs its own release's charts, the ones it was tested with,
+// so the newer charts come with the newer kates. The check never stops a run:
+// offline, or on any error, it says nothing.
+func warnIfNewerRelease(ctx context.Context) {
+	if ChartVersions == "" {
+		return // a dev build installs its checkout
+	}
+	latest, err := latestReleaseFn(ctx)
+	if err != nil {
+		return
+	}
+	if cmp, err := compareVersions(strings.TrimPrefix(latest, "v"), strings.TrimPrefix(Version, "v")); err == nil && cmp > 0 {
+		output.Warn(fmt.Sprintf("kates %s is out; this is %s, so this run installs %s's charts. For the new ones, upgrade first: brew upgrade bmscomp/tap/kates", latest, Version, Version))
+	}
 }

@@ -52,8 +52,11 @@ A cluster admin gets the full profile. For any other account, deploy says so
 and offers the admin-less profile instead.
 
 A release build installs the charts its release published to
-oci://ghcr.io/bmscomp/charts, at the versions of its tag, pulled once into the
-user cache, so no checkout of the repository is needed. A dev build installs
+oci://ghcr.io/bmscomp/charts, at the versions of its tag, pulled fresh into the
+user cache on every run (the cached copy serves when the registry cannot be
+reached), so no checkout of the repository is needed, and it says when a newer
+kates release is out. With no reachable cluster, and Docker and kind on the
+machine, it offers to create the local 3-zone kind cluster. A dev build installs
 the charts of the checkout it runs in. --checkout (or KATES_CHECKOUT) makes any
 build install a checkout's charts:
 
@@ -153,6 +156,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Before the gate, which may build a kind cluster: a newer release's
+	// charts need the newer kates.
+	warnIfNewerRelease(context.Background())
 
 	// ── Target cluster ───────────────────────────────────────────────────
 	// This runs FIRST, before the banner and the wizard. There is no point

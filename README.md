@@ -37,7 +37,7 @@ It has three parts: the `kates` CLI (Go), a backend service (Quarkus) that runs 
 
 This path builds the whole stack on a local Kind cluster. You need:
 
-- a clone of this repository, for the `make` targets and the Kind cluster definition, which are read relative to the working directory, so run every command from the repository root. The Homebrew `kates` installs the charts its release published, the same versions as the tag you check out; a `kates` built from source installs the checkout's charts;
+- a clone of this repository, for the `make` targets, which are read relative to the working directory, so run every command from the repository root. The Homebrew `kates` installs the charts its release published, the same versions as the tag you check out; a `kates` built from source installs the checkout's charts;
 - Docker (any daemon the `docker` CLI talks to), [Kind](https://kind.sigs.k8s.io/), `kubectl` and Helm, at the minimum versions in the book's [Prerequisites](docs/book/12-deployment.md#prerequisites);
 - about 16 GB of RAM, with at least 10 GB of it available to Docker, on macOS or Linux (amd64 or arm64).
 
