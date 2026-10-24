@@ -13,12 +13,9 @@ type: application
 # REMOVED. 0.10.0 froze them into the generated board and documented them as
 # inert, which left two keys that accept a number and ignore it; a release
 # setting either is now refused with the constant to edit named.
-# Patch: test-mm2 and test-connectors get requests and limits, so every pod
-# passes Pod Security "restricted" with default values; podLabels reach every
-# pod and global.imageRegistry every image.
-# Patch: the pre-flight, data-test and secret-sync image moves to kates-tester 1.29.3, the tag the
-# v1.29.3 release publishes; every Strimzi chart pins the same one.
-version: 0.11.12
+# Patch: testImages.kubectl moves to kates-tester 1.30.0, the tag the v1.30.0
+# release publishes; every chart that runs it pins the same one.
+version: 0.11.13
 # Tracks the Kafka line the MM2 Connect workers run (STRIMZI_KAFKA_VERSION).
 appVersion: "4.3.1"
 kubeVersion: ">=1.27.0-0"
@@ -45,6 +42,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.30.0, the tag the v1.30.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.29.3 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.29.3, the tag the v1.29.3 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.29.2 — nothing under tester/ moved — so this is the pin, not the tooling."
     - kind: changed
