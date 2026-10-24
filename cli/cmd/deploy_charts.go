@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -102,10 +103,18 @@ func resolveChartRoot(ctx context.Context, checkout string, offline bool, dirs .
 		}
 	}
 	if refreshErr != nil {
-		fmt.Fprintln(output.Err, output.WarningStyle.Render(fmt.Sprintf("  %s Could not refresh the published charts, so the copies cached in %s are used: %v", output.Glyphs().Warn, root, refreshErr)))
+		warnStderr(fmt.Sprintf("Could not refresh the published charts, so the copies cached in %s are used: %v", root, refreshErr))
+	}
+	if err := checkChartSignatures(root, dirs); err != nil {
+		return err
 	}
 	chartRoot, chartsPublished = root, true
 	return nil
+}
+
+// warnStderr warns on stderr, so `kates versions -o json` still prints only JSON.
+func warnStderr(msg string) {
+	fmt.Fprintln(output.Err, output.WarningStyle.Render("  "+output.Glyphs().Warn+" "+msg))
 }
 
 // pruneOtherChartCaches removes the charts cached for other kates versions,
@@ -133,10 +142,11 @@ func parseChartVersions(s string) map[string]string {
 	return versions
 }
 
-// pullPublishedChart unpacks a fresh copy of one published chart into
-// root/charts/dir. Offline, or with keepCached, a cached copy of the same
-// version is used as it is. When the pull fails and such a copy is cached,
-// it is kept and the failure comes back as failed rather than err.
+// pullPublishedChart unpacks a fresh, signature-checked copy of one published
+// chart into root/charts/dir. Offline, or with keepCached, a cached copy of
+// the same version is used as it is. When the pull fails and such a copy is
+// cached, it is kept and the failure comes back as failed rather than err;
+// a signature that does not check out is always err.
 func pullPublishedChart(ctx context.Context, root, dir string, versions map[string]string, offline, keepCached bool) (failed, err error) {
 	name := deployChartNames[dir]
 	version := versions[name]
@@ -154,15 +164,17 @@ func pullPublishedChart(ctx context.Context, root, dir string, versions map[stri
 		return nil, fmt.Errorf("chart %s %s is not cached in %s and the network is off", ref, version, dest)
 	}
 	err = fetchPublishedChart(ctx, ref, name, version, dir, dest)
-	if err != nil && cached {
+	var sigErr *chartSignatureError
+	if err != nil && cached && !errors.As(err, &sigErr) {
 		return err, nil
 	}
 	return nil, err
 }
 
-// fetchPublishedChart pulls ref at version and swaps it in for dest. dest is
-// set aside first and put back if the swap fails, so a failed refresh leaves
-// the cached copy in place.
+// fetchPublishedChart pulls ref at version, checks its signature, and swaps
+// it in for dest. dest is set aside first and put back if the swap fails, so
+// a failed refresh leaves the cached copy in place. Without cosign the chart
+// goes in unchecked, and its verified marker is removed.
 func fetchPublishedChart(ctx context.Context, ref, name, version, dir, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("creating the chart cache: %w", err)
@@ -179,12 +191,23 @@ func fetchPublishedChart(ctx context.Context, ref, name, version, dir, dest stri
 	// The largest package is a few MB; a stalled network must not hold the run.
 	pullCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if out, err := runExecCombinedFn(pullCtx, "helm", "pull", ref, "--version", version, "--untar", "--untardir", pullDir); err != nil {
+	out, err := runExecCombinedFn(pullCtx, "helm", "pull", ref, "--version", version, "--untar", "--untardir", pullDir)
+	if err != nil {
 		return fmt.Errorf("pulling %s %s: %w: %s", ref, version, err, strings.TrimSpace(string(out)))
 	}
 	pulled := filepath.Join(pullDir, name)
 	if _, got, err := localChart(pulled); err != nil || got != version {
 		return fmt.Errorf("pulling %s %s gave %q: %v", ref, version, got, err)
+	}
+	m := helmDigest.FindStringSubmatch(string(out))
+	if m == nil {
+		return fmt.Errorf("helm pull printed no digest for %s %s, so its signature cannot be checked", ref, version)
+	}
+	signed := true
+	if err := verifyChart(ctx, ref, m[1], dest); errors.Is(err, errNoCosign) {
+		signed = false
+	} else if err != nil {
+		return err
 	}
 	if dir == "strimzi-operator" {
 		// A package carries its subcharts unpacked; pkg/strimzi reads the
@@ -195,6 +218,12 @@ func fetchPublishedChart(ctx context.Context, ref, name, version, dir, dest stri
 			return fmt.Errorf("packing the operator chart of %s %s: %w: %s", ref, version, err, strings.TrimSpace(string(out)))
 		}
 		if err := os.RemoveAll(sub); err != nil {
+			return err
+		}
+	}
+	marker := verifiedMarker(dest)
+	if !signed {
+		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -209,6 +238,9 @@ func fetchPublishedChart(ctx context.Context, ref, name, version, dir, dest stri
 		}
 		_ = os.Rename(old, dest)
 		return fmt.Errorf("unpacking %s %s into %s: %w", ref, version, dest, err)
+	}
+	if signed {
+		return os.WriteFile(marker, []byte(m[1]+"\n"), 0o644)
 	}
 	return nil
 }

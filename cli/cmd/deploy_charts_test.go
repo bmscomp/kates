@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,21 +20,40 @@ func withChartBuild(t *testing.T, versions string) {
 	t.Helper()
 	oldVersions, oldVersion := ChartVersions, Version
 	oldRoot, oldPublished := chartRoot, chartsPublished
-	oldCombined, oldHelm, oldLatest := runExecCombinedFn, runHelmFn, latestReleaseFn
+	oldCombined, oldHelm, oldLatest, oldCosign := runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn
 	oldOut, oldErr := output.Out, output.Err
 	t.Cleanup(func() {
 		ChartVersions, Version = oldVersions, oldVersion
 		chartRoot, chartsPublished = oldRoot, oldPublished
-		runExecCombinedFn, runHelmFn, latestReleaseFn = oldCombined, oldHelm, oldLatest
+		runExecCombinedFn, runHelmFn, latestReleaseFn, cosignPathFn = oldCombined, oldHelm, oldLatest, oldCosign
 		output.Out, output.Err = oldOut, oldErr
 	})
 	ChartVersions, Version = versions, "v9.9.9"
+	cosignPathFn = func() (string, error) { return "cosign", nil }
 	t.Setenv("KATES_CHECKOUT", "")
+	t.Setenv("KATES_REQUIRE_SIGNED_CHARTS", "")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 }
 
+// fakeDigest is the digest the fake registry serves for a chart at a version.
+func fakeDigest(name, version string) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(name+"@"+version)))
+}
+
+// callsOf are the calls among calls that start with prefix ("helm pull").
+func callsOf(calls [][]string, prefix string) [][]string {
+	var out [][]string
+	for _, c := range calls {
+		if strings.HasPrefix(strings.Join(c, " "), prefix) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // fakeHelmPull stands in for `helm pull --untar` and `helm package`, writing
-// what they would, and records every call.
+// what they would, and for a `cosign verify` that passes, and records every
+// call.
 func fakeHelmPull(t *testing.T) *[][]string {
 	t.Helper()
 	var calls [][]string
@@ -46,6 +67,9 @@ func fakeHelmPull(t *testing.T) *[][]string {
 				t.Fatal(err)
 			}
 		}
+		if name == "cosign" {
+			return []byte("Verification for ... --\n"), nil
+		}
 		switch args[0] {
 		case "pull": // pull <ref> --version <v> --untar --untardir <dir>
 			chart := filepath.Join(args[6], filepath.Base(args[1]))
@@ -53,6 +77,7 @@ func fakeHelmPull(t *testing.T) *[][]string {
 			if filepath.Base(args[1]) == "strimzi-operator" {
 				write(filepath.Join(chart, "charts", "strimzi-kafka-operator", "Chart.yaml"), "name: strimzi-kafka-operator\nversion: 1.2.0\n")
 			}
+			return []byte("Pulled: " + args[1] + ":" + args[3] + "\nDigest: " + fakeDigest(filepath.Base(args[1]), args[3]) + "\n"), nil
 		case "package": // package <dir> --destination <dir>
 			write(filepath.Join(args[3], "strimzi-kafka-operator-1.2.0.tgz"), "tgz")
 		}
@@ -143,19 +168,21 @@ func TestResolveChartRootPullsThePublishedVersionsFreshEachRun(t *testing.T) {
 		t.Fatalf("offline, the cache was pulled again: %v", (*calls)[n:])
 	}
 
-	// Online, every run pulls fresh copies: three pulls and one repack.
+	// Online, every run pulls fresh copies. The digests are the ones already
+	// verified, so cosign is not asked again.
 	if err := resolveChartRoot(context.Background(), "", false, dirs...); err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != 2*n {
-		t.Fatalf("a second run made %d calls, want %d: %v", len(*calls)-n, n, (*calls)[n:])
+	if again := (*calls)[n:]; len(callsOf(again, "helm pull")) != 3 || len(callsOf(again, "cosign")) != 0 {
+		t.Fatalf("a second run made %v; want three pulls and no cosign call", again)
 	}
 
 	ChartVersions = "kates=0.14.2,kates-monitoring=1.7.1,strimzi-operator=0.4.5"
 	if err := resolveChartRoot(context.Background(), "", false, "kates"); err != nil {
 		t.Fatal(err)
 	}
-	if last := (*calls)[len(*calls)-1]; !slices.Contains(last, "0.14.2") {
+	pulls := callsOf(*calls, "helm pull")
+	if last := pulls[len(pulls)-1]; !slices.Contains(last, "0.14.2") {
 		t.Fatalf("a new kates version was not pulled: %v", last)
 	}
 	if _, v, _ := localChart(chartRootPath("charts/kates")); v != "0.14.2" {

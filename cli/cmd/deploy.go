@@ -55,7 +55,8 @@ A release build installs the charts its release published to
 oci://ghcr.io/bmscomp/charts, at the versions of its tag, pulled fresh into the
 user cache on every run (the cached copy serves when the registry cannot be
 reached), so no checkout of the repository is needed, and it says when a newer
-kates release is out. With no reachable cluster, and Docker and kind on the
+kates release is out. Each chart's cosign signature is checked before it is
+used; KATES_REQUIRE_SIGNED_CHARTS=1 refuses charts it could not check. With no reachable cluster, and Docker and kind on the
 machine, it offers to create the local 3-zone kind cluster; behind a proxy, its
 nodes get HTTP_PROXY, HTTPS_PROXY, NO_PROXY and the CA in PROXY_CA_FILE. A dev build installs
 the charts of the checkout it runs in. --checkout (or KATES_CHECKOUT) makes any

@@ -890,6 +890,8 @@ cosign verify ghcr.io/bmscomp/kates:<version> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
+`kates deploy` applies the same kind of check to the charts it pulls. Each one must carry a signature from `publish-charts.yml` before deploy uses it, and a chart that fails stops the run. [Where the charts come from](10-cli-reference.md#deploy) has the rules, including what happens without cosign.
+
 To verify images you sign yourself, for example in a mirror, set `publicKey`. The chart then renders a `ClusterPolicy` for that key instead. Like any `ClusterPolicy` check, it reads the legacy `.sig` format only: sign with cosign 2, or with cosign 3 and `--new-bundle-format=false`.
 
 ```yaml
