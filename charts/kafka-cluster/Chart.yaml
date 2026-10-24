@@ -2,14 +2,10 @@ apiVersion: v2
 name: kafka-cluster
 description: A Strimzi Kafka cluster in KRaft mode — node pools, topics, users, rebalancing, tiered storage, network policy and observability
 type: application
-# Patch: with default values every pod passes Pod Security "restricted" —
-# the Helm test pods get requests and limits, the operator's pods get the
-# restricted security contexts through their CR templates — podLabels reach
-# every pod, and global.imagePullSecrets also takes plain names. SeaweedFS
-# (off by default) is unchanged and cannot pass restricted.
-# Patch: the package ships the environment overlays (values-*.yaml), which
-# kates deploy passes with -f when it installs the published chart.
-version: 1.0.18
+# Patch: testImages.kubectl and testImages.kafka move to kates-tester 1.30.0,
+# the tag the v1.30.0 release publishes; every chart that runs it pins the
+# same one.
+version: 1.0.19
 appVersion: "4.3.1"
 icon: https://strimzi.io/assets/images/strimzi_logo.png
 home: https://strimzi.io/
@@ -43,6 +39,8 @@ annotations:
   # newer; never lower it without removing the feature that set it.
   kates.io/kafka-floor: "4.2.0"
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl and testImages.kafka move to kates-tester 1.30.0, the tag the v1.30.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.29.3 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed
       description: "The package ships the environment overlays (values-*.yaml), which .helmignore used to leave out, so kates deploy installs the published chart with the same -f overlays as a checkout, and helm pull --untar hands them to anyone else"
     - kind: fixed

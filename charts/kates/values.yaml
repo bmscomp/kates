@@ -29,7 +29,7 @@ image:
   repository: ghcr.io/bmscomp/kates
   # -- Image tag. Must be the release that carries the non-blocking health
   # endpoints the probe defaults below depend on (>= 1.22.0).
-  tag: "1.29.3"
+  tag: "1.30.0"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 

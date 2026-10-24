@@ -49,7 +49,7 @@ strimziVersion: "1.2.0"
 # tests). The operator's own image comes from the subchart.
 testImages:
   # -- kubectl image used by the CRD-upgrade hook Job and the Helm tests
-  kubectl: "ghcr.io/bmscomp/kates-tester:1.29.3"
+  kubectl: "ghcr.io/bmscomp/kates-tester:1.30.0"
 
 # ── Helm tests ───────────────────────────────────────────────────────────────
 tests:
