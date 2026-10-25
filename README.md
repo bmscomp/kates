@@ -24,7 +24,7 @@ Performance tests work against any Kafka cluster the Kates API can reach; fault 
 **[The book](https://bmscomp.github.io/kates/)** · [Why Kates](#why-kates) · [Quick start](#quick-start) · [CLI at a glance](#cli-at-a-glance) · [Architecture](#architecture) · [Documentation](#documentation) · [Helm charts](#helm-charts) · [Building from source](#building-from-source) · [Contributing](#contributing)
 
 <p align="center">
-  <img src="docs/assets/kates-deploy.png" width="900" alt="kates deploy terminal UI showing live rollout progress for Strimzi Operator, Cert-Manager, Kyverno, a three-zone KRaft Kafka cluster (alpha, sigma, gamma), and Prometheus/Grafana monitoring" />
+  <img src="docs/assets/demo.gif" width="900" alt="Animated terminal demo of kates health, kates test create --type LOAD --records 100000 --wait, kates gate --min-grade C, and kates security audit running against a live Kafka cluster" />
 </p>
 
 ## What it does
@@ -105,6 +105,10 @@ kates gate --min-grade C --records 100000
 </details>
 
 ### What `kates deploy` installs
+
+<p align="center">
+  <img src="docs/assets/kates-deploy.png" width="900" alt="kates deploy terminal UI showing live rollout progress for Strimzi Operator, Cert-Manager, Kyverno, a three-zone KRaft Kafka cluster (alpha, sigma, gamma), and Prometheus/Grafana monitoring" />
+</p>
 
 With the default isolated topology:
 
