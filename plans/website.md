@@ -20,8 +20,8 @@ Every claim on the page comes from the README or the book: eight test types, thi
 
 ### Identity
 
-- **Palette**: the book's dark theme (`docs/book/theme/kates-dark.scss`): background `#0e1425`, surfaces `#131c33` / `#182340`, borders `#243150`, text `#dbe2f0`, headings `#f1f4fa`, accent `#5fa9ee` / `#4fa3f0` (the K in the wordmark). Green `#5ed39b` marks passing gates, amber `#f2b84b` a degraded number. One accent only; the page should feel like the CLI output it shows.
-- **Type**: Inter for the interface (as the book does), JetBrains Mono for every command, grade and metric. The book's EB Garamond is for long reading and stays in the book.
+- **Palette**: the "Paper" theme, chosen on 2026-10-25 from five rendered variants (Navy, Paper, Phosphor, Ember, Slate). Off-white page `#f7f5ef`, white cards, navy ink `#102a66` for headings (the logo's navy), text `#2b3350`, accent `#1a5bcc` (the book's link blue), green `#1f8a5b` for passing gates, amber for a degraded number. Terminals and code blocks stay dark (`#0a0f1d`) so the CLI output reads as a screen on a page. The footer is solid navy. The other four palettes are kept as drop-in override stylesheets in `website/themes/`; adding one `<link>` after `styles.css` switches the whole site.
+- **Type**: EB Garamond for `h1` and `h2` and the wordmark, as in the book's chapters; Inter for everything else; JetBrains Mono for every command, grade and metric.
 - **Marks**: the ring-and-streams logo (`docs/assets/kates-logo.svg`) in the nav, the CTA and as favicon; the dark wordmark in the footer; `docs/assets/social-preview.png` as the Open Graph card. The site copies these into `website/assets/` so the folder deploys on its own.
 - **Tone**: plain, declarative, no superlatives. Terminal output and YAML carry the proof; prose explains why it matters.
 

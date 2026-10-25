@@ -1,0 +1,26 @@
+/* Theme: Navy — the book's dark palette (the original default). */
+:root {
+  --bg: #0e1425;
+  --bg-alt: #111a30;
+  --surface: #131c33;
+  --surface-2: #182340;
+  --border: #243150;
+  --border-strong: #33426a;
+  --text: #dbe2f0;
+  --heading: #f1f4fa;
+  --muted: #95a2bd;
+  --accent: #5fa9ee;
+  --accent-strong: #4fa3f0;
+  --accent-soft: rgba(95, 169, 238, 0.14);
+  --ok: #5ed39b;
+  --warn: #f2b84b;
+  --no: #8794b0;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 14px;
+  --wrap: 1180px;
+  --gutter: 20px;
+  color-scheme: dark;
+}
+.nav { background: rgba(14, 20, 37, 0.82); }
+.footer { background: #0a0f1d; }

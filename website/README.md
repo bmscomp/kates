@@ -7,7 +7,8 @@ site links to it.
 ```
 website/
 ├── index.html      the one page
-├── styles.css      palette and layout, shared with the book's dark theme
+├── styles.css      the Paper theme (light, EB Garamond headings) and the layout
+├── themes/         alternative palettes (navy, phosphor, ember, slate); add one <link> after styles.css to switch
 ├── site.js         mobile menu and footer year
 ├── _headers        security and cache headers (Cloudflare Pages, Netlify)
 ├── robots.txt, sitemap.xml
