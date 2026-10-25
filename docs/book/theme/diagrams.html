@@ -13,8 +13,8 @@
 (() => {
   "use strict";
 
-  const FIT_LIMIT = 1.3;  // wider than this many times the room: a thumbnail
-  const FIT_SLACK = 1.1;  // up to this many times the column: shrink to it rather than reach into the margin
+  const FIT_LIMIT = 1.4;  // wider than this many times the room: a thumbnail
+  const FIT_SLACK = 1.12; // up to this many times the column: shrink to it rather than reach into the margin
   const FIT_MAX = 1.5;    // how far "fit to width" may enlarge a small diagram
   const ZOOM_MIN = 0.1;
   const ZOOM_MAX = 4;
@@ -78,7 +78,19 @@
       ...mermaidOpts,
       ...(font ? { fontFamily: font } : {}),
       themeCSS: (mermaidOpts.themeCSS || "") + LABEL_CSS,
-      flowchart: { ...mermaidOpts.flowchart, subGraphTitleMargin: { top: 8, bottom: 6 } },
+      flowchart: {
+        ...mermaidOpts.flowchart,
+        nodeSpacing: 36,
+        rankSpacing: 44,
+        padding: 14,
+        subGraphTitleMargin: { top: 10, bottom: 8 },
+      },
+      sequence: {
+        ...mermaidOpts.sequence,
+        boxMargin: 10,
+        noteMargin: 12,
+        messageMargin: 36,
+      },
     });
   }
 
@@ -95,7 +107,7 @@
   // than cover it. Done to the rendered SVG, so the full-screen copy
   // inherits it.
 
-  const RADIUS = { card: 8, zone: 12, note: 6 };
+  const RADIUS = { card: 10, zone: 14, note: 8 };
   const TITLE_INSET = 12;
 
   function round(rect, radius) {

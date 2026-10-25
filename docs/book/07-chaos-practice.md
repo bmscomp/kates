@@ -293,6 +293,9 @@ steps:
 Aims a `NETWORK_PARTITION` fault at node 0 to test cluster consensus under split-brain conditions [@bailis2014network; @alquraan2018analysis]. For 60 seconds, Kates adds a NetworkPolicy with no allow rules to the pod, on either chaos provider. The playbook does not look up the active controller: `targetBrokerId: 0` picks the broker whose pod name ends in `-0`, which is the active controller only if node 0 also has the controller role and leads the metadata [quorum](appendix-a-glossary.md#gl-quorum) at the time. `targetBrokerId` never picks a dedicated controller; to aim the fault at one, name its pod in `targetPod`.
 
 ```mermaid
+%%| label: fig-chaos-practice-split-brain
+%%| fig-cap: "The `split-brain` playbook isolates Broker 0 behind a deny-all NetworkPolicy while Brokers 1 and 2 continue serving in the quorum majority."
+%%| fig-alt: "Diagram with two groups: Quorum Majority (Broker 1 and Broker 2 with normal communication between them) and Partition target (Broker 0), separated by a dashed edge labeled NETWORK_PARTITION."
 graph LR
     subgraph Majority["Quorum Majority"]
         B1[Broker 1]

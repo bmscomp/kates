@@ -6,7 +6,12 @@ Two things to keep in mind while reading. First, **any job that renders a chart 
 
 ## Pipeline Overview
 
+The diagram below traces how repository events trigger the validation, live-scrape, and release workflows and publish multi-architecture artifacts to container registries and GitHub Releases:
+
 ```mermaid
+%%| label: fig-cicd-pipeline-overview
+%%| fig-cap: "GitHub Actions CI/CD pipeline mapping triggers to validation, live metric scrape, and multi-arch release workflows."
+%%| fig-alt: "Diagram with four main stages: Triggers (Push to main, Pull Request, Tag v*, Manual dispatch, Weekly schedule), Validation on PR/Push (ci.yml, ci-kafka-charts.yml, ci-mirror-maker2.yml, ci-docker.yml, integration.yml), Live scrape on schedule/dispatch/PRs (metrics-live jobs on Kind + real brokers), and Release on Tag (release.yml calling publish-docker.yml, publish-tester.yml, and publish-connect.yml to push multi-arch manifests to ghcr.io and docker.io and CLI binaries to GitHub Release and Homebrew tap)."
 graph LR
     subgraph Triggers
         Push[Push to main]
@@ -457,6 +462,9 @@ kates version
 The following diagram shows how the workflows relate:
 
 ```mermaid
+%%| label: fig-cicd-workflow-dependencies
+%%| fig-cap: "Execution relationships between parallel PR validation workflows, scheduled live-scrape jobs, and tag-triggered release workflows."
+%%| fig-alt: "Diagram grouping workflows into three contexts: On Every PR / Push (lint.yml, ci.yml, ci-kafka-charts.yml, ci-mirror-maker2.yml, ci-docker.yml, integration.yml), Weekly / on demand (metrics-live jobs gated inside ci-kafka-charts.yml and ci-mirror-maker2.yml, plus security.yml rescan), and On Tag v* (release.yml invoking publish-docker.yml, publish-tester.yml, and publish-connect.yml via workflow_call)."
 graph LR
     subgraph "On Every PR / Push (parallel, path-filtered)"
         L[lint.yml]

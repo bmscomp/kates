@@ -9,7 +9,12 @@ This chapter provides step-by-step procedures for upgrading every component in t
 
 ## Upgrade Strategy
 
+Every component upgrade follows a five-stage pipeline with an explicit validation gate that triggers an immediate rollback if post-upgrade checks fail:
+
 ```mermaid
+%%| label: fig-upgrade-strategy-pipeline
+%%| fig-cap: "Five-stage upgrade pipeline with a post-upgrade validation gate and rollback branch."
+%%| fig-alt: "Flowchart progressing left to right from Backup to Pre-flight checks, Upgrade, Validate, and Monitor, with a fail branch from Validate leading to Rollback."
 graph LR
     B[Backup] --> P[Pre-flight<br/>checks] --> U[Upgrade] --> V[Validate] --> M[Monitor]
     V -->|"fail"| R[Rollback]

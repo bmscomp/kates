@@ -649,11 +649,12 @@ div.callout {
 
 figure.kates-diagram {
   position: relative;
-  margin: 1.5rem 0 2rem;
-  padding: 1.25rem 1rem;
+  margin: 1.75rem 0 2.25rem;
+  padding: 1.5rem 1.35rem 1.25rem;
   background-color: $kates-diagram-bg;
   border: 1px solid $kates-border;
   border-radius: $border-radius-lg;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05), 0 12px 28px -12px $kates-diagram-shadow;
 
   > .kates-diagram-frame {
     overflow-x: auto;
@@ -673,7 +674,12 @@ figure.kates-diagram {
   }
 
   figcaption {
-    margin-top: 0.75rem;
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid $kates-rule;
+    font-size: 0.88em;
+    line-height: 1.5;
+    color: $kates-muted;
   }
 }
 
@@ -845,23 +851,24 @@ svg.mermaid-js {
   }
 
   .kates-group-title .nodeLabel p {
-    margin: 0 -0.35em !important;
-    padding: 0 0.35em;
-    border-radius: 0.3em;
+    margin: 0 -0.4em !important;
+    padding: 1px 0.45em;
+    border-radius: 0.35em;
     background: var(--mermaid-fg-color--lightest) !important;
+    box-shadow: 0 0 0 1px $kates-border;
   }
 
   // Cards: flowchart and state nodes, sequence participants, ER tables
   .node .label-container,
   .node.default > g:first-child,
   rect.actor {
-    filter: drop-shadow(0 1px 2px $kates-diagram-shadow);
+    filter: drop-shadow(0 2px 4px $kates-diagram-shadow);
   }
 
   .node .label-container,
   .node .label-container path,
   rect.actor {
-    stroke-width: 1.25px !important;
+    stroke-width: 1.5px !important;
   }
 
   rect.actor {
@@ -871,8 +878,8 @@ svg.mermaid-js {
 
   // Subgraphs: a tinted zone; the dashes say it groups, not that it is a box
   .cluster > rect {
-    stroke-width: 1px !important;
-    stroke-dasharray: 5 4;
+    stroke-width: 1.25px !important;
+    stroke-dasharray: 6 4;
   }
 
   // Edges: a firmer line, and dotted edges as round dots

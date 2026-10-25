@@ -1,6 +1,6 @@
 # Test Types Deep Dive
 
-This chapter covers the eight core Kates test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` types, covered in [CLI Reference](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
+Kates provides eight core test types, each designed to answer a specific question about your Kafka cluster's behavior — the methodology, use case, and configuration for every type. (Kates also has specialized `TUNE_*` types, covered in [CLI Reference](10-cli-reference.md), and an `INTEGRATION_CDC` type.)
 
 Whether you're baselining a new cluster or gating a CI pipeline, after this chapter you can:
 
@@ -14,8 +14,12 @@ Whether you're baselining a new cluster or gating a CI pipeline, after this chap
 A test type decides the tasks its run starts: how many producers and consumers, at what rate, with which defaults. Both benchmark backends run those same tasks. The default native backend runs them inside the [Kates API](appendix-a-glossary.md#gl-kates-api), the service in the cluster that runs your tests. The [Trogdor](appendix-a-glossary.md#gl-trogdor) backend (`--backend trogdor`) submits each one to the Trogdor coordinator as a task of its own. Each load shape below therefore holds on either backend, and a section says so where Trogdor differs. The diagram groups the types by the question they answer:
 
 ```mermaid
+%%| label: fig-types-taxonomy
+%%| fig-cap: "The eight core Kates test types divide into six performance workloads and two correctness and latency verification workloads."
+%%| fig-alt: "Diagram with two groups: Performance Tests (LOAD for steady-state capacity, STRESS for breaking point, SPIKE for burst handling, ENDURANCE for long-term stability, VOLUME for large data sets, and CAPACITY for maximum throughput) and Correctness Tests (ROUND_TRIP for end-to-end latency and INTEGRITY for zero data loss)."
 graph TB
     subgraph Performance["Performance Tests"]
+        direction LR
         LOAD[LOAD<br/>Steady-state capacity]
         STRESS[STRESS<br/>Breaking point]
         SPIKE[SPIKE<br/>Burst handling]
@@ -25,6 +29,7 @@ graph TB
     end
     
     subgraph Correctness["Correctness Tests"]
+        direction LR
         RT[ROUND_TRIP<br/>End-to-end latency]
         INT[INTEGRITY<br/>Zero data loss]
     end
@@ -39,6 +44,9 @@ graph TB
 A LOAD test sends a fixed number of records at a controlled, sustainable rate. It measures the [baseline](appendix-a-glossary.md#gl-baseline) performance that users experience during normal operations.
 
 ```mermaid
+%%| label: fig-types-load-profile
+%%| fig-cap: "A LOAD test holds a steady, rate-limited send rate across the run before collecting summary percentiles."
+%%| fig-alt: "Flowchart from left to right inside Load Profile: Start producers and consumers, hold Steady State at a fixed rate until records are sent or duration is reached, and Collect results."
 graph LR
     subgraph Load["Load Profile"]
         direction LR
@@ -222,10 +230,13 @@ Each row is a moment around the burst and what to note there. Only the middle ro
 An ENDURANCE (soak) test runs at a moderate, realistic load for an **extended period** — up to two hours on a default install, longer once you raise the Kates API's run limit — to detect slow resource leaks and gradual degradation.
 
 ```mermaid
+%%| label: fig-types-endurance-profile
+%%| fig-cap: "An ENDURANCE soak run sustains a moderate rate over hours to expose slow memory, disk, or thread leaks."
+%%| fig-alt: "Diagram showing Endurance Load Profile: sustained rate-limited load at 5,000 rec/s default with a 2-hour default run limit that can be raised for long-term leak hunting."
 graph LR
     subgraph Endurance["Load Profile"]
         direction LR
-        E1["Sustained rate-limited load<br/>5,000 msg/s default<br/>2 h run limit by default — raise it for leak hunting"]
+        E1["Sustained rate-limited load<br/>5,000 rec/s default<br/>2 h run limit by default — raise it for leak hunting"]
     end
 ```
 

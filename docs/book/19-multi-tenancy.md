@@ -14,6 +14,9 @@ After this chapter, you can:
 The krafter cluster uses **namespace-level isolation** within a single Kafka cluster:
 
 ```mermaid
+%%| label: fig-mt-isolation-model
+%%| fig-cap: "Namespace-level tenant isolation within the shared krafter cluster using prefix-scoped topics and dedicated KafkaUser principals."
+%%| fig-alt: "Diagram showing Access Control principals mapping to topic groups inside the Kafka Cluster: kates-backend (superUser) maps to Kates Platform topics (kates-events, kates-results, kates-metrics, kates-audit, kates-dlq), apicurio-registry (prefix __apicurio) maps to Schema Registry topics (__apicurio-*), and my-service (prefix my-service) maps to New Service topics (my-service-commands, my-service-events)."
 graph TB
     subgraph Kafka Cluster
         subgraph Kates["Kates Platform"]
@@ -309,6 +312,9 @@ Consider adding per-tenant Grafana dashboards using the `app.kubernetes.io/part-
 The following flowchart shows the end-to-end tenant onboarding process:
 
 ```mermaid
+%%| label: fig-mt-onboarding-workflow
+%%| fig-cap: "Seven-step declarative tenant onboarding workflow from KafkaUser creation through access verification."
+%%| fig-alt: "Flowchart showing steps 1 to 7: Create KafkaUser, Set ACLs (prefix-scoped), Configure Quotas (produce/consume/CPU), Create Topics (with naming convention), Sync Credentials (mount Strimzi secret), Add networkPolicy.clients entry (pod selector), and Verify Access (produce/consume test). A decision diamond asks Verification Passed? Yes leads to Tenant Ready; No leads to Debug & Retry which loops back to step 1."
 flowchart TD
     A["1. Create KafkaUser"] --> B["2. Set ACLs\n(prefix-scoped)"]
     B --> C["3. Configure Quotas\n(produce/consume/CPU)"]
@@ -317,7 +323,7 @@ flowchart TD
     E --> F["6. Add networkPolicy.clients entry\n(pod selector)"]
     F --> G["7. Verify Access\n(produce/consume test)"]
     G --> H{"Verification\nPassed?"}
-    H -->|Yes| I["Tenant Ready ✅"]
+    H -->|Yes| I["Tenant Ready"]
     H -->|No| J["Debug & Retry"]
     J --> A
 ```

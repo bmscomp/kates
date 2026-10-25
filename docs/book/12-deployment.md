@@ -100,6 +100,9 @@ For Kafka broker storage, **always use persistent volumes** — even in developm
 The following diagram shows three representative topologies. Most teams start with Minimal, grow into Standard for shared use, and arrive at Production for continuous benchmarking:
 
 ```mermaid
+%%| label: fig-deployment-topologies
+%%| fig-cap: "Three Kubernetes deployment topologies scaling from a single-node Kind development lab to a dedicated multi-node production cluster."
+%%| fig-alt: "Diagram comparing three topologies: Minimal (1 Kind node running 3 Brokers + 3 Controllers, Kates API + PostgreSQL, and Prometheus + Grafana), Standard (3 nodes alpha, sigma, and gamma, each running a Broker + Controller alongside Kates API + PostgreSQL on Node 1, Monitoring on Node 2, and LitmusChaos on Node 3), and Production (6+ nodes separating Nodes 1–3 for Kafka with anti-affinity, Node 4 for Kates API and external PostgreSQL, Node 5 for Prometheus and Grafana with persistent storage, and Node 6 for LitmusChaos and spare capacity)."
 graph TB
     subgraph Minimal["Minimal (1 Kind node)"]
         direction LR
@@ -533,6 +536,9 @@ make all
 `make all` drives the deployment through the Kates CLI itself — the Makefile checks prerequisites, ensures a cluster exists, then hands the heavy lifting to `kates deploy`:
 
 ```mermaid
+%%| label: fig-deployment-make-all-flow
+%%| fig-cap: "Execution sequence of `make all`, from prerequisite validation and Kind cluster creation to `kates deploy` and port forwarding."
+%%| fig-alt: "Top-down flowchart of seven steps: 1. Check prerequisites (kubectl, helm), 2. Ensure cluster connectivity (creates Kind cluster panda if none is reachable), 3. Build the kates CLI if the binary is missing, 4. Prompt for deployment topology (single namespace kates-stack or isolated namespaces), 5. Run kates deploy --topology <choice> --with-schema-registry apicurio, 6. Expose service ports via scripts/port-forward.sh, and 7. Print access points (Apicurio 30082, Kates 30083)."
 graph TD
     S1["Check prerequisites<br/>(kubectl, helm)"] --> S2["Ensure cluster connectivity<br/>(creates Kind cluster 'panda'<br/>if none is reachable)"]
     S2 --> S3["Build the kates CLI<br/>if the binary is missing"]
@@ -1019,9 +1025,15 @@ The namespace scope trades these away:
 
 ## Makefile Reference
 
+The root `Makefile` groups every operational target into six functional domains so you can provision infrastructure, build and deploy Kates, compile the CLI, run tests, or launch chaos drills from a single entry point:
+
 ```mermaid
+%%| label: fig-deployment-makefile-targets
+%%| fig-cap: "Root Makefile target groups organized into Infrastructure, Kates, CLI, Testing, Chaos, and Operations domains."
+%%| fig-alt: "Diagram grouping Makefile targets into six boxes: Infrastructure (make all, cluster, monitoring, kafka, ui, apicurio, litmus, jaeger, kyverno), Kates (make kates, kates-build, kates-native, kates-deploy, kates-redeploy, kates-logs, kates-undeploy, kates-helm), CLI (make cli-build, cli-install, cli-clean), Testing (make test, test-load, test-stress, test-spike, test-endurance, test-volume, test-capacity), Chaos (make litmus-test, litmus-gameday, chaos-status, chaos-ui, gameday), and Operations (make ports, status, destroy)."
 graph TB
     subgraph Infrastructure
+        direction TB
         ALL[make all<br/>Complete setup]
         CLUSTER[make cluster]
         MONITOR[make monitoring]
@@ -1034,6 +1046,7 @@ graph TB
     end
     
     subgraph Kates
+        direction TB
         K[make kates]
         KB[make kates-build]
         KN[make kates-native]
@@ -1045,12 +1058,14 @@ graph TB
     end
     
     subgraph CLI
+        direction TB
         CB[make cli-build]
         CI[make cli-install]
         CC[make cli-clean]
     end
     
     subgraph Testing
+        direction TB
         T[make test]
         TL[make test-load]
         TS[make test-stress]
@@ -1061,6 +1076,7 @@ graph TB
     end
     
     subgraph Chaos
+        direction TB
         LT[make litmus-test]
         LG[make litmus-gameday]
         CS[make chaos-status]
@@ -1069,6 +1085,7 @@ graph TB
     end
     
     subgraph Operations
+        direction TB
         PORTS[make ports]
         STATUS[make status]
         DESTROY[make destroy]

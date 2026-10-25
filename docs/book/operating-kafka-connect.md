@@ -143,6 +143,9 @@ Each row pairs a workload with a worker count and a heap, and gives the containe
 Connectors are divided into tasks, and tasks are distributed across workers:
 
 ```mermaid
+%%| label: fig-op-connect-task-distribution
+%%| fig-cap: "Distribution of single-task Debezium CDC sources and multi-task JDBC sink and Mirror connectors across three Connect workers."
+%%| fig-alt: "Diagram showing three Connect workers: Worker 0 runs CDC Orders (task 0) and JDBC Sink (task 0); Worker 1 runs CDC Customers (task 0) and JDBC Sink (task 1); Worker 2 runs JDBC Sink (task 2) and Mirror (task 0)."
 graph TB
     subgraph W1["Worker 0"]
         T1["CDC Orders (task 0)"]

@@ -70,9 +70,15 @@ The Kates API is a Quarkus application. It exposes both a REST API and a **gRPC 
 
 ### Component Map
 
+The service layer divides responsibilities across four internal packages: domain models, the execution engine, report synthesis, and format exporters.
+
 ```mermaid
+%%| label: fig-architecture-component-map
+%%| fig-cap: "Inside the Kates API, the orchestrator drives the benchmark backend and histogram, while the report generator assembles snapshots, SLA evaluations, and export formats."
+%%| fig-alt: "Flowchart in four groups: Domain (TestRun, TestSpec, TestType, TestResult), Engine (TestOrchestrator, NativeKafkaBackend, LatencyHistogram, BenchmarkStatus, BenchmarkMetrics), Report (ReportGenerator, ClusterSnapshot, BrokerMetrics, SlaVerdict), and Export (CsvExporter, JunitXmlExporter, HeatmapExporter). TestOrchestrator calls NativeKafkaBackend, which updates LatencyHistogram and BenchmarkStatus. ReportGenerator produces ClusterSnapshot, BrokerMetrics, and SlaVerdict, and feeds CsvExporter, JunitXmlExporter, and HeatmapExporter."
 graph LR
     subgraph Domain
+        direction TB
         TR[TestRun]
         TS[TestSpec]
         TT[TestType]
@@ -80,6 +86,7 @@ graph LR
     end
     
     subgraph Engine
+        direction TB
         TO[TestOrchestrator]
         NKB[NativeKafkaBackend]
         LH[LatencyHistogram]
@@ -88,6 +95,7 @@ graph LR
     end
     
     subgraph Report
+        direction TB
         RG[ReportGenerator]
         CS[ClusterSnapshot]
         BrokerM[BrokerMetrics]
@@ -95,6 +103,7 @@ graph LR
     end
     
     subgraph Export
+        direction TB
         CSV[CsvExporter]
         JUnit[JunitXmlExporter]
         HM[HeatmapExporter]
@@ -137,6 +146,9 @@ The native benchmark backend (`NativeKafkaBackend`) runs each test's producers a
 The histogram is the heart of latency measurement. It is backed by **HdrHistogram** (configured for 1µs–60s with 3 significant value digits), which provides high resolution at low latencies (sub-millisecond) while covering tails up to 60 seconds.
 
 ```mermaid
+%%| label: fig-architecture-histogram
+%%| fig-cap: "HdrHistogram records microsecond-precision latencies across five orders of magnitude and exports 25 logarithmic buckets on each poll for heatmap rendering."
+%%| fig-alt: "Flowchart from left to right. On the left, Internal HdrHistogram (1 microsecond to 60 seconds) chains resolution steps from 0.001 ms through 0.01 ms, 0.1 ms, 1 ms, 10 ms, 100 ms, and 1000 ms. An arrow labeled exportBuckets leads to Export (25 Heatmap Buckets), listing representative bucket ranges from 0–0.1 ms up to 500 ms–10 s."
 graph LR
     subgraph Internal["HdrHistogram (1µs–60s)"]
         direction TB
@@ -144,7 +156,7 @@ graph LR
     end
     
     subgraph Export["25 Heatmap Buckets"]
-        direction LR
+        direction TB
         H1["0–0.1ms"]
         H2["0.1–0.5ms"]
         H3["0.5–1ms"]
@@ -234,13 +246,18 @@ Before a disruption plan touches the cluster, Kates counts the brokers its steps
 The CLI is a **standalone Go binary** built with Cobra. It splits its work between two channels: it calls the Kates API over REST for test, report, and disruption operations, and it shells out to `kubectl`, `helm`, and `kind` (via `os/exec`) for cluster provisioning and lifecycle tasks such as `kates deploy`, `kates clean`, and `kates ports`. It also keeps your contexts, profiles and snapshots in files in your home directory; the [Commands](10-cli-reference.md#commands) table in CLI Reference says which command uses which.
 
 ```mermaid
+%%| label: fig-architecture-cli
+%%| fig-cap: "The CLI resolves target cluster credentials through the context manager before dispatching command groups and formatting output for terminals or scripts."
+%%| fig-alt: "Top-down flowchart in three groups: Config (~/.kates.yaml feeding Context Manager), Commands (test, report, disruption, resilience, trend, and health/cluster/top/dashboard/status), and Output (Table Renderer, JSON Printer, Sparkline Charts, Status Badges, and Metric Bars). Context Manager feeds Commands, which route results to the Output renderers."
 graph TD
     subgraph Config
+        direction LR
         CTX[~/.kates.yaml]
         CTXM[Context Manager]
     end
     
     subgraph Commands
+        direction TB
         TEST[test create/list/get/delete/watch/apply/scaffold]
         REPORT[report show/summary/export/compare/diff/brokers]
         DISRUPT[disruption run/list/status/timeline/types/kafka-metrics]
@@ -250,6 +267,7 @@ graph TD
     end
     
     subgraph Output
+        direction TB
         TABLE[Table Renderer]
         JSON[JSON Printer]
         SPARK[Sparkline Charts]
@@ -276,6 +294,9 @@ Key design decisions:
 This diagram traces a complete test execution from CLI command to final report:
 
 ```mermaid
+%%| label: fig-architecture-data-flow
+%%| fig-cap: "End-to-end execution of a LOAD run: topic setup, virtual-thread production, periodic histogram bucket snapshots, and on-demand report generation."
+%%| fig-alt: "Sequence diagram across Kates CLI, REST API, TestOrchestrator, NativeKafkaBackend, Kafka Cluster, LatencyHistogram, and ReportGenerator. The CLI sends POST /api/tests; TestOrchestrator creates the topic on Kafka and starts NativeKafkaBackend, which produces messages to Kafka and records microsecond latencies in LatencyHistogram. In a polling loop, TestOrchestrator polls NativeKafkaBackend, exports 25 heatmap buckets from LatencyHistogram, and accumulates heatmap rows. Finally, the CLI queries GET /api/tests/{id} and GET /api/tests/{id}/report, where ReportGenerator captures a broker metrics snapshot from Kafka and returns the TestReport."
 sequenceDiagram
     participant CLI as Kates CLI
     participant API as REST API
@@ -404,6 +425,9 @@ What lives in the Kates API's memory goes with its pod. When the Kates API shuts
 Kates uses PostgreSQL for persistent storage. The schema is managed by Flyway migrations in `kates/src/main/resources/db/migration/`.
 
 ```mermaid
+%%| label: fig-architecture-data-model
+%%| fig-cap: "PostgreSQL schema backing the Kates API: test runs have a one-to-many relationship with phase results, alongside standalone tables for schedules and disruption reports."
+%%| fig-alt: "Entity-relationship diagram showing five tables: test_runs (with primary key id, test_type, status, created_at, backend, scenario_name, and JSON columns for spec, requested_spec, sla, and labels) having a one-to-many relationship with test_results (primary key id, foreign key test_run_id, throughput and percentile columns, and phase_name), plus scheduled_test_runs, disruption_reports, and disruption_schedules."
 erDiagram
     test_runs ||--o{ test_results : "has many"
     

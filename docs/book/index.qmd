@@ -32,18 +32,20 @@ Kates answers three questions about an Apache Kafka cluster: how much load it ta
 
 **Kates** (Kafka Advanced Testing & Engineering Suite) is a Kubernetes-native platform for performance testing, chaos engineering, and operational resilience auditing of Apache Kafka clusters.
 
-This guide takes you from first principles to production operations:
+This guide takes you from first principles to production operations across six parts:
 
-- **Part I — Foundations**: What Kates is, its architecture, and the cluster under test
-- **Part II — Performance Testing**: Measurement theory, the test types, scenario files with SLA gates, and the interactive Lab
-- **Part III — Chaos & Integrity**: Chaos engineering theory and practice, and zero-loss verification
-- **Part IV — Observability**: Dashboards, metrics, heatmaps, tracing, and alerting
-- **Part V — Deployment & Operations**: Installing and engineering Kafka, deploying Kates, security, multi-tenancy, upgrades, Kafka Connect, and operational recipes
-- **Part VI — Reference**: The complete CLI, REST API, and gRPC API references
+- Part I (Foundations) introduces Kates, its architecture, and the cluster under test
+- Part II (Performance Testing) covers measurement theory, the test types, scenario files with SLA gates, and the interactive Lab
+- Part III (Chaos & Integrity) covers chaos engineering theory and practice alongside zero-loss verification
+- Part IV (Observability) covers dashboards, metrics, heatmaps, tracing, and alerting
+- Part V (Deployment & Operations) covers installing and engineering Kafka, deploying Kates, security, multi-tenancy, upgrades, Kafka Connect, and operational recipes
+- Part VI (Reference) provides the complete CLI, REST API, and gRPC API references
 
 ![The Kates CLI command overview alongside a live load test execution with throughput and SLO gate summary.](assets/kates-cli-overview.png)
 
 ## Who This Book Is For
+
+Use the table below to pick your entry point and primary reading track based on your role:
 
 | Reader | Start Here | Focus On |
 |--------|-----------|----------|
@@ -108,10 +110,7 @@ The same conventions hold in every chapter. The table says what each one means:
 
 ## Source Code
 
-The complete source code for Kates is available on GitHub:
-
-- **Repository**: [github.com/bmscomp/kates](https://github.com/bmscomp/kates)
-- **License**: Apache 2.0
+The complete source code for Kates is available on GitHub at [github.com/bmscomp/kates](https://github.com/bmscomp/kates) under the Apache 2.0 license. Turn to [Part I — Foundations](part-foundations.md) to begin with the architecture and cluster model behind every test.
 
 ```{=html}
 <style>

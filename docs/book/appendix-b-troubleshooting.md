@@ -106,6 +106,9 @@ Something that worked before an operator or Kafka upgrade fails or slows down af
 When you can't connect to Kafka, work through this decision tree. The commands here and in [Quick Diagnostic Commands](#quick-diagnostic-commands) assume the chart defaults — cluster name `krafter` in namespace `kafka` (set in `charts/kafka-cluster/values.yaml`); adjust them if your deployment overrides these values.
 
 ```mermaid
+%%| label: fig-troubleshooting-connectivity-tree
+%%| fig-cap: "Decision tree for diagnosing Kafka connectivity failures across pod scheduling, NetworkPolicies, DNS, and SCRAM authentication."
+%%| fig-alt: "Flowchart starting at Can't connect to Kafka and branching through three main checks: (1) Are Kafka pods running? If No, check kubectl get pods -n kafka, StorageClass/PVCs if Pending, or previous pod logs; (2) Can you reach the bootstrap service? If No, check whether a NetworkPolicy is blocking, verify DNS resolution with nslookup krafter-kafka-bootstrap.kafka and CoreDNS pods, or check port-forward/NodePort; (3) Authentication succeeds? If No, check SCRAM Secret and KafkaUser reconciliation; if Yes, connection works and check application config."
 flowchart TD
     A["Can't connect to Kafka"] --> B{"Are Kafka pods running?"}
     B -->|No| B1["Check pod status:<br/>kubectl get pods -n kafka"]

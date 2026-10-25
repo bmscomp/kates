@@ -26,7 +26,12 @@ Pick a recipe by the question you need answered. Two of them disrupt the cluster
 
 ### Procedure
 
+The verification follows four steps before and after the rolling upgrade:
+
 ```mermaid
+%%| label: fig-recipes-upgrade-validation
+%%| fig-cap: "Pre- and post-upgrade verification loop: baseline capture on the current Kafka version, rolling upgrade, re-test, and report diff."
+%%| fig-alt: "Flowchart from left to right: Baseline on current version, Upgrade Kafka, Re-test on new version, and Diff results."
 graph LR
     B[Baseline\non current version] --> U[Upgrade\nKafka] --> R[Re-test\non new version] --> D[Diff\nresults]
 ```
@@ -183,13 +188,16 @@ Certification is the production-like step of [3. Run Experiments in Production (
 Run these tests sequentially. All must pass before the cluster is certified.
 
 ```mermaid
+%%| label: fig-recipes-production-certification
+%%| fig-cap: "Sequential six-stage production readiness certification pipeline combining performance, data integrity, chaos playbooks, and resilience under fault."
+%%| fig-alt: "Top-down flowchart chaining six stages: LOAD run (Baseline perf), INTEGRITY run (Zero data loss), leader-cascade (Election recovery), split-brain (Network partition), az-failure (Zone outage), and Resilience run (Perf under chaos), ending at Certified."
 graph TD
     L[LOAD run\nBaseline perf] --> I[INTEGRITY run\nZero data loss]
     I --> C1[leader-cascade\nElection recovery]
     C1 --> C2[split-brain\nNetwork partition]
     C2 --> C3[az-failure\nZone outage]
     C3 --> R[Resilience run\nPerf under chaos]
-    R --> CERT[Certified ✅]
+    R --> CERT[Certified: Ready for production]
 ```
 
 **Step 1 — Performance baseline:**

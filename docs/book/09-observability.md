@@ -18,6 +18,9 @@ After this chapter, you can:
 Before diving into dashboards and metrics, it helps to understand how data flows from Kafka brokers and the Kates API into the tools you'll use day-to-day. The architecture has four layers: sources generate data, collectors normalize and transport it, storage backends retain it, and visualization tools let you query and explore.
 
 ```mermaid
+%%| label: fig-observability-architecture
+%%| fig-cap: "Four-layer observability pipeline connecting Kafka brokers, the Kates API, Kubernetes events, and OpenTelemetry spans to Grafana, the CLI, and Jaeger."
+%%| fig-alt: "Top-down flowchart across four layers: Data Sources (Kafka Brokers JMX metrics, Kates API test metrics, Kubernetes pod events, OTel SDK trace spans), Collection (JMX Exporter Agent, Kates REST API, OTLP Collector), Storage (Prometheus time-series DB, Kates DB PostgreSQL, Jaeger Trace Store), and Visualization (Grafana Dashboards, Kates CLI Terminal UI, Heatmap Export JSON/CSV, Jaeger UI Trace Explorer)."
 graph TB
     subgraph Sources["Data Sources"]
         KB[Kafka Brokers<br/>JMX metrics]
@@ -410,7 +413,12 @@ For the theory behind why heatmaps matter and why percentiles alone are insuffic
 
 ### How Heatmaps Work
 
+During a test run, the orchestrator snapshots the histogram on each status poll so the full distribution can be exported as JSON or CSV once the run finishes:
+
 ```mermaid
+%%| label: fig-observability-heatmap-pipeline
+%%| fig-cap: "Periodic `exportBuckets()` snapshots accumulate 25-bucket latency rows during execution and export to Grafana JSON or spreadsheet CSV after completion."
+%%| fig-alt: "Top-down flowchart in two stages: During Test Execution (on each status poll call LatencyHistogram.exportBuckets(), 25 logarithmic buckets from 0 ms to 10,000 ms, counts per bucket stored as HeatmapRow) leading to After Test (JSON Export for Grafana and CSV Export for spreadsheets)."
 graph TD
     subgraph Collection["During Test Execution"]
         direction LR

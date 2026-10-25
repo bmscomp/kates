@@ -165,6 +165,9 @@ Before running `helm install`, it helps to understand what the chart creates.
 When you install the kafka-cluster chart, Helm creates these Kubernetes resources:
 
 ```mermaid
+%%| label: fig-install-chart-deployed-resources
+%%| fig-cap: "Kubernetes custom resources, observability objects, and security policies created by the kafka-cluster Helm chart and reconciled by the Strimzi Operator."
+%%| fig-alt: "Diagram showing the strimzi-kafka-operator managing the Kafka Cluster group (Kafka CR krafter, KafkaNodePool controllers with 3 pods, KafkaNodePools brokers-alpha, brokers-sigma, and brokers-gamma with 1 pod each, Entity Operator, Cruise Control, and Kafka Exporter), which in turn reconciles Topics & Users (KafkaTopics kates-events, kates-results, kates-metrics, kates-audit, kates-dlq and KafkaUsers kates-backend, kafka-ui, apicurio-registry), alongside Observability (PodMonitors, PrometheusRule alerts, Grafana Dashboards) and Security (NetworkPolicies, ServiceAccount + Role + RoleBinding)."
 graph TD
     subgraph "Strimzi Operator (manages everything below)"
         OP["strimzi-kafka-operator"]
@@ -934,6 +937,9 @@ This section provides a comprehensive view of *every* resource the kafka-cluster
 The chart renders 27 template files into the following resource categories — 14 at the top level of `templates/` and 13 under `templates/tests/`:
 
 ```mermaid
+%%| label: fig-install-chart-resource-graph
+%%| fig-cap: "Division of Kubernetes resources between the per-cluster kafka-cluster 1.0 chart and the cluster-wide strimzi-operator 0.3 chart."
+%%| fig-alt: "Diagram comparing two Helm charts: Helm Chart kafka-cluster 1.0 (containing Core CRDs, Data Management, Observability, Security, Operations, and Storage subgraphs) and Helm Chart strimzi-operator 0.3 (containing CRD Upgrade Hook, Drain Cleaner, Operator PodMonitor + alerts, and Strimzi Grafana dashboards)."
 graph TD
     subgraph "Helm Chart: kafka-cluster 1.0"
         subgraph "Core CRDs"
@@ -1283,6 +1289,9 @@ What the chart's policies add, where they render, is a limit on the egress of th
 The solid edges are the chart's rules; the dashed ones are Strimzi's generated policy, which admits every pod whatever the chart's rules say.
 
 ```mermaid
+%%| label: fig-install-network-policy-traffic-flow
+%%| fig-cap: "Allowed ingress and inter-pod traffic flows across the kafka, monitoring, strimzi-operator, and client namespaces."
+%%| fig-alt: "Diagram showing solid arrows for the kafka-cluster chart's NetworkPolicy rules (networkPolicy.clients on 9092 and 9093, Prometheus on 9404 and 8080/8081, Strimzi Operator on 9090, 9091, 8443, 9092, and 9093, and Helm test pods on 9090-9093) and dashed arrows for Strimzi's generated policy allowing any pod in any namespace to reach 9092, 9093 (until networkPolicyPeers are set) and 9404 (while metrics are on)."
 graph LR
     subgraph "kafka namespace"
         B["Brokers + controllers<br/>krafter-kafka"]
@@ -1431,7 +1440,12 @@ The chart deploys a comprehensive monitoring pipeline that integrates with the P
 
 ### Architecture
 
+Prometheus scrapes the cluster's four component PodMonitors alongside the operator's PodMonitor, evaluates the chart's alert and recording rules, and feeds the Strimzi dashboards in Grafana:
+
 ```mermaid
+%%| label: fig-install-observability-architecture
+%%| fig-cap: "End-to-end observability pipeline from Kafka component metrics endpoints through PodMonitors and Prometheus to Grafana dashboards."
+%%| fig-alt: "Flowchart showing four Kafka Cluster components (Brokers and controllers, Cruise Control, Kafka Exporter on :9404/metrics, and Entity Operator on healthcheck ports) scraped by 4 PodMonitors in the Collection layer alongside the operator PodMonitor from the strimzi-operator chart. Both feed Prometheus Server, which evaluates the PrometheusRule (22 alerts + recording rules) and serves Grafana with the Strimzi dashboards."
 graph TB
     subgraph "Kafka Cluster"
         B["Brokers and controllers"]
@@ -1552,6 +1566,9 @@ The platform's topics, users, super user and client NetworkPolicy grants are the
 **How it works:**
 
 ```mermaid
+%%| label: fig-install-tiered-storage-flow
+%%| fig-cap: "Kafka tiered storage data flow separating hot local SSD segments from cold object-storage segments."
+%%| fig-alt: "Flowchart showing Producers writing to a Broker (local SSD). Hot data under 1 day old is served directly from the Broker to Consumers, while cold segments are offloaded to S3 / SeaweedFS and fetched on demand by Consumers."
 graph LR
     P[Producers] --> B["Broker (local SSD)"]
     B -->|"hot data (< 1 day)"| C[Consumers]

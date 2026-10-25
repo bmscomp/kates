@@ -34,7 +34,12 @@ After this chapter, you can:
 
 ## Test Execution Flow
 
+Every gRPC test run follows an asynchronous submit-and-poll lifecycle between the client, the Kates gRPC server, and the target Kafka cluster:
+
 ```mermaid
+%%| label: fig-grpc-test-execution-flow
+%%| fig-cap: "Asynchronous gRPC test execution flow from CreateTest submission through GetTest polling to terminal completion."
+%%| fig-alt: "Sequence diagram between Client, Kates gRPC Server, and Kafka Cluster. The Client calls CreateTest(CreateTestRequest), the server creates the topic and initializes producers on the Kafka Cluster, and returns a TestRun in PENDING status. The Client then loops calling GetTest(GetTestRequest) while status is RUNNING until GetTest returns status COMPLETED with results attached."
 sequenceDiagram
     participant Client
     participant Kates gRPC Server

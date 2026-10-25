@@ -1,6 +1,6 @@
 # Performance Theory
 
-This chapter covers the fundamentals of measuring distributed system performance. Understanding these concepts is essential before running any Kates test — without them, you'll collect numbers but not learn anything.
+Measuring distributed system performance starts with how load, queues, and tail latency interact — without those fundamentals, you'll collect numbers from Kates runs without knowing what they mean.
 
 After this chapter, you can:
 
@@ -19,6 +19,9 @@ Every performance measurement reduces to two fundamental questions:
 These two metrics have a **complex, non-linear relationship**. Increasing throughput eventually causes latency to rise, and that inflection point is exactly what performance testing is designed to find [@jain1991art].
 
 ```mermaid
+%%| label: fig-perf-throughput-latency-regimes
+%%| fig-cap: "As offered load increases, a cluster progresses from linear scaling (Ideal) through queueing inflection (Saturation) to throughput collapse and errors (Overload)."
+%%| fig-alt: "Flowchart from left to right across three regimes: Ideal (Load rises, Throughput rises while Latency stays stable), Saturation (Load rises further, Throughput plateaus while Latency spikes), and Overload (Load rises further, Throughput drops, Latency grows unbounded, and Errors rise)."
 graph LR
     subgraph Ideal
         A[Load ↑] --> B[Throughput ↑<br/>Latency stable]
@@ -56,6 +59,9 @@ Kates measures:
 Latency is the time between sending a message and receiving an acknowledgment. For Kafka producers with [`acks=all`](appendix-a-glossary.md#gl-acks), this includes:
 
 ```mermaid
+%%| label: fig-perf-acks-all-latency-path
+%%| fig-cap: "End-to-end producer latency with `acks=all` spans six network and page-cache hops across the leader and follower brokers."
+%%| fig-alt: "Sequence diagram across Producer, Leader Broker, and Follower Broker. Step 1: Producer sends message to Leader. Step 2: Leader writes to page cache. Step 3: Leader replicates to Follower. Step 4: Follower writes to page cache. Step 5: Follower sends replication ACK to Leader. Step 6: Leader sends ACK to Producer. Total latency equals the sum of all six steps."
 sequenceDiagram
     participant Producer
     participant Leader as Leader Broker
@@ -114,13 +120,13 @@ Kates reports the mean plus P50, P95, P99, P99.9, and Max for every [test run](a
 A run's percentiles can sit far apart. In the illustrative distribution below, P50 is 5 ms while the slowest request takes 2 s, and the list after it names what causes that tail in Kafka.
 
 ```mermaid
+%%| label: fig-perf-long-tail-percentiles
+%%| fig-cap: "A skewed latency distribution where median latency (P50 = 5 ms) masks severe high-percentile spikes (P99 = 150 ms, Max = 2,000 ms)."
+%%| fig-alt: "Flowchart showing four latency percentile tiers in a Distribution group: P50 at 5 ms (most requests), P95 at 20 ms (a few slow), P99 at 150 ms (rare spikes), and Max at 2000 ms (outliers)."
 graph LR
     subgraph Distribution
-        direction TB
-        A["P50: 5ms<br/>(most requests)"]
-        B["P95: 20ms<br/>(a few slow)"]
-        C["P99: 150ms<br/>(rare spikes)"]
-        D["Max: 2000ms<br/>(outliers)"]
+        direction LR
+        A["P50: 5ms<br/>(most requests)"] --> B["P95: 20ms<br/>(a few slow)"] --> C["P99: 150ms<br/>(rare spikes)"] --> D["Max: 2000ms<br/>(outliers)"]
     end
 ```
 
@@ -183,13 +189,13 @@ Know the limits, though: Kates does not apply coordinated-omission correction. T
 Percentiles compress the latency distribution into a few numbers. Heatmaps preserve the **full distribution over time**, revealing patterns invisible in aggregate metrics [@gregg2010visualizing].
 
 ```mermaid
-graph TD
+%%| label: fig-perf-heatmap-slices
+%%| fig-cap: "A latency heatmap captures bucketed distributions across consecutive time windows, exposing a transient bimodal spike at t=20s that single-run percentiles flatten."
+%%| fig-alt: "Flowchart inside a Latency Heatmap group showing four sequential time slices from left to right: t=0s (most at 2 ms), t=10s (most at 2 ms), t=20s (bimodal: 2 ms + 200 ms), and t=30s (most at 2 ms)."
+graph LR
     subgraph Heatmap["Latency Heatmap (Time → Latency → Count)"]
         direction LR
-        T1["t=0s<br/>Most at 2ms"]
-        T2["t=10s<br/>Most at 2ms"]
-        T3["t=20s<br/>Bimodal!<br/>2ms + 200ms"]
-        T4["t=30s<br/>Most at 2ms"]
+        T1["t=0s<br/>Most at 2ms"] --> T2["t=10s<br/>Most at 2ms"] --> T3["t=20s<br/>Bimodal!<br/>2ms + 200ms"] --> T4["t=30s<br/>Most at 2ms"]
     end
 ```
 

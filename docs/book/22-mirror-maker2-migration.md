@@ -132,7 +132,12 @@ plan for duplicates rather than being surprised by them.
 
 ### The Cutover Is a Sequence
 
+Cutting over without losing records or consumer positions requires draining the source and stopping connectors in a strict order:
+
 ```mermaid
+%%| label: fig-mm2-cutover-sequence
+%%| fig-cap: "Ordered MirrorMaker 2 cutover sequence preserving translated consumer offsets before retiring the mirror."
+%%| fig-alt: "Flowchart progressing top to bottom: Replication lag reaches zero, Stop producers on the source, decision diamond Source end offsets static? (no loops back to Stop producers; yes continues), Let the mirror drain one refresh interval, Stop the SOURCE connector while keeping the CHECKPOINT connector running, Move consumers one group at a time onto translated offsets, Move producers to the target, and Retire the mirror."
 flowchart TD
     A[Replication lag reaches zero] --> B[Stop producers on the source]
     B --> C{Source end offsets static?}

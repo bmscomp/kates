@@ -19,6 +19,9 @@ CLI flags are convenient for ad-hoc testing, but production-grade performance va
 - **SLA enforcement** — define pass/fail criteria that block CI/CD pipelines on regressions
 
 ```mermaid
+%%| label: fig-scenarios-orchestration
+%%| fig-cap: "A scenario file (`scenario.yaml`) submitted via `kates test apply -f --wait` runs multiple test types and evaluates each scenario's SLA gates."
+%%| fig-alt: "Flowchart from left to right across three groups: Developer (scenario.yaml passed to kates test apply -f), Kates (running Scenario 1 LOAD test, Scenario 2 STRESS test, and Scenario 3 INTEGRITY test, each followed by Validate SLAs), and Result (emitting PASS or FAIL for each scenario)."
 graph LR
     subgraph Developer
         Y[scenario.yaml] --> CLI[kates test apply -f]
@@ -34,9 +37,9 @@ graph LR
     end
     
     subgraph Result
-        V1 --> R1["✅ PASS / ❌ FAIL"]
-        V2 --> R2["✅ PASS / ❌ FAIL"]
-        V3 --> R3["✅ PASS / ❌ FAIL"]
+        V1 --> R1["PASS / FAIL"]
+        V2 --> R2["PASS / FAIL"]
+        V3 --> R3["PASS / FAIL"]
     end
 ```
 
@@ -157,7 +160,12 @@ Each threshold in `validate` is a gate. Kates has two other words for a result, 
 SLA gates are only evaluated when you run `kates test apply` with `--wait`. Without it, scenarios are fire-and-forget: each one is submitted (status `SUBMITTED`), no gate is ever checked, and how the tests turn out never affects the exit status. A scenario that fails to submit still makes the CLI exit 1.
 :::
 
+The diagram below summarizes how a completed run's metrics flow through the `validate` block's gates to determine the CLI exit code:
+
 ```mermaid
+%%| label: fig-scenarios-sla-gate-evaluation
+%%| fig-cap: "When a scenario completes under `--wait`, `kates test apply` evaluates every configured performance, resilience, and integrity threshold before returning an exit code."
+%%| fig-alt: "Flowchart from left to right. Test Completes (Test Results) fans out into SLA Gates (P99 <= threshold?, Avg <= threshold?, Throughput >= min?, Data loss <= max?, RTO <= max?, RPO <= max?, Out-of-order <= max?, and CRC failures <= max?), which determine the Outcome (All pass -> exit 0, or Any fail -> exit 1)."
 graph LR
     subgraph Test Completes
         R[Test Results]

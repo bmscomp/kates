@@ -67,6 +67,9 @@ If the source is older than 2.1, one mirror cannot reach it. The supported
 shape is two migrations with an intermediate cluster in the middle:
 
 ```mermaid
+%%| label: fig-legacy-two-hop-migration
+%%| fig-cap: "Two-hop migration topology bridging a pre-2.1 Kafka source to a 4.x target through an intermediate 3.9.x cluster."
+%%| fig-alt: "Flowchart from left to right: Source (0.11 – 2.0) replicates via MM2 on a 3.9 line to Intermediate (3.9.x), which replicates via MM2 on the 4.x line to Target (4.x)."
 flowchart LR
     A["Source<br/>0.11 – 2.0"] -->|"MM2 on a 3.9 line"| B["Intermediate<br/>3.9.x"]
     B -->|"MM2 on the 4.x line"| C["Target<br/>4.x"]

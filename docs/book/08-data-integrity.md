@@ -22,35 +22,45 @@ A cluster that performs well but occasionally loses messages is worse than one t
 
 ## The Integrity Verification Pipeline
 
+An INTEGRITY run executes five sequential phases to compare every acknowledged producer sequence number against the records read back from the topic:
+
 ```mermaid
+%%| label: fig-integrity-verification-pipeline
+%%| fig-cap: "The five-phase INTEGRITY verification pipeline: sequenced production, optional fault injection, ISR recovery, full topic replay, and sequence gap evaluation."
+%%| fig-alt: "Top-down flowchart across five phases: Phase 1 Produce (generate messages with monotonic sequence numbers, track producer ACKs, record unacked messages), Phase 2 Inject while producing (optional: kill broker, network partition, or CPU stress), Phase 3 Recover (wait for ISR recovery, verify cluster health), Phase 4 Consume (consume all messages from beginning, verify sequence numbers, detect gaps), and Phase 5 Verdict (decision whether all acknowledged sequences are present: Yes yields PASS, No yields DATA_LOSS)."
 graph TB
     subgraph Produce["Phase 1: Produce"]
+        direction TB
         P1[Generate messages with<br/>monotonic sequence numbers]
         P2[Track producer ACKs]
         P3[Record unacked messages]
     end
     
     subgraph Inject["Phase 2: Inject while producing (Optional)"]
+        direction TB
         I1[Kill broker]
         I2[Network partition]
         I3[CPU stress]
     end
     
     subgraph Recover["Phase 3: Recover"]
+        direction TB
         R1[Wait for ISR recovery]
         R2[Verify cluster health]
     end
     
     subgraph Consume["Phase 4: Consume"]
+        direction TB
         C1[Consume all messages<br/>from beginning]
         C2[Verify sequence numbers]
         C3[Detect gaps]
     end
     
     subgraph Verdict["Phase 5: Verdict"]
+        direction TB
         V1{All sequences<br/>present?}
-        PASS[PASS ✅]
-        FAIL[DATA_LOSS ❌]
+        PASS[PASS: Zero data loss]
+        FAIL[DATA_LOSS: Gaps detected]
     end
     
     Produce --> Inject

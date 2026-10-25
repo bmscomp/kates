@@ -45,6 +45,9 @@ Each broker sends the active controller regular heartbeats. When a broker's hear
 The `panda` [Kind](appendix-a-glossary.md#gl-kind) cluster has three nodes, `alpha`, `sigma` and `gamma`, and each one stands in for a zone. Every node runs one broker and one controller of the `krafter` Kafka cluster. Notice that they are separate pods: the brokers replicate data among themselves, while the controllers keep the cluster's metadata in their own Raft quorum.
 
 ```mermaid
+%%| label: fig-cluster-physical-topology
+%%| fig-cap: "Physical layout of the `krafter` cluster across the three `panda` Kind nodes (`alpha`, `sigma`, `gamma`), separating the broker replication plane from the KRaft controller quorum."
+%%| fig-alt: "Top-down topology diagram of the Kind cluster panda with three node subgraphs: alpha (control-plane) hosting brokers-alpha-0 and controllers-3, sigma (worker) hosting brokers-sigma-2 and controllers-4, and gamma (worker) hosting brokers-gamma-1 and controllers-5. The three brokers replicate partition data among themselves, fetch metadata from the controllers, and the three controllers maintain Raft metadata consensus."
 graph TB
     subgraph Kind["Kind Cluster: panda"]
         direction TB

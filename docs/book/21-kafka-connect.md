@@ -16,6 +16,9 @@ Whether you're wiring a database into Kafka for the first time or reviewing an e
 Kafka Connect runs as a distributed cluster of worker processes that execute connectors. Each connector is a plugin that moves data between Kafka and an external system (database, object store, search index). The Kates platform deploys Connect as a **separate Helm chart** decoupled from the Kafka broker chart, enabling independent scaling, upgrades, and lifecycle management.
 
 ```mermaid
+%%| label: fig-kc-architecture-overview
+%%| fig-cap: "Distributed Kafka Connect worker cluster bridging source databases and sink storage systems through the krafter Kafka cluster."
+%%| fig-alt: "Architecture diagram showing Source Systems (PostgreSQL via Debezium WAL/pgoutput and MySQL via Binlog) streaming into Worker 0 (zone alpha) and Worker 1 (zone sigma) in the Kafka Connect Cluster. Workers produce to and consume from Broker 0, Broker 1, and Broker 2 in the Kafka Cluster while coordinating through Internal Topics (offsets, configs, status), and Worker 2 (zone gamma) writes to Sink Systems (Elasticsearch and S3 / Object Store)."
 graph TB
     subgraph ConnectCluster["Kafka Connect Cluster (KafkaConnect CR)"]
         W1["Worker 0<br/>zone: alpha"]
@@ -162,6 +165,9 @@ A release installed from chart 1.x upgrades in place: 1.x keys still render in 2
 The chart generates a `KafkaConnect` CR that the Strimzi operator reconciles into a Deployment of Connect worker pods:
 
 ```mermaid
+%%| label: fig-kc-reconciliation-sequence
+%%| fig-cap: "Reconciliation sequence of a KafkaConnect custom resource from Helm upgrade to worker group formation."
+%%| fig-alt: "Sequence diagram: helm upgrade applies the KafkaConnect CR to the Kubernetes API, which notifies the Strimzi Operator. Strimzi validates the CR spec, creates the Deployment and ConfigMaps, and Kubernetes schedules the Connect Workers. The workers join the consumer group on the Kafka Brokers, create the internal topics, receive task assignments, and Strimzi updates the CR status to Ready: True."
 sequenceDiagram
     participant Helm as helm upgrade
     participant K8s as Kubernetes API
@@ -262,6 +268,9 @@ A connector either reads from an external system into Kafka, as a source, or fro
 Source connectors read from an external system and produce to Kafka:
 
 ```mermaid
+%%| label: fig-kc-source-connector-flow
+%%| fig-cap: "Source connector data flow streaming database WAL changes into a Kafka data topic while committing positions to connect-offsets."
+%%| fig-alt: "Flowchart showing PostgreSQL sending a WAL stream to a Source Connector (Debezium), which produces records to cdc.public.orders (Kafka topic) and commits source offsets to connect-offsets (internal topic)."
 graph LR
     DB["PostgreSQL"] -->|"WAL stream"| SC["Source Connector<br/>(Debezium)"]
     SC -->|"produce"| Topic["cdc.public.orders<br/>(Kafka topic)"]
@@ -273,6 +282,9 @@ graph LR
 Sink connectors consume from Kafka and write to an external system:
 
 ```mermaid
+%%| label: fig-kc-sink-connector-flow
+%%| fig-cap: "Sink connector data flow consuming records from a Kafka topic, writing to a target store, and tracking consumer offsets."
+%%| fig-alt: "Flowchart showing a Sink Connector (JDBC Sink) consuming from cdc.public.orders (Kafka topic), performing a JDBC insert into a Data Warehouse, and committing offsets to connect-offsets (internal topic)."
 graph LR
     Topic["cdc.public.orders<br/>(Kafka topic)"] -->|"consume"| SK["Sink Connector<br/>(JDBC Sink)"]
     SK -->|"JDBC insert"| DW["Data Warehouse"]
@@ -402,6 +414,9 @@ The script is written to run as an init container that populates a shared volume
 The default Kates CDC pipeline captures changes from a PostgreSQL database:
 
 ```mermaid
+%%| label: fig-kc-postgres-cdc-pipeline
+%%| fig-cap: "PostgreSQL logical replication pipeline from pgoutput WAL decoding through Debezium to per-table Kafka topics."
+%%| fig-alt: "Flowchart showing the Write-Ahead Log (pgoutput plugin) in PostgreSQL feeding logical replication into Replication Slot debezium_kates, which streams changes to the Debezium Connector (PostgresConnector) in Connect. Debezium writes per-table topics cdc.public.orders and cdc.public.customers and DDL changes to cdc-schema-history in Kafka."
 graph LR
     subgraph PostgreSQL
         WAL["Write-Ahead Log<br/>(pgoutput plugin)"]
@@ -505,7 +520,7 @@ The chart validates connector configurations while Helm renders it (`_resolve.tp
 graph LR
     A["helm upgrade"] --> B{"Render:<br/>_resolve.tpl + _validate.tpl"}
     B -->|"All checks pass"| C["Apply KafkaConnect + KafkaConnectors"]
-    B -->|"A check fails"| D["❌ Upgrade refused, nothing applied"]
+    B -->|"A check fails"| D["Upgrade refused, nothing applied"]
 ```
 
 ### What It Validates
@@ -691,7 +706,12 @@ SMTs are lightweight, in-line transformations applied to each record as it passe
 
 ### Transform Pipeline
 
+Single Message Transforms execute sequentially inside the connector task before the record is written to Kafka (for a source) or handed to the sink:
+
 ```mermaid
+%%| label: fig-kc-smt-pipeline
+%%| fig-cap: "Chained Single Message Transform pipeline routing, flattening, and masking records inline before producing to Kafka."
+%%| fig-alt: "Flowchart progressing left to right from Source System to Connector, then through SMT 1 (Route by field), SMT 2 (Flatten nested), and SMT 3 (Mask PII) into a Kafka Topic."
 graph LR
     Source["Source System"] --> C["Connector"]
     C --> T1["SMT 1: Route by field"]
@@ -756,7 +776,12 @@ When Apicurio Registry is deployed alongside Kafka, Connect can serialize record
 
 ### Data Flow with Schema Registry
 
+When a source connector emits a record, the Apicurio converter registers or looks up the schema in Apicurio Registry and writes the compact schema identifier alongside the serialized payload:
+
 ```mermaid
+%%| label: fig-kc-schema-registry-flow
+%%| fig-cap: "Schema registration and serialization flow between a Connect worker, Apicurio Registry, and a Kafka topic."
+%%| fig-alt: "Diagram showing Debezium inside a Connect Worker passing a record to the Apicurio Converter, which (1) registers the schema with the Schema Store in Apicurio Registry, (2) receives the schema ID back, and (3) produces the schema ID plus payload to cdc.public.orders in Kafka."
 graph LR
     subgraph Connect Worker
         DBZ["Debezium"] --> CONV["Apicurio Converter"]
@@ -837,7 +862,12 @@ When a sink connector encounters a record it cannot process (malformed data, sch
 
 ### DLQ Flow
 
+Records that pass deserialization and sink delivery land in the target database, while poison records are diverted with full exception headers to the connector's dead-letter topic:
+
 ```mermaid
+%%| label: fig-kc-dlq-flow
+%%| fig-cap: "Sink connector Dead Letter Queue routing separating valid database writes from poison records."
+%%| fig-alt: "Flowchart showing a Source Topic feeding a Sink Connector. On success, the connector writes to the Target Database; on error, it routes the record to the DLQ Topic (groupId-dlq-connector), which triggers an Alert on DLQ growth and supports Manual inspection & replay."
 graph LR
     T["Source Topic"] --> SK["Sink Connector"]
     SK -->|"success"| DB["Target Database"]
@@ -893,6 +923,9 @@ The three patterns below are what CDC is for in practice: publishing events with
 The Outbox pattern avoids dual-write problems by writing events to an `outbox` table in the same database transaction as the business data [@richardson2018microservices; @kleppmann2017designing]. Debezium captures the outbox table and routes events to Kafka.
 
 ```mermaid
+%%| label: fig-kc-transactional-outbox
+%%| fig-cap: "Transactional Outbox sequence committing domain state and outbox event in one PostgreSQL transaction before Debezium WAL capture."
+%%| fig-alt: "Sequence diagram between Application, PostgreSQL, Debezium, and Kafka. The Application executes BEGIN, INSERT INTO orders, INSERT INTO outbox (aggregate_type, payload), and COMMIT on PostgreSQL. PostgreSQL streams the WAL event for the outbox table to Debezium, which produces the event to events.orders on Kafka."
 sequenceDiagram
     participant App as Application
     participant DB as PostgreSQL

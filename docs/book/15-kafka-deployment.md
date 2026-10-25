@@ -29,7 +29,12 @@ Strimzi watches for `Kafka`, `KafkaNodePool`, `KafkaTopic`, and `KafkaUser` cust
 
 ### Reconciliation Loop
 
+When you apply or update a `Kafka` custom resource, the Strimzi Cluster Operator diffs the desired spec against the live cluster state and orchestrates rolling updates until every pod reports ready:
+
 ```mermaid
+%%| label: fig-kde-reconciliation-loop
+%%| fig-cap: "Strimzi Cluster Operator reconciliation loop from custom resource apply through rolling pod restart to Ready status."
+%%| fig-alt: "Sequence diagram showing kubectl or GitOps applying a Kafka CR to the Kubernetes API, which sends a watch event to the Strimzi Operator. The operator diffs current versus desired state, updates ConfigMaps, Secrets, and StrimziPodSets, triggers a rolling restart on Kafka Pods if configuration changed, waits for the Ready signal, and updates the Kafka status to Ready: True."
 sequenceDiagram
     participant User as kubectl / GitOps
     participant Operator as Strimzi Operator
@@ -57,6 +62,9 @@ Key behaviors:
 The krafter cluster uses **dedicated roles** — controllers and brokers run in separate pods. This is the production-recommended topology for Kafka 4.x with KRaft.
 
 ```mermaid
+%%| label: fig-kde-cluster-architecture
+%%| fig-cap: "Dedicated KRaft controller quorum and zone-pinned broker pools in the krafter cluster."
+%%| fig-alt: "Architecture diagram showing a 3-voter KRaft Controller Quorum (controllers-3, controllers-4, controllers-5) exchanging Raft metadata, and three zone-pinned brokers (brokers-alpha-0 in Zone alpha, brokers-sigma-2 in Zone sigma, and brokers-gamma-1 in Zone gamma, each with 4Gi RAM, 50Gi PVC, and 2Gi JVM heap) fetching metadata from the controllers and replicating partitions across zones."
 graph TB
     subgraph Controllers["KRaft Controller Quorum (Raft consensus)"]
         C3["controllers-3<br/>voter"]
@@ -373,6 +381,9 @@ The `replace-key` policy generates a new key pair during renewal — stronger th
 With `networkPolicy.enabled` on, the chart renders a deny-all policy for the cluster's pods and one allow policy per component. It is on by default, and `values-staging.yaml` and `values-prod.yaml` keep it; `values-kind.yaml` and `values-dev.yaml` turn it off, and so does the `.build/values-detected.yaml` that `kates deploy` writes for a cluster whose CNI it cannot identify, EKS, GKE and AKS excepted. The Strimzi Cluster Operator adds a policy of its own for the brokers, and the two sets add up:
 
 ```mermaid
+%%| label: fig-kde-network-policy-union
+%%| fig-cap: "Combined ingress rules from the kafka-cluster chart's krafter-kafka policy and Strimzi's generated krafter-network-policy-kafka policy."
+%%| fig-alt: "Diagram showing two NetworkPolicy sources feeding into Brokers + controllers: krafter-kafka from the kafka-cluster chart (allowing networkPolicy.clients on 9092 and 9093, kates.io/test-pod pods on 9092 and 9093, and monitoring namespace on 9404) and krafter-network-policy-kafka from Strimzi (allowing any pod in any namespace on 9092, 9093, and 9404 until networkPolicyPeers are set)."
 graph LR
     subgraph Chart["krafter-kafka (kafka-cluster chart)"]
         clients["networkPolicy.clients: Kates, Litmus,<br/>Kafka UI, Apicurio, Connect, MirrorMaker 2"]
@@ -413,6 +424,9 @@ kafka-cluster 1.0 dropped the policies that selected **other releases'** pods �
 When deploying with `kates deploy --topology isolated` (the kates CLI's default topology), the Strimzi Operator runs in a dedicated `strimzi-operator` namespace, separate from the Kafka application namespace. That needs a precisely scoped NetworkPolicy, and since strimzi-operator 0.3 the wrapper chart renders it: `operatorPolicy.enabled`, on by default, produces one policy named after the release (`strimzi-operator`) in the operator's own namespace. kafka-cluster 0.4 used to write a fixed-name policy *into* the operator's namespace, so two Kafka releases naming the same operator fought over one object; kafka-cluster 1.0 no longer renders it at all.
 
 ```mermaid
+%%| label: fig-kde-operator-network-policy
+%%| fig-cap: "Ingress and egress rules of the hardened strimzi-operator NetworkPolicy in the isolated topology."
+%%| fig-alt: "Diagram showing the Strimzi Operator in the strimzi-operator namespace receiving ingress on port 8080 from Kubelet health probes, and opening egress to CoreDNS on port 53, the Kubernetes API Server on ports 443 and 6443, Brokers + controllers on ports 9090-9093 and 8443, and Connect / MirrorMaker 2 workers on port 8083 across watched namespaces."
 graph LR
     subgraph "strimzi-operator namespace"
         OP["Strimzi Operator"]

@@ -1,6 +1,6 @@
 # Chaos Engineering Theory
 
-Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production [@principlesofchaos2019; @basiri2016chaos]. This chapter covers the theory — [Chaos Engineering in Practice](07-chaos-practice.md) covers how Kates implements it.
+Chaos engineering is the discipline of experimenting on a distributed system to build confidence in its ability to withstand turbulent conditions in production [@principlesofchaos2019; @basiri2016chaos]. Rather than waiting for production outages, you inject controlled faults to verify recovery behavior — [Chaos Engineering in Practice](07-chaos-practice.md) shows how Kates executes those experiments.
 
 You don't need prior chaos tooling experience — just a working knowledge of Kafka's replication model. After this chapter, you can:
 
@@ -21,6 +21,9 @@ Distributed systems fail in ways that are impossible to predict from reading cod
 Chaos engineering replaces **hope** with **evidence**.
 
 ```mermaid
+%%| label: fig-chaos-reactive-vs-proactive
+%%| fig-cap: "Reactive incident response waits for production outages, whereas proactive chaos engineering surfaces and fixes failure modes in staging before release."
+%%| fig-alt: "Comparison flowchart with two vertical tracks. Without Chaos: Deploy to production, Wait for incident, Scramble to fix, Post-mortem, and Hope it doesn't happen again. With Chaos: Deploy to staging, Inject controlled failure, Observe behavior, Fix weaknesses, Build confidence, and Deploy to production."
 graph TD
     subgraph Without Chaos
         direction TB
@@ -59,8 +62,12 @@ Before injecting chaos, you must define what "normal" looks like. For Kafka, ste
 Inject faults that actually happen in production:
 
 ```mermaid
+%%| label: fig-chaos-fault-taxonomy
+%%| fig-cap: "Real-world distributed failures span four domains: infrastructure, network, application runtime, and Kafka-specific protocol events."
+%%| fig-alt: "Diagram with four fault groups: Infrastructure (Pod/VM crash, Disk failure, CPU exhaustion, Memory pressure), Network (Partition, Latency injection, Packet loss, DNS failure), Application (Process kill, Config corruption, Resource exhaustion, Clock skew), and Kafka-Specific (Broker crash, Leader election, ISR shrink, Log corruption, Rebalance storm)."
 graph TB
     subgraph Infrastructure
+        direction TB
         IF1[Pod/VM crash]
         IF2[Disk failure]
         IF3[CPU exhaustion]
@@ -68,6 +75,7 @@ graph TB
     end
     
     subgraph Network
+        direction TB
         NF1[Partition]
         NF2[Latency injection]
         NF3[Packet loss]
@@ -75,6 +83,7 @@ graph TB
     end
     
     subgraph Application
+        direction TB
         AF1[Process kill]
         AF2[Config corruption]
         AF3[Resource exhaustion]
@@ -82,6 +91,7 @@ graph TB
     end
     
     subgraph Kafka-Specific
+        direction TB
         KF1[Broker crash]
         KF2[Leader election]
         KF3[ISR shrink]
@@ -135,6 +145,9 @@ In a Kates [disruption plan](appendix-a-glossary.md#gl-disruption-plan), each ru
 A **Game Day** is a structured chaos engineering session [@robbins2012resilience; @allspaw2012fault]. Here's the process:
 
 ```mermaid
+%%| label: fig-chaos-gameday-methodology
+%%| fig-cap: "A Game Day moves through four disciplined phases: preparation, controlled fault execution, quantitative SLA analysis, and engineering follow-up."
+%%| fig-alt: "Flowchart across four sequential stages: Preparation (Define hypothesis, Set SLA thresholds, Prepare rollback plan, Alert the team), Execution (Establish baseline, Inject failure, Observe impact, Allow recovery), Analysis (Compare baseline vs. impact, Measure recovery time, Check for data loss, Grade against SLA), and Follow-Up (Document findings, File improvement tickets, Schedule retest)."
 graph TD
     subgraph Preparation
         P1[Define hypothesis]
@@ -219,6 +232,9 @@ Key timing (with default broker and client configs):
 When a follower falls behind (or a broker recovers), the ISR changes [@wang2015building]:
 
 ```mermaid
+%%| label: fig-chaos-isr-state-machine
+%%| fig-cap: "Partition availability state transitions as brokers fail and recover under `replication.factor=3` and `min.insync.replicas=2`."
+%%| fig-alt: "State diagram starting at Healthy (RF=3, ISR=3). When one broker fails, the partition moves to Degraded (ISR=2), where writes still succeed; if that broker recovers and catches up, it returns to Healthy. If another broker fails while Degraded, the partition enters Critical (ISR=1) and transitions to WriteUnavailable because ISR is below min.insync.replicas. When a broker recovers and ISR reaches at least 2, the partition returns to Degraded."
 stateDiagram-v2
     [*] --> Healthy: RF=3, ISR=3
     Healthy --> Degraded: Broker fails<br/>ISR=2
@@ -280,6 +296,9 @@ A Kates [disruption](appendix-a-glossary.md#gl-disruption) reports several of th
 A fully automated Game Day follows a 7-phase pipeline. Each phase has clear entry and exit criteria:
 
 ```mermaid
+%%| label: fig-chaos-gameday-pipeline
+%%| fig-cap: "The seven-phase automated Game Day pipeline orchestrated by `make gameday`, bracketed by pre-flight and post-flight LOAD comparisons."
+%%| fig-alt: "Top-down flowchart of seven phases: 1. Pre-flight (cluster healthy, backups verified, team notified), 2. Baseline (run LOAD test, record metrics, confirm steady state), 3. Chaos (inject fault, monitor impact, record timeline), 4. Observe (track recovery, measure RTO/RPO, check data integrity), 5. Recover (verify ISR restored, confirm zero data loss, check consumer lag), 6. Post-flight (re-run LOAD test, compare vs baseline, grade against SLA), and 7. Report (generate summary, file improvement tickets, schedule retest)."
 flowchart TB
     P["1. Pre-flight\n• Cluster healthy\n• Backups verified\n• Team notified"] --> B["2. Baseline\n• Run LOAD test\n• Record metrics\n• Confirm steady state"]
     B --> C["3. Chaos\n• Inject fault\n• Monitor impact\n• Record timeline"]

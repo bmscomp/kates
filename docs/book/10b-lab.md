@@ -78,6 +78,9 @@ Note that each preset also switches the **Test Type** ([`SPIKE`](appendix-a-glos
 Lab moves between a few states as you work: you set parameters, a test runs, and you compare the results. The diagram shows the main keys that move you from one state to the next.
 
 ```mermaid
+%%| label: fig-lab-state-machine
+%%| fig-cap: "Interactive state transitions in the `kates lab` TUI driven by single-key shortcuts."
+%%| fig-alt: "State diagram starting at Config (entered via kates lab). Pressing Enter or s (auto-sweep) transitions to Running; when the test completes or x (cancel) is pressed, it returns to Config. Pressing d enters Diff, and pressing c enters PinSelect (where Enter opens Diff). Pressing Esc from Diff returns to Config, and pressing q quits."
 stateDiagram-v2
     [*] --> Config: kates lab
     Config --> Running: Enter
