@@ -30,8 +30,8 @@ func TestWithImageMirrorSetsEachChartsOwnKey(t *testing.T) {
 			"--set global.imageRegistry=" + m},
 		{[]string{"upgrade", "--install", "strimzi-operator", strimzi, "-n", "strimzi-operator"},
 			"--set strimzi-kafka-operator.defaultImageRegistry=" + m + "/quay.io --set testImages.kubectl=" + m + "/ghcr.io/bmscomp/kates-tester:1.29.3"},
-		{[]string{"upgrade", "--install", "kyverno", "/b/third-party/kyverno-3.6.4.tgz", "-n", "kyverno"},
-			"--set global.image.registry=" + m + "/reg.kyverno.io --set test.image.registry=" + m + "/curlimages --set webhooksCleanup.image.registry=" + m + "/registry.k8s.io"},
+		{[]string{"upgrade", "--install", "kyverno", "/b/third-party/kyverno-3.7.2.tgz", "-n", "kyverno"},
+			"--set global.image.registry=" + m + "/reg.kyverno.io --set test.image.registry=" + m + "/ghcr.io --set webhooksCleanup.image.registry=" + m + "/registry.k8s.io"},
 		{[]string{"upgrade", "--install", "cert-manager", "jetstack/cert-manager", "--version", "v1.13.3"},
 			"--set image.registry=" + m + " --set webhook.image.registry=" + m},
 		{[]string{"template", "kates-bundle", filepath.Join(charts, "kafka-ui")},
@@ -147,10 +147,10 @@ func TestChartsPushPushesBothNamesAndChecksCoverage(t *testing.T) {
 
 	// A chart that takes the mirror some other way is caught here.
 	fakeDocker(t, []string{"quay.io/strimzi/operator:1.2.0"}, func([]string) string {
-		return "spec:\n  containers:\n    - image: quay.io/jetstack/cert-manager-controller:v1.13.3\n    - image: " + m + "/kyverno/kyverno:v1.16.4\n"
+		return "spec:\n  containers:\n    - image: quay.io/jetstack/cert-manager-controller:v1.13.3\n    - image: " + m + "/kyverno/kyverno:v1.17.2\n"
 	})
 	err := runChartsPush(context.Background(), bundle, m)
-	if err == nil || !strings.Contains(err.Error(), "quay.io/jetstack/cert-manager-controller:v1.13.3") || !strings.Contains(err.Error(), m+"/kyverno/kyverno:v1.16.4") {
+	if err == nil || !strings.Contains(err.Error(), "quay.io/jetstack/cert-manager-controller:v1.13.3") || !strings.Contains(err.Error(), m+"/kyverno/kyverno:v1.17.2") {
 		t.Fatalf("an image outside the mirror and one it lacks must both be refused: %v", err)
 	}
 }

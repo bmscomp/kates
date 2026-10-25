@@ -23,9 +23,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// kyvernoChartVersion pins the Kyverno chart: the last stable patch of the
-// 3.6 minor series. Chart versions: https://kyverno.github.io/kyverno/
-const kyvernoChartVersion = "3.6.4"
+// kyvernoChartVersion pins the Kyverno chart: 3.7.2 is Kyverno 1.17.2, the
+// first line that serves the ImageValidatingPolicy the kates chart's
+// kyvernoPolicy.cosign renders (#465). Chart versions:
+// https://kyverno.github.io/kyverno/
+const kyvernoChartVersion = "3.7.2"
 
 type deployProxySettings struct {
 	http    string

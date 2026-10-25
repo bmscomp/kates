@@ -58,7 +58,7 @@ It uses Helm to apply the exact configuration needed.`,
 					return err
 				}
 				out, err := hc.Run(ctx, "upgrade", "--install", "kyverno", "kyverno/kyverno",
-					"--version", "3.6.4", "-n", "kyverno", "--create-namespace",
+					"--version", kyvernoChartVersion, "-n", "kyverno", "--create-namespace",
 					"--set", "admissionController.replicas=1",
 					"--set", "backgroundController.replicas=1",
 					"--set", "cleanupController.replicas=1",

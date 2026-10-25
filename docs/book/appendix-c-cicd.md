@@ -107,7 +107,7 @@ Every workflow also shares three conventions: a `concurrency` group per branch (
 | **Dependency CVE scan** | — | Trivy over the Maven tree and `govulncheck` over the Go module, as its own job so a new CVE and a failing test are two different red checks |
 | **CLI Tests** | Go 1.25 | Runs `go test -race` across all CLI packages, then the terminal-compatibility and CLI style harnesses |
 | **Helm Lint** | Helm v3.17.0 | Lints, renders and schema-validates every chart under `charts/`, and runs the repository's cross-file consistency checks |
-| **Kyverno Policy Validation** | Kyverno CLI v1.16.4 | Holds every chart to the cluster policies in `.github/kyverno/`, then applies the `kates`, `kafka-cluster` and `kates-chaos` charts' own policies to their workloads |
+| **Kyverno Policy Validation** | Kyverno CLI v1.17.2 | Holds every chart to the cluster policies in `.github/kyverno/`, then applies the `kates`, `kafka-cluster` and `kates-chaos` charts' own policies to their workloads |
 | **YAML Validation** | Python + PyYAML | Parses every YAML file under `config/` to catch syntax errors |
 
 ### Key Details

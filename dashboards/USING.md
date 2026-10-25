@@ -184,7 +184,7 @@ helm upgrade chaos charts/kates-chaos -n litmus --reuse-values \
   --set litmus-core.exporter.enabled=true --set monitoring.serviceMonitor.enabled=true
 helm upgrade monitoring charts/monitoring -n monitoring --reuse-values \
   --set chaosAlerts.enabled=true
-helm upgrade kyverno kyverno/kyverno --version 3.6.4 -n kyverno --reuse-values \
+helm upgrade kyverno kyverno/kyverno --version 3.7.2 -n kyverno --reuse-values \
   --set admissionController.serviceMonitor.enabled=true --set backgroundController.serviceMonitor.enabled=true
 ```
 

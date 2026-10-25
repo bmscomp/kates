@@ -82,7 +82,7 @@ var mirrorSets = map[string][]mirrorSet{
 	// the test and cleanup images keep their own registries.
 	"kyverno": {
 		{key: "global.image.registry", suffix: "/reg.kyverno.io"},
-		{key: "test.image.registry", suffix: "/curlimages"},
+		{key: "test.image.registry", suffix: "/ghcr.io"},
 		{key: "webhooksCleanup.image.registry", suffix: "/registry.k8s.io"},
 	},
 }

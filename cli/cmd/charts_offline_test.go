@@ -107,7 +107,7 @@ func TestABundleCarriesTheThirdPartyChartsWithTheirChecksums(t *testing.T) {
 	}
 	helmRan = nil
 	args, err = thirdPartyChartArgs(context.Background(), "kyverno", true)
-	if err != nil || len(args) != 1 || args[0] != filepath.Join(bundle, "third-party", "kyverno-3.6.4.tgz") || len(helmRan) != 0 {
+	if err != nil || len(args) != 1 || args[0] != filepath.Join(bundle, "third-party", "kyverno-"+kyvernoChartVersion+".tgz") || len(helmRan) != 0 {
 		t.Fatalf("bundle mode: %v %v, helm %v; want the tarball and no repository", args, err, helmRan)
 	}
 	setDeployFlags(t, func() { deployWithCertManager, deployWithKyverno = true, true })
