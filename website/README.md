@@ -52,10 +52,11 @@ the domain root. Setup, once:
 2. Create a fine-grained personal access token restricted to that repository with
    *Contents: Read and write*, and store it in this repository as the secret
    `KATESPLATFORM_PAGES_TOKEN`.
-3. Push to `main` once (or run the *Website* workflow by hand). The job creates the
-   `gh-pages` branch in the other repository.
-4. In `bmscomp/katesplatform.io` → Settings → Pages, set the source to *Deploy from a
-   branch*, branch `gh-pages`, folder `/ (root)`. The site is live a minute later.
+3. Push to `main` once (or run the *Website* workflow by hand). The job commits the folder
+   to the other repository's `main` branch.
+4. In `bmscomp/katesplatform.io` → Settings → Pages, the source is *Deploy from a
+   branch*, branch `main`, folder `/ (root)`; this is already set. The site updates a
+   minute after each deploy.
 
 Both deploys are independent: each runs when its secret is present and skips otherwise.
 `.nojekyll` in this folder stops GitHub Pages from running Jekyll, which would otherwise drop

@@ -84,7 +84,8 @@ jobs:
   # GitHub Pages serves one site per repository and this repository's slot is
   # the book, so the website goes to a second repository, bmscomp/katesplatform.io,
   # whose Pages site is https://bmscomp.github.io/katesplatform.io/. This job
-  # pushes the website folder to that repository's gh-pages branch. The
+  # pushes the website folder to that repository's main branch, the branch
+  # its Pages site is configured to serve. The
   # workflow's own GITHUB_TOKEN cannot write to another repository, so it
   # needs a secret: KATESPLATFORM_PAGES_TOKEN, a fine-grained personal access
   # token with Contents: read and write on bmscomp/katesplatform.io only.
@@ -112,13 +113,14 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Push the website folder to bmscomp/katesplatform.io (gh-pages)
+      - name: Push the website folder to bmscomp/katesplatform.io (main)
         if: steps.secrets.outputs.ready == 'true'
         uses: peaceiris/actions-gh-pages@47f197a2200bb9de68ba5f48fad1c088eb1c4a32 # v4.0.0
         with:
           personal_token: ${{ secrets.KATESPLATFORM_PAGES_TOKEN }}
           external_repository: bmscomp/katesplatform.io
-          publish_branch: gh-pages
+          publish_branch: main
           publish_dir: website
-          force_orphan: true
+          exclude_assets: ""
+          keep_files: false
           commit_message: "deploy: ${{ github.sha }}"
