@@ -35,6 +35,7 @@ func TestRenderHTMLReport_Basic(t *testing.T) {
 		"Reliability",
 		"100.0K",
 		"bar-fill",
+		"https://github.com/bmscomp/kates",
 	}
 	for _, exp := range expectations {
 		if !strings.Contains(html, exp) {

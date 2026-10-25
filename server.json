@@ -1,0 +1,50 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.bmscomp/kates",
+  "title": "Kates MCP Server",
+  "description": "Read-only Model Context Protocol (MCP) server for Apache Kafka cluster diagnostics, benchmark run analysis, chaos dry-run previews, and security posture audits.",
+  "version": "1.30.0",
+  "websiteUrl": "https://bmscomp.github.io/kates/",
+  "repository": {
+    "url": "https://github.com/bmscomp/kates",
+    "source": "github"
+  },
+  "remotes": [],
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/bmscomp/kates/releases/download/v1.30.0/kates-linux-amd64.tar.gz",
+      "version": "1.30.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Start the read-only Kates MCP server over stdio"
+        },
+        {
+          "type": "named",
+          "name": "--context",
+          "description": "Explicit Kates CLI context name (for example, ports or lab)",
+          "isRequired": true
+        },
+        {
+          "type": "named",
+          "name": "--allow-cluster",
+          "description": "Kafka clusterId that this MCP server is permitted to inspect",
+          "isRequired": true
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "KATES_API_KEY",
+          "description": "Optional API key override for the Kates API (defaults to the key stored in the named CLI context)",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,164 @@
+name: "Kates Quality Gate"
+description: "Run an Apache Kafka performance test and enforce an A–F SLA grade gate in CI/CD"
+author: "bmscomp"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  api-url:
+    description: "URL of the Kates API (for example, http://localhost:8080)"
+    required: false
+    default: "http://localhost:8080"
+  api-key:
+    description: "API key for the Kates API (from Secret kates-api-key)"
+    required: false
+    default: ""
+  min-grade:
+    description: "Minimum passing performance grade (A, B, C, D, or F)"
+    required: false
+    default: "C"
+  type:
+    description: "Workload type to run (LOAD, STRESS, SPIKE, ENDURANCE, VOLUME, CAPACITY, ROUND_TRIP, INTEGRITY)"
+    required: false
+    default: "LOAD"
+  records:
+    description: "Number of records to produce"
+    required: false
+    default: "50000"
+  backend:
+    description: "Benchmark backend (native or trogdor)"
+    required: false
+    default: ""
+  timeout:
+    description: "Timeout in seconds"
+    required: false
+    default: "180"
+  version:
+    description: "Kates CLI release tag to install (for example, v1.30.0 or latest)"
+    required: false
+    default: "latest"
+
+outputs:
+  run-id:
+    description: "ID of the test run created by kates gate"
+    value: ${{ steps.gate.outputs.run-id }}
+  grade:
+    description: "Computed A–F performance grade"
+    value: ${{ steps.gate.outputs.grade }}
+  passed:
+    description: "Whether the run met or exceeded min-grade (true or false)"
+    value: ${{ steps.gate.outputs.passed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install kates CLI
+      shell: bash
+      env:
+        KATES_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if command -v kates >/dev/null 2>&1; then
+          echo "Using existing kates CLI: $(kates version 2>/dev/null || echo 'installed')"
+          exit 0
+        fi
+        os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        arch="$(uname -m)"
+        case "$arch" in
+          x86_64|amd64) arch="amd64" ;;
+          aarch64|arm64) arch="arm64" ;;
+          *) echo "::error::Unsupported architecture: $arch"; exit 1 ;;
+        esac
+        if [ "$KATES_VERSION" = "latest" ]; then
+          url="https://github.com/bmscomp/kates/releases/latest/download/kates-${os}-${arch}.tar.gz"
+        else
+          url="https://github.com/bmscomp/kates/releases/download/${KATES_VERSION}/kates-${os}-${arch}.tar.gz"
+        fi
+        install_dir="${RUNNER_TEMP:-/tmp}/kates-bin"
+        mkdir -p "$install_dir"
+        curl -fsSL "$url" | tar -xz -C "$install_dir"
+        chmod +x "$install_dir/kates"
+        echo "$install_dir" >> "$GITHUB_PATH"
+
+    - name: Run kates gate
+      id: gate
+      shell: bash
+      env:
+        KATES_API_URL: ${{ inputs.api-url }}
+        KATES_API_KEY: ${{ inputs.api-key }}
+        INPUT_MIN_GRADE: ${{ inputs.min-grade }}
+        INPUT_TYPE: ${{ inputs.type }}
+        INPUT_RECORDS: ${{ inputs.records }}
+        INPUT_BACKEND: ${{ inputs.backend }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -uo pipefail
+        args=(gate --min-grade "$INPUT_MIN_GRADE" --type "$INPUT_TYPE" --records "$INPUT_RECORDS" --timeout "$INPUT_TIMEOUT" --url "$KATES_API_URL" -o json)
+        if [ -n "$INPUT_BACKEND" ]; then
+          args+=(--backend "$INPUT_BACKEND")
+        fi
+        out_file="${RUNNER_TEMP:-/tmp}/kates-gate-result.json"
+        kates "${args[@]}" > "$out_file"
+        rc=$?
+
+        python3 - "$out_file" "$rc" <<'PY'
+        import json, os, pathlib, sys
+
+        out_path = pathlib.Path(sys.argv[1])
+        rc = int(sys.argv[2])
+        data = {}
+        if out_path.exists():
+            raw = out_path.read_text(encoding="utf-8").strip()
+            if raw:
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    pass
+
+        run_id = data.get("runId", "")
+        grade = data.get("grade", "—")
+        min_grade = data.get("minGrade", os.environ.get("INPUT_MIN_GRADE", "C"))
+        passed = bool(data.get("passed", False))
+        test_type = data.get("testType", os.environ.get("INPUT_TYPE", "LOAD"))
+        records = data.get("records", os.environ.get("INPUT_RECORDS", "50000"))
+        tput = data.get("avgThroughputRecPerSec")
+        p99 = data.get("p99LatencyMs")
+        err = data.get("error", "")
+
+        gh_out = os.environ.get("GITHUB_OUTPUT")
+        if gh_out:
+            with open(gh_out, "a", encoding="utf-8") as fh:
+                fh.write(f"run-id={run_id}\n")
+                fh.write(f"grade={grade}\n")
+                fh.write(f"passed={'true' if passed else 'false'}\n")
+
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            verdict = "PASS" if passed else "FAIL"
+            tput_str = f"{tput:,.1f} rec/s" if isinstance(tput, (int, float)) else "—"
+            p99_str = f"{p99:.2f} ms" if isinstance(p99, (int, float)) else "—"
+            lines = [
+                f"### Kates Quality Gate — {verdict} (Grade `{grade}` / min `{min_grade}`)",
+                "",
+                "| Metric | Value |",
+                "|:-------|:------|",
+                f"| **Verdict** | **{verdict}** |",
+                f"| **Performance Grade** | `{grade}` (minimum `{min_grade}`) |",
+                f"| **Workload** | `{test_type}` ({records} records) |",
+                f"| **Avg Throughput** | `{tput_str}` |",
+                f"| **P99 Latency** | `{p99_str}` |",
+                f"| **Run ID** | `{run_id or '—'}` |",
+            ]
+            if err:
+                lines.extend(["", f"> **Error:** `{err}`"])
+            lines.extend([
+                "",
+                "---",
+                "*Graded by [Kates](https://github.com/bmscomp/kates) — Performance testing, chaos engineering and security auditing for Apache Kafka on Kubernetes.*",
+            ])
+            with open(summary_path, "a", encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+
+        sys.exit(rc)
+        PY
