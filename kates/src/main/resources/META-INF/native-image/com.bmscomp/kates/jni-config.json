@@ -2,45 +2,60 @@
   {
     "name": "com.github.luben.zstd.Zstd",
     "allPublicMethods": true,
-    "allPublicFields": true
+    "allPublicFields": true,
+    "allDeclaredFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdCompressCtx",
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdDecompressCtx",
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdDictCompress",
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdDictDecompress",
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdOutputStreamNoFinalizer",
     "allDeclaredMethods": true,
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdInputStreamNoFinalizer",
     "allDeclaredMethods": true,
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdDirectBufferCompressingStreamNoFinalizer",
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
   },
   {
     "name": "com.github.luben.zstd.ZstdDirectBufferDecompressingStreamNoFinalizer",
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.github.luben.zstd.BaseZstdBufferDecompressingStreamNoFinalizer",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
   },
   {
     "name": "com.github.luben.zstd.ZstdBufferDecompressingStreamNoFinalizer",
-    "allPublicMethods": true
+    "allPublicMethods": true,
+    "allDeclaredFields": true
   },
   {
     "name": "net.jpountz.lz4.LZ4JNI",

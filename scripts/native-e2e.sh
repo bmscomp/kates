@@ -333,8 +333,10 @@ RF=$(( BROKERS < 3 ? BROKERS : 3 ))
 MIN_ISR=$(( RF > 1 ? RF - 1 : 1 ))
 info "  ${BROKERS} broker(s) → replication-factor ${RF}, min-isr ${MIN_ISR}"
 
-# lz4 on purpose: compression is JNI, and a native image that failed to ship or
-# initialise those libraries only finds out here, minutes into a run.
+# lz4 and zstd on purpose: compression is JNI, and a native image that failed to
+# ship or initialise those libraries only finds out here, minutes into a run.
+# zstd also reads Java fields from native code, which jni-config.json must
+# register separately (NoSuchFieldError ...ZstdOutputStreamNoFinalizer.dstPos).
 # The CLI's exit code is the authoritative verdict — cmd/test.go returns an
 # error when a run ends FAILED, with a comment saying that exiting 0 there is
 # "how CI stayed green while load tests failed". Discarding it with `|| true`
@@ -342,48 +344,50 @@ info "  ${BROKERS} broker(s) → replication-factor ${RF}, min-isr ${MIN_ISR}"
 # "✅ Native end-to-end passed".
 # tee to a FILE, not to /dev/tty: there is no controlling terminal in CI or
 # when make's output is redirected, and tee then fails on every run.
-RUN_LOG="$(mktemp)"
-set +e
-RUN_OUTPUT="$("${KATES_CLI}" test create \
-    --url "${BASE}" \
-    --api-key "${API_KEY}" \
-    --type LOAD \
-    --topic native-e2e \
-    --records 10000 \
-    --record-size 512 \
-    --compression lz4 \
-    --replication-factor "${RF}" \
-    --min-isr "${MIN_ISR}" \
-    --wait 2>&1 | tee "${RUN_LOG}")"
-CLI_STATUS=${PIPESTATUS[0]}
-set -e
-rm -f "${RUN_LOG}"
+for CODEC in lz4 zstd; do
+    RUN_LOG="$(mktemp)"
+    set +e
+    RUN_OUTPUT="$("${KATES_CLI}" test create \
+        --url "${BASE}" \
+        --api-key "${API_KEY}" \
+        --type LOAD \
+        --topic "native-e2e-${CODEC}" \
+        --records 10000 \
+        --record-size 512 \
+        --compression "${CODEC}" \
+        --replication-factor "${RF}" \
+        --min-isr "${MIN_ISR}" \
+        --wait 2>&1 | tee "${RUN_LOG}")"
+    CLI_STATUS=${PIPESTATUS[0]}
+    set -e
+    rm -f "${RUN_LOG}"
 
-# Strip ANSI before parsing: the id is printed in a styled column, and the
-# escape sequence sits between "ID" and the value.
-RUN_ID="$(printf '%s' "${RUN_OUTPUT}" \
-    | sed 's/\x1b\[[0-9;]*m//g' \
-    | sed -n 's/.*ID[[:space:]]\{2,\}\([0-9a-f]\{8\}\).*/\1/p' \
-    | head -1)"
+    # Strip ANSI before parsing: the id is printed in a styled column, and the
+    # escape sequence sits between "ID" and the value.
+    RUN_ID="$(printf '%s' "${RUN_OUTPUT}" \
+        | sed 's/\x1b\[[0-9;]*m//g' \
+        | sed -n 's/.*ID[[:space:]]\{2,\}\([0-9a-f]\{8\}\).*/\1/p' \
+        | head -1)"
 
-if [ "${CLI_STATUS}" -ne 0 ]; then
-    error "❌ the benchmark did not finish cleanly (CLI exit ${CLI_STATUS})"
-    if [ -n "${RUN_ID}" ]; then
-        # The reason lives on the run, not in the progress view. Printing the
-        # per-task status and error is the difference between "the benchmark
-        # failed" and "the producer could not authenticate to the broker".
-        echo "" >&2
-        echo "Task detail for run ${RUN_ID}:" >&2
-        api_get "/api/tests/${RUN_ID}" 200 'final run state' \
-            | tr ',' '\n' \
-            | grep -E '"(taskId|status|error|phaseName)"' \
-            | sed 's/^/  /' >&2 || true
-        echo "" >&2
-        echo "  Full detail:  ${KATES_CLI} test get ${RUN_ID} --url ${BASE} --api-key <key>" >&2
+    if [ "${CLI_STATUS}" -ne 0 ]; then
+        error "❌ the benchmark did not finish cleanly (CLI exit ${CLI_STATUS})"
+        if [ -n "${RUN_ID}" ]; then
+            # The reason lives on the run, not in the progress view. Printing the
+            # per-task status and error is the difference between "the benchmark
+            # failed" and "the producer could not authenticate to the broker".
+            echo "" >&2
+            echo "Task detail for run ${RUN_ID}:" >&2
+            api_get "/api/tests/${RUN_ID}" 200 'final run state' \
+                | tr ',' '\n' \
+                | grep -E '"(taskId|status|error|phaseName)"' \
+                | sed 's/^/  /' >&2 || true
+            echo "" >&2
+            echo "  Full detail:  ${KATES_CLI} test get ${RUN_ID} --url ${BASE} --api-key <key>" >&2
+        fi
+        fail "${CODEC} benchmark run ${RUN_ID:-<unknown>} did not succeed"
     fi
-    fail "benchmark run ${RUN_ID:-<unknown>} did not succeed"
-fi
-info "✓ benchmark completed on the native backend"
+    info "✓ ${CODEC} benchmark completed on the native backend"
+done
 
 echo ""
 bold "✅ Native end-to-end passed"
