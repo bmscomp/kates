@@ -57,7 +57,7 @@ GitHub Pages serves one site per repository and `bmscomp.github.io/kates` alread
 |:--|:--|:--|:--|:--|
 | **Cloudflare Pages (recommended)** | Free, unlimited bandwidth | Yes, automatic | Direct upload of `website/` from a workflow; no Git integration needed | Fast global edge, `_headers` supported, preview URLs per branch if wanted |
 | Netlify | Free tier (100 GB/month) | Yes, automatic | Same folder, `netlify deploy --dir=website --prod` | `_headers` works unchanged; bandwidth cap is the only difference |
-| GitHub Pages on a second repository (`bmscomp/katesplatforme.io`) | Free | Yes, via `CNAME` file | Needs a sync workflow that pushes `website/` to the other repo | Keeps everything on GitHub; one more repository to maintain |
+| GitHub Pages on a second repository (`bmscomp/katesplatform.io`), **implemented** | Free | Yes, via `CNAME` file; served meanwhile at <https://bmscomp.github.io/katesplatform.io/> | The `deploy-github-pages` job in `website.yml` pushes `website/` to that repository's `gh-pages` branch with the `KATESPLATFORM_PAGES_TOKEN` secret | Keeps everything on GitHub; one more repository to maintain. Setup steps in `website/README.md` |
 | GitHub Pages on this repository | Free | Yes | Would replace the book's URL | Rejected: breaks every link to the book |
 
 ### How (Cloudflare Pages)

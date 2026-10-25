@@ -80,3 +80,45 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy website --project-name=kates-website --branch=main --commit-dirty=true
+
+  # GitHub Pages serves one site per repository and this repository's slot is
+  # the book, so the website goes to a second repository, bmscomp/katesplatform.io,
+  # whose Pages site is https://bmscomp.github.io/katesplatform.io/. This job
+  # pushes the website folder to that repository's gh-pages branch. The
+  # workflow's own GITHUB_TOKEN cannot write to another repository, so it
+  # needs a secret: KATESPLATFORM_PAGES_TOKEN, a fine-grained personal access
+  # token with Contents: read and write on bmscomp/katesplatform.io only.
+  deploy-github-pages:
+    name: Deploy to GitHub Pages (bmscomp/katesplatform.io)
+    needs: validate
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: website-github-pages
+      url: https://bmscomp.github.io/katesplatform.io/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the GitHub Pages token is present
+        id: secrets
+        env:
+          TOKEN: ${{ secrets.KATESPLATFORM_PAGES_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "KATESPLATFORM_PAGES_TOKEN is not set; skipping the GitHub Pages deploy." >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the website folder to bmscomp/katesplatform.io (gh-pages)
+        if: steps.secrets.outputs.ready == 'true'
+        uses: peaceiris/actions-gh-pages@47f197a2200bb9de68ba5f48fad1c088eb1c4a32 # v4.0.0
+        with:
+          personal_token: ${{ secrets.KATESPLATFORM_PAGES_TOKEN }}
+          external_repository: bmscomp/katesplatform.io
+          publish_branch: gh-pages
+          publish_dir: website
+          force_orphan: true
+          commit_message: "deploy: ${{ github.sha }}"
