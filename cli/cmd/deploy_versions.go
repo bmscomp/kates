@@ -261,6 +261,9 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 		if requested != pin {
 			vp.Notes = append(vp.Notes, fmt.Sprintf("admin-less: Kafka follows the installed Strimzi %s, which only a cluster admin can change", requested))
 		}
+		if older, cerr := compareVersions(requested, pin); cerr == nil && older < 0 {
+			vp.Notes = append(vp.Notes, fmt.Sprintf("Strimzi %s is available (this platform's pin): ask a cluster admin to upgrade the operator, then deploy again for its newer Kafka versions", pin))
+		}
 	}
 
 	// 3. Operator chart.
@@ -309,6 +312,11 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 		newest, _ := chart.Window.Newest()
 		vp.kafka = newest
 		vp.KafkaDefaulted = true
+		// A running primary keeps its version: an upgrade is offered, not done.
+		if cur, ok := vp.runningPrimaryKafka(ctx, r, o); ok && chart.Window.Supports(cur) && cur.Less(newest) {
+			vp.kafka = cur
+			vp.Notes = append(vp.Notes, fmt.Sprintf("%s/%s runs Kafka %s, which deploy keeps; Kafka %s is available: kates deploy --kafka-version %s upgrades it (a rolling restart)", o.KafkaNS, o.KafkaName, cur, newest, newest))
+		}
 	} else {
 		v, err := kafkaversion.Parse(o.KafkaVersion)
 		if err != nil {
@@ -515,6 +523,21 @@ func (vp *versionPlan) compareInstalled(ctx context.Context, r strimzi.Runner, o
 }
 
 type runningKafka struct{ namespace, name, version string }
+
+// runningPrimaryKafka is the version the primary Kafka already runs, if any.
+func (vp *versionPlan) runningPrimaryKafka(ctx context.Context, r strimzi.Runner, o versionOptions) (kafkaversion.Version, bool) {
+	if r == nil || vp.primaryOp == nil || o.KafkaName == "" {
+		return kafkaversion.Version{}, false
+	}
+	running, _ := runningKafkaVersions(ctx, r, vp.primaryOp)
+	for _, k := range running {
+		if k.namespace == o.KafkaNS && k.name == o.KafkaName {
+			v, err := kafkaversion.Parse(k.version)
+			return v, err == nil
+		}
+	}
+	return kafkaversion.Version{}, false
+}
 
 func (vp *versionPlan) checkStrimziCRDStorage(ctx context.Context, r strimzi.Runner) error {
 	if at, _ := compareVersions(vp.StrimziVersion, strimziV1); at < 0 {

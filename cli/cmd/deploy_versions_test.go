@@ -622,3 +622,48 @@ func TestResolveVersionPlan_AdminlessFollowsInstalled(t *testing.T) {
 		t.Errorf("full profile: want an upgrade, got %+v, %v", vp, err)
 	}
 }
+
+// A running primary keeps its Kafka version, and the newer one is offered.
+func TestResolveVersionPlan_KeepsRunningKafkaAndOffersUpgrade(t *testing.T) {
+	root := versionsRepo(t, "1.1.0", "4.2.0")
+	pods, dep := operatorPodsJSON("strimzi-operator", "1.1.0", "*")
+	r := &scriptedRunner{answers: map[string]string{
+		"get pods -A -l strimzi.io/kind=cluster-operator": pods,
+		"get deployment -n strimzi-operator":              dep,
+		"helm list -A -o json":                            `[]`,
+		"get kafka -A -o json":                            kafkaListJSON("kafka/krafter/4.2.1"),
+	}}
+	o := versionOptions{RepoRoot: root, CacheDir: t.TempDir(), Offline: true, KafkaNS: "kafka", KafkaName: "krafter"}
+	vp, err := resolveVersionPlan(context.Background(), r, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vp.KafkaVersion != "4.2.1" || !hasNote(vp, "--kafka-version 4.3.0 upgrades it") {
+		t.Errorf("want 4.2.1 kept and 4.3.0 offered, got %s %v", vp.KafkaVersion, vp.Notes)
+	}
+	o.KafkaVersion = "4.3.0"
+	if vp, err = resolveVersionPlan(context.Background(), r, o); err != nil || vp.KafkaVersion != "4.3.0" {
+		t.Errorf("explicit version must win: %+v, %v", vp, err)
+	}
+}
+
+func TestResolveVersionPlan_AdminlessOffersOperatorUpgrade(t *testing.T) {
+	root := versionsRepo(t, "1.1.0", "4.2.0")
+	cache := t.TempDir()
+	writeOperatorTgz(t, filepath.Join(cache, strimzi.ChartFileName("1.0.1")), "1.0.1",
+		[]string{"4.1.0", "4.1.1", "4.1.2", "4.2.0"}, []string{"v1"}, "v1")
+	pods, dep := operatorPodsJSON("strimzi-operator", "1.0.1", "*")
+	r := &scriptedRunner{answers: map[string]string{
+		"get pods -A -l strimzi.io/kind=cluster-operator": pods,
+		"get deployment -n strimzi-operator":              dep,
+		"helm list -A -o json":                            `[]`,
+		"get kafka -A -o json":                            kafkaListJSON(),
+	}}
+	vp, err := resolveVersionPlan(context.Background(), r, versionOptions{RepoRoot: root, CacheDir: cache, Offline: true, KafkaNS: "kafka", FollowInstalled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasNote(vp, "Strimzi 1.1.0 is available") {
+		t.Errorf("want the pin offered to the admin: %v", vp.Notes)
+	}
+}
