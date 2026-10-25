@@ -17,27 +17,44 @@
   </p>
 </div>
 
-Kates runs performance tests against Apache Kafka, injects faults into its brokers and measures what they cost in throughput, latency and recovery time, and audits broker security configuration. It is for teams that run Kafka on Kubernetes and want those measurements to be repeatable, on a local Kind cluster or in a CI pipeline. Performance tests work against any Kafka the backend can reach; fault injection targets Strimzi-managed brokers, by default the cluster `krafter` in namespace `kafka`.
+You find out how a Kafka cluster handles a broker failure on the day a broker fails — unless you have already tried it. Kates puts load on Apache Kafka, injects faults into its brokers, measures what they cost in throughput, P99 latency, recovery time and lost records, and audits broker security configuration. It is for teams that run Kafka on Kubernetes and want those measurements to be repeatable, on a local Kind cluster or as pass/fail gates in a CI pipeline.
 
-It has three parts: the `kates` CLI (Go), a backend service (Quarkus) that runs the tests and faults and keeps the results in PostgreSQL, and the Helm charts that install Kafka and everything around it.
+Performance tests work against any Kafka cluster the Kates API can reach; fault injection targets Strimzi-managed brokers, by default the cluster `krafter` in namespace `kafka`. Kates has three parts: the `kates` CLI (Go), the Kates API (Quarkus) that runs the tests and faults and keeps the results in PostgreSQL, and the signed Helm charts that install Kafka and everything around it.
 
-**[The book](https://bmscomp.github.io/kates/)** · [Quick start](#quick-start) · [Architecture](#architecture) · [Documentation](#documentation) · [CLI at a glance](#cli-at-a-glance) · [Helm charts](#helm-charts) · [Building from source](#building-from-source) · [Contributing](#contributing)
+**[The book](https://bmscomp.github.io/kates/)** · [Why Kates](#why-kates) · [Quick start](#quick-start) · [CLI at a glance](#cli-at-a-glance) · [Architecture](#architecture) · [Documentation](#documentation) · [Helm charts](#helm-charts) · [Building from source](#building-from-source) · [Contributing](#contributing)
+
+<p align="center">
+  <img src="docs/assets/kates-deploy.png" width="900" alt="kates deploy terminal UI showing live rollout progress for Strimzi Operator, Cert-Manager, Kyverno, a three-zone KRaft Kafka cluster (alpha, sigma, gamma), and Prometheus/Grafana monitoring" />
+</p>
 
 ## What it does
 
-- **Performance tests.** Eight workload types (`LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`); `kates test types` lists every type the backend accepts. The default engine runs Kafka producers and consumers inside the backend on virtual threads; `--backend trogdor` hands the workload to a Trogdor coordinator you run yourself. Reports give throughput, latency percentiles and error rate, and export as CSV, JUnit XML, Markdown, HTML or latency heatmaps.
-- **Fault injection.** Thirteen disruption types, from broker pod kills and network partitions to CPU, memory and I/O stress, DNS errors, disk fill and node drain (`kates disruption types`). The default install runs eleven of them through LitmusChaos. Network latency and disk fill time out, because the `kates-chaos` chart ships no Litmus experiment for them (see `experiments.definitions` in its values). The direct Kubernetes provider covers eight.
-- **Resilience runs and fault plans.** `kates resilience run` pairs one load test with one fault and reports the before/after change and the recovery time. `kates disruption run` executes multi-step plans; `kates disruption playbook list` shows the built-in ones. Plans get blast-radius checks, a dry run, ISR and consumer-lag tracking, and an A–F grade against absolute latency, throughput and recovery-time thresholds.
+- **Performance tests.** Eight workload types (`LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`); `kates test types` lists every type the Kates API accepts. The default `native` benchmark backend runs Kafka producers and consumers inside the Kates API on virtual threads; `--backend trogdor` hands the workload to a Trogdor coordinator you run yourself. Reports give throughput, latency percentiles (`P50`, `P95`, `P99`) and error rate, and export as CSV, JUnit XML, Markdown, HTML or latency heatmaps.
+- **Fault injection.** Thirteen disruption types, from broker pod kills and network partitions to CPU, memory and I/O stress, DNS errors, disk fill and node drain (`kates disruption types`). The default install runs eleven of them through LitmusChaos. Network latency and disk fill time out, because the `kates-chaos` chart ships no Litmus experiment for them (see `experiments.definitions` in its values). The direct Kubernetes chaos provider covers eight.
+- **Resilience runs and disruption plans.** `kates resilience run` pairs one load test with one fault and reports the before/after change and the recovery time. `kates disruption run` executes multi-step disruption plans; `kates disruption playbook list` shows the built-in playbooks. Plans get blast-radius checks, a dry run, ISR and consumer-lag tracking, and an A–F SLA grade against absolute latency, throughput and recovery-time thresholds.
 - **Security audit.** `kates security audit` grades broker configuration A–F. Related commands map the checks to CIS, SOC 2 and PCI DSS, save a baseline and report drift from it.
-- **CI gates.** `kates gate --min-grade B` runs a load test and exits non-zero below the grade, `kates test apply -f <scenario> --wait` fails when a scenario violates its SLA, and `kates security gate` does the same for the audit grade. Finished tests can notify webhooks (`kates webhook add`).
-- **A multi-zone lab on one machine.** A three-node Kind cluster whose nodes (`alpha`, `sigma`, `gamma`) sit in separate zones. On it, `kates deploy` gives each zone its own StorageClass and broker pool and turns on rack awareness, so a zone failure can be rehearsed locally.
-- **Metrics and dashboards.** The backend exposes Prometheus metrics, the monitoring chart adds Grafana dashboards for Kafka, Kates and chaos runs, and the charts ship Prometheus alert rules. The backend also exports OTLP traces, but the default install has no Jaeger to receive them; [Observability](docs/book/09-observability.md) covers the dashboards, the alerts and tracing.
+- **CI gates.** `kates gate --min-grade B` runs a load test and exits non-zero below the performance grade, `kates test apply -f <scenario> --wait` fails when a scenario violates its SLA gates, and `kates security gate` does the same for the security grade. Finished tests can notify webhooks (`kates webhook add`).
+- **A multi-zone lab on one machine.** A three-node Kind cluster (`panda`) whose nodes (`alpha`, `sigma`, `gamma`) sit in separate zones. On it, `kates deploy` gives each zone its own StorageClass and broker pool and turns on rack awareness, so a full zone failure can be rehearsed locally.
+- **Metrics and dashboards.** The Kates API exposes Prometheus metrics, the `monitoring` chart adds twelve Grafana dashboards for Kafka, Kates and chaos runs, and the charts ship Prometheus alert rules. The Kates API also exports OTLP traces, though the default install has no Jaeger to receive them; [Observability](docs/book/09-observability.md) covers the dashboards, the alerts and tracing.
+
+## Why Kates
+
+Most teams validate Kafka resilience by running `kafka-producer-perf-test` in one terminal, deleting a pod in another, and eyeballing a Grafana board. The table below compares that workflow and standalone benchmark tools against Kates:
+
+| Capability | `kafka-producer-perf-test` | OpenMessaging Benchmark | Manual Litmus / `kubectl` | Kates |
+|:-----------|:---------------------------|:------------------------|:--------------------------|:------|
+| Load, stress, spike and round-trip workloads | Producer or consumer only | Yes | No | Yes (`native` virtual threads or Trogdor) |
+| Coordinated fault injection under load | No | No | Manual | Yes (`kates resilience` and `kates disruption`) |
+| Blast-radius safety guard and rollback | No | No | No | Yes (`maxAffectedBrokers`, auto-rollback) |
+| Zero-loss, ordering and gap verification | No | No | No | Yes (`INTEGRITY` test type) |
+| Broker security and compliance audit | No | No | No | Yes (A–F grade, CIS / SOC 2 / PCI DSS) |
+| Repeatable CI gates and historical trends | No | No | No | Yes (`kates gate`, JUnit XML, PostgreSQL history) |
 
 ## Quick start
 
 This path builds the whole stack on a local Kind cluster. You need:
 
-- a clone of this repository, for the `make` targets, which are read relative to the working directory, so run every command from the repository root. The Homebrew `kates` installs the charts its release published, the same versions as the tag you check out; a `kates` built from source installs the checkout's charts;
+- a clone of this repository, for the `make` targets, which are read relative to the working directory, so run every command from the repository root;
 - Docker (any daemon the `docker` CLI talks to), [Kind](https://kind.sigs.k8s.io/), `kubectl` and Helm, at the minimum versions in the book's [Prerequisites](docs/book/12-deployment.md#prerequisites);
 - about 16 GB of RAM, with at least 10 GB of it available to Docker, on macOS or Linux (amd64 or arm64).
 
@@ -62,11 +79,30 @@ kates health
 kates test create --type LOAD --records 100000 --wait
 ```
 
-- **Release or `main`.** Homebrew, the release tarballs and `make kates-native` all give the latest release, so step 1 checks out that release's charts to match. Without Homebrew, download `kates-<os>-<arch>.tar.gz` from the [latest release](https://github.com/bmscomp/kates/releases/latest); it holds a single `kates` binary. To run `main` instead, skip the `git checkout` and build both halves from the checkout: `make cli-install` for the CLI and `make kates-image-native-local` for the backend (see [Building from source](#building-from-source)).
+<p align="center">
+  <img src="docs/assets/kates-test-load.png" width="700" alt="kates test create --type LOAD --records 100000 --wait terminal output showing live progress bar, throughput sparkline, produce/consume phase breakdown, and 202.4K rec/s throughput with 52.19 ms P99 latency" />
+</p>
+
+Run a CI quality gate against a minimum grade:
+
+```bash
+kates gate --min-grade C --records 100000
+```
+
+<p align="center">
+  <img src="docs/assets/kates-gate.png" width="700" alt="kates gate --min-grade C --records 100000 terminal output showing 201.9K rec/s throughput, 49.439 ms P99 latency, and PASS Grade C" />
+</p>
+
+<details>
+<summary><strong>Notes on releases, cluster contexts, images and API keys</strong></summary>
+
+- **Release or `main`.** Homebrew, the release tarballs and `make kates-native` all give the latest release, so step 1 checks out that release's charts to match. Without Homebrew, download `kates-<os>-<arch>.tar.gz` from the [latest release](https://github.com/bmscomp/kates/releases/latest); it holds a single `kates` binary. The Homebrew `kates` installs the charts its release published, the same versions as the tag you check out; a `kates` built from source installs the checkout's charts. To run `main` instead, skip the `git checkout` and build both halves from the checkout: `make cli-install` for the CLI and `make kates-image-native-local` for the Kates API image (see [Building from source](#building-from-source)).
 - **Which cluster.** `kates deploy` installs into kubectl's current context. `make cluster` switches that to `kind-panda` only when it creates the cluster, so check `kubectl config current-context` and run `kubectl config use-context kind-panda` if needed. Before deploying, `kates deploy` probes every context in your kubeconfig: with none reachable it offers to create the Kind cluster, and with several it asks which one, but it does not switch to the one you pick. `-y` never prompts, so it fails where it would have asked.
 - **The backend image.** On Kind, `kates deploy` runs a local native image, `kates:native-local` if present and otherwise `kates:native`, and never pulls one. Without either, the deploy stops at the backend step, after Kafka and monitoring are installed. `make kates-native` pulls the published image of the release that `charts/kates/Chart.yaml` names, and compiles one only if the pull fails; it keeps a `kates:native` already on the machine, so run `docker rmi kates:native` first when you change releases. `make kates-image-native-local` compiles your working tree instead (several minutes, about 8 GB of Docker memory). Both load the image into `panda`, so create the cluster first.
 - **The API key.** Every `/api` call except `/api/health` needs the key from Secret `kates-api-key` in namespace `kates` (`kates-stack` with `--topology single`). `kates deploy` writes it into the active CLI context unless that context already holds a key kates did not put there, and `kates ports` into a context of its own, `ports`; a context you create yourself needs `--api-key`. Because `/api/health` is public, a green `kates health` does not prove the key works; `kates test list` does.
 - **`make all`** is an interactive wrapper: it creates the Kind cluster if no cluster is reachable, asks for a topology, runs `kates deploy` and then the `make ports` script, which uses the second port map below. With the single-namespace topology that script finds nothing to forward, so run `kates ports` afterwards. It uses the `kates` on your `PATH` and does not fetch the backend image, so do step 1 and `make cluster && make kates-native` first.
+
+</details>
 
 ### What `kates deploy` installs
 
@@ -109,6 +145,9 @@ Kafka UI can only read: its Kafka user has Describe and Read ACLs, so the broker
 
 ### If something fails
 
+<details>
+<summary><strong>Common symptoms and fixes</strong></summary>
+
 | Symptom | What to do |
 |:--|:--|
 | `kates deploy` stops at the backend: "no local backend image" | Run `make kates-native` or `make kates-image-native-local`, then `kates deploy` again. |
@@ -121,6 +160,8 @@ Kafka UI can only read: its Kafka user has Describe and Read ACLs, so the broker
 | A test is refused with `400` and `fieldErrors.durationMs` | `kates.engine.max-duration-ms`, two hours by default, caps how long a run may be set to last, and an `INTEGRITY` run counts its duration twice. Pass a shorter `--duration`, or raise the cap with `engine.maxDurationMs` in the `kates` chart. |
 | A test ends `FAILED` with a `Timeout:` error | The backend fails a run still `PENDING` after `kates.engine.submission-timeout-ms` (two minutes by default), and fails a run still `RUNNING` or `STOPPING` after its duration plus `kates.engine.reaper-grace-ms`. Its finished tasks keep their results, and `kates test get` shows which task had not finished. |
 
+</details>
+
 The [Troubleshooting Index](docs/book/appendix-b-troubleshooting.md) covers the rest.
 
 ### Tear down
@@ -131,6 +172,29 @@ make destroy          # delete the Kind cluster panda (FORCE=1 skips the prompt)
 ```
 
 `kates clean` works on kubectl's current context and names it before asking. It removes the Strimzi, Litmus, Prometheus Operator, cert-manager and Kyverno CRDs, and the cert-manager, Kyverno and Strimzi operators, unless objects of their kinds exist outside the namespaces it deletes; it keeps a namespace that also holds a Helm release it does not install. It lists what it keeps and why. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes.
+
+## CLI at a glance
+
+```bash
+kates deploy -i                                             # Deployment wizard
+kates ports                                                 # Port-forward services; point the ports context at the API
+kates health                                                # Backend health and Kafka connectivity
+kates kafka tui                                             # Full-screen Kafka explorer
+kates test create --type LOAD --records 100000 --wait       # Run a load test and print the results
+kates benchmark                                             # LOAD, STRESS and SPIKE, each graded A–F
+kates resilience run -f cli/examples/resilience-test.yaml   # Load test with a broker pod kill
+kates disruption playbook list                              # Built-in multi-step fault plans
+kates report show <id>                                      # Throughput, latency percentiles, error rate
+kates test apply -f scenarios/ci-gate.yaml --wait           # Scenarios with SLA checks; exits 1 on a violation
+kates gate --min-grade B                                    # CI gate: run a LOAD test, exit 1 below grade B
+kates security audit                                        # Security configuration audit, graded A–F
+kates dashboard                                             # Live full-screen dashboard
+kates mcp --context ports --allow-cluster <clusterId>       # Read-only MCP server for AI agents (experimental)
+```
+
+`kates gate` grades average throughput and p99 latency against fixed bands, the same for every test type. The SLA verdict in `kates report show` checks only thresholds stored with the run, and runs from `kates test create` carry none; to check thresholds, put them in a scenario's `validate:` block and run it with `kates test apply`.
+
+`kates ctx` points the CLI at other Kates instances. Contexts are Kates API profiles kept in `~/.kates.yaml`, not Kubernetes contexts; each takes a URL and an `--api-key`, and `kates ctx show` lists them. `kates <command> --help` documents every command.
 
 ## Other clusters
 
@@ -166,29 +230,6 @@ The CLI and its full-screen views talk to the backend over REST. The backend als
 | [Local development](docs/local-development.md) | Makefile targets, image management, working behind a proxy |
 | [Dashboards](dashboards/USING.md) | Which Grafana board answers which question |
 | [Export formats](kates/docs/export-formats.md) | CSV, JUnit XML and latency heatmap layouts |
-
-## CLI at a glance
-
-```bash
-kates deploy -i                                             # Deployment wizard
-kates ports                                                 # Port-forward services; point the ports context at the API
-kates health                                                # Backend health and Kafka connectivity
-kates kafka tui                                             # Full-screen Kafka explorer
-kates test create --type LOAD --records 100000 --wait       # Run a load test and print the results
-kates benchmark                                             # LOAD, STRESS and SPIKE, each graded A–F
-kates resilience run -f cli/examples/resilience-test.yaml   # Load test with a broker pod kill
-kates disruption playbook list                              # Built-in multi-step fault plans
-kates report show <id>                                      # Throughput, latency percentiles, error rate
-kates test apply -f scenarios/ci-gate.yaml --wait           # Scenarios with SLA checks; exits 1 on a violation
-kates gate --min-grade B                                    # CI gate: run a LOAD test, exit 1 below grade B
-kates security audit                                        # Security configuration audit, graded A–F
-kates dashboard                                             # Live full-screen dashboard
-kates mcp --context ports --allow-cluster <clusterId>       # Read-only MCP server for AI agents (experimental)
-```
-
-`kates gate` grades average throughput and p99 latency against fixed bands, the same for every test type. The SLA verdict in `kates report show` checks only thresholds stored with the run, and runs from `kates test create` carry none; to check thresholds, put them in a scenario's `validate:` block and run it with `kates test apply`.
-
-`kates ctx` points the CLI at other Kates instances. Contexts are Kates API profiles kept in `~/.kates.yaml`, not Kubernetes contexts; each takes a URL and an `--api-key`, and `kates ctx show` lists them. `kates <command> --help` documents every command.
 
 ## Helm charts
 
