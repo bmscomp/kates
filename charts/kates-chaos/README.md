@@ -74,7 +74,7 @@ helm upgrade --install chaos charts/kates-chaos \
 | `images.kubectl.repository` | Image for the installer Job | `registry.k8s.io/kubectl` |
 | `images.kubectl.tag` | kubectl image tag | `v1.33.0` |
 | `images.kubectl.digest` | Pin by digest (wins over tag) | `""` |
-| `images.tester` | Image for GameDay and the Helm tests, whose scripts need a shell; runs as uid 1000 | `ghcr.io/bmscomp/kates-tester:1.30.0` |
+| `images.tester` | Image for GameDay and the Helm tests, whose scripts need a shell; runs as uid 1000 | `ghcr.io/bmscomp/kates-tester:1.30.1` |
 | `images.goRunner.repository` | Default runtime for experiments | `litmuschaos/go-runner` |
 | `images.goRunner.tag` | go-runner image tag | `3.28.0` |
 

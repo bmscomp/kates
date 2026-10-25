@@ -32,7 +32,7 @@ $code-block-font-size: 0.84rem;
 $code-block-bg-padding: 0.95rem 1.15rem;
 
 // Running text, measured with Introduction at 17px: see "Prose" below
-$kates-measure: 66ch;
+$kates-measure: 78ch;
 
 // The panels beside the text: entries at 17px, their notes (the question
 // under a chapter, a glossary definition) at 16px, and labels in small
@@ -1203,13 +1203,13 @@ dialog.kates-diagram-viewer {
 @include media-breakpoint-up(xl) {
   :root {
     --kates-text: clamp(20.4px, calc(17.2px + 0.25vw), 22px);
-    --kates-edge: clamp(24px, 2.6vw, 56px);
-    --kates-panel-width: clamp(224px, 17.5vw, 330px);
-    --kates-gap: clamp(32px, 2.5vw, 56px);
-    --kates-column: calc(var(--kates-text) * 29);
+    --kates-edge: clamp(16px, 1.8vw, 40px);
+    --kates-panel-width: clamp(210px, 15.5vw, 290px);
+    --kates-gap: clamp(24px, 2vw, 44px);
+    --kates-column: clamp(680px, 48vw, 920px);
     // How far wide material may step out on each side: the room the other
-    // bands leave, less 16px of air, and never more than 200px
-    --kates-bleed: clamp(0px, calc((100vw - 2 * var(--kates-edge) - 2 * var(--kates-panel-width) - 2 * var(--kates-gap) - var(--kates-column)) / 2 - 16px), 200px);
+    // bands leave, less 16px of air, and never more than 260px
+    --kates-bleed: clamp(0px, calc((100vw - 2 * var(--kates-edge) - 2 * var(--kates-panel-width) - 2 * var(--kates-gap) - var(--kates-column)) / 2 - 16px), 260px);
   }
 
   #quarto-content.page-columns {
@@ -2107,7 +2107,7 @@ $kates-part-hang: 2.15em; // the part numerals' column
     grid-column: body-content-start / page-end;
     justify-self: center;
     width: 100%;
-    max-width: calc(800px - 3em);
+    max-width: min(100%, 920px);
   }
 }
 
