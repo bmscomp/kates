@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 560" width="1120" height="560">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#0b1120"/>
+    </linearGradient>
+    <style>
+      .mono { font-family: "JetBrains Mono", Menlo, monospace; font-size: 14px; }
+      .mono-sm { font-family: "JetBrains Mono", Menlo, monospace; font-size: 12.5px; }
+      .mono-title { font-family: "JetBrains Mono", Menlo, monospace; font-size: 14.5px; font-weight: 700; }
+      .bold { font-weight: 700; }
+      .semi { font-weight: 600; }
+    </style>
+  </defs>
+
+  <!-- Outer Terminal Window -->
+  <rect x="0" y="0" width="1120" height="560" rx="12" fill="url(#bg)" stroke="#334155" stroke-width="1.5"/>
+
+  <!-- Window Title Bar -->
+  <path d="M 1 12 Q 1 1 12 1 L 1108 1 Q 1119 1 1119 12 L 1119 42 L 1 42 Z" fill="#1e293b"/>
+  <line x1="1" y1="42" x2="1119" y2="42" stroke="#334155" stroke-width="1"/>
+  <circle cx="24" cy="21" r="6.5" fill="#ef4444"/>
+  <circle cx="46" cy="21" r="6.5" fill="#f59e0b"/>
+  <circle cx="68" cy="21" r="6.5" fill="#22c55e"/>
+  <text x="560" y="26" text-anchor="middle" fill="#94a3b8" class="mono-sm semi">kates lab — zsh — 110×28</text>
+
+  <!-- TUI Header Banner -->
+  <rect x="20" y="56" width="1080" height="38" rx="6" fill="#172554" stroke="#2563eb" stroke-width="1"/>
+  <text x="36" y="80" fill="#93c5fd" class="mono-title">Kates Lab</text>
+  <text x="128" y="80" fill="#64748b" class="mono">·</text>
+  <text x="146" y="80" fill="#e2e8f0" class="mono semi">Interactive Performance Tuning</text>
+  <text x="1082" y="80" text-anchor="end" fill="#60a5fa" class="mono-sm">→ http://localhost:8080</text>
+
+  <!-- Left Pane: Parameters -->
+  <rect x="20" y="106" width="460" height="364" rx="8" fill="#111827" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="38" y="134" fill="#c4b5fd" class="mono bold">Parameters</text>
+  <text x="462" y="134" text-anchor="end" fill="#64748b" class="mono-sm">Preset: Durability</text>
+  <line x1="36" y1="146" x2="464" y2="146" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Active Row: Test Type -->
+  <rect x="30" y="156" width="440" height="52" rx="5" fill="#1e293b"/>
+  <text x="40" y="176" fill="#fb923c" class="mono bold">▸ Test Type</text>
+  <rect x="176" y="161" width="54" height="22" rx="4" fill="#2563eb"/>
+  <text x="203" y="176" text-anchor="middle" fill="#ffffff" class="mono bold">LOAD</text>
+  <text x="244" y="176" fill="#94a3b8" class="mono">STRESS</text>
+  <text x="310" y="176" fill="#94a3b8" class="mono">SPIKE</text>
+  <text x="368" y="176" fill="#94a3b8" class="mono">ENDURANCE</text>
+  <text x="178" y="198" fill="#64748b" class="mono-sm">←/→ select workload profile</text>
+
+  <!-- Other Parameter Rows -->
+  <g class="mono">
+    <text x="56" y="232" fill="#9ca3af">Producers</text>
+    <text x="190" y="232" fill="#60a5fa" class="semi">[4]</text>
+
+    <text x="56" y="258" fill="#9ca3af">Records</text>
+    <text x="190" y="258" fill="#60a5fa" class="semi">[50000]</text>
+
+    <text x="56" y="284" fill="#9ca3af">Record Size</text>
+    <text x="190" y="284" fill="#60a5fa" class="semi">[512]</text>
+
+    <text x="56" y="310" fill="#9ca3af">Acks</text>
+    <text x="190" y="310" fill="#60a5fa" class="semi">[all]</text>
+
+    <text x="56" y="336" fill="#9ca3af">Compression</text>
+    <text x="190" y="336" fill="#60a5fa" class="semi">[lz4]</text>
+
+    <text x="56" y="362" fill="#9ca3af">Batch Size</text>
+    <text x="190" y="362" fill="#60a5fa" class="semi">[16384]</text>
+
+    <text x="56" y="388" fill="#9ca3af">Linger ms</text>
+    <text x="190" y="388" fill="#60a5fa" class="semi">[0]</text>
+
+    <text x="56" y="414" fill="#9ca3af">Partitions</text>
+    <text x="190" y="414" fill="#60a5fa" class="semi">[6]</text>
+
+    <text x="56" y="440" fill="#9ca3af">Replication</text>
+    <text x="190" y="440" fill="#60a5fa" class="semi">[3]</text>
+  </g>
+
+  <!-- Right Pane: Iteration History -->
+  <rect x="494" y="106" width="606" height="364" rx="8" fill="#111827" stroke="#334155" stroke-width="1.2"/>
+  <text x="516" y="134" fill="#c4b5fd" class="mono bold">Iteration History</text>
+  <text x="1080" y="134" text-anchor="end" fill="#64748b" class="mono-sm">3 runs recorded</text>
+
+  <!-- Table Header -->
+  <g class="mono-sm semi" fill="#9ca3af">
+    <text x="520" y="166">#</text>
+    <text x="568" y="166">Throughput</text>
+    <text x="720" y="166">P99</text>
+    <text x="830" y="166">Err %</text>
+    <text x="945" y="166">Δ</text>
+  </g>
+  <line x1="516" y1="176" x2="1080" y2="176" stroke="#334155" stroke-width="1"/>
+
+  <!-- Iteration Rows -->
+  <g class="mono">
+    <!-- Row 1 -->
+    <text x="520" y="204" fill="#e2e8f0">1</text>
+    <text x="568" y="204" fill="#60a5fa" class="semi">45.2K rec/s</text>
+    <text x="720" y="204" fill="#fb923c">12.00ms</text>
+    <text x="830" y="204" fill="#64748b">0.0000%</text>
+    <text x="945" y="204" fill="#64748b">—</text>
+
+    <!-- Row 2 -->
+    <rect x="512" y="216" width="568" height="28" rx="4" fill="#172033"/>
+    <text x="520" y="235" fill="#e2e8f0">2</text>
+    <text x="568" y="235" fill="#60a5fa" class="semi">52.1K rec/s</text>
+    <text x="720" y="235" fill="#34d399">8.00ms</text>
+    <text x="830" y="235" fill="#64748b">0.0000%</text>
+    <text x="945" y="235" fill="#34d399" class="bold">▲15%</text>
+
+    <!-- Row 3 -->
+    <text x="520" y="266" fill="#e2e8f0">3</text>
+    <text x="568" y="266" fill="#60a5fa" class="semi">48.7K rec/s</text>
+    <text x="720" y="266" fill="#fb923c">11.00ms</text>
+    <text x="830" y="266" fill="#64748b">0.0000%</text>
+    <text x="945" y="266" fill="#f87171" class="bold">▼7%</text>
+  </g>
+
+  <line x1="516" y1="292" x2="1080" y2="292" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Sparkline Trends Box -->
+  <rect x="516" y="308" width="564" height="140" rx="6" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+  <text x="534" y="334" fill="#9ca3af" class="mono-sm semi">SPARKLINE TRENDS (OLDEST → NEWEST)</text>
+
+  <!-- Throughput Sparkline -->
+  <text x="534" y="372" fill="#9ca3af" class="mono">Throughput:</text>
+  <!-- Bar 1 (low: 45.2K) -->
+  <rect x="650" y="366" width="14" height="8" rx="1.5" fill="#60a5fa"/>
+  <!-- Bar 2 (high: 52.1K) -->
+  <rect x="670" y="352" width="14" height="22" rx="1.5" fill="#34d399"/>
+  <!-- Bar 3 (mid: 48.7K) -->
+  <rect x="690" y="359" width="14" height="15" rx="1.5" fill="#60a5fa"/>
+  <text x="722" y="372" fill="#64748b" class="mono-sm">Peak: #2 (52.1K rec/s)</text>
+
+  <!-- P99 Latency Sparkline -->
+  <text x="534" y="416" fill="#9ca3af" class="mono">P99 ms:</text>
+  <!-- Bar 1 (high: 12ms) -->
+  <rect x="650" y="396" width="14" height="22" rx="1.5" fill="#fb923c"/>
+  <!-- Bar 2 (low: 8ms) -->
+  <rect x="670" y="410" width="14" height="8" rx="1.5" fill="#34d399"/>
+  <!-- Bar 3 (mid-high: 11ms) -->
+  <rect x="690" y="400" width="14" height="18" rx="1.5" fill="#fb923c"/>
+  <text x="722" y="416" fill="#64748b" class="mono-sm">Best: #2 (8.00ms)</text>
+
+  <!-- Status Bar & Keybinding Footer -->
+  <rect x="20" y="482" width="1080" height="60" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <text x="38" y="506" fill="#34d399" class="mono bold">✓</text>
+  <text x="58" y="506" fill="#e2e8f0" class="mono semi">#3 — 48.7K rec/s, p99=11.00ms</text>
+  <text x="1082" y="506" text-anchor="end" fill="#9ca3af" class="mono-sm">Warmup: off · Median: off</text>
+
+  <text x="38" y="530" fill="#94a3b8" class="mono-sm">
+    <tspan fill="#60a5fa" class="bold">↑↓</tspan> navigate   <tspan fill="#60a5fa" class="bold">←→</tspan> change   <tspan fill="#60a5fa" class="bold">Enter</tspan> run   <tspan fill="#60a5fa" class="bold">p</tspan> preset   <tspan fill="#60a5fa" class="bold">s</tspan> sweep   <tspan fill="#60a5fa" class="bold">m</tspan> median   <tspan fill="#60a5fa" class="bold">W</tspan> warmup   <tspan fill="#60a5fa" class="bold">d</tspan> diff   <tspan fill="#60a5fa" class="bold">c</tspan> compare   <tspan fill="#60a5fa" class="bold">e</tspan> export   <tspan fill="#60a5fa" class="bold">q</tspan> quit
+  </text>
+</svg>

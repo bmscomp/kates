@@ -6,6 +6,28 @@ title-block-banner: false
 
 Kates answers three questions about an Apache Kafka cluster: how much load it takes before latency degrades, what happens when parts of it fail, and whether it loses data along the way. This book teaches you to ask those questions and to read the answers.
 
+```{=html}
+<div class="kates-hero-banner">
+  <div class="kates-hero-badges">
+    <span class="kates-hero-badge">Apache Kafka 4.x · KRaft</span>
+    <span class="kates-hero-badge">Performance &amp; Tail-Latency Engineering</span>
+    <span class="kates-hero-badge">Chaos Mesh Resilience</span>
+    <span class="kates-hero-badge">Zero-Loss Auditing</span>
+  </div>
+  <div>
+    A complete practitioner's guide from measurement theory and workload
+    design to chaos fault injection, interactive CLI tuning, and production
+    SLO gates on Kubernetes.
+  </div>
+  <div class="kates-hero-actions">
+    <a class="kates-hero-btn is-primary" href="01-introduction.html">Start Reading →</a>
+    <a class="kates-hero-btn" href="01-introduction.html#quick-start">Quick Start</a>
+    <a class="kates-hero-btn" href="10-cli-reference.html">CLI Reference</a>
+    <a class="kates-hero-btn" href="10b-lab.html">Interactive Lab TUI</a>
+  </div>
+</div>
+```
+
 ## What This Book Covers
 
 **Kates** (Kafka Advanced Testing & Engineering Suite) is a Kubernetes-native platform for performance testing, chaos engineering, and operational resilience auditing of Apache Kafka clusters.
@@ -18,6 +40,8 @@ This guide takes you from first principles to production operations:
 - **Part IV — Observability**: Dashboards, metrics, heatmaps, tracing, and alerting
 - **Part V — Deployment & Operations**: Installing and engineering Kafka, deploying Kates, security, multi-tenancy, upgrades, Kafka Connect, and operational recipes
 - **Part VI — Reference**: The complete CLI, REST API, and gRPC API references
+
+![The Kates CLI command overview alongside a live load test execution with throughput and SLO gate summary.](assets/kates-cli-overview.png)
 
 ## Who This Book Is For
 

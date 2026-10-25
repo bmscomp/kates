@@ -13,6 +13,8 @@ This chapter serves two readers: the operator scanning for a flag mid-incident, 
 - Locate the right command family for any task, from test lifecycle to security auditing
 - Switch the commands that have a JSON form to JSON output and wire them into scripts and pipelines
 
+![The Kates CLI command overview alongside a live load test execution with throughput and SLO gate summary.](assets/kates-cli-overview.png)
+
 ## Installation
 
 ```bash

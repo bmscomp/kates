@@ -32,7 +32,7 @@ $code-block-font-size: 0.84rem;
 $code-block-bg-padding: 0.95rem 1.15rem;
 
 // Running text, measured with Introduction at 17px: see "Prose" below
-$kates-measure: 58ch;
+$kates-measure: 66ch;
 
 // The panels beside the text: entries at 17px, their notes (the question
 // under a chapter, a glossary definition) at 16px, and labels in small
@@ -221,6 +221,13 @@ $kates-margin-box: ":is(#quarto-margin-sidebar, #quarto-toc-toggle > .quarto-sid
 }
 
 #quarto-document-content {
+  > section > h2,
+  h2.anchored,
+  h3.anchored,
+  h4.anchored {
+    scroll-margin-top: 2rem;
+  }
+
   // The rule under a section heading is a hairline, like the panels' rules
   > section > h2,
   h2.anchored {
@@ -1080,11 +1087,93 @@ dialog.kates-diagram-viewer {
   }
 }
 
-// ── Cover ───────────────────────────────────────────────────────────────────
+// ── Cover & Screenshots ─────────────────────────────────────────────────────
 
 .quarto-cover-image {
   border-radius: $border-radius;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 14px 32px -12px $kates-cover-shadow;
+}
+
+#quarto-document-content .quarto-figure:not(:has(> figure.kates-diagram)) {
+  margin: 1.5rem 0 2rem;
+
+  img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: $border-radius-lg;
+    border: 1px solid $kates-border;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1), 0 16px 36px -14px $kates-cover-shadow;
+  }
+
+  figcaption {
+    margin-top: 0.65rem;
+    font-size: 0.85em;
+    color: $kates-muted;
+    text-align: center;
+  }
+}
+
+.kates-hero-banner {
+  margin: 1.25rem 0 2rem;
+  padding: 1.15rem 1.35rem;
+  background-color: $kates-surface;
+  border: 1px solid $kates-border;
+  border-left: 4px solid $kates-link;
+  border-radius: $border-radius-lg;
+  clear: both;
+}
+
+.kates-hero-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.kates-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.6rem;
+  font-family: $font-family-monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: $kates-heading;
+  background-color: $body-bg;
+  border: 1px solid $kates-border;
+  border-radius: 999px;
+}
+
+.kates-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+
+  a.kates-hero-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.85rem;
+    font-size: 0.84rem;
+    font-weight: 600;
+    text-decoration: none !important;
+    border-radius: $border-radius-sm;
+    border: 1px solid $kates-border-strong;
+    color: $kates-heading;
+    background-color: $body-bg;
+    transition: border-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      color: $kates-link;
+      border-color: $kates-link;
+    }
+
+    &.is-primary {
+      color: $kates-link;
+      border-color: $kates-link;
+    }
+  }
 }
 
 // On a phone a floated cover squeezes the text beside it to a word a line;
@@ -1101,7 +1190,7 @@ dialog.kates-diagram-viewer {
 // ── The page, from 1200px up ────────────────────────────────────────────────
 // Five bands that all grow with the window: an edge, the navigation, the text
 // and its two outsets, the contents, an edge. The text column is its own
-// measure, 25.5 times the text's size (about 63 characters a line), so
+// measure, 29 times the text's size (about 70 characters a line), so
 // running text fills it. A table, a code block or a diagram steps out into
 // the outsets, equally on both sides, only when the column is too narrow for
 // it, and only as far as it needs: theme/reader.html marks it .kates-wide
@@ -1115,12 +1204,12 @@ dialog.kates-diagram-viewer {
   :root {
     --kates-text: clamp(20.4px, calc(17.2px + 0.25vw), 22px);
     --kates-edge: clamp(24px, 2.6vw, 56px);
-    --kates-panel-width: clamp(236px, 19vw, 380px);
+    --kates-panel-width: clamp(224px, 17.5vw, 330px);
     --kates-gap: clamp(32px, 2.5vw, 56px);
-    --kates-column: calc(var(--kates-text) * 25.5);
+    --kates-column: calc(var(--kates-text) * 29);
     // How far wide material may step out on each side: the room the other
-    // bands leave, less 16px of air, and never more than 168px
-    --kates-bleed: clamp(0px, calc((100vw - 2 * var(--kates-edge) - 2 * var(--kates-panel-width) - 2 * var(--kates-gap) - var(--kates-column)) / 2 - 16px), 168px);
+    // bands leave, less 16px of air, and never more than 200px
+    --kates-bleed: clamp(0px, calc((100vw - 2 * var(--kates-edge) - 2 * var(--kates-panel-width) - 2 * var(--kates-gap) - var(--kates-column)) / 2 - 16px), 200px);
   }
 
   #quarto-content.page-columns {
@@ -1143,6 +1232,13 @@ dialog.kates-diagram-viewer {
 
   #quarto-content > #quarto-margin-sidebar {
     grid-column: page-end-inset / page-end;
+  }
+
+  #quarto-document-content .quarto-figure:not(:has(> figure.kates-diagram)) {
+    --kates-fig-step: min(96px, var(--kates-bleed));
+    width: calc(100% + 2 * var(--kates-fig-step));
+    margin-left: calc(-1 * var(--kates-fig-step));
+    margin-right: calc(-1 * var(--kates-fig-step));
   }
 
   // Wide material steps out as far as it needs, and never past the outsets

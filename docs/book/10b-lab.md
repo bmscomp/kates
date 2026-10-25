@@ -27,25 +27,7 @@ After this chapter, you can:
 
 Lab splits the terminal into two panes:
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│  Kates Lab  ·  Interactive Performance Tuning  →  URL   │
-├──────────────────────────┬──────────────────────────────┤
-│  ▸ Test Type     [LOAD]  │  Iteration History           │
-│    Producers     [4]     │                              │
-│    Records       [50000] │  #   Throughput  P99    Δ    │
-│    Record Size   [512]   │  ──────────────────────────  │
-│    Acks          [all]   │  1   45.2K rec/s 12ms   —    │
-│    Compression   [lz4]   │  2   52.1K rec/s  8ms  ▲15%  │
-│    Batch Size    [16384] │  3   48.7K rec/s 11ms  ▼7%   │
-│    Linger ms     [0]     │                              │
-│    Partitions    [6]     │  Throughput: ▁█▄             │
-│    Replication   [3]     │  P99 ms:     █▁▆             │
-├──────────────────────────┴──────────────────────────────┤
-│  ✓ #3 — 48.7K rec/s, p99=11.00ms                        │
-│  ↑↓ navigate  ←→ change  Enter run  p preset  d diff    │
-└─────────────────────────────────────────────────────────┘
-```
+![The Kates Lab interactive TUI showing the parameter configuration pane on the left, iteration history and sparklines on the right, and the status and keybinding bar at the bottom.](assets/kates-lab-tui.png)
 
 Read the screen from the top:
 

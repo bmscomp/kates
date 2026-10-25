@@ -204,9 +204,9 @@ format:
     # the PDF; neutral is Mermaid's own greyscale theme.
     mermaid:
       theme: neutral
-    # A 150 mm text block.
+    # A 160 mm text block on A4 for balanced technical tables and code listings.
     geometry:
-      - top=30mm
-      - bottom=30mm
-      - left=30mm
-      - right=30mm
+      - top=26mm
+      - bottom=28mm
+      - left=25mm
+      - right=25mm
