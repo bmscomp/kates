@@ -1,0 +1,26 @@
+/* Theme: Slate — light, minimal, monochrome with one indigo accent and large type. */
+:root {
+  --bg: #fafafa; --bg-alt: #f1f3f6; --surface: #ffffff; --surface-2: #f4f6f9;
+  --border: #e3e7ee; --border-strong: #c9d0db;
+  --text: #334155; --heading: #0f172a; --muted: #64748b;
+  --accent: #4f46e5; --accent-strong: #4f46e5; --accent-soft: rgba(79, 70, 229, 0.09);
+  --ok: #059669; --warn: #d97706; --no: #94a3b8; --radius: 10px; color-scheme: light;
+}
+body { font-size: 18px; }
+h1 { font-size: clamp(2.4rem, 5.6vw, 4rem); letter-spacing: -0.035em; }
+h2 { letter-spacing: -0.03em; }
+.nav { background: rgba(250, 250, 250, 0.9); }
+.hero-glow { background: radial-gradient(60% 50% at 20% 30%, rgba(79, 70, 229, 0.1), transparent 70%); }
+.btn-primary { color: #fff; } .btn-primary:hover { background: #6366f1; }
+.btn-ghost { color: var(--heading); }
+.terminal, .code-block { background: #0f172a; border-color: #1e293b; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18); }
+.terminal-bar, .code-title { background: #111c33; border-bottom-color: #1e293b; }
+p code, li code, td code, th code, h2 code { color: #3730a3; }
+.cta { background: radial-gradient(60% 80% at 50% 0%, rgba(79, 70, 229, 0.08), transparent 70%); }
+.footer { background: #0f172a; }
+.footer-links a, .footer-brand p, .footer-legal, .footer-links h4 { color: #cbd5e1; }
+.footer-links a { color: #f1f5f9; }
+.footer-legal { border-top-color: #1e293b; }
+.compare .hl { background: rgba(79, 70, 229, 0.05); }
+.card:hover { box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06); }
+.arch .box rect { fill: #f4f6f9; } .arch .box-cli rect, .arch .box-api rect { fill: #eef0ff; }

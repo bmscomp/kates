@@ -1,0 +1,23 @@
+/* Theme: Phosphor — near-black ops console, green accent, mono headings. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&display=swap');
+:root {
+  --bg: #080b09; --bg-alt: #0c100d; --surface: #0f1511; --surface-2: #141c16;
+  --border: #1f2b22; --border-strong: #2c3d30;
+  --text: #cfd8d0; --heading: #f2f7f2; --muted: #879a8b;
+  --accent: #4ade80; --accent-strong: #4ade80; --accent-soft: rgba(74, 222, 128, 0.12);
+  --ok: #4ade80; --warn: #fbbf24; --no: #6b7c70;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace; --radius: 6px;
+}
+h1, h2, .eyebrow, .brand-name { font-family: var(--mono); letter-spacing: -0.03em; }
+h1 { font-weight: 700; font-size: clamp(2rem, 4.6vw, 3.2rem); }
+.nav { background: rgba(8, 11, 9, 0.88); }
+.hero-glow { background: radial-gradient(50% 45% at 25% 30%, rgba(74, 222, 128, 0.12), transparent 70%); }
+.btn-primary { color: #04120a; } .btn-primary:hover { background: #6ee7a0; }
+.terminal, .code-block { background: #050705; border-color: #2c3d30; box-shadow: 0 0 0 1px rgba(74,222,128,.08), 0 30px 80px rgba(0,0,0,.6); }
+.terminal-bar, .code-title { background: #0a0e0b; }
+.terminal pre, .code-block pre { color: #b8e6c4; }
+p code, li code, td code, th code, h2 code { color: #a7f3c0; }
+.cta { background: radial-gradient(60% 80% at 50% 0%, rgba(74, 222, 128, 0.1), transparent 70%); }
+.footer { background: #050705; }
+.hero-points li::before { box-shadow: 0 0 0 4px var(--accent-soft), 0 0 12px var(--accent); }
+.arch .box rect { fill: #141c16; } .arch .box-cli rect, .arch .box-api rect { fill: #11261a; }

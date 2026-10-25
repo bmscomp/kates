@@ -1,0 +1,25 @@
+/* Theme: Ember — warm charcoal with an amber accent, geometric headings. */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap');
+:root {
+  --bg: #141210; --bg-alt: #1a1714; --surface: #1f1b17; --surface-2: #27221d;
+  --border: #332c25; --border-strong: #4a4035;
+  --text: #e6ded4; --heading: #fbf6ef; --muted: #a79c8e;
+  --accent: #f59e0b; --accent-strong: #f59e0b; --accent-soft: rgba(245, 158, 11, 0.13);
+  --ok: #34d399; --warn: #fb7185; --no: #7d7368; --radius: 18px;
+}
+h1, h2, h3, .brand-name { font-family: "Space Grotesk", var(--sans); }
+h1 { font-weight: 700; }
+.nav { background: rgba(20, 18, 16, 0.86); }
+.hero-glow { background: radial-gradient(60% 50% at 20% 30%, rgba(245, 158, 11, 0.16), transparent 70%), radial-gradient(40% 40% at 85% 20%, rgba(120, 53, 15, 0.5), transparent 70%); }
+.btn-primary { color: #1a1206; } .btn-primary:hover { background: #fbbf24; }
+.terminal, .code-block { background: #0f0d0b; border-color: #4a4035; }
+.terminal-bar, .code-title { background: #16130f; }
+.terminal pre, .code-block pre { color: #e8dccd; }
+.terminal .p { color: var(--accent); }
+p code, li code, td code, th code, h2 code { color: #fcd38d; }
+.code-block .k { color: #fcd38d; }
+.cta { background: radial-gradient(60% 80% at 50% 0%, rgba(245, 158, 11, 0.14), transparent 70%); }
+.footer { background: #0f0d0b; }
+.compare .hl { background: rgba(245, 158, 11, 0.07); }
+.arch .box rect { fill: #27221d; } .arch .box-cli rect, .arch .box-api rect { fill: #3a2a12; }
+.arch .t-code { fill: #fcd38d; }
