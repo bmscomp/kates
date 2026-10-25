@@ -98,8 +98,8 @@ Override it like any other value:
 
 ```yaml
 testImages:
-  kubectl: ghcr.io/bmscomp/kates-tester:1.30.0
-  kafka:   ghcr.io/bmscomp/kates-tester:1.30.0
+  kubectl: ghcr.io/bmscomp/kates-tester:1.30.1
+  kafka:   ghcr.io/bmscomp/kates-tester:1.30.1
 ```
 
 ---

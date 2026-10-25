@@ -3,9 +3,9 @@ name: strimzi-operator
 # Minor: the operator runs Strimzi's restricted pod security provider by
 # default, which rolls every Kafka pod it manages once and refuses a Kaniko
 # Connect build; the Helm tests get resources, and podLabels is new.
-# Patch: testImages.kubectl moves to kates-tester 1.30.0, the tag the v1.30.0
+# Patch: testImages.kubectl moves to kates-tester 1.30.1, the tag the v1.30.1
 # release publishes; every chart that runs it pins the same one.
-version: 0.4.6
+version: 0.4.7
 # Tracks the Strimzi operator version this chart deploys. The CLI rewrites this
 # (and the dependency version) in a generated copy when another version is
 # selected; the repository copy is the pin.
@@ -32,6 +32,8 @@ annotations:
   artifacthub.io/category: streaming-messaging
   artifacthub.io/license: Apache-2.0
   artifacthub.io/changes: |
+    - kind: changed
+      description: "testImages.kubectl moves to kates-tester 1.30.1, the tag the v1.30.1 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.30.0 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed
       description: "testImages.kubectl moves to kates-tester 1.30.0, the tag the v1.30.0 release publishes; scripts/check-versions.sh holds it to the kates chart's appVersion. The image is unchanged since 1.29.3 (nothing under tester/ moved), so this is the pin, not the tooling."
     - kind: changed
