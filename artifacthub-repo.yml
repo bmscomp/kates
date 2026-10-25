@@ -1,0 +1,5 @@
+# Artifact Hub repository metadata
+# https://artifacthub.io/docs/topics/repositories/helm-charts/#repository-metadata-file
+owners:
+  - name: Said Boudjelda
+    email: bmscomp@gmail.com

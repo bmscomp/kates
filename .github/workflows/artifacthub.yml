@@ -1,0 +1,74 @@
+name: Artifact Hub · Metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      chart:
+        description: 'Specific chart name (e.g. kates, kafka-cluster, or "all")'
+        required: true
+        default: 'all'
+      repository_id:
+        description: 'Artifact Hub Repository ID (UUID) from Control Panel (leave blank for initial registration)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  push-metadata:
+    name: Push Artifact Hub Metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install ORAS
+        run: |
+          set -euo pipefail
+          VERSION="1.2.2"
+          curl -fsSL "https://github.com/oras-project/oras/releases/download/v${VERSION}/oras_${VERSION}_linux_amd64.tar.gz" | tar -xz -C /tmp oras
+          sudo mv /tmp/oras /usr/local/bin/
+          oras version
+
+      - name: Log in to GHCR
+        env:
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${TOKEN}" | oras login ghcr.io -u "${ACTOR}" --password-stdin
+
+      - name: Generate and Push artifacthub-repo.yml
+        env:
+          CHART_INPUT: ${{ github.event.inputs.chart }}
+          REPO_ID: ${{ github.event.inputs.repository_id }}
+        run: |
+          set -euo pipefail
+
+          if [ "${CHART_INPUT}" = "all" ]; then
+            CHARTS=()
+            for chart_dir in $(git ls-files ':(glob)charts/*/Chart.yaml' | xargs -n1 dirname); do
+              name=$(sed -nE 's/^name:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/p' "${chart_dir}/Chart.yaml")
+              CHARTS+=("${name}")
+            done
+          else
+            CHARTS=("${CHART_INPUT}")
+          fi
+
+          for chart in "${CHARTS[@]}"; do
+            echo "==> Pushing Artifact Hub metadata for ${chart}..."
+            {
+              echo "owners:"
+              echo "  - name: Said Boudjelda"
+              echo "    email: bmscomp@gmail.com"
+              if [ -n "${REPO_ID}" ]; then
+                echo "repositoryID: ${REPO_ID}"
+              fi
+            } > /tmp/artifacthub-repo.yml
+
+            oras push "ghcr.io/bmscomp/charts/${chart}:artifacthub.io" \
+              --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+              /tmp/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+            echo "✓ Pushed metadata to ghcr.io/bmscomp/charts/${chart}:artifacthub.io"
+          done

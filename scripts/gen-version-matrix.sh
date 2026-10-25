@@ -37,6 +37,7 @@ print_table() {
   echo "| Go (CLI) | $(grep -E '^go ' cli/go.mod | awk '{print $2}') | \`cli/go.mod\` |"
   local dir name
   for dir in charts/*/; do
+    [[ -f "${dir}Chart.yaml" ]] || continue
     name=$(basename "$dir")
     local app detail
     app=$(chart_field "$name" appVersion || true)
