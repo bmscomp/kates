@@ -39,7 +39,17 @@ func (e *exitError) Error() string { return e.msg }
 // cmdErr prints a styled error and returns a silentErr so Cobra sets exit code 1.
 func cmdErr(msg string) error {
 	output.Error(msg)
+	if refusedLocalAPI(msg) {
+		output.Hint("Nothing answers on that local port: forward the Kates API with kates ports, or point --url or KATES_URL at it.")
+	}
 	return &silentErr{msg: msg}
+}
+
+// refusedLocalAPI is a request that found no listener on this machine, which
+// is what an API reached through a port-forward that has stopped looks like.
+func refusedLocalAPI(msg string) bool {
+	return strings.Contains(msg, "connection refused") &&
+		(strings.Contains(msg, "127.0.0.1") || strings.Contains(msg, "localhost") || strings.Contains(msg, "[::1]"))
 }
 
 // mapStr extracts a string value from a map, returning fallback for missing/nil keys.

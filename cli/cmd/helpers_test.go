@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 )
 
 func TestMapStr(t *testing.T) {
@@ -194,5 +196,20 @@ func TestSpinnerFrame(t *testing.T) {
 	f10 := spinnerFrame(10)
 	if f10 != f0 {
 		t.Errorf("spinnerFrame(10) should equal spinnerFrame(0) (wrap)")
+	}
+}
+
+func TestCmdErrHintsKatesPortsWhenTheLocalAPIRefuses(t *testing.T) {
+	for msg, hinted := range map[string]bool{
+		`Failed to create test: connection failed: Post "http://127.0.0.1:8080/api/tests": dial tcp 127.0.0.1:8080: connect: connection refused`: true,
+		`connection failed: Get "http://localhost:8080/api/health": dial tcp [::1]:8080: connect: connection refused`:                            true,
+		`connection failed: Post "https://kates.example.com/api/tests": dial tcp 10.0.0.5:443: connect: connection refused`:                      false,
+		`Failed to create test: 400 Bad Request`: false,
+	} {
+		out := output.ResetForTesting()
+		_ = cmdErr(msg)
+		if got := strings.Contains(out.String(), "kates ports"); got != hinted {
+			t.Errorf("%q: hint %v, want %v\n%s", msg, got, hinted, out.String())
+		}
 	}
 }
