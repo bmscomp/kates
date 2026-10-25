@@ -40,10 +40,10 @@ jobs:
           set -euo pipefail
           cd website
           missing=0
-          for ref in $(grep -oE '(src|href)="[^"#:]+"' index.html | sed -E 's/^[a-z]+="//; s/"$//' | sort -u); do
+          while IFS= read -r ref; do
             [ -e "$ref" ] || { echo "missing: $ref"; missing=1; }
-          done
-          exit $missing
+          done < <(grep -oE '(src|href)="[^"#:]+"' index.html | sed -E 's/^[a-z]+="//; s/"$//' | sort -u)
+          exit "$missing"
 
   deploy:
     name: Deploy to Cloudflare Pages
