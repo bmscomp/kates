@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kates — Kafka testing, chaos and security on Kubernetes</title>
+  <meta name="description" content="Kates puts load on Apache Kafka, injects faults into its brokers, measures throughput, P99 latency, recovery time and lost records, and audits broker security. Repeatable on a laptop, pass/fail in CI.">
+  <link rel="canonical" href="https://katesplatforme.io/">
+  <link rel="icon" type="image/svg+xml" href="assets/kates-logo.svg">
+  <meta name="theme-color" content="#0e1425">
+
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://katesplatforme.io/">
+  <meta property="og:title" content="Kates — Kafka advanced testing and engineering suite">
+  <meta property="og:description" content="Find out how your Kafka cluster handles a broker failure before the day a broker fails. Load tests, fault injection, security audits and CI gates for Kafka on Kubernetes.">
+  <meta property="og:image" content="https://katesplatforme.io/assets/social-preview.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Kates — Kafka advanced testing and engineering suite">
+  <meta name="twitter:description" content="Load tests, fault injection, security audits and CI gates for Apache Kafka on Kubernetes.">
+  <meta name="twitter:image" content="https://katesplatforme.io/assets/social-preview.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Kates",
+    "alternateName": "Kafka Advanced Testing and Engineering Suite",
+    "url": "https://katesplatforme.io/",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS, Kubernetes",
+    "license": "https://github.com/bmscomp/kates/blob/main/LICENSE",
+    "codeRepository": "https://github.com/bmscomp/kates",
+    "description": "Performance testing, chaos engineering and security auditing for Apache Kafka on Kubernetes.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav" id="top">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="Kates home">
+        <img src="assets/kates-logo.svg" width="36" height="36" alt="">
+        <span class="brand-name"><b>K</b>ates</span>
+      </a>
+      <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+      <nav id="nav-links" class="nav-links" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#compare">Compare</a>
+        <a href="#ci">CI gates</a>
+        <a href="https://bmscomp.github.io/kates/">Docs</a>
+        <a class="gh" href="https://github.com/bmscomp/kates">
+          <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+        <a class="btn btn-primary btn-sm" href="#how">Get started</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="hero-glow" aria-hidden="true"></div>
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Open source · Apache Kafka · Kubernetes</p>
+          <h1>Break your Kafka cluster <span class="accent">before production does.</span></h1>
+          <p class="lead">
+            You find out how a Kafka cluster handles a broker failure on the day a broker fails,
+            unless you have already tried it. Kates puts load on Apache Kafka, injects faults into
+            its brokers, measures what they cost in throughput, P99 latency, recovery time and
+            lost records, and audits broker security configuration.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="#how">Quick start</a>
+            <a class="btn btn-ghost" href="https://bmscomp.github.io/kates/">Read the book</a>
+          </div>
+          <ul class="hero-points">
+            <li>Repeatable on a local Kind cluster or as pass/fail gates in CI</li>
+            <li>Three parts: a Go CLI, a Quarkus API, signed Helm charts</li>
+            <li>Apache 2.0 licensed, built in the open on GitHub</li>
+          </ul>
+        </div>
+
+        <div class="hero-demo">
+          <div class="terminal" role="img" aria-label="Terminal running a Kates load test and a CI gate">
+            <div class="terminal-bar"><span></span><span></span><span></span><em>zsh — kates</em></div>
+            <pre><code><span class="p">$</span> kates health
+<span class="ok">✓</span> Kates API      http://localhost:8080   <span class="dim">v1.0</span>
+<span class="ok">✓</span> Kafka          krafter.kafka           <span class="dim">3 brokers · 3 zones</span>
+
+<span class="p">$</span> kates test create --type LOAD --records 100000 --wait
+<span class="dim">test  7f3a…  LOAD  running ████████████████████ 100%</span>
+throughput   <span class="num">48,112</span> rec/s
+P50 / P95 / P99   <span class="num">3.1</span> / <span class="num">9.4</span> / <span class="num">17.8</span> ms
+errors       <span class="num">0</span>          grade  <span class="grade">A</span>
+
+<span class="p">$</span> kates resilience run --type LOAD --fault broker-pod-kill
+fault        broker-pod-kill → krafter-kafka-1
+before/after P99   17.8 → <span class="warn">41.2</span> ms   (+131%)
+recovery     <span class="num">6.4</span> s      lost records  <span class="num">0</span>
+
+<span class="p">$</span> kates gate --min-grade B
+<span class="ok">PASS</span>  grade A ≥ B   <span class="dim">exit 0</span></code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ TRUST STRIP ============ -->
+    <section class="strip" aria-label="Built on">
+      <div class="wrap strip-inner">
+        <span class="strip-label">Built on and for</span>
+        <ul class="strip-list">
+          <li>Apache Kafka</li>
+          <li>Strimzi</li>
+          <li>LitmusChaos</li>
+          <li>Quarkus</li>
+          <li>Helm</li>
+          <li>Prometheus &amp; Grafana</li>
+          <li>Kind</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ PROBLEM ============ -->
+    <section class="section" id="why">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Why Kates</p>
+          <h2>Most teams test Kafka resilience with two terminals and a hunch.</h2>
+          <p class="sub">
+            A perf-test script in one window, <code>kubectl delete pod</code> in another, and a Grafana board
+            someone eyeballs. Kates turns those checks into tests you can repeat, run in a pipeline and
+            grade against targets you set.
+          </p>
+        </div>
+        <div class="cards three">
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 5-8 4 5" /></svg>
+            </div>
+            <h3>Performance</h3>
+            <p>How many records per second can the cluster sustain before latency degrades? Where is the capacity limit?</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z" /><path d="M9 12l2 2 4-4" /></svg>
+            </div>
+            <h3>Resilience</h3>
+            <p>What happens to in-flight messages when a broker dies? Does the cluster recover from a network partition within the SLA?</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M8 4v16" /></svg>
+            </div>
+            <h3>Data integrity</h3>
+            <p>Is there any data loss under cascading failures? Are ordering and exactly-once guarantees kept under stress?</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FEATURES ============ -->
+    <section class="section alt" id="features">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">What it does</p>
+          <h2>One toolkit, from load generation to the audit report.</h2>
+        </div>
+        <div class="cards three features">
+          <article class="card">
+            <h3>Performance tests</h3>
+            <p>Eight workload types: <code>LOAD</code>, <code>STRESS</code>, <code>SPIKE</code>, <code>ENDURANCE</code>, <code>VOLUME</code>, <code>CAPACITY</code>, <code>ROUND_TRIP</code> and <code>INTEGRITY</code>. Real Kafka producers and consumers on virtual threads, or hand the workload to Trogdor.</p>
+            <p class="meta">Reports: throughput, P50/P95/P99, error rate. Exports: CSV, JUnit XML, Markdown, HTML, latency heatmaps.</p>
+          </article>
+          <article class="card">
+            <h3>Fault injection</h3>
+            <p>Thirteen disruption types, from broker pod kills and network partitions to CPU, memory and I/O stress, DNS errors, disk fill and node drain, executed through LitmusChaos or a direct Kubernetes provider.</p>
+            <p class="meta">Blast-radius guard, dry run, automatic rollback.</p>
+          </article>
+          <article class="card">
+            <h3>Resilience runs &amp; disruption plans</h3>
+            <p>Pair one load test with one fault and get the before/after change and the recovery time. Or run multi-step disruption plans with ISR and consumer-lag tracking and an A–F SLA grade.</p>
+            <p class="meta">Built-in playbooks for the failures you fear most.</p>
+          </article>
+          <article class="card">
+            <h3>Security audit</h3>
+            <p>Grade broker configuration A–F. Map the checks to CIS, SOC 2 and PCI DSS, save a baseline and report drift from it on the next run.</p>
+            <p class="meta"><code>kates security audit</code> · <code>kates security gate</code></p>
+          </article>
+          <article class="card">
+            <h3>CI gates</h3>
+            <p>Exit non-zero below a minimum performance or security grade, or when a scenario file violates its SLA. Webhooks notify your pipeline when a test finishes.</p>
+            <p class="meta">JUnit XML out of the box. History kept in PostgreSQL for trends.</p>
+          </article>
+          <article class="card">
+            <h3>A multi-zone lab on one machine</h3>
+            <p>A three-node Kind cluster whose nodes sit in separate zones, each with its own StorageClass and broker pool, with rack awareness on. Rehearse a full zone failure on a laptop.</p>
+            <p class="meta">Twelve Grafana dashboards, Prometheus alert rules and OTLP traces included.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HOW IT WORKS ============ -->
+    <section class="section" id="how">
+      <div class="wrap how-grid">
+        <div class="how-copy">
+          <p class="eyebrow">Quick start</p>
+          <h2>From an empty laptop to a graded load test in five commands.</h2>
+          <p class="sub">
+            You need Docker, Kind, kubectl and Helm, and about 16 GB of RAM. Everything else,
+            Strimzi, Kafka, Prometheus, Grafana, LitmusChaos and the Kates API, is installed by
+            <code>kates deploy</code>.
+          </p>
+          <ol class="steps">
+            <li><b>Install the CLI</b> with Homebrew, or download a single binary from the latest release.</li>
+            <li><b>Create the lab</b>: a three-zone Kind cluster named <code>panda</code>.</li>
+            <li><b>Deploy the stack</b> with a wizard, or <code>--dry-run</code> to see the plan first.</li>
+            <li><b>Open the ports</b>: the CLI context is configured with the API URL and key.</li>
+            <li><b>Run a test</b> and read the graded report.</li>
+          </ol>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/bmscomp/kates#quick-start">Full quick start</a>
+            <a class="btn btn-ghost" href="https://bmscomp.github.io/kates/12-deployment.html">Deployment guide</a>
+          </div>
+        </div>
+        <div class="how-code">
+          <div class="code-block">
+            <div class="code-title">Terminal</div>
+<pre><code><span class="c"># 1. The CLI (macOS or Linux)</span>
+brew install bmscomp/tap/kates
+git clone https://github.com/bmscomp/kates &amp;&amp; cd kates
+
+<span class="c"># 2. A three-zone Kind cluster named panda</span>
+make cluster
+make kates-native
+
+<span class="c"># 3. The stack: Strimzi, Kafka, monitoring, chaos, Kates API</span>
+kates deploy
+
+<span class="c"># 4. Port-forwards and a ready CLI context</span>
+kates ports
+
+<span class="c"># 5. A first load test, then a CI gate</span>
+kates test create --type LOAD --records 100000 --wait
+kates gate --min-grade C --records 100000</code></pre>
+          </div>
+          <div class="code-block">
+            <div class="code-title">GitHub Actions</div>
+<pre><code><span class="k">- uses:</span> bmscomp/kates@v1
+  <span class="k">with:</span>
+    <span class="k">api-url:</span> ${{ secrets.KATES_API_URL }}
+    <span class="k">api-key:</span> ${{ secrets.KATES_API_KEY }}
+    <span class="k">min-grade:</span> B</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ARCHITECTURE ============ -->
+    <section class="section alt" id="architecture">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Architecture</p>
+          <h2>Three parts that fit how you already run Kafka.</h2>
+          <p class="sub">
+            Performance tests work against any Kafka cluster the Kates API can reach. Fault injection
+            targets Strimzi-managed brokers. Every run is stored, so the numbers from last month are
+            there to compare with today's.
+          </p>
+        </div>
+
+        <figure class="arch">
+          <svg viewBox="0 0 960 360" role="img" aria-labelledby="arch-title arch-desc">
+            <title id="arch-title">Kates architecture</title>
+            <desc id="arch-desc">The kates CLI on a laptop or CI runner talks to the Kates API inside Kubernetes. The API runs load tests against Kafka brokers, drives faults through LitmusChaos, stores results in PostgreSQL and exposes metrics to Prometheus and Grafana. Helm charts install everything.</desc>
+            <defs>
+              <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M0 0L10 5L0 10z" fill="currentColor" />
+              </marker>
+            </defs>
+            <!-- outside cluster -->
+            <g class="box box-cli">
+              <rect x="20" y="120" width="190" height="120" rx="12" />
+              <text x="115" y="160" text-anchor="middle" class="t-title">kates CLI</text>
+              <text x="115" y="184" text-anchor="middle" class="t-sub">Go · laptop or CI runner</text>
+              <text x="115" y="206" text-anchor="middle" class="t-code">kates test · gate · disruption</text>
+            </g>
+            <!-- cluster boundary -->
+            <rect x="260" y="20" width="680" height="320" rx="16" class="cluster" />
+            <text x="280" y="48" class="t-cluster">Kubernetes cluster</text>
+
+            <!-- API -->
+            <g class="box box-api">
+              <rect x="300" y="120" width="200" height="120" rx="12" />
+              <text x="400" y="160" text-anchor="middle" class="t-title">Kates API</text>
+              <text x="400" y="184" text-anchor="middle" class="t-sub">Quarkus · native image</text>
+              <text x="400" y="206" text-anchor="middle" class="t-code">load · faults · grades · webhooks</text>
+            </g>
+            <!-- Kafka -->
+            <g class="box">
+              <rect x="580" y="60" width="160" height="80" rx="12" />
+              <text x="660" y="94" text-anchor="middle" class="t-title">Kafka</text>
+              <text x="660" y="116" text-anchor="middle" class="t-sub">Strimzi · 3 zones</text>
+            </g>
+            <!-- Litmus -->
+            <g class="box">
+              <rect x="580" y="160" width="160" height="80" rx="12" />
+              <text x="660" y="194" text-anchor="middle" class="t-title">LitmusChaos</text>
+              <text x="660" y="216" text-anchor="middle" class="t-sub">13 disruption types</text>
+            </g>
+            <!-- Postgres -->
+            <g class="box">
+              <rect x="580" y="260" width="160" height="60" rx="12" />
+              <text x="660" y="296" text-anchor="middle" class="t-title">PostgreSQL</text>
+            </g>
+            <!-- Monitoring -->
+            <g class="box">
+              <rect x="780" y="60" width="140" height="180" rx="12" />
+              <text x="850" y="110" text-anchor="middle" class="t-title">Prometheus</text>
+              <text x="850" y="134" text-anchor="middle" class="t-title">Grafana</text>
+              <text x="850" y="160" text-anchor="middle" class="t-sub">12 dashboards</text>
+              <text x="850" y="180" text-anchor="middle" class="t-sub">alert rules</text>
+            </g>
+            <!-- Helm -->
+            <text x="600" y="330" class="t-sub">Installed by signed Helm charts</text>
+
+            <!-- arrows -->
+            <g class="arrow">
+              <path d="M210 180H298" marker-end="url(#arr)" />
+              <text x="254" y="170" text-anchor="middle" class="t-edge">REST · API key</text>
+              <path d="M500 160L578 110" marker-end="url(#arr)" />
+              <text x="520" y="124" class="t-edge">producers / consumers</text>
+              <path d="M500 190H578" marker-end="url(#arr)" />
+              <path d="M660 140V158" marker-end="url(#arr)" class="dashed" />
+              <path d="M500 210L578 280" marker-end="url(#arr)" />
+              <path d="M740 100H778" marker-end="url(#arr)" />
+              <path d="M500 140C540 60 640 40 778 80" marker-end="url(#arr)" class="dashed" />
+            </g>
+          </svg>
+          <figcaption>The CLI never touches Kafka directly: the API inside the cluster runs the load, drives the faults, grades the result and keeps the history.</figcaption>
+        </figure>
+
+        <div class="screens">
+          <figure>
+            <img src="assets/kates-cli-overview.png" alt="Overview of the kates CLI command groups" loading="lazy">
+            <figcaption>The CLI at a glance</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/kates-lab-tui.png" alt="The kates lab terminal UI showing a disruption run" loading="lazy">
+            <figcaption>The lab TUI during a disruption run</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ COMPARE ============ -->
+    <section class="section" id="compare">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Compared with the usual workflow</p>
+          <h2>Benchmark tools measure. Kates measures under failure and keeps score.</h2>
+        </div>
+        <div class="table-wrap">
+          <table class="compare">
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                <th scope="col"><code>kafka-producer-perf-test</code></th>
+                <th scope="col">OpenMessaging Benchmark</th>
+                <th scope="col">Manual Litmus / <code>kubectl</code></th>
+                <th scope="col" class="hl">Kates</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Load, stress, spike and round-trip workloads</th><td>Producer or consumer only</td><td class="yes">Yes</td><td class="no">No</td><td class="yes hl">Yes</td></tr>
+              <tr><th scope="row">Coordinated fault injection under load</th><td class="no">No</td><td class="no">No</td><td>Manual</td><td class="yes hl">Yes</td></tr>
+              <tr><th scope="row">Blast-radius guard and rollback</th><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes hl">Yes</td></tr>
+              <tr><th scope="row">Zero-loss, ordering and gap verification</th><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes hl">Yes</td></tr>
+              <tr><th scope="row">Broker security and compliance audit</th><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes hl">A–F · CIS / SOC 2 / PCI DSS</td></tr>
+              <tr><th scope="row">Repeatable CI gates and historical trends</th><td class="no">No</td><td class="no">No</td><td class="no">No</td><td class="yes hl">Yes</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CI GATES ============ -->
+    <section class="section alt" id="ci">
+      <div class="wrap how-grid reverse">
+        <div class="how-code">
+          <div class="code-block">
+            <div class="code-title">scenario.yaml</div>
+<pre><code><span class="k">name:</span> checkout-peak
+<span class="k">type:</span> LOAD
+<span class="k">records:</span> 2000000
+<span class="k">producers:</span> 8
+<span class="k">gates:</span>
+  <span class="k">minThroughput:</span> 40000      <span class="c"># rec/s</span>
+  <span class="k">maxP99LatencyMs:</span> 25
+  <span class="k">maxErrorRate:</span> 0.001
+<span class="k">disruption:</span>
+  <span class="k">type:</span> broker-pod-kill
+  <span class="k">maxAffectedBrokers:</span> 1
+  <span class="k">maxRecoverySeconds:</span> 30</code></pre>
+          </div>
+          <div class="code-block">
+            <div class="code-title">Terminal</div>
+<pre><code>$ kates test apply -f scenario.yaml --wait
+<span class="ok">PASS</span>  throughput 47,902 ≥ 40,000
+<span class="ok">PASS</span>  P99 19.6 ms ≤ 25 ms
+<span class="ok">PASS</span>  recovery 8.1 s ≤ 30 s
+<span class="ok">PASS</span>  lost records 0
+grade <span class="grade">A</span> · junit → reports/checkout-peak.xml</code></pre>
+          </div>
+        </div>
+        <div class="how-copy">
+          <p class="eyebrow">CI gates</p>
+          <h2>Make resilience a build step, not a quarterly exercise.</h2>
+          <p class="sub">
+            Describe a workload and its SLA in a scenario file. Kates runs it, injects the fault,
+            checks every gate and exits non-zero when one fails. The same file runs on a laptop and
+            in the pipeline, and every run lands in PostgreSQL so a regression shows up as a trend,
+            not a surprise.
+          </p>
+          <ul class="checks">
+            <li><code>kates gate --min-grade B</code> for a one-line performance gate</li>
+            <li><code>kates security gate</code> for the broker configuration grade</li>
+            <li>JUnit XML for your CI dashboard, webhooks for everything else</li>
+            <li>A GitHub Action, <code>bmscomp/kates</code>, ready to drop into a workflow</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CTA ============ -->
+    <section class="section cta">
+      <div class="wrap cta-inner">
+        <img src="assets/kates-logo.svg" width="72" height="72" alt="">
+        <h2>Try the failure before it tries you.</h2>
+        <p class="sub">Kates is free and open source. Install it, point it at a cluster, and read the first graded report in minutes.</p>
+        <div class="cta-row center">
+          <a class="btn btn-primary" href="https://github.com/bmscomp/kates">Star on GitHub</a>
+          <a class="btn btn-ghost" href="https://bmscomp.github.io/kates/">Read the book</a>
+          <a class="btn btn-ghost" href="https://artifacthub.io/packages/search?repo=kates">Helm charts on Artifact Hub</a>
+        </div>
+        <p class="install"><code>brew install bmscomp/tap/kates</code></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <picture>
+          <img src="assets/kates-wordmark-dark.svg" width="320" height="28" alt="Kates — Kafka advanced testing and engineering suite">
+        </picture>
+        <p>Performance testing, chaos engineering and security auditing for Apache Kafka on Kubernetes.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/bmscomp/kates">Source code</a>
+          <a href="https://github.com/bmscomp/kates/releases/latest">Releases</a>
+          <a href="https://github.com/bmscomp/kates/blob/main/CONTRIBUTING.md">Contributing</a>
+          <a href="https://github.com/bmscomp/kates/blob/main/LICENSE">License</a>
+        </div>
+        <div>
+          <h4>Learn</h4>
+          <a href="https://bmscomp.github.io/kates/">The book</a>
+          <a href="https://bmscomp.github.io/kates/10-cli-reference.html">CLI reference</a>
+          <a href="https://bmscomp.github.io/kates/11-api-reference.html">API reference</a>
+          <a href="https://bmscomp.github.io/kates/14-recipes.html">Recipes</a>
+        </div>
+        <div>
+          <h4>Ecosystem</h4>
+          <a href="https://strimzi.io/">Strimzi</a>
+          <a href="https://litmuschaos.io/">LitmusChaos</a>
+          <a href="https://kafka.apache.org/">Apache Kafka</a>
+          <a href="https://artifacthub.io/packages/search?repo=kates">Artifact Hub</a>
+        </div>
+      </nav>
+    </div>
+    <div class="wrap footer-legal">
+      <span>© <span id="year">2026</span> Kates contributors. Apache License 2.0.</span>
+      <span>Apache Kafka is a trademark of the Apache Software Foundation. Kates is an independent project, not affiliated with the ASF.</span>
+    </div>
+  </footer>
+
+  <script src="site.js" defer></script>
+</body>
+</html>
