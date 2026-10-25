@@ -79,19 +79,11 @@ kates health
 kates test create --type LOAD --records 100000 --wait
 ```
 
-<p align="center">
-  <img src="docs/assets/kates-test-load.png" width="700" alt="kates test create --type LOAD --records 100000 --wait terminal output showing live progress bar, throughput sparkline, produce/consume phase breakdown, and 202.4K rec/s throughput with 52.19 ms P99 latency" />
-</p>
-
 Run a CI quality gate against a minimum grade:
 
 ```bash
 kates gate --min-grade C --records 100000
 ```
-
-<p align="center">
-  <img src="docs/assets/kates-gate.png" width="700" alt="kates gate --min-grade C --records 100000 terminal output showing 201.9K rec/s throughput, 49.439 ms P99 latency, and PASS Grade C" />
-</p>
 
 <details>
 <summary><strong>Notes on releases, cluster contexts, images and API keys</strong></summary>
@@ -105,10 +97,6 @@ kates gate --min-grade C --records 100000
 </details>
 
 ### What `kates deploy` installs
-
-<p align="center">
-  <img src="docs/assets/kates-deploy.png" width="900" alt="kates deploy terminal UI showing live rollout progress for Strimzi Operator, Cert-Manager, Kyverno, a three-zone KRaft Kafka cluster (alpha, sigma, gamma), and Prometheus/Grafana monitoring" />
-</p>
 
 With the default isolated topology:
 
