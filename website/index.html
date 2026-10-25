@@ -284,74 +284,216 @@ kates gate --min-grade C --records 100000</code></pre>
         </div>
 
         <figure class="arch">
-          <svg viewBox="0 0 960 360" role="img" aria-labelledby="arch-title arch-desc">
+          <svg class="arch-h" viewBox="0 0 960 400" role="group" aria-labelledby="arch-title arch-desc">
             <title id="arch-title">Kates architecture</title>
-            <desc id="arch-desc">The kates CLI on a laptop or CI runner talks to the Kates API inside Kubernetes. The API runs load tests against Kafka brokers, drives faults through LitmusChaos, stores results in PostgreSQL and exposes metrics to Prometheus and Grafana. Helm charts install everything.</desc>
+            <desc id="arch-desc">The kates CLI on a laptop or CI runner talks to the Kates API inside Kubernetes over REST with an API key. The API puts load on Kafka, drives faults through LitmusChaos, stores results in PostgreSQL and exposes metrics to Prometheus and Grafana, which also scrape Kafka. Signed Helm charts install everything.</desc>
             <defs>
-              <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-                <path d="M0 0L10 5L0 10z" fill="currentColor" />
-              </marker>
+              <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
+              <marker id="arr-fault" class="mk-fault" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
+              <marker id="arr-ok" class="mk-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
+              <clipPath id="p99-clip"><rect x="784" y="190" width="0" height="150" /></clipPath>
             </defs>
-            <!-- outside cluster -->
-            <g class="box box-cli">
-              <rect x="20" y="120" width="190" height="120" rx="12" />
-              <text x="115" y="160" text-anchor="middle" class="t-title">kates CLI</text>
-              <text x="115" y="184" text-anchor="middle" class="t-sub">Go · laptop or CI runner</text>
-              <text x="115" y="206" text-anchor="middle" class="t-code">kates test · gate · disruption</text>
-            </g>
-            <!-- cluster boundary -->
-            <rect x="260" y="20" width="680" height="320" rx="16" class="cluster" />
-            <text x="280" y="48" class="t-cluster">Kubernetes cluster</text>
 
-            <!-- API -->
-            <g class="box box-api">
-              <rect x="300" y="120" width="200" height="120" rx="12" />
-              <text x="400" y="160" text-anchor="middle" class="t-title">Kates API</text>
-              <text x="400" y="184" text-anchor="middle" class="t-sub">Quarkus · native image</text>
-              <text x="400" y="206" text-anchor="middle" class="t-code">load · faults · grades · webhooks</text>
-            </g>
-            <!-- Kafka -->
-            <g class="box">
-              <rect x="580" y="60" width="160" height="80" rx="12" />
-              <text x="660" y="94" text-anchor="middle" class="t-title">Kafka</text>
-              <text x="660" y="116" text-anchor="middle" class="t-sub">Strimzi · 3 zones</text>
-            </g>
-            <!-- Litmus -->
-            <g class="box">
-              <rect x="580" y="160" width="160" height="80" rx="12" />
-              <text x="660" y="194" text-anchor="middle" class="t-title">LitmusChaos</text>
-              <text x="660" y="216" text-anchor="middle" class="t-sub">13 disruption types</text>
-            </g>
-            <!-- Postgres -->
-            <g class="box">
-              <rect x="580" y="260" width="160" height="60" rx="12" />
-              <text x="660" y="296" text-anchor="middle" class="t-title">PostgreSQL</text>
-            </g>
-            <!-- Monitoring -->
-            <g class="box">
-              <rect x="780" y="60" width="140" height="180" rx="12" />
-              <text x="850" y="110" text-anchor="middle" class="t-title">Prometheus</text>
-              <text x="850" y="134" text-anchor="middle" class="t-title">Grafana</text>
-              <text x="850" y="160" text-anchor="middle" class="t-sub">12 dashboards</text>
-              <text x="850" y="180" text-anchor="middle" class="t-sub">alert rules</text>
-            </g>
-            <!-- Helm -->
-            <text x="600" y="330" class="t-sub">Installed by signed Helm charts</text>
+            <rect x="240" y="16" width="704" height="368" rx="16" class="cluster" />
+            <text x="264" y="44" class="t-cluster">Kubernetes cluster</text>
+            <text x="264" y="368" class="t-sub">Installed by signed Helm charts</text>
 
-            <!-- arrows -->
-            <g class="arrow">
-              <path d="M210 180H298" marker-end="url(#arr)" />
-              <text x="254" y="170" text-anchor="middle" class="t-edge">REST · API key</text>
-              <path d="M500 160L578 110" marker-end="url(#arr)" />
-              <text x="520" y="124" class="t-edge">producers / consumers</text>
-              <path d="M500 190H578" marker-end="url(#arr)" />
-              <path d="M660 140V158" marker-end="url(#arr)" class="dashed" />
-              <path d="M500 210L578 280" marker-end="url(#arr)" />
-              <path d="M740 100H778" marker-end="url(#arr)" />
-              <path d="M500 140C540 60 640 40 778 80" marker-end="url(#arr)" class="dashed" />
+            <!-- links: drawn under the boxes; each has a base edge, a moving packet and a label chip; data-ph packets run only in those phases -->
+            <g class="link" data-a="cli" data-b="api" style="--d:0">
+              <path class="edge" pathLength="1" d="M196 182H290" marker-end="url(#arr)" />
+              <path class="pkt" pathLength="1" d="M196 182H290" style="--t:1.4s" />
+              <g class="chip" transform="translate(243 162)"><rect x="-44" y="-10" width="88" height="20" rx="10" /><text text-anchor="middle" y="4">REST · API key</text></g>
+            </g>
+            <g class="link ok" data-a="api" data-b="cli" data-ph="4" style="--d:0">
+              <path class="edge" pathLength="1" d="M290 222H196" marker-end="url(#arr-ok)" />
+              <path class="pkt" pathLength="1" d="M290 222H196" style="--t:0.9s" />
+            </g>
+            <g class="link" data-a="api" data-b="kafka" style="--d:1">
+              <path class="edge" pathLength="1" d="M470 168C515 168 515 112 560 112" marker-end="url(#arr)" />
+              <path class="pkt" pathLength="1" d="M470 168C515 168 515 112 560 112" style="--t:1.1s" />
+              <g class="chip" transform="translate(515 140)"><rect x="-20" y="-10" width="40" height="20" rx="10" /><text text-anchor="middle" y="4">load</text></g>
+            </g>
+            <g class="link" data-a="api" data-b="litmus" style="--d:2">
+              <path class="edge" pathLength="1" d="M470 195C515 195 515 236 560 236" marker-end="url(#arr)" />
+              <path class="pkt" data-ph="1" pathLength="1" d="M470 195C515 195 515 236 560 236" style="--t:0.8s" />
+              <g class="chip" transform="translate(515 216)"><rect x="-26" y="-10" width="52" height="20" rx="10" /><text text-anchor="middle" y="4">faults</text></g>
+            </g>
+            <g class="link" data-a="api" data-b="pg" style="--d:3">
+              <path class="edge" pathLength="1" d="M470 222C515 222 515 329 560 329" marker-end="url(#arr)" />
+              <path class="pkt" data-ph="4" pathLength="1" d="M470 222C515 222 515 329 560 329" style="--t:0.9s" />
+              <g class="chip" transform="translate(515 290)"><rect x="-29" y="-10" width="58" height="20" rx="10" /><text text-anchor="middle" y="4">results</text></g>
+            </g>
+            <g class="link fault" data-a="litmus" data-b="kafka" style="--d:4">
+              <path class="edge" pathLength="1" d="M650 200V174" marker-end="url(#arr-fault)" />
+              <path class="pkt" data-ph="1" pathLength="1" d="M650 200V174" style="--t:0.6s" />
+              <g class="chip" transform="translate(692 187)"><rect x="-26" y="-10" width="52" height="20" rx="10" /><text text-anchor="middle" y="4">inject</text></g>
+            </g>
+            <g class="link" data-a="kafka" data-b="mon" style="--d:5">
+              <path class="edge" pathLength="1" d="M740 112H770" marker-end="url(#arr)" />
+              <path class="pkt" pathLength="1" d="M740 112H770" style="--t:1.2s" />
+            </g>
+
+            <g class="box box-cli node" data-node="cli" tabindex="0" role="img" aria-label="kates CLI" style="--d:0" data-note="The kates CLI runs on a laptop or a CI runner and only ever talks to the Kates API.">
+              <rect x="16" y="140" width="180" height="110" rx="12" />
+              <text x="106" y="182" text-anchor="middle" class="t-title">kates CLI</text>
+              <text x="106" y="204" text-anchor="middle" class="t-sub">Go · laptop or CI runner</text>
+              <text x="106" y="230" text-anchor="middle" class="t-code">test · gate · disruption</text>
+            </g>
+            <g class="stamp" data-ph="4" aria-hidden="true"><circle cx="190" cy="142" r="20" /><text x="190" y="149" text-anchor="middle">A</text></g>
+            <g class="box box-api node" data-node="api" tabindex="0" role="img" aria-label="Kates API" style="--d:1" data-note="The Kates API runs the load, drives the faults, grades every run and sends the webhooks.">
+              <rect x="290" y="140" width="180" height="110" rx="12" />
+              <text x="380" y="182" text-anchor="middle" class="t-title">Kates API</text>
+              <text x="380" y="204" text-anchor="middle" class="t-sub">Quarkus · native image</text>
+              <text x="380" y="230" text-anchor="middle" class="t-code">load · faults · grades</text>
+            </g>
+            <g class="box node" data-node="kafka" tabindex="0" role="img" aria-label="Kafka" style="--d:2" data-note="Kafka managed by Strimzi, one broker per zone: the system under test.">
+              <rect class="kafka-hit" x="560" y="52" width="180" height="122" rx="12" />
+              <text x="650" y="84" text-anchor="middle" class="t-title">Kafka</text>
+              <text x="650" y="104" text-anchor="middle" class="t-sub">Strimzi · 3 zones</text>
+              <circle class="broker" cx="616" cy="138" r="8" />
+              <circle class="broker hit" cx="650" cy="138" r="8" />
+              <circle class="broker" cx="684" cy="138" r="8" />
+              <text x="650" y="164" text-anchor="middle" class="t-sub t-small">kafka-0 · 1 · 2</text>
+            </g>
+            <g class="box node" data-node="litmus" tabindex="0" role="img" aria-label="LitmusChaos" style="--d:3" data-note="LitmusChaos carries out the 13 disruption types against the brokers, then lets them recover.">
+              <rect class="litmus-hit" x="560" y="200" width="180" height="72" rx="12" />
+              <text x="650" y="232" text-anchor="middle" class="t-title">LitmusChaos</text>
+              <text x="650" y="254" text-anchor="middle" class="t-sub">13 disruption types</text>
+            </g>
+            <g class="box node" data-node="pg" tabindex="0" role="img" aria-label="PostgreSQL" style="--d:4" data-note="PostgreSQL keeps every run, so last month's numbers are there to compare with today's.">
+              <rect x="560" y="298" width="180" height="62" rx="12" />
+              <text x="650" y="324" text-anchor="middle" class="t-title">PostgreSQL</text>
+              <text x="650" y="344" text-anchor="middle" class="t-sub">every run kept</text>
+            </g>
+            <g class="box node" data-node="mon" tabindex="0" role="img" aria-label="Prometheus and Grafana" style="--d:5" data-note="Prometheus scrapes the Kates API and Kafka; 12 Grafana dashboards and the alert rules come with the charts.">
+              <rect x="770" y="52" width="160" height="308" rx="12" />
+              <text x="850" y="84" text-anchor="middle" class="t-title">Grafana</text>
+              <text x="850" y="104" text-anchor="middle" class="t-sub">Prometheus scrape</text>
+              <text x="786" y="146" class="t-sub t-small">P99 latency</text>
+              <text x="786" y="176" class="p99">17.8 ms</text>
+              <line class="grid" x1="784" x2="916" y1="237" y2="237" />
+              <line class="grid" x1="784" x2="916" y1="306" y2="306" />
+              <rect class="band" x="837" y="190" width="53" height="150" />
+              <g clip-path="url(#p99-clip)"><path class="p99-area" /><path class="p99-line" /></g>
+              <circle class="p99-head" r="4.5" cx="784" cy="306" />
+              <text x="850" y="352" text-anchor="middle" class="t-sub t-small">12 dashboards · alerts</text>
             </g>
           </svg>
-          <figcaption>The CLI never touches Kafka directly: the API inside the cluster runs the load, drives the faults, grades the result and keeps the history.</figcaption>
+          <svg class="arch-v" viewBox="0 0 360 900" role="group" aria-labelledby="arch-title arch-desc">
+            <defs>
+              <marker id="arr-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
+              <marker id="arr-fault-v" class="mk-fault" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" /></marker>
+            </defs>
+
+            <rect x="8" y="150" width="344" height="740" rx="16" class="cluster" />
+            <text x="24" y="174" class="t-cluster">Kubernetes</text>
+            <text x="180" y="874" text-anchor="middle" class="t-sub">Installed by signed Helm charts</text>
+            <g class="link" data-a="cli" data-b="api" style="--d:0">
+              <path class="edge" pathLength="1" d="M180 108V186" marker-end="url(#arr-v)" />
+              <path class="pkt" pathLength="1" d="M180 108V186" style="--t:1.6s" />
+              <g class="chip" transform="translate(180 140)"><rect x="-50" y="-10" width="100" height="20" rx="10" /><text text-anchor="middle" y="4">REST · API key</text></g>
+            </g>
+            <g class="link" data-a="api" data-b="kafka" style="--d:1">
+              <path class="edge" pathLength="1" d="M180 290V356" marker-end="url(#arr-v)" />
+              <path class="pkt" pathLength="1" d="M180 290V356" style="--t:1.2s" />
+              <g class="chip" transform="translate(180 323)"><rect x="-20" y="-10" width="40" height="20" rx="10" /><text text-anchor="middle" y="4">load</text></g>
+            </g>
+            <g class="link" data-a="api" data-b="litmus" style="--d:2">
+              <path class="edge" pathLength="1" d="M80 262H40V540H60" marker-end="url(#arr-v)" />
+              <path class="pkt" data-ph="1" pathLength="1" d="M80 262H40V540H60" />
+              <g class="chip" transform="translate(40 420) rotate(-90)"><rect x="-26" y="-10" width="52" height="20" rx="10" /><text text-anchor="middle" y="4">faults</text></g>
+            </g>
+            <g class="link" data-a="api" data-b="pg" style="--d:3">
+              <path class="edge" pathLength="1" d="M80 280H20V651H60" marker-end="url(#arr-v)" />
+              <path class="pkt" data-ph="4" pathLength="1" d="M80 280H20V651H60" />
+              <g class="chip" transform="translate(20 600) rotate(-90)"><rect x="-29" y="-10" width="58" height="20" rx="10" /><text text-anchor="middle" y="4">results</text></g>
+            </g>
+            <g class="link fault" data-a="litmus" data-b="kafka" style="--d:4">
+              <path class="edge" pathLength="1" d="M180 500V456" marker-end="url(#arr-fault-v)" />
+              <path class="pkt" data-ph="1" pathLength="1" d="M180 500V456" />
+              <g class="chip" transform="translate(226 478)"><rect x="-26" y="-10" width="52" height="20" rx="10" /><text text-anchor="middle" y="4">inject</text></g>
+            </g>
+            <g class="link" data-a="kafka" data-b="mon" style="--d:5">
+              <path class="edge" pathLength="1" d="M296 406H316V760H300" marker-end="url(#arr-v)" />
+              <path class="pkt" pathLength="1" d="M296 406H316V760H300" style="--t:2.4s" />
+            </g>
+            <g class="link" data-a="api" data-b="mon" style="--d:6">
+              <path class="edge" pathLength="1" d="M280 250H336V786H300" marker-end="url(#arr-v)" />
+              <path class="pkt" pathLength="1" d="M280 250H336V786H300" style="--t:3.6s" />
+              <g class="chip" transform="translate(336 560) rotate(-90)"><rect x="-29" y="-10" width="58" height="20" rx="10" /><text text-anchor="middle" y="4">metrics</text></g>
+            </g>
+
+            <g class="box box-cli node" data-node="cli" tabindex="0" role="img" aria-label="kates CLI" style="--d:0">
+              <rect x="80" y="12" width="200" height="96" rx="12" />
+              <text x="180" y="42" text-anchor="middle" class="t-title">kates CLI</text>
+              <text x="180" y="64" text-anchor="middle" class="t-sub">Go · laptop or CI runner</text>
+              <text x="180" y="90" text-anchor="middle" class="t-code">test · gate · disruption</text>
+            </g>
+            <g class="box box-api node" data-node="api" tabindex="0" role="img" aria-label="Kates API" style="--d:1">
+              <rect x="80" y="190" width="200" height="100" rx="12" />
+              <text x="180" y="224" text-anchor="middle" class="t-title">Kates API</text>
+              <text x="180" y="246" text-anchor="middle" class="t-sub">Quarkus · native image</text>
+              <text x="180" y="272" text-anchor="middle" class="t-code">load · faults · grades</text>
+            </g>
+            <g class="box node" data-node="kafka" tabindex="0" role="img" aria-label="Kafka" style="--d:2">
+              <rect class="kafka-hit" x="64" y="360" width="232" height="92" rx="12" />
+              <text x="180" y="392" text-anchor="middle" class="t-title">Kafka</text>
+              <text x="180" y="414" text-anchor="middle" class="t-sub">Strimzi · 3 zones</text>
+              <circle class="broker" cx="158" cy="434" r="5" />
+              <circle class="broker" cx="180" cy="434" r="5" />
+              <circle class="broker hit" cx="202" cy="434" r="5" />
+            </g>
+            <g class="box node" data-node="litmus" tabindex="0" role="img" aria-label="LitmusChaos" style="--d:3">
+              <rect class="litmus-hit" x="64" y="500" width="232" height="80" rx="12" />
+              <text x="180" y="534" text-anchor="middle" class="t-title">LitmusChaos</text>
+              <text x="180" y="558" text-anchor="middle" class="t-sub">13 disruption types</text>
+            </g>
+            <g class="box node" data-node="pg" tabindex="0" role="img" aria-label="PostgreSQL" style="--d:4">
+              <rect x="64" y="620" width="232" height="62" rx="12" />
+              <text x="180" y="646" text-anchor="middle" class="t-title">PostgreSQL</text>
+              <text x="180" y="667" text-anchor="middle" class="t-sub">every run kept</text>
+            </g>
+            <g class="box node" data-node="mon" tabindex="0" role="img" aria-label="Prometheus and Grafana" style="--d:5">
+              <rect x="64" y="720" width="232" height="100" rx="12" />
+              <text x="180" y="752" text-anchor="middle" class="t-title">Prometheus · Grafana</text>
+              <text x="180" y="776" text-anchor="middle" class="t-sub">12 dashboards · alert rules</text>
+              <polyline class="spark" pathLength="1" points="150,808 160,800 170,803 180,792 190,796 200,786 210,790" />
+            </g>
+          </svg>
+          <div class="arch-tl" role="group" aria-label="Phases of a disruption run">
+            <div class="arch-tl-bar"><span></span></div>
+            <button type="button">Baseline</button>
+            <button type="button" class="bad">Inject</button>
+            <button type="button" class="bad">Broker down</button>
+            <button type="button" class="good">Recovery</button>
+            <button type="button" class="good">Graded</button>
+          </div>
+          <p class="arch-step"></p>
+          <figcaption aria-live="polite">The CLI never touches Kafka directly: the API inside the cluster runs the load, drives the faults, grades the result and keeps the history.</figcaption>
+        </figure>
+
+        <figure class="kz" data-phase="0">
+          <h3>Inside Kafka during a broker kill</h3>
+          <div class="kz-src"><b>Kates API · producers</b><span>48,112 rec/s · acks=all</span></div>
+          <div class="kz-row" aria-hidden="true">
+            <div><div class="kz-lane"><i></i><i></i><i></i></div>
+              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>kafka-0</b><small>zone a</small></div>
+                <div class="kz-parts"><span class="ldr">p0</span><span>p1</span><span>p2</span></div></div></div>
+            <div class="kz-hit"><div class="kz-lane"><i></i><i></i><i></i></div>
+              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>kafka-1</b><small>zone b</small></div>
+                <div class="kz-parts"><span>p0</span><span class="ldr" data-move>p1</span><span>p2</span></div></div></div>
+            <div><div class="kz-lane"><i></i><i></i><i></i></div>
+              <div class="kz-brk"><div class="kz-brk-h"><b><span>krafter-</span>kafka-2</b><small>zone c</small></div>
+                <div class="kz-parts"><span>p0</span><span data-take>p1</span><span class="ldr">p2</span></div></div></div>
+          </div>
+          <div class="kz-row" aria-hidden="true"><div></div><div class="kz-bolt"></div><div></div></div>
+          <div class="kz-row" aria-hidden="true"><div></div><div class="kz-chaos"><b>LitmusChaos</b><span>broker-pod-kill</span></div><div></div></div>
+          <div class="kz-isr" aria-hidden="true">
+            <span>p0 <i></i><i class="hit"></i><i></i></span>
+            <span>p1 <i></i><i class="hit"></i><i></i></span>
+            <span>p2 <i></i><i class="hit"></i><i></i></span>
+          </div>
+          <figcaption><b>Healthy.</b> ISR back to 3, preferred leader restored. Recovered in 6.4 s, 0 records lost.</figcaption>
         </figure>
 
         <div class="screens">

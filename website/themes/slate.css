@@ -23,4 +23,3 @@ p code, li code, td code, th code, h2 code { color: #3730a3; }
 .footer-legal { border-top-color: #1e293b; }
 .compare .hl { background: rgba(79, 70, 229, 0.05); }
 .card:hover { box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06); }
-.arch .box rect { fill: #f4f6f9; } .arch .box-cli rect, .arch .box-api rect { fill: #eef0ff; }

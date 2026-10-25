@@ -170,19 +170,145 @@ h3 { font-size: 1.2rem; font-weight: 600; }
 .checks li::before { content: "✓"; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
 
 /* ---------- architecture ---------- */
-.arch { margin: 0 0 56px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
-.arch svg { width: 100%; height: auto; font-family: var(--sans); color: var(--muted); }
+.arch { margin: 0 0 56px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; --fault: #d64545; }
+.arch svg { display: block; width: 100%; height: auto; font-family: var(--sans); color: var(--muted); }
+.arch .arch-v { display: none; }
+/* below this the wide layout's labels get too small, so a vertical layout takes over */
+@media (max-width: 820px) {
+  .arch { padding: 12px; }
+  .arch .arch-h { display: none; }
+  .arch .arch-v { display: block; max-width: 420px; margin: 0 auto; }
+}
 .arch .box rect { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1.5; }
-.arch .box-cli rect, .arch .box-api rect { stroke: var(--accent); fill: #15264a; }
+.arch .box-cli rect, .arch .box-api rect { stroke: var(--accent); fill: var(--accent-soft); }
 .arch .cluster { fill: none; stroke: var(--border-strong); stroke-dasharray: 6 6; }
 .arch .t-title { fill: var(--heading); font-size: 17px; font-weight: 600; }
 .arch .t-sub { fill: var(--muted); font-size: 13px; }
-.arch .t-code { fill: #a9cff6; font-size: 12px; font-family: var(--mono); }
+.arch .t-code { fill: var(--accent); font-size: 12px; font-family: var(--mono); }
 .arch .t-cluster { fill: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; }
-.arch .t-edge { fill: var(--muted); font-size: 12px; }
-.arch .arrow path { fill: none; stroke: var(--accent); stroke-width: 1.8; }
-.arch .arrow .dashed { stroke-dasharray: 5 5; stroke: var(--muted); }
+.arch .edge { fill: none; stroke: var(--accent); stroke-width: 1.8; }
+.arch .fault .edge, .arch .fault .pkt { stroke: var(--fault); }
+.arch marker path { fill: var(--accent); }
+.arch .mk-fault path { fill: var(--fault); }
+.arch .pkt { fill: none; stroke: var(--accent); stroke-width: 7; stroke-linecap: round; stroke-dasharray: 0.01 0.99; stroke-dashoffset: 1; animation: arch-flow var(--t, 2s) linear infinite; filter: drop-shadow(0 0 3px var(--accent)); }
+.arch .fault .pkt { filter: drop-shadow(0 0 4px var(--fault)); }
+.arch .chip rect { fill: var(--surface); stroke: var(--border-strong); }
+.arch .chip text { fill: var(--muted); font-size: 11px; }
+.arch .fault .chip text { fill: var(--fault); }
+.arch .broker { fill: var(--ok); transition: fill 0.3s, opacity 0.3s; }
+.arch .spark { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-dasharray: 1; animation: arch-spark 6s ease-in-out infinite; }
+.arch .t-small { font-size: 11px; }
+/* the story: site.js sets data-phase 0-4 (baseline, inject, broker down, recovery, graded) on the figure */
+.arch [data-ph] { visibility: hidden; }
+.arch[data-phase="1"] [data-ph="1"], .arch[data-phase="4"] [data-ph="4"] { visibility: visible; }
+.arch .fault .edge { stroke-opacity: 0.3; }
+.arch[data-phase="1"] .fault .edge, .arch[data-phase="2"] .fault .edge { stroke-opacity: 1; }
+.arch .ok .edge { stroke: var(--ok); stroke-dasharray: 5 4; }
+.arch .ok .pkt { stroke: var(--ok); filter: drop-shadow(0 0 4px var(--ok)); }
+.arch .mk-ok path { fill: var(--ok); }
+.arch[data-phase="1"] .litmus-hit, .arch[data-phase="2"] .kafka-hit { stroke: var(--fault); stroke-width: 2.5; }
+.arch[data-phase="3"] .kafka-hit { stroke: var(--warn); }
+.arch[data-phase="2"] .broker.hit { fill: var(--fault); opacity: 0.3; }
+.arch[data-phase="3"] .broker.hit { fill: var(--warn); animation: arch-blink 0.5s infinite alternate; }
+.arch .stamp { transform-box: fill-box; transform-origin: center; transform: scale(2.2) rotate(-14deg); transition: transform 0.35s cubic-bezier(.3, 1.6, .5, 1); }
+.arch[data-phase="4"] .stamp { transform: rotate(-10deg); }
+.arch .stamp circle { fill: var(--ok); }
+.arch .stamp text { fill: var(--surface); font-weight: 800; font-size: 20px; }
+.arch .p99 { font-size: 26px; font-weight: 700; fill: var(--heading); transition: fill 0.3s; }
+.arch[data-phase="2"] .p99 { fill: var(--fault); }
+.arch[data-phase="3"] .p99 { fill: var(--warn); }
+.arch .p99-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.arch .p99-area { fill: var(--accent-soft); }
+.arch .p99-head { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.arch .band { fill: var(--fault); fill-opacity: 0.07; }
+.arch .grid { stroke: var(--border); stroke-dasharray: 2 4; }
+.arch-tl { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 14px; padding-top: 10px; position: relative; }
+.arch-tl-bar { position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.arch-tl-bar span { display: block; height: 100%; width: 0; background: var(--accent); }
+.arch-tl button { font: 500 13px var(--sans); color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; cursor: pointer; transition: color 0.2s, border-color 0.2s, background 0.2s; }
+.arch-tl button[aria-pressed="true"] { color: var(--heading); border-color: var(--accent); background: var(--accent-soft); }
+.arch-tl button.bad[aria-pressed="true"] { color: var(--fault); border-color: var(--fault); }
+.arch-tl button.good[aria-pressed="true"] { color: var(--ok); border-color: var(--ok); }
+.arch-step { text-align: center; font-weight: 600; color: var(--heading); margin: 12px 0 0; min-height: 1.65em; }
+.arch[data-phase="1"] .arch-step, .arch[data-phase="2"] .arch-step { color: var(--fault); }
+.arch[data-phase="3"] .arch-step, .arch[data-phase="4"] .arch-step { color: var(--ok); }
+.arch .node { cursor: default; outline: none; transform-box: fill-box; }
+.arch .node:focus-visible rect { stroke-width: 3; stroke: var(--accent); }
+/* dimming sits on the link group and the box contents, apart from the entrance transitions */
+.arch .node > *, .arch .link { transition: opacity 0.2s; }
+.arch.focus .node:not(.on) > *, .arch.focus .link:not(.on) { opacity: 0.18; }
+/* entrance: site.js adds .anim, then .seen once the figure scrolls into view */
+.arch.anim .node { opacity: 0; transform: translateY(10px); transition: opacity 0.6s cubic-bezier(.2, .7, .2, 1), transform 0.6s cubic-bezier(.2, .7, .2, 1); transition-delay: calc(var(--d) * 110ms); }
+.arch.anim.seen .node { opacity: 1; transform: none; }
+/* opacity too, or the arrowheads would show before their lines are drawn */
+.arch.anim .edge { opacity: 0; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset 0.8s cubic-bezier(.4, 0, .2, 1), opacity 0.1s; transition-delay: calc(600ms + var(--d) * 120ms); }
+.arch.anim.seen .edge { opacity: 1; stroke-dashoffset: 0; }
+.arch.anim .chip, .arch.anim .pkt { opacity: 0; transition: opacity 0.4s; transition-delay: calc(1100ms + var(--d, 7) * 120ms); }
+.arch.anim.seen .chip, .arch.anim.seen .pkt { opacity: 1; }
+.arch.paused * { animation-play-state: paused; }
+@keyframes arch-flow { to { stroke-dashoffset: 0; } }
+@keyframes arch-blink { to { opacity: 0.3; } }
+@keyframes arch-spark { 0% { stroke-dashoffset: 1; } 45%, 85% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -1; } }
+@media (prefers-reduced-motion: reduce) {
+  .arch .pkt, .kz-lane i { display: none; }
+  .arch .broker.hit, .arch .spark, .kz * { animation: none !important; stroke-dashoffset: 0; }
+}
 .arch figcaption { color: var(--muted); font-size: 0.92rem; margin-top: 14px; text-align: center; }
+/* inside Kafka: site.js sets data-phase 0-4 on the figure */
+.kz { margin: 0 0 56px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; --fault: #d64545; }
+.kz h3 { margin-bottom: 16px; }
+.kz-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.kz-src { border: 1.5px solid var(--accent); background: var(--accent-soft); border-radius: 12px; padding: 10px 16px; display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; }
+.kz-src b, .kz-chaos b, .kz-brk-h b { color: var(--heading); }
+.kz-src span, .kz-chaos span { color: var(--muted); font: 13px var(--mono); }
+.kz-lane { height: 54px; position: relative; }
+.kz-lane::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1.5px dashed var(--border-strong); }
+.kz-lane i { position: absolute; left: calc(50% - 4px); top: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: kz-drop 1s linear infinite; }
+.kz-lane i:nth-child(2) { animation-delay: -0.33s; } .kz-lane i:nth-child(3) { animation-delay: -0.66s; }
+.kz-lane.busy i { animation-duration: 0.55s; }
+.kz-lane.idle i { visibility: hidden; }
+.kz-brk { border: 1.5px solid var(--border-strong); background: var(--surface-2); border-radius: 12px; padding: 12px; transition: opacity 0.4s, filter 0.4s, border-color 0.3s; }
+.kz-brk-h { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.kz-brk-h b { font: 600 13px var(--mono); }
+.kz-brk-h small { color: var(--muted); font-size: 12px; }
+.kz-parts { display: flex; gap: 6px; }
+.kz-parts span { position: relative; overflow: hidden; flex: 1; text-align: center; font: 500 12px/1.4 var(--mono); padding: 6px 0; border-radius: 7px; border: 1.5px solid var(--accent); color: var(--accent); background: var(--surface); transition: background 0.5s, color 0.5s; }
+.kz-parts .ldr { background: var(--accent); color: var(--surface); }
+.kz-parts .ldr::before { content: "★ "; font-size: 10px; }
+.kz-parts span::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: var(--warn); }
+.kz[data-phase="1"] .kz-hit .kz-brk { animation: kz-shake 0.12s 6; border-color: var(--fault); }
+.kz[data-phase="2"] .kz-hit .kz-brk { opacity: 0.35; filter: grayscale(1); border-style: dashed; }
+.kz[data-phase="2"] .kz-hit .kz-parts span { border-style: dashed; }
+.kz[data-phase="3"] .kz-hit .kz-brk { border-color: var(--warn); }
+.kz[data-phase="3"] .kz-hit .kz-parts span::after { width: 100%; transition: width 2.4s linear; }
+.kz-bolt { height: 36px; position: relative; }
+.kz-bolt::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 2px dashed var(--fault); opacity: 0.25; transition: opacity 0.3s; }
+.kz[data-phase="1"] .kz-bolt::before { opacity: 1; animation: kz-up 0.4s linear infinite; }
+.kz-chaos { border: 1.5px solid var(--border-strong); background: var(--surface-2); border-radius: 12px; padding: 10px 14px; text-align: center; display: grid; transition: border-color 0.3s; }
+.kz[data-phase="1"] .kz-chaos { border-color: var(--fault); }
+.kz[data-phase="1"] .kz-chaos span { color: var(--fault); }
+.kz-isr { display: flex; justify-content: center; gap: 12px 28px; flex-wrap: wrap; margin-top: 18px; font: 500 13px var(--mono); color: var(--muted); }
+.kz-isr span { display: inline-flex; gap: 4px; align-items: center; }
+.kz-isr i { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); border: 2px solid var(--ok); transition: background 0.3s, border-color 0.3s; }
+.kz[data-phase="2"] .kz-isr .hit { background: transparent; border-color: var(--fault); }
+.kz[data-phase="3"] .kz-isr .hit { background: transparent; border-color: var(--warn); animation: arch-blink 0.5s infinite alternate; }
+.kz figcaption { text-align: center; color: var(--muted); font-size: 0.92rem; margin-top: 12px; min-height: 3.2em; }
+.kz figcaption b { color: var(--heading); }
+.kz[data-phase="1"] figcaption, .kz[data-phase="2"] figcaption { color: var(--fault); }
+.kz[data-phase="4"] figcaption { color: var(--ok); }
+.kz.paused * { animation-play-state: paused; }
+@keyframes kz-drop { from { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } to { transform: translateY(48px); opacity: 0.2; } }
+@keyframes kz-shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+@keyframes kz-up { to { transform: translateY(-6px); } }
+/* three brokers side by side leave no room for full names or a row of partitions */
+@media (max-width: 640px) {
+  .kz { padding: 14px; }
+  .kz-row { gap: 8px; }
+  .kz-brk { padding: 8px; }
+  .kz-brk-h b span { display: none; }
+  .kz-parts { flex-direction: column; gap: 4px; }
+  .kz-parts span { flex: none; }
+}
 .screens { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .screens figure { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .screens img { width: 100%; }
@@ -259,4 +385,3 @@ p code, li code, td code, th code, h2 code { color: #143f8f; }
 .footer-links a { color: #e6eaf2; }
 .footer-legal { border-top-color: #243f7a; }
 .compare .hl { background: rgba(26, 91, 204, 0.06); }
-.arch .box rect { fill: #f1eee6; } .arch .box-cli rect, .arch .box-api rect { fill: #e3ecfa; }

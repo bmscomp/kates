@@ -21,5 +21,3 @@ p code, li code, td code, th code, h2 code { color: #fcd38d; }
 .cta { background: radial-gradient(60% 80% at 50% 0%, rgba(245, 158, 11, 0.14), transparent 70%); }
 .footer { background: #0f0d0b; }
 .compare .hl { background: rgba(245, 158, 11, 0.07); }
-.arch .box rect { fill: #27221d; } .arch .box-cli rect, .arch .box-api rect { fill: #3a2a12; }
-.arch .t-code { fill: #fcd38d; }

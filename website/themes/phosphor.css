@@ -20,4 +20,3 @@ p code, li code, td code, th code, h2 code { color: #a7f3c0; }
 .cta { background: radial-gradient(60% 80% at 50% 0%, rgba(74, 222, 128, 0.1), transparent 70%); }
 .footer { background: #050705; }
 .hero-points li::before { box-shadow: 0 0 0 4px var(--accent-soft), 0 0 12px var(--accent); }
-.arch .box rect { fill: #141c16; } .arch .box-cli rect, .arch .box-api rect { fill: #11261a; }
