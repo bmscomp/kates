@@ -14,6 +14,9 @@ book:
   cover-image: assets/cover.svg
   cover-image-alt: "Kates — The Definitive Guide"
   favicon: assets/kates-mark.svg
+  site-url: https://bmscomp.github.io/kates/
+  open-graph: true
+  twitter-card: true
   repo-url: https://github.com/bmscomp/kates
   repo-subdir: docs/book
   repo-actions: [edit, issue]
@@ -31,6 +34,10 @@ book:
     logo-alt: "Kates"
     # Only the current part starts open.
     collapse-level: 1
+    tools:
+      - icon: star
+        href: https://github.com/bmscomp/kates
+        text: "Star Kates on GitHub"
   page-footer:
     left: "Kates — The Definitive Guide"
     right:
