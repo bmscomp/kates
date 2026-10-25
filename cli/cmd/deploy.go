@@ -168,6 +168,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// charts need the newer kates.
 	warnIfNewerRelease(context.Background())
 
+	// Before the gate too, so a run with no charts to install stops before it
+	// builds a cluster; and before the wizard, whose version screen reads the
+	// operator chart.
+	if err := resolveChartRoot(context.Background(), deployCheckout, false, deployChartDirs()...); err != nil {
+		return err
+	}
+
 	// ── Target cluster ───────────────────────────────────────────────────
 	// This runs FIRST, before the banner and the wizard. There is no point
 	// asking eight questions about a deployment and only then discovering
@@ -188,11 +195,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 	defer pinKubeContext(target)()
 	PrintDeployBanner(target)
-
-	// Before the wizard: its version screen reads the operator chart.
-	if err := resolveChartRoot(context.Background(), deployCheckout, false, deployChartDirs()...); err != nil {
-		return err
-	}
 
 	// Guarded by isInteractive: the forms open /dev/tty directly, so without a
 	// terminal they fail with "could not open a new TTY" rather than falling

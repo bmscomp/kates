@@ -320,3 +320,30 @@ func TestHelmDependencySkipsPublishedPackages(t *testing.T) {
 		t.Fatalf("checkout: ran %v", ran)
 	}
 }
+
+// A dev build outside a checkout, or a --checkout without charts, stops in
+// resolveChartRoot with what to do, before deploy builds a cluster.
+func TestResolveChartRootRefusesADirectoryWithoutCharts(t *testing.T) {
+	withChartBuild(t, "")
+	checkoutMustHaveCharts = true
+	t.Cleanup(func() { checkoutMustHaveCharts = false })
+	t.Chdir(t.TempDir())
+
+	err := resolveChartRoot(context.Background(), "", false, deployChartDirs()...)
+	if err == nil || !strings.Contains(err.Error(), "development build") || !strings.Contains(err.Error(), "brew install bmscomp/tap/kates") {
+		t.Fatalf("dev build outside a checkout: %v", err)
+	}
+	if err := resolveChartRoot(context.Background(), "/nowhere/kates", false); err == nil || !strings.Contains(err.Error(), "is not a Kates checkout") {
+		t.Fatalf("--checkout without charts: %v", err)
+	}
+	checkout := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(checkout, "charts", "kates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "charts", "kates", "Chart.yaml"), []byte("name: kates\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolveChartRoot(context.Background(), checkout, false); err != nil || chartRoot != checkout {
+		t.Fatalf("a checkout: %v, root %q", err, chartRoot)
+	}
+}

@@ -103,6 +103,11 @@ func chartRootPath(rel string) string {
 // pulled fresh on every run, so a cache left damaged or half-written never
 // reaches a deploy; offline, or when the registry cannot be reached, the copy
 // already cached is used. The caches of other kates versions are removed.
+// checkoutMustHaveCharts makes resolveChartRoot refuse a checkout with no
+// charts, before deploy builds a cluster for them. Off in TestMain: the
+// deploy tests run in cli/cmd with every chart read stubbed.
+var checkoutMustHaveCharts = true
+
 func resolveChartRoot(ctx context.Context, checkout string, offline bool, dirs ...string) error {
 	if checkout == "" {
 		checkout = os.Getenv("KATES_CHECKOUT")
@@ -114,8 +119,17 @@ func resolveChartRoot(ctx context.Context, checkout string, offline bool, dirs .
 	case bundle != "" && ChartVersions == "":
 		return fmt.Errorf("the chart bundle %s needs a release build of kates, which knows its chart versions; this is %s, so use --checkout instead", bundle, Version)
 	case checkout != "" || ChartVersions == "":
-		if checkout == "" {
+		named := checkout != ""
+		if !named {
 			checkout = "."
+		}
+		if _, err := os.Stat(filepath.Join(checkout, "charts", "kates", "Chart.yaml")); err != nil && checkoutMustHaveCharts {
+			abs, _ := filepath.Abs(checkout)
+			if named {
+				return fmt.Errorf("%s is not a Kates checkout: it has no charts/kates/Chart.yaml", abs)
+			}
+			return fmt.Errorf("this kates (%s) is a development build, which installs the charts of the checkout it runs in, and %s is not one.\n"+
+				"  Run it from a Kates checkout, name one with --checkout or KATES_CHECKOUT, or install a release build, which pulls the published charts: brew install bmscomp/tap/kates", Version, abs)
 		}
 		chartRoot, chartsPublished = checkout, false
 		return nil
