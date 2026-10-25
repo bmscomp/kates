@@ -2,125 +2,143 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
-type ThemeConfig struct {
-	Primary   string `yaml:"primary"`
-	Secondary string `yaml:"secondary"`
-	Success   string `yaml:"success"`
-	Warning   string `yaml:"warning"`
-	Error     string `yaml:"error"`
-	Muted     string `yaml:"muted"`
-	Text      string `yaml:"text"`
-}
-
-var builtinThemes = map[string]ThemeConfig{
-	"default": {
-		Primary: "#7C3AED", Secondary: "#06B6D4", Success: "#22C55E",
-		Warning: "#F59E0B", Error: "#EF4444", Muted: "#6B7280", Text: "#E5E7EB",
-	},
-	"dracula": {
-		Primary: "#BD93F9", Secondary: "#8BE9FD", Success: "#50FA7B",
-		Warning: "#F1FA8C", Error: "#FF5555", Muted: "#6272A4", Text: "#F8F8F2",
-	},
-	"gruvbox": {
-		Primary: "#D3869B", Secondary: "#83A598", Success: "#B8BB26",
-		Warning: "#FABD2F", Error: "#FB4934", Muted: "#928374", Text: "#EBDBB2",
-	},
-	"monokai": {
-		Primary: "#AE81FF", Secondary: "#66D9EF", Success: "#A6E22E",
-		Warning: "#E6DB74", Error: "#F92672", Muted: "#75715E", Text: "#F8F8F2",
-	},
-	"solarized": {
-		Primary: "#6C71C4", Secondary: "#2AA198", Success: "#859900",
-		Warning: "#B58900", Error: "#DC322F", Muted: "#586E75", Text: "#93A1A1",
-	},
-}
-
 var themeCmd = &cobra.Command{
 	Use:   "theme",
-	Short: "Preview CLI color palettes (not yet configurable)",
+	Short: "List, preview and choose the CLI color theme",
+	Long: `Kates renders with one color theme, chosen when it starts:
+KATES_THEME if set, else "theme:" in ~/.kates.yaml, else "default".`,
 }
 
 var themeListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List the built-in palettes",
+	Short: "List the built-in themes",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println()
-		output.Header("Built-in Palettes")
+		output.Header("Themes")
 		fmt.Println()
-
-		for name, t := range builtinThemes {
-			swatch := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Primary)).Render("■") + " " +
-				lipgloss.NewStyle().Foreground(lipgloss.Color(t.Secondary)).Render("■") + " " +
-				lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Render("■") + " " +
-				lipgloss.NewStyle().Foreground(lipgloss.Color(t.Warning)).Render("■") + " " +
-				lipgloss.NewStyle().Foreground(lipgloss.Color(t.Error)).Render("■")
-
-			label := output.PadRight(
-				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.Primary)).Render(name), 14)
-			fmt.Printf("  %s %s\n", label, swatch)
+		active := theme.Selected()
+		for _, name := range theme.Names() {
+			p := theme.Palettes[name]
+			mark := "  "
+			if name == active {
+				mark = lipgloss.NewStyle().Foreground(p.Success).Render("● ")
+			}
+			label := output.PadRight(lipgloss.NewStyle().Bold(true).Foreground(p.Primary).Render(name), 12)
+			fmt.Printf("  %s%s %s  %s\n", mark, label, swatches(p), lipgloss.NewStyle().Foreground(p.Muted).Render(p.Description))
 		}
 		fmt.Println()
-		// Deliberately no "set theme in ~/.kates.yaml" hint here: nothing reads
-		// that setting, so the previous hint promised configuration that never
-		// took effect (and marked the configured theme "(active)" when it was
-		// not). These are previews; kates always renders the default palette.
-		output.Hint("Themes are previews — kates currently always uses the default palette.")
+		if req := theme.Requested(); req != "" && req != active {
+			output.Warn(fmt.Sprintf("theme %q is not a built-in theme; using %s", req, active))
+		}
+		output.Hint("kates theme preview <name> shows one; kates theme set <name> uses it.")
 		return nil
 	},
 }
 
 var themePreviewCmd = &cobra.Command{
 	Use:   "preview <name>",
-	Short: "Preview a theme's color palette",
+	Short: "Preview a theme on sample output",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := strings.ToLower(args[0])
-		t, ok := builtinThemes[name]
-		if !ok {
-			return cmdErr("unknown theme: " + name + " (use: default, dracula, gruvbox, monokai, solarized)")
+		name, p, err := lookupTheme(args[0])
+		if err != nil {
+			return err
+		}
+		fg := func(c lipgloss.TerminalColor) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
+
+		fmt.Println()
+		fmt.Println("  " + fg(p.Primary).Bold(true).Render("Theme: "+name) + "  " + fg(p.Muted).Render(p.Description))
+		fmt.Println()
+		roles := []struct {
+			name string
+			c    lipgloss.AdaptiveColor
+		}{
+			{"Primary", p.Primary}, {"Secondary", p.Secondary}, {"Accent", p.Accent},
+			{"Info", p.Info}, {"Highlight", p.Highlight}, {"Success", p.Success},
+			{"Warning", p.Warning}, {"Error", p.Error}, {"Text", p.Text},
+			{"Muted", p.Muted}, {"Subtle", p.Subtle}, {"Surface", p.Surface},
+		}
+		for _, r := range roles {
+			block := lipgloss.NewStyle().Background(r.c).Render("      ")
+			fmt.Printf("  %s  %s %s\n", block, output.PadRight(fg(r.c).Render(r.name), 10),
+				fg(p.Muted).Render(r.c.Light+" light · "+r.c.Dark+" dark"))
 		}
 
+		// The same pieces kates draws: a header, a status line, a table row, a badge.
+		box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(p.Accent).Padding(0, 1)
+		badge := lipgloss.NewStyle().Background(p.Accent).Foreground(p.OnColor).Bold(true).Padding(0, 1)
+		sample := strings.Join([]string{
+			fg(p.Primary).Bold(true).Render("Kates Lab") + fg(p.Muted).Render(" · ") + fg(p.Text).Render("Interactive Performance Tuning"),
+			fg(p.Secondary).Render("Parameters") + "   " + badge.Render("LOAD") + " " + fg(p.Muted).Render("STRESS  SPIKE"),
+			fg(p.Text).Render("#2  ") + fg(p.Info).Render("52.1K rec/s  ") + fg(p.Success).Render("8.00ms  ▲15%"),
+			fg(p.Text).Render("#3  ") + fg(p.Info).Render("48.7K rec/s  ") + fg(p.Warning).Render("11.00ms ") + fg(p.Error).Render("▼7%"),
+			fg(p.Success).Render("✓ PASS") + "  " + fg(p.Error).Render("✖ FAIL") + "  " + fg(p.Warning).Render("⚠ WARN") + "  " + fg(p.Highlight).Render("▸ selected") + "  " + fg(p.Muted).Render("dim text"),
+		}, "\n")
 		fmt.Println()
-		fmt.Println("  " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.Primary)).Render("Theme: "+name))
+		fmt.Println(lipgloss.NewStyle().MarginLeft(2).Render(box.Render(sample)))
 		fmt.Println()
-
-		colors := []struct{ name, hex string }{
-			{"Primary", t.Primary},
-			{"Secondary", t.Secondary},
-			{"Success", t.Success},
-			{"Warning", t.Warning},
-			{"Error", t.Error},
-			{"Muted", t.Muted},
-			{"Text", t.Text},
-		}
-
-		for _, c := range colors {
-			block := lipgloss.NewStyle().Background(lipgloss.Color(c.hex)).Render("      ")
-			label := lipgloss.NewStyle().Foreground(lipgloss.Color(c.hex)).Render(c.name)
-			fmt.Printf("  %s  %-14s %s\n", block, label,
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(c.hex))
-		}
-
-		fmt.Println()
-		fmt.Println("  " + lipgloss.NewStyle().Foreground(lipgloss.Color(t.Success)).Render("✓ PASS") +
-			"  " + lipgloss.NewStyle().Foreground(lipgloss.Color(t.Error)).Render("✖ FAIL") +
-			"  " + lipgloss.NewStyle().Foreground(lipgloss.Color(t.Warning)).Render("⚠ WARN") +
-			"  " + lipgloss.NewStyle().Foreground(lipgloss.Color(t.Muted)).Render("dim text"))
-		fmt.Println()
-
 		return nil
 	},
 }
 
+var themeSetCmd = &cobra.Command{
+	Use:   "set <name>",
+	Short: "Use a theme from now on (saved in ~/.kates.yaml)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _, err := lookupTheme(args[0])
+		if err != nil {
+			return err
+		}
+		if err := updateConfig(func(cfg *Config) error {
+			stored := name
+			if name == theme.DefaultName {
+				stored = ""
+			}
+			if cfg.Theme == stored {
+				return errConfigUnchanged
+			}
+			cfg.Theme = stored
+			return nil
+		}); err != nil {
+			return err
+		}
+		output.Success("Theme set to " + name + "; the next kates command uses it.")
+		if env := strings.ToLower(strings.TrimSpace(os.Getenv("KATES_THEME"))); env != "" && env != name {
+			output.Hint("KATES_THEME=" + env + " is set and overrides it in this shell.")
+		}
+		return nil
+	},
+}
+
+func lookupTheme(arg string) (string, theme.Palette, error) {
+	name := strings.ToLower(strings.TrimSpace(arg))
+	p, ok := theme.Palettes[name]
+	if !ok {
+		return "", p, cmdErr("unknown theme: " + arg + " (use: " + strings.Join(theme.Names(), ", ") + ")")
+	}
+	return name, p, nil
+}
+
+func swatches(p theme.Palette) string {
+	var b strings.Builder
+	for _, c := range []lipgloss.AdaptiveColor{p.Primary, p.Secondary, p.Success, p.Warning, p.Error} {
+		b.WriteString(lipgloss.NewStyle().Foreground(c).Render("■") + " ")
+	}
+	return b.String()
+}
+
 func init() {
-	themeCmd.AddCommand(themeListCmd, themePreviewCmd)
+	themeCmd.AddCommand(themeListCmd, themePreviewCmd, themeSetCmd)
 	rootCmd.AddCommand(themeCmd)
 	registerThemeCompletions()
 }

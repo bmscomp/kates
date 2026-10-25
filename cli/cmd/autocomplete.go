@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -109,7 +110,7 @@ func completeThemeNames(cmd *cobra.Command, args []string, toComplete string) ([
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return []string{"default", "dracula", "gruvbox", "monokai", "solarized"}, cobra.ShellCompDirectiveNoFileComp
+	return theme.Names(), cobra.ShellCompDirectiveNoFileComp
 }
 
 func completeTestTypes(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -214,6 +215,7 @@ func registerSnapshotCompletions() {
 
 func registerThemeCompletions() {
 	themePreviewCmd.ValidArgsFunction = completeThemeNames
+	themeSetCmd.ValidArgsFunction = completeThemeNames
 }
 
 func registerCostCompletions() {

@@ -51,6 +51,8 @@ type Context struct {
 type Config struct {
 	CurrentContext string             `yaml:"current-context"`
 	Contexts       map[string]Context `yaml:"contexts"`
+	// Theme names the palette pkg/theme renders with; empty is the default.
+	Theme string `yaml:"theme,omitempty"`
 }
 
 func configPath() string {
