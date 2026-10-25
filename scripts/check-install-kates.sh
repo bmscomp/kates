@@ -41,10 +41,12 @@ run_installer() {
   (cd "$cwd" && INSTALL_DIR="$1" KATES_DOWNLOAD_URL="$2" bash "$INSTALLER") >"$work/out" 2>&1 || status=$?
 }
 
-# The stand-in binary: the installer only copies it and runs `version`.
+# The stand-in binary and LICENSE (krew-index requires LICENSE alongside kates
+# in each release tarball; the installer only copies kates and runs `version`).
 mkdir -p "$work/stage"
 printf '#!/bin/sh\necho "kates stand-in $*"\n' >"$work/stage/kates"
 chmod +x "$work/stage/kates"
+cp LICENSE "$work/stage/LICENSE"
 
 # Every platform, so whichever one the installer detects is there.
 release="$work/release"
@@ -52,7 +54,7 @@ mkdir -p "$release"
 for os in darwin linux; do
   for arch in amd64 arm64; do
     archive="kates-$os-$arch.tar.gz"
-    tar -czf "$release/$archive" -C "$work/stage" kates
+    tar -czf "$release/$archive" -C "$work/stage" kates LICENSE
     (cd "$release" && shasum -a 256 "$archive") >>"$release/checksums.txt"
   done
 done

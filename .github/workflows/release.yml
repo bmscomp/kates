@@ -88,14 +88,15 @@ jobs:
               -X ${MODULE}.MigratePins=${MIGRATE_PINS}" \
             -o kates .
 
-      # scripts/install-kates.sh unpacks this layout, and
-      # scripts/check-install-kates.sh packs its stand-in the same way:
-      # change the three together.
+      # scripts/install-kates.sh unpacks this layout, krew/kates.yaml extracts
+      # kates and LICENSE from it, and scripts/check-install-kates.sh packs its
+      # stand-in the same way: change them together.
       - name: Package tarball
         working-directory: cli
         run: |
           ARCHIVE="kates-${{ matrix.os }}-${{ matrix.arch }}.tar.gz"
-          tar -czf "${ARCHIVE}" kates
+          cp ../LICENSE LICENSE
+          tar -czf "${ARCHIVE}" kates LICENSE
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
 
       # SLSA build provenance for each tarball, verifiable with
