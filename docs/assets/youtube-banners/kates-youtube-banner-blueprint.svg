@@ -1,0 +1,289 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1440" width="2560" height="1440" role="img" aria-label="Kates YouTube channel banner, engineering blueprint: a Kafka-on-Kubernetes schematic around a drawing title block">
+  <!--
+    Kates YouTube banner: "Engineering Blueprint".
+    The whole canvas is one drawing sheet. A Kafka-on-Kubernetes schematic runs across the
+    desktop strip (y 508..931): producers on the left, brokers struck by a fault probe on the
+    right, the KRaft quorum, the chaos unit, a load diagram, a detail view and the consumers
+    above and below on the TV view.
+    All text and the logo sit in the title block, inside the phone safe area (x 537..2023, y 538..901).
+    Fonts: EB Garamond outlines (title), Avenir Next (tagline), JetBrains Mono (sheet fields).
+  -->
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="2560" y2="1440" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F3B86"/>
+      <stop offset="1" stop-color="#0A2960"/>
+    </linearGradient>
+    <radialGradient id="paper-light" cx="1280" cy="720" r="1500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1A4FA8" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#1A4FA8" stop-opacity="0"/>
+    </radialGradient>
+    <!-- grid: 20 px minor, 100 px major, major lines pass through the centre (1280, 720) -->
+    <pattern id="grid-minor" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M20 0H0V20" fill="none" stroke="#9CCBFF" stroke-opacity=".09" stroke-width="1"/>
+    </pattern>
+    <pattern id="grid-major" x="80" y="20" width="100" height="100" patternUnits="userSpaceOnUse">
+      <path d="M100 0H0V100" fill="none" stroke="#9CCBFF" stroke-opacity=".2" stroke-width="1.5"/>
+    </pattern>
+    <!-- section hatching for the records at risk on the struck broker -->
+    <pattern id="hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="10" stroke="#FFB547" stroke-width="3"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path d="M0 1L12 6L0 11Z" fill="#EAF3FF"/>
+    </marker>
+    <marker id="dim" viewBox="0 0 16 10" refX="16" refY="5" markerWidth="16" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path d="M0 0L16 5L0 10Z" fill="#9FD3FF"/>
+    </marker>
+  </defs>
+
+  <!-- ============ 1. Paper and grid (full TV canvas) ============ -->
+  <rect width="2560" height="1440" fill="url(#paper)"/>
+  <rect width="2560" height="1440" fill="url(#paper-light)"/>
+  <rect width="2560" height="1440" fill="url(#grid-minor)"/>
+  <rect width="2560" height="1440" fill="url(#grid-major)"/>
+
+  <!-- ============ 2. Sheet frame: border, zone ticks, centring marks ============ -->
+  <g fill="none" stroke="#EAF3FF">
+    <rect x="40" y="40" width="2480" height="1360" stroke-width="3" stroke-opacity=".7"/>
+    <rect x="64" y="64" width="2432" height="1312" stroke-width="1.5" stroke-opacity=".55"/>
+    <path stroke-width="1.5" stroke-opacity=".55" d="M320 40V64M640 40V64M960 40V64M1600 40V64M1920 40V64M2240 40V64
+      M320 1376V1400M640 1376V1400M960 1376V1400M1600 1376V1400M1920 1376V1400M2240 1376V1400
+      M40 360H64M40 1080H64M2496 360H2520M2496 1080H2520"/>
+  </g>
+  <g fill="#EAF3FF" fill-opacity=".7">
+    <path d="M1268 40H1292L1280 64Z"/>
+    <path d="M1268 1400H1292L1280 1376Z"/>
+    <path d="M40 708V732L64 720Z"/>
+    <path d="M2520 708V732L2496 720Z"/>
+  </g>
+
+  <!-- ============ 3. Construction lines (TV) ============ -->
+  <g fill="none" stroke="#8FD0FF" stroke-width="2" stroke-opacity=".45" stroke-dasharray="48 10 6 10">
+    <path d="M1280 80V528"/>
+    <path d="M1280 912V1360"/>
+  </g>
+
+  <!-- load diagram over the producers: ramp in steps, then a spike (TV, no values) -->
+  <g fill="none" stroke="#9FD3FF" stroke-width="2" stroke-opacity=".8">
+    <path d="M150 380V140" marker-end="url(#dim)"/>
+    <path d="M150 380H910" marker-end="url(#dim)"/>
+  </g>
+  <path d="M150 360H230V320H300V280H370V240H560V170H600V240H860" fill="none" stroke="#EAF3FF" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- overall dimension across the system, producers to brokers (TV) -->
+  <g fill="none" stroke="#9FD3FF" stroke-width="2" stroke-opacity=".8">
+    <path d="M150 440V574M2310 440V566"/>
+    <path d="M150 455H2310" marker-start="url(#dim)" marker-end="url(#dim)"/>
+  </g>
+
+  <!-- ============ 4. Left wing: producers into the bus (desktop strip) ============ -->
+  <g fill="none" stroke="#EAF3FF" stroke-width="3">
+    <rect x="150" y="586" width="112" height="60" rx="8"/>
+    <rect x="150" y="690" width="112" height="60" rx="8"/>
+    <rect x="150" y="794" width="112" height="60" rx="8"/>
+  </g>
+  <!-- records leaving each producer -->
+  <g fill="#EAF3FF">
+    <rect x="170" y="609" width="14" height="14" fill-opacity=".35"/>
+    <rect x="194" y="609" width="14" height="14" fill-opacity=".6"/>
+    <rect x="218" y="609" width="14" height="14"/>
+    <rect x="170" y="713" width="14" height="14" fill-opacity=".35"/>
+    <rect x="194" y="713" width="14" height="14" fill-opacity=".6"/>
+    <rect x="218" y="713" width="14" height="14"/>
+    <rect x="170" y="817" width="14" height="14" fill-opacity=".35"/>
+    <rect x="194" y="817" width="14" height="14" fill-opacity=".6"/>
+    <rect x="218" y="817" width="14" height="14"/>
+  </g>
+  <!-- stubs, bus bar and the bus into the title block -->
+  <g fill="none" stroke="#EAF3FF" stroke-width="3">
+    <path d="M262 616H320M262 720H320M262 824H320"/>
+    <path d="M320 614V826" stroke-width="5"/>
+    <path d="M320 720H534" marker-end="url(#arrow)"/>
+  </g>
+  <g fill="#EAF3FF">
+    <rect x="368" y="713" width="14" height="14"/>
+    <rect x="408" y="713" width="14" height="14"/>
+    <rect x="448" y="713" width="14" height="14"/>
+  </g>
+  <!-- vertical dimension over the producer stack -->
+  <g fill="none" stroke="#9FD3FF" stroke-width="2" stroke-opacity=".8">
+    <path d="M144 586H100M144 854H100"/>
+    <path d="M112 586V854" marker-start="url(#dim)" marker-end="url(#dim)"/>
+  </g>
+
+  <!-- ============ 5. Right wing: bus out of the title block into three brokers ============ -->
+  <g fill="none" stroke="#EAF3FF" stroke-width="3">
+    <path d="M2020 720H2070"/>
+    <path d="M2070 606V834" stroke-width="5"/>
+    <path d="M2070 608H2108M2070 720H2108M2070 832H2108" marker-end="url(#arrow)"/>
+  </g>
+  <!-- brokers: each one a partition log; the middle one is under fault -->
+  <g fill="none" stroke="#EAF3FF" stroke-width="3">
+    <rect x="2110" y="578" width="200" height="60" rx="8"/>
+    <rect x="2110" y="802" width="200" height="60" rx="8"/>
+  </g>
+  <g fill="none" stroke="#EAF3FF" stroke-width="2">
+    <path d="M2124 590h28v36h-28zM2160 590h28v36h-28zM2196 590h28v36h-28zM2232 590h28v36h-28zM2268 590h28v36h-28z"/>
+    <path d="M2124 814h28v36h-28zM2160 814h28v36h-28zM2196 814h28v36h-28zM2232 814h28v36h-28zM2268 814h28v36h-28z"/>
+    <path d="M2124 702h28v36h-28zM2160 702h28v36h-28zM2196 702h28v36h-28z"/>
+  </g>
+  <rect x="2110" y="690" width="200" height="60" rx="8" fill="none" stroke="#FFB547" stroke-width="3" stroke-dasharray="12 7"/>
+  <path d="M2232 702h28v36h-28zM2268 702h28v36h-28z" fill="url(#hatch)" stroke="#FFB547" stroke-width="2"/>
+  <!-- revision cloud around the struck broker -->
+  <path fill="none" stroke="#FFB547" stroke-width="2.5" stroke-opacity=".9"
+    d="M2090 672
+       a15 15 0 0 1 24 0a15 15 0 0 1 24 0a15 15 0 0 1 24 0a15 15 0 0 1 24 0a15 15 0 0 1 24 0
+       a15 15 0 0 1 24 0a15 15 0 0 1 24 0a15 15 0 0 1 24 0a15 15 0 0 1 24 0a15 15 0 0 1 24 0
+       a15 15 0 0 1 0 24a15 15 0 0 1 0 24a15 15 0 0 1 0 24a15 15 0 0 1 0 24
+       a15 15 0 0 1 -24 0a15 15 0 0 1 -24 0a15 15 0 0 1 -24 0a15 15 0 0 1 -24 0a15 15 0 0 1 -24 0
+       a15 15 0 0 1 -24 0a15 15 0 0 1 -24 0a15 15 0 0 1 -24 0a15 15 0 0 1 -24 0a15 15 0 0 1 -24 0
+       a15 15 0 0 1 0 -24a15 15 0 0 1 0 -24a15 15 0 0 1 0 -24a15 15 0 0 1 0 -24Z"/>
+
+  <!-- fault-injection probe, tip on the struck broker -->
+  <g fill="none" stroke="#FFB547" stroke-width="3" stroke-linejoin="round">
+    <path d="M2318 720H2352"/>
+    <path d="M2352 715L2378 706V734L2352 725Z" fill="#FFB547" fill-opacity=".25"/>
+    <rect x="2378" y="703" width="68" height="34" rx="6" fill="#0E3680"/>
+    <path d="M2398 703V737M2408 703V737M2418 703V737" stroke-width="2"/>
+    <rect x="2446" y="710" width="10" height="20" rx="2"/>
+    <!-- cable up to the chaos unit -->
+    <path d="M2456 720H2462Q2474 720 2474 708V300Q2474 286 2460 286"/>
+  </g>
+  <!-- spark at the contact point -->
+  <g stroke="#FFB547" stroke-width="3" stroke-linecap="round">
+    <path d="M2312 702L2306 690M2312 738L2306 750M2300 720H2288M2322 700L2326 688M2322 740L2326 752"/>
+  </g>
+
+  <!-- ============ 6. TV top: KRaft controller quorum and the chaos unit ============ -->
+  <g fill="none" stroke="#EAF3FF" stroke-width="3">
+    <circle cx="2150" cy="330" r="34"/>
+    <circle cx="2270" cy="330" r="34"/>
+    <circle cx="2210" cy="226" r="34"/>
+  </g>
+  <circle cx="2210" cy="226" r="11" fill="#EAF3FF"/>
+  <g fill="none" stroke="#8FD0FF" stroke-width="2" stroke-dasharray="8 7">
+    <path d="M2184 330H2236M2167 300L2193 256M2253 300L2227 256"/>
+    <!-- metadata from the quorum down to the brokers -->
+    <path d="M2210 296V576"/>
+  </g>
+  <!-- construction circle and centre mark of the quorum -->
+  <g fill="none" stroke="#8FD0FF" stroke-width="1.5" stroke-opacity=".6">
+    <circle cx="2210" cy="295" r="112" stroke-dasharray="40 8 4 8"/>
+    <path d="M2196 295H2224M2210 281V309"/>
+  </g>
+  <!-- chaos unit: the probe's source -->
+  <g fill="none" stroke="#FFB547" stroke-width="3" stroke-linejoin="round">
+    <rect x="2360" y="246" width="100" height="80" rx="8"/>
+    <path d="M2416 260L2394 290H2412L2402 314L2428 280H2410Z" fill="#FFB547"/>
+  </g>
+
+  <!-- ============ 7. TV bottom: consumers, scale bar ============ -->
+  <g fill="none" stroke="#EAF3FF" stroke-width="3">
+    <path d="M2210 862V968"/>
+    <path d="M2084 968H2336" stroke-width="5"/>
+    <path d="M2090 968V1022M2210 968V1022M2330 968V1022" marker-end="url(#arrow)"/>
+    <rect x="2044" y="1024" width="92" height="56" rx="8"/>
+    <rect x="2164" y="1024" width="92" height="56" rx="8"/>
+    <rect x="2284" y="1024" width="92" height="56" rx="8"/>
+  </g>
+  <g fill="#EAF3FF">
+    <rect x="2061" y="1045" width="14" height="14"/>
+    <rect x="2083" y="1045" width="14" height="14" fill-opacity=".6"/>
+    <rect x="2105" y="1045" width="14" height="14" fill-opacity=".35"/>
+    <rect x="2181" y="1045" width="14" height="14"/>
+    <rect x="2203" y="1045" width="14" height="14" fill-opacity=".6"/>
+    <rect x="2225" y="1045" width="14" height="14" fill-opacity=".35"/>
+    <rect x="2301" y="1045" width="14" height="14"/>
+    <rect x="2323" y="1045" width="14" height="14" fill-opacity=".6"/>
+    <rect x="2345" y="1045" width="14" height="14" fill-opacity=".35"/>
+  </g>
+  <!-- detail view of the records on the bus: a partition log, next offset still open -->
+  <g fill="none" stroke="#8FD0FF" stroke-width="2" stroke-dasharray="40 8 4 8">
+    <circle cx="415" cy="720" r="56"/>
+    <circle cx="415" cy="1150" r="140"/>
+  </g>
+  <path d="M415 776V1010" fill="none" stroke="#8FD0FF" stroke-width="2"/>
+  <g fill="none" stroke="#EAF3FF" stroke-width="3">
+    <path d="M325 1120h160v60h-160zM365 1120v60M405 1120v60M445 1120v60"/>
+    <path d="M485 1120h40v60h-40" stroke-dasharray="8 6"/>
+    <path d="M325 1186v12M365 1186v12M405 1186v12M445 1186v12M485 1186v12" stroke="#9FD3FF" stroke-width="2"/>
+    <path d="M505 1070V1114" marker-end="url(#arrow)"/>
+  </g>
+  <g fill="#EAF3FF">
+    <rect x="335" y="1140" width="20" height="20" fill-opacity=".35"/>
+    <rect x="375" y="1140" width="20" height="20" fill-opacity=".55"/>
+    <rect x="415" y="1140" width="20" height="20" fill-opacity=".75"/>
+    <rect x="455" y="1140" width="20" height="20"/>
+  </g>
+  <!-- scale bar -->
+  <g stroke="#EAF3FF" stroke-width="2" stroke-opacity=".75">
+    <rect x="700" y="1290" width="80" height="16" fill="#EAF3FF" fill-opacity=".75"/>
+    <rect x="780" y="1290" width="80" height="16" fill="none"/>
+    <rect x="860" y="1290" width="80" height="16" fill="#EAF3FF" fill-opacity=".75"/>
+    <rect x="940" y="1290" width="80" height="16" fill="none"/>
+    <path d="M700 1280V1316M860 1280V1316M1020 1280V1316" fill="none"/>
+  </g>
+
+  <!-- ============ 8. Title block (safe area, x 540..2020, y 541..898) ============ -->
+  <rect x="540" y="541" width="1480" height="357" fill="#0C3274" fill-opacity=".94"/>
+  <g fill="none" stroke="#EAF3FF">
+    <rect x="540" y="541" width="1480" height="357" stroke-width="4"/>
+    <path stroke-width="2" d="M540 806H2020M820 541V806M1250 806V898M1700 806V898"/>
+  </g>
+
+  <!-- logo cell: centre lines behind the mark, as on a drawn part -->
+  <g fill="none" stroke="#8FD0FF" stroke-width="1.5" stroke-opacity=".7" stroke-dasharray="30 6 4 6">
+    <path d="M556 673H806M680 553V794"/>
+  </g>
+  <svg x="557" y="558" width="230" height="230" viewBox="0 0 1024 1024">
+    <g fill="#E6EAF2">
+      <path d="M769.7 627A282.2 282.2 0 1 1 769.7 397L705.9 397A225.4 225.4 0 1 0 705.9 627ZM789.2 459A282.2 282.2 0 0 1 792.3 479L735 479A225.4 225.4 0 0 0 731.1 459ZM792.1 546A282.2 282.2 0 0 1 789.2 565L731.1 565A225.4 225.4 0 0 0 734.8 546Z"/>
+      <path transform="rotate(45 512 512)" d="M699.6 490.9H745.4V533.1H699.6ZM780 487H794.5A11 11 0 0 1 805.5 498V526A11 11 0 0 1 794.5 537H780ZM800 497.4L870 490A22 22 0 0 1 870 534L800 526.6Z"/>
+      <path transform="rotate(90 512 512)" d="M699.6 490.9H745.4V533.1H699.6ZM780 487H794.5A11 11 0 0 1 805.5 498V526A11 11 0 0 1 794.5 537H780ZM800 497.4L870 490A22 22 0 0 1 870 534L800 526.6Z"/>
+      <path transform="rotate(135 512 512)" d="M699.6 490.9H745.4V533.1H699.6ZM780 487H794.5A11 11 0 0 1 805.5 498V526A11 11 0 0 1 794.5 537H780ZM800 497.4L870 490A22 22 0 0 1 870 534L800 526.6Z"/>
+      <path transform="rotate(180 512 512)" d="M699.6 490.9H745.4V533.1H699.6ZM780 487H794.5A11 11 0 0 1 805.5 498V526A11 11 0 0 1 794.5 537H780ZM800 497.4L870 490A22 22 0 0 1 870 534L800 526.6Z"/>
+      <path transform="rotate(225 512 512)" d="M699.6 490.9H745.4V533.1H699.6ZM780 487H794.5A11 11 0 0 1 805.5 498V526A11 11 0 0 1 794.5 537H780ZM800 497.4L870 490A22 22 0 0 1 870 534L800 526.6Z"/>
+      <path transform="rotate(270 512 512)" d="M699.6 490.9H745.4V533.1H699.6ZM780 487H794.5A11 11 0 0 1 805.5 498V526A11 11 0 0 1 794.5 537H780ZM800 497.4L870 490A22 22 0 0 1 870 534L800 526.6Z"/>
+      <path transform="rotate(315 512 512)" d="M699.6 490.9H745.4V533.1H699.6ZM780 487H794.5A11 11 0 0 1 805.5 498V526A11 11 0 0 1 794.5 537H780ZM800 497.4L870 490A22 22 0 0 1 870 534L800 526.6Z"/>
+      <path fill-rule="evenodd" d="M577.8 545.2A3 3 0 0 0 578.4 548.7L590.5 560.8A92.4 92.4 0 0 1 560.8 590.5L548.7 578.4A3 3 0 0 0 545.2 577.8A73.7 73.7 0 0 1 535.1 582A3 3 0 0 0 533 584.8L533 635A4 4 0 0 1 529 639L495 639A4 4 0 0 1 491 635L491 584.8A3 3 0 0 0 488.9 582A73.7 73.7 0 0 1 478.8 577.8A3 3 0 0 0 475.3 578.4L439.9 613.8A4 4 0 0 1 434.2 613.8L410.2 589.8A4 4 0 0 1 410.2 584.1L445.6 548.7A3 3 0 0 0 446.2 545.2A73.7 73.7 0 0 1 442 535.1A3 3 0 0 0 439.2 533L389 533A4 4 0 0 1 385 529L385 495A4 4 0 0 1 389 491L439.2 491A3 3 0 0 0 442 488.9A73.7 73.7 0 0 1 446.2 478.8A3 3 0 0 0 445.6 475.3L410.2 439.9A4 4 0 0 1 410.2 434.2L434.2 410.2A4 4 0 0 1 439.9 410.2L475.3 445.6A3 3 0 0 0 478.8 446.2A73.7 73.7 0 0 1 488.9 442A3 3 0 0 0 491 439.2L491 389A4 4 0 0 1 495 385L529 385A4 4 0 0 1 533 389L533 439.2A3 3 0 0 0 535.1 442A73.7 73.7 0 0 1 545.2 446.2A3 3 0 0 0 548.7 445.6L584.1 410.2A4 4 0 0 1 589.8 410.2L613.8 434.2A4 4 0 0 1 613.8 439.9L578.4 475.3A3 3 0 0 0 577.8 478.8A73.7 73.7 0 0 1 577.8 545.2ZM480.5 512a31.5 31.5 0 1 0 63 0a31.5 31.5 0 1 0 -63 0Z"/>
+      <path d="M652.6 527.1L699.5 479.6A36.3 36.3 0 0 0 726.4 492.1C729 492.1 731.5 492.5 734.6 493.1L742 496L742 531.5L684 531.5L671.3 535.3Z"/>
+      <path d="M595.8 399.2L618.9 374.7A174 174 0 0 1 663 425.5L639 452A140.5 140.5 0 0 0 595.8 399.2Z"/>
+    </g>
+    <g fill="#4FA3F0">
+      <path d="M741.3 627A256.5 256.5 0 1 1 741.3 397L727.8 397A244.5 244.5 0 1 0 727.8 627ZM763 459A256.5 256.5 0 0 1 766.4 479L754.3 479A244.5 244.5 0 0 0 750.7 459ZM766.2 546A256.5 256.5 0 0 1 763 565L750.7 565A244.5 244.5 0 0 0 754.1 546Z"/>
+      <path d="M553 342.9L553 320L607 357.5L553 395L553 377.6A140.5 140.5 0 1 0 618.7 603.4A70 70 0 0 1 671.8 579L796.5 579L796.5 557.5L850.9 595.7L796.5 633.5L796.5 612.7L669.1 612.7A28 28 0 0 0 649.3 620.9L548.5 721.7L572.7 675.1A174 174 0 1 1 553 342.9Z"/>
+      <path d="M582.4 491.8L602.7 491.8A35 35 0 0 0 627.5 481.5L680.1 428.9A61 61 0 0 1 723.3 411L796.6 411L796.6 390.3L850.8 428.1L796.6 465.9L796.6 444.7L728.3 444.7A31 31 0 0 0 706.4 453.8L646.3 513.9A62 62 0 0 1 602.4 532.1L582.4 532.1A73.2 73.2 0 0 0 582.4 491.8Z"/>
+      <path d="M683.5 531.5L705.1 509A55 55 0 0 1 744.8 492.1L835.7 492.1L835.7 468.8L893.9 511.8L835.7 555L835.7 531.5Z"/>
+      <path d="M564 628C582 608.4 580.9 609.7 559.6 589.3A90.8 90.8 0 0 0 589.3 559.6C598.7 569 608.3 579.5 620.1 565.1C634 548 633 538.6 654.3 525L671.5 535C656.9 544 647.3 550.4 638.2 565.6C654.6 553.3 664 551 682.6 546L678 565.6C661.9 566.1 651.4 565.1 635.8 573.4C614.2 584.7 608.8 597 591.1 611.1C579.6 620.3 576 621.2 564 628Z"/>
+      <path d="M595.8 399.2L618.9 374.7A174 174 0 0 1 663 425.5Z"/>
+    </g>
+  </svg>
+
+  <!-- projection symbol, as in any drawing's title block -->
+  <g fill="none" stroke="#8FD0FF" stroke-width="1.5" stroke-dasharray="20 5 3 5">
+    <path d="M1788 636H1994M1940 586V686"/>
+  </g>
+  <g fill="none" stroke="#EAF3FF" stroke-width="3" stroke-linejoin="round">
+    <path d="M1800 612L1880 596V676L1800 660Z"/>
+    <circle cx="1940" cy="636" r="40"/>
+    <circle cx="1940" cy="636" r="22"/>
+  </g>
+
+  <!-- title cell: drawing title and tagline -->
+  <!-- wordmark: the book cover's "Kates" (docs/book/assets/cover.svg #title), EB Garamond wght 600 as outlines;
+       K blue, "ates" white. Cap height 155, ink width 505. -->
+  <g id="wordmark" transform="translate(868 716) scale(1.2602)">
+    <g transform="translate(-99.1 -510.0)">
+      <path fill="#4FA3F0" d="M104.3 508.4Q102.3 508.4 100.7 507.7Q99.1 506.9 99.1 505.7Q99.1 503 104.3 502Q111.3 500.6 113.6 498Q115.9 495.4 115.9 489.2V406Q115.9 399.9 113.4 397.4Q110.9 394.9 103.7 393.4Q99.1 392.4 99.1 389.5Q99.1 388.3 100.3 387.7Q101.6 387.1 103.3 387.1Q107.7 387.1 111.9 387.2Q116 387.4 120 387.5Q123.9 387.7 127.7 387.7Q131.3 387.7 135.1 387.6Q138.9 387.5 143 387.3Q147.1 387.2 151.5 387.2Q153.3 387.2 154.4 387.7Q155.5 388.3 155.5 389.6Q155.5 391.2 154.3 392Q153.1 392.8 150.8 393.4Q143.6 395.2 141.7 397.9Q139.8 400.7 139.8 406.1V442.6Q139.8 443.7 140.2 444.7Q140.6 445.7 141.3 445.7Q142.2 445.7 143.5 444.8Q144.7 443.9 146 442.7L181.9 404.7Q183.3 403.1 184.2 401.8Q185 400.4 185 399.1Q185 395.4 178.8 393.9Q176.5 393.3 175.4 392.4Q174.3 391.6 174.3 390.1Q174.3 388.9 175.6 388.2Q176.8 387.6 178.5 387.6H190.3Q196.2 387.6 202.3 387.5Q208.4 387.4 214.1 387.2Q219.9 387 224.5 387Q226.4 387 227.7 387.6Q229.1 388.2 229.1 389.4Q229.1 391 227.4 391.9Q225.6 392.8 223.3 393.2Q214.9 394.5 207.9 397.4Q200.9 400.3 195.2 404.8Q189.2 409.6 183.9 414.6Q178.6 419.5 173.4 424.9Q168.1 430.3 162.2 436.2Q160 438.1 162.6 441L206.8 489.6Q209.8 492.9 212.3 495.2Q214.8 497.5 218 499.1Q221.2 500.7 226.1 502Q228.4 502.6 230.2 503.3Q232 504 232 505.6Q232 506.8 230.3 507.6Q228.5 508.3 225.4 508.3Q220 508.3 215.1 508Q210.3 507.7 205.4 507.5Q200.6 507.2 195 507.2Q189.7 507.2 185.3 507.5Q181 507.8 174.6 507.8Q173 507.8 171.7 507.2Q170.4 506.6 170.4 505.4Q170.4 502.7 174.6 501.7Q181.1 500.4 181.3 497.2Q181.3 495.8 180.5 494.5Q179.7 493.2 178.4 491.6L145.4 454.1Q144.2 452.7 143.1 451.9Q142 451 141.1 451Q140.4 451 140 452.1Q139.7 453.2 139.7 454.4Q139.7 462.8 139.8 470.8Q140 478.9 140.4 488.4Q140.6 492 141.4 494.6Q142.2 497.3 144.5 499Q146.8 500.8 151.5 502Q153.8 502.5 155.2 503.3Q156.7 504 156.7 505.6Q156.7 506.8 155.1 507.5Q153.6 508.2 151.5 508.2Q146 508.2 142.3 507.9Q138.5 507.5 135.5 507.2Q132.5 506.8 128.9 506.8Q124.9 506.8 121.4 507.2Q118 507.6 114 508Q110.1 508.4 104.3 508.4Z"/>
+      <path fill="#ffffff" d="M251.4 510Q247 510 243.1 507.6Q239.1 505.1 236.6 501.3Q234.2 497.5 234.2 493.4Q234.2 487.2 237.9 483.3Q241.6 479.3 249 476.2L266.1 468.8Q269.8 467.3 270.6 466Q271.4 464.8 271.5 461.2L271.8 450.3Q271.9 445.2 269.6 442.1Q267.3 438.9 262.8 438.9Q260.4 438.9 257.8 439.9Q255.2 440.9 253.8 442.3Q253 443 252.7 444.2Q252.5 445.3 252.5 446.6Q252.5 447.5 252.6 448.9Q252.8 450.3 252.8 451.2Q252.8 452.3 250 454Q247.3 455.7 243.7 457Q240.2 458.3 237.8 458.3Q236.6 458.3 235.8 457.4Q235 456.5 235 455.2Q235 452.2 236.9 449.2Q238.9 446.1 243.1 442.7Q247.8 438.7 253.2 435.7Q258.7 432.6 264 430.8Q269.3 429 273.2 429Q281.9 429 287.3 434.8Q292.7 440.6 292.4 449.9L291.5 489.5Q291.3 493.5 293 496.3Q294.8 499 297.4 499Q301.3 499 303.7 496.8Q304.4 496.1 305 496.1Q305.9 496.1 306.5 496.7Q307.1 497.3 307.1 498.2Q307.1 500.3 304.2 503.3Q300.9 506.5 297.2 508.2Q293.4 510 289.6 510Q280 510 273.8 499.8H273.3Q267.3 505.2 262.1 507.6Q257 510 251.4 510ZM261.6 499Q264.2 499 265.9 498.2Q267.7 497.4 269.1 495.7Q269.8 494.9 270.3 493.6Q270.7 492.3 270.8 490L271.3 478.2Q271.4 476.3 270.9 475.7Q270.4 475 269.5 475Q269.2 475 268.5 475.1Q267.8 475.3 266.9 475.7Q260 478.6 257.1 481.7Q254.1 484.7 254.1 489.7Q254.1 494.8 256.6 496.9Q259 499 261.6 499ZM343.1 510Q332 510 326.3 504.1Q320.5 498.1 320.5 487V444.5Q320.5 442.9 319.3 442.2Q318.1 441.5 314.8 441.4H312.7Q311.6 441.4 310.8 439.6Q310 437.8 310 436.2Q310 435.9 310.4 435.2Q310.7 434.6 311.2 434.4Q315.4 432.4 319.8 429.3Q324.2 426.1 328.2 422.7Q332.1 419.3 334.6 417Q335.8 415.9 336.6 415.2Q337.5 414.6 338.7 414.6Q340.1 414.6 340.9 415.1Q341.7 415.7 341.4 417.7L340.3 427.7Q340.1 429.9 341.3 430.7Q342.5 431.5 344.8 431.5H366.4Q366.9 431.5 367.5 432.7Q368 434 368 435.2Q368 437.6 367.4 439.7Q366.7 441.7 365.9 441.7H348.4Q344.1 441.7 342.5 442.7Q341 443.6 341 446.6V481.8Q341 489.9 344.2 494.1Q347.4 498.3 353 498.3Q358.2 498.3 360.8 497.3Q363.5 496.3 365.7 495.1Q366.2 494.8 366.7 494.8Q367.5 494.8 368 495.8Q368.4 496.8 368.4 498.2Q368.4 499.2 364.8 502.1Q361.2 505 355.5 507.5Q349.7 510 343.1 510ZM406.9 510.1Q396.9 510.1 389.1 504.9Q381.4 499.7 377 490.6Q372.5 481.5 372.5 469.9Q372.5 458.6 377.8 449.3Q383 440.1 391.8 434.6Q400.6 429 411.2 429Q418.8 429 425 432.3Q431.1 435.5 434.6 441.1Q438.2 446.6 438.2 453.7Q438.2 460.2 432.6 460.2H395.1Q392.5 460.2 391.4 461.7Q390.3 463.1 390.3 466.8Q390.3 474.5 393.6 480.7Q397 487 402.7 490.6Q408.5 494.3 415.7 494.3Q421.1 494.3 425.6 492.2Q430.1 490.2 434.2 486.4Q434.8 485.8 435.4 485.4Q436 485.1 436.5 485.1Q438.3 485.1 438.3 487.2Q438.3 489.7 436.2 493.4Q434.1 497.7 429.9 501.6Q425.7 505.4 419.9 507.7Q414 510.1 406.9 510.1ZM395.2 453.2H408.1Q413.1 453.2 415.4 453Q417.8 452.8 419.9 452.3Q420.9 452 421.3 450.6Q421.7 449.3 421.7 447.4Q421.7 442.4 417.9 439Q414.1 435.7 408.6 435.7Q404.7 435.7 401 438Q397.3 440.2 395 443.7Q392.6 447.2 392.7 450.9Q392.7 453.2 395.2 453.2ZM470.1 510Q464.1 510 458.7 508.5Q453.3 506.9 449 503.7Q447.5 501.1 446.9 495.6Q446.3 490.1 446.3 484.7Q446.3 482.6 449.5 482.6Q450.8 482.6 451.7 483.4Q452.7 484.1 453 484.9Q456.1 493 460.8 498Q465.6 502.9 471.8 502.9Q476.8 502.9 479.8 499.7Q482.7 496.4 482.7 492.1Q482.7 487.2 479.1 483.9Q475.5 480.6 469.2 477Q463.6 473.9 459.1 470.4Q454.7 467 452 462.5Q449.4 458 449.4 451.9Q449.4 445.1 453 440Q456.5 434.8 462.8 431.9Q469.1 428.9 477.4 428.9Q483.3 428.9 488 430.2Q492.6 431.4 494.6 432.7Q496 434.6 496.9 439.5Q497.9 444.3 497.9 449.7Q497.9 451.4 495 451.4Q493.8 451.4 492.5 450.6Q491.3 449.8 490.9 449Q488.5 442.2 484.8 438.8Q481.1 435.3 476.3 435.3Q472 435.3 468.6 437.9Q465.2 440.6 465.2 445.3Q465.2 449.3 468.5 452.4Q471.8 455.6 477.8 458.9Q489.3 465.1 494.5 470.7Q499.7 476.3 499.7 485.6Q499.7 496.9 492 503.4Q484.2 510 470.1 510Z"/>
+    </g>
+  </g>
+  <text x="868" y="776" font-family="'Avenir Next'" font-size="40" font-weight="500" fill="#C9E4FF">Kafka advanced testing and engineering suite</text>
+
+  <!-- sheet fields -->
+  <g font-family="'JetBrains Mono'" font-size="36">
+    <text x="572" y="865" fill="#8FD0FF" font-weight="500">SHEET: <tspan fill="#F2F6FC" font-weight="700">KAFKA RESILIENCE</tspan></text>
+    <text x="1282" y="865" fill="#8FD0FF" font-weight="500">katesplatforme.io</text>
+    <text x="1732" y="865" fill="#F2F6FC" font-weight="700">APACHE 2.0</text>
+  </g>
+</svg>
