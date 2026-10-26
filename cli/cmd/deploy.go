@@ -99,6 +99,7 @@ var (
 	deployNamespaceLabels    []string
 	deployNoWriteProbes      bool
 	deployYes                bool
+	deployUpgrade            []string
 
 	// Versions and scope (multi-version plan §3.1–3.3).
 	deployOperatorScope  string
@@ -140,8 +141,9 @@ func init() {
 	deployCmd.Flags().BoolVarP(&deployPortForward, "port-forward", "P", false, "After deploy, run kates ports: forward every service in the background and make the ports context current")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Show the deployment plan without executing anything")
 	deployCmd.Flags().BoolVarP(&deployYes, "yes", "y", false, "Assume yes and never prompt (fails instead of asking)")
+	deployCmd.Flags().StringSliceVar(&deployUpgrade, "upgrade", nil, "Installed components to upgrade to this deploy's charts: apicurio, connect-cluster, kafka-ui, mm2, monitoring, or all (default: installed components are kept; Kates is always upgraded)")
 	deployCmd.Flags().StringVar(&deployOperatorScope, "operator-scope", "cluster", "Strimzi operator scope: 'cluster' (one operator watching every namespace) or 'namespace' (one per Kafka namespace)")
-	deployCmd.Flags().StringVar(&deployStrimziVersion, "strimzi-version", "", "Strimzi operator version to install (default: the repository pin; 'latest' for the newest published)")
+	deployCmd.Flags().StringVar(&deployStrimziVersion, "strimzi-version", "", "Strimzi operator version to install (default: this release's pin; 'latest' for the newest published)")
 	deployCmd.Flags().StringVar(&deployStrimziChart, "strimzi-chart", "", "Local strimzi-kafka-operator chart tarball to install from (air-gapped mirrors)")
 	deployCmd.Flags().StringVar(&deployKafkaVersion, "kafka-version", "", "Kafka version for the primary cluster (default: the newest the operator supports; 'latest' spells the default)")
 	deployCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
@@ -161,6 +163,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// A bad namespace label fails before anything asks the cluster.
 	namespaceLabels, namespaceLabelSources, err := namespaceUserLabels()
 	if err != nil {
+		return err
+	}
+	if err := applyUpgradeFlag(deployUpgrade); err != nil {
 		return err
 	}
 
@@ -246,6 +251,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			deployDbNS = deployNamespace
 		}
 	}
+	if err := checkUpgradeInDeploy(deployUpgrade, buildSharedEntries(resolveNamespaces())); err != nil {
+		return err
+	}
 
 	if deployAdminless {
 		if err := checkAdminlessPrerequisites(context.Background(), resolveNamespaces()); err != nil {
@@ -321,6 +329,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			output.Error(fmt.Sprintf("Introspection failed: %v", err))
 			return err
 		}
+		PrintPhaseItem(fmt.Sprintf("Platform: %s (%s)", report.Provider, report.ProviderBasis))
 	}
 
 	// ── Versions and scope ───────────────────────────────────────────────

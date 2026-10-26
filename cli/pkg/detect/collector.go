@@ -76,11 +76,17 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 	// Context & Server (Sequential since they are very fast and needed for provider)
 	report.Context = c.getContext()
 	report.Server = c.getServer()
-	report.Provider = c.getProvider(report.Context)
 
 	// Concurrent fetching
+	var gitVersion string
+	var apiVersions []string
 	g.Go(func() error {
-		report.K8sVersion, report.K8sMinor = c.getK8sVersion()
+		report.K8sVersion, report.K8sMinor, gitVersion = c.getK8sVersion()
+		return nil
+	})
+	g.Go(func() error {
+		out, _ := c.exec.Exec("kubectl", "api-versions")
+		apiVersions = strings.Fields(out)
 		return nil
 	})
 	g.Go(func() error {
@@ -142,6 +148,7 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		return nil, err
 	}
 
+	report.Provider, report.ProviderBasis = platformOf(gitVersion, apiVersions, report.Nodes, report.Context)
 	report.Workload = hydrateWorkloadPressure(report.Nodes, report.Workload)
 
 	if !c.ReadOnly {
@@ -207,7 +214,47 @@ func (c *Collector) getServer() string {
 	return out
 }
 
-func (c *Collector) getProvider(ctx string) string {
+// platformOf names the platform from the strongest signal there is, and says
+// which: the OpenShift API group, the server version's suffix, a node's
+// providerID, and last the context name, which is only a guess. Neither
+// signal alone names EKS or GKE: a cloud's providerID (aws://, gce://) is
+// also a self-built cluster's, and EKS Anywhere and Google Distributed Cloud
+// run the -eks- and -gke. builds off that cloud, so it takes both.
+func platformOf(gitVersion string, apiVersions []string, nodes []NodeInfo, kubeContext string) (provider, basis string) {
+	for _, v := range apiVersions {
+		if strings.HasPrefix(v, "config.openshift.io/") {
+			return "openshift", "API group config.openshift.io"
+		}
+	}
+	for _, s := range []struct{ mark, provider, node string }{{"-eks-", "eks", "aws://"}, {"-gke.", "gke", "gce://"}, {"+k3s", "k3s", ""}, {"+rke2", "rke2", ""}} {
+		if !strings.Contains(gitVersion, s.mark) {
+			continue
+		}
+		if s.node == "" {
+			return s.provider, "server version " + gitVersion
+		}
+		if slices.ContainsFunc(nodes, func(n NodeInfo) bool { return strings.HasPrefix(n.ProviderID, s.node) }) {
+			return s.provider, "server version " + gitVersion + " on " + s.node + " nodes"
+		}
+	}
+	for _, n := range nodes {
+		id := strings.ToLower(n.ProviderID)
+		switch {
+		case strings.HasPrefix(id, "kind://"):
+			return "kind", "node providerID kind://"
+		case strings.HasPrefix(id, "k3s://"):
+			return "k3s", "node providerID k3s://"
+		case strings.HasPrefix(id, "azure://") && strings.Contains(id, "/virtualmachinescalesets/aks-"):
+			return "aks", "node providerID, an AKS scale set"
+		}
+	}
+	if p := providerFromContext(kubeContext); p != "generic" {
+		return p, "context name, guessed"
+	}
+	return "generic", "no platform signal"
+}
+
+func providerFromContext(ctx string) string {
 	lowerCtx := strings.ToLower(ctx)
 	if strings.Contains(lowerCtx, "kind") {
 		return "kind"
@@ -224,21 +271,22 @@ func (c *Collector) getProvider(ctx string) string {
 	return "generic"
 }
 
-func (c *Collector) getK8sVersion() (string, int) {
+func (c *Collector) getK8sVersion() (version string, minor int, gitVersion string) {
 	out, err := c.exec.Exec("kubectl", "version", "-o", "json")
 	if err != nil {
-		return "unknown", 0
+		return "unknown", 0, ""
 	}
 	var data struct {
 		ServerVersion struct {
-			Major string `json:"major"`
-			Minor string `json:"minor"`
+			Major      string `json:"major"`
+			Minor      string `json:"minor"`
+			GitVersion string `json:"gitVersion"`
 		} `json:"serverVersion"`
 	}
 	json.Unmarshal([]byte(out), &data)
 	minorStr := strings.TrimRight(data.ServerVersion.Minor, "+")
-	minor, _ := strconv.Atoi(minorStr)
-	return fmt.Sprintf("%s.%s", data.ServerVersion.Major, data.ServerVersion.Minor), minor
+	minor, _ = strconv.Atoi(minorStr)
+	return fmt.Sprintf("%s.%s", data.ServerVersion.Major, data.ServerVersion.Minor), minor, data.ServerVersion.GitVersion
 }
 
 func (c *Collector) getHelmVersion() (string, int) {
@@ -264,6 +312,9 @@ func (c *Collector) parseNodes() ([]NodeInfo, error) {
 				Name   string            `json:"name"`
 				Labels map[string]string `json:"labels"`
 			} `json:"metadata"`
+			Spec struct {
+				ProviderID string `json:"providerID"`
+			} `json:"spec"`
 			Status struct {
 				Allocatable struct {
 					CPU    string `json:"cpu"`
@@ -323,6 +374,8 @@ func (c *Collector) parseNodes() ([]NodeInfo, error) {
 			Runtime:  n.Status.NodeInfo.ContainerRuntimeVersion,
 			Kubelet:  n.Status.NodeInfo.KubeletVersion,
 			OS:       n.Status.NodeInfo.OSImage,
+
+			ProviderID: n.Spec.ProviderID,
 		})
 	}
 	return nodes, nil

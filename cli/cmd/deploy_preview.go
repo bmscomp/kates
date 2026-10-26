@@ -14,7 +14,7 @@ import (
 // happens afterwards. It shares its column layout with the final summary
 // (deploy_ui.go) on purpose: the preview and the result should be readable as
 // the same table, so a component that moved between them is obvious.
-func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[string]bool, labels, labelSources map[string]string) {
+func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[string]bool, installed []string, labels, labelSources map[string]string) {
 	g := output.Glyphs()
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrAccent).Render("  Deployment plan") +
@@ -62,6 +62,16 @@ func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[stri
 		fmt.Printf("  %s %s\n",
 			lipgloss.NewStyle().Foreground(clrDim).Render("namespaces:"),
 			strings.Join(namespaces, "  "))
+	}
+
+	// Each installed component with its chart beside this deploy's, and what
+	// happens to it: "already present" alone does not say what is running.
+	if len(installed) > 0 {
+		fmt.Println()
+		fmt.Printf("  %s\n", lipgloss.NewStyle().Bold(true).Render("Already installed"))
+		for _, line := range installed {
+			fmt.Printf("    %s\n", line)
+		}
 	}
 
 	// Each label with where it came from: with three sources overriding one

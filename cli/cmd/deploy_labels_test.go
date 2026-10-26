@@ -432,7 +432,7 @@ func TestEnsureDeployNamespaceForbiddenPatchShowsTheLabelCommand(t *testing.T) {
 
 func TestDeployDryRunListsNamespaceLabels(t *testing.T) {
 	out := stripStyle(captureStdout(t, func() {
-		renderDeployPreview(uiTestEntries(), map[string]bool{},
+		renderDeployPreview(uiTestEntries(), map[string]bool{}, nil,
 			map[string]string{"a": "1", "b": "2", "c": ""},
 			map[string]string{"a": ".labels:3", "b": namespaceLabelsEnv, "c": namespaceLabelFlag})
 	}))
@@ -441,7 +441,7 @@ func TestDeployDryRunListsNamespaceLabels(t *testing.T) {
 			t.Errorf("preview lacks %q:\n%s", want, out)
 		}
 	}
-	if out := stripStyle(captureStdout(t, func() { renderDeployPreview(uiTestEntries(), map[string]bool{}, nil, nil) })); strings.Contains(out, "Namespace labels") {
+	if out := stripStyle(captureStdout(t, func() { renderDeployPreview(uiTestEntries(), map[string]bool{}, nil, nil, nil) })); strings.Contains(out, "Namespace labels") {
 		t.Errorf("preview without user labels has a labels block:\n%s", out)
 	}
 }

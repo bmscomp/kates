@@ -285,6 +285,9 @@ func deployReviewSummary() string {
 		waveCount(entries),
 		plural(len(namespaceList(entries)), "namespace", "namespaces"))
 	b.WriteString(componentGrid(entries, gridOptions{Width: uiWidth() - 4}))
+	if installed := installedSummary(installedRows(ctx, entries, deployedReleases(ctx, entries))); len(installed) > 0 {
+		b.WriteString("\nAlready installed\n  " + strings.Join(installed, "\n  ") + "\n")
+	}
 	return b.String()
 }
 

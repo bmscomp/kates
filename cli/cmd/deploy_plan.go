@@ -439,7 +439,8 @@ func runDeployDryRun(sharedEntries []DeploySummaryEntry, labels, labelSources ma
 			existingReleases[key] = true
 		}
 	}
-	renderDeployPreview(sharedEntries, existingReleases, labels, labelSources)
+	installed := installedSummary(installedRows(dryCtx, sharedEntries, deployedReleases(dryCtx, sharedEntries)))
+	renderDeployPreview(sharedEntries, existingReleases, installed, labels, labelSources)
 	return nil
 }
 

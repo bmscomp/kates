@@ -12,7 +12,11 @@ func RenderTUI(report *DetectReport) {
 	output.Header("Cluster Identity")
 	output.KeyValue("Context:", report.Context)
 	output.KeyValue("Server:", report.Server)
-	output.KeyValue("Provider:", report.Provider)
+	provider := report.Provider
+	if report.ProviderBasis != "" {
+		provider += "  (" + report.ProviderBasis + ")"
+	}
+	output.KeyValue("Provider:", provider)
 	output.KeyValue("Kubernetes:", report.K8sVersion)
 	output.KeyValue("Helm:", report.HelmVersion)
 

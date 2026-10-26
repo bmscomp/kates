@@ -11,6 +11,8 @@ type NodeInfo struct {
 	Runtime  string
 	Kubelet  string
 	OS       string
+	// ProviderID is the node's spec.providerID ("kind://docker/panda/…").
+	ProviderID string
 }
 
 type ZoneInfo struct {
@@ -377,6 +379,7 @@ type DetectReport struct {
 	Context       string
 	Server        string
 	Provider      string
+	ProviderBasis string // what Provider was read from: "server version v1.30.4-eks-…"
 	K8sVersion    string
 	K8sMinor      int
 	HelmVersion   string

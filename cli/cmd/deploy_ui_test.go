@@ -153,7 +153,7 @@ func TestDeployRowsShareColumnOffsets(t *testing.T) {
 func TestPreviewAndSummarySpeakTheSameLanguage(t *testing.T) {
 	entries := uiTestEntries()
 	preview := stripStyle(captureStdout(t, func() {
-		renderDeployPreview(entries, map[string]bool{}, nil, nil)
+		renderDeployPreview(entries, map[string]bool{}, nil, nil, nil)
 	}))
 	for i := range entries {
 		entries[i].Status = "deployed"
@@ -279,7 +279,7 @@ func TestSummariseCountsAndFindsTheSlowest(t *testing.T) {
 func TestPreviewNamesTheNamespaces(t *testing.T) {
 	entries := uiTestEntries()
 	out := stripStyle(captureStdout(t, func() {
-		renderDeployPreview(entries, map[string]bool{}, nil, nil)
+		renderDeployPreview(entries, map[string]bool{}, nil, nil, nil)
 	}))
 	for _, ns := range []string{"kafka", "kates", "connect", "database", "litmus"} {
 		if !strings.Contains(out, ns) {
@@ -291,7 +291,7 @@ func TestPreviewNamesTheNamespaces(t *testing.T) {
 	}
 	// Grammar: the old footer said "1 components".
 	single := stripStyle(captureStdout(t, func() {
-		renderDeployPreview(entries[:1], map[string]bool{}, nil, nil)
+		renderDeployPreview(entries[:1], map[string]bool{}, nil, nil, nil)
 	}))
 	if strings.Contains(single, "1 components") {
 		t.Errorf("plural bug is back:\n%s", single)

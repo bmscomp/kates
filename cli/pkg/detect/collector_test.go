@@ -726,3 +726,34 @@ func TestMemoryMiB(t *testing.T) {
 		}
 	}
 }
+
+func TestPlatformOf(t *testing.T) {
+	aks := "azure:///subscriptions/s/resourceGroups/MC_rg_c_westeurope/providers/Microsoft.Compute/virtualMachineScaleSets/aks-nodepool1-123-vmss/virtualMachines/0"
+	cases := []struct {
+		name, gitVersion string
+		apis             []string
+		providerID, ctx  string
+		want, basis      string
+	}{
+		{"openshift wins over its cloud", "v1.29.6+abc", []string{"v1", "config.openshift.io/v1"}, "aws:///eu-west-1a/i-1", "prod", "openshift", "API group config.openshift.io"},
+		{"eks from the version on AWS nodes", "v1.30.4-eks-a737599", nil, "aws:///eu-west-1a/i-1", "prod", "eks", "server version v1.30.4-eks-a737599 on aws:// nodes"},
+		{"gke from the version on GCE nodes", "v1.30.3-gke.1639000", nil, "gce://p/europe-west1-b/gke-c-pool-1", "", "gke", "server version v1.30.3-gke.1639000 on gce:// nodes"},
+		{"EKS Anywhere off AWS is not eks", "v1.28.15-eks-1-28-47", nil, "vsphere://4201", "mgmt-admin@mgmt", "generic", "no platform signal"},
+		{"Google Distributed Cloud on bare metal is not gke", "v1.30.3-gke.1", nil, "", "admin", "generic", "no platform signal"},
+		{"k3s from the version", "v1.29.4+k3s1", nil, "", "default", "k3s", "server version v1.29.4+k3s1"},
+		{"rke2 from the version", "v1.28.9+rke2r1", nil, "", "default", "rke2", "server version v1.28.9+rke2r1"},
+		{"aks from its scale set", "v1.29.4", nil, aks, "prod", "aks", "node providerID, an AKS scale set"},
+		{"kind from the node, whatever the context", "v1.31.0", nil, "kind://docker/panda/panda-control-plane", "lab", "kind", "node providerID kind://"},
+		{"a self-built AWS cluster is not eks", "v1.30.1", nil, "aws:///eu-west-1a/i-1", "prod", "generic", "no platform signal"},
+		{"context name last", "v1.30.1", nil, "", "kind-panda", "kind", "context name, guessed"},
+		{"nothing at all", "", nil, "", "", "generic", "no platform signal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, basis := platformOf(tc.gitVersion, tc.apis, []NodeInfo{{ProviderID: tc.providerID}}, tc.ctx)
+			if got != tc.want || basis != tc.basis {
+				t.Errorf("platformOf = %q (%q), want %q (%q)", got, basis, tc.want, tc.basis)
+			}
+		})
+	}
+}
