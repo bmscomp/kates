@@ -674,15 +674,15 @@ Each entry names the symptom, then its cause and the fix.
 
 **Cause:** The Helm chart's Kafka image map includes versions not supported by the operator binary
 
-**Fix:** Reconcile the wrapper chart, whose vendored subchart is the OCI chart published beside the operator binary and therefore always in sync with it. `helm dependency build` resolves it from `Chart.lock`, so the pinned Strimzi version cannot drift. `--reset-values` rebuilds the release from the chart's defaults and drops every value it was installed with, so the command passes back what the operator runs with. `helm get values` prints what the release carries now:
+**Fix:** Reconcile the wrapper chart, whose vendored subchart is the OCI chart published beside the operator binary and therefore always in sync with it. The published chart carries that subchart, so the pinned Strimzi version cannot drift. `--reset-values` rebuilds the release from the chart's defaults and drops every value it was installed with, so the command passes back what the operator runs with. `helm get values` prints what the release carries now:
 
 ```bash
 helm get values strimzi-operator -n strimzi-operator
 
-helm dependency build charts/strimzi-operator
-helm upgrade --install strimzi-operator charts/strimzi-operator \
+helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar
+helm upgrade --install strimzi-operator ./strimzi-operator \
   --namespace strimzi-operator --reset-values \
-  -f charts/strimzi-operator/values-<overlay>.yaml \
+  -f strimzi-operator/values-<overlay>.yaml \
   --set strimzi-kafka-operator.kubernetesServiceDnsDomain=<domain> \
   --wait
 ```
@@ -769,10 +769,10 @@ Where upstream's policy is the cause, turn it off after those values. `values-pr
 ```bash
 helm get values strimzi-operator -n strimzi-operator
 
-helm dependency build charts/strimzi-operator
-helm upgrade strimzi-operator charts/strimzi-operator \
+helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar
+helm upgrade strimzi-operator ./strimzi-operator \
   -n strimzi-operator --reset-values \
-  -f charts/strimzi-operator/values-prod.yaml \
+  -f strimzi-operator/values-prod.yaml \
   --set strimzi-kafka-operator.kubernetesServiceDnsDomain=<domain> \
   --set strimzi-kafka-operator.operatorNetworkPolicy.enabled=false
 

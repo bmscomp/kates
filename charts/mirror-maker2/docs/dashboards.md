@@ -35,9 +35,9 @@ its siblings are written for a lab on a laptop, where there is no Prometheus to
 scrape anything. Turn both on for a real migration:
 
 ```bash
-helm dependency build charts/mirror-maker2    # once per checkout: the kafka-common library
-helm upgrade mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-migrate-3x.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-migrate-3x.yaml \
   --set metrics.enabled=true --set podMonitors.enabled=true
 ```
 

@@ -8,20 +8,21 @@ difference: MM2 spans **two Kafka clusters**.
 
 | | |
 |---|---|
-| Install (loopback smoke test) | `helm install mm2 charts/mirror-maker2 -n kafka -f charts/mirror-maker2/values-kind.yaml` |
-| Migrate from Kafka 2.8.2 | `helm install mm2 charts/mirror-maker2 -n kafka -f charts/mirror-maker2/values-migrate-2x.yaml` |
-| Migrate from Kafka 3.9.1 | `helm install mm2 charts/mirror-maker2 -n kafka -f charts/mirror-maker2/values-migrate-3x.yaml` |
-| Mirror a source you may only **read** | add `-f charts/mirror-maker2/values-readonly-source.yaml` |
-| Consolidate several sources | `-f charts/mirror-maker2/values-fan-in.yaml` |
-| Cut over | add `-f charts/mirror-maker2/values-cutover.yaml` |
-| Fail over (the source is gone) | add `-f charts/mirror-maker2/values-failover.yaml` |
+| Get the chart and its overlays | `helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar` |
+| Install (loopback smoke test) | `helm install mm2 ./mirror-maker2 -n kafka -f mirror-maker2/values-kind.yaml` |
+| Migrate from Kafka 2.8.2 | `helm install mm2 ./mirror-maker2 -n kafka -f mirror-maker2/values-migrate-2x.yaml` |
+| Migrate from Kafka 3.9.1 | `helm install mm2 ./mirror-maker2 -n kafka -f mirror-maker2/values-migrate-3x.yaml` |
+| Mirror a source you may only **read** | add `-f mirror-maker2/values-readonly-source.yaml` |
+| Consolidate several sources | `-f mirror-maker2/values-fan-in.yaml` |
+| Cut over | add `-f mirror-maker2/values-cutover.yaml` |
+| Fail over (the source is gone) | add `-f mirror-maker2/values-failover.yaml` |
 | Prove it end to end | `kates migrate run --from 3.9.1` |
 | See what it replicated | `kates migrate target topics` |
 | Remove it (including the kept CR) | `kates migrate mirror remove --release mm2 --namespace kafka --yes` |
 
-**From a checkout**, build the chart's one dependency first — the
-[`kafka-common`](../kafka-common/) library it shares with `connect-cluster`:
-`helm dependency build charts/mirror-maker2`. A packaged chart carries it.
+**The published chart** carries its one dependency — the
+[`kafka-common`](../kafka-common/) library it shares with `connect-cluster` — so
+nothing is built first.
 
 **New here?** [`docs/`](docs/) is the task-organised entry point — the
 [Migration Plan](docs/migration-plan.md) for moving a cluster onto the 4.x
@@ -224,9 +225,10 @@ Full walkthroughs: [2.x → 4.x](../../docs/tutorials/11-migrating-kafka-2x-to-4
 `values-cutover.yaml` is the last step of a migration expressed as a values file:
 
 ```bash
-helm upgrade mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-migrate-2x.yaml \
-  -f charts/mirror-maker2/values-cutover.yaml
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-migrate-2x.yaml \
+  -f mirror-maker2/values-cutover.yaml
 ```
 
 It stops the **source** connector and keeps the **checkpoint** connector
@@ -461,9 +463,10 @@ alerts, the dashboard rows, and the data tests all range over the list rather
 than describing the first entry.
 
 ```bash
-helm upgrade --install mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-kind.yaml \
-  -f charts/mirror-maker2/values-fan-in.yaml
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade --install mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-kind.yaml \
+  -f mirror-maker2/values-fan-in.yaml
 ```
 
 The **alias** is what separates the sources, everywhere it matters: the
@@ -504,9 +507,10 @@ where consumers resume on the target.
 
 ```bash
 # The source is gone.
-helm upgrade mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-prod.yaml \
-  -f charts/mirror-maker2/values-failover.yaml
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-prod.yaml \
+  -f mirror-maker2/values-failover.yaml
 ```
 
 `values-failover.yaml` stops the source connector (`stopped`, not `paused` —
@@ -528,9 +532,10 @@ of re-enabling the first one. `values-failback.yaml` renders it, starting
 `stopped` so nobody replicates in a direction they have not checked:
 
 ```bash
-helm upgrade --install mm2-back charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-prod.yaml \
-  -f charts/mirror-maker2/values-failback.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade --install mm2-back ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-prod.yaml \
+  -f mirror-maker2/values-failback.yaml \
   --set target.clusterName=<the original cluster> \
   --set 'mirrors[0].source.clusterName=<the failover cluster>'
 ```
@@ -705,8 +710,9 @@ Prometheus to scrape them), so turn them on for the real thing — the board
 has nothing to draw otherwise:
 
 ```bash
-helm upgrade mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-migrate-3x.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-migrate-3x.yaml \
   --set metrics.enabled=true --set podMonitors.enabled=true
 ```
 
@@ -819,7 +825,8 @@ using Strimzi's built-in Clients CA — it provisions a `type: tls` KafkaUser
 Cluster CA via `krafter-cluster-ca-cert`, and narrows egress to 9093.
 
 ```bash
-helm install mm2 charts/mirror-maker2 -n kafka -f charts/mirror-maker2/values-mtls.yaml
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm install mm2 ./mirror-maker2 -n kafka -f mirror-maker2/values-mtls.yaml
 ```
 
 Assumes MM2 is in the same namespace as the cluster (`kafka`); if elsewhere,

@@ -308,7 +308,7 @@ The connectivity test pod (`test-01-connect.yaml`) checks the credentials Secret
 Because the hook resources are removed the moment the suite succeeds, nothing persists after `helm test` returns. To keep the example topic and connectors running — as the working-examples tutorial does — render the same templates and apply them directly (they keep their hook annotations, so a later `helm test` removes them again):
 
 ```bash
-helm template connect-cluster charts/connect-cluster -n connect \
+helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect \
   --set kafka.namespace=kafka \
   -s templates/tests/test-02-topics.yaml \
   -s templates/tests/test-02-connectors.yaml | kubectl apply -f -
@@ -532,11 +532,9 @@ When a new Debezium or Kafka version is released:
 #    then build and push — the image tag is derived from that ARG
 make connect-build connect-push
 
-# 2. Upgrade the release from the values it runs with. charts/connect-cluster/charts/
-#    is generated and gitignored, so build the kafka-common library first.
-helm dependency build charts/connect-cluster
+# 2. Upgrade the release from the values it runs with.
 helm get values connect-cluster -n connect -o yaml > connect-current.yaml
-helm upgrade connect-cluster charts/connect-cluster \
+helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster \
   --namespace connect -f connect-current.yaml \
   --set image=ghcr.io/bmscomp/connect:3.7.0
 ```
@@ -552,11 +550,13 @@ Strimzi performs a **rolling restart** — one worker at a time. Each restarted 
 Chart 2.0 reads 1.x values: each moved key is translated, and `helm upgrade` prints a `DEPRECATED` line in the release notes for each one still in use. Start from the values the 1.x release runs with, then check the render and the list before you upgrade:
 
 ```bash
-helm dependency build charts/connect-cluster
 helm get values connect-cluster -n connect -o yaml > connect-current.yaml
-helm template connect-cluster charts/connect-cluster -n connect -f connect-current.yaml > /dev/null
-helm upgrade connect-cluster charts/connect-cluster -n connect -f connect-current.yaml --dry-run | sed -n '/^NOTES/,$p'
-helm upgrade connect-cluster charts/connect-cluster -n connect -f connect-current.yaml
+helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect \
+  -f connect-current.yaml > /dev/null
+helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect \
+  -f connect-current.yaml --dry-run | sed -n '/^NOTES/,$p'
+helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect \
+  -f connect-current.yaml
 ```
 
 The upgrade rolls the workers once (the metrics ConfigMap key is now `metrics-config.yml`). Afterwards, check that every connector still runs: one that fails with `Forbidden` reading a Secret needs that Secret in `rbac.secretNames`. The Kafka egress ports, the operator namespace and three alert names changed too — see [Network Policies](#network-policies), [Prometheus Alerts](#prometheus-alerts), and [the 2.0 upgrade guide](../connect-cluster-2.0-upgrade.md) for the key-by-key table.
@@ -584,9 +584,8 @@ Either return to the previous Helm revision, or pin the previous image and upgra
 helm rollback connect-cluster -n connect
 
 # Or pin to previous image
-helm dependency build charts/connect-cluster
 helm get values connect-cluster -n connect -o yaml > connect-current.yaml
-helm upgrade connect-cluster charts/connect-cluster \
+helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster \
   --namespace connect -f connect-current.yaml \
   --set image=ghcr.io/bmscomp/connect:3.6.2-kafka-4.3.1
 ```
@@ -744,7 +743,7 @@ heartbeat.interval.ms: "10000"
 connect-cluster: connectors.orders-cdc (io.debezium.connector.postgresql.PostgresConnector) needs config.topic.prefix
 ```
 
-Fix the connector configs in `values.yaml`, render them again (`helm dependency build charts/connect-cluster`, then `helm template connect-cluster charts/connect-cluster -n connect -f values.yaml > /dev/null`), and re-run `helm upgrade`. [Pre-Deploy Validation](21-kafka-connect.md#pre-deploy-validation) lists the checks.
+Fix the connector configs in `values.yaml`, render them again (`helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect -f values.yaml > /dev/null`), and re-run `helm upgrade`. [Pre-Deploy Validation](21-kafka-connect.md#pre-deploy-validation) lists the checks.
 
 ### Connector Fails with `Forbidden` Reading a Secret
 

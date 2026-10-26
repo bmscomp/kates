@@ -154,7 +154,7 @@ The stack is up and the Kates API answers, but a command or a test result isn't 
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs" | Missing `ClusterRoleBinding` for the Kates service account — the Kates API can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates charts/kates -n kates` |
+| `kates cluster topology` returns "Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs" | Missing `ClusterRoleBinding` for the Kates service account — the Kates API can't query Strimzi CRDs | Verify RBAC: `kubectl get clusterrolebinding kates` — if missing, redeploy with `helm upgrade --install kates oci://ghcr.io/bmscomp/charts/kates -n kates` |
 | Test results show 0 records consumed even though producers succeeded | Consumer group hasn't started consuming, or topic has no committed offsets for the group | Check consumer lag: `kates kafka group <group-name>`. If lag equals total records, the consumer never started — check the Kates API's logs for consumer errors |
 | `kates trend` shows no data even after running tests | A trend reads only the type's `DONE` runs created within `--days`; `FAILED` runs and runs still in flight are left out | Check the runs' status with `kates test list --type <TYPE>`, and widen `--days` for older runs |
 

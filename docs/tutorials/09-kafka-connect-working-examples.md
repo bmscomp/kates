@@ -41,11 +41,7 @@ Required secrets in `CONNECT_NS`:
 
 The chart grants the Connect workers `get` on these two Secrets because the example connectors' configs reference them. The Debezium example reads `kates-connect` for its SCRAM schema-history client, so the examples expect the default SCRAM connection on port 9092 (`values-prod.yaml` turns them off).
 
-The chart depends on the `kafka-common` library; `kates deploy` builds it, otherwise run this once before any `helm template` or `helm test` below:
-
-```bash
-helm dependency build charts/connect-cluster
-```
+The published chart carries the `kafka-common` library, so nothing is built before the `helm template` below.
 
 ## Namespace and Cluster Name Customization
 
@@ -83,7 +79,7 @@ kubectl exec -n "${DB_NS}" postgresql-0 -- /bin/bash -lc \
 helm test connect-cluster -n "${CONNECT_NS}" --logs
 
 # Deploy the CDC topic and all working example connectors persistently
-helm template "${CONNECT_CLUSTER}" charts/connect-cluster -n "${CONNECT_NS}" \
+helm template "${CONNECT_CLUSTER}" oci://ghcr.io/bmscomp/charts/connect-cluster -n "${CONNECT_NS}" \
   --set kafka.namespace="${KAFKA_NS}" \
   --set kafka.clusterName="${KAFKA_CLUSTER}" \
   -s templates/tests/test-02-topics.yaml \

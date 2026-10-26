@@ -183,19 +183,30 @@ func KeyValueIndent(key, value string, indent int) {
 }
 
 func Success(msg string) {
-	fmt.Fprintln(Out, SuccessStyle.Render("  "+Glyphs().Check+" "+msg))
+	fmt.Fprintln(Out, renderLines(SuccessStyle, "  "+Glyphs().Check+" "+msg))
 }
 
 func Warn(msg string) {
-	fmt.Fprintln(Out, WarningStyle.Render("  "+Glyphs().Warn+" "+msg))
+	fmt.Fprintln(Out, renderLines(WarningStyle, "  "+Glyphs().Warn+" "+msg))
 }
 
 func Error(msg string) {
-	fmt.Fprintln(Err, ErrorStyle.Render("  "+Glyphs().Cross+" "+msg))
+	fmt.Fprintln(Err, renderLines(ErrorStyle, "  "+Glyphs().Cross+" "+msg))
 }
 
 func Hint(msg string) {
-	fmt.Fprintln(Out, DimStyle.Render("  "+msg))
+	fmt.Fprintln(Out, renderLines(DimStyle, "  "+msg))
+}
+
+// renderLines styles each line of msg on its own: lipgloss pads a block's
+// lines to its widest, and a space after a printed command's trailing `\`
+// breaks the command when it is copied into a shell.
+func renderLines(style lipgloss.Style, msg string) string {
+	lines := strings.Split(msg, "\n")
+	for i, l := range lines {
+		lines[i] = style.Render(l)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func JSON(v interface{}) {

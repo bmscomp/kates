@@ -65,10 +65,11 @@ No image to build — the official Apache image covers 3.7.0 and up, on both amd
 and arm64:
 
 ```bash
-helm upgrade --install legacy charts/legacy-kafka \
+helm pull oci://ghcr.io/bmscomp/charts/legacy-kafka --untar
+helm upgrade --install legacy ./legacy-kafka \
   -n "${LEGACY_NS}" --create-namespace \
-  -f charts/legacy-kafka/values-kafka-3x.yaml \
-  -f charts/legacy-kafka/values-kind.yaml \
+  -f legacy-kafka/values-kafka-3x.yaml \
+  -f legacy-kafka/values-kind.yaml \
   --set "topics[0].name=${TOPIC}" \
   --wait --timeout 10m
 
@@ -115,17 +116,15 @@ kubectl -n "${LEGACY_NS}" run consumer --rm -i --restart=Never \
 
 ## Step 3: Install MirrorMaker 2
 
-The chart is built on the `kafka-common` library chart, declared as a `file://`
-dependency, and `charts/*/charts/` is generated rather than committed — so
-resolve it first or nothing renders. It is idempotent, and running it once here
-covers the upgrades in Steps 5 and 6 too:
+The chart is built on the `kafka-common` library chart. The published chart
+carries it, so nothing is built first:
 
 ```bash
-helm dependency build charts/mirror-maker2
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
 
-helm upgrade --install mm2 charts/mirror-maker2 \
+helm upgrade --install mm2 ./mirror-maker2 \
   -n "${KAFKA_NS}" \
-  -f charts/mirror-maker2/values-migrate-3x.yaml \
+  -f mirror-maker2/values-migrate-3x.yaml \
   --set "mirrors[0].source.bootstrapServers=legacy-legacy-kafka-bootstrap.${LEGACY_NS}.svc.cluster.local:9092" \
   --wait --timeout 10m
 ```
@@ -194,7 +193,7 @@ On the 2.x path the risk is "can it read the source at all". Here it is
 throughput and timing, so turn on metrics and actually look:
 
 ```bash
-helm upgrade mm2 charts/mirror-maker2 -n "${KAFKA_NS}" --reuse-values \
+helm upgrade mm2 oci://ghcr.io/bmscomp/charts/mirror-maker2 -n "${KAFKA_NS}" --reuse-values \
   --set metrics.enabled=true \
   --set podMonitors.enabled=true \
   --set alerts.enabled=true
@@ -226,9 +225,10 @@ Same sequence as the 2.x path, and the ordering is the part that matters:
 # 2. Let the mirror drain: one refresh interval plus the observed lag.
 
 # 3. Apply the cutover.
-helm upgrade mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
-  -f charts/mirror-maker2/values-migrate-3x.yaml \
-  -f charts/mirror-maker2/values-cutover.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n "${KAFKA_NS}" \
+  -f mirror-maker2/values-migrate-3x.yaml \
+  -f mirror-maker2/values-cutover.yaml \
   --set "mirrors[0].source.bootstrapServers=legacy-legacy-kafka-bootstrap.${LEGACY_NS}.svc.cluster.local:9092"
 
 # 4. Move consumers, one group at a time, onto the translated offsets.

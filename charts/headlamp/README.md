@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-helm install headlamp charts/headlamp -n headlamp --create-namespace
+helm install headlamp oci://ghcr.io/bmscomp/charts/headlamp -n headlamp --create-namespace
 kubectl port-forward -n headlamp svc/headlamp 8080:80
 ```
 

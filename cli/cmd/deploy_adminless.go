@@ -210,9 +210,9 @@ func adminlessStrimziNamespaces(ns resolvedNamespaces) []string {
 // platform's pinned Strimzi in its own namespace watching exactly the
 // admin-less namespaces.
 func strimziInstallSuggestion(watch []string) string {
-	pin := "the version charts/strimzi-operator pins"
+	pin := "the Strimzi version this platform pins"
 	if v, err := pinnedStrimziVersion(chartRoot); err == nil {
-		pin = "Strimzi " + v + ", the version charts/strimzi-operator pins"
+		pin = "Strimzi " + v + ", the version this platform pins"
 	}
 	return fmt.Sprintf(`Ask a cluster admin to install %s, in its own namespace strimzi-operator,
 watching %s:

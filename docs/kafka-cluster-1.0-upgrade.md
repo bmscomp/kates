@@ -9,26 +9,26 @@ Background: [docs/kafka-charts-refactor-plan.md](kafka-charts-refactor-plan.md) 
 - **Brokers roll.** The metrics ConfigMap is now `<clusterName>-kafka-metrics`, and its name is part of the Kafka CR. Set `compatibility.legacyResourceNames=true` to keep the 0.4 names during the upgrade and clear it in a maintenance window. Strimzi rolls one broker at a time either way, and the new exporter rules take effect as each broker restarts.
 - **Alert names changed** (Alertmanager routes match on them): `KafkaRaftLeaderElectionRate` is `KafkaRaftLeaderElections`, `KafkaRaftUncommittedRecords` is `KafkaRaftUnknownVoters`, and `StrimziOperatorDown` and the certificate alerts come from strimzi-operator. New alerts are listed in the chart README.
 - **The dashboards are gone from kafka-cluster.** Enable the operator's (`strimzi-kafka-operator.dashboards.enabled`, on by default in strimzi-operator 0.3). External dashboards that read the old hand-rolled series names need the new ones (the upstream Strimzi rules).
-- **`helm dependency build` may refuse** with a `Chart.lock` from 0.4: run `helm dependency update charts/kafka-cluster` once.
+- **Nothing to build.** The published chart carries its subcharts and the `kafka-common` library, so nothing is built first.
 
 ## Order
 
 1. **kafka-cluster to 1.0**, with `drainCleaner.enabled=false` if you had it on (1.0 refuses `true`). Helm removes the 0.4 drain cleaner, the CRD hook, the dashboards and the operator NetworkPolicy the chart wrote into the operator's namespace.
 
    ```bash
-   helm dependency update charts/kafka-cluster
-   helm upgrade krafter charts/kafka-cluster -n kafka \
+   helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --version '^1' --untar
+   helm upgrade krafter ./kafka-cluster -n kafka \
      -f <your values> \
-     -f charts/kafka-cluster/values-platform.yaml \
+     -f kafka-cluster/values-platform.yaml \
      --set compatibility.legacyResourceNames=true
    ```
 
 2. **strimzi-operator to 0.3**, with `drainCleaner.enabled=true` where you want it (`values-prod.yaml` has it, with two replicas and a cert-manager certificate). The operator's NetworkPolicy is on by default.
 
    ```bash
-   helm dependency build charts/strimzi-operator
-   helm upgrade strimzi-operator charts/strimzi-operator -n strimzi-operator \
-     --reset-values -f charts/strimzi-operator/values-prod.yaml
+   helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar
+   helm upgrade strimzi-operator ./strimzi-operator -n strimzi-operator \
+     --reset-values -f strimzi-operator/values-prod.yaml
    ```
 
    Upgrading the operator first is safe: an object a kafka-cluster 0.4 release still owns is skipped, NOTES name the owner, and the next upgrade after step 1 creates it.
@@ -87,9 +87,8 @@ The platform profile still provisions `kates-connect` and `kates-mm2` (and `kafk
 kubectl -n kafka annotate kafkauser kates-connect --overwrite \
   meta.helm.sh/release-name=connect-cluster meta.helm.sh/release-namespace=connect
 kubectl -n kafka label kafkauser kates-connect --overwrite app.kubernetes.io/managed-by=Helm
-helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values --set users.items.kates-connect.enabled=false
-helm dependency build charts/connect-cluster      # the kafka-common library
-helm upgrade --install connect-cluster charts/connect-cluster -n connect --set kafkaUser.create=true
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster --version '^1' -n kafka --reuse-values --set users.items.kates-connect.enabled=false
+helm upgrade --install connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect --set kafkaUser.create=true
 ```
 
 The KafkaUser carries `helm.sh/resource-policy: keep`, so the kafka-cluster upgrade leaves it in place for the new owner.

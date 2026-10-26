@@ -32,22 +32,22 @@ Every namespaced resource carries the cluster name, so two clusters can share a 
 |:---|:---|
 | Kubernetes | ≥ 1.27 |
 | Helm | ≥ 3.12 |
-| Strimzi Cluster Operator | 1.2.0 — `charts/strimzi-operator`, installed first |
+| Strimzi Cluster Operator | 1.2.0 — `oci://ghcr.io/bmscomp/charts/strimzi-operator`, installed first |
 | prometheus-operator CRDs | optional (PodMonitors, alerts) |
 | Velero, cert-manager, Kyverno | optional (`backup`, `kyvernoPolicy`) |
 
 ## Install
 
 ```bash
-helm dependency build charts/kafka-cluster      # kafka-common (and seaweedfs)
-helm upgrade --install krafter charts/kafka-cluster -n kafka --create-namespace \
-  -f charts/kafka-cluster/values-prod.yaml \
-  -f charts/kafka-cluster/values-platform.yaml
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install krafter ./kafka-cluster -n kafka --create-namespace \
+  -f kafka-cluster/values-prod.yaml \
+  -f kafka-cluster/values-platform.yaml
 kubectl wait kafka/krafter -n kafka --for=condition=Ready --timeout=600s
 helm test krafter -n kafka --timeout 5m
 ```
 
-`kates deploy` does this for you, with the node pools `kates detect` generates. A `Chart.lock` left by 0.4 makes `helm dependency build` refuse the new library dependency; run `helm dependency update` once.
+`kates deploy` does this for you, with the node pools `kates detect` generates. The published chart carries its subcharts and the kafka-common library, so nothing is built first. From a checkout, a `Chart.lock` left by 0.4 makes `helm dependency build` refuse the new library dependency; run `helm dependency update` once.
 
 ## Values files
 

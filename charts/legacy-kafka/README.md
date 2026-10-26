@@ -29,7 +29,7 @@ image `Dockerfile.legacy-kafka` builds, `<legacyImageRegistry>/kates-legacy-kafk
 (`ghcr.io/bmscomp` by default). So one flag deploys any line:
 
 ```bash
-helm upgrade --install legacy charts/legacy-kafka -n kafka-legacy --create-namespace \
+helm upgrade --install legacy oci://ghcr.io/bmscomp/charts/legacy-kafka -n kafka-legacy --create-namespace \
   --set kafka.version=3.5.2        # → KRaft, ghcr.io/bmscomp/kates-legacy-kafka:3.5.2 (build it first)
   --set kafka.version=2.8.2        # → ZooKeeper, the built image
   --set kafka.version=3.9.1        # → KRaft, apache/kafka:3.9.1
@@ -52,10 +52,11 @@ pairing this chart exists to reproduce.
 build:
 
 ```bash
-helm upgrade --install legacy charts/legacy-kafka \
+helm pull oci://ghcr.io/bmscomp/charts/legacy-kafka --untar
+helm upgrade --install legacy ./legacy-kafka \
   -n kafka-legacy-3x --create-namespace \
-  -f charts/legacy-kafka/values-kafka-3x.yaml \
-  -f charts/legacy-kafka/values-kind.yaml
+  -f legacy-kafka/values-kafka-3x.yaml \
+  -f legacy-kafka/values-kind.yaml
 ```
 
 **Kafka 2.8.2 (ZooKeeper)** — needs the image built first, because no official
@@ -64,10 +65,11 @@ Apache image exists below 3.7.0 and no third-party 2.x image ships arm64:
 ```bash
 scripts/build-legacy-kafka-image.sh --version 2.8.2 --load    # build + load into kind
 
-helm upgrade --install legacy charts/legacy-kafka \
+helm pull oci://ghcr.io/bmscomp/charts/legacy-kafka --untar
+helm upgrade --install legacy ./legacy-kafka \
   -n kafka-legacy-2x --create-namespace \
-  -f charts/legacy-kafka/values-kafka-2x.yaml \
-  -f charts/legacy-kafka/values-kind.yaml
+  -f legacy-kafka/values-kafka-2x.yaml \
+  -f legacy-kafka/values-kind.yaml
 ```
 
 Then:

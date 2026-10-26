@@ -416,7 +416,7 @@ func TestAdminlessGrants_MonitoringWhereEachScrapeIsMade(t *testing.T) {
 
 func TestAdminlessOperatorAdvice(t *testing.T) {
 	kates := strimzi.Operator{Namespace: "strimzi-operator", Version: "1.1.0", Release: "strimzi-operator"}
-	if got := adminlessOperatorAdvice(kates, "1.2.0", nil); !strings.Contains(got, "helm upgrade strimzi-operator charts/strimzi-operator -n strimzi-operator --reuse-values --set strimziVersion=1.2.0") {
+	if got := adminlessOperatorAdvice(kates, "1.2.0", nil); !strings.Contains(got, "helm upgrade strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator -n strimzi-operator --reuse-values --set strimziVersion=1.2.0") {
 		t.Errorf("an older kates operator: want the upgrade command, got %q", got)
 	}
 	foreign := strimzi.Operator{Namespace: "operators", Version: "1.1.0"}

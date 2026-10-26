@@ -139,9 +139,9 @@ and replicates nothing.
 Start from the preset and change what is specific to you:
 
 ```bash
-helm dependency build charts/mirror-maker2    # once per checkout: the kafka-common library
-helm install mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-migrate-2x.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm install mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-migrate-2x.yaml \
   -f my-migration.yaml
 ```
 

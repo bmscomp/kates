@@ -105,16 +105,17 @@ The chart expects a Strimzi `KafkaUser` with SCRAM-SHA-512 authentication. By de
 
 ```bash
 # Install with default settings (connects to the "krafter" Kafka cluster)
-helm install kafka-ui charts/kafka-ui --namespace kafka
+helm install kafka-ui oci://ghcr.io/bmscomp/charts/kafka-ui --namespace kafka
 
 # Install with the Kind (local development) profile
-helm install kafka-ui charts/kafka-ui \
-  -f charts/kafka-ui/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-ui --untar
+helm install kafka-ui ./kafka-ui \
+  -f kafka-ui/values-kind.yaml \
   --namespace kafka
 
 # Upgrade an existing release
-helm upgrade kafka-ui charts/kafka-ui \
-  -f charts/kafka-ui/values-kind.yaml \
+helm upgrade kafka-ui ./kafka-ui \
+  -f kafka-ui/values-kind.yaml \
   --namespace kafka
 ```
 
@@ -385,8 +386,9 @@ The chart ships with four value overlays for different environments. Use the `-f
 ### Example: Full Local Stack
 
 ```bash
-helm install kafka-ui charts/kafka-ui \
-  -f charts/kafka-ui/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-ui --untar
+helm install kafka-ui ./kafka-ui \
+  -f kafka-ui/values-kind.yaml \
   --namespace kafka
 ```
 
@@ -400,8 +402,9 @@ This deploys Kafka UI with:
 ### Example: Production
 
 ```bash
-helm install kafka-ui charts/kafka-ui \
-  -f charts/kafka-ui/values-prod.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-ui --untar
+helm install kafka-ui ./kafka-ui \
+  -f kafka-ui/values-prod.yaml \
   --namespace kafka \
   --set kafka.tls.enabled=true \
   --set ingress.hosts[0].host=kafka-ui.mycompany.com

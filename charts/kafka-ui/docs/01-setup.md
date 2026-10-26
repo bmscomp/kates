@@ -44,7 +44,7 @@ patterns:
 ## Install
 
 ```bash
-helm upgrade --install kafka-ui charts/kafka-ui \
+helm upgrade --install kafka-ui oci://ghcr.io/bmscomp/charts/kafka-ui \
   --namespace kafka \
   --set kafka.clusterName=krafter \
   --set service.type=NodePort --set service.nodePort=30081 \
@@ -63,7 +63,8 @@ Pre-built value files ship with the chart:
 | `values-prod.yaml` | Production (2 replicas, PDB, topology spread, ServiceMonitor, TLS, Ingress) |
 
 ```bash
-helm upgrade --install kafka-ui charts/kafka-ui -n kafka -f charts/kafka-ui/values-prod.yaml --wait
+helm pull oci://ghcr.io/bmscomp/charts/kafka-ui --untar
+helm upgrade --install kafka-ui ./kafka-ui -n kafka -f kafka-ui/values-prod.yaml --wait
 ```
 
 ## Web login
@@ -111,7 +112,7 @@ the pod to load it, then read it back:
 kubectl delete secret kafka-ui-web-password -n kafka
 
 # 2. Regenerate (a new random password is created because none exists now)
-helm upgrade kafka-ui charts/kafka-ui -n kafka --reuse-values --wait
+helm upgrade kafka-ui oci://ghcr.io/bmscomp/charts/kafka-ui -n kafka --reuse-values --wait
 
 # 3. Restart so the pod picks up the new value (env is read at startup)
 kubectl rollout restart deploy/kafka-ui -n kafka
@@ -126,7 +127,7 @@ To rotate to a **specific** value instead of a random one, skip the delete and
 set it explicitly:
 
 ```bash
-helm upgrade kafka-ui charts/kafka-ui -n kafka --reuse-values \
+helm upgrade kafka-ui oci://ghcr.io/bmscomp/charts/kafka-ui -n kafka --reuse-values \
   --set auth.password='my-new-password' --wait
 kubectl rollout restart deploy/kafka-ui -n kafka
 ```

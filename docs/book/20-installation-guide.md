@@ -75,10 +75,9 @@ Why `--dry-run=client | apply`? This is an idempotent pattern — it creates the
 If you want metrics, dashboards, and alerts, install the local monitoring wrapper chart first. It is `kates-monitoring` (versions in the [Version & Compatibility Matrix](appendix-d-versions.md)), and it wraps kube-prometheus-stack with the Kates dashboards and scrape configuration:
 
 ```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm dependency build charts/monitoring
-helm upgrade --install monitoring charts/monitoring \
-  -f charts/monitoring/values-generic.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kates-monitoring --untar
+helm upgrade --install monitoring ./kates-monitoring \
+  -f kates-monitoring/values-generic.yaml \
   --namespace monitoring --create-namespace
 ```
 
@@ -146,7 +145,7 @@ Start with `kyvernoPolicy.action: Audit` (the default) to observe policy violati
 
 Nothing in the repository creates the storage location for you, and `make velero` does not match what the overlay expects: it installs Velero into the `kafka` namespace, with a location called `default` on a SeaweedFS of its own, and no node agent. The SeaweedFS the overlay deploys creates no bucket, keeps its data in `hostPath` directories on whichever nodes its pods land on, and, with authentication on, does not accept the keys in `kafka-seaweedfs-credentials` — [SeaweedFS](#seaweedfs) explains all three before you point a storage location at it.
 
-`helm dependency build` downloads the SeaweedFS subchart, so the machine that installs needs the `helm repo add seaweedfs` of [Step 3 — Build the Chart Dependencies](#step-3--build-the-chart-dependencies) and a route to `https://seaweedfs.github.io/seaweedfs/helm`.
+The published chart carries the SeaweedFS subchart (see [Step 3 — Build the Chart Dependencies](#step-3--build-the-chart-dependencies)), so the machine that installs needs a route to `ghcr.io` rather than to `https://seaweedfs.github.io/seaweedfs/helm`.
 
 ::: {.callout-warning title="Enforce refuses the SeaweedFS pods"}
 With Kyverno installed, the `Enforce` policy of `values-prod.yaml` refuses the SeaweedFS pods that overlay turns on: master, volume and filer, and the bucket hook of [SeaweedFS](#seaweedfs), which set no security context. Their StatefulSets never get a pod, and the `--wait` of [Step 5 — Install the Chart](#step-5--install-the-chart) times out. Set `seaweedfs.enabled: false` and point Velero at an object store outside the namespace, or layer a file with `kyvernoPolicy.action: Audit` after the overlay.
@@ -247,6 +246,8 @@ Why this matters to you:
 
 ## Installation
 
+The `helm` commands in this book install the published charts, which every release pushes to `oci://ghcr.io/bmscomp/charts` under their `Chart.yaml` names (`monitoring` is published as `kates-monitoring`), so they need no checkout of the repository. They name no `--version`, so Helm takes the latest release. Add `--version` to take another, as a version (`1.0.19`) or a range (`'^1'`); the [Version & Compatibility Matrix](appendix-d-versions.md) lists the chart versions this edition describes. An upgrade moves a release to the latest chart in the same way, so to change only its values, pass the version it runs, which `helm list` shows under `CHART`. A command that layers a chart's own `values-*.yaml` overlays first unpacks the chart with `helm pull … --untar`, which refuses a directory that already exists: remove an older copy first, or keep it when it is the version you want.
+
 ### Choosing the Operator Scope and Versions
 
 The CLI decides three things before it installs anything, and each has a flag:
@@ -287,18 +288,17 @@ done
 
 ### Step 2 — Install the Strimzi Operator {#step-2--install-the-strimzi-operator}
 
-The kafka-cluster chart creates Strimzi custom resources, but it does **not** bundle the Strimzi operator — the operator must already be running in the cluster. If you deploy with `kates deploy` (see [Step 5 — Install the Chart](#step-5--install-the-chart)), the CLI installs the operator for you. To install it manually, use the repository's wrapper chart, `charts/strimzi-operator` (its chart and Strimzi versions are in the [Version & Compatibility Matrix](appendix-d-versions.md)):
+The kafka-cluster chart creates Strimzi custom resources, but it does **not** bundle the Strimzi operator — the operator must already be running in the cluster. If you deploy with `kates deploy` (see [Step 5 — Install the Chart](#step-5--install-the-chart)), the CLI installs the operator for you. To install it manually, use the repository's wrapper chart, `strimzi-operator` (its chart and Strimzi versions are in the [Version & Compatibility Matrix](appendix-d-versions.md)):
 
 ```bash
-helm dependency build charts/strimzi-operator
-helm upgrade --install strimzi-operator charts/strimzi-operator \
+helm upgrade --install strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
   --namespace strimzi-operator --create-namespace \
   --reset-values \
   --timeout 10m --wait
 kubectl wait --for=condition=Established crd kafkas.kafka.strimzi.io --timeout=60s
 ```
 
-That is what `scripts/deploy-kafka.sh` runs (it creates the namespace with `kubectl` beforehand rather than with `--create-namespace`, which is the only difference). `scripts/deploy-kafka-generic.sh` runs the same thing and adds `--set strimzi-kafka-operator.kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}"` from its own detection, because the upstream chart emits `KUBERNETES_SERVICE_DNS_DOMAIN` only when the domain differs from `cluster.local` — omit it on a cluster with a custom domain and the operator silently fails to resolve its operands.
+That is what `scripts/deploy-kafka.sh` runs from a checkout (it creates the namespace with `kubectl` beforehand rather than with `--create-namespace`, which is the only other difference). `scripts/deploy-kafka-generic.sh` runs the same thing and adds `--set strimzi-kafka-operator.kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}"` from its own detection, because the upstream chart emits `KUBERNETES_SERVICE_DNS_DOMAIN` only when the domain differs from `cluster.local` — omit it on a cluster with a custom domain and the operator silently fails to resolve its operands.
 
 **Why a wrapper and not the `oci://` chart directly.** The upstream chart is still in there, declared as a subchart and vendored as `charts/strimzi-operator/charts/strimzi-kafka-operator-1.2.0.tgz`. What the wrapper adds is everything the upstream chart leaves to the caller:
 
@@ -318,11 +318,11 @@ That is what `scripts/deploy-kafka.sh` runs (it creates the namespace with `kube
 **The overlay chain.** The base values render the primary, cluster-wide operator. Layer at most one environment overlay on top:
 
 ```bash
-helm dependency build charts/strimzi-operator
-helm upgrade --install strimzi-operator charts/strimzi-operator \
+helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar
+helm upgrade --install strimzi-operator ./strimzi-operator \
   --namespace strimzi-operator --create-namespace \
   --reset-values \
-  -f charts/strimzi-operator/values-prod.yaml \
+  -f strimzi-operator/values-prod.yaml \
   --timeout 10m --wait
 ```
 
@@ -345,20 +345,13 @@ kafka-cluster 1.0 has two Helm dependencies, and Helm refuses to render the char
 | `kafka-common` 0.1.0 | `file://../kafka-common` | always — it is the library chart holding the shared names, rails, Kafka client authentication, `KafkaUser`, NetworkPolicy and monitoring fragments |
 | `seaweedfs` 3.68.0 | `https://seaweedfs.github.io/seaweedfs/helm` | `seaweedfs.enabled` |
 
-So every install, upgrade or `helm template` of this chart is preceded by `helm dependency build`. Both deploy scripts run it unconditionally rather than testing for it — it is idempotent and cheap, and an empty or stale `charts/` directory fails the render outright. Add the SeaweedFS repository once per machine first:
-
-```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-```
-
-The `helm repo add` matters from the second build on. The first `build` finds no `Chart.lock`, falls back to `update` and fetches the chart straight from its URL; once the lock exists, `build` accepts only a repository Helm has configured and stops with `no repository definition for https://seaweedfs.github.io/seaweedfs/helm`.
+The published chart carries both archives, so an install, upgrade or `helm template` of `oci://ghcr.io/bmscomp/charts/kafka-cluster` builds nothing first and needs no SeaweedFS repository. Both deploy scripts install from a checkout instead, and run `helm dependency build` unconditionally rather than testing for it — it is idempotent and cheap, and an empty or stale `charts/` directory fails the render outright.
 
 ::: {.callout-note}
-`build` resolves from `Chart.lock`, which is what keeps the pinned SeaweedFS version from drifting. If you are coming from a kafka-cluster 0.4 checkout, that lock file predates the `kafka-common` dependency and `build` refuses it — run `helm dependency update charts/kafka-cluster` once to regenerate the lock, then go back to `build`. Both deploy scripts do exactly this: `helm dependency build … || helm dependency update …`.
+The published chart's archives are resolved from `Chart.lock`, which is what keeps the pinned SeaweedFS version from drifting. A kafka-cluster 0.4 checkout's lock file predates the `kafka-common` dependency and `build` refuses it, which is why both deploy scripts run `helm dependency build … || helm dependency update …`.
 :::
 
-connect-cluster and mirror-maker2 depend on the same library chart, so each needs its own `helm dependency build` too — [Step 7 — Install Kafka Connect (Optional)](#step-7--install-kafka-connect-optional) does it for Connect.
+connect-cluster and mirror-maker2 depend on the same library chart, and their published charts carry it too — [Step 7 — Install Kafka Connect (Optional)](#step-7--install-kafka-connect-optional) installs Connect.
 
 ### Step 4 — Review and Customize Values {#step-4--review-and-customize-values}
 
@@ -448,22 +441,22 @@ Use `kates deploy` for interactive development. Use direct Helm commands (below)
 
 **Alternative — Direct Helm installation:**
 
-With the Strimzi operator already installed (see [Step 2 — Install the Strimzi Operator](#step-2--install-the-strimzi-operator)) and the production prerequisites in place (see [Production Prerequisites](#production-prerequisites)), build the dependencies and install the chart with the full values chain — the platform profile first, one environment overlay second:
+With the Strimzi operator already installed (see [Step 2 — Install the Strimzi Operator](#step-2--install-the-strimzi-operator)) and the production prerequisites in place (see [Production Prerequisites](#production-prerequisites)), pull the chart and install it with the full values chain — the platform profile first, one environment overlay second:
 
 ```bash
-helm dependency build charts/kafka-cluster
-helm upgrade --install kafka-cluster charts/kafka-cluster \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install kafka-cluster ./kafka-cluster \
   --namespace kafka --create-namespace \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-prod.yaml \
+  -f kafka-cluster/values-platform.yaml \
+  -f kafka-cluster/values-prod.yaml \
   --timeout 600s \
   --wait
 ```
 
 Three parts of that command earn their place:
 
-- `helm dependency build` is not optional. The chart depends on the `kafka-common` library and will not render without it (see [Step 3 — Build the Chart Dependencies](#step-3--build-the-chart-dependencies)).
-- `-f charts/kafka-cluster/values-platform.yaml` selects the platform profile. Drop it only for a Kafka cluster that does not host kates.
+- `helm pull --untar` unpacks the published chart into `./kafka-cluster`, with the overlay files the `-f` flags read. It carries the `kafka-common` library and the SeaweedFS subchart, so nothing is built first (see [Step 3 — Build the Chart Dependencies](#step-3--build-the-chart-dependencies)).
+- `-f kafka-cluster/values-platform.yaml` selects the platform profile. Drop it only for a Kafka cluster that does not host kates.
 - The environment overlay comes **after** the profile. Swap `values-prod.yaml` for `values-staging.yaml`, `values-dev.yaml`, or `values-dev.yaml` followed by `values-kind.yaml` on Kind — which is the exact chain `ENV=kind scripts/deploy-kafka.sh` passes.
 
 The `--wait` flag tells Helm to block until all deployments are ready. Note that Helm returning is not the same as Kafka being ready: the operator still has to form the KRaft quorum, which is what [Check Kafka CR Status](#check-kafka-cr-status) checks.
@@ -501,13 +494,13 @@ The initial deployment takes **3–8 minutes**. The operator generates TLS certi
 
 Kafka Connect is a separate Helm release from a separate chart, `charts/connect-cluster` (versions in the [Version & Compatibility Matrix](appendix-d-versions.md)). Keeping it separate is deliberate: Connect upgrades never roll the brokers, and several Connect groups can share one Kafka cluster. It needs the same Strimzi operator (see [Step 2 — Install the Strimzi Operator](#step-2--install-the-strimzi-operator)) and a Kafka cluster that is already `Ready` (see [Check Kafka CR Status](#check-kafka-cr-status)).
 
-Build its dependency — connect-cluster 2.0 is built on the same `kafka-common` library chart as kafka-cluster — then install it with one environment overlay. There is no profile layer here; that concept belongs to kafka-cluster:
+Pull the chart — connect-cluster 2.0 is built on the same `kafka-common` library chart as kafka-cluster, and the published chart carries it — then install it with one environment overlay. There is no profile layer here; that concept belongs to kafka-cluster:
 
 ```bash
-helm dependency build charts/connect-cluster
-helm upgrade --install connect-cluster charts/connect-cluster \
+helm pull oci://ghcr.io/bmscomp/charts/connect-cluster --untar
+helm upgrade --install connect-cluster ./connect-cluster \
   --namespace connect --create-namespace \
-  -f charts/connect-cluster/values-prod.yaml \
+  -f connect-cluster/values-prod.yaml \
   --timeout 600s
 kubectl wait kafkaconnect/connect-cluster -n connect --for=condition=Ready --timeout=300s
 helm test connect-cluster -n connect
@@ -748,10 +741,10 @@ The chart ships with pre-configured overlays for different environments. Use the
 ### Development
 
 ```bash
-helm dependency build charts/kafka-cluster
-helm upgrade --install kafka-cluster charts/kafka-cluster \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-dev.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install kafka-cluster ./kafka-cluster \
+  -f kafka-cluster/values-platform.yaml \
+  -f kafka-cluster/values-dev.yaml \
   --namespace kafka
 ```
 
@@ -760,10 +753,11 @@ helm upgrade --install kafka-cluster charts/kafka-cluster \
 On Kind, add `values-kind.yaml` after it, which is the chain `ENV=kind scripts/deploy-kafka.sh` passes:
 
 ```bash
-helm upgrade --install kafka-cluster charts/kafka-cluster \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-dev.yaml \
-  -f charts/kafka-cluster/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install kafka-cluster ./kafka-cluster \
+  -f kafka-cluster/values-platform.yaml \
+  -f kafka-cluster/values-dev.yaml \
+  -f kafka-cluster/values-kind.yaml \
   --namespace kafka
 ```
 
@@ -772,10 +766,10 @@ helm upgrade --install kafka-cluster charts/kafka-cluster \
 The staging overlay turns the Velero backup on too, so it needs Velero with its CRDs and node agent in the `velero` namespace and a `BackupStorageLocation` named `default` there (the Velero rows of [Production Prerequisites](#production-prerequisites)), and its Kyverno policy is in `Enforce` (the warning in [Production Prerequisites](#production-prerequisites)).
 
 ```bash
-helm dependency build charts/kafka-cluster
-helm upgrade --install kafka-cluster charts/kafka-cluster \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-staging.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install kafka-cluster ./kafka-cluster \
+  -f kafka-cluster/values-platform.yaml \
+  -f kafka-cluster/values-staging.yaml \
   --namespace kafka
 ```
 
@@ -786,10 +780,10 @@ helm upgrade --install kafka-cluster charts/kafka-cluster \
 The production overlay needs Velero, a storage location and the other prerequisites in [Production Prerequisites](#production-prerequisites) before it installs.
 
 ```bash
-helm dependency build charts/kafka-cluster
-helm upgrade --install kafka-cluster charts/kafka-cluster \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-prod.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install kafka-cluster ./kafka-cluster \
+  -f kafka-cluster/values-platform.yaml \
+  -f kafka-cluster/values-prod.yaml \
   --namespace kafka
 ```
 
@@ -1101,7 +1095,7 @@ Writing the external listener into `kafka.listeners` instead replaces the whole 
 **`kates deploy` publishes port 9094 on EKS, GKE and AKS.** There, `.build/values-detected.yaml` declares `external` as a LoadBalancer with one annotation, on the bootstrap Service only — `aws-load-balancer-type: nlb` on EKS, `cloud.google.com/l4-rbs: enabled` on GKE, `azure-load-balancer-internal: "true"` on AKS — and with no `loadBalancerSourceRanges`. Every broker's load balancer gets the provider's default, usually a public address, and on EKS and GKE so does the bootstrap's. TLS and SCRAM-SHA-512 still guard the port, but anyone who reaches it can probe the TLS stack and try passwords. `scripts/deploy-kafka-generic.sh` generates the same listener, unless an overlay in its chain sets `kafka.externalAccess`.
 :::
 
-`my-values.yaml`, with your provider's annotations, fixes that on such a release too: the preset replaces a listener of the same name, so an upgrade over the values the release runs with, as in [Upgrading Chart Values](#upgrading-chart-values), makes `external` internal. It replaces the listener, though, not its load balancers: Strimzi changes the annotations of the Services that exist. On EKS the in-tree provider then leaves those Services to the AWS Load Balancer Controller and keeps the public load balancers it created, still forwarding to the brokers, while the controller creates internal ones beside them; on GKE and AKS the upgrade would switch live load balancers from public to internal in place. So take the listener away first, and add the file's once its load balancers are gone. Build the chart's dependencies as in [Upgrading Chart Values](#upgrading-chart-values), then:
+`my-values.yaml`, with your provider's annotations, fixes that on such a release too: the preset replaces a listener of the same name, so an upgrade over the values the release runs with, as in [Upgrading Chart Values](#upgrading-chart-values), makes `external` internal. It replaces the listener, though, not its load balancers: Strimzi changes the annotations of the Services that exist. On EKS the in-tree provider then leaves those Services to the AWS Load Balancer Controller and keeps the public load balancers it created, still forwarding to the brokers, while the controller creates internal ones beside them; on GKE and AKS the upgrade would switch live load balancers from public to internal in place. So take the listener away first, and add the file's once its load balancers are gone:
 
 ```bash
 # Every value the release was installed with — its files and its --set flags
@@ -1111,7 +1105,8 @@ helm get values krafter -n kafka -o yaml > krafter-current.yaml
 In `krafter-current.yaml`, delete the entry of `kafka.listeners` whose `name` is `external`. It is the last entry, and Helm writes each entry's keys in alphabetical order, so it runs from its `- authentication:` line to its `type: loadbalancer` line; leave `plain` and `tls` as they are. Upgrade from the edited file alone and list the cluster's Services:
 
 ```bash
-helm upgrade krafter charts/kafka-cluster -n kafka -f krafter-current.yaml
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml
 
 kubectl get svc -n kafka -l strimzi.io/cluster=krafter
 ```
@@ -1119,7 +1114,7 @@ kubectl get svc -n kafka -l strimzi.io/cluster=krafter
 The brokers roll to drop the listener, and Strimzi deletes its Services. Wait until the list shows no Service of type `LoadBalancer`, and check in the provider's console or CLI that their load balancers are gone too. Then upgrade with your file last:
 
 ```bash
-helm upgrade krafter charts/kafka-cluster -n kafka \
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   -f my-values.yaml
 
@@ -1892,20 +1887,17 @@ If tier 2 (produce/consume) fails but tier 1 passes, the issue is usually authen
 When changing configuration (topics, users, resources), upgrade the release starting from the values it runs with, and put your own file last:
 
 ```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-
 # Every value the release was installed with — its files and its --set flags
 helm get values kafka-cluster -n kafka -o yaml > kafka-cluster-current.yaml
 
-helm upgrade kafka-cluster charts/kafka-cluster \
+helm upgrade kafka-cluster oci://ghcr.io/bmscomp/charts/kafka-cluster \
   --namespace kafka \
   -f kafka-cluster-current.yaml \
   -f my-values.yaml \
   --timeout 600s
 ```
 
-`kafka-cluster` is the release that the Helm install of [Step 5 — Install the Chart](#step-5--install-the-chart) and [Environment Overlays](#environment-overlays) and both deploy scripts create. `kates deploy` names its release after the cluster: for a cluster it installed, write `krafter` for `kafka-cluster` in the `helm get values` and the `helm upgrade`. `kates deploy` itself is not an upgrade path for the Kafka cluster. Once the release is deployed, a later run prints `Kafka Cluster already deployed. Skipping.` and leaves it as it is, whatever flags you pass, and it takes no values file of yours. The `helm repo add` is the one of [Step 3 — Build the Chart Dependencies](#step-3--build-the-chart-dependencies): once a `Chart.lock` exists, and `kates deploy` writes one, `helm dependency build` stops at the SeaweedFS repository until Helm has it configured.
+`kafka-cluster` is the release that the Helm install of [Step 5 — Install the Chart](#step-5--install-the-chart) and [Environment Overlays](#environment-overlays) and both deploy scripts create. `kates deploy` names its release after the cluster: for a cluster it installed, write `krafter` for `kafka-cluster` in the `helm get values` and the `helm upgrade`. `kates deploy` itself is not an upgrade path for the Kafka cluster. Once the release is deployed, a later run prints `Kafka Cluster already deployed. Skipping.` and leaves it as it is, whatever flags you pass, and it takes no values file of yours.
 
 Helm merges `-f` files left to right within one command, but an upgrade that supplies any values at all *replaces* the previous release's set rather than adding to it. `helm get values` hands that set back — the platform profile, the environment overlay, your earlier files and every `--set` flag — so none of it disappears on an upgrade that sets one unrelated value.
 
@@ -1913,7 +1905,7 @@ Helm merges `-f` files left to right within one command, but an upgrade that sup
 Do not rebuild the values chain from the repository's files. `kates deploy` and `scripts/deploy-kafka-generic.sh` install the release with `.build/values-detected.yaml` first — the node pools, their zones and storage classes come from it — and `kates deploy` adds `--set` flags no file records, the Kafka and metadata versions among them. A chain without them renders other pool names: a pool's name is its identity, so each renamed pool is a new pool with new, empty volumes, while the old pools drop out of the release but keep running with the data (the chart marks them `helm.sh/resource-policy: keep`). If you do keep the values in files, re-run the exact chain the install used, generated file included, with your file last.
 :::
 
-A release installed from the repository's files alone, as in [Step 5 — Install the Chart](#step-5--install-the-chart) and [Environment Overlays](#environment-overlays), records no `kafkaVersion`, and only `values-kind.yaml` sets a `kafka.metadataVersion`. The chart you upgrade with supplies what is missing, so from a newer checkout a configuration change can upgrade Kafka as well. Unless you mean it to, put the versions the cluster runs in your file as `kafkaVersion` and `kafka.metadataVersion`; this prints them:
+A release installed from the repository's files alone, as in [Step 5 — Install the Chart](#step-5--install-the-chart) and [Environment Overlays](#environment-overlays), records no `kafkaVersion`, and only `values-kind.yaml` sets a `kafka.metadataVersion`. The chart you upgrade with supplies what is missing, so once a newer chart is published a configuration change can upgrade Kafka as well. Unless you mean it to, put the versions the cluster runs in your file as `kafkaVersion` and `kafka.metadataVersion`; this prints them:
 
 ```bash
 kubectl get kafka krafter -n kafka \
@@ -1927,9 +1919,6 @@ The operator performs a **rolling restart** — one broker at a time, maintainin
 The Kafka version is a chart value, not a hand-edited CR: `kafkaVersion` renders `spec.kafka.version`, and `kafka.metadataVersion` renders `spec.kafka.metadataVersion`. Start from the values the release runs with, as in [Upgrading Chart Values](#upgrading-chart-values), set the new version, and pin the metadata version the cluster runs now:
 
 ```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-
 # Every value the release was installed with — its files and its --set flags
 helm get values kafka-cluster -n kafka -o yaml > kafka-cluster-current.yaml
 
@@ -1939,7 +1928,7 @@ kubectl get kafka krafter -n kafka -o jsonpath='{.status.kafkaMetadataVersion}{"
 # The running operator's Kafka window, which must contain <new-version>
 kates versions
 
-helm upgrade kafka-cluster charts/kafka-cluster \
+helm upgrade kafka-cluster oci://ghcr.io/bmscomp/charts/kafka-cluster \
   --namespace kafka \
   -f kafka-cluster-current.yaml \
   --set-string kafkaVersion=<new-version> \

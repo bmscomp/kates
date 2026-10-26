@@ -461,12 +461,7 @@ kube-prometheus-stack:
 Each chart is its own Helm release, so each takes its own overlay — there is no single file that spans them. Layer the Kafka one after the platform profile, and the Kates and monitoring ones after the chart's `values-generic.yaml`, the file `kates deploy` applies on any cluster other than Kind. Without `charts/monitoring/values-generic.yaml` Grafana keeps the chart's default admin password, `admin`, on a load balancer; with it the Grafana chart generates one and stores it in the `monitoring-grafana` Secret.
 :::
 
-`kafka-cluster` and `monitoring` take subcharts from chart repositories — SeaweedFS and kube-prometheus-stack — and `helm dependency build` refuses to fetch them until those repositories are added. Add them once:
-
-```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-```
+`kafka-cluster` and `monitoring` take subcharts from chart repositories — SeaweedFS and kube-prometheus-stack — and the published charts carry them, with `kafka-cluster`'s `kafka-common` library, so nothing is built first.
 
 ::: {.callout-caution}
 Do not run the install chain below against a `krafter` that `kates deploy` installed: `helm upgrade --install` upgrades a release that already exists. `kates deploy` installs the release with `.build/values-detected.yaml` first — the node pools, their zones and storage classes come from it — and a chain without it renders other pool names. A pool's name is its identity, so each renamed pool is a new pool with new, empty volumes, while the old pools drop out of the release but keep running with the data (the chart marks them `helm.sh/resource-policy: keep`). Upgrade such a release from its own values instead, as shown after the chain.
@@ -475,16 +470,16 @@ Do not run the install chain below against a `krafter` that `kates deploy` insta
 Install a release that does not exist yet from the chart's files, with the overlay last:
 
 ```bash
-helm dependency build charts/kafka-cluster
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
 
-helm upgrade --install krafter charts/kafka-cluster -n kafka --create-namespace \
-  -f charts/kafka-cluster/values-platform.yaml \
+helm upgrade --install krafter ./kafka-cluster -n kafka --create-namespace \
+  -f kafka-cluster/values-platform.yaml \
   -f kafka-eks.yaml
 
-helm dependency build charts/monitoring
+helm pull oci://ghcr.io/bmscomp/charts/kates-monitoring --untar
 
-helm upgrade --install monitoring charts/monitoring -n monitoring --create-namespace \
-  -f charts/monitoring/values-generic.yaml \
+helm upgrade --install monitoring ./kates-monitoring -n monitoring --create-namespace \
+  -f kates-monitoring/values-generic.yaml \
   -f monitoring-eks.yaml
 ```
 
@@ -495,8 +490,6 @@ On `krafter`, first take away the listener the overlay replaces. On EKS, GKE and
 Save the release's values:
 
 ```bash
-helm dependency build charts/kafka-cluster
-
 # Every value the release was installed with — its files and its --set flags
 helm get values krafter -n kafka -o yaml > krafter-current.yaml
 ```
@@ -504,7 +497,8 @@ helm get values krafter -n kafka -o yaml > krafter-current.yaml
 In `krafter-current.yaml`, delete the entry of `kafka.listeners` whose `name` is `external`. The detected values append it after `plain` and `tls`, and Helm keeps a list in order, so it is the last entry. Helm sorts the keys inside it, so it runs from its `- authentication:` line to its `type: loadbalancer` line; leave `plain` and `tls` as they are. If the file has no such entry, go straight to the upgrade with the overlay. Otherwise upgrade from the edited file alone, then list the cluster's Services:
 
 ```bash
-helm upgrade krafter charts/kafka-cluster -n kafka -f krafter-current.yaml
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml
 
 kubectl get svc -n kafka -l strimzi.io/cluster=krafter
 ```
@@ -512,7 +506,7 @@ kubectl get svc -n kafka -l strimzi.io/cluster=krafter
 The brokers roll to drop the listener, and Strimzi deletes its bootstrap and per-broker Services. Wait until the list shows no Service of type `LoadBalancer`, then check in the provider's console or CLI that their load balancers are gone too. Then upgrade with the overlay, from the edited file:
 
 ```bash
-helm upgrade krafter charts/kafka-cluster -n kafka \
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   -f kafka-eks.yaml
 
@@ -522,7 +516,7 @@ kubectl get kafka krafter -n kafka \
 
 The brokers roll again, and Strimzi creates the listener's Services afresh, with the overlay's annotations from the start. External clients get a new bootstrap address, which the `kubectl get kafka` prints once the brokers are ready. The overlay's `nodePools.defaults.storage` changes nothing on such a release: the detected pools set their own storage class and size.
 
-Upgrade `monitoring` in `monitoring` and `kates` in `kates` in one step, from `helm get values` with the overlay last (build the `monitoring` chart's dependencies first). Their overlays' storage settings do not reach the volumes that exist, because a StatefulSet's `volumeClaimTemplates` cannot change once it is created. The Kates overlay's `postgresql.storage` changes those of the bundled PostgreSQL, which `kates deploy` created at the chart's 1Gi on the default class, so Kubernetes refuses the upgrade and Helm marks the release failed: leave the `postgresql` block out of the overlay for such a release. The monitoring overlay's Prometheus `storageSpec` meets the same restriction, but the Prometheus operator replaces the StatefulSet itself, and Prometheus restarts on the volume it had, with that volume's class and size.
+Upgrade `monitoring` in `monitoring` and `kates` in `kates` in one step, from `helm get values` with the overlay last. Their overlays' storage settings do not reach the volumes that exist, because a StatefulSet's `volumeClaimTemplates` cannot change once it is created. The Kates overlay's `postgresql.storage` changes those of the bundled PostgreSQL, which `kates deploy` created at the chart's 1Gi on the default class, so Kubernetes refuses the upgrade and Helm marks the release failed: leave the `postgresql` block out of the overlay for such a release. The monitoring overlay's Prometheus `storageSpec` meets the same restriction, but the Prometheus operator replaces the StatefulSet itself, and Prometheus restarts on the volume it had, with that volume's class and size.
 
 ---
 
@@ -929,8 +923,8 @@ The granting account creates a [KafkaUser](appendix-a-glossary.md#gl-kafkauser) 
 It then renders the Role from the same release name, namespace and values as the team's install, so that it binds the right ServiceAccount, and applies it:
 
 ```bash
-helm template kates charts/kates -n team --set rbac.scope=namespace \
-  --show-only templates/rbac.yaml | kubectl apply -f -
+helm template kates oci://ghcr.io/bmscomp/charts/kates -n team \
+  --set rbac.scope=namespace --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
 The Role is `kates-kafka-reader-team` in the `kafka` namespace, and it only reads. Each grant serves part of a conformity check:
@@ -951,7 +945,7 @@ The team stores the password where the chart looks for it, the key `password` of
 
 ```bash
 kubectl create secret generic kates-backend -n team --from-literal=password="$PASSWORD"
-helm upgrade --install kates charts/kates -n team \
+helm upgrade --install kates oci://ghcr.io/bmscomp/charts/kates -n team \
   --set rbac.scope=namespace \
   --set rbac.kafkaNamespaceRole=false \
   --set kafka.sasl.username=team-kates
@@ -1006,7 +1000,8 @@ Before installing, it checks two things and stops with what is missing:
 Conformity checks need the read-only Role the `kates` chart creates in the Kafka namespace ([Step 1](#step-1--grant-the-teams-kates-access-to-kafka) lists its grants). Kubernetes lets an account create a Role only for permissions it holds, so `kates deploy --adminless` first asks whether the account holds each of them there. When it does, the Role is installed and conformity checks work. When it lacks any (PodMonitors are the usual one: the built-in `admin` role doesn't include them), Kates installs without it (`rbac.kafkaNamespaceRole=false`), everything else works, and deploy names the missing reads and prints the command an account that holds them runs to turn conformity checks on:
 
 ```bash
-helm template kates charts/kates -n team-kates --set rbac.scope=namespace \
+helm template kates oci://ghcr.io/bmscomp/charts/kates -n team-kates \
+  --set rbac.scope=namespace \
   --set networkPolicy.kafka.namespace=team-kafka \
   --show-only templates/rbac.yaml | kubectl apply -f -
 ```
@@ -1208,11 +1203,10 @@ The `strimzi-operator` chart carries the operator's own policy (`operatorPolicy`
 ACLs are declared via `KafkaUser` CRs that the chart renders from `users.items` (GitOps). With the `platform` profile selected the release carries `kates-backend` (the one super user), `kafka-ui`, `apicurio-registry`, `litmus-chaos`, `kates-connect`, `kates-mm2` and the Helm-test principal. Confirm what a given values chain produces rather than trusting a list:
 
 ```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
 
-helm template krafter charts/kafka-cluster -n kafka \
-  -f charts/kafka-cluster/values-platform.yaml \
+helm template krafter ./kafka-cluster -n kafka \
+  -f kafka-cluster/values-platform.yaml \
   | grep -A2 'kind: KafkaUser' | grep 'name:'
 ```
 

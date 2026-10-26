@@ -34,13 +34,13 @@ What it manages:
 kubectl apply -f config/litmus/chaos-litmus-chaos-enable.yml
 kubectl wait --for=condition=Established crd/chaosexperiments.litmuschaos.io --timeout=60s
 
-# 2. Dependencies
-helm dependency build charts/kates-chaos
+# 2. Chart (it carries its dependencies)
+helm pull oci://ghcr.io/bmscomp/charts/kates-chaos --untar
 
 # 3. Install
-helm upgrade --install chaos charts/kates-chaos \
+helm upgrade --install chaos ./kates-chaos \
   -n litmus --create-namespace \
-  -f charts/kates-chaos/values-generic.yaml --wait
+  -f kates-chaos/values-generic.yaml --wait
 ```
 
 ### Overlays

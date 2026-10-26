@@ -73,11 +73,6 @@ kates test create --type INTEGRITY --records 50000 --wait
 The Kafka version is a chart value, not a hand-edited CR: `kafkaVersion` renders `spec.kafka.version`, and `kafka.metadataVersion` renders `spec.kafka.metadataVersion`. Start from the values the release runs with, change the version, and pin the metadata version the cluster runs now. The release is `krafter` when `kates deploy` installed it and `kafka-cluster` when `make kafka` did — `helm list -n kafka` shows which — while the Kafka cluster is `krafter` either way:
 
 ```bash
-# Once per machine: the build downloads the SeaweedFS subchart, and once
-# Chart.lock exists it accepts only a repository Helm has configured
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-
 # The Helm release: krafter from kates deploy, kafka-cluster from make kafka
 RELEASE=krafter
 
@@ -90,13 +85,13 @@ kubectl get kafka krafter -n kafka -o jsonpath='{.status.kafkaMetadataVersion}{"
 # The running operator's Kafka window, which must contain <new-version>
 kates versions
 
-helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+helm upgrade "${RELEASE}" oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   --set-string kafkaVersion=<new-version> \
   --set-string kafka.metadataVersion=<current-metadata-version>
 ```
 
-`kafka.metadataVersion` stays at the version the cluster runs, which is what keeps a rollback possible (see [Kafka Version Rollback](#kafka-version-rollback)). `krafter-current.yaml` carries it only when the install set it — `kates deploy` and the Kind overlay do. Otherwise the default of the chart checkout you upgrade from applies, and that can raise it in the same step.
+`kafka.metadataVersion` stays at the version the cluster runs, which is what keeps a rollback possible (see [Kafka Version Rollback](#kafka-version-rollback)). `krafter-current.yaml` carries it only when the install set it — `kates deploy` and the Kind overlay do. Otherwise the default of the chart you upgrade from applies, and that can raise it in the same step.
 
 ::: {.callout-caution}
 Do not rebuild the values chain from the repository's files. `kates deploy` and `scripts/deploy-kafka-generic.sh` install the release with `.build/values-detected.yaml` first — the node pools, their zones and storage classes come from it — and `kates deploy` adds `--set` flags no file records, the metadata version among them. A chain without them renders other pool names: a pool's name is its identity, so each renamed pool is a new pool with new, empty volumes, while the old pools drop out of the release but keep running with the data (the chart marks them `helm.sh/resource-policy: keep`). It also takes `kafka.metadataVersion` from the files, which can raise it in the same step. If you do keep the values in files, re-run the exact chain the install used, generated file included, and set the new version last.
@@ -186,11 +181,10 @@ kubectl apply -f config/kafka/
 Drain Cleaner is part of the `strimzi-operator` release (`charts/strimzi-operator/templates/drain-cleaner.yaml`) when `drainCleaner.enabled` is true (its prod values enable it), with the image pinned by the `drainCleaner.image` value (default `quay.io/strimzi/drain-cleaner:1.6.1`). kafka-cluster 0.4 used to deploy it; see `docs/kafka-cluster-1.0-upgrade.md` for the move. To upgrade it, bump the image tag and re-deploy the operator chart from the values the release runs with — they carry the overlay it was installed with and the DNS domain the deploy scripts inject:
 
 ```bash
-helm dependency build charts/strimzi-operator
-
 helm get values strimzi-operator -n strimzi-operator -o yaml > operator-current.yaml
 
-helm upgrade strimzi-operator charts/strimzi-operator -n strimzi-operator \
+helm upgrade strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
+  -n strimzi-operator \
   -f operator-current.yaml \
   --set drainCleaner.image=quay.io/strimzi/drain-cleaner:<version>
 
@@ -198,17 +192,17 @@ helm upgrade strimzi-operator charts/strimzi-operator -n strimzi-operator \
 kubectl get pods -n strimzi-operator -l app=strimzi-drain-cleaner
 ```
 
-If `operator-current.yaml` sets `strimziVersion`, the release runs an operator other than the repository's pin, and upgrading it from `charts/strimzi-operator` would change the operator as well — stop and upgrade the operator first.
+If `operator-current.yaml` sets `strimziVersion`, the release runs an operator other than the repository's pin, and upgrading it from `oci://ghcr.io/bmscomp/charts/strimzi-operator` would change the operator as well — stop and upgrade the operator first.
 
 ## Kates API Upgrade
 
-The `kates` chart installs the Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)). The chart pins its image: `values.yaml` sets `image.tag` to the release's version (the chart's `appVersion`), and the generic, corporate and production overlays pin a tag of their own. Building or pulling a newer image changes nothing the Deployment runs, and `kubectl rollout restart` only restarts the pinned tag. An upgrade is a `helm upgrade` of the `kates` release that sets the new tag, from the values the release runs with and from a checkout of the version you are moving to, so the chart's templates and the image agree:
+The `kates` chart installs the Kates API, the service in the cluster that runs your tests ([Architecture & Design](02-architecture.md)). The chart pins its image: `values.yaml` sets `image.tag` to the release's version (the chart's `appVersion`), and the generic, corporate and production overlays pin a tag of their own. Building or pulling a newer image changes nothing the Deployment runs, and `kubectl rollout restart` only restarts the pinned tag. An upgrade is a `helm upgrade` of the `kates` release that sets the new tag, from the values the release runs with and from the published chart of the version you are moving to, which `--version` names, so the chart's templates and the image agree:
 
 ```bash
 # Every value the release was installed with — its files and its --set flags
 helm get values kates -n kates -o yaml > kates-current.yaml
 
-helm upgrade kates charts/kates -n kates \
+helm upgrade kates oci://ghcr.io/bmscomp/charts/kates --version <chart-version> -n kates \
   -f kates-current.yaml \
   --set-string image.tag=<new-version> \
   --timeout 8m --wait
@@ -257,13 +251,9 @@ The `monitoring` release lives in the `kafka` namespace when `make monitoring` i
 ```bash
 MON_NS=kafka   # or monitoring, for a release kates deploy installed
 
-# Once per machine, for the kube-prometheus-stack subchart
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm dependency build charts/monitoring
-
 helm get values monitoring -n "${MON_NS}" -o yaml > monitoring-current.yaml
 
-helm upgrade monitoring charts/monitoring \
+helm upgrade monitoring oci://ghcr.io/bmscomp/charts/kates-monitoring \
   --namespace "${MON_NS}" \
   -f monitoring-current.yaml
 ```
@@ -418,15 +408,12 @@ Rollback is a critical part of any upgrade plan. Each component has different ro
 **Step 1 — Revert the Kafka version, keeping every other value:**
 
 ```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-
 # The Helm release: krafter from kates deploy, kafka-cluster from make kafka
 RELEASE=krafter
 
 helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
 
-helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+helm upgrade "${RELEASE}" oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   --set-string kafkaVersion=<previous-version>
 ```

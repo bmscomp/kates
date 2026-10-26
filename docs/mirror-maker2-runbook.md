@@ -7,12 +7,10 @@ step-by-step walkthroughs see the
 [3.x → 4.x](tutorials/12-migrating-kafka-3x-to-4x.md) tutorials; for the chart
 itself see [charts/mirror-maker2](../charts/mirror-maker2/README.md).
 
-> **Every `helm` command below runs the chart from a checkout**, and since 0.8.0
+> **Every `helm` command below uses the published chart**, and since 0.8.0
 > the chart depends on the [`kafka-common`](../charts/kafka-common/README.md)
-> library. `charts/mirror-maker2/charts/` is generated and gitignored, so run
-> `helm dependency build charts/mirror-maker2` once first or Helm refuses to
-> render — `helm upgrade`, `helm install` and `helm template` alike. A packaged
-> chart carries the library inside it, and `kates` builds it itself.
+> library. The published chart carries the library inside it, so nothing is
+> built first.
 
 ---
 
@@ -111,9 +109,10 @@ then verify the target's end offsets equal the source's.
 ### 3. Apply the cutover
 
 ```bash
-helm upgrade mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-migrate-2x.yaml \
-  -f charts/mirror-maker2/values-cutover.yaml
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-migrate-2x.yaml \
+  -f mirror-maker2/values-cutover.yaml
 ```
 
 This stops the **source** connector and keeps the **checkpoint** connector
@@ -168,8 +167,9 @@ period. It is the only rollback you have that does not involve a data merge.
 **Before producers have moved** — trivial. Remove the cutover overlay:
 
 ```bash
-helm upgrade mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-migrate-2x.yaml
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-migrate-2x.yaml
 ```
 
 `stopped` → `running` resumes from the connector's committed offsets, so nothing
@@ -199,9 +199,10 @@ consumers resume on the target.
 ### Failing over
 
 ```bash
-helm upgrade mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-prod.yaml \
-  -f charts/mirror-maker2/values-failover.yaml
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-prod.yaml \
+  -f mirror-maker2/values-failover.yaml
 ```
 
 That overlay sets three things, and each of them is a decision:
@@ -260,9 +261,10 @@ procedure.
    records the original never saw.
 
    ```bash
-   helm upgrade --install mm2-back charts/mirror-maker2 -n kafka \
-     -f charts/mirror-maker2/values-prod.yaml \
-     -f charts/mirror-maker2/values-failback.yaml \
+   helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+   helm upgrade --install mm2-back ./mirror-maker2 -n kafka \
+     -f mirror-maker2/values-prod.yaml \
+     -f mirror-maker2/values-failback.yaml \
      --set target.clusterName=<the original cluster> \
      --set 'mirrors[0].source.clusterName=<the failover cluster>'
    ```
@@ -273,9 +275,10 @@ procedure.
    cluster to itself. Check the rendered bootstraps before you install:
 
    ```bash
-   helm template mm2-back charts/mirror-maker2 -n kafka \
-     -f charts/mirror-maker2/values-prod.yaml \
-     -f charts/mirror-maker2/values-failback.yaml \
+   helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+   helm template mm2-back ./mirror-maker2 -n kafka \
+     -f mirror-maker2/values-prod.yaml \
+     -f mirror-maker2/values-failback.yaml \
      --set target.clusterName=<the original cluster> \
      --set 'mirrors[0].source.clusterName=<the failover cluster>' \
      | grep bootstrapServers
@@ -355,9 +358,10 @@ or chart-wide with `offsetSyncs.location: target`, which is what
 `charts/mirror-maker2/values-readonly-source.yaml` does:
 
 ```bash
-helm upgrade --install mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-kind.yaml \
-  -f charts/mirror-maker2/values-readonly-source.yaml
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade --install mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-kind.yaml \
+  -f mirror-maker2/values-readonly-source.yaml
 ```
 
 The chart writes the setting onto **both** connectors, because Kafka reads it on

@@ -172,17 +172,17 @@ older `kates detect` left in the stored values and which wins over the current
 one:
 
 ```bash
-helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values \
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka --reuse-values \
   --set monitoring.podMonitor.enabled=true --set podMonitors.enabled=true --set alerts.enabled=true
-helm upgrade connect-cluster charts/connect-cluster -n connect --reuse-values \
+helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect --reuse-values \
   --set monitoring.podMonitor.enabled=true --set alerts.enabled=true
-helm upgrade mm2 charts/mirror-maker2 -n kafka --reuse-values \
+helm upgrade mm2 oci://ghcr.io/bmscomp/charts/mirror-maker2 -n kafka --reuse-values \
   --set metrics.enabled=true --set podMonitors.enabled=true --set alerts.enabled=true
-helm upgrade kates charts/kates -n kates --reuse-values \
+helm upgrade kates oci://ghcr.io/bmscomp/charts/kates -n kates --reuse-values \
   --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true
-helm upgrade chaos charts/kates-chaos -n litmus --reuse-values \
+helm upgrade chaos oci://ghcr.io/bmscomp/charts/kates-chaos -n litmus --reuse-values \
   --set litmus-core.exporter.enabled=true --set monitoring.serviceMonitor.enabled=true
-helm upgrade monitoring charts/monitoring -n monitoring --reuse-values \
+helm upgrade monitoring oci://ghcr.io/bmscomp/charts/kates-monitoring -n monitoring --reuse-values \
   --set chaosAlerts.enabled=true
 helm upgrade kyverno kyverno/kyverno --version 3.7.2 -n kyverno --reuse-values \
   --set admissionController.serviceMonitor.enabled=true --set backgroundController.serviceMonitor.enabled=true
@@ -253,7 +253,7 @@ That is Grafana protecting the provisioner, not a broken installer.
 
 ```bash
 helm list -A | grep -i monitor      # find the release and its namespace
-helm upgrade monitoring charts/monitoring -n "$PROM_NS" --timeout 10m --wait
+helm upgrade monitoring oci://ghcr.io/bmscomp/charts/kates-monitoring -n "$PROM_NS" --timeout 10m --wait
 ```
 
 The sidecar notices the new ConfigMap within a minute or so and rewrites the

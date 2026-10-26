@@ -1,19 +1,16 @@
 # kates-platform
 
-Umbrella chart deploying the full Kates platform in one release: the Strimzi-based Kafka cluster (`kafka-cluster`) and the Kates application (`kates`). Both subcharts resolve from local `file://` references in this repository, so the umbrella always ships the code you checked out.
+Umbrella chart deploying the full Kates platform in one release: the Strimzi-based Kafka cluster (`kafka-cluster`) and the Kates application (`kates`). Both subcharts resolve from local `file://` references in this repository, so each published version of the umbrella packs the two charts as they were at its release.
 
 ## Install
 
 ```bash
-# The three Kafka subcharts each depend on the kafka-common library, and
-# `helm dependency build` takes one chart at a time.
-for c in kafka-cluster mirror-maker2 connect-cluster; do helm dependency build "charts/$c"; done
-helm dependency update charts/kates-platform
-helm install platform charts/kates-platform -n kates --create-namespace
+# The published chart carries its subcharts and their kafka-common library.
+helm install platform oci://ghcr.io/bmscomp/charts/kates-platform -n kates --create-namespace
 helm test platform -n kates
 ```
 
-The Strimzi operator must be running (see `charts/strimzi-operator`) before the Kafka CRs reconcile.
+The Strimzi operator must be running (install `oci://ghcr.io/bmscomp/charts/strimzi-operator` first) before the Kafka CRs reconcile.
 
 Any namespace works: Kafka and Kates both run in the release namespace, and the umbrella points Kates at it (the `kates.kafka.*`, `kates.trogdor.coordinatorUrl` and `kates.networkPolicy.kafka.namespace` rows below) and admits Kates to the brokers from it. The kates chart's own defaults name namespace `kafka`, where `kates deploy` installs Kafka. Nothing in the umbrella installs a Trogdor coordinator.
 

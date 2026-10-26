@@ -222,11 +222,11 @@ On the Kates Kind cluster, the monitoring stack — Prometheus, Grafana, the
 sidecar and all twelve boards — is one command:
 
 ```bash
-helm dependency build charts/monitoring
+helm pull oci://ghcr.io/bmscomp/charts/kates-monitoring --untar
 
-helm upgrade --install monitoring charts/monitoring \
+helm upgrade --install monitoring ./kates-monitoring \
   --namespace kafka --create-namespace \
-  -f charts/monitoring/values-kind.yaml \
+  -f kates-monitoring/values-kind.yaml \
   --timeout 10m --wait
 ```
 
@@ -238,38 +238,31 @@ Installing a board and filling it are different things: the boards arrive
 with `charts/monitoring`, and the workload charts decide whether they have
 data. §2's table is the full map. The switches that most often need turning
 on — written as upgrades of releases you already have, with `--reuse-values`
-so nothing else about the release moves, which is also how Tutorial 10 turns
+so each release keeps the values it has, which is also how Tutorial 10 turns
 MirrorMaker 2's observability on:
 
 ```bash
-helm upgrade mm2 charts/mirror-maker2 -n kafka --reuse-values \
+helm upgrade mm2 oci://ghcr.io/bmscomp/charts/mirror-maker2 -n kafka --reuse-values \
   --set metrics.enabled=true \
   --set podMonitors.enabled=true
 
-helm upgrade kates charts/kates -n kates --reuse-values \
+helm upgrade kates oci://ghcr.io/bmscomp/charts/kates -n kates --reuse-values \
   --set metrics.serviceMonitor.enabled=true
 ```
 
 `connect-cluster`, `mirror-maker2` and `kafka-cluster` are built on the
-`kafka-common` library chart, declared as a `file://` dependency. Nothing
-renders until it is resolved — not `helm template`, not `helm lint`, not `helm
-upgrade` — so run this once for any of them you are about to touch.
-`kates-chaos` and `monitoring` have remote dependencies (litmus-core and
-kube-prometheus-stack) and need the same treatment; `charts/kates` has none.
-
-```bash
-helm dependency build charts/connect-cluster
-helm dependency build charts/mirror-maker2
-helm dependency build charts/kates-chaos
-```
+`kafka-common` library chart, and `kates-chaos` and `monitoring` have remote
+dependencies (litmus-core and kube-prometheus-stack); `charts/kates` has none.
+The published charts carry them, so nothing is built first.
 
 Rehearse any of them before it reaches the cluster. `check-dashboards.py
 --render` reads a `helm template` stream on stdin and holds every dashboard
 ConfigMap in it to the same layout and documentation rules the directory gets:
 
 ```bash
-helm template monitoring charts/monitoring -n kafka \
-  -f charts/monitoring/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kates-monitoring --untar
+helm template monitoring ./kates-monitoring -n kafka \
+  -f kates-monitoring/values-kind.yaml \
   -s templates/grafana-dashboards.yaml \
   | python3 scripts/check-dashboards.py --render
 ```
@@ -305,7 +298,7 @@ worth keeping, because it is the same inspector that answers "which board is
 in this ConfigMap?" during an incident:
 
 ```bash
-helm template monitoring charts/monitoring -n kafka \
+helm template monitoring oci://ghcr.io/bmscomp/charts/kates-monitoring -n kafka \
   -s templates/grafana-dashboards.yaml \
   | python3 -c '
 import sys, json, yaml
@@ -966,7 +959,7 @@ All five get the label from one place — the labelmap at the top of
 PodMonitor:
 
 ```bash
-helm template krafter charts/kafka-cluster -n kafka \
+helm template krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   --api-versions monitoring.coreos.com/v1 \
   | grep -A4 'action: labelmap' | head -5
 ```
@@ -1304,7 +1297,7 @@ Confirm a chart would render the relabelings before blaming the cluster — the
 labelmap from 6.2, plus the five `replace` rules that follow it:
 
 ```bash
-helm template krafter charts/kafka-cluster -n kafka \
+helm template krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   --api-versions monitoring.coreos.com/v1 \
   | grep -A24 'relabelings:' | head -26
 ```
@@ -1374,8 +1367,9 @@ kubectl get podmonitors -A \
 Confirm what your own release renders rather than trusting either default:
 
 ```bash
-helm template monitoring charts/monitoring -n kafka \
-  -f charts/monitoring/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kates-monitoring --untar
+helm template monitoring ./kates-monitoring -n kafka \
+  -f kates-monitoring/values-kind.yaml \
   | python3 -c '
 import sys, yaml
 for d in yaml.safe_load_all(sys.stdin):
@@ -1383,7 +1377,7 @@ for d in yaml.safe_load_all(sys.stdin):
         print("podMonitorSelector:", d["spec"].get("podMonitorSelector"))
 '
 
-helm template krafter charts/kafka-cluster -n kafka \
+helm template krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   --api-versions monitoring.coreos.com/v1 \
   | python3 -c '
 import sys, yaml
@@ -1399,11 +1393,11 @@ rather move:
 
 ```bash
 # make the workload charts' monitors match the Prometheus
-helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values \
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka --reuse-values \
   --set monitoring.podMonitor.labels.release=monitoring
 
 # or widen the Prometheus to take any PodMonitor in any namespace
-helm upgrade monitoring charts/monitoring -n kafka --reuse-values \
+helm upgrade monitoring oci://ghcr.io/bmscomp/charts/kates-monitoring -n kafka --reuse-values \
   --set kube-prometheus-stack.prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false
 ```
 

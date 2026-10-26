@@ -136,22 +136,20 @@ The CLI deploys the `connect-cluster` chart as a separate Helm release (into the
 For CI pipelines or when fine-grained control is needed:
 
 ```bash
-# Build the kafka-common library dependency first
-helm dependency build charts/connect-cluster
-
 # Basic deployment (same namespace as Kafka)
-helm upgrade --install connect-cluster charts/connect-cluster \
+helm upgrade --install connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster \
   --namespace kafka
 
 # Connect in its own namespace
-helm upgrade --install connect-cluster charts/connect-cluster \
+helm upgrade --install connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster \
   --namespace connect --create-namespace \
   --set kafka.namespace=kafka
 
 # With environment overlay
-helm upgrade --install connect-cluster charts/connect-cluster \
+helm pull oci://ghcr.io/bmscomp/charts/connect-cluster --untar
+helm upgrade --install connect-cluster ./connect-cluster \
   --namespace connect --create-namespace \
-  -f charts/connect-cluster/values-prod.yaml
+  -f connect-cluster/values-prod.yaml
 ```
 
 `kafka.namespace` defaults to the release's own namespace, so a release outside the Kafka namespace has to name it. `values-prod.yaml` sets it to `kafka`, turns on `productionMode`, and dials the TLS listener (9093) with `kafka.authentication.type: tls` and a chart-managed `KafkaUser` (`kafkaUser.create: true`).
@@ -551,11 +549,8 @@ Every check is an error:
 A class outside this table counts as a sink when its name contains `Sink`; `type: sink` or `type: source` on the connector overrides that. The same pass checks the rest of the values too — floating image tags, TLS with SCRAM on the mutual-TLS port, `exactly.once.source.support` in `extraConfig`, a replication factor above `kafka.brokerCount` — and the chart README lists every rail. Render your values before an upgrade; a PostgreSQL connector without `topic.prefix`, for example, fails like this:
 
 ```bash
-# charts/connect-cluster/charts/ is generated and gitignored, so a fresh
-# checkout needs the kafka-common library before helm will render anything
-helm dependency build charts/connect-cluster
-
-helm template connect-cluster charts/connect-cluster -n connect -f my-values.yaml > /dev/null
+helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster \
+  -n connect -f my-values.yaml > /dev/null
 ```
 
 Output:
@@ -1021,10 +1016,8 @@ helm test connect-cluster -n connect
 
 # Deploy the CDC topic (in the kafka namespace, on the krafter cluster) and the
 # working-example connectors persistently. kafka.namespace defaults to the
-# release namespace, so name it as kates deploy does. The chart renders only
-# once the kafka-common library is in charts/connect-cluster/charts/.
-helm dependency build charts/connect-cluster
-helm template connect-cluster charts/connect-cluster -n connect \
+# release namespace, so name it as kates deploy does.
+helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect \
   --set kafka.namespace=kafka \
   -s templates/tests/test-02-topics.yaml \
   -s templates/tests/test-02-connectors.yaml | kubectl apply -f -

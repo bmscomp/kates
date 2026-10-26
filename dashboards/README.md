@@ -399,7 +399,7 @@ changing a board; `--check` fails CI when it is stale.
 One chart ships all twelve, on by default:
 
 ```bash
-helm upgrade --install monitoring charts/monitoring -n monitoring --create-namespace
+helm upgrade --install monitoring oci://ghcr.io/bmscomp/charts/kates-monitoring -n monitoring --create-namespace
 ```
 
 Every route installs the boards identically — one copy each, under its base
