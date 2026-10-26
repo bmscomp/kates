@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/detect"
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -355,6 +357,16 @@ func PrintDeployBanner(target string) {
 		Render(strings.Repeat(g.HeavyRule, uiWidth())))
 }
 
+// printPlatform says what deploy is about to install onto: the platform and
+// how it was told, the Kubernetes version, and the account.
+func printPlatform(target, account string) {
+	provider, basis, version := detect.Platform(defaultExecutor, target)
+	if version == "" {
+		version = "version unknown"
+	}
+	PrintPhaseItem(fmt.Sprintf("%s (%s) · Kubernetes %s · %s", provider, basis, version, account))
+}
+
 // bannerSubtitle is the one-line context: CLI version and target cluster,
 // each omitted when unknown rather than printed as "unknown".
 func bannerSubtitle(target string) string {
@@ -366,6 +378,13 @@ func bannerSubtitle(target string) string {
 		parts = append(parts, target)
 	}
 	return strings.Join(parts, "  ·  ")
+}
+
+// accessibleUI is huh's line-by-line prompting and a printed, not live,
+// deploy dashboard: for screen readers and dumb terminals (TERM=dumb, or
+// KATES_ACCESSIBLE=1).
+func accessibleUI() bool {
+	return os.Getenv("TERM") == "dumb" || os.Getenv("KATES_ACCESSIBLE") == "1"
 }
 
 // ThemeKates returns a custom huh theme using the Kates blue palette,

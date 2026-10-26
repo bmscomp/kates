@@ -171,7 +171,7 @@ func runVersionPickerForm() error {
 			kafkaSelect,
 		}
 	}
-	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(ThemeKates())
+	form := huh.NewForm(huh.NewGroup(fields...)).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
 
 	if err := form.Run(); err != nil {
 		return err
@@ -315,7 +315,7 @@ func runDeployReviewForm() error {
 				Negative("Cancel").
 				Value(&confirm),
 		),
-	).WithTheme(ThemeKates())
+	).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
 	if err := form.Run(); err != nil {
 		return err
 	}

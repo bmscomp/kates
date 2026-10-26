@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/bmscomp/kates/cli/output"
@@ -24,6 +25,9 @@ var dl *DashboardController
 
 type DashboardController struct {
 	p *tea.Program
+	// closed is set once the window is gone (Ctrl-C closes it mid-deploy):
+	// what the deploy says from then on goes to the terminal.
+	closed atomic.Bool
 }
 
 // Every method tolerates a nil receiver. dl is a package-level pointer set
@@ -31,8 +35,12 @@ type DashboardController struct {
 // a step that moved earlier than the dashboard's construction — would
 // otherwise panic mid-deploy on a log line. Logging is never worth a crash.
 
+func (c *DashboardController) live() bool {
+	return c != nil && c.p != nil && !c.closed.Load()
+}
+
 func (c *DashboardController) Printf(format string, a ...any) {
-	if c != nil && c.p != nil {
+	if c.live() {
 		c.p.Send(logMsg{text: fmt.Sprintf(format, a...)})
 	} else {
 		fmt.Printf(format, a...)
@@ -40,7 +48,7 @@ func (c *DashboardController) Printf(format string, a ...any) {
 }
 
 func (c *DashboardController) Println(a ...any) {
-	if c != nil && c.p != nil {
+	if c.live() {
 		c.p.Send(logMsg{text: fmt.Sprint(a...)})
 	} else {
 		fmt.Println(a...)
@@ -48,19 +56,19 @@ func (c *DashboardController) Println(a ...any) {
 }
 
 func (c *DashboardController) StartComponent(id string, timeout time.Duration) {
-	if c != nil && c.p != nil {
+	if c.live() {
 		c.p.Send(compStatusMsg{id: id, active: true, timeout: timeout})
 	}
 }
 
 func (c *DashboardController) FinishComponent(id string, success bool) {
-	if c != nil && c.p != nil {
+	if c.live() {
 		c.p.Send(compStatusMsg{id: id, active: false, done: true, success: success})
 	}
 }
 
 func (c *DashboardController) UpdateProgress(current, total int) {
-	if c != nil && c.p != nil {
+	if c.live() {
 		c.p.Send(progressMsg{current: current, total: total})
 	}
 }
@@ -130,6 +138,11 @@ type deployDashboardModel struct {
 
 	focusedPane int // 0: components, 1: logs
 	helmVersion string
+	// scrolled is set once a key scrolls the components pane; until then the
+	// pane follows the component being deployed.
+	scrolled bool
+	// interrupted is set when Ctrl-C closed the window before the deploy ended.
+	interrupted bool
 
 	// read runs the poller's kubectl queries. It is the seam as it stood when
 	// the dashboard was built: the poller runs on Bubble Tea's goroutines,
@@ -145,7 +158,8 @@ func NewDeployDashboard(ctx context.Context, totalSteps int) deployDashboardMode
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(theme.Accent)
 
-	prog := progress.New(progress.WithDefaultGradient())
+	// The header prints the percentage itself.
+	prog := progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage())
 
 	logsVp := viewport.New(100, 10)
 	compVp := viewport.New(100, 15)
@@ -265,13 +279,6 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat, read fun
 							stat.ready = *item.Status.ReadyReplicas
 						}
 					}
-					// Poll pods for this workload to get phase
-					podOut, _ := read(ctx, "kubectl", "get", "pods", "-n", target.Namespace, "-l", target.Selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}")
-					phases := strings.Split(strings.TrimSpace(string(podOut)), ",")
-					if len(phases) > 0 && phases[0] != "" {
-						stat.phase = phases[0] // Simplify by just taking the first pod's phase for the workload
-					}
-
 					workloads = append(workloads, stat)
 				}
 			}
@@ -360,7 +367,11 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
-			m.cancel() // cancel context for background workers
+			// Closes the window only. Helm may be mid-install, so the deploy
+			// goes on, printing to the terminal (runDeploy); the terminal is
+			// no longer raw, so a second Ctrl-C ends kates.
+			m.cancel() // stops the poller
+			m.interrupted = true
 			return m, tea.Quit
 		}
 		if msg.String() == "tab" {
@@ -371,6 +382,7 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		if m.focusedPane == 0 {
 			m.componentsViewport, cmd = m.componentsViewport.Update(msg)
+			m.scrolled = true
 		} else {
 			m.logsViewport, cmd = m.logsViewport.Update(msg)
 		}
@@ -429,33 +441,41 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				c.Workloads = w
 			}
 		}
+		// The next poll waits for this one: ticking regardless stacked
+		// kubectl calls up whenever a poll took longer than the tick.
+		cmds = append(cmds, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }))
 
 	case tickMsg:
-		cmds = append(cmds,
-			pollAllWorkloads(m.ctx, m.components, m.read),
-			tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
-		)
+		// Only the components that have started have workloads to show.
+		var started []*componentStat
+		for _, c := range m.components {
+			if c.Active || c.Done {
+				started = append(started, c)
+			}
+		}
+		cmds = append(cmds, pollAllWorkloads(m.ctx, started, m.read))
 	}
 
 	var cmd tea.Cmd
 	m.spinner, cmd = m.spinner.Update(msg)
 	cmds = append(cmds, cmd)
 
+	// The pane's content lives in the model, not only in View's copy, so
+	// the keys can scroll it.
+	content, activeLine := m.componentsContent()
+	m.componentsViewport.SetContent(content)
+	if !m.scrolled && activeLine >= 0 {
+		m.componentsViewport.SetYOffset(activeLine - 1) // with the line above it
+	}
+
 	return m, tea.Batch(cmds...)
 }
 
-func (m deployDashboardModel) View() string {
+// componentsContent is the components pane, and the line the first component
+// being deployed starts on (-1 when none is).
+func (m deployDashboardModel) componentsContent() (string, int) {
 	var b strings.Builder
-
-	pct := float64(m.currentStep) / float64(m.totalSteps)
-	if m.totalSteps == 0 {
-		pct = 0
-	}
-	if pct > 1.0 {
-		pct = 1.0
-	}
-
-	bar := m.progressBar.ViewAs(pct)
+	activeLine := -1
 
 	prevGroup := ""
 	for i, c := range m.components {
@@ -473,105 +493,94 @@ func (m deployDashboardModel) View() string {
 			b.WriteString(fmt.Sprintf("%s\n", lipgloss.NewStyle().Bold(true).Foreground(theme.Accent).Render("── "+label)))
 		}
 
-		if !c.Active && !c.Done {
-			b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("◯ Pending...")))
-		} else {
-			icon := m.spinner.View()
-			if c.Done {
-				if c.Success {
-					icon = output.SuccessStyle.Render("✔")
-				} else {
-					icon = output.ErrorStyle.Render("✖")
-				}
+		if c.Active && activeLine < 0 {
+			activeLine = strings.Count(b.String(), "\n")
+		}
+
+		// A pending component is named too: the pane is the plan as well as
+		// the progress.
+		icon, statusText, name := output.DimStyle.Render("◯"), output.DimStyle.Render("Pending"), output.DimStyle.Render(c.Name)
+		switch {
+		case c.Done && c.Success:
+			icon, statusText = output.SuccessStyle.Render("✔"), output.AccentStyle.Render("Ready")
+		case c.Done:
+			icon, statusText = output.ErrorStyle.Render("✖"), output.ErrorStyle.Render("Failed")
+		case c.Active:
+			icon, statusText = m.spinner.View(), output.DimStyle.Render("Deploying...")
+		}
+		if c.Active || c.Done {
+			name = lipgloss.NewStyle().Bold(true).Render(c.Name)
+		}
+
+		nsStr := ""
+		if len(c.Targets) > 0 {
+			nsStr = " [" + c.Targets[0].Namespace + "]"
+		}
+		leftPart := fmt.Sprintf("%s %s%s", icon, name, output.DimStyle.Render(nsStr))
+		rightPart := statusText
+		// We just use m.compWidth for total width
+		spaces := m.compWidth - lipgloss.Width(leftPart) - lipgloss.Width(rightPart)
+		if spaces < 1 {
+			spaces = 1
+		}
+		fmt.Fprintf(&b, "%s%s%s\n", leftPart, strings.Repeat(" ", spaces), rightPart)
+
+		// Render timeout bar if active
+		if c.Active && !c.Done && c.Timeout > 0 {
+			elapsed := time.Since(c.StartTime)
+			if elapsed > c.Timeout {
+				elapsed = c.Timeout
 			}
 
-			statusText := output.DimStyle.Render("Deploying...")
-			if c.Done {
-				if c.Success {
-					statusText = output.AccentStyle.Render("Ready")
-				} else {
-					statusText = output.ErrorStyle.Render("Failed")
-				}
+			tLeft := fmt.Sprintf("  %s", output.DimStyle.Render("Timeout"))
+
+			// Format mm:ss
+			eM := int(elapsed.Minutes())
+			eS := int(elapsed.Seconds()) % 60
+			tM := int(c.Timeout.Minutes())
+			tS := int(c.Timeout.Seconds()) % 60
+
+			tRight := fmt.Sprintf("[%s] %02d:%02d / %02d:%02d",
+				renderProgressBar(int(elapsed.Seconds()), int(c.Timeout.Seconds()), 15, false, true),
+				eM, eS, tM, tS)
+
+			tSpaces := m.compWidth - lipgloss.Width(tLeft) - lipgloss.Width(tRight)
+			if tSpaces < 1 {
+				tSpaces = 1
+			}
+			fmt.Fprintf(&b, "%s%s%s\n", tLeft, strings.Repeat(" ", tSpaces), output.DimStyle.Render(tRight))
+		}
+
+		for _, w := range c.Workloads {
+			name := w.name
+			maxNameLen := (m.compWidth - 4) * 45 / 100
+			if maxNameLen < 18 {
+				maxNameLen = 18
+			}
+			if len(name) > maxNameLen {
+				name = name[:maxNameLen-3] + "..."
+			}
+			barReady := w.ready
+			barTotal := w.expected
+			if barTotal == 0 {
+				barTotal = 1
+				barReady = 1
 			}
 
-			nsStr := ""
-			if len(c.Targets) > 0 {
-				nsStr = " [" + c.Targets[0].Namespace + "]"
-			}
-			boldStyle := lipgloss.NewStyle().Bold(true)
-			leftPart := fmt.Sprintf("%s %s%s", icon, boldStyle.Render(c.Name), output.DimStyle.Render(nsStr))
-			rightPart := statusText
-			// We just use m.compWidth for total width
-			spaces := m.compWidth - lipgloss.Width(leftPart) - lipgloss.Width(rightPart)
-			if spaces < 1 {
-				spaces = 1
-			}
-			b.WriteString(fmt.Sprintf("%s%s%s\n", leftPart, strings.Repeat(" ", spaces), rightPart))
-
-			// Render timeout bar if active
-			if c.Active && !c.Done && c.Timeout > 0 {
-				elapsed := time.Since(c.StartTime)
-				if elapsed > c.Timeout {
-					elapsed = c.Timeout
-				}
-
-				tLeft := fmt.Sprintf("  %s", output.DimStyle.Render("Timeout"))
-
-				// Format mm:ss
-				eM := int(elapsed.Minutes())
-				eS := int(elapsed.Seconds()) % 60
-				tM := int(c.Timeout.Minutes())
-				tS := int(c.Timeout.Seconds()) % 60
-
-				tRight := fmt.Sprintf("[%s] %02d:%02d / %02d:%02d",
-					renderProgressBar(int(elapsed.Seconds()), int(c.Timeout.Seconds()), 15, false, true),
-					eM, eS, tM, tS)
-
-				tSpaces := m.compWidth - lipgloss.Width(tLeft) - lipgloss.Width(tRight)
-				if tSpaces < 1 {
-					tSpaces = 1
-				}
-				b.WriteString(fmt.Sprintf("%s%s%s\n", tLeft, strings.Repeat(" ", tSpaces), output.DimStyle.Render(tRight)))
+			// From the ready count: the first pod's phase, read before, put
+			// a healthy workload in amber as "Running".
+			status := output.AccentStyle.Render("Ready")
+			if w.ready < w.expected {
+				status = output.WarningStyle.Render("Waiting")
 			}
 
-			for _, w := range c.Workloads {
-				name := w.name
-				maxNameLen := (m.compWidth - 4) * 45 / 100
-				if maxNameLen < 18 {
-					maxNameLen = 18
-				}
-				if len(name) > maxNameLen {
-					name = name[:maxNameLen-3] + "..."
-				}
-				barReady := w.ready
-				barTotal := w.expected
-				if barTotal == 0 {
-					barTotal = 1
-					barReady = 1
-				}
-
-				status := w.phase
-				if status == "" {
-					if w.ready >= w.expected {
-						status = "Ready"
-					} else {
-						status = "Pending"
-					}
-				}
-				if status == "Ready" {
-					status = output.AccentStyle.Render("Ready")
-				} else {
-					status = output.WarningStyle.Render(status)
-				}
-
-				wLeft := fmt.Sprintf("  %s", output.DimStyle.Render(name)) // removed one space
-				wRight := fmt.Sprintf("[%s] %2d/%-2d %s", renderProgressBar(barReady, barTotal, 10, false, false), w.ready, w.expected, status)
-				wSpaces := m.compWidth - lipgloss.Width(wLeft) - lipgloss.Width(wRight)
-				if wSpaces < 1 {
-					wSpaces = 1
-				}
-				b.WriteString(fmt.Sprintf("%s%s%s\n", wLeft, strings.Repeat(" ", wSpaces), wRight))
+			wLeft := fmt.Sprintf("  %s", output.DimStyle.Render(name)) // removed one space
+			wRight := fmt.Sprintf("[%s] %2d/%-2d %s", renderProgressBar(barReady, barTotal, 10, false, false), w.ready, w.expected, status)
+			wSpaces := m.compWidth - lipgloss.Width(wLeft) - lipgloss.Width(wRight)
+			if wSpaces < 1 {
+				wSpaces = 1
 			}
+			fmt.Fprintf(&b, "%s%s%s\n", wLeft, strings.Repeat(" ", wSpaces), wRight)
 		}
 
 		if isLastInGroup {
@@ -581,23 +590,19 @@ func (m deployDashboardModel) View() string {
 		prevGroup = c.Group
 	}
 
-	// Calculate which line the active component starts at to auto-scroll
-	contentStr := b.String()
-	m.componentsViewport.SetContent(contentStr)
+	return b.String(), activeLine
+}
 
-	// Simple auto-scroll heuristic: if there's an active component, scroll roughly to it
-	activeIdx := -1
-	for i, c := range m.components {
-		if c.Active {
-			activeIdx = i
-			break
-		}
+func (m deployDashboardModel) View() string {
+	pct := float64(m.currentStep) / float64(m.totalSteps)
+	if m.totalSteps == 0 {
+		pct = 0
 	}
-	if activeIdx >= 0 && m.focusedPane != 0 {
-		pct := float64(activeIdx) / float64(len(m.components))
-		targetLine := int(pct * float64(m.componentsViewport.TotalLineCount()))
-		m.componentsViewport.SetYOffset(targetLine)
+	if pct > 1.0 {
+		pct = 1.0
 	}
+
+	bar := m.progressBar.ViewAs(pct)
 
 	var out strings.Builder
 
@@ -642,7 +647,6 @@ type workloadStat struct {
 	name     string
 	ready    int
 	expected int
-	phase    string
 }
 
 type tickMsg time.Time

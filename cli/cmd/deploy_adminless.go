@@ -63,7 +63,7 @@ func runProfileForm() error {
 				huh.NewOption("Admin-less — Kafka, Connect, MirrorMaker 2, Apicurio, Kafka UI, Kates; no chaos engineering", true),
 			).
 			Value(&deployAdminless),
-	)).WithTheme(ThemeKates()).Run()
+	)).WithTheme(ThemeKates()).WithAccessible(accessibleUI()).Run()
 }
 
 // The flags the profile leaves out: each installs something cluster-scoped.

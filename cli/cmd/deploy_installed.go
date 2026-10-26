@@ -123,6 +123,40 @@ func describeInstalled(e DeploySummaryEntry, chart, dir string) string {
 	return fmt.Sprintf("%s %s → %s in %s (%s)", e.Name, have, ours, e.Namespace, verb)
 }
 
+// installedHints is, per wizard component option, the releases of it already
+// deployed in any namespace ("kafka-ui-0.3.2 in kafka"). It is read before
+// the namespaces are chosen, so the component list can show them.
+func installedHints(ctx context.Context) map[string]string {
+	ns := resolveNamespaces()
+	options := []struct{ option, release, namespace string }{
+		{"strimzi", "strimzi-operator", "strimzi-operator"},
+		{"kafka-connect", "connect-cluster", ns.connect},
+		{"kafka-ui", "kafka-ui", ns.kafkaUI},
+		{"mirror-maker2", "mm2", ns.mm2},
+		{"chaos", "chaos", ns.chaos},
+		{"monitoring", "monitoring", ns.jaeger},
+		{"cert-manager", "cert-manager", "cert-manager"},
+		{"kyverno", "kyverno", "kyverno"},
+	}
+	entries := make([]DeploySummaryEntry, len(options))
+	for i, o := range options {
+		entries[i] = DeploySummaryEntry{Release: o.release, Namespace: o.namespace}
+	}
+	hints := map[string]string{}
+	for _, r := range deployedReleases(ctx, entries) {
+		i := slices.IndexFunc(options, func(o struct{ option, release, namespace string }) bool { return o.release == r.Name })
+		if i < 0 {
+			continue
+		}
+		hint := r.Chart + " in " + r.Namespace
+		if prev := hints[options[i].option]; prev != "" {
+			hint = prev + ", " + hint
+		}
+		hints[options[i].option] = hint
+	}
+	return hints
+}
+
 // installedRow is a component of this deploy that is already installed.
 type installedRow struct {
 	release string
@@ -294,7 +328,7 @@ func runInstalledReleasesForm() error {
 			Options(options...).
 			Value(&picked))
 	}
-	if err := huh.NewForm(huh.NewGroup(fields...)).WithTheme(ThemeKates()).Run(); err != nil {
+	if err := huh.NewForm(huh.NewGroup(fields...)).WithTheme(ThemeKates()).WithAccessible(accessibleUI()).Run(); err != nil {
 		return err
 	}
 	for _, o := range options {
