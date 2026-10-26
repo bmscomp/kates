@@ -283,7 +283,7 @@
   <!-- sheet fields -->
   <g font-family="'JetBrains Mono'" font-size="36">
     <text x="572" y="865" fill="#8FD0FF" font-weight="500">SHEET: <tspan fill="#F2F6FC" font-weight="700">KAFKA RESILIENCE</tspan></text>
-    <text x="1282" y="865" fill="#8FD0FF" font-weight="500">katesplatforme.io</text>
+    <text x="1282" y="865" fill="#8FD0FF" font-weight="500">katesplatform.io</text>
     <text x="1732" y="865" fill="#F2F6FC" font-weight="700">APACHE 2.0</text>
   </g>
 </svg>

@@ -149,7 +149,7 @@
   </g>
 
   <!-- the site, on the wordmark's baseline, its right edge flush with the line below (ink ends at x 2023) -->
-  <text x="2027" y="655" text-anchor="end" font-family="JetBrains Mono" font-weight="500" font-size="40" fill="#1a5bcc">katesplatforme.io</text>
+  <text x="2027" y="655" text-anchor="end" font-family="JetBrains Mono" font-weight="500" font-size="40" fill="#1a5bcc">katesplatform.io</text>
 
   <!-- one line below the streams: the site's headline -->
   <text x="950" y="840" font-family="Avenir Next" font-weight="500" font-size="48" fill="#2b3350">Break your Kafka cluster before production does.</text>

@@ -125,7 +125,7 @@
     </g>
     <rect x="258" y="14" width="238" height="38" rx="19" fill="#F59E0B" fill-opacity="0.16" stroke="#F59E0B" stroke-width="1.5"/>
     <circle cx="280" cy="33" r="5" fill="#FBBF24"/>
-    <text x="296" y="39" fill="#FDE68A" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700">katesplatforme.io</text>
+    <text x="296" y="39" fill="#FDE68A" font-family="JetBrains Mono, monospace" font-size="18" font-weight="700">katesplatform.io</text>
 
     <text x="108" y="80" fill="#94A3B8" font-family="JetBrains Mono, monospace" font-size="17" font-weight="500">KAFKA ADVANCED TESTING &amp; ENGINEERING SUITE · APACHE 2.0</text>
 

@@ -1,4 +1,4 @@
-# katesplatforme.io
+# katesplatform.io
 
 The marketing site for Kates. Plain HTML, CSS and one small script, no build step: the
 folder is the site. The book at <https://bmscomp.github.io/kates/> stays where it is; this
@@ -10,6 +10,7 @@ website/
 ├── styles.css      the Paper theme (light, EB Garamond headings) and the layout
 ├── themes/         alternative palettes (navy, phosphor, ember, slate); add one <link> after styles.css to switch
 ├── site.js         mobile menu and footer year
+├── CNAME           custom domain (katesplatform.io) for GitHub Pages
 ├── _headers        security and cache headers (Cloudflare Pages, Netlify)
 ├── robots.txt, sitemap.xml
 └── assets/         logo, wordmark, screenshots, social preview (copied from docs/)
@@ -32,7 +33,7 @@ Setup, once:
    integration: the workflow uploads the folder).
 2. Add two repository secrets: `CLOUDFLARE_API_TOKEN` (a token with *Cloudflare Pages:
    Edit*) and `CLOUDFLARE_ACCOUNT_ID`.
-3. In the Pages project, add the custom domain `katesplatforme.io` and `www.katesplatforme.io`.
+3. In the Pages project, add the custom domain `katesplatform.io` and `www.katesplatform.io`.
    If the domain's DNS is on Cloudflare the records are created for you; otherwise add a
    `CNAME` for both names pointing at `kates-website.pages.dev`.
 
@@ -40,10 +41,11 @@ Without the secrets the deploy step is skipped and only the validation runs, so 
 workflow is safe on forks. [`plans/website.md`](../plans/website.md) has the full plan,
 including the alternatives (Netlify, GitHub Pages on a second repository).
 
-### GitHub Pages at https://bmscomp.github.io/katesplatform.io/
+### GitHub Pages at https://katesplatform.io/ (via `bmscomp/katesplatform.io`)
 
 The same workflow also publishes the folder to a second repository,
-`bmscomp/katesplatform.io`, whose GitHub Pages site is served at that URL. This
+`bmscomp/katesplatform.io`, whose GitHub Pages site is served at <https://katesplatform.io/>
+(with `CNAME` included in `website/CNAME` and DNS `A` records pointing to GitHub Pages). This
 repository's own Pages slot is the book, which is why a second repository is needed. The
 page uses relative links only, so it works under the `/katesplatform.io/` path as it does at
 the domain root. Setup, once:

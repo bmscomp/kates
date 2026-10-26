@@ -72,7 +72,7 @@
       </g>
     </g>
     <rect x="248" y="14" width="225" height="36" rx="18" fill="#10B981" fill-opacity="0.16" stroke="#10B981" stroke-width="1.5"/>
-    <text x="268" y="38" fill="#6EE7B7" font-family="JetBrains Mono, monospace" font-size="17" font-weight="700">katesplatforme.io</text>
+    <text x="268" y="38" fill="#6EE7B7" font-family="JetBrains Mono, monospace" font-size="17" font-weight="700">katesplatform.io</text>
     <text x="104" y="76" fill="#94A3B8" font-family="JetBrains Mono, monospace" font-size="15">github.com/bmscomp/kates · CLI + Helm + Book</text>
 
     <text x="0" y="148" fill="#FFFFFF" font-family="Inter, -apple-system, sans-serif" font-size="40" font-weight="800">
@@ -88,7 +88,7 @@
     <!-- Bottom Domain & Book Callout -->
     <rect x="0" y="274" width="680" height="52" rx="12" fill="#0B1324" stroke="#1E293B" stroke-width="1.5"/>
     <text x="20" y="306" fill="#E2E8F0" font-family="JetBrains Mono, monospace" font-size="16">
-      📚 Free 40-Chapter Engineering Book &amp; Tutorials → <tspan fill="#38BDF8" font-weight="700">katesplatforme.io</tspan>
+      📚 Free 40-Chapter Engineering Book &amp; Tutorials → <tspan fill="#38BDF8" font-weight="700">katesplatform.io</tspan>
     </text>
   </g>
 

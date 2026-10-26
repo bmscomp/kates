@@ -1,8 +1,8 @@
-# katesplatforme.io — Website Plan (2026-10-25)
+# katesplatform.io — Website Plan (2026-10-25)
 
 **Status: first version in `website/`, deploy workflow in `.github/workflows/website.yml`, DNS and Cloudflare project still to be created by the domain owner.**
 
-Goal: a public site at **katesplatforme.io** that promotes Kates as a technology (performance testing, chaos engineering and security auditing for Apache Kafka on Kubernetes), sends visitors to the quick start, the book and the GitHub repository, and costs nothing to host or maintain. The book at <https://bmscomp.github.io/kates/> is the reference manual and keeps its URL; the website is the front door to it.
+Goal: a public site at **katesplatform.io** that promotes Kates as a technology (performance testing, chaos engineering and security auditing for Apache Kafka on Kubernetes), sends visitors to the quick start, the book and the GitHub repository, and costs nothing to host or maintain. The book at <https://bmscomp.github.io/kates/> is the reference manual and keeps its URL; the website is the front door to it.
 
 ## 1. Audience and message
 
@@ -65,7 +65,7 @@ GitHub Pages serves one site per repository and `bmscomp.github.io/kates` alread
 1. **Project.** In the Cloudflare dashboard, Workers & Pages → Create → Pages → *Direct upload*, name `kates-website`. The first upload can be empty; the workflow fills it.
 2. **Token.** My Profile → API Tokens → Create Token → *Edit Cloudflare Workers* template, or a custom token with *Account · Cloudflare Pages · Edit*. Copy the account ID from the dashboard's URL or the Workers & Pages overview.
 3. **Secrets.** Repository Settings → Secrets and variables → Actions: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`. Optionally create a GitHub *environment* named `website` and move the secrets there so a deploy can require a reviewer.
-4. **Domain.** Pages project → Custom domains → add `katesplatforme.io` and `www.katesplatforme.io`. With the zone on Cloudflare, the `CNAME` records are created automatically and `www` can be redirected to the apex with a Bulk Redirect or a Page Rule. With DNS elsewhere, add `CNAME katesplatforme.io → kates-website.pages.dev` (or `ALIAS`/`ANAME` at the apex where the registrar supports it) and the same for `www`, then wait for the certificate.
+4. **Domain.** Pages project → Custom domains → add `katesplatform.io` and `www.katesplatform.io`. With the zone on Cloudflare, the `CNAME` records are created automatically and `www` can be redirected to the apex with a Bulk Redirect or a Page Rule. With DNS elsewhere, add `CNAME katesplatform.io → kates-website.pages.dev` (or `ALIAS`/`ANAME` at the apex where the registrar supports it) and the same for `www`, then wait for the certificate.
 5. **Deploy.** Merge to `main`. `.github/workflows/website.yml` validates the HTML with `html-validate`, checks every local `src`/`href` exists, and runs `wrangler pages deploy website --project-name=kates-website`. Without the two secrets the deploy step is skipped and only the validation runs, so forks and the first pull request stay green.
 
 ### Workflow behaviour
@@ -80,7 +80,7 @@ GitHub Pages serves one site per repository and `bmscomp.github.io/kates` alread
 - `npx html-validate website/index.html` passes; the page renders without horizontal scroll at 360, 768 and 1440 px (checked with Playwright in this session).
 - Lighthouse after deploy: aim for ≥ 95 on Performance, Accessibility, Best Practices and SEO. The fonts and the two PNG screenshots are the only external or heavy resources.
 - Open Graph check with the Twitter/X card validator or <https://opengraph.xyz> once the domain serves `assets/social-preview.png`.
-- `curl -I https://katesplatforme.io` shows the `_headers` values; <https://securityheaders.com> grades it.
+- `curl -I https://katesplatform.io` shows the `_headers` values; <https://securityheaders.com> grades it.
 - Search Console: add the property, submit `sitemap.xml`.
 
 ## 5. Later, if wanted

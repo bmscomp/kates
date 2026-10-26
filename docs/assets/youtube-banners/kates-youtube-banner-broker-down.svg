@@ -157,7 +157,7 @@
     </g>
   </g>
   <line x1="866" y1="556" x2="866" y2="612" stroke="#2c3a5c" stroke-width="3"/>
-  <text x="896" y="608" font-family="'JetBrains Mono', monospace" font-size="38" font-weight="500" fill="#8a97b4">katesplatforme.io</text>
+  <text x="896" y="608" font-family="'JetBrains Mono', monospace" font-size="38" font-weight="500" fill="#8a97b4">katesplatform.io</text>
 
   <!-- Headline: the site's own line, the second half in the fault colour -->
   <g font-family="'Avenir Next Condensed', 'Helvetica Neue', sans-serif" font-weight="700" font-size="104">

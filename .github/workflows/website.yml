@@ -1,4 +1,4 @@
-name: Website · katesplatforme.io
+name: Website · katesplatform.io
 
 on:
   pull_request:
@@ -56,7 +56,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: website
-      url: https://katesplatforme.io
+      url: https://katesplatform.io
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -97,7 +97,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: website-github-pages
-      url: https://bmscomp.github.io/katesplatform.io/
+      url: https://katesplatform.io/
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
