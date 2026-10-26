@@ -222,6 +222,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"apicurio", cleanNamespace},
 			helmRelease{"connect-cluster", cleanNamespace},
 			helmRelease{"mm2", cleanNamespace},
+			helmRelease{"kafka-ui", cleanNamespace},
 		)
 		coreReleases = append(coreReleases,
 			helmRelease{"jaeger", cleanNamespace},
@@ -240,6 +241,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"apicurio", cleanKafkaNS},
 			helmRelease{"connect-cluster", cleanConnectNS},
 			helmRelease{"mm2", cleanMM2NS},
+			helmRelease{"kafka-ui", cleanKafkaNS},
 		)
 		coreReleases = append(coreReleases,
 			helmRelease{"jaeger", cleanMonitoringNS},
