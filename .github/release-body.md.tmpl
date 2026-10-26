@@ -1,0 +1,66 @@
+Run an Apache Kafka performance test and enforce an **A–F** SLA grade gate in GitHub Actions with [Kates](https://github.com/bmscomp/kates).
+
+The action installs the `kates` CLI (when not already on `PATH`), runs `kates gate -o json` against a reachable Kates API, exposes the run's grade and verdict as step outputs, writes a Markdown SLA summary table to `$GITHUB_STEP_SUMMARY`, and exits non-zero when the grade falls below `min-grade`.
+
+## Usage
+
+```yaml
+steps:
+  - name: Run Kafka SLA Quality Gate
+    id: kafka-gate
+    uses: bmscomp/kates@__TAG__
+    with:
+      api-url: http://localhost:8080
+      api-key: ${{ secrets.KATES_API_KEY }}
+      min-grade: B
+      type: LOAD
+      records: 100000
+      timeout: 180
+```
+
+## Inputs
+
+| Input | Default | Description |
+|:------|:--------|:------------|
+| `api-url` | `http://localhost:8080` | URL of the Kates API |
+| `api-key` | `""` | API key for the Kates API (from Secret `kates-api-key`) |
+| `min-grade` | `C` | Minimum passing performance grade (`A`, `B`, `C`, `D`, or `F`) |
+| `type` | `LOAD` | Workload type (`LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP`, `INTEGRITY`) |
+| `records` | `50000` | Number of records to produce |
+| `backend` | `""` | Benchmark backend (`native` or `trogdor`) |
+| `timeout` | `180` | Timeout in seconds |
+| `version` | `latest` | Kates CLI release tag to install (`latest` or a tag such as `__TAG__`) |
+
+## Outputs
+
+| Output | Description |
+|:-------|:------------|
+| `run-id` | ID of the test run created by `kates gate` |
+| `grade` | Computed `A–F` performance grade |
+| `passed` | Whether the run met or exceeded `min-grade` (`true` or `false`) |
+
+## Grading Thresholds
+
+| Grade | Minimum Avg Throughput | Maximum P99 Latency |
+|:------|:-----------------------|:--------------------|
+| **A** | `>= 50,000 rec/s` | `< 5 ms` |
+| **B** | `>= 30,000 rec/s` | `< 20 ms` |
+| **C** | `>= 15,000 rec/s` | `< 50 ms` |
+| **D** | `>= 5,000 rec/s` | `< 200 ms` |
+| **F** | Below grade D thresholds | `>= 200 ms` |
+
+## Install the `kates` CLI (`__TAG__`)
+
+```bash
+# Homebrew (macOS & Linux)
+brew install bmscomp/tap/kates
+
+# Direct binary archive (__TAG__)
+curl -fsSL https://github.com/bmscomp/kates/releases/download/__TAG__/kates-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar -xz
+```
+
+## Links
+
+- **Website:** [katesplatform.io](https://katesplatform.io/)
+- **Documentation:** [Kates — The Definitive Guide](https://bmscomp.github.io/kates/)
+- **Repository:** [github.com/bmscomp/kates](https://github.com/bmscomp/kates)
