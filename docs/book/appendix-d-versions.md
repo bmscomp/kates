@@ -18,11 +18,11 @@ Every version the platform pins, in one place. This table is generated from the 
 | `cdc-postgresql` chart | 0.2.0 (app 16.15) | `charts/cdc-postgresql/Chart.yaml` |
 | `connect-cluster` chart | 2.1.16 (app 4.3.1) | `charts/connect-cluster/Chart.yaml` |
 | `headlamp` chart | 0.2.1 (app 0.40.1) | `charts/headlamp/Chart.yaml` |
-| `kafka-cluster` chart | 1.0.20 (app 4.3.1) | `charts/kafka-cluster/Chart.yaml` |
+| `kafka-cluster` chart | 1.0.21 (app 4.3.1) | `charts/kafka-cluster/Chart.yaml` |
 | `kafka-common` chart | 0.1.1 (library) | `charts/kafka-common/Chart.yaml` |
 | `kafka-ui` chart | 0.3.2 (app v1.5.0) | `charts/kafka-ui/Chart.yaml` |
 | `kates-chaos` chart | 2.3.6 (app 3.28.0) | `charts/kates-chaos/Chart.yaml` |
-| `kates-platform` chart | 0.8.9 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
+| `kates-platform` chart | 0.8.10 (app 1.0.0) | `charts/kates-platform/Chart.yaml` |
 | `kates` chart | 0.14.2 (app 1.30.1) | `charts/kates/Chart.yaml` |
 | `legacy-kafka` chart | 0.2.1 (app 3.9.1) | `charts/legacy-kafka/Chart.yaml` |
 | `mirror-maker2` chart | 0.11.14 (app 4.3.1) | `charts/mirror-maker2/Chart.yaml` |
