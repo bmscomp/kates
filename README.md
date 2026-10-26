@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kates-wordmark-dark.svg" />
-    <img src="docs/assets/kates-wordmark.svg" width="500" alt="Kates — Kafka advanced testing and engineering suite" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/kates-wordmark.svg" />
+    <img src="docs/assets/kates-wordmark-dark.svg" width="620" alt="Kates — Kafka advanced testing and engineering suite" />
   </picture>
 
   <p>
@@ -12,6 +12,7 @@
   <p>
     <a href="https://github.com/bmscomp/kates/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/bmscomp/kates/ci.yml?branch=main&label=backend%20CI&logo=github" alt="Backend CI status" /></a>
     <a href="https://github.com/bmscomp/kates/releases/latest"><img src="https://img.shields.io/github/v/release/bmscomp/kates?label=release&logo=github" alt="Latest release" /></a>
+    <a href="https://github.com/marketplace/actions/kates-quality-gate"><img src="https://img.shields.io/badge/marketplace-kates--quality--gate-blue?logo=githubactions&logoColor=white" alt="GitHub Marketplace" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/bmscomp/kates" alt="License" /></a>
     <a href="https://bmscomp.github.io/kates/"><img src="https://img.shields.io/badge/docs-the%20book-1A5BCC" alt="The Kates book" /></a>
   </p>
