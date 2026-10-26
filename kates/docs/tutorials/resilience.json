@@ -572,10 +572,6 @@
       "get_report takes the runId submit_single or submit_by_scenario prints. The test run goes on after that answer, and its report is final once the run is DONE."
     ],
     "script_alternatives": {
-      "broker_delete": "./scripts/test-chaos-broker-delete.sh",
-      "cpu_hog":       "./scripts/test-chaos-broker-cpu-hog.sh",
-      "net_partition": "./scripts/test-chaos-network-partition.sh",
-      "disk_io":       "./scripts/test-chaos-disk-io-stress.sh",
       "full_gameday":  "./scripts/test-chaos-gameday.sh"
     }
   }

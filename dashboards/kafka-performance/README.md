@@ -17,8 +17,8 @@ can be judged rather than just reported.
 
 ## Who opens it
 
-- Whoever is running `scripts/test-perf-*.sh`, `kates` or a `kafka-producer-
-  perf-test`, while it is running. The refresh is 10 s and the window is 1 h
+- Whoever is running `kates test create` or a `kafka-producer-perf-test`,
+  while it is running. The refresh is 10 s and the window is 1 h
   for that reason: this board is *watched*, not consulted.
 - Whoever is sizing a cluster and wants to know which resource runs out first.
 - Whoever is holding a throughput number from last week and wants to know why

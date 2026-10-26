@@ -411,31 +411,31 @@ test-cli:  ## Run the Go CLI tests
 # Run Performance Test
 test:  ## Run baseline 1M-message perf test
 	@echo "🧪 Running Performance Test..."
-	./scripts/test-kafka-performance.sh
+	$(KATES_BIN) test create --type LOAD --records 1000000 --wait
 
 test-load:  ## Run load test (concurrent producers)
 	@echo "🧪 Running Load Test..."
-	./scripts/test-perf-load.sh
+	$(KATES_BIN) test create --type LOAD --wait
 
 test-stress:  ## Run stress test (ramp to breaking point)
 	@echo "🧪 Running Stress Test..."
-	./scripts/test-perf-stress.sh
+	$(KATES_BIN) test create --type STRESS --wait
 
 test-spike:  ## Run spike test (flash sale simulation)
 	@echo "🧪 Running Spike Test..."
-	./scripts/test-perf-spike.sh
+	$(KATES_BIN) test create --type SPIKE --wait
 
 test-endurance:  ## Run endurance/soak test (sustained load)
 	@echo "🧪 Running Endurance (Soak) Test..."
-	./scripts/test-perf-endurance.sh
+	$(KATES_BIN) test create --type ENDURANCE --wait
 
 test-volume:  ## Run volume test (large data)
 	@echo "🧪 Running Volume Test..."
-	./scripts/test-perf-volume.sh
+	$(KATES_BIN) test create --type VOLUME --wait
 
 test-capacity:  ## Run capacity test (find max throughput)
 	@echo "🧪 Running Capacity Test..."
-	./scripts/test-perf-capacity.sh
+	$(KATES_BIN) test create --type CAPACITY --wait
 
 test-net-kafka:  ## Test TCP connectivity to Kafka from default namespace
 	@domain=$$(source scripts/common.sh && get_cluster_domain); \
@@ -1369,7 +1369,7 @@ kafka-upgrade: kafka-chart-deps  ## Upgrade existing Kafka release (ENV=...)
 	ENV=$(ENV) ./scripts/deploy-kafka-generic.sh --yes
 
 kafka-detect:  ## Deep cluster compatibility report for Kafka
-	@./scripts/kafka-cluster-report.sh
+	@$(KATES_BIN) detect
 
 kafka-verify-policies:  ## Verify Kyverno/network policy compliance for generic cluster
 	@./scripts/verify-kafka-policies.sh
