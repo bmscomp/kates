@@ -206,8 +206,9 @@ empties `jvm.options` and sizes resources for a native binary.
 ## Running it
 
 ```bash
-helm upgrade --install kates charts/kates -n kates \
-  -f charts/kates/values-native.yaml
+helm pull oci://ghcr.io/bmscomp/charts/kates --untar
+helm upgrade --install kates ./kates -n kates \
+  -f kates/values-native.yaml
 ```
 
 Images are published as `<appVersion>-native` alongside the JVM tag by

@@ -47,14 +47,7 @@ graph TB
 
 ## Quick Start
 
-### Step 1 — Add the Litmus Helm Repository
-
-```bash
-helm repo add litmuschaos https://litmuschaos.github.io/litmus-helm/
-helm repo update
-```
-
-### Step 2 — Install CRDs
+### Step 1 — Install CRDs
 
 CRDs must be applied before Helm install (the post-install hooks depend on them):
 
@@ -65,28 +58,21 @@ kubectl wait --for=condition=Established \
   crd/chaosengines.litmuschaos.io --timeout=60s
 ```
 
-### Step 3 — Build Chart Dependencies
+### Step 2 — Install the Chart
+
+The published chart carries its `litmus-core` 3.28.1 subchart, so nothing is built or added first.
 
 ```bash
-cd charts/kates-chaos
-helm dependency build
-cd ../..
-```
-
-This downloads `litmus-core-3.28.1.tgz` into `charts/kates-chaos/charts/`.
-
-### Step 4 — Install the Chart
-
-```bash
-helm upgrade --install chaos charts/kates-chaos \
+helm pull oci://ghcr.io/bmscomp/charts/kates-chaos --untar
+helm upgrade --install chaos ./kates-chaos \
   -n litmus --create-namespace \
-  -f charts/kates-chaos/values-generic.yaml \
+  -f kates-chaos/values-generic.yaml \
   --timeout 10m --wait
 ```
 
 Or use the Makefile shorthand (`make litmus-generic` — note it installs into the `kafka` namespace).
 
-### Step 5 — Verify Deployment
+### Step 3 — Verify Deployment
 
 ```bash
 kubectl rollout status deployment -l app.kubernetes.io/name=litmus -n litmus
@@ -314,7 +300,7 @@ gameday:
 
 ```bash
 # Enable on an existing release
-helm upgrade chaos charts/kates-chaos -n litmus --reuse-values --set gameday.enabled=true
+helm upgrade chaos oci://ghcr.io/bmscomp/charts/kates-chaos -n litmus --reuse-values --set gameday.enabled=true
 ```
 
 ## Uninstalling

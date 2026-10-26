@@ -11,6 +11,10 @@ type Remediation struct {
 	DocURL   string   // link to relevant docs
 }
 
+// ChartRef names a chart of this repository (its charts/ directory) in a
+// printed command. The CLI sets it to the chart's published reference.
+var ChartRef = func(dir string) string { return "charts/" + dir }
+
 // GenerateRemediation inspects the report and produces actionable hints.
 func GenerateRemediation(report *DetectReport) []Remediation {
 	var hints []Remediation
@@ -26,8 +30,7 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 			// hardcoded upstream — so a differently-named release does not
 			// install a second operator, it collides with the first.
 			Commands: []string{
-				"helm dependency build charts/strimzi-operator",
-				"helm upgrade --install strimzi-operator charts/strimzi-operator --namespace strimzi-operator --create-namespace",
+				"helm upgrade --install strimzi-operator " + ChartRef("strimzi-operator") + " --namespace strimzi-operator --create-namespace",
 			},
 			DocURL: "https://strimzi.io/docs/operators/latest/deploying",
 		})
@@ -165,7 +168,7 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 			Summary:  "Kyverno enforces resource limits — ensure all components have limits in values.yaml",
 			Commands: []string{
 				"# Verify limits are set for all components in your values.yaml:",
-				"grep -A 4 'limits:' charts/kafka-cluster/values.yaml",
+				"helm show values " + ChartRef("kafka-cluster") + " | grep -A 4 'limits:'",
 			},
 		})
 	}
@@ -177,7 +180,7 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 			Severity: "warning",
 			Summary:  "An existing Kafka cluster is running — use helm upgrade instead of install",
 			Commands: []string{
-				"helm upgrade kafka-cluster charts/kafka-cluster -n kafka -f values.yaml --timeout 10m --wait",
+				"helm upgrade kafka-cluster " + ChartRef("kafka-cluster") + " -n kafka -f values.yaml --timeout 10m --wait",
 			},
 		})
 	}

@@ -96,39 +96,25 @@ This section installs the operator on a cluster that has none. If one is already
 
 ### Prerequisites
 
-The chart declares a subchart, so the dependency must be fetched **before** any Helm operation — template, lint, install, or upgrade:
-
-```bash
-helm dependency build charts/strimzi-operator
-```
-
-Skip it and every command fails before it ever contacts the cluster:
-
-Output:
-
-```text
-Error: An error occurred while checking for chart dependencies. You may need to run `helm dependency build` to fetch missing dependencies: found in Chart.yaml, but missing in charts/ directory: strimzi-kafka-operator
-```
+The chart declares a subchart, and the published chart carries it, so nothing is fetched before any Helm operation — template, install, or upgrade.
 
 ::: {.callout-warning}
 `helm lint` only **warns** about a missing dependency and still reports `0 chart(s) failed`. A green lint does not mean a deployable chart — the failure surfaces at deploy time. Any CI job or script that renders this chart must run `helm dependency build` first.
 :::
 
-The dependency build pulls from `quay.io`, and the CRD hook fetches from `github.com`. Both are required egress paths; the first one is not new, since the ad-hoc install this chart replaces already pulled the same chart from the same registry.
+Helm pulls the published chart from `ghcr.io`, and the CRD hook fetches from `github.com`. Both are required egress paths.
 
 ### Fresh Install
 
-On a cluster with no Strimzi operator, the install is two commands. The first repeats the prerequisite, so the block runs as it stands:
+On a cluster with no Strimzi operator, the install is one command:
 
 ```bash
-helm dependency build charts/strimzi-operator
-
-helm upgrade --install strimzi-operator charts/strimzi-operator \
+helm upgrade --install strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
   --namespace strimzi-operator --create-namespace \
   --timeout 5m --wait
 ```
 
-That is the whole install. No `--version` flag and no `--set` flags: the version is pinned in `Chart.yaml`, and the defaults already reproduce what runs in production. `scripts/deploy-kafka.sh` runs the same two commands before it touches `kafka-cluster`, with `--reset-values` and a 10m timeout; `scripts/deploy-kafka-generic.sh` adds the detected DNS domain. Both reconcile the operator unconditionally, because the CRD hook is a `pre-upgrade` gate and skipping the upgrade when the operator already exists is what freezes the CRDs.
+That is the whole install. No `--set` flags: the defaults already reproduce what runs in production. Without `--version` Helm takes the latest published chart, whose `Chart.yaml` pins the Strimzi version. `scripts/deploy-kafka.sh` runs the same install from a checkout before it touches `kafka-cluster`, with `--reset-values` and a 10m timeout; `scripts/deploy-kafka-generic.sh` adds the detected DNS domain. Both reconcile the operator unconditionally, because the CRD hook is a `pre-upgrade` gate and skipping the upgrade when the operator already exists is what freezes the CRDs.
 
 ### Environment Overlays
 
@@ -149,9 +135,10 @@ It no longer turns the operator's dashboards off. They are ConfigMaps, inert wit
 :::
 
 ```bash
-helm upgrade --install strimzi-operator charts/strimzi-operator \
+helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar
+helm upgrade --install strimzi-operator ./strimzi-operator \
   --namespace strimzi-operator --create-namespace \
-  -f charts/strimzi-operator/values-prod.yaml \
+  -f strimzi-operator/values-prod.yaml \
   --timeout 5m --wait
 ```
 
@@ -164,7 +151,8 @@ helm upgrade --install strimzi-operator charts/strimzi-operator \
 Every operator setting nests under the `strimzi-kafka-operator:` key, because that is the subchart's name. A top-level `watchAnyNamespace: true` is not an override — Helm silently ignores it. The schema rejects it deliberately so the mistake is loud:
 
 ```bash
-helm template strimzi-operator charts/strimzi-operator -n strimzi-operator \
+helm template strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
+  -n strimzi-operator \
   --set watchAnyNamespace=true
 ```
 
@@ -218,9 +206,6 @@ helm get values strimzi-operator -n strimzi-operator > /tmp/pre-migration-values
 # Back up the CRDs. Helm does not manage them, so neither `helm rollback` nor
 # `helm uninstall` can restore them — this file is the only way back.
 kubectl get crd -l strimzi.io/crd-install=true -o yaml > /tmp/pre-migration-crds.yaml
-
-# The chart will not render without this
-helm dependency build charts/strimzi-operator
 ```
 
 The CRD backup is the one artifact you cannot reconstruct after the fact. The label selects every Strimzi CRD, including `strimzipodsets.core.strimzi.io`, which lives outside the `kafka.strimzi.io` group and is easy to miss when selecting by name.
@@ -232,7 +217,8 @@ The CRD backup is the one artifact you cannot reconstruct after the fact. The la
 kubectl get kafka -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.spec.kafka.version}{"\n"}{end}'
 
 # What the target operator supports — read it out of the rendered Deployment
-helm template strimzi-operator charts/strimzi-operator -n strimzi-operator \
+helm template strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
+  -n strimzi-operator \
   | grep -A5 STRIMZI_KAFKA_IMAGES
 ```
 
@@ -301,7 +287,7 @@ Pass `--reset-values`. Bare `helm upgrade` **is** `--reuse-values`: when you sup
 `--reset-values` drops every other value the release carries as well, so the command passes back what the operator must keep. `<domain>` is the cluster's DNS domain: the `kubernetesServiceDnsDomain` value in the Step 0 record, `/tmp/pre-migration-values.yaml`, or `cluster.local` when the record has none. On a later upgrade of an operator that runs with more — an overlay such as `values-prod.yaml`, or a namespace scope — add those flags too; [Upgrading the Operator](#upgrading-the-operator) lists them.
 
 ```bash
-helm upgrade strimzi-operator charts/strimzi-operator \
+helm upgrade strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
   --namespace strimzi-operator \
   --reset-values \
   --set strimzi-kafka-operator.kubernetesServiceDnsDomain=<domain> \
@@ -334,7 +320,8 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
   -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_NAMESPACE")].value}'
 
 # Rendered
-helm template strimzi-operator charts/strimzi-operator -n strimzi-operator \
+helm template strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
+  -n strimzi-operator \
   | grep -A1 'name: STRIMZI_NAMESPACE'
 ```
 
@@ -346,7 +333,8 @@ kubectl get deploy strimzi-cluster-operator -n strimzi-operator \
   -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_KAFKA_IMAGES")].value}'
 
 # Rendered
-helm template strimzi-operator charts/strimzi-operator -n strimzi-operator \
+helm template strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
+  -n strimzi-operator \
   | grep -A4 'name: STRIMZI_KAFKA_IMAGES'
 ```
 
@@ -398,7 +386,7 @@ kubectl get kafkanodepool -A
 Pass back the same values as in Step 1 — the DNS domain, and on a later upgrade the overlay and scope the operator runs with:
 
 ```bash
-helm upgrade strimzi-operator charts/strimzi-operator \
+helm upgrade strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
   --namespace strimzi-operator \
   --reset-values \
   --set strimzi-kafka-operator.kubernetesServiceDnsDomain=<domain> \
@@ -510,7 +498,7 @@ From there the procedure is Step 0 through Step 3 above. Every operator upgrade 
 `--reset-values` in Step 1 and Step 3b is deliberate: it takes `strimziVersion`, and with it the CRD bundle, from the chart you install rather than from the release. It also drops everything the release was installed with, so both commands pass back what the operator runs with. `helm get values strimzi-operator -n strimzi-operator` shows what the release carries now; compare it with the flags before you run either command:
 
 - The DNS domain, which both commands already carry: `--set strimzi-kafka-operator.kubernetesServiceDnsDomain=<domain>`.
-- The overlay the operator runs with: `-f charts/strimzi-operator/values-prod.yaml` in production; `kates deploy` installs with `values-kind.yaml` or `values-generic.yaml`.
+- The overlay the operator runs with: in production, `helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar`, then upgrade `./strimzi-operator` with `-f strimzi-operator/values-prod.yaml`; `kates deploy` installs with `values-kind.yaml` or `values-generic.yaml`.
 - The scope of an operator installed with `kates deploy --operator-scope namespace`: `--set strimzi-kafka-operator.watchAnyNamespace=false --set 'strimzi-kafka-operator.watchNamespaces={<namespace>,<namespace>}'`. Without them the operator comes back watching every namespace.
 
 The [Upgrade Playbook](18-upgrade-playbook.md)'s golden rule still holds: upgrade the operator before Kafka, and run `make gameday` afterwards.
@@ -549,11 +537,11 @@ Never migrate or roll back by uninstalling. `helm uninstall strimzi-operator` le
 On a scratch cluster, install the operator and prove all three of the chart's claims — the watch scope, the CRDs, and the operand mapping — without deploying a single Kafka broker:
 
 ```bash
-helm dependency build charts/strimzi-operator
+helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar
 
-helm upgrade --install strimzi-operator charts/strimzi-operator \
+helm upgrade --install strimzi-operator ./strimzi-operator \
   --namespace strimzi-operator --create-namespace \
-  -f charts/strimzi-operator/values-kind.yaml \
+  -f strimzi-operator/values-kind.yaml \
   --timeout 5m --wait
 
 # 1. The watch scope did not collapse

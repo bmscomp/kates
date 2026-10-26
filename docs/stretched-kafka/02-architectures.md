@@ -198,9 +198,9 @@ The sketches target `charts/kafka-cluster`, whose node pool model is described u
 Check a sketch before you install it:
 
 ```bash
-helm dependency build charts/kafka-cluster
-helm template krafter charts/kafka-cluster -n kafka \
-  -f charts/kafka-cluster/values-prod.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm template krafter ./kafka-cluster -n kafka \
+  -f kafka-cluster/values-prod.yaml \
   -f stretch.yaml > rendered.yaml
 ```
 

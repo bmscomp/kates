@@ -211,8 +211,19 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// Full for a cluster admin, who the wizard also lets pick admin-less.
 	// Anyone else is offered the admin-less stack (deploy_adminless.go)
 	// rather than walked into a refusal halfway through.
+	// The platform line comes first, before the first question.
+	account := "admin-less profile (--adminless)"
 	if !deployAdminless {
 		admin, ok := clusterAdminFn(context.Background())
+		switch {
+		case ok && admin:
+			account = "cluster admin"
+		case ok:
+			account = "not cluster admin"
+		default:
+			account = "cluster admin not confirmed"
+		}
+		printPlatform(target, account)
 		if ok && admin && wizard {
 			if err := profileFormFn(); err != nil {
 				return err
@@ -233,6 +244,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			}
 			deployAdminless = true
 		}
+	} else {
+		printPlatform(target, account)
 	}
 	if deployAdminless {
 		if err := applyAdminlessProfile(context.Background(), cmd); err != nil {
@@ -329,7 +342,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			output.Error(fmt.Sprintf("Introspection failed: %v", err))
 			return err
 		}
-		PrintPhaseItem(fmt.Sprintf("Platform: %s (%s)", report.Provider, report.ProviderBasis))
 	}
 
 	// ── Versions and scope ───────────────────────────────────────────────
@@ -443,7 +455,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	var p *tea.Program
 	if isTesting {
 		p = tea.NewProgram(dashboard, tea.WithoutRenderer(), tea.WithInput(nil))
-	} else if IsInteractive() {
+	} else if IsInteractive() && !accessibleUI() {
 		p = tea.NewProgram(dashboard, tea.WithAltScreen())
 	}
 	dl = &DashboardController{p: p}
@@ -503,7 +515,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}()
 
 	if p != nil {
-		if _, err := p.Run(); err != nil {
+		final, err := p.Run()
+		// The window is gone: what the deploy still says goes to the terminal.
+		dl.closed.Store(true)
+		if m, ok := final.(deployDashboardModel); ok && m.interrupted {
+			output.Warn("Deploy window closed; the deploy goes on and prints below. Ctrl-C again stops kates, which can leave a Helm release half-applied.")
+		}
+		if err != nil {
 			// The dashboard is cosmetic; the deploy goroutine is real work.
 			// Returning here used to orphan it mid-helm — the process exited
 			// while installs were in flight, leaving releases half-applied.

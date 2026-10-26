@@ -23,8 +23,7 @@ The worker spec, client authentication, KafkaUser, secret sync, PodMonitor and N
 Needs the Strimzi operator ([strimzi-operator](../strimzi-operator/README.md)) and a Kafka cluster.
 
 ```bash
-helm dependency build charts/connect-cluster      # the kafka-common library
-helm upgrade --install connect-cluster charts/connect-cluster -n connect --create-namespace \
+helm upgrade --install connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect --create-namespace \
   --set kafka.namespace=kafka
 kubectl -n connect wait kafkaconnect/connect-cluster --for=condition=Ready --timeout=300s
 helm test connect-cluster -n connect

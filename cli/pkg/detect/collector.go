@@ -254,6 +254,18 @@ func platformOf(gitVersion string, apiVersions []string, nodes []NodeInfo, kubeC
 	return "generic", "no platform signal"
 }
 
+// Platform reads only what platformOf needs: the server version, the API
+// groups and the nodes' providerIDs, which an admin-less account may not
+// read. version is the server's gitVersion.
+func Platform(exec CommandExecutor, kubeContext string) (provider, basis, version string) {
+	c := &Collector{exec: exec}
+	_, _, version = c.getK8sVersion()
+	out, _ := exec.Exec("kubectl", "api-versions")
+	nodes, _ := c.parseNodes()
+	provider, basis = platformOf(version, strings.Fields(out), nodes, kubeContext)
+	return provider, basis, version
+}
+
 func providerFromContext(ctx string) string {
 	lowerCtx := strings.ToLower(ctx)
 	if strings.Contains(lowerCtx, "kind") {

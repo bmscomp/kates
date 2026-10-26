@@ -52,6 +52,7 @@ var (
 )
 
 func init() {
+	detect.ChartRef = chartRef
 	detectCmd.Flags().StringVarP(&detectValuesFile, "values", "f", "", "Path to custom/base values.yaml (for budgeting or merge base)")
 	detectCmd.Flags().BoolVar(&failOnWarning, "fail-on-warning", false, "Exit with code 1 if warnings are detected (for CI/CD)")
 	detectCmd.Flags().BoolVar(&failOnError, "fail-on-error", false, "Exit with code 2 if compatibility checks fail (for CI/CD)")
@@ -190,7 +191,7 @@ func runDetect(cmd *cobra.Command, args []string) error {
 			detect.RenderValuesWithReserve(report, clusterName, reservePct, f)
 		}
 		output.Success(fmt.Sprintf("Values written to %s", valuesOutput))
-		output.Hint(fmt.Sprintf("Deploy with: helm upgrade --install %s charts/kafka-cluster -n kafka -f %s --timeout 10m --wait", clusterName, valuesOutput))
+		output.Hint(fmt.Sprintf("Deploy with: helm upgrade --install %s %s -n kafka -f %s --timeout 10m --wait", clusterName, chartRef("kafka-cluster"), valuesOutput))
 		return nil
 	}
 

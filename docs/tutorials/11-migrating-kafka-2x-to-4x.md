@@ -120,10 +120,11 @@ a corrupted archive is worse than one that fails.
 ## Step 2: Deploy the 2.8.2 Source
 
 ```bash
-helm upgrade --install legacy charts/legacy-kafka \
+helm pull oci://ghcr.io/bmscomp/charts/legacy-kafka --untar
+helm upgrade --install legacy ./legacy-kafka \
   -n "${LEGACY_NS}" --create-namespace \
-  -f charts/legacy-kafka/values-kafka-2x.yaml \
-  -f charts/legacy-kafka/values-kind.yaml \
+  -f legacy-kafka/values-kafka-2x.yaml \
+  -f legacy-kafka/values-kind.yaml \
   --set "topics[0].name=${TOPIC}" \
   --wait --timeout 10m
 ```
@@ -214,17 +215,14 @@ numbers offset translation has to carry across.
 ## Step 4: Install MirrorMaker 2
 
 Since 0.8.0 the `mirror-maker2` chart is built on the `kafka-common` library
-chart, declared as a `file://` dependency, and `charts/*/charts/` is generated
-rather than committed. Nothing renders until that dependency is resolved — not
-`helm template`, not `helm lint`, not `helm upgrade`. The build is idempotent,
-so running it once here covers the cutover upgrade in Step 7 as well:
+chart. The published chart carries it, so nothing is built first:
 
 ```bash
-helm dependency build charts/mirror-maker2
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
 
-helm upgrade --install mm2 charts/mirror-maker2 \
+helm upgrade --install mm2 ./mirror-maker2 \
   -n "${KAFKA_NS}" \
-  -f charts/mirror-maker2/values-migrate-2x.yaml \
+  -f mirror-maker2/values-migrate-2x.yaml \
   --set "mirrors[0].source.bootstrapServers=legacy-legacy-kafka-bootstrap.${LEGACY_NS}.svc.cluster.local:9092" \
   --wait --timeout 10m
 ```
@@ -361,9 +359,10 @@ scripts/mm2-kafka-cli.sh offsets "${TOPIC}"
 Then apply the cutover:
 
 ```bash
-helm upgrade mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
-  -f charts/mirror-maker2/values-migrate-2x.yaml \
-  -f charts/mirror-maker2/values-cutover.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm upgrade mm2 ./mirror-maker2 -n "${KAFKA_NS}" \
+  -f mirror-maker2/values-migrate-2x.yaml \
+  -f mirror-maker2/values-cutover.yaml \
   --set "mirrors[0].source.bootstrapServers=legacy-legacy-kafka-bootstrap.${LEGACY_NS}.svc.cluster.local:9092"
 ```
 

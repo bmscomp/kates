@@ -7,7 +7,7 @@ Install [Kates](https://github.com/bmscomp/kates) — Kafka Advanced Testing & E
 ## Install
 
 ```bash
-helm install kates ./charts/kates \
+helm install kates oci://ghcr.io/bmscomp/charts/kates \
   --namespace kates --create-namespace \
   --set kafka.bootstrapServers=my-kafka-bootstrap.kafka.svc:9092
 ```
@@ -119,7 +119,7 @@ that namespace (`kates/docs/deployment.md` runs one in `kates`) needs a
 An installer with only `edit` in the release namespace can't create that Role, so it installs with `rbac.kafkaNamespaceRole=false` as well. Kubernetes lets an account create a Role only for permissions it holds itself, so an account with Strimzi's and the Prometheus Operator's reads in the Kafka namespace, a cluster admin where those operators don't add them to `admin`, renders it from the same release name, namespace and values, and applies it:
 
 ```bash
-helm template kates charts/kates -n team -f team-values.yaml \
+helm template kates oci://ghcr.io/bmscomp/charts/kates -n team -f team-values.yaml \
   --set rbac.kafkaNamespaceRole=true --show-only templates/rbac.yaml | kubectl apply -f -
 ```
 
@@ -276,7 +276,7 @@ Upgrading from 0.10.9 or earlier: the job there never deleted a run. It asked fo
 ## Example: Local Kind Cluster
 
 ```bash
-helm install kates ./charts/kates \
+helm install kates oci://ghcr.io/bmscomp/charts/kates \
   --namespace kates --create-namespace \
   --set image.pullPolicy=Never \
   --set service.type=NodePort \
@@ -286,7 +286,7 @@ helm install kates ./charts/kates \
 ## Example: Production with External DB
 
 ```bash
-helm install kates ./charts/kates \
+helm install kates oci://ghcr.io/bmscomp/charts/kates \
   --namespace kates --create-namespace \
   --set kafka.bootstrapServers=my-kafka:9092 \
   --set postgresql.enabled=false \
@@ -310,7 +310,7 @@ helm install kates ./charts/kates \
 The repository is an ECR mirror of `ghcr.io/bmscomp/kates` holding the tag `values.yaml` names. The ALB is internal: reachable from the VPC only.
 
 ```bash
-helm install kates ./charts/kates \
+helm install kates oci://ghcr.io/bmscomp/charts/kates \
   --namespace kates --create-namespace \
   --set image.repository=123456789.dkr.ecr.us-east-1.amazonaws.com/kates \
   --set kafka.bootstrapServers=b-1.msk-cluster.kafka.us-east-1.amazonaws.com:9092 \
@@ -326,7 +326,7 @@ helm install kates ./charts/kates \
 All 8 test types are pre-configured in `values.yaml` under the `tests` section. Override any parameter:
 
 ```bash
-helm install kates ./charts/kates \
+helm install kates oci://ghcr.io/bmscomp/charts/kates \
   --set tests.stress.numProducers=6 \
   --set tests.stress.partitions=12 \
   --set defaults.compressionType=zstd

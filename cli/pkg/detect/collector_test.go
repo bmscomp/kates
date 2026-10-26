@@ -757,3 +757,19 @@ func TestPlatformOf(t *testing.T) {
 		})
 	}
 }
+
+func TestPlatform_ReadsOnlyWhatItNeeds(t *testing.T) {
+	m := NewMockExecutor()
+	m.Set(`{"serverVersion":{"major":"1","minor":"30","gitVersion":"v1.30.4-eks-a737599"}}`, "kubectl", "version", "-o", "json")
+	m.Set("v1\napps/v1", "kubectl", "api-versions")
+	m.Set(`{"items":[{"metadata":{"name":"ip-10-0-1-1"},"spec":{"providerID":"aws:///eu-west-1a/i-1"}}]}`, "kubectl", "get", "nodes", "-o", "json")
+	if p, basis, v := Platform(m, "prod"); p != "eks" || basis != "server version v1.30.4-eks-a737599 on aws:// nodes" || v != "v1.30.4-eks-a737599" {
+		t.Errorf("Platform = %q, %q, %q", p, basis, v)
+	}
+
+	// An admin-less account may not list nodes: the version and the context still count.
+	m.Errors["kubectl get nodes"] = errors.New("forbidden")
+	if p, basis, _ := Platform(m, "kind-panda"); p != "kind" || basis != "context name, guessed" {
+		t.Errorf("without nodes: Platform = %q, %q", p, basis)
+	}
+}

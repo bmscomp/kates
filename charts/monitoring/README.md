@@ -5,8 +5,7 @@ Wraps [kube-prometheus-stack](https://github.com/prometheus-community/helm-chart
 ## Install
 
 ```bash
-helm dependency build charts/monitoring
-helm install monitoring charts/monitoring -n monitoring --create-namespace
+helm install monitoring oci://ghcr.io/bmscomp/charts/kates-monitoring -n monitoring --create-namespace
 helm test monitoring -n monitoring
 ```
 

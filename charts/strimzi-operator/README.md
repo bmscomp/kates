@@ -21,13 +21,13 @@ In its default shape the chart is a **cluster singleton**: 13 of the operator's 
 
 | Requirement | Minimum | Notes |
 |-------------|---------|-------|
-| **`helm dependency build`** | — | **Required.** The chart will not render without it — see below. |
+| **`helm dependency build`** | — | **Required from a checkout.** The chart will not render without it — see below. The published chart carries the subchart, so nothing is built first. |
 | Kubernetes | 1.27+ | Enforced via `kubeVersion` |
 | Helm | 3.12+ | Tested on Helm 4.2.x |
-| Egress to `quay.io` | — | `helm dependency build` pulls the operator subchart |
+| Egress to `quay.io` | — | From a checkout, `helm dependency build` pulls the operator subchart |
 | Egress to `github.com` | — | The CRD hook fetches the bundle on **every** install and upgrade. Mirror it via `crdUpgrade.url` — see `values-prod.yaml`. |
 
-**The dependency build is not optional.** This chart declares a subchart, so without it every `helm template`/`install`/`upgrade`/`lint` fails before contacting the cluster:
+**The dependency build is not optional from a checkout.** The published chart carries the operator subchart, so nothing is built first, but a checkout's chart only declares it, so without the build every `helm template`/`install`/`upgrade`/`lint` fails before contacting the cluster:
 
 ```text
 Error: an error occurred while checking for chart dependencies: found in Chart.yaml, but missing in charts/ directory: strimzi-kafka-operator
@@ -38,11 +38,7 @@ Note that `helm lint` only **warns** about this, so a green lint does not mean a
 ## Installation
 
 ```bash
-# 1. Dependencies (REQUIRED — see above)
-helm dependency build charts/strimzi-operator
-
-# 2. Install
-helm upgrade --install strimzi-operator charts/strimzi-operator \
+helm upgrade --install strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
   -n strimzi-operator --create-namespace \
   --timeout 5m --wait
 ```
@@ -121,7 +117,7 @@ Only these deviate from stock upstream. Everything else in the [upstream values]
 Redirect images to an internal registry:
 
 ```bash
-helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator \
+helm upgrade --install strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator -n strimzi-operator \
   --set strimzi-kafka-operator.defaultImageRegistry=registry.internal \
   --set strimzi-kafka-operator.defaultImageRepository=strimzi
 ```
@@ -129,15 +125,16 @@ helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-opera
 Non-default cluster DNS domain:
 
 ```bash
-helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator \
-  -f charts/strimzi-operator/values-generic.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/strimzi-operator --untar
+helm upgrade --install strimzi-operator ./strimzi-operator -n strimzi-operator \
+  -f strimzi-operator/values-generic.yaml \
   --set strimzi-kafka-operator.kubernetesServiceDnsDomain="${CLUSTER_DOMAIN}"
 ```
 
 Airgapped CRD mirror:
 
 ```bash
-helm upgrade --install strimzi-operator charts/strimzi-operator -n strimzi-operator \
+helm upgrade --install strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator -n strimzi-operator \
   --set crdUpgrade.url=https://mirror.internal/strimzi-crds-1.2.0.yaml
 ```
 

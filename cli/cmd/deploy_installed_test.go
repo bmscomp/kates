@@ -3,8 +3,10 @@ package cmd
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -204,5 +206,23 @@ func TestDeployDryRunListsInstalled(t *testing.T) {
 	out := stripStyle(captureStdout(t, func() { renderDeployPreview(uiTestEntries(), map[string]bool{}, []string{line}, nil, nil) }))
 	if !strings.Contains(out, "Already installed\n    "+line) {
 		t.Errorf("the dry run does not list what is installed:\n%s", out)
+	}
+}
+
+func TestInstalledHints(t *testing.T) {
+	orig := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = orig })
+	runExecOutputFn = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if slices.Contains(args, "-A") {
+			return []byte(`[{"name":"kafka-ui","namespace":"kafka","chart":"kafka-ui-0.3.2"},
+				{"name":"kafka-ui","namespace":"team","chart":"kafka-ui-0.3.0"},
+				{"name":"cert-manager","namespace":"cert-manager","chart":"cert-manager-v1.13.3"}]`), nil
+		}
+		return nil, errors.New("unexpected")
+	}
+	got := installedHints(context.Background())
+	want := map[string]string{"kafka-ui": "kafka-ui-0.3.2 in kafka, kafka-ui-0.3.0 in team", "cert-manager": "cert-manager-v1.13.3 in cert-manager"}
+	if !maps.Equal(got, want) {
+		t.Errorf("installedHints = %v, want %v", got, want)
 	}
 }

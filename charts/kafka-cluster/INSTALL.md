@@ -29,21 +29,15 @@ Step-by-step installation, verification and day-2 operations. The chart referenc
 | `values-staging.yaml` | 3 | 3 | 3 | 24 GiB | 12 cores |
 | `values-prod.yaml` | 3 | 9 | 3+ | 96 GiB | 36 cores |
 
-**The Strimzi operator comes first**, from `charts/strimzi-operator` — it owns the Strimzi CRDs (and, if you want them, the drain cleaner and the Kafka dashboards):
+**The Strimzi operator comes first**, from `oci://ghcr.io/bmscomp/charts/strimzi-operator` — it owns the Strimzi CRDs (and, if you want them, the drain cleaner and the Kafka dashboards):
 
 ```bash
-helm dependency build charts/strimzi-operator
-helm upgrade --install strimzi-operator charts/strimzi-operator \
+helm upgrade --install strimzi-operator oci://ghcr.io/bmscomp/charts/strimzi-operator \
   -n strimzi-operator --create-namespace --reset-values
 kubectl wait --for=condition=Established crd/kafkas.kafka.strimzi.io --timeout=120s
 ```
 
-**Chart dependencies.** kafka-cluster depends on the `kafka-common` library (in this repository) and the SeaweedFS chart:
-
-```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster   # `update` if a Chart.lock from 0.4 is in the way
-```
+**Chart dependencies.** kafka-cluster depends on the `kafka-common` library (in this repository) and the SeaweedFS chart; the published chart carries both, so nothing is built first.
 
 ---
 
@@ -62,10 +56,11 @@ ENV=kind ./scripts/deploy-kafka.sh                   # operator + kafka-cluster
 The equivalent Helm command:
 
 ```bash
-helm upgrade --install kafka-cluster charts/kafka-cluster -n kafka --create-namespace \
-  -f charts/kafka-cluster/values-platform.yaml \
-  -f charts/kafka-cluster/values-dev.yaml \
-  -f charts/kafka-cluster/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install kafka-cluster ./kafka-cluster -n kafka --create-namespace \
+  -f kafka-cluster/values-platform.yaml \
+  -f kafka-cluster/values-dev.yaml \
+  -f kafka-cluster/values-kind.yaml \
   --timeout 10m
 kubectl wait kafka/krafter -n kafka --for=condition=Ready --timeout=600s
 ```
@@ -113,9 +108,10 @@ The Kafka image comes from the operator (`strimzi-kafka-operator.defaultImageReg
 ### 4. Install
 
 ```bash
-helm upgrade --install kafka-cluster charts/kafka-cluster -n kafka --create-namespace \
-  -f charts/kafka-cluster/values-prod.yaml \
-  -f charts/kafka-cluster/values-platform.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install kafka-cluster ./kafka-cluster -n kafka --create-namespace \
+  -f kafka-cluster/values-prod.yaml \
+  -f kafka-cluster/values-platform.yaml \
   -f my-pools.yaml \
   --timeout 10m
 kubectl wait kafka/krafter -n kafka --for=condition=Ready --timeout=900s

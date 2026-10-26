@@ -14,17 +14,28 @@ import (
 func runInteractiveForms() error {
 	var components []string
 
+	// What is already installed, beside each component it belongs to.
+	hintCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	hints := installedHints(hintCtx)
+	cancel()
+	option := func(label, value string, on bool) huh.Option[string] {
+		if hint := hints[value]; hint != "" {
+			label += "  · " + hint
+		}
+		return huh.NewOption(label, value).Selected(on)
+	}
+
 	var leftOut []leftOutComponent
 	isolated := "Isolated Namespaces (kafka, kates, monitoring, litmus)"
 	componentOptions := []huh.Option[string]{
-		huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
-		huh.NewOption("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect").Selected(deployWithKafkaConnect),
-		huh.NewOption("💻 Kafka UI (Dashboard)", "kafka-ui").Selected(deployWithKafkaUI),
-		huh.NewOption("🔁 MirrorMaker 2 (loopback mirror of the primary)", "mirror-maker2").Selected(deployWithMirrorMaker2),
-		huh.NewOption("🧪 Litmus Chaos Engine", "chaos").Selected(deployWithChaos),
-		huh.NewOption("📊 Monitoring (Grafana + Prometheus)", "monitoring").Selected(deployWithMonitoring),
-		huh.NewOption("🔐 Cert-Manager (TLS)", "cert-manager").Selected(deployWithCertManager),
-		huh.NewOption("🚦 Kyverno (Policies)", "kyverno").Selected(deployWithKyverno),
+		option("🦊 Strimzi Operator", "strimzi", deployWithStrimzi),
+		option("🔗 Kafka Connect + PostgreSQL (CDC)", "kafka-connect", deployWithKafkaConnect),
+		option("💻 Kafka UI (Dashboard)", "kafka-ui", deployWithKafkaUI),
+		option("🔁 MirrorMaker 2 (loopback mirror of the primary)", "mirror-maker2", deployWithMirrorMaker2),
+		option("🧪 Litmus Chaos Engine", "chaos", deployWithChaos),
+		option("📊 Monitoring (Grafana + Prometheus)", "monitoring", deployWithMonitoring),
+		option("🔐 Cert-Manager (TLS)", "cert-manager", deployWithCertManager),
+		option("🚦 Kyverno (Policies)", "kyverno", deployWithKyverno),
 	}
 	if deployAdminless {
 		// Only what installs into a namespace: no operators, no chaos
@@ -42,7 +53,7 @@ func runInteractiveForms() error {
 	componentFields := []huh.Field{
 		huh.NewMultiSelect[string]().
 			Title("Select Components").
-			Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed.").
+			Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed. After · is what is installed now.").
 			Options(componentOptions...).
 			Value(&components),
 	}
@@ -82,7 +93,7 @@ func runInteractiveForms() error {
 		// multi-select squeezed under three other fields could hide its
 		// last entries until the cursor reached them.
 		huh.NewGroup(componentFields...),
-	).WithTheme(ThemeKates())
+	).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
 
 	if err := form1.Run(); err != nil {
 		return err
@@ -99,16 +110,16 @@ func runInteractiveForms() error {
 				Title("Namespace").
 				Description("An existing namespace this account may write to; everything goes there").
 				Value(&deployNamespace),
-		)).WithTheme(ThemeKates())
+		)).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
 		if err := form2.Run(); err != nil {
 			return err
 		}
 	}
 	if deployTopology != "single" {
-		var nsGroups []*huh.Group
-
-		// Core namespaces (always shown for isolated topology)
-		nsGroups = append(nsGroups, huh.NewGroup(
+		// Two pages at most: the namespaces every deploy needs, then the
+		// chosen components'. A huh group scrolls to the focused field, so
+		// the second page fits any terminal however many components are on.
+		nsGroups := []*huh.Group{huh.NewGroup(
 			huh.NewInput().
 				Title("Kafka Namespace").
 				Description("Namespace for Strimzi operator and Kafka cluster").
@@ -117,29 +128,23 @@ func runInteractiveForms() error {
 				Title("Kates App Namespace").
 				Description("Namespace for the Kates backend service").
 				Value(&deployAppNS),
-		))
+		)}
 
-		// Conditional namespace groups based on selected components
+		var optional []huh.Field
 		if sliceContains(components, "monitoring") && !deployAdminless {
-			nsGroups = append(nsGroups, huh.NewGroup(
-				huh.NewInput().
-					Title("Monitoring Namespace").
-					Description("Namespace for Jaeger and monitoring components").
-					Value(&deployMonitoringNS),
-			))
+			optional = append(optional, huh.NewInput().
+				Title("Monitoring Namespace").
+				Description("Namespace for the Prometheus and Grafana stack").
+				Value(&deployMonitoringNS))
 		}
-
 		if sliceContains(components, "chaos") {
-			nsGroups = append(nsGroups, huh.NewGroup(
-				huh.NewInput().
-					Title("Chaos Namespace").
-					Description("Namespace for Litmus Chaos engine").
-					Value(&deployChaosNS),
-			))
+			optional = append(optional, huh.NewInput().
+				Title("Chaos Namespace").
+				Description("Namespace for Litmus Chaos engine").
+				Value(&deployChaosNS))
 		}
-
 		if sliceContains(components, "kafka-connect") {
-			nsGroups = append(nsGroups, huh.NewGroup(
+			optional = append(optional,
 				huh.NewInput().
 					Title("Kafka Connect Namespace").
 					Description("Namespace for Kafka Connect cluster (separate from Kafka)").
@@ -147,29 +152,25 @@ func runInteractiveForms() error {
 				huh.NewInput().
 					Title("Database Namespace").
 					Description("Namespace for PostgreSQL CDC database").
-					Value(&deployDbNS),
-			))
+					Value(&deployDbNS))
 		}
-
 		if sliceContains(components, "mirror-maker2") {
-			nsGroups = append(nsGroups, huh.NewGroup(
-				huh.NewInput().
-					Title("MirrorMaker 2 Namespace").
-					Description("Namespace for the loopback mirror (the Kafka namespace is the simplest: the kates-mm2 credential lives there)").
-					Value(&deployMM2NS),
-			))
+			optional = append(optional, huh.NewInput().
+				Title("MirrorMaker 2 Namespace").
+				Description("Namespace for the loopback mirror (the Kafka namespace is the simplest: the kates-mm2 credential lives there)").
+				Value(&deployMM2NS))
 		}
-
 		if sliceContains(components, "kafka-ui") {
-			nsGroups = append(nsGroups, huh.NewGroup(
-				huh.NewInput().
-					Title("Kafka UI Namespace").
-					Description("Namespace for the Kafka UI dashboard").
-					Value(&deployKafkaUINS),
-			))
+			optional = append(optional, huh.NewInput().
+				Title("Kafka UI Namespace").
+				Description("Namespace for the Kafka UI dashboard").
+				Value(&deployKafkaUINS))
+		}
+		if len(optional) > 0 {
+			nsGroups = append(nsGroups, huh.NewGroup(optional...))
 		}
 
-		form2 := huh.NewForm(nsGroups...).WithTheme(ThemeKates())
+		form2 := huh.NewForm(nsGroups...).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
 		if err := form2.Run(); err != nil {
 			return err
 		}
@@ -271,7 +272,7 @@ func printComponentSelection() {
 		PrintPhaseSuccess("Litmus Chaos Engine")
 	}
 	if deployWithMonitoring {
-		PrintPhaseSuccess("Jaeger (Tracing)")
+		PrintPhaseSuccess("Monitoring (Prometheus + Grafana)")
 	}
 	if deployWithCertManager {
 		PrintPhaseSuccess("Cert-Manager (TLS)")

@@ -331,14 +331,16 @@ func helmDependency(ctx context.Context, args ...string) error {
 	return runHelmFn(ctx, append([]string{"dependency"}, args...)...)
 }
 
-// chartRef names a chart in a command printed for someone else to run: its
-// published reference, or its path in the checkout.
+// chartRef names a chart in a command printed for someone else to run, who
+// has no checkout: its published reference, at this release's version. A dev
+// build knows no published versions, and its checkout's may not be out yet,
+// so it names the latest.
 func chartRef(dir string) string {
-	if chartsPublished {
-		name := deployChartNames[dir]
-		return fmt.Sprintf("%s/%s --version %s", chartRegistry(), name, parseChartVersions(ChartVersions)[name])
+	name := deployChartNames[dir]
+	if v := parseChartVersions(ChartVersions)[name]; v != "" {
+		return fmt.Sprintf("%s/%s --version %s", chartRegistry(), name, v)
 	}
-	return chartRootPath(filepath.Join("charts", dir))
+	return chartRegistry() + "/" + name
 }
 
 // chartSource says where this run's charts come from.

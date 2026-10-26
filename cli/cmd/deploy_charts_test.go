@@ -122,6 +122,10 @@ func TestResolveChartRootDevBuildReadsWorkingDirectory(t *testing.T) {
 	if got := chartRootPath("charts/kafka-cluster"); got != "charts/kafka-cluster" {
 		t.Fatalf("chartRootPath = %q, want the path deploy always used", got)
 	}
+	// A dev build's checkout may be ahead of the registry: the latest it has.
+	if got := chartRef("monitoring"); got != "oci://ghcr.io/bmscomp/charts/kates-monitoring" {
+		t.Fatalf("chartRef = %q, want the published chart with no version", got)
+	}
 }
 
 func TestResolveChartRootCheckoutBeatsPublished(t *testing.T) {
@@ -140,8 +144,9 @@ func TestResolveChartRootCheckoutBeatsPublished(t *testing.T) {
 	if chartRoot != "/flag/kates" || len(*calls) != 0 {
 		t.Fatalf("--checkout: root %q calls %v; the flag wins over the env and nothing is pulled", chartRoot, *calls)
 	}
-	if got := chartRef("kates"); got != "/flag/kates/charts/kates" {
-		t.Fatalf("chartRef = %q, want the checkout's path", got)
+	// Printed for someone with no checkout: the chart this release published.
+	if got := chartRef("kates"); got != "oci://ghcr.io/bmscomp/charts/kates --version 0.14.1" {
+		t.Fatalf("chartRef = %q, want the published chart", got)
 	}
 }
 

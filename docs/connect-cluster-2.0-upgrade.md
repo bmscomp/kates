@@ -6,7 +6,7 @@ Background: [docs/kafka-charts-refactor-plan.md](kafka-charts-refactor-plan.md) 
 
 ## Before you start
 
-- **Build the dependency.** The chart now depends on `kafka-common` (`file://../kafka-common`): run `helm dependency build charts/connect-cluster` (`kates deploy` does it).
+- **Nothing to build.** The chart now depends on `kafka-common`, which the published chart carries, so nothing is built first.
 - **Workers roll once.** The metrics ConfigMap key is `metrics-config.yml`, and the pod template's checksums now cover only the rules and the logging configuration, so later chart bumps alone no longer roll the workers.
 - **Secret access narrows.** 1.x let the workers read every Secret in the Connect namespace, and every Secret in the Kafka namespace when `kafka.namespace` was set. 2.0 grants `get` on the Secrets that the connectors and test connectors in the values reference. Connectors applied some other way need their Secrets in `rbac.secretNames` (see below). `rbac.allSecrets: true` restores the old breadth for the transition.
 - **Kafka egress follows the bootstrap.** 1.x allowed 9092 and 9093 whatever the bootstrap dialled; 2.0 allows the port the bootstrap dials. `networkPolicy.kafka.ports` sets them explicitly.
@@ -19,15 +19,14 @@ Background: [docs/kafka-charts-refactor-plan.md](kafka-charts-refactor-plan.md) 
 1. Check the render against your values, and read the `DEPRECATED` list:
 
    ```bash
-   helm dependency build charts/connect-cluster
-   helm template connect-cluster charts/connect-cluster -n connect -f <your values> > /dev/null
-   helm upgrade connect-cluster charts/connect-cluster -n connect -f <your values> --dry-run | sed -n '/^NOTES/,$p'
+   helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster --version '^2' -n connect -f <your values> > /dev/null
+   helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster --version '^2' -n connect -f <your values> --dry-run | sed -n '/^NOTES/,$p'
    ```
 
 2. Upgrade:
 
    ```bash
-   helm upgrade connect-cluster charts/connect-cluster -n connect -f <your values>
+   helm upgrade connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster --version '^2' -n connect -f <your values>
    ```
 
 3. Check that the connectors still run. A connector that fails with `Forbidden` reading a Secret needs that Secret in `rbac.secretNames`; see [the runbook](connect-cluster-runbook.md#a-connector-cannot-read-a-secret).
@@ -79,9 +78,9 @@ If kafka-cluster's platform profile provisions `kates-connect`, hand the object 
 kubectl -n kafka annotate kafkauser kates-connect --overwrite \
   meta.helm.sh/release-name=connect-cluster meta.helm.sh/release-namespace=connect
 kubectl -n kafka label kafkauser kates-connect --overwrite app.kubernetes.io/managed-by=Helm
-helm dependency build charts/kafka-cluster        # kafka-cluster needs kafka-common too
-helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values --set users.items.kates-connect.enabled=false
-helm upgrade connect-cluster charts/connect-cluster -n connect -f charts/connect-cluster/values-prod.yaml
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka --reuse-values --set users.items.kates-connect.enabled=false
+helm pull oci://ghcr.io/bmscomp/charts/connect-cluster --version '^2' --untar
+helm upgrade connect-cluster ./connect-cluster -n connect -f connect-cluster/values-prod.yaml
 ```
 
 The User Operator switches the user from SCRAM to a certificate. Clients still holding the SCRAM password (Debezium's schema history producer, for example) need the same switch.

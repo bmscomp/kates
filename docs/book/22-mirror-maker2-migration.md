@@ -90,10 +90,8 @@ goes further and performs the `ApiVersions` handshake against the real source
 with the workers' own client, so a pass is evidence rather than an assumption.
 
 That rail only fires once helm can render at all. The chart is built on the
-`kafka-common` library chart, and `charts/mirror-maker2/charts/` is generated
-and gitignored, so run `helm dependency build charts/mirror-maker2` on a fresh
-checkout before any `helm install`, `upgrade`, `template` or `lint`.
-`kates migrate` does it for you.
+`kafka-common` library chart, which the published chart carries, so nothing is
+built before a `helm install`, `upgrade` or `template`.
 
 ### Identity Mode Makes the Mirror Self-Matching
 

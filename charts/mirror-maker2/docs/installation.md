@@ -41,19 +41,9 @@ source you may only read, and `values-scale.yaml` for a large estate.
 
 ## First Install
 
-**From a checkout, build the chart's one dependency first.** `mirror-maker2` is
-built on the [`kafka-common`](../../kafka-common/) library chart, and
-`charts/*/charts/` is generated rather than committed — so on a fresh clone
-every `helm install`, `upgrade`, `template` and `lint` on this page fails with
-*"found in Chart.yaml, but missing in charts/ directory: kafka-common"* until
-you run, once:
-
-```bash
-helm dependency build charts/mirror-maker2
-```
-
-A packaged chart already carries it; this is only for rendering from the
-repository.
+**The published chart carries its one dependency.** `mirror-maker2` is
+built on the [`kafka-common`](../../kafka-common/) library chart, and the
+package includes it, so nothing is built first.
 
 ### The loopback, to prove the chart works
 
@@ -62,9 +52,10 @@ is the fastest way to confirm the operator, the credentials and the namespace
 are right before a real source is involved:
 
 ```bash
-helm install mm2 charts/mirror-maker2 \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm install mm2 ./mirror-maker2 \
   -n kafka \
-  -f charts/mirror-maker2/values-kind.yaml
+  -f mirror-maker2/values-kind.yaml
 ```
 
 **A loopback must run under the `default` replication policy. Under `identity` it
@@ -74,9 +65,10 @@ it.** The overlay sets this correctly; do not layer `identity` onto it.
 ### A real mirror
 
 ```bash
-helm install mm2 charts/mirror-maker2 \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm install mm2 ./mirror-maker2 \
   -n kafka \
-  -f charts/mirror-maker2/values-prod.yaml \
+  -f mirror-maker2/values-prod.yaml \
   --set 'mirrors[0].source.bootstrapServers=kafka-east.example.com:9094' \
   --set 'mirrors[0].source.kafkaVersion=3.9.1' \
   --set 'mirrors[0].source.alias=east'
@@ -95,8 +87,9 @@ reports DNS resolution, TCP reachability and the broker's advertised protocol
 versions:
 
 ```bash
-helm install mm2 charts/mirror-maker2 -n kafka \
-  -f charts/mirror-maker2/values-prod.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm install mm2 ./mirror-maker2 -n kafka \
+  -f mirror-maker2/values-prod.yaml \
   --set preflight.enabled=true \
   --set preflight.failOnError=true
 ```

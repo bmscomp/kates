@@ -201,9 +201,6 @@ The default node layout, three brokers and three controllers, covers the most co
 To add brokers (e.g., testing partition rebalancing after scale-up), upgrade the release from the values it runs with — not with `--reuse-values`, which applies the release's values over the *old* chart's defaults and so ignores every default the chart has changed since the install.
 
 ```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-
 # The Helm release: krafter from kates deploy, kafka-cluster from make kafka
 RELEASE=krafter
 
@@ -211,7 +208,7 @@ RELEASE=krafter
 helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
 ```
 
-`charts/kafka-cluster/charts/` is generated and gitignored, so the `helm dependency build` that resolves the `kafka-common` [library chart](appendix-a-glossary.md#gl-library-chart) is not optional on a fresh checkout — without it Helm refuses to render. The same applies to every `helm` command against `connect-cluster` and `mirror-maker2`, which share that library. For kafka-cluster the build also downloads the SeaweedFS subchart, and once `Chart.lock` exists it accepts only a repository Helm has configured — hence the `helm repo add`, once per machine.
+The published chart carries its SeaweedFS subchart and the `kafka-common` [library chart](appendix-a-glossary.md#gl-library-chart), so nothing is built first. The same applies to every `helm` command against `connect-cluster` and `mirror-maker2`, which share that library.
 
 `kates deploy` and `make kafka` (`scripts/deploy-kafka-generic.sh`) install the same `krafter` Kafka cluster under different [Helm releases](appendix-a-glossary.md#gl-helm-release), `krafter` and `kafka-cluster` respectively; `helm list -n kafka` shows which one you have. The `helm` commands here take the release from `RELEASE`.
 
@@ -244,7 +241,8 @@ brokerPools:
 Upgrade from the edited file, then check that the new broker runs:
 
 ```bash
-helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka -f krafter-current.yaml
+helm upgrade "${RELEASE}" oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
+  -f krafter-current.yaml
 
 # Two pods, both Running once the roll finishes
 kubectl get pods -n kafka -l strimzi.io/pool-name=brokers-alpha
@@ -255,7 +253,7 @@ The new resources apply to every broker pool, so Strimzi also rolls the three ex
 A broker pool that sets no `replicas` of its own, such as the chart's default `brokers` pool, takes the count from the role default instead:
 
 ```bash
-helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+helm upgrade "${RELEASE}" oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   --set nodePools.roleDefaults.broker.replicas=4
 ```

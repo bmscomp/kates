@@ -117,3 +117,15 @@ func TestTableNotes(t *testing.T) {
 		t.Errorf("a cut note ends with an ellipsis: %q", note)
 	}
 }
+
+// A printed command must survive a copy into a shell: lipgloss pads a block's
+// lines to its widest, which leaves a space after each continuation `\`.
+func TestErrorLinesCarryNoTrailingSpace(t *testing.T) {
+	buf := ResetForTesting()
+	Error("no operator.\n\n  helm upgrade --install op oci://example/op \\\n    --set a.long.value=true")
+	for _, l := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if l := stripAnsi(l); l != strings.TrimRight(l, " ") {
+			t.Errorf("trailing space: %q", l)
+		}
+	}
+}

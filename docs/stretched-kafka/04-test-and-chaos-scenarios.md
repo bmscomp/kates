@@ -162,7 +162,7 @@ flowchart LR
 
 ### Kafka and the Harness in the Lab
 
-The examples use the default cluster, `krafter`, in namespace `kafka`. Install the Strimzi Cluster Operator from `charts/strimzi-operator` with `strimzi-kafka-operator.replicas: 2` (the chart default is 1), and keep the two replicas in different sites. Then install `charts/kafka-cluster` with its platform profile (`values-platform.yaml`, which creates the `kates-backend` KafkaUser that Kates authenticates as and makes it a super user), then `values-kind.yaml`, then this overlay. The overlay pins every pool, adds the `site` pod label the selectors below use, takes the rack from `KAFKA_RACK`, and applies the B0-K tolerations for node-local volumes. Strimzi writes `broker.rack` only for broker-role nodes, so only broker pools need `KAFKA_RACK`. Node-pool lists replace the chart's, so this is the whole pool list. Add per-pool `resources`, `jvmOptions` and `storage` sized for your machine: the chart defaults are production sizes.
+The examples use the default cluster, `krafter`, in namespace `kafka`. Install the Strimzi Cluster Operator from `oci://ghcr.io/bmscomp/charts/strimzi-operator` with `strimzi-kafka-operator.replicas: 2` (the chart default is 1), and keep the two replicas in different sites. Then install `oci://ghcr.io/bmscomp/charts/kafka-cluster` with its platform profile (`values-platform.yaml`, which creates the `kates-backend` KafkaUser that Kates authenticates as and makes it a super user), then `values-kind.yaml`, then this overlay. The overlay pins every pool, adds the `site` pod label the selectors below use, takes the rack from `KAFKA_RACK`, and applies the B0-K tolerations for node-local volumes. Strimzi writes `broker.rack` only for broker-role nodes, so only broker pools need `KAFKA_RACK`. Node-pool lists replace the chart's, so this is the whole pool list. Add per-pool `resources`, `jvmOptions` and `storage` sized for your machine: the chart defaults are production sizes.
 
 ```yaml
 # stretch-lab.yaml: an A2-shaped lab (C 1/2/2, one broker per AZ, RF 3, m 2)
@@ -221,9 +221,9 @@ nodePools:
 ```
 
 ```bash
-helm dependency build charts/kafka-cluster
-helm upgrade --install krafter charts/kafka-cluster -n kafka --create-namespace \
-  -f charts/kafka-cluster/values-platform.yaml -f charts/kafka-cluster/values-kind.yaml -f stretch-lab.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
+helm upgrade --install krafter ./kafka-cluster -n kafka --create-namespace \
+  -f kafka-cluster/values-platform.yaml -f kafka-cluster/values-kind.yaml -f stretch-lab.yaml \
   --set monitoring.podMonitor.interval=5s     # resolves windows of a few seconds (T10)
 ```
 
@@ -504,7 +504,7 @@ for s in a b; do
   # Kates authenticates to Kafka as kates-backend, the KafkaUser of the platform profile
   kubectl -n "kates-$s" create secret generic kates-backend --from-literal=password="$(
     kubectl -n kafka get secret kates-backend -o jsonpath='{.data.password}' | base64 -d)"
-  helm upgrade --install "kates-$s" charts/kates -n "kates-$s" -f "kates-site-$s.yaml"
+  helm upgrade --install "kates-$s" oci://ghcr.io/bmscomp/charts/kates -n "kates-$s" -f "kates-site-$s.yaml"
 done
 KEY_A=$(kubectl -n kates-a get secret kates-a-api-key -o jsonpath='{.data.api-key}' | base64 -d)
 KEY_B=$(kubectl -n kates-b get secret kates-b-api-key -o jsonpath='{.data.api-key}' | base64 -d)

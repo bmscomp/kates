@@ -509,14 +509,12 @@ The peers rely on the chart's policies: without them, Strimzi's policy is the on
 Apply the file over the values the release already has:
 
 ```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-
-helm upgrade krafter charts/kafka-cluster -n kafka --reuse-values -f closed-listeners.yaml
+helm upgrade krafter oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
+  --reuse-values -f closed-listeners.yaml
 kubectl get networkpolicy krafter-kafka -n kafka
 ```
 
-The chart does not render until `helm dependency build` has filled its gitignored `charts/` directory, and once `Chart.lock` exists the build fetches the SeaweedFS subchart only from a repository Helm has configured, hence the `helm repo add`, once per machine. `--reuse-values` keeps everything the release was installed with — for a `kates deploy` release, `values-detected.yaml`, the platform profile, the kind overlay, its `--set` flags and the version pins — and lays the file over it. Do not upgrade with the file alone: the release would lose the platform profile, and with it every `networkPolicy.clients` grant and the `kates-backend` super user, while the peers admit only test pods, so Kates, Kafka UI and Connect would lose the brokers. `kates deploy` has no flag for a values file of yours, and a later run leaves the release alone, because it skips a Kafka cluster that is already installed. The `kubectl get` must find `krafter-kafka`. If it does not, the chart's policies are off and only the peers can connect: add the key from the previous paragraph and upgrade again.
+The published chart carries its SeaweedFS subchart and the `kafka-common` library, so nothing is built first. `--reuse-values` keeps everything the release was installed with — for a `kates deploy` release, `values-detected.yaml`, the platform profile, the kind overlay, its `--set` flags and the version pins — and lays the file over it. Do not upgrade with the file alone: the release would lose the platform profile, and with it every `networkPolicy.clients` grant and the `kates-backend` super user, while the peers admit only test pods, so Kates, Kafka UI and Connect would lose the brokers. `kates deploy` has no flag for a values file of yours, and a later run leaves the release alone, because it skips a Kafka cluster that is already installed. The `kubectl get` must find `krafter-kafka`. If it does not, the chart's policies are off and only the peers can connect: add the key from the previous paragraph and upgrade again.
 
 ::: {.callout-warning}
 Anything that reaches the brokers today without a `networkPolicy.clients` entry loses access when the peers land: an ad-hoc debug pod, a client nobody declared. Compare the client list with what actually connects before you roll this out, and run the probe in [Testing Network Policies](#testing-network-policies) afterwards.
@@ -611,11 +609,10 @@ Client ports come from the listeners, so an external listener, from the `kafka.e
 Re-derive the list rather than trusting this table, since it follows the values chain you deploy with:
 
 ```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
+helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar
 
-helm template krafter charts/kafka-cluster -n kafka \
-  -f charts/kafka-cluster/values-platform.yaml \
+helm template krafter ./kafka-cluster -n kafka \
+  -f kafka-cluster/values-platform.yaml \
   | grep -A2 'kind: NetworkPolicy' | grep 'name:'
 ```
 

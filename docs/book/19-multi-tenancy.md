@@ -192,21 +192,16 @@ Step 2 grants consumer groups by prefix too, so every consumer's `group.id` must
 Start from the values the release runs with — every file and `--set` flag it was installed with — then render to see exactly what the tenant block adds, and upgrade. The release is `krafter` when `kates deploy` installed it and `kafka-cluster` when `make kafka` did — `helm list -n kafka` shows which — while the Kafka cluster is `krafter` either way:
 
 ```bash
-# Once per machine: the build downloads the SeaweedFS subchart, and once
-# Chart.lock exists it accepts only a repository Helm has configured
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-
 # The Helm release: krafter from kates deploy, kafka-cluster from make kafka
 RELEASE=krafter
 
 helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
 
-helm template "${RELEASE}" charts/kafka-cluster -n kafka \
+helm template "${RELEASE}" oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   -f tenants.yaml | grep -E 'kind: (KafkaTopic|KafkaUser|NetworkPolicy)' -A2 | grep 'name:'
 
-helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+helm upgrade "${RELEASE}" oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   -f tenants.yaml
 ```
@@ -333,15 +328,12 @@ flowchart TD
 There is no dedicated CLI command for tenant onboarding — the workflow is declarative, and all three pieces are chart values. Add the tenant's `topics.items`, `users.items` and `networkPolicy.clients` entries to `tenants.yaml`, then upgrade the release from its current values and verify:
 
 ```bash
-helm repo add seaweedfs https://seaweedfs.github.io/seaweedfs/helm
-helm dependency build charts/kafka-cluster
-
 # The Helm release: krafter from kates deploy, kafka-cluster from make kafka
 RELEASE=krafter
 
 helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
 
-helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+helm upgrade "${RELEASE}" oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   -f tenants.yaml
 
@@ -444,7 +436,7 @@ networkPolicy:
 RELEASE=krafter
 helm get values "${RELEASE}" -n kafka -o yaml > krafter-current.yaml
 
-helm upgrade "${RELEASE}" charts/kafka-cluster -n kafka \
+helm upgrade "${RELEASE}" oci://ghcr.io/bmscomp/charts/kafka-cluster -n kafka \
   -f krafter-current.yaml \
   -f tenants.yaml
 

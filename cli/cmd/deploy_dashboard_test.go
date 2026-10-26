@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -141,5 +142,86 @@ func TestMarkEntryStatuses(t *testing.T) {
 		if e.Status != "deployed" {
 			t.Errorf("%s = %q, want deployed on fresh cluster", e.Release, e.Status)
 		}
+	}
+}
+
+// The pane printed "◯ Pending..." for a component that had not started,
+// without its name. Its content lived only in View's copy of the viewport, so
+// the keys could not scroll it, and it followed the deploy only while the logs
+// had focus: below the fold, components were never seen.
+func TestDashboardComponentsPane(t *testing.T) {
+	m := NewDeployDashboard(context.Background(), 8)
+	for _, id := range []string{"strimzi", "cert-manager", "kyverno", "kafka", "kafka-users", "kates", "kafka-ui", "chaos"} {
+		m.RegisterComponent(id, "Component "+id, "A", Target{"ns-" + id, ""})
+	}
+	m = dashUpdate(t, m, tea.WindowSizeMsg{Width: 120, Height: 12})
+	if content, _ := m.componentsContent(); !strings.Contains(content, "Component kafka-ui") {
+		t.Errorf("a pending component is not named:\n%s", content)
+	}
+
+	m = dashUpdate(t, m, compStatusMsg{id: "chaos", active: true, timeout: time.Minute})
+	followed := m.componentsViewport.YOffset
+	if followed == 0 {
+		t.Fatal("the pane does not follow the component being deployed")
+	}
+
+	m = dashUpdate(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.componentsViewport.YOffset != followed-1 {
+		t.Fatalf("up scrolled the pane to %d, want %d", m.componentsViewport.YOffset, followed-1)
+	}
+	m = dashUpdate(t, m, compStatusMsg{id: "chaos", done: true, success: true})
+	if m.componentsViewport.YOffset != followed-1 {
+		t.Errorf("the pane moved under the user's scroll, to %d", m.componentsViewport.YOffset)
+	}
+}
+
+// A tick polled every component's workloads, then each workload's pods again,
+// and ticked again whatever the poll's progress: on a slow API server the
+// kubectl calls stacked up. A healthy workload showed its first pod's phase,
+// "Running", in amber.
+func TestDashboardPollsOneAtATime(t *testing.T) {
+	m := NewDeployDashboard(context.Background(), 2)
+	var reads []string
+	m.read = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		reads = append(reads, strings.Join(args, " "))
+		return []byte(`{"items":[{"kind":"Deployment","metadata":{"name":"kates"},"spec":{"replicas":2},"status":{"readyReplicas":2}}]}`), nil
+	}
+	m.RegisterComponent("kafka", "Kafka Cluster", "B", Target{"kafka", "strimzi.io/cluster=krafter"})
+	m.RegisterComponent("kates", "Kates Backend", "C", Target{"kates", "app.kubernetes.io/instance=kates"})
+	m = dashUpdate(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = dashUpdate(t, m, compStatusMsg{id: "kates", active: true, timeout: time.Minute})
+
+	_, cmd := m.Update(tickMsg(time.Now()))
+	msg, ok := cmd().(allWorkloadsMsg)
+	if !ok {
+		t.Fatal("a tick should run the poll and nothing else")
+	}
+	if len(reads) != 1 || !strings.Contains(reads[0], "-n kates") {
+		t.Errorf("want one read, of the started component's workloads; got %q", reads)
+	}
+
+	next, cmd := m.Update(msg)
+	if cmd == nil {
+		t.Error("the poll's answer should schedule the next tick")
+	}
+	content, _ := next.(deployDashboardModel).componentsContent()
+	if !strings.Contains(content, "2/2") || !strings.Contains(content, "Ready") || strings.Contains(content, "Waiting") {
+		t.Errorf("a ready workload should read Ready:\n%s", content)
+	}
+}
+
+// Ctrl-C closed the window and nothing else: the deploy went on with nowhere
+// to print, and the terminal looked hung until it ended.
+func TestDashboardCtrlCClosesWindowOnly(t *testing.T) {
+	m := NewDeployDashboard(context.Background(), 2)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if dm := next.(deployDashboardModel); !dm.interrupted || dm.ctx.Err() == nil || cmd == nil {
+		t.Errorf("Ctrl-C should mark the window interrupted, stop the poller and quit")
+	}
+
+	c := &DashboardController{p: &tea.Program{}}
+	c.closed.Store(true)
+	if c.live() {
+		t.Error("a closed window should send the deploy's lines to the terminal")
 	}
 }

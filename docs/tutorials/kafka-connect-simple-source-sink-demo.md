@@ -39,9 +39,8 @@ kubectl exec -n database postgresql-0 -- /bin/bash -lc \
 ```bash
 # helm test creates the demo resources, checks them, and deletes them when it
 # passes, so render the same manifests and apply them to keep them running.
-# kafka-common must be built once (kates deploy does it).
-helm dependency build charts/connect-cluster
-helm template connect-cluster charts/connect-cluster -n connect \
+# The published chart carries kafka-common, so nothing is built first.
+helm template connect-cluster oci://ghcr.io/bmscomp/charts/connect-cluster -n connect \
   --set kafka.namespace=kafka \
   -s templates/tests/test-02-topics.yaml \
   -s templates/tests/test-02-connectors.yaml | kubectl apply -f -

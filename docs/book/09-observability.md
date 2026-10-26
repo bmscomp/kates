@@ -763,12 +763,11 @@ There is no board switch to decide any more. Chart 1.3.0 removed the nine deprec
 To render the same thing by hand — which is what you do when you need a values chain the targets do not offer:
 
 ```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm dependency build charts/monitoring
+helm pull oci://ghcr.io/bmscomp/charts/kates-monitoring --untar
 
-helm upgrade --install monitoring charts/monitoring \
+helm upgrade --install monitoring ./kates-monitoring \
   --namespace kafka --create-namespace \
-  -f charts/monitoring/values-kind.yaml \
+  -f kates-monitoring/values-kind.yaml \
   --timeout 10m --wait
 ```
 

@@ -60,26 +60,9 @@ second — operator before cluster, because `kafka-cluster` 1.0 no longer applie
 the Strimzi CRDs and the operator chart's `crdUpgrade` hook owns them. It layers
 `values-platform.yaml`, which is where the `kates-mm2` user comes from.
 
-One more prerequisite, and it is the one that bites: since 0.8.0 the
-`mirror-maker2` chart is built on the `kafka-common` library chart, declared as a
-`file://` dependency. Nothing renders until that dependency is resolved — not
-`helm template`, not `helm lint`, not `helm upgrade`:
-
-```bash
-helm dependency build charts/mirror-maker2
-```
-
-`make mm2-chart-deps` is the same command, and every `mm2-chart-*` target in the
-Makefile already depends on it. The bare `helm` commands below do not, so run it
-once now.
-
-> **What it looks like when you skip it.** `helm template` and `helm upgrade`
-> stop before touching the cluster with
-> `found in Chart.yaml, but missing in charts/ directory: kafka-common`. `helm
-> lint` fails too, but for a confusing reason — it reports
-> `no template "kafka-common.fullname" associated with template "gotpl"`
-> alongside the dependency warning, because the chart's own helpers call into
-> the library. Both messages mean the same thing: run the dependency build.
+Since 0.8.0 the `mirror-maker2` chart is built on the `kafka-common` library
+chart. The published chart carries it, so nothing is built before the commands
+below.
 
 ## Step 1: Understand What You Are Installing
 
@@ -92,12 +75,12 @@ splits into two halves:
 | Worker | `replicas`, `jvmOptions`, `resources`, `metrics`, `networkPolicy` | The Connect runtime — same surface as `charts/connect-cluster` |
 | Mirror | `target`, `mirrors[]`, `replicationPolicy`, `compatibility` | The two-cluster part, which is everything that is different |
 
-Read the rendered CR before installing anything (the dependency build from the
-prerequisites must have run, or this stops before it renders a line):
+Read the rendered CR before installing anything:
 
 ```bash
-helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
-  -f charts/mirror-maker2/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm template mm2 ./mirror-maker2 -n "${KAFKA_NS}" \
+  -f mirror-maker2/values-kind.yaml \
   | grep -A 40 'kind: KafkaMirrorMaker2'
 ```
 
@@ -123,17 +106,17 @@ versions following the operator's; `kates deploy status` and `kates clean`
 know about it. By hand, the same install is:
 
 ```bash
-helm dependency build charts/mirror-maker2
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
 
-helm upgrade --install "${MM2_RELEASE}" charts/mirror-maker2 \
+helm upgrade --install "${MM2_RELEASE}" ./mirror-maker2 \
   --namespace "${KAFKA_NS}" \
-  -f charts/mirror-maker2/values-kind.yaml \
+  -f mirror-maker2/values-kind.yaml \
   --wait --timeout 10m
 ```
 
-The dependency build is repeated here on purpose: every upgrade in this tutorial
-needs it too, and `helm dependency build` is idempotent — it resolves
-`Chart.lock` and does nothing when the library is already in place.
+The pull is repeated so the block stands alone. If `./mirror-maker2` is already
+there from Step 1, `helm pull` refuses to overwrite it and the install uses
+that copy.
 
 The `values-kind.yaml` overlay drops every replication factor to 1, because the
 kind cluster has one broker and RF3 internal topics would fail to create — not
@@ -245,8 +228,9 @@ Try switching this loopback to identity mode and the chart refuses to render at
 all:
 
 ```bash
-helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
-  -f charts/mirror-maker2/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+helm template mm2 ./mirror-maker2 -n "${KAFKA_NS}" \
+  -f mirror-maker2/values-kind.yaml \
   --set replicationPolicy.mode=identity
 ```
 
@@ -269,11 +253,12 @@ the target. Naming a cluster that does not exist is fine here, because this is a
 render and never reaches the API server:
 
 ```bash
-diff <(helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
-         -f charts/mirror-maker2/values-kind.yaml \
+helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar
+diff <(helm template mm2 ./mirror-maker2 -n "${KAFKA_NS}" \
+         -f mirror-maker2/values-kind.yaml \
          --set 'mirrors[0].source.clusterName=legacy') \
-     <(helm template mm2 charts/mirror-maker2 -n "${KAFKA_NS}" \
-         -f charts/mirror-maker2/values-kind.yaml \
+     <(helm template mm2 ./mirror-maker2 -n "${KAFKA_NS}" \
+         -f mirror-maker2/values-kind.yaml \
          --set 'mirrors[0].source.clusterName=legacy' \
          --set replicationPolicy.mode=identity)
 ```
@@ -306,7 +291,7 @@ The second exists because the first passes on a broken mirror. Enable the data
 test to close the loop entirely:
 
 ```bash
-helm upgrade "${MM2_RELEASE}" charts/mirror-maker2 \
+helm upgrade "${MM2_RELEASE}" oci://ghcr.io/bmscomp/charts/mirror-maker2 \
   --namespace "${KAFKA_NS}" --reuse-values \
   --set tests.replication.enabled=true \
   --set tests.replication.topic=kates.demo \
@@ -324,7 +309,7 @@ whose failure means something unambiguous.
 ## Step 6: Turn On Observability
 
 ```bash
-helm upgrade "${MM2_RELEASE}" charts/mirror-maker2 \
+helm upgrade "${MM2_RELEASE}" oci://ghcr.io/bmscomp/charts/mirror-maker2 \
   --namespace "${KAFKA_NS}" --reuse-values \
   --set metrics.enabled=true \
   --set podMonitors.enabled=true \

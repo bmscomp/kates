@@ -15,7 +15,8 @@ chart deploys the registry backend only — there is **no bundled Kafka broker**
 
 Since kafka-cluster 1.0 the `apicurio-registry` KafkaUser is part of the
 `platform` profile rather than the base values, so the Kafka release must be
-installed with `-f charts/kafka-cluster/values-platform.yaml` (or
+installed with `-f kafka-cluster/values-platform.yaml`, after
+`helm pull oci://ghcr.io/bmscomp/charts/kafka-cluster --untar` (or
 `profile: platform`) — a base install provisions no platform users at all.
 
 The registry **refuses to start** if the journal/snapshots topics do not use

@@ -733,7 +733,7 @@ In A6, R-DR also covers the loss of KB's two-voter room (S4). There the trigger 
    - The node controller marks site B's nodes unreachable, and unpinned Deployments from site B reschedule into site A after 5 min 50 s, so site A needs the capacity.
    - Pause the dead main cluster's reconciliation (`kubectl -n kafka annotate kafka <cluster> strimzi.io/pause-reconciliation=true`). Its reconciles can only fail, and nothing should touch it before failback.
 6. **Promote the standby.**
-   - Stop MM2's source connector: `helm upgrade` the mirror with `charts/mirror-maker2/values-failover.yaml`, which sets the source connector to `stopped` and keeps the checkpoint connector `running` ([Failing over](../mirror-maker2-runbook.md#failing-over)). From then on, a site B that comes back unfenced can no longer feed the standby.
+   - Stop MM2's source connector: `helm upgrade` the mirror with `mirror-maker2/values-failover.yaml` (from `helm pull oci://ghcr.io/bmscomp/charts/mirror-maker2 --untar`), which sets the source connector to `stopped` and keeps the checkpoint connector `running` ([Failing over](../mirror-maker2-runbook.md#failing-over)). From then on, a site B that comes back unfenced can no longer feed the standby.
    - Record the last mirrored offset and timestamp of every partition. They are the RPO evidence: RPO = the MM2 lag at the moment of failure.
    - Check the synced group offsets on the standby with `kafka-consumer-groups.sh --describe --all-groups`.
    - Open the producer ACLs on the standby through its KafkaUsers.

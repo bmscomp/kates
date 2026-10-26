@@ -32,7 +32,7 @@ The examples target the reference stack in this repo (adjust names to your own):
 ## 60-second install
 
 ```bash
-helm upgrade --install kafka-ui charts/kafka-ui -n kafka \
+helm upgrade --install kafka-ui oci://ghcr.io/bmscomp/charts/kafka-ui -n kafka \
   --set kafka.clusterName=krafter \
   --set service.type=NodePort --set service.nodePort=30081 \
   --set auth.enabled=true --set auth.type=LOGIN_FORM \
