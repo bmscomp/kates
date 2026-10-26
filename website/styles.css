@@ -128,7 +128,10 @@ h3 { font-size: 1.2rem; font-weight: 600; }
 .strip { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg-alt); }
 .strip-inner { display: flex; align-items: center; gap: 28px; padding: 18px 0; flex-wrap: wrap; }
 .strip-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); white-space: nowrap; }
-.strip-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 28px; color: var(--heading); font-weight: 600; font-size: 0.95rem; opacity: 0.85; }
+.strip-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 32px; color: var(--heading); font-weight: 600; font-size: 0.95rem; opacity: 0.85; }
+.strip-list li { display: inline-flex; align-items: center; gap: 8px; line-height: 1; white-space: nowrap; }
+.strip-list svg { width: 20px; height: 20px; flex: none; fill: currentColor; }
+.strip-list svg + svg { margin-left: -2px; }
 
 /* ---------- sections ---------- */
 .section { padding: 96px 0; }
@@ -147,6 +150,11 @@ h3 { font-size: 1.2rem; font-weight: 600; }
 .card .meta { margin-top: 14px; color: var(--muted); font-size: 0.88rem; padding-top: 12px; border-top: 1px dashed var(--border); }
 .icon { width: 44px; height: 44px; border-radius: 12px; background: var(--accent-soft); display: grid; place-items: center; margin-bottom: 16px; }
 .icon svg { width: 24px; height: 24px; fill: none; stroke: var(--accent-strong); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.features .card { display: flex; flex-direction: column; }
+.features .card .meta { margin-top: auto; }
+.features .card p:has(+ .meta) { margin-bottom: 14px; }
+.card .fig { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; color: var(--muted); font-size: 0.9rem; }
+.fig b { font-size: 2rem; font-weight: 800; line-height: 1; letter-spacing: -0.02em; color: var(--accent-strong); }
 
 /* ---------- how / ci ---------- */
 .how-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 56px; align-items: start; }
