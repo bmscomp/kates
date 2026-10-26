@@ -14,6 +14,7 @@ import (
 func runInteractiveForms() error {
 	var components []string
 
+	var leftOut []leftOutComponent
 	isolated := "Isolated Namespaces (kafka, kates, monitoring, litmus)"
 	componentOptions := []huh.Option[string]{
 		huh.NewOption("🦊 Strimzi Operator", "strimzi").Selected(deployWithStrimzi),
@@ -31,10 +32,22 @@ func runInteractiveForms() error {
 		// already on the cluster.
 		isolated = "Isolated Namespaces (existing ones: kafka, connect, db, kates)"
 		componentOptions = []huh.Option[string]{componentOptions[1], componentOptions[2], componentOptions[3]}
-		if prometheusOperatorAPI(context.Background()) {
+		prometheus := prometheusOperatorAPI(context.Background())
+		if prometheus {
 			componentOptions = append(componentOptions,
 				huh.NewOption("📊 Monitoring (PodMonitors and rules for the cluster's Prometheus)", "monitoring").Selected(deployAdminlessScrape))
 		}
+		leftOut = adminlessLeftOut(prometheus, false)
+	}
+	componentFields := []huh.Field{
+		huh.NewMultiSelect[string]().
+			Title("Select Components").
+			Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed.").
+			Options(componentOptions...).
+			Value(&components),
+	}
+	if len(leftOut) > 0 {
+		componentFields = append(componentFields, huh.NewNote().Title("Not installed admin-less").Description(describeLeftOut(leftOut)))
 	}
 
 	form1 := huh.NewForm(
@@ -68,13 +81,7 @@ func runInteractiveForms() error {
 		// group scrolls per focused field, not per option, so a long
 		// multi-select squeezed under three other fields could hide its
 		// last entries until the cursor reached them.
-		huh.NewGroup(
-			huh.NewMultiSelect[string]().
-				Title("Select Components").
-				Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed.").
-				Options(componentOptions...).
-				Value(&components),
-		),
+		huh.NewGroup(componentFields...),
 	).WithTheme(ThemeKates())
 
 	if err := form1.Run(); err != nil {
@@ -277,6 +284,14 @@ func printComponentSelection() {
 	}
 	if deployWithMirrorMaker2 {
 		PrintPhaseSuccess("MirrorMaker 2 (loopback mirror)")
+	}
+	if deployAdminlessScrape {
+		PrintPhaseSuccess("Monitoring (PodMonitors and rules for the cluster's Prometheus)")
+	}
+	if deployAdminless {
+		for _, c := range adminlessLeftOut(deployAdminlessScrape || prometheusOperatorAPI(context.Background()), deployAdminlessScrape) {
+			PrintPhaseItem("Not installed: " + c.name + " — " + c.why)
+		}
 	}
 }
 

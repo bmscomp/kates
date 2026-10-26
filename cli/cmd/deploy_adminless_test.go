@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -426,5 +427,50 @@ func TestAdminlessOperatorAdvice(t *testing.T) {
 		if got := adminlessOperatorAdvice(strimzi.Operator{Version: version}, "1.2.0", nil); !strings.Contains(got, want) || strings.Contains(got, "helm") {
 			t.Errorf("%s: want %q and no command, got %q", version, want, got)
 		}
+	}
+}
+
+func TestPrintComponentSelection_AdminlessNamesWhatIsLeftOut(t *testing.T) {
+	orig := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = orig; deployAdminlessScrape = false })
+	setDeployFlags(t, func() {
+		deployAdminless, deployWithStrimzi, deployWithKafkaUI = true, false, true
+		deployWithChaos, deployWithMonitoring, deployWithCertManager, deployWithKyverno = false, false, false, false
+	})
+
+	for _, tc := range []struct {
+		name, apiResources string
+		scrape             bool
+		want               []string
+	}{
+		{"no Prometheus operator", "", false, []string{
+			"Not installed: Strimzi Operator — its CRDs and cluster roles need cluster admin; Kafka runs on the operator a cluster admin installed",
+			"Not installed: Cert-Manager, Kyverno — cluster-wide CRDs and admission webhooks need cluster admin",
+			"Not installed: Litmus Chaos — its CRDs and cluster roles need cluster admin, so this Kates runs no chaos experiments",
+			"Not installed: Monitoring (Prometheus, Grafana) — needs cluster admin, and the cluster has no Prometheus operator for this stack's PodMonitors",
+		}},
+		{"a Prometheus operator", "podmonitors.monitoring.coreos.com\nprometheusrules.monitoring.coreos.com", false, []string{
+			"Not installed: Monitoring (Prometheus, Grafana) — needs cluster admin; the wizard's admin-less Monitoring option adds PodMonitors for the cluster's own Prometheus instead",
+		}},
+		{"the wizard's scrape chosen", "", true, []string{
+			"✓ Monitoring (PodMonitors and rules for the cluster's Prometheus)",
+			"Not installed: Monitoring (Prometheus, Grafana) — needs cluster admin; the cluster's own Prometheus scrapes this stack instead",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deployAdminlessScrape = tc.scrape
+			runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+				if name == "kubectl" && len(args) > 0 && args[0] == "api-resources" {
+					return []byte(tc.apiResources), nil
+				}
+				return nil, errors.New("unexpected")
+			}
+			out := stripStyle(captureStdout(t, printComponentSelection))
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing %q in:\n%s", want, out)
+				}
+			}
+		})
 	}
 }

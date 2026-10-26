@@ -245,6 +245,38 @@ A cluster admin upgrades it with the tool that installed it, or removes it and i
 %s`, pin, strimziInstallSuggestion(watch))
 }
 
+// leftOutComponent is a component the admin-less profile does not install.
+type leftOutComponent struct{ name, why string }
+
+// adminlessLeftOut is what the admin-less profile does not install, and why,
+// so the wizard and the plan name it instead of leaving it out unseen.
+// prometheus says whether the cluster has a Prometheus operator to scrape for,
+// scrape whether the wizard's PodMonitors for it were chosen.
+func adminlessLeftOut(prometheus, scrape bool) []leftOutComponent {
+	monitoring := "needs cluster admin, and the cluster has no Prometheus operator for this stack's PodMonitors"
+	switch {
+	case scrape:
+		monitoring = "needs cluster admin; the cluster's own Prometheus scrapes this stack instead"
+	case prometheus:
+		monitoring = "needs cluster admin; the wizard's admin-less Monitoring option adds PodMonitors for the cluster's own Prometheus instead"
+	}
+	return []leftOutComponent{
+		{"Strimzi Operator", "its CRDs and cluster roles need cluster admin; Kafka runs on the operator a cluster admin installed"},
+		{"Cert-Manager, Kyverno", "cluster-wide CRDs and admission webhooks need cluster admin"},
+		{"Litmus Chaos", "its CRDs and cluster roles need cluster admin, so this Kates runs no chaos experiments"},
+		{"Monitoring (Prometheus, Grafana)", monitoring},
+	}
+}
+
+// describeLeftOut is the left-out components, one per line.
+func describeLeftOut(components []leftOutComponent) string {
+	lines := make([]string, len(components))
+	for i, c := range components {
+		lines[i] = c.name + " — " + c.why
+	}
+	return strings.Join(lines, "\n")
+}
+
 // prometheusOperatorAPI says whether the cluster serves PodMonitors, which
 // admin-less monitoring creates for a Prometheus already there.
 func prometheusOperatorAPI(ctx context.Context) bool {
