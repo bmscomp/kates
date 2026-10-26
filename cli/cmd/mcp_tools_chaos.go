@@ -117,7 +117,7 @@ var mcpCaveatsChaos = []mcpCaveat{
 				"impact(spec, kafkaPods).pods()", "affected.addAll(hit);",
 				"What a step's fault would hit", "pods.stream().filter(brokers::contains)"),
 			mcpJava + "chaos/PodTargets.java:108-119",
-			mcpJava + "service/ClusterTopologyService.java:523-595",
+			mcpJava + "service/ClusterTopologyService.java:568-641",
 			"charts/kafka-cluster/values.yaml:281-282",
 		},
 	},

@@ -13,12 +13,16 @@ import (
 // MCPClusterTopology is the part of GET /api/cluster/topology that the
 // cluster_topology tool reads: the Strimzi Kafka resource, its KafkaNodePools
 // and the pods of those pools. The endpoint returns some twenty other sections
-// (services, PVCs, ACLs, Connect and more); decoding only these three keeps a
-// change in any other section from failing the tool.
+// (services, PVCs, ACLs, Connect and more); decoding only these three, and
+// which sections were refused, keeps a change in any other section from
+// failing the tool.
 type MCPClusterTopology struct {
 	Cluster   *MCPTopologyCluster `json:"cluster"`
 	NodePools []MCPNodePool       `json:"nodePools"`
 	Nodes     []MCPTopologyNode   `json:"nodes"`
+	// Unread maps each section Kubernetes refused the backend a read for
+	// (HTTP 403) to the API server's message.
+	Unread map[string]string `json:"unread"`
 }
 
 // MCPTopologyCluster describes the Kafka resource the backend is configured to

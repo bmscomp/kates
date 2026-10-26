@@ -334,9 +334,10 @@ var mcpCaveatsCluster = []mcpCaveat{
 			"kafka; the chart sets it from networkPolicy.kafka.namespace). A Kafka cluster with another name matches " +
 			"nothing. The backend reads the pods pool by pool and stops at the first read that fails, logging it and " +
 			"keeping the pods it had, so a pool can show fewer pods than it has, or none. An empty list, or a pool " +
-			"with fewer pods than replicas, is therefore not evidence that controllers or brokers are missing.",
+			"with fewer pods than replicas, is therefore not evidence that controllers or brokers are missing. A read " +
+			"that Kubernetes refuses (HTTP 403) is named in topology.unread.",
 		Refs: []string{
-			mcpJava + "service/ClusterTopologyService.java:108-112,523-596,599-688",
+			mcpJava + "service/ClusterTopologyService.java:109-113,568-642,645-735",
 			mcpAnchoredRef("charts/kates/templates/configmap.yaml:11,13,15", "$kafkaNamespace := tpl",
 				"KATES_TOPOLOGY_KAFKA_NAMESPACE:", "KATES_TOPOLOGY_KAFKA_CLUSTER:"),
 		},

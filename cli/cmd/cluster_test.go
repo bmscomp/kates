@@ -230,3 +230,42 @@ func TestClusterBrokerConfigsCmd(t *testing.T) {
 		t.Errorf("missing static config: %s", out)
 	}
 }
+
+func TestClusterTopologyCmdNamesTheUnreadSections(t *testing.T) {
+	ts, buf := setupTest(t, "GET", "/api/cluster/topology", 200, `{
+		"cluster": {"name": "krafter", "kafkaVersion": "4.1.0"},
+		"unread": {
+			"topics": "kafkatopics.kafka.strimzi.io is forbidden",
+			"cluster": "kafkas.kafka.strimzi.io \"krafter\" is forbidden",
+			"certificates": "kafkas.kafka.strimzi.io \"krafter\" is forbidden"
+		}
+	}`)
+	defer ts.Close()
+
+	if err := clusterTopologyCmd.RunE(clusterTopologyCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"Kubernetes refused some reads",
+		`certificates, cluster: kafkas.kafka.strimzi.io "krafter" is forbidden`,
+		"topics: kafkatopics.kafka.strimzi.io is forbidden",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestClusterTopologyCmdPassesTheBackendsRefusalOn(t *testing.T) {
+	ts, _ := setupTest(t, "GET", "/api/cluster/topology", 503, `{"status": 503, "error": "Service Unavailable",
+		"message": "The Kates API's service account may not list pods in kafka"}`)
+	defer ts.Close()
+
+	err := clusterTopologyCmd.RunE(clusterTopologyCmd, nil)
+
+	if err == nil || !strings.Contains(err.Error(), "may not list pods in kafka") {
+		t.Fatalf("want the backend's message, got %v", err)
+	}
+}

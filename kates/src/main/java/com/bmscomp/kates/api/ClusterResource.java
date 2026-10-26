@@ -220,9 +220,13 @@ public class ClusterResource {
     @Path("/topology")
     @Operation(
             summary = "Get cluster topology",
-            description = "Returns full cluster topology including KRaft controllers and broker node pools")
+            description = "Returns full cluster topology including KRaft controllers and broker node pools, and in"
+                    + " `unread` each section Kubernetes refused a read for, with the API server's message")
     @APIResponse(responseCode = "200", description = "Cluster topology")
-    @APIResponse(responseCode = "503", description = "Kubernetes API not available")
+    @APIResponse(
+            responseCode = "503",
+            description = "Kubernetes API not available, or the service account may not list pods in the Kafka"
+                    + " namespace")
     public Response getClusterTopology() {
         try {
             return Response.ok(clusterTopologyService.describeTopology()).build();

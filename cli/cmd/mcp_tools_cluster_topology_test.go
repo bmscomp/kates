@@ -603,6 +603,28 @@ func TestMCPClusterTopologyEmptyLooksUnread(t *testing.T) {
 	assertReadOnly(t, fb.Requests())
 }
 
+// TestMCPClusterTopologyNamesRefusedReads: a section Kubernetes refused the
+// backend (HTTP 403) is named with the API server's message, for the sections
+// this tool reads only.
+func TestMCPClusterTopologyNamesRefusedReads(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	body := mcpClusterLabTopology("cluster-a")
+	body["nodePools"], body["nodes"] = []any{}, []any{}
+	body["unread"] = map[string]any{
+		"nodePools": "kafkanodepools.kafka.strimzi.io is forbidden",
+		"topics":    "kafkatopics.kafka.strimzi.io is forbidden",
+	}
+	fb.JSON("GET", "/api/cluster/topology", http.StatusOK, body)
+	h := newMCPHarness(t, fb)
+
+	got := mcpData[mcpClusterTopologyOut](t, h.callOK("cluster_topology", nil))
+	if u := got.Topology.Unread; len(u) != 1 || u[0].Section != "nodePools" || !mcpFenced(h, u[0].Reason) ||
+		!strings.Contains(string(u[0].Reason), "kafkanodepools.kafka.strimzi.io is forbidden") {
+		t.Errorf("unread = %+v, want nodePools with the API server's message, fenced", u)
+	}
+	assertReadOnly(t, fb.Requests())
+}
+
 // TestMCPClusterTopologyPartialPodRead: the backend reads the pods pool by
 // pool and keeps what it had when a read fails, so a pool can come back with
 // fewer pods than replicas, or none, while the other pools look whole. The

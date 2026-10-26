@@ -62,15 +62,29 @@ var clusterInfoCmd = &cobra.Command{
 	},
 }
 
+// topologyUnreadLines groups the sections topology could not read by the API
+// server's message: one line per message, in order of section name.
+func topologyUnreadLines(unread map[string]string) []string {
+	sections := map[string][]string{}
+	for section, message := range unread {
+		sections[message] = append(sections[message], section)
+	}
+	lines := make([]string, 0, len(sections))
+	for message, names := range sections {
+		sort.Strings(names)
+		lines = append(lines, strings.Join(names, ", ")+": "+message)
+	}
+	sort.Strings(lines)
+	return lines
+}
+
 var clusterTopologyCmd = &cobra.Command{
 	Use:   "topology",
 	Short: "Show full cluster topology including KRaft controllers and broker node pools",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := apiClient.ClusterTopology(context.Background())
 		if err != nil {
-			if strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "Service Unavailable") {
-				return cmdErr("Cluster topology is only available when the Kates backend is deployed on Kubernetes with access to Strimzi CRDs.")
-			}
+			// A 503 says why: no Kubernetes API, or a service account that may not list the Kafka pods.
 			return cmdErr("Failed to get cluster topology: " + err.Error())
 		}
 
@@ -90,6 +104,12 @@ var clusterTopologyCmd = &cobra.Command{
 		}
 		output.Banner("Kafka Cluster Topology",
 			fmt.Sprintf("Cluster: %s  │  Kafka %s  │  %s", clusterName, kafkaVersion, kraftLabel))
+		if len(result.Unread) > 0 {
+			output.Warn("Kubernetes refused some reads, so these sections are empty or partial:")
+			for _, line := range topologyUnreadLines(result.Unread) {
+				output.Hint(line)
+			}
+		}
 
 		// Kubernetes
 		if k := result.Kubernetes; k != nil {

@@ -71,6 +71,9 @@ type ClusterTopology struct {
 	Endpoints       []map[string]interface{} `json:"endpoints,omitempty"`
 	Connect         []map[string]interface{} `json:"connect,omitempty"`
 	MirrorMaker     []map[string]interface{} `json:"mirrorMaker2,omitempty"`
+	// Unread maps each section Kubernetes refused the backend a read for
+	// (HTTP 403) to the API server's message; nil from an older backend.
+	Unread map[string]string `json:"unread,omitempty"`
 }
 
 type TopoCountItems struct {

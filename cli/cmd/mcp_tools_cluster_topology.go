@@ -98,13 +98,25 @@ type mcpClusterTopologyOut struct {
 }
 
 type mcpTopologyRead struct {
-	Available bool         `json:"available" jsonschema:"false when the backend could not read the Strimzi resources; kafka, nodePools and controllers are then empty and brokers come from the Kafka admin API alone. Only a call with topic answers when this read fails."`
-	ErrorCode mcpErrorCode `json:"errorCode,omitempty" jsonschema:"why the Strimzi resources are not available"`
+	Available bool                `json:"available" jsonschema:"false when the backend could not read the Strimzi resources; kafka, nodePools and controllers are then empty and brokers come from the Kafka admin API alone. Only a call with topic answers when this read fails."`
+	ErrorCode mcpErrorCode        `json:"errorCode,omitempty" jsonschema:"why the Strimzi resources are not available"`
+	Unread    []mcpTopologyUnread `json:"unread,omitempty" jsonschema:"the parts of this result Kubernetes refused the backend a read for (HTTP 403), which are then empty or partial because of that, not because the cluster has none"`
+}
+
+type mcpTopologyUnread struct {
+	Section string       `json:"section" jsonschema:"kafka, nodePools, or nodes (the pods behind controllers, brokers and otherPods)"`
+	Reason  mcpUntrusted `json:"reason" jsonschema:"the Kubernetes API server's message, which names the verb, the resource and the namespace"`
+}
+
+// mcpTopologyUnreadSections are the backend's topology sections this tool
+// reads, by the name the result gives each.
+var mcpTopologyUnreadSections = []struct{ backend, section string }{
+	{"cluster", "kafka"}, {"nodePools", "nodePools"}, {"nodes", "nodes"},
 }
 
 // mcpTopologyKafka is the Kafka resource the backend is configured to read.
 // The backend reports its name and namespace from configuration whether or not
-// the resource exists (ClusterTopologyService.java:303-327).
+// the resource exists (ClusterTopologyService.java:346-371).
 type mcpTopologyKafka struct {
 	Name         string `json:"name" jsonschema:"the name the backend is configured to read (kates.topology.kafka-cluster), reported whether or not such a resource exists"`
 	Namespace    string `json:"namespace" jsonschema:"the namespace the backend is configured to read (kates.topology.kafka-namespace)"`
@@ -229,8 +241,13 @@ func mcpClusterTopology(ctx context.Context, call *mcpCall, in mcpClusterTopolog
 		out.Topology = mcpTopologyRead{Available: false, ErrorCode: mcpErrBackend}
 	default:
 		out.Topology = mcpTopologyRead{Available: true}
+		for _, u := range mcpTopologyUnreadSections {
+			if reason, refused := topo.Unread[u.backend]; refused {
+				out.Topology.Unread = append(out.Topology.Unread, mcpTopologyUnread{Section: u.section, Reason: call.Fence(reason)})
+			}
+		}
 		// The backend fills clusterId from the admin API, or with "unknown"
-		// when that call failed (ClusterTopologyService.java:396-411).
+		// when that call failed (ClusterTopologyService.java:440-455).
 		if topo.Cluster != nil && topo.Cluster.ClusterID != "unknown" {
 			if err := call.CheckCluster(topo.Cluster.ClusterID); err != nil {
 				return out, err
@@ -252,8 +269,8 @@ func mcpClusterTopology(ctx context.Context, call *mcpCall, in mcpClusterTopolog
 
 // mcpTopologyError says what a failed topology read means. The backend
 // answers 503 when it cannot reach the Kubernetes API, which it reads the
-// Strimzi resources through (ClusterTopologyService.java:115-122,
-// ClusterResource.java:229-232): for a backend outside Kubernetes that is
+// Strimzi resources through (ClusterTopologyService.java:125-138,
+// ClusterResource.java:233-236): for a backend outside Kubernetes that is
 // every call, so the generic "retry later" would send an agent round in
 // circles.
 func mcpTopologyError(call *mcpCall, err error) *mcpToolError {
@@ -261,8 +278,9 @@ func mcpTopologyError(call *mcpCall, err error) *mcpToolError {
 	var he *client.HTTPError
 	if errors.As(err, &he) && he.StatusCode == http.StatusServiceUnavailable {
 		te.Message = "The Kates API could not read the cluster topology (HTTP 503). The backend answers so when it " +
-			"cannot reach the Kubernetes API, through which it reads the Strimzi resources, and always when it runs " +
-			"outside Kubernetes; the detail says which. Retry only if the backend runs in Kubernetes."
+			"cannot reach the Kubernetes API, through which it reads the Strimzi resources, always when it runs " +
+			"outside Kubernetes, and when its service account may not list the pods in the Kafka namespace; the " +
+			"detail says which. Retry only if the backend can reach Kubernetes and read the Kafka namespace."
 	}
 	return te
 }
@@ -273,7 +291,7 @@ func mcpTopologyError(call *mcpCall, err error) *mcpToolError {
 // check read for this call) are added either way.
 //
 // A pod's roles are its pool's: the backend gives each node only the first of
-// them (ClusterTopologyService.java:639-640), which would hide the controller
+// them (ClusterTopologyService.java:685-686), which would hide the controller
 // in a pool whose roles are [broker, controller].
 //
 // Names from Kubernetes are passed on only in the shape Kubernetes allows
@@ -286,7 +304,7 @@ func mcpTopologyNodes(call *mcpCall, topo *client.MCPClusterTopology, out *mcpCl
 	others := []mcpTopologyPod{}
 	brokers := map[int]*mcpTopologyBroker{}
 	// Pods whose name ends in no number all get id -1 from the backend
-	// (ClusterTopologyService.java:1364-1371); keyed by id they would collapse
+	// (ClusterTopologyService.java:1424-1431); keyed by id they would collapse
 	// into one, so they are kept apart.
 	var unnumbered []mcpTopologyBroker
 	if topo != nil {
@@ -328,7 +346,7 @@ func mcpTopologyNodes(call *mcpCall, topo *client.MCPClusterTopology, out *mcpCl
 		}
 		// The backend lists the pools, then their pods pool by pool, and a
 		// read that fails is logged and left out: the pods listed before it
-		// are kept (ClusterTopologyService.java:523-596,599-688). So an empty
+		// are kept (ClusterTopologyService.java:568-642,645-735). So an empty
 		// list, or a pool with fewer pods than replicas, is not evidence that
 		// the nodes are missing.
 		if len(topo.NodePools) == 0 || len(topo.Nodes) == 0 || short {

@@ -13,6 +13,7 @@ import jakarta.inject.Inject;
 import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.VersionInfo;
 import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -111,52 +112,87 @@ public class ClusterTopologyService {
     @ConfigProperty(name = "kates.topology.kafka-cluster", defaultValue = "krafter")
     String kafkaCluster;
 
+    /** The sections built from the Kafka resource, which a refused read of it leaves empty. */
+    private static final List<String> KAFKA_CR_SECTIONS = List.of(
+            "cluster", "kafkaConfig", "entityOperator", "cruiseControl", "kafkaExporter", "certificates", "metrics");
+
+    /**
+     * The topology, with {@code unread}: each section that Kubernetes refused a read for (HTTP 403), with the API
+     * server's message, which names the verb, the resource and the namespace. Such a section is empty or partial
+     * because the service account may not read it, not because the cluster has none.
+     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> describeTopology() {
         try {
             kubernetesClient.pods().inNamespace(kafkaNamespace).list();
         } catch (Exception e) {
+            String refusal = forbidden(e);
+            if (refusal != null) {
+                throw new KubernetesNotAvailableException("The Kates API's service account may not list pods in "
+                        + kafkaNamespace + ": bind it a Role there that grants it, such as the kates chart's with"
+                        + " rbac.scope=namespace. The API server said: " + refusal);
+            }
             throw new KubernetesNotAvailableException(
                     "Cluster topology requires the backend to be running on Kubernetes "
                             + "with access to Strimzi CRDs. Kubernetes API is not available: " + e.getMessage());
         }
 
         Map<String, Object> topology = new LinkedHashMap<>();
+        Map<String, String> unread = new LinkedHashMap<>();
 
         // Read the Kafka CR once and share it across sections
-        Map<String, Object> kafkaCrSpec = readKafkaCrSpec();
+        Map<String, Object> kafkaCrSpec = readKafkaCrSpec(unread);
 
-        topology.put("kubernetes", describeKubernetes());
-        topology.put("strimzi", describeStrimzi());
+        topology.put("kubernetes", describeKubernetes(unread));
+        topology.put("strimzi", describeStrimzi(unread));
         topology.put("cluster", describeKafkaCluster(kafkaCrSpec));
         topology.put("kafkaConfig", describeKafkaConfig(kafkaCrSpec));
-        topology.put("nodePools", describeNodePools());
-        topology.put("nodes", describeNodes());
+        topology.put("nodePools", describeNodePools(unread));
+        topology.put("nodes", describeNodes(unread));
         topology.put("entityOperator", describeEntityOperator(kafkaCrSpec));
         topology.put("cruiseControl", describeCruiseControl(kafkaCrSpec));
         topology.put("kafkaExporter", describeKafkaExporter(kafkaCrSpec));
         topology.put("certificates", describeCertificates(kafkaCrSpec));
-        topology.put("metrics", describeMetrics(kafkaCrSpec));
-        topology.put("topics", describeTopics());
-        topology.put("users", describeUsers());
+        topology.put("metrics", describeMetrics(kafkaCrSpec, unread));
+        topology.put("topics", describeTopics(unread));
+        topology.put("users", describeUsers(unread));
         topology.put("consumerGroups", describeConsumerGroups());
         topology.put("acls", describeAcls());
         topology.put("logDirs", describeLogDirs());
         topology.put("featureFlags", describeFeatureFlags());
-        topology.put("rebalances", describeRebalances());
-        topology.put("drainCleaner", describeDrainCleaner());
-        topology.put("podSets", describeStrimziPodSets());
-        topology.put("networkPolicies", describeNetworkPolicies());
-        topology.put("pvcs", describePvcs());
-        topology.put("services", describeServices());
-        topology.put("endpoints", describeEndpoints());
-        topology.put("connect", describeConnect());
-        topology.put("mirrorMaker2", describeMirrorMaker2());
+        topology.put("rebalances", describeRebalances(unread));
+        topology.put("drainCleaner", describeDrainCleaner(unread));
+        topology.put("podSets", describeStrimziPodSets(unread));
+        topology.put("networkPolicies", describeNetworkPolicies(unread));
+        topology.put("pvcs", describePvcs(unread));
+        topology.put("services", describeServices(unread));
+        topology.put("endpoints", describeEndpoints(unread));
+        topology.put("connect", describeConnect(unread));
+        topology.put("mirrorMaker2", describeMirrorMaker2(unread));
+        topology.put("unread", unread);
 
         return topology;
     }
 
-    private Map<String, Object> describeKubernetes() {
+    /** The API server's message when e is a refused (403) read, else null. */
+    private static String forbidden(Exception e) {
+        if (!(e instanceof KubernetesClientException k) || k.getCode() != 403) {
+            return null;
+        }
+        return k.getStatus() != null && k.getStatus().getMessage() != null
+                ? k.getStatus().getMessage()
+                : k.getMessage();
+    }
+
+    /** Records a refused read of a section; the first refusal names it. */
+    private static void refused(Map<String, String> unread, String section, Exception e) {
+        String refusal = forbidden(e);
+        if (refusal != null) {
+            unread.putIfAbsent(section, refusal);
+        }
+    }
+
+    private Map<String, Object> describeKubernetes(Map<String, String> unread) {
         Map<String, Object> k8s = new LinkedHashMap<>();
         try {
             VersionInfo version = kubernetesClient.getKubernetesVersion();
@@ -164,6 +200,7 @@ public class ClusterTopologyService {
             k8s.put("platform", version.getPlatform());
             k8s.put("gitVersion", version.getGitVersion());
         } catch (Exception e) {
+            refused(unread, "kubernetes", e);
             LOG.debug("Unable to read Kubernetes version", e);
             k8s.put("version", "unknown");
         }
@@ -201,13 +238,14 @@ public class ClusterTopologyService {
             k8s.put("nodes", nodeList);
             k8s.put("nodeCount", nodeList.size());
         } catch (Exception e) {
+            refused(unread, "kubernetes", e);
             LOG.debug("Unable to list Kubernetes nodes", e);
         }
 
         return k8s;
     }
 
-    private Map<String, Object> describeStrimzi() {
+    private Map<String, Object> describeStrimzi(Map<String, String> unread) {
         Map<String, Object> strimzi = new LinkedHashMap<>();
         try {
             var pods = kubernetesClient
@@ -227,6 +265,7 @@ public class ClusterTopologyService {
                 strimzi.put("operatorReady", isPodReady(operatorPod));
             }
         } catch (Exception e) {
+            refused(unread, "strimzi", e);
             LOG.debug("Unable to read Strimzi operator info", e);
         }
 
@@ -242,6 +281,7 @@ public class ClusterTopologyService {
                 strimzi.put("entityOperatorReady", isPodReady(entityPods.get(0)));
             }
         } catch (Exception e) {
+            refused(unread, "strimzi", e);
             LOG.debug("Unable to read Entity Operator info", e);
         }
 
@@ -257,6 +297,7 @@ public class ClusterTopologyService {
                 strimzi.put("cruiseControlReady", isPodReady(ccPods.get(0)));
             }
         } catch (Exception e) {
+            refused(unread, "strimzi", e);
             LOG.debug("Unable to read Cruise Control info", e);
         }
 
@@ -272,6 +313,7 @@ public class ClusterTopologyService {
                 strimzi.put("kafkaExporterReady", isPodReady(expPods.get(0)));
             }
         } catch (Exception e) {
+            refused(unread, "strimzi", e);
             LOG.debug("Unable to read Kafka Exporter info", e);
         }
 
@@ -293,6 +335,7 @@ public class ClusterTopologyService {
                 strimzi.put("kafkaConnectImage", connectImage);
             }
         } catch (Exception e) {
+            refused(unread, "strimzi", e);
             LOG.debug("Unable to read Kafka Connect pod info", e);
         }
 
@@ -300,7 +343,7 @@ public class ClusterTopologyService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> readKafkaCrSpec() {
+    private Map<String, Object> readKafkaCrSpec(Map<String, String> unread) {
         try {
             GenericKubernetesResource kafka = kubernetesClient
                     .genericKubernetesResources(KAFKA_CRD)
@@ -315,6 +358,7 @@ public class ClusterTopologyService {
                 return result;
             }
         } catch (Exception e) {
+            KAFKA_CR_SECTIONS.forEach(section -> refused(unread, section, e));
             LOG.warn("Failed to read Kafka CR", e);
         }
         return Map.of();
@@ -487,7 +531,7 @@ public class ClusterTopologyService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> describeMetrics(Map<String, Object> kafkaCr) {
+    private Map<String, Object> describeMetrics(Map<String, Object> kafkaCr, Map<String, String> unread) {
         Map<String, Object> result = new LinkedHashMap<>();
         Map<String, Object> spec = (Map<String, Object>) kafkaCr.getOrDefault("spec", Map.of());
         Map<String, Object> kafkaSpec = (Map<String, Object>) spec.getOrDefault("kafka", Map.of());
@@ -514,13 +558,14 @@ public class ClusterTopologyService {
                 result.put("podMonitors", monitorNames);
             }
         } catch (Exception e) {
+            refused(unread, "metrics", e);
             LOG.debug("Unable to read PodMonitors", e);
         }
         return result;
     }
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> describeNodePools() {
+    private List<Map<String, Object>> describeNodePools(Map<String, String> unread) {
         List<Map<String, Object>> nodePools = new ArrayList<>();
         try {
             var pools = kubernetesClient
@@ -589,6 +634,7 @@ public class ClusterTopologyService {
                 nodePools.add(poolInfo);
             }
         } catch (Exception e) {
+            refused(unread, "nodePools", e);
             LOG.warn("Failed to read Strimzi KafkaNodePool CRDs", e);
         }
         nodePools.sort(Comparator.comparing(p -> (String) p.get("name")));
@@ -596,7 +642,7 @@ public class ClusterTopologyService {
     }
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> describeNodes() {
+    private List<Map<String, Object>> describeNodes(Map<String, String> unread) {
         List<Map<String, Object>> allNodes = new ArrayList<>();
 
         Map<Integer, Map<String, Object>> brokerNodes = new LinkedHashMap<>();
@@ -680,6 +726,7 @@ public class ClusterTopologyService {
                 }
             }
         } catch (Exception e) {
+            refused(unread, "nodes", e);
             LOG.warn("Failed to read node pool pods", e);
         }
 
@@ -688,7 +735,7 @@ public class ClusterTopologyService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> describeTopics() {
+    private Map<String, Object> describeTopics(Map<String, String> unread) {
         Map<String, Object> topics = new LinkedHashMap<>();
         try {
             var topicList = kubernetesClient
@@ -712,6 +759,7 @@ public class ClusterTopologyService {
             topicDetails.sort(Comparator.comparing(t -> (String) t.get("name")));
             topics.put("items", topicDetails);
         } catch (Exception e) {
+            refused(unread, "topics", e);
             LOG.debug("Unable to read KafkaTopics", e);
             topics.put("count", 0);
         }
@@ -719,7 +767,7 @@ public class ClusterTopologyService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> describeUsers() {
+    private Map<String, Object> describeUsers(Map<String, String> unread) {
         Map<String, Object> users = new LinkedHashMap<>();
         try {
             var userList = kubernetesClient
@@ -758,6 +806,7 @@ public class ClusterTopologyService {
             userDetails.sort(Comparator.comparing(t -> (String) t.get("name")));
             users.put("items", userDetails);
         } catch (Exception e) {
+            refused(unread, "users", e);
             LOG.debug("Unable to read KafkaUsers", e);
             users.put("count", 0);
         }
@@ -887,7 +936,7 @@ public class ClusterTopologyService {
     }
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> describeRebalances() {
+    private List<Map<String, Object>> describeRebalances(Map<String, String> unread) {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
             var list = kubernetesClient
@@ -915,12 +964,13 @@ public class ClusterTopologyService {
                 result.add(r);
             }
         } catch (Exception e) {
+            refused(unread, "rebalances", e);
             LOG.debug("Unable to read KafkaRebalances", e);
         }
         return result;
     }
 
-    private Map<String, Object> describeDrainCleaner() {
+    private Map<String, Object> describeDrainCleaner(Map<String, String> unread) {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             var deploy = kubernetesClient
@@ -953,13 +1003,14 @@ public class ClusterTopologyService {
                 }
             }
         } catch (Exception e) {
+            refused(unread, "drainCleaner", e);
             LOG.debug("Unable to describe Drain Cleaner", e);
         }
         return result;
     }
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> describeStrimziPodSets() {
+    private List<Map<String, Object>> describeStrimziPodSets(Map<String, String> unread) {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
             var list = kubernetesClient
@@ -981,12 +1032,13 @@ public class ClusterTopologyService {
                 result.add(ps);
             }
         } catch (Exception e) {
+            refused(unread, "podSets", e);
             LOG.debug("Unable to read StrimziPodSets", e);
         }
         return result;
     }
 
-    private List<Map<String, Object>> describeNetworkPolicies() {
+    private List<Map<String, Object>> describeNetworkPolicies(Map<String, String> unread) {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
             var policies = kubernetesClient
@@ -1016,12 +1068,13 @@ public class ClusterTopologyService {
                 result.add(p);
             }
         } catch (Exception e) {
+            refused(unread, "networkPolicies", e);
             LOG.debug("Unable to list NetworkPolicies", e);
         }
         return result;
     }
 
-    private List<Map<String, Object>> describePvcs() {
+    private List<Map<String, Object>> describePvcs(Map<String, String> unread) {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
             var pvcs = kubernetesClient
@@ -1060,12 +1113,13 @@ public class ClusterTopologyService {
                 result.add(p);
             }
         } catch (Exception e) {
+            refused(unread, "pvcs", e);
             LOG.debug("Unable to list PVCs", e);
         }
         return result;
     }
 
-    private List<Map<String, Object>> describeServices() {
+    private List<Map<String, Object>> describeServices(Map<String, String> unread) {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
             var svcs = kubernetesClient
@@ -1098,12 +1152,13 @@ public class ClusterTopologyService {
                 result.add(s);
             }
         } catch (Exception e) {
+            refused(unread, "services", e);
             LOG.debug("Unable to list Services", e);
         }
         return result;
     }
 
-    private List<Map<String, Object>> describeEndpoints() {
+    private List<Map<String, Object>> describeEndpoints(Map<String, String> unread) {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
             var endpoints = kubernetesClient
@@ -1140,13 +1195,14 @@ public class ClusterTopologyService {
                 result.add(e);
             }
         } catch (Exception e) {
+            refused(unread, "endpoints", e);
             LOG.debug("Unable to list Endpoints", e);
         }
         return result;
     }
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> describeConnect() {
+    private List<Map<String, Object>> describeConnect(Map<String, String> unread) {
         List<Map<String, Object>> connects = new ArrayList<>();
         try {
             var list = kubernetesClient
@@ -1273,6 +1329,7 @@ public class ClusterTopologyService {
                     c.put("readyPods", readyCount);
                     c.put("totalPods", connectPods.size());
                 } catch (Exception e) {
+                    refused(unread, "connect", e);
                     LOG.debug("Unable to read Kafka Connect pods for " + connectName, e);
                 }
 
@@ -1327,19 +1384,21 @@ public class ClusterTopologyService {
                     connectorList.sort(Comparator.comparing(ci -> (String) ci.get("name")));
                     c.put("connectors", connectorList);
                 } catch (Exception e) {
+                    refused(unread, "connect", e);
                     LOG.debug("Unable to read KafkaConnectors for " + connectName, e);
                 }
 
                 connects.add(c);
             }
         } catch (Exception e) {
+            refused(unread, "connect", e);
             LOG.debug("Unable to read KafkaConnects", e);
         }
         return connects;
     }
 
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> describeMirrorMaker2() {
+    private List<Map<String, Object>> describeMirrorMaker2(Map<String, String> unread) {
         List<Map<String, Object>> mm2s = new ArrayList<>();
         try {
             var list = kubernetesClient
@@ -1356,6 +1415,7 @@ public class ClusterTopologyService {
                 mm2s.add(m);
             }
         } catch (Exception e) {
+            refused(unread, "mirrorMaker2", e);
             LOG.debug("Unable to read KafkaMirrorMaker2s", e);
         }
         return mm2s;
