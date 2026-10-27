@@ -1,6 +1,6 @@
 # Kates CLI — Review and Enhancement Plan (2026-10-27)
 
-**Status: Wave 1 shipped in #518; wave 2 in #519; wave 3 in #520; wave 4 and item 2.12 in #523. Every item of the plan is done.**
+**Status: Wave 1 shipped in #518; wave 2 in #519; wave 3 in #520; wave 4 and item 2.12 in #523. Wave 5 (debt to zero) is in progress.**
 
 Goal: a `kates` CLI whose every command exits non-zero when it failed, can be interrupted without leaving work running on the cluster, produces machine-readable output that is actually parseable, and whose generated artefacts (JUnit, HTML, PDF, Helm values) are correct on every input. Then: pay down the duplication that makes each of those properties expensive to keep.
 
@@ -229,6 +229,18 @@ Small, verified, each with a test. All on `cli/`; none changes a command's flags
 | 4.7 | Typed JSON fields in `client/types.go` (`json.Number` or custom unmarshal for the `interface{}` ids, ports and durations); `ParseBackendDuration` applied at decode time. | Removes a type switch from every caller and the `mcpInt` helper. | M |
 | 4.8 | Remove `kates operator` or implement it against a stated reconciliation contract. | A command that prints "Reconciling" and does nothing misleads. | S |
 | 4.9 | Migration `cutover --dry-run` at the lab level, with the RUNNING pre-check, and `status --watch` saying that offsets are off. | | S |
+
+### Wave 5 — debt to zero
+
+Waves 1–4 left the lint backlog that `--new-from-merge-base` hides. Measured on main after #523 (golangci-lint v2.14.0, every per-file waiver removed): 28 funlen and 10 gocyclo findings, about 70 errcheck findings, 5 `output.Error` then `return nil` exits counted in `exitZeroBacklog`, and 5 files that are not gofmt-clean.
+
+| # | Item | Done when |
+|---|------|-----------|
+| 5.1 | `pkg/detect`: split the collector probes (`getEcosystemStatus`, `getAZLatency`, `runLiveStorageBench`, `runAZBandwidthBench`, `runDNSResolutionProbe`, `getSecurityAudit`, `getStrimziStatus`, `parseKyvernoPolicies`), `GenerateRemediation` and `calculateVerdict` into one function per check; `detect.go` values-file errors exit 2. | No finding in `pkg/detect` or `detect.go`; the collector waiver is gone. |
+| 5.2 | Deploy and cluster commands: `runDeploy`, the dashboard model, `resolveVersionPlan`, the picker and plan forms, `runUpgrade`, `runPorts`, `runHelmTests`/`exportHelmTestPDF`, `runDoctorNetwork`, `runDoctorDns`. | No finding in those files; their waivers are gone. |
+| 5.3 | Test and report commands: `watch` model, `runAuto`, `analyzeRun`, `renderHTMLReport`, the security export, `security audit`'s error exit, and errcheck in `autocomplete`, `notify`, `kyverno`, `flow`, `export`. | No finding in those files; `exitZeroBacklog` is empty and deleted. |
+| 5.4 | Migrate, strimzi and client: `resolveMigratePair`, `discoverLab`, `labFromDiscovery`, `runMigrateMirrorDeploy`, `printMigratePlan`, `runMigrateTarget`, `migrate.New`, `MirrorValues`, `TestInstalledOperators`; errcheck in `client` tests; gofmt on the five files; the MCP timeline test made independent of machine speed. | No finding in those files. |
+| 5.5 | errcheck enabled in `.golangci.yml`, every waiver deleted, and CI lints the whole tree rather than the diff. | `golangci-lint run ./...` reports 0 issues on main. |
 
 ## 5. Verification for every PR
 
