@@ -159,7 +159,7 @@ Small, verified, each with a test. All on `cli/`; none changes a command's flags
 | 1.10 | B3 | One `copySecretPassword(ctx, name, from, to) error` used by the five copies; a failure is reported at once with kubectl's stderr. |
 | 1.11 | B2 | `execMutex` covers only the printing in `runExecDefault`'s non-verbose branch; verbose keeps the lock (it streams to the terminal). Test: two stubbed Helm calls in Group A overlap. |
 | 1.12 | B11 | `connect scale` parses the replica count with `strconv.Atoi` and marshals the patch. |
-| 1.13 | C1 | JUnit step `time` parsed with `client.ParseBackendDuration` into seconds; suite `time` is the wall-clock duration; a step with no outcome is an `<error>`, not a `<failure>`; golden-file test. |
+| 1.13 | C1 | JUnit step `time` parsed with `client.ParseBackendDuration` into seconds; suite `time` is the sum of the step times (the disruption report carries no start or end); a step with no outcome is an `<error>`, not a `<failure>`; golden-file test. |
 | 1.14 | C2 | `gate` is `interruptible`, uses `cmd.Context()`, sleeps through the context, and cancels the run it started on Ctrl-C or `--timeout`. |
 | 1.15 | C3 | `benchmark` is `interruptible`, counts consecutive poll errors (three in a row fail the phase), gains `--timeout` (default 30 min) replacing the hidden cap. |
 | 1.16 | C4 | `client.TestSpec` gains `yaml` tags matching its `json` names; `flow` evaluates `maxP99`, `minThroughput`, `maxErrorRate` (reading the run's report), refuses `expect` and `webhook`/`notify` steps as not implemented instead of pretending, normalises grades to upper case and fails an unknown grade. |

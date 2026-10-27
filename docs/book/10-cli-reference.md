@@ -364,7 +364,7 @@ Expected output:
   ✓ local │ UP │ Kafka ✓ │ 12 configs │ 0 running │ 8 done │ 0 failed
 ```
 
-If the API is unreachable — or rejects the API key — the line shows the context name, its URL, and `unreachable` instead, and the command still exits `0`.
+If the API is unreachable — or rejects the API key — the line shows the context name, the URL the command used, and `unreachable` instead, and the command exits `1`. With `-o json` it prints one object instead of the line: `context`, `url`, `status`, `kafka`, `configs`, `runningTests`, `doneTests` and `failedTests`, plus an `error` when it could not reach the API.
 
 #### version
 
@@ -385,6 +385,8 @@ kates doctor
 kates preflight
 kates check
 ```
+
+It exits `1` when a check other than Kyverno's fails, and `0` when every check passes or only Kyverno's warn. With `-o json` it prints only the checks, as an array of `name`, `passed`, `detail` and `remediation`, with the same exit code.
 
 Expected output:
 
@@ -1496,7 +1498,7 @@ It first stops every `kubectl port-forward` you are running, including ones it d
 
 It finds the services by listing them in every namespace. An account that may not, such as one with `edit` in its own namespace only, gets the services of `--app-ns` and `--kafka-ns` instead, so pass the namespace the Kates API runs in: `kates ports --app-ns team`. [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) in the Deployment Guide sets such an install up.
 
-A local port that another program already listens on is not forwarded, and the table marks it `[IN USE]`. When that port is the API's, `kates ports` leaves the `ports` context as it is and sends no key, since the program on the port, not the API, would receive it.
+A local port that another program already listens on is not forwarded, and the table marks it `[IN USE]`. The command exits `1` when any forward could not be established. Before it starts, it stops the `kubectl port-forward` processes it started earlier, those forwarding into its namespaces for the same kube-context, and leaves forwards to other clusters running. When that port is the API's, `kates ports` leaves the `ports` context as it is and sends no key, since the program on the port, not the API, would receive it.
 
 It reads the API key from the `kates-api-key` Secret in the namespace where it found the API's Service, and nowhere else, and checks it with a request to `/api/tests/types`, which needs the key; `/api/health` would accept any key. A key the API accepts goes into `ports`, and so does one it cannot check because the API does not answer or fails with a status other than 401 or 403. A key the API rejects does not: `kates ports` says so and leaves the key that `ports` already had. A key you put in `ports` yourself, with `kates ctx set`, `kates ctx import` or an editor, stays whatever the Secret holds; `kates ports` reports whether the API accepts it.
 
@@ -1814,6 +1816,8 @@ kates kyv st
 kates kyv list
 ```
 
+`kyverno status`, `violations`, `enforce` and `audit` exit `1` when Kyverno is missing or `kubectl` fails.
+
 #### kyverno violations
 
 Aliases: `viol`, `fails`
@@ -2064,7 +2068,7 @@ kates bench
 kates benchmark -o json
 ```
 
-With `-o json` it prints only the scorecard, once the battery ends: per test its `runId`, `status`, peak throughput, highest P99, `score` and `grade`, and the `overallGrade`. A metric no phase reported is `null`, as the table's `—` is. The scorecard takes each test's status from its run, so a run that finished `FAILED` shows as `FAILED` whether or not one of its phases carried an error message. A test that could not be created shows as `FAILED`. A run with no final status after 120 polls shows as `ERROR`, because it may still be going; the battery stops there, and the tests after it show as `SKIPPED`. The command exits `0` in every one of these cases.
+With `-o json` it prints only the scorecard, once the battery ends: per test its `runId`, `status`, peak throughput, highest P99, `score` and `grade`, and the `overallGrade`. A metric no phase reported is `null`, as the table's `—` is. The scorecard takes each test's status from its run, so a run that finished `FAILED` shows as `FAILED` whether or not one of its phases carried an error message. A test that could not be created shows as `FAILED`. A run with no final status when `--timeout` passes (default `30m`; a duration such as `10m`, or a number of seconds), or whose status could not be read three polls in a row, shows as `ERROR`, because it may still be going; the battery stops there, and the tests after it show as `SKIPPED`. The command exits `0` in every one of these cases. Ctrl-C cancels the run it is waiting for and exits `130`.
 
 #### advisor
 
@@ -2122,7 +2126,7 @@ kates gate --min-grade A --timeout 300
 kates gate --min-grade B -o json
 ```
 
-With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. When `kates gate` ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — it prints the same object with an `error`, and with `null` for the throughput and P99 it never read. A run that measured no latency gets no grade either, because its P99 reads 0, which would grade as the lowest latency possible. The gate fails, its `error` says the P99 was not measured, and the P99 is `null`. The exit code is the same as with the table.
+With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. When `kates gate` ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — it prints the same object with an `error`, and with `null` for the throughput and P99 it never read. A run that measured no latency gets no grade either, because its P99 reads 0, which would grade as the lowest latency possible. The gate fails, its `error` says the P99 was not measured, and the P99 is `null`. The exit code is the same as with the table. Ctrl-C cancels the run it started and exits `130`; when `--timeout` passes, the run is cancelled too, the `status` reads `CANCELLED`, and the gate fails.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -2130,7 +2134,7 @@ With `-o json` stdout carries only the result, once the test exists: the `runId`
 | `--type` | `LOAD` | Test type to run |
 | `--records` | 50000 | Number of records |
 | `--backend` | | Benchmark backend |
-| `--timeout` | 180 | Timeout in seconds |
+| `--timeout` | 180 | Seconds to wait for the run; when they pass, the run is cancelled and the gate fails |
 
 #### test baseline
 
@@ -2342,6 +2346,9 @@ kates flow run -f pipeline.yaml
 | Flag | Description |
 |------|-------------|
 | `-f` | Path to flow pipeline YAML file |
+| `--wait` | Wait for each test step to finish (default); `--wait=false` starts the run and moves on |
+
+A test step's `spec` takes the request's own field names (`numRecords`, `recordSize`, `numProducers`, …), as a scenario file does. Its `gate` may set `minGrade`, `maxP99`, `minThroughput` and `maxErrorRate`; a run that misses one is `GATE_FAILED` with the metric named. Grades compare case-insensitively, and an unknown grade fails the gate. `expect`, and the `webhook` and `notify` actions, are not implemented: a step that uses them fails rather than reporting success.
 
 ---
 
@@ -2618,7 +2625,7 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 Consequences worth knowing in scripts:
 
 - `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
-- `test apply --wait`, `test create --wait` and `replay --wait` cancel the run they are waiting for when interrupted, and exit `130`. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
+- `test apply --wait`, `test create --wait`, `replay --wait`, `gate` and `benchmark` cancel the run they are waiting for when interrupted, and exit `130`. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
 - `kates cluster alerts` exits `1` wherever a critical alert rule is defined, firing or not, which on a default install means always — see its section above.
 - A declined confirmation exits `1` in `deploy`, `clean`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
 - Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.
@@ -2629,13 +2636,11 @@ Consequences worth knowing in scripts:
 Some commands report a failure on screen and still exit `0`, so a script cannot rely on their status. Among them:
 
 - A mistyped subcommand under a command group — `kates ctx list`, for instance — which prints the group's help.
-- `kates status` when the API does not answer or rejects the API key: it prints `unreachable`.
-- `kates ports` when it finds no Kates services, some forwards fail, or the API rejects a key it checks.
+- `kates ports` when it finds no Kates services or the API rejects a key it checks; a forward that fails exits `1`.
 - `kates snapshot create` when the API fails: it saves a snapshot of zeros.
-- `kates doctor`, whatever its checks find, and `kates cluster check` on `WARNING` and `CRITICAL` alike.
+- `kates cluster check` on `WARNING` and `CRITICAL` alike.
 - `kates security audit` and `kates security tls-inspect` when the Kates API reports that the check itself failed.
 - `kates detect` on failing checks or a cluster it cannot inspect, unless you pass `--fail-on-error` (`--fail-on-warning` reacts to warnings only); with it, still when it cannot read its `--values` file.
-- `kates kyverno status`, `violations`, `enforce` and `audit` when Kyverno is missing or the change fails.
 - `kates advisor` when the run or its report is not found.
 - `kates benchmark`, whatever its runs do: a test it could not create, a run that finished `FAILED` and one it lost track of all exit `0`.
 :::
