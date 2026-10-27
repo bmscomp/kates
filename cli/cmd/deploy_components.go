@@ -685,9 +685,11 @@ func (dc *deployContext) certManagerComponent() component {
 			// installation. Restart it to force fresh CA bundle generation and
 			// re-injection into the MutatingWebhookConfiguration.
 			dl.Println("    - Restarting Cert-Manager CA injector for fresh CA bundle...")
-			runExecFn(ctx, "kubectl", "rollout", "restart",
+			// Best effort: the webhook rollout below and the ClusterIssuer
+			// apply's fallback catch a cainjector that did not come back.
+			_ = runExecFn(ctx, "kubectl", "rollout", "restart",
 				"deployment/cert-manager-cainjector", "-n", ns)
-			runExecFn(ctx, "kubectl", "rollout", "status",
+			_ = runExecFn(ctx, "kubectl", "rollout", "status",
 				"deployment/cert-manager-cainjector", "-n", ns, "--timeout=90s")
 
 			// The webhook pod must be serving before the API server can call it.
@@ -696,7 +698,9 @@ func (dc *deployContext) certManagerComponent() component {
 			// below races the webhook Deployment and dies with
 			// "Internal error occurred: failed calling webhook".
 			dl.Println("    - Waiting for Cert-Manager webhook rollout...")
-			runExecFn(ctx, "kubectl", "rollout", "status",
+			// Best effort: applyCertMgrClusterIssuer retries and falls back
+			// when the webhook is still not serving.
+			_ = runExecFn(ctx, "kubectl", "rollout", "status",
 				"deployment/cert-manager-webhook", "-n", ns, "--timeout=180s")
 
 			return applyCertMgrClusterIssuer(ctx)
@@ -785,7 +789,7 @@ spec:
 	dl.Println("    ⚠ Webhook TLS not verifiable — temporarily setting failurePolicy: Ignore")
 	defer restoreCertMgrWebhookPolicy(ctx, certMgrWebhookConfigs)
 	for _, kind := range certMgrWebhookConfigs {
-		runExecFn(ctx, "kubectl", "patch",
+		_ = runExecFn(ctx, "kubectl", "patch", // the apply below reports a patch that did not take
 			kind, "cert-manager-webhook",
 			"--type=json", "-p",
 			`[{"op":"replace","path":"/webhooks/0/failurePolicy","value":"Ignore"}]`)
@@ -1451,7 +1455,7 @@ func (dc *deployContext) kafkaConnectorComponent() component {
 		wait: func(ctx context.Context) error {
 			if err := waitConnectorReadySilent(ctx, connectNS, 10*time.Minute); err != nil {
 				printConnectorDiagnostics(ctx, connectNS)
-				return fmt.Errorf("Kafka Connectors failed to become ready: %w", err)
+				return fmt.Errorf("kafka connectors failed to become ready: %w", err)
 			}
 			return nil
 		},

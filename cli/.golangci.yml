@@ -37,7 +37,7 @@ linters:
     # whose refactor removes it. A waiver covers the whole file, so a new
     # over-long function in one of these files is not caught: delete the
     # waiver as soon as the named function is under the limit. The waivers
-    # for security.go, cluster.go, deploy_status.go, kafka.go, connect.go,
+    # for clean.go, security.go, cluster.go, deploy_status.go, kafka.go, connect.go,
     # test.go, disruption.go and kyverno.go are gone: nothing in them is over
     # the limit any more. Files not listed here (deploy_components.go,
     # migrate*.go, report_html.go, security_export.go, detect.go, auto.go,
@@ -63,11 +63,6 @@ linters:
       - linters:
           - funlen
         path: deploy\.go
-      # runClean (298 statements): item 3.7 moves the CRD and release tables
-      # it walks into pkg/strimzi.
-      - linters:
-          - funlen
-        path: clean\.go
       # runHelmTests (79 statements) and exportHelmTestPDF (77): item 3.8
       # renders every report from one document, PDF as a view of it.
       - linters:
