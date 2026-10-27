@@ -167,19 +167,25 @@ func init() {
 }
 
 // resolveMirrorRelease finds the mirror a command acts on: --release, else
-// the lab's (--name, or the single lab).
-func resolveMirrorRelease(ctx context.Context, f *migrateMirrorFlags) (release, namespace, cr string, err error) {
+// the lab's (--name, or the single lab). lab is the name the lab's files are
+// kept under (.build/migrate/<lab>): the discovered lab's, or --name, or,
+// for a bare --release, the release itself.
+func resolveMirrorRelease(ctx context.Context, f *migrateMirrorFlags) (release, namespace, cr, lab string, err error) {
 	if f.Release != "" {
-		return f.Release, f.Namespace, f.Release + "-mirror-maker2", nil
+		lab = f.Name
+		if lab == "" {
+			lab = f.Release
+		}
+		return f.Release, f.Namespace, f.Release + "-mirror-maker2", lab, nil
 	}
 	d, err := discoverLab(ctx, f.Name)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	if d.MirrorRelease == "" {
-		return "", "", "", fmt.Errorf("lab %s has no mirror", d.Name)
+		return "", "", "", "", fmt.Errorf("lab %s has no mirror", d.Name)
 	}
-	return d.MirrorRelease, d.MirrorNamespace, d.MirrorCR, nil
+	return d.MirrorRelease, d.MirrorNamespace, d.MirrorCR, d.Name, nil
 }
 
 // runMigrateMirrorDeploy is `kates migrate mirror deploy`.
@@ -215,7 +221,7 @@ func runMigrateMirrorDeploy(ctx context.Context, f *migrateMirrorFlags) error {
 			opts.Name = src.Lab
 		}
 		bootstrap, namespace = src.Bootstrap, src.Namespace
-		if strings.HasSuffix(bootstrap, ":9094") {
+		if src.SASL {
 			opts.SASL = true
 			sourceUser, mechanism = migrate.LegacySASLUser, migrate.MechanismPlain
 			sourceSecret = src.Release + "-" + migrate.LegacySASLUser
@@ -321,7 +327,7 @@ func runMigrateMirrorStatus(ctx context.Context, f *migrateMirrorFlags) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	release, namespace, cr, err := resolveMirrorRelease(ctx, f)
+	release, namespace, cr, _, err := resolveMirrorRelease(ctx, f)
 	if err != nil {
 		return err
 	}
@@ -375,13 +381,15 @@ func runMigrateMirrorCutover(ctx context.Context, f *migrateMirrorFlags, rollbac
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	release, namespace, cr, err := resolveMirrorRelease(ctx, f)
+	release, namespace, cr, lab, err := resolveMirrorRelease(ctx, f)
 	if err != nil {
 		return err
 	}
 	var argv []string
 	if rollback {
-		path := rollbackValuesPath(release)
+		// Keyed by the lab, as run's rollback writes it and removeLabFiles
+		// deletes it; keyed by the release, the file outlived the lab.
+		path := rollbackValuesPath(lab)
 		if !f.DryRun {
 			if err := writeLabFile(path, rollbackValues); err != nil {
 				return err
@@ -426,7 +434,7 @@ func runMigrateMirrorRemove(ctx context.Context, f *migrateMirrorFlags) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	release, namespace, cr, err := resolveMirrorRelease(ctx, f)
+	release, namespace, cr, _, err := resolveMirrorRelease(ctx, f)
 	if err != nil {
 		return err
 	}

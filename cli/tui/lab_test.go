@@ -1009,6 +1009,29 @@ func TestStripAnsi(t *testing.T) {
 // A lab run sends the batch size and linger it shows, 0 included. The first
 // linger, 0, used to be left out of the request, so a LOAD iteration shown at
 // linger 0 ran at its type's 5 ms.
+// The derived duration ends before the poll deadline: a million records
+// derived a 16.7-minute run against a 15-minute wait, so the TUI reported a
+// timeout on a test that was still running.
+func TestLabBuildSpecDurationEndsBeforeThePollDeadline(t *testing.T) {
+	m := NewLab(nil, "")
+	for i := range m.params {
+		if m.params[i].Key == "records" {
+			m.params[i].Current = len(m.params[i].Values) - 1 // 1000000
+		}
+	}
+	spec, _ := m.buildSpec()
+	if spec.Records != 1_000_000 {
+		t.Fatalf("records = %d, want the largest choice", spec.Records)
+	}
+	maxWait := m.pollMaxWait(spec.Records)
+	if got := time.Duration(spec.DurationMs) * time.Millisecond; got+time.Duration(labPollMarginMs)*time.Millisecond > maxWait {
+		t.Errorf("duration %s does not end a minute before the %s poll deadline", got, maxWait)
+	}
+	if spec.DurationMs < 60000 {
+		t.Errorf("duration %dms fell under the one-minute floor", spec.DurationMs)
+	}
+}
+
 func TestLabBuildSpecSendsTheSettingsShown(t *testing.T) {
 	_, req := NewLab(nil, "").buildSpec()
 	body, err := json.Marshal(req)

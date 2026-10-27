@@ -543,13 +543,47 @@ func TestGetNetworkStatus_PrefersCoreDNSClusterDomain(t *testing.T) {
         pods insecure
     }
 }`, "kubectl", "get", "configmap", "-n", "kube-system", "coredns", "-o", "jsonpath={.data.Corefile}")
-	m.Set("default misleading-pod", "kubectl", "get", "pods", "--all-namespaces", "--field-selector=status.phase=Running",
-		"-o", "jsonpath={.items[0].metadata.namespace} {.items[0].metadata.name}")
-	m.Set("search default.svc.cluster.local svc.cluster.local cluster.local", "kubectl", "exec", "-n", "default", "misleading-pod", "--", "cat", "/etc/resolv.conf")
+	m.Set("misleading-pod", "kubectl", "get", "pods", "-n", "kates", "--field-selector=status.phase=Running",
+		"--request-timeout=10s", "-o", "jsonpath={.items[0].metadata.name}")
+	m.Set("search default.svc.cluster.local svc.cluster.local cluster.local", "kubectl", "exec", "--request-timeout=10s", "-n", "kates", "misleading-pod", "--", "cat", "/etc/resolv.conf")
 
 	got := NewCollector(m).getNetworkStatus().ClusterDomain
 	if got != "taz-tls-int-1.local" {
 		t.Fatalf("ClusterDomain = %q, want taz-tls-int-1.local", got)
+	}
+}
+
+// Without a Corefile, the domain is read from a pod the deploy owns — one in
+// the kates namespace, with every call bounded — never from the first
+// Running pod on the cluster. A read-only collection execs into nothing.
+func TestGetNetworkStatus_ReadsResolvConfFromAKatesPod(t *testing.T) {
+	m := NewMockExecutor()
+	m.Set("kates-backend-0", "kubectl", "get", "pods", "-n", "kates", "--field-selector=status.phase=Running",
+		"--request-timeout=10s", "-o", "jsonpath={.items[0].metadata.name}")
+	m.Set("search kates.svc.taz-tls-int-1.local svc.taz-tls-int-1.local taz-tls-int-1.local\nnameserver 10.96.0.10",
+		"kubectl", "exec", "--request-timeout=10s", "-n", "kates", "kates-backend-0", "--", "cat", "/etc/resolv.conf")
+
+	if got := NewCollector(m).getNetworkStatus().ClusterDomain; got != "taz-tls-int-1.local" {
+		t.Fatalf("ClusterDomain = %q, want taz-tls-int-1.local", got)
+	}
+	for _, call := range m.Calls() {
+		if strings.Contains(call, "--all-namespaces") {
+			t.Errorf("the lookup still scans every namespace: %q", call)
+		}
+		if strings.HasPrefix(call, "kubectl exec") && !strings.Contains(call, "--request-timeout=10s") {
+			t.Errorf("an unbounded exec: %q", call)
+		}
+	}
+
+	roMock := NewMockExecutor()
+	roMock.Responses = m.Responses
+	ro := NewCollector(roMock)
+	ro.ReadOnly = true
+	if got := ro.getNetworkStatus().ClusterDomain; got != "cluster.local" {
+		t.Errorf("read-only ClusterDomain = %q, want the cluster.local default", got)
+	}
+	if containsCall(roMock.Calls(), "kubectl exec") || containsCall(roMock.Calls(), "kubectl run") {
+		t.Errorf("a read-only collection execed into or ran a pod:\n  %s", strings.Join(roMock.Calls(), "\n  "))
 	}
 }
 
@@ -754,6 +788,10 @@ func TestCollect_ReadOnlyIssuesNoWrites(t *testing.T) {
 
 	if writes := mutatingCalls(m.Calls()); len(writes) > 0 {
 		t.Errorf("a read-only collection wrote to the cluster:\n  %s", strings.Join(writes, "\n  "))
+	}
+	// Nor did it exec into anyone's pod to read resolv.conf.
+	if containsCall(m.Calls(), "kubectl exec") {
+		t.Errorf("a read-only collection execed into a pod:\n  %s", strings.Join(m.Calls(), "\n  "))
 	}
 
 	// The reads still ran...

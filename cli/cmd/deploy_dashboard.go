@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/charmbracelet/x/ansi"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/bmscomp/kates/cli/tui"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -200,18 +203,27 @@ func (m *deployDashboardModel) RegisterComponent(id, name, group string, targets
 	m.compMap[id] = c
 }
 
-func pollAllWorkloads(ctx context.Context, components []*componentStat, read func(ctx context.Context, name string, args ...string) ([]byte, error)) tea.Cmd {
+// pollTarget is what the poller needs of a component — its id and targets —
+// copied out of the model when the poll is scheduled. The poll runs on a
+// Bubble Tea goroutine while Update keeps writing the *componentStat it
+// came from; sharing the pointer was a data race.
+type pollTarget struct {
+	id      string
+	targets []Target
+}
+
+func pollAllWorkloads(ctx context.Context, components []pollTarget, read func(ctx context.Context, name string, args ...string) ([]byte, error)) tea.Cmd {
 	return func() tea.Msg {
 		results := make(map[string][]workloadStat)
 
 		for _, c := range components {
-			if len(c.Targets) == 0 {
+			if len(c.targets) == 0 {
 				continue
 			}
 
 			var workloads []workloadStat
 
-			for _, target := range c.Targets {
+			for _, target := range c.targets {
 				if target.Selector == "" {
 					continue
 				}
@@ -284,7 +296,7 @@ func pollAllWorkloads(ctx context.Context, components []*componentStat, read fun
 			}
 
 			sort.Slice(workloads, func(i, j int) bool { return workloads[i].name < workloads[j].name })
-			results[c.ID] = workloads
+			results[c.id] = workloads
 		}
 
 		return allWorkloadsMsg{workloads: results}
@@ -366,7 +378,8 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logsViewport.SetContent(m.buildLogContent())
 
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		// The too-small card offers q; otherwise q is a viewport key.
+		if msg.String() == "ctrl+c" || (msg.String() == "q" && tui.TooSmall(m.width, m.height)) {
 			// Closes the window only. Helm may be mid-install, so the deploy
 			// goes on, printing to the terminal (runDeploy); the terminal is
 			// no longer raw, so a second Ctrl-C ends kates.
@@ -446,11 +459,12 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }))
 
 	case tickMsg:
-		// Only the components that have started have workloads to show.
-		var started []*componentStat
+		// Only the components that have started have workloads to show. The
+		// poll gets copies: it runs while Update goes on writing these.
+		var started []pollTarget
 		for _, c := range m.components {
 			if c.Active || c.Done {
-				started = append(started, c)
+				started = append(started, pollTarget{id: c.ID, targets: slices.Clone(c.Targets)})
 			}
 		}
 		cmds = append(cmds, pollAllWorkloads(m.ctx, started, m.read))
@@ -594,6 +608,9 @@ func (m deployDashboardModel) componentsContent() (string, int) {
 }
 
 func (m deployDashboardModel) View() string {
+	if tui.TooSmall(m.width, m.height) {
+		return tui.TooSmallCard(m.width, m.height)
+	}
 	pct := float64(m.currentStep) / float64(m.totalSteps)
 	if m.totalSteps == 0 {
 		pct = 0

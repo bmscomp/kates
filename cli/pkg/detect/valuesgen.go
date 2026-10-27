@@ -117,8 +117,10 @@ func (g *ValuesGenerator) computeCapacityBudget() CapacityBudget {
 		}
 	}
 
-	// Step 6: Determine replicas
-	cb.ControllerReplicas = g.selectControllerReplicas()
+	// Step 6: Determine replicas. ControllerReplicas is the number of
+	// controllers the pools Generate emits run in total, which is what the
+	// per-controller share below divides by.
+	cb.ControllerReplicas = g.controllerCount()
 	cb.BrokerReplicas = g.selectBrokerReplicas()
 
 	// Step 7: Distribute across components
@@ -174,6 +176,20 @@ func (g *ValuesGenerator) selectControllerReplicas() int {
 		return 3
 	}
 	return 1
+}
+
+// controllerCount is how many controllers buildControllerPools emits in all:
+// one per zone with three or more zones, three (one pinned, two floating)
+// with one zone, and otherwise a single pool sized by the cluster.
+func (g *ValuesGenerator) controllerCount() int {
+	switch n := len(g.Report.Zones); {
+	case n >= 3:
+		return n
+	case n == 1:
+		return 3
+	default:
+		return g.selectControllerReplicas()
+	}
 }
 
 func (g *ValuesGenerator) selectBrokerReplicas() int {
@@ -376,6 +392,24 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 	}
 
 	cb := g.Cap
+	sameFor := func(cpuMilli, memGi int) GenResources {
+		r := GenResourceValues{Memory: formatMem(memGi), CPU: fmt.Sprintf("%dm", cpuMilli)}
+		return GenResources{Requests: r, Limits: r}
+	}
+	scheduling := GenScheduling{
+		Spread: GenSpread{
+			Enabled:           zoneScheduling,
+			TopologyKey:       topologyKey,
+			WhenUnsatisfiable: "ScheduleAnyway",
+		},
+		AntiAffinity: GenAntiAffinity{
+			Enabled:     zoneScheduling,
+			TopologyKey: "kubernetes.io/hostname",
+		},
+	}
+	if zoneScheduling {
+		scheduling.ZoneKey = topologyKey
+	}
 
 	return &GeneratedValues{
 		Global: GenGlobal{
@@ -384,63 +418,23 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 		},
 		ClusterName: g.ClusterName,
 
-		StrimziOp:       g.buildStrimziOp(),
-		CRDUpgrade:      g.buildCRDUpgrade(),
-		ControllerPools: g.buildControllerPools(),
-		ControllerDefaults: GenControllerDefaults{
-			Resources: GenResources{
-				Requests: GenResourceValues{
-					Memory: formatMem(cb.ControllerMem),
-					CPU:    fmt.Sprintf("%dm", cb.ControllerCPU),
-				},
-				Limits: GenResourceValues{
-					Memory: formatMem(cb.ControllerMem),
-					CPU:    fmt.Sprintf("%dm", cb.ControllerCPU),
-				},
+		NodePools: GenNodePools{
+			Defaults: GenPoolDefaults{Scheduling: scheduling},
+			RoleDefaults: GenRoleDefaults{
+				Controller: GenRoleDefault{Resources: sameFor(cb.ControllerCPU, cb.ControllerMem)},
+				Broker:     GenRoleDefault{Resources: sameFor(cb.BrokerCPU, cb.BrokerMem)},
 			},
-			TopologyTSC: GenTopologyConstraints{
-				Enabled:           zoneScheduling,
-				TopologyKey:       topologyKey,
-				WhenUnsatisfiable: "ScheduleAnyway",
-			},
-			AntiAffinity: GenAntiAffinity{
-				Enabled:     zoneScheduling,
-				TopologyKey: "kubernetes.io/hostname",
-			},
-		},
-		BrokerPools: g.buildBrokerPools(),
-		BrokerDefaults: GenBrokerDefaults{
-			Resources: GenResources{
-				Requests: GenResourceValues{
-					Memory: formatMem(cb.BrokerMem),
-					CPU:    fmt.Sprintf("%dm", cb.BrokerCPU),
-				},
-				Limits: GenResourceValues{
-					Memory: formatMem(cb.BrokerMem),
-					CPU:    fmt.Sprintf("%dm", cb.BrokerCPU),
-				},
-			},
-			TopologyTSC: GenTopologyConstraints{
-				Enabled:           zoneScheduling,
-				TopologyKey:       topologyKey,
-				WhenUnsatisfiable: "ScheduleAnyway",
-			},
-			AntiAffinity: GenAntiAffinity{
-				Enabled:     zoneScheduling,
-				TopologyKey: "kubernetes.io/hostname",
-			},
+			Pools: append(g.buildControllerPools(), g.buildBrokerPools()...),
 		},
 		Kafka:         g.buildKafka(topologyKey),
 		Monitoring:    g.buildMonitoring(),
 		Alerts:        g.buildAlerts(),
-		NetPolicies:   g.buildNetworkPolicies(),
+		NetworkPolicy: g.buildNetworkPolicy(),
 		Topics:        GenFeature{Enabled: true},
 		CruiseControl: GenFeature{Enabled: false},
 		KafkaExporter: GenFeature{Enabled: false},
-		DrainCleaner:  GenFeature{Enabled: false},
 		Rebalance:     GenFeature{Enabled: true},
-		KafkaConnect:  g.buildKafkaConnect(),
-		RBAC:          GenFeature{Create: true},
+		RBAC:          GenRBAC{Create: true},
 		EntityOperator: map[string]interface{}{
 			"topicOperator": map[string]interface{}{
 				"resources": map[string]interface{}{
@@ -464,240 +458,87 @@ func (g *ValuesGenerator) Generate() *GeneratedValues {
 				},
 			},
 		},
-		StrimziSubchart: GenStrimziSubchart{},
 	}
 }
 
-func (g *ValuesGenerator) buildKafkaConnect() GenKafkaConnect {
-	zoneScheduling := len(g.Report.Zones) >= 3
-	topologyKey := "topology.kubernetes.io/zone"
-	if !zoneScheduling {
-		topologyKey = "kubernetes.io/hostname"
-	}
+// ── Node pools ───────────────────────────────────────────────────────────────
 
-	// JVM sizing: memory limit based on cluster capacity
-	// Connect gets ~10% of Kafka memory budget, clamped [2Gi, 8Gi]
-	connectMemGi := float64(g.Cap.KafkaMem) * 0.1
-	if connectMemGi < 2 {
-		connectMemGi = 2
+// pool is one nodePools.pools entry: a zone-pinned pool takes its zone's
+// storage class, a floating one (zone "") the default class.
+func (g *ValuesGenerator) pool(name, role, zone string, replicas int, size string) GenPool {
+	class := g.selectDefaultSC()
+	if zone != "" {
+		class = g.matchStorageClass(zone)
 	}
-	if connectMemGi > 8 {
-		connectMemGi = 8
-	}
-	memLimitMi := int(connectMemGi * 1024)
-	// Heap = 50% of limit (safe ratio for off-heap buffers)
-	heapMi := memLimitMi / 2
-	memRequestMi := memLimitMi * 3 / 4
-
-	// CPU: 10% of Kafka CPU budget, clamped [1000m, 4000m]
-	connectCPU := g.Cap.KafkaCPU / 10
-	if connectCPU < 1000 {
-		connectCPU = 1000
-	}
-	if connectCPU > 4000 {
-		connectCPU = 4000
-	}
-	cpuLimit := connectCPU * 2
-	if cpuLimit > 8000 {
-		cpuLimit = 8000
-	}
-
-	replicas := 3
-	if len(g.Report.Zones) > 0 && len(g.Report.Zones) < 3 {
-		replicas = len(g.Report.Zones)
-	}
-
-	// Auto-enable TLS when Kafka has TLS listener
-	tlsEnabled := false
-	for _, l := range g.Report.ExistingKafka.Health.Listeners {
-		if l.Type == "tls" || l.TLS {
-			tlsEnabled = true
-			break
-		}
-	}
-
-	extraConfig := map[string]string{
-		"producer.acks":               "all",
-		"producer.enable.idempotence": "true",
-		"consumer.auto.offset.reset":  "earliest",
-		"exactly.once.source.support": "enabled",
-	}
-
-	return GenKafkaConnect{
-		Enabled:  g.Report.Ecosystem.KafkaConnect.Installed,
+	return GenPool{
+		Name:     name,
+		Roles:    []string{role},
+		Zone:     zone,
 		Replicas: replicas,
-		GroupID:  "kates-connect-cluster",
-		JVMOptions: GenJVMOptions{
-			Xms: fmt.Sprintf("%dm", heapMi),
-			Xmx: fmt.Sprintf("%dm", heapMi),
-		},
-		Resources: GenResources{
-			Requests: GenResourceValues{
-				Memory: fmt.Sprintf("%dMi", memRequestMi),
-				CPU:    fmt.Sprintf("%dm", connectCPU),
-			},
-			Limits: GenResourceValues{
-				Memory: fmt.Sprintf("%dMi", memLimitMi),
-				CPU:    fmt.Sprintf("%dm", cpuLimit),
-			},
-		},
-		TLS: GenConnectTLS{
-			Enabled: tlsEnabled,
-		},
-		Rack: GenConnectRack{
-			Enabled:     zoneScheduling,
-			TopologyKey: topologyKey,
-		},
-		Tracing: GenConnectTracing{
-			Enabled: g.Report.Monitoring.PodMonitorCRD,
-			Type:    "opentelemetry",
-		},
-		TopologySpread: GenTopologyConstraints{
-			Enabled:           zoneScheduling,
-			TopologyKey:       topologyKey,
-			WhenUnsatisfiable: "DoNotSchedule",
-		},
-		PodAntiAffinity: GenAntiAffinity{
-			Enabled:     true,
-			TopologyKey: "kubernetes.io/hostname",
-		},
-		PDB: GenConnectPDB{
-			MaxUnavailable: 1,
-		},
-		Config: GenConnectConfig{
-			ReplicationFactor: 3,
-			KeyConverter:      "org.apache.kafka.connect.json.JsonConverter",
-			ValueConverter:    "org.apache.kafka.connect.json.JsonConverter",
-		},
-		ExtraConfig: extraConfig,
+		Storage:  GenPoolStorage{Volumes: []GenVolume{{ID: 0, Size: size, Class: class}}},
 	}
 }
 
-// ── Broker Pools ─────────────────────────────────────────────────────────────
-
-func (g *ValuesGenerator) buildBrokerPools() []GenBrokerPool {
+// buildBrokerPools emits three broker pools: one per zone with three or
+// more zones, pinned pools plus floating ones with fewer, and a single
+// three-broker pool without zones.
+func (g *ValuesGenerator) buildBrokerPools() []GenPool {
 	zones := g.Report.Zones
 	cb := g.Cap
+	brokers := func(zone, suffix string) GenPool {
+		name := "brokers-" + suffix
+		if zone != "" {
+			name = "brokers-" + sanitizeK8sName(zone)
+		}
+		return g.pool(name, "broker", zone, cb.BrokerReplicas, cb.BrokerStorage)
+	}
 
 	switch {
 	case len(zones) >= 3:
-		pools := make([]GenBrokerPool, 3)
+		pools := make([]GenPool, 3)
 		for i := 0; i < 3; i++ {
-			zoneName := zones[i].Name
-			pools[i] = GenBrokerPool{
-				Name:         "brokers-" + sanitizeK8sName(zoneName),
-				Zone:         zoneName,
-				Replicas:     cb.BrokerReplicas,
-				StorageSize:  cb.BrokerStorage,
-				StorageClass: g.matchStorageClass(zoneName),
-			}
+			pools[i] = brokers(zones[i].Name, "")
 		}
 		return pools
 
 	case len(zones) == 2:
-		pools := make([]GenBrokerPool, 3)
-		for i := 0; i < 2; i++ {
-			zoneName := zones[i].Name
-			pools[i] = GenBrokerPool{
-				Name:         "brokers-" + sanitizeK8sName(zoneName),
-				Zone:         zoneName,
-				Replicas:     cb.BrokerReplicas,
-				StorageSize:  cb.BrokerStorage,
-				StorageClass: g.matchStorageClass(zoneName),
-			}
-		}
-		pools[2] = GenBrokerPool{
-			Name:         "brokers-float",
-			Zone:         "",
-			Replicas:     cb.BrokerReplicas,
-			StorageSize:  cb.BrokerStorage,
-			StorageClass: g.selectDefaultSC(),
-		}
-		return pools
+		return []GenPool{brokers(zones[0].Name, ""), brokers(zones[1].Name, ""), brokers("", "float")}
 
 	case len(zones) == 1:
-		zoneName := zones[0].Name
-		return []GenBrokerPool{
-			{
-				Name: "brokers-" + sanitizeK8sName(zoneName), Zone: zoneName,
-				Replicas: cb.BrokerReplicas, StorageSize: cb.BrokerStorage,
-				StorageClass: g.matchStorageClass(zoneName),
-			},
-			{
-				Name: "brokers-float-2", Zone: "",
-				Replicas: cb.BrokerReplicas, StorageSize: cb.BrokerStorage,
-				StorageClass: g.selectDefaultSC(),
-			},
-			{
-				Name: "brokers-float-3", Zone: "",
-				Replicas: cb.BrokerReplicas, StorageSize: cb.BrokerStorage,
-				StorageClass: g.selectDefaultSC(),
-			},
-		}
+		return []GenPool{brokers(zones[0].Name, ""), brokers("", "float-2"), brokers("", "float-3")}
 
 	default:
-		return []GenBrokerPool{
-			{
-				Name: "brokers", Zone: "",
-				Replicas: cb.BrokerReplicas * 3, StorageSize: cb.BrokerStorage,
-				StorageClass: g.selectDefaultSC(),
-			},
-		}
+		return []GenPool{g.pool("brokers", "broker", "", cb.BrokerReplicas*3, cb.BrokerStorage)}
 	}
 }
 
-// ── Controller Pools ────────────────────────────────────────────────────────
-
-// buildControllerPools creates one controller pool per detected zone,
-// each pinned to its zone's storage class via node affinity.
-// This mirrors the broker pool pattern and ensures each controller gets
-// a PV provisioned in its own zone.
-func (g *ValuesGenerator) buildControllerPools() []GenControllerPool {
+// buildControllerPools creates one controller pool per detected zone, each
+// pinned to its zone's storage class, so every controller gets a PV
+// provisioned in its own zone; the count agrees with controllerCount.
+func (g *ValuesGenerator) buildControllerPools() []GenPool {
 	cb := g.Cap
 	zones := g.Report.Zones
+	controllers := func(zone, suffix string) GenPool {
+		name := "controllers-" + suffix
+		if zone != "" {
+			name = "controllers-" + sanitizeK8sName(zone)
+		}
+		return g.pool(name, "controller", zone, 1, cb.ControllerStorage)
+	}
 
 	switch {
 	case len(zones) >= 3:
-		pools := make([]GenControllerPool, 0, len(zones))
+		pools := make([]GenPool, 0, len(zones))
 		for _, z := range zones {
-			pools = append(pools, GenControllerPool{
-				Name:         "controllers-" + sanitizeK8sName(z.Name),
-				Zone:         z.Name,
-				Replicas:     1,
-				StorageSize:  cb.ControllerStorage,
-				StorageClass: g.matchStorageClass(z.Name),
-			})
+			pools = append(pools, controllers(z.Name, ""))
 		}
 		return pools
 
 	case len(zones) == 1:
-		zoneName := zones[0].Name
-		return []GenControllerPool{
-			{
-				Name: "controllers-" + sanitizeK8sName(zoneName), Zone: zoneName,
-				Replicas: 1, StorageSize: cb.ControllerStorage,
-				StorageClass: g.matchStorageClass(zoneName),
-			},
-			{
-				Name: "controllers-float-2", Zone: "",
-				Replicas: 1, StorageSize: cb.ControllerStorage,
-				StorageClass: g.selectDefaultSC(),
-			},
-			{
-				Name: "controllers-float-3", Zone: "",
-				Replicas: 1, StorageSize: cb.ControllerStorage,
-				StorageClass: g.selectDefaultSC(),
-			},
-		}
+		return []GenPool{controllers(zones[0].Name, ""), controllers("", "float-2"), controllers("", "float-3")}
 
 	default:
-		return []GenControllerPool{
-			{
-				Name: "controllers", Zone: "",
-				Replicas: cb.ControllerReplicas, StorageSize: cb.ControllerStorage,
-				StorageClass: g.selectDefaultSC(),
-			},
-		}
+		return []GenPool{g.pool("controllers", "controller", "", cb.ControllerReplicas, cb.ControllerStorage)}
 	}
 }
 
@@ -747,16 +588,6 @@ func (g *ValuesGenerator) selectDefaultSC() string {
 		return g.Report.Storage[0].Name
 	}
 	return "standard"
-}
-
-// ── Strimzi ──────────────────────────────────────────────────────────────────
-
-func (g *ValuesGenerator) buildStrimziOp() GenStrimziOp {
-	return GenStrimziOp{Enabled: !g.Report.Strimzi.Running}
-}
-
-func (g *ValuesGenerator) buildCRDUpgrade() GenCRDUpgrade {
-	return GenCRDUpgrade{Enabled: !g.Report.Strimzi.Running && !g.Report.Strimzi.CRDsPresent}
 }
 
 // ── Listeners ────────────────────────────────────────────────────────────────
@@ -846,9 +677,9 @@ func (g *ValuesGenerator) buildAlerts() GenAlerts {
 	return GenAlerts{Enabled: g.Report.Monitoring.PodMonitorCRD && g.Report.Monitoring.PrometheusRuleCRD}
 }
 
-// ── Network Policies ─────────────────────────────────────────────────────────
+// ── Network Policy ───────────────────────────────────────────────────────────
 
-func (g *ValuesGenerator) buildNetworkPolicies() GenNetPolicies {
+func (g *ValuesGenerator) buildNetworkPolicy() GenNetworkPolicy {
 	cniSupported := g.Report.Network.CNI != "" && g.Report.Network.CNI != "unknown"
 	if !cniSupported {
 		provider := strings.ToLower(g.Report.Provider)
@@ -857,15 +688,19 @@ func (g *ValuesGenerator) buildNetworkPolicies() GenNetPolicies {
 		}
 	}
 	if !cniSupported {
-		return GenNetPolicies{Enabled: false}
+		return GenNetworkPolicy{Enabled: false}
 	}
 
+	// The chart derives this selector from clusterName when it is empty; it
+	// is spelled out so a Kyverno policy that refuses an empty podSelector
+	// sees it in the values too.
 	selector := map[string]string{
 		"app.kubernetes.io/part-of": fmt.Sprintf("strimzi-%s", g.ClusterName),
 	}
-	return GenNetPolicies{
-		Enabled: true, DefaultDeny: true, DefaultSelector: selector,
-		AllowDNS: true, AllowDNSSelector: selector,
+	return GenNetworkPolicy{
+		Enabled:     true,
+		DefaultDeny: GenSelectorToggle{Enabled: true, Selector: selector},
+		DNS:         GenSelectorToggle{Enabled: true, Selector: selector},
 	}
 }
 

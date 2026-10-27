@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -383,7 +386,96 @@ func TestMigrateTopicsFromPattern(t *testing.T) {
 	if got := topicsFromPattern(`kates\..*`); len(got) != 0 {
 		t.Fatalf("a real regex must yield no topic, got %v", got)
 	}
-	if name := kafkaTopicResourceName("m282-430", "source.checkpoints.internal"); name != "m282-430-source-checkpoints-internal" {
-		t.Fatalf("resource name = %s", name)
+}
+
+// A sanitised name carries a short hash of the original: a.b, a-b and A_B
+// used to map to one KafkaTopic, the second apply overwriting the first. A
+// name sanitising did not touch stays as it was.
+func TestKafkaTopicResourceNameDoesNotCollide(t *testing.T) {
+	if name := kafkaTopicResourceName("m282-430", "orders"); name != "m282-430-orders" {
+		t.Errorf("an already-valid name changed: %s", name)
+	}
+	sum := sha256.Sum256([]byte("source.checkpoints.internal"))
+	if want, got := "m282-430-source-checkpoints-internal-"+hex.EncodeToString(sum[:3]), kafkaTopicResourceName("m282-430", "source.checkpoints.internal"); got != want {
+		t.Errorf("resource name = %s, want %s", got, want)
+	}
+	seen := map[string]string{}
+	for _, topic := range []string{"a.b", "a-b", "A_B", "a..b", strings.Repeat("x", 70) + "1", strings.Repeat("x", 70) + "2"} {
+		name := kafkaTopicResourceName("lab", topic)
+		if len(name) > 63 || !regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`).MatchString(name) {
+			t.Errorf("%q → %q is not a DNS-1123 label", topic, name)
+		}
+		if other, dup := seen[name]; dup {
+			t.Errorf("%q and %q share the name %s", topic, other, name)
+		}
+		seen[name] = topic
+	}
+}
+
+// The topics come from the kates.io/lab-topics annotation up wrote, so a
+// mirror installed with a real regular expression (through --values-mirror)
+// still names its topics; topicsPattern is the fallback for a CR without it.
+// In a fan-in each leg takes the recorded names its own pattern matches.
+func TestReadMirrorSpecPrefersTheRecordedTopics(t *testing.T) {
+	spec := json.RawMessage(`{"target":{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092","groupId":"mm2-x"},
+		"mirrors":[{"source":{"alias":"source","bootstrapServers":"src:9092"},"topicsPattern":"kates\\..*"}]}`)
+	d := &labDiscovery{}
+	d.readMirrorSpec(spec, "")
+	if len(d.Topics) != 0 {
+		t.Fatalf("a regex pattern without the annotation should name no topic, got %v", d.Topics)
+	}
+	d = &labDiscovery{}
+	d.readMirrorSpec(spec, "kates.orders, kates.payments")
+	if strings.Join(d.Topics, ",") != "kates.orders,kates.payments" || strings.Join(d.legs[0].Topics, ",") != "kates.orders,kates.payments" {
+		t.Fatalf("recorded topics not read back: %v / %v", d.Topics, d.legs[0].Topics)
+	}
+
+	fanIn := json.RawMessage(`{"target":{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092","groupId":"mm2-x"},
+		"mirrors":[{"source":{"alias":"src282","bootstrapServers":"a:9092"},"topicsPattern":"kates\\.orders\\.src282"},
+		           {"source":{"alias":"src391","bootstrapServers":"b:9092"},"topicsPattern":"kates\\.orders\\.src391"}]}`)
+	d = &labDiscovery{}
+	d.readMirrorSpec(fanIn, "kates.orders.src282,kates.orders.src391")
+	if strings.Join(d.legs[0].Topics, ",") != "kates.orders.src282" || strings.Join(d.legs[1].Topics, ",") != "kates.orders.src391" {
+		t.Fatalf("legs did not each take their own recorded topics: %v / %v", d.legs[0].Topics, d.legs[1].Topics)
+	}
+}
+
+// SASL is read from the CR's authentication block for the source cluster,
+// not from the port: a SASL listener on 9092 is SASL, a plaintext one on
+// 9094 is not. A CR that lists no clusters falls back to the port.
+func TestLabSourceSASLFromTheCRsAuthentication(t *testing.T) {
+	withClusters := func(bootstrap, auth string) *labDiscovery {
+		t.Helper()
+		spec := json.RawMessage(fmt.Sprintf(`{"target":{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092","groupId":"g"},
+			"clusters":[{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092"},{"alias":"source","bootstrapServers":%q%s}],
+			"mirrors":[{"source":{"alias":"source","bootstrapServers":%q},"topicsPattern":"kates\\.orders"}]}`, bootstrap, auth, bootstrap))
+		d := &labDiscovery{}
+		d.readMirrorSpec(spec, "")
+		d.Sources = orderLabSources([]*labSource{{Release: "lab-src", Namespace: "kafka-lab-src"}}, d.legs)
+		return d
+	}
+	plainAuth := `,"authentication":{"type":"plain","username":"mm2reader","passwordSecret":{"secretName":"lab-src-mm2reader","password":"password"}}`
+
+	if d := withClusters("lab-src-legacy-kafka-bootstrap.kafka-lab-src.svc:9092", plainAuth); !d.Sources[0].usesSASL() || d.Sources[0].Auth.Secret != "lab-src-mm2reader" || d.Sources[0].Auth.User != "mm2reader" {
+		t.Errorf("a SASL block on 9092 was not read as SASL: %+v", d.Sources[0].Auth)
+	}
+	if d := withClusters("lab-src-legacy-kafka-bootstrap.kafka-lab-src.svc:9094", ""); d.Sources[0].usesSASL() {
+		t.Errorf("no authentication block on 9094 was read as SASL: %+v", d.Sources[0].Auth)
+	}
+	noClusters := &labDiscovery{}
+	noClusters.readMirrorSpec(json.RawMessage(`{"target":{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092"},
+		"mirrors":[{"source":{"alias":"source","bootstrapServers":"src:9094"},"topicsPattern":"kates\\.orders"}]}`), "")
+	noClusters.Sources = orderLabSources([]*labSource{{Release: "src", Namespace: "ns"}}, noClusters.legs)
+	if !noClusters.Sources[0].usesSASL() {
+		t.Error("a CR listing no clusters should fall back to the port")
+	}
+
+	// mirror deploy reads the same answer off the source's bootstrap Service.
+	sasl := []servicePort{{Name: "plaintext", Port: 9092}, {Name: "sasl", Port: 9095}}
+	if !saslBootstrap("src.ns.svc:9095", sasl) || saslBootstrap("src.ns.svc:9092", sasl) || saslBootstrap("src.ns.svc:9094", sasl) {
+		t.Error("saslBootstrap should follow the Service's sasl port, whatever its number")
+	}
+	if !saslBootstrap("src.ns.svc:9094", nil) || saslBootstrap("src.ns.svc:9092", nil) {
+		t.Error("without ports, saslBootstrap should fall back to 9094")
 	}
 }

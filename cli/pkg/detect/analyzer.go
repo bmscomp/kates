@@ -85,6 +85,12 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 			Detail:      detail,
 		})
 	}
+	// addWarn is a passing row that counts as a warning: every warning has a
+	// row, so --fail-on-warning never exits 1 over something no report shows.
+	addWarn := func(desc, detail string) {
+		v.Warns++
+		addCheck(desc, true, detail)
+	}
 
 	addCheck("Kubernetes version ≥ 1.25", report.K8sMinor >= 25, report.K8sVersion)
 	addCheck("Helm version ≥ 3.12", report.HelmMajor >= 3, report.HelmVersion)
@@ -108,20 +114,22 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	addCheck("≥ 1 node per zone", min1Node, fmt.Sprintf("%d nodes across %d zones", len(report.Nodes), len(report.Zones)))
 	addCheck("StorageClass available", len(report.Storage) > 0, fmt.Sprintf("%d class(es)", len(report.Storage)))
 
-	// Active Infrastructure Probing Validation
-	minIOPS := 1000 // we want at least 1000 IOPS
-	iopsPass := false
-	maxIOPS := 0
-	for _, sc := range report.Storage {
-		if sc.ProbedIOPS >= minIOPS {
-			iopsPass = true
+	// Disk IOPS of the class the pools will use — the default one — and not
+	// the best class on the cluster, which may be one nothing provisions
+	// from. The number is an estimate from the class's name unless the live
+	// bench measured it, and the row says which.
+	const minIOPS = 1000
+	if sc, isDefault := defaultStorageClass(report.Storage); sc != nil {
+		basis := "estimated from the provisioner"
+		if sc.IOPSMeasured {
+			basis = "measured"
 		}
-		if sc.ProbedIOPS > maxIOPS {
-			maxIOPS = sc.ProbedIOPS
+		which := "default class"
+		if !isDefault {
+			which = "no default class; judging"
 		}
-	}
-	if len(report.Storage) > 0 {
-		addCheck("Disk IOPS sufficient (≥ 1000)", iopsPass, fmt.Sprintf("max %d IOPS measured", maxIOPS))
+		addCheck("Disk IOPS sufficient (≥ 1000)", sc.ProbedIOPS >= minIOPS,
+			fmt.Sprintf("%s %s: %d IOPS %s", which, sc.Name, sc.ProbedIOPS, basis))
 	}
 
 	addCheck("Controller resources fit", report.Budget.TotalCPU >= report.Budget.CtrlCPU && report.Budget.TotalMem >= report.Budget.CtrlMem, fmt.Sprintf("%dm needed", report.Budget.CtrlCPU))
@@ -239,11 +247,11 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 		}
 	}
 
-	if report.ExistingKafka.KafkaClusters > 0 {
-		v.Warns++
+	if n := report.ExistingKafka.KafkaClusters; n > 0 {
+		addWarn("Existing Kafka clusters", fmt.Sprintf("%d Kafka CR(s) already on the cluster — kates deploy adds another", n))
 	}
 	if !report.Strimzi.Running && report.Strimzi.CRDsPresent {
-		v.Warns++
+		addWarn("Strimzi operator running", "CRDs present but no operator reconciles them — a Kafka CR would never become Ready")
 	}
 
 	// New pre-flight security audit check
@@ -329,6 +337,21 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 
 	v.Compatible = v.Fails == 0
 	report.Verdict = v
+}
+
+// defaultStorageClass is the class marked default, or, when none is, the
+// first one (isDefault false): a chart with no class named uses the former,
+// and the latter is the closest thing to it the report has.
+func defaultStorageClass(classes []SCInfo) (sc *SCInfo, isDefault bool) {
+	for i := range classes {
+		if classes[i].IsDefault {
+			return &classes[i], true
+		}
+	}
+	if len(classes) > 0 {
+		return &classes[0], false
+	}
+	return nil, false
 }
 
 // parseHeapMi converts a JVM heap string like "768m" or "2g" to MiB.

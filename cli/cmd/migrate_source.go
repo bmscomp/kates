@@ -205,6 +205,34 @@ type legacySource struct {
 	Mode               string
 	Bootstrap          string
 	Image              string
+	// SASL says Bootstrap is the SASL listener (see saslBootstrap).
+	SASL bool
+}
+
+// servicePort is one port of a legacy source's bootstrap Service.
+type servicePort struct {
+	Name string `json:"name"`
+	Port int    `json:"port"`
+}
+
+// saslBootstrap says a legacy source's bootstrap address names its SASL
+// listener: the bootstrap Service's port called "sasl" (values-sasl.yaml),
+// whatever number it was given. A Service that lists no ports — an older
+// chart's — is judged by the legacy chart's default SASL port, 9094.
+func saslBootstrap(bootstrap string, ports []servicePort) bool {
+	if len(ports) == 0 {
+		return strings.HasSuffix(bootstrap, ":9094")
+	}
+	port := ""
+	if i := strings.LastIndexByte(bootstrap, ':'); i >= 0 {
+		port = bootstrap[i+1:]
+	}
+	for _, p := range ports {
+		if p.Name == "sasl" && fmt.Sprint(p.Port) == port {
+			return true
+		}
+	}
+	return false
 }
 
 // findLegacySources lists the legacy-kafka releases on the cluster through
@@ -229,6 +257,9 @@ func findLegacySources(ctx context.Context, namespace string) ([]legacySource, e
 				Labels      map[string]string `json:"labels"`
 				Annotations map[string]string `json:"annotations"`
 			} `json:"metadata"`
+			Spec struct {
+				Ports []servicePort `json:"ports"`
+			} `json:"spec"`
 		} `json:"items"`
 	}
 	if strings.TrimSpace(out) != "" {
@@ -248,6 +279,7 @@ func findLegacySources(ctx context.Context, namespace string) ([]legacySource, e
 			Lab:       it.Metadata.Labels[migrate.LabelLab],
 			Mode:      it.Metadata.Labels["kates.io/kafka-mode"],
 			Bootstrap: bootstrap,
+			SASL:      saslBootstrap(bootstrap, it.Spec.Ports),
 		}
 		if v, err := kafkaversion.Parse(it.Metadata.Annotations["kates.io/kafka-version"]); err == nil {
 			s.Version = v

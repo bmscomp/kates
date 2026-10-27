@@ -298,9 +298,11 @@ func TestLiveStorageBench_Success(t *testing.T) {
 	m.Responses["kubectl create -f"] = ""
 	m.Responses["kubectl label ns"] = ""
 	m.Responses["kubectl delete ns"] = ""
-	m.Responses["sh -c cat <<EOF | kubectl apply -f -"] = ""
+	m.Responses["kubectl create configmap kates-detect-bench-script"] = ""
+	m.Responses["kubectl apply -f"] = ""
 	m.Responses["kubectl run kates-detect-bench-pod-0"] = ""
 	m.Responses["kubectl wait --for=condition=Ready pod/kates-detect-bench-pod-0"] = "pod/kates-detect-bench-pod-0 condition met"
+	m.Responses["kubectl wait --for=jsonpath={.status.phase}=Succeeded pod/kates-detect-bench-pod-0"] = "pod/kates-detect-bench-pod-0 condition met"
 
 	// Mock FIO logs
 	fioJSON := `{
@@ -322,7 +324,7 @@ func TestLiveStorageBench_Success(t *testing.T) {
     }
   ]
 }`
-	m.Responses["kubectl logs -f kates-detect-bench-pod-0"] = "fetch https://dl-cdn.alpinelinux.org/alpine/v3.19/main\nInstalling fio...\n" + fioJSON
+	m.Responses["kubectl logs kates-detect-bench-pod-0"] = "fetch https://dl-cdn.alpinelinux.org/alpine/v3.19/main\nInstalling fio...\n" + fioJSON
 
 	collector := NewCollector(m)
 	collector.BenchStorage = true
@@ -346,6 +348,22 @@ func TestLiveStorageBench_Success(t *testing.T) {
 	}
 	if report.Storage[0].ProbeLatencyMs != 0.5 {
 		t.Errorf("Expected 0.5ms latency, got %f", report.Storage[0].ProbeLatencyMs)
+	}
+	if !report.Storage[0].IOPSMeasured {
+		t.Error("a live bench result must be marked measured")
+	}
+	// No shell program anywhere, the script travels in a ConfigMap, and the
+	// log read is a single bounded call.
+	for _, call := range m.Calls() {
+		if strings.HasPrefix(call, "sh ") || strings.Contains(call, "sh -c") {
+			t.Errorf("the bench composed a shell program: %q", call)
+		}
+		if strings.Contains(call, "logs -f") {
+			t.Errorf("the bench streams logs without a bound: %q", call)
+		}
+	}
+	if !containsCall(m.Calls(), "kubectl create configmap kates-detect-bench-script", "--from-file=bench.sh=") {
+		t.Errorf("the bench script did not go through a ConfigMap:\n  %s", strings.Join(m.Calls(), "\n  "))
 	}
 
 	if len(progressMessages) == 0 {
@@ -377,7 +395,8 @@ func TestLiveStorageBench_Fallback(t *testing.T) {
 	m.Responses["kubectl create -f"] = ""
 	m.Responses["kubectl label ns"] = ""
 	m.Responses["kubectl delete ns"] = ""
-	m.Responses["sh -c cat <<EOF | kubectl apply -f -"] = ""
+	m.Responses["kubectl create configmap kates-detect-bench-script"] = ""
+	m.Responses["kubectl apply -f"] = ""
 	m.Responses["kubectl run kates-detect-bench-pod-0"] = ""
 	m.Errors["kubectl wait --for=condition=Ready pod/kates-detect-bench-pod-0"] = fmt.Errorf("timeout waiting for pod")
 
@@ -399,6 +418,9 @@ func TestLiveStorageBench_Fallback(t *testing.T) {
 	}
 	if report.Storage[0].ProbeLatencyMs != 0.5 {
 		t.Errorf("Expected fallback to keep 0.5ms latency, got %f", report.Storage[0].ProbeLatencyMs)
+	}
+	if report.Storage[0].IOPSMeasured {
+		t.Error("a failed bench must leave the estimate marked as one")
 	}
 }
 

@@ -33,6 +33,11 @@ const (
 	// several of them; absent when the lab has one source, whose alias is
 	// SourceAlias.
 	LabelSourceAlias = "kates.io/lab-source"
+	// AnnotationLabTopics is written on the KafkaMirrorMaker2 CR at install:
+	// the lab's topic list, comma-separated, so discovery reads the names
+	// back rather than guessing them out of topicsPattern (a real regular
+	// expression there yields none).
+	AnnotationLabTopics = "kates.io/lab-topics"
 
 	// RoleSource is the old Kafka, RoleTarget the new one (when the lab
 	// creates it), RoleMirror the MirrorMaker 2 release.

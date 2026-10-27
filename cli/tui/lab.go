@@ -1023,6 +1023,12 @@ func (m LabModel) buildSpec() (*client.TestSpec, *client.CreateTestRequest) {
 	if durationMs < 60000 {
 		durationMs = 60000
 	}
+	// The poll gives up at pollMaxWait: a run asked to last longer than that
+	// was reported as timed out while it was still running (a million
+	// records derived 16.7 minutes against a 15-minute wait).
+	if limit := int(m.pollMaxWait(spec.Records)/time.Millisecond) - labPollMarginMs; durationMs > limit {
+		durationMs = limit
+	}
 	spec.DurationMs = durationMs
 
 	req := &client.CreateTestRequest{
@@ -1086,6 +1092,11 @@ func (m LabModel) retryTest() tea.Cmd {
 		return labTestStartedMsg{run: run, req: m.lastTestReq, records: records}
 	}
 }
+
+// labPollMarginMs is how long before the poll deadline a derived test
+// duration must end: time for the run to finish and report after its last
+// record.
+const labPollMarginMs = 60000
 
 func (m LabModel) pollMaxWait(records int) time.Duration {
 	maxWait := 6 * time.Minute

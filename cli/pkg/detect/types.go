@@ -31,6 +31,9 @@ type SCInfo struct {
 	AllowExpansion bool
 	ProbedIOPS     int
 	ProbeLatencyMs float64
+	// IOPSMeasured says ProbedIOPS came from the live fio bench; otherwise
+	// it is an estimate from the provisioner's and the class's names.
+	IOPSMeasured bool
 }
 
 type StorageAudit struct {
@@ -403,32 +406,30 @@ type DetectReport struct {
 	Security      SecurityAudit
 }
 
-// ── Generated Values Types (mirrors kafka-cluster Helm chart values.yaml) ────
+// ── Generated Values Types (mirrors kafka-cluster 1.x values.yaml) ───────────
+//
+// Only keys the chart reads are emitted. The 0.4 shape (controllerPools,
+// brokerPools, *Defaults, networkPolicies, strimziOperator, crdUpgrade,
+// kafkaConnect, drainCleaner) is still translated by kafka-cluster 1.x, but
+// three of those blocks are ignored there and drainCleaner.enabled fails the
+// render, so none of them belongs in a file this CLI writes.
 
 type GeneratedValues struct {
 	Global      GenGlobal `yaml:"global"`
 	ClusterName string    `yaml:"clusterName"`
 
-	StrimziOp          GenStrimziOp           `yaml:"strimziOperator"`
-	CRDUpgrade         GenCRDUpgrade          `yaml:"crdUpgrade"`
-	ControllerPools    []GenControllerPool    `yaml:"controllerPools"`
-	ControllerDefaults GenControllerDefaults  `yaml:"controllerDefaults"`
-	BrokerPools        []GenBrokerPool        `yaml:"brokerPools"`
-	BrokerDefaults     GenBrokerDefaults      `yaml:"brokerDefaults"`
-	Kafka              GenKafka               `yaml:"kafka"`
-	Monitoring         GenMonitoring          `yaml:"monitoring"`
-	Alerts             GenAlerts              `yaml:"alerts"`
-	NetPolicies        GenNetPolicies         `yaml:"networkPolicies"`
-	Users              *GenUsers              `yaml:"users,omitempty"`
-	Topics             GenFeature             `yaml:"topics"`
-	CruiseControl      GenFeature             `yaml:"cruiseControl"`
-	KafkaExporter      GenFeature             `yaml:"kafkaExporter"`
-	DrainCleaner       GenFeature             `yaml:"drainCleaner"`
-	Rebalance          GenFeature             `yaml:"rebalance"`
-	KafkaConnect       GenKafkaConnect        `yaml:"kafkaConnect"`
-	RBAC               GenFeature             `yaml:"rbac"`
-	EntityOperator     map[string]interface{} `yaml:"entityOperator"`
-	StrimziSubchart    GenStrimziSubchart     `yaml:"strimzi-kafka-operator"`
+	NodePools      GenNodePools           `yaml:"nodePools"`
+	Kafka          GenKafka               `yaml:"kafka"`
+	Monitoring     GenMonitoring          `yaml:"monitoring"`
+	Alerts         GenAlerts              `yaml:"alerts"`
+	NetworkPolicy  GenNetworkPolicy       `yaml:"networkPolicy"`
+	Users          *GenUsers              `yaml:"users,omitempty"`
+	Topics         GenFeature             `yaml:"topics"`
+	CruiseControl  GenFeature             `yaml:"cruiseControl"`
+	KafkaExporter  GenFeature             `yaml:"kafkaExporter"`
+	Rebalance      GenFeature             `yaml:"rebalance"`
+	RBAC           GenRBAC                `yaml:"rbac"`
+	EntityOperator map[string]interface{} `yaml:"entityOperator"`
 }
 
 type GenGlobal struct {
@@ -436,49 +437,57 @@ type GenGlobal struct {
 	StorageClass  string `yaml:"storageClass,omitempty"`
 }
 
-type GenStrimziOp struct {
-	Enabled bool `yaml:"enabled"`
+// GenNodePools is nodePools: every pool is rendered from Pools, with
+// precedence pool > roleDefaults[role] > defaults (maps merged, lists
+// replaced), so a pool's storage volume carries its size and class in full.
+type GenNodePools struct {
+	Defaults     GenPoolDefaults `yaml:"defaults"`
+	RoleDefaults GenRoleDefaults `yaml:"roleDefaults"`
+	Pools        []GenPool       `yaml:"pools"`
 }
 
-type GenStrimziSubchart struct {
-	KubernetesServiceDnsDomain string `yaml:"kubernetesServiceDnsDomain,omitempty"`
+type GenPoolDefaults struct {
+	Scheduling GenScheduling `yaml:"scheduling"`
 }
 
-type GenCRDUpgrade struct {
-	Enabled bool `yaml:"enabled"`
+type GenScheduling struct {
+	// ZoneKey is the node label a pool's zone pins to.
+	ZoneKey      string          `yaml:"zoneKey,omitempty"`
+	Spread       GenSpread       `yaml:"spread"`
+	AntiAffinity GenAntiAffinity `yaml:"antiAffinity"`
 }
 
-type GenControllerPool struct {
-	Name         string `yaml:"name"`
-	Zone         string `yaml:"zone"`
-	Replicas     int    `yaml:"replicas"`
-	StorageSize  string `yaml:"storageSize"`
-	StorageClass string `yaml:"storageClass"`
+type GenSpread struct {
+	Enabled           bool   `yaml:"enabled"`
+	TopologyKey       string `yaml:"topologyKey"`
+	WhenUnsatisfiable string `yaml:"whenUnsatisfiable,omitempty"`
 }
 
-type GenControllerDefaults struct {
-	Resources    GenResources           `yaml:"resources"`
-	TopologyTSC  GenTopologyConstraints `yaml:"topologySpreadConstraints"`
-	AntiAffinity GenAntiAffinity        `yaml:"podAntiAffinity"`
+type GenRoleDefaults struct {
+	Controller GenRoleDefault `yaml:"controller"`
+	Broker     GenRoleDefault `yaml:"broker"`
 }
 
-type GenStorage struct {
+type GenRoleDefault struct {
+	Resources GenResources `yaml:"resources"`
+}
+
+type GenPool struct {
+	Name     string         `yaml:"name"`
+	Roles    []string       `yaml:"roles"`
+	Zone     string         `yaml:"zone,omitempty"`
+	Replicas int            `yaml:"replicas"`
+	Storage  GenPoolStorage `yaml:"storage"`
+}
+
+type GenPoolStorage struct {
+	Volumes []GenVolume `yaml:"volumes"`
+}
+
+type GenVolume struct {
+	ID    int    `yaml:"id"`
 	Size  string `yaml:"size"`
 	Class string `yaml:"class,omitempty"`
-}
-
-type GenBrokerPool struct {
-	Name         string `yaml:"name"`
-	Zone         string `yaml:"zone"`
-	Replicas     int    `yaml:"replicas"`
-	StorageSize  string `yaml:"storageSize"`
-	StorageClass string `yaml:"storageClass"`
-}
-
-type GenBrokerDefaults struct {
-	Resources    GenResources           `yaml:"resources"`
-	TopologyTSC  GenTopologyConstraints `yaml:"topologySpreadConstraints"`
-	AntiAffinity GenAntiAffinity        `yaml:"podAntiAffinity"`
 }
 
 type GenResources struct {
@@ -491,15 +500,13 @@ type GenResourceValues struct {
 	CPU    string `yaml:"cpu"`
 }
 
-type GenTopologyConstraints struct {
-	Enabled           bool   `yaml:"enabled"`
-	TopologyKey       string `yaml:"topologyKey"`
-	WhenUnsatisfiable string `yaml:"whenUnsatisfiable,omitempty"`
-}
-
 type GenAntiAffinity struct {
 	Enabled     bool   `yaml:"enabled"`
 	TopologyKey string `yaml:"topologyKey"`
+}
+
+type GenRBAC struct {
+	Create bool `yaml:"create"`
 }
 
 type GenKafka struct {
@@ -548,12 +555,18 @@ type GenAlerts struct {
 	Enabled bool `yaml:"enabled"`
 }
 
-type GenNetPolicies struct {
-	Enabled          bool              `yaml:"enabled"`
-	DefaultDeny      bool              `yaml:"defaultDeny"`
-	DefaultSelector  map[string]string `yaml:"defaultDenySelector,omitempty"`
-	AllowDNS         bool              `yaml:"allowDNS"`
-	AllowDNSSelector map[string]string `yaml:"allowDNSSelector,omitempty"`
+// GenNetworkPolicy is kafka-cluster 1.x's networkPolicy block (the 0.4
+// networkPolicies block is translated over it, so emitting that one would
+// shadow a base file's).
+type GenNetworkPolicy struct {
+	Enabled     bool              `yaml:"enabled"`
+	DefaultDeny GenSelectorToggle `yaml:"defaultDeny"`
+	DNS         GenSelectorToggle `yaml:"dns"`
+}
+
+type GenSelectorToggle struct {
+	Enabled  bool              `yaml:"enabled"`
+	Selector map[string]string `yaml:"selector,omitempty"`
 }
 
 type GenUsers struct {
@@ -596,50 +609,4 @@ type GenAclResource struct {
 
 type GenFeature struct {
 	Enabled bool `yaml:"enabled"`
-	Create  bool `yaml:"create,omitempty"`
-}
-
-type GenKafkaConnect struct {
-	Enabled         bool                   `yaml:"enabled"`
-	Replicas        int                    `yaml:"replicas"`
-	GroupID         string                 `yaml:"groupId"`
-	JVMOptions      GenJVMOptions          `yaml:"jvmOptions"`
-	Resources       GenResources           `yaml:"resources"`
-	TLS             GenConnectTLS          `yaml:"tls"`
-	Rack            GenConnectRack         `yaml:"rack"`
-	Tracing         GenConnectTracing      `yaml:"tracing"`
-	TopologySpread  GenTopologyConstraints `yaml:"topologySpreadConstraints"`
-	PodAntiAffinity GenAntiAffinity        `yaml:"podAntiAffinity"`
-	PDB             GenConnectPDB          `yaml:"podDisruptionBudget"`
-	Config          GenConnectConfig       `yaml:"config"`
-	ExtraConfig     map[string]string      `yaml:"extraConfig,omitempty"`
-}
-
-type GenJVMOptions struct {
-	Xms string `yaml:"-Xms"`
-	Xmx string `yaml:"-Xmx"`
-}
-
-type GenConnectTLS struct {
-	Enabled bool `yaml:"enabled"`
-}
-
-type GenConnectRack struct {
-	Enabled     bool   `yaml:"enabled"`
-	TopologyKey string `yaml:"topologyKey,omitempty"`
-}
-
-type GenConnectTracing struct {
-	Enabled bool   `yaml:"enabled"`
-	Type    string `yaml:"type,omitempty"`
-}
-
-type GenConnectPDB struct {
-	MaxUnavailable int `yaml:"maxUnavailable"`
-}
-
-type GenConnectConfig struct {
-	ReplicationFactor int    `yaml:"replicationFactor"`
-	KeyConverter      string `yaml:"keyConverter"`
-	ValueConverter    string `yaml:"valueConverter"`
 }

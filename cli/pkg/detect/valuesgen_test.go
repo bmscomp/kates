@@ -2,8 +2,18 @@ package detect
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"gopkg.in/yaml.v3"
 )
 
 func buildTestReport(zones int, scNames []string) *DetectReport {
@@ -27,30 +37,45 @@ func buildTestReport(zones int, scNames []string) *DetectReport {
 	return r
 }
 
+// poolsWithRole returns the generated pools carrying role, in order.
+func poolsWithRole(vals *GeneratedValues, role string) []GenPool {
+	var out []GenPool
+	for _, p := range vals.NodePools.Pools {
+		if slices.Contains(p.Roles, role) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func TestGenerateValues_3AZ(t *testing.T) {
 	r := buildTestReport(3, []string{"local-storage-alpha", "local-storage-gamma", "local-storage-sigma", "standard"})
 	gen := NewValuesGenerator(r, "krafter")
 	vals := gen.Generate()
 
-	if len(vals.BrokerPools) != 3 {
-		t.Fatalf("expected 3 broker pools, got %d", len(vals.BrokerPools))
+	brokers := poolsWithRole(vals, "broker")
+	if len(brokers) != 3 {
+		t.Fatalf("expected 3 broker pools, got %d", len(brokers))
 	}
 	// Check zone-named pools
-	if vals.BrokerPools[0].Name != "brokers-alpha" {
-		t.Errorf("expected brokers-alpha, got %s", vals.BrokerPools[0].Name)
+	if brokers[0].Name != "brokers-alpha" {
+		t.Errorf("expected brokers-alpha, got %s", brokers[0].Name)
 	}
-	if vals.BrokerPools[1].Name != "brokers-gamma" {
-		t.Errorf("expected brokers-gamma, got %s", vals.BrokerPools[1].Name)
+	if brokers[1].Name != "brokers-gamma" {
+		t.Errorf("expected brokers-gamma, got %s", brokers[1].Name)
 	}
-	if vals.BrokerPools[2].Name != "brokers-sigma" {
-		t.Errorf("expected brokers-sigma, got %s", vals.BrokerPools[2].Name)
+	if brokers[2].Name != "brokers-sigma" {
+		t.Errorf("expected brokers-sigma, got %s", brokers[2].Name)
 	}
-	// Check per-zone SC matching
-	if vals.BrokerPools[0].StorageClass != "local-storage-alpha" {
-		t.Errorf("expected local-storage-alpha for alpha zone, got %s", vals.BrokerPools[0].StorageClass)
+	// Check per-zone SC matching, on the volume the chart reads it from
+	if brokers[0].Storage.Volumes[0].Class != "local-storage-alpha" {
+		t.Errorf("expected local-storage-alpha for alpha zone, got %s", brokers[0].Storage.Volumes[0].Class)
 	}
-	if vals.BrokerPools[1].StorageClass != "local-storage-gamma" {
-		t.Errorf("expected local-storage-gamma for gamma zone, got %s", vals.BrokerPools[1].StorageClass)
+	if brokers[1].Storage.Volumes[0].Class != "local-storage-gamma" {
+		t.Errorf("expected local-storage-gamma for gamma zone, got %s", brokers[1].Storage.Volumes[0].Class)
+	}
+	if brokers[0].Zone != "alpha" || brokers[0].Storage.Volumes[0].Size != gen.Cap.BrokerStorage {
+		t.Errorf("pool %+v is not pinned to its zone with the broker storage size", brokers[0])
 	}
 }
 
@@ -59,14 +84,15 @@ func TestGenerateValues_2AZ(t *testing.T) {
 	gen := NewValuesGenerator(r, "krafter")
 	vals := gen.Generate()
 
-	if len(vals.BrokerPools) != 3 {
-		t.Fatalf("expected 3 broker pools (2 pinned + 1 float), got %d", len(vals.BrokerPools))
+	brokers := poolsWithRole(vals, "broker")
+	if len(brokers) != 3 {
+		t.Fatalf("expected 3 broker pools (2 pinned + 1 float), got %d", len(brokers))
 	}
-	if vals.BrokerPools[2].Name != "brokers-float" {
-		t.Errorf("expected floating pool named brokers-float, got %s", vals.BrokerPools[2].Name)
+	if brokers[2].Name != "brokers-float" {
+		t.Errorf("expected floating pool named brokers-float, got %s", brokers[2].Name)
 	}
-	if vals.BrokerPools[2].Zone != "" {
-		t.Errorf("expected empty zone for floating pool, got %s", vals.BrokerPools[2].Zone)
+	if brokers[2].Zone != "" {
+		t.Errorf("expected empty zone for floating pool, got %s", brokers[2].Zone)
 	}
 }
 
@@ -77,43 +103,318 @@ func TestGenerateValues_NoZones(t *testing.T) {
 	gen := NewValuesGenerator(r, "krafter")
 	vals := gen.Generate()
 
-	if len(vals.BrokerPools) != 1 {
-		t.Fatalf("expected 1 broker pool (no zones), got %d", len(vals.BrokerPools))
+	brokers := poolsWithRole(vals, "broker")
+	if len(brokers) != 1 {
+		t.Fatalf("expected 1 broker pool (no zones), got %d", len(brokers))
 	}
-	if vals.BrokerPools[0].Name != "brokers" {
-		t.Errorf("expected pool named 'brokers', got %s", vals.BrokerPools[0].Name)
+	if brokers[0].Name != "brokers" {
+		t.Errorf("expected pool named 'brokers', got %s", brokers[0].Name)
 	}
-	if vals.BrokerDefaults.TopologyTSC.Enabled {
-		t.Error("expected topology constraints disabled with no zones")
+	if vals.NodePools.Defaults.Scheduling.Spread.Enabled {
+		t.Error("expected topology spread disabled with no zones")
 	}
-}
-
-func TestGenerateValues_StrimziDeployed(t *testing.T) {
-	r := buildTestReport(3, []string{"standard"})
-	r.Strimzi.Running = true
-	gen := NewValuesGenerator(r, "krafter")
-	vals := gen.Generate()
-
-	if vals.StrimziOp.Enabled {
-		t.Error("expected strimziOperator.enabled=false when already running")
-	}
-	if vals.CRDUpgrade.Enabled {
-		t.Error("expected crdUpgrade.enabled=false when already running")
+	if vals.NodePools.Defaults.Scheduling.ZoneKey != "" {
+		t.Errorf("no pool pins a zone, so zoneKey should stay the chart's; got %q", vals.NodePools.Defaults.Scheduling.ZoneKey)
 	}
 }
 
-func TestGenerateValues_StrimziNotInstalled(t *testing.T) {
+// Controller sizing divides the controller share by the number of
+// controllers the pools emit — one per zone — not by a replica count the
+// pools never used: three zones used to get three single-controller pools
+// sized as if they were one.
+func TestGenerateValues_ControllerSizingMatchesThePoolsEmitted(t *testing.T) {
+	for _, tc := range []struct {
+		zones, wantControllers int
+	}{{3, 3}, {4, 4}, {1, 3}, {2, -1}, {0, -1}} {
+		r := buildTestReport(tc.zones, []string{"standard"})
+		if tc.zones == 0 {
+			r.Nodes = append(r.Nodes, NodeInfo{CPU: 8000, MemoryGi: 16})
+		}
+		gen := NewValuesGenerator(r, "krafter")
+		if tc.wantControllers < 0 {
+			// One pool, sized by the cluster.
+			tc.wantControllers = gen.selectControllerReplicas()
+		}
+		vals := gen.Generate()
+		emitted := 0
+		for _, p := range poolsWithRole(vals, "controller") {
+			emitted += p.Replicas
+		}
+		if emitted != tc.wantControllers || gen.Cap.ControllerReplicas != tc.wantControllers {
+			t.Errorf("%d zones: pools run %d controllers, budget divides by %d, want %d",
+				tc.zones, emitted, gen.Cap.ControllerReplicas, tc.wantControllers)
+		}
+		if tc.zones == 3 {
+			want := clamp(int(float64(gen.Cap.KafkaCPU)*controllerCPUShare)/3, minControllerCPU, maxControllerCPU)
+			if gen.Cap.ControllerCPU != want {
+				t.Errorf("controller CPU = %dm, want the share split three ways, %dm", gen.Cap.ControllerCPU, want)
+			}
+		}
+	}
+}
+
+// The 0.4 keys are gone from the output: kafka-cluster 1.x ignores
+// strimziOperator, crdUpgrade and kafkaConnect, fails on
+// drainCleaner.enabled, and translates the pool keys with a deprecation
+// note. Every top-level key emitted is one the chart's schema knows and
+// does not mark deprecated.
+func TestRenderValues_EmitsOnlyCurrentChartKeys(t *testing.T) {
 	r := buildTestReport(3, []string{"standard"})
 	r.Strimzi.Running = false
 	r.Strimzi.CRDsPresent = false
-	gen := NewValuesGenerator(r, "krafter")
-	vals := gen.Generate()
-
-	if !vals.StrimziOp.Enabled {
-		t.Error("expected strimziOperator.enabled=true when not installed")
+	r.Ecosystem.KafkaConnect.Installed = true
+	var buf bytes.Buffer
+	if err := RenderValues(r, "krafter", &buf); err != nil {
+		t.Fatalf("RenderValues failed: %v", err)
 	}
-	if !vals.CRDUpgrade.Enabled {
-		t.Error("expected crdUpgrade.enabled=true when no CRDs")
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("output is not YAML: %v\n%s", err, buf.String())
+	}
+	for _, legacy := range []string{"strimziOperator", "crdUpgrade", "drainCleaner", "kafkaConnect", "controllerPools", "brokerPools",
+		"controllerDefaults", "brokerDefaults", "networkPolicies", "strimzi-kafka-operator", "podMonitors", "dashboards", "zookeeper"} {
+		if _, ok := doc[legacy]; ok {
+			t.Errorf("the deprecated key %q is emitted:\n%s", legacy, buf.String())
+		}
+	}
+	pools, _ := doc["nodePools"].(map[string]interface{})["pools"].([]interface{})
+	if len(pools) != 6 {
+		t.Errorf("want 3 controller + 3 broker pools under nodePools.pools, got %d", len(pools))
+	}
+
+	schema := loadChartSchema(t)
+	props, _ := schema["properties"].(map[string]interface{})
+	for key := range doc {
+		p, ok := props[key].(map[string]interface{})
+		if !ok {
+			t.Errorf("top-level key %q is not in the chart's values.schema.json", key)
+			continue
+		}
+		if dep, _ := p["deprecated"].(bool); dep {
+			t.Errorf("top-level key %q is deprecated in the chart's schema", key)
+		}
+	}
+}
+
+const kafkaClusterChart = "../../../charts/kafka-cluster"
+
+func loadChartSchema(t *testing.T) map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(kafkaClusterChart, "values.schema.json"))
+	if err != nil {
+		t.Skipf("chart schema not available: %v", err)
+	}
+	var schema map[string]interface{}
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("parse values.schema.json: %v", err)
+	}
+	return schema
+}
+
+// The generated values pass the chart's own schema, the check helm runs
+// before rendering: a misspelled or moved key fails here rather than at
+// install.
+func TestGeneratedValuesMatchChartSchema(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(kafkaClusterChart, "values.schema.json"))
+	if err != nil {
+		t.Skipf("chart schema not available: %v", err)
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("parse values.schema.json: %v", err)
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		t.Fatalf("resolve values.schema.json: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		zones int
+		prov  string
+		scs   []string
+	}{
+		{"three zones on kind", 3, "kind", []string{"local-storage-alpha", "local-storage-gamma", "local-storage-sigma", "standard"}},
+		{"two zones on eks", 2, "eks", []string{"gp3"}},
+		{"one zone", 1, "generic", []string{"standard"}},
+		{"no zones", 0, "aks", []string{"managed-csi"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := buildTestReport(tc.zones, tc.scs)
+			r.Provider = tc.prov
+			if tc.zones == 0 {
+				r.Nodes = append(r.Nodes, NodeInfo{CPU: 8000, MemoryGi: 16})
+			}
+			var buf bytes.Buffer
+			if err := RenderValues(r, "krafter", &buf); err != nil {
+				t.Fatal(err)
+			}
+			var doc map[string]interface{}
+			if err := yaml.Unmarshal(buf.Bytes(), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if err := resolved.Validate(doc); err != nil {
+				t.Errorf("generated values fail the chart schema: %v\n%s", err, buf.String())
+			}
+		})
+	}
+}
+
+// TestGeneratedValuesRenderWithHelm renders the generated values with the
+// real chart, the way kates deploy installs them, and checks the pools and
+// the keys the chart derived from them. It needs helm on PATH and skips
+// without it; it touches no cluster. The chart's seaweedfs dependency comes
+// from a remote repository, so the dependency build is skipped, not failed,
+// when it cannot be reached.
+func TestGeneratedValuesRenderWithHelm(t *testing.T) {
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not on PATH")
+	}
+	if _, err := os.Stat(kafkaClusterChart); err != nil {
+		t.Skipf("chart not available: %v", err)
+	}
+	depCtx, depCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer depCancel()
+	if out, err := exec.CommandContext(depCtx, helm, "dependency", "build", kafkaClusterChart).CombinedOutput(); err != nil {
+		t.Skipf("helm dependency build (the chart's seaweedfs dependency is remote): %v\n%s", err, out)
+	}
+	r := buildTestReport(3, []string{"local-storage-alpha", "local-storage-gamma", "local-storage-sigma", "standard"})
+	var buf bytes.Buffer
+	if err := RenderValues(r, "krafter", &buf); err != nil {
+		t.Fatal(err)
+	}
+	values := filepath.Join(t.TempDir(), "generated.yaml")
+	if err := os.WriteFile(values, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, helm, "template", "krafter", kafkaClusterChart, "-n", "kafka", "-f", values).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	rendered := string(out)
+	for _, want := range []string{
+		"kind: KafkaNodePool",
+		"name: controllers-alpha",
+		"name: brokers-sigma",
+		"class: local-storage-gamma",
+		"topology.kubernetes.io/zone",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered chart lacks %q", want)
+		}
+	}
+	if strings.Contains(rendered, "DEPRECATED") {
+		t.Errorf("the chart reports a deprecated key in the generated values:\n%s", rendered)
+	}
+}
+
+// A base values file is the user's: the merge keeps every toggle it set
+// (cruiseControl, alerts), every list it defined (its own pools), and lets
+// the detected facts — the cluster domain, the default storage class — win
+// over it, naming each one in the header. Detected values fill only the keys
+// the base left unset.
+func TestRenderValuesFromBase_BaseWinsExceptDetectedFacts(t *testing.T) {
+	r := buildTestReport(3, []string{"local-storage-alpha", "local-storage-gamma", "local-storage-sigma", "standard"})
+	r.Network.ClusterDomain = "taz-tls-int-1.local"
+	r.Monitoring.PrometheusRuleCRD = false // the generator would say alerts: false
+	base := []byte(`
+global:
+  clusterDomain: cluster.local
+cruiseControl:
+  enabled: true
+alerts:
+  enabled: true
+kafka:
+  listeners:
+    - name: plain
+      port: 9092
+      type: internal
+      tls: false
+nodePools:
+  roleDefaults:
+    broker:
+      resources:
+        requests:
+          cpu: 7000m
+  pools:
+    - name: mine
+      roles: [controller, broker]
+      replicas: 3
+`)
+	var buf bytes.Buffer
+	if err := RenderValuesFromBase(r, "krafter", base, &buf); err != nil {
+		t.Fatalf("RenderValuesFromBase: %v", err)
+	}
+	out := buf.String()
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("merged output is not YAML: %v\n%s", err, out)
+	}
+	at := func(path string) interface{} {
+		var cur interface{} = doc
+		for _, k := range strings.Split(path, ".") {
+			m, ok := cur.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			cur = m[k]
+		}
+		return cur
+	}
+	if at("cruiseControl.enabled") != true || at("alerts.enabled") != true {
+		t.Errorf("the base's toggles were flipped: cruiseControl=%v alerts=%v\n%s", at("cruiseControl.enabled"), at("alerts.enabled"), out)
+	}
+	if pools, _ := at("nodePools.pools").([]interface{}); len(pools) != 1 {
+		t.Errorf("the base's pool list was replaced: %v", at("nodePools.pools"))
+	}
+	if listeners, _ := at("kafka.listeners").([]interface{}); len(listeners) != 1 {
+		t.Errorf("the base's listener list was replaced: %v", at("kafka.listeners"))
+	}
+	if at("nodePools.roleDefaults.broker.resources.requests.cpu") != "7000m" {
+		t.Errorf("the base's broker CPU request was overridden: %v", at("nodePools.roleDefaults.broker.resources.requests.cpu"))
+	}
+	if at("nodePools.roleDefaults.broker.resources.requests.memory") == nil || at("nodePools.roleDefaults.controller.resources.requests.cpu") == nil {
+		t.Error("the sizes the base did not set were not filled in")
+	}
+	if at("global.clusterDomain") != "taz-tls-int-1.local" || at("global.storageClass") != "standard" {
+		t.Errorf("the detected facts did not win: domain=%v class=%v", at("global.clusterDomain"), at("global.storageClass"))
+	}
+	if !strings.Contains(out, "# Detected facts that replaced a value the base set:") ||
+		!strings.Contains(out, "#   global.clusterDomain: cluster.local → taz-tls-int-1.local") {
+		t.Errorf("the header does not name the override:\n%s", out)
+	}
+	if strings.Contains(out, "#   cruiseControl") || strings.Contains(out, "#   alerts") {
+		t.Errorf("a toggle is listed as overridden:\n%s", out)
+	}
+}
+
+// A base still on the 0.4 pool keys keeps them: the chart refuses both
+// shapes at once, so no nodePools.pools join the merge.
+func TestMergeValuesWithBase_LeavesLegacyPoolsAlone(t *testing.T) {
+	base := map[string]interface{}{
+		"brokerPools": []interface{}{map[string]interface{}{"name": "brokers", "replicas": 3}},
+	}
+	gen := map[string]interface{}{
+		"nodePools": map[string]interface{}{
+			"pools":        []interface{}{map[string]interface{}{"name": "brokers-a"}},
+			"roleDefaults": map[string]interface{}{"broker": map[string]interface{}{"resources": map[string]interface{}{}}},
+		},
+	}
+	merged, overrides := MergeValuesWithBase(base, gen)
+	np := merged["nodePools"].(map[string]interface{})
+	if _, ok := np["pools"]; ok {
+		t.Errorf("nodePools.pools were added beside brokerPools: %v", merged)
+	}
+	if _, ok := np["roleDefaults"]; !ok {
+		t.Error("roleDefaults should still be filled in")
+	}
+	if len(overrides) != 0 {
+		t.Errorf("nothing was overridden, got %v", overrides)
+	}
+	if _, ok := gen["nodePools"].(map[string]interface{})["pools"]; !ok {
+		t.Error("the caller's generated map was mutated")
 	}
 }
 
@@ -169,14 +470,14 @@ func TestGenerateValues_KyvernoSafe(t *testing.T) {
 	gen := NewValuesGenerator(r, "krafter")
 	vals := gen.Generate()
 
-	if !vals.NetPolicies.Enabled {
-		t.Error("expected networkPolicies enabled")
+	if !vals.NetworkPolicy.Enabled || !vals.NetworkPolicy.DefaultDeny.Enabled {
+		t.Error("expected networkPolicy and its default deny enabled")
 	}
-	if vals.NetPolicies.DefaultSelector == nil {
-		t.Fatal("expected explicit defaultDenySelector")
+	if vals.NetworkPolicy.DefaultDeny.Selector == nil {
+		t.Fatal("expected an explicit defaultDeny.selector")
 	}
-	if vals.NetPolicies.DefaultSelector["app.kubernetes.io/part-of"] != "strimzi-krafter" {
-		t.Errorf("expected strimzi-krafter selector, got %v", vals.NetPolicies.DefaultSelector)
+	if vals.NetworkPolicy.DefaultDeny.Selector["app.kubernetes.io/part-of"] != "strimzi-krafter" {
+		t.Errorf("expected strimzi-krafter selector, got %v", vals.NetworkPolicy.DefaultDeny.Selector)
 	}
 }
 
@@ -289,8 +590,8 @@ func TestGenerateValues_CapsKafkaPodsToSchedulableNode(t *testing.T) {
 	if gen.Cap.BrokerCPU != 3339 {
 		t.Fatalf("broker CPU = %dm, want the weakest zone's best-node cap of 3339m", gen.Cap.BrokerCPU)
 	}
-	if vals.BrokerDefaults.Resources.Requests.CPU != "3339m" {
-		t.Fatalf("rendered broker CPU request = %s, want 3339m", vals.BrokerDefaults.Resources.Requests.CPU)
+	if got := vals.NodePools.RoleDefaults.Broker.Resources.Requests.CPU; got != "3339m" {
+		t.Fatalf("rendered broker CPU request = %s, want 3339m", got)
 	}
 	if gen.Cap.BrokerMem != 16 {
 		t.Fatalf("broker memory should still use the configured max when node memory permits it, got %dGi", gen.Cap.BrokerMem)

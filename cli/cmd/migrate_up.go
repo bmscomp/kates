@@ -245,8 +245,9 @@ func (r *labRun) refuseOverlappingLab(ctx context.Context) (written map[string]b
 	var list struct {
 		Items []struct {
 			Metadata struct {
-				Name   string            `json:"name"`
-				Labels map[string]string `json:"labels"`
+				Name        string            `json:"name"`
+				Labels      map[string]string `json:"labels"`
+				Annotations map[string]string `json:"annotations"`
 			} `json:"metadata"`
 			Spec json.RawMessage `json:"spec"`
 		} `json:"items"`
@@ -265,7 +266,7 @@ func (r *labRun) refuseOverlappingLab(ctx context.Context) (written map[string]b
 			continue
 		}
 		d := &labDiscovery{}
-		d.readMirrorSpec(item.Spec)
+		d.readMirrorSpec(item.Spec, item.Metadata.Annotations[migrate.AnnotationLabTopics])
 		if other == l.Name && item.Metadata.Name == l.MirrorCR {
 			for _, leg := range d.legs {
 				for _, t := range leg.Topics {
@@ -569,6 +570,20 @@ func (r *labRun) phaseMirror(ctx context.Context, s *migrate.State) error {
 		return fmt.Errorf("install the mirror: %w", err)
 	}
 	rep.Pass(migrate.RowMirrorInstalled, "preflight passed — the source answered a 4.x client")
+
+	// The topic list goes on the CR, where discovery reads it back: the
+	// names are not recoverable from a topicsPattern a user wrote as a
+	// regular expression. Best effort — down still falls back to the pattern.
+	var topics []string
+	for _, src := range l.Sources() {
+		topics = append(topics, src.Topics...)
+	}
+	if len(topics) > 0 {
+		if _, err := defaultRunner.Run(ctx, "kubectl", "-n", l.MirrorNamespace, "annotate", "kafkamirrormaker2", l.MirrorCR,
+			migrate.AnnotationLabTopics+"="+strings.Join(topics, ","), "--overwrite"); err != nil {
+			migrateWarn(fmt.Sprintf("could not record the lab's topics on %s (%v): down will read them back from topicsPattern", l.MirrorCR, err))
+		}
+	}
 
 	if _, err := defaultRunner.Run(ctx, "kubectl", "-n", l.MirrorNamespace, "wait", "kafkamirrormaker2/"+l.MirrorCR,
 		"--for=condition=Ready", "--timeout="+formatSeconds(r.timeout)); err != nil {

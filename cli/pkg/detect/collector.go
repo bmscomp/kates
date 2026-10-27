@@ -1008,6 +1008,16 @@ func (c *Collector) checkKafkaCapacity(report *DetectReport, reservePct float64)
 	return "Insufficient: missing " + strings.Join(deficits, ", ")
 }
 
+const (
+	// resolvConfNamespace is where the cluster-domain lookup finds a pod to
+	// read /etc/resolv.conf from: the deploy's own namespace, never an
+	// arbitrary workload's.
+	resolvConfNamespace = "kates"
+	// resolvConfTimeout bounds that lookup's API calls (kubectl's
+	// --request-timeout), so a slow exec cannot hang the collection.
+	resolvConfTimeout = "10s"
+)
+
 // createProbeNamespace creates a probe's namespace in one call, already
 // carrying NamespaceLabels and the probe's labels (which win a clash): a
 // policy that requires labels refuses a bare namespace before any label call.
@@ -1023,20 +1033,33 @@ func (c *Collector) createProbeNamespace(ns, runID string) error {
 	}
 	labels["kates-detect-experimental"] = "true"
 	labels["kates-detect-run"] = runID
-	f, err := os.CreateTemp("", "kates-detect-namespace-*.yaml")
+	path, err := writeProbeFile("kates-detect-namespace-*.yaml", NamespaceManifest(ns, labels, nil))
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(NamespaceManifest(ns, labels, nil))
+	defer os.Remove(path)
+	_, err = c.exec.Exec("kubectl", "create", "-f", path)
+	return err
+}
+
+// writeProbeFile writes content to a new temp file named after pattern and
+// returns its path; the caller removes it. The executor has no stdin, so
+// everything a probe hands kubectl as a document goes through a file — never
+// through a shell and a heredoc.
+func writeProbeFile(pattern, content string) (string, error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	_, err = f.WriteString(content)
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
-		return err
+		os.Remove(f.Name())
+		return "", err
 	}
-	_, err = c.exec.Exec("kubectl", "create", "-f", f.Name())
-	return err
+	return f.Name(), nil
 }
 
 // NamespaceManifest renders a Namespace for kubectl create -f, every label
@@ -1435,21 +1458,20 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		}
 	}
 
-	// Attempt 1: Get from an already running pod
-	if info.ClusterDomain == "cluster.local" {
-		podOut, _ := c.exec.Exec("kubectl", "get", "pods", "--all-namespaces", "--field-selector=status.phase=Running",
-			"-o", "jsonpath={.items[0].metadata.namespace} {.items[0].metadata.name}")
+	// Without a Corefile to read, a pod's resolv.conf names the domain. The
+	// pod is one of the deploy's own (the kates namespace), never the first
+	// Running pod on the cluster, and the exec is bounded. A read-only
+	// collection execs into nothing and keeps the cluster.local default.
+	if info.ClusterDomain == "cluster.local" && !c.ReadOnly {
+		podOut, _ := c.exec.Exec("kubectl", "get", "pods", "-n", resolvConfNamespace, "--field-selector=status.phase=Running",
+			"--request-timeout="+resolvConfTimeout, "-o", "jsonpath={.items[0].metadata.name}")
 		var resolvContent string
-		if podOut != "" {
-			parts := strings.Fields(podOut)
-			if len(parts) == 2 {
-				resolvContent, _ = c.exec.Exec("kubectl", "exec", "-n", parts[0], parts[1], "--", "cat", "/etc/resolv.conf")
-			}
+		if pod := strings.TrimSpace(podOut); pod != "" {
+			resolvContent, _ = c.exec.Exec("kubectl", "exec", "--request-timeout="+resolvConfTimeout, "-n", resolvConfNamespace, pod, "--", "cat", "/etc/resolv.conf")
 		}
 
-		// Attempt 2: If no running pods, spin up a temporary pod. A read-only
-		// collection keeps the cluster.local default instead.
-		if resolvContent == "" && !c.ReadOnly {
+		// No pod of ours yet (a first deploy): a temporary one.
+		if resolvContent == "" {
 			resolvContent, _ = c.exec.Exec("kubectl", "run", "--rm", "-i", "--image="+probeImage("busybox:1.36"), "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
 		}
 
@@ -1939,6 +1961,40 @@ type fioOutput struct {
 	} `json:"jobs"`
 }
 
+const (
+	// storageBenchScriptName is the ConfigMap the bench pod mounts its
+	// script from.
+	storageBenchScriptName = "kates-detect-bench-script"
+	// storageBenchTimeout bounds the wait for the bench pod to finish: a
+	// 15 s fio run, the fio package install, and slack for a slow image pull.
+	storageBenchTimeout = "120s"
+	// storageBenchScript is what the bench pod runs. It lives in a ConfigMap,
+	// never on a `sh -c` command line.
+	storageBenchScript = `#!/bin/sh
+set -e
+apk add --no-cache fio >&2
+exec fio --name=bench-test --filename=/data/testfile --size=64M --rw=randrw --rwmixwrite=50 --bs=4k --direct=1 --numjobs=1 --time_based --runtime=15 --group_reporting --output-format=json
+`
+)
+
+// storageBenchPVCManifest renders the 1Gi claim the bench pod mounts, for
+// kubectl apply -f.
+func storageBenchPVCManifest(name, namespace, storageClass string) string {
+	return fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: %s
+  resources:
+    requests:
+      storage: 1Gi
+`, strconv.Quote(name), strconv.Quote(namespace), strconv.Quote(storageClass))
+}
+
 func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectReport) {
 	if len(report.Nodes) == 0 || len(report.Storage) == 0 {
 		return
@@ -1961,6 +2017,18 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
 	}()
 
+	// The bench script reaches the pod through a ConfigMap, not a shell
+	// program on the command line: the pod runs `sh /scripts/bench.sh`.
+	scriptPath, err := writeProbeFile("kates-detect-bench-*.sh", storageBenchScript)
+	if err != nil {
+		return
+	}
+	defer os.Remove(scriptPath)
+	if _, err := c.exec.Exec("kubectl", "create", "configmap", storageBenchScriptName, "-n", ns, "--from-file=bench.sh="+scriptPath); err != nil {
+		c.progress("Storage benchmarking: failed to create the bench script ConfigMap, falling back to heuristics...")
+		return
+	}
+
 	// Benchmark each StorageClass sequentially to avoid disk self-contention
 	for idx, sc := range report.Storage {
 		scName := sc.Name
@@ -1968,23 +2036,13 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 		podName := fmt.Sprintf("kates-detect-bench-pod-%d", idx)
 
 		c.progress(fmt.Sprintf("Storage benchmarking: provisioning ephemeral PVC on StorageClass %q...", scName))
-		// 1. Create Dynamic PVC inside temporary namespace
-		pvcManifest := fmt.Sprintf(`cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: %s
-  resources:
-    requests:
-      storage: 1Gi
-EOF`, pvcName, ns, scName)
-
-		_, pvcErr := c.exec.Exec("sh", "-c", pvcManifest)
+		// 1. Create Dynamic PVC inside temporary namespace, from a manifest file
+		pvcPath, err := writeProbeFile("kates-detect-bench-pvc-*.yaml", storageBenchPVCManifest(pvcName, ns, scName))
+		if err != nil {
+			return
+		}
+		_, pvcErr := c.exec.Exec("kubectl", "apply", "-f", pvcPath)
+		os.Remove(pvcPath)
 		if pvcErr != nil {
 			c.progress(fmt.Sprintf("Storage benchmarking: failed to provision PVC on %q, falling back to heuristics...", scName))
 			continue // fallback remains unchanged
@@ -1992,7 +2050,8 @@ EOF`, pvcName, ns, scName)
 
 		c.progress(fmt.Sprintf("Storage benchmarking: launching ephemeral FIO pod for %q...", scName))
 		// 2. Create the Benchmark Pod pinned to target node to resolve WaitForFirstConsumer immediately
-		podOverrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","volumes":[{"name":"bench-volume","persistentVolumeClaim":{"claimName":"%s"}}],"containers":[{"name":"fio-bench","image":"`+probeImage("alpine:3.19")+`","volumeMounts":[{"name":"bench-volume","mountPath":"/data"}],"command":["sh","-c","apk add --no-cache fio && fio --name=bench-test --filename=/data/testfile --size=64M --rw=randrw --rwmixwrite=50 --bs=4k --direct=1 --numjobs=1 --time_based --runtime=15 --group_reporting --output-format=json"]}]}}`, nodeName, pvcName)
+		podOverrides := fmt.Sprintf(`{"spec":{"nodeName":%q,"volumes":[{"name":"bench-volume","persistentVolumeClaim":{"claimName":%q}},{"name":"bench-script","configMap":{"name":%q}}],"containers":[{"name":"fio-bench","image":%q,"volumeMounts":[{"name":"bench-volume","mountPath":"/data"},{"name":"bench-script","mountPath":"/scripts"}],"command":["sh","/scripts/bench.sh"]}]}}`,
+			nodeName, pvcName, storageBenchScriptName, probeImage("alpine:3.19"))
 
 		_, runErr := c.exec.Exec("kubectl", "run", podName,
 			"--image="+probeImage("alpine:3.19"), "-n", ns,
@@ -2012,8 +2071,13 @@ EOF`, pvcName, ns, scName)
 		}
 
 		c.progress(fmt.Sprintf("Storage benchmarking: executing 15s random I/O benchmark on %q...", scName))
-		// 4. Stream and capture logs (kubectl logs -f blocks until pod exits)
-		logOut, logErr := c.exec.Exec("kubectl", "logs", "-f", podName, "-n", ns)
+		// 4. Wait for the run to end, bounded (the fio run is 15 s plus the
+		// package install), then read the logs once: `logs -f` had no bound.
+		if _, doneErr := c.exec.Exec("kubectl", "wait", "--for=jsonpath={.status.phase}=Succeeded", "pod/"+podName, "-n", ns, "--timeout="+storageBenchTimeout); doneErr != nil {
+			c.progress(fmt.Sprintf("Storage benchmarking: benchmark did not finish within %s on %q, falling back to heuristics...", storageBenchTimeout, scName))
+			continue // fallback remains unchanged
+		}
+		logOut, logErr := c.exec.Exec("kubectl", "logs", podName, "-n", ns)
 		if logErr != nil {
 			c.progress(fmt.Sprintf("Storage benchmarking: failed to capture benchmark logs on %q, falling back to heuristics...", scName))
 			continue // fallback remains unchanged
@@ -2051,6 +2115,7 @@ EOF`, pvcName, ns, scName)
 				// Overwrite with actual dynamic measurements
 				report.Storage[idx].ProbedIOPS = totalIOPS
 				report.Storage[idx].ProbeLatencyMs = meanLat
+				report.Storage[idx].IOPSMeasured = true
 			} else {
 				c.progress(fmt.Sprintf("Storage benchmarking: measured 0 IOPS on %q, falling back to heuristics...", scName))
 			}

@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -45,9 +48,29 @@ type labSource struct {
 	Bootstrap          string
 	// Topics are the topics this leg mirrors, read back out of the CR.
 	Topics []string
+	// Auth is how the mirror authenticates to it, from the CR's clusters.
+	Auth mirrorAuth
 	// NamespaceOwned says the namespace carries the lab's label, so the lab
 	// created it and down may delete it.
 	NamespaceOwned bool
+}
+
+// mirrorAuth is how the KafkaMirrorMaker2 CR authenticates to one cluster:
+// Known when the CR lists the cluster at all, SASL when that entry carries a
+// SASL authentication block, with its user and credential Secret.
+type mirrorAuth struct {
+	Known, SASL  bool
+	User, Secret string
+}
+
+// usesSASL says the mirror reads this source over SASL: what the CR's
+// authentication block says when the CR lists the cluster, else — a CR
+// written before the clusters were read — the legacy chart's SASL port.
+func (s *labSource) usesSASL() bool {
+	if s.Auth.Known {
+		return s.Auth.SASL
+	}
+	return strings.HasSuffix(s.Bootstrap, ":9094")
 }
 
 // labDiscovery is a lab as the cluster describes it.
@@ -93,6 +116,7 @@ type mirrorLeg struct {
 	Alias     string
 	Bootstrap string
 	Topics    []string
+	Auth      mirrorAuth
 }
 
 // ReplicatedTopic is the lab's rule for the target-side name.
@@ -204,7 +228,7 @@ func discoverLab(ctx context.Context, name string) (*labDiscovery, error) {
 		case "kafkamirrormaker2":
 			d.Mirror = res
 			d.MirrorRelease, d.MirrorNamespace, d.MirrorCR = res.Release, res.Namespace, res.Name
-			d.readMirrorSpec(it.Spec)
+			d.readMirrorSpec(it.Spec, it.Metadata.Annotations[migrate.AnnotationLabTopics])
 		case "statefulset":
 			if it.Metadata.Labels["app.kubernetes.io/component"] != "broker" {
 				continue // the ZooKeeper StatefulSet carries the same labels
@@ -284,7 +308,7 @@ func orderLabSources(found []*labSource, legs []mirrorLeg) []*labSource {
 			continue
 		}
 		claimed[match] = true
-		match.Alias, match.Bootstrap, match.Topics = leg.Alias, leg.Bootstrap, leg.Topics
+		match.Alias, match.Bootstrap, match.Topics, match.Auth = leg.Alias, leg.Bootstrap, leg.Topics, leg.Auth
 		out = append(out, match)
 	}
 	for _, src := range found {
@@ -295,7 +319,7 @@ func orderLabSources(found []*labSource, legs []mirrorLeg) []*labSource {
 	// One source and one leg that did not match by name still belong
 	// together: the leg is what verify and down work from.
 	if len(out) == 1 && len(legs) == 1 && out[0].Bootstrap == "" {
-		out[0].Alias, out[0].Bootstrap, out[0].Topics = legs[0].Alias, legs[0].Bootstrap, legs[0].Topics
+		out[0].Alias, out[0].Bootstrap, out[0].Topics, out[0].Auth = legs[0].Alias, legs[0].Bootstrap, legs[0].Topics, legs[0].Auth
 	}
 	return out
 }
@@ -343,14 +367,27 @@ func parseLabelledItems(listJSON string) ([]labItem, error) {
 }
 
 // readMirrorSpec reads what down and status need from the
-// KafkaMirrorMaker2 spec: the target, the source, the topics, the policy.
-func (d *labDiscovery) readMirrorSpec(spec json.RawMessage) {
+// KafkaMirrorMaker2 spec: the target, the source, the topics, the policy,
+// and how the CR authenticates to each cluster. labTopics is the CR's
+// AnnotationLabTopics value — the topic list up recorded — and wins over the
+// names read out of topicsPattern, which a real regular expression hides.
+func (d *labDiscovery) readMirrorSpec(spec json.RawMessage, labTopics string) {
 	var s struct {
 		Target struct {
 			Alias            string `json:"alias"`
 			BootstrapServers string `json:"bootstrapServers"`
 			GroupID          string `json:"groupId"`
 		} `json:"target"`
+		Clusters []struct {
+			Alias          string `json:"alias"`
+			Authentication *struct {
+				Type           string `json:"type"`
+				Username       string `json:"username"`
+				PasswordSecret struct {
+					SecretName string `json:"secretName"`
+				} `json:"passwordSecret"`
+			} `json:"authentication"`
+		} `json:"clusters"`
 		Mirrors []struct {
 			Source struct {
 				Alias            string `json:"alias"`
@@ -371,13 +408,27 @@ func (d *labDiscovery) readMirrorSpec(spec json.RawMessage) {
 	if len(s.Mirrors) == 0 {
 		return
 	}
+	auth := map[string]mirrorAuth{}
+	for _, c := range s.Clusters {
+		a := mirrorAuth{Known: true}
+		if c.Authentication != nil && c.Authentication.Type != "" && c.Authentication.Type != "tls" {
+			a.SASL, a.User, a.Secret = true, c.Authentication.Username, c.Authentication.PasswordSecret.SecretName
+		}
+		auth[c.Alias] = a
+	}
+	recorded := splitTopics(labTopics)
 	for _, m := range s.Mirrors {
-		d.legs = append(d.legs, mirrorLeg{
+		leg := mirrorLeg{
 			Alias:     m.Source.Alias,
 			Bootstrap: m.Source.BootstrapServers,
-			Topics:    topicsFromPattern(m.TopicsPattern),
-		})
-		d.Topics = append(d.Topics, topicsFromPattern(m.TopicsPattern)...)
+			Topics:    legTopics(recorded, m.TopicsPattern, len(s.Mirrors)),
+			Auth:      auth[m.Source.Alias],
+		}
+		d.legs = append(d.legs, leg)
+		d.Topics = append(d.Topics, leg.Topics...)
+	}
+	if len(recorded) > 0 {
+		d.Topics = recorded
 	}
 	first := s.Mirrors[0]
 	d.SourceAlias = first.Source.Alias
@@ -386,6 +437,33 @@ func (d *labDiscovery) readMirrorSpec(spec json.RawMessage) {
 	if policy, _ := first.SourceConnector.Config["replication.policy.class"].(string); strings.Contains(policy, "IdentityReplicationPolicy") {
 		d.Policy = migrate.PolicyIdentity
 	}
+}
+
+// legTopics is one mirror leg's topics: the recorded list when the lab has
+// one leg; in a fan-in, the recorded names the leg's pattern matches, since
+// each leg carries its own. Without a recorded list, or when the pattern
+// claims none of it, the names are read out of the pattern itself.
+func legTopics(recorded []string, pattern string, legs int) []string {
+	if len(recorded) == 0 {
+		return topicsFromPattern(pattern)
+	}
+	if legs == 1 {
+		return recorded
+	}
+	re, err := regexp.Compile("^(?:" + pattern + ")$")
+	if err != nil {
+		return topicsFromPattern(pattern)
+	}
+	var out []string
+	for _, t := range recorded {
+		if re.MatchString(t) {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return topicsFromPattern(pattern)
+	}
+	return out
 }
 
 // clusterFromBootstrap reads a Strimzi bootstrap address back into the
@@ -504,9 +582,18 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 	if d.TargetCluster != "" && d.TargetNamespace != "" {
 		opts.TargetCluster, opts.TargetNamespace = d.TargetCluster, d.TargetNamespace
 	}
-	// The mirror reads the legacy chart's SASL listener on 9094, the
-	// plaintext one on 9092: the port says which credential the lab has.
-	if provider == kafkaversion.ProviderLegacy && strings.HasSuffix(d.SourceBootstrap, ":9094") {
+	// The CR's authentication block for the source says whether the mirror
+	// reads it over SASL; a CR that lists no clusters is judged by the legacy
+	// chart's SASL port, 9094.
+	var first *labSource
+	if len(d.Sources) > 0 {
+		first = d.Sources[0]
+	}
+	sourceSASL := strings.HasSuffix(d.SourceBootstrap, ":9094")
+	if first != nil && first.Auth.Known {
+		sourceSASL = first.Auth.SASL
+	}
+	if provider == kafkaversion.ProviderLegacy && sourceSASL {
 		opts.SASL = true
 		opts.SourcePassword = "existing" // the Secret exists; the lab never rewrites it
 	}
@@ -521,6 +608,13 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 		l.SourceCluster = d.SourceRelease
 		if l.SASL && provider == kafkaversion.ProviderLegacy {
 			l.SourceSecret = l.SourceRelease + "-" + migrate.LegacySASLUser
+		}
+	}
+	// The credential the CR really uses, when it names one.
+	if first != nil && first.Auth.Secret != "" {
+		l.SourceSecret = first.Auth.Secret
+		if first.Auth.User != "" {
+			l.SourceUser = first.Auth.User
 		}
 	}
 	if d.SourceNamespace != "" {
@@ -563,10 +657,13 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 		}
 		if src.Bootstrap != "" {
 			extra.Bootstrap = src.Bootstrap
-			extra.SASL = strings.HasSuffix(src.Bootstrap, ":9094")
+			extra.SASL = src.usesSASL()
 			if extra.SASL && extra.Provider == kafkaversion.ProviderLegacy {
 				extra.User = migrate.LegacySASLUser
 				extra.Secret = extra.Release + "-" + migrate.LegacySASLUser
+			}
+			if src.Auth.Secret != "" {
+				extra.User, extra.Secret = src.Auth.User, src.Auth.Secret
 			}
 		}
 		if len(src.Topics) > 0 {
@@ -1048,7 +1145,7 @@ func sharedInternalTopics(ctx context.Context, d *labDiscovery) (map[string]bool
 			continue
 		}
 		other := &labDiscovery{}
-		other.readMirrorSpec(it.Spec)
+		other.readMirrorSpec(it.Spec, it.Metadata.Annotations[migrate.AnnotationLabTopics])
 		if other.TargetCluster != "" && (other.TargetCluster != d.TargetCluster || other.TargetNamespace != d.TargetNamespace) {
 			continue
 		}
@@ -1107,7 +1204,10 @@ func kafkaTopicManifests(d *labDiscovery, topics []string) (string, error) {
 
 // kafkaTopicResourceName is a DNS-1123 name for the KafkaTopic that adopts
 // a topic: the lab name, then the topic lowercased with every other
-// character turned into a dash.
+// character turned into a dash. Whenever that changed the name — or the
+// 63-character limit cut it — the first six hex digits of the topic's
+// SHA-256 follow, so a.b, a-b and A_B are three KafkaTopics, not one
+// overwriting the other two.
 func kafkaTopicResourceName(lab, topic string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(topic) {
@@ -1118,9 +1218,15 @@ func kafkaTopicResourceName(lab, topic string) string {
 			b.WriteByte('-')
 		}
 	}
-	name := strings.Trim(lab+"-"+strings.Trim(b.String(), "-"), "-")
-	if len(name) > 63 {
-		name = strings.TrimRight(name[:63], "-")
+	sanitized := strings.Trim(b.String(), "-")
+	name := strings.Trim(lab+"-"+sanitized, "-")
+	if sanitized == topic && len(name) <= 63 {
+		return name
 	}
-	return name
+	sum := sha256.Sum256([]byte(topic))
+	suffix := "-" + hex.EncodeToString(sum[:3])
+	if len(name)+len(suffix) > 63 {
+		name = strings.TrimRight(name[:63-len(suffix)], "-")
+	}
+	return name + suffix
 }

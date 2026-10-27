@@ -210,6 +210,59 @@ func TestDashboardPollsOneAtATime(t *testing.T) {
 	}
 }
 
+// The poll ran on a Bubble Tea goroutine over the same *componentStat
+// Update was writing: a race under -race, and a torn read in the wild. The
+// poll now works from copies, so Update may change a component mid-poll.
+func TestDashboardPollDoesNotShareComponentState(t *testing.T) {
+	m := NewDeployDashboard(context.Background(), 2)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	m.read = func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		return []byte(`{"items":[]}`), nil
+	}
+	m.RegisterComponent("kates", "Kates Backend", "C", Target{"kates", "app.kubernetes.io/instance=kates"})
+	m = dashUpdate(t, m, compStatusMsg{id: "kates", active: true, timeout: time.Minute})
+
+	_, cmd := m.Update(tickMsg(time.Now()))
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	<-started
+	// Update writes the component the poll was scheduled from.
+	m = dashUpdate(t, m, compStatusMsg{id: "kates", done: true, success: true})
+	m.components[0].Targets = append(m.components[0].Targets, Target{"other", "x=y"})
+	close(release)
+	if _, ok := (<-done).(allWorkloadsMsg); !ok {
+		t.Fatal("the poll did not answer")
+	}
+	if !m.components[0].Done {
+		t.Error("the update was lost")
+	}
+}
+
+// The deploy dashboard is a full-screen TUI like the others: below 80x24 it
+// shows the shared too-small card instead of clipping its panes.
+func TestDashboardTooSmallCard(t *testing.T) {
+	m := NewDeployDashboard(context.Background(), 2)
+	m = dashUpdate(t, m, tea.WindowSizeMsg{Width: 60, Height: 20})
+	if view := m.View(); !strings.Contains(view, "Terminal too small") {
+		t.Errorf("a 60x20 window renders the dashboard, not the card:\n%s", view)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if !next.(deployDashboardModel).interrupted || cmd == nil {
+		t.Error("q on the too-small card should close the window, as the card says")
+	}
+	m = dashUpdate(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	if view := m.View(); strings.Contains(view, "Terminal too small") {
+		t.Error("a 120x40 window still shows the card")
+	}
+}
+
 // Ctrl-C closed the window and nothing else: the deploy went on with nowhere
 // to print, and the terminal looked hung until it ended.
 func TestDashboardCtrlCClosesWindowOnly(t *testing.T) {

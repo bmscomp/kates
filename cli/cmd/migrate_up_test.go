@@ -18,6 +18,7 @@ func scriptUp(f *fakeProc) {
 	f.on("helm upgrade --install m282-430-src charts/legacy-kafka", "")
 	f.on("helm test m282-430-src -n kafka-m282-430-src", "")
 	f.on("helm upgrade --install mm2-m282-430 charts/mirror-maker2", "")
+	f.on("kubectl -n kafka annotate kafkamirrormaker2 mm2-m282-430-mirror-maker2 kates.io/lab-topics=", "annotated")
 	f.on("kubectl -n kafka wait kafkamirrormaker2/mm2-m282-430-mirror-maker2 --for=condition=Ready", "condition met")
 	f.on("kubectl -n kafka get kafkamirrormaker2 mm2-m282-430-mirror-maker2 -o json", mirrorCRJSON("mm2-m282-430-mirror-maker2", "RUNNING", "RUNNING"))
 }
@@ -47,6 +48,8 @@ func TestMigrateUpPhasesAndHelmArgv(t *testing.T) {
 		"helm upgrade --install m282-430-src charts/legacy-kafka -n kafka-m282-430-src -f .build/migrate/m282-430/source-values.yaml --wait --timeout 600s",
 		"helm test m282-430-src -n kafka-m282-430-src --timeout 600s",
 		"helm upgrade --install mm2-m282-430 charts/mirror-maker2 -n kafka -f charts/mirror-maker2/values-kind.yaml -f charts/mirror-maker2/values-migrate-2x.yaml -f .build/migrate/m282-430/mirror-values.yaml --timeout 10m",
+		// The topic list is recorded on the CR, for discovery to read back.
+		"kubectl -n kafka annotate kafkamirrormaker2 mm2-m282-430-mirror-maker2 kates.io/lab-topics=kates.orders --overwrite",
 		"kubectl -n kafka wait kafkamirrormaker2/mm2-m282-430-mirror-maker2 --for=condition=Ready --timeout=600s",
 		"kubectl -n kafka get kafkamirrormaker2 mm2-m282-430-mirror-maker2 -o json",
 	}
@@ -157,6 +160,7 @@ func scriptUpFanIn(f *fakeProc) {
 		f.on("helm test "+lab+"-"+alias+" -n "+ns, "")
 	}
 	f.on("helm upgrade --install mm2-"+lab+" charts/mirror-maker2", "")
+	f.on("kubectl -n kafka annotate kafkamirrormaker2 mm2-"+lab+"-mirror-maker2 kates.io/lab-topics=", "annotated")
 	f.on("kubectl -n kafka wait kafkamirrormaker2/mm2-"+lab+"-mirror-maker2 --for=condition=Ready", "condition met")
 	f.on("kubectl -n kafka get kafkamirrormaker2 mm2-"+lab+"-mirror-maker2 -o json", mirrorCRJSON("mm2-"+lab+"-mirror-maker2", "RUNNING", "RUNNING"))
 }

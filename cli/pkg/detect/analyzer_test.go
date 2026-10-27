@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,78 @@ func TestVerdict_KyvernoWarnings(t *testing.T) {
 	}
 	if r.Verdict.Warns == 0 {
 		t.Error("expected at least 1 warning for Kyverno empty-selector")
+	}
+}
+
+// The IOPS row judges the default class — the one the pools provision from —
+// and says whether its number was measured or estimated from the class's
+// name; it used to pass on the best class on the cluster and call every
+// estimate "measured".
+func TestVerdict_IOPSJudgesTheDefaultClassAndNamesItsBasis(t *testing.T) {
+	iopsRow := func(r *DetectReport) CheckResult {
+		t.Helper()
+		NewAnalyzer(setupHealthyMock()).Analyze(r, ParsedReqs{})
+		for _, c := range r.Verdict.Checks {
+			if strings.HasPrefix(c.Description, "Disk IOPS") {
+				return c
+			}
+		}
+		t.Fatal("no IOPS row")
+		return CheckResult{}
+	}
+
+	r := buildReport(3, true, true, 0, 2)
+	r.Storage = []SCInfo{
+		{Name: "fast-nobody-uses", ProbedIOPS: 16000},
+		{Name: "nfs", IsDefault: true, ProbedIOPS: 200},
+	}
+	row := iopsRow(r)
+	if row.Status {
+		t.Errorf("the slow default class passed on the strength of another class: %+v", row)
+	}
+	if !strings.Contains(row.Detail, "default class nfs") || !strings.Contains(row.Detail, "estimated") || strings.Contains(row.Detail, "measured") {
+		t.Errorf("detail = %q, want it to name the default class and call the number an estimate", row.Detail)
+	}
+
+	r = buildReport(3, true, true, 0, 2)
+	r.Storage = []SCInfo{{Name: "gp3", IsDefault: true, ProbedIOPS: 9800, IOPSMeasured: true}}
+	if row = iopsRow(r); !row.Status || !strings.Contains(row.Detail, "9800 IOPS measured") {
+		t.Errorf("a measured default class: %+v", row)
+	}
+
+	r = buildReport(3, true, true, 0, 2)
+	r.Storage = []SCInfo{{Name: "only", ProbedIOPS: 3000}}
+	if row = iopsRow(r); !strings.Contains(row.Detail, "no default class; judging only") {
+		t.Errorf("without a default class the row should say which it judged: %q", row.Detail)
+	}
+}
+
+// Every warning has a row: Warns counted two conditions no report showed, so
+// --fail-on-warning exited 1 over an invisible warning.
+func TestVerdict_EveryWarningHasARow(t *testing.T) {
+	r := buildReport(3, true, false, 1, 2) // CRDs present, operator not running
+	r.ExistingKafka.KafkaClusters = 2
+	NewAnalyzer(setupHealthyMock()).Analyze(r, ParsedReqs{})
+
+	passingRows := 0
+	for _, c := range r.Verdict.Checks {
+		if c.Status {
+			passingRows++
+		}
+	}
+	if r.Verdict.Warns > passingRows {
+		t.Errorf("%d warnings but only %d passing rows to carry them", r.Verdict.Warns, passingRows)
+	}
+	for _, want := range []string{"Existing Kafka clusters", "Strimzi operator running"} {
+		found := false
+		for _, c := range r.Verdict.Checks {
+			if c.Description == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no row %q for a counted warning", want)
+		}
 	}
 }
 
