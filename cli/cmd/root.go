@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
@@ -175,17 +174,18 @@ func lockConfig() (unlock func(), err error) {
 	if err != nil {
 		return func() {}, nil
 	}
-	fd := int(f.Fd())
 	deadline := time.Now().Add(configLockWait)
 	for {
-		err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+		// tryLockFile and unlockFile are flock on Unix and LockFileEx on
+		// Windows (config_lock_unix.go, config_lock_windows.go).
+		busy, err := tryLockFile(f)
 		switch {
-		case err == nil:
+		case err == nil && !busy:
 			return func() {
-				_ = syscall.Flock(fd, syscall.LOCK_UN)
+				_ = unlockFile(f)
 				f.Close()
 			}, nil
-		case !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR):
+		case err != nil:
 			f.Close()
 			return func() {}, nil
 		case time.Now().After(deadline):

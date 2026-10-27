@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -85,16 +86,21 @@ README files, GitHub PRs, or dashboards.`,
 			label = "kates " + strings.ToLower(badgeType)
 		}
 
-		encodedLabel := strings.ReplaceAll(label, " ", "%20")
-		encodedValue := strings.ReplaceAll(value, " ", "%20")
-		url := fmt.Sprintf("https://img.shields.io/badge/%s-%s-%s", encodedLabel, encodedValue, color)
+		link := badgeURL(label, value, color)
 
-		fmt.Printf("URL:      %s\n", url)
-		fmt.Printf("Markdown: ![%s %s](%s)\n", label, badgeMetric, url)
-		fmt.Printf("HTML:     <img src=\"%s\" alt=\"%s %s\">\n", url, label, badgeMetric)
+		fmt.Printf("URL:      %s\n", link)
+		fmt.Printf("Markdown: ![%s %s](%s)\n", label, badgeMetric, link)
+		fmt.Printf("HTML:     <img src=\"%s\" alt=\"%s %s\">\n", link, label, badgeMetric)
 
 		return nil
 	},
+}
+
+// badgeURL is the shields.io static badge for label and value. Both are path
+// segments, so every reserved character is escaped: only spaces used to be,
+// and the "/" in "N/A" or "rec/s" made a fourth segment that shields rejects.
+func badgeURL(label, value, color string) string {
+	return fmt.Sprintf("https://img.shields.io/badge/%s-%s-%s", url.PathEscape(label), url.PathEscape(value), color)
 }
 
 func init() {

@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -79,20 +81,30 @@ var ctxSetOutput string
 var ctxSetAPIKey string
 var ctxSetProxy string
 var ctxSetInsecure bool
+var ctxSetReplace bool
 
 var ctxSetCmd = &cobra.Command{
 	Use:   "set <name>",
 	Short: "Create or update a context",
-	Args:  cobra.ExactArgs(1),
+	Long: `Create a context, or change the settings of one that exists.
+
+On an existing context only the settings whose flags are passed change: the
+API key, proxy and TLS setting stay as they are when only --url is given.
+Pass --replace to build the context from the flags alone, as creating it
+does. --url is required to create a context or with --replace.`,
+	Args: cobra.ExactArgs(1),
 	Example: `  kates ctx set local    --url http://localhost:30083
   kates ctx set staging  --url https://kates-staging.company.com
-  kates ctx set prod     --url https://kates.company.com --default-output json --api-key mykey`,
+  kates ctx set prod     --url https://kates.company.com --default-output json --api-key mykey
+  kates ctx set prod     --api-key newkey            # keeps the URL and the rest
+  kates ctx set prod     --url https://kates.company.com --replace`,
 	// RunE, not Run: this validates its input, and a command that rejects what
 	// you gave it must exit non-zero. With Run the errors below printed and then
 	// returned 0, so a script could not tell a stored context from a refused one.
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		if ctxSetURL == "" {
+		_, exists := loadConfig().Contexts[name]
+		if ctxSetURL == "" && (!exists || ctxSetReplace) {
 			return cmdErr("--url is required")
 		}
 
@@ -115,34 +127,55 @@ var ctxSetCmd = &cobra.Command{
 		if cmd.Flags().Changed("output") && !cmd.Flags().Changed("default-output") {
 			fmt.Fprintln(output.Err, "  ! --output is this command's output format. The context's default is --default-output.")
 		}
-		out := ctxSetOutput
-		if out == "" {
-			out = "table"
-		}
 		var cfg Config
+		var ctx Context
 		err := updateConfig(func(c *Config) error {
-			c.Contexts[name] = Context{
-				URL:      ctxSetURL,
-				Output:   out,
-				APIKey:   ctxSetAPIKey,
-				ProxyURL: ctxSetProxy,
-				Insecure: ctxSetInsecure,
-				// Set only by kates ctx profiles set, so kept here.
-				Profiles: c.Contexts[name].Profiles,
+			old, had := c.Contexts[name]
+			// Only the settings whose flags were passed change. `ctx set prod
+			// --url …` used to rebuild the context from the flags, which
+			// dropped the API key, proxy and TLS setting it had.
+			next := old
+			if !had || ctxSetReplace {
+				next = Context{
+					// Set only by kates ctx profiles set, so kept here.
+					Profiles: old.Profiles,
+				}
 			}
+			passed := cmd.Flags().Changed
+			if passed("url") || next.URL == "" {
+				next.URL = ctxSetURL
+			}
+			if passed("default-output") || next.Output == "" {
+				next.Output = ctxSetOutput
+				if next.Output == "" {
+					next.Output = "table"
+				}
+			}
+			if passed("api-key") {
+				// A key set by hand is the user's: KeySource is the Secret a
+				// key kates copied came from, which this one did not.
+				next.APIKey, next.KeySource = ctxSetAPIKey, ""
+			}
+			if passed("proxy") {
+				next.ProxyURL = ctxSetProxy
+			}
+			if passed("insecure") {
+				next.Insecure = ctxSetInsecure
+			}
+			c.Contexts[name] = next
 
 			// Auto-select if first context
 			if len(c.Contexts) == 1 {
 				c.CurrentContext = name
 			}
-			cfg = *c
+			cfg, ctx = *c, next
 			return nil
 		})
 		if err != nil {
 			return cmdErr("Failed to save: " + err.Error())
 		}
-		output.Success(fmt.Sprintf("Context '%s' → %s", name, ctxSetURL))
-		if ctxSetAPIKey != "" {
+		output.Success(fmt.Sprintf("Context '%s' → %s", name, ctx.URL))
+		if cmd.Flags().Changed("api-key") {
 			output.Hint("  API key configured ✓")
 		}
 		if cfg.CurrentContext == name {
@@ -199,10 +232,11 @@ var ctxDeleteCmd = &cobra.Command{
 			}
 			delete(cfg.Contexts, name)
 			if cfg.CurrentContext == name {
+				// The first by name: it used to be the first the map
+				// happened to yield, so two runs picked two contexts.
 				cfg.CurrentContext = ""
-				for n := range cfg.Contexts {
-					cfg.CurrentContext = n
-					break
+				if names := slices.Sorted(maps.Keys(cfg.Contexts)); len(names) > 0 {
+					cfg.CurrentContext = names[0]
 				}
 			}
 			current = cfg.CurrentContext
@@ -490,6 +524,7 @@ func init() {
 	ctxSetCmd.Flags().StringVar(&ctxSetAPIKey, "api-key", "", "API key for authentication")
 	ctxSetCmd.Flags().StringVar(&ctxSetProxy, "proxy", "", "Proxy server URL (e.g., http://proxy:8080)")
 	ctxSetCmd.Flags().BoolVar(&ctxSetInsecure, "insecure", false, "Skip TLS certificate verification (useful for SSL proxies)")
+	ctxSetCmd.Flags().BoolVar(&ctxSetReplace, "replace", false, "Build the context from the flags alone, dropping settings not passed")
 
 	ctxExportCmd.Flags().StringVar(&ctxExportFlag, "name", "", "Export only a specific context")
 	ctxExportCmd.Flags().BoolVar(&ctxExportReveal, "reveal", false, "Print API keys, proxy passwords and key-source in clear instead of masked")

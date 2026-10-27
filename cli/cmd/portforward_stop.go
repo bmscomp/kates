@@ -2,11 +2,8 @@ package cmd
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 )
 
 // Stopping port-forwards by what they forward.
@@ -32,30 +29,11 @@ var (
 	// Overridden in tests, which must never stop a real process.
 	listProcessesFn = listProcesses
 	// stopProcessFn asks a process to exit.
-	stopProcessFn = func(pid int) error { return syscall.Kill(pid, syscall.SIGTERM) }
+	stopProcessFn = stopProcess
 )
 
-// listProcesses runs ps. -A and -o pid=,args= mean the same on macOS and
-// Linux.
-func listProcesses() (map[int]string, error) {
-	out, err := exec.Command("ps", "-A", "-o", "pid=", "-o", "args=").Output()
-	if err != nil {
-		return nil, err
-	}
-	procs := map[int]string{}
-	for _, line := range strings.Split(string(out), "\n") {
-		pidField, cmdLine, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if !ok {
-			continue
-		}
-		pid, err := strconv.Atoi(pidField)
-		if err != nil {
-			continue
-		}
-		procs[pid] = strings.TrimSpace(cmdLine)
-	}
-	return procs, nil
-}
+// listProcesses, stopProcess and detachProcess are per platform:
+// portforward_proc_unix.go and portforward_proc_windows.go.
 
 // parsePortForward reads cmdLine as a kubectl port-forward command line and
 // reports whether it is one.

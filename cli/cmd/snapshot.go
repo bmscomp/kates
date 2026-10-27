@@ -55,6 +55,9 @@ var snapshotCreateCmd = &cobra.Command{
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+		if err := validSnapshotName(name); err != nil {
+			return cmdErr(err.Error())
+		}
 
 		snap := ClusterSnapshot{
 			Name:       name,
@@ -236,7 +239,20 @@ func snapshotDir() string {
 	return filepath.Join(home, ".kates", "snapshots")
 }
 
+// validSnapshotName keeps a name to what can be a file name: the name becomes
+// <snapshotDir>/<name>.json, and "../x" used to escape the directory. The
+// pattern is the profile names' (profileNamePattern).
+func validSnapshotName(name string) error {
+	if !profileNamePattern.MatchString(name) || name == "." || name == ".." {
+		return fmt.Errorf("invalid snapshot name %q: use letters, digits, '.', '_' and '-'", name)
+	}
+	return nil
+}
+
 func saveSnapshot(s ClusterSnapshot) error {
+	if err := validSnapshotName(s.Name); err != nil {
+		return err
+	}
 	dir := snapshotDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -249,6 +265,9 @@ func saveSnapshot(s ClusterSnapshot) error {
 }
 
 func loadSnapshot(name string) (*ClusterSnapshot, error) {
+	if err := validSnapshotName(name); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(filepath.Join(snapshotDir(), name+".json"))
 	if err != nil {
 		return nil, fmt.Errorf("snapshot %q not found", name)

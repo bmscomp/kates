@@ -27,7 +27,6 @@ var costModels = map[string]costModel{
 
 var (
 	costCloud      string
-	costProducers  int
 	costRecords    int
 	costRecordSize int
 	costDuration   int
@@ -61,12 +60,15 @@ var costEstimateCmd = &cobra.Command{
 	Use:   "estimate",
 	Short: "Estimate resource costs for a test run",
 	Example: `  kates cost estimate --records 1000000 --record-size 1024 --duration 60
-  kates cost estimate --producers 16 --records 5000000 --cloud gcp
+  kates cost estimate --records 5000000 --cloud gcp
   kates cost estimate --brokers 6 --duration 3600 --cloud confluent`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		model, ok := costModels[strings.ToLower(costCloud)]
 		if !ok {
 			return cmdErr("unknown cloud provider: " + costCloud + " (use: aws, azure, gcp, confluent)")
+		}
+		if err := validCostInputs(costReplicas, costRecords, costRecordSize, costDuration, costBrokers); err != nil {
+			return cmdErr(err.Error())
 		}
 
 		dataGB := float64(costRecords) * float64(costRecordSize) / (1024 * 1024 * 1024)
@@ -104,6 +106,20 @@ var costEstimateCmd = &cobra.Command{
 	},
 }
 
+// validCostInputs refuses what the model cannot price: --replicas 0 made the
+// network-out term (replicas-1) negative and the total with it.
+func validCostInputs(replicas, records, recordSize, duration, brokers int) error {
+	if replicas < 1 {
+		return fmt.Errorf("--replicas must be at least 1, got %d", replicas)
+	}
+	for name, v := range map[string]int{"--records": records, "--record-size": recordSize, "--duration": duration, "--brokers": brokers} {
+		if v < 0 {
+			return fmt.Errorf("%s must not be negative, got %d", name, v)
+		}
+	}
+	return nil
+}
+
 func printCostRow(label string, gb, rate, cost float64) {
 	fmt.Printf("  %s %s\n",
 		costLabelStyle.Render(label),
@@ -114,7 +130,6 @@ func printCostRow(label string, gb, rate, cost float64) {
 
 func init() {
 	costEstimateCmd.Flags().StringVar(&costCloud, "cloud", "aws", "Cloud provider: aws, azure, gcp, confluent")
-	costEstimateCmd.Flags().IntVar(&costProducers, "producers", 4, "Number of producers")
 	costEstimateCmd.Flags().IntVar(&costRecords, "records", 100000, "Number of records")
 	costEstimateCmd.Flags().IntVar(&costRecordSize, "record-size", 512, "Record size in bytes")
 	costEstimateCmd.Flags().IntVar(&costDuration, "duration", 300, "Duration in seconds")

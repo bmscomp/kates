@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -35,20 +35,21 @@ Groups events by category with statistics.`,
 	Example: `  kates changelog --since 2024-01-01 --until 2024-01-31
   kates changelog --since 2024-06-01`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Before the request: a bad date used to be ignored, so --until 2024-13-01
+		// quietly listed everything up to now.
+		untilTime, err := parseChangelogUntil(changelogUntil)
+		if err != nil {
+			return cmdErr(err.Error())
+		}
+
 		entries, err := apiClient.Audit(context.Background(), 500, "", changelogSince, "")
 		if err != nil {
 			return err
 		}
 
-		var untilTime time.Time
-		if changelogUntil != "" {
-			untilTime, _ = time.Parse("2006-01-02", changelogUntil)
-		}
-
 		type stat struct {
-			count  int
-			types  map[string]int
-			failed int
+			count int
+			types map[string]int
 		}
 		categories := map[string]*stat{}
 
@@ -119,6 +120,18 @@ Groups events by category with statistics.`,
 
 		return nil
 	},
+}
+
+// parseChangelogUntil reads --until; the zero time is no end date.
+func parseChangelogUntil(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--until %q is not a date (want YYYY-MM-DD)", s)
+	}
+	return t, nil
 }
 
 func init() {

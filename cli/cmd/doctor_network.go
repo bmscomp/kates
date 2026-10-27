@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 // ─── Namespace flags for doctor network ─────────────────────
@@ -20,6 +21,11 @@ var (
 	doctorConnectNS string
 	doctorAppNS     string
 	doctorDbNS      string
+
+	// doctorNetworkTimeout (--timeout) bounds the whole run; doctorProbeTimeout
+	// bounds each ephemeral pod, which pulls an image and runs one command.
+	doctorNetworkTimeout time.Duration
+	doctorProbeTimeout   = 30 * time.Second
 )
 
 // ─── Check result types ─────────────────────────────────────
@@ -45,7 +51,10 @@ Examples:
   kates doctor network
 
   # Custom namespaces
-  kates doctor network --kafka-ns kafka-prod --connect-ns connect-prod --db-ns pg-system`,
+  kates doctor network --kafka-ns kafka-prod --connect-ns connect-prod --db-ns pg-system
+
+  # Allow more time on a slow cluster
+  kates doctor network --timeout 5m`,
 	RunE: runDoctorNetwork,
 }
 
@@ -55,6 +64,7 @@ func init() {
 	doctorNetworkCmd.Flags().StringVar(&doctorConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect")
 	doctorNetworkCmd.Flags().StringVar(&doctorAppNS, "app-ns", "kates", "Namespace for Kates application")
 	doctorNetworkCmd.Flags().StringVar(&doctorDbNS, "db-ns", "database", "Namespace for PostgreSQL database")
+	doctorNetworkCmd.Flags().DurationVar(&doctorNetworkTimeout, "timeout", 2*time.Minute, "Time limit for the whole run (each probe pod gets 30s)")
 
 	doctorCmd.AddCommand(doctorNetworkCmd)
 }
@@ -62,7 +72,7 @@ func init() {
 // ─── Main runner ────────────────────────────────────────────
 
 func runDoctorNetwork(cmd *cobra.Command, args []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), doctorNetworkTimeout)
 	defer cancel()
 
 	// Detect cluster DNS domain (fall back to "cluster.local" if detection fails)
@@ -78,9 +88,6 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	var checks []networkCheck
-
-	// ── Phase 1: DNS Resolution ──
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("📡 DNS Resolution"))
 
 	dnsTargets := []struct {
 		host string
@@ -103,17 +110,6 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 			ns:   doctorAppNS,
 		},
 	}
-
-	for _, t := range dnsTargets {
-		result := runDNSCheck(ctx, t.host, t.ns)
-		checks = append(checks, result)
-		printNetworkCheck(result)
-	}
-
-	fmt.Println()
-
-	// ── Phase 2: TCP Connectivity ──
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("🔌 TCP Connectivity"))
 
 	tcpTargets := []struct {
 		host string
@@ -153,8 +149,38 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	for _, t := range tcpTargets {
-		result := runTCPCheck(ctx, t.host, t.port, t.desc, t.ns)
+	// The probes run at once, each under its own deadline (doctorProbeTimeout).
+	// They used to run one after another under the one 120 s context, so a
+	// slow image pull on the first left the last ones no time at all.
+	dnsResults := make([]networkCheck, len(dnsTargets))
+	tcpResults := make([]networkCheck, len(tcpTargets))
+	g, gctx := errgroup.WithContext(ctx)
+	for i, t := range dnsTargets {
+		g.Go(func() error {
+			dnsResults[i] = runDNSCheck(gctx, t.host, t.ns)
+			return nil
+		})
+	}
+	for i, t := range tcpTargets {
+		g.Go(func() error {
+			tcpResults[i] = runTCPCheck(gctx, t.host, t.port, t.desc, t.ns)
+			return nil
+		})
+	}
+	_ = g.Wait() // a probe that fails is a failed check, never an error
+
+	// ── Phase 1: DNS Resolution ──
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("📡 DNS Resolution"))
+	for _, result := range dnsResults {
+		checks = append(checks, result)
+		printNetworkCheck(result)
+	}
+
+	fmt.Println()
+
+	// ── Phase 2: TCP Connectivity ──
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("🔌 TCP Connectivity"))
+	for _, result := range tcpResults {
 		checks = append(checks, result)
 		printNetworkCheck(result)
 	}
@@ -367,8 +393,14 @@ func runNetPolAudit(ctx context.Context, ns string) []networkCheck {
 
 // ─── Ephemeral pod runner ───────────────────────────────────
 
+// runKubectlCombinedFn runs kubectl and returns its combined output.
+// Overridden in tests, which have no cluster.
+var runKubectlCombinedFn = func(ctx context.Context, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
+}
+
 func runEphemeralPod(ctx context.Context, podName, namespace, shellCmd string) (string, error) {
-	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	runCtx, cancel := context.WithTimeout(ctx, doctorProbeTimeout)
 	defer cancel()
 
 	args := []string{
@@ -379,18 +411,26 @@ func runEphemeralPod(ctx context.Context, podName, namespace, shellCmd string) (
 		"--", "sh", "-c", shellCmd,
 	}
 
-	cmd := exec.CommandContext(runCtx, "kubectl", args...)
-	out, err := cmd.CombinedOutput()
+	out, err := runKubectlCombinedFn(runCtx, args...)
 	if err != nil {
-		// If the pod completed but had a non-zero exit, the output is still
-		// useful for parsing DNS_OK/TCP_OK markers.
-		if len(out) > 0 {
-			return string(out), nil
+		// A non-zero exit is a probe that did not run: the shell commands end
+		// in `|| echo *_FAIL`, so they exit 0 themselves. Output on a failed
+		// run used to count as a result, which reported an image pull or
+		// RBAC error as "Could not resolve hostname".
+		if last := lastOutputLine(out); last != "" {
+			return "", fmt.Errorf("kubectl run failed: %w: %s", err, last)
 		}
 		return "", fmt.Errorf("kubectl run failed: %w", err)
 	}
 
 	return string(out), nil
+}
+
+// lastOutputLine is the last non-empty line of a command's output, which is
+// where kubectl puts the reason it failed.
+func lastOutputLine(out []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // ─── Output helpers ─────────────────────────────────────────

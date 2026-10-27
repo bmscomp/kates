@@ -133,7 +133,7 @@ func runPorts(ctx context.Context) error {
 			if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil && pid != myPid {
 				if cmdOut, err := exec.Command("ps", "-p", pidStr, "-o", "command=").Output(); err == nil {
 					if isKatesPortsCommand(string(cmdOut)) {
-						_ = syscall.Kill(pid, syscall.SIGTERM)
+						_ = stopProcessFn(pid)
 					}
 				}
 			}
@@ -303,7 +303,7 @@ func startDetachedPortForward(spec portForwardSpec) error {
 	cmd := exec.Command("kubectl", portForwardArgs(spec)...)
 	// Detach from the current process group so forwards survive after
 	// `kates ports` exits and the shell returns to prompt.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	detachProcess(cmd)
 	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err == nil {
 		defer devNull.Close()

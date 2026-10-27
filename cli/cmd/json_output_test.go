@@ -75,7 +75,7 @@ func (b *runsBackend) resetFlags() {
 	gateMinGrade, gateType, gateRecords, gateBackend, gateTimeout = "C", "LOAD", 50000, "", 180
 	benchRecords, benchTimeout = 50000, defaultBenchTimeout
 	applyFile, applyWait = "", false
-	advisorApply = false
+	advisorApply = ""
 }
 
 func (b *runsBackend) serve(w http.ResponseWriter, r *http.Request) {

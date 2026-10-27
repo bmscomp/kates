@@ -2,14 +2,16 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/internal/kubectl"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -181,11 +183,7 @@ func checkDeploymentDNS(ctx context.Context, kc *kubectl.Client, name, ns, requi
 		// Ignore if deployment doesn't exist
 		return false
 	}
-	searches := string(out)
-	if !strings.Contains(searches, requiredSearch) {
-		return true
-	}
-	return false
+	return !strings.Contains(string(out), requiredSearch)
 }
 
 func checkKafkaConnectDNS(ctx context.Context, kc *kubectl.Client, name, ns, requiredSearch string) bool {
@@ -193,21 +191,74 @@ func checkKafkaConnectDNS(ctx context.Context, kc *kubectl.Client, name, ns, req
 	if err != nil {
 		return false
 	}
-	searches := string(out)
-	if !strings.Contains(searches, requiredSearch) {
-		return true
+	return !strings.Contains(string(out), requiredSearch)
+}
+
+// dnsKubectlOutputFn and dnsKubectlRunFn run kubectl for the DNS patches.
+// Overridden in tests, which have no cluster.
+var (
+	dnsKubectlOutputFn = func(ctx context.Context, kc *kubectl.Client, args ...string) ([]byte, error) {
+		return kc.Output(ctx, args...)
 	}
-	return false
+	dnsKubectlRunFn = func(ctx context.Context, kc *kubectl.Client, args ...string) (string, error) {
+		return kc.Run(ctx, args...)
+	}
+)
+
+// currentDNSSearches returns the search domains the resource has at jsonPath.
+// kubectl prints a list as a JSON array, and nothing for a missing field.
+func currentDNSSearches(ctx context.Context, kc *kubectl.Client, kind, name, ns, jsonPath string) ([]string, error) {
+	out, err := dnsKubectlOutputFn(ctx, kc, "get", kind, name, "-n", ns, "-o", "jsonpath="+jsonPath)
+	if err != nil {
+		return nil, err
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, nil
+	}
+	var searches []string
+	if err := json.Unmarshal([]byte(raw), &searches); err != nil {
+		return nil, fmt.Errorf("parsing %s %s/%s dnsConfig.searches %q: %w", kind, ns, name, raw, err)
+	}
+	return searches, nil
+}
+
+// dnsSearchesPatch returns the searches list the patch sets: the current one
+// with searchDomain appended. Both a strategic and a merge patch replace the
+// whole list, so patching ["<domain>"] alone dropped every entry the resource
+// had.
+func dnsSearchesPatch(current []string, searchDomain string) ([]byte, error) {
+	searches := append([]string{}, current...)
+	if !slices.Contains(searches, searchDomain) {
+		searches = append(searches, searchDomain)
+	}
+	return json.Marshal(searches)
 }
 
 func patchDeploymentDNS(ctx context.Context, kc *kubectl.Client, name, ns, searchDomain string) error {
-	patch := fmt.Sprintf(`{"spec":{"template":{"spec":{"dnsConfig":{"searches":["%s"]}}}}}`, searchDomain)
-	_, err := kc.Run(ctx, "patch", "deployment", name, "-n", ns, "--type=strategic", "-p", patch)
+	current, err := currentDNSSearches(ctx, kc, "deployment", name, ns, "{.spec.template.spec.dnsConfig.searches}")
+	if err != nil {
+		return err
+	}
+	searches, err := dnsSearchesPatch(current, searchDomain)
+	if err != nil {
+		return err
+	}
+	patch := fmt.Sprintf(`{"spec":{"template":{"spec":{"dnsConfig":{"searches":%s}}}}}`, searches)
+	_, err = dnsKubectlRunFn(ctx, kc, "patch", "deployment", name, "-n", ns, "--type=strategic", "-p", patch)
 	return err
 }
 
 func patchKafkaConnectDNS(ctx context.Context, kc *kubectl.Client, name, ns, searchDomain string) error {
-	patch := fmt.Sprintf(`{"spec":{"template":{"pod":{"dnsConfig":{"searches":["%s"]}}}}}`, searchDomain)
-	_, err := kc.Run(ctx, "patch", "kafkaconnect", name, "-n", ns, "--type=merge", "-p", patch)
+	current, err := currentDNSSearches(ctx, kc, "kafkaconnect", name, ns, "{.spec.template.pod.dnsConfig.searches}")
+	if err != nil {
+		return err
+	}
+	searches, err := dnsSearchesPatch(current, searchDomain)
+	if err != nil {
+		return err
+	}
+	patch := fmt.Sprintf(`{"spec":{"template":{"pod":{"dnsConfig":{"searches":%s}}}}}`, searches)
+	_, err = dnsKubectlRunFn(ctx, kc, "patch", "kafkaconnect", name, "-n", ns, "--type=merge", "-p", patch)
 	return err
 }
