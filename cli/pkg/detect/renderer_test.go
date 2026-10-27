@@ -159,9 +159,15 @@ func TestRenderHTML(t *testing.T) {
 	}
 	report.Budget.RecommendedProfile = "production"
 
-	// Trigger matrix generation logic by having zones in Nodes
+	// The matrix is what the probe measured, listed out of zone order.
 	report.Nodes[0].Zone = "zone-a"
 	report.Nodes[1].Zone = "zone-b"
+	report.Network.LatencyMatrix = []LatencyResult{
+		{SourceZone: "zone-b", TargetZone: "zone-a", AvgMs: 1.22, Success: true},
+		{SourceZone: "zone-b", TargetZone: "zone-b", AvgMs: 0.04, Success: true},
+		{SourceZone: "zone-a", TargetZone: "zone-a", AvgMs: 0.05, Success: true},
+		{SourceZone: "zone-a", TargetZone: "zone-b", AvgMs: 1.25, Success: true},
+	}
 
 	var buf bytes.Buffer
 	err := RenderHTML(report, &buf)
@@ -185,6 +191,105 @@ func TestRenderHTML(t *testing.T) {
 	}
 	if !strings.Contains(htmlStr, "zone-a") {
 		t.Error("expected html to contain zone-a in matrix")
+	}
+	// The matrix renders the measured values, not the old hard-coded 0.12ms.
+	for _, want := range []string{"1.25ms", "1.22ms", "0.05ms", "0.04ms"} {
+		if !strings.Contains(htmlStr, want) {
+			t.Errorf("matrix lacks the measured %s", want)
+		}
+	}
+	if strings.Contains(htmlStr, "0.12ms") || strings.Contains(htmlStr, "0.08ms") {
+		t.Error("matrix still holds a hard-coded latency")
+	}
+	// Zones come sorted, whatever order the probe listed them in.
+	if a, b := strings.Index(htmlStr, "<th style=\"text-align:center\">zone-a"), strings.Index(htmlStr, "<th style=\"text-align:center\">zone-b"); a < 0 || b < a {
+		t.Errorf("zone columns at %d and %d, want zone-a before zone-b", a, b)
+	}
+
+	// No matrix measured (read-only run): no section, and no invented numbers.
+	report.Network.LatencyMatrix = nil
+	buf.Reset()
+	if err := RenderHTML(report, &buf); err != nil {
+		t.Fatalf("RenderHTML failed: %v", err)
+	}
+	if strings.Contains(buf.String(), "Latency Matrix") {
+		t.Error("a report without a measured matrix rendered the matrix section")
+	}
+}
+
+// TestRenderHTMLEscapesClusterValues: everything that comes from the cluster
+// is text in the page. A zone label of <script> must not become an element,
+// and a remediation hint's <node-name> placeholder must survive the browser.
+func TestRenderHTMLEscapesClusterValues(t *testing.T) {
+	report := buildReport(2, true, true, 1, 2) // 2 zones: the "label node <node-name>" hint fires
+	report.Context = `kind-<script>alert("ctx")</script>`
+	report.Nodes[0].Name = "<script>alert(1)</script>"
+	report.Nodes[0].Zone = "<script>"
+	report.Network.LatencyMatrix = []LatencyResult{
+		{SourceZone: "<script>", TargetZone: "<script>", AvgMs: 0.05, Success: true},
+	}
+	report.Verdict.Checks = []CheckResult{
+		{Description: "node <b>bold</b>", Status: false, Detail: "a & b <i>"},
+	}
+
+	var buf bytes.Buffer
+	if err := RenderHTML(report, &buf); err != nil {
+		t.Fatalf("RenderHTML failed: %v", err)
+	}
+	htmlStr := buf.String()
+
+	if strings.Contains(htmlStr, "<script>alert") {
+		t.Error("a <script> from the cluster reached the page unescaped")
+	}
+	for _, want := range []string{
+		"&lt;script&gt;",                       // zone / context
+		"node &lt;b&gt;bold&lt;/b&gt;",         // check description
+		"a &amp; b &lt;i&gt;",                  // check detail
+		"kubectl label node &lt;node-name&gt;", // remediation command
+	} {
+		if !strings.Contains(htmlStr, want) {
+			t.Errorf("page lacks the escaped %q", want)
+		}
+	}
+	if strings.Contains(htmlStr, "<node-name>") {
+		t.Error("the <node-name> placeholder is raw HTML; a browser would swallow it")
+	}
+}
+
+// TestRenderPDFTranslatesUnicode: the core fonts are cp1252, so every string
+// from the report goes through the translator and truncation counts runes.
+// A node name with accents and a "≥" in a check must not break the render.
+func TestRenderPDFTranslatesUnicode(t *testing.T) {
+	report := buildReport(3, true, true, 1, 2)
+	report.Context = "kind-éléphant"
+	report.Nodes[0].Name = "nœud-é-1"
+	report.Nodes[0].Zone = "zone-ä"
+	report.Verdict.Checks = []CheckResult{
+		{Description: "≥ 3 availability zones", Status: true, Detail: strings.Repeat("é", 80) + " — long detail ✓"},
+	}
+	report.Strimzi.Health.WarningLogs = []string{strings.Repeat("ü", 120)}
+	report.NetPolAudit.TotalCount = 1
+	report.NetPolAudit.Existing = []ExistingNetPol{{Name: "np", PodSelector: strings.Repeat("ß", 50), PolicyTypes: []string{"Ingress"}}}
+
+	pdfPath := filepath.Join(t.TempDir(), "unicode.pdf")
+	if err := RenderPDF(report, pdfPath); err != nil {
+		t.Fatalf("RenderPDF failed: %v", err)
+	}
+	info, err := os.Stat(pdfPath)
+	if err != nil || info.Size() == 0 {
+		t.Fatalf("PDF not written: %v (size %d)", err, info.Size())
+	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	if got := truncateRunes("ééééé", 4); got != "é..." {
+		t.Errorf("truncateRunes(5 x é, 4) = %q, want é...", got)
+	}
+	if got := truncateRunes("short", 10); got != "short" {
+		t.Errorf("truncateRunes(short, 10) = %q, want it unchanged", got)
+	}
+	if got := truncateRunes("abcd", 4); got != "abcd" {
+		t.Errorf("truncateRunes(abcd, 4) = %q, want it unchanged at the limit", got)
 	}
 }
 

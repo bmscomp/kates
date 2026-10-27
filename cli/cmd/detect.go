@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/detect"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -83,10 +83,12 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	collector.BenchDNS = benchDNS
 	analyzer := detect.NewAnalyzer(executor)
 
+	// Exit codes go through exitError, not os.Exit: Execute exits with the
+	// code after RunE returns, so deferred Close and cancel calls run.
 	if err := collector.Preflight(); err != nil {
 		output.Error(err.Error())
 		if failOnError {
-			os.Exit(2)
+			return &exitError{code: 2}
 		}
 		return nil
 	}
@@ -139,7 +141,7 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	if collectErr != nil {
 		output.Error(fmt.Sprintf("Cluster introspection failed: %v", collectErr))
 		if failOnError {
-			os.Exit(2)
+			return &exitError{code: 2}
 		}
 		return nil
 	}
@@ -287,12 +289,13 @@ func runDetect(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// CI/CD exit codes
+	// CI/CD exit codes; the report files above are closed by their defers on
+	// the way out.
 	if failOnError && report.Verdict.Fails > 0 {
-		os.Exit(2)
+		return &exitError{code: 2}
 	}
 	if failOnWarning && report.Verdict.Warns > 0 {
-		os.Exit(1)
+		return &exitError{code: 1}
 	}
 
 	return nil

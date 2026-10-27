@@ -104,7 +104,7 @@
         "description": "the tool's result",
         "properties": {
           "auditRuns": {
-            "description": "security audits this call made the backend run: one each for posture and compliance, one for drift when a baseline is saved, none for a read the API refused (4xx); a failed read that may have reached the audit is counted, and a backend retry after a timeout runs more. On a current backend only the posture audit adds an entry to its in-memory grade history; an older backend adds one for every audit",
+            "description": "security audits this call made the backend run: one each for posture and compliance, one for drift when a baseline is saved, none for a read the API refused (4xx); a failed read that may have reached the audit is counted; the MCP client does not retry, so one request is one audit. On a current backend only the posture audit adds an entry to its in-memory grade history; an older backend adds one for every audit",
             "type": "integer"
           },
           "certs": {

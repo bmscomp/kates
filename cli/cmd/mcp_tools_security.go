@@ -130,7 +130,7 @@ func mcpSecurityEvidenceInputSchema() any {
 
 type mcpSecurityEvidenceOut struct {
 	Section    string                 `json:"section"`
-	AuditRuns  int                    `json:"auditRuns" jsonschema:"security audits this call made the backend run: one each for posture and compliance, one for drift when a baseline is saved, none for a read the API refused (4xx); a failed read that may have reached the audit is counted, and a backend retry after a timeout runs more. On a current backend only the posture audit adds an entry to its in-memory grade history; an older backend adds one for every audit"`
+	AuditRuns  int                    `json:"auditRuns" jsonschema:"security audits this call made the backend run: one each for posture and compliance, one for drift when a baseline is saved, none for a read the API refused (4xx); a failed read that may have reached the audit is counted; the MCP client does not retry, so one request is one audit. On a current backend only the posture audit adds an entry to its in-memory grade history; an older backend adds one for every audit"`
 	Summary    *mcpSecuritySummary    `json:"summary,omitempty"`
 	Posture    *mcpSecurityPosture    `json:"posture,omitempty"`
 	Pentest    *mcpSecurityPentest    `json:"pentest,omitempty"`
@@ -396,9 +396,14 @@ func mcpSecurityEmpty(what string) error {
 
 // mcpSecurityPaged returns the page of items the caller asked for, shrunk
 // until the result fits: set puts a page into out. It marks the call
-// truncated when items remain after the page.
-func mcpSecurityPaged[T any](call *mcpCall, out *mcpSecurityEvidenceOut, items []T, in mcpSecurityEvidenceIn, set func([]T)) {
+// truncated when items remain after the page. An offset past the last item
+// is refused, as cluster_topology refuses from_partition past the last
+// partition: an empty page there would read as "no more problems".
+func mcpSecurityPaged[T any](call *mcpCall, out *mcpSecurityEvidenceOut, items []T, in mcpSecurityEvidenceIn, set func([]T)) error {
 	matched := len(items)
+	if in.Offset >= matched && matched > 0 {
+		return mcpInvalidArgument("offset is past the section's last item; page with page.nextOffset of the previous call, or start again from 0.", strconv.Itoa(in.Offset))
+	}
 	offset := min(in.Offset, matched)
 	page := items[offset:min(offset+in.Limit, matched)]
 	if page == nil {
@@ -415,6 +420,7 @@ func mcpSecurityPaged[T any](call *mcpCall, out *mcpSecurityEvidenceOut, items [
 		out.Page.NextOffset = next
 		call.MarkTruncated()
 	}
+	return nil
 }
 
 // mcpSecStatusRank orders statuses worst first, so a page cut short keeps the
@@ -491,8 +497,7 @@ func mcpSecurityPostureOf(ctx context.Context, call *mcpCall, in mcpSecurityEvid
 		p.Total, p.Passed, p.Warnings, p.Failures = s.Total, s.Passed, s.Warnings, s.Failures
 	}
 	out.Posture = p
-	mcpSecurityPaged(call, out, mcpSecurityChecksFrom(call, r.Checks, in.ProblemsOnly), in, func(c []mcpSecurityCheck) { p.Checks = c })
-	return nil
+	return mcpSecurityPaged(call, out, mcpSecurityChecksFrom(call, r.Checks, in.ProblemsOnly), in, func(c []mcpSecurityCheck) { p.Checks = c })
 }
 
 func mcpAuditError(r *client.SecurityAuditReport) string {
@@ -528,8 +533,7 @@ func mcpSecurityPentestOf(ctx context.Context, call *mcpCall, in mcpSecurityEvid
 	status := func(t mcpPentestTest) string { return t.Result }
 	mcpSecWorstFirst(tests, status)
 	out.Pentest = p
-	mcpSecurityPaged(call, out, mcpSecKeepProblems(tests, in.ProblemsOnly, status), in, func(t []mcpPentestTest) { p.Tests = t })
-	return nil
+	return mcpSecurityPaged(call, out, mcpSecKeepProblems(tests, in.ProblemsOnly, status), in, func(t []mcpPentestTest) { p.Tests = t })
 }
 
 func mcpSecErrorOf[T any](r *T, msg func(*T) string) string {
@@ -596,9 +600,8 @@ func mcpSecurityComplianceOf(ctx context.Context, call *mcpCall, in mcpSecurityE
 	}
 	status := func(c mcpComplianceControl) string { return c.Status }
 	mcpSecWorstFirst(controls, status)
-	mcpSecurityPaged(call, out, mcpSecKeepProblems(controls, in.ProblemsOnly, status), in,
+	return mcpSecurityPaged(call, out, mcpSecKeepProblems(controls, in.ProblemsOnly, status), in,
 		func(p []mcpComplianceControl) { c.Frameworks[0].Controls = p })
-	return nil
 }
 
 func mcpSecurityTLSOf(ctx context.Context, call *mcpCall, in mcpSecurityEvidenceIn, out *mcpSecurityEvidenceOut) error {
@@ -612,8 +615,7 @@ func mcpSecurityTLSOf(ctx context.Context, call *mcpCall, in mcpSecurityEvidence
 	}
 	t := &mcpSecurityChecks{Timestamp: mcpSecLine(r.Timestamp)}
 	out.TLS = t
-	mcpSecurityPaged(call, out, mcpSecurityChecksFrom(call, r.Checks, in.ProblemsOnly), in, func(c []mcpSecurityCheck) { t.Checks = c })
-	return nil
+	return mcpSecurityPaged(call, out, mcpSecurityChecksFrom(call, r.Checks, in.ProblemsOnly), in, func(c []mcpSecurityCheck) { t.Checks = c })
 }
 
 // mcpSecCertBrokers caps the brokers a certificate report lists. The backend
@@ -696,8 +698,7 @@ func mcpSecurityCVEOf(ctx context.Context, call *mcpCall, in mcpSecurityEvidence
 	}
 	out.CVE = c
 	cves := mcpSecKeepProblems(all, in.ProblemsOnly, func(c mcpCVE) string { return c.Status })
-	mcpSecurityPaged(call, out, cves, in, func(p []mcpCVE) { c.CVEs = p })
-	return nil
+	return mcpSecurityPaged(call, out, cves, in, func(p []mcpCVE) { c.CVEs = p })
 }
 
 // A CVE report the backend built without a Kafka version.
@@ -786,8 +787,7 @@ func mcpSecurityDriftOf(ctx context.Context, call *mcpCall, in mcpSecurityEviden
 		d.Improved, d.Degraded, d.Unchanged, d.Total = s.Improved, s.Degraded, s.Unchanged, s.Total
 	}
 	out.Drift = d
-	mcpSecurityPaged(call, out, mcpDriftEntriesFrom(call, r.Drifts, in.ProblemsOnly), in, func(p []mcpDriftEntry) { d.Drifts = p })
-	return nil
+	return mcpSecurityPaged(call, out, mcpDriftEntriesFrom(call, r.Drifts, in.ProblemsOnly), in, func(p []mcpDriftEntry) { d.Drifts = p })
 }
 
 func mcpSecConfigKeysFrom(call *mcpCall, r *client.SecurityConfigDiffReport, problemsOnly bool) []mcpSecConfigKey {
@@ -839,8 +839,7 @@ func mcpSecurityConfigDiffOf(ctx context.Context, call *mcpCall, in mcpSecurityE
 		Grade:         mcpSanitizeLine(r.Grade, 8),
 	}
 	out.ConfigDiff = c
-	mcpSecurityPaged(call, out, mcpSecConfigKeysFrom(call, r, in.ProblemsOnly), in, func(p []mcpSecConfigKey) { c.Keys = p })
-	return nil
+	return mcpSecurityPaged(call, out, mcpSecConfigKeysFrom(call, r, in.ProblemsOnly), in, func(p []mcpSecConfigKey) { c.Keys = p })
 }
 
 // The security_posture_check prompt (plan §4.3): a static template, framed

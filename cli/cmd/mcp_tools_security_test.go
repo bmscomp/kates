@@ -385,6 +385,16 @@ func TestMCPSecurityEvidencePosturePages(t *testing.T) {
 		t.Errorf("last page = %+v, truncated %v", pg, env.Truncated)
 	}
 
+	// An offset past the last item is refused, as cluster_topology refuses a
+	// from_partition past the last partition: an empty page there read as
+	// "no more problems".
+	for _, offset := range []int{30, 31, 1000} {
+		e := h.callErr("security_evidence", map[string]any{"section": "posture", "offset": offset, "limit": 12})
+		if e.Error.Code != mcpErrInvalidArgument || e.Error.Retryable || !strings.Contains(e.Error.Message, "nextOffset") {
+			t.Errorf("offset %d of 30: got %+v, want %s naming nextOffset", offset, e.Error, mcpErrInvalidArgument)
+		}
+	}
+
 	out = mcpData[mcpSecurityEvidenceOut](t, h.callOK("security_evidence", map[string]any{"section": "posture", "problems_only": true, "limit": 50}))
 	if out.Page.Matched != 20 || len(out.Posture.Checks) != 20 {
 		t.Errorf("problems_only matched %d, returned %d; want the 20 not PASS", out.Page.Matched, len(out.Posture.Checks))
@@ -393,6 +403,28 @@ func TestMCPSecurityEvidencePosturePages(t *testing.T) {
 		if c.Status == "PASS" {
 			t.Errorf("problems_only returned %s, which passes", c.Name)
 		}
+	}
+	assertReadOnly(t, fb.Requests())
+}
+
+// TestMCPSecurityEvidenceNothingMatchedIsAnEmptyPage: offset 0 of a section
+// with nothing to list (every check passes, problems_only) is an empty page,
+// not a refused offset.
+func TestMCPSecurityEvidenceNothingMatchedIsAnEmptyPage(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	fb.JSON("GET", "/api/security/audit", http.StatusOK, map[string]any{
+		"checks":  []any{mcpSecCheck("TLS on", "tls", "PASS", "HIGH", "CIS-1"), mcpSecCheck("ACLs on", "auth", "PASS", "HIGH", "CIS-2")},
+		"grade":   "A",
+		"summary": map[string]any{"total": 2, "passed": 2, "warnings": 0, "failures": 0},
+	})
+	h := newMCPHarness(t, fb)
+	env := h.callOK("security_evidence", map[string]any{"section": "posture", "problems_only": true})
+	out := mcpData[mcpSecurityEvidenceOut](t, env)
+	if pg := out.Page; pg == nil || pg.Matched != 0 || pg.Returned != 0 || pg.Offset != 0 || env.Truncated {
+		t.Errorf("page = %+v, truncated %v; want an empty page", out.Page, env.Truncated)
+	}
+	if out.Posture == nil || len(out.Posture.Checks) != 0 {
+		t.Errorf("posture = %+v; want its checks empty, not absent", out.Posture)
 	}
 	assertReadOnly(t, fb.Requests())
 }

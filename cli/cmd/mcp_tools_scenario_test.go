@@ -147,6 +147,25 @@ func TestMCPDraftScenarioTemplate(t *testing.T) {
 	mcpScnOnlyPinCheck(t, fb)
 }
 
+// TestMCPDraftScenarioNameLengthIsInCharacters: the schema's maxLength of
+// 200 counts characters, and so does the handler; a 200-character name of
+// two-byte runes was refused as 400 bytes.
+func TestMCPDraftScenarioNameLengthIsInCharacters(t *testing.T) {
+	fb := newMCPFakeBackend(t, "cluster-a")
+	h := newMCPHarness(t, fb)
+	name := strings.Repeat("é", 200)
+	if _, out := mcpDraft(t, h, map[string]any{"template": "quick-load", "name": name}); !strings.Contains(out.YAML, name) {
+		t.Errorf("a 200-character name did not reach the YAML:\n%s", out.YAML)
+	}
+	// 201 characters: the schema's maxLength refuses it before the handler
+	// (the SDK counts code points too), so only the code is the handler's.
+	e := h.callErr("draft_scenario", map[string]any{"template": "quick-load", "name": name + "é"})
+	if e.Error.Code != mcpErrInvalidArgument {
+		t.Errorf("201 characters: got %+v, want %s", e.Error, mcpErrInvalidArgument)
+	}
+	mcpScnOnlyPinCheck(t, fb)
+}
+
 // TestMCPDraftScenarioCountsTheRunIgnores: a count above what the run starts
 // is a warning, and parallelProducers on a LOAD scenario brings the
 // single-producer caveat. No template sets either count

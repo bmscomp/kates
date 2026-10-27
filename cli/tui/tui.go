@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bmscomp/kates/cli/client"
 	tea "github.com/charmbracelet/bubbletea"
@@ -187,12 +188,17 @@ func (m Model) handleFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.topics.cursor = 0
 		m.topics.applyFilter()
 	case "backspace":
+		// The buffer holds runes, so backspace removes a whole one, not the
+		// last byte of a multi-byte character.
 		if len(m.filterBuf) > 0 {
-			m.filterBuf = m.filterBuf[:len(m.filterBuf)-1]
+			_, size := utf8.DecodeLastRuneInString(m.filterBuf)
+			m.filterBuf = m.filterBuf[:len(m.filterBuf)-size]
 		}
 	default:
-		if len(msg.String()) == 1 {
-			m.filterBuf += msg.String()
+		// As produce.go: a key of type KeyRunes is typed text, "é" and a
+		// paste included; msg.String() of a non-ASCII rune is not 1 byte long.
+		if msg.Type == tea.KeyRunes {
+			m.filterBuf += string(msg.Runes)
 		}
 	}
 	return m, nil

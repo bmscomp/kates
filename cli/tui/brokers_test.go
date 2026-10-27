@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/bmscomp/kates/cli/client"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // The cursor on the last broker, and a refresh with one broker fewer: View
@@ -32,6 +34,29 @@ func TestBrokersRefreshWithFewerBrokers(t *testing.T) {
 	m, _ = m.Update(brokersLoadedMsg{info: brokers(0)})
 	if m.cursor != 0 || !strings.Contains(m.View(), "No brokers found") {
 		t.Errorf("cursor = %d with no brokers, want 0 and the empty view", m.cursor)
+	}
+}
+
+// A failed load leaves info nil, and every key was dropped while it was: r
+// could not retry. The cursor keys still need data.
+func TestBrokersRefreshKeyWorksWithoutData(t *testing.T) {
+	m := brokersModel{client: &client.Client{}, width: 120, height: 40}
+	m, _ = m.Update(brokersLoadedMsg{err: errors.New("connection refused")})
+	if m.info != nil || m.loading {
+		t.Fatalf("after a failed load: info %v, loading %v", m.info, m.loading)
+	}
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("r with no data produced no load command")
+	}
+	if !m.loading {
+		t.Error("r with no data did not put the view back to loading")
+	}
+
+	m.loading = false
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown}); cmd != nil || m.cursor != 0 {
+		t.Errorf("down with no data: cmd %v, cursor %d; want nothing", cmd, m.cursor)
 	}
 }
 

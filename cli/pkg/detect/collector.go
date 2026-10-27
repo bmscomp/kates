@@ -374,15 +374,16 @@ func (c *Collector) parseNodes() ([]NodeInfo, error) {
 			cpu *= 1000
 		}
 
-		memStr := n.Status.Allocatable.Memory
-		memKi, _ := strconv.Atoi(strings.TrimSuffix(memStr, "Ki"))
+		// Allocatable memory comes in whatever unit the kubelet reports (Ki on
+		// most nodes, Mi or Gi on some); memoryMiB reads them all.
+		memGi := int(memoryMiB(n.Status.Allocatable.Memory) / 1024)
 
 		nodes = append(nodes, NodeInfo{
 			Name:     n.Metadata.Name,
 			Zone:     zone,
 			Roles:    roleStr,
 			CPU:      cpu,
-			MemoryGi: memKi / 1048576,
+			MemoryGi: memGi,
 			Runtime:  n.Status.NodeInfo.ContainerRuntimeVersion,
 			Kubelet:  n.Status.NodeInfo.KubeletVersion,
 			OS:       n.Status.NodeInfo.OSImage,
@@ -410,6 +411,8 @@ func (c *Collector) groupNodesByZone(nodes []NodeInfo) []ZoneInfo {
 	for _, z := range zoneMap {
 		zones = append(zones, *z)
 	}
+	// Map order is random, and the zones head every report and values file.
+	sort.Slice(zones, func(i, j int) bool { return zones[i].Name < zones[j].Name })
 	return zones
 }
 
@@ -2283,6 +2286,14 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 
 	c.progress("Auditing CoreDNS performance: running rapid parallel DNS queries...")
 
+	// Stage 1 read the cluster domain from CoreDNS; a cluster that is not
+	// cluster.local would otherwise fail every internal query.
+	clusterDomain := report.Network.ClusterDomain
+	if clusterDomain == "" {
+		clusterDomain = "cluster.local"
+	}
+	internalName := "kubernetes.default.svc." + clusterDomain
+
 	var internalTimes []float64
 	var externalTimes []float64
 
@@ -2296,7 +2307,7 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 		gInt, _ := errgroup.WithContext(ctx)
 		for i := 0; i < 20; i++ {
 			gInt.Go(func() error {
-				out, err := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", "kubernetes.default.svc.cluster.local")
+				out, err := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", internalName)
 				if err == nil {
 					if ms, ok := parseDigOutput(out); ok {
 						internalChan <- ms

@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/client"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/client"
 )
 
 type brokersModel struct {
@@ -62,6 +62,12 @@ func (m brokersModel) Update(msg tea.Msg) (brokersModel, tea.Cmd) {
 			m.cursor = max(0, len(m.info.Brokers)-1)
 		}
 	case tea.KeyMsg:
+		// r needs no data: a failed load leaves info nil, and r is how the
+		// user retries it. (q and ctrl+c never reach here; tui.go quits first.)
+		if msg.String() == "r" {
+			m.loading = true
+			return m, m.loadBrokers()
+		}
 		if m.info == nil {
 			break
 		}
@@ -75,9 +81,6 @@ func (m brokersModel) Update(msg tea.Msg) (brokersModel, tea.Cmd) {
 			if m.cursor < count-1 {
 				m.cursor++
 			}
-		case "r":
-			m.loading = true
-			return m, m.loadBrokers()
 		}
 	}
 	return m, nil

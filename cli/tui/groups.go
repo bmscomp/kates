@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/client"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/client"
 )
 
 type groupsView int
@@ -161,7 +161,19 @@ func (m groupsModel) viewList() string {
 	var list strings.Builder
 	list.WriteString(dimStyle.Render(fmt.Sprintf("  Consumer Groups (%d)", len(m.groups))) + "\n\n")
 
-	for i, g := range m.groups {
+	// A window of the list, as topics.go: without one a cluster with more
+	// groups than terminal rows scrolls the cursor off the screen.
+	start := 0
+	maxVisible := m.height - 8
+	if maxVisible < 5 {
+		maxVisible = 20
+	}
+	if m.cursor >= maxVisible {
+		start = m.cursor - maxVisible + 1
+	}
+
+	for i := start; i < len(m.groups) && i < start+maxVisible; i++ {
+		g := m.groups[i]
 		stateIcon := dimStyle.Render("○")
 		switch strings.ToUpper(g.State) {
 		case "STABLE":

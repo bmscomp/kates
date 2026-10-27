@@ -1335,6 +1335,10 @@ func newMCPClient(base *client.Client) (*client.Client, error) {
 	// would cut off, and then retry, the one slow cluster check that deadline
 	// is sized to let through.
 	hc.Timeout = 0
+	// No retries. The CLI's client retries a 5xx up to MaxRetries times, and
+	// a retry of GET /api/security/audit runs a second audit on the brokers
+	// while auditRuns reports one. The test harness already sets 1.
+	c.MaxRetries = 1
 	// No redirects. The transport checks each request, but a redirect is
 	// followed by http.Client, which forwards the Authorization header to
 	// the same host on another port and repeats a POST on a 307 or 308; the

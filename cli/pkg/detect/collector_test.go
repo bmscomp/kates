@@ -147,6 +147,99 @@ func TestCollect_HealthyCluster(t *testing.T) {
 	}
 }
 
+// The zones came out of a map, so two runs of detect listed them in two
+// orders; the report, the values file and every renderer read them in order.
+func TestGroupNodesByZone_SortsZones(t *testing.T) {
+	nodes := []NodeInfo{
+		{Name: "n1", Zone: "us-east-1d", CPU: 1000, MemoryGi: 4},
+		{Name: "n2", Zone: "us-east-1b", CPU: 1000, MemoryGi: 4},
+		{Name: "n3", Zone: "us-east-1a", CPU: 1000, MemoryGi: 4},
+		{Name: "n4", Zone: "us-east-1c", CPU: 1000, MemoryGi: 4},
+		{Name: "n5", Zone: "us-east-1a", CPU: 1000, MemoryGi: 4},
+		{Name: "n6", Zone: "-", CPU: 1000, MemoryGi: 4},
+	}
+	want := []string{"us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d"}
+	// A few runs: map order is random, so one lucky pass proves nothing.
+	for run := 0; run < 5; run++ {
+		zones := NewCollector(NewMockExecutor()).groupNodesByZone(nodes)
+		var got []string
+		for _, z := range zones {
+			got = append(got, z.Name)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("zones = %v, want %v", got, want)
+		}
+		if zones[0].Nodes != 2 || zones[0].CPUAllocatable != 2000 || zones[0].MemAllocatableGi != 8 {
+			t.Fatalf("us-east-1a = %+v, want 2 nodes, 2000m, 8Gi", zones[0])
+		}
+	}
+}
+
+// Allocatable memory arrives as Ki from most kubelets, but a node can report
+// Mi or Gi; parseNodes read everything as Ki and made the others 0.
+func TestParseNodes_MemoryUnits(t *testing.T) {
+	m := NewMockExecutor()
+	m.Set(`{"items": [
+	  {"metadata": {"name": "ki"}, "status": {"allocatable": {"cpu": "4", "memory": "16777216Ki"}}},
+	  {"metadata": {"name": "mi"}, "status": {"allocatable": {"cpu": "4", "memory": "16384Mi"}}},
+	  {"metadata": {"name": "gi"}, "status": {"allocatable": {"cpu": "4", "memory": "16Gi"}}},
+	  {"metadata": {"name": "plain"}, "status": {"allocatable": {"cpu": "4", "memory": "17179869184"}}}
+	]}`, "kubectl", "get", "nodes", "-o", "json")
+
+	nodes, err := NewCollector(m).parseNodes()
+	if err != nil {
+		t.Fatalf("parseNodes: %v", err)
+	}
+	if len(nodes) != 4 {
+		t.Fatalf("got %d nodes, want 4", len(nodes))
+	}
+	for _, n := range nodes {
+		if n.MemoryGi != 16 {
+			t.Errorf("node %s: MemoryGi = %d, want 16", n.Name, n.MemoryGi)
+		}
+		if n.CPU != 4000 {
+			t.Errorf("node %s: CPU = %d, want 4000", n.Name, n.CPU)
+		}
+	}
+}
+
+// The internal DNS probe digs the cluster's own domain, the one stage 1 read
+// from CoreDNS, not cluster.local on every cluster.
+func TestDNSResolutionProbe_UsesTheClusterDomain(t *testing.T) {
+	m := NewMockExecutor()
+	m.Responses["kubectl create -f"] = ""
+	m.Responses["kubectl label ns"] = ""
+	m.Responses["kubectl delete ns"] = ""
+	m.Responses["kubectl run dns-prober"] = ""
+	m.Responses["kubectl wait --for=condition=Ready pod/dns-prober"] = "pod condition met"
+	m.Responses["dns-prober -- apk add"] = "installed bind-tools"
+	m.Responses["dns-prober -- dig"] = ";; Query time: 2 msec"
+
+	collector := NewCollector(m)
+	collector.BenchDNS = true
+	report := &DetectReport{
+		Nodes:   []NodeInfo{{Name: "node-1", Zone: "zone-a"}},
+		Network: NetworkInfo{ClusterDomain: "taz-tls-int-1.local"},
+	}
+	collector.runDNSResolutionProbe(context.Background(), report)
+
+	digs := 0
+	for _, call := range m.Calls() {
+		if !strings.Contains(call, "dig ") {
+			continue
+		}
+		if strings.Contains(call, "kubernetes.default.svc.") {
+			digs++
+			if !strings.HasSuffix(call, "kubernetes.default.svc.taz-tls-int-1.local") {
+				t.Fatalf("internal dig %q, want the cluster domain taz-tls-int-1.local", call)
+			}
+		}
+	}
+	if digs != 20 {
+		t.Errorf("%d internal digs, want 20", digs)
+	}
+}
+
 func TestCollect_NoStrimzi(t *testing.T) {
 	m := setupHealthyMock()
 	// Override: Strimzi CRD not found

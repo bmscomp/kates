@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -414,8 +415,10 @@ func mcpScnCleanScalars(n *yaml.Node) bool {
 }
 
 func mcpScnCheckOverrides(in mcpDraftScenarioIn) error {
-	if in.Name != "" && (!mcpScnCleanText(in.Name) || strings.ContainsAny(in.Name, "\n\r\t") || len(in.Name) > 200) {
-		return mcpInvalidArgument("name must be one line of plain text, at most 200 bytes.", "")
+	// Counted in characters, as the schema's maxLength is (JSON Schema counts
+	// code points); a byte count refused a shorter name of multi-byte runes.
+	if in.Name != "" && (!mcpScnCleanText(in.Name) || strings.ContainsAny(in.Name, "\n\r\t") || utf8.RuneCountInString(in.Name) > 200) {
+		return mcpInvalidArgument("name must be one line of plain text, at most 200 characters.", "")
 	}
 	for k, v := range in.SpecOverrides {
 		if !mcpScnOverrideKeyRE.MatchString(k) {
