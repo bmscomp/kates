@@ -285,13 +285,27 @@ func renderAdvisor(res advisorResult) {
 	}
 }
 
+// advisorCheck is one advisor rule: what it recommends for a run's spec at
+// the run's average throughput and p99, or nil when it has nothing to say.
+type advisorCheck func(spec *client.TestSpec, avgThroughput, p99 float64) *advisorRule
+
+// advisorChecks run in this order, which is the order the advice prints in.
+var advisorChecks = []advisorCheck{
+	adviseBatchSize,
+	adviseLinger,
+	adviseAcks,
+	adviseCompression,
+	advisePartitions,
+	adviseRecordSize,
+	adviseLatencyBatch,
+}
+
 func analyzeRun(run *client.TestRun, report *client.Report) []advisorRule {
 	var rules []advisorRule
 
 	if run.Spec == nil || len(run.Results) == 0 {
 		return rules
 	}
-	spec := run.Spec
 
 	var avgThroughput float64
 	for _, r := range run.Results {
@@ -300,109 +314,141 @@ func analyzeRun(run *client.TestRun, report *client.Report) []advisorRule {
 	avgThroughput /= float64(len(run.Results))
 	p99 := latencyOf(run.Results).P99Ms
 
-	if b := spec.BatchSize; b != nil && *b > 0 && *b <= 16384 && avgThroughput > 10000 {
-		rules = append(rules, advisorRule{
-			Severity: "HIGH",
-			Title:    fmt.Sprintf("batch.size=%d is leaving throughput on the table", *b),
-			Fix:      "Try batch.size=65536 for improved batching efficiency",
-			Evidence: fmt.Sprintf("current throughput: %s rec/s, estimated gain: ~30-50%%", fmtAdvisorNum(avgThroughput)),
-			tune:     map[string]any{"batchSize": 65536},
-		})
-	}
-
-	if spec.LingerMs != nil && *spec.LingerMs == 0 && avgThroughput > 5000 {
-		rules = append(rules, advisorRule{
-			Severity: "HIGH",
-			Title:    "linger.ms=0 causes excessive small-batch sends",
-			Fix:      "Set linger.ms=10 to coalesce batches and reduce request count",
-			Evidence: "zero linger forces immediate sends, increasing network overhead",
-			tune:     map[string]any{"lingerMs": 10},
-		})
-	}
-
-	if (spec.Acks == "1" || spec.Acks == "0") && spec.ReplicationFactor >= 3 {
-		severity := "MED"
-		if spec.Acks == "0" {
-			severity = "HIGH"
+	for _, check := range advisorChecks {
+		if rule := check(run.Spec, avgThroughput, p99); rule != nil {
+			rules = append(rules, *rule)
 		}
-		rules = append(rules, advisorRule{
-			Severity: severity,
-			Title:    fmt.Sprintf("acks=%s with replicationFactor=%d risks data loss", spec.Acks, spec.ReplicationFactor),
-			Fix:      "Use acks=all for data durability with high replication",
-			Evidence: fmt.Sprintf("replication=%d provides redundancy, but acks=%s bypasses it", spec.ReplicationFactor, spec.Acks),
-			tune:     map[string]any{"acks": "all"},
-		})
 	}
+	return rules
+}
 
-	if spec.CompressionType == "none" || spec.CompressionType == "" {
+func adviseBatchSize(spec *client.TestSpec, avgThroughput, _ float64) *advisorRule {
+	b := spec.BatchSize
+	fires := b != nil && *b > 0 && *b <= 16384 && avgThroughput > 10000
+	if !fires {
+		return nil
+	}
+	return &advisorRule{
+		Severity: "HIGH",
+		Title:    fmt.Sprintf("batch.size=%d is leaving throughput on the table", *b),
+		Fix:      "Try batch.size=65536 for improved batching efficiency",
+		Evidence: fmt.Sprintf("current throughput: %s rec/s, estimated gain: ~30-50%%", fmtAdvisorNum(avgThroughput)),
+		tune:     map[string]any{"batchSize": 65536},
+	}
+}
+
+func adviseLinger(spec *client.TestSpec, avgThroughput, _ float64) *advisorRule {
+	fires := spec.LingerMs != nil && *spec.LingerMs == 0 && avgThroughput > 5000
+	if !fires {
+		return nil
+	}
+	return &advisorRule{
+		Severity: "HIGH",
+		Title:    "linger.ms=0 causes excessive small-batch sends",
+		Fix:      "Set linger.ms=10 to coalesce batches and reduce request count",
+		Evidence: "zero linger forces immediate sends, increasing network overhead",
+		tune:     map[string]any{"lingerMs": 10},
+	}
+}
+
+func adviseAcks(spec *client.TestSpec, _, _ float64) *advisorRule {
+	fires := (spec.Acks == "1" || spec.Acks == "0") && spec.ReplicationFactor >= 3
+	if !fires {
+		return nil
+	}
+	severity := "MED"
+	if spec.Acks == "0" {
+		severity = "HIGH"
+	}
+	return &advisorRule{
+		Severity: severity,
+		Title:    fmt.Sprintf("acks=%s with replicationFactor=%d risks data loss", spec.Acks, spec.ReplicationFactor),
+		Fix:      "Use acks=all for data durability with high replication",
+		Evidence: fmt.Sprintf("replication=%d provides redundancy, but acks=%s bypasses it", spec.ReplicationFactor, spec.Acks),
+		tune:     map[string]any{"acks": "all"},
+	}
+}
+
+func adviseCompression(spec *client.TestSpec, avgThroughput, _ float64) *advisorRule {
+	switch spec.CompressionType {
+	case "none", "":
 		if avgThroughput > 20000 {
-			rules = append(rules, advisorRule{
+			return &advisorRule{
 				Severity: "HIGH",
 				Title:    "No compression detected — high bandwidth usage",
 				Fix:      "Use compression=lz4 for best throughput or zstd for best ratio",
 				Evidence: fmt.Sprintf("%s rec/s uncompressed wastes ~30-60%% network bandwidth", fmtAdvisorNum(avgThroughput)),
 				tune:     map[string]any{"compressionType": "lz4"},
-			})
-		} else {
-			rules = append(rules, advisorRule{
-				Severity: "MED",
-				Title:    "No compression — consider enabling for network efficiency",
-				Fix:      "compression=lz4 adds negligible CPU overhead",
-				tune:     map[string]any{"compressionType": "lz4"},
-			})
+			}
 		}
-	} else if spec.CompressionType == "gzip" {
-		rules = append(rules, advisorRule{
+		return &advisorRule{
+			Severity: "MED",
+			Title:    "No compression — consider enabling for network efficiency",
+			Fix:      "compression=lz4 adds negligible CPU overhead",
+			tune:     map[string]any{"compressionType": "lz4"},
+		}
+	case "gzip":
+		return &advisorRule{
 			Severity: "MED",
 			Title:    "gzip compression has highest CPU overhead",
 			Fix:      "Switch to lz4 for 3-5x faster compression at similar ratios",
 			Evidence: "gzip is best for cold storage, lz4/zstd for streaming",
 			tune:     map[string]any{"compressionType": "lz4"},
-		})
-	} else {
-		rules = append(rules, advisorRule{
+		}
+	default:
+		return &advisorRule{
 			Severity: "OK",
 			Title:    fmt.Sprintf("compression=%s is optimal for this workload", spec.CompressionType),
-		})
-	}
-
-	if spec.Partitions > 0 && spec.ParallelProducers > 0 {
-		ratio := float64(spec.Partitions) / float64(spec.ParallelProducers)
-		if ratio < 2 {
-			rules = append(rules, advisorRule{
-				Severity: "MED",
-				Title:    fmt.Sprintf("partitions=%d with %d producers limits parallelism", spec.Partitions, spec.ParallelProducers),
-				Fix:      fmt.Sprintf("Increase partitions to %d (4× producers) for better distribution", spec.ParallelProducers*4),
-				Evidence: fmt.Sprintf("partition:producer ratio is %.1f (recommended: ≥ 4)", ratio),
-				tune:     map[string]any{"partitions": spec.ParallelProducers * 4},
-			})
-		} else {
-			rules = append(rules, advisorRule{
-				Severity: "OK",
-				Title:    fmt.Sprintf("partitions=%d matches producer count well", spec.Partitions),
-			})
 		}
 	}
+}
 
-	if spec.RecordSizeBytes > 0 && spec.RecordSizeBytes < 256 && avgThroughput > 50000 {
-		rules = append(rules, advisorRule{
-			Severity: "MED",
-			Title:    fmt.Sprintf("recordSize=%dB is small — high per-record overhead", spec.RecordSizeBytes),
-			Fix:      "Batch application records or increase record size to reduce overhead",
-			Evidence: "small records amplify per-message metadata costs",
-		})
+func advisePartitions(spec *client.TestSpec, _, _ float64) *advisorRule {
+	fires := spec.Partitions > 0 && spec.ParallelProducers > 0
+	if !fires {
+		return nil
 	}
-
-	if b := spec.BatchSize; p99 > 100 && b != nil && *b > 65536 {
-		rules = append(rules, advisorRule{
+	ratio := float64(spec.Partitions) / float64(spec.ParallelProducers)
+	if ratio < 2 {
+		return &advisorRule{
 			Severity: "MED",
-			Title:    fmt.Sprintf("p99=%.0fms with large batch.size=%d — try reducing", p99, *b),
-			Fix:      "Reduce batch.size or linger.ms to trade throughput for latency",
-			Evidence: "large batches increase fill time, raising tail latency",
-		})
+			Title:    fmt.Sprintf("partitions=%d with %d producers limits parallelism", spec.Partitions, spec.ParallelProducers),
+			Fix:      fmt.Sprintf("Increase partitions to %d (4× producers) for better distribution", spec.ParallelProducers*4),
+			Evidence: fmt.Sprintf("partition:producer ratio is %.1f (recommended: ≥ 4)", ratio),
+			tune:     map[string]any{"partitions": spec.ParallelProducers * 4},
+		}
 	}
+	return &advisorRule{
+		Severity: "OK",
+		Title:    fmt.Sprintf("partitions=%d matches producer count well", spec.Partitions),
+	}
+}
 
-	return rules
+func adviseRecordSize(spec *client.TestSpec, avgThroughput, _ float64) *advisorRule {
+	fires := spec.RecordSizeBytes > 0 && spec.RecordSizeBytes < 256 && avgThroughput > 50000
+	if !fires {
+		return nil
+	}
+	return &advisorRule{
+		Severity: "MED",
+		Title:    fmt.Sprintf("recordSize=%dB is small — high per-record overhead", spec.RecordSizeBytes),
+		Fix:      "Batch application records or increase record size to reduce overhead",
+		Evidence: "small records amplify per-message metadata costs",
+	}
+}
+
+func adviseLatencyBatch(spec *client.TestSpec, _, p99 float64) *advisorRule {
+	b := spec.BatchSize
+	fires := p99 > 100 && b != nil && *b > 65536
+	if !fires {
+		return nil
+	}
+	return &advisorRule{
+		Severity: "MED",
+		Title:    fmt.Sprintf("p99=%.0fms with large batch.size=%d — try reducing", p99, *b),
+		Fix:      "Reduce batch.size or linger.ms to trade throughput for latency",
+		Evidence: "large batches increase fill time, raising tail latency",
+	}
 }
 
 func truncAdvisorID(id string) string {

@@ -2,11 +2,14 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // auditBackend is one check from the backend and a summary that counts it,
@@ -129,5 +132,41 @@ func TestSecurityAudit_KyvernoMissingAndViolations(t *testing.T) {
 	}
 	if exported["grade"] != "B" {
 		t.Errorf("grade = %v, want B: a violation costs one grade", exported["grade"])
+	}
+}
+
+// The Kates API answers an audit or a TLS inspection it could not run with an
+// "error" field. Both printed it, or nothing at all, and exited 0; a script
+// read that as a clean bill of health. They exit 2, with the message, in
+// either output mode, and -o json still prints the API's answer.
+func TestSecurity_APIErrorExitsCouldNotTell(t *testing.T) {
+	runKubectlFn = func(...string) (string, error) { return "", fmt.Errorf("no kubectl here") }
+	defer func() { runKubectlFn = runKubectlDefault }()
+
+	for _, tt := range []struct {
+		name, path, msg string
+		cmd             *cobra.Command
+	}{
+		{"audit", "/api/security/audit", "Security audit failed: no brokers", securityAuditCmd},
+		{"tls-inspect", "/api/security/tls", "TLS inspection failed: no brokers", securityTLSCmd},
+	} {
+		for _, mode := range []string{"table", "json"} {
+			t.Run(tt.name+" "+mode, func(t *testing.T) {
+				ts, buf := setupTest(t, "GET", tt.path, 200, `{"error":"`+tt.msg+`"}`)
+				defer ts.Close()
+				outputMode = mode
+				defer func() { outputMode = "table" }()
+
+				var err error
+				stdout := captureStdout(t, func() { err = tt.cmd.RunE(tt.cmd, nil) }) + buf.String()
+				var exit *exitError
+				if !errors.As(err, &exit) || exit.code != couldNotTellExitCode || exit.msg != tt.msg {
+					t.Fatalf("err = %v (%T), want exit %d with %q", err, err, couldNotTellExitCode, tt.msg)
+				}
+				if mode == "json" && !strings.Contains(stdout, tt.msg) {
+					t.Errorf("-o json does not print the API's answer:\n%s", stdout)
+				}
+			})
+		}
 	}
 }

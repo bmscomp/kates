@@ -1,0 +1,184 @@
+{{- /* The test report as a page (kates report export --format html). Every
+  value goes through html/template's contextual escaping: a phase named
+  <script> or a task error quoted in a violation's reason is text. */ -}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kates Report — {{.ShortID}}</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --dim: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --gradient-start: #7c3aed; --gradient-end: #06b6d4;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); padding: 2rem; line-height: 1.6;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  .header {
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    border-radius: 12px; padding: 2rem; margin-bottom: 2rem; text-align: center;
+  }
+  .header h1 { font-size: 1.8rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .header .subtitle { opacity: 0.85; font-size: 0.95rem; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.5rem; margin-bottom: 1.25rem;
+  }
+  .card h2 {
+    font-size: 1.1rem; color: var(--accent); margin-bottom: 1rem;
+    padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th {
+    text-align: left; padding: 0.6rem 0.8rem; color: var(--dim);
+    font-weight: 600; border-bottom: 2px solid var(--border); font-size: 0.8rem;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  td { padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover { background: rgba(88,166,255,0.04); }
+  .metric-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bar-container {
+    width: 120px; height: 8px; background: var(--border);
+    border-radius: 4px; overflow: hidden; display: inline-block; vertical-align: middle;
+    margin-left: 0.5rem;
+  }
+  .bar-fill {
+    height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, var(--green), var(--yellow), var(--red));
+  }
+  .badge {
+    display: inline-block; padding: 0.15rem 0.6rem; border-radius: 12px;
+    font-size: 0.8rem; font-weight: 600;
+  }
+  .badge-pass { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge-fail { background: rgba(248,81,73,0.15); color: var(--red); }
+  .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .kv-item { }
+  .kv-label { font-size: 0.8rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; }
+  .kv-value { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .footer {
+    text-align: center; color: var(--dim); font-size: 0.8rem;
+    margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);
+  }
+  .footer a { color: var(--accent); text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+  <h1>Performance Report</h1>
+  <div class="subtitle">Test ID: {{.ID}}</div>
+</div>
+{{- with .Summary}}
+<div class="card">
+  <h2>Throughput</h2>
+  <div class="kv-grid">
+    <div class="kv-item">
+      <div class="kv-label">Total Records</div>
+      <div class="kv-value">{{.TotalRecords}}</div>
+    </div>
+    <div class="kv-item">
+      <div class="kv-label">Avg Throughput</div>
+      <div class="kv-value">{{.AvgRecPerSec}} <span style="font-size:0.7em;color:var(--dim)">rec/s</span></div>
+    </div>
+    <div class="kv-item">
+      <div class="kv-label">Peak Throughput</div>
+      <div class="kv-value">{{.PeakRecPerSec}} <span style="font-size:0.7em;color:var(--dim)">rec/s</span></div>
+    </div>
+    <div class="kv-item">
+      <div class="kv-label">Avg Bandwidth</div>
+      <div class="kv-value">{{.AvgMBPerSec}} <span style="font-size:0.7em;color:var(--dim)">MB/s</span></div>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <h2>Latency Distribution</h2>
+  <table>
+    <thead><tr><th>Percentile</th><th>Value (ms)</th><th>Distribution</th></tr></thead>
+    <tbody>
+{{- range .Latencies}}
+    <tr>
+      <td>{{.Label}}</td>
+      <td class="metric-value">{{.Value}}</td>
+      <td><div class="bar-container"><div class="bar-fill" style="width:{{.Width}}%"></div></div></td>
+    </tr>
+{{- end}}
+    </tbody>
+  </table>
+</div>
+<div class="card">
+  <h2>Reliability</h2>
+  <div class="kv-grid">
+    <div class="kv-item">
+      <div class="kv-label">Error Rate</div>
+      <div class="kv-value" style="color:{{.ErrorColor}}">{{.ErrorRate}}%</div>
+    </div>
+    <div class="kv-item">
+      <div class="kv-label">Total Records</div>
+      <div class="kv-value">{{.TotalRecords}}</div>
+    </div>
+  </div>
+</div>
+{{- end}}
+{{- with .SLA}}
+{{- if .Passed}}
+<div class="card">
+  <h2>SLA Verdict</h2>
+  <p><span class="badge badge-pass">✓ PASSED</span> All SLA thresholds met</p>
+</div>
+{{- else}}
+<div class="card">
+  <h2>SLA Verdict</h2>
+  <p style="margin-bottom:1rem"><span class="badge badge-fail">✖ FAILED</span> SLA violations detected</p>
+{{- if .Violations}}
+  <table>
+    <thead><tr><th>Metric</th><th>Threshold</th><th>Actual</th><th>Status</th></tr></thead>
+    <tbody>
+{{- range .Violations}}
+    <tr>
+      <td>{{.Metric}}</td>
+      <td class="metric-value">{{.Threshold}}</td>
+      <td class="metric-value" style="color:var(--red)">{{.Actual}}</td>
+      <td><span class="badge badge-fail">FAIL</span></td>
+    </tr>
+{{- end}}
+    </tbody>
+  </table>
+{{- end}}
+</div>
+{{- end}}
+{{- end}}
+{{- if .Phases}}
+<div class="card">
+  <h2>Phase Breakdown</h2>
+  <table>
+    <thead><tr><th>Phase</th><th>SLA</th><th>Records</th><th>Throughput</th><th>P99 (ms)</th><th>Errors</th></tr></thead>
+    <tbody>
+{{- range .Phases}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>{{if not .HasSLA}}—{{else if .SLAPassed}}<span class="badge badge-pass">✓ PASSED</span>{{else}}<span class="badge badge-fail">✖ FAILED</span>{{end}}</td>
+      <td class="metric-value">{{.Records}}</td>
+      <td class="metric-value">{{.Throughput}} rec/s</td>
+      <td class="metric-value">{{.P99}}</td>
+      <td class="metric-value">{{.ErrorRate}}%</td>
+    </tr>
+{{- end}}
+    </tbody>
+  </table>
+</div>
+{{- end}}
+<div class="footer">
+  Generated by <a href="https://github.com/bmscomp/kates" target="_blank" rel="noopener noreferrer">Kates</a> · <strong>kates report export {{.ID}} --format html</strong>
+</div>
+</div>
+</body>
+</html>

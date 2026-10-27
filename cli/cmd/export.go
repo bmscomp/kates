@@ -73,7 +73,9 @@ func writeExportFile(path string, data []byte) error {
 	}
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
-		os.MkdirAll(dir, 0755)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
 	}
 	return os.WriteFile(path, data, 0644)
 }

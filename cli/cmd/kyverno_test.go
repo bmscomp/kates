@@ -257,3 +257,22 @@ func TestKyvernoReleaseNamespace(t *testing.T) {
 		t.Errorf("two installed: err %v, stderr %q", err, stderr)
 	}
 }
+
+// kyverno status counts failures from the policy reports' FAIL column, by
+// namespace; a short line or a count that is not a number counts nothing.
+func TestPolicyReportFailures(t *testing.T) {
+	out := `
+app   cpol-require-labels   Deployment   web   3   2   0   0   0   5d
+app   cpol-no-privileged    Pod          db    1   1   0   0   0   5d
+ops   cpol-require-labels   Pod          job   4   0   0   0   0   5d
+ops   short line
+ops   cpol-x                Pod          y     1   n/a 0   0   0   5d
+`
+	total, perNS := policyReportFailures(out)
+	if total != 3 || len(perNS) != 1 || perNS["app"] != 3 {
+		t.Errorf("total %d, per namespace %v; want 3, all in app", total, perNS)
+	}
+	if total, perNS := policyReportFailures(""); total != 0 || len(perNS) != 0 {
+		t.Errorf("no reports: total %d, per namespace %v", total, perNS)
+	}
+}

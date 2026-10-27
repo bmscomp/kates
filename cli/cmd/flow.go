@@ -433,7 +433,7 @@ func init() {
 	flowRunCmd.Flags().StringVarP(&flowFile, "file", "f", "", "Path to flow pipeline YAML (required)")
 	addWaitFlag(flowRunCmd, &flowWait, true)
 	flowRunCmd.Flags().BoolVar(&flowDry, "dry-run", false, "Validate pipeline without executing")
-	flowRunCmd.MarkFlagRequired("file")
+	_ = flowRunCmd.MarkFlagRequired("file") // errors only for a flag that does not exist; --file is defined above
 	interruptible(flowRunCmd)
 	flowCmd.AddCommand(flowRunCmd)
 	rootCmd.AddCommand(flowCmd)

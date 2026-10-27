@@ -86,35 +86,16 @@ func runAuto(cmd *cobra.Command, args []string) error {
 
 	// 2. Generate Phase
 	output.Header("Generate Configuration")
-
-	tmpDir := ".build"
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return fmt.Errorf("failed to create %s directory: %w", tmpDir, err)
-	}
-
-	valuesPath := filepath.Join(tmpDir, "values-detected.yaml")
-	f, err := os.Create(valuesPath)
+	valuesPath, err := writeAutoValues(report, ".build")
 	if err != nil {
-		return fmt.Errorf("failed to create values file: %w", err)
+		return err
 	}
-
-	if autoBaseValues != "" {
-		baseData, err := os.ReadFile(autoBaseValues)
-		if err != nil {
-			f.Close()
-			return fmt.Errorf("failed to read base values: %w", err)
-		}
-		detect.RenderValuesFromBaseWithReserve(report, autoClusterName, baseData, autoReservePct, f)
-	} else {
-		detect.RenderValuesWithReserve(report, autoClusterName, autoReservePct, f)
-	}
-	f.Close()
 	output.Success(fmt.Sprintf("Configuration generated: %s", valuesPath))
 
 	// 3. Helm Build Dependencies Phase
 	output.Header("Helm Deployment")
 	if _, err := os.Stat(filepath.Join(autoChartDir, "Chart.yaml")); os.IsNotExist(err) {
-		return fmt.Errorf("Helm chart not found at %s. Please run this command from the repository root or provide --chart-dir", autoChartDir)
+		return fmt.Errorf("helm chart not found at %s. Please run this command from the repository root or provide --chart-dir", autoChartDir)
 	}
 
 	output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", autoChartDir))
@@ -155,47 +136,88 @@ func runAuto(cmd *cobra.Command, args []string) error {
 	output.Success("✅ Kafka cluster successfully deployed with auto-detected configuration!")
 
 	// 5. Monitoring Deployment Phase
-	if !autoSkipMonitoring {
-		monitoringChartDir := filepath.Join(filepath.Dir(autoChartDir), "monitoring")
-		if _, err := os.Stat(filepath.Join(monitoringChartDir, "Chart.yaml")); os.IsNotExist(err) {
-			output.Warn(fmt.Sprintf("Monitoring chart not found at %s — skipping monitoring deployment", monitoringChartDir))
-		} else {
-			output.Header("Monitoring Deployment")
-
-			// Determine the values file: prefer values-generic.yaml for real clusters
-			monitoringValues := filepath.Join(monitoringChartDir, "values-generic.yaml")
-			if _, err := os.Stat(monitoringValues); os.IsNotExist(err) {
-				monitoringValues = filepath.Join(monitoringChartDir, "values.yaml")
-			}
-
-			output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", monitoringChartDir))
-			if err := hc.DependencyBuild(context.Background(), monitoringChartDir); err != nil {
-				output.Error(fmt.Sprintf("Monitoring helm dependency build failed: %v", err))
-				output.Warn("Continuing without monitoring — Kafka cluster is deployed successfully")
-			} else {
-				monHelmArgs := []string{
-					"upgrade", "--install", "monitoring", monitoringChartDir,
-					"--namespace", autoNamespace, "--create-namespace",
-					"-f", monitoringValues,
-					"--timeout", "10m", "--wait",
-				}
-
-				if autoDryRun {
-					monHelmArgs = append(monHelmArgs, "--dry-run")
-				}
-
-				output.Hint(fmt.Sprintf("📊 Executing: helm %s", strings.Join(monHelmArgs, " ")))
-				if _, err := hc.Run(context.Background(), monHelmArgs...); err != nil {
-					output.Error(fmt.Sprintf("Monitoring deployment failed: %v", err))
-					output.Warn("Kafka cluster is deployed successfully but monitoring failed — you can retry with: make monitoring-generic")
-				} else {
-					output.Success("✅ Monitoring stack (Prometheus + Grafana) deployed successfully!")
-				}
-			}
-		}
-	} else {
+	if autoSkipMonitoring {
 		output.Hint("⏭️  Skipping monitoring deployment (--skip-monitoring)")
+		return nil
+	}
+	deployAutoMonitoring(hc)
+	return nil
+}
+
+// writeAutoValues writes the detected values into dir as
+// values-detected.yaml, merged over --values when one was given, and returns
+// the file's path.
+func writeAutoValues(report *detect.DetectReport, dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create %s directory: %w", dir, err)
 	}
 
-	return nil
+	var baseData []byte
+	if autoBaseValues != "" {
+		data, err := os.ReadFile(autoBaseValues)
+		if err != nil {
+			return "", fmt.Errorf("failed to read base values: %w", err)
+		}
+		baseData = data
+	}
+
+	valuesPath := filepath.Join(dir, "values-detected.yaml")
+	f, err := os.Create(valuesPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create values file: %w", err)
+	}
+	if autoBaseValues != "" {
+		err = detect.RenderValuesFromBaseWithReserve(report, autoClusterName, baseData, autoReservePct, f)
+	} else {
+		err = detect.RenderValuesWithReserve(report, autoClusterName, autoReservePct, f)
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to write values file %s: %w", valuesPath, err)
+	}
+	return valuesPath, nil
+}
+
+// deployAutoMonitoring installs the monitoring chart next to the
+// kafka-cluster chart into the same namespace. Kafka is already deployed
+// when it runs, so a failure here warns rather than failing the command.
+func deployAutoMonitoring(hc *helm.Client) {
+	monitoringChartDir := filepath.Join(filepath.Dir(autoChartDir), "monitoring")
+	if _, err := os.Stat(filepath.Join(monitoringChartDir, "Chart.yaml")); os.IsNotExist(err) {
+		output.Warn(fmt.Sprintf("Monitoring chart not found at %s — skipping monitoring deployment", monitoringChartDir))
+		return
+	}
+	output.Header("Monitoring Deployment")
+
+	// Determine the values file: prefer values-generic.yaml for real clusters
+	monitoringValues := filepath.Join(monitoringChartDir, "values-generic.yaml")
+	if _, err := os.Stat(monitoringValues); os.IsNotExist(err) {
+		monitoringValues = filepath.Join(monitoringChartDir, "values.yaml")
+	}
+
+	output.Hint(fmt.Sprintf("📦 Building Helm dependencies for %s...", monitoringChartDir))
+	if err := hc.DependencyBuild(context.Background(), monitoringChartDir); err != nil {
+		output.Error(fmt.Sprintf("Monitoring helm dependency build failed: %v", err))
+		output.Warn("Continuing without monitoring — Kafka cluster is deployed successfully")
+		return
+	}
+	monHelmArgs := []string{
+		"upgrade", "--install", "monitoring", monitoringChartDir,
+		"--namespace", autoNamespace, "--create-namespace",
+		"-f", monitoringValues,
+		"--timeout", "10m", "--wait",
+	}
+	if autoDryRun {
+		monHelmArgs = append(monHelmArgs, "--dry-run")
+	}
+
+	output.Hint(fmt.Sprintf("📊 Executing: helm %s", strings.Join(monHelmArgs, " ")))
+	if _, err := hc.Run(context.Background(), monHelmArgs...); err != nil {
+		output.Error(fmt.Sprintf("Monitoring deployment failed: %v", err))
+		output.Warn("Kafka cluster is deployed successfully but monitoring failed — you can retry with: make monitoring-generic")
+		return
+	}
+	output.Success("✅ Monitoring stack (Prometheus + Grafana) deployed successfully!")
 }

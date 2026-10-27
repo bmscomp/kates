@@ -247,3 +247,71 @@ func TestPollPlain_ReportsRepairFailure(t *testing.T) {
 		}
 	}
 }
+
+// A phase's status gets its mark whatever its case, and a status the watch
+// does not know is printed as it came.
+func TestPhaseStatusBadge(t *testing.T) {
+	for status, want := range map[string]string{
+		"DONE": "✓ DONE", "completed": "✓ completed", "Running": "● Running",
+		"FAILED": "✖ FAILED", "PENDING": "PENDING",
+	} {
+		if got := stripAnsi(phaseStatusBadge(status)); got != want {
+			t.Errorf("phaseStatusBadge(%q) = %q, want %q", status, got, want)
+		}
+	}
+}
+
+// A finished run shows the report summary's numbers when it has a
+// throughput, and otherwise the phases' best throughput and worst p99.
+func TestPollModel_CompletedTotals(t *testing.T) {
+	phases := []client.PhaseResult{
+		{ThroughputRecordsPerSec: 900, P99LatencyMs: 40},
+		{ThroughputRecordsPerSec: 1200, P99LatencyMs: 25},
+	}
+	m := pollModel{phases: phases, summary: &client.ReportSummary{AvgThroughputRecPerSec: 1000, P99LatencyMs: 30, ErrorRate: 0.002}}
+	if tp, p99, errRate := m.completedTotals(); tp != 1000 || p99 != 30 || errRate != 0.2 {
+		t.Errorf("with a summary: %v %v %v, want 1000 30 0.2", tp, p99, errRate)
+	}
+	m.summary = &client.ReportSummary{}
+	if tp, p99, errRate := m.completedTotals(); tp != 1200 || p99 != 40 || errRate != 0 {
+		t.Errorf("with an empty summary: %v %v %v, want 1200 40 0", tp, p99, errRate)
+	}
+}
+
+// A failed poll waits out a backoff before the next one, and the
+// maxConnRetries-th failure in a row ends the watch with the error.
+func TestPollModel_PollErrorsBackOffThenQuit(t *testing.T) {
+	stubPoll(t, []func() (*client.TestRun, error){run("RUNNING", 0)})
+	m := pollModel{ctx: context.Background(), id: "test-1234"}
+	boom := errors.New("connection refused")
+	for i := 1; i < maxConnRetries; i++ {
+		if cmd := m.onPollError(boom); cmd != nil {
+			t.Fatalf("failure %d: a command %v, want to wait for the backoff", i, cmd)
+		}
+		if m.connRetries != i || !m.retryAt.After(time.Now().Add(-time.Second)) || m.err != nil {
+			t.Fatalf("failure %d: retries %d, retryAt %v, err %v", i, m.connRetries, m.retryAt, m.err)
+		}
+	}
+	if cmd := m.onPollError(boom); cmd == nil || m.err == nil || !errors.Is(m.err, boom) {
+		t.Errorf("failure %d: cmd %v, err %v; want to quit with the error", maxConnRetries, cmd, m.err)
+	}
+}
+
+// A run that succeeded with stale results is polled again up to
+// maxStaleRetries times, then counts as done with no data.
+func TestPollModel_StaleSuccessRetriesThenNoData(t *testing.T) {
+	stubPoll(t, []func() (*client.TestRun, error){run("DONE", 0)})
+	m := pollModel{ctx: context.Background(), id: "test-1234"}
+	stale := &client.TestRun{Status: "done", Results: []client.PhaseResult{{Status: "DONE"}}}
+	if !isStaleResult(stale.Results) {
+		t.Fatal("the fixture is not a stale result")
+	}
+	for i := range maxStaleRetries {
+		if cmd := m.onTest(stale); cmd != nil || m.done {
+			t.Fatalf("poll %d: done %t, want another poll", i, m.done)
+		}
+	}
+	if cmd := m.onTest(stale); cmd == nil || !m.done || !m.noData || m.lastStatus != "DONE" {
+		t.Errorf("after %d stale polls: done %t, noData %t, status %q", maxStaleRetries, m.done, m.noData, m.lastStatus)
+	}
+}

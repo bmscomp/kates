@@ -165,65 +165,11 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pollResultMsg:
 		if msg.err != nil {
-			repaired, repairErr := tryRepairPollingConnection(m.ctx, msg.err, m.connRetries)
-			if repaired {
-				m.lastErr = nil
-				m.repairErr = nil
-				return m, m.fetchTest()
-			}
-			if repairErr != nil {
-				m.repairErr = repairErr
-			}
-			m.connRetries++
-			m.lastErr = pollErrorWithRepair(msg.err, m.repairErr)
-			if m.connRetries >= maxConnRetries {
-				m.err = fmt.Errorf("connection lost: could not read the run's status %d times in a row: %w", m.connRetries, m.lastErr)
-				return m, tea.Quit
-			}
-			m.retryAt = time.Now().Add(nextPollDelay(pollInterval, m.connRetries, m.lastErr))
-			return m, nil
+			cmd := m.onPollError(msg.err)
+			return m, cmd
 		}
-		m.connRetries = 0
-		m.retryAt = time.Time{}
-		m.lastErr = nil
-		m.repairErr = nil
-		test := msg.test
-		m.lastStatus = strings.ToUpper(test.Status)
-		m.phases = test.Results
-
-		var totalSent float64
-		var maxThroughput float64
-		for _, r := range test.Results {
-			totalSent += r.RecordsSent
-			if r.ThroughputRecordsPerSec > maxThroughput {
-				maxThroughput = r.ThroughputRecordsPerSec
-			}
-		}
-		m.recordsSent = totalSent
-		m.throughputHist = append(m.throughputHist, maxThroughput)
-		// The whole run's history grew without bound: an hour in, the
-		// sparkline was 1,823 columns and the live number was cut off.
-		if len(m.throughputHist) > sparklinePoints {
-			m.throughputHist = m.throughputHist[len(m.throughputHist)-sparklinePoints:]
-		}
-
-		if test.Spec != nil && test.Spec.Records > 0 {
-			m.totalRecords = float64(test.Spec.Records)
-		}
-
-		switch {
-		case succeededRunStatus(m.lastStatus):
-			if isStaleResult(test.Results) && m.staleRetries < maxStaleRetries {
-				m.staleRetries++
-				return m, nil
-			}
-			m.done = true
-			m.noData = isStaleResult(test.Results)
-			return m, m.fetchSummary()
-		case isFailedStatus(m.lastStatus):
-			m.failed = true
-			return m, tea.Quit
-		}
+		cmd := m.onTest(msg.test)
+		return m, cmd
 
 	case pollDoneMsg:
 		m.summary = msg.summary
@@ -237,15 +183,103 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// onPollError handles a failed poll: a repaired port-forward polls again at
+// once, maxConnRetries failures in a row end the watch, and anything less
+// waits out the backoff before the next poll.
+func (m *pollModel) onPollError(pollErr error) tea.Cmd {
+	repaired, repairErr := tryRepairPollingConnection(m.ctx, pollErr, m.connRetries)
+	if repaired {
+		m.lastErr = nil
+		m.repairErr = nil
+		return m.fetchTest()
+	}
+	if repairErr != nil {
+		m.repairErr = repairErr
+	}
+	m.connRetries++
+	m.lastErr = pollErrorWithRepair(pollErr, m.repairErr)
+	if m.connRetries >= maxConnRetries {
+		m.err = fmt.Errorf("connection lost: could not read the run's status %d times in a row: %w", m.connRetries, m.lastErr)
+		return tea.Quit
+	}
+	m.retryAt = time.Now().Add(nextPollDelay(pollInterval, m.connRetries, m.lastErr))
+	return nil
+}
+
+// onTest records a polled run: its phases, records sent and throughput, and
+// whether it has finished. A run that succeeded with stale results is polled
+// up to maxStaleRetries more times before it counts as one with no data.
+func (m *pollModel) onTest(test *client.TestRun) tea.Cmd {
+	m.connRetries = 0
+	m.retryAt = time.Time{}
+	m.lastErr = nil
+	m.repairErr = nil
+	m.lastStatus = strings.ToUpper(test.Status)
+	m.phases = test.Results
+
+	var totalSent float64
+	var maxThroughput float64
+	for _, r := range test.Results {
+		totalSent += r.RecordsSent
+		if r.ThroughputRecordsPerSec > maxThroughput {
+			maxThroughput = r.ThroughputRecordsPerSec
+		}
+	}
+	m.recordsSent = totalSent
+	m.throughputHist = append(m.throughputHist, maxThroughput)
+	// The whole run's history grew without bound: an hour in, the
+	// sparkline was 1,823 columns and the live number was cut off.
+	if len(m.throughputHist) > sparklinePoints {
+		m.throughputHist = m.throughputHist[len(m.throughputHist)-sparklinePoints:]
+	}
+
+	if test.Spec != nil && test.Spec.Records > 0 {
+		m.totalRecords = float64(test.Spec.Records)
+	}
+
+	switch {
+	case succeededRunStatus(m.lastStatus):
+		if isStaleResult(test.Results) && m.staleRetries < maxStaleRetries {
+			m.staleRetries++
+			return nil
+		}
+		m.done = true
+		m.noData = isStaleResult(test.Results)
+		return m.fetchSummary()
+	case isFailedStatus(m.lastStatus):
+		m.failed = true
+		return tea.Quit
+	}
+	return nil
+}
+
 func (m pollModel) View() string {
 	if m.err != nil {
 		return output.ErrorStyle.Render("  ✖ Polling failed: "+m.err.Error()) + "\n"
 	}
 
 	var b strings.Builder
-
 	b.WriteString("\n")
+	m.viewProgress(&b)
+	m.viewPhases(&b)
+	switch {
+	case m.done && m.noData:
+		viewNoData(&b)
+	case m.done:
+		m.viewCompleted(&b)
+	}
+	if m.failed {
+		fmt.Fprintf(&b, "\n  %s\n", output.ErrorStyle.Render("Test failed"))
+	}
+	if !m.done && !m.failed {
+		m.viewPolling(&b)
+	}
+	return b.String()
+}
 
+// viewProgress writes the header line, the progress bar, the elapsed time and
+// records sent, and the throughput sparkline once there are two points.
+func (m pollModel) viewProgress(b *strings.Builder) {
 	statusBadge := output.AccentStyle.Render(m.lastStatus)
 	if m.done {
 		statusBadge = output.SuccessStyle.Render("✓ COMPLETED")
@@ -253,124 +287,133 @@ func (m pollModel) View() string {
 		statusBadge = output.ErrorStyle.Render("✖ FAILED")
 	}
 
-	b.WriteString(fmt.Sprintf("  %s  %s  %s\n\n",
+	fmt.Fprintf(b, "  %s  %s  %s\n\n",
 		output.AccentStyle.Render("Test"),
 		output.DimStyle.Render(truncID(m.id)),
 		statusBadge,
-	))
+	)
 
 	pct := m.progressPercent()
 	bar := m.progress.ViewAs(pct)
-	b.WriteString(fmt.Sprintf("  %s  %s\n",
+	fmt.Fprintf(b, "  %s  %s\n",
 		bar,
 		output.DimStyle.Render(fmt.Sprintf("%.0f%%", pct*100)),
-	))
+	)
 
 	elapsedStr := m.elapsed.Truncate(time.Second).String()
 	recordsStr := fmtNum(m.recordsSent)
-	b.WriteString(fmt.Sprintf("  %s %s  %s %s",
+	fmt.Fprintf(b, "  %s %s  %s %s",
 		output.DimStyle.Render("Elapsed:"),
 		elapsedStr,
 		output.DimStyle.Render("Records:"),
 		recordsStr,
-	))
+	)
 	if m.totalRecords > 0 {
-		b.WriteString(fmt.Sprintf(" / %s", fmtNum(m.totalRecords)))
+		fmt.Fprintf(b, " / %s", fmtNum(m.totalRecords))
 	}
 	b.WriteString("\n")
 
 	if len(m.throughputHist) > 1 {
 		spark := output.Sparkline(m.throughputHist)
 		latest := m.throughputHist[len(m.throughputHist)-1]
-		b.WriteString(fmt.Sprintf("  %s %s %s\n",
+		fmt.Fprintf(b, "  %s %s %s\n",
 			output.DimStyle.Render("Throughput:"),
 			spark,
 			fmtNum(latest)+" rec/s",
-		))
+		)
 	}
+}
 
-	if len(m.phases) > 0 {
-		b.WriteString("\n")
-		for _, r := range m.phases {
-			phase := r.PhaseName
-			if phase == "" {
-				phase = "main"
-			}
-			phaseStatus := output.DimStyle.Render(r.Status)
-			if strings.EqualFold(r.Status, "DONE") || strings.EqualFold(r.Status, "COMPLETED") {
-				phaseStatus = output.SuccessStyle.Render("✓ " + r.Status)
-			} else if strings.EqualFold(r.Status, "RUNNING") {
-				phaseStatus = output.AccentStyle.Render("● " + r.Status)
-			} else if strings.EqualFold(r.Status, "FAILED") {
-				phaseStatus = output.ErrorStyle.Render("✖ " + r.Status)
-			}
-			b.WriteString(fmt.Sprintf("  %-12s %s  %s rec/s  p99=%sms\n",
-				phase,
-				phaseStatus,
-				fmtFloat(r.ThroughputRecordsPerSec, 1),
-				fmtFloat(r.P99LatencyMs, 2),
-			))
-			// The API sends the reason with the status. Printing only "FAILED"
-			// left you watching a red word for the rest of the run and reaching
-			// for kubectl to find out what it meant.
-			if r.Error != "" {
-				b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("   └ "+truncate(r.Error, 100))))
-			}
+// viewPhases writes one line per phase, and the phase's error under it.
+func (m pollModel) viewPhases(b *strings.Builder) {
+	if len(m.phases) == 0 {
+		return
+	}
+	b.WriteString("\n")
+	for _, r := range m.phases {
+		phase := r.PhaseName
+		if phase == "" {
+			phase = "main"
+		}
+		fmt.Fprintf(b, "  %-12s %s  %s rec/s  p99=%sms\n",
+			phase,
+			phaseStatusBadge(r.Status),
+			fmtFloat(r.ThroughputRecordsPerSec, 1),
+			fmtFloat(r.P99LatencyMs, 2),
+		)
+		// The API sends the reason with the status. Printing only "FAILED"
+		// left you watching a red word for the rest of the run and reaching
+		// for kubectl to find out what it meant.
+		if r.Error != "" {
+			fmt.Fprintf(b, "  %s\n", output.DimStyle.Render("   └ "+truncate(r.Error, 100)))
 		}
 	}
+}
 
-	if m.done && m.noData {
-		b.WriteString(fmt.Sprintf("\n  %s\n", output.WarningStyle.Render("⚠ Test completed but produced no data (0 records sent)")))
-		b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("Possible causes:")))
-		b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("  • Backend pod restarted (in-memory state lost)")))
-		b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("  • Kafka producer/consumer failed to connect")))
-		b.WriteString(fmt.Sprintf("  %s\n", output.DimStyle.Render("  • Check logs: kubectl logs -n kates -l app=kates --tail=50")))
-	} else if m.done {
-		throughput := 0.0
-		p99 := 0.0
-		errorRate := 0.0
-		if m.summary != nil && m.summary.AvgThroughputRecPerSec > 0 {
-			throughput = m.summary.AvgThroughputRecPerSec
-			p99 = m.summary.P99LatencyMs
-			errorRate = m.summary.ErrorRate * 100
-		} else {
-			for _, r := range m.phases {
-				if r.ThroughputRecordsPerSec > throughput {
-					throughput = r.ThroughputRecordsPerSec
-				}
-				if r.P99LatencyMs > p99 {
-					p99 = r.P99LatencyMs
-				}
-			}
+// phaseStatusBadge styles a phase status: a tick when it finished, a dot
+// while it runs, a cross when it failed, and dim text otherwise.
+func phaseStatusBadge(status string) string {
+	switch {
+	case strings.EqualFold(status, "DONE") || strings.EqualFold(status, "COMPLETED"):
+		return output.SuccessStyle.Render("✓ " + status)
+	case strings.EqualFold(status, "RUNNING"):
+		return output.AccentStyle.Render("● " + status)
+	case strings.EqualFold(status, "FAILED"):
+		return output.ErrorStyle.Render("✖ " + status)
+	default:
+		return output.DimStyle.Render(status)
+	}
+}
+
+func viewNoData(b *strings.Builder) {
+	fmt.Fprintf(b, "\n  %s\n", output.WarningStyle.Render("⚠ Test completed but produced no data (0 records sent)"))
+	fmt.Fprintf(b, "  %s\n", output.DimStyle.Render("Possible causes:"))
+	fmt.Fprintf(b, "  %s\n", output.DimStyle.Render("  • Backend pod restarted (in-memory state lost)"))
+	fmt.Fprintf(b, "  %s\n", output.DimStyle.Render("  • Kafka producer/consumer failed to connect"))
+	fmt.Fprintf(b, "  %s\n", output.DimStyle.Render("  • Check logs: kubectl logs -n kates -l app=kates --tail=50"))
+}
+
+func (m pollModel) viewCompleted(b *strings.Builder) {
+	throughput, p99, errorRate := m.completedTotals()
+	fmt.Fprintf(b, "\n  %s\n", output.SuccessStyle.Render("Test completed successfully"))
+	fmt.Fprintf(b, "  Throughput: %s rec/s  │  P99: %s ms  │  Errors: %.4f%%\n",
+		fmtNum(throughput),
+		fmtFloat(p99, 2),
+		errorRate,
+	)
+	fmt.Fprintf(b, "  %s\n",
+		output.DimStyle.Render(fmt.Sprintf("Full report: kates report show %s", m.id)),
+	)
+}
+
+// completedTotals gives a finished run's throughput, p99 and error rate (in
+// percent): the report summary's when it has a throughput, otherwise the
+// best throughput and worst p99 of the phases, with no error rate.
+func (m pollModel) completedTotals() (throughput, p99, errorRate float64) {
+	if m.summary != nil && m.summary.AvgThroughputRecPerSec > 0 {
+		return m.summary.AvgThroughputRecPerSec, m.summary.P99LatencyMs, m.summary.ErrorRate * 100
+	}
+	for _, r := range m.phases {
+		if r.ThroughputRecordsPerSec > throughput {
+			throughput = r.ThroughputRecordsPerSec
 		}
-		b.WriteString(fmt.Sprintf("\n  %s\n", output.SuccessStyle.Render("Test completed successfully")))
-		b.WriteString(fmt.Sprintf("  Throughput: %s rec/s  │  P99: %s ms  │  Errors: %.4f%%\n",
-			fmtNum(throughput),
-			fmtFloat(p99, 2),
-			errorRate,
-		))
-		b.WriteString(fmt.Sprintf("  %s\n",
-			output.DimStyle.Render(fmt.Sprintf("Full report: kates report show %s", m.id)),
-		))
-	}
-
-	if m.failed {
-		b.WriteString(fmt.Sprintf("\n  %s\n", output.ErrorStyle.Render("Test failed")))
-	}
-
-	if !m.done && !m.failed {
-		if m.connRetries > 0 {
-			b.WriteString(fmt.Sprintf("\n  %s\n",
-				output.WarningStyle.Render(fmt.Sprintf("⚠ Connection error (retry %d/%d)...", m.connRetries, maxConnRetries)),
-			))
-		} else {
-			b.WriteString(fmt.Sprintf("\n  %s\n",
-				output.DimStyle.Render(fmt.Sprintf("Polling every %s · q to detach", pollInterval.Truncate(time.Millisecond))),
-			))
+		if r.P99LatencyMs > p99 {
+			p99 = r.P99LatencyMs
 		}
 	}
+	return throughput, p99, 0
+}
 
-	return b.String()
+func (m pollModel) viewPolling(b *strings.Builder) {
+	if m.connRetries > 0 {
+		fmt.Fprintf(b, "\n  %s\n",
+			output.WarningStyle.Render(fmt.Sprintf("⚠ Connection error (retry %d/%d)...", m.connRetries, maxConnRetries)),
+		)
+		return
+	}
+	fmt.Fprintf(b, "\n  %s\n",
+		output.DimStyle.Render(fmt.Sprintf("Polling every %s · q to detach", pollInterval.Truncate(time.Millisecond))),
+	)
 }
 
 func (m pollModel) progressPercent() float64 {

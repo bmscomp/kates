@@ -60,30 +60,9 @@ func TestNoExitZeroAfterError(t *testing.T) {
 		})
 	}
 	sort.Strings(hits)
-	perFile := map[string]int{}
 	for _, h := range hits {
-		perFile[h[:strings.Index(h, ":")]]++
-	}
-	for _, h := range hits {
-		if file := h[:strings.Index(h, ":")]; perFile[file] <= exitZeroBacklog[file] {
-			continue
-		}
 		t.Errorf("%s: output.Error then return nil exits 0 after reporting a failure; return cmdErr, couldNotTell or an error, or mark the return with %s <reason>", h, exit0Marker)
 	}
-	for file, n := range exitZeroBacklog {
-		if perFile[file] < n {
-			t.Logf("%s has %d hits left of %d: lower its exitZeroBacklog entry", file, perFile[file], n)
-		}
-	}
-}
-
-// exitZeroBacklog counts the hits still in files other wave-3 items are
-// rewriting, so they are fixed there rather than in two places at once. A new
-// hit in one of these files fails the test; a fix lowers the count here.
-//
-//	security.go  security audit: an "error" field in the API's result exits 0.
-var exitZeroBacklog = map[string]int{
-	"security.go": 1,
 }
 
 // runBodies returns the body of every Run and RunE of a cobra.Command in

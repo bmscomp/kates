@@ -10,32 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-type kyvernoPolicyItem struct {
-	Name     string `json:"name"`
-	Validate int    `json:"validate"`
-	Mutate   int    `json:"mutate"`
-	Ready    bool   `json:"ready"`
-	Action   string `json:"action"`
-}
-
-type policyReportResult struct {
-	Policy   string `json:"policy"`
-	Rule     string `json:"rule"`
-	Result   string `json:"result"`
-	Message  string `json:"message"`
-	Category string `json:"category"`
-}
-
-type policyReportItem struct {
-	Namespace string               `json:"namespace"`
-	PodName   string               `json:"podName"`
-	Pass      int                  `json:"pass"`
-	Fail      int                  `json:"fail"`
-	Results   []policyReportResult `json:"results"`
-}
-
 // ── Root command ─────────────────────────────────────────────────────────────
 
 var kyvernoCmd = &cobra.Command{
@@ -155,22 +129,7 @@ var kyvernoStatusCmd = &cobra.Command{
 		// Show violation summary
 		violationOut, err := kc.Output(ctx, "get", "policyreport", "-A", "--no-headers")
 		if err == nil && len(violationOut) > 0 {
-			totalPass, totalFail := 0, 0
-			nsFails := map[string]int{}
-			for _, line := range strings.Split(strings.TrimSpace(string(violationOut)), "\n") {
-				fields := strings.Fields(line)
-				if len(fields) >= 6 {
-					ns := fields[0]
-					var pass, fail int
-					fmt.Sscanf(fields[4], "%d", &pass)
-					fmt.Sscanf(fields[5], "%d", &fail)
-					totalPass += pass
-					totalFail += fail
-					if fail > 0 {
-						nsFails[ns] += fail
-					}
-				}
-			}
+			totalFail, nsFails := policyReportFailures(string(violationOut))
 			if totalFail > 0 {
 				output.Warn(fmt.Sprintf("  %d violations detected across %d namespace(s) (run 'kates kyverno violations' for details)",
 					totalFail, len(nsFails)))
@@ -340,4 +299,27 @@ func init() {
 	kyvernoCmd.AddCommand(kyvernoEnforceCmd)
 	kyvernoCmd.AddCommand(kyvernoAuditCmd)
 	rootCmd.AddCommand(kyvernoCmd)
+}
+
+// policyReportFailures counts the failed results in `kubectl get policyreport
+// -A --no-headers` output, in all and per namespace. FAIL is the sixth
+// column; a line with fewer columns, or a count that is not a number, adds
+// nothing.
+func policyReportFailures(out string) (total int, perNamespace map[string]int) {
+	perNamespace = map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 6 {
+			continue
+		}
+		var fail int
+		if _, err := fmt.Sscanf(fields[5], "%d", &fail); err != nil {
+			continue
+		}
+		total += fail
+		if fail > 0 {
+			perNamespace[fields[0]] += fail
+		}
+	}
+	return total, perNamespace
 }

@@ -150,11 +150,20 @@ func completeTestTypes(cmd *cobra.Command, args []string, toComplete string) ([]
 	return []string{"LOAD", "STRESS", "SPIKE", "ENDURANCE", "VOLUME", "CAPACITY", "ROUND_TRIP"}, cobra.ShellCompDirectiveNoFileComp
 }
 
+// registerFlagCompletion registers a flag's completion. The only errors are
+// a flag that does not exist and one registered twice, both mistakes in this
+// file, so it panics: every test run, and every command, would show it.
+func registerFlagCompletion(cmd *cobra.Command, flag string, fn cobra.CompletionFunc) {
+	if err := cmd.RegisterFlagCompletionFunc(flag, fn); err != nil {
+		panic(err)
+	}
+}
+
 func registerTestCompletions() {
-	testCreateCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(testCreateCmd, "type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return completeTestTypes(cmd, args, toComplete)
 	})
-	testCreateCmd.RegisterFlagCompletionFunc("backend", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(testCreateCmd, "backend", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		ctx, cancel := completionContext(cmd)
 		defer cancel()
 		backends, err := apiClient.Backends(ctx)
@@ -163,13 +172,13 @@ func registerTestCompletions() {
 		}
 		return []string{"native", "kafka-clients"}, cobra.ShellCompDirectiveNoFileComp
 	})
-	testCreateCmd.RegisterFlagCompletionFunc("compression", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(testCreateCmd, "compression", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"none", "gzip", "snappy", "lz4", "zstd"}, cobra.ShellCompDirectiveNoFileComp
 	})
-	testListCmd.RegisterFlagCompletionFunc("status", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(testListCmd, "status", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"PENDING", "RUNNING", "DONE", "FAILED"}, cobra.ShellCompDirectiveNoFileComp
 	})
-	testListCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(testListCmd, "type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return completeTestTypes(cmd, args, toComplete)
 	})
 
@@ -179,7 +188,7 @@ func registerTestCompletions() {
 	testExportCmd.ValidArgsFunction = completeDoneRunIDs
 	testFlameCmd.ValidArgsFunction = completeDoneRunIDs
 
-	testExportCmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(testExportCmd, "format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"csv", "json"}, cobra.ShellCompDirectiveNoFileComp
 	})
 }
@@ -192,20 +201,26 @@ func registerAnalysisCompletions() {
 	replayCmd.ValidArgsFunction = completeDoneRunIDs
 	reportDiffCmd.ValidArgsFunction = completeDoneRunIDs
 
-	badgeCmd.RegisterFlagCompletionFunc("metric", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+}
+
+// registerBadgeCompletions is called from badge.go's init, once badge's
+// flags exist: advisor.go's init, which registered them before, runs first,
+// so the registration failed and badge had no flag completion.
+func registerBadgeCompletions() {
+	registerFlagCompletion(badgeCmd, "metric", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"grade\tOverall grade badge", "p99\tP99 latency badge", "throughput\tThroughput badge"}, cobra.ShellCompDirectiveNoFileComp
 	})
-	badgeCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return completeTestTypes(cmd, args, toComplete)
-	})
+	registerFlagCompletion(badgeCmd, "type", completeTestTypes)
+}
 
-	watchEventsCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return completeTestTypes(cmd, args, toComplete)
-	})
+// registerWatchEventsCompletions is called from watch_events.go's init, for
+// the reason registerBadgeCompletions is called from badge.go's.
+func registerWatchEventsCompletions() {
+	registerFlagCompletion(watchEventsCmd, "type", completeTestTypes)
 }
 
 func registerKafkaCompletions() {
-	kafkaConsumeCmd.RegisterFlagCompletionFunc("offset", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(kafkaConsumeCmd, "offset", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"latest", "earliest"}, cobra.ShellCompDirectiveNoFileComp
 	})
 
@@ -255,7 +270,7 @@ func registerThemeCompletions() {
 }
 
 func registerCostCompletions() {
-	costEstimateCmd.RegisterFlagCompletionFunc("cloud", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	registerFlagCompletion(costEstimateCmd, "cloud", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{
 			"aws\tAmazon Web Services (MSK)",
 			"azure\tAzure Event Hubs",

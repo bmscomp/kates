@@ -19,9 +19,19 @@ var securityTLSCmd = &cobra.Command{
 			return cmdErr("TLS inspection failed: " + err.Error())
 		}
 
+		// A failed inspection comes back as an "error" field and no checks:
+		// it printed an empty banner and exited 0. It did not run, so exit 2
+		// in either output mode, with the message on stderr.
+		errMsg, failed := result["error"].(string)
 		if outputMode == "json" {
 			output.JSON(result)
+			if failed {
+				return couldNotTell(errMsg)
+			}
 			return nil
+		}
+		if failed {
+			return couldNotTell(errMsg)
 		}
 
 		output.Banner("TLS Inspection", "Certificate & Protocol Analysis")

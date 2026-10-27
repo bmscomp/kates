@@ -1721,6 +1721,8 @@ kates security scan
 kates sec audit -o json
 ```
 
+When the Kates API answers that the audit itself failed, the command prints that error and exits `2`, since it can say nothing about the cluster's posture. With `-o json` it first prints the API's answer, `error` field included.
+
 #### security tls-inspect
 
 Aliases: `tls`
@@ -1731,6 +1733,8 @@ Inspect TLS configuration, protocol versions, and cipher suites.
 kates security tls-inspect
 kates sec tls
 ```
+
+When the Kates API answers that the inspection itself failed, the command prints that error and exits `2`. With `-o json` it first prints the API's answer, `error` field included.
 
 #### security auth-test
 
@@ -2769,7 +2773,7 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 |------|---------|
 | `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
 | `1` | The operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), or a confirmation was declined or could not be asked |
-| `2` | Kates could not tell, so neither yes nor no: `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates detect`, with or without `--fail-on-error`, could not read its `--values` file, or could not render or write the values `--generate-values` asked for; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`); `kates test apply` and `kates flow run` found an error in their file, or `test apply` was given flags that don't go together, and started nothing; `test lint`, `flow lint` and `conformity lint` could not read a file; a command with no JSON form was run with `-o json` (`webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary`, `test flame`), which prints nothing on stdout and says so on stderr |
+| `2` | Kates could not tell, so neither yes nor no: `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates detect`, with or without `--fail-on-error`, could not read its `--values` file, or could not render or write the values `--generate-values` asked for; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`); `kates security audit` and `kates security tls-inspect` got an answer from the Kates API saying the check itself failed; `kates test apply` and `kates flow run` found an error in their file, or `test apply` was given flags that don't go together, and started nothing; `test lint`, `flow lint` and `conformity lint` could not read a file; a command with no JSON form was run with `-o json` (`webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary`, `test flame`), which prints nothing on stdout and says so on stderr |
 | `130` | Ctrl-C or SIGTERM stopped a command that starts work and waits for it, after it cancelled the test it started |
 
 Consequences worth knowing in scripts:
@@ -2790,7 +2794,6 @@ Some commands report a failure on screen and still exit `0`, so a script cannot 
 - `kates ports` when it finds no Kates services or the API rejects a key it checks; a forward that fails exits `1`.
 - `kates snapshot create` when the API fails: it saves a snapshot of zeros.
 - `kates cluster check` on `WARNING` and `CRITICAL` alike.
-- `kates security audit` and `kates security tls-inspect` when the Kates API reports that the check itself failed.
 - `kates detect` on failing checks or a cluster it cannot inspect, unless you pass `--fail-on-error` (`--fail-on-warning` reacts to warnings only).
 - `kates advisor` when the run or its report is not found.
 - `kates benchmark`, whatever its runs do: a test it could not create, a run that finished `FAILED` and one it lost track of all exit `0`.

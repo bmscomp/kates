@@ -37,18 +37,24 @@ var securityAuditCmd = &cobra.Command{
 
 		injectKyvernoChecks(result)
 
+		// The Kates API answers a failed audit with an "error" field and
+		// whatever it graded before it failed: the audit did not run, so
+		// exit 2 in either output mode, with the message on stderr.
+		errMsg, failed := result["error"].(string)
 		if outputMode == "json" {
 			output.JSON(result)
+			if failed {
+				return couldNotTell(errMsg)
+			}
 			return nil
 		}
 
 		grade := fmt.Sprintf("%v", result["grade"])
 		output.Banner("Security Audit", "Grade: "+gradeStyle(grade)+"  │  Kafka Cluster Posture Scan")
 
-		if errMsg, ok := result["error"].(string); ok {
+		if failed {
 			fmt.Println()
-			output.Error(errMsg)
-			return nil
+			return couldNotTell(errMsg)
 		}
 
 		checks, _ := result["checks"].([]interface{})

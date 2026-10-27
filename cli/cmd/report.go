@@ -216,7 +216,8 @@ for every format including html.`,
 			if err == nil && exportFormat == "md" {
 				body, defaultFile = renderMarkdownReport(id, report), "kates-report-"+id+".md"
 			} else if err == nil {
-				body, defaultFile = renderHTMLReport(id, report), "kates-report-"+id+".html"
+				body, err = renderHTMLReport(id, report)
+				defaultFile = "kates-report-" + id + ".html"
 			}
 		default:
 			return cmdErr("Unknown format '" + exportFormat + "'. Use 'csv', 'junit', 'heatmap', 'heatmap-csv', 'md', or 'html'.")

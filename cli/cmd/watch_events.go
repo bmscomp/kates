@@ -123,5 +123,6 @@ func init() {
 	watchEventsCmd.Flags().StringVar(&watchType, "type", "", "Filter by test type (LOAD, STRESS, etc.)")
 	watchEventsCmd.Flags().StringVar(&watchID, "id", "", "Watch a specific test ID")
 	watchEventsCmd.Flags().BoolVarP(&watchFollow, "follow", "f", true, "Continuously follow events")
+	registerWatchEventsCompletions()
 	rootCmd.AddCommand(watchEventsCmd)
 }

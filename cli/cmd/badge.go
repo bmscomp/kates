@@ -117,5 +117,6 @@ func badgeGradeColor(value string) string {
 func init() {
 	badgeCmd.Flags().StringVar(&badgeType, "type", "", "Test type filter (LOAD, STRESS, etc.)")
 	badgeCmd.Flags().StringVar(&badgeMetric, "metric", "grade", "Badge metric: grade, p99, or throughput")
+	registerBadgeCompletions()
 	rootCmd.AddCommand(badgeCmd)
 }

@@ -83,3 +83,30 @@ func TestTruncate_RuneSafe(t *testing.T) {
 		t.Errorf("truncate(_, 0) = %q", got)
 	}
 }
+
+// Every export skips a check that is not an object, and marks a status other
+// than FAIL and WARN as a pass.
+func TestAuditChecksAndMarks(t *testing.T) {
+	result := map[string]interface{}{"checks": []interface{}{
+		map[string]interface{}{"status": "FAIL"}, "junk", 7,
+		map[string]interface{}{"status": "WARN"}, map[string]interface{}{"status": "SKIP"},
+	}}
+	var marks []string
+	for _, chk := range auditChecks(result) {
+		marks = append(marks, auditMark(chk, "pass", "warn", "fail"))
+	}
+	if got := strings.Join(marks, " "); got != "fail warn pass" {
+		t.Errorf("marks = %q, want fail warn pass", got)
+	}
+	if got := auditChecks(map[string]interface{}{}); len(got) != 0 {
+		t.Errorf("no checks: %v", got)
+	}
+
+	txt := auditText(result)
+	if !strings.Contains(txt, "[FAIL]") || !strings.Contains(txt, "[WARN]") || strings.Count(txt, "[PASS]") != 1 {
+		t.Errorf("text export:\n%s", txt)
+	}
+	if !strings.Contains(txt, "REMEDIATION\n  - <nil>: <nil>\n  - <nil>: <nil>\n  - <nil>: <nil>\n") {
+		t.Errorf("every check that did not PASS needs a remediation line:\n%s", txt)
+	}
+}
