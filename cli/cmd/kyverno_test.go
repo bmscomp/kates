@@ -146,21 +146,95 @@ func TestKyvernoApplyBuildCommand(t *testing.T) {
 	}
 }
 
-func TestKyvernoApplyDryRun(t *testing.T) {
-	buf := output.ResetForTesting()
-	defer func() { output.Out = os.Stdout }()
-
-	kyvernoApplyDryRun = true
+// kyvernoApplyCluster stands in for the cluster kyverno apply reads: Kyverno
+// is installed, and the kates release is deployed in installedNS (none when
+// empty). helm calls through the write seams are recorded in helmCalls.
+func kyvernoApplyCluster(t *testing.T, installedNS string, dryRunOut string, dryRunErr error) (helmCalls *[]string) {
+	t.Helper()
+	origK, origOut, origComb, origHelm := newKyvernoKubectlFn, runExecOutputFn, runExecCombinedFn, runHelmFn
+	prevDry, prevMode, prevYes := kyvernoApplyDryRun, kyvernoApplyMode, kyvernoApplyYes
+	t.Cleanup(func() {
+		newKyvernoKubectlFn, runExecOutputFn, runExecCombinedFn, runHelmFn = origK, origOut, origComb, origHelm
+		kyvernoApplyDryRun, kyvernoApplyMode, kyvernoApplyYes = prevDry, prevMode, prevYes
+	})
 	kyvernoApplyMode = "Audit"
+	newKyvernoKubectlFn = func() kyvernoKubectl { return &fakeKyvernoKubectl{} }
+	var calls []string
+	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "helm" && args[0] == "list" {
+			if installedNS == "" {
+				return []byte("[]"), nil
+			}
+			return []byte(`[{"name":"kates","namespace":"` + installedNS + `","chart":"kates-1.0.0"}]`), nil
+		}
+		return nil, errors.New("unexpected read: " + name + " " + strings.Join(args, " "))
+	}
+	runExecCombinedFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return []byte(dryRunOut), dryRunErr
+	}
+	runHelmFn = func(_ context.Context, args ...string) error {
+		calls = append(calls, "helm "+strings.Join(args, " "))
+		return nil
+	}
+	return &calls
+}
 
-	cmd := kyvernoApplyCmd
-	err := cmd.RunE(cmd, []string{})
+// --dry-run runs helm --dry-run against the installed release's namespace.
+// It used to return before Helm ran, with -n kates hard-coded in the command
+// it printed.
+func TestKyvernoApplyDryRun(t *testing.T) {
+	calls := kyvernoApplyCluster(t, "team-kates", "kind: ClusterPolicy\n---\nkind: ClusterPolicy\n", nil)
+	kyvernoApplyDryRun = true
+
+	stdout, _, err := commandOutput(t, func() error { return kyvernoApplyCmd.RunE(kyvernoApplyCmd, nil) })
 	if err != nil {
-		t.Fatalf("Apply dry-run failed: %v", err)
+		t.Fatalf("apply --dry-run: %v", err)
+	}
+	if len(*calls) != 1 || !strings.HasPrefix((*calls)[0], "helm upgrade --install kates ") || !strings.Contains((*calls)[0], " -n team-kates ") || !strings.HasSuffix((*calls)[0], " --dry-run") {
+		t.Errorf("helm must run once, with --dry-run, against the installed release's namespace: %q", *calls)
+	}
+	if out := string(stdout); !strings.Contains(out, "Dry run complete: Helm rendered 2 resources for release kates in team-kates") {
+		t.Errorf("dry run summary missing:\n%s", out)
 	}
 
-	outStr := buf.String()
-	if !strings.Contains(outStr, "Dry run complete") {
-		t.Errorf("Expected dry run completion message, got:\n%s", outStr)
+	// A render error is the point of a dry run: it fails the command.
+	calls = kyvernoApplyCluster(t, "team-kates", "Error: values don't meet the specifications of the schema", errors.New("exit status 1"))
+	kyvernoApplyDryRun = true
+	_, stderr, err := commandOutput(t, func() error { return kyvernoApplyCmd.RunE(kyvernoApplyCmd, nil) })
+	if _, ok := err.(*silentErr); !ok || !strings.Contains(stderr, "schema") {
+		t.Errorf("a failed render: err %v (%T), stderr %q", err, err, stderr)
+	}
+}
+
+// The policies go to the kates release that is installed; the flags decide
+// when they were given, or when nothing or more than one is installed.
+func TestKyvernoReleaseNamespace(t *testing.T) {
+	orig := runExecOutputFn
+	t.Cleanup(func() { runExecOutputFn = orig })
+	list := func(releases string) {
+		runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+			return []byte(releases), nil
+		}
+	}
+
+	list(`[]`)
+	if ns, err := kyvernoReleaseNamespace(context.Background(), "kates", false); ns != "kates" || err != nil {
+		t.Errorf("nothing installed: %q %v", ns, err)
+	}
+	list(`[{"name":"kates","namespace":"team-kates","chart":"kates-1.0.0"}]`)
+	if ns, err := kyvernoReleaseNamespace(context.Background(), "kates", false); ns != "team-kates" || err != nil {
+		t.Errorf("one installed elsewhere: %q %v", ns, err)
+	}
+	if ns, err := kyvernoReleaseNamespace(context.Background(), "kates", true); ns != "kates" || err != nil {
+		t.Errorf("flags given: %q %v", ns, err)
+	}
+	list(`[{"name":"kates","namespace":"a","chart":"kates-1.0.0"},{"name":"kates","namespace":"b","chart":"kates-1.0.0"}]`)
+	_, stderr, err := commandOutput(t, func() error {
+		_, err := kyvernoReleaseNamespace(context.Background(), "kates", false)
+		return err
+	})
+	if err == nil || !strings.Contains(stderr, "a and b") || !strings.Contains(stderr, "--app-ns") {
+		t.Errorf("two installed: err %v, stderr %q", err, stderr)
 	}
 }

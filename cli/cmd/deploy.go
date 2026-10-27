@@ -110,15 +110,8 @@ var (
 )
 
 func init() {
-	deployCmd.Flags().StringVar(&deployTopology, "topology", "isolated", "Deployment topology: 'isolated' (separate namespaces) or 'single' (one namespace)")
-	deployCmd.Flags().StringVar(&deployNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
-	deployCmd.Flags().StringVar(&deployKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
-	deployCmd.Flags().StringVar(&deployConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
-	deployCmd.Flags().StringVar(&deployDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
-	deployCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
-	deployCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
-	deployCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components (Jaeger) when topology is 'isolated'")
-	deployCmd.Flags().StringVar(&deployKafkaUINS, "ui-ns", "kafka", "Namespace for Kafka UI when topology is 'isolated'")
+	// Topology, namespaces and --kafka-name: deploy_flags.go.
+	addDeployScopeFlags(deployCmd)
 
 	// Component flags
 	deployCmd.Flags().StringVar(&deployWithSchemaRegistry, "with-schema-registry", "apicurio", "Schema Registry to deploy: 'none', 'apicurio', or 'confluent'")
@@ -132,7 +125,6 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployWithKafkaConnect, "with-kafka-connect", false, "Deploy Kafka Connect with PostgreSQL CDC (Debezium)")
 	deployCmd.Flags().BoolVar(&deployWithKafkaUI, "with-kafka-ui", true, "Deploy Kafka UI for browser-based cluster monitoring")
 	deployCmd.Flags().BoolVar(&deployWithMirrorMaker2, "with-mirror-maker2", false, "Deploy MirrorMaker 2 as a loopback mirror of the primary (replication lab; kates migrate for real sources)")
-	deployCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
 	deployCmd.Flags().StringArrayVar(&deployNamespaceLabels, "namespace-label", nil, "Label to apply to the namespaces deploy ensures (key=value, repeatable; overrides KATES_NAMESPACE_LABELS, which overrides the labels file)")
 	addLabelsFileFlag(deployCmd)
 	deployCmd.Flags().BoolVar(&deployNoWriteProbes, "no-write-probes", false, "Skip the introspection probes that create a namespace, a Secret or pods (as --dry-run does)")
@@ -146,7 +138,6 @@ func init() {
 	deployCmd.Flags().StringVar(&deployStrimziVersion, "strimzi-version", "", "Strimzi operator version to install (default: this release's pin; 'latest' for the newest published)")
 	deployCmd.Flags().StringVar(&deployStrimziChart, "strimzi-chart", "", "Local strimzi-kafka-operator chart tarball to install from (air-gapped mirrors)")
 	deployCmd.Flags().StringVar(&deployKafkaVersion, "kafka-version", "", "Kafka version for the primary cluster (default: the newest the operator supports; 'latest' spells the default)")
-	deployCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
 	deployCmd.Flags().StringVar(&deployCheckout, "checkout", "", "Install the charts of the Kates checkout in this directory instead of the published ones (env KATES_CHECKOUT)")
 	deployCmd.Flags().StringVar(&deployChartBundle, "chart-bundle", "", "Install from the bundle `kates charts pull --to` wrote in this directory, with no network (env KATES_CHART_BUNDLE)")
 	deployCmd.Flags().BoolVar(&deployAdminless, "adminless", false, "Install without cluster admin: Kafka, Kafka Connect, MirrorMaker 2, Apicurio, Kafka UI and Kates into existing namespaces placed by --topology and the --*-ns flags (single: --namespace, default the kube context's), on a Strimzi operator already watching them")
@@ -701,22 +692,54 @@ func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string
 	return strings.Contains(s, `"status":"deployed"`) || strings.Contains(s, `"status": "deployed"`)
 }
 
-// cleanupStaleClusterResource removes a cluster-scoped resource if it belongs
-// to a Helm release in a different namespace, preventing ownership conflicts
-// when switching deployment topologies.
+// cleanupStaleClusterResource removes a cluster-scoped resource that a Helm
+// release in another namespace installed, once that release is gone: a
+// topology switch leaves clusterrole/kates annotated with the old namespace,
+// and Helm refuses to adopt it. While the release still exists the resource
+// is its, and is left alone with a note — it used to be deleted whichever
+// namespace owned it, which broke a second tenant's stack (clean is careful
+// about the same case; deploy was not).
 func cleanupStaleClusterResource(ctx context.Context, kind, name, expectedNS string) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := runExecOutputFn(checkCtx, "kubectl", "get", kind, name, "-o", "jsonpath={.metadata.annotations.meta\\.helm\\.sh/release-namespace}")
+	out, err := runExecOutputFn(checkCtx, "kubectl", "get", kind, name, "-o", `jsonpath={.metadata.annotations.meta\.helm\.sh/release-namespace}{"\t"}{.metadata.annotations.meta\.helm\.sh/release-name}`)
 	if err != nil {
 		return // resource doesn't exist, nothing to clean
 	}
-	existingNS := strings.TrimSpace(string(out))
-	if existingNS != "" && existingNS != expectedNS {
-		dl.Printf("    - Cleaning stale %s/%s (owned by namespace %q, deploying to %q)\n", kind, name, existingNS, expectedNS)
+	existingNS, release, _ := strings.Cut(strings.TrimSpace(string(out)), "\t")
+	if existingNS == "" || existingNS == expectedNS {
+		return
+	}
+	if release == "" {
+		release = name
+	}
+	switch live, err := helmReleaseExists(ctx, release, existingNS); {
+	case err != nil:
+		dl.Printf("    - Keeping %s/%s: owned by release %s in %q, which could not be checked (%v)\n", kind, name, release, existingNS, err)
+	case live:
+		dl.Printf("    - Keeping %s/%s: release %s in %q still owns it (deploying to %q)\n", kind, name, release, existingNS, expectedNS)
+	default:
+		dl.Printf("    - Cleaning stale %s/%s (owned by namespace %q, whose release %s is gone; deploying to %q)\n", kind, name, existingNS, release, expectedNS)
 		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
 		defer delCancel()
 		_, _ = runExecCombinedFn(delCtx, "kubectl", "delete", kind, name, "--ignore-not-found")
+	}
+}
+
+// helmReleaseExists says whether helm knows release in namespace, in any
+// status. Only helm's own "not found" counts as gone; any other failure is
+// returned, so a cluster that does not answer never reads as "gone".
+func helmReleaseExists(ctx context.Context, release, namespace string) (bool, error) {
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := runExecCombinedFn(checkCtx, "helm", "status", release, "-n", namespace)
+	switch {
+	case err == nil:
+		return true, nil
+	case strings.Contains(strings.ToLower(string(out)), "not found"):
+		return false, nil
+	default:
+		return false, fmt.Errorf("%w: %s", err, firstLine(strings.TrimSpace(string(out))))
 	}
 }
 

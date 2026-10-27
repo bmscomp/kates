@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -32,22 +30,9 @@ var deployStatusCmd = &cobra.Command{
 }
 
 func init() {
-	// Note: We use the same package-level flag variables defined in deploy.go
-	// However, cobra commands share flags if not careful. Since these are package vars,
-	// if deployStatusCmd adds the same flags, they overwrite the pointers.
-	// We'll reuse the pointers. It is safe since they are only accessed during RunE.
-
-	deployStatusCmd.Flags().StringVar(&deployTopology, "topology", "isolated", "Deployment topology: 'isolated' (separate namespaces) or 'single' (one namespace)")
-	deployStatusCmd.Flags().StringVar(&deployNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
-	deployStatusCmd.Flags().StringVar(&deployKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
-	deployStatusCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster")
-	deployStatusCmd.Flags().StringVar(&deployConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
-	deployStatusCmd.Flags().StringVar(&deployDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
-	deployStatusCmd.Flags().StringVar(&deployAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
-	deployStatusCmd.Flags().StringVar(&deployChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
-	deployStatusCmd.Flags().StringVar(&deployMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components when topology is 'isolated'")
-	deployStatusCmd.Flags().StringVar(&deployKafkaUINS, "ui-ns", "kafka", "Namespace for Kafka UI when topology is 'isolated'")
-	deployStatusCmd.Flags().StringVar(&deployMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
+	// The scope flags bind deploy's package-level variables (deploy_flags.go);
+	// both commands only read them during RunE.
+	addDeployScopeFlags(deployStatusCmd)
 
 	deployStatusCmd.Flags().BoolVarP(&deployStatusInteractive, "interactive", "i", false, "Enable interactive Bubble Tea status loader")
 	deployStatusCmd.Flags().StringVarP(&deployStatusOutput, "output", "o", "table", "Output format: table or json")
@@ -175,7 +160,7 @@ type componentSpec struct {
 // check handles — the check used to name the Strimzi kinds it knew, and a
 // component whose kind was not on that list reported a blank "Unknown"
 // forever without anything failing.
-func statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS string) []componentSpec {
+func statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS, mm2NS string) []componentSpec {
 	return []componentSpec{
 		{"A", "🦊", "Strimzi Operator", "strimzi-operator", "strimzi-operator", "pod", "-l name=strimzi-cluster-operator"},
 		{"A", "🔐", "Cert-Manager", "cert-manager", "cert-manager", "pod", "-l app.kubernetes.io/instance=cert-manager"},
@@ -187,7 +172,7 @@ func statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaU
 		{"C", "📋", "Apicurio Registry", "apicurio", kafkaNS, "pod", "-l app.kubernetes.io/instance=apicurio"},
 		{"C", "📦", "Kates Backend", "kates", appNS, "pod", "-l app.kubernetes.io/instance=kates"},
 		{"C", "💻", "Kafka UI", "kafka-ui", kafkaUINS, "pod", "-l app.kubernetes.io/name=kafka-ui"},
-		{"C", "🔁", "MirrorMaker 2", "mm2", deployMM2NS, "kafkamirrormaker2s.kafka.strimzi.io", "mm2-mirror-maker2"},
+		{"C", "🔁", "MirrorMaker 2", "mm2", mm2NS, "kafkamirrormaker2s.kafka.strimzi.io", "mm2-mirror-maker2"},
 		{"C", "🧪", "Litmus Chaos", "chaos", chaosNS, "pod", "-l app.kubernetes.io/instance=chaos"},
 	}
 }
@@ -201,17 +186,17 @@ func healthCheckKinds(kind string) bool {
 func runDeployStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	var kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS string
+	// The same resolution deploy uses, into locals: this used to write the
+	// single namespace into deployMM2NS, a flag variable deploy shares.
+	ns := resolveNamespaces()
+	dbNS := deployDbNS
 	if deployTopology == "single" {
-		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace, deployNamespace
-		deployMM2NS = deployNamespace
-	} else {
-		kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS = deployKafkaNS, deployConnectNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployDbNS, deployKafkaUINS
+		dbNS = deployNamespace
 	}
 
 	helmIndex := loadHelmReleaseIndex(ctx)
 
-	components := statusComponents(kafkaNS, connectNS, appNS, chaosNS, jaegerNS, dbNS, kafkaUINS)
+	components := statusComponents(ns.kafka, ns.connect, ns.app, ns.chaos, ns.jaeger, dbNS, ns.kafkaUI, ns.mm2)
 
 	// Route based on flags
 	if deployStatusOutput == "json" {
@@ -261,7 +246,7 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 				st.Health, st.Details = getHealthStatus(ctx, c.Kind, c.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
-				st.Details = "Not deployed"
+				st.Details = notDeployedDetails(st.HelmStatus)
 			}
 			statuses = append(statuses, st)
 		}
@@ -276,12 +261,16 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 
 // ── V1 Existing Logic (Retained for default sequential flow) ──
 
+// loadHelmReleaseIndex reads every release on the cluster, by name. It goes
+// through runExecOutputFn like the rest of deploy's cluster reads, so a test
+// can hand it a cluster and the call is pinned to the deploy's context.
 func loadHelmReleaseIndex(ctx context.Context) map[string][]helmStatusRelease {
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(checkCtx, "helm", "list", "-A", "-o", "json")
-	out, err := cmd.Output()
+	// -a: a failed or pending release is still a release, and the table
+	// should say so rather than "missing".
+	out, err := runExecOutputFn(checkCtx, "helm", "list", "-A", "-a", "-o", "json")
 	if err != nil || len(out) == 0 {
 		return nil
 	}
@@ -298,6 +287,10 @@ func loadHelmReleaseIndex(ctx context.Context) map[string][]helmStatusRelease {
 	return index
 }
 
+// lookupHelmRelease finds the release in the namespace the flags name. A
+// same-named release in another namespace is reported as "elsewhere (ns)",
+// not adopted: the table used to switch to it, so the health of a second
+// tenant's Kafka UI showed up under this deploy's namespace.
 func lookupHelmRelease(index map[string][]helmStatusRelease, release, namespace string) (status, resolvedNamespace string, ok bool) {
 	if index == nil {
 		return "", namespace, false
@@ -314,12 +307,11 @@ func lookupHelmRelease(index map[string][]helmStatusRelease, release, namespace 
 		}
 	}
 
-	// Fallback: if a release name is unique cluster-wide, trust that namespace.
-	if len(releases) == 1 {
-		return strings.ToLower(releases[0].Status), releases[0].Namespace, true
+	var elsewhere []string
+	for _, rel := range releases {
+		elsewhere = append(elsewhere, rel.Namespace)
 	}
-
-	return "", namespace, false
+	return "elsewhere (" + strings.Join(elsewhere, ", ") + ")", namespace, true
 }
 
 func getHelmStatusWithNamespace(ctx context.Context, index map[string][]helmStatusRelease, release, namespace string) (status, resolvedNamespace string) {
@@ -329,14 +321,38 @@ func getHelmStatusWithNamespace(ctx context.Context, index map[string][]helmStat
 	return getHelmStatus(ctx, release, namespace), namespace
 }
 
+// getHelmStatus is the release's real status (deployed, failed,
+// pending-install, ...), or "missing". helm status exits 0 for a failed
+// release, so the exit code alone used to report every release as deployed.
 func getHelmStatus(ctx context.Context, release, namespace string) string {
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "helm", "status", release, "-n", namespace)
-	if err := cmd.Run(); err == nil {
-		return "deployed"
+	out, err := runExecOutputFn(checkCtx, "helm", "status", release, "-n", namespace, "-o", "json")
+	if err != nil {
+		return "missing"
 	}
-	return "missing"
+	var rel struct {
+		Info struct {
+			Status string `json:"status"`
+		} `json:"info"`
+	}
+	if json.Unmarshal(out, &rel) != nil || rel.Info.Status == "" {
+		return "unknown"
+	}
+	return strings.ToLower(rel.Info.Status)
+}
+
+// notDeployedDetails is the DETAILS cell of a release that is not deployed
+// here: where it is instead, or what state it is in.
+func notDeployedDetails(helmStatus string) string {
+	switch {
+	case strings.HasPrefix(helmStatus, "elsewhere ("):
+		return "A release of this name is in " + strings.TrimSuffix(strings.TrimPrefix(helmStatus, "elsewhere ("), ")") + ", not in this namespace"
+	case helmStatus == "missing":
+		return "Not deployed"
+	default:
+		return "Release is " + helmStatus
+	}
 }
 
 // strimziCR reports whether a component's kind is a Strimzi custom resource.
@@ -382,8 +398,7 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 	if kind == "pod" {
 		args := append([]string{"get", "pods", "-n", namespace}, strings.Split(resource, " ")...)
 		args = append(args, "-o", "json")
-		cmd := exec.CommandContext(checkCtx, "kubectl", args...)
-		out, err := cmd.Output()
+		out, err := runExecOutputFn(checkCtx, "kubectl", args...)
 		if err != nil {
 			return "Unknown", "Failed to query pods: " + err.Error(), nil
 		}
@@ -393,15 +408,12 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 		health, details, raw := parsePodListHealth(out)
 		return health, details, raw
 	} else if strimziCR(kind) {
-		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "json")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
+		// Combined output: on failure it holds kubectl's own words, and
+		// "NotFound" and "the server doesn't have a resource type" are
+		// different problems the reader can act on.
+		out, err := runExecCombinedFn(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "json")
 		if err != nil {
-			// kubectl's own words: "NotFound" and "the server doesn't have a
-			// resource type" are different problems and the reader can act on
-			// the difference.
-			msg := strings.TrimSpace(stderr.String())
+			msg := strings.TrimSpace(string(out))
 			if msg == "" {
 				msg = err.Error()
 			}
@@ -410,8 +422,7 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 		health, details, raw := parseKafkaHealth(out, kind)
 		return health, details, raw
 	} else if kind == "statefulset" || kind == "deployment" {
-		cmd := exec.CommandContext(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "json")
-		out, err := cmd.Output()
+		out, err := runExecOutputFn(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "json")
 		if err != nil {
 			return "Unknown", "Resource not found: " + err.Error(), nil
 		}
@@ -600,7 +611,7 @@ func runJSONStatus(ctx context.Context, components []componentSpec) ([]Component
 				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
-				st.Details = "Not deployed"
+				st.Details = notDeployedDetails(st.HelmStatus)
 			}
 			statuses[idx] = st
 		}(i, c)
@@ -752,7 +763,7 @@ func runInteractiveStatus(ctx context.Context, components []componentSpec) ([]Co
 				st.Health, st.Details, st.RawDetails = getHealthStatusV2(ctx, comp.Kind, comp.Resource, st.Namespace)
 			} else {
 				st.Health = "N/A"
-				st.Details = "Not deployed"
+				st.Details = notDeployedDetails(st.HelmStatus)
 			}
 			p.Send(compStatusUpdateMsg{index: idx, status: st})
 		}(i, c)

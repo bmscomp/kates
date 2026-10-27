@@ -104,6 +104,9 @@ type versionOptions struct {
 	// FollowInstalled is the admin-less profile: the operator is a cluster
 	// admin's, so the plan takes whatever version it runs.
 	FollowInstalled bool
+	// Yes is deploy's --yes: a cluster that cannot say which operators it
+	// runs is deployed to as if it ran none, with a warning, instead of refused.
+	Yes bool
 }
 
 func (o versionOptions) watchList() []string {
@@ -133,6 +136,7 @@ func deployVersionOptions() versionOptions {
 		SingleNS:        deployNamespace,
 		RepoRoot:        chartRoot,
 		FollowInstalled: deployAdminless,
+		Yes:             deployYes,
 	}
 }
 
@@ -437,11 +441,7 @@ func unsupportedKafkaError(v kafkaversion.Version, chart *strimzi.Chart, scope s
 func (vp *versionPlan) readInstalled(ctx context.Context, r strimzi.Runner, o versionOptions) error {
 	ops, err := strimzi.InstalledOperators(ctx, r)
 	if err != nil {
-		// No cluster access is not a resolution failure: deploy's own
-		// preflight already decided the cluster is reachable, so this is
-		// "no operator yet".
-		vp.Notes = append(vp.Notes, "could not list installed operators: "+firstLine(err.Error()))
-		return nil
+		return vp.installedUnreadable(err, r, o)
 	}
 	vp.operators = ops
 	if len(ops) == 0 {
@@ -458,6 +458,45 @@ func (vp *versionPlan) readInstalled(ctx context.Context, r strimzi.Runner, o ve
 	vp.primaryOp = primary
 	vp.Installed = primary.Version
 	return nil
+}
+
+// installedUnreadable decides what it means that the operators could not be
+// listed. Every failure used to read as "no operator yet", which sent an
+// RBAC refusal or a cluster that did not answer down the install path: helm
+// upgrade --install --reset-values on an operator that is there, past the
+// downgrade rail. Only the reads that say "nothing there" still mean that.
+func (vp *versionPlan) installedUnreadable(err error, r strimzi.Runner, o versionOptions) error {
+	msg := firstLine(err.Error())
+	lower := strings.ToLower(msg)
+	switch {
+	case isChartOnlyRunner(r):
+		// kates versions and the wizard never consult kubectl.
+		vp.Notes = append(vp.Notes, "could not list installed operators: "+msg)
+		return nil
+	case strings.Contains(lower, "notfound") || strings.Contains(lower, "not found"):
+		// The Deployment behind an operator pod is gone: it is on its way out.
+		vp.Notes = append(vp.Notes, "no installed operator to compare with: "+msg)
+		return nil
+	case strings.Contains(lower, "forbidden"):
+		if o.FollowInstalled {
+			// A namespace account may not list pods cluster-wide; the
+			// admin-less prerequisites read the operator their own way.
+			vp.Notes = append(vp.Notes, "could not list installed operators (not permitted): "+msg)
+			return nil
+		}
+		return fmt.Errorf("listing the installed Strimzi operators was refused: %s\n  The full profile needs cluster admin; without it, kates deploy --adminless installs onto an operator a cluster admin runs", msg)
+	case o.Yes:
+		output.Warn("Could not list the installed Strimzi operators: " + msg + ". Deploying as --yes asked, as if none were installed: an operator that is there is reset to this deploy's version without the version checks.")
+		vp.Notes = append(vp.Notes, "WARNING: installed operators unknown ("+msg+"); treated as none because of --yes")
+		return nil
+	default:
+		return fmt.Errorf("could not list the installed Strimzi operators: %s\n  Retry once the cluster answers, or pass --yes to deploy as if none were installed (an operator that is there is then reset without the version checks)", msg)
+	}
+}
+
+func isChartOnlyRunner(r strimzi.Runner) bool {
+	_, ok := r.(chartOnlyRunner)
+	return ok
 }
 
 // compareInstalled judges the chosen version against the operator already

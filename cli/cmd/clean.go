@@ -44,22 +44,23 @@ var (
 	cleanAppNS        string
 	cleanChaosNS      string
 	cleanMonitoringNS string
+	cleanKafkaUINS    string
 )
 
 func init() {
 	cleanCmd.Flags().BoolVarP(&cleanForce, "yes", "y", false, "Skip the confirmation prompt")
 	cleanCmd.Flags().BoolVar(&cleanForce, "force", false, "Same as --yes")
 	cleanCmd.Flags().BoolVarP(&cleanVerbose, "verbose", "v", false, "Show full command output during cleanup")
-	cleanCmd.Flags().StringVar(&cleanTopology, "topology", "", "Topology to clean: 'isolated' or 'single'. If empty, cleans both.")
-	cleanCmd.Flags().StringVar(&cleanNamespace, "namespace", "kates-stack", "Target namespace when topology is 'single'")
-	cleanCmd.Flags().StringVar(&deployKafkaName, "kafka-name", "krafter", "Name of the primary Kafka cluster (its Helm release)")
-	cleanCmd.Flags().StringVar(&cleanKafkaNS, "kafka-ns", "kafka", "Namespace for Kafka when topology is 'isolated'")
-	cleanCmd.Flags().StringVar(&cleanConnectNS, "connect-ns", "connect", "Namespace for Kafka Connect when topology is 'isolated'")
-	cleanCmd.Flags().StringVar(&cleanDbNS, "db-ns", "database", "Namespace for PostgreSQL Database when topology is 'isolated'")
-	cleanCmd.Flags().StringVar(&cleanMM2NS, "mm2-ns", "kafka", "Namespace for MirrorMaker 2 when topology is 'isolated'")
-	cleanCmd.Flags().StringVar(&cleanAppNS, "app-ns", "kates", "Namespace for Kates Backend when topology is 'isolated'")
-	cleanCmd.Flags().StringVar(&cleanChaosNS, "chaos-ns", "litmus", "Namespace for Chaos Engine when topology is 'isolated'")
-	cleanCmd.Flags().StringVar(&cleanMonitoringNS, "monitoring-ns", "monitoring", "Namespace for monitoring components when topology is 'isolated'")
+	// The same scope flags as deploy (deploy_flags.go), into clean's own
+	// variables; an empty --topology cleans both.
+	addDeployScopeFlags(cleanCmd,
+		scopeInto(deployScopeVars{
+			Topology: &cleanTopology, Namespace: &cleanNamespace,
+			KafkaNS: &cleanKafkaNS, ConnectNS: &cleanConnectNS, DbNS: &cleanDbNS,
+			AppNS: &cleanAppNS, ChaosNS: &cleanChaosNS, MonitoringNS: &cleanMonitoringNS,
+			KafkaUINS: &cleanKafkaUINS, MM2NS: &cleanMM2NS,
+		}),
+		scopeTopologyDefault("", "Topology to clean: 'isolated' or 'single'. If empty, cleans both."))
 	rootCmd.AddCommand(cleanCmd)
 }
 
@@ -242,7 +243,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 			helmRelease{"apicurio", cleanKafkaNS},
 			helmRelease{"connect-cluster", cleanConnectNS},
 			helmRelease{"mm2", cleanMM2NS},
-			helmRelease{"kafka-ui", cleanKafkaNS},
+			helmRelease{"kafka-ui", cleanKafkaUINS},
 		)
 		coreReleases = append(coreReleases,
 			helmRelease{"jaeger", cleanMonitoringNS},
@@ -255,6 +256,9 @@ func runClean(cmd *cobra.Command, args []string) error {
 		)
 		if cleanMM2NS != "" && cleanMM2NS != cleanKafkaNS {
 			managedNamespaces = append(managedNamespaces, cleanMM2NS)
+		}
+		if cleanKafkaUINS != "" && !slices.Contains(managedNamespaces, cleanKafkaUINS) {
+			managedNamespaces = append(managedNamespaces, cleanKafkaUINS)
 		}
 		strimziNS = append(strimziNS, cleanKafkaNS)
 	}
