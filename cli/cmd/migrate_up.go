@@ -348,6 +348,22 @@ func topicsFromPattern(pattern string) []string {
 	return out
 }
 
+// literalPattern says every part of a topicsPattern is a quoted name, so
+// topicsFromPattern reads all of it back; a pattern with real regex syntax
+// names topics only the target's own list can resolve.
+func literalPattern(pattern string) bool {
+	if pattern == "" {
+		return true
+	}
+	for _, part := range strings.Split(pattern, "|") {
+		name := javaRegexUnquote(part)
+		if name == "" || strings.ContainsAny(name, `*+?()[]{}^$`) {
+			return false
+		}
+	}
+	return true
+}
+
 func javaRegexUnquote(s string) string {
 	var b strings.Builder
 	esc := false

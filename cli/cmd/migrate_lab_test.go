@@ -52,6 +52,48 @@ func scriptDown(f *fakeProc, namespaceOwned bool) {
 	f.on("kubectl -n kafka delete kafkatopic -l kates.io/lab=m282-430 --ignore-not-found --timeout=120s", "")
 	f.on("kubectl -n kafka delete secret -l kates.io/lab=m282-430 --ignore-not-found", "")
 	f.on("kubectl delete namespace kafka-m282-430-src --ignore-not-found --timeout=600s", "")
+	// down's data guard: the lab's client pod on the target lists the
+	// topics and reads their end offsets — empty unless a test says so.
+	scriptPods(f)
+	scriptTargetTopics(f, "m282-430", map[string]int64{"kates.orders": 0}, "__consumer_offsets", "kates-events")
+}
+
+// topicApplies are the applies of KafkaTopic manifests (the client pod is
+// applied through the same command).
+func topicApplies(f *fakeProc) []fakeCall {
+	var out []fakeCall
+	for _, c := range f.find("kubectl -n kafka apply -f -") {
+		if strings.Contains(c.stdin, "kind: KafkaTopic") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// scriptTargetTopics scripts the lab's client pod on the target: the topic
+// listing (the topics given, plus extra names) and each topic's end
+// offsets, all on partition 0. A topic absent from offsets has none to read.
+func scriptTargetTopics(f *fakeProc, lab string, offsets map[string]int64, extra ...string) {
+	pod := "exec kates-migrate-" + lab + "-tgt -c client -- "
+	listed := append([]string(nil), extra...)
+	for t := range offsets {
+		listed = append(listed, t)
+	}
+	f.rule(func(l string) bool {
+		return strings.Contains(l, pod) && strings.Contains(l, "kafka-topics.sh") && strings.Contains(l, "--list")
+	},
+		func([]string, string) (string, error) { return strings.Join(listed, "\n"), nil })
+	f.rule(func(l string) bool { return strings.Contains(l, pod) && strings.Contains(l, "kafka-get-offsets.sh") },
+		func(args []string, _ string) (string, error) {
+			for i, a := range args {
+				if a == "--topic" && i+1 < len(args) {
+					if n, ok := offsets[args[i+1]]; ok {
+						return fmt.Sprintf("%s:0:%d", args[i+1], n), nil
+					}
+				}
+			}
+			return "", fmt.Errorf("no such topic")
+		})
 }
 
 func TestMigrateDownTouchesOnlyTheLabelledLab(t *testing.T) {
@@ -91,7 +133,7 @@ func TestMigrateDownTouchesOnlyTheLabelledLab(t *testing.T) {
 	}
 	// The lab's topics on the target are adopted as labelled KafkaTopics,
 	// the mirrored one and the mirror's own, then deleted.
-	applies := f.find("kubectl -n kafka apply -f -")
+	applies := topicApplies(f)
 	if len(applies) != 1 {
 		t.Fatalf("want one KafkaTopic apply, got %d", len(applies))
 	}
@@ -159,7 +201,7 @@ func TestMigrateDownKeepsTheTopicsAnotherMirrorWrites(t *testing.T) {
 			if err := runMigrateDown(context.Background()); err != nil {
 				t.Fatalf("down: %v", err)
 			}
-			manifest := f.find("kubectl -n kafka apply -f -")[0].stdin
+			manifest := topicApplies(f)[0].stdin
 			for _, topic := range tc.kept {
 				if strings.Contains(manifest, "topicName: "+topic+"\n") {
 					t.Errorf("down deleted %s, which another mirror writes:\n%s", topic, manifest)
@@ -190,7 +232,7 @@ func TestMigrateDownKeepsTheMirrorsTopicsWhenMirrorsCannotBeListed(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "kept the mirror's own topics") {
 		t.Fatalf("want down to report the kept topics, got %v", err)
 	}
-	manifest := f.find("kubectl -n kafka apply -f -")[0].stdin
+	manifest := topicApplies(f)[0].stdin
 	if !strings.Contains(manifest, "topicName: kates.orders") {
 		t.Errorf("the mirrored topic must still be deleted:\n%s", manifest)
 	}
@@ -328,6 +370,8 @@ func TestMigrateDownAndStatusAcrossSeveralSources(t *testing.T) {
 	f.on("kubectl -n kafka delete secret -l kates.io/lab="+lab+" --ignore-not-found", "")
 	f.on("kubectl -n kafka get kafka krafter -o jsonpath=", "4.3.0 True")
 	f.on("kubectl -n kafka get kafkamirrormaker2 mm2-"+lab+"-mirror-maker2 -o json", mirrorCRJSON("mm2-"+lab+"-mirror-maker2", "RUNNING", "RUNNING"))
+	scriptPods(f)
+	scriptTargetTopics(f, lab, map[string]int64{"kates.orders.src282": 0, "kates.orders.src391": 0})
 	out := captureOutput(t, "json")
 
 	// status finds both legs by the lab label alone.
@@ -367,7 +411,7 @@ func TestMigrateDownAndStatusAcrossSeveralSources(t *testing.T) {
 		}
 	}
 	// Both legs' topics and both checkpoints topics are adopted and deleted.
-	applies := f.find("kubectl -n kafka apply -f -")
+	applies := topicApplies(f)
 	if len(applies) != 1 {
 		t.Fatalf("want one KafkaTopic apply, got %d", len(applies))
 	}

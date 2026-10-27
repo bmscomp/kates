@@ -33,6 +33,11 @@ type migrateTargetOptions struct {
 	Partitions               bool
 	Timeout                  int
 	KeepPod                  bool
+	// Pod and Labels override the client pod's name and add to its labels:
+	// down runs its check from a pod carrying the lab's label, so the lab's
+	// own teardown sweeps it if the check is interrupted.
+	Pod    string
+	Labels map[string]string
 }
 
 var (
@@ -114,10 +119,17 @@ func openTargetClient(ctx context.Context, o migrateTargetOptions) (*targetClien
 	if timeout <= 0 {
 		timeout = podrun.DefaultReadyTimeout
 	}
+	name, labels := targetClientPodName, map[string]string{"app.kubernetes.io/component": "migrate-cli"}
+	if o.Pod != "" {
+		name = o.Pod
+	}
+	for k, v := range o.Labels {
+		labels[k] = v
+	}
 	c := &targetClient{
 		pod: podrun.Pod{
-			Namespace: o.Namespace, Name: targetClientPodName, Image: pins.KafkaImage,
-			Labels: map[string]string{"app.kubernetes.io/component": "migrate-cli"},
+			Namespace: o.Namespace, Name: name, Image: pins.KafkaImage,
+			Labels: labels,
 		},
 		tools:     podrun.ToolsFor(version, ""),
 		bootstrap: targetBootstrapFor(o.Cluster, o.Namespace),

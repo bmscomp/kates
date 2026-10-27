@@ -949,6 +949,11 @@ func migrateConfirm(yes bool, question string) error {
 	if yes {
 		return nil
 	}
+	// -o json is a script reading stdout: a prompt there is a hang or a
+	// question the script never sees, so it states intent with --yes.
+	if outputMode == "json" {
+		return errors.New("-o json does not prompt for confirmation — pass --yes to proceed unattended")
+	}
 	ok, err := confirm(question)
 	if err != nil {
 		return err

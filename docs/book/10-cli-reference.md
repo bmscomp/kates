@@ -1617,6 +1617,31 @@ Two combinations the chart refuses at render time are refused by the CLI first, 
 
 `up`, `run` and `migrate mirror deploy` also refuse a lab whose topic names on the target, after the policy, are already there. A re-run, whose own KafkaMirrorMaker2 exists, may keep only the topics that mirror already writes: new `--topics` or a new `--policy` under the same lab name are checked like a new lab. Removing a lab deletes the topics it mirrored into, so with the identity policy `--topics orders` would take the primary's own `orders` with it, data and all. The CLI lists the target's topics as `kates-mm2` from a client pod it deletes afterwards, and refuses when it cannot. The refusal names each topic and the ways out: `--topics` with names the target does not have, or `--policy default`. A `run` refused at its prerequisites, by this check or because another lab already mirrors one of its topics, removes nothing. `migrate mirror deploy` makes both checks before it asks to install, and installs nothing when one refuses; its `--dry-run` makes neither. Its re-run is one with the same `--release`: a mirror of the same lab name under another release is checked like another lab's.
 
+#### Cutting over and removing a lab
+
+The cutover and the teardown are the two steps that change what a lab's users depend on, so each one checks before it acts:
+
+```bash
+kates migrate cutover --name m282-431 --dry-run     # checks and plan; writes nothing
+kates migrate status  --name m282-431 --watch       # every 10 s, no end offsets
+kates migrate down --name m282-431 --yes --keep-topics   # leave mirrored topics
+kates migrate down --name m282-431 --yes --delete-data   # delete them, records too
+```
+
+`cutover` first checks that the lab is running: the KafkaMirrorMaker2 CR Ready, its source and checkpoint connectors RUNNING with every task, every source's brokers ready, and the target Kafka Ready. A source connector already `STOPPED` means the lab is cut over, and `rollback` reverses that. A failed check refuses the cutover with exit code `1` before it asks or changes anything. `--dry-run` runs the same checks and prints what the cutover would do: the `helm upgrade --reuse-values` command, the values `values-cutover.yaml` sets, the connector states before and after, what happens to clients, and the proof that follows. Kates repoints no client: producers and consumers move to the target themselves, and the consumer group keeps its translated position because the checkpoint connector keeps running. The dry run creates no client pod, writes no file and exits `1` when a check fails; `-o json` prints the same plan as one document.
+
+`status --watch` does not read end offsets, since each reading starts a client pod on every end. Every frame says so in its notes. Run `status` without `--watch` to read them.
+
+`down` treats the mirrored topics on the target as data. Before it deletes them, it lists the target's topics and reads the end offset of each mirrored topic as `kates-mm2`, from a client pod labelled with the lab that it removes afterwards. Some topics need a second confirmation that names them and their record counts:
+
+- a topic that holds records;
+- a topic whose offsets cannot be read, which includes every topic when the target cannot be reached;
+- a topic named only by the mirror's `topicsPattern`. When the CR carries no `kates.io/lab-topics` list and the pattern is a real regular expression, `down` matches the pattern against the target's topic list. Kafka's and MirrorMaker's own topics are never matched.
+
+On a terminal, `down` asks that second question. With `--yes`, with `-o json`, or without a terminal, it refuses with exit code `1` and removes nothing, unless `--delete-data` is also given: a single `--yes` does not delete records. `--keep-topics` removes the lab and leaves its mirrored topics, without the check; the mirror's own internal topics still go. The two flags exclude each other. `run` removes its own lab without this check: it created those topics, refusing names that already existed, and wrote only its corpus into them.
+
+Every lab command that asks first (`up`, `cutover`, `rollback`, `down`, `run`, and the `source` and `mirror` building blocks) refuses under `-o json` without `--yes` instead of prompting. A script reading the document cannot answer a question.
+
 #### Read-only sources
 
 `--read-only-source` (on `plan`, `up`, `run` and `migrate mirror deploy`) sets `readOnlySource: true` on every mirror, which the chart turns into `offset-syncs.topic.location: target` (KIP-716 [@kip716]) on both connectors and into the matching target ACL. It is **off by default**, and the difference is what the source principal must be granted:

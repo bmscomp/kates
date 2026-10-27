@@ -696,6 +696,7 @@ type migrateLabFlags struct {
 	Name            string
 	Yes             bool
 	Keep            bool
+	DryRun          bool
 	Timeout         int
 	Messages        int
 	TargetCluster   string
@@ -755,14 +756,22 @@ are removed at the end unless --keep.`,
 	}
 
 	migrateCutoverCmd = &cobra.Command{
-		Use:   "cutover [--name <lab>] [--yes]",
+		Use:   "cutover [--name <lab>] [--yes] [--dry-run]",
 		Short: "Stop the source connector, keep the checkpoints running, prove the target is frozen",
 		Long: `Applies charts/mirror-maker2/values-cutover.yaml on top of the mirror's
 values: the source connector goes STOPPED (data replication ends), the
 checkpoint connector stays RUNNING (offset translation continues for the
 consumers that have not moved yet). Then it produces more records to the
-source and proves the target's end offsets do not move.`,
-		Example: `  kates migrate cutover --name m282-430 --yes`,
+source and proves the target's end offsets do not move.
+
+It first checks that the lab is running: the mirror Ready, both connectors
+RUNNING, every source's brokers ready and the target Ready. A failed check
+refuses the cutover (exit 1) before anything changes. --dry-run runs the
+checks and prints what the cutover would do — the helm command, the values
+the overlay sets, the connector states, what happens to clients and the
+proof — and writes nothing.`,
+		Example: `  kates migrate cutover --name m282-430 --dry-run
+  kates migrate cutover --name m282-430 --yes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMigrateCutover(cmd.Context(), &migrateCutoverFlags)
 		},
@@ -816,6 +825,7 @@ func init() {
 	migrateVerifyCmd.Flags().StringVar(&migrateVerifyFlags.Topics, "topics", migrate.DefaultTopic, "Topics to seed on a --from-bootstrap source, comma-separated")
 
 	addMigrateLabFlags(migrateCutoverCmd, &migrateCutoverFlags, true)
+	migrateCutoverCmd.Flags().BoolVar(&migrateCutoverFlags.DryRun, "dry-run", false, "Run the pre-checks and print what the cutover would do; change nothing")
 	addMigrateLabFlags(migrateRollbackCmd, &migrateRollbackFlags, true)
 
 	addMigratePairFlags(migrateRunCmd, &migrateRunFlags)
@@ -955,6 +965,23 @@ func runMigrateCutover(ctx context.Context, f *migrateLabFlags) error {
 	if err != nil {
 		return err
 	}
+	d, _ := r.state.Values["discovery"].(*labDiscovery)
+	if d == nil {
+		d = discoveryFromLab(r.lab, nil)
+	}
+	checks := cutoverPreChecks(ctx, d)
+	failed := failedChecks(checks)
+	if f.DryRun {
+		printCutoverPlan(planCutover(r, checks))
+		if len(failed) > 0 {
+			return cmdErr(fmt.Sprintf("lab %s is not ready for a cutover: %s", r.lab.Name, strings.Join(failed, "; ")))
+		}
+		return nil
+	}
+	if len(failed) > 0 {
+		printCutoverChecks(checks)
+		return cmdErr(fmt.Sprintf("refusing to cut over lab %s: %s", r.lab.Name, strings.Join(failed, "; ")))
+	}
 	if err := migrateConfirm(f.Yes, fmt.Sprintf("Cut over lab %s: stop the source connector of %s (the checkpoints keep running)?", r.lab.Name, r.lab.MirrorRelease)); err != nil {
 		return err
 	}
@@ -1064,7 +1091,7 @@ func runMigrateRun(ctx context.Context, f *migratePairFlags) error {
 	default:
 		r.deleteClients(cleanupCtx)
 		migrateHint("cleaning up...")
-		if err := labDown(cleanupCtx, discoveryFromLab(r.lab, r.createdNamespace), r.timeout); err != nil {
+		if err := labDown(cleanupCtx, discoveryFromLab(r.lab, r.createdNamespace), r.timeout, false); err != nil {
 			migrateWarn(err.Error())
 		}
 	}

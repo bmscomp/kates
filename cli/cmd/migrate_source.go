@@ -390,7 +390,7 @@ func runMigrateSourceRemove(ctx context.Context, f *migrateSourceFlags) error {
 			Provider: kafkaversion.ProviderLegacy, Version: s.Version, Bootstrap: s.Bootstrap,
 		}},
 	}
-	if err := labDown(ctx, d, time.Duration(f.Timeout)*time.Second); err != nil {
+	if err := labDown(ctx, d, time.Duration(f.Timeout)*time.Second, false); err != nil {
 		return err
 	}
 	if s.Lab != "" {
