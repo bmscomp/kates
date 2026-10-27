@@ -172,6 +172,7 @@ func NewLab(c *client.Client, url string) LabModel {
 
 func RunLab(c *client.Client, url string) error {
 	m := NewLab(c, url)
+	theme.FullScreen()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	final, err := p.Run()
 	// Quitting mid-run used to cancel only the local context; the server-side

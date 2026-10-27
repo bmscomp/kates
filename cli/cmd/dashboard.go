@@ -8,6 +8,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/bmscomp/kates/cli/tui"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,6 +40,7 @@ var dashboardCmd = &cobra.Command{
 			return runDashboardFrames(ctx, apiClient, interval)
 		}
 		m := newDashModel(ctx, apiClient, interval)
+		theme.FullScreen()
 		_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
 		return err
 	},
@@ -255,7 +257,10 @@ type dashSnapshotMsg dashSnapshot
 // dashTickMsg asks for the next refresh.
 type dashTickMsg struct{}
 
-var dashQuitKey = key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit"))
+var (
+	dashQuitKey = key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit"))
+	dashLookKey = key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "next look"))
+)
 
 func newDashModel(ctx context.Context, api dashAPI, interval time.Duration) dashModel {
 	return dashModel{ctx: ctx, api: api, interval: interval, timeout: dashCallTimeout, tick: tea.Tick}
@@ -278,9 +283,12 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
-		if key.Matches(msg, dashQuitKey) {
+		switch {
+		case key.Matches(msg, dashQuitKey):
 			m.quitting = true
 			return m, tea.Quit
+		case key.Matches(msg, dashLookKey):
+			theme.NextLook()
 		}
 	case dashSnapshotMsg:
 		s := dashSnapshot(msg)
@@ -310,7 +318,8 @@ func (m dashModel) View() string {
 	if width == 0 {
 		width = termWidth()
 	}
-	return renderDashFrame(*m.snap, m.hist, width) + dashFooter(m.frames-1, m.interval, "q or Ctrl+C to quit")
+	view := renderDashFrame(*m.snap, m.hist, width) + dashFooter(m.frames-1, m.interval, "T next look · q or Ctrl+C to quit")
+	return theme.Screen(view, m.width, m.height)
 }
 
 // dashSummaryContent is the Test Summary panel. A run list the API did not

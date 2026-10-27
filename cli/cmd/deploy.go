@@ -17,6 +17,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/detect"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -448,6 +449,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if isTesting {
 		p = tea.NewProgram(dashboard, tea.WithoutRenderer(), tea.WithInput(nil))
 	} else if IsInteractive() && !accessibleUI() {
+		theme.FullScreen()
 		p = tea.NewProgram(dashboard, tea.WithAltScreen())
 	}
 	dl = &DashboardController{p: p}

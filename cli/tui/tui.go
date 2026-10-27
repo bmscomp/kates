@@ -51,6 +51,7 @@ func New(c *client.Client) Model {
 
 func Run(c *client.Client) error {
 	m := New(c)
+	theme.FullScreen()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err

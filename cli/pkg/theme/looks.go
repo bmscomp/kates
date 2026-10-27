@@ -58,13 +58,21 @@ var (
 	CommanderBar  = lipgloss.Color("#22D3EE")
 	CommanderInk  = lipgloss.Color("#0B1220")
 	CommanderKey  = lipgloss.Color("#F1F5F9")
+
+	// PaneFill is the fill of panes, striped rows and tab bars. Surface
+	// downsampled reads as navy on 256 colors and as blue on 16, which is
+	// Commander's screen, so those terminals get a gray, or nothing.
+	PaneFill = lipgloss.CompleteAdaptiveColor{
+		Light: lipgloss.CompleteColor{TrueColor: Surface.Light, ANSI256: "255", ANSI: "7"},
+		Dark:  lipgloss.CompleteColor{TrueColor: Surface.Dark, ANSI256: "235", ANSI: "0"},
+	}
 )
 
 // Looks are the built-in looks, by name.
 var Looks = map[string]*Look{
 	Classic: {Description: "The Kates look: what kates has always drawn"},
 	Panels: {Description: "Every pane boxed and filled, the focused one in the accent color",
-		Border: &rounded, Edge: Subtle, Focus: Accent, Fill: Surface, FrameAll: true},
+		Border: &rounded, Edge: Subtle, Focus: Accent, Fill: PaneFill, FrameAll: true},
 	Minimal: {Description: "No frames, no fills: thin rules and spacing",
 		Border: &hidden},
 	Grid: {Description: "Square frames, titles in the border, column lines and striped rows",
@@ -77,13 +85,43 @@ var Looks = map[string]*Look{
 
 var lookOrder = []string{Classic, Panels, Minimal, Grid, Commander, Chips}
 
-var current atomic.Pointer[Look]
+var (
+	current atomic.Pointer[Look]
+	// fullScreen is set once a full-screen view starts; termDark is the
+	// terminal's own background, read before a screen color overrides it.
+	fullScreen bool
+	termDark   *bool
+)
 
 func init() {
 	for name, l := range Looks {
 		l.Name = name
 	}
 	current.Store(Looks[SelectedLook()])
+}
+
+// FullScreen marks the process as drawing full-screen views, where a look
+// with a screen color paints the whole terminal. Call it before the view
+// starts, from the goroutine that renders it.
+func FullScreen() {
+	fullScreen = true
+	use(CurrentLook())
+}
+
+// use switches to l. A painted screen is dark whatever the terminal is, so
+// while one is shown the dark shades are drawn on it; leaving it gives the
+// terminal's own background back.
+func use(l *Look) {
+	current.Store(l)
+	painted := fullScreen && l.Screen != nil
+	if !painted && termDark == nil {
+		return // never overridden: lipgloss still asks the terminal
+	}
+	if termDark == nil {
+		dark := lipgloss.HasDarkBackground()
+		termDark = &dark
+	}
+	lipgloss.SetHasDarkBackground(painted || *termDark)
 }
 
 // LookNames lists the looks, Classic first, in the order T steps through them.
@@ -98,7 +136,7 @@ func UseLook(name string) error {
 	if !ok {
 		return fmt.Errorf("unknown look: %s (use: %s)", name, strings.Join(lookOrder, ", "))
 	}
-	current.Store(l)
+	use(l)
 	return nil
 }
 
@@ -106,7 +144,7 @@ func UseLook(name string) error {
 func NextLook() string {
 	i := slices.Index(lookOrder, CurrentLook().Name)
 	name := lookOrder[(i+1)%len(lookOrder)]
-	current.Store(Looks[name])
+	use(Looks[name])
 	return name
 }
 

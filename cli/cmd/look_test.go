@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	tea "github.com/charmbracelet/bubbletea"
@@ -61,5 +62,16 @@ func TestDashboardFitsInEveryLook(t *testing.T) {
 	_ = theme.UseLook(theme.Classic)
 	if dashUpdate(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")}); theme.CurrentLook().Name != theme.Panels {
 		t.Errorf("T on the dashboard: look %s, want panels", theme.CurrentLook().Name)
+	}
+}
+
+func TestDashboardTSwitchesTheLook(t *testing.T) {
+	prev := theme.CurrentLook().Name
+	t.Cleanup(func() { _ = theme.UseLook(prev) })
+	_ = theme.UseLook(theme.Classic)
+	m := newDashModel(context.Background(), nil, time.Second)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
+	if _, ok := next.(dashModel); !ok || theme.CurrentLook().Name != theme.Panels {
+		t.Errorf("T on kates dashboard: look %s, want panels", theme.CurrentLook().Name)
 	}
 }

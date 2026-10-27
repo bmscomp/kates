@@ -85,7 +85,7 @@ func tabStyles() (active, inactive, gap lipgloss.Style) {
 	switch theme.CurrentLook().Name {
 	case theme.Panels:
 		return tab.Bold(true).Foreground(theme.OnColor).Background(theme.Accent),
-			tab.Foreground(theme.Muted).Background(theme.Surface), lipgloss.NewStyle().Background(theme.Surface)
+			tab.Foreground(theme.Muted).Background(theme.PaneFill), lipgloss.NewStyle().Background(theme.PaneFill)
 	case theme.Minimal:
 		return tab.Bold(true).Underline(true).Foreground(theme.Text), tab.Foreground(theme.Muted), lipgloss.NewStyle()
 	case theme.Grid:
@@ -96,7 +96,7 @@ func tabStyles() (active, inactive, gap lipgloss.Style) {
 			tab.Foreground(theme.CommanderInk).Background(theme.CommanderBar), lipgloss.NewStyle().Background(theme.CommanderBar)
 	case theme.Chips:
 		chip := lipgloss.NewStyle().Padding(0, 1).Margin(0, 1, 0, 0)
-		return chip.Bold(true).Foreground(theme.OnColor).Background(theme.Accent), chip.Foreground(theme.Text).Background(theme.Surface), lipgloss.NewStyle()
+		return chip.Bold(true).Foreground(theme.OnColor).Background(theme.Accent), chip.Foreground(theme.Text).Background(theme.PaneFill), lipgloss.NewStyle()
 	}
 	return activeTabStyle, inactiveTabStyle, tabGapStyle
 }

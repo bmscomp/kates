@@ -160,3 +160,45 @@ func TestPickDrawsTheRowInOneStyle(t *testing.T) {
 		}
 	}
 }
+
+// Commander paints a dark screen in full-screen views, so it draws the dark
+// shades there even on a light terminal, and gives the terminal's own
+// background back when the look changes.
+func TestCommanderDrawsDarkShadesOnItsScreen(t *testing.T) {
+	prevFull, prevDark := fullScreen, termDark
+	t.Cleanup(func() {
+		fullScreen, termDark = prevFull, prevDark
+		lipgloss.SetHasDarkBackground(true)
+	})
+	useLook(t, Classic)
+	fullScreen, termDark = false, nil
+	lipgloss.SetHasDarkBackground(false)
+
+	useLook(t, Commander)
+	if lipgloss.HasDarkBackground() {
+		t.Error("plain output has no screen: Commander must keep the terminal's light shades")
+	}
+	FullScreen()
+	if !lipgloss.HasDarkBackground() {
+		t.Error("on its screen Commander must draw the dark shades")
+	}
+	useLook(t, Panels)
+	if lipgloss.HasDarkBackground() {
+		t.Error("leaving Commander must give the light terminal its shades back")
+	}
+}
+
+// Downsampled, Surface is navy on 256 colors and blue on 16: Commander's
+// screen, not a pane.
+func TestPaneFillStaysGrayOnFewerColors(t *testing.T) {
+	r := lipgloss.NewRenderer(nil)
+	r.SetHasDarkBackground(true)
+	r.SetColorProfile(termenv.ANSI256)
+	if got := r.NewStyle().Background(PaneFill).Render("x"); !strings.Contains(got, "48;5;235m") {
+		t.Errorf("256 colors: %q, want gray 235", got)
+	}
+	r.SetColorProfile(termenv.ANSI)
+	if got := r.NewStyle().Background(PaneFill).Render("x"); strings.Contains(got, "44m") {
+		t.Errorf("16 colors: %q is blue", got)
+	}
+}

@@ -374,7 +374,7 @@ func lookTable(l *theme.Look, headers []string, rows [][]string) {
 		case row == lgtable.HeaderRow:
 			return head
 		case l.Name == theme.Grid && row%2 == 1:
-			return cell.Background(Surface)
+			return cell.Background(theme.PaneFill)
 		}
 		return cell
 	})
