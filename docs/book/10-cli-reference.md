@@ -186,6 +186,8 @@ kates --context staging test list
 
 The `kates` chart turns API-key authentication on by default and generates the key into the `kates-api-key` Secret; the command above reads it from the `kates` namespace of the default install. The URL answers only while something forwards the API to it: `make ports` forwards it to `localhost:30083`, `kates ports` to `localhost:8080`, and when only one of those two ports answers, the CLI uses that one. `kates health` reads a public endpoint and succeeds without a key, so check a new context with `kates test list` instead. `kates ctx set` switches to the context it stores only when that is the only context, and on a fresh machine the configuration starts with a built-in `default` context pointing at `http://localhost:8080`, so follow it with `kates ctx use`.
 
+On a context that already exists, `kates ctx set` changes only the settings whose flags you pass and keeps the rest, so `kates ctx set local --url http://localhost:8080` keeps its API key, proxy and `insecure` setting. `--replace` rebuilds the context from the flags alone, as earlier releases did. `kates ctx delete` of the current context makes the alphabetically first remaining context current.
+
 `--url` and `KATES_URL` take the context's API key, proxy and `insecure` setting only to the context's own host. The port may differ, `localhost` and `127.0.0.1` count as one host, and plain HTTP never gets what the context sends over HTTPS. For another server, pass `--api-key` or set `KATES_API_KEY`; without either, the CLI says on stderr that it is not sending the context's key, and the request goes without one.
 
 The context stores the key in plain text in `~/.kates.yaml`. The CLI writes that file readable by you alone (mode `0600`); a file that an earlier release left readable by others is tightened to `0600` the next time the CLI saves it, on `kates ctx use` for instance. That keeps other users of the machine out, not other programs you run; to keep the key out of the file, leave `--api-key` out of the context and export the key as `KATES_API_KEY` for the session instead.
@@ -1460,7 +1462,7 @@ kates clean
 kates clean --yes
 ```
 
-`kates clean` works on kubectl's current context. It names that cluster, lists the Helm releases, namespaces and CRDs it will remove, and asks before removing anything; without a terminal it refuses unless `--yes` is given (`--force` does the same). Every kubectl and helm call it then makes names that context, so switching contexts in another terminal while it runs does not move the teardown. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes and leaves every other forward running.
+`kates clean` works on kubectl's current context. It names that cluster, lists the Helm releases, namespaces and CRDs it will remove, and asks before removing anything; without a terminal it refuses unless `--yes` is given (`--force` does the same). Every kubectl and helm call it then makes names that context, so switching contexts in another terminal while it runs does not move the teardown. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes and leaves every other forward running. It takes the same namespace flags as `kates deploy`, `--ui-ns` among them, so a stack deployed into other namespaces is removed from those. It exits `1` when a step fails, naming what it could not remove.
 
 On a cluster shared with other software, `kates clean` leaves what that software uses, and lists each thing it keeps with the reason:
 
@@ -1876,7 +1878,8 @@ kates kyverno apply --mode Enforce --yes --with-netpol
 | `--with-cosign` | Enable Cosign image signature verification |
 | `--with-netpol` | Enable NetworkPolicy generation |
 | `--yes`, `-y` | Skip confirmation prompt |
-| `--dry-run` | Show what would be applied without executing |
+| `--dry-run` | Render the release with `helm upgrade --install --dry-run` and report how many resources it would apply; installs nothing |
+| `--app-ns`, `--topology`, `--namespace` | The namespace of the kates release to update, as for `kates deploy`. Without them it uses the namespace of the installed `kates` release, and asks for `--app-ns` when two are installed |
 | `--labels-file` | Labels for the `kyverno` and `kates` namespaces (default: `.labels` in the current directory); see [Namespace Labels](12-deployment.md#namespace-labels) |
 
 **See also:** [Security & Compliance](17-security.md) for Kyverno policy deep dive and custom policy authoring.
@@ -2078,7 +2081,10 @@ Analyze test results and recommend configuration improvements.
 kates advisor <run-id>
 kates advisor abc123
 kates advisor abc123 -o json
+kates advisor abc123 --apply tuned.yaml
 ```
+
+`--apply <file>` writes a scenario file that reruns the test with the settings the recommendations change (batch size, linger, acks, compression, partitions), for `kates test apply -f`. It fails when no recommendation changes a setting.
 
 With `-o json` it prints the recommendations, each with its `severity`, `title`, `fix` and `evidence`, and a `status`: `ANALYZED`, or `RUN_NOT_FOUND` and `REPORT_NOT_READY` with an empty list. Those two exit `0` in both modes. The rules are the CLI's own, not the Kates API's advisor that `GET /api/tests/{id}/advisor` serves.
 
