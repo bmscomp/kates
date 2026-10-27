@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 	"gopkg.in/yaml.v3"
 )
@@ -244,8 +245,13 @@ func TitleBar(title, rest string, width int) string {
 }
 
 // Pick draws the selected row or value in the current look; s is how Classic
-// draws it, and every look keeps its width.
+// draws it, and every look keeps its width. Outside Classic the row is drawn
+// in one style: a colored icon inside it would end the fill, or vanish when
+// it has the fill's color.
 func Pick(s lipgloss.Style, text string) string {
+	if !CurrentLook().Classic() {
+		text = ansi.Strip(text)
+	}
 	switch CurrentLook().Name {
 	case Panels:
 		s = s.Foreground(Text).Background(Subtle).Bold(true)

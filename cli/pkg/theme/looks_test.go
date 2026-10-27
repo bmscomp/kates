@@ -141,3 +141,22 @@ func TestScreenPaintsEdgeToEdge(t *testing.T) {
 		t.Error("a look without a screen color must leave the view alone")
 	}
 }
+
+// A selected row is one style in the other looks: a colored icon inside it
+// must not end the fill.
+func TestPickDrawsTheRowInOneStyle(t *testing.T) {
+	trueColor(t)
+	s := lipgloss.NewStyle().Background(Primary).Padding(0, 1)
+	text := "▸ " + lipgloss.NewStyle().Foreground(Success).Render("✓") + " orders"
+	useLook(t, Classic)
+	if Pick(s, text) != s.Render(text) {
+		t.Error("Classic must draw the row as its caller's style")
+	}
+	for _, name := range LookNames()[1:] {
+		useLook(t, name)
+		out := Pick(s, text)
+		if lipgloss.Width(out) != lipgloss.Width(s.Render(text)) || !strings.Contains(out, "▸ ✓ orders") {
+			t.Errorf("%s: %q, want the row unbroken and as wide as Classic's", name, out)
+		}
+	}
+}

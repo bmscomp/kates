@@ -90,7 +90,7 @@ func TestTSwitchesTheLookOnTheSpot(t *testing.T) {
 	m := tuiAt(t, 100, 30)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
 	if got := theme.CurrentLook().Name; got != theme.Minimal {
-		t.Errorf("T in kates tui: look %s, want minimal", got)
+		t.Errorf("T in kates kafka tui: look %s, want minimal", got)
 	}
 	// Typing a filter is text, not a key binding.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
