@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -171,23 +172,22 @@ func (m topicsModel) Update(msg tea.Msg) (topicsModel, tea.Cmd) {
 }
 
 func (m topicsModel) updateList(msg tea.KeyMsg) (topicsModel, tea.Cmd) {
-	count := m.visibleCount()
-	switch msg.String() {
-	case "up", "k":
+	k := topicsKeys()
+	switch {
+	case key.Matches(msg, k.Up):
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case "down", "j":
-		if m.cursor < count-1 {
+	case key.Matches(msg, k.Down):
+		if m.cursor < m.visibleCount()-1 {
 			m.cursor++
 		}
-	case "enter":
-		t := m.selectedTopic()
-		if t != nil {
+	case key.Matches(msg, k.Detail):
+		if t := m.selectedTopic(); t != nil {
 			m.loading = true
 			return m, m.loadDetail(t.Name)
 		}
-	case "r":
+	case key.Matches(msg, k.Refresh):
 		m.loading = true
 		return m, m.loadTopics()
 	}
@@ -195,15 +195,15 @@ func (m topicsModel) updateList(msg tea.KeyMsg) (topicsModel, tea.Cmd) {
 }
 
 func (m topicsModel) updateDetail(msg tea.KeyMsg) (topicsModel, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "backspace":
+	k := topicsKeys()
+	switch {
+	case key.Matches(msg, k.Back):
 		m.view = topicsList
 		m.detail = nil
-	case "c":
+	case key.Matches(msg, k.Consume):
 		m.view = topicsConsume
 		m.records = nil
-		t := m.selectedTopic()
-		if t != nil {
+		if t := m.selectedTopic(); t != nil {
 			return m, tea.Batch(m.fetchRecords(t.Name), m.consumeTick())
 		}
 	}
@@ -211,8 +211,7 @@ func (m topicsModel) updateDetail(msg tea.KeyMsg) (topicsModel, tea.Cmd) {
 }
 
 func (m topicsModel) updateConsume(msg tea.KeyMsg) (topicsModel, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "backspace":
+	if key.Matches(msg, topicsKeys().Stop) {
 		m.view = topicsDetail
 		m.records = nil
 	}
@@ -221,7 +220,7 @@ func (m topicsModel) updateConsume(msg tea.KeyMsg) (topicsModel, tea.Cmd) {
 
 func (m topicsModel) View() string {
 	if m.loading {
-		return dimStyle.Render("  Loading topics…")
+		return dimStyle.Render("  Loading topics" + glyphs().Ellipsis)
 	}
 	if m.err != nil {
 		return errorStyle.Render("  Error: " + m.err.Error())
@@ -251,33 +250,21 @@ func (m topicsModel) viewList() string {
 	}
 	list.WriteString(dimStyle.Render(header) + "\n\n")
 
-	count := m.visibleCount()
-	start := 0
-	maxVisible := m.height - 8
-	if maxVisible < 5 {
-		maxVisible = 20
-	}
-	if m.cursor >= maxVisible {
-		start = m.cursor - maxVisible + 1
-	}
-
-	for vi := start; vi < count && vi < start+maxVisible; vi++ {
+	g := glyphs()
+	start, end := scrollWindow(m.cursor, m.visibleCount(), listRows(m.height))
+	for vi := start; vi < end; vi++ {
 		idx := m.visibleIndex(vi)
 		t := m.topics[idx]
-		health := healthyStyle.Render("✓")
+		health := healthyStyle.Render(g.Check)
 		ur := fmt.Sprintf("%v", t.UnderReplicated)
 		if ur != "0" && ur != "<nil>" {
-			health = warnStyle.Render("⚠")
+			health = warnStyle.Render(g.Warn)
 		}
 		label := fmt.Sprintf("%s %s", health, t.Name)
 		if t.Internal {
 			label += dimStyle.Render(" (internal)")
 		}
-		if vi == m.cursor {
-			list.WriteString(selectedItemStyle.Render("▸ "+label) + "\n")
-		} else {
-			list.WriteString(listItemStyle.Render("  "+label) + "\n")
-		}
+		list.WriteString(listRow(label, vi == m.cursor) + "\n")
 	}
 
 	listPane := lipgloss.NewStyle().Width(listWidth).Render(list.String())
@@ -289,7 +276,7 @@ func (m topicsModel) viewList() string {
 			detailKeyStyle.Render("Partitions") + detailValueStyle.Render(fmt.Sprintf("%d", t.Partitions)) + "\n" +
 			detailKeyStyle.Render("Rep. Factor") + detailValueStyle.Render(fmt.Sprintf("%d", t.ReplicationFactor)) + "\n" +
 			detailKeyStyle.Render("Internal") + detailValueStyle.Render(fmt.Sprintf("%v", t.Internal)) + "\n\n" +
-			dimStyle.Render("Enter: full detail  ·  c: consume")
+			dimStyle.Render(hint(topicsKeys().Detail))
 	} else {
 		detailStr = dimStyle.Render("No topic selected")
 	}
@@ -298,7 +285,7 @@ func (m topicsModel) viewList() string {
 	if detailWidth < 20 {
 		detailWidth = 40
 	}
-	detailPane := detailBorderStyle.Width(detailWidth).Render(detailStr)
+	detailPane := detailBox().Width(detailWidth).Render(detailStr)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 }
@@ -345,18 +332,19 @@ func (m topicsModel) viewDetail() string {
 			if !ok {
 				continue
 			}
-			health := healthyStyle.Render("✓")
+			health := healthyStyle.Render(glyphs().Check)
 			if ur, _ := pm["underReplicated"].(bool); ur {
-				health = warnStyle.Render("⚠")
+				health = warnStyle.Render(glyphs().Warn)
 			}
 			b.WriteString(fmt.Sprintf("  %-6v%-8v%-15v%-15v%s\n",
 				pm["partition"], pm["leader"], pm["replicas"], pm["isr"], health))
 		}
 	}
 
-	b.WriteString("\n" + dimStyle.Render("c: consume  ·  Esc: back"))
+	k := topicsKeys()
+	b.WriteString("\n" + dimStyle.Render(hint(k.Consume, k.Back)))
 
-	return detailBorderStyle.Width(m.width - 4).Render(b.String())
+	return detailBox().Width(m.width - 4).Render(b.String())
 }
 
 func (m topicsModel) viewConsume() string {
@@ -368,10 +356,13 @@ func (m topicsModel) viewConsume() string {
 
 	var b strings.Builder
 	b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Consuming: %s", topicName)) + "\n")
-	b.WriteString(dimStyle.Render(fmt.Sprintf("  %d records  ·  polling every 2s  ·  Esc to stop", len(m.records))) + "\n\n")
+	g := glyphs()
+	sep := "  " + g.Dot + "  "
+	b.WriteString(dimStyle.Render(fmt.Sprintf("  %d records%spolling every 2s%s%s",
+		len(m.records), sep, sep, hint(topicsKeys().Stop))) + "\n\n")
 
 	if len(m.records) == 0 {
-		b.WriteString(dimStyle.Render("  Waiting for records…"))
+		b.WriteString(dimStyle.Render("  Waiting for records" + g.Ellipsis))
 	} else {
 		b.WriteString(dimStyle.Render("  Part  Offset  Key                Value") + "\n")
 		start := 0
@@ -395,16 +386,18 @@ func (m topicsModel) viewConsume() string {
 		}
 	}
 
-	return detailBorderStyle.Width(m.width - 4).Render(b.String())
+	return detailBox().Width(m.width - 4).Render(b.String())
 }
 
-func (m topicsModel) helpContext() helpContext {
+// helpBindings are the keys of the view on screen.
+func (m topicsModel) helpBindings() []key.Binding {
+	k := topicsKeys()
 	switch m.view {
 	case topicsDetail:
-		return helpDetail
+		return []key.Binding{k.Back, k.Consume}
 	case topicsConsume:
-		return helpConsumer
+		return []key.Binding{k.Stop}
 	default:
-		return helpMain
+		return []key.Binding{k.Up, k.Down, k.Detail, k.Filter, k.Refresh}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -64,7 +65,8 @@ func (m brokersModel) Update(msg tea.Msg) (brokersModel, tea.Cmd) {
 	case tea.KeyMsg:
 		// r needs no data: a failed load leaves info nil, and r is how the
 		// user retries it. (q and ctrl+c never reach here; tui.go quits first.)
-		if msg.String() == "r" {
+		k := brokersKeys()
+		if key.Matches(msg, k.Refresh) {
 			m.loading = true
 			return m, m.loadBrokers()
 		}
@@ -72,12 +74,12 @@ func (m brokersModel) Update(msg tea.Msg) (brokersModel, tea.Cmd) {
 			break
 		}
 		count := len(m.info.Brokers)
-		switch msg.String() {
-		case "up", "k":
+		switch {
+		case key.Matches(msg, k.Up):
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case "down", "j":
+		case key.Matches(msg, k.Down):
 			if m.cursor < count-1 {
 				m.cursor++
 			}
@@ -88,7 +90,7 @@ func (m brokersModel) Update(msg tea.Msg) (brokersModel, tea.Cmd) {
 
 func (m brokersModel) View() string {
 	if m.loading {
-		return dimStyle.Render("  Loading brokers…")
+		return dimStyle.Render("  Loading brokers" + glyphs().Ellipsis)
 	}
 	if m.err != nil {
 		return errorStyle.Render("  Error: " + m.err.Error())
@@ -104,12 +106,13 @@ func (m brokersModel) View() string {
 		}
 	}
 
+	g := glyphs()
 	listWidth := 32
 	var list strings.Builder
 
 	clusterShort := m.info.ClusterID
 	if len(clusterShort) > 12 {
-		clusterShort = clusterShort[:12] + "…"
+		clusterShort = clusterShort[:12] + g.Ellipsis
 	}
 	list.WriteString(dimStyle.Render(fmt.Sprintf("  %v broker(s)  %s", m.info.BrokerCount, clusterShort)) + "\n\n")
 
@@ -121,14 +124,10 @@ func (m brokersModel) View() string {
 		}
 		badge := ""
 		if isCtrl {
-			badge = " ★"
+			badge = " " + g.Star
 		}
-		label := fmt.Sprintf("Broker %v · %s%s", b.ID, rack, badge)
-		if i == m.cursor {
-			list.WriteString(selectedItemStyle.Render("▸ "+label) + "\n")
-		} else {
-			list.WriteString(listItemStyle.Render("  "+label) + "\n")
-		}
+		label := fmt.Sprintf("Broker %v %s %s%s", b.ID, g.Dot, rack, badge)
+		list.WriteString(listRow(label, i == m.cursor) + "\n")
 	}
 
 	listPane := lipgloss.NewStyle().Width(listWidth).Render(list.String())
@@ -137,7 +136,7 @@ func (m brokersModel) View() string {
 	isCtrl := fmt.Sprintf("%v", b.ID) == controllerID
 	role := dimStyle.Render("broker")
 	if isCtrl {
-		role = healthyStyle.Render("★ CONTROLLER")
+		role = healthyStyle.Render(g.Star + " CONTROLLER")
 	}
 	rack := fmt.Sprintf("%v", b.Rack)
 	if rack == "" || rack == "<nil>" {
@@ -160,7 +159,7 @@ func (m brokersModel) View() string {
 	if detailWidth < 20 {
 		detailWidth = 40
 	}
-	detailPane := detailBorderStyle.Width(detailWidth).Render(detail)
+	detailPane := detailBox().Width(detailWidth).Render(detail)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 }
@@ -173,12 +172,18 @@ func controllerText(check *client.ClusterHealthReport) string {
 	id, ok := check.ActiveController()
 	switch {
 	case !ok && check.KraftQuorum.Issue != "NO_LEADER":
-		return warnStyle.Render("⚠ KRaft leader unknown")
+		return warnStyle.Render(glyphs().Warn + " KRaft leader unknown")
 	case !ok:
-		return errorStyle.Render("✖ no KRaft leader")
+		return errorStyle.Render(glyphs().Cross + " no KRaft leader")
 	case check.KraftQuorum == nil:
 		return fmt.Sprintf("Broker %d", id)
 	default:
 		return fmt.Sprintf("KRaft leader %d", id)
 	}
+}
+
+// helpBindings are the brokers tab's keys.
+func (m brokersModel) helpBindings() []key.Binding {
+	k := brokersKeys()
+	return []key.Binding{k.Up, k.Down, k.Refresh}
 }

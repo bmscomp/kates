@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -105,22 +106,23 @@ func (m groupsModel) Update(msg tea.Msg) (groupsModel, tea.Cmd) {
 }
 
 func (m groupsModel) updateList(msg tea.KeyMsg) (groupsModel, tea.Cmd) {
+	k := groupsKeys()
 	count := len(m.groups)
-	switch msg.String() {
-	case "up", "k":
+	switch {
+	case key.Matches(msg, k.Up):
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case "down", "j":
+	case key.Matches(msg, k.Down):
 		if m.cursor < count-1 {
 			m.cursor++
 		}
-	case "enter":
+	case key.Matches(msg, k.Detail):
 		if m.cursor < count {
 			m.loading = true
 			return m, m.loadGroupDetail(m.groups[m.cursor].GroupID)
 		}
-	case "r":
+	case key.Matches(msg, k.Refresh):
 		m.loading = true
 		return m, m.loadGroups()
 	}
@@ -128,8 +130,7 @@ func (m groupsModel) updateList(msg tea.KeyMsg) (groupsModel, tea.Cmd) {
 }
 
 func (m groupsModel) updateDetail(msg tea.KeyMsg) (groupsModel, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "backspace":
+	if key.Matches(msg, groupsKeys().Back) {
 		m.view = groupsList
 		m.detail = nil
 	}
@@ -138,7 +139,7 @@ func (m groupsModel) updateDetail(msg tea.KeyMsg) (groupsModel, tea.Cmd) {
 
 func (m groupsModel) View() string {
 	if m.loading {
-		return dimStyle.Render("  Loading consumer groups…")
+		return dimStyle.Render("  Loading consumer groups" + glyphs().Ellipsis)
 	}
 	if m.err != nil {
 		return errorStyle.Render("  Error: " + m.err.Error())
@@ -163,34 +164,11 @@ func (m groupsModel) viewList() string {
 
 	// A window of the list, as topics.go: without one a cluster with more
 	// groups than terminal rows scrolls the cursor off the screen.
-	start := 0
-	maxVisible := m.height - 8
-	if maxVisible < 5 {
-		maxVisible = 20
-	}
-	if m.cursor >= maxVisible {
-		start = m.cursor - maxVisible + 1
-	}
-
-	for i := start; i < len(m.groups) && i < start+maxVisible; i++ {
+	start, end := scrollWindow(m.cursor, len(m.groups), listRows(m.height))
+	for i := start; i < end; i++ {
 		g := m.groups[i]
-		stateIcon := dimStyle.Render("○")
-		switch strings.ToUpper(g.State) {
-		case "STABLE":
-			stateIcon = healthyStyle.Render("●")
-		case "EMPTY":
-			stateIcon = dimStyle.Render("○")
-		case "DEAD":
-			stateIcon = errorStyle.Render("✖")
-		default:
-			stateIcon = warnStyle.Render("⚠")
-		}
-		label := fmt.Sprintf("%s %s", stateIcon, g.GroupID)
-		if i == m.cursor {
-			list.WriteString(selectedItemStyle.Render("▸ "+label) + "\n")
-		} else {
-			list.WriteString(listItemStyle.Render("  "+label) + "\n")
-		}
+		label := fmt.Sprintf("%s %s", groupStateIcon(g.State), g.GroupID)
+		list.WriteString(listRow(label, i == m.cursor) + "\n")
 	}
 
 	listPane := lipgloss.NewStyle().Width(listWidth).Render(list.String())
@@ -198,19 +176,10 @@ func (m groupsModel) viewList() string {
 	var detailStr string
 	if m.cursor < len(m.groups) {
 		g := m.groups[m.cursor]
-		stateLabel := g.State
-		switch strings.ToUpper(g.State) {
-		case "STABLE":
-			stateLabel = healthyStyle.Render("● STABLE")
-		case "EMPTY":
-			stateLabel = dimStyle.Render("○ EMPTY")
-		case "DEAD":
-			stateLabel = errorStyle.Render("✖ DEAD")
-		}
 		detailStr = detailTitleStyle.Render(g.GroupID) + "\n\n" +
-			detailKeyStyle.Render("State") + stateLabel + "\n" +
+			detailKeyStyle.Render("State") + groupStateLabel(g.State, true) + "\n" +
 			detailKeyStyle.Render("Members") + detailValueStyle.Render(g.Members) + "\n\n" +
-			dimStyle.Render("Enter: view offsets & lag")
+			dimStyle.Render(hint(groupsKeys().Detail))
 	} else {
 		detailStr = dimStyle.Render("No group selected")
 	}
@@ -219,7 +188,7 @@ func (m groupsModel) viewList() string {
 	if detailWidth < 20 {
 		detailWidth = 40
 	}
-	detailPane := detailBorderStyle.Width(detailWidth).Render(detailStr)
+	detailPane := detailBox().Width(detailWidth).Render(detailStr)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 }
@@ -234,26 +203,11 @@ func (m groupsModel) viewDetail() string {
 	members := fmt.Sprintf("%v", m.detail["members"])
 	totalLag := fmt.Sprintf("%v", m.detail["totalLag"])
 
-	stateLabel := state
-	switch strings.ToUpper(state) {
-	case "STABLE":
-		stateLabel = healthyStyle.Render("● STABLE")
-	case "EMPTY":
-		stateLabel = dimStyle.Render("○ EMPTY")
-	}
-
-	lagLabel := totalLag
-	if totalLag != "0" {
-		lagLabel = warnStyle.Render(totalLag)
-	} else {
-		lagLabel = healthyStyle.Render("0")
-	}
-
 	var b strings.Builder
 	b.WriteString(detailTitleStyle.Render("Group: "+groupID) + "\n\n")
-	b.WriteString(detailKeyStyle.Render("State") + stateLabel + "\n")
+	b.WriteString(detailKeyStyle.Render("State") + groupStateLabel(state, false) + "\n")
 	b.WriteString(detailKeyStyle.Render("Members") + detailValueStyle.Render(members) + "\n")
-	b.WriteString(detailKeyStyle.Render("Total Lag") + lagLabel + "\n")
+	b.WriteString(detailKeyStyle.Render("Total Lag") + lagLabel(totalLag) + "\n")
 
 	if offsets, ok := m.detail["offsets"].([]interface{}); ok && len(offsets) > 0 {
 		b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("Partition Offsets (%d)", len(offsets))) + "\n")
@@ -263,28 +217,63 @@ func (m groupsModel) viewDetail() string {
 			if !ok {
 				continue
 			}
-			lag := fmt.Sprintf("%v", om["lag"])
-			lagCol := lag
-			if lag != "0" {
-				lagCol = warnStyle.Render(lag)
-			} else {
-				lagCol = healthyStyle.Render("0")
-			}
 			b.WriteString(fmt.Sprintf("  %-17v%-6v%-11v%-11v%s\n",
-				om["topic"], om["partition"], om["currentOffset"], om["endOffset"], lagCol))
+				om["topic"], om["partition"], om["currentOffset"], om["endOffset"],
+				lagLabel(fmt.Sprintf("%v", om["lag"]))))
 		}
 	}
 
-	b.WriteString("\n" + dimStyle.Render("Esc: back"))
+	b.WriteString("\n" + dimStyle.Render(hint(groupsKeys().Back)))
 
-	return detailBorderStyle.Width(m.width - 4).Render(b.String())
+	return detailBox().Width(m.width - 4).Render(b.String())
 }
 
-func (m groupsModel) helpCtx() helpContext {
-	switch m.view {
-	case groupsDetail:
-		return helpDetail
-	default:
-		return helpMain
+// lagLabel colours a lag: green at zero, amber otherwise.
+func lagLabel(lag string) string {
+	if lag != "0" {
+		return warnStyle.Render(lag)
 	}
+	return healthyStyle.Render("0")
+}
+
+// groupStateIcon marks a group's state in the list.
+func groupStateIcon(state string) string {
+	g := glyphs()
+	switch strings.ToUpper(state) {
+	case "STABLE":
+		return healthyStyle.Render(g.Bullet)
+	case "EMPTY":
+		return dimStyle.Render(g.Ring)
+	case "DEAD":
+		return errorStyle.Render(g.Cross)
+	default:
+		return warnStyle.Render(g.Warn)
+	}
+}
+
+// groupStateLabel is a group's state with its mark, or the bare state when
+// it has none. The list's summary pane labels DEAD; the detail page never
+// has, so withDead says which this is.
+func groupStateLabel(state string, withDead bool) string {
+	g := glyphs()
+	switch strings.ToUpper(state) {
+	case "STABLE":
+		return healthyStyle.Render(g.Bullet + " STABLE")
+	case "EMPTY":
+		return dimStyle.Render(g.Ring + " EMPTY")
+	case "DEAD":
+		if withDead {
+			return errorStyle.Render(g.Cross + " DEAD")
+		}
+	}
+	return state
+}
+
+// helpBindings are the keys of the view on screen.
+func (m groupsModel) helpBindings() []key.Binding {
+	k := groupsKeys()
+	if m.view == groupsDetail {
+		return []key.Binding{k.Back}
+	}
+	return []key.Binding{k.Up, k.Down, k.Detail, k.Refresh}
 }

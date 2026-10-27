@@ -3,10 +3,11 @@ package tui
 import (
 	"context"
 	"fmt"
-	"github.com/charmbracelet/bubbles/textinput"
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -105,11 +106,12 @@ func (m produceModel) Update(msg tea.Msg) (produceModel, tea.Cmd) {
 
 	case produceSentMsg:
 		m.loading = false
+		g := glyphs()
 		if msg.err != nil {
-			m.statusMsg = errorStyle.Render("✖ " + msg.err.Error())
+			m.statusMsg = errorStyle.Render(g.Cross + " " + msg.err.Error())
 		} else {
-			m.statusMsg = healthyStyle.Render(
-				fmt.Sprintf("✓ Produced to %s → partition %s, offset %s", msg.topic, msg.partition, msg.offset))
+			m.statusMsg = healthyStyle.Render(fmt.Sprintf("%s Produced to %s %s partition %s, offset %s",
+				g.Check, msg.topic, g.To, msg.partition, msg.offset))
 			m.history = append(m.history, producedRecord{
 				Topic: msg.topic, Key: msg.key, Partition: msg.partition, Offset: msg.offset,
 			})
@@ -131,23 +133,30 @@ func (m produceModel) Update(msg tea.Msg) (produceModel, tea.Cmd) {
 }
 
 func (m produceModel) updateTopicSelect(msg tea.KeyMsg) (produceModel, tea.Cmd) {
+	k := produceKeys()
 	count := len(m.topics)
-	switch msg.String() {
-	case "up", "k":
+	switch {
+	case key.Matches(msg, k.Up):
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case "down", "j":
+	case key.Matches(msg, k.Down):
 		if m.cursor < count-1 {
 			m.cursor++
 		}
-	case "enter":
+	case key.Matches(msg, k.Select):
 		if m.cursor < count {
 			m.view = produceInput
-			m.activeField = 1
 			m.statusMsg = ""
+			// The value field takes the typing. Marking it active without
+			// focusing it left keystrokes going nowhere: the key field held
+			// the focus from construction, and an unfocused textinput
+			// ignores input.
+			m.activeField = 1
+			m.valueInput.Focus()
+			m.keyInput.Blur()
 		}
-	case "r":
+	case key.Matches(msg, k.Refresh):
 		m.loading = true
 		return m, m.loadTopics()
 	}
@@ -155,14 +164,15 @@ func (m produceModel) updateTopicSelect(msg tea.KeyMsg) (produceModel, tea.Cmd) 
 }
 
 func (m produceModel) updateInput(msg tea.KeyMsg) (produceModel, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	k := produceKeys()
+	switch {
+	case key.Matches(msg, k.Back):
 		m.view = produceTopicSelect
 		m.keyInput.SetValue("")
 		m.valueInput.SetValue("")
 		m.statusMsg = ""
 		return m, nil
-	case "tab":
+	case key.Matches(msg, k.NextField):
 		m.activeField = (m.activeField + 1) % 2
 		if m.activeField == 0 {
 			m.keyInput.Focus()
@@ -172,14 +182,18 @@ func (m produceModel) updateInput(msg tea.KeyMsg) (produceModel, tea.Cmd) {
 			m.keyInput.Blur()
 		}
 		return m, nil
-	case "enter":
+	case key.Matches(msg, k.Send):
 		if m.valueInput.Value() == "" {
 			m.statusMsg = warnStyle.Render("Value cannot be empty")
 			return m, nil
 		}
+		if m.cursor >= len(m.topics) {
+			m.statusMsg = warnStyle.Render("No topic selected")
+			return m, nil
+		}
 		topic := m.topics[m.cursor].Name
 		m.loading = true
-		m.statusMsg = dimStyle.Render("Sending…")
+		m.statusMsg = dimStyle.Render("Sending" + glyphs().Ellipsis)
 		return m, m.sendRecord(topic, m.keyInput.Value(), m.valueInput.Value())
 	}
 
@@ -196,7 +210,7 @@ func (m produceModel) updateInput(msg tea.KeyMsg) (produceModel, tea.Cmd) {
 
 func (m produceModel) View() string {
 	if m.loading && len(m.topics) == 0 {
-		return dimStyle.Render("  Loading topics…")
+		return dimStyle.Render("  Loading topics" + glyphs().Ellipsis)
 	}
 	if m.err != nil {
 		return errorStyle.Render("  Error: " + m.err.Error())
@@ -219,27 +233,14 @@ func (m produceModel) viewTopicSelect() string {
 	var list strings.Builder
 	list.WriteString(dimStyle.Render(fmt.Sprintf("  Select Topic (%d)", len(m.topics))) + "\n\n")
 
-	maxVisible := m.height - 8
-	if maxVisible < 5 {
-		maxVisible = 20
-	}
-	start := 0
-	if m.cursor >= maxVisible {
-		start = m.cursor - maxVisible + 1
-	}
-	count := len(m.topics)
-
-	for vi := start; vi < count && vi < start+maxVisible; vi++ {
+	start, end := scrollWindow(m.cursor, len(m.topics), listRows(m.height))
+	for vi := start; vi < end; vi++ {
 		t := m.topics[vi]
 		label := t.Name
 		if t.Internal {
 			label += dimStyle.Render(" (internal)")
 		}
-		if vi == m.cursor {
-			list.WriteString(selectedItemStyle.Render("▸ "+label) + "\n")
-		} else {
-			list.WriteString(listItemStyle.Render("  "+label) + "\n")
-		}
+		list.WriteString(listRow(label, vi == m.cursor) + "\n")
 	}
 
 	listPane := lipgloss.NewStyle().Width(listWidth).Render(list.String())
@@ -250,7 +251,7 @@ func (m produceModel) viewTopicSelect() string {
 		detailStr = detailTitleStyle.Render(t.Name) + "\n\n" +
 			detailKeyStyle.Render("Partitions") + detailValueStyle.Render(fmt.Sprintf("%d", t.Partitions)) + "\n" +
 			detailKeyStyle.Render("Rep. Factor") + detailValueStyle.Render(fmt.Sprintf("%d", t.ReplicationFactor)) + "\n\n" +
-			dimStyle.Render("Enter: select for producing")
+			dimStyle.Render(hint(produceKeys().Select))
 	}
 
 	if len(m.history) > 0 {
@@ -261,7 +262,7 @@ func (m produceModel) viewTopicSelect() string {
 		}
 		for _, h := range m.history[start:] {
 			detailStr += fmt.Sprintf("  %s p%s @%s  %s\n",
-				healthyStyle.Render("✓"), h.Partition, h.Offset,
+				healthyStyle.Render(glyphs().Check), h.Partition, h.Offset,
 				dimStyle.Render(h.Topic))
 		}
 	}
@@ -270,7 +271,7 @@ func (m produceModel) viewTopicSelect() string {
 	if detailWidth < 20 {
 		detailWidth = 40
 	}
-	detailPane := detailBorderStyle.Width(detailWidth).Render(detailStr)
+	detailPane := detailBox().Width(detailWidth).Render(detailStr)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 }
@@ -290,7 +291,7 @@ func (m produceModel) viewInput() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Produce → %s", topicName)) + "\n\n")
+	b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Produce %s %s", glyphs().To, topicName)) + "\n\n")
 	b.WriteString(keyLabel + "\n")
 	b.WriteString(m.keyInput.View() + "\n\n")
 	b.WriteString(valueLabel + "\n")
@@ -300,16 +301,18 @@ func (m produceModel) viewInput() string {
 		b.WriteString(m.statusMsg + "\n\n")
 	}
 
-	b.WriteString(dimStyle.Render("Tab: switch field · Enter: send · Esc: back"))
+	k := produceKeys()
+	b.WriteString(dimStyle.Render(hint(k.NextField, k.Send, k.Back)))
 
-	return detailBorderStyle.Width(m.width - 4).Render(b.String())
+	return detailBox().Width(m.width - 4).Render(b.String())
 }
 
-func (m produceModel) helpCtx() helpContext {
-	switch m.view {
-	case produceInput:
-		return helpProduce
-	default:
-		return helpMain
+// helpBindings are the keys of the view on screen. In the input every other
+// key is text, so the tab bar's own keys are not offered there.
+func (m produceModel) helpBindings() []key.Binding {
+	k := produceKeys()
+	if m.view == produceInput {
+		return []key.Binding{k.NextField, k.Send, k.Back, k.Quit}
 	}
+	return []key.Binding{k.Up, k.Down, k.Select, k.Refresh}
 }

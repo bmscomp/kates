@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Adaptive palette for the TUI — all values flip between light/dark terminal modes.

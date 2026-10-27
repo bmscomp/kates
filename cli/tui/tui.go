@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -73,121 +74,106 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.brokers.width = msg.Width
-		m.brokers.height = msg.Height
-		m.topics.width = msg.Width
-		m.topics.height = msg.Height
-		m.groups.width = msg.Width
-		m.groups.height = msg.Height
-		m.produce.width = msg.Width
-		m.produce.height = msg.Height
+		m.width, m.height = msg.Width, msg.Height
+		m.brokers.width, m.brokers.height = msg.Width, msg.Height
+		m.topics.width, m.topics.height = msg.Width, msg.Height
+		m.groups.width, m.groups.height = msg.Width, msg.Height
+		m.produce.width, m.produce.height = msg.Width, msg.Height
 		return m, nil
 
 	case autoRefreshMsg:
-		var cmds []tea.Cmd
-		cmds = append(cmds, m.brokers.loadBrokers())
-		cmds = append(cmds, m.topics.loadTopics())
-		cmds = append(cmds, m.groups.loadGroups())
-		cmds = append(cmds, scheduleAutoRefresh())
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(
+			m.brokers.loadBrokers(),
+			m.topics.loadTopics(),
+			m.groups.loadGroups(),
+			scheduleAutoRefresh(),
+		)
 
 	case tea.KeyMsg:
-		if m.filtering {
-			return m.handleFilter(msg)
-		}
+		return m.updateKey(msg)
+	}
+	return m.broadcast(msg)
+}
 
-		if m.active == tabProduce && m.produce.view == produceInput {
-			var cmd tea.Cmd
-			m.produce, cmd = m.produce.Update(msg)
-			return m, cmd
-		}
+// updateKey handles a key press: the filter's keys while it is open, the
+// produce input's while that has focus, the tab bar's own, and otherwise the
+// active tab's.
+func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filtering {
+		return m.handleFilter(msg)
+	}
 
-		switch msg.String() {
-		case "q", "ctrl+c":
+	if m.active == tabProduce && m.produce.view == produceInput {
+		// Every key but ctrl+c is the input's: q, tab and the digits are text.
+		if key.Matches(msg, produceKeys().Quit) {
 			m.quitting = true
 			return m, tea.Quit
-		case "tab":
-			m.active = tab((int(m.active) + 1) % len(m.tabs))
-			return m, nil
-		case "shift+tab":
-			m.active = tab((int(m.active) - 1 + len(m.tabs)) % len(m.tabs))
-			return m, nil
-		case "1":
-			m.active = tabBrokers
-			return m, nil
-		case "2":
-			m.active = tabTopics
-			return m, nil
-		case "3":
-			m.active = tabGroups
-			return m, nil
-		case "4":
-			m.active = tabProduce
-			return m, nil
-		case "/":
-			if m.active == tabTopics && m.topics.view == topicsList {
-				m.filtering = true
-				m.filterBuf = m.topics.filter
-				return m, nil
-			}
 		}
+		var cmd tea.Cmd
+		m.produce, cmd = m.produce.Update(msg)
+		return m, cmd
+	}
+
+	k := tabsKeys()
+	switch {
+	case key.Matches(msg, k.Quit):
+		m.quitting = true
+		return m, tea.Quit
+	case key.Matches(msg, k.NextTab):
+		m.active = tab((int(m.active) + 1) % len(m.tabs))
+		return m, nil
+	case key.Matches(msg, k.PrevTab):
+		m.active = tab((int(m.active) - 1 + len(m.tabs)) % len(m.tabs))
+		return m, nil
+	case key.Matches(msg, k.JumpTab):
+		m.active = tab(msg.String()[0] - '1')
+		return m, nil
+	case key.Matches(msg, topicsKeys().Filter) && m.active == tabTopics && m.topics.view == topicsList:
+		m.filtering = true
+		m.filterBuf = m.topics.filter
+		return m, nil
 	}
 
 	var cmd tea.Cmd
-	var cmds []tea.Cmd
-
-	switch msg.(type) {
-	case tea.KeyMsg:
-		switch m.active {
-		case tabBrokers:
-			m.brokers, cmd = m.brokers.Update(msg)
-		case tabTopics:
-			m.topics, cmd = m.topics.Update(msg)
-		case tabGroups:
-			m.groups, cmd = m.groups.Update(msg)
-		case tabProduce:
-			m.produce, cmd = m.produce.Update(msg)
-		}
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	default:
+	switch m.active {
+	case tabBrokers:
 		m.brokers, cmd = m.brokers.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	case tabTopics:
 		m.topics, cmd = m.topics.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	case tabGroups:
 		m.groups, cmd = m.groups.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	case tabProduce:
 		m.produce, cmd = m.produce.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 	}
+	return m, cmd
+}
+
+// broadcast hands a message that is not a key to every tab: each picks out
+// the results of its own commands.
+func (m Model) broadcast(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmds := make([]tea.Cmd, 4)
+	m.brokers, cmds[0] = m.brokers.Update(msg)
+	m.topics, cmds[1] = m.topics.Update(msg)
+	m.groups, cmds[2] = m.groups.Update(msg)
+	m.produce, cmds[3] = m.produce.Update(msg)
 	return m, tea.Batch(cmds...)
 }
 
 func (m Model) handleFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
+	k := tabsKeys()
+	switch {
+	case key.Matches(msg, k.FilterApply):
 		m.filtering = false
 		m.topics.filter = m.filterBuf
 		m.topics.cursor = 0
 		m.topics.applyFilter()
-	case "esc":
+	case key.Matches(msg, k.FilterClear):
 		m.filtering = false
 		m.filterBuf = ""
 		m.topics.filter = ""
 		m.topics.cursor = 0
 		m.topics.applyFilter()
-	case "backspace":
+	case key.Matches(msg, k.FilterErase):
 		// The buffer holds runes, so backspace removes a whole one, not the
 		// last byte of a multi-byte character.
 		if len(m.filterBuf) > 0 {
@@ -204,6 +190,30 @@ func (m Model) handleFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// helpBindings are the keys that act on the screen as it is: the active
+// tab's view first, then the tab bar's own.
+func (m Model) helpBindings() []key.Binding {
+	k := tabsKeys()
+	if m.filtering {
+		return []key.Binding{k.FilterType, k.FilterApply, k.FilterErase, k.FilterClear}
+	}
+	var view []key.Binding
+	switch m.active {
+	case tabBrokers:
+		view = m.brokers.helpBindings()
+	case tabTopics:
+		view = m.topics.helpBindings()
+	case tabGroups:
+		view = m.groups.helpBindings()
+	case tabProduce:
+		view = m.produce.helpBindings()
+		if m.produce.view == produceInput {
+			return view
+		}
+	}
+	return append(view, k.NextTab, k.PrevTab, k.JumpTab, k.Quit)
+}
+
 func (m Model) View() string {
 	if m.quitting {
 		return ""
@@ -215,31 +225,21 @@ func (m Model) View() string {
 
 	tabBar := m.renderTabs()
 	var body string
-	var hctx helpContext
-
 	switch m.active {
 	case tabBrokers:
 		body = m.brokers.View()
-		hctx = helpMain
 	case tabTopics:
 		body = m.topics.View()
-		hctx = m.topics.helpContext()
 	case tabGroups:
 		body = m.groups.View()
-		hctx = m.groups.helpCtx()
 	case tabProduce:
 		body = m.produce.View()
-		hctx = m.produce.helpCtx()
 	}
 
-	if m.filtering {
-		hctx = helpFilter
-	}
-
-	help := renderHelp(hctx)
+	help := renderHelp(m.helpBindings(), m.width)
 	filterLine := ""
 	if m.filtering {
-		filterLine = "\n" + filterActiveStyle.Render(fmt.Sprintf("  / %s▌", m.filterBuf))
+		filterLine = "\n" + filterActiveStyle.Render(fmt.Sprintf("  / %s%s", m.filterBuf, glyphs().Caret))
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
@@ -249,7 +249,8 @@ func (m Model) View() string {
 		filterLine,
 	)
 
-	bodyHeight := m.height - 2
+	// The help sits on the last rows; the body is padded down to it.
+	bodyHeight := m.height - 1 - (strings.Count(help, "\n") + 1)
 	contentLines := strings.Count(content, "\n") + 1
 	if contentLines < bodyHeight {
 		content += strings.Repeat("\n", bodyHeight-contentLines)
