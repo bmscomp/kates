@@ -18,7 +18,8 @@ func ScreenHeader(title, rest string, width int) string {
 	if !theme.CurrentLook().Classic() {
 		return theme.TitleBar(title, rest, width)
 	}
-	return labHeaderStyle.Width(width).Render("  " + title + rest)
+	// Cut, not wrapped: the padding takes a column either side.
+	return labHeaderStyle.Width(width).Render(ansi.Truncate("  "+title+rest, max(width-2, 0), glyphs().Ellipsis))
 }
 
 // Pane is a framed pane as the lab draws its results, width by height cells:

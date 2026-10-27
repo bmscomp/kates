@@ -59,14 +59,24 @@ var (
 	CommanderInk  = lipgloss.Color("#0B1220")
 	CommanderKey  = lipgloss.Color("#F1F5F9")
 
-	// PaneFill is the fill of panes, striped rows and tab bars. Surface
-	// downsampled reads as navy on 256 colors and as blue on 16, which is
-	// Commander's screen, so those terminals get a gray, or nothing.
-	PaneFill = lipgloss.CompleteAdaptiveColor{
-		Light: lipgloss.CompleteColor{TrueColor: Surface.Light, ANSI256: "255", ANSI: "7"},
-		Dark:  lipgloss.CompleteColor{TrueColor: Surface.Dark, ANSI256: "235", ANSI: "0"},
-	}
+	// PaneFill is the fill of panes, striped rows and tab bars: the active
+	// palette's Surface. Downsampled, Surface reads as navy on 256 colors and
+	// as blue on 16, which is Commander's screen, so those terminals get a
+	// gray, or nothing.
+	PaneFill lipgloss.TerminalColor = fill{&paneFill}
+	paneFill                        = paneFillOf(Active.Surface)
 )
+
+type fill struct {
+	*lipgloss.CompleteAdaptiveColor
+}
+
+func paneFillOf(surface lipgloss.AdaptiveColor) lipgloss.CompleteAdaptiveColor {
+	return lipgloss.CompleteAdaptiveColor{
+		Light: lipgloss.CompleteColor{TrueColor: surface.Light, ANSI256: "255", ANSI: "7"},
+		Dark:  lipgloss.CompleteColor{TrueColor: surface.Dark, ANSI256: "235", ANSI: "0"},
+	}
+}
 
 // Looks are the built-in looks, by name.
 var Looks = map[string]*Look{
@@ -91,6 +101,8 @@ var (
 	// terminal's own background, read before a screen color overrides it.
 	fullScreen bool
 	termDark   *bool
+	// The look and palette when the first full-screen view started.
+	screenLook, screenPalette string
 )
 
 func init() {
@@ -104,8 +116,26 @@ func init() {
 // with a screen color paints the whole terminal. Call it before the view
 // starts, from the goroutine that renders it.
 func FullScreen() {
+	if !fullScreen {
+		screenLook, screenPalette = CurrentLook().Name, activeName
+	}
 	fullScreen = true
 	use(CurrentLook())
+}
+
+// SwitchedOnScreen is the look and the palette switched to in full-screen
+// views with T and C, each "" when it is the one they started with.
+func SwitchedOnScreen() (look, palette string) {
+	if !fullScreen {
+		return "", ""
+	}
+	if l := CurrentLook().Name; l != screenLook {
+		look = l
+	}
+	if activeName != screenPalette {
+		palette = activeName
+	}
+	return look, palette
 }
 
 // use switches to l. A painted screen is dark whatever the terminal is, so
@@ -267,6 +297,9 @@ func OpenPane(s lipgloss.Style, focused bool, content string) string {
 func TitleBar(title, rest string, width int) string {
 	l := CurrentLook()
 	bold := lipgloss.NewStyle().Bold(true)
+	// One line in every look: rest is cut to what the title, the padding and
+	// a frame leave.
+	rest = ansi.Truncate(rest, max(width-lipgloss.Width(title)-4, 0), "…")
 	switch l.Name {
 	case Panels, Grid:
 		return Box(lipgloss.NewStyle().Padding(0, 1).Width(width-2), true,
@@ -290,19 +323,25 @@ func Pick(s lipgloss.Style, text string) string {
 	if !CurrentLook().Classic() {
 		text = ansi.Strip(text)
 	}
+	return PickStyle(s).Render(text)
+}
+
+// PickStyle is the style Pick draws with: s in Classic, else s with the
+// current look's colors for a selection.
+func PickStyle(s lipgloss.Style) lipgloss.Style {
 	switch CurrentLook().Name {
 	case Panels:
-		s = s.Foreground(Text).Background(Subtle).Bold(true)
+		return s.Foreground(Text).Background(Subtle).Bold(true)
 	case Minimal:
-		s = s.UnsetBackground().Foreground(Text).Bold(true)
+		return s.UnsetBackground().Foreground(Text).Bold(true)
 	case Grid:
-		s = s.Foreground(OnColor).Background(Info)
+		return s.Foreground(OnColor).Background(Info)
 	case Commander:
-		s = s.Foreground(CommanderInk).Background(CommanderBar)
+		return s.Foreground(CommanderInk).Background(CommanderBar)
 	case Chips:
-		s = s.Foreground(OnColor).Background(Accent).Bold(true)
+		return s.Foreground(OnColor).Background(Accent).Bold(true)
 	}
-	return s.Render(text)
+	return s
 }
 
 // Pill draws text as a filled pill in color c, for the Chips look.

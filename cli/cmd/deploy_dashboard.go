@@ -15,6 +15,7 @@ import (
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/bmscomp/kates/cli/tui"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -391,8 +392,12 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusedPane = (m.focusedPane + 1) % 2
 			return m, nil
 		}
-		if msg.String() == "T" {
+		switch msg.String() {
+		case "T":
 			theme.NextLook()
+			return m, nil
+		case "C":
+			theme.NextPalette()
 			return m, nil
 		}
 
@@ -627,16 +632,11 @@ func (m deployDashboardModel) View() string {
 
 	var out strings.Builder
 
-	headerStyle := lipgloss.NewStyle().
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder(), true).
-		BorderForeground(theme.Accent).
-		// Content width; +2 border columns renders the header at m.width-2 —
-		// the same rowWidth the panes fill, so the right edges align.
-		Width(m.width - 4)
-
-	headerContent := fmt.Sprintf("📦 Kates Cluster Deployment: %s %.0f%% (%d/%d Steps) │ Helm: %s", bar, pct*100, m.currentStep, m.totalSteps, m.helmVersion)
-	out.WriteString(theme.Box(headerStyle, true, headerContent) + "\n")
+	// The lab's title bar, m.width-2 wide: the rowWidth the panes fill, so
+	// the right edges align.
+	dot := "  " + glyphOr("·", "|") + "  "
+	rest := fmt.Sprintf("%s%s %.0f%% (%d/%d steps)%sHelm %s", dot, bar, pct*100, m.currentStep, m.totalSteps, dot, m.helmVersion)
+	out.WriteString(tui.ScreenHeader("Kates Cluster Deployment", rest, m.width-2) + "\n\n")
 
 	compBorderStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 	if m.focusedPane == 0 {
@@ -657,9 +657,18 @@ func (m deployDashboardModel) View() string {
 		theme.Box(logBorderStyle, m.focusedPane == 1, m.logsViewport.View()),
 	)
 	out.WriteString(split)
-	out.WriteString("\n")
+	out.WriteString(tui.HelpLines(deployDashboardHelp, m.width))
 
 	return theme.Screen(out.String(), m.width, m.height)
+}
+
+// deployDashboardHelp is the dashboard's key help, as the lab shows its own.
+var deployDashboardHelp = []key.Binding{
+	key.NewBinding(key.WithHelp("tab", "switch pane")),
+	key.NewBinding(key.WithHelp(glyphOr("↑/↓", "up/down"), "scroll")),
+	key.NewBinding(key.WithHelp("T (shift+t)", "next look")),
+	key.NewBinding(key.WithHelp("C (shift+c)", "next colors")),
+	key.NewBinding(key.WithHelp("ctrl+c", "close the window")),
 }
 
 // extend workloadStat to support phase

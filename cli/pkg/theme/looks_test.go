@@ -202,3 +202,56 @@ func TestPaneFillStaysGrayOnFewerColors(t *testing.T) {
 		t.Errorf("16 colors: %q is blue", got)
 	}
 }
+
+// Tokens point into the active palette, so a style built before a switch
+// draws with the new palette after it.
+func TestUsePaletteRecolorsStylesAlreadyBuilt(t *testing.T) {
+	trueColor(t)
+	lipgloss.SetHasDarkBackground(true)
+	prev := ActivePalette()
+	t.Cleanup(func() { _ = UsePalette(prev) })
+	_ = UsePalette(DefaultName)
+	s := lipgloss.NewStyle().Foreground(Accent).Background(PaneFill)
+	before := s.Render("x")
+	if err := UsePalette("Dracula"); err != nil || ActivePalette() != "dracula" {
+		t.Fatalf("UsePalette(Dracula) = %v, active %s", err, ActivePalette())
+	}
+	if after := s.Render("x"); after == before {
+		t.Errorf("the style kept the default colors: %q", after)
+	}
+	if err := UsePalette("neon"); err == nil || ActivePalette() != "dracula" {
+		t.Errorf("an unknown theme must be refused and change nothing")
+	}
+	_ = UsePalette(DefaultName)
+	for _, want := range append(Names()[1:], DefaultName) {
+		if got := NextPalette(); got != want {
+			t.Fatalf("NextPalette() = %s, want %s", got, want)
+		}
+	}
+}
+
+func TestSwitchedOnScreenNamesOnlyWhatChanged(t *testing.T) {
+	prevFull, prevLook, prevPalette := fullScreen, screenLook, screenPalette
+	t.Cleanup(func() {
+		fullScreen, screenLook, screenPalette = prevFull, prevLook, prevPalette
+		_ = UsePalette(DefaultName)
+	})
+	useLook(t, Classic)
+	_ = UsePalette(DefaultName)
+	fullScreen = false
+	if l, p := SwitchedOnScreen(); l != "" || p != "" {
+		t.Errorf("before a full-screen view: %q %q", l, p)
+	}
+	FullScreen()
+	if l, p := SwitchedOnScreen(); l != "" || p != "" {
+		t.Errorf("nothing switched yet: %q %q", l, p)
+	}
+	NextLook()
+	if l, p := SwitchedOnScreen(); l != Panels || p != "" {
+		t.Errorf("after T: %q %q, want panels and no palette", l, p)
+	}
+	NextPalette()
+	if _, p := SwitchedOnScreen(); p != Names()[1] {
+		t.Errorf("after C: palette %q, want %s", p, Names()[1])
+	}
+}

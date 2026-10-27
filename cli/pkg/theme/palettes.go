@@ -1,8 +1,11 @@
 package theme
 
 import (
+	"fmt"
 	"os"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -114,6 +117,31 @@ func Names() []string {
 // Requested is the theme asked for, before checking it exists: KATES_THEME,
 // else `theme:` in ~/.kates.yaml, else "".
 func Requested() string { return pick(os.Getenv("KATES_THEME"), readUserConfig().Theme) }
+
+// ActivePalette names the palette kates draws with now.
+func ActivePalette() string { return activeName }
+
+// UsePalette switches the palette: every style built from the tokens draws
+// with it from now on. Call it from the goroutine that renders.
+func UsePalette(name string) error {
+	name = strings.ToLower(strings.TrimSpace(name))
+	p, ok := Palettes[name]
+	if !ok {
+		return fmt.Errorf("unknown theme: %s (use: %s)", name, strings.Join(Names(), ", "))
+	}
+	Active, activeName = p, name
+	paneFill = paneFillOf(Active.Surface)
+	return nil
+}
+
+// NextPalette switches to the palette after the active one and returns its
+// name.
+func NextPalette() string {
+	names := Names()
+	name := names[(slices.Index(names, activeName)+1)%len(names)]
+	_ = UsePalette(name)
+	return name
+}
 
 // Selected is the theme this process uses: the requested one when it exists,
 // else the default.

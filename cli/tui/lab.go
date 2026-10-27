@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -175,6 +176,7 @@ func RunLab(c *client.Client, url string) error {
 	theme.FullScreen()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	final, err := p.Run()
+	output.KeepHint()
 	// Quitting mid-run used to cancel only the local context; the server-side
 	// test kept running, orphaned, burning cluster resources with nothing
 	// watching it. Best-effort cancel after the program exits — commands
@@ -462,6 +464,9 @@ func (m *LabModel) updateFileKey(msg tea.KeyMsg) {
 	case key.Matches(msg, k.Look):
 		name := theme.NextLook()
 		m.status = dimStyle.Render("Look: " + name + "  " + g.Dot + "  T for the next  " + g.Dot + "  kates look set " + name + " keeps it")
+	case key.Matches(msg, k.Colors):
+		name := theme.NextPalette()
+		m.status = dimStyle.Render("Colors: " + name + "  " + g.Dot + "  C for the next  " + g.Dot + "  kates theme set " + name + " keeps it")
 	case key.Matches(msg, k.Load):
 		if path, ok := m.loadSession(); ok {
 			m.status = healthyStyle.Render(g.Check + " Session loaded from " + path)
@@ -690,7 +695,7 @@ func (m LabModel) helpBindings() []key.Binding {
 	if m.view != labConfig {
 		bindings = append(bindings, k.Back)
 	}
-	return append(bindings, k.Look, k.Quit)
+	return append(bindings, k.Look, k.Colors, k.Quit)
 }
 
 func (m LabModel) viewParams(width int) string {

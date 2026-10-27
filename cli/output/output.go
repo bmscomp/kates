@@ -329,6 +329,18 @@ func table(headers []string, rows [][]string, notes []string) {
 	fmt.Fprintln(Out)
 }
 
+// KeepHint, after a full-screen view closes, says how to keep a look or
+// colors switched there: T and C last only until the view closes.
+func KeepHint() {
+	look, palette := theme.SwitchedOnScreen()
+	if look != "" {
+		Hint("Look " + look + " lasted for this session; kates look set " + look + " keeps it.")
+	}
+	if palette != "" {
+		Hint("Colors " + palette + " lasted for this session; kates theme set " + palette + " keeps them.")
+	}
+}
+
 // statusStyle is the style of a table cell that names a status or a trend.
 func statusStyle(cell string) (lipgloss.Style, bool) {
 	switch strings.ToUpper(cell) {
@@ -526,7 +538,7 @@ func SparklineColored(values []float64, higherIsBetter bool) string {
 			idx = 0
 		}
 		ratio := (v - min) / span
-		var color lipgloss.AdaptiveColor
+		var color lipgloss.TerminalColor
 		if higherIsBetter {
 			if ratio > 0.66 {
 				color = Green
