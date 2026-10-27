@@ -194,7 +194,10 @@ func MergeValuesWithBase(base, gen map[string]interface{}) (map[string]interface
 }
 
 func mergeBaseFirst(base, gen map[string]interface{}, prefix string, overrides *[]string) map[string]interface{} {
-	result := make(map[string]interface{}, len(base)+len(gen))
+	// No size hint: len(base)+len(gen) is a sum of lengths read from user
+	// YAML, which code scanning reports as a possible overflow, and the hint
+	// buys nothing for maps this small.
+	result := make(map[string]interface{})
 	for k, v := range base {
 		result[k] = v
 	}
