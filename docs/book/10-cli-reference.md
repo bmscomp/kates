@@ -2637,7 +2637,7 @@ kates test list -o table
 kates test list -o json
 ```
 
-Many commands have no JSON form and print the same output whatever `-o` says, among them `status`, `ctx show`, `snapshot`, `profile`, `kyverno`, `test compare`, `test summary`, `webhook list`, `changelog` and the full-screen views (`dashboard`, `top`, `lab`). Check a command's output before you pipe it into `jq`.
+Under `-o json` a command puts one JSON document on stdout and nothing else. A command with no JSON form prints nothing on stdout, says so on stderr and exits `2`, so a script never parses a table by mistake: among them `webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary` and `test flame`.
 
 An AI agent that has a shell can drive Kates through this CLI rather than through [`kates mcp`](#mcp-server-for-ai-agents). The skill file `skills/kates-cli/SKILL.md` at the root of the repository tells it how: set up a context with the API key, pass `-o json`, and follow one recipe for each task, from security posture and drift to planning a Game Day with `disruption playbook show` and `--dry-run`.
 
@@ -2657,7 +2657,7 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 Consequences worth knowing in scripts:
 
 - `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
-- `test apply --wait`, `test create --wait`, `replay --wait`, `gate` and `benchmark` cancel the run they are waiting for when interrupted, and exit `130`. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
+- `test apply --wait`, `test create --wait`, `replay --wait`, `gate`, `benchmark` and `flow run` cancel the run they are waiting for when interrupted, and exit `130`. `kates detect` stops its probes and exits `130` too. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
 - `kates cluster alerts` exits `1` wherever a critical alert rule is defined, firing or not, which on a default install means always — see its section above.
 - A declined confirmation exits `1` in `deploy`, `clean`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
 - Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.

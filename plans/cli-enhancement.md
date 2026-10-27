@@ -1,6 +1,6 @@
 # Kates CLI — Review and Enhancement Plan (2026-10-27)
 
-**Status: Wave 1 shipped in #518; wave 2 (except 2.12, left for the maintainer) in #519. Waves 3–4 are open.**
+**Status: Wave 1 shipped in #518; wave 2 (except 2.12, left for the maintainer) in #519; wave 3 is in #520. Wave 4 is open.**
 
 Goal: a `kates` CLI whose every command exits non-zero when it failed, can be interrupted without leaving work running on the cluster, produces machine-readable output that is actually parseable, and whose generated artefacts (JUnit, HTML, PDF, Helm values) are correct on every input. Then: pay down the duplication that makes each of those properties expensive to keep.
 
