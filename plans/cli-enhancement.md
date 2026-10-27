@@ -1,6 +1,6 @@
 # Kates CLI — Review and Enhancement Plan (2026-10-27)
 
-**Status: Wave 1 shipped in #518; wave 2 (except 2.12, left for the maintainer) in #519; wave 3 is in #520. Wave 4 is open.**
+**Status: Wave 1 shipped in #518; wave 2 in #519; wave 3 in #520. Wave 4 and item 2.12 are in progress.**
 
 Goal: a `kates` CLI whose every command exits non-zero when it failed, can be interrupted without leaving work running on the cluster, produces machine-readable output that is actually parseable, and whose generated artefacts (JUnit, HTML, PDF, Helm values) are correct on every input. Then: pay down the duplication that makes each of those properties expensive to keep.
 
@@ -188,7 +188,7 @@ Small, verified, each with a test. All on `cli/`; none changes a command's flags
 | 2.9 | B16 | One `addDeployScopeFlags(cmd)` registering topology and namespace flags for `deploy`, `deploy status`, `clean` and `kyverno apply`; adds `--ui-ns` to `clean`; `deploy status` stops mutating globals. | M |
 | 2.10 | B17 | `waitComponentReadySilent` prints pod phase counts every 30 s when there is no live dashboard. | S |
 | 2.11 | C5 | `resilience run` becomes `interruptible`; the client prints the run id as soon as the backend assigns one (the API returns it in the first response or a `Location` header; confirm with the backend team), and Ctrl-C cancels through the existing cancel endpoint. | M |
-| 2.12 | C7 | `apply`'s SLA gates evaluate the report aggregate (same row filter as `latencyOf`); a `perTask: true` key keeps the old semantics; `stress-test.yaml` updated; the book's scenario chapter updated. | M |
+| 2.12 | C7 | `apply`'s SLA gates evaluate the report aggregate (same row filter as `latencyOf`); `--sla-scope task` or a `perTask: true` key keeps the old semantics; `--no-sla` runs without checking gates, since whether a run is checked depends on how the command is used; `stress-test.yaml` updated; the book's scenario chapter updated. Decided by the maintainer; shipped with wave 4. | M |
 | 2.13 | C8 | Security audit routes Kyverno probes through `runKubectlFn` and recomputes `summary` after injecting checks. | S |
 | 2.14 | C11 | One `terminalRunStatus(status) bool` used by every poller. | S |
 | 2.15 | C13 | `advisor --apply` writes the tuned scenario file or the flag is removed; `cost` validates inputs; `changelog --until` errors; `snapshot` validates names; `badge` URL-escapes. | S |
