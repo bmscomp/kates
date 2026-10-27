@@ -341,14 +341,14 @@ kates gate --min-grade C --records 100000</code></pre>
               <path class="pkt" pathLength="1" d="M290 222H196" style="--t:0.9s" />
             </g>
             <g class="link" data-a="api" data-b="kafka" style="--d:1">
-              <path class="edge" pathLength="1" d="M470 168C515 168 515 112 560 112" marker-end="url(#arr)" />
-              <path class="pkt" pathLength="1" d="M470 168C515 168 515 112 560 112" style="--t:1.1s" />
-              <g class="chip" transform="translate(515 140)"><rect x="-22" y="-10" width="44" height="20" rx="4" /><text text-anchor="middle" y="4">load</text></g>
+              <path class="edge" pathLength="1" d="M470 168C515 168 515 104 560 104" marker-end="url(#arr)" />
+              <path class="pkt" pathLength="1" d="M470 168C515 168 515 104 560 104" style="--t:1.1s" />
+              <g class="chip" transform="translate(515 136)"><rect x="-22" y="-10" width="44" height="20" rx="4" /><text text-anchor="middle" y="4">load</text></g>
             </g>
             <g class="link" data-a="api" data-b="litmus" style="--d:2">
-              <path class="edge" pathLength="1" d="M470 195C515 195 515 236 560 236" marker-end="url(#arr)" />
-              <path class="pkt" data-ph="1" pathLength="1" d="M470 195C515 195 515 236 560 236" style="--t:0.8s" />
-              <g class="chip" transform="translate(515 216)"><rect x="-28" y="-10" width="56" height="20" rx="4" /><text text-anchor="middle" y="4">faults</text></g>
+              <path class="edge" pathLength="1" d="M470 195C515 195 515 240 560 240" marker-end="url(#arr)" />
+              <path class="pkt" data-ph="1" pathLength="1" d="M470 195C515 195 515 240 560 240" style="--t:0.8s" />
+              <g class="chip" transform="translate(515 218)"><rect x="-28" y="-10" width="56" height="20" rx="4" /><text text-anchor="middle" y="4">faults</text></g>
             </g>
             <g class="link" data-a="api" data-b="pg" style="--d:3">
               <path class="edge" pathLength="1" d="M470 222C515 222 515 329 560 329" marker-end="url(#arr)" />
@@ -356,19 +356,19 @@ kates gate --min-grade C --records 100000</code></pre>
               <g class="chip" transform="translate(515 290)"><rect x="-32" y="-10" width="64" height="20" rx="4" /><text text-anchor="middle" y="4">results</text></g>
             </g>
             <g class="link fault" data-a="litmus" data-b="kafka" style="--d:4">
-              <path class="edge" pathLength="1" d="M650 200V174" marker-end="url(#arr-fault)" />
-              <path class="pkt" data-ph="1" pathLength="1" d="M650 200V174" style="--t:0.6s" />
-              <g class="chip" transform="translate(692 187)"><rect x="-28" y="-10" width="56" height="20" rx="4" /><text text-anchor="middle" y="4">inject</text></g>
+              <path class="edge" pathLength="1" d="M680 206V162" marker-end="url(#arr-fault)" />
+              <path class="pkt" data-ph="1" pathLength="1" d="M680 206V162" style="--t:0.6s" />
+              <g class="chip" transform="translate(718 184)"><rect x="-28" y="-10" width="56" height="20" rx="4" /><text text-anchor="middle" y="4">inject</text></g>
             </g>
             <g class="link" data-a="kafka" data-b="mon" style="--d:5">
-              <path class="edge" pathLength="1" d="M740 112H770" marker-end="url(#arr)" />
-              <path class="pkt" pathLength="1" d="M740 112H770" style="--t:1.2s" />
+              <path class="edge" pathLength="1" d="M740 104H770" marker-end="url(#arr)" />
+              <path class="pkt" pathLength="1" d="M740 104H770" style="--t:1.2s" />
             </g>
 
             <g class="box box-cli node" data-node="cli" tabindex="0" role="img" aria-label="kates CLI" style="--d:0" data-note="The kates CLI runs on a laptop or a CI runner and only ever talks to the Kates API.">
               <rect class="pane-bg" x="16" y="140" width="180" height="110" rx="6" />
               <rect class="pane-stripes" x="17" y="141" width="178" height="108" rx="5" fill="url(#tui-stripes)" />
-              <rect class="title-cut" x="28" y="130" width="96" height="20" rx="3" />
+              <rect class="title-cut" x="28" y="131" width="86" height="18" rx="3" />
               <text x="34" y="144" class="t-border-title">kates CLI</text>
               <text x="106" y="176" text-anchor="middle" class="t-title">kates CLI</text>
               <text x="106" y="200" text-anchor="middle" class="t-sub">Go · laptop / CI</text>
@@ -378,47 +378,47 @@ kates gate --min-grade C --records 100000</code></pre>
             <g class="box box-api node" data-node="api" tabindex="0" role="img" aria-label="Kates API" style="--d:1" data-note="The Kates API runs the load, drives the faults, grades every run and sends the webhooks.">
               <rect class="pane-bg" x="290" y="140" width="180" height="110" rx="6" />
               <rect class="pane-stripes" x="291" y="141" width="178" height="108" rx="5" fill="url(#tui-stripes)" />
-              <rect class="title-cut" x="302" y="130" width="96" height="20" rx="3" />
+              <rect class="title-cut" x="302" y="131" width="86" height="18" rx="3" />
               <text x="308" y="144" class="t-border-title">Kates API</text>
               <text x="380" y="176" text-anchor="middle" class="t-title">Kates API</text>
               <text x="380" y="200" text-anchor="middle" class="t-sub">● UP  native engine</text>
               <text x="380" y="226" text-anchor="middle" class="t-code">load · faults · grades</text>
             </g>
             <g class="box node" data-node="kafka" tabindex="0" role="img" aria-label="Kafka" style="--d:2" data-note="Kafka managed by Strimzi, one broker per zone: the system under test.">
-              <rect class="pane-bg kafka-hit" x="560" y="52" width="180" height="122" rx="6" />
-              <rect class="pane-stripes" x="561" y="53" width="178" height="120" rx="5" fill="url(#tui-stripes)" />
-              <rect class="title-cut" x="572" y="42" width="64" height="20" rx="3" />
-              <text x="578" y="56" class="t-border-title">Kafka</text>
-              <text x="650" y="84" text-anchor="middle" class="t-title">Kafka</text>
-              <text x="650" y="104" text-anchor="middle" class="t-sub">Strimzi · 3 zones</text>
-              <circle class="broker" cx="616" cy="134" r="7" />
-              <circle class="broker hit" cx="650" cy="134" r="7" />
-              <circle class="broker" cx="684" cy="134" r="7" />
-              <text x="650" y="160" text-anchor="middle" class="t-sub t-small">kafka-0 · 1 · 2</text>
+              <rect class="pane-bg kafka-hit" x="560" y="44" width="180" height="118" rx="6" />
+              <rect class="pane-stripes" x="561" y="45" width="178" height="116" rx="5" fill="url(#tui-stripes)" />
+              <rect class="title-cut" x="572" y="35" width="54" height="18" rx="3" />
+              <text x="578" y="48" class="t-border-title">Kafka</text>
+              <text x="650" y="76" text-anchor="middle" class="t-title">Kafka</text>
+              <text x="650" y="96" text-anchor="middle" class="t-sub">Strimzi · 3 zones</text>
+              <circle class="broker" cx="616" cy="124" r="7" />
+              <circle class="broker hit" cx="650" cy="124" r="7" />
+              <circle class="broker" cx="684" cy="124" r="7" />
+              <text x="650" y="150" text-anchor="middle" class="t-sub t-small">kafka-0 · 1 · 2</text>
             </g>
             <g class="box node" data-node="litmus" tabindex="0" role="img" aria-label="LitmusChaos" style="--d:3" data-note="LitmusChaos carries out the 13 disruption types against the brokers, then lets them recover.">
-              <rect class="pane-bg litmus-hit" x="560" y="200" width="180" height="72" rx="6" />
-              <rect class="pane-stripes" x="561" y="201" width="178" height="70" rx="5" fill="url(#tui-stripes)" />
-              <rect class="title-cut" x="572" y="190" width="112" height="20" rx="3" />
-              <text x="578" y="204" class="t-border-title">LitmusChaos</text>
-              <text x="650" y="232" text-anchor="middle" class="t-title">LitmusChaos</text>
-              <text x="650" y="254" text-anchor="middle" class="t-sub">13 disruption types</text>
+              <rect class="pane-bg litmus-hit" x="560" y="206" width="180" height="68" rx="6" />
+              <rect class="pane-stripes" x="561" y="207" width="178" height="66" rx="5" fill="url(#tui-stripes)" />
+              <rect class="title-cut" x="572" y="197" width="102" height="18" rx="3" />
+              <text x="578" y="210" class="t-border-title">LitmusChaos</text>
+              <text x="650" y="236" text-anchor="middle" class="t-title">LitmusChaos</text>
+              <text x="650" y="256" text-anchor="middle" class="t-sub">13 disruption types</text>
             </g>
             <g class="box node" data-node="pg" tabindex="0" role="img" aria-label="PostgreSQL" style="--d:4" data-note="PostgreSQL keeps every run, so last month's numbers are there to compare with today's.">
               <rect class="pane-bg" x="560" y="298" width="180" height="62" rx="6" />
               <rect class="pane-stripes" x="561" y="299" width="178" height="60" rx="5" fill="url(#tui-stripes)" />
-              <rect class="title-cut" x="572" y="288" width="104" height="20" rx="3" />
+              <rect class="title-cut" x="572" y="289" width="94" height="18" rx="3" />
               <text x="578" y="302" class="t-border-title">PostgreSQL</text>
               <text x="650" y="324" text-anchor="middle" class="t-title">PostgreSQL</text>
               <text x="650" y="344" text-anchor="middle" class="t-sub">every run kept</text>
             </g>
             <g class="box node" data-node="mon" tabindex="0" role="img" aria-label="Prometheus and Grafana" style="--d:5" data-note="Prometheus scrapes the Kates API and Kafka; 12 Grafana dashboards and the alert rules come with the charts.">
-              <rect class="pane-bg" x="770" y="52" width="160" height="308" rx="6" />
-              <rect class="pane-stripes" x="771" y="53" width="158" height="306" rx="5" fill="url(#tui-stripes)" />
-              <rect class="title-cut" x="782" y="42" width="80" height="20" rx="3" />
-              <text x="788" y="56" class="t-border-title">Grafana</text>
-              <text x="850" y="84" text-anchor="middle" class="t-title">Grafana</text>
-              <text x="850" y="104" text-anchor="middle" class="t-sub">Prometheus scrape</text>
+              <rect class="pane-bg" x="770" y="44" width="160" height="316" rx="6" />
+              <rect class="pane-stripes" x="771" y="45" width="158" height="314" rx="5" fill="url(#tui-stripes)" />
+              <rect class="title-cut" x="782" y="35" width="72" height="18" rx="3" />
+              <text x="788" y="48" class="t-border-title">Grafana</text>
+              <text x="850" y="76" text-anchor="middle" class="t-title">Grafana</text>
+              <text x="850" y="98" text-anchor="middle" class="t-sub">Prometheus scrape</text>
               <text x="786" y="144" class="t-sub t-small">P99 latency</text>
               <text x="786" y="176" class="p99">17.8 ms</text>
               <line class="grid" x1="784" x2="916" y1="237" y2="237" />

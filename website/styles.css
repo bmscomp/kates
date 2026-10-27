@@ -386,15 +386,15 @@ h3 { font-size: 1.2rem; font-weight: 600; }
 .arch .fault .pkt { filter: drop-shadow(0 0 5px var(--tui-fault)); }
 .arch .chip rect { fill: #151926; stroke: var(--tui-border); stroke-width: 1.2; }
 .arch .chip text { fill: var(--tui-heading); font-size: 10.5px; font-family: var(--mono); }
-.arch .fault .chip rect { stroke: var(--tui-fault); }
-.arch .fault .chip text { fill: var(--tui-fault); }
+.arch .fault .chip rect { fill: rgba(251, 113, 133, 0.18); stroke: var(--tui-fault); stroke-width: 1.5; }
+.arch .fault .chip text { fill: var(--tui-fault); font-weight: 700; }
 .arch .broker { fill: var(--tui-ok); transition: fill 0.3s, opacity 0.3s; }
 .arch .spark { fill: none; stroke: var(--tui-accent); stroke-width: 2; stroke-linejoin: round; stroke-dasharray: 1; animation: arch-spark 6s ease-in-out infinite; }
 .arch .t-small { font-size: 11px; }
 /* the story: site.js sets data-phase 0-4 (baseline, inject, broker down, recovery, graded) on the figure */
 .arch [data-ph] { visibility: hidden; }
 .arch[data-phase="1"] [data-ph="1"], .arch[data-phase="4"] [data-ph="4"] { visibility: visible; }
-.arch .fault .edge { stroke-opacity: 0.32; }
+.arch .fault .edge { stroke-opacity: 0.65; }
 .arch[data-phase="1"] .fault .edge, .arch[data-phase="2"] .fault .edge { stroke-opacity: 1; }
 .arch .ok .edge { stroke: var(--tui-ok); stroke-dasharray: 5 4; }
 .arch .ok .pkt { stroke: var(--tui-ok); filter: drop-shadow(0 0 4px var(--tui-ok)); }
