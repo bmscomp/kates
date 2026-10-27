@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -45,9 +48,29 @@ type labSource struct {
 	Bootstrap          string
 	// Topics are the topics this leg mirrors, read back out of the CR.
 	Topics []string
+	// Auth is how the mirror authenticates to it, from the CR's clusters.
+	Auth mirrorAuth
 	// NamespaceOwned says the namespace carries the lab's label, so the lab
 	// created it and down may delete it.
 	NamespaceOwned bool
+}
+
+// mirrorAuth is how the KafkaMirrorMaker2 CR authenticates to one cluster:
+// Known when the CR lists the cluster at all, SASL when that entry carries a
+// SASL authentication block, with its user and credential Secret.
+type mirrorAuth struct {
+	Known, SASL  bool
+	User, Secret string
+}
+
+// usesSASL says the mirror reads this source over SASL: what the CR's
+// authentication block says when the CR lists the cluster, else — a CR
+// written before the clusters were read — the legacy chart's SASL port.
+func (s *labSource) usesSASL() bool {
+	if s.Auth.Known {
+		return s.Auth.SASL
+	}
+	return strings.HasSuffix(s.Bootstrap, ":9094")
 }
 
 // labDiscovery is a lab as the cluster describes it.
@@ -93,6 +116,12 @@ type mirrorLeg struct {
 	Alias     string
 	Bootstrap string
 	Topics    []string
+	Auth      mirrorAuth
+	// Pattern is the leg's topicsPattern; PatternOnly says Topics does not
+	// cover it (no recorded list, and the pattern holds real regex syntax),
+	// so only the target's topic list can say which topics it mirrored.
+	Pattern     string
+	PatternOnly bool
 }
 
 // ReplicatedTopic is the lab's rule for the target-side name.
@@ -204,7 +233,7 @@ func discoverLab(ctx context.Context, name string) (*labDiscovery, error) {
 		case "kafkamirrormaker2":
 			d.Mirror = res
 			d.MirrorRelease, d.MirrorNamespace, d.MirrorCR = res.Release, res.Namespace, res.Name
-			d.readMirrorSpec(it.Spec)
+			d.readMirrorSpec(it.Spec, it.Metadata.Annotations[migrate.AnnotationLabTopics])
 		case "statefulset":
 			if it.Metadata.Labels["app.kubernetes.io/component"] != "broker" {
 				continue // the ZooKeeper StatefulSet carries the same labels
@@ -284,7 +313,7 @@ func orderLabSources(found []*labSource, legs []mirrorLeg) []*labSource {
 			continue
 		}
 		claimed[match] = true
-		match.Alias, match.Bootstrap, match.Topics = leg.Alias, leg.Bootstrap, leg.Topics
+		match.Alias, match.Bootstrap, match.Topics, match.Auth = leg.Alias, leg.Bootstrap, leg.Topics, leg.Auth
 		out = append(out, match)
 	}
 	for _, src := range found {
@@ -295,7 +324,7 @@ func orderLabSources(found []*labSource, legs []mirrorLeg) []*labSource {
 	// One source and one leg that did not match by name still belong
 	// together: the leg is what verify and down work from.
 	if len(out) == 1 && len(legs) == 1 && out[0].Bootstrap == "" {
-		out[0].Alias, out[0].Bootstrap, out[0].Topics = legs[0].Alias, legs[0].Bootstrap, legs[0].Topics
+		out[0].Alias, out[0].Bootstrap, out[0].Topics, out[0].Auth = legs[0].Alias, legs[0].Bootstrap, legs[0].Topics, legs[0].Auth
 	}
 	return out
 }
@@ -343,14 +372,27 @@ func parseLabelledItems(listJSON string) ([]labItem, error) {
 }
 
 // readMirrorSpec reads what down and status need from the
-// KafkaMirrorMaker2 spec: the target, the source, the topics, the policy.
-func (d *labDiscovery) readMirrorSpec(spec json.RawMessage) {
+// KafkaMirrorMaker2 spec: the target, the source, the topics, the policy,
+// and how the CR authenticates to each cluster. labTopics is the CR's
+// AnnotationLabTopics value — the topic list up recorded — and wins over the
+// names read out of topicsPattern, which a real regular expression hides.
+func (d *labDiscovery) readMirrorSpec(spec json.RawMessage, labTopics string) {
 	var s struct {
 		Target struct {
 			Alias            string `json:"alias"`
 			BootstrapServers string `json:"bootstrapServers"`
 			GroupID          string `json:"groupId"`
 		} `json:"target"`
+		Clusters []struct {
+			Alias          string `json:"alias"`
+			Authentication *struct {
+				Type           string `json:"type"`
+				Username       string `json:"username"`
+				PasswordSecret struct {
+					SecretName string `json:"secretName"`
+				} `json:"passwordSecret"`
+			} `json:"authentication"`
+		} `json:"clusters"`
 		Mirrors []struct {
 			Source struct {
 				Alias            string `json:"alias"`
@@ -371,13 +413,30 @@ func (d *labDiscovery) readMirrorSpec(spec json.RawMessage) {
 	if len(s.Mirrors) == 0 {
 		return
 	}
+	auth := map[string]mirrorAuth{}
+	for _, c := range s.Clusters {
+		a := mirrorAuth{Known: true}
+		if c.Authentication != nil && c.Authentication.Type != "" && c.Authentication.Type != "tls" {
+			a.SASL, a.User, a.Secret = true, c.Authentication.Username, c.Authentication.PasswordSecret.SecretName
+		}
+		auth[c.Alias] = a
+	}
+	recorded := splitTopics(labTopics)
 	for _, m := range s.Mirrors {
-		d.legs = append(d.legs, mirrorLeg{
-			Alias:     m.Source.Alias,
-			Bootstrap: m.Source.BootstrapServers,
-			Topics:    topicsFromPattern(m.TopicsPattern),
-		})
-		d.Topics = append(d.Topics, topicsFromPattern(m.TopicsPattern)...)
+		topics, patternOnly := legTopics(recorded, m.TopicsPattern, len(s.Mirrors))
+		leg := mirrorLeg{
+			Alias:       m.Source.Alias,
+			Bootstrap:   m.Source.BootstrapServers,
+			Topics:      topics,
+			Auth:        auth[m.Source.Alias],
+			Pattern:     m.TopicsPattern,
+			PatternOnly: patternOnly,
+		}
+		d.legs = append(d.legs, leg)
+		d.Topics = append(d.Topics, leg.Topics...)
+	}
+	if len(recorded) > 0 {
+		d.Topics = recorded
 	}
 	first := s.Mirrors[0]
 	d.SourceAlias = first.Source.Alias
@@ -386,6 +445,35 @@ func (d *labDiscovery) readMirrorSpec(spec json.RawMessage) {
 	if policy, _ := first.SourceConnector.Config["replication.policy.class"].(string); strings.Contains(policy, "IdentityReplicationPolicy") {
 		d.Policy = migrate.PolicyIdentity
 	}
+}
+
+// legTopics is one mirror leg's topics: the recorded list when the lab has
+// one leg; in a fan-in, the recorded names the leg's pattern matches, since
+// each leg carries its own. Without a recorded list, or when the pattern
+// claims none of it, the names are read out of the pattern itself, and
+// patternOnly says whether the pattern holds more than those names.
+func legTopics(recorded []string, pattern string, legs int) (topics []string, patternOnly bool) {
+	fromPattern := func() ([]string, bool) { return topicsFromPattern(pattern), !literalPattern(pattern) }
+	if len(recorded) == 0 {
+		return fromPattern()
+	}
+	if legs == 1 {
+		return recorded, false
+	}
+	re, err := regexp.Compile("^(?:" + pattern + ")$")
+	if err != nil {
+		return fromPattern()
+	}
+	var out []string
+	for _, t := range recorded {
+		if re.MatchString(t) {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return fromPattern()
+	}
+	return out, false
 }
 
 // clusterFromBootstrap reads a Strimzi bootstrap address back into the
@@ -504,9 +592,18 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 	if d.TargetCluster != "" && d.TargetNamespace != "" {
 		opts.TargetCluster, opts.TargetNamespace = d.TargetCluster, d.TargetNamespace
 	}
-	// The mirror reads the legacy chart's SASL listener on 9094, the
-	// plaintext one on 9092: the port says which credential the lab has.
-	if provider == kafkaversion.ProviderLegacy && strings.HasSuffix(d.SourceBootstrap, ":9094") {
+	// The CR's authentication block for the source says whether the mirror
+	// reads it over SASL; a CR that lists no clusters is judged by the legacy
+	// chart's SASL port, 9094.
+	var first *labSource
+	if len(d.Sources) > 0 {
+		first = d.Sources[0]
+	}
+	sourceSASL := strings.HasSuffix(d.SourceBootstrap, ":9094")
+	if first != nil && first.Auth.Known {
+		sourceSASL = first.Auth.SASL
+	}
+	if provider == kafkaversion.ProviderLegacy && sourceSASL {
 		opts.SASL = true
 		opts.SourcePassword = "existing" // the Secret exists; the lab never rewrites it
 	}
@@ -521,6 +618,13 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 		l.SourceCluster = d.SourceRelease
 		if l.SASL && provider == kafkaversion.ProviderLegacy {
 			l.SourceSecret = l.SourceRelease + "-" + migrate.LegacySASLUser
+		}
+	}
+	// The credential the CR really uses, when it names one.
+	if first != nil && first.Auth.Secret != "" {
+		l.SourceSecret = first.Auth.Secret
+		if first.Auth.User != "" {
+			l.SourceUser = first.Auth.User
 		}
 	}
 	if d.SourceNamespace != "" {
@@ -563,10 +667,13 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 		}
 		if src.Bootstrap != "" {
 			extra.Bootstrap = src.Bootstrap
-			extra.SASL = strings.HasSuffix(src.Bootstrap, ":9094")
+			extra.SASL = src.usesSASL()
 			if extra.SASL && extra.Provider == kafkaversion.ProviderLegacy {
 				extra.User = migrate.LegacySASLUser
 				extra.Secret = extra.Release + "-" + migrate.LegacySASLUser
+			}
+			if src.Auth.Secret != "" {
+				extra.User, extra.Secret = src.Auth.User, src.Auth.Secret
 			}
 		}
 		if len(src.Topics) > 0 {
@@ -595,7 +702,8 @@ var (
 		Long: `Finds the lab by its kates.io/lab label and prints its source, its target,
 the KafkaMirrorMaker2 CR's readiness and every connector's state, and —
 best effort, through a client pod on each side — the end offsets of the
-mirrored topics on both ends. --watch repeats every 10 seconds.`,
+mirrored topics on both ends. --watch repeats every 10 seconds without the
+end offsets, and says so on every frame.`,
 		Example: `  kates migrate status
   kates migrate status --name m282-430 --watch
   kates migrate status -o json`,
@@ -608,7 +716,7 @@ mirrored topics on both ends. --watch repeats every 10 seconds.`,
 func init() {
 	migrateStatusCmd.Flags().StringVar(&migrateStatusName, "name", "", "Lab name (default: the single lab on the cluster)")
 	migrateStatusCmd.Flags().BoolVarP(&migrateStatusWatch, "watch", "w", false, "Repeat every 10 seconds")
-	migrateStatusCmd.Flags().BoolVar(&migrateStatusOffsets, "offsets", true, "Read the end offsets on both ends through client pods")
+	migrateStatusCmd.Flags().BoolVar(&migrateStatusOffsets, "offsets", true, "Read the end offsets on both ends through client pods (never under --watch)")
 	migrateStatusCmd.Flags().StringVar(&migrateStatusTarget.TargetCluster, "target-cluster", migrate.DefaultTargetCluster, "Name of the target Kafka")
 	migrateStatusCmd.Flags().StringVar(&migrateStatusTarget.TargetNamespace, "target-namespace", migrate.DefaultTargetNamespace, "Namespace of the target Kafka")
 	migrateStatusCmd.Flags().IntVar(&migrateStatusTarget.Timeout, "timeout", migrateDefaultTimeout, "Client pod readiness budget in seconds")
@@ -658,6 +766,10 @@ type labStatusOffsets struct {
 	Target     string `json:"targetEndOffsets"`
 }
 
+// watchOffsetsNote is what status --watch says in place of the end offsets
+// it does not read.
+const watchOffsetsNote = "end offsets are off under --watch (each reading starts a client pod on every end); run kates migrate status without --watch to read them"
+
 // runMigrateStatus is `kates migrate status`.
 func runMigrateStatus(ctx context.Context) error {
 	if ctx == nil {
@@ -667,6 +779,11 @@ func runMigrateStatus(ctx context.Context) error {
 		st, err := collectLabStatus(ctx, migrateStatusName, migrateStatusOffsets && !migrateStatusWatch)
 		if err != nil {
 			return err
+		}
+		if migrateStatusWatch && migrateStatusOffsets {
+			// Each reading starts a client pod on every end; every ten
+			// seconds that is churn, not status. Say so on every frame.
+			st.Notes = append(st.Notes, watchOffsetsNote)
 		}
 		if migrateStatusWatch && outputMode != "json" {
 			output.ClearFrame(IsInteractive())
@@ -844,12 +961,14 @@ func printLabStatus(st *labStatus) {
 // ── down ─────────────────────────────────────────────────────────────────
 
 var (
-	migrateDownName    string
-	migrateDownYes     bool
-	migrateDownTimeout int
+	migrateDownName       string
+	migrateDownYes        bool
+	migrateDownTimeout    int
+	migrateDownKeepTopics bool
+	migrateDownDeleteData bool
 
 	migrateDownCmd = &cobra.Command{
-		Use:   "down [--name <lab>] [--yes]",
+		Use:   "down [--name <lab>] [--yes] [--keep-topics | --delete-data]",
 		Short: "Remove the lab: the mirror, the source, the lab's topics on the target — found by label",
 		Long: `Finds the lab by its kates.io/lab label and removes exactly what up created:
 the mirror release and its kept CR, the source release, the source namespace
@@ -857,8 +976,19 @@ when the lab created it (it carries the label), the lab's topics on the
 target (the mirrored topics and the mirror's own), the credential Secrets and
 the client pods. Nothing without the label is touched, and a topic of the
 mirror's own that another mirror on the target also writes, such as the
-source.checkpoints.internal every single-source lab shares, is kept.`,
+source.checkpoints.internal every single-source lab shares, is kept.
+
+The mirrored topics are data. Before deleting them, down reads their end
+offsets on the target as kates-mm2, from a client pod it removes afterwards.
+A topic that holds records, whose offsets cannot be read, or that only the
+mirror's topicsPattern names (a regular expression, resolved against the
+target's topic list) needs a second confirmation naming it; without a
+terminal, or with --yes or -o json, down refuses unless --delete-data is
+also given. --keep-topics removes the lab and leaves its mirrored topics
+in place (the mirror's own internal topics still go).`,
 		Example: `  kates migrate down --name m282-430 --yes
+  kates migrate down --name m282-430 --yes --keep-topics
+  kates migrate down --name m282-430 --yes --delete-data
   kates migrate down`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMigrateDown(cmd.Context())
@@ -870,6 +1000,9 @@ func init() {
 	migrateDownCmd.Flags().StringVar(&migrateDownName, "name", "", "Lab name (default: the single lab on the cluster)")
 	migrateDownCmd.Flags().BoolVarP(&migrateDownYes, "yes", "y", false, "Assume yes and never prompt (fails instead of asking)")
 	migrateDownCmd.Flags().IntVar(&migrateDownTimeout, "timeout", migrateDefaultTimeout, "Deletion budget in seconds")
+	migrateDownCmd.Flags().BoolVar(&migrateDownKeepTopics, "keep-topics", false, "Remove the lab but leave its mirrored topics on the target")
+	migrateDownCmd.Flags().BoolVar(&migrateDownDeleteData, "delete-data", false, "Delete mirrored topics that hold records (or cannot be checked) without a second prompt")
+	migrateDownCmd.MarkFlagsMutuallyExclusive("keep-topics", "delete-data")
 	migrateCmd.AddCommand(migrateDownCmd)
 }
 
@@ -878,26 +1011,39 @@ func runMigrateDown(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if migrateDownKeepTopics && migrateDownDeleteData {
+		return errors.New("--keep-topics and --delete-data contradict each other: pass one")
+	}
 	d, err := discoverLab(ctx, migrateDownName)
 	if err != nil {
 		return err
 	}
 	output.SubHeader("Lab " + d.Name + " — to be removed")
-	for _, line := range describeLabTeardown(d) {
+	for _, line := range describeLabTeardown(d, migrateDownKeepTopics) {
 		migrateHint(line)
 	}
 	if err := migrateConfirm(migrateDownYes, fmt.Sprintf("Remove lab %s?", d.Name)); err != nil {
 		return err
 	}
-	if err := labDown(ctx, d, time.Duration(migrateDownTimeout)*time.Second); err != nil {
+	if !migrateDownKeepTopics {
+		if err := guardLabTopics(ctx, d, time.Duration(migrateDownTimeout)*time.Second, migrateDownYes, migrateDownDeleteData); err != nil {
+			return err
+		}
+	}
+	if err := labDown(ctx, d, time.Duration(migrateDownTimeout)*time.Second, migrateDownKeepTopics); err != nil {
 		return err
+	}
+	if migrateDownKeepTopics {
+		if kept := d.ReplicatedTopics(); len(kept) > 0 {
+			migrateHint(fmt.Sprintf("--keep-topics: %s left on %s in %s", strings.Join(kept, ", "), d.TargetCluster, d.TargetNamespace))
+		}
 	}
 	migrateSuccess("lab " + d.Name + " removed")
 	return nil
 }
 
 // describeLabTeardown lists what down will remove.
-func describeLabTeardown(d *labDiscovery) []string {
+func describeLabTeardown(d *labDiscovery, keepTopics bool) []string {
 	var lines []string
 	if d.MirrorRelease != "" {
 		lines = append(lines, fmt.Sprintf("mirror release %s in %s (and the kept CR %s)", d.MirrorRelease, d.MirrorNamespace, d.MirrorCR))
@@ -916,8 +1062,22 @@ func describeLabTeardown(d *labDiscovery) []string {
 	if d.Target != nil {
 		lines = append(lines, fmt.Sprintf("additional target %s in %s", d.Target.Name, d.Target.Namespace))
 	}
-	if topics := append(d.ReplicatedTopics(), d.internalTopics()...); len(topics) > 0 && d.TargetNamespace != "" {
-		lines = append(lines, fmt.Sprintf("topics on %s: %s (an internal one another mirror there also writes is kept)", d.TargetCluster, strings.Join(topics, ", ")))
+	if d.TargetNamespace != "" {
+		mirrored := d.ReplicatedTopics()
+		switch {
+		case keepTopics && len(mirrored) > 0:
+			lines = append(lines, fmt.Sprintf("mirrored topics on %s are kept (--keep-topics): %s", d.TargetCluster, strings.Join(mirrored, ", ")))
+		case len(mirrored) > 0:
+			lines = append(lines, fmt.Sprintf("mirrored topics on %s: %s (a topic that holds records needs a second confirmation)", d.TargetCluster, strings.Join(mirrored, ", ")))
+		}
+		if !keepTopics {
+			for _, p := range d.patternLegs() {
+				lines = append(lines, fmt.Sprintf("the topics on %s that topicsPattern %q matches (no recorded topic list: resolved against the target's topics, then confirmed)", d.TargetCluster, p.Pattern))
+			}
+		}
+		if internal := d.internalTopics(); len(internal) > 0 {
+			lines = append(lines, fmt.Sprintf("the mirror's own topics on %s: %s (one another mirror there also writes is kept)", d.TargetCluster, strings.Join(internal, ", ")))
+		}
 	}
 	if d.MirrorNamespace != "" {
 		lines = append(lines, fmt.Sprintf("secrets and client pods labelled %s=%s", migrate.LabelLab, d.Name))
@@ -928,8 +1088,9 @@ func describeLabTeardown(d *labDiscovery) []string {
 // labDown removes a lab: the mirror (release, then the kept CR), the source
 // release, the source namespace when the lab created it, the lab's topics on
 // the target through KafkaTopic resources, the lab's Secrets and client pods.
-// Every step is by name or by label; nothing else is touched.
-func labDown(ctx context.Context, d *labDiscovery, timeout time.Duration) error {
+// Every step is by name or by label; nothing else is touched. keepTopics
+// leaves the mirrored topics in place; the mirror's own still go.
+func labDown(ctx context.Context, d *labDiscovery, timeout time.Duration, keepTopics bool) error {
 	var problems []string
 	note := func(format string, a ...any) { problems = append(problems, fmt.Sprintf(format, a...)) }
 	labelled := d.Name != "" // an unnamed source has no label to select by
@@ -966,7 +1127,7 @@ func labDown(ctx context.Context, d *labDiscovery, timeout time.Duration) error 
 		}
 	}
 	if labelled && d.TargetNamespace != "" && d.TargetCluster != "" {
-		if err := deleteLabTopics(ctx, d); err != nil {
+		if err := deleteLabTopics(ctx, d, keepTopics); err != nil {
 			note("lab topics on %s: %v", d.TargetCluster, err)
 		}
 	}
@@ -1002,10 +1163,14 @@ func isNotFound(err error) bool {
 // operator adopts the existing topic) and deleted, which deletes the topic.
 // No credential is needed and nothing but the named topics is touched. An
 // internal topic another mirror on the target also writes is kept, and all
-// of them are when the other mirrors cannot be listed.
-func deleteLabTopics(ctx context.Context, d *labDiscovery) error {
+// of them are when the other mirrors cannot be listed. keepTopics leaves
+// the mirrored topics out.
+func deleteLabTopics(ctx context.Context, d *labDiscovery, keepTopics bool) error {
 	shared, sharedErr := sharedInternalTopics(ctx, d)
-	topics := d.ReplicatedTopics()
+	var topics []string
+	if !keepTopics {
+		topics = d.ReplicatedTopics()
+	}
 	for _, t := range d.internalTopics() {
 		if sharedErr == nil && !shared[t] {
 			topics = append(topics, t)
@@ -1048,7 +1213,7 @@ func sharedInternalTopics(ctx context.Context, d *labDiscovery) (map[string]bool
 			continue
 		}
 		other := &labDiscovery{}
-		other.readMirrorSpec(it.Spec)
+		other.readMirrorSpec(it.Spec, it.Metadata.Annotations[migrate.AnnotationLabTopics])
 		if other.TargetCluster != "" && (other.TargetCluster != d.TargetCluster || other.TargetNamespace != d.TargetNamespace) {
 			continue
 		}
@@ -1107,7 +1272,10 @@ func kafkaTopicManifests(d *labDiscovery, topics []string) (string, error) {
 
 // kafkaTopicResourceName is a DNS-1123 name for the KafkaTopic that adopts
 // a topic: the lab name, then the topic lowercased with every other
-// character turned into a dash.
+// character turned into a dash. Whenever that changed the name — or the
+// 63-character limit cut it — the first six hex digits of the topic's
+// SHA-256 follow, so a.b, a-b and A_B are three KafkaTopics, not one
+// overwriting the other two.
 func kafkaTopicResourceName(lab, topic string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(topic) {
@@ -1118,9 +1286,15 @@ func kafkaTopicResourceName(lab, topic string) string {
 			b.WriteByte('-')
 		}
 	}
-	name := strings.Trim(lab+"-"+strings.Trim(b.String(), "-"), "-")
-	if len(name) > 63 {
-		name = strings.TrimRight(name[:63], "-")
+	sanitized := strings.Trim(b.String(), "-")
+	name := strings.Trim(lab+"-"+sanitized, "-")
+	if sanitized == topic && len(name) <= 63 {
+		return name
 	}
-	return name
+	sum := sha256.Sum256([]byte(topic))
+	suffix := "-" + hex.EncodeToString(sum[:3])
+	if len(name)+len(suffix) > 63 {
+		name = strings.TrimRight(name[:63-len(suffix)], "-")
+	}
+	return name + suffix
 }

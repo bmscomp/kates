@@ -1,3 +1,7 @@
+# A STRESS run starts one producer per parallelProducers, all at once.
+# kates test apply --wait checks the gates against the run as a whole: the
+# p99 is the highest of the producers', and the throughput the 16 producers'
+# rates added up, so 100,000 rec/s is about 6,250 from each.
 scenarios:
   - name: "Stress Test — High Throughput"
     type: STRESS

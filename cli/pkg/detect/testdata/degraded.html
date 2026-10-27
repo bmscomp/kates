@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kates Preflight Audit Report</title>
+<style>
+  :root {
+    --bg-color: #0d1117;
+    --surface-color: #161b22;
+    --surface-hover: #21262d;
+    --border-color: #30363d;
+    --text-main: #c9d1d9;
+    --text-muted: #8b949e;
+    --text-white: #f0f6fc;
+    --primary: #58a6ff;
+    --primary-gradient: linear-gradient(135deg, #7c3aed, #06b6d4);
+    --success: #3fb950;
+    --warning: #d29922;
+    --error: #f85149;
+    --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    font-family: var(--font-stack);
+    line-height: 1.6;
+    padding: 2.5rem 1rem;
+  }
+
+  .container {
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+   
+  .header-card {
+    background: var(--primary-gradient);
+    color: var(--text-white);
+    border-radius: 16px;
+    padding: 2.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    position: relative;
+    overflow: hidden;
+  }
+  .header-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 300px;
+    height: 300px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .header-card h1 {
+    font-size: 2.2rem;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.02em;
+  }
+  .header-card p {
+    font-size: 1rem;
+    opacity: 0.85;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255,255,255,0.15);
+    font-size: 0.85rem;
+    opacity: 0.9;
+  }
+
+   
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  @media (max-width: 600px) {
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+
+   
+  .card {
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+  .card h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 1.25rem;
+    color: var(--text-white);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.75rem;
+  }
+
+   
+  .verdict-banner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem;
+    border-radius: 10px;
+    margin-bottom: 1.5rem;
+    font-weight: 700;
+  }
+  .verdict-pass {
+    background-color: rgba(63, 185, 80, 0.15);
+    border: 1px solid var(--success);
+    color: var(--success);
+  }
+  .verdict-warn {
+    background-color: rgba(210, 153, 34, 0.15);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+  }
+  .verdict-fail {
+    background-color: rgba(248, 81, 73, 0.15);
+    border: 1px solid var(--error);
+    color: var(--error);
+  }
+
+   
+  .budget-meter {
+    margin-bottom: 1.25rem;
+  }
+  .meter-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    margin-bottom: 0.4rem;
+  }
+  .meter-bg {
+    height: 10px;
+    background-color: var(--border-color);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .meter-fill {
+    height: 100%;
+    border-radius: 5px;
+  }
+  .fill-purple { background: linear-gradient(90deg, #7c3aed, #9b66ff); }
+  .fill-blue { background: linear-gradient(90deg, #00b4d8, #0077b6); }
+
+   
+  .tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+    overflow-x: auto;
+  }
+  .tab-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+  .tab-btn:hover {
+    color: var(--text-white);
+    background-color: var(--surface-hover);
+  }
+  .tab-btn.active {
+    color: var(--primary);
+    background-color: rgba(88, 166, 255, 0.1);
+  }
+
+   
+  .check-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .check-item:last-child { border-bottom: none; }
+  .check-title {
+    font-weight: 600;
+    color: var(--text-white);
+  }
+  .check-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+  }
+  .status-badge {
+    padding: 0.2rem 0.6rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .badge-pass { background-color: rgba(63, 185, 80, 0.15); color: var(--success); }
+  .badge-fail { background-color: rgba(248, 81, 73, 0.15); color: var(--error); }
+
+   
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+  }
+  th {
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 600;
+    padding: 0.6rem;
+    border-bottom: 2px solid var(--border-color);
+  }
+  td {
+    padding: 0.6rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  tr:last-child td { border-bottom: none; }
+
+   
+  .matrix-cell {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+   
+  .remediation-block {
+    margin-bottom: 1.25rem;
+    border-left: 3px solid var(--warning);
+    background-color: rgba(210, 153, 34, 0.05);
+    padding: 1rem;
+    border-radius: 0 8px 8px 0;
+  }
+  .remediation-block.critical {
+    border-left-color: var(--error);
+    background-color: rgba(248, 81, 73, 0.05);
+  }
+  .remediation-title {
+    font-weight: 700;
+    color: var(--text-white);
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }
+  .remediation-summary {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+  }
+  pre {
+    background-color: #070a0e;
+    color: #8b949e;
+    padding: 0.75rem;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+    font-size: 0.8rem;
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+  }
+
+   
+  .footer {
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+  }
+   
+  .status-ok { color: var(--success); }
+  .status-warn { color: var(--warning); }
+  .status-fail { color: var(--error); }
+  .status-skipped { color: var(--text-muted); font-style: italic; }
+  .badge-ok { background-color: rgba(63, 185, 80, 0.15); color: var(--success); }
+  .badge-warn { background-color: rgba(210, 153, 34, 0.15); color: var(--warning); }
+  .badge-skipped { background-color: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+  .card h2 .status-badge { margin-left: auto; }
+  .fact-label { color: var(--text-muted); width: 35%; }
+  .section-text { font-size: 0.9rem; margin-bottom: 0.75rem; }
+  .section-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem; }
+  .matrix-head { font-weight: 700; color: var(--text-white); }
+  .table-wrap { overflow-x: auto; margin-bottom: 0.75rem; }
+  .hint-check { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+  .remediation-block a { color: var(--primary); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header-card">
+    <h1>Kafka Cluster Compatibility Report</h1>
+    <p>Automated preflight infrastructure audit for 3-AZ Kafka deployments</p>
+    <div class="meta-grid">
+      <div><strong>Context:</strong> kind-&lt;script&gt;alert(&#34;ctx&#34;)&lt;/script&gt;</div>
+      <div><strong>Provider:</strong> unknown</div>
+      <div><strong>Kubernetes:</strong> v1.24.0</div>
+      <div><strong>Helm:</strong> v3.11.0</div>
+      <div><strong>Generated:</strong> 2026-01-02T03:04:05Z</div>
+    </div>
+  </div>
+
+  <div class="verdict-banner verdict-fail">
+    INCOMPATIBLE: 3 check(s) failed and 2 warning(s). Resolve the failures before deploying.
+  </div>
+
+  <div class="card" id="section-cluster">
+    <h2>Cluster Identity</h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">Context</td><td>kind-&lt;script&gt;alert(&#34;ctx&#34;)&lt;/script&gt;</td></tr>
+        <tr><td class="fact-label">Server</td><td>https://127.0.0.1:6443</td></tr>
+        <tr><td class="fact-label">Provider</td><td>unknown</td></tr>
+        <tr><td class="fact-label">Kubernetes</td><td>v1.24.0</td></tr>
+        <tr><td class="fact-label">Helm</td><td>v3.11.0</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" id="section-nodes">
+    <h2>Nodes <span class="status-badge badge-ok">ok</span></h2>
+    <p class="section-text">1 node(s).</p>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Zone</th>
+          <th>Roles</th>
+          <th>CPU</th>
+          <th>Memory</th>
+          <th>Runtime</th>
+          <th>Kubelet</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>&lt;script&gt;alert(1)&lt;/script&gt;</td>
+          <td>zone-a</td>
+          <td>control-plane</td>
+          <td>2000m</td>
+          <td>4Gi</td>
+          <td></td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" id="section-zones">
+    <h2>Zones <span class="status-badge badge-fail">fail</span></h2>
+    <p class="section-text">1 zone(s); a 3-AZ deployment needs at least 3.</p>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Zone</th>
+          <th>Nodes</th>
+          <th>CPU</th>
+          <th>Memory</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>zone-a</td>
+          <td>1</td>
+          <td>2000m</td>
+          <td>4Gi</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" id="section-budget">
+    <h2>Resource Budget <span class="status-badge badge-fail">fail</span></h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">Resources</td><td class="status-fail">insufficient (need 11000m CPU, 40Gi memory)</td></tr>
+        <tr><td class="fact-label">Recommended profile</td><td class="status-fail">INSUFFICIENT</td></tr>
+        <tr><td class="fact-label">Profile</td><td>Not enough capacity for any profile: scale the cluster to at least 3 CPU cores and 8Gi of memory.</td></tr>
+      </tbody>
+    </table>
+    <div class="budget-meter">
+      <div class="meter-meta">
+        <span>CPU (need 11000m of 2000m)</span>
+        <strong>100%</strong>
+      </div>
+      <div class="meter-bg">
+        <div class="meter-fill fill-purple" style="width: 100%"></div>
+      </div>
+    </div>
+    <div class="budget-meter">
+      <div class="meter-meta">
+        <span>Memory (need 40Gi of 4Gi)</span>
+        <strong>100%</strong>
+      </div>
+      <div class="meter-bg">
+        <div class="meter-fill fill-blue" style="width: 100%"></div>
+      </div>
+    </div>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th>CPU</th>
+          <th>Memory</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Controllers</td>
+          <td>1500m</td>
+          <td>3Gi</td>
+        </tr>
+        <tr>
+          <td>Brokers (3)</td>
+          <td>9000m</td>
+          <td>36Gi</td>
+        </tr>
+        <tr>
+          <td>Operators &#43; exporter</td>
+          <td>500m</td>
+          <td>1Gi</td>
+        </tr>
+        <tr>
+          <td>Total required</td>
+          <td>11000m</td>
+          <td>40Gi</td>
+        </tr>
+        <tr>
+          <td>Cluster allocatable</td>
+          <td>2000m</td>
+          <td>4Gi</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" id="section-storage">
+    <h2>Storage <span class="status-badge badge-fail">fail</span></h2>
+    <p class="section-text">No StorageClass found: Kafka PVCs will not bind.</p>
+  </div>
+
+  <div class="card" id="section-strimzi">
+    <h2>Strimzi Operator <span class="status-badge badge-warn">warn</span></h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">Status</td><td class="status-ok">running in kafka</td></tr>
+        <tr><td class="fact-label">Image</td><td>quay.io/strimzi/operator:0.38.0</td></tr>
+        <tr><td class="fact-label">Replicas</td><td>0/1 ready</td></tr>
+        <tr><td class="fact-label">Health</td><td class="status-warn">Unhealthy</td></tr>
+        <tr><td class="fact-label">Operator pods</td><td class="status-fail">not ready</td></tr>
+        <tr><td class="fact-label">Missing CRDs</td><td class="status-warn">kafkarebalances.kafka.strimzi.io</td></tr>
+      </tbody>
+    </table>
+    <pre>WARN Reconciliation #12 failed: &lt;timeout&gt; &amp; retry
+</pre>
+    <p class="section-note">Warning and error lines from the operator log in the last 15 minutes.</p>
+  </div>
+
+  <div class="card" id="section-kafka">
+    <h2>Existing Kafka <span class="status-badge badge-warn">warn</span></h2>
+    <p class="section-text">An existing Kafka deployment was found: upgrade mode is recommended.</p>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">Kafka clusters</td><td>1</td></tr>
+        <tr><td class="fact-label">KafkaNodePools</td><td>2</td></tr>
+        <tr><td class="fact-label">KafkaTopics</td><td>0</td></tr>
+        <tr><td class="fact-label">KafkaUsers</td><td>0</td></tr>
+        <tr><td class="fact-label">PVCs</td><td>3 (2 bound)</td></tr>
+        <tr><td class="fact-label">Helm release</td><td>krafter</td></tr>
+        <tr><td class="fact-label">Cluster</td><td>krafter (Kafka 3.9.0)</td></tr>
+        <tr><td class="fact-label">Replicas</td><td class="status-warn">1/3 ready</td></tr>
+        <tr><td class="fact-label">Ready condition</td><td class="status-fail">False NotReady</td></tr>
+      </tbody>
+    </table>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Listener</th>
+          <th>Type</th>
+          <th>Port</th>
+          <th>TLS</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>plain</td>
+          <td>internal</td>
+          <td>9092</td>
+          <td>no</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" id="section-ecosystem">
+    <h2>Kafka Connect and CDC</h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">Kafka Connect</td><td>not installed</td></tr>
+        <tr><td class="fact-label">Schema Registry</td><td>not installed</td></tr>
+        <tr><td class="fact-label">CDC database</td><td>not detected</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" id="section-monitoring">
+    <h2>Monitoring <span class="status-badge badge-warn">warn</span></h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">PodMonitor CRD</td><td class="status-warn">not found</td></tr>
+        <tr><td class="fact-label">PrometheusRule CRD</td><td class="status-warn">not found</td></tr>
+        <tr><td class="fact-label">Grafana</td><td class="status-warn">not found</td></tr>
+        <tr><td class="fact-label">Release label</td><td>none</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" id="section-network">
+    <h2>Network and DNS <span class="status-badge badge-fail">fail</span></h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">CNI</td><td>kindnet</td></tr>
+        <tr><td class="fact-label">CoreDNS</td><td class="status-fail">not detected</td></tr>
+        <tr><td class="fact-label">Cluster domain</td><td>cluster.local</td></tr>
+        <tr><td class="fact-label">Pod CIDR</td><td>unknown</td></tr>
+        <tr><td class="fact-label">Service CIDR</td><td>unknown</td></tr>
+      </tbody>
+    </table>
+    <p class="section-note">DNS probe skipped: run with --bench-dns to measure CoreDNS latency.</p>
+  </div>
+
+  <div class="card" id="section-latency">
+    <h2>Inter-Zone Latency <span class="status-badge badge-skipped">skipped</span></h2>
+    <p class="section-text">Skipped: the inter-zone latency probe did not run (read-only run, or no zones to probe).</p>
+  </div>
+
+  <div class="card" id="section-bandwidth">
+    <h2>Inter-Zone Bandwidth <span class="status-badge badge-skipped">skipped</span></h2>
+    <p class="section-text">Skipped: run with --bench-network to measure throughput between zones.</p>
+  </div>
+
+  <div class="card" id="section-security">
+    <h2>Security <span class="status-badge badge-fail">fail</span></h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">Pod Security admission</td><td>none</td></tr>
+        <tr><td class="fact-label">Kyverno enforcing</td><td>no</td></tr>
+        <tr><td class="fact-label">Namespace permissions</td><td class="status-fail">missing</td></tr>
+        <tr><td class="fact-label">Wildcard RBAC</td><td class="status-warn">wildcard rules found in the kafka namespace Roles</td></tr>
+        <tr><td class="fact-label">TLS certificates</td><td class="status-warn">1 expire within 30 days</td></tr>
+        <tr><td class="fact-label">Secret creation</td><td class="status-fail">blocked by admission policy restrict-secrets</td></tr>
+      </tbody>
+    </table>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Secret</th>
+          <th>Subject</th>
+          <th>Expires</th>
+          <th>Days left</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-status="warn">
+          <td>krafter-cluster-ca-cert</td>
+          <td>CN=cluster-ca</td>
+          <td>2026-01-20</td>
+          <td class="status-warn">18</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" id="section-admission">
+    <h2>Admission Controllers</h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">Kyverno</td><td>not installed</td></tr>
+        <tr><td class="fact-label">OPA Gatekeeper</td><td class="status-ok">running in gatekeeper-system (1 constraints)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" id="section-netpol">
+    <h2>NetworkPolicies (kafka namespace) <span class="status-badge badge-warn">warn</span></h2>
+    <table class="facts">
+      <tbody>
+        <tr><td class="fact-label">Managed by Helm</td><td>0</td></tr>
+        <tr><td class="fact-label">Managed by Strimzi</td><td>0</td></tr>
+        <tr><td class="fact-label">Managed by hand</td><td class="status-warn">1</td></tr>
+        <tr><td class="fact-label">Default deny</td><td>no</td></tr>
+      </tbody>
+    </table>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Selector</th>
+          <th>Types</th>
+          <th>In/Out</th>
+          <th>Managed by</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>legacy|allow</td>
+          <td>app=kafka</td>
+          <td>Ingress</td>
+          <td>1/0</td>
+          <td>manual</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" id="section-checks">
+    <h2>Compatibility Checks <span class="status-badge badge-fail">fail</span></h2>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="filterChecks(this, 'all')">All checks</button>
+      <button class="tab-btn" onclick="filterChecks(this, 'fail')">Failures and warnings</button>
+    </div>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Status</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-status="fail">
+          <td>Kubernetes version ≥ 1.25</td>
+          <td class="status-fail">FAIL</td>
+          <td>v1.24.0</td>
+        </tr>
+        <tr data-status="fail">
+          <td>≥ 3 availability zones</td>
+          <td class="status-fail">FAIL</td>
+          <td>1 zone(s)</td>
+        </tr>
+        <tr data-status="fail">
+          <td>StorageClass available</td>
+          <td class="status-fail">FAIL</td>
+          <td>0 class(es)</td>
+        </tr>
+        <tr data-status="ok">
+          <td>node &lt;b&gt;bold&lt;/b&gt;</td>
+          <td class="status-ok">PASS</td>
+          <td>a &amp; b &lt;i&gt;</td>
+        </tr>
+        <tr data-status="warn">
+          <td>Existing Kafka clusters</td>
+          <td class="status-warn">WARN</td>
+          <td>1 Kafka CR(s) already on the cluster</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" id="section-remediation">
+    <h2>Remediation <span class="status-badge badge-fail">fail</span></h2>
+    <div class="remediation-block critical">
+      <div class="remediation-title">Only 1 zone(s) found — 3-AZ Kafka requires at least 3 zones</div>
+      <div class="hint-check">Check: ≥ 3 availability zones</div>
+      <pre>kubectl get nodes --show-labels | grep topology.kubernetes.io/zone
+kubectl label node &lt;node-name&gt; topology.kubernetes.io/zone=&lt;zone&gt;  # if labels are missing</pre>
+    </div>
+    <div class="remediation-block critical">
+      <div class="remediation-title">No StorageClass found — Kafka PVCs will fail to bind</div>
+      <div class="hint-check">Check: StorageClass available</div>
+      <pre>kubectl apply -f config/storage/  # apply zone-specific storage classes
+kubectl get sc  # verify</pre>
+    </div>
+    <div class="remediation-block critical">
+      <div class="remediation-title">Cluster does not have enough CPU/memory for the requested Kafka deployment</div>
+      <div class="hint-check">Check: Broker resources fit (all zones)</div>
+      <pre># Short by 9000m CPU, 36Gi memory
+# Option 1: Add nodes to the cluster
+# Option 2: Reduce broker resources in values.yaml:
+#   brokerDefaults.resources.requests.cpu: 500m
+#   brokerDefaults.resources.requests.memory: 1Gi</pre>
+    </div>
+    <div class="remediation-block critical">
+      <div class="remediation-title">CoreDNS not detected — Kafka brokers require DNS for discovery</div>
+      <div class="hint-check">Check: DNS resolution</div>
+      <pre>kubectl get deployment -n kube-system | grep -i dns
+kubectl rollout restart deployment/coredns -n kube-system</pre>
+    </div>
+    <div class="remediation-block">
+      <div class="remediation-title">PodMonitor CRD not found — Kafka metrics will not be scraped</div>
+      <div class="hint-check">Check: Prometheus monitoring</div>
+      <pre>helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace</pre>
+      <a href="https://prometheus-operator.dev/docs/getting-started/introduction/">Documentation</a>
+    </div>
+    <div class="remediation-block">
+      <div class="remediation-title">An existing Kafka cluster is running — use helm upgrade instead of install</div>
+      <div class="hint-check">Check: Existing deployment</div>
+      <pre>helm upgrade kafka-cluster charts/kafka-cluster -n kafka -f values.yaml --timeout 10m --wait</pre>
+    </div>
+    <div class="remediation-block">
+      <div class="remediation-title">Namespace Roles contain wildcard &#39;*&#39; resources or verbs which violates least privilege security standards</div>
+      <div class="hint-check">Check: Wildcard RBAC roles avoided</div>
+      <pre># Inspect Roles with wildcard permissions in the namespace:
+kubectl get roles -n kafka -o json | jq &#39;.items[] | select(.rules[].verbs[] == &#34;*&#34; or .rules[].resources[] == &#34;*&#34;) | .metadata.name&#39;
+# Scope down rules to explicit apiGroups, resources, and verbs in values.yaml</pre>
+    </div>
+    <div class="remediation-block">
+      <div class="remediation-title">1 TLS certificate(s) in namespace &#39;kafka&#39; are expiring within 30 days</div>
+      <div class="hint-check">Check: TLS certificate validity</div>
+      <pre># Cert &#39;krafter-cluster-ca-cert&#39; (CN=cluster-ca) expires in 18 days
+# Renew expiring TLS secrets or trigger certificate rotation:
+kubectl delete secret &lt;secret-name&gt; -n kafka  # if managed by cert-manager to force renewal</pre>
+    </div>
+  </div>
+
+  <script>
+    function filterChecks(button, mode) {
+      document.querySelectorAll('#section-checks .tab-btn').forEach(b => b.classList.remove('active'));
+      button.classList.add('active');
+      document.querySelectorAll('#section-checks tbody tr').forEach(row => {
+        const status = row.getAttribute('data-status');
+        row.style.display = (mode === 'all' || status === 'fail' || status === 'warn') ? '' : 'none';
+      });
+    }
+  </script>
+
+  <div class="footer">
+    Report generated by <strong>kates detect</strong>.
+  </div>
+</div>
+</body>
+</html>

@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -22,7 +21,7 @@ import (
 const mcpClusterTopologyDescription = "Where the pinned Kafka cluster runs: the Strimzi Kafka resource, its node pools " +
 	"(roles, replicas, storage), the KRaft controllers, and the brokers, each with its pod's readiness and Kubernetes " +
 	"node and whether the Kafka admin API lists it, and the pods of pools with neither role. With topic, also that topic's partitions: leader, replicas and " +
-	"in-sync replicas of each, a page at a time (from_partition), with counts of under-replicated and leaderless " +
+	"in-sync replicas of each, a page at a time (offset and limit), with counts of under-replicated and leaderless " +
 	"partitions and how many partitions each broker leads over the whole topic, and the topic's min.insync.replicas " +
 	"in force with what set it (the topic, a broker, or Kafka's default). It does not name the KRaft quorum " +
 	"leader: cluster_overview does. Node pools and controllers are read through the Kubernetes API, so a backend " +
@@ -36,55 +35,25 @@ const (
 	mcpTopologyMaxNodes        = 200
 	mcpTopologyPartitionsPage  = 100
 	mcpTopologyLeaderSummaries = 200
+	mcpTopologyMaxOffset       = 1_000_000
 )
-
-// mcpKafkaTopicPattern is Kafka's rule for topic names: 1 to 249 of these
-// characters (org.apache.kafka.common.internals.Topic, kafka-clients 3.9.2).
-// "." and ".." match it and are refused separately.
-const mcpKafkaTopicPattern = `^[a-zA-Z0-9._-]{1,249}$`
-
-var mcpKafkaTopicRE = regexp.MustCompile(mcpKafkaTopicPattern)
-
-// mcpValidateKafkaTopic refuses anything Kafka would not accept as a topic name,
-// so a topic argument can carry neither prose nor a path.
-func mcpValidateKafkaTopic(field, topic string) error {
-	if !mcpKafkaTopicRE.MatchString(topic) || topic == "." || topic == ".." {
-		return mcpInvalidArgument(field+" must be a Kafka topic name: 1 to 249 letters, digits, '.', '_' or '-', "+
-			"and not \".\" or \"..\".", topic)
-	}
-	return nil
-}
-
-// mcpClusterInputSchema is the input schema addReadTool would infer for In, with
-// edit applied: the constraints a struct tag cannot carry (a pattern, bounds),
-// so that the SDK refuses a bad argument before any Kates code runs. The
-// handler checks the same things again.
-func mcpClusterInputSchema[In any](name string, edit func(props map[string]*jsonschema.Schema)) *jsonschema.Schema {
-	s, err := mcpSchemaFor[In]()
-	if err != nil {
-		panic(fmt.Sprintf("kates mcp: tool %q input schema: %v", name, err))
-	}
-	edit(s.Properties)
-	return s
-}
-
-func mcpClusterFloat(f float64) *float64 { return &f }
 
 func registerMCPClusterTopology(s *mcp.Server, deps *mcpDeps) {
 	addReadTool(s, deps, &mcp.Tool{
 		Name:        "cluster_topology",
 		Title:       "Cluster topology",
 		Description: mcpClusterTopologyDescription,
-		InputSchema: mcpClusterInputSchema[mcpClusterTopologyIn]("cluster_topology", func(p map[string]*jsonschema.Schema) {
-			p["topic"].Pattern = mcpKafkaTopicPattern
-			p["from_partition"].Minimum = mcpClusterFloat(0)
+		InputSchema: mcpInputSchema[mcpClusterTopologyIn]("cluster_topology", func(s *jsonschema.Schema) {
+			s.Properties["topic"].Pattern = mcpKafkaTopicPattern
+			mcpPageSchema(s, mcpTopologyMaxOffset, mcpTopologyPartitionsPage)
 		}),
 	}, mcpClusterTopology, mcpCaveatClusterDataCached)
 }
 
 type mcpClusterTopologyIn struct {
-	Topic         string `json:"topic,omitempty" jsonschema:"a topic name; with it the result adds the topic's partitions"`
-	FromPartition int    `json:"from_partition,omitempty" jsonschema:"with topic: the first partition to list (default 0); pass nextFromPartition from the previous result for the next page"`
+	Topic  string `json:"topic,omitempty" jsonschema:"a topic name; with it the result adds the topic's partitions"`
+	Offset int    `json:"offset,omitempty" jsonschema:"with topic: the first partition to list, counted from 0 in partition order (default 0); pass nextOffset from the previous result for the next page"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"with topic: most partitions to list, 1 to 100 (default 100)"`
 }
 
 type mcpClusterTopologyOut struct {
@@ -161,9 +130,9 @@ type mcpTopicLayout struct {
 	UnderReplicated   int                 `json:"underReplicated" jsonschema:"partitions, over the whole topic, with fewer in-sync replicas than replicas"`
 	Leaderless        int                 `json:"leaderless" jsonschema:"partitions, over the whole topic, with no leader"`
 	Leaders           []mcpBrokerLeads    `json:"leaders" jsonschema:"how many partitions each broker leads, over the whole topic, by broker id; broker -1 counts partitions with no leader"`
-	FromPartition     int                 `json:"fromPartition" jsonschema:"the first partition this page lists"`
+	Offset            int                 `json:"offset" jsonschema:"where this page starts in the topic's partitions, in partition order"`
 	Partitions        []mcpTopicPartition `json:"partitions" jsonschema:"this page of partitions, by partition id"`
-	NextFromPartition *int                `json:"nextFromPartition,omitempty" jsonschema:"pass as from_partition for the next page; absent on the last page"`
+	NextOffset        *int                `json:"nextOffset,omitempty" jsonschema:"pass as offset for the next page; absent on the last page"`
 }
 
 type mcpBrokerLeads struct {
@@ -186,11 +155,12 @@ func mcpClusterTopology(ctx context.Context, call *mcpCall, in mcpClusterTopolog
 			return out, err
 		}
 	}
-	switch {
-	case in.FromPartition < 0:
-		return out, mcpInvalidArgument("from_partition must be 0 or more.", strconv.Itoa(in.FromPartition))
-	case in.FromPartition > 0 && in.Topic == "":
-		return out, mcpInvalidArgument("from_partition pages a topic's partitions, so it needs topic.", strconv.Itoa(in.FromPartition))
+	limit, err := mcpPageArgs(in.Offset, in.Limit, mcpTopologyMaxOffset, mcpTopologyPartitionsPage, mcpTopologyPartitionsPage)
+	if err != nil {
+		return out, err
+	}
+	if (in.Offset > 0 || in.Limit > 0) && in.Topic == "" {
+		return out, mcpInvalidArgument("offset and limit page a topic's partitions, so they need topic.", strconv.Itoa(in.Offset))
 	}
 
 	// The two reads are independent. With a topic, the partitions are what
@@ -257,7 +227,7 @@ func mcpClusterTopology(ctx context.Context, call *mcpCall, in mcpClusterTopolog
 
 	mcpTopologyNodes(call, topo, &out)
 	if detail != nil {
-		layout, err := mcpTopicLayoutFrom(call, detail, in.FromPartition)
+		layout, err := mcpTopicLayoutFrom(call, detail, in.Offset, limit)
 		if err != nil {
 			return out, err
 		}
@@ -355,7 +325,7 @@ func mcpTopologyNodes(call *mcpCall, topo *client.MCPClusterTopology, out *mcpCl
 	}
 	if info := call.ClusterInfo(); info != nil {
 		for _, b := range info.Brokers {
-			id := mcpInt(b.ID)
+			id := b.ID.Int()
 			br := brokers[id]
 			if br == nil {
 				br = &mcpTopologyBroker{ID: id}
@@ -491,8 +461,8 @@ func mcpHasRole(roles []string, role string) bool {
 }
 
 // mcpTopicLayoutFrom summarises a topic over all its partitions and lists one
-// page of them, starting at partition from.
-func mcpTopicLayoutFrom(call *mcpCall, d *client.TopicDetail, from int) (*mcpTopicLayout, error) {
+// page of at most limit of them, in partition order, starting at offset.
+func mcpTopicLayoutFrom(call *mcpCall, d *client.TopicDetail, offset, limit int) (*mcpTopicLayout, error) {
 	parts := make([]mcpTopicPartition, 0, len(d.PartitionInfo))
 	leads := map[int]int{}
 	t := &mcpTopicLayout{
@@ -500,7 +470,7 @@ func mcpTopicLayoutFrom(call *mcpCall, d *client.TopicDetail, from int) (*mcpTop
 		Internal:          d.Internal,
 		PartitionCount:    d.Partitions,
 		ReplicationFactor: d.ReplicationFactor,
-		FromPartition:     from,
+		Offset:            offset,
 	}
 	for _, p := range d.PartitionInfo {
 		leader := p.Leader
@@ -544,15 +514,15 @@ func mcpTopicLayoutFrom(call *mcpCall, d *client.TopicDetail, from int) (*mcpTop
 		call.Caveat(mcpCaveatMinISRBrokerLevel)
 	}
 
-	start := sort.Search(len(parts), func(i int) bool { return parts[i].Partition >= from })
-	if from > 0 && start == len(parts) {
-		return nil, mcpInvalidArgument("from_partition is past the topic's last partition; start again from 0.", strconv.Itoa(from))
+	if err := mcpPastEnd(offset, len(parts)); err != nil {
+		return nil, err
 	}
-	page := parts[start:]
-	if len(page) > mcpTopologyPartitionsPage {
-		next := page[mcpTopologyPartitionsPage].Partition
-		t.NextFromPartition = &next
-		page = page[:mcpTopologyPartitionsPage]
+	page := parts[min(offset, len(parts)):]
+	if len(page) > limit {
+		page = page[:limit]
+	}
+	t.NextOffset = mcpNextOffset(offset, len(page), len(parts))
+	if t.NextOffset != nil {
 		call.MarkTruncated()
 	}
 	t.Partitions = page
@@ -573,44 +543,29 @@ const mcpTopologyMinPage = 10
 
 // mcpFitTopology shortens a result too large for one call. The partition page
 // goes first, down to mcpTopologyMinPage, since the caller pages on with
-// nextFromPartition; after that the longest list is halved until it fits.
+// nextOffset; after that the longest list is halved until it fits.
 func mcpFitTopology(call *mcpCall, out *mcpClusterTopologyOut) {
-	type list struct {
-		n   int
-		cut func(n int)
+	t := out.Topic
+	cutPage := func(n int) {
+		next := t.Offset + n
+		t.Partitions, t.NextOffset = t.Partitions[:n], &next
 	}
-	cutPage := func(t *mcpTopicLayout, n int) {
-		next := t.Partitions[n].Partition
-		t.Partitions, t.NextFromPartition = t.Partitions[:n], &next
-	}
-	for !call.Fits(out) {
-		call.MarkTruncated()
-		t := out.Topic
-		if t != nil && len(t.Partitions) > mcpTopologyMinPage {
-			cutPage(t, len(t.Partitions)/2)
-			continue
-		}
-		lists := []list{
-			{len(out.Brokers), func(n int) { out.Brokers = out.Brokers[:n] }},
-			{len(out.Controllers), func(n int) { out.Controllers = out.Controllers[:n] }},
-			{len(out.NodePools), func(n int) { out.NodePools = out.NodePools[:n] }},
-		}
-		if t != nil {
-			lists = append(lists,
-				list{len(t.Leaders), func(n int) { t.Leaders = t.Leaders[:n] }},
-				list{len(t.Partitions), func(n int) { cutPage(t, n) }})
-		}
-		longest := 0
-		for i, l := range lists {
-			if l.n > lists[longest].n {
-				longest = i
+	mcpShrink(call, out,
+		func() bool {
+			if t == nil || len(t.Partitions) <= mcpTopologyMinPage {
+				return false
 			}
-		}
-		if lists[longest].n <= 1 {
-			return // nothing left to cut; the guard refuses the result
-		}
-		lists[longest].cut(lists[longest].n / 2)
-	}
+			cutPage(len(t.Partitions) / 2)
+			return true
+		},
+		func() bool {
+			lists := []mcpShrinkList{mcpShrinkOf(&out.Brokers), mcpShrinkOf(&out.Controllers), mcpShrinkOf(&out.NodePools)}
+			if t != nil {
+				lists = append(lists, mcpShrinkOf(&t.Leaders), mcpShrinkList{n: len(t.Partitions), cut: cutPage})
+			}
+			return mcpHalveLongest(1, lists...)
+		},
+	)
 }
 
 // Paging through the topic list to tell a missing topic from a failed read.

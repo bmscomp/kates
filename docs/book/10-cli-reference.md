@@ -186,6 +186,8 @@ kates --context staging test list
 
 The `kates` chart turns API-key authentication on by default and generates the key into the `kates-api-key` Secret; the command above reads it from the `kates` namespace of the default install. The URL answers only while something forwards the API to it: `make ports` forwards it to `localhost:30083`, `kates ports` to `localhost:8080`, and when only one of those two ports answers, the CLI uses that one. `kates health` reads a public endpoint and succeeds without a key, so check a new context with `kates test list` instead. `kates ctx set` switches to the context it stores only when that is the only context, and on a fresh machine the configuration starts with a built-in `default` context pointing at `http://localhost:8080`, so follow it with `kates ctx use`.
 
+On a context that already exists, `kates ctx set` changes only the settings whose flags you pass and keeps the rest, so `kates ctx set local --url http://localhost:8080` keeps its API key, proxy and `insecure` setting. `--replace` rebuilds the context from the flags alone, as earlier releases did. `kates ctx delete` of the current context makes the alphabetically first remaining context current.
+
 `--url` and `KATES_URL` take the context's API key, proxy and `insecure` setting only to the context's own host. The port may differ, `localhost` and `127.0.0.1` count as one host, and plain HTTP never gets what the context sends over HTTPS. For another server, pass `--api-key` or set `KATES_API_KEY`; without either, the CLI says on stderr that it is not sending the context's key, and the request goes without one.
 
 The context stores the key in plain text in `~/.kates.yaml`. The CLI writes that file readable by you alone (mode `0600`); a file that an earlier release left readable by others is tightened to `0600` the next time the CLI saves it, on `kates ctx use` for instance. That keeps other users of the machine out, not other programs you run; to keep the key out of the file, leave `--api-key` out of the context and export the key as `KATES_API_KEY` for the session instead.
@@ -289,7 +291,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno, and `doctor dns` and `doctor network` work through `kubectl` alone |
 | [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs` | What does the Kafka cluster look like, and is it healthy? | Kates API |
 | [Conformity](#conformity) | `conformity check`, `lint`, `fmt` | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
-| [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test scaffold` uses only templates built into the CLI |
+| [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `lint`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test lint` works on local files, and `test scaffold` uses only templates built into the CLI |
 | [Report Commands](#report-commands) | `report show`, `summary`, `export`, `diff`, `compare`, `brokers` | What did a run measure, and how does it compare with another run? | Kates API |
 | [Trend Analysis](#trend-analysis) | `trend` | How has one metric moved across a test type's runs over recent days? | Kates API |
 | [Disruption Commands](#disruption-commands) | `disruption run`, `list`, `status`, `timeline`, `types`, `kafka-metrics`, `watch`, `playbook list`, `playbook show`, `playbook run` | What happens to the cluster when a fault hits it, and how fast does it recover? | Kates API |
@@ -298,7 +300,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Schedule Commands](#schedule-commands) | `schedule list`, `get`, `create`, `delete` | How do you run the same test on a cron schedule? | Kates API |
 | [Observability & Monitoring](#observability--monitoring) | `dashboard`, `top` | What is running right now, and how is it doing? | Kates API |
 | [Interactive Lab](#interactive-lab) | `lab` | Which settings work best, when you try them one run at a time? | Kates API |
-| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `charts pull`, `charts push`, `clean`, `detect`, `ports`, `auto`, `operator`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
+| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `charts pull`, `charts push`, `clean`, `detect`, `ports`, `auto`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
 | [Versions and Operators](#versions-and-operators) | `versions`, `operators list` | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
 | [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes, through `kubectl` and `helm`; when a source has no upstream image, `up` and `run` build one with `docker` and, on a Kind cluster, load it there, unless you pass `--skip-build` |
 | [Security Commands](#security-commands) | `security audit`, `tls-inspect`, `auth-test`, `pentest`, `compliance`, `baseline`, `drift`, `gate`, `certs`, `cve`, `secrets`, `netpol`, `acl-map`, `config-diff`, `trend` | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl`, and `security audit` also asks it about Kyverno |
@@ -309,11 +311,11 @@ Find your question in the table below, then follow its link to the family's comm
 | [Profile Commands](#profile-commands) | `profile save`, `list`, `compare`, `assert` | Does a new run still perform like one you saved earlier? | Kates API for `save` and `assert`; profiles are files in `~/.kates/profiles` |
 | [Cost Estimation](#cost-estimation) | `cost estimate` | Roughly what would a workload cost to run with a cloud provider? | Nothing: the CLI computes the estimate itself |
 | [Snapshot Commands](#snapshot-commands) | `snapshot create`, `list`, `diff` | What changed in the cluster's brokers, topics and groups between two moments? | Kates API for `create`; snapshots are files in `~/.kates/snapshots` |
-| [Flow Pipelines](#flow-pipelines) | `flow run` | How do you run several tests in a row from one YAML file? | Kates API, for a pipeline read from a local file |
+| [Flow Pipelines](#flow-pipelines) | `flow run`, `lint` | How do you run several tests in a row from one YAML file? | Kates API, for a pipeline read from a local file; `flow lint` works on local files |
 | [Badge Generation](#badge-generation) | `badge` | What badge shows the latest run's grade, P99 or throughput? | Kates API |
 | [Webhook Notifications](#webhook-notifications) | `webhook list`, `add`, `remove` | Which URLs hear about it when a test finishes? | Kates API |
 | [MCP Server for AI Agents](#mcp-server-for-ai-agents) | `mcp` | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
-| [Developer & Help Commands](#developer--help-commands) | `docs`, `tldr`, `changelog` | How does a command work, and what does the Kates API's audit log record? | Nothing for `docs` and `tldr`; `changelog` reads audit events from the Kates API |
+| [Developer & Help Commands](#developer--help-commands) | `docs`, `tldr`, `changelog`, `plugin` | How does a command work, what does the Kates API's audit log record, and how do you add a command of your own? | Nothing for `docs` and `tldr`; `changelog` reads audit events from the Kates API; a plugin gets the context's URL and API key |
 
 Contexts, profiles and snapshots are files in your home directory, so they stay on the machine that made them. To move your contexts to another machine, print them with `kates ctx export --reveal`, keys in clear, and load the file there with `kates ctx import --file`.
 
@@ -364,7 +366,16 @@ Expected output:
   ✓ local │ UP │ Kafka ✓ │ 12 configs │ 0 running │ 8 done │ 0 failed
 ```
 
-If the API is unreachable — or rejects the API key — the line shows the context name, its URL, and `unreachable` instead, and the command still exits `0`.
+If the API is unreachable — or rejects the API key — the line shows the context name, the URL the command used, and `unreachable` instead, and the command exits `1`. With `-o json` it prints one object instead of the line: `context`, `url`, `status`, `kafka`, `configs`, `runningTests`, `doneTests` and `failedTests`, plus an `error` when it could not reach the API.
+
+`--watch` (`-w`) keeps polling, every `--interval` seconds (default 5), until you press Ctrl-C:
+
+```bash
+kates status --watch
+kates status --watch --interval 2 -o json >> status.ndjson
+```
+
+In a terminal the line is redrawn on a cleared screen at each poll. Anywhere else, such as a pipe, a file or a CI log, a line is printed only when the status changes, with the time in front of it, so the log holds the changes and nothing else. Under `-o json` each change is one compact object on its own line (NDJSON), the same object `kates status -o json` prints. An API that stops answering is a change like any other: the watch prints its `unreachable` line and goes on polling. Ctrl-C ends the watch with exit `0`, whatever the last status was, since stopping a watch is not a failure; an `--interval` under 1 exits `2`.
 
 #### version
 
@@ -385,6 +396,15 @@ kates doctor
 kates preflight
 kates check
 ```
+
+It exits `1` when a check other than Kyverno's fails, and `0` when every check passes or only Kyverno's warn. With `-o json` it prints only the checks, as an array of `name`, `passed`, `detail` and `remediation`, with the same exit code.
+
+Two flags shape the checklist:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--timeout` | `2m` | Time limit for the whole checklist, a duration such as `30s` or a number of seconds. A check still waiting when it runs out fails with `timed out` in its detail, and the checks after it fail at once, so `kates doctor` ends in about that time against an API that does not answer. A value that is not a duration exits `2`. |
+| `--kyverno` | `true` | `--kyverno=false` leaves the four Kyverno checks out and runs no `kubectl`, for a cluster that does not use Kyverno. |
 
 Expected output:
 
@@ -824,13 +844,46 @@ Live-stream test progress to the terminal. Stopping it, with `q` or Ctrl-C, leav
 kates test apply -f scenario.yaml
 kates test apply -f scenario.yaml --wait
 kates test apply -f scenario.yaml --wait -o json
+kates test apply -f scenario.yaml --wait --sla-scope task
+kates test apply -f scenario.yaml --wait --no-sla
+kates test apply -f scenario.yaml --wait --output-junit kates-apply.xml
 ```
 
-Apply a YAML or JSON scenario file: a `scenarios` list, or the fields of one scenario at its top level. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
+Apply a YAML or JSON scenario file: a `scenarios` list, or the fields of one scenario at its top level. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax. Before the first scenario starts, the CLI checks the whole file as `kates test lint` does and prints what it finds to stderr. A file with an error, such as a misspelled key, an unknown type, or an `enableCrc` that holds anything but `true` or `false`, exits 2, and none of its scenarios starts.
 
-In a terminal, `--wait` shows a spinner while each run goes. Without one (a pipe, a CI job, an agent's shell) or with `--plain`, it prints a plain line to stderr each time a run's status changes, such as `quick (3f8a2c1e): RUNNING`. With `-o json` stdout carries only the summary as JSON: each scenario's `name`, `type`, `runId`, `status` and `error`, and with `--wait`, for a scenario with a `validate` block, an `sla` object with its `violations` and the gates that were `notEvaluable`. A scenario that failed to submit has no `runId`. The exit code is the same in every mode.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-f`, `--file` | | The scenario file. Required |
+| `--wait` | `false` | Wait for each run to finish before starting the next, and check its gates; Ctrl-C cancels the run and exits 130 |
+| `--sla-scope` | `report` | What a `validate` block is checked against: `report`, the run as a whole as its report sums it up (the producers' latency, their throughput added up, a consumer's row left out), or `task`, each task row on its own. A block with `perTask: true` is checked per task whatever the flag says. Needs `--wait` |
+| `--no-sla` | `false` | Wait for the runs but check no gate, so the exit code says only how they ended. Needs `--wait`, and does not go with `--sla-scope` |
+| `--output-junit` | | Also write a JUnit XML report to this file, one test case per scenario. `--junit` is the same flag. Needs `--wait` |
+
+A flag that needs `--wait` without it, `--no-sla` with `--sla-scope`, a scope other than `report` or `task`, and `--output-junit -` all exit 2 before anything starts.
+
+In a terminal, `--wait` shows a spinner while each run goes. Without one (a pipe, a CI job, an agent's shell) or with `--plain`, it prints a plain line to stderr each time a run's status changes, such as `quick (3f8a2c1e): RUNNING`. With `-o json` stdout carries only the summary as JSON: an `sla` object with whether the gates were `checked` and, when they were, the `scope`; then each scenario's `name`, `type`, `runId`, `status` and `error`, and for a graded scenario with a `validate` block, an `sla` object with its `scope`, its `violations` and the gates that were `notEvaluable`. Without `--wait`, or with `--no-sla`, the summary reads `"sla": {"checked": false}` and no scenario has an `sla` object. A scenario that failed to submit has no `runId`. The exit code is the same in every mode: `0` when every run finished and no gate was violated, `1` when a scenario failed to submit, ended `FAILED` or `ERROR`, or violated a gate, `2` for a file with an error or flags that don't go together, and `130` when interrupted.
+
+The JUnit report holds one test suite, timed by the apply's wall clock, and one test case per scenario, timed from its submission to its end. Violated gates are a `<failure>` of type `sla_violation`, and a run that ended `FAILED` a `<failure>` of type `run_failed`. A scenario that failed to submit is an `<error>` of type `submit_error`, and one the CLI lost track of an `<error>` of type `wait_error`. The scenario Ctrl-C stopped, and those never started after it, are `<skipped>`. Gates that could not be evaluated go in the test case's output.
 
 Ctrl-C while `--wait` waits, or `q` in the spinner, stops the apply. The run it is waiting for is cancelled, as `kates test cancel` would cancel it, and the scenarios after it are not started. The summary shows that scenario as `CANCELLED`, or as `INTERRUPTED` with the command to cancel it when the cancel failed, the JSON summary carries `"interrupted": true`, and the CLI exits 130. A CI job that is cancelled stops the apply the same way, through the SIGTERM it sends.
+
+#### test lint
+
+Check scenario files offline, as `kates test apply` reads them: no Kates API and no cluster. It checks the YAML or JSON syntax, the `scenarios` list or the one scenario at the top level, every key against the ones `kates test apply` reads, each `type` and `backend`, each `spec` value, and each `validate` gate. A misspelled key is an error, named with the key it is closest to. So is a value apply could not send as written: a quoted number, a unit such as `10m`, `yes` for `true`, or a fraction such as `durationSeconds: 1.5` that would be cut to a whole number. A gate that checks nothing, `maxErrorRate` or a `0` that turns a gate off, is a warning. Each finding is a line `file:line:col: severity: path: message [code]`, with the source line under it, as `kates conformity lint` prints its own.
+
+```text
+s.yaml:4:3: error: spec.record: unknown field (did you mean "records"?) [unknown-field]
+  4 |   record: 100000
+    |   ^
+```
+
+```bash
+kates test lint scenario.yaml
+kates test lint scenarios/*.yaml
+kates test lint -o json scenarios/*.yaml
+```
+
+`-o json` lists the findings instead, each with its `file`, `line`, `col`, `severity`, `code`, `path` and `message`. It exits `0` when no file has an error (warnings are printed), `1` when one does, and `2` when a file cannot be read. For a flow file, use [`kates flow lint`](#flow-lint).
 
 #### test scaffold
 
@@ -849,7 +902,7 @@ kates test scaffold export --all           # export every template
 |----------|------|--------------|
 | `quick-load` | LOAD | 50k records of 1 KiB through one producer and one consumer; gates on P99 ≤ 100 ms and at least 5,000 rec/s |
 | `production-load` | LOAD | Up to 1M records of 2 KiB with `acks=all`, lz4 and 12 partitions for at most 300 s, through one producer and one consumer; gates on P99 ≤ 50 ms, average ≤ 10 ms and at least 50,000 rec/s |
-| `stress-test` | STRESS | 16 producers, each sending up to 5M records of 512 B with `acks=1` and snappy to 24 partitions; gates each producer on P99 ≤ 200 ms and at least 100,000 rec/s |
+| `stress-test` | STRESS | 16 producers, each sending up to 5M records of 512 B with `acks=1` and snappy to 24 partitions; gates the run on P99 ≤ 200 ms and on at least 100,000 rec/s from the 16 producers together |
 | `endurance-soak` | ENDURANCE | 10M records of 1 KiB at 5,000 rec/s through one producer and one consumer; gates on P99 ≤ 100 ms and average ≤ 20 ms. The records take about 33 minutes, so the run ends on its record count, well inside its `durationSeconds` of 3,600 |
 | `exactly-once` | ROUND_TRIP | 100k records of 256 B with `acks=all` through one idempotent, transactional producer at 10,000 rec/s; gates on P99 ≤ 200 ms. A ROUND_TRIP run makes no integrity check, so the template sets no loss, ordering or CRC gate; `integrity-tx` sets all three |
 | `integrity-tx` | INTEGRITY | 200k records of 512 B with `acks=all` and zstd through one producer and one consumer — CRC-checked, idempotent and transactional, read with `read_committed`; gates on zero loss, zero out-of-order, zero CRC failures and P99 ≤ 150 ms |
@@ -919,6 +972,7 @@ kates report export <id> --format junit
 kates report export <id> --format md
 kates report export <id> --format heatmap > heatmap.json
 kates report export <id> --format heatmap-csv > heatmap.csv
+kates report export <id> --format junit -f results.xml
 ```
 
 | Format | Description |
@@ -930,7 +984,12 @@ kates report export <id> --format heatmap-csv > heatmap.csv
 | `heatmap` | Latency heatmap as JSON |
 | `heatmap-csv` | Latency heatmap as CSV |
 
-When run in a terminal, the export is written to an auto-named file (e.g. `kates-report-<id>.csv`); when piped or redirected, it goes to stdout. For the full report as JSON, use the global output flag instead: `kates report show <id> -o json`. The `junit` format needs a finished run: until the run is `DONE` or `FAILED` the Kates API answers `409 Conflict`, and the command fails rather than write a suite that reads as passed.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format` | `csv` | One of the formats above |
+| `-f`, `--file` | | Write to this file instead of the command's default; `-` writes to stdout |
+
+With `-f` the export goes to that file. Without it, in a terminal it goes to an auto-named file (e.g. `kates-report-<id>.csv`) in the current directory; piped, redirected or with `--plain`, it goes to stdout, for every format including `html`. For the full report as JSON, use the global output flag instead: `kates report show <id> -o json`. The `junit` format needs a finished run: until the run is `DONE` or `FAILED` the Kates API answers `409 Conflict`, and the command fails rather than write a suite that reads as passed.
 
 #### report diff
 
@@ -1458,7 +1517,7 @@ kates clean
 kates clean --yes
 ```
 
-`kates clean` works on kubectl's current context. It names that cluster, lists the Helm releases, namespaces and CRDs it will remove, and asks before removing anything; without a terminal it refuses unless `--yes` is given (`--force` does the same). Every kubectl and helm call it then makes names that context, so switching contexts in another terminal while it runs does not move the teardown. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes and leaves every other forward running.
+`kates clean` works on kubectl's current context. It names that cluster, lists the Helm releases, namespaces and CRDs it will remove, and asks before removing anything; without a terminal it refuses unless `--yes` is given (`--force` does the same). Every kubectl and helm call it then makes names that context, so switching contexts in another terminal while it runs does not move the teardown. Once you confirm, it stops the `kubectl port-forward` processes into the namespaces it deletes and leaves every other forward running. It takes the same namespace flags as `kates deploy`, `--ui-ns` among them, so a stack deployed into other namespaces is removed from those. It exits `1` when a step fails, naming what it could not remove.
 
 On a cluster shared with other software, `kates clean` leaves what that software uses, and lists each thing it keeps with the reason:
 
@@ -1496,7 +1555,7 @@ It first stops every `kubectl port-forward` you are running, including ones it d
 
 It finds the services by listing them in every namespace. An account that may not, such as one with `edit` in its own namespace only, gets the services of `--app-ns` and `--kafka-ns` instead, so pass the namespace the Kates API runs in: `kates ports --app-ns team`. [Running Without Cluster Admin](12-deployment.md#running-without-cluster-admin) in the Deployment Guide sets such an install up.
 
-A local port that another program already listens on is not forwarded, and the table marks it `[IN USE]`. When that port is the API's, `kates ports` leaves the `ports` context as it is and sends no key, since the program on the port, not the API, would receive it.
+A local port that another program already listens on is not forwarded, and the table marks it `[IN USE]`. The command exits `1` when any forward could not be established. Before it starts, it stops the `kubectl port-forward` processes it started earlier, those forwarding into its namespaces for the same kube-context, and leaves forwards to other clusters running. When that port is the API's, `kates ports` leaves the `ports` context as it is and sends no key, since the program on the port, not the API, would receive it.
 
 It reads the API key from the `kates-api-key` Secret in the namespace where it found the API's Service, and nowhere else, and checks it with a request to `/api/tests/types`, which needs the key; `/api/health` would accept any key. A key the API accepts goes into `ports`, and so does one it cannot check because the API does not answer or fails with a status other than 401 or 403. A key the API rejects does not: `kates ports` says so and leaves the key that `ports` already had. A key you put in `ports` yourself, with `kates ctx set`, `kates ctx import` or an editor, stays whatever the Secret holds; `kates ports` reports whether the API accepts it.
 
@@ -1511,14 +1570,6 @@ kates auto
 ```
 
 `--labels-file` (default: `.labels` in the current directory) and `KATES_NAMESPACE_LABELS` label the namespace it installs into, as [Namespace Labels](12-deployment.md#namespace-labels) describes for `kates deploy`.
-
-#### operator
-
-Run the Kates Environment Operator.
-
-```bash
-kates operator
-```
 
 #### init
 
@@ -1598,6 +1649,31 @@ Two combinations the chart refuses at render time are refused by the CLI first, 
 - **an identity fan-in over one topic name** (`--from 2.8.2 --from 3.9.1 --topics orders`) — under the identity policy topic names are kept, so both legs would write `orders` on the target. The refusal names the three ways out: `--policy default` (each source's topics land as `<alias>.<topic>`), dropping `--topics` so the lab gives each source its own corpus, or one lab per source.
 
 `up`, `run` and `migrate mirror deploy` also refuse a lab whose topic names on the target, after the policy, are already there. A re-run, whose own KafkaMirrorMaker2 exists, may keep only the topics that mirror already writes: new `--topics` or a new `--policy` under the same lab name are checked like a new lab. Removing a lab deletes the topics it mirrored into, so with the identity policy `--topics orders` would take the primary's own `orders` with it, data and all. The CLI lists the target's topics as `kates-mm2` from a client pod it deletes afterwards, and refuses when it cannot. The refusal names each topic and the ways out: `--topics` with names the target does not have, or `--policy default`. A `run` refused at its prerequisites, by this check or because another lab already mirrors one of its topics, removes nothing. `migrate mirror deploy` makes both checks before it asks to install, and installs nothing when one refuses; its `--dry-run` makes neither. Its re-run is one with the same `--release`: a mirror of the same lab name under another release is checked like another lab's.
+
+#### Cutting over and removing a lab
+
+The cutover and the teardown are the two steps that change what a lab's users depend on, so each one checks before it acts:
+
+```bash
+kates migrate cutover --name m282-431 --dry-run     # checks and plan; writes nothing
+kates migrate status  --name m282-431 --watch       # every 10 s, no end offsets
+kates migrate down --name m282-431 --yes --keep-topics   # leave mirrored topics
+kates migrate down --name m282-431 --yes --delete-data   # delete them, records too
+```
+
+`cutover` first checks that the lab is running: the KafkaMirrorMaker2 CR Ready, its source and checkpoint connectors RUNNING with every task, every source's brokers ready, and the target Kafka Ready. A source connector already `STOPPED` means the lab is cut over, and `rollback` reverses that. A failed check refuses the cutover with exit code `1` before it asks or changes anything. `--dry-run` runs the same checks and prints what the cutover would do: the `helm upgrade --reuse-values` command, the values `values-cutover.yaml` sets, the connector states before and after, what happens to clients, and the proof that follows. Kates repoints no client: producers and consumers move to the target themselves, and the consumer group keeps its translated position because the checkpoint connector keeps running. The dry run creates no client pod, writes no file and exits `1` when a check fails; `-o json` prints the same plan as one document.
+
+`status --watch` does not read end offsets, since each reading starts a client pod on every end. Every frame says so in its notes. Run `status` without `--watch` to read them.
+
+`down` treats the mirrored topics on the target as data. Before it deletes them, it lists the target's topics and reads the end offset of each mirrored topic as `kates-mm2`, from a client pod labelled with the lab that it removes afterwards. Some topics need a second confirmation that names them and their record counts:
+
+- a topic that holds records;
+- a topic whose offsets cannot be read, which includes every topic when the target cannot be reached;
+- a topic named only by the mirror's `topicsPattern`. When the CR carries no `kates.io/lab-topics` list and the pattern is a real regular expression, `down` matches the pattern against the target's topic list. Kafka's and MirrorMaker's own topics are never matched.
+
+On a terminal, `down` asks that second question. With `--yes`, with `-o json`, or without a terminal, it refuses with exit code `1` and removes nothing, unless `--delete-data` is also given: a single `--yes` does not delete records. `--keep-topics` removes the lab and leaves its mirrored topics, without the check; the mirror's own internal topics still go. The two flags exclude each other. `run` removes its own lab without this check: it created those topics, refusing names that already existed, and wrote only its corpus into them.
+
+Every lab command that asks first (`up`, `cutover`, `rollback`, `down`, `run`, and the `source` and `mirror` building blocks) refuses under `-o json` without `--yes` instead of prompting. A script reading the document cannot answer a question.
 
 #### Read-only sources
 
@@ -1814,6 +1890,8 @@ kates kyv st
 kates kyv list
 ```
 
+`kyverno status`, `violations`, `enforce` and `audit` exit `1` when Kyverno is missing or `kubectl` fails.
+
 #### kyverno violations
 
 Aliases: `viol`, `fails`
@@ -1872,7 +1950,8 @@ kates kyverno apply --mode Enforce --yes --with-netpol
 | `--with-cosign` | Enable Cosign image signature verification |
 | `--with-netpol` | Enable NetworkPolicy generation |
 | `--yes`, `-y` | Skip confirmation prompt |
-| `--dry-run` | Show what would be applied without executing |
+| `--dry-run` | Render the release with `helm upgrade --install --dry-run` and report how many resources it would apply; installs nothing |
+| `--app-ns`, `--topology`, `--namespace` | The namespace of the kates release to update, as for `kates deploy`. Without them it uses the namespace of the installed `kates` release, and asks for `--app-ns` when two are installed |
 | `--labels-file` | Labels for the `kyverno` and `kates` namespaces (default: `.labels` in the current directory); see [Namespace Labels](12-deployment.md#namespace-labels) |
 
 **See also:** [Security & Compliance](17-security.md) for Kyverno policy deep dive and custom policy authoring.
@@ -2061,10 +2140,20 @@ Run a LOAD, a STRESS and a SPIKE test one after another, grade each from its pea
 ```bash
 kates benchmark
 kates bench
+kates benchmark --records 100000 --timeout 10m
 kates benchmark -o json
 ```
 
-With `-o json` it prints only the scorecard, once the battery ends: per test its `runId`, `status`, peak throughput, highest P99, `score` and `grade`, and the `overallGrade`. A metric no phase reported is `null`, as the table's `—` is. The scorecard takes each test's status from its run, so a run that finished `FAILED` shows as `FAILED` whether or not one of its phases carried an error message. A test that could not be created shows as `FAILED`. A run with no final status after 120 polls shows as `ERROR`, because it may still be going; the battery stops there, and the tests after it show as `SKIPPED`. The command exits `0` in every one of these cases.
+The two flags are the ones `kates gate` shares:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--records` | 50000 | Number of records each test run sends |
+| `--timeout` | `30m` | How long to wait for each phase's run: a duration such as `10m`, or a number of seconds |
+
+Each test scores from 0 to 100: 50 × min(throughput / 50,000, 1) for throughput plus max(0, 50 − 5 × P99 ms) for latency. A score of 90 or more is an A, 80 a B, 70 a C, 60 a D and anything less an F; the overall grade averages the scores. `kates benchmark --help` prints the same formula.
+
+With `-o json` it prints only the scorecard, once the battery ends: per test its `runId`, `status`, peak throughput, highest P99, `score` and `grade`, and the `overallGrade`. A metric no phase reported is `null`, as the table's `—` is. The scorecard takes each test's status from its run, so a run that finished `FAILED` shows as `FAILED` whether or not one of its phases carried an error message. A test that could not be created shows as `FAILED`. A run with no final status when `--timeout` passes (default `30m`; a duration such as `10m`, or a number of seconds), or whose status could not be read three polls in a row, shows as `ERROR`, because it may still be going; the battery stops there, and the tests after it show as `SKIPPED`. The command exits `0` in every one of these cases. Ctrl-C cancels the run it is waiting for and exits `130`.
 
 #### advisor
 
@@ -2074,7 +2163,10 @@ Analyze test results and recommend configuration improvements.
 kates advisor <run-id>
 kates advisor abc123
 kates advisor abc123 -o json
+kates advisor abc123 --apply tuned.yaml
 ```
+
+`--apply <file>` writes a scenario file that reruns the test with the settings the recommendations change (batch size, linger, acks, compression, partitions), for `kates test apply -f`. It fails when no recommendation changes a setting.
 
 With `-o json` it prints the recommendations, each with its `severity`, `title`, `fix` and `evidence`, and a `status`: `ANALYZED`, or `RUN_NOT_FOUND` and `REPORT_NOT_READY` with an empty list. Those two exit `0` in both modes. The rules are the CLI's own, not the Kates API's advisor that `GET /api/tests/{id}/advisor` serves.
 
@@ -2122,7 +2214,7 @@ kates gate --min-grade A --timeout 300
 kates gate --min-grade B -o json
 ```
 
-With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. When `kates gate` ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — it prints the same object with an `error`, and with `null` for the throughput and P99 it never read. A run that measured no latency gets no grade either, because its P99 reads 0, which would grade as the lowest latency possible. The gate fails, its `error` says the P99 was not measured, and the P99 is `null`. The exit code is the same as with the table.
+With `-o json` stdout carries only the result, once the test exists: the `runId`, its `status`, the average throughput and P99 it was graded on, the `grade`, the `minGrade` and `passed`. When `kates gate` ends without a grade — the run `FAILED`, the timeout passed, the report could not be read — it prints the same object with an `error`, and with `null` for the throughput and P99 it never read. A run that measured no latency gets no grade either, because its P99 reads 0, which would grade as the lowest latency possible. The gate fails, its `error` says the P99 was not measured, and the P99 is `null`. The exit code is the same as with the table. Ctrl-C cancels the run it started and exits `130`; when `--timeout` passes, the run is cancelled too, the `status` reads `CANCELLED`, and the gate fails.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -2130,7 +2222,17 @@ With `-o json` stdout carries only the result, once the test exists: the `runId`
 | `--type` | `LOAD` | Test type to run |
 | `--records` | 50000 | Number of records |
 | `--backend` | | Benchmark backend |
-| `--timeout` | 180 | Timeout in seconds |
+| `--timeout` | `180` | How long to wait for the run: a duration such as `10m`, or a number of seconds as before; when it passes, the run is cancelled and the gate fails |
+
+The grade comes from the run's average throughput and P99, and a run must clear both numbers of a rung; `kates gate --help` prints the same ladder.
+
+| Grade | Throughput | P99 |
+|-------|-----------|-----|
+| A | ≥ 50,000 rec/s | < 5 ms |
+| B | ≥ 30,000 rec/s | < 20 ms |
+| C | ≥ 15,000 rec/s | < 50 ms |
+| D | ≥ 5,000 rec/s | < 200 ms |
+| F | anything below D | |
 
 #### test baseline
 
@@ -2319,7 +2421,7 @@ kates snapshot diff pre-upgrade post-upgrade
 
 ### Flow Pipelines
 
-A flow is a YAML file of steps that `kates flow run` runs in order; no step reads another's result. A step's `action` is one of three. `test` starts a test of the step's `type`, LOAD when it has none, and fails when the run fails or hasn't finished after about six minutes. `wait` pauses for as many seconds as the step's `records` field gives, 10 when it gives none. `webhook` and `notify` print that a notification went out and pass, but send nothing. The flow skips any other action as unknown, so a step can't run a disruption or compare reports. A step that does not pass, a skipped one included, stops the flow unless it sets `onFail: continue`; either way `kates flow run` exits 1 at the end.
+A flow is a YAML file of steps that `kates flow run` runs in order; no step reads another's result. A step's `action` is one of three. `test` starts a test of the step's `type`, LOAD when it has none, and fails when the run fails or hasn't finished after about six minutes. `wait` pauses for as many seconds as the step's `records` field gives, 10 when it gives none. `expect`, `webhook` and `notify` are not implemented, and a step that uses one fails. The flow skips any other action as unknown, so a step can't run a disruption or compare reports; `kates flow lint` reports both as errors. A step that does not pass, a skipped one included, stops the flow unless it sets `onFail: continue`; either way `kates flow run` exits 1 at the end.
 
 A `test` step's `gate.minGrade` is the only threshold a flow checks, and any value above D fails the step: the flow reads the grade from the run's report, which carries none. A flow injects no fault; run one with `kates disruption run` or `kates resilience run`, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
 
@@ -2342,6 +2444,22 @@ kates flow run -f pipeline.yaml
 | Flag | Description |
 |------|-------------|
 | `-f` | Path to flow pipeline YAML file |
+| `--wait` | Wait for each test step to finish (default); `--wait=false` starts the run and moves on |
+
+A test step's `spec` takes the request's own field names (`numRecords`, `recordSize`, `numProducers`, …), not a scenario file's. Its `gate` may set `minGrade`, `maxP99`, `minThroughput` and `maxErrorRate`; a run that misses one is `GATE_FAILED` with the metric named. Grades compare case-insensitively, and an unknown grade fails the gate. `expect`, and the `webhook` and `notify` actions, are not implemented: a step that uses them fails rather than reporting success.
+
+Before the first step, `kates flow run` checks the whole file as `kates flow lint` does and prints what it finds to stderr. On an error it exits 2 and runs no step.
+
+#### flow lint
+
+Check flow files offline, after expanding environment variables as `kates flow run` does: YAML syntax, every key against the ones `flow run` reads, each step's `action`, each test step's `type`, `gate` and `spec`, and `onFail`. A misspelled key is an error, named with the key it is closest to, and so are an unknown or unimplemented action, a grade off the scale, a whole number written as `1.5` and an `onFail` other than `continue` or `stop`. A key a `wait` step does not read, such as `gate`, is a warning. Findings print as `kates test lint` prints them, and `-o json` lists them.
+
+```bash
+kates flow lint release-qual.yaml
+kates flow lint -o json flows/*.yaml
+```
+
+It exits `0` when no file has an error (warnings are printed), `1` when one does, and `2` when a file cannot be read.
 
 ---
 
@@ -2449,19 +2567,35 @@ The API key grants every endpoint. An agent that can also run shell commands can
 
 #### What the Server Exposes
 
-Twelve tools, all read-only:
+Fourteen tools, all read-only:
 
-| Area | Tools |
-|------|-------|
-| Cluster | `cluster_overview` (start here: clusterId, brokers, partition health, the KRaft quorum, alert rules), `cluster_topology` (node pools, controllers, brokers; with a topic, its partitions), `consumer_group_lag` (one group's lag by topic, partition and leader) |
-| Kates activity | `kates_activity` (tests not yet finished, runs, disruption reports and audit rows since a time) |
-| Test runs | `list_runs`, `get_run` (effective spec, the request's own spec fields, tasks, summary and an INTEGRITY run's integrity result), `assess_run` (regression, a noise band over earlier runs with the same spec, broker skew, advisor rules) |
-| Chaos | `list_chaos_catalog` (disruption types, playbooks, templates, chaos providers), `preview_disruption` (the Kates API's dry run of a playbook or an ad-hoc plan), `disruption_report` (one disruption, with an optional baseline) |
-| Security and scenarios | `security_evidence` (the security checks, as a lab posture and drift check), `draft_scenario` (checks a `kates test apply` scenario file and saves nothing) |
+<!-- mcp-tools -->
+| Tool | Area | What it returns | Paged |
+|------|------|-----------------|-------|
+| `cluster_overview` | Cluster | Start here: clusterId, brokers, partition health, the KRaft quorum, alert rules | No |
+| `cluster_topology` | Cluster | Node pools, controllers, brokers; with a topic, its partitions | Partitions |
+| `list_topics` | Cluster | Topic names, in name order | Yes |
+| `list_consumer_groups` | Cluster | Consumer groups and their state, in id order | Yes |
+| `consumer_group_lag` | Cluster | One group's lag by topic, partition and leader | Partitions |
+| `kates_activity` | Kates activity | Tests not yet finished, runs, disruption reports and audit rows since a time | Each list |
+| `list_runs` | Test runs | Runs, newest first, by type and status | Yes |
+| `get_run` | Test runs | Effective spec, the request's own spec fields, tasks, summary and an INTEGRITY run's integrity result | No |
+| `assess_run` | Test runs | Regression, a noise band over earlier runs with the same spec, broker skew, advisor rules | No |
+| `list_chaos_catalog` | Chaos | Disruption types, playbooks, templates, chaos providers | No |
+| `preview_disruption` | Chaos | The Kates API's dry run of a playbook or an ad-hoc plan | No |
+| `disruption_report` | Chaos | One disruption, with an optional baseline | Steps |
+| `security_evidence` | Security | The security checks, as a lab posture and drift check | Detail sections |
+| `draft_scenario` | Scenarios | Checks a `kates test apply` scenario file and saves nothing | No |
+<!-- /mcp-tools -->
+
+Every paged tool takes `offset`, the first item counted from 0, and `limit`, the most items to return, and its result carries `nextOffset` while more items remain. Pass that value as `offset` for the next page. `list_runs` took `page` and `size`, and `cluster_topology` took `from_partition` and returned `nextFromPartition`, before they moved to this vocabulary; the old names are refused.
+
+`tools/list` gives each tool a short summary and the outline of its result, and stays under 80,000 bytes so that it does not crowd the agent's context on every turn. The long description of a tool and the meaning of each result field are in the resource `kates://docs/mcp/<tool>`, and `kates://docs/mcp` lists them all.
 
 Resources, which Claude Code offers as `@` mentions:
 
-- `kates://caveats` — every caveat the tools can attach, with the source files each was checked against
+- `kates://caveats` — the full text of every caveat the tools can attach, with the source files each was checked against
+- `kates://docs/mcp` and `kates://docs/mcp/{tool}` — each tool's full description, its arguments, the caveats it always carries and every field of its result
 - `kates://runs/{id}/report.md` — a run's Markdown report
 - `kates://disruptions/{id}/timeline` — a disruption's steps and pod events
 - `kates://playbooks/{name}` — a built-in playbook's resolved plan
@@ -2474,7 +2608,7 @@ What the server never does: start or cancel a test; run a disruption, playbook o
 
 #### Reading the Results
 
-Every tool result carries the pinned cluster (`cluster.id` and `cluster.label`), the tier (`observe`, the only one so far), the result itself under `data`, `truncated`, which is true when a list was cut to fit, and `caveats`: the limits of the data the result rests on, such as a summary that averages tasks or alert rules that are definitions rather than firing alerts. The `kates://caveats` resource lists every caveat, and the server's instructions tell the agent to read them before drawing conclusions.
+Every tool result carries the pinned cluster (`cluster.id` and `cluster.label`), the tier (`observe`, the only one so far), the result itself under `data`, `truncated`, which is true when a list was cut to fit, and `caveats`: the limits of the data the result rests on, such as a summary that averages tasks or alert rules that are definitions rather than firing alerts. Each caveat in a result is an id and a one-line summary. The `kates://caveats` resource holds the full text of every caveat, and the server's instructions tell the agent to read them before drawing conclusions.
 
 Text that a third party controls — alert rule annotations, Kates API error messages, scenario and plan names, report Markdown, advisor text — arrives inside fences:
 
@@ -2500,7 +2634,7 @@ A failed call returns an error with a fixed code, a message, the fenced detail a
 | `KATES_RESULT_TOO_LARGE` | The result would not fit; ask for a smaller page |
 | `KATES_INTERNAL` | A bug in `kates mcp` |
 
-Results stay under 48,000 bytes, below Claude Code's default limit on tool output; lists are paged, or cut with `truncated` set.
+Results stay under 48,000 bytes, below Claude Code's default limit on tool output; lists are paged, or cut with `truncated` set. The caveats do not count against that budget, so a result is never cut because caveats apply to it.
 
 #### Client Setup
 
@@ -2584,6 +2718,29 @@ kates changelog --since 2025-01-01 --until 2025-01-31
 | `--since` | Start date for changelog range |
 | `--until` | End date for changelog range |
 
+#### plugin
+
+A plugin is an executable named `kates-<name>`, in `~/.kates/plugins/` or on your `PATH`; `kates <name>` runs it, and `kates plugin list` lists the ones found. The first found wins, the plugin directory before the `PATH`. A plugin named like a built-in command or one of its aliases is skipped with a warning on stderr, so a file on the `PATH` cannot take over `kates version`.
+
+```bash
+kates plugin list
+kates --context prod my-report --since 7d
+```
+
+Kates reads its own global flags (`--context`, `--url`, `--api-key`, `-o` and `--plain`) when they come before the plugin's name, and passes every argument after the name to the plugin untouched, `-o` and `--help` included. It then resolves the context as it would for one of its own commands, and runs the plugin with the result in these environment variables:
+
+| Variable | Value |
+|----------|-------|
+| `KATES_URL` | The Kates API URL: `--url`, else `KATES_URL`, else the context's, with the same local port fallback the CLI uses |
+| `KATES_API_KEY` | The API key: `--api-key`, else `KATES_API_KEY`, else the context's. Unset when there is none, as when `--url` points at a server other than the context's, which never receives the context's key |
+| `KATES_CONTEXT` | The name of the context in use |
+| `KATES_OUTPUT` | `table` or `json`: `-o`, else `KATES_OUTPUT`, else the context's output setting |
+| `KATES_PLAIN` | `1` under `--plain` or `KATES_PLAIN=1`, else unset; `NO_COLOR=1` comes with it unless `NO_COLOR` is already set |
+
+The resolved values replace whatever the plugin would have inherited, so `kates -o table my-report` gives it `KATES_OUTPUT=table` even with `KATES_OUTPUT=json` exported: the plugin sees what a Kates command would have used. Every other variable, `NO_COLOR` and `TERM` among them, passes through unchanged. Kates never prints the API key. A context that cannot be resolved, a `--context` name the config does not have or a config file Kates cannot read, stops the plugin from running, and Kates exits `1` with the reason.
+
+The plugin runs on Kates' own stdin, stdout and stderr, and its exit code is Kates' exit code: a plugin that exits `3` makes `kates <name>` exit `3`, with nothing added to what the plugin printed.
+
 ---
 
 ## Output Modes
@@ -2598,7 +2755,7 @@ kates test list -o table
 kates test list -o json
 ```
 
-Many commands have no JSON form and print the same output whatever `-o` says, among them `status`, `ctx show`, `snapshot`, `profile`, `kyverno`, `test compare`, `test summary`, `webhook list`, `changelog` and the full-screen views (`dashboard`, `top`, `lab`). Check a command's output before you pipe it into `jq`.
+Under `-o json` a command puts one JSON document on stdout and nothing else. A command with no JSON form prints nothing on stdout, says so on stderr and exits `2`, so a script never parses a table by mistake: among them `webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary` and `test flame`.
 
 An AI agent that has a shell can drive Kates through this CLI rather than through [`kates mcp`](#mcp-server-for-ai-agents). The skill file `skills/kates-cli/SKILL.md` at the root of the repository tells it how: set up a context with the API key, pass `-o json`, and follow one recipe for each task, from security posture and drift to planning a Game Day with `disruption playbook show` and `--dry-run`.
 
@@ -2612,13 +2769,14 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 |------|---------|
 | `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
 | `1` | The operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), or a confirmation was declined or could not be asked |
-| `2` | `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`) |
+| `2` | Kates could not tell, so neither yes nor no: `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`); `kates test apply` and `kates flow run` found an error in their file, or `test apply` was given flags that don't go together, and started nothing; `test lint`, `flow lint` and `conformity lint` could not read a file; a command with no JSON form was run with `-o json` (`webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary`, `test flame`), which prints nothing on stdout and says so on stderr |
 | `130` | Ctrl-C or SIGTERM stopped a command that starts work and waits for it, after it cancelled the test it started |
 
 Consequences worth knowing in scripts:
 
 - `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
-- `test apply --wait`, `test create --wait` and `replay --wait` cancel the run they are waiting for when interrupted, and exit `130`. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
+- `test apply --wait`, `test create --wait`, `replay --wait`, `gate`, `benchmark` and `flow run` cancel the run they are waiting for when interrupted, and exit `130`. `kates detect` stops its probes and exits `130` too. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. `kates status --watch` ends with exit `0` on Ctrl-C, since it starts nothing and stopping it is what you asked for. Every other command ends on the first Ctrl-C and leaves anything it started running.
+- A plugin's exit code is passed through as Kates' own; see [plugin](#plugin).
 - `kates cluster alerts` exits `1` wherever a critical alert rule is defined, firing or not, which on a default install means always — see its section above.
 - A declined confirmation exits `1` in `deploy`, `clean`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
 - Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.
@@ -2629,13 +2787,11 @@ Consequences worth knowing in scripts:
 Some commands report a failure on screen and still exit `0`, so a script cannot rely on their status. Among them:
 
 - A mistyped subcommand under a command group — `kates ctx list`, for instance — which prints the group's help.
-- `kates status` when the API does not answer or rejects the API key: it prints `unreachable`.
-- `kates ports` when it finds no Kates services, some forwards fail, or the API rejects a key it checks.
+- `kates ports` when it finds no Kates services or the API rejects a key it checks; a forward that fails exits `1`.
 - `kates snapshot create` when the API fails: it saves a snapshot of zeros.
-- `kates doctor`, whatever its checks find, and `kates cluster check` on `WARNING` and `CRITICAL` alike.
+- `kates cluster check` on `WARNING` and `CRITICAL` alike.
 - `kates security audit` and `kates security tls-inspect` when the Kates API reports that the check itself failed.
 - `kates detect` on failing checks or a cluster it cannot inspect, unless you pass `--fail-on-error` (`--fail-on-warning` reacts to warnings only); with it, still when it cannot read its `--values` file.
-- `kates kyverno status`, `violations`, `enforce` and `audit` when Kyverno is missing or the change fails.
 - `kates advisor` when the run or its report is not found.
 - `kates benchmark`, whatever its runs do: a test it could not create, a run that finished `FAILED` and one it lost track of all exit `0`.
 :::

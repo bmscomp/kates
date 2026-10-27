@@ -43,14 +43,16 @@ third parties control, such as alert rule annotations, arrives inside
 «untrusted:…» fences. The server is experimental.
 
 The tools cover the cluster (cluster_overview, cluster_topology,
-consumer_group_lag), what Kates is doing (kates_activity), test runs
+list_topics, list_consumer_groups, consumer_group_lag), what Kates is doing (kates_activity), test runs
 (list_runs, get_run, assess_run), chaos (list_chaos_catalog,
 preview_disruption, disruption_report), and security posture and scenarios
 (security_evidence, draft_scenario). preview_disruption runs the backend's
 dry run, which injects nothing; draft_scenario checks a scenario file and
 saves nothing. The resources are kates://caveats, the run reports,
-disruption timelines, playbook plans, the built-in scenario templates and
-the help of every kates command (kates://docs/cli); the prompts are
+disruption timelines, playbook plans, the built-in scenario templates, the
+full description of every tool (kates://docs/mcp) and the help of every
+kates command (kates://docs/cli); paged tools take offset and limit and
+return nextOffset. The prompts are
 diagnose_run, did_kates_cause_this, plan_game_day, debrief_disruption and
 security_posture_check.
 

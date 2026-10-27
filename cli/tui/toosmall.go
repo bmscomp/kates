@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // MinTUIWidth/MinTUIHeight are the floor every kates full-screen TUI supports.
@@ -43,29 +45,12 @@ func TooSmall(width, height int) bool {
 	return width < MinTUIWidth || height < MinTUIHeight
 }
 
+// centerLine pads s to the middle of a line width cells wide. It measures
+// display cells, not bytes: escape codes take none, and a wide rune two.
 func centerLine(s string, width int) string {
-	pad := (width - len(stripAnsiPlain(s))) / 2
+	pad := (width - lipgloss.Width(s)) / 2
 	if pad < 0 {
 		pad = 0
 	}
 	return strings.Repeat(" ", pad) + s
-}
-
-// stripAnsiPlain removes SGR sequences for width measurement.
-func stripAnsiPlain(s string) string {
-	var b strings.Builder
-	inEsc := false
-	for _, r := range s {
-		switch {
-		case inEsc:
-			if r == 'm' {
-				inEsc = false
-			}
-		case r == '\x1b':
-			inEsc = true
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }

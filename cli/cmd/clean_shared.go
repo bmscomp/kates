@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/bmscomp/kates/cli/pkg/components"
 )
 
 // What kates clean leaves for others.
@@ -26,67 +28,10 @@ import (
 // holds only the stack, nothing is kept and clean removes what it always did.
 // When it cannot tell, it keeps.
 
-// crdGroup is a set of CRDs that go together, with the operator release that
-// owns them when kates installs that operator as a release of its own.
-type crdGroup struct {
-	Name     string
-	Operator *helmRelease // nil when a stack release brings the CRDs
-	CRDs     []string
-	// UsedBy are the CRDs whose objects, outside the stack, keep the group.
-	// Kinds an operator makes by itself on the cluster at large, such as
-	// Kyverno's policy reports, would keep it on every cluster.
-	UsedBy []string
-	// Own are cluster-scoped objects of the group that kates makes without
-	// Helm, as kind/name.
-	Own []string
-}
-
-func cleanCRDGroups() []crdGroup {
-	strimzi := []string{
-		"kafkabridges.kafka.strimzi.io", "kafkaconnectors.kafka.strimzi.io", "kafkaconnects.kafka.strimzi.io",
-		"kafkamirrormaker2s.kafka.strimzi.io", "kafkanodepools.kafka.strimzi.io", "kafkarebalances.kafka.strimzi.io",
-		"kafkas.kafka.strimzi.io", "kafkatopics.kafka.strimzi.io", "kafkausers.kafka.strimzi.io",
-		"strimzipodsets.core.strimzi.io",
-	}
-	monitoring := []string{
-		"alertmanagerconfigs.monitoring.coreos.com", "alertmanagers.monitoring.coreos.com",
-		"podmonitors.monitoring.coreos.com", "probes.monitoring.coreos.com",
-		"prometheusagents.monitoring.coreos.com", "prometheuses.monitoring.coreos.com",
-		"prometheusrules.monitoring.coreos.com", "scrapeconfigs.monitoring.coreos.com",
-		"servicemonitors.monitoring.coreos.com", "thanosrulers.monitoring.coreos.com",
-	}
-	litmus := []string{"chaosengines.litmuschaos.io", "chaosexperiments.litmuschaos.io", "chaosresults.litmuschaos.io"}
-	return []crdGroup{
-		{
-			Name: "Strimzi", Operator: &helmRelease{"strimzi-operator", "strimzi-operator"},
-			CRDs: strimzi, UsedBy: strimzi,
-		},
-		{
-			Name: "cert-manager", Operator: &helmRelease{"cert-manager", "cert-manager"},
-			CRDs: []string{
-				"certificaterequests.cert-manager.io", "certificates.cert-manager.io", "challenges.acme.cert-manager.io",
-				"clusterissuers.cert-manager.io", "issuers.cert-manager.io", "orders.acme.cert-manager.io",
-			},
-			UsedBy: []string{"certificates.cert-manager.io", "issuers.cert-manager.io", "clusterissuers.cert-manager.io"},
-			// kates deploy applies it after installing cert-manager.
-			Own: []string{"ClusterIssuer/selfsigned-issuer"},
-		},
-		{
-			Name: "Kyverno", Operator: &helmRelease{"kyverno", "kyverno"},
-			CRDs: []string{
-				"admissionreports.kyverno.io", "backgroundscanreports.kyverno.io", "clusteradmissionreports.kyverno.io",
-				"clusterbackgroundscanreports.kyverno.io", "cleanuppolicies.kyverno.io", "clustercleanuppolicies.kyverno.io",
-				"clusterpolicies.kyverno.io", "policies.kyverno.io", "policyexceptions.kyverno.io",
-				"updaterequests.kyverno.io",
-			},
-			UsedBy: []string{
-				"clusterpolicies.kyverno.io", "policies.kyverno.io", "cleanuppolicies.kyverno.io",
-				"clustercleanuppolicies.kyverno.io", "policyexceptions.kyverno.io",
-			},
-		},
-		{Name: "Litmus", CRDs: litmus, UsedBy: litmus},
-		{Name: "Prometheus Operator", CRDs: monitoring, UsedBy: monitoring},
-	}
+// cleanCRDGroups are the CRD groups the stack brings, from the component
+// table, in the order clean lists them.
+func cleanCRDGroups() []components.CRDGroup {
+	return components.Groups()
 }
 
 // k8sObject is the part of a Kubernetes object the checks read.
@@ -114,7 +59,7 @@ type keptItem struct {
 // one of those namespaces or the group operator's own, or, cluster-scoped,
 // when Helm installed it from one of them or it is one the group lists as
 // kates' own.
-func groupInUse(ctx context.Context, g crdGroup, present, deleting map[string]bool) string {
+func groupInUse(ctx context.Context, g components.CRDGroup, present, deleting map[string]bool) string {
 	var kinds []string
 	for _, crd := range g.UsedBy {
 		if present[crd] {
@@ -124,7 +69,7 @@ func groupInUse(ctx context.Context, g crdGroup, present, deleting map[string]bo
 	if len(kinds) == 0 {
 		return ""
 	}
-	ours := func(ns string) bool { return deleting[ns] || (g.Operator != nil && ns == g.Operator.Namespace) }
+	ours := func(ns string) bool { return deleting[ns] || (g.Owner != nil && ns == g.Owner.Namespace) }
 	own := map[string]bool{}
 	for _, o := range g.Own {
 		own[o] = true
@@ -207,14 +152,14 @@ func pluralKind(kind string, n int) string {
 
 // foreignReleases returns the Helm releases in namespace ns that are not
 // among the stack's releases, as name/namespace.
-func foreignReleases(list []helmReleaseJSON, ns string, stack []helmRelease) []string {
-	ours := map[helmRelease]bool{}
+func foreignReleases(list []helmRelease, ns string, stack []components.Release) []string {
+	ours := map[components.Release]bool{}
 	for _, r := range stack {
 		ours[r] = true
 	}
 	var foreign []string
 	for _, l := range list {
-		if l.Namespace == ns && !ours[helmRelease(l)] {
+		if l.Namespace == ns && !ours[components.Release{Name: l.Name, Namespace: l.Namespace}] {
 			foreign = append(foreign, l.Name)
 		}
 	}

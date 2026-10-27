@@ -196,6 +196,15 @@ func mcpMarkUntrusted(s *jsonschema.Schema) {
 	mcpMarkUntrusted(s.AdditionalProperties)
 }
 
+// mcpToolOutputTypes maps each tool addReadTool registered to its Out type:
+// the Go side of its output schema, which TestMCPUnfencedStringsAreIdentifiers
+// walks to check that every plain string a result can carry is an identifier
+// the backend minted, and everything a third party can write is mcpUntrusted.
+var (
+	mcpToolOutputsMu   sync.Mutex
+	mcpToolOutputTypes = map[string]reflect.Type{}
+)
+
 // mcpReadHandler is what a read tool implements. It reads through call.Client,
 // fences third-party text with call.Fence, and notes caveats and truncation on
 // call; the guard does the rest.
@@ -233,9 +242,20 @@ func addReadTool[In, Out any](s *mcp.Server, d *mcpDeps, tool *mcp.Tool, h mcpRe
 	if err != nil {
 		panic(fmt.Sprintf("kates mcp: tool %q output schema: %v", t.Name, err))
 	}
-	t.OutputSchema = out
+	d.toolDocs[t.Name] = mcpToolDoc{
+		Title:       t.Title,
+		Description: t.Description,
+		Caveats:     append([]mcpCaveatID(nil), caveats...),
+		In:          mcpSchemaOf(t.Name, t.InputSchema),
+		Out:         out,
+	}
+	t.Description = mcpPublishedDescription(t.Name, t.Description)
+	t.OutputSchema = mcpCompactOutputSchema(out)
 	t.Annotations = roAnnotations(t.Title)
 	d.guarded[t.Name] = true
+	mcpToolOutputsMu.Lock()
+	mcpToolOutputTypes[t.Name] = reflect.TypeFor[Out]()
+	mcpToolOutputsMu.Unlock()
 
 	static := append([]mcpCaveatID(nil), caveats...)
 	name := t.Name
@@ -252,6 +272,23 @@ func addReadTool[In, Out any](s *mcp.Server, d *mcpDeps, tool *mcp.Tool, h mcpRe
 		}
 		return nil, env, nil
 	})
+}
+
+// mcpSchemaOf is an input schema as a *jsonschema.Schema, whichever form the
+// tool gave it in.
+func mcpSchemaOf(name string, v any) *jsonschema.Schema {
+	if s, ok := v.(*jsonschema.Schema); ok {
+		return s
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		panic(fmt.Sprintf("kates mcp: tool %q input schema: %v", name, err))
+	}
+	var s jsonschema.Schema
+	if err := json.Unmarshal(raw, &s); err != nil {
+		panic(fmt.Sprintf("kates mcp: tool %q input schema: %v", name, err))
+	}
+	return &s
 }
 
 func mcpMustKnowCaveats(owner string, ids []mcpCaveatID) {
@@ -354,7 +391,7 @@ func (c *mcpCall) Fits(data any) bool {
 		return true // the guard reports the bad caveat
 	}
 	b, err := c.deps.marshalEnvelope(refs, truncated, data)
-	return err == nil && mcpWireBytes(b) <= c.deps.maxResultBytes
+	return err == nil && mcpBudgetBytes(b, refs) <= c.deps.maxResultBytes
 }
 
 // mcpCap returns at most limit items, marking the call truncated when it cuts,
@@ -379,7 +416,7 @@ func (c *mcpCall) envelopeParts() ([]mcpCaveatRef, bool, error) {
 		if !ok {
 			return nil, false, fmt.Errorf("unknown caveat %q", id)
 		}
-		refs = append(refs, mcpCaveatRef{ID: string(cv.ID), Text: cv.Text})
+		refs = append(refs, mcpCaveatRef{ID: string(cv.ID), Text: cv.Short})
 	}
 	return refs, c.truncated, nil
 }
@@ -495,7 +532,7 @@ func (d *mcpDeps) envelope(name string, data any, call *mcpCall) (json.RawMessag
 		d.logger.Error("tool result", "tool", name, "error", err)
 		return nil, &mcpToolError{Code: mcpErrInternal, Message: "kates mcp could not serialise the result. This is a bug in kates mcp; its log on stderr has the details.", cause: err}
 	}
-	if wire := mcpWireBytes(b); wire > d.maxResultBytes {
+	if wire := mcpBudgetBytes(b, refs); wire > d.maxResultBytes {
 		return nil, &mcpToolError{
 			Code: mcpErrResultTooLarge,
 			Message: fmt.Sprintf("The result would be %d bytes on the wire (its JSON goes out twice, as structured content "+
@@ -529,6 +566,18 @@ func (d *mcpDeps) marshalEnvelope(refs []mcpCaveatRef, truncated bool, data any)
 // two a client passes to the model, or whether it passes both, is not settled
 // (plan §4, §8.2), so the size cap counts both.
 func mcpWireBytes(envelope []byte) int { return 2 * len(envelope) }
+
+// mcpBudgetBytes is what a serialised result counts against the size cap: its
+// wire bytes less those of its caveats. The caveats are a fixed set of
+// one-line summaries this server writes, the same whatever the data, so they
+// are exempt: a result is never cut, or refused, because caveats apply to it.
+func mcpBudgetBytes(envelope []byte, refs []mcpCaveatRef) int {
+	caveats, err := json.Marshal(refs)
+	if err != nil || len(refs) == 0 {
+		return mcpWireBytes(envelope)
+	}
+	return mcpWireBytes(envelope) - 2*(len(caveats)-len("[]"))
+}
 
 // mcpCheckOutput is the guard's last look at a result before it leaves. Every
 // string in the JSON, keys included, must be text mcpSanitize could have
@@ -873,7 +922,7 @@ func mcpClassifyError(err error, callTimeout time.Duration) *mcpToolError {
 	}
 	var he *client.HTTPError
 	if errors.As(err, &he) {
-		return mcpClassifyStatus(he)
+		return mcpClassifyStatus(he, err)
 	}
 	var ue *url.Error
 	if errors.As(err, &ue) {
@@ -898,9 +947,13 @@ func mcpClassifyError(err error, callTimeout time.Duration) *mcpToolError {
 	return &mcpToolError{Code: mcpErrBackend, Message: "The request to the Kates API failed.", Detail: mcpErrorText(err), cause: err}
 }
 
-func mcpClassifyStatus(he *client.HTTPError) *mcpToolError {
+// mcpClassifyStatus maps an HTTP error to a tool error. err is the error the
+// handler returned, he the HTTPError inside it: when err wraps he with an
+// explanation (client.PlaybookPlan says why a 405 means an older backend),
+// the detail keeps the whole text, not only the backend's answer.
+func mcpClassifyStatus(he *client.HTTPError, err error) *mcpToolError {
 	s := he.StatusCode
-	te := &mcpToolError{Detail: he.Error(), Retryable: he.Retryable(), cause: he}
+	te := &mcpToolError{Detail: mcpErrorText(err), Retryable: he.Retryable(), cause: err}
 	switch s {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		te.Code = mcpErrInvalidArgument
@@ -914,6 +967,11 @@ func mcpClassifyStatus(he *client.HTTPError) *mcpToolError {
 	case http.StatusNotFound:
 		te.Code = mcpErrNotFound
 		te.Message = "The Kates API has no such item (HTTP 404)."
+	case http.StatusMethodNotAllowed:
+		// The path exists but not for GET: a backend older than this CLI,
+		// which serves the path for another method only.
+		te.Code = mcpErrBackend
+		te.Message = "The Kates API does not support this read (HTTP 405). The backend may be older than this CLI."
 	case http.StatusTooManyRequests:
 		// The backend's 429 carries Retry-After, but cli/client does not
 		// pass headers on; a fixed hint is the honest fallback.
@@ -1335,6 +1393,10 @@ func newMCPClient(base *client.Client) (*client.Client, error) {
 	// would cut off, and then retry, the one slow cluster check that deadline
 	// is sized to let through.
 	hc.Timeout = 0
+	// No retries. The CLI's client retries a 5xx up to MaxRetries times, and
+	// a retry of GET /api/security/audit runs a second audit on the brokers
+	// while auditRuns reports one. The test harness already sets 1.
+	c.MaxRetries = 1
 	// No redirects. The transport checks each request, but a redirect is
 	// followed by http.Client, which forwards the Authorization header to
 	// the same host on another port and repeats a POST on a 307 or 308; the

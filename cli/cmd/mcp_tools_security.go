@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -104,33 +104,24 @@ type mcpSecurityEvidenceIn struct {
 }
 
 func mcpSecurityEvidenceInputSchema() any {
-	s, err := mcpSchemaFor[mcpSecurityEvidenceIn]()
-	if err != nil {
-		panic(fmt.Sprintf("kates mcp: security_evidence input schema: %v", err))
-	}
-	sections := make([]any, 0, len(mcpSecuritySections))
-	for _, v := range mcpSecuritySections {
-		sections = append(sections, v)
-	}
-	// No "default": go-sdk v1.8 applies schema defaults to the arguments,
-	// and panics on a call that sends none (a nil map), which would end the
-	// server. The handler treats a missing section as summary.
-	s.Properties["section"].Enum = sections
-	frameworks := make([]any, 0, len(mcpComplianceFrameworks))
-	for _, f := range mcpComplianceFrameworks {
-		frameworks = append(frameworks, f.key)
-	}
-	s.Properties["framework"].Enum = frameworks
-	zero, one, maxLimit := 0.0, 1.0, float64(mcpSecMaxLimit)
-	s.Properties["offset"].Minimum = &zero
-	s.Properties["limit"].Minimum = &one
-	s.Properties["limit"].Maximum = &maxLimit
-	return s
+	return mcpInputSchema[mcpSecurityEvidenceIn]("security_evidence", func(s *jsonschema.Schema) {
+		// No "default": go-sdk v1.8 applies schema defaults to the arguments,
+		// and panics on a call that sends none (a nil map), which would end the
+		// server. The handler treats a missing section as summary.
+		s.Properties["section"].Enum = mcpAnys(mcpSecuritySections)
+		frameworks := make([]any, 0, len(mcpComplianceFrameworks))
+		for _, f := range mcpComplianceFrameworks {
+			frameworks = append(frameworks, f.key)
+		}
+		s.Properties["framework"].Enum = frameworks
+		mcpAtLeast(s.Properties["offset"], 0)
+		mcpBounds(s.Properties["limit"], 1, mcpSecMaxLimit)
+	})
 }
 
 type mcpSecurityEvidenceOut struct {
 	Section    string                 `json:"section"`
-	AuditRuns  int                    `json:"auditRuns" jsonschema:"security audits this call made the backend run: one each for posture and compliance, one for drift when a baseline is saved, none for a read the API refused (4xx); a failed read that may have reached the audit is counted, and a backend retry after a timeout runs more. On a current backend only the posture audit adds an entry to its in-memory grade history; an older backend adds one for every audit"`
+	AuditRuns  int                    `json:"auditRuns" jsonschema:"security audits this call made the backend run: one each for posture and compliance, one for drift when a baseline is saved, none for a read the API refused (4xx); a failed read that may have reached the audit is counted; the MCP client does not retry, so one request is one audit. On a current backend only the posture audit adds an entry to its in-memory grade history; an older backend adds one for every audit"`
 	Summary    *mcpSecuritySummary    `json:"summary,omitempty"`
 	Posture    *mcpSecurityPosture    `json:"posture,omitempty"`
 	Pentest    *mcpSecurityPentest    `json:"pentest,omitempty"`
@@ -396,9 +387,14 @@ func mcpSecurityEmpty(what string) error {
 
 // mcpSecurityPaged returns the page of items the caller asked for, shrunk
 // until the result fits: set puts a page into out. It marks the call
-// truncated when items remain after the page.
-func mcpSecurityPaged[T any](call *mcpCall, out *mcpSecurityEvidenceOut, items []T, in mcpSecurityEvidenceIn, set func([]T)) {
+// truncated when items remain after the page. An offset past the last item
+// is refused, as cluster_topology refuses an offset past the last
+// partition: an empty page there would read as "no more problems".
+func mcpSecurityPaged[T any](call *mcpCall, out *mcpSecurityEvidenceOut, items []T, in mcpSecurityEvidenceIn, set func([]T)) error {
 	matched := len(items)
+	if in.Offset >= matched && matched > 0 {
+		return mcpInvalidArgument("offset is past the section's last item; page with page.nextOffset of the previous call, or start again from 0.", strconv.Itoa(in.Offset))
+	}
 	offset := min(in.Offset, matched)
 	page := items[offset:min(offset+in.Limit, matched)]
 	if page == nil {
@@ -415,6 +411,7 @@ func mcpSecurityPaged[T any](call *mcpCall, out *mcpSecurityEvidenceOut, items [
 		out.Page.NextOffset = next
 		call.MarkTruncated()
 	}
+	return nil
 }
 
 // mcpSecStatusRank orders statuses worst first, so a page cut short keeps the
@@ -491,8 +488,7 @@ func mcpSecurityPostureOf(ctx context.Context, call *mcpCall, in mcpSecurityEvid
 		p.Total, p.Passed, p.Warnings, p.Failures = s.Total, s.Passed, s.Warnings, s.Failures
 	}
 	out.Posture = p
-	mcpSecurityPaged(call, out, mcpSecurityChecksFrom(call, r.Checks, in.ProblemsOnly), in, func(c []mcpSecurityCheck) { p.Checks = c })
-	return nil
+	return mcpSecurityPaged(call, out, mcpSecurityChecksFrom(call, r.Checks, in.ProblemsOnly), in, func(c []mcpSecurityCheck) { p.Checks = c })
 }
 
 func mcpAuditError(r *client.SecurityAuditReport) string {
@@ -528,8 +524,7 @@ func mcpSecurityPentestOf(ctx context.Context, call *mcpCall, in mcpSecurityEvid
 	status := func(t mcpPentestTest) string { return t.Result }
 	mcpSecWorstFirst(tests, status)
 	out.Pentest = p
-	mcpSecurityPaged(call, out, mcpSecKeepProblems(tests, in.ProblemsOnly, status), in, func(t []mcpPentestTest) { p.Tests = t })
-	return nil
+	return mcpSecurityPaged(call, out, mcpSecKeepProblems(tests, in.ProblemsOnly, status), in, func(t []mcpPentestTest) { p.Tests = t })
 }
 
 func mcpSecErrorOf[T any](r *T, msg func(*T) string) string {
@@ -596,9 +591,8 @@ func mcpSecurityComplianceOf(ctx context.Context, call *mcpCall, in mcpSecurityE
 	}
 	status := func(c mcpComplianceControl) string { return c.Status }
 	mcpSecWorstFirst(controls, status)
-	mcpSecurityPaged(call, out, mcpSecKeepProblems(controls, in.ProblemsOnly, status), in,
+	return mcpSecurityPaged(call, out, mcpSecKeepProblems(controls, in.ProblemsOnly, status), in,
 		func(p []mcpComplianceControl) { c.Frameworks[0].Controls = p })
-	return nil
 }
 
 func mcpSecurityTLSOf(ctx context.Context, call *mcpCall, in mcpSecurityEvidenceIn, out *mcpSecurityEvidenceOut) error {
@@ -612,8 +606,7 @@ func mcpSecurityTLSOf(ctx context.Context, call *mcpCall, in mcpSecurityEvidence
 	}
 	t := &mcpSecurityChecks{Timestamp: mcpSecLine(r.Timestamp)}
 	out.TLS = t
-	mcpSecurityPaged(call, out, mcpSecurityChecksFrom(call, r.Checks, in.ProblemsOnly), in, func(c []mcpSecurityCheck) { t.Checks = c })
-	return nil
+	return mcpSecurityPaged(call, out, mcpSecurityChecksFrom(call, r.Checks, in.ProblemsOnly), in, func(c []mcpSecurityCheck) { t.Checks = c })
 }
 
 // mcpSecCertBrokers caps the brokers a certificate report lists. The backend
@@ -696,8 +689,7 @@ func mcpSecurityCVEOf(ctx context.Context, call *mcpCall, in mcpSecurityEvidence
 	}
 	out.CVE = c
 	cves := mcpSecKeepProblems(all, in.ProblemsOnly, func(c mcpCVE) string { return c.Status })
-	mcpSecurityPaged(call, out, cves, in, func(p []mcpCVE) { c.CVEs = p })
-	return nil
+	return mcpSecurityPaged(call, out, cves, in, func(p []mcpCVE) { c.CVEs = p })
 }
 
 // A CVE report the backend built without a Kafka version.
@@ -786,8 +778,7 @@ func mcpSecurityDriftOf(ctx context.Context, call *mcpCall, in mcpSecurityEviden
 		d.Improved, d.Degraded, d.Unchanged, d.Total = s.Improved, s.Degraded, s.Unchanged, s.Total
 	}
 	out.Drift = d
-	mcpSecurityPaged(call, out, mcpDriftEntriesFrom(call, r.Drifts, in.ProblemsOnly), in, func(p []mcpDriftEntry) { d.Drifts = p })
-	return nil
+	return mcpSecurityPaged(call, out, mcpDriftEntriesFrom(call, r.Drifts, in.ProblemsOnly), in, func(p []mcpDriftEntry) { d.Drifts = p })
 }
 
 func mcpSecConfigKeysFrom(call *mcpCall, r *client.SecurityConfigDiffReport, problemsOnly bool) []mcpSecConfigKey {
@@ -839,8 +830,7 @@ func mcpSecurityConfigDiffOf(ctx context.Context, call *mcpCall, in mcpSecurityE
 		Grade:         mcpSanitizeLine(r.Grade, 8),
 	}
 	out.ConfigDiff = c
-	mcpSecurityPaged(call, out, mcpSecConfigKeysFrom(call, r, in.ProblemsOnly), in, func(p []mcpSecConfigKey) { c.Keys = p })
-	return nil
+	return mcpSecurityPaged(call, out, mcpSecConfigKeysFrom(call, r, in.ProblemsOnly), in, func(p []mcpSecConfigKey) { c.Keys = p })
 }
 
 // The security_posture_check prompt (plan §4.3): a static template, framed
@@ -864,14 +854,12 @@ func registerMCPSecurityPrompt(s *mcp.Server) {
 
 func mcpSecurityPostureCheckPrompt(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	var framework mcpComplianceFrameworkName
-	if req != nil && req.Params != nil {
-		if v := strings.ToLower(strings.TrimSpace(req.Params.Arguments["framework"])); v != "" {
-			f, ok := mcpFrameworkByKey(v)
-			if !ok {
-				return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "framework must be cis, soc2 or pci"}
-			}
-			framework = f
+	if v := strings.ToLower(strings.TrimSpace(mcpPromptArgs(req)["framework"])); v != "" {
+		f, ok := mcpFrameworkByKey(v)
+		if !ok {
+			return nil, mcpPromptArgError("framework must be cis, soc2 or pci")
 		}
+		framework = f
 	}
 	return &mcp.GetPromptResult{
 		Description: "Lab security posture and drift check, not audit evidence",
@@ -929,7 +917,8 @@ const (
 // in mcpCaveatIDsSecurity in the group's test file.
 var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 	{
-		ID: mcpCaveatSecurityConfigReadSilent,
+		ID:    mcpCaveatSecurityConfigReadSilent,
+		Short: "When Kafka does not answer the config or ACL read, the checks run on empty data and do not say so.",
 		Text: "The audit, pentest, TLS and certificate checks read the configuration of the first broker the " +
 			"backend lists (the config consistency check reads every broker's; compliance and drift run the audit). " +
 			"When Kafka does not answer that read, or the ACL read, the " +
@@ -944,7 +933,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityTLSConfigOnly,
+		ID:    mcpCaveatSecurityTLSConfigOnly,
+		Short: "TLS and certificate checks read broker-wide ssl.* settings only and never open a certificate.",
 		Text: "The TLS and certificate checks read the broker-wide ssl.* settings of the first broker listed, never " +
 			"its listeners or listener.name.<listener>.* settings, so they say nothing about whether a given listener " +
 			"is encrypted (see security-broker-wide-keys). A missing setting counts as the secure default the check " +
@@ -957,7 +947,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityBrokerWideKeys,
+		ID:    mcpCaveatSecurityBrokerWideKeys,
+		Short: "Listener checks read listener protocols, but TLS checks read only broker-wide keys and can miss per-listener TLS.",
 		Text: "The audit's SASL Authentication, SASL Mechanism Strength, No Plaintext Listeners and Listener Protocol " +
 			"Map checks and the pentest's metadata-leak and unencrypted checks take each listener's protocol from " +
 			"listeners and listener.security.protocol.map (a listener the map does not name has the protocol of its " +
@@ -990,7 +981,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityDriftNewChecks,
+		ID:    mcpCaveatSecurityDriftNewChecks,
+		Short: "Drift counts a check missing from the baseline as IMPROVED, even a FAIL; without a baseline there is no drift.",
 		Text: "Drift compares a fresh audit with the saved baseline by check name. A check the baseline lacks is " +
 			"compared with UNKNOWN and counted IMPROVED whatever its status, FAIL included, and a check the baseline " +
 			"has but the fresh audit lacks is not listed. Without a saved baseline there is no drift to report, and " +
@@ -1003,7 +995,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityComplianceByCategory,
+		ID:    mcpCaveatSecurityComplianceByCategory,
+		Short: "Compliance relabels audit checks by category; it is not an assessment against the frameworks.",
 		Text: "The compliance mapping relabels the audit's checks and is not an assessment against the frameworks: " +
 			"CIS ids are the ones the checks carry, SOC2 and PCI-DSS controls are assigned by check category alone " +
 			"(auth, authz and transport for SOC2; transport, auth and limits for PCI-DSS), and the percentage is the " +

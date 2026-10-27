@@ -102,3 +102,21 @@ func (c *Client) MCPTopicNames(ctx context.Context, page, size int) (*MCPTopicNa
 		"size": {strconv.Itoa(size)},
 	}))
 }
+
+// MCPConsumerGroupsPage is one page of GET /api/cluster/groups: each group's
+// id and state, in the order Kafka listed them, and how many there are in all.
+type MCPConsumerGroupsPage struct {
+	Page  int                    `json:"page"`
+	Size  int                    `json:"size"`
+	Total int                    `json:"total"`
+	Items []ConsumerGroupSummary `json:"items"`
+}
+
+// MCPConsumerGroups reads one page of consumer groups. The backend caps size
+// at 200 and lists the groups afresh from Kafka on every request.
+func (c *Client) MCPConsumerGroups(ctx context.Context, page, size int) (*MCPConsumerGroupsPage, error) {
+	return get[*MCPConsumerGroupsPage](c, ctx, withQuery("/api/cluster/groups", url.Values{
+		"page": {strconv.Itoa(page)},
+		"size": {strconv.Itoa(size)},
+	}))
+}

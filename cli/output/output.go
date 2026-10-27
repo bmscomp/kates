@@ -37,7 +37,10 @@ func SetPlain(plain bool) {
 	plainMode = plain
 	if plain {
 		lipgloss.SetColorProfile(termenv.Ascii)
-		// Plain output is read by machines: it keeps the one stable shape.
+	}
+	// Plain output is read by machines, and the other looks draw Unicode
+	// frames: both keep Classic, which falls back to ASCII.
+	if ASCII() {
 		_ = theme.UseLook(theme.Classic)
 	}
 }
@@ -198,12 +201,14 @@ func KeyValueIndent(key, value string, indent int) {
 	fmt.Fprintf(Out, "%s%s %s\n", prefix, KeyStyle.Render(key), ValueStyle.Render(value))
 }
 
+// Success, Warn and Hint are notes beside a command's result: stdout in table
+// mode, stderr under -o json (see render.go). Error is stderr always.
 func Success(msg string) {
-	fmt.Fprintln(Out, renderLines(SuccessStyle, "  "+Glyphs().Check+" "+msg))
+	fmt.Fprintln(noteWriter(), renderLines(SuccessStyle, "  "+Glyphs().Check+" "+msg))
 }
 
 func Warn(msg string) {
-	fmt.Fprintln(Out, renderLines(WarningStyle, "  "+Glyphs().Warn+" "+msg))
+	fmt.Fprintln(noteWriter(), renderLines(WarningStyle, "  "+Glyphs().Warn+" "+msg))
 }
 
 func Error(msg string) {
@@ -211,7 +216,7 @@ func Error(msg string) {
 }
 
 func Hint(msg string) {
-	fmt.Fprintln(Out, renderLines(DimStyle, "  "+msg))
+	fmt.Fprintln(noteWriter(), renderLines(DimStyle, "  "+msg))
 }
 
 // renderLines styles each line of msg on its own: lipgloss pads a block's
@@ -399,7 +404,12 @@ func Divider() {
 	fmt.Fprintln(Out, DimStyle.Render("  "+strings.Repeat("·", 40)))
 }
 
+// Banner opens a table view. Under -o json it prints nothing: a box before
+// the document is what broke kates doctor -o json.
 func Banner(title, subtitle string) {
+	if jsonMode {
+		return
+	}
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(HeaderColor).

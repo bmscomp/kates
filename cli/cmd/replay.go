@@ -102,7 +102,7 @@ func replaySpec(run *client.MCPRun) (json.RawMessage, error) {
 }
 
 func init() {
-	replayCmd.Flags().BoolVar(&replayWait, "wait", false, "Wait for test to complete; Ctrl-C cancels it")
+	addWaitFlag(replayCmd, &replayWait, false)
 	interruptible(replayCmd)
 	rootCmd.AddCommand(replayCmd)
 }

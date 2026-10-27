@@ -107,12 +107,12 @@ var disruptionRunCmd = &cobra.Command{
 			s := result.Report.Summary
 			output.SubHeader("Summary")
 			output.KeyValue("Steps", fmt.Sprintf("%d/%d passed", s.PassedSteps, s.TotalSteps))
-			if s.WorstRecovery != nil {
+			if !s.WorstRecovery.IsZero() {
 				output.KeyValue("Worst Recovery", fmt.Sprintf("%v", s.WorstRecovery))
 			}
 			output.KeyValue("Avg Throughput Impact", fmt.Sprintf("%+.1f%%", s.AvgThroughputDegradation))
 			output.KeyValue("Max P99 Spike", fmt.Sprintf("%+.1f%%", s.MaxP99LatencySpike))
-			if s.WorstIsrRecovery != nil {
+			if !s.WorstIsrRecovery.IsZero() {
 				output.KeyValue("Worst ISR Recovery", fmt.Sprintf("%v", s.WorstIsrRecovery))
 			}
 			if s.PeakConsumerLag > 0 {
@@ -321,10 +321,10 @@ var disruptionStatusCmd = &cobra.Command{
 			s := report.Summary
 			output.SubHeader("Summary")
 			output.KeyValue("Steps", fmt.Sprintf("%d/%d passed", s.PassedSteps, s.TotalSteps))
-			if s.WorstRecovery != nil {
+			if !s.WorstRecovery.IsZero() {
 				output.KeyValue("Worst Recovery", fmt.Sprintf("%v", s.WorstRecovery))
 			}
-			if s.WorstIsrRecovery != nil {
+			if !s.WorstIsrRecovery.IsZero() {
 				output.KeyValue("Worst ISR Recovery", fmt.Sprintf("%v", s.WorstIsrRecovery))
 			}
 			if s.PeakConsumerLag > 0 {
@@ -427,7 +427,7 @@ var disruptionKafkaMetricsCmd = &cobra.Command{
 
 			if m.Isr != nil {
 				output.SubHeader("  ISR Health")
-				if m.Isr.TimeToFullIsr != nil {
+				if !m.Isr.TimeToFullIsr.IsZero() {
 					output.KeyValue("  Time to Full ISR", fmt.Sprintf("%v", m.Isr.TimeToFullIsr))
 				} else {
 					output.KeyValue("  Time to Full ISR", output.StatusBadge("NOT RECOVERED"))
@@ -442,7 +442,7 @@ var disruptionKafkaMetricsCmd = &cobra.Command{
 				output.KeyValue("  Baseline Lag", fmt.Sprintf("%d", m.Lag.BaselineLag))
 				output.KeyValue("  Peak Lag", fmt.Sprintf("%d", m.Lag.PeakLag))
 				output.KeyValue("  Lag Spike", fmt.Sprintf("+%d", m.Lag.PeakLag-m.Lag.BaselineLag))
-				if m.Lag.TimeToLagRecovery != nil {
+				if !m.Lag.TimeToLagRecovery.IsZero() {
 					output.KeyValue("  Time to Lag Recovery", fmt.Sprintf("%v", m.Lag.TimeToLagRecovery))
 				} else {
 					output.KeyValue("  Time to Lag Recovery", output.StatusBadge("NOT RECOVERED"))
@@ -481,13 +481,13 @@ func renderStepReport(step client.StepReport) {
 			output.KeyValue("Failure", step.ChaosOutcome.FailureReason)
 		}
 	}
-	if step.TimeToFirstReady != nil {
+	if !step.TimeToFirstReady.IsZero() {
 		output.KeyValue("Time to First Ready", fmt.Sprintf("%v", step.TimeToFirstReady))
 	}
-	if step.TimeToAllReady != nil {
+	if !step.TimeToAllReady.IsZero() {
 		output.KeyValue("Time to All Ready", fmt.Sprintf("%v", step.TimeToAllReady))
 	}
-	if step.StrimziRecoveryTime != nil {
+	if !step.StrimziRecoveryTime.IsZero() {
 		output.KeyValue("Strimzi Recovery", fmt.Sprintf("%v", step.StrimziRecoveryTime))
 	}
 	if len(step.PodTimeline) > 0 {
@@ -516,14 +516,14 @@ func renderStepReport(step client.StepReport) {
 	}
 
 	if step.IsrMetrics != nil {
-		if step.IsrMetrics.TimeToFullIsr != nil {
+		if !step.IsrMetrics.TimeToFullIsr.IsZero() {
 			output.KeyValue("Time to Full ISR", fmt.Sprintf("%v", step.IsrMetrics.TimeToFullIsr))
 		}
 		output.KeyValue("Min ISR Depth", fmt.Sprintf("%d", step.IsrMetrics.MinIsrDepth))
 	}
 	if step.LagMetrics != nil {
 		output.KeyValue("Peak Lag", fmt.Sprintf("%d (baseline: %d)", step.LagMetrics.PeakLag, step.LagMetrics.BaselineLag))
-		if step.LagMetrics.TimeToLagRecovery != nil {
+		if !step.LagMetrics.TimeToLagRecovery.IsZero() {
 			output.KeyValue("Lag Recovery", fmt.Sprintf("%v", step.LagMetrics.TimeToLagRecovery))
 		}
 	}

@@ -73,8 +73,6 @@ func commandContext(cmd *cobra.Command) context.Context {
 // gives a process that SIGINT ended.
 var errInterrupted = errors.New("interrupted")
 
-const interruptedExitCode = 130
-
 // errStoppedWaiting is returned by a wait that ended because the user
 // stopped it (Ctrl-C or q in a spinner) or the command's context was
 // cancelled, before the run it followed finished.

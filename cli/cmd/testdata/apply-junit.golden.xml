@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="apply:suite.yaml" tests="7" failures="2" errors="2" skipped="2" time="9.000">
+    <testcase name="fast" classname="apply.LOAD" time="1.500">
+      <system-out>run run-1: DONE&#xA;not evaluable: maxRtoMs (RTO not measured)</system-out>
+    </testcase>
+    <testcase name="slow" classname="apply.STRESS" time="2.000">
+      <failure message="p99=210ms &gt; 50ms; throughput=6000 &lt; 10000 rec/s" type="sla_violation">scope: task&#xA;p99=210ms &gt; 50ms&#xA;throughput=6000 &lt; 10000 rec/s</failure>
+      <system-out>run run-2: DONE</system-out>
+    </testcase>
+    <testcase name="crashed" classname="apply.LOAD" time="0.250">
+      <failure message="run FAILED" type="run_failed">run FAILED: boom</failure>
+      <system-out>run run-3: FAILED</system-out>
+    </testcase>
+    <testcase name="refused" classname="apply.SPIKE" time="0.000">
+      <error message="[400] Validation Failed: throughput" type="submit_error"></error>
+    </testcase>
+    <testcase name="lost" classname="apply.LOAD" time="3.000">
+      <error message="connection lost" type="wait_error"></error>
+      <system-out>run run-5: ERROR</system-out>
+    </testcase>
+    <testcase name="stopped" classname="apply.LOAD" time="1.000">
+      <skipped message="CANCELLED: interrupted; the run was cancelled"></skipped>
+      <system-out>run run-6: CANCELLED</system-out>
+    </testcase>
+    <testcase name="Scenario 7" classname="apply.INTEGRITY" time="0.000">
+      <skipped message="not started: the apply was interrupted"></skipped>
+    </testcase>
+  </testsuite>
+</testsuites>

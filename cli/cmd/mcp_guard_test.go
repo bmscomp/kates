@@ -669,7 +669,7 @@ func TestMCPEnvelopeCarriesCaveats(t *testing.T) {
 	var ids []string
 	for _, c := range env.Caveats {
 		ids = append(ids, c.ID)
-		if c.Text != mcpCaveatIndex[mcpCaveatID(c.ID)].Text {
+		if c.Text != mcpCaveatIndex[mcpCaveatID(c.ID)].Short {
 			t.Errorf("caveat %s carries the wrong text: %q", c.ID, c.Text)
 		}
 	}

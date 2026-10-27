@@ -26,7 +26,10 @@ func TestHelperRunKates(t *testing.T) {
 	if home := os.Getenv("KATES_TEST_HOME"); home != "" {
 		os.Setenv("HOME", home)
 	}
-	rootCmd.SetArgs(strings.Fields(os.Getenv("KATES_TEST_ARGS")))
+	args := strings.Fields(os.Getenv("KATES_TEST_ARGS"))
+	// Execute and the plugin commands read os.Args, as they do in kates.
+	os.Args = append([]string{"kates"}, args...)
+	rootCmd.SetArgs(args)
 	Execute()
 	os.Exit(0)
 }
@@ -84,6 +87,32 @@ func TestConnectFindsItsNamespaceWhenItRuns(t *testing.T) {
 	}
 	if !strings.Contains(joined, "get kafkaconnect -n connect-ns") {
 		t.Errorf("connect status did not use the namespace it found:\n%s", joined)
+	}
+}
+
+// connect scale's argument is a replica count, checked before it goes into
+// the patch. It used to be pasted into the JSON as typed.
+func TestConnectScalePatch(t *testing.T) {
+	for _, tt := range []struct {
+		arg  string
+		want string // "" when the argument is refused
+	}{
+		{"3", `{"spec":{"replicas":3}}`},
+		{" 0 ", `{"spec":{"replicas":0}}`},
+		{"-1", ""},
+		{"three", ""},
+		{`3},"metadata":{"labels":{"x":"y"}}`, ""},
+		{"", ""},
+	} {
+		got, err := connectScalePatch(tt.arg)
+		switch {
+		case tt.want == "" && err == nil:
+			t.Errorf("connectScalePatch(%q) = %q, want an error", tt.arg, got)
+		case tt.want == "" && !strings.Contains(err.Error(), "replicas must be a non-negative integer"):
+			t.Errorf("connectScalePatch(%q) error = %q, want it to say what a replica count is", tt.arg, err)
+		case tt.want != "" && (err != nil || got != tt.want):
+			t.Errorf("connectScalePatch(%q) = %q, %v; want %q", tt.arg, got, err, tt.want)
+		}
 	}
 }
 

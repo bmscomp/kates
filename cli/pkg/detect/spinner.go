@@ -3,10 +3,10 @@ package detect
 import (
 	"fmt"
 
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/bmscomp/kates/cli/output"
 )
 
 type ProgressMsg string
@@ -31,7 +31,14 @@ func (m SpinnerModel) Init() tea.Cmd {
 func (m SpinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		return m, tea.Quit
+		// Ctrl-C, q or Esc stops the collection; any other key is ignored
+		// rather than taken as a reason to stop.
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
+			m.quitting = true
+			return m, tea.Quit
+		}
+		return m, nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)

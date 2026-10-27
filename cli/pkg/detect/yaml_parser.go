@@ -2,7 +2,6 @@ package detect
 
 import (
 	"strconv"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -39,48 +38,28 @@ type ValuesConfig struct {
 	KafkaExporter KafkaExporterComponent `yaml:"kafkaExporter"`
 }
 
-func parseMemory(v interface{}) int {
-	if v == nil {
-		return 0
-	}
-	s := ""
+// quantityText is a YAML scalar as the quantity text it spells: a values file
+// may write cpu: 2, cpu: 0.5 or cpu: "500m".
+func quantityText(v interface{}) string {
 	switch val := v.(type) {
 	case string:
-		s = val
-	case int:
-		s = strconv.Itoa(val)
-	}
-
-	s = strings.TrimSuffix(s, "i")
-	if strings.HasSuffix(s, "G") {
-		val, _ := strconv.Atoi(strings.TrimSuffix(s, "G"))
 		return val
+	case int:
+		return strconv.Itoa(val)
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
 	}
-	if strings.HasSuffix(s, "M") {
-		val, _ := strconv.Atoi(strings.TrimSuffix(s, "M"))
-		return val / 1024
-	}
-	return 0
+	return ""
 }
 
-func parseCPU(v interface{}) int {
-	if v == nil {
-		return 0
-	}
-	s := ""
-	switch val := v.(type) {
-	case string:
-		s = val
-	case int:
-		s = strconv.Itoa(val)
-	}
+// parseMemory reads a memory request in whole GiB, rounded up.
+func parseMemory(v interface{}) int {
+	return parseMemoryGiBCeil(quantityText(v))
+}
 
-	if strings.HasSuffix(s, "m") {
-		val, _ := strconv.Atoi(strings.TrimSuffix(s, "m"))
-		return val
-	}
-	val, _ := strconv.Atoi(s)
-	return val * 1000
+// parseCPU reads a CPU request in millicores.
+func parseCPU(v interface{}) int {
+	return parseCPUMilli(quantityText(v))
 }
 
 func ParseValuesYAML(data []byte) ParsedReqs {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bmscomp/kates/cli/internal/kubectl"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
@@ -65,7 +64,7 @@ var kyvernoStatusCmd = &cobra.Command{
 	Short:   "Show all Kyverno ClusterPolicies with status and rule counts",
 	Example: "  kates kyverno status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New("")
+		kc := newKubectl("")
 		ctx := context.Background()
 
 		output.Banner("Kyverno Policy Status", "Cluster-wide admission policies")
@@ -97,9 +96,10 @@ var kyvernoStatusCmd = &cobra.Command{
 				} `json:"status"`
 			} `json:"items"`
 		}
+		// A kubectl failure exits 1. These four commands used to print it and
+		// return nil, so a script saw a clean exit with no status.
 		if err := kc.JSON(ctx, &result, "get", "clusterpolicies"); err != nil {
-			output.Error("Failed to query ClusterPolicies: " + err.Error())
-			return nil
+			return cmdErr("Failed to query ClusterPolicies: " + err.Error())
 		}
 
 		if len(result.Items) == 0 {
@@ -194,7 +194,7 @@ var kyvernoViolationsCmd = &cobra.Command{
 	Example: `  kates kyverno violations
   kates kyverno violations --namespace kafka`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New("")
+		kc := newKubectl("")
 		ctx := context.Background()
 
 		output.Banner("Kyverno Violations", "Policy audit report")
@@ -209,8 +209,7 @@ var kyvernoViolationsCmd = &cobra.Command{
 
 		out, err := kc.Output(ctx, kubectlArgs...)
 		if err != nil {
-			output.Error("Failed to query PolicyReports: " + err.Error())
-			return nil
+			return cmdErr("Failed to query PolicyReports: " + err.Error())
 		}
 
 		var reportList struct {
@@ -230,8 +229,7 @@ var kyvernoViolationsCmd = &cobra.Command{
 			} `json:"items"`
 		}
 		if err := json.Unmarshal(out, &reportList); err != nil {
-			output.Error("Failed to parse report data: " + err.Error())
-			return nil
+			return cmdErr("Failed to parse report data: " + err.Error())
 		}
 
 		totalFails := 0
@@ -290,7 +288,7 @@ var kyvernoEnforceCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	Example: "  kates kyverno enforce kates-pod-security-standards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New("")
+		kc := newKubectl("")
 		ctx := context.Background()
 		policyName := args[0]
 		patchJSON := `{"spec":{"validationFailureAction":"Enforce"}}`
@@ -298,8 +296,7 @@ var kyvernoEnforceCmd = &cobra.Command{
 		_, err := kc.Run(ctx, "patch", "clusterpolicy", policyName,
 			"--type=merge", "-p", patchJSON)
 		if err != nil {
-			output.Error(fmt.Sprintf("Failed to enforce policy '%s': %v", policyName, err))
-			return nil
+			return cmdErr(fmt.Sprintf("Failed to enforce policy '%s': %v", policyName, err))
 		}
 		output.Success(fmt.Sprintf("  Policy '%s' switched to Enforce mode", policyName))
 		output.Warn("  ⚠ Non-compliant pods will now be BLOCKED from deploying")
@@ -316,7 +313,7 @@ var kyvernoAuditCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	Example: "  kates kyverno audit kates-pod-security-standards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New("")
+		kc := newKubectl("")
 		ctx := context.Background()
 		policyName := args[0]
 		patchJSON := `{"spec":{"validationFailureAction":"Audit"}}`
@@ -324,8 +321,7 @@ var kyvernoAuditCmd = &cobra.Command{
 		_, err := kc.Run(ctx, "patch", "clusterpolicy", policyName,
 			"--type=merge", "-p", patchJSON)
 		if err != nil {
-			output.Error(fmt.Sprintf("Failed to switch policy '%s' to Audit: %v", policyName, err))
-			return nil
+			return cmdErr(fmt.Sprintf("Failed to switch policy '%s' to Audit: %v", policyName, err))
 		}
 		output.Success(fmt.Sprintf("  Policy '%s' switched to Audit mode", policyName))
 		output.Hint("  Violations will be logged but NOT blocked")

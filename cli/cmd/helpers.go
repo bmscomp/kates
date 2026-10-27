@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/spf13/cobra"
 )
 
 var componentGroupNames = map[string]string{
@@ -28,7 +29,7 @@ func (e *silentErr) Error() string { return e.msg }
 
 // exitError ends a command with its own exit code, after printing msg when
 // there is one: kates conformity check exits 1 on a gap and 2 when it could
-// not tell.
+// not tell. The codes are in exitcodes.go.
 type exitError struct {
 	code int
 	msg  string
@@ -43,6 +44,13 @@ func cmdErr(msg string) error {
 		output.Hint("Nothing answers on that local port: forward the Kates API with kates ports, or point --url or KATES_URL at it.")
 	}
 	return &silentErr{msg: msg}
+}
+
+// noJSONForm ends a command that has no JSON output when -o json asked for
+// one: exit 2, since it can neither answer nor fail, rather than a table on
+// the stdout a script is about to parse.
+func noJSONForm(cmd *cobra.Command) error {
+	return couldNotTell("this command has no JSON output: run " + cmd.CommandPath() + " without -o json")
 }
 
 // refusedLocalAPI is a request that found no listener on this machine, which

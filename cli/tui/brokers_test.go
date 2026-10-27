@@ -1,19 +1,21 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/bmscomp/kates/cli/client"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // The cursor on the last broker, and a refresh with one broker fewer: View
 // indexed past the end and the dashboard died with the broker.
 func TestBrokersRefreshWithFewerBrokers(t *testing.T) {
 	brokers := func(n int) *client.ClusterInfo {
-		info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: n}
+		info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: client.IntOf(int64(n))}
 		for i := range n {
-			info.Brokers = append(info.Brokers, client.BrokerNode{ID: i, Host: "kafka", Port: 9092})
+			info.Brokers = append(info.Brokers, client.BrokerNode{ID: client.IntOf(int64(i)), Host: "kafka", Port: client.IntOf(9092)})
 		}
 		return info
 	}
@@ -35,10 +37,33 @@ func TestBrokersRefreshWithFewerBrokers(t *testing.T) {
 	}
 }
 
+// A failed load leaves info nil, and every key was dropped while it was: r
+// could not retry. The cursor keys still need data.
+func TestBrokersRefreshKeyWorksWithoutData(t *testing.T) {
+	m := brokersModel{client: &client.Client{}, width: 120, height: 40}
+	m, _ = m.Update(brokersLoadedMsg{err: errors.New("connection refused")})
+	if m.info != nil || m.loading {
+		t.Fatalf("after a failed load: info %v, loading %v", m.info, m.loading)
+	}
+
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("r with no data produced no load command")
+	}
+	if !m.loading {
+		t.Error("r with no data did not put the view back to loading")
+	}
+
+	m.loading = false
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown}); cmd != nil || m.cursor != 0 {
+		t.Errorf("down with no data: cmd %v, cursor %d; want nothing", cmd, m.cursor)
+	}
+}
+
 // Broker 0 answered DescribeCluster; broker 1 leads the KRaft quorum.
 func TestBrokersMarkTheKRaftLeader(t *testing.T) {
-	info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: 2, Controller: &client.BrokerNode{ID: 0},
-		Brokers: []client.BrokerNode{{ID: 0, Host: "kafka-0", Port: 9092}, {ID: 1, Host: "kafka-1", Port: 9092}}}
+	info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: client.IntOf(2), Controller: &client.BrokerNode{ID: client.IntOf(0)},
+		Brokers: []client.BrokerNode{{ID: client.IntOf(0), Host: "kafka-0", Port: client.IntOf(9092)}, {ID: client.IntOf(1), Host: "kafka-1", Port: client.IntOf(9092)}}}
 	check := &client.ClusterHealthReport{ControllerID: 0,
 		KraftQuorum: &client.KraftQuorumHealth{LeaderID: 1, Voters: 3, HasLeader: true}}
 	m := brokersModel{width: 120, height: 40}

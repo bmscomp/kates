@@ -4,7 +4,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/bmscomp/kates/cli/client"
 )
@@ -31,7 +30,7 @@ type junitTestCase struct {
 	ClassName string        `xml:"classname,attr"`
 	Time      string        `xml:"time,attr"`
 	Failure   *junitFailure `xml:"failure,omitempty"`
-	Error     *junitFailure `xml:"error,omitempty"`
+	Error     *junitError   `xml:"error,omitempty"`
 	Skipped   *junitSkipped `xml:"skipped,omitempty"`
 	SystemOut string        `xml:"system-out,omitempty"`
 }
@@ -46,12 +45,42 @@ type junitFailure struct {
 	Content string `xml:",chardata"`
 }
 
+// junitError is a test case that could not be judged, as opposed to one that
+// was judged and failed: a step with no chaos outcome, a rule that could not
+// be read. CI shows the two counts apart.
+type junitError struct {
+	Message string `xml:"message,attr"`
+	Type    string `xml:"type,attr"`
+	Content string `xml:",chardata"`
+}
+
+// backendMillis is a step's duration in milliseconds, read when the report
+// was decoded from any of the backend's forms ("1234ms", "PT1.5S" or a
+// number of seconds). ok is false for a value it cannot read, N/A among
+// them, and for a negative one.
+func backendMillis(d client.Duration) (millis int64, ok bool) {
+	millis, ok = d.Millis()
+	if !ok || millis < 0 {
+		return 0, false
+	}
+	return millis, true
+}
+
+// junitSeconds is the decimal seconds a JUnit time attribute holds.
+func junitSeconds(millis int64) string {
+	return fmt.Sprintf("%.3f", float64(millis)/1000)
+}
+
 func writeJUnitXML(report *client.DisruptionReport, outputPath string) error {
 	suite := junitTestSuite{
 		Name:  "disruption:" + report.PlanName,
 		Tests: len(report.StepReports),
 	}
 
+	// The report carries no start or end, so the suite's time is the steps'
+	// recovery times added up. It used to be the Unix time of the export,
+	// which CI read as a run of fifty-odd years.
+	var totalMillis int64
 	for _, step := range report.StepReports {
 		tc := junitTestCase{
 			Name:      step.StepName,
@@ -59,22 +88,32 @@ func writeJUnitXML(report *client.DisruptionReport, outputPath string) error {
 			Time:      "0",
 		}
 
-		if step.TimeToAllReady != nil {
-			tc.Time = fmt.Sprintf("%v", step.TimeToAllReady)
+		if millis, ok := backendMillis(step.TimeToAllReady); ok {
+			tc.Time = junitSeconds(millis)
+			totalMillis += millis
 		}
 
-		passed := step.ChaosOutcome != nil && step.ChaosOutcome.Verdict == "PASS"
-		if !passed {
+		content := fmt.Sprintf("Step: %s\nType: %s\nRolledBack: %v", step.StepName, step.DisruptionType, step.RolledBack)
+		switch {
+		case step.ChaosOutcome == nil:
+			// No verdict at all: the step was not judged, which is not the
+			// same as judged and failed.
+			suite.Errors++
+			tc.Error = &junitError{
+				Message: "disruption step has no chaos outcome",
+				Type:    "disruption_error",
+				Content: content,
+			}
+		case step.ChaosOutcome.Verdict != "PASS":
 			suite.Failures++
 			reason := "disruption step failed"
-			if step.ChaosOutcome != nil && step.ChaosOutcome.FailureReason != "" {
+			if step.ChaosOutcome.FailureReason != "" {
 				reason = step.ChaosOutcome.FailureReason
 			}
 			tc.Failure = &junitFailure{
 				Message: reason,
 				Type:    "disruption_failure",
-				Content: fmt.Sprintf("Step: %s\nType: %s\nRolledBack: %v",
-					step.StepName, step.DisruptionType, step.RolledBack),
+				Content: content,
 			}
 		}
 
@@ -100,7 +139,7 @@ func writeJUnitXML(report *client.DisruptionReport, outputPath string) error {
 		}
 	}
 
-	suite.Time = fmt.Sprintf("%.3f", float64(time.Now().Unix()))
+	suite.Time = junitSeconds(totalMillis)
 
 	suites := junitTestSuites{
 		Suites: []junitTestSuite{suite},

@@ -8,7 +8,8 @@
 # API refuses any rate but -1 for it. So the two steps at a set rate are STRESS
 # runs, which start the same 6 producers at up to targetThroughput msg/s each.
 # In both types each producer sends `records` records, and kates test apply
-# --wait checks each gate against every producer.
+# --wait checks each gate against the run as a whole: the highest p99 of the
+# producers, and their rates added up.
 #
 # Usage:  kates test apply -f cli/examples/perf-capacity.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ scenarios:
       lingerMs: 10
       compressionType: lz4
     validate:
-      minThroughputRecPerSec: 1667    # per producer, 6 × 1667 ≈ 10k msg/s: fail if the ceiling is lower
+      minThroughputRecPerSec: 10000   # the 6 producers together: fail if the ceiling is lower
 
   - name: "Capacity — back-off validation at 20k msg/s"
     type: STRESS
@@ -69,4 +70,4 @@ scenarios:
       compressionType: lz4
     validate:
       maxP99LatencyMs: 500
-      minThroughputRecPerSec: 3000    # per producer: must sustain 90% of its 3334 msg/s
+      minThroughputRecPerSec: 18000   # the 6 producers together: must sustain 90% of 20k msg/s

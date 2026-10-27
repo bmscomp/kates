@@ -19,7 +19,7 @@ row, key hints and tables. Colors still come from the theme (kates theme).
 
 Kates starts with KATES_LOOK if set, else "look:" in ~/.kates.yaml, else
 "classic", the look kates has always had. --look draws one command in another
-look, and --plain always draws classic. In kates tui, kates lab and the deploy
+look; --plain and ASCII-only terminals always draw classic. In kates tui, kates lab and the deploy
 dashboard, T switches to the next look on the spot.`,
 }
 

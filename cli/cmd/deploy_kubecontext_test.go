@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/bmscomp/kates/cli/internal/proc"
 )
 
 func TestWithKubeContext(t *testing.T) {
@@ -92,9 +94,12 @@ func TestPinKubeContext_WrapsTheSeamsAndRestoresThem(t *testing.T) {
 	}
 	executor := &recordingExecutor{}
 	defaultExecutor = executor
+	runner := stubRunner(t)
 
 	unpin := pinKubeContext("kind-panda")
 	ctx := context.Background()
+	_, _ = newKubectl("kafka").Output(ctx, "get", "pods")
+	_, _ = newHelm("").Run(ctx, "list")
 	_ = runExecFn(ctx, "kubectl", "rollout", "status", "deploy/kates")
 	_ = runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, "kind: Namespace")
 	_ = runHelmFn(ctx, "upgrade", "--install", "kates", "charts/kates")
@@ -119,6 +124,13 @@ func TestPinKubeContext_WrapsTheSeamsAndRestoresThem(t *testing.T) {
 	}
 	if calls := executor.commands(); len(calls) != 1 || calls[0] != "kubectl cluster-info --context=kind-panda" {
 		t.Errorf("introspection calls = %q, want the one call pinned", calls)
+	}
+	// The typed clients: one wrapper around the runner they share.
+	if want := []string{"kubectl get pods -n kafka --context=kind-panda", "helm list --kube-context=kind-panda"}; !reflect.DeepEqual(runner.Lines(), want) {
+		t.Errorf("calls through the typed clients = %q, want %q", runner.Lines(), want)
+	}
+	if commandRunner != proc.Runner(runner) {
+		t.Errorf("after unpin commandRunner is %T, want the runner that was there before", commandRunner)
 	}
 
 	// Unpinned: the same seams, the same stubs, no flag.

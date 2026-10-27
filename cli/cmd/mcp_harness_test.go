@@ -469,7 +469,16 @@ func (h *mcpHarness) validateOutput(name string, structured []byte) {
 	if tool == nil || tool.OutputSchema == nil {
 		h.t.Fatalf("%s: no outputSchema in tools/list", name)
 	}
-	raw, err := json.Marshal(tool.OutputSchema)
+	// The full schema, with additionalProperties false, as well as the one
+	// tools/list shows: a field the Go type does not declare fails here.
+	for _, published := range []any{tool.OutputSchema, h.deps.toolDocs[name].Out} {
+		h.validateAgainst(name, published, structured)
+	}
+}
+
+func (h *mcpHarness) validateAgainst(name string, outputSchema any, structured []byte) {
+	h.t.Helper()
+	raw, err := json.Marshal(outputSchema)
 	if err != nil {
 		h.t.Fatal(err)
 	}

@@ -147,6 +147,99 @@ func TestCollect_HealthyCluster(t *testing.T) {
 	}
 }
 
+// The zones came out of a map, so two runs of detect listed them in two
+// orders; the report, the values file and every renderer read them in order.
+func TestGroupNodesByZone_SortsZones(t *testing.T) {
+	nodes := []NodeInfo{
+		{Name: "n1", Zone: "us-east-1d", CPU: 1000, MemoryGi: 4},
+		{Name: "n2", Zone: "us-east-1b", CPU: 1000, MemoryGi: 4},
+		{Name: "n3", Zone: "us-east-1a", CPU: 1000, MemoryGi: 4},
+		{Name: "n4", Zone: "us-east-1c", CPU: 1000, MemoryGi: 4},
+		{Name: "n5", Zone: "us-east-1a", CPU: 1000, MemoryGi: 4},
+		{Name: "n6", Zone: "-", CPU: 1000, MemoryGi: 4},
+	}
+	want := []string{"us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d"}
+	// A few runs: map order is random, so one lucky pass proves nothing.
+	for run := 0; run < 5; run++ {
+		zones := NewCollector(NewMockExecutor()).groupNodesByZone(nodes)
+		var got []string
+		for _, z := range zones {
+			got = append(got, z.Name)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("zones = %v, want %v", got, want)
+		}
+		if zones[0].Nodes != 2 || zones[0].CPUAllocatable != 2000 || zones[0].MemAllocatableGi != 8 {
+			t.Fatalf("us-east-1a = %+v, want 2 nodes, 2000m, 8Gi", zones[0])
+		}
+	}
+}
+
+// Allocatable memory arrives as Ki from most kubelets, but a node can report
+// Mi or Gi; parseNodes read everything as Ki and made the others 0.
+func TestParseNodes_MemoryUnits(t *testing.T) {
+	m := NewMockExecutor()
+	m.Set(`{"items": [
+	  {"metadata": {"name": "ki"}, "status": {"allocatable": {"cpu": "4", "memory": "16777216Ki"}}},
+	  {"metadata": {"name": "mi"}, "status": {"allocatable": {"cpu": "4", "memory": "16384Mi"}}},
+	  {"metadata": {"name": "gi"}, "status": {"allocatable": {"cpu": "4", "memory": "16Gi"}}},
+	  {"metadata": {"name": "plain"}, "status": {"allocatable": {"cpu": "4", "memory": "17179869184"}}}
+	]}`, "kubectl", "get", "nodes", "-o", "json")
+
+	nodes, err := NewCollector(m).parseNodes(context.Background())
+	if err != nil {
+		t.Fatalf("parseNodes: %v", err)
+	}
+	if len(nodes) != 4 {
+		t.Fatalf("got %d nodes, want 4", len(nodes))
+	}
+	for _, n := range nodes {
+		if n.MemoryGi != 16 {
+			t.Errorf("node %s: MemoryGi = %d, want 16", n.Name, n.MemoryGi)
+		}
+		if n.CPU != 4000 {
+			t.Errorf("node %s: CPU = %d, want 4000", n.Name, n.CPU)
+		}
+	}
+}
+
+// The internal DNS probe digs the cluster's own domain, the one stage 1 read
+// from CoreDNS, not cluster.local on every cluster.
+func TestDNSResolutionProbe_UsesTheClusterDomain(t *testing.T) {
+	m := NewMockExecutor()
+	m.Responses["kubectl create -f"] = ""
+	m.Responses["kubectl label ns"] = ""
+	m.Responses["kubectl delete ns"] = ""
+	m.Responses["kubectl run dns-prober"] = ""
+	m.Responses["kubectl wait --for=condition=Ready pod/dns-prober"] = "pod condition met"
+	m.Responses["dns-prober -- apk add"] = "installed bind-tools"
+	m.Responses["dns-prober -- dig"] = ";; Query time: 2 msec"
+
+	collector := NewCollector(m)
+	collector.BenchDNS = true
+	report := &DetectReport{
+		Nodes:   []NodeInfo{{Name: "node-1", Zone: "zone-a"}},
+		Network: NetworkInfo{ClusterDomain: "taz-tls-int-1.local"},
+	}
+	collector.runDNSResolutionProbe(context.Background(), report)
+
+	digs := 0
+	for _, call := range m.Calls() {
+		if !strings.Contains(call, "dig ") {
+			continue
+		}
+		if strings.Contains(call, "kubernetes.default.svc.") {
+			digs++
+			if !strings.HasSuffix(call, "kubernetes.default.svc.taz-tls-int-1.local") {
+				t.Fatalf("internal dig %q, want the cluster domain taz-tls-int-1.local", call)
+			}
+		}
+	}
+	if digs != 20 {
+		t.Errorf("%d internal digs, want 20", digs)
+	}
+}
+
 func TestCollect_NoStrimzi(t *testing.T) {
 	m := setupHealthyMock()
 	// Override: Strimzi CRD not found
@@ -181,7 +274,7 @@ func TestGetStrimziStatus_FindsTheOperatorBesideAnErrorLogLevel(t *testing.T) {
 	   "status":{"readyReplicas":1,"replicas":1}}]}`,
 		"kubectl", "get", "deployment", "-A", "-o", "json")
 
-	info := NewCollector(m).getStrimziStatus()
+	info := NewCollector(m).getStrimziStatus(context.Background())
 	if !info.Running || info.Namespace != "strimzi-system" || info.Image != "quay.io/strimzi/operator:0.48.0" {
 		t.Errorf("Running %v in %q with image %q, want the operator in strimzi-system", info.Running, info.Namespace, info.Image)
 	}
@@ -353,7 +446,7 @@ func TestCheckKafkaCapacity(t *testing.T) {
 				Nodes:    tt.nodes,
 				Workload: tt.workload,
 			}
-			got := c.checkKafkaCapacity(report, tt.reservePct)
+			got := c.checkKafkaCapacity(context.Background(), report, tt.reservePct)
 			if got != tt.want {
 				t.Errorf("checkKafkaCapacity() = %q, want %q", got, tt.want)
 			}
@@ -424,7 +517,7 @@ func TestGetNetworkStatus_ServiceCIDRFromTheAPIServerCommand(t *testing.T) {
 			m := NewMockExecutor()
 			m.Set(tt.command, "kubectl", "get", "pod", "-n", "kube-system", "-l", "component=kube-apiserver",
 				"-o", "jsonpath={.items[0].spec.containers[0].command}")
-			if got := NewCollector(m).getNetworkStatus().ServiceCIDR; got != tt.want {
+			if got := NewCollector(m).getNetworkStatus(context.Background()).ServiceCIDR; got != tt.want {
 				t.Errorf("ServiceCIDR = %q, want %q", got, tt.want)
 			}
 		})
@@ -450,13 +543,47 @@ func TestGetNetworkStatus_PrefersCoreDNSClusterDomain(t *testing.T) {
         pods insecure
     }
 }`, "kubectl", "get", "configmap", "-n", "kube-system", "coredns", "-o", "jsonpath={.data.Corefile}")
-	m.Set("default misleading-pod", "kubectl", "get", "pods", "--all-namespaces", "--field-selector=status.phase=Running",
-		"-o", "jsonpath={.items[0].metadata.namespace} {.items[0].metadata.name}")
-	m.Set("search default.svc.cluster.local svc.cluster.local cluster.local", "kubectl", "exec", "-n", "default", "misleading-pod", "--", "cat", "/etc/resolv.conf")
+	m.Set("misleading-pod", "kubectl", "get", "pods", "-n", "kates", "--field-selector=status.phase=Running",
+		"--request-timeout=10s", "-o", "jsonpath={.items[0].metadata.name}")
+	m.Set("search default.svc.cluster.local svc.cluster.local cluster.local", "kubectl", "exec", "--request-timeout=10s", "-n", "kates", "misleading-pod", "--", "cat", "/etc/resolv.conf")
 
-	got := NewCollector(m).getNetworkStatus().ClusterDomain
+	got := NewCollector(m).getNetworkStatus(context.Background()).ClusterDomain
 	if got != "taz-tls-int-1.local" {
 		t.Fatalf("ClusterDomain = %q, want taz-tls-int-1.local", got)
+	}
+}
+
+// Without a Corefile, the domain is read from a pod the deploy owns — one in
+// the kates namespace, with every call bounded — never from the first
+// Running pod on the cluster. A read-only collection execs into nothing.
+func TestGetNetworkStatus_ReadsResolvConfFromAKatesPod(t *testing.T) {
+	m := NewMockExecutor()
+	m.Set("kates-backend-0", "kubectl", "get", "pods", "-n", "kates", "--field-selector=status.phase=Running",
+		"--request-timeout=10s", "-o", "jsonpath={.items[0].metadata.name}")
+	m.Set("search kates.svc.taz-tls-int-1.local svc.taz-tls-int-1.local taz-tls-int-1.local\nnameserver 10.96.0.10",
+		"kubectl", "exec", "--request-timeout=10s", "-n", "kates", "kates-backend-0", "--", "cat", "/etc/resolv.conf")
+
+	if got := NewCollector(m).getNetworkStatus(context.Background()).ClusterDomain; got != "taz-tls-int-1.local" {
+		t.Fatalf("ClusterDomain = %q, want taz-tls-int-1.local", got)
+	}
+	for _, call := range m.Calls() {
+		if strings.Contains(call, "--all-namespaces") {
+			t.Errorf("the lookup still scans every namespace: %q", call)
+		}
+		if strings.HasPrefix(call, "kubectl exec") && !strings.Contains(call, "--request-timeout=10s") {
+			t.Errorf("an unbounded exec: %q", call)
+		}
+	}
+
+	roMock := NewMockExecutor()
+	roMock.Responses = m.Responses
+	ro := NewCollector(roMock)
+	ro.ReadOnly = true
+	if got := ro.getNetworkStatus(context.Background()).ClusterDomain; got != "cluster.local" {
+		t.Errorf("read-only ClusterDomain = %q, want the cluster.local default", got)
+	}
+	if containsCall(roMock.Calls(), "kubectl exec") || containsCall(roMock.Calls(), "kubectl run") {
+		t.Errorf("a read-only collection execed into or ran a pod:\n  %s", strings.Join(roMock.Calls(), "\n  "))
 	}
 }
 
@@ -662,6 +789,10 @@ func TestCollect_ReadOnlyIssuesNoWrites(t *testing.T) {
 	if writes := mutatingCalls(m.Calls()); len(writes) > 0 {
 		t.Errorf("a read-only collection wrote to the cluster:\n  %s", strings.Join(writes, "\n  "))
 	}
+	// Nor did it exec into anyone's pod to read resolv.conf.
+	if containsCall(m.Calls(), "kubectl exec") {
+		t.Errorf("a read-only collection execed into a pod:\n  %s", strings.Join(m.Calls(), "\n  "))
+	}
 
 	// The reads still ran...
 	if len(report.Nodes) != 3 || !report.Strimzi.Running {
@@ -697,32 +828,13 @@ func TestGetWorkloadPressure_SumsMemoryBeforeRounding(t *testing.T) {
 	m.Set(`{"items":[`+strings.Join(pods, ",")+`]}`,
 		"kubectl", "get", "pods", "-A", "-o", "json", "--field-selector=status.phase=Running")
 
-	wp := NewCollector(m).getWorkloadPressure()
+	wp := NewCollector(m).getWorkloadPressure(context.Background())
 	if wp.TotalPods != 100 || wp.TotalMemRequests != 50 {
 		t.Errorf("%d pods requesting %d GiB, want 100 pods requesting 50 GiB", wp.TotalPods, wp.TotalMemRequests)
 	}
 	for _, node := range wp.PerNode {
 		if node.MemRequested != 25 {
 			t.Errorf("%s requests %d GiB, want 25", node.Name, node.MemRequested)
-		}
-	}
-}
-
-func TestMemoryMiB(t *testing.T) {
-	for quantity, want := range map[string]float64{
-		"256Mi":     256,
-		"2Gi":       2048,
-		"0.5Gi":     512,
-		"524288Ki":  512,
-		"268435456": 256,
-		"1Ti":       1 << 20,
-		"1G":        1e9 / (1 << 20),
-		"500M":      500e6 / (1 << 20),
-		"":          0,
-		"lots":      0,
-	} {
-		if got := memoryMiB(quantity); got != want {
-			t.Errorf("memoryMiB(%q) = %v, want %v", quantity, got, want)
 		}
 	}
 }

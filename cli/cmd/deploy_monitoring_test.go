@@ -184,7 +184,7 @@ func TestDeployGroupB_ReconcilesMonitoringNodeExporterRejectedByPSA(t *testing.T
 		return nil
 	}
 
-	err := deployGroupB(&deployContext{
+	err := runComponentIDs(&deployContext{
 		ctx:          context.Background(),
 		ns:           resolvedNamespaces{kafka: "kafka", connect: "connect", jaeger: "monitoring"},
 		valuesFile:   ".build/values-detected.yaml",
@@ -193,9 +193,9 @@ func TestDeployGroupB_ReconcilesMonitoringNodeExporterRejectedByPSA(t *testing.T
 		advanceStep:  func() {},
 		versions:     stubVersionPlan(versionOptions{}),
 		primary:      primaryCluster{Name: "krafter", Namespace: "kafka"},
-	})
+	}, "monitoring", "kafka")
 	if err != nil {
-		t.Fatalf("deployGroupB returned error: %v", err)
+		t.Fatalf("monitoring and kafka components returned error: %v", err)
 	}
 
 	var mon string

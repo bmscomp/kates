@@ -18,6 +18,9 @@ var testCompareCmd = &cobra.Command{
 	Example: "  kates test compare abc123 def456",
 	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		ctx := context.Background()
 		a, err := apiClient.GetTest(ctx, args[0])
 		if err != nil {
@@ -135,6 +138,9 @@ var testSummaryCmd = &cobra.Command{
 	Short:   "Aggregate statistics across all completed tests",
 	Example: "  kates test summary",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		ctx := context.Background()
 		paged, err := apiClient.ListTests(ctx, "", "DONE", 0, 100)
 		if err != nil {
@@ -224,6 +230,9 @@ var testFlameCmd = &cobra.Command{
 	Example: "  kates test flame 69acdf31",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		ctx := context.Background()
 		run, err := apiClient.GetTest(ctx, args[0])
 		if err != nil {

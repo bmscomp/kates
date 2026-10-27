@@ -561,6 +561,12 @@ func unknownField(key *yaml.Node, path string, known []string) Diagnostic {
 	return at(key, Error, "unknown-field", path, msg)
 }
 
+// Closest is closest for another linter: kates test lint and flow lint
+// suggest a key the same way.
+func Closest(key string, known []string) string {
+	return closest(key, known)
+}
+
 // closest is the known key within two edits of key, if one is.
 func closest(key string, known []string) string {
 	best, bestDist := "", 3

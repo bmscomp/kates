@@ -97,13 +97,11 @@ func InstalledOperators(ctx context.Context, r Runner) ([]Operator, error) {
 		ops = append(ops, op)
 	}
 	if len(ops) > 0 {
-		listJSON, err := r.Run(ctx, "helm", "list", "-A", "-o", "json")
+		releases, err := ListReleases(ctx, r, "")
 		if err != nil {
 			return nil, fmt.Errorf("list helm releases: %w", err)
 		}
-		if err := attachReleases(ops, []byte(listJSON)); err != nil {
-			return nil, err
-		}
+		attachReleases(ops, releases)
 	}
 	slices.SortFunc(ops, func(a, b Operator) int {
 		if c := strings.Compare(a.Namespace, b.Namespace); c != 0 {
@@ -265,19 +263,10 @@ func watchScope(c container, ownNamespace string) (scope string, watches []strin
 	return ScopeNamespaces, watches
 }
 
-// attachReleases sets Release and AppVersion from helm list output for the
+// attachReleases sets Release and AppVersion from the helm list rows for the
 // wrapper release in each operator's namespace. It also records an upstream
 // Strimzi Helm release, when present, without marking it as Kates-owned.
-func attachReleases(ops []Operator, listJSON []byte) error {
-	var releases []struct {
-		Name       string `json:"name"`
-		Namespace  string `json:"namespace"`
-		Chart      string `json:"chart"`
-		AppVersion string `json:"app_version"`
-	}
-	if err := json.Unmarshal(listJSON, &releases); err != nil {
-		return fmt.Errorf("parse helm list output: %w", err)
-	}
+func attachReleases(ops []Operator, releases []Release) {
 	for i := range ops {
 		for _, rel := range releases {
 			if rel.Namespace != ops[i].Namespace || !isStrimziHelmChart(rel.Chart) {
@@ -293,7 +282,6 @@ func attachReleases(ops []Operator, listJSON []byte) error {
 			}
 		}
 	}
-	return nil
 }
 
 func isStrimziHelmChart(chart string) bool {

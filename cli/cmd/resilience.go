@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,8 +133,16 @@ leaves out its default. --dry-run prints the body.`,
 			fmt.Println(output.AccentStyle.Render("◉ Running resilience test..."))
 		}
 
-		result, err := apiClient.Resilience(context.Background(), cfg)
+		// Ctrl-C cancels this context (see interrupt.go), and with it the
+		// POST that waits for the report. The call used to run on
+		// context.Background(), so a kill left kates waiting up to 20
+		// minutes with nothing to show.
+		ctx := commandContext(cmd)
+		result, err := apiClient.Resilience(ctx, cfg)
 		if err != nil {
+			if ctx.Err() != nil {
+				return stopResilienceRun()
+			}
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "EOF") || strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "connection reset") {
 				output.Warn("Connection error — common causes:")
@@ -214,6 +221,20 @@ leaves out its default. --dry-run prints the body.`,
 		}
 		return nil
 	},
+}
+
+// stopResilienceRun ends a resilience run that was interrupted while it
+// waited for the report. POST /api/resilience answers only when the run has
+// ended (ResilienceResource.executeWithKeepAlive): it names no run id before
+// that, and the Kates API has no endpoint that cancels a resilience run, so
+// there is nothing to cancel from here. Closing the call does make the API
+// interrupt the run's thread, but the test it started and the fault it
+// injected may go on; this says so, and how to follow them.
+func stopResilienceRun() error {
+	interruptNote("Stopped waiting for the resilience test. The Kates API cannot cancel a resilience run:" +
+		" its test and its fault may keep running on the cluster." +
+		" Follow them with: kates test list, kates disruption list")
+	return errInterrupted
 }
 
 // printResilienceJSON prints the report as the Kates API sent it, indented.
@@ -324,6 +345,7 @@ func printResilienceProbes(r *client.ResilienceResult) {
 func init() {
 	resilienceRunCmd.Flags().StringVarP(&resilienceFile, "file", "f", "", "Path to resilience test config (YAML or JSON)")
 	resilienceRunCmd.Flags().BoolVar(&resilienceDryRun, "dry-run", false, "Print the request body without sending it")
+	interruptible(resilienceRunCmd)
 
 	resilienceCmd.AddCommand(resilienceRunCmd)
 	rootCmd.AddCommand(resilienceCmd)

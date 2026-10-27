@@ -77,7 +77,13 @@ func ParsePins(text string) (Pins, error) {
 			return Pins{}, fmt.Errorf("line %d: not a KEY=value assignment: %q", n, line)
 		}
 		key, value := m[1], strings.TrimSpace(m[2])
-		if i := strings.Index(value, " #"); i >= 0 && !strings.HasPrefix(value, `"`) && !strings.HasPrefix(value, "'") {
+		// A trailing comment goes first: after the closing quote of a quoted
+		// value, or from " #" in a bare one. Then the quotes.
+		if q := value[0]; len(value) > 1 && (q == '"' || q == '\'') {
+			if end := strings.IndexByte(value[1:], q); end >= 0 {
+				value = value[:end+2]
+			}
+		} else if i := strings.Index(value, " #"); i >= 0 {
 			value = strings.TrimSpace(value[:i])
 		}
 		if len(value) >= 2 && (value[0] == '"' && value[len(value)-1] == '"' || value[0] == '\'' && value[len(value)-1] == '\'') {

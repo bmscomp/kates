@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -49,6 +52,48 @@ func scriptDown(f *fakeProc, namespaceOwned bool) {
 	f.on("kubectl -n kafka delete kafkatopic -l kates.io/lab=m282-430 --ignore-not-found --timeout=120s", "")
 	f.on("kubectl -n kafka delete secret -l kates.io/lab=m282-430 --ignore-not-found", "")
 	f.on("kubectl delete namespace kafka-m282-430-src --ignore-not-found --timeout=600s", "")
+	// down's data guard: the lab's client pod on the target lists the
+	// topics and reads their end offsets — empty unless a test says so.
+	scriptPods(f)
+	scriptTargetTopics(f, "m282-430", map[string]int64{"kates.orders": 0}, "__consumer_offsets", "kates-events")
+}
+
+// topicApplies are the applies of KafkaTopic manifests (the client pod is
+// applied through the same command).
+func topicApplies(f *fakeProc) []fakeCall {
+	var out []fakeCall
+	for _, c := range f.find("kubectl -n kafka apply -f -") {
+		if strings.Contains(c.stdin, "kind: KafkaTopic") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// scriptTargetTopics scripts the lab's client pod on the target: the topic
+// listing (the topics given, plus extra names) and each topic's end
+// offsets, all on partition 0. A topic absent from offsets has none to read.
+func scriptTargetTopics(f *fakeProc, lab string, offsets map[string]int64, extra ...string) {
+	pod := "exec kates-migrate-" + lab + "-tgt -c client -- "
+	listed := append([]string(nil), extra...)
+	for t := range offsets {
+		listed = append(listed, t)
+	}
+	f.rule(func(l string) bool {
+		return strings.Contains(l, pod) && strings.Contains(l, "kafka-topics.sh") && strings.Contains(l, "--list")
+	},
+		func([]string, string) (string, error) { return strings.Join(listed, "\n"), nil })
+	f.rule(func(l string) bool { return strings.Contains(l, pod) && strings.Contains(l, "kafka-get-offsets.sh") },
+		func(args []string, _ string) (string, error) {
+			for i, a := range args {
+				if a == "--topic" && i+1 < len(args) {
+					if n, ok := offsets[args[i+1]]; ok {
+						return fmt.Sprintf("%s:0:%d", args[i+1], n), nil
+					}
+				}
+			}
+			return "", fmt.Errorf("no such topic")
+		})
 }
 
 func TestMigrateDownTouchesOnlyTheLabelledLab(t *testing.T) {
@@ -88,7 +133,7 @@ func TestMigrateDownTouchesOnlyTheLabelledLab(t *testing.T) {
 	}
 	// The lab's topics on the target are adopted as labelled KafkaTopics,
 	// the mirrored one and the mirror's own, then deleted.
-	applies := f.find("kubectl -n kafka apply -f -")
+	applies := topicApplies(f)
 	if len(applies) != 1 {
 		t.Fatalf("want one KafkaTopic apply, got %d", len(applies))
 	}
@@ -156,7 +201,7 @@ func TestMigrateDownKeepsTheTopicsAnotherMirrorWrites(t *testing.T) {
 			if err := runMigrateDown(context.Background()); err != nil {
 				t.Fatalf("down: %v", err)
 			}
-			manifest := f.find("kubectl -n kafka apply -f -")[0].stdin
+			manifest := topicApplies(f)[0].stdin
 			for _, topic := range tc.kept {
 				if strings.Contains(manifest, "topicName: "+topic+"\n") {
 					t.Errorf("down deleted %s, which another mirror writes:\n%s", topic, manifest)
@@ -187,7 +232,7 @@ func TestMigrateDownKeepsTheMirrorsTopicsWhenMirrorsCannotBeListed(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "kept the mirror's own topics") {
 		t.Fatalf("want down to report the kept topics, got %v", err)
 	}
-	manifest := f.find("kubectl -n kafka apply -f -")[0].stdin
+	manifest := topicApplies(f)[0].stdin
 	if !strings.Contains(manifest, "topicName: kates.orders") {
 		t.Errorf("the mirrored topic must still be deleted:\n%s", manifest)
 	}
@@ -325,6 +370,8 @@ func TestMigrateDownAndStatusAcrossSeveralSources(t *testing.T) {
 	f.on("kubectl -n kafka delete secret -l kates.io/lab="+lab+" --ignore-not-found", "")
 	f.on("kubectl -n kafka get kafka krafter -o jsonpath=", "4.3.0 True")
 	f.on("kubectl -n kafka get kafkamirrormaker2 mm2-"+lab+"-mirror-maker2 -o json", mirrorCRJSON("mm2-"+lab+"-mirror-maker2", "RUNNING", "RUNNING"))
+	scriptPods(f)
+	scriptTargetTopics(f, lab, map[string]int64{"kates.orders.src282": 0, "kates.orders.src391": 0})
 	out := captureOutput(t, "json")
 
 	// status finds both legs by the lab label alone.
@@ -364,7 +411,7 @@ func TestMigrateDownAndStatusAcrossSeveralSources(t *testing.T) {
 		}
 	}
 	// Both legs' topics and both checkpoints topics are adopted and deleted.
-	applies := f.find("kubectl -n kafka apply -f -")
+	applies := topicApplies(f)
 	if len(applies) != 1 {
 		t.Fatalf("want one KafkaTopic apply, got %d", len(applies))
 	}
@@ -383,7 +430,96 @@ func TestMigrateTopicsFromPattern(t *testing.T) {
 	if got := topicsFromPattern(`kates\..*`); len(got) != 0 {
 		t.Fatalf("a real regex must yield no topic, got %v", got)
 	}
-	if name := kafkaTopicResourceName("m282-430", "source.checkpoints.internal"); name != "m282-430-source-checkpoints-internal" {
-		t.Fatalf("resource name = %s", name)
+}
+
+// A sanitised name carries a short hash of the original: a.b, a-b and A_B
+// used to map to one KafkaTopic, the second apply overwriting the first. A
+// name sanitising did not touch stays as it was.
+func TestKafkaTopicResourceNameDoesNotCollide(t *testing.T) {
+	if name := kafkaTopicResourceName("m282-430", "orders"); name != "m282-430-orders" {
+		t.Errorf("an already-valid name changed: %s", name)
+	}
+	sum := sha256.Sum256([]byte("source.checkpoints.internal"))
+	if want, got := "m282-430-source-checkpoints-internal-"+hex.EncodeToString(sum[:3]), kafkaTopicResourceName("m282-430", "source.checkpoints.internal"); got != want {
+		t.Errorf("resource name = %s, want %s", got, want)
+	}
+	seen := map[string]string{}
+	for _, topic := range []string{"a.b", "a-b", "A_B", "a..b", strings.Repeat("x", 70) + "1", strings.Repeat("x", 70) + "2"} {
+		name := kafkaTopicResourceName("lab", topic)
+		if len(name) > 63 || !regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`).MatchString(name) {
+			t.Errorf("%q → %q is not a DNS-1123 label", topic, name)
+		}
+		if other, dup := seen[name]; dup {
+			t.Errorf("%q and %q share the name %s", topic, other, name)
+		}
+		seen[name] = topic
+	}
+}
+
+// The topics come from the kates.io/lab-topics annotation up wrote, so a
+// mirror installed with a real regular expression (through --values-mirror)
+// still names its topics; topicsPattern is the fallback for a CR without it.
+// In a fan-in each leg takes the recorded names its own pattern matches.
+func TestReadMirrorSpecPrefersTheRecordedTopics(t *testing.T) {
+	spec := json.RawMessage(`{"target":{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092","groupId":"mm2-x"},
+		"mirrors":[{"source":{"alias":"source","bootstrapServers":"src:9092"},"topicsPattern":"kates\\..*"}]}`)
+	d := &labDiscovery{}
+	d.readMirrorSpec(spec, "")
+	if len(d.Topics) != 0 {
+		t.Fatalf("a regex pattern without the annotation should name no topic, got %v", d.Topics)
+	}
+	d = &labDiscovery{}
+	d.readMirrorSpec(spec, "kates.orders, kates.payments")
+	if strings.Join(d.Topics, ",") != "kates.orders,kates.payments" || strings.Join(d.legs[0].Topics, ",") != "kates.orders,kates.payments" {
+		t.Fatalf("recorded topics not read back: %v / %v", d.Topics, d.legs[0].Topics)
+	}
+
+	fanIn := json.RawMessage(`{"target":{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092","groupId":"mm2-x"},
+		"mirrors":[{"source":{"alias":"src282","bootstrapServers":"a:9092"},"topicsPattern":"kates\\.orders\\.src282"},
+		           {"source":{"alias":"src391","bootstrapServers":"b:9092"},"topicsPattern":"kates\\.orders\\.src391"}]}`)
+	d = &labDiscovery{}
+	d.readMirrorSpec(fanIn, "kates.orders.src282,kates.orders.src391")
+	if strings.Join(d.legs[0].Topics, ",") != "kates.orders.src282" || strings.Join(d.legs[1].Topics, ",") != "kates.orders.src391" {
+		t.Fatalf("legs did not each take their own recorded topics: %v / %v", d.legs[0].Topics, d.legs[1].Topics)
+	}
+}
+
+// SASL is read from the CR's authentication block for the source cluster,
+// not from the port: a SASL listener on 9092 is SASL, a plaintext one on
+// 9094 is not. A CR that lists no clusters falls back to the port.
+func TestLabSourceSASLFromTheCRsAuthentication(t *testing.T) {
+	withClusters := func(bootstrap, auth string) *labDiscovery {
+		t.Helper()
+		spec := json.RawMessage(fmt.Sprintf(`{"target":{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092","groupId":"g"},
+			"clusters":[{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092"},{"alias":"source","bootstrapServers":%q%s}],
+			"mirrors":[{"source":{"alias":"source","bootstrapServers":%q},"topicsPattern":"kates\\.orders"}]}`, bootstrap, auth, bootstrap))
+		d := &labDiscovery{}
+		d.readMirrorSpec(spec, "")
+		d.Sources = orderLabSources([]*labSource{{Release: "lab-src", Namespace: "kafka-lab-src"}}, d.legs)
+		return d
+	}
+	plainAuth := `,"authentication":{"type":"plain","username":"mm2reader","passwordSecret":{"secretName":"lab-src-mm2reader","password":"password"}}`
+
+	if d := withClusters("lab-src-legacy-kafka-bootstrap.kafka-lab-src.svc:9092", plainAuth); !d.Sources[0].usesSASL() || d.Sources[0].Auth.Secret != "lab-src-mm2reader" || d.Sources[0].Auth.User != "mm2reader" {
+		t.Errorf("a SASL block on 9092 was not read as SASL: %+v", d.Sources[0].Auth)
+	}
+	if d := withClusters("lab-src-legacy-kafka-bootstrap.kafka-lab-src.svc:9094", ""); d.Sources[0].usesSASL() {
+		t.Errorf("no authentication block on 9094 was read as SASL: %+v", d.Sources[0].Auth)
+	}
+	noClusters := &labDiscovery{}
+	noClusters.readMirrorSpec(json.RawMessage(`{"target":{"alias":"target","bootstrapServers":"krafter-kafka-bootstrap.kafka.svc:9092"},
+		"mirrors":[{"source":{"alias":"source","bootstrapServers":"src:9094"},"topicsPattern":"kates\\.orders"}]}`), "")
+	noClusters.Sources = orderLabSources([]*labSource{{Release: "src", Namespace: "ns"}}, noClusters.legs)
+	if !noClusters.Sources[0].usesSASL() {
+		t.Error("a CR listing no clusters should fall back to the port")
+	}
+
+	// mirror deploy reads the same answer off the source's bootstrap Service.
+	sasl := []servicePort{{Name: "plaintext", Port: 9092}, {Name: "sasl", Port: 9095}}
+	if !saslBootstrap("src.ns.svc:9095", sasl) || saslBootstrap("src.ns.svc:9092", sasl) || saslBootstrap("src.ns.svc:9094", sasl) {
+		t.Error("saslBootstrap should follow the Service's sasl port, whatever its number")
+	}
+	if !saslBootstrap("src.ns.svc:9094", nil) || saslBootstrap("src.ns.svc:9092", nil) {
+		t.Error("without ports, saslBootstrap should fall back to 9094")
 	}
 }

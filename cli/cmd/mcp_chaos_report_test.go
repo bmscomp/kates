@@ -114,6 +114,7 @@ func TestMCPDisruptionReport(t *testing.T) {
 		SLA: &mcpDisruptionReportSLA{Grade: "C", Violated: true, TotalChecks: 3, PassedChecks: 2,
 			Violations:  []mcpDisruptionReportSLAViolation{{Metric: "p99LatencyMs", Constraint: "max", Threshold: 100, Actual: 180.25, Severity: "MAJOR"}},
 			Unevaluated: []mcpUntrusted{"maxDataLossPercent: a disruption plan runs no workload"}},
+		StepCount: 2,
 		Steps: []mcpDisruptionReportStep{
 			{Name: "kill-leader-partition-0", DisruptionType: "POD_KILL", Verdict: "Pass", FaultStart: "2026-09-25T12:00:00Z",
 				FaultEnd: "2026-09-25T12:00:31.500Z", FaultDurationMs: ms(31500), TimeToFirstReadyMs: ms(4200), TimeToAllReadyMs: ms(12750),
@@ -217,7 +218,9 @@ func TestMCPDisruptionReportRefusesIDs(t *testing.T) {
 		{"disruption_id": "0a1b2c3d?x"},
 		{"disruption_id": "0a1b2c3d", "baseline_id": "nope"},
 		{"disruption_id": "0a1b2c3d", "baseline_id": ""},
-		{"disruption_id": "0a1b2c3d", "limit": 5},
+		{"disruption_id": "0a1b2c3d", "limit": mcpDisruptionReportMaxSteps + 1},
+		{"disruption_id": "0a1b2c3d", "offset": -1},
+		{"disruption_id": "0a1b2c3d", "steps": 5},
 	} {
 		fb.ResetLog()
 		if e := h.callErr("disruption_report", args); e.Error.Code != mcpErrInvalidArgument {
@@ -344,7 +347,9 @@ func TestMCPDisruptionReportNeverTooLarge(t *testing.T) {
 	}
 }
 
-func TestMCPDisruptionReportCapsSteps(t *testing.T) {
+// TestMCPDisruptionReportPagesSteps: steps come a page at a time, with
+// nextOffset, not cut at a fixed ten.
+func TestMCPDisruptionReportPagesSteps(t *testing.T) {
 	fb := mcpDisruptionReportBackend(t)
 	report := mcpLeaderCascadeReport()
 	steps := make([]map[string]any, 0, 15)
@@ -358,8 +363,22 @@ func TestMCPDisruptionReportCapsSteps(t *testing.T) {
 
 	env := h.callOK("disruption_report", map[string]any{"disruption_id": "0a1b2c3d"})
 	got := mcpData[mcpDisruptionReportOut](t, env)
-	if !env.Truncated || len(got.Steps) != mcpDisruptionReportMaxSteps {
-		t.Errorf("truncated=%v steps=%d, want true and %d", env.Truncated, len(got.Steps), mcpDisruptionReportMaxSteps)
+	if len(got.Steps) != mcpDisruptionReportDefaultSteps || got.StepCount != 15 || got.NextOffset == nil || *got.NextOffset != 10 {
+		t.Fatalf("first page: steps=%d stepCount=%d next=%v", len(got.Steps), got.StepCount, got.NextOffset)
+	}
+	got = mcpData[mcpDisruptionReportOut](t, h.callOK("disruption_report", map[string]any{"disruption_id": "0a1b2c3d", "offset": 10}))
+	if len(got.Steps) != 5 || got.Steps[0].Name == "" || got.Offset != 10 || got.NextOffset != nil {
+		t.Errorf("last page: steps=%d offset=%d next=%v", len(got.Steps), got.Offset, got.NextOffset)
+	}
+	if !strings.Contains(string(got.Steps[0].Name), "step-10") {
+		t.Errorf("the second page starts at %q, want step-10", got.Steps[0].Name)
+	}
+	got = mcpData[mcpDisruptionReportOut](t, h.callOK("disruption_report", map[string]any{"disruption_id": "0a1b2c3d", "limit": 50}))
+	if len(got.Steps) != 15 || got.NextOffset != nil {
+		t.Errorf("limit 50: steps=%d next=%v, want all 15", len(got.Steps), got.NextOffset)
+	}
+	if e := h.callErr("disruption_report", map[string]any{"disruption_id": "0a1b2c3d", "offset": 15}); e.Error.Code != mcpErrInvalidArgument {
+		t.Errorf("offset past the last step: %s", e.Error.Code)
 	}
 }
 

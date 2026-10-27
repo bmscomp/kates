@@ -3,8 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/bmscomp/kates/cli/pkg/components"
 	"github.com/bmscomp/kates/cli/pkg/detect"
 	"github.com/charmbracelet/huh"
 )
@@ -12,7 +16,7 @@ import (
 // runInteractiveForms runs the interactive huh forms (Form 1: component selection,
 // Form 2: namespace configuration) and updates the global deploy* flag variables.
 func runInteractiveForms() error {
-	var components []string
+	var picked []string
 
 	// What is already installed, beside each component it belongs to.
 	hintCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -55,7 +59,7 @@ func runInteractiveForms() error {
 			Title("Select Components").
 			Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed. After · is what is installed now.").
 			Options(componentOptions...).
-			Value(&components),
+			Value(&picked),
 	}
 	if len(leftOut) > 0 {
 		componentFields = append(componentFields, huh.NewNote().Title("Not installed admin-less").Description(describeLeftOut(leftOut)))
@@ -100,7 +104,7 @@ func runInteractiveForms() error {
 	}
 
 	// ── Form 2: Namespace configuration ──────────────────────────────────
-	// Built after Form 1 completes so that `components` is fully populated.
+	// Built after Form 1 completes so that `picked` is fully populated.
 	// This avoids a huh library issue where MultiSelect values from a
 	// previous group aren't reliably available in WithHideFunc closures
 	// of subsequent groups within the same form.
@@ -131,19 +135,19 @@ func runInteractiveForms() error {
 		)}
 
 		var optional []huh.Field
-		if sliceContains(components, "monitoring") && !deployAdminless {
+		if slices.Contains(picked, "monitoring") && !deployAdminless {
 			optional = append(optional, huh.NewInput().
 				Title("Monitoring Namespace").
 				Description("Namespace for the Prometheus and Grafana stack").
 				Value(&deployMonitoringNS))
 		}
-		if sliceContains(components, "chaos") {
+		if slices.Contains(picked, "chaos") {
 			optional = append(optional, huh.NewInput().
 				Title("Chaos Namespace").
 				Description("Namespace for Litmus Chaos engine").
 				Value(&deployChaosNS))
 		}
-		if sliceContains(components, "kafka-connect") {
+		if slices.Contains(picked, "kafka-connect") {
 			optional = append(optional,
 				huh.NewInput().
 					Title("Kafka Connect Namespace").
@@ -154,13 +158,13 @@ func runInteractiveForms() error {
 					Description("Namespace for PostgreSQL CDC database").
 					Value(&deployDbNS))
 		}
-		if sliceContains(components, "mirror-maker2") {
+		if slices.Contains(picked, "mirror-maker2") {
 			optional = append(optional, huh.NewInput().
 				Title("MirrorMaker 2 Namespace").
 				Description("Namespace for the loopback mirror (the Kafka namespace is the simplest: the kates-mm2 credential lives there)").
 				Value(&deployMM2NS))
 		}
-		if sliceContains(components, "kafka-ui") {
+		if slices.Contains(picked, "kafka-ui") {
 			optional = append(optional, huh.NewInput().
 				Title("Kafka UI Namespace").
 				Description("Namespace for the Kafka UI dashboard").
@@ -186,7 +190,7 @@ func runInteractiveForms() error {
 	deployWithMirrorMaker2 = false
 	deployAdminlessScrape = false
 
-	for _, c := range components {
+	for _, c := range picked {
 		switch c {
 		case "strimzi":
 			deployWithStrimzi = true
@@ -331,116 +335,110 @@ func resolveNamespaces() resolvedNamespaces {
 	}
 }
 
+// deployPlacement is where this deploy puts each component: the resolved
+// namespaces, the database on --db-ns under both topologies (an existing
+// database is never moved), and the primary's name.
+func deployPlacement(ns resolvedNamespaces) components.Placement {
+	return components.Placement{
+		Kafka: ns.kafka, Connect: ns.connect, Database: deployDbNS, App: ns.app,
+		Chaos: ns.chaos, Monitoring: ns.jaeger, KafkaUI: ns.kafkaUI, MM2: ns.mm2,
+		KafkaName: deployKafkaName,
+	}
+}
+
+// componentSelected says whether the flags (or the wizard) turned a component
+// of the table on for this deploy. Kafka, its users and Kates are always in.
+func componentSelected(id string) bool {
+	switch id {
+	case "strimzi":
+		return deployWithStrimzi
+	case "cert-manager":
+		return deployWithCertManager
+	case "kyverno":
+		return deployWithKyverno
+	case "monitoring":
+		return deployWithMonitoring
+	case "postgres", "kafka-connect", "kafka-connector":
+		return deployWithKafkaConnect
+	case "apicurio":
+		return deployWithSchemaRegistry == "apicurio"
+	case "kafka-ui":
+		return deployWithKafkaUI
+	case "mirror-maker2":
+		return deployWithMirrorMaker2
+	case "chaos":
+		return deployWithChaos
+	case "kafka", "kafka-users", "kates":
+		return true
+	}
+	return false
+}
+
+// selectedComponents is the component table filtered to this deploy, in
+// install order.
+func selectedComponents() []components.Component {
+	var selected []components.Component
+	for _, c := range components.All() {
+		if componentSelected(c.ID) {
+			selected = append(selected, c)
+		}
+	}
+	return selected
+}
+
+// entryName is the deploy views' name for a component: shorter than the
+// dashboard's, and the Kafka row carries the cluster's name.
+func entryName(c components.Component) string {
+	switch c.ID {
+	case "kafka":
+		return "Kafka (" + deployKafkaName + ")"
+	case "monitoring":
+		return "Monitoring"
+	case "apicurio":
+		return "Apicurio"
+	}
+	return c.Name
+}
+
 // buildSharedEntries builds the shared component registry (single source of truth)
-// used by both the deploy preview and the final summary dashboard.
+// used by both the deploy preview and the final summary dashboard: one row per
+// release the component table says this deploy installs.
 func buildSharedEntries(ns resolvedNamespaces) []DeploySummaryEntry {
+	placement := deployPlacement(ns)
 	var entries []DeploySummaryEntry
-	if deployWithStrimzi {
-		entries = append(entries, DeploySummaryEntry{Icon: "🦊", Name: "Strimzi Operator", Release: "strimzi-operator", Namespace: "strimzi-operator", Group: "A"})
-	}
-	if deployWithCertManager {
-		entries = append(entries, DeploySummaryEntry{Icon: "🔐", Name: "Cert-Manager", Release: "cert-manager", Namespace: "cert-manager", Group: "A"})
-	}
-	if deployWithKyverno {
-		entries = append(entries, DeploySummaryEntry{Icon: "🚦", Name: "Kyverno", Release: "kyverno", Namespace: "kyverno", Group: "A"})
-	}
-	entries = append(entries, DeploySummaryEntry{Icon: "📨", Name: "Kafka (" + deployKafkaName + ")", Release: deployKafkaName, Namespace: ns.kafka, Group: "B"})
-	if deployWithKafkaConnect {
-		entries = append(entries, DeploySummaryEntry{Icon: "🐘", Name: "PostgreSQL", Release: "postgresql", Namespace: deployDbNS, Group: "B"})
-		entries = append(entries, DeploySummaryEntry{Icon: "🔗", Name: "Kafka Connect", Release: "connect-cluster", Namespace: ns.connect, Group: "B"})
-	}
-	if deployWithMonitoring {
-		entries = append(entries, DeploySummaryEntry{Icon: "📊", Name: "Monitoring", Release: "monitoring", Namespace: ns.jaeger, Group: "B"})
-	}
-	if deployWithSchemaRegistry == "apicurio" {
-		entries = append(entries, DeploySummaryEntry{Icon: "📋", Name: "Apicurio", Release: "apicurio", Namespace: ns.kafka, Group: "C"})
-	}
-	entries = append(entries, DeploySummaryEntry{Icon: "📦", Name: "Kates Backend", Release: "kates", Namespace: ns.app, Group: "C"})
-	if deployWithKafkaUI {
-		entries = append(entries, DeploySummaryEntry{Icon: "💻", Name: "Kafka UI", Release: "kafka-ui", Namespace: ns.kafkaUI, Group: "C"})
-	}
-	if deployWithMirrorMaker2 {
-		entries = append(entries, DeploySummaryEntry{Icon: "🔁", Name: "MirrorMaker 2", Release: "mm2", Namespace: ns.mm2, Group: "C"})
-	}
-	if deployWithChaos {
-		entries = append(entries, DeploySummaryEntry{Icon: "🧪", Name: "Litmus Chaos", Release: "chaos", Namespace: ns.chaos, Group: "C"})
+	for _, c := range selectedComponents() {
+		if !c.Installs() {
+			continue
+		}
+		entries = append(entries, DeploySummaryEntry{
+			Icon: c.Icon, Name: entryName(c), Release: c.ReleaseName(placement),
+			Namespace: c.Namespace(placement), Group: c.Group,
+		})
 	}
 	return entries
 }
 
-// countDeploySteps calculates the total number of deployment steps based on
-// the selected components.
+// countDeploySteps is the number of dashboard steps: every selected
+// component, the release-less ones (Kafka users, the CDC connectors) included.
 func countDeploySteps() int {
-	var totalSteps int
-	if deployWithStrimzi {
-		totalSteps++
+	return len(selectedComponents())
+}
+
+// dashboardSelector is the pod selector the dashboard watches for a
+// component: the table's, with the Kafka cluster's name filled in.
+func dashboardSelector(c components.Component) string {
+	if strings.Contains(c.Selector, "%s") {
+		return fmt.Sprintf(c.Selector, deployKafkaName)
 	}
-	if deployWithCertManager {
-		totalSteps++
-	}
-	if deployWithKyverno {
-		totalSteps++
-	}
-	totalSteps += 2 // kafka, kafka-users
-	if deployWithMonitoring {
-		totalSteps++
-	}
-	if deployWithKafkaConnect {
-		totalSteps += 3
-	} // postgres, kafka-connect, kafka-connector
-	if deployWithSchemaRegistry == "apicurio" {
-		totalSteps++
-	}
-	totalSteps++ // kates
-	if deployWithKafkaUI {
-		totalSteps++
-	}
-	if deployWithMirrorMaker2 {
-		totalSteps++
-	}
-	if deployWithChaos {
-		totalSteps++
-	}
-	return totalSteps
+	return c.Selector
 }
 
 // registerDashboardComponents registers all selected components with the
 // deployment dashboard for progress tracking.
 func registerDashboardComponents(dashboard *deployDashboardModel, ns resolvedNamespaces) {
-	if deployWithStrimzi {
-		dashboard.RegisterComponent("strimzi", "Strimzi Operator", "A", Target{"strimzi-operator", "name=strimzi-cluster-operator"})
-	}
-	if deployWithCertManager {
-		dashboard.RegisterComponent("cert-manager", "Cert-Manager", "A", Target{"cert-manager", "app.kubernetes.io/instance=cert-manager"})
-	}
-	if deployWithKyverno {
-		dashboard.RegisterComponent("kyverno", "Kyverno", "A", Target{"kyverno", "app.kubernetes.io/instance=kyverno"})
-	}
-	dashboard.RegisterComponent("kafka", "Kafka Cluster", "B", Target{ns.kafka, "strimzi.io/cluster=" + deployKafkaName})
-	dashboard.RegisterComponent("kafka-users", "Kafka Users", "B", Target{ns.kafka, "app.kubernetes.io/name=entity-operator"})
-	if deployWithMonitoring {
-		dashboard.RegisterComponent("monitoring", "Monitoring Stack", "B", Target{ns.jaeger, "release=monitoring"})
-	}
-	if deployWithKafkaConnect {
-		dashboard.RegisterComponent("postgres", "PostgreSQL", "B",
-			Target{deployDbNS, "app.kubernetes.io/instance=postgresql"})
-		dashboard.RegisterComponent("kafka-connect", "Kafka Connect", "B",
-			Target{ns.connect, "strimzi.io/kind=KafkaConnect"})
-		dashboard.RegisterComponent("kafka-connector", "CDC Connector", "B",
-			Target{ns.connect, "strimzi.io/cluster=connect-cluster"})
-	}
-	if deployWithSchemaRegistry == "apicurio" {
-		dashboard.RegisterComponent("apicurio", "Apicurio Registry", "C", Target{ns.kafka, "app.kubernetes.io/instance=apicurio"})
-	}
-	dashboard.RegisterComponent("kates", "Kates Backend", "C", Target{ns.app, "app.kubernetes.io/instance=kates"})
-	if deployWithKafkaUI {
-		dashboard.RegisterComponent("kafka-ui", "Kafka UI", "C", Target{ns.kafkaUI, "app.kubernetes.io/name=kafka-ui"})
-	}
-	if deployWithMirrorMaker2 {
-		dashboard.RegisterComponent("mirror-maker2", "MirrorMaker 2", "C", Target{ns.mm2, "strimzi.io/kind=KafkaMirrorMaker2"})
-	}
-	if deployWithChaos {
-		dashboard.RegisterComponent("chaos", "Litmus Chaos", "C", Target{ns.chaos, "app.kubernetes.io/instance=chaos"})
+	placement := deployPlacement(ns)
+	for _, c := range selectedComponents() {
+		dashboard.RegisterComponent(c.ID, c.Name, c.Group, Target{c.Namespace(placement), dashboardSelector(c)})
 	}
 }
 
@@ -474,9 +472,10 @@ type deployContext struct {
 	// describes. Both replace the "krafter"/pinned-version literals.
 	versions *versionPlan
 	primary  primaryCluster
-	// kyvernoInstalled is set by Group A when it installs Kyverno in this
-	// run, so Group B can wire its scrape once the monitoring CRDs exist
-	// (deploy_monitoring.go). A Kyverno that was already there is left
-	// alone, like every other existing release.
-	kyvernoInstalled bool
+	// installedNow holds the components this run installed, as opposed to
+	// found there, by id (deploy_scheduler.go). wireKyvernoScrape reads it:
+	// a Kyverno that was already there is left alone, like every other
+	// existing release.
+	installedMu  sync.Mutex
+	installedNow map[string]bool
 }

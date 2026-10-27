@@ -151,8 +151,8 @@ func TestHealth(t *testing.T) {
 func TestClusterInfo(t *testing.T) {
 	c, _ := testServer(t, jsonHandler(t, "GET", "/api/cluster/info", ClusterInfo{
 		ClusterID:   "test-cluster",
-		BrokerCount: 3,
-		Brokers:     []BrokerNode{{ID: 0, Host: "broker-0", Port: 9092, Rack: "az-1"}},
+		BrokerCount: IntOf(3),
+		Brokers:     []BrokerNode{{ID: IntOf(0), Host: "broker-0", Port: IntOf(9092), Rack: "az-1"}},
 	}))
 	resp, err := c.ClusterInfo(context.Background())
 	if err != nil {

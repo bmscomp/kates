@@ -76,6 +76,11 @@ func TestParsePins(t *testing.T) {
 			text: "export STRIMZI_VERSION=1.0.1\nSTRIMZI_KAFKA_VERSION='1.0.1-kafka-4.2.0'\nKAFKA_IMAGE=quay.io/strimzi/kafka:$STRIMZI_KAFKA_VERSION # the client\n",
 			want: Pins{StrimziVersion: "1.0.1", KafkaVersion: "4.2.0", KafkaImage: "quay.io/strimzi/kafka:1.0.1-kafka-4.2.0"},
 		},
+		{
+			name: "quoted values with trailing comments",
+			text: "STRIMZI_VERSION=\"1.1.0\" # the operator\nSTRIMZI_KAFKA_VERSION='1.1.0-kafka-4.3.0' # its Kafka\nKAFKA_IMAGE=\"quay.io/strimzi/kafka:${STRIMZI_KAFKA_VERSION}\"#tag\n",
+			want: Pins{StrimziVersion: "1.1.0", KafkaVersion: "4.3.0", KafkaImage: "quay.io/strimzi/kafka:1.1.0-kafka-4.3.0"},
+		},
 		{name: "empty", text: "\n# only comments\n", wantErr: "no pins"},
 		{name: "not an assignment", text: "STRIMZI_VERSION\n", wantErr: "line 1"},
 		{name: "forward reference", text: "KAFKA_IMAGE=\"quay.io/strimzi/kafka:${STRIMZI_KAFKA_VERSION}\"\nSTRIMZI_KAFKA_VERSION=\"1.1.0-kafka-4.3.0\"\n", wantErr: "not defined above it"},

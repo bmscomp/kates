@@ -5,7 +5,7 @@ Scenario files are the declarative way to define, execute, and validate Kates [t
 This chapter is for engineers graduating from ad-hoc `kates test create` runs to version-controlled, CI-gated test suites. After this chapter, you can:
 
 - Describe a multi-scenario test suite in YAML, with [`spec`](appendix-a-glossary.md#gl-test-spec) parameters and `validate` SLA [gates](appendix-a-glossary.md#gl-gate)
-- Run a suite with `kates test apply -f` and read its pass/fail summary
+- Check a file offline with `kates test lint`, then run it with `kates test apply -f` and read its pass/fail summary
 - Wire the [exit code](appendix-a-glossary.md#gl-exit-code) into a CI/CD pipeline so performance regressions block the merge
 - Spot the common scenario-file mistakes and predict how the CLI reacts to each
 
@@ -157,8 +157,22 @@ The `validate` section defines pass/fail criteria that the CLI checks after each
 Each threshold in `validate` is a gate. Kates has two other words for a result, and neither names a gate. A disruption plan's `sla` block earns an [SLA grade](appendix-a-glossary.md#gl-sla-grade), a letter from A to F, as [SLA Grading](07-chaos-practice.md#sla-grading) explains. An INTEGRITY run ends with a [verdict](appendix-a-glossary.md#gl-verdict), such as PASS or DATA_LOSS, as [Interpreting Integrity Results](08-data-integrity.md#interpreting-integrity-results) explains.
 
 ::: {.callout-warning}
-SLA gates are only evaluated when you run `kates test apply` with `--wait`. Without it, scenarios are fire-and-forget: each one is submitted (status `SUBMITTED`), no gate is ever checked, and how the tests turn out never affects the exit status. A scenario that fails to submit still makes the CLI exit 1.
+SLA gates are only evaluated when you run `kates test apply` with `--wait`. Without it, scenarios are fire-and-forget: each one is submitted (status `SUBMITTED`), no gate is ever checked, and how the tests turn out never affects the exit status. A scenario that fails to submit still makes the CLI exit 1. With `--wait --no-sla`, the CLI waits for every run but checks no gate, so the exit code says only how the runs ended.
 :::
+
+### Gate Scope
+
+By default, a scenario's gates judge the run as a whole, the way its report sums it up. The latency gates read the run's P99 and average from the rows that measured latency, leaving out a consumer's row as the report does: the P99 is the highest producer P99, and the average is weighted by records. `minThroughputRecPerSec` reads the producers' rates added up, since a STRESS or CAPACITY run starts its producers at once, so the shipped `stress-test` template's 100,000 rec/s is what its 16 producers send together. The integrity gates read every row that reports integrity data: the worst loss, RTO and RPO, and the out-of-order records and CRC failures added up.
+
+Two switches bring back the older rule, where every task row of the run must meet every gate on its own, a consumer's row included:
+
+| Where | Setting | Effect |
+|-------|---------|--------|
+| Command line | `--sla-scope task` | Every scenario in the file is judged task by task. `--sla-scope report` is the default |
+| `validate` block | `perTask: true` | This scenario is judged task by task, whatever `--sla-scope` says. It is not a gate itself |
+| Command line | `--no-sla` | No gate is checked. The summary says so, and the JSON summary carries `"sla": {"checked": false}` |
+
+`--sla-scope` and `--no-sla` need `--wait`, and they don't go together: any of those mistakes, or a scope other than `report` or `task`, exits 2 before anything starts. The summary marks a scenario judged task by task with `(per task)`, and the JSON summary gives each graded scenario's `scope`.
 
 The diagram below summarizes how a completed run's metrics flow through the `validate` block's gates to determine the CLI exit code:
 
@@ -190,7 +204,7 @@ graph LR
 
 ### Performance Gates
 
-These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated, since a run reports no error count. Each gate is checked against every task of the run, not against the report summary, so every task must meet it. A consumer records no latency on the native backend, so there a LOAD run's latency gates judge its producer, while `minThroughputRecPerSec` judges the producer and the consumer alike. A latency gate needs at least one task that measured latency. When none did, as with a producer that failed before its first acknowledgment or a ROUND_TRIP run on the Trogdor backend, the gate fails as `p99 not measured` or `avg not measured`.
+These gates judge a run's speed. The CLI checks the first three; `maxErrorRate` is accepted but not evaluated, since a run reports no error count, and `kates test lint` warns about it. Each gate is checked against the run as a whole, as [Gate Scope](#gate-scope) explains, so a LOAD run's gates judge its producer, not its consumer, and a STRESS run's throughput gate judges its producers together. A latency gate needs at least one task that measured latency. When none did, as with a producer that failed before its first acknowledgment or a ROUND_TRIP run on the Trogdor backend, the gate fails as `p99 not measured` or `avg not measured`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -329,10 +343,10 @@ Use `--wait` whenever the scenarios are meant to be compared, as in the [Tuning 
 
 ### How Execution Works
 
-1. Kates parses the file (YAML or JSON) — a malformed file aborts the run with the raw parse error; there is no further schema validation on the client side
+1. Kates checks the whole file as `kates test lint` does (see [Checking a File Before It Runs](#checking-a-file-before-it-runs)) and prints what it finds to stderr; a file with an error exits 2, and no scenario starts
 2. Each scenario is submitted to the Kates API sequentially
 3. If `--wait` is specified, Kates polls until each test completes before submitting the next
-4. SLA gates are evaluated for each completed scenario — this only happens with `--wait`; without it, every scenario is left as `SUBMITTED` and never validated
+4. SLA gates are evaluated for each completed scenario — this only happens with `--wait`, and not with `--no-sla`; without `--wait`, every scenario is left as `SUBMITTED` and never validated
 5. A summary table is printed showing each scenario's result
 
 ### Output
@@ -373,13 +387,19 @@ kates test apply -f regression-suite.yaml --wait
 # The exit code tells you the result:
 # 0 = every scenario finished and no SLA gate was violated
 # 1 = a scenario failed to submit, finished FAILED, was lost track of (ERROR), or violated an SLA gate
+# 2 = the file has an error, or the flags don't go together; nothing was started
+# 130 = interrupted
 ```
 
-A CI job has no terminal, so `--wait` shows no spinner there: it prints a plain line to stderr each time a run's status changes, and the summary table to stdout. With `-o json` stdout carries only the summary as JSON, with each scenario's `runId`, `status` and, for a scenario with gates, its `sla` violations. A scenario that failed to submit has no `runId`, so a script reads the run IDs with `jq -r '.scenarios[] | select(.runId) | .runId'`. The exit code is the same either way.
+A CI job has no terminal, so `--wait` shows no spinner there: it prints a plain line to stderr each time a run's status changes, and the summary table to stdout. With `-o json` stdout carries only the summary as JSON: an `sla` object saying whether the gates were `checked` and at which `scope`, then each scenario's `runId`, `status` and, for a scenario with gates, its own `sla` object with its `scope`, `violations` and the gates that were `notEvaluable`. A scenario that failed to submit has no `runId`, so a script reads the run IDs with `jq -r '.scenarios[] | select(.runId) | .runId'`. The exit code is the same either way.
 
 A failed run fails the pipeline whether or not its scenario has gates. A scenario that fails to submit or finishes `FAILED` shows as `FAILED` in the summary, one the CLI loses track of while waiting shows as `ERROR`, and any of them makes the command exit 1, just as a violated gate does. A run that finishes `FAILED` meets none of its gates: its first violation is `run FAILED`, with the first task error or `before any task ran`. Interrupting the command, with Ctrl-C or by cancelling the job, which sends SIGTERM, cancels the run it is waiting for, starts no further scenario, and exits 130. A scenario that finishes `DONE` passes unless one of its gates is violated, so a regression fails the pipeline only in a scenario that carries a `validate` block; without one, a run that completes but regresses exits 0.
 
-For JUnit-compatible output, export each test report individually after the suite completes — see [Observability & Monitoring](09-observability.md) for export formats.
+For a CI test report, add `--output-junit <file>` (or `--junit <file>`) to a `--wait` run. The file holds one test suite for the scenario file and one test case per scenario, timed in seconds, and the suite takes the apply's wall-clock time. Violated gates are a failure of type `sla_violation`, and a run that ends `FAILED` is a failure of type `run_failed`. A scenario that could not be created, or whose run the CLI lost track of, is an error. The scenario that Ctrl-C stopped, and those never started after it, are skipped. With `--no-sla` no gate fails a test case, so only runs that ended `FAILED` do.
+
+```bash
+kates test apply -f regression-suite.yaml --wait --output-junit kates-apply.xml
+```
 
 ## JSON Format
 
@@ -427,13 +447,42 @@ kates test scaffold export --all --dir ./scenarios/
 
 The library covers the common cases: `quick-load` (fast smoke test), `production-load` (1M records, strict SLA), `stress-test`, `endurance-soak`, `exactly-once`, `integrity-tx`, `spike-test`, and `ci-gate` (a fast 10k-record CI pipeline gate). Edit the exported file and run it with `kates test apply -f`.
 
+## Checking a File Before It Runs
+
+`kates test lint` checks scenario files without a Kates API or a cluster, as `kates conformity lint` checks a reference. It reads each file as `kates test apply` reads it and reports every finding as `file:line:col: severity: path: message [code]`, with the source line and a caret under it:
+
+```bash
+kates test lint regression-suite.yaml
+kates test lint scenarios/*.yaml
+kates test lint -o json scenarios/*.yaml
+```
+
+```text
+s.yaml:4:3: error: spec.record: unknown field (did you mean "records"?) [unknown-field]
+  4 |   record: 100000
+    |   ^
+```
+
+An error is something `kates test apply` would refuse, or would run other than as written:
+
+- a key it does not read, at the top level, in a scenario, in `spec` or in `validate`, named with the key it is closest to (`unknown-field`), or a key set twice (`duplicate-key`)
+- a scenario without a `type` (`missing-type`), a type the Kates API has no test for (`unknown-type`), or a `backend` other than `native` or `trogdor`
+- a `spec` value it could not send as written: a quoted number, a unit such as `10m`, `yes` for `true`, or a fraction such as `durationSeconds: 1.5`, which would run for 1 second (`wrong-value`)
+- a gate whose value is not a number, or a fraction for `maxOutOfOrder` or `maxCrcFailures`, which would be read as a whole number (`wrong-type`, `wrong-value`)
+
+A warning is a gate that checks nothing: `maxErrorRate`, which no run reports, or a `0` on a gate that only a value above 0 turns on. `-o json` lists the findings, each with its `file`, `line`, `col`, `severity`, `code`, `path` and `message`. The command exits 0 when no file has an error, 1 when one does, and 2 when a file cannot be read.
+
+`kates test apply` runs the same checks over the whole file before the first scenario starts. It prints what it finds to stderr; on an error it exits 2 and starts none of the file's scenarios, so a typo in the third scenario stops the file before the first two run.
+
+Both readers of a scenario file, the YAML one and the JSON one, drop a key they don't know. Without these checks, a gate named `maxP99Latency` would never be checked, and a `spec` key named `record` would leave the run at its type's default records, without a word. A `spec` key takes the scenario file's name, such as `records` or `durationSeconds`, not the Kates API's `numRecords` or `durationMs`, and lint names the right key for those.
+
 ## Common Mistakes
 
-The CLI does not validate scenario files against a schema — a file either parses or it doesn't, and everything else is checked by the Kates API when the scenario is submitted. These are the most frequent mistakes and what actually happens when you make them.
+`kates test lint`, and `kates test apply` before it starts anything, catch most mistakes in a file. These are the most frequent ones and what actually happens when you make them.
 
 ### 1. Missing Required Field (`type`)
 
-`type` is the only required field, but the CLI does not check for it. The scenario is submitted as-is and the Kates API rejects it with a 400 (its request validation requires a test type), so the scenario shows a `✖ Failed: ...` line and is marked `FAILED` in the summary table.
+`type` is the only required field. A scenario without one is a `missing-type` error, and `kates test apply` exits 2 without starting any scenario. A file whose only scenario sits at its top level without a `type` reads as a file with no scenarios, which is an error too.
 
 **Fix:** Add the `type` field to every scenario:
 
@@ -447,7 +496,7 @@ scenarios:
 
 ### 2. Invalid Test Type Name
 
-Case is not the problem — the CLI upper-cases the type before submitting, so `load` and `Load` work fine. What fails is a name that isn't a real test type: the Kates API rejects it at submission and the scenario is marked `FAILED`.
+Case is not the problem — the CLI upper-cases the type before submitting, so `load` and `Load` work fine. What fails is a name that isn't a real test type: lint reports it as `unknown-type`, listing the types there are, and no scenario starts.
 
 **Fix:** Use one of the valid type names:
 
@@ -461,12 +510,7 @@ scenarios:
 
 ### 3. SLA Threshold Format Error
 
-SLA threshold values must be plain numbers, not strings with units — the field name already indicates the unit (e.g., `maxP99LatencyMs` implies milliseconds). A string value fails YAML decoding, so the whole run aborts with the raw parse error:
-
-```text
-  ✖ Invalid scenario file: yaml: unmarshal errors:
-  line 8: cannot unmarshal !!str `50ms` into float64
-```
+SLA threshold values must be plain numbers, not strings with units — the field name already indicates the unit (e.g., `maxP99LatencyMs` implies milliseconds). A string value such as `50ms` is a `wrong-type` error at its line, with the message ``cannot unmarshal !!str `50ms` into float64``, and no scenario starts.
 
 **Fix:** Remove the unit suffix and any quotes around the number:
 
@@ -553,9 +597,11 @@ No real cluster delivers a 1 ms P99, so the summary table marks the scenario `DO
 ## Summary
 
 - A scenario file is a `scenarios:` list in YAML or JSON, or the fields of one scenario at its top level; `type` is the only field a scenario must carry, and the Kates API fills in per-type defaults for everything else
-- SLA gates in the `validate` block are evaluated only with `--wait` — without it, `kates test apply` is fire-and-forget, and how the runs turn out never affects its exit status
+- SLA gates in the `validate` block are evaluated only with `--wait` — without it, `kates test apply` is fire-and-forget, and how the runs turn out never affects its exit status; `--no-sla` waits but checks no gate
+- Gates judge the run as a whole by default: the producers' latency, their throughput added up, a consumer's row left out; `--sla-scope task` or `perTask: true` judges every task row on its own
 - `kates test apply` exits 1 when any scenario fails to submit, with or without `--wait`; with `--wait` it also exits 1 when a scenario finishes `FAILED`, is lost track of (`ERROR`), or violates a gate, and a run that completes without a `validate` block passes whatever its numbers
-- The CLI never validates a file against a schema: malformed YAML aborts the run with the raw parse error, while an invalid `type` travels to the Kates API and is rejected there
+- `kates test lint` checks a file offline, with a line and column for each finding, and `kates test apply` runs the same checks first: a file with an error exits 2 and starts nothing
+- `--output-junit` writes one JUnit test case per scenario for a CI report
 - Start from a `kates test scaffold export` template instead of a blank file — edit a known-good scenario, then run it with `kates test apply -f`
 
 Scenario files lock a winning configuration into Git; finding that configuration interactively is the job of [Lab — Interactive Performance Tuning](10b-lab.md).

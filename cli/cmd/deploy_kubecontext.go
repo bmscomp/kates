@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/bmscomp/kates/cli/internal/proc"
 	"github.com/bmscomp/kates/cli/pkg/detect"
 )
 
@@ -85,7 +86,13 @@ func pinKubeContext(kubeContext string) (unpin func()) {
 
 	execFn, stdinFn, helmFn := runExecFn, runExecStdinFn, runHelmFn
 	outputFn, combinedFn := runExecOutputFn, runExecCombinedFn
-	procFn, executor := runProcFn, defaultExecutor
+	procFn, executor, runner := runProcFn, defaultExecutor, commandRunner
+
+	// The typed kubectl and helm clients (deploy status, kyverno, connect,
+	// doctor): one wrapper around the one runner they share.
+	commandRunner = proc.Rewrite(runner, func(name string, args []string) []string {
+		return withKubeContext(kubeContext, name, args)
+	})
 
 	runExecFn = func(ctx context.Context, name string, args ...string) error {
 		return execFn(ctx, name, withKubeContext(kubeContext, name, args)...)
@@ -112,7 +119,7 @@ func pinKubeContext(kubeContext string) (unpin func()) {
 	return func() {
 		runExecFn, runExecStdinFn, runHelmFn = execFn, stdinFn, helmFn
 		runExecOutputFn, runExecCombinedFn = outputFn, combinedFn
-		runProcFn, defaultExecutor = procFn, executor
+		runProcFn, defaultExecutor, commandRunner = procFn, executor, runner
 	}
 }
 

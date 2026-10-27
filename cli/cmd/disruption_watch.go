@@ -56,6 +56,9 @@ does, follow a run with 'kates disruption status <id>'.`,
 		fmt.Println(strings.Repeat("─", 60))
 
 		scanner := bufio.NewScanner(stream)
+		// A data line carries a whole event as JSON; one past bufio's 64 KiB
+		// default ended the stream with "token too long".
+		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 		var eventName string
 
 		for scanner.Scan() {
@@ -81,7 +84,13 @@ does, follow a run with 'kates disruption status <id>'.`,
 				}
 			}
 		}
-		return scanner.Err()
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+		// The stream closed with no final event: the disruption's outcome is
+		// unknown, which used to exit 0 as if it had completed.
+		return cmdErr("The event stream ended before disruption " + output.Printable(disruptionID) +
+			" completed or failed. Follow it with: kates disruption status " + output.Printable(disruptionID))
 	},
 }
 

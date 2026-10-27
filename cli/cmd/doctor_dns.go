@@ -2,14 +2,15 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/internal/kubectl"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +46,7 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	kc := kubectl.New("")
+	kc := newKubectl("")
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(clrText)
 	separator := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("━", 50))
@@ -65,10 +66,9 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 	podName := fmt.Sprintf("kates-dns-test-%d", rand.Intn(100000))
 
 	// We use the "default" namespace because the application namespace might not exist yet
-	// This ephemeral pod run needs exec.CommandContext because it requires interactive stdin
-	resolvConfOut, err := exec.CommandContext(ctx, "kubectl", "run", "--rm", "-i", "--restart=Never",
+	resolvConfOut, err := kc.Combined(ctx, "run", "--rm", "-i", "--restart=Never",
 		"--image=busybox:1.36", podName, "-n", "default",
-		"--", "cat", "/etc/resolv.conf").CombinedOutput()
+		"--", "cat", "/etc/resolv.conf")
 
 	if err != nil {
 		fmt.Printf("  %s Failed to run ephemeral pod in namespace default: %v\n", fail, err)
@@ -181,11 +181,7 @@ func checkDeploymentDNS(ctx context.Context, kc *kubectl.Client, name, ns, requi
 		// Ignore if deployment doesn't exist
 		return false
 	}
-	searches := string(out)
-	if !strings.Contains(searches, requiredSearch) {
-		return true
-	}
-	return false
+	return !strings.Contains(string(out), requiredSearch)
 }
 
 func checkKafkaConnectDNS(ctx context.Context, kc *kubectl.Client, name, ns, requiredSearch string) bool {
@@ -193,21 +189,63 @@ func checkKafkaConnectDNS(ctx context.Context, kc *kubectl.Client, name, ns, req
 	if err != nil {
 		return false
 	}
-	searches := string(out)
-	if !strings.Contains(searches, requiredSearch) {
-		return true
+	return !strings.Contains(string(out), requiredSearch)
+}
+
+// currentDNSSearches returns the search domains the resource has at jsonPath.
+// kubectl prints a list as a JSON array, and nothing for a missing field.
+func currentDNSSearches(ctx context.Context, kc *kubectl.Client, kind, name, ns, jsonPath string) ([]string, error) {
+	out, err := kc.Output(ctx, "get", kind, name, "-n", ns, "-o", "jsonpath="+jsonPath)
+	if err != nil {
+		return nil, err
 	}
-	return false
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, nil
+	}
+	var searches []string
+	if err := json.Unmarshal([]byte(raw), &searches); err != nil {
+		return nil, fmt.Errorf("parsing %s %s/%s dnsConfig.searches %q: %w", kind, ns, name, raw, err)
+	}
+	return searches, nil
+}
+
+// dnsSearchesPatch returns the searches list the patch sets: the current one
+// with searchDomain appended. Both a strategic and a merge patch replace the
+// whole list, so patching ["<domain>"] alone dropped every entry the resource
+// had.
+func dnsSearchesPatch(current []string, searchDomain string) ([]byte, error) {
+	searches := append([]string{}, current...)
+	if !slices.Contains(searches, searchDomain) {
+		searches = append(searches, searchDomain)
+	}
+	return json.Marshal(searches)
 }
 
 func patchDeploymentDNS(ctx context.Context, kc *kubectl.Client, name, ns, searchDomain string) error {
-	patch := fmt.Sprintf(`{"spec":{"template":{"spec":{"dnsConfig":{"searches":["%s"]}}}}}`, searchDomain)
-	_, err := kc.Run(ctx, "patch", "deployment", name, "-n", ns, "--type=strategic", "-p", patch)
+	current, err := currentDNSSearches(ctx, kc, "deployment", name, ns, "{.spec.template.spec.dnsConfig.searches}")
+	if err != nil {
+		return err
+	}
+	searches, err := dnsSearchesPatch(current, searchDomain)
+	if err != nil {
+		return err
+	}
+	patch := fmt.Sprintf(`{"spec":{"template":{"spec":{"dnsConfig":{"searches":%s}}}}}`, searches)
+	_, err = kc.Run(ctx, "patch", "deployment", name, "-n", ns, "--type=strategic", "-p", patch)
 	return err
 }
 
 func patchKafkaConnectDNS(ctx context.Context, kc *kubectl.Client, name, ns, searchDomain string) error {
-	patch := fmt.Sprintf(`{"spec":{"template":{"pod":{"dnsConfig":{"searches":["%s"]}}}}}`, searchDomain)
-	_, err := kc.Run(ctx, "patch", "kafkaconnect", name, "-n", ns, "--type=merge", "-p", patch)
+	current, err := currentDNSSearches(ctx, kc, "kafkaconnect", name, ns, "{.spec.template.pod.dnsConfig.searches}")
+	if err != nil {
+		return err
+	}
+	searches, err := dnsSearchesPatch(current, searchDomain)
+	if err != nil {
+		return err
+	}
+	patch := fmt.Sprintf(`{"spec":{"template":{"pod":{"dnsConfig":{"searches":%s}}}}}`, searches)
+	_, err = kc.Run(ctx, "patch", "kafkaconnect", name, "-n", ns, "--type=merge", "-p", patch)
 	return err
 }

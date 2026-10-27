@@ -72,10 +72,11 @@ func newRunsBackend(t *testing.T) *runsBackend {
 // JSON again.
 func (b *runsBackend) resetFlags() {
 	outputMode = "table"
-	gateMinGrade, gateType, gateRecords, gateBackend, gateTimeout = "C", "LOAD", 50000, "", 180
-	benchRecords = 50000
+	gateMinGrade, gateType, gateRecords, gateBackend, gateTimeout = "C", "LOAD", 50000, "", defaultGateTimeout
+	benchRecords, benchTimeout = 50000, defaultBenchTimeout
 	applyFile, applyWait = "", false
-	advisorApply = false
+	applyNoSLA, applySLAScope, applyJUnit = false, "", ""
+	advisorApply = ""
 }
 
 func (b *runsBackend) serve(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +510,9 @@ func TestBenchmark_LostRun(t *testing.T) {
 	b := newRunsBackend(t)
 	b.stuck["LOAD"] = true
 
-	stdout := commandStdout(t, func() error { return runCommandLine(t, "benchmark", "--records", "1000", "-o", "json") })
+	stdout := commandStdout(t, func() error {
+		return runCommandLine(t, "benchmark", "--records", "1000", "--timeout", "50ms", "-o", "json")
+	})
 	var got benchmarkResult
 	decodeStdout(t, stdout, &got)
 	if created := b.createdTypes(); !reflect.DeepEqual(created, []string{"LOAD"}) {
@@ -536,7 +539,9 @@ func TestBenchmark_LostRun(t *testing.T) {
 	}
 
 	b.resetFlags()
-	table := stripAnsi(string(commandStdout(t, func() error { return runCommandLine(t, "benchmark", "--records", "1000") })))
+	table := stripAnsi(string(commandStdout(t, func() error {
+		return runCommandLine(t, "benchmark", "--records", "1000", "--timeout", "50ms")
+	})))
 	for _, row := range [][]string{{"LOAD", "ERROR", "—", "—", "—"}, {"STRESS", "SKIPPED"}, {"SPIKE", "SKIPPED"}} {
 		if !tableHasRow(table, row) {
 			t.Errorf("table lacks row %q:\n%s", row, table)
@@ -618,11 +623,11 @@ func TestApply_JSON(t *testing.T) {
 	}
 	var got applyResult
 	decodeStdout(t, stdout, &got)
-	want := applyResult{File: file, Waited: true, Scenarios: []applyScenarioResult{
+	want := applyResult{File: file, Waited: true, SLA: applySLAMode{Checked: true, Scope: "report"}, Scenarios: []applyScenarioResult{
 		{Name: "fast", Type: "LOAD", RunID: "run-1", Status: "DONE", SLA: &applySLAResult{
-			Violations: []string{}, NotEvaluable: []string{"maxRtoMs (RTO not measured)"}}},
+			Scope: "report", Violations: []string{}, NotEvaluable: []string{"maxRtoMs (RTO not measured)"}}},
 		{Name: "slow", Type: "STRESS", RunID: "run-2", Status: "DONE", SLA: &applySLAResult{
-			Violations: []string{"p99=210ms > 50ms"}}},
+			Scope: "report", Violations: []string{"p99=210ms > 50ms"}}},
 		{Name: "ungated", Type: "SPIKE", RunID: "run-3", Status: "DONE"},
 	}}
 	if !reflect.DeepEqual(got, want) {

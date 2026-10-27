@@ -77,3 +77,30 @@ func TestDisruptionWatch_SendsAPIKey(t *testing.T) {
 		t.Errorf("Authorization headers = %q, want the key on the first request", auths)
 	}
 }
+
+// A stream that closes with no COMPLETED or FAILED event leaves the outcome
+// unknown, which used to exit 0. A data line longer than bufio's default
+// token (64 KiB) is read, not reported as "token too long".
+func TestDisruptionWatch_StreamEndsEarly(t *testing.T) {
+	long := strings.Repeat("x", 100*1024)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: STARTED\ndata: {\"type\":\"STARTED\",\"message\":\"plan started\"}\n\n"+
+			"event: STEP_STARTED\ndata: {\"type\":\"STEP_STARTED\",\"stepName\":\"big\",\"message\":\""+long+"\"}\n\n")
+	}))
+	t.Cleanup(ts.Close)
+	origClient := apiClient
+	t.Cleanup(func() { apiClient = origClient })
+	apiClient = client.New(ts.URL)
+
+	stdout, stderr, err := commandOutput(t, func() error { return runCommandLine(t, "disruption", "watch", "d-7") })
+	if _, ok := err.(*silentErr); !ok {
+		t.Fatalf("err = %v (%T), want a silentErr, which exits 1", err, err)
+	}
+	if !strings.Contains(string(stdout), "plan started") || !strings.Contains(string(stdout), "[big] "+long[:100]) {
+		t.Errorf("stdout lacks the events that did arrive:\n%.300s", stdout)
+	}
+	if !strings.Contains(stderr, "ended before") || !strings.Contains(stderr, "kates disruption status d-7") {
+		t.Errorf("stderr = %q, want it to say the stream ended early and how to follow the run", stderr)
+	}
+}

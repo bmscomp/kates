@@ -13,6 +13,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/pkg/theme"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -55,7 +56,7 @@ type labPreset struct {
 var labPresets = []labPreset{
 	{
 		Name: "Low Latency",
-		Desc: "Minimize p99 — acks=1, no compression, small batch",
+		Desc: "Minimize p99: acks=1, no compression, small batch",
 		Values: map[string]string{
 			"type": "SPIKE", "acks": "1", "compression": "none",
 			"batchSize": "16384", "lingerMs": "0", "producers": "1",
@@ -63,7 +64,7 @@ var labPresets = []labPreset{
 	},
 	{
 		Name: "Max Throughput",
-		Desc: "Maximize rec/s — large batches, lz4, many producers",
+		Desc: "Maximize rec/s: large batches, lz4, many producers",
 		Values: map[string]string{
 			"type": "STRESS", "acks": "all", "compression": "lz4",
 			"batchSize": "262144", "lingerMs": "50", "producers": "8",
@@ -71,7 +72,7 @@ var labPresets = []labPreset{
 	},
 	{
 		Name: "Durability",
-		Desc: "No data loss — acks=all, RF=3, idempotent",
+		Desc: "No data loss: acks=all, RF=3, idempotent",
 		Values: map[string]string{
 			"type": "LOAD", "acks": "all", "replication": "3",
 			"compression": "lz4", "batchSize": "65536", "lingerMs": "5",
@@ -165,7 +166,7 @@ func NewLab(c *client.Client, url string) LabModel {
 		},
 		pinA:   -1,
 		pinB:   -1,
-		status: dimStyle.Render("Press Enter to run  ·  p presets  ·  s sweep"),
+		status: dimStyle.Render("Press Enter to run  " + glyphs().Dot + "  p presets  " + glyphs().Dot + "  s sweep"),
 	}
 }
 
@@ -199,306 +200,17 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
-
 	case tea.KeyMsg:
 		if m.running {
-			switch msg.String() {
-			case "ctrl+c":
-				m.quitting = true
-				if m.cancelFn != nil {
-					m.cancelFn()
-				}
-				return m, tea.Quit
-			case "x":
-				if m.cancelFn != nil {
-					m.cancelFn()
-					// Fire the server-side cancel as a command. It used to run
-					// synchronously HERE, inside Update — freezing the entire
-					// TUI for up to the 30s client timeout.
-					cancelCmd := m.cancelRun(m.runTestID)
-					m.running = false
-					m.runTestID = ""
-					m.sweepActive = false
-					m.medianActive = false
-					m.medianResults = nil
-					m.warmupRemaining = 0
-					m.status = warnStyle.Render("⏹ Test cancelled")
-					return m, cancelCmd
-				}
-				return m, nil
-			}
-			return m, nil
+			return m.updateRunningKey(msg)
 		}
-
-		switch msg.String() {
-		case "q", "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		case "up", "k":
-			if m.view == labPinSelect {
-				if m.pinA > 0 {
-					m.pinA--
-				}
-			} else if m.cursor > 0 {
-				m.cursor--
-			}
-		case "down", "j":
-			if m.view == labPinSelect {
-				if m.pinA < len(m.iterations)-1 {
-					m.pinA++
-				}
-			} else if m.cursor < len(m.params)-1 {
-				m.cursor++
-			}
-		case "left", "h":
-			if m.view == labPinSelect {
-				if m.pinB > 0 {
-					m.pinB--
-				}
-			} else {
-				p := &m.params[m.cursor]
-				if p.Current > 0 {
-					p.Current--
-				}
-			}
-		case "right", "l":
-			if m.view == labPinSelect {
-				if m.pinB < len(m.iterations)-1 {
-					m.pinB++
-				}
-			} else {
-				p := &m.params[m.cursor]
-				if p.Current < len(p.Values)-1 {
-					p.Current++
-				}
-			}
-		case "enter":
-			if m.view == labPinSelect {
-				m.view = labHistory
-				return m, nil
-			}
-			if m.warmupCount > 0 && m.warmupRemaining == 0 {
-				m.warmupRemaining = m.warmupCount
-			}
-			m.running = true
-			m.elapsed = 0
-			m.liveRecords = 0
-			m.liveThroughput = 0
-			m.liveLatency = 0
-			m.lastError = nil
-			ctx, cancel := context.WithCancel(context.Background())
-			m.cancelCtx = ctx
-			m.cancelFn = cancel
-			if m.warmupRemaining > 0 {
-				m.status = filterActiveStyle.Render(fmt.Sprintf("🔥 Warmup %d/%d…", m.warmupCount-m.warmupRemaining+1, m.warmupCount))
-			} else {
-				m.status = filterActiveStyle.Render("⏳ Running iteration #" + fmt.Sprintf("%d", len(m.iterations)+1) + "…")
-			}
-			return m, tea.Batch(m.runTest(), m.tickElapsed())
-		case "d":
-			if len(m.iterations) >= 2 {
-				m.view = labHistory
-				if m.pinA < 0 || m.pinB < 0 {
-					m.pinA = len(m.iterations) - 2
-					m.pinB = len(m.iterations) - 1
-				}
-			}
-		case "c":
-			if len(m.iterations) >= 2 {
-				m.view = labPinSelect
-				m.pinA = len(m.iterations) - 2
-				m.pinB = len(m.iterations) - 1
-			}
-		case "p":
-			m.applyNextPreset()
-		case "s":
-			if !m.sweepActive {
-				m.startSweep()
-				return m, tea.Batch(m.runTest(), m.tickElapsed())
-			}
-		case "W":
-			if !m.running {
-				m.warmupCount++
-				if m.warmupCount > 5 {
-					m.warmupCount = 0
-				}
-				if m.warmupCount == 0 {
-					m.status = dimStyle.Render("Warmup: off")
-				} else {
-					m.status = filterActiveStyle.Render(fmt.Sprintf("🔥 Warmup: %d iteration(s) before measuring", m.warmupCount))
-				}
-			}
-		case "m":
-			if !m.running && !m.medianActive {
-				m.medianActive = true
-				m.medianRemaining = 3
-				m.medianResults = nil
-				m.running = true
-				m.elapsed = 0
-				m.liveRecords = 0
-				m.liveThroughput = 0
-				m.liveLatency = 0
-				m.lastError = nil
-				ctx, cancel := context.WithCancel(context.Background())
-				m.cancelCtx = ctx
-				m.cancelFn = cancel
-				m.status = filterActiveStyle.Render("📊 Median mode: running 1/3…")
-				return m, tea.Batch(m.runTest(), m.tickElapsed())
-			}
-		case "e":
-			if len(m.iterations) > 0 {
-				// Report what actually happened. This used to render
-				// "✓ Exported" unconditionally — a full disk or read-only
-				// home directory produced a success message and no file.
-				if path, err := m.exportCSV(); err != nil {
-					m.status = warnStyle.Render("⚠ Export failed: " + err.Error())
-				} else {
-					m.status = healthyStyle.Render("✓ Exported to " + path)
-				}
-			}
-		case "w":
-			if path, err := m.saveSession(); err != nil {
-				m.status = warnStyle.Render("⚠ Save failed: " + err.Error())
-			} else {
-				m.status = healthyStyle.Render("✓ Session saved to " + path)
-			}
-		case "T":
-			name := theme.NextLook()
-			m.status = dimStyle.Render("Look: " + name + "  ·  T for the next  ·  kates look set " + name + " keeps it")
-		case "L":
-			if path, ok := m.loadSession(); ok {
-				m.status = healthyStyle.Render("✓ Session loaded from " + path)
-			} else {
-				m.status = warnStyle.Render("No saved session found")
-			}
-		case "r":
-			if m.lastError != nil && m.lastTestReq != nil {
-				m.running = true
-				m.elapsed = 0
-				m.liveRecords = 0
-				m.liveThroughput = 0
-				m.liveLatency = 0
-				m.lastError = nil
-				ctx, cancel := context.WithCancel(context.Background())
-				m.cancelCtx = ctx
-				m.cancelFn = cancel
-				m.status = filterActiveStyle.Render("⏳ Retrying…")
-				return m, tea.Batch(m.retryTest(), m.tickElapsed())
-			}
-		case "escape", "esc":
-			m.view = labConfig
-		}
-
+		return m.updateKey(msg)
 	case labTestStartedMsg:
-		if !m.running {
-			// Cancelled while the test was being created. The run the API
-			// started anyway used to be dropped here, and ran on unwatched.
-			return m, m.cancelRun(msg.run.ID)
-		}
-		m.runTestID = msg.run.ID
-		m.lastTestReq = msg.req
-		maxWait := m.pollMaxWait(msg.records)
-		return m, m.pollTestOnce(msg.run.ID, time.Now().Add(maxWait), maxWait)
-
+		return m.onTestStarted(msg)
 	case labTestDoneMsg:
-		if msg.testID != "" && msg.testID != m.runTestID {
-			return m, nil // stale result from a cancelled run
-		}
-		if msg.testID == "" && !m.running {
-			return m, nil // create failed after the run was cancelled
-		}
-		m.running = false
-		m.runTestID = ""
-		if msg.err != nil {
-			if msg.req != nil {
-				m.lastTestReq = msg.req
-			}
-			m.lastError = msg.err
-			m.status = errorStyle.Render("✖ " + msg.err.Error() + "  ·  press r to retry")
-			if m.sweepActive {
-				m.sweepActive = false
-			}
-			m.warmupRemaining = 0
-			m.medianActive = false
-			return m, nil
-		}
-		iter := m.buildIteration(msg.run, msg.summary)
-
-		// Warmup: discard this iteration silently.
-		// The tick chain from the initial run is still alive (running never
-		// observably went false), so continuations must not start another one.
-		if m.warmupRemaining > 0 {
-			m.warmupRemaining--
-			if m.warmupRemaining > 0 {
-				m.running = true
-				m.elapsed = 0
-				m.liveRecords = 0
-				ctx, cancel := context.WithCancel(context.Background())
-				m.cancelCtx = ctx
-				m.cancelFn = cancel
-				m.status = filterActiveStyle.Render(fmt.Sprintf("🔥 Warmup %d/%d…", m.warmupCount-m.warmupRemaining+1, m.warmupCount))
-				return m, m.runTest()
-			}
-			// Last warmup done — now run the real iteration
-			m.running = true
-			m.elapsed = 0
-			m.liveRecords = 0
-			ctx, cancel := context.WithCancel(context.Background())
-			m.cancelCtx = ctx
-			m.cancelFn = cancel
-			m.status = filterActiveStyle.Render("⏳ Running measured iteration…")
-			return m, m.runTest()
-		}
-
-		// Median mode: collect 3 runs, report median
-		if m.medianActive {
-			m.medianResults = append(m.medianResults, iter)
-			m.medianRemaining--
-			if m.medianRemaining > 0 {
-				m.running = true
-				m.elapsed = 0
-				m.liveRecords = 0
-				ctx, cancel := context.WithCancel(context.Background())
-				m.cancelCtx = ctx
-				m.cancelFn = cancel
-				m.status = filterActiveStyle.Render(fmt.Sprintf("📊 Median mode: running %d/3…", 3-m.medianRemaining+1))
-				return m, m.runTest()
-			}
-			// All 3 done — pick the median by throughput
-			median := m.computeMedianIteration()
-			m.medianActive = false
-			m.medianResults = nil
-			iter = median
-		}
-
-		m.iterations = append(m.iterations, iter)
-		m.status = healthyStyle.Render(fmt.Sprintf(
-			"✓ #%d — %s rec/s, p99=%sms",
-			iter.Number,
-			fmtLabNum(iter.Throughput),
-			fmtLabFloat(iter.P99Ms),
-		))
-
-		if m.sweepActive {
-			return m, m.nextSweepStep()
-		}
-
+		return m.onTestDone(msg)
 	case labProgressMsg:
-		if !m.running || msg.testID != m.runTestID {
-			return m, nil // stale poll from a cancelled run
-		}
-		if msg.hasStats {
-			m.liveRecords = msg.records
-			m.liveThroughput = msg.throughput
-			m.liveLatency = msg.latency
-		}
-		if msg.pollErr != "" {
-			m.status = warnStyle.Render("⚠ poll failed (retrying): " + msg.pollErr)
-		} else if msg.hasStats {
-			m.status = filterActiveStyle.Render("⏳ Running iteration #" + fmt.Sprintf("%d", len(m.iterations)+1) + "…")
-		}
-		return m, m.pollTestOnce(msg.testID, msg.deadline, msg.maxWait)
-
+		return m.onProgress(msg)
 	case labTickMsg:
 		if m.running {
 			m.elapsed++
@@ -506,6 +218,365 @@ func (m LabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// startRun arms the model for a run: a fresh cancellable context, the live
+// counters and the clock zeroed, and status on the status line. Every way a
+// run starts goes through it — a new run, a retry, a median or sweep start,
+// and the continuations between warmup, median and sweep steps. The caller
+// dispatches the run.
+func (m *LabModel) startRun(status string) {
+	m.running = true
+	m.elapsed = 0
+	m.liveRecords = 0
+	m.liveThroughput = 0
+	m.liveLatency = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelCtx = ctx
+	m.cancelFn = cancel
+	m.status = status
+}
+
+// stopRun drops every run in progress and what it was part of: a sweep, a
+// median series or a warmup.
+func (m *LabModel) stopRun() {
+	m.running = false
+	m.runTestID = ""
+	m.sweepActive = false
+	m.medianActive = false
+	m.medianResults = nil
+	m.warmupRemaining = 0
+}
+
+// runningStatus is the status line of iteration n while it runs.
+func runningStatus(n int) string {
+	return filterActiveStyle.Render(withIcon(glyphs().Running, fmt.Sprintf("Running iteration #%d%s", n, glyphs().Ellipsis)))
+}
+
+// warmupStatus is the status line of the next warmup run.
+func (m LabModel) warmupStatus() string {
+	return filterActiveStyle.Render(withIcon(glyphs().Warmup,
+		fmt.Sprintf("Warmup %d/%d%s", m.warmupCount-m.warmupRemaining+1, m.warmupCount, glyphs().Ellipsis)))
+}
+
+// medianStatus is the status line of median run n of 3.
+func medianStatus(n int) string {
+	return filterActiveStyle.Render(withIcon(glyphs().Median, fmt.Sprintf("Median mode: running %d/3%s", n, glyphs().Ellipsis)))
+}
+
+// updateRunningKey handles a key while a run is in flight: only cancel and
+// quit act.
+func (m LabModel) updateRunningKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	k := labKeys()
+	switch {
+	case key.Matches(msg, k.ForceQuit):
+		m.quitting = true
+		if m.cancelFn != nil {
+			m.cancelFn()
+		}
+		return m, tea.Quit
+	case key.Matches(msg, k.Cancel):
+		if m.cancelFn == nil {
+			return m, nil
+		}
+		m.cancelFn()
+		// Fire the server-side cancel as a command. It used to run
+		// synchronously HERE, inside Update — freezing the entire TUI for up
+		// to the 30s client timeout.
+		cancelCmd := m.cancelRun(m.runTestID)
+		m.stopRun()
+		m.status = warnStyle.Render(withIcon(glyphs().Stopped, "Test cancelled"))
+		return m, cancelCmd
+	}
+	return m, nil
+}
+
+// updateKey handles a key between runs. In the pin picker the arrows and
+// Enter pick iterations; every other key acts as it does on the results.
+func (m LabModel) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	k := labKeys()
+	if m.view == labPinSelect && m.updatePinKey(msg) {
+		return m, nil
+	}
+	switch {
+	case key.Matches(msg, k.Quit):
+		m.quitting = true
+		return m, tea.Quit
+	case key.Matches(msg, k.Up):
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case key.Matches(msg, k.Down):
+		if m.cursor < len(m.params)-1 {
+			m.cursor++
+		}
+	case key.Matches(msg, k.Left):
+		if p := &m.params[m.cursor]; p.Current > 0 {
+			p.Current--
+		}
+	case key.Matches(msg, k.Right):
+		if p := &m.params[m.cursor]; p.Current < len(p.Values)-1 {
+			p.Current++
+		}
+	case key.Matches(msg, k.Back):
+		m.view = labConfig
+	default:
+		return m.updateActionKey(msg)
+	}
+	return m, nil
+}
+
+// updatePinKey moves the pins in the picker, and Enter confirms them. It
+// reports whether it handled the key.
+func (m *LabModel) updatePinKey(msg tea.KeyMsg) bool {
+	k := labKeys()
+	last := len(m.iterations) - 1
+	switch {
+	case key.Matches(msg, k.Up):
+		if m.pinA > 0 {
+			m.pinA--
+		}
+	case key.Matches(msg, k.Down):
+		if m.pinA < last {
+			m.pinA++
+		}
+	case key.Matches(msg, k.Left):
+		if m.pinB > 0 {
+			m.pinB--
+		}
+	case key.Matches(msg, k.Right):
+		if m.pinB < last {
+			m.pinB++
+		}
+	case key.Matches(msg, k.Run):
+		m.view = labHistory
+	default:
+		return false
+	}
+	return true
+}
+
+// updateActionKey handles the keys that start runs, change views or touch
+// files.
+func (m LabModel) updateActionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	k := labKeys()
+	switch {
+	case key.Matches(msg, k.Run):
+		return m.startIteration()
+	case key.Matches(msg, k.Diff):
+		if len(m.iterations) >= 2 {
+			m.view = labHistory
+			if m.pinA < 0 || m.pinB < 0 {
+				m.pinA = len(m.iterations) - 2
+				m.pinB = len(m.iterations) - 1
+			}
+		}
+	case key.Matches(msg, k.Compare):
+		if len(m.iterations) >= 2 {
+			m.view = labPinSelect
+			m.pinA = len(m.iterations) - 2
+			m.pinB = len(m.iterations) - 1
+		}
+	case key.Matches(msg, k.Preset):
+		m.applyNextPreset()
+	case key.Matches(msg, k.Sweep):
+		if !m.sweepActive {
+			m.startSweep()
+			return m, tea.Batch(m.runTest(), m.tickElapsed())
+		}
+	case key.Matches(msg, k.Warmup):
+		m.cycleWarmup()
+	case key.Matches(msg, k.Median):
+		if !m.medianActive {
+			m.medianActive = true
+			m.medianRemaining = 3
+			m.medianResults = nil
+			m.lastError = nil
+			m.startRun(medianStatus(1))
+			return m, tea.Batch(m.runTest(), m.tickElapsed())
+		}
+	case key.Matches(msg, k.Retry):
+		if m.lastError != nil && m.lastTestReq != nil {
+			m.lastError = nil
+			m.startRun(filterActiveStyle.Render(withIcon(glyphs().Running, "Retrying"+glyphs().Ellipsis)))
+			return m, tea.Batch(m.retryTest(), m.tickElapsed())
+		}
+	default:
+		m.updateFileKey(msg)
+	}
+	return m, nil
+}
+
+// startIteration runs the parameters on screen, after the warmup runs when
+// a warmup is set.
+func (m LabModel) startIteration() (tea.Model, tea.Cmd) {
+	if m.warmupCount > 0 && m.warmupRemaining == 0 {
+		m.warmupRemaining = m.warmupCount
+	}
+	m.lastError = nil
+	if m.warmupRemaining > 0 {
+		m.startRun(m.warmupStatus())
+	} else {
+		m.startRun(runningStatus(len(m.iterations) + 1))
+	}
+	return m, tea.Batch(m.runTest(), m.tickElapsed())
+}
+
+// cycleWarmup steps the warmup count 0, 1, … 5 and back to 0.
+func (m *LabModel) cycleWarmup() {
+	m.warmupCount++
+	if m.warmupCount > 5 {
+		m.warmupCount = 0
+	}
+	if m.warmupCount == 0 {
+		m.status = dimStyle.Render("Warmup: off")
+	} else {
+		m.status = filterActiveStyle.Render(withIcon(glyphs().Warmup,
+			fmt.Sprintf("Warmup: %d iteration(s) before measuring", m.warmupCount)))
+	}
+}
+
+// updateFileKey handles export, save and load.
+func (m *LabModel) updateFileKey(msg tea.KeyMsg) {
+	k := labKeys()
+	g := glyphs()
+	switch {
+	case key.Matches(msg, k.Export):
+		if len(m.iterations) > 0 {
+			// Report what actually happened. This used to render
+			// "Exported" unconditionally — a full disk or read-only home
+			// directory produced a success message and no file.
+			if path, err := m.exportCSV(); err != nil {
+				m.status = warnStyle.Render(g.Warn + " Export failed: " + err.Error())
+			} else {
+				m.status = healthyStyle.Render(g.Check + " Exported to " + path)
+			}
+		}
+	case key.Matches(msg, k.Save):
+		if path, err := m.saveSession(); err != nil {
+			m.status = warnStyle.Render(g.Warn + " Save failed: " + err.Error())
+		} else {
+			m.status = healthyStyle.Render(g.Check + " Session saved to " + path)
+		}
+	case key.Matches(msg, k.Look):
+		name := theme.NextLook()
+		m.status = dimStyle.Render("Look: " + name + "  " + g.Dot + "  T for the next  " + g.Dot + "  kates look set " + name + " keeps it")
+	case key.Matches(msg, k.Load):
+		if path, ok := m.loadSession(); ok {
+			m.status = healthyStyle.Render(g.Check + " Session loaded from " + path)
+		} else {
+			m.status = warnStyle.Render("No saved session found")
+		}
+	}
+}
+
+func (m LabModel) onTestStarted(msg labTestStartedMsg) (tea.Model, tea.Cmd) {
+	if !m.running {
+		// Cancelled while the test was being created. The run the API
+		// started anyway used to be dropped here, and ran on unwatched.
+		return m, m.cancelRun(msg.run.ID)
+	}
+	m.runTestID = msg.run.ID
+	m.lastTestReq = msg.req
+	maxWait := m.pollMaxWait(msg.records)
+	return m, m.pollTestOnce(msg.run.ID, time.Now().Add(maxWait), maxWait)
+}
+
+func (m LabModel) onTestDone(msg labTestDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.testID != "" && msg.testID != m.runTestID {
+		return m, nil // stale result from a cancelled run
+	}
+	if msg.testID == "" && !m.running {
+		return m, nil // create failed after the run was cancelled
+	}
+	m.running = false
+	m.runTestID = ""
+	if msg.err != nil {
+		if msg.req != nil {
+			m.lastTestReq = msg.req
+		}
+		m.lastError = msg.err
+		m.status = errorStyle.Render(glyphs().Cross + " " + msg.err.Error() + "  " + glyphs().Dot + "  press r to retry")
+		m.sweepActive = false
+		m.warmupRemaining = 0
+		m.medianActive = false
+		return m, nil
+	}
+	iter := m.buildIteration(msg.run, msg.summary)
+
+	// The continuations below are bare runTests: the tick chain from the
+	// initial run is still alive (running never observably went false), so
+	// they must not start another one.
+	if m.warmupRemaining > 0 {
+		return m.continueWarmup()
+	}
+	if m.medianActive {
+		var cmd tea.Cmd
+		var done bool
+		if iter, cmd, done = m.continueMedian(iter); !done {
+			return m, cmd
+		}
+	}
+
+	m.iterations = append(m.iterations, iter)
+	m.status = healthyStyle.Render(fmt.Sprintf(
+		"%s #%d %s %s rec/s, p99=%sms",
+		glyphs().Check,
+		iter.Number,
+		glyphs().Dash,
+		fmtLabNum(iter.Throughput),
+		fmtLabFloat(iter.P99Ms),
+	))
+
+	if m.sweepActive {
+		return m, m.nextSweepStep()
+	}
+	return m, nil
+}
+
+// continueWarmup discards a warmup run's result and starts the next warmup,
+// or the measured run after the last.
+func (m LabModel) continueWarmup() (tea.Model, tea.Cmd) {
+	m.warmupRemaining--
+	if m.warmupRemaining > 0 {
+		m.startRun(m.warmupStatus())
+	} else {
+		m.startRun(filterActiveStyle.Render(withIcon(glyphs().Running, "Running measured iteration"+glyphs().Ellipsis)))
+	}
+	return m, m.runTest()
+}
+
+// continueMedian collects a median-mode run. Until the third it starts the
+// next run and reports not done; after it, it returns the median iteration
+// by throughput.
+func (m *LabModel) continueMedian(iter labIteration) (labIteration, tea.Cmd, bool) {
+	m.medianResults = append(m.medianResults, iter)
+	m.medianRemaining--
+	if m.medianRemaining > 0 {
+		m.startRun(medianStatus(3 - m.medianRemaining + 1))
+		return iter, m.runTest(), false
+	}
+	median := m.computeMedianIteration()
+	m.medianActive = false
+	m.medianResults = nil
+	return median, nil, true
+}
+
+func (m LabModel) onProgress(msg labProgressMsg) (tea.Model, tea.Cmd) {
+	if !m.running || msg.testID != m.runTestID {
+		return m, nil // stale poll from a cancelled run
+	}
+	if msg.hasStats {
+		m.liveRecords = msg.records
+		m.liveThroughput = msg.throughput
+		m.liveLatency = msg.latency
+	}
+	if msg.pollErr != "" {
+		m.status = warnStyle.Render(glyphs().Warn + " poll failed (retrying): " + msg.pollErr)
+	} else if msg.hasStats {
+		m.status = runningStatus(len(m.iterations) + 1)
+	}
+	return m, m.pollTestOnce(msg.testID, msg.deadline, msg.maxWait)
 }
 
 func (m LabModel) View() string {
@@ -524,12 +595,13 @@ func (m LabModel) View() string {
 		w = 40
 	}
 
+	g := glyphs()
 	rest := ""
 	if w >= 60 {
-		rest += "  ·  Interactive Performance Tuning"
+		rest += "  " + g.Dot + "  Interactive Performance Tuning"
 	}
 	if w >= 100 && m.apiURL != "" {
-		rest += "  →  " + m.apiURL
+		rest += "  " + g.To + "  " + m.apiURL
 	}
 	header := labHeaderStyle.Width(w - 2).Render("  Kates Lab" + rest)
 	if l := theme.CurrentLook(); !l.Classic() {
@@ -547,7 +619,7 @@ func (m LabModel) View() string {
 		contentW := w - 4
 		leftContent := m.viewParams(contentW)
 		rightContent := m.viewResults(contentW - 4)
-		rightPane := theme.Box(detailBorderStyle.Width(contentW), false, rightContent)
+		rightPane := theme.Box(detailBox().Width(contentW), false, rightContent)
 		body = leftContent + "\n" + rightPane
 	} else {
 		// Side-by-side: normal (35/65 at 80-119) or wide (50/50 at ≥120)
@@ -572,7 +644,7 @@ func (m LabModel) View() string {
 			left = left.Width(leftW+theme.OpenPaneInset()-1).Padding(1, 1)
 		}
 		leftPane := theme.OpenPane(left, true, leftContent)
-		rightPane := theme.Box(detailBorderStyle.Width(rightW), false, rightContent)
+		rightPane := theme.Box(detailBox().Width(rightW), false, rightContent)
 
 		body = lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 	}
@@ -589,66 +661,55 @@ func (m LabModel) View() string {
 		}
 	}
 
-	help := m.renderHelp(m.helpKeys(), w)
+	help := m.renderHelp(m.helpBindings(), w)
 
 	return theme.Screen(header+"\n\n"+body+statusBar+help, m.width, m.height)
 }
 
-func (m LabModel) renderHelp(keys []string, maxWidth int) string {
-	if !theme.CurrentLook().Classic() {
-		var sb strings.Builder
-		for _, l := range theme.KeyHints(keys, maxWidth-4) {
-			sb.WriteString("\n  " + l)
+// renderHelp is the lab's help for bindings, wrapped to maxWidth, one
+// indented line each.
+func (m LabModel) renderHelp(bindings []key.Binding, maxWidth int) string {
+	lines := lookHelp(bindings, maxWidth-4)
+	if lines == nil {
+		sep := "  " + glyphs().Dot + "  "
+		for _, l := range wrapHelp(helpEntries(bindings), sep, maxWidth-4) {
+			lines = append(lines, dimStyle.Render(l))
 		}
-		return sb.String()
-	}
-	sep := "  ·  "
-	avail := maxWidth - 4
-	var lines []string
-	var line string
-	for i, k := range keys {
-		next := k
-		if line != "" {
-			next = sep + k
-		}
-		if len(line)+len(next) > avail && line != "" {
-			lines = append(lines, line)
-			line = k
-		} else {
-			if i == 0 {
-				line = k
-			} else {
-				line += next
-			}
-		}
-	}
-	if line != "" {
-		lines = append(lines, line)
 	}
 	var sb strings.Builder
 	for _, l := range lines {
-		sb.WriteString("\n  " + dimStyle.Render(l))
+		sb.WriteString("\n  " + l)
 	}
 	return sb.String()
 }
 
-func (m LabModel) helpKeys() []string {
+// helpBindings are the keys that act on the screen as it is.
+func (m LabModel) helpBindings() []key.Binding {
+	k := labKeys()
+	g := glyphs()
 	if m.running {
-		return []string{"x cancel", "ctrl+c quit"}
+		return []key.Binding{k.Cancel, k.ForceQuit}
 	}
 	if m.view == labPinSelect {
-		return []string{"↑↓ select A", "←→ select B", "Enter confirm", "Esc back"}
+		return []key.Binding{
+			relabel(k.Up, g.KeyUp+"/k "+g.KeyDown+"/j", "select A"),
+			relabel(k.Left, g.KeyLeft+"/h "+g.KeyRight+"/l", "select B"),
+			relabel(k.Run, "enter", "confirm"),
+			k.Back,
+		}
 	}
-	keys := []string{"↑↓ navigate", "←→ change", "Enter run", "p preset", "d diff"}
+	bindings := []key.Binding{k.Up, k.Down, k.Left, k.Right, k.Run, k.Preset, k.Diff}
 	if len(m.iterations) >= 2 {
-		keys = append(keys, "c compare")
+		bindings = append(bindings, k.Compare)
 	}
-	keys = append(keys, "s sweep", "m median", "W warmup", "e export", "w save", "L load")
+	bindings = append(bindings, k.Sweep, k.Median, k.Warmup, k.Export, k.Save, k.Load)
 	if m.lastError != nil {
-		keys = append(keys, "r retry")
+		bindings = append(bindings, k.Retry)
 	}
-	keys = append(keys, "T look", "q quit")
-	return keys
+	if m.view != labConfig {
+		bindings = append(bindings, k.Back)
+	}
+	return append(bindings, k.Look, k.Quit)
 }
 
 func (m LabModel) viewParams(width int) string {
@@ -663,13 +724,13 @@ func (m LabModel) viewParams(width int) string {
 	var b strings.Builder
 
 	if m.sweepActive {
-		b.WriteString(filterActiveStyle.Render("⟳ Auto-sweep active") + "\n\n")
+		b.WriteString(filterActiveStyle.Render(withIcon(glyphs().Sweep, "Auto-sweep active")) + "\n\n")
 	}
 
 	for i, p := range m.params {
 		prefix := "  "
 		if i == m.cursor {
-			prefix = "▸ "
+			prefix = glyphs().Arrow + " "
 		}
 
 		label := p.Label
@@ -788,55 +849,38 @@ func (m LabModel) viewResults(width int) string {
 
 	b.WriteString(detailTitleStyle.Render("Iteration History") + "\n\n")
 
-	numW := 4
 	gap := "  " // 2-space gap between columns
 	showErr := width >= 60
 
 	// Fixed column widths — generous enough for typical values
-	thrW := 16    // e.g. "122.9K rec/s"
-	p99W := 10    // e.g. "0.01ms"
-	errPctW := 10 // e.g. "0.0000%"
-	deltaW := 8   // e.g. "▲133%"
+	const (
+		numW    = 4
+		thrW    = 16 // e.g. "122.9K rec/s"
+		p99W    = 10 // e.g. "0.01ms"
+		errPctW = 10 // e.g. "0.0000%"
+		deltaW  = 8  // e.g. "+133%"
+	)
 
-	if showErr {
-		b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s%s%s\n",
-			dimStyle.Render(padRight("#", numW)),
-			gap,
-			dimStyle.Render(padRight("Throughput", thrW)),
-			gap,
-			dimStyle.Render(padRight("P99", p99W)),
-			gap,
-			dimStyle.Render(padRight("Err %", errPctW)),
-			gap,
-			dimStyle.Render(padRight("Δ", deltaW)),
-		))
-	} else {
-		b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s\n",
-			dimStyle.Render(padRight("#", numW)),
-			gap,
-			dimStyle.Render(padRight("Throughput", thrW)),
-			gap,
-			dimStyle.Render(padRight("P99", p99W)),
-			gap,
-			dimStyle.Render(padRight("Δ", deltaW)),
-		))
+	header := []string{
+		dimStyle.Render(padRight("#", numW)),
+		dimStyle.Render(padRight("Throughput", thrW)),
+		dimStyle.Render(padRight("P99", p99W)),
 	}
+	if showErr {
+		header = append(header, dimStyle.Render(padRight("Err %", errPctW)))
+	}
+	header = append(header, dimStyle.Render(padRight(deltaHeader(), deltaW)))
+	b.WriteString("  " + strings.Join(header, gap) + "\n")
 
 	sepW := width - 4
 	if sepW < 10 {
 		sepW = 10
 	}
-	b.WriteString(dimStyle.Render("  "+strings.Repeat("─", sepW)) + "\n\n")
+	b.WriteString(dimStyle.Render("  "+rule(sepW)) + "\n\n")
 
 	maxVisible := 10
 	if m.height > 0 {
-		maxVisible = (m.height - 14) / 2
-		if maxVisible < 3 {
-			maxVisible = 3
-		}
-		if maxVisible > 20 {
-			maxVisible = 20
-		}
+		maxVisible = min(max((m.height-14)/2, 3), 20)
 	}
 	start := 0
 	if len(m.iterations) > maxVisible {
@@ -846,38 +890,18 @@ func (m LabModel) viewResults(width int) string {
 	for _, iter := range m.iterations[start:] {
 		delta := iter.Delta
 		if delta == "" {
-			delta = dimStyle.Render("—")
+			delta = dimStyle.Render(glyphs().Dash)
 		}
-
-		numStr := padRight(fmt.Sprintf("%d", iter.Number), numW)
+		row := []string{
+			padRight(fmt.Sprintf("%d", iter.Number), numW),
+			healthyStyle.Render(padRight(fmtLabNum(iter.Throughput)+" rec/s", thrW)),
+			warnStyle.Render(padRight(fmtLabFloat(iter.P99Ms)+"ms", p99W)),
+		}
 		if showErr {
-			thrStr := padRight(fmtLabNum(iter.Throughput)+" rec/s", thrW)
-			p99Str := padRight(fmtLabFloat(iter.P99Ms)+"ms", p99W)
-			errPctStr := padRight(fmt.Sprintf("%.4f%%", iter.ErrorRate), errPctW)
-			b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s%s%s\n",
-				numStr,
-				gap,
-				healthyStyle.Render(thrStr),
-				gap,
-				warnStyle.Render(p99Str),
-				gap,
-				dimStyle.Render(errPctStr),
-				gap,
-				delta,
-			))
-		} else {
-			thrStr := padRight(fmtLabNum(iter.Throughput)+" rec/s", thrW)
-			p99Str := padRight(fmtLabFloat(iter.P99Ms)+"ms", p99W)
-			b.WriteString(fmt.Sprintf("  %s%s%s%s%s%s%s\n",
-				numStr,
-				gap,
-				healthyStyle.Render(thrStr),
-				gap,
-				warnStyle.Render(p99Str),
-				gap,
-				delta,
-			))
+			row = append(row, dimStyle.Render(padRight(fmt.Sprintf("%.4f%%", iter.ErrorRate), errPctW)))
 		}
+		row = append(row, delta)
+		b.WriteString("  " + strings.Join(row, gap) + "\n")
 	}
 
 	if len(m.iterations) > 1 {
@@ -893,7 +917,9 @@ func (m LabModel) viewPinSelect() string {
 	var sb strings.Builder
 	sb.WriteString(detailTitleStyle.Render("Select Iterations to Compare") + "\n\n")
 
-	sb.WriteString(dimStyle.Render("  ↑↓ = iteration A    ←→ = iteration B") + "\n\n")
+	g := glyphs()
+	sb.WriteString(dimStyle.Render(fmt.Sprintf("  %s%s = iteration A    %s%s = iteration B",
+		g.KeyUp, g.KeyDown, g.KeyLeft, g.KeyRight)) + "\n\n")
 
 	for i, iter := range m.iterations {
 		marker := "  "
@@ -957,7 +983,7 @@ func (m LabModel) viewDiff(width int) string {
 	if sepW < 10 {
 		sepW = 10
 	}
-	sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", sepW)) + "\n")
+	sb.WriteString(dimStyle.Render("  "+rule(sepW)) + "\n")
 
 	writeDiffRow := func(label string, aVal, bVal float64, unit string, higherIsBetter bool) {
 		delta := bVal - aVal
@@ -965,22 +991,7 @@ func (m LabModel) viewDiff(width int) string {
 		if aVal != 0 {
 			pct = (delta / aVal) * 100
 		}
-		var changeStr string
-		if pct > 1 {
-			if higherIsBetter {
-				changeStr = healthyStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
-			} else {
-				changeStr = errorStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
-			}
-		} else if pct < -1 {
-			if higherIsBetter {
-				changeStr = errorStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
-			} else {
-				changeStr = healthyStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
-			}
-		} else {
-			changeStr = dimStyle.Render("≈")
-		}
+		changeStr := diffChange(pct, higherIsBetter)
 
 		sb.WriteString(fmt.Sprintf("  %-*s %-*s %-*s %s\n",
 			colW, label,
@@ -1000,22 +1011,24 @@ func (m LabModel) viewDiff(width int) string {
 		if paramSepW < 10 {
 			paramSepW = 10
 		}
-		sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", paramSepW)) + "\n")
+		sb.WriteString(dimStyle.Render("  "+rule(paramSepW)) + "\n")
 		// In key order: ranging over the map reordered the rows every frame.
 		for _, key := range slices.Sorted(maps.Keys(a.Params)) {
 			aVal, bVal := a.Params[key], b.Params[key]
 			if aVal != bVal {
-				sb.WriteString(fmt.Sprintf("  %-*s %s → %s\n",
+				fmt.Fprintf(&sb, "  %-*s %s %s %s\n",
 					colW,
 					dimStyle.Render(key),
 					warnStyle.Render(aVal),
+					glyphs().To,
 					healthyStyle.Render(bVal),
-				))
+				)
 			}
 		}
 	}
 
-	sb.WriteString("\n  " + dimStyle.Render("Press Esc to go back  ·  c to pick iterations"))
+	k := labKeys()
+	sb.WriteString("\n  " + dimStyle.Render(hint(k.Back, relabel(k.Compare, "c", "pick iterations"))))
 
 	return sb.String()
 }
@@ -1037,6 +1050,12 @@ func (m LabModel) buildSpec() (*client.TestSpec, *client.CreateTestRequest) {
 	durationMs := spec.Records / 1000 * 1000
 	if durationMs < 60000 {
 		durationMs = 60000
+	}
+	// The poll gives up at pollMaxWait: a run asked to last longer than that
+	// was reported as timed out while it was still running (a million
+	// records derived 16.7 minutes against a 15-minute wait).
+	if limit := int(m.pollMaxWait(spec.Records)/time.Millisecond) - labPollMarginMs; durationMs > limit {
+		durationMs = limit
 	}
 	spec.DurationMs = durationMs
 
@@ -1101,6 +1120,11 @@ func (m LabModel) retryTest() tea.Cmd {
 		return labTestStartedMsg{run: run, req: m.lastTestReq, records: records}
 	}
 }
+
+// labPollMarginMs is how long before the poll deadline a derived test
+// duration must end: time for the run to finish and report after its last
+// record.
+const labPollMarginMs = 60000
 
 func (m LabModel) pollMaxWait(records int) time.Duration {
 	maxWait := 6 * time.Minute
@@ -1186,13 +1210,7 @@ func (m *LabModel) buildIteration(run *client.TestRun, summary *client.ReportSum
 		prev := m.iterations[len(m.iterations)-1]
 		if prev.Throughput > 0 {
 			pct := ((iter.Throughput - prev.Throughput) / prev.Throughput) * 100
-			if pct > 0 {
-				iter.Delta = healthyStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
-			} else if pct < 0 {
-				iter.Delta = errorStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
-			} else {
-				iter.Delta = dimStyle.Render("—")
-			}
+			iter.Delta = deltaLabel(pct, true)
 		}
 	}
 	return iter
@@ -1216,11 +1234,7 @@ func (m *LabModel) computeMedianIteration() labIteration {
 		prev := m.iterations[len(m.iterations)-1]
 		if prev.Throughput > 0 {
 			pct := ((median.Throughput - prev.Throughput) / prev.Throughput) * 100
-			if pct > 0 {
-				median.Delta = healthyStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
-			} else if pct < 0 {
-				median.Delta = errorStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
-			}
+			median.Delta = deltaLabel(pct, false)
 		}
 	}
 	return median
@@ -1250,7 +1264,7 @@ func (m *LabModel) applyNextPreset() {
 			}
 		}
 	}
-	m.status = filterActiveStyle.Render("⚡ Preset: " + preset.Name + " — " + preset.Desc)
+	m.status = filterActiveStyle.Render(withIcon(glyphs().Preset, "Preset: "+preset.Name+" "+glyphs().Dash+" "+preset.Desc))
 }
 
 func (m *LabModel) startSweep() {
@@ -1259,32 +1273,20 @@ func (m *LabModel) startSweep() {
 	p := &m.params[m.sweepParam]
 	p.Current = 0
 
-	m.status = filterActiveStyle.Render(fmt.Sprintf("⟳ Sweeping %s (%d values)…", p.Label, len(p.Values)))
-
-	m.running = true
-	m.elapsed = 0
-	m.liveRecords = 0
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancelCtx = ctx
-	m.cancelFn = cancel
+	m.startRun(filterActiveStyle.Render(withIcon(glyphs().Sweep,
+		fmt.Sprintf("Sweeping %s (%d values)%s", p.Label, len(p.Values), glyphs().Ellipsis))))
 }
 
 func (m *LabModel) nextSweepStep() tea.Cmd {
 	p := &m.params[m.sweepParam]
 	if p.Current < len(p.Values)-1 {
 		p.Current++
-		m.running = true
-		m.elapsed = 0
-		m.liveRecords = 0
-		ctx, cancel := context.WithCancel(context.Background())
-		m.cancelCtx = ctx
-		m.cancelFn = cancel
-		m.status = filterActiveStyle.Render(fmt.Sprintf("⟳ Sweep %s = %s (%d/%d)",
-			p.Label, p.Values[p.Current], p.Current+1, len(p.Values)))
+		m.startRun(filterActiveStyle.Render(withIcon(glyphs().Sweep, fmt.Sprintf("Sweep %s = %s (%d/%d)",
+			p.Label, p.Values[p.Current], p.Current+1, len(p.Values)))))
 		return m.runTest()
 	}
 	m.sweepActive = false
-	m.status = healthyStyle.Render(fmt.Sprintf("✓ Sweep complete — %d iterations", len(p.Values)))
+	m.status = healthyStyle.Render(fmt.Sprintf("%s Sweep complete %s %d iterations", glyphs().Check, glyphs().Dash, len(p.Values)))
 	return nil
 }
 
@@ -1401,11 +1403,7 @@ func (m *LabModel) loadSession() (string, bool) {
 			prev := m.iterations[i-1]
 			if prev.Throughput > 0 {
 				pct := ((iter.Throughput - prev.Throughput) / prev.Throughput) * 100
-				if pct > 0 {
-					iter.Delta = healthyStyle.Render(fmt.Sprintf("▲%.0f%%", pct))
-				} else if pct < 0 {
-					iter.Delta = errorStyle.Render(fmt.Sprintf("▼%.0f%%", -pct))
-				}
+				iter.Delta = deltaLabel(pct, false)
 			}
 		}
 		m.iterations = append(m.iterations, iter)
@@ -1449,7 +1447,7 @@ func sparkline(values []float64) string {
 	if len(values) == 0 {
 		return ""
 	}
-	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	blocks := glyphs().Spark
 	min, max := values[0], values[0]
 	for _, v := range values {
 		if v < min {
@@ -1558,3 +1556,46 @@ var (
 				Foreground(theme.Info).
 				Bold(true)
 )
+
+// deltaLabel is a change of pct percent against the previous iteration, up
+// or down; a change of zero is a dash when zeroDash, else nothing.
+func deltaLabel(pct float64, zeroDash bool) string {
+	g := glyphs()
+	switch {
+	case pct > 0:
+		return healthyStyle.Render(fmt.Sprintf("%s%.0f%%", g.Up, pct))
+	case pct < 0:
+		return errorStyle.Render(fmt.Sprintf("%s%.0f%%", g.Down, -pct))
+	case zeroDash:
+		return dimStyle.Render(g.Dash)
+	}
+	return ""
+}
+
+// deltaHeader heads the delta column: a delta sign, or d in ASCII.
+func deltaHeader() string {
+	if glyphs().Up == utf8TUIGlyphs.Up {
+		return "Δ"
+	}
+	return "d"
+}
+
+// diffChange is the change column of a diff row: a rise or fall beyond 1 %,
+// green when it is the better way and red when not, else about the same.
+func diffChange(pct float64, higherIsBetter bool) string {
+	g := glyphs()
+	better, worse := healthyStyle, errorStyle
+	switch {
+	case pct > 1:
+		if !higherIsBetter {
+			better = worse
+		}
+		return better.Render(fmt.Sprintf("%s%.0f%%", g.Up, pct))
+	case pct < -1:
+		if higherIsBetter {
+			better = worse
+		}
+		return better.Render(fmt.Sprintf("%s%.0f%%", g.Down, -pct))
+	}
+	return dimStyle.Render(g.Approx)
+}

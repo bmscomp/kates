@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/bmscomp/kates/cli/pkg/components"
 	"github.com/bmscomp/kates/cli/pkg/kafkaversion"
 )
 
@@ -30,23 +31,12 @@ const (
 	maxEntrySize = 16 << 20
 )
 
-var requiredCRDNames = []string{
-	"kafkas.kafka.strimzi.io",
-	"kafkaconnects.kafka.strimzi.io",
-	"kafkatopics.kafka.strimzi.io",
-	"kafkausers.kafka.strimzi.io",
-	"kafkanodepools.kafka.strimzi.io",
-	"kafkabridges.kafka.strimzi.io",
-	"kafkaconnectors.kafka.strimzi.io",
-	"kafkamirrormaker2s.kafka.strimzi.io",
-	"kafkarebalances.kafka.strimzi.io",
-	"strimzipodsets.core.strimzi.io",
-}
-
 // RequiredCRDNames returns the Strimzi CRDs the Kates charts render resources
-// for. The returned slice is a copy so callers cannot mutate the package set.
+// for: the Strimzi group of the component table, which clean deletes by the
+// same list. The returned slice is a copy so callers cannot mutate the set.
 func RequiredCRDNames() []string {
-	return slices.Clone(requiredCRDNames)
+	g, _ := components.Group(components.CRDStrimzi)
+	return g.CRDs
 }
 
 // Chart is what a strimzi-kafka-operator chart tarball says about itself,

@@ -3,7 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
+	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
@@ -170,116 +170,89 @@ var reportCompareCmd = &cobra.Command{
 	},
 }
 
-var exportFormat string
+var (
+	exportFormat string
+	exportFile   string
+)
 
 var reportExportCmd = &cobra.Command{
 	Use:   "export <id>",
 	Short: "Export report as csv, junit, heatmap, heatmap-csv, md, or html",
-	Args:  cobra.ExactArgs(1),
+	Long: `Export a run's report in one of six formats.
+
+With -f the export goes to that file. Without it, in a terminal it goes to a
+file named after the run (kates-report-<id>.csv, kates-heatmap-<id>.json, …)
+in the current directory; piped, redirected or with --plain it goes to stdout,
+for every format including html.`,
+	Args: cobra.ExactArgs(1),
 	Example: `  kates report export abc123 --format csv
-  kates report export abc123 --format junit
+  kates report export abc123 --format junit -f results.xml
   kates report export abc123 --format md
   kates report export abc123 --format html
   kates report export abc123 --format heatmap
   kates report export abc123 --format csv > report.csv`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
+		ctx := context.Background()
 
+		var body, defaultFile string
+		var err error
 		switch exportFormat {
 		case "csv":
-			csv, err := apiClient.ExportCSV(context.Background(), id)
-			if err != nil {
-				return cmdErr("Export failed: " + err.Error())
-			}
-			if isTerminal() {
-				file := "kates-report-" + id + ".csv"
-				if err := os.WriteFile(file, []byte(csv), 0644); err != nil {
-					return cmdErr("Write failed: " + err.Error())
-				}
-				output.Success("Exported to " + file)
-			} else {
-				fmt.Print(csv)
-			}
-
+			body, err = apiClient.ExportCSV(ctx, id)
+			defaultFile = "kates-report-" + id + ".csv"
 		case "junit":
-			xml, err := apiClient.ExportJUnit(context.Background(), id)
-			if err != nil {
-				return cmdErr("Export failed: " + err.Error())
-			}
-			if isTerminal() {
-				file := "kates-report-" + id + ".xml"
-				if err := os.WriteFile(file, []byte(xml), 0644); err != nil {
-					return cmdErr("Write failed: " + err.Error())
-				}
-				output.Success("Exported to " + file)
-			} else {
-				fmt.Print(xml)
-			}
-
+			body, err = apiClient.ExportJUnit(ctx, id)
+			defaultFile = "kates-report-" + id + ".xml"
 		case "heatmap":
-			heatmap, err := apiClient.ExportHeatmap(context.Background(), id, "json")
-			if err != nil {
-				return cmdErr("Export failed: " + err.Error())
-			}
-			if isTerminal() {
-				file := "kates-heatmap-" + id + ".json"
-				if err := os.WriteFile(file, []byte(heatmap), 0644); err != nil {
-					return cmdErr("Write failed: " + err.Error())
-				}
-				output.Success("Exported to " + file)
-			} else {
-				fmt.Print(heatmap)
-			}
-
+			body, err = apiClient.ExportHeatmap(ctx, id, "json")
+			defaultFile = "kates-heatmap-" + id + ".json"
 		case "heatmap-csv":
-			heatmapCsv, err := apiClient.ExportHeatmap(context.Background(), id, "csv")
-			if err != nil {
-				return cmdErr("Export failed: " + err.Error())
+			body, err = apiClient.ExportHeatmap(ctx, id, "csv")
+			defaultFile = "kates-heatmap-" + id + ".csv"
+		case "md", "html":
+			var report *client.Report
+			report, err = apiClient.Report(ctx, id)
+			if err == nil && exportFormat == "md" {
+				body, defaultFile = renderMarkdownReport(id, report), "kates-report-"+id+".md"
+			} else if err == nil {
+				body, defaultFile = renderHTMLReport(id, report), "kates-report-"+id+".html"
 			}
-			if isTerminal() {
-				file := "kates-heatmap-" + id + ".csv"
-				if err := os.WriteFile(file, []byte(heatmapCsv), 0644); err != nil {
-					return cmdErr("Write failed: " + err.Error())
-				}
-				output.Success("Exported to " + file)
-			} else {
-				fmt.Print(heatmapCsv)
-			}
-
-		case "md":
-			report, err := apiClient.Report(context.Background(), id)
-			if err != nil {
-				return cmdErr("Export failed: " + err.Error())
-			}
-			md := renderMarkdownReport(id, report)
-			if isTerminal() {
-				file := "kates-report-" + id + ".md"
-				if err := os.WriteFile(file, []byte(md), 0644); err != nil {
-					return cmdErr("Write failed: " + err.Error())
-				}
-				output.Success("Exported to " + file)
-			} else {
-				fmt.Print(md)
-			}
-
-		case "html":
-			report, err := apiClient.Report(context.Background(), id)
-			if err != nil {
-				return cmdErr("Export failed: " + err.Error())
-			}
-			html := renderHTMLReport(id, report)
-			file := "kates-report-" + id + ".html"
-			if err := os.WriteFile(file, []byte(html), 0644); err != nil {
-				return cmdErr("Write failed: " + err.Error())
-			}
-			output.Success("Exported to " + file)
-			output.Hint("  Open: open " + file)
-
 		default:
 			return cmdErr("Unknown format '" + exportFormat + "'. Use 'csv', 'junit', 'heatmap', 'heatmap-csv', 'md', or 'html'.")
 		}
-		return nil
+		if err != nil {
+			return cmdErr("Export failed: " + err.Error())
+		}
+		return writeReportExport(exportFile, defaultFile, []byte(body))
 	},
+}
+
+// writeReportExport writes an export where report export puts it: to file
+// when -f named one ("-" for stdout); otherwise to stdout when no one is
+// watching a terminal, which is what a pipe or a CI step reads, and to
+// defaultFile in the current directory when someone is. The html format used
+// to go to the file even when piped, so `kates report export x --format html
+// > r.html` left an empty r.html and a file in the working directory.
+func writeReportExport(file, defaultFile string, data []byte) error {
+	switch {
+	case file == "-":
+		fmt.Print(string(data))
+		return nil
+	case file == "" && !IsInteractive():
+		fmt.Print(string(data))
+		return nil
+	case file == "":
+		file = defaultFile
+	}
+	if err := writeExportFile(file, data); err != nil {
+		return cmdErr("Write failed: " + err.Error())
+	}
+	output.Success("Exported to " + file)
+	if strings.HasSuffix(file, ".html") {
+		output.Hint("  Open: open " + file)
+	}
+	return nil
 }
 
 // violationCells gives a report violation's threshold and actual value as the
@@ -298,16 +271,9 @@ func violationCells(v client.SlaViolation) (threshold, actual string) {
 	return threshold, actual
 }
 
-func isTerminal() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return true
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
-}
-
 func init() {
 	reportExportCmd.Flags().StringVar(&exportFormat, "format", "csv", "Export format: csv, junit, heatmap, heatmap-csv, md, or html")
+	addOutputFileFlag(reportExportCmd, &exportFile)
 
 	reportCmd.AddCommand(reportShowCmd)
 	reportCmd.AddCommand(reportSummaryCmd)

@@ -44,7 +44,8 @@ var topCmd = &cobra.Command{
 
 			counts := CountStatuses(paged.Content)
 
-			fmt.Printf("  %s API: %s  Kafka: %s  │  %s running  %s pending  %s done  %s failed  │  %s total\n\n",
+			bar := glyphOr("│", "|")
+			fmt.Printf("  %s API: %s  Kafka: %s  "+bar+"  %s running  %s pending  %s done  %s failed  "+bar+"  %s total\n\n",
 				output.AccentStyle.Bold(true).Render("Kates Top"),
 				output.StatusBadge(apiStatus),
 				output.StatusBadge(kafkaStatus),
@@ -84,7 +85,7 @@ var topCmd = &cobra.Command{
 			}
 
 			if len(activeRows) > 0 {
-				fmt.Println(output.SubHeaderStyle.Render("  ◉ Active Tests"))
+				fmt.Println(output.SubHeaderStyle.Render("  " + output.Glyphs().DotOn + " Active Tests"))
 				fmt.Println()
 				output.Table(
 					[]string{"ID", "Type", "Status", "Backend", "Started", "Records", "Throughput", "P99 Lat."},
@@ -100,7 +101,7 @@ var topCmd = &cobra.Command{
 				if len(recentRows) < limit {
 					limit = len(recentRows)
 				}
-				fmt.Println(output.SubHeaderStyle.Render("  ▸ Recent Tests"))
+				fmt.Println(output.SubHeaderStyle.Render("  " + output.Glyphs().Arrow + " Recent Tests"))
 				fmt.Println()
 				output.Table(
 					[]string{"ID", "Type", "Status", "Backend", "Created"},

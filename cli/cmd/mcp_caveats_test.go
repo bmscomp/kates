@@ -67,7 +67,10 @@ func TestMCPCaveatCatalogue(t *testing.T) {
 		if c.Text == "" || len(c.Refs) == 0 {
 			t.Errorf("caveat %q needs text and at least one source ref", id)
 		}
-		if strings.ContainsAny(c.Text, "«»") {
+		if c.Short == "" || len(c.Short) > mcpCaveatShortMax || strings.Contains(c.Short, "\n") {
+			t.Errorf("caveat %q needs a one-line short text of at most %d bytes, has %d", id, mcpCaveatShortMax, len(c.Short))
+		}
+		if strings.ContainsAny(c.Text+c.Short, "«»") {
 			t.Errorf("caveat %q: fence markers do not belong in caveat text", id)
 		}
 	}
@@ -310,7 +313,7 @@ func TestMCPCaveatsResource(t *testing.T) {
 	}
 	text := res.Contents[0].Text
 	for _, c := range mcpCaveats {
-		if !strings.Contains(text, "## "+string(c.ID)+"\n") || !strings.Contains(text, c.Text) {
+		if !strings.Contains(text, "## "+string(c.ID)+"\n") || !strings.Contains(text, c.Text) || !strings.Contains(text, c.Short) {
 			t.Errorf("the resource lacks caveat %s", c.ID)
 		}
 		for _, r := range c.Refs {

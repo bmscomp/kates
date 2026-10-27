@@ -168,3 +168,16 @@ func TestMCPPromptDidKatesCauseThisRefuses(t *testing.T) {
 		})
 	}
 }
+
+// Every prompt reads its arguments through mcpPromptArgs, which a request
+// without params (a direct handler call; the SDK always sets them) must not
+// panic on.
+func TestMCPPromptArgsWithoutParams(t *testing.T) {
+	if mcpPromptArgs(nil) != nil || mcpPromptArgs(&mcp.GetPromptRequest{}) != nil {
+		t.Error("a request without params has arguments")
+	}
+	args := map[string]string{"topic": "orders"}
+	if got := mcpPromptArgs(&mcp.GetPromptRequest{Params: &mcp.GetPromptParams{Arguments: args}}); got["topic"] != "orders" {
+		t.Errorf("got %v", got)
+	}
+}

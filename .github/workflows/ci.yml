@@ -632,6 +632,14 @@ jobs:
         working-directory: cli
         run: go test -p 1 ./... -v -race -count=1 -coverprofile=coverage.out
 
+      # The config lock and the port-forward process code are per platform;
+      # the Linux build does not notice when the Windows or macOS one breaks.
+      - name: Cross-compile for Windows and macOS
+        working-directory: cli
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
+
       - name: Coverage summary
         if: always()
         working-directory: cli

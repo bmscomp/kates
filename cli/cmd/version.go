@@ -45,8 +45,12 @@ var versionCmd = &cobra.Command{
 		output.KeyValue("Go", runtime.Version())
 		output.KeyValue("OS/Arch", fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
 
-		// Try to get API version
-		health, err := apiClient.Health(context.Background())
+		// Try to get API version. The lookup is optional, so it gets the
+		// completers' short timeout: kates version must answer at once, with
+		// the API not reachable, when the host is blackholed.
+		ctx, cancel := context.WithTimeout(commandContext(cmd), completionTimeout)
+		defer cancel()
+		health, err := apiClient.Health(ctx)
 		if err == nil {
 			output.KeyValue("API Status", output.StatusBadge(health.Status))
 			if eng := health.Engine; eng != nil {

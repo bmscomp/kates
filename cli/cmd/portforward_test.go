@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -998,6 +999,51 @@ func TestPrintAPIPortTaken(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// Before forwarding, kates ports stops only the forwards it would start
+// itself: into the cluster it forwards from and the namespaces it forwards.
+// It used to run `pkill -f "kubectl port-forward"`, which ended forwards to
+// other clusters that kates did not start.
+func TestStopOwnPortForwards_LeavesOtherClustersAlone(t *testing.T) {
+	origList, origStop, origKubeContext := listProcessesFn, stopProcessFn, portsKubeContext
+	origKafkaNS, origAppNS, origMonitoringNS := portsKafkaNS, portsAppNS, portsMonitoringNS
+	t.Cleanup(func() {
+		listProcessesFn, stopProcessFn, portsKubeContext = origList, origStop, origKubeContext
+		portsKafkaNS, portsAppNS, portsMonitoringNS = origKafkaNS, origAppNS, origMonitoringNS
+	})
+	portsKafkaNS, portsAppNS, portsMonitoringNS = "kafka", "kates", "monitoring"
+
+	procs := map[int]string{
+		101: "kubectl port-forward --address 127.0.0.1 service/kates 8080:8080 -n kates",
+		102: "kubectl --context prod-cluster port-forward --address 127.0.0.1 service/kates 8080:8080 -n kates",
+		103: "kubectl port-forward svc/orders-db 5432:5432 -n prod",
+		104: "kubectl --context kind-kates port-forward service/monitoring-grafana 3000:80 -n monitoring",
+		105: "vim cli/cmd/ports.go",
+	}
+	listProcessesFn = func() (map[int]string, error) { return procs, nil }
+
+	for _, tt := range []struct {
+		kubeContext string
+		want        []int
+	}{
+		// The current context: forwards with no --context and nothing else.
+		{"", []int{101}},
+		// deploy --port-forward names the cluster: its forwards and the
+		// current context's, never another cluster's.
+		{"kind-kates", []int{101, 104}},
+	} {
+		portsKubeContext = tt.kubeContext
+		var stopped []int
+		stopProcessFn = func(pid int) error { stopped = append(stopped, pid); return nil }
+
+		n := stopOwnPortForwards()
+
+		sort.Ints(stopped)
+		if !reflect.DeepEqual(stopped, tt.want) || n != len(tt.want) {
+			t.Errorf("context %q: stopped %v (%d), want %v", tt.kubeContext, stopped, n, tt.want)
 		}
 	}
 }

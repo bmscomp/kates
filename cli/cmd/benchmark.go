@@ -1,18 +1,20 @@
 package cmd
 
 import (
-	"context"
+	"errors"
 	"fmt"
-	"math"
-	"strings"
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/grade"
 	"github.com/spf13/cobra"
 )
 
-var benchRecords int
+var (
+	benchRecords int
+	benchTimeout string
+)
 
 var benchmarkCmd = &cobra.Command{
 	Use:     "benchmark",
@@ -21,17 +23,31 @@ var benchmarkCmd = &cobra.Command{
 	Long: `Run a LOAD, a STRESS and a SPIKE test one after another and grade each
 from its peak throughput and p99 latency, then give an overall grade.
 
-A run that reports no final status in time shows as ERROR: it may still be
-going, so the battery stops there and the tests after it show as SKIPPED.
+Each test scores from 0 to 100, half for throughput and half for latency, and
+the score gives its grade; the overall grade averages the scores:
+
+` + grade.BenchmarkThresholds() + `
+
+A run that reports no final status within --timeout, or whose status cannot
+be read three times in a row, shows as ERROR: it may still be going, so the
+battery stops there and the tests after it show as SKIPPED.
 
 With -o json it prints only the scorecard, as JSON, when the battery ends.`,
 	Example: `  kates benchmark
   kates benchmark --records 100000
+  kates benchmark --timeout 10m
   kates benchmark -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		// Ctrl-C cancels this context (see interrupt.go), and the run the
+		// battery is waiting for with it.
+		ctx := commandContext(cmd)
 		jsonOut := outputMode == "json"
 		types := []string{"LOAD", "STRESS", "SPIKE"}
+
+		timeout, err := parseTimeoutFlag(benchTimeout)
+		if err != nil {
+			return cmdErr(err.Error())
+		}
 
 		if !jsonOut {
 			output.Banner("Kates Benchmark", "Full performance battery")
@@ -71,13 +87,24 @@ With -o json it prints only the scorecard, as JSON, when the battery ends.`,
 				output.Hint(fmt.Sprintf("  Running %s → %s", tt, truncID(run.ID)))
 			}
 
-			final := waitForCompletion(ctx, run.ID)
-			if final == nil {
+			final, err := followRun(ctx, run.ID, followOpts{
+				interval:     testPollInterval,
+				deadline:     time.Now().Add(timeout),
+				maxErrors:    benchmarkPollFailures,
+				cancelOnStop: stopStartedRun,
+			})
+			if errors.Is(err, errInterrupted) {
+				return err
+			}
+			if err != nil {
 				// The outcome is unknown, not a failure, as test apply reports
 				// a run it lost track of. It used to read FAILED, and the next
 				// test started on top of a run that may still put load on the
 				// cluster.
-				msg := fmt.Sprintf("no final status after %s; the run may still be going", benchmarkPolls*testPollInterval)
+				if errors.Is(err, errFollowDeadline) {
+					err = fmt.Errorf("no final status after %s", timeout)
+				}
+				msg := err.Error() + "; the run may still be going"
 				if !jsonOut {
 					output.Error(fmt.Sprintf("  %s: %s", tt, msg))
 				}
@@ -110,7 +137,7 @@ With -o json it prints only the scorecard, as JSON, when the battery ends.`,
 			}
 		}
 		if scored > 0 {
-			res.OverallGrade = letterGrade(totalScore / float64(scored))
+			res.OverallGrade = grade.FromScore(totalScore / float64(scored)).String()
 		}
 
 		output.Render(jsonOut, res, func() { renderBenchmark(res) })
@@ -144,9 +171,14 @@ type benchmarkTest struct {
 	Error                   string   `json:"error,omitempty"`
 }
 
-// benchmarkPolls is how many times benchmark asks for a run's status before
-// it gives up on the run.
-const benchmarkPolls = 120
+// benchmarkPollFailures is how many GetTest errors in a row end a phase. One
+// error used to be skipped without a word, so an API that had gone away was
+// polled, in vain, for the whole six minutes.
+const benchmarkPollFailures = followMaxErrors
+
+// defaultBenchTimeout bounds the wait for each phase's run. The old cap was
+// hidden: 120 polls of 3 s, which no flag could lengthen for a slow cluster.
+const defaultBenchTimeout = "30m"
 
 // scoreBenchmarkRun turns a finished run into its scorecard row. Only a run
 // that finished DONE with throughput is graded.
@@ -171,9 +203,9 @@ func scoreBenchmarkRun(testType string, run *client.TestRun) benchmarkTest {
 	}
 
 	if run.Status == "DONE" && peak > 0 {
-		score := gradeScore(peak, maxP99)
+		score := grade.BenchmarkScore(peak, maxP99)
 		bt.Score = &score
-		bt.Grade = letterGrade(score)
+		bt.Grade = grade.FromScore(score).String()
 	}
 	return bt
 }
@@ -216,63 +248,26 @@ func renderBenchmark(res benchmarkResult) {
 	}
 }
 
-func gradeScore(throughput, p99 float64) float64 {
-	tScore := math.Min(throughput/50000.0, 1.0) * 50
-	lScore := 50.0
-	if p99 > 0 {
-		lScore = math.Max(0, 50.0-(p99*5.0))
-	}
-	return tScore + lScore
-}
-
-func letterGrade(score float64) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
-}
-
-func gradeColor(grade string) string {
-	switch grade {
+func gradeColor(g string) string {
+	switch g {
 	case "A":
-		return output.SuccessStyle.Bold(true).Render("★ " + grade)
+		return output.SuccessStyle.Bold(true).Render("★ " + g)
 	case "B":
-		return output.SuccessStyle.Render(grade)
+		return output.SuccessStyle.Render(g)
 	case "C":
-		return output.WarningStyle.Render(grade)
+		return output.WarningStyle.Render(g)
 	default:
-		return output.ErrorStyle.Render(grade)
+		return output.ErrorStyle.Render(g)
 	}
 }
 
-// testPollInterval is how often gate and benchmark ask for a run's status.
-// Tests shorten it.
+// testPollInterval is how often gate, benchmark and flow ask for a run's
+// status. Tests shorten it.
 var testPollInterval = 3 * time.Second
 
-func waitForCompletion(ctx context.Context, id string) *client.TestRun {
-	for i := 0; i < benchmarkPolls; i++ {
-		time.Sleep(testPollInterval)
-		run, err := apiClient.GetTest(ctx, id)
-		if err != nil {
-			continue
-		}
-		status := strings.ToUpper(run.Status)
-		if status == "DONE" || status == "FAILED" {
-			return run
-		}
-	}
-	return nil
-}
-
 func init() {
-	benchmarkCmd.Flags().IntVar(&benchRecords, "records", 50000, "Records per test phase")
+	addRecordsFlag(benchmarkCmd, &benchRecords, 50000)
+	addTimeoutFlag(benchmarkCmd, &benchTimeout, defaultBenchTimeout)
+	interruptible(benchmarkCmd)
 	rootCmd.AddCommand(benchmarkCmd)
 }

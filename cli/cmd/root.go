@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
@@ -30,6 +29,10 @@ var (
 	apiClient        *client.Client
 	activeContext    string
 	apiURLOverridden bool
+	// contextErr is why the pre-run could not resolve the context: a name the
+	// config does not have, or a config it could not load. Every API call
+	// fails with it; a plugin is not started with it (see runPlugin).
+	contextErr error
 )
 
 type Context struct {
@@ -179,17 +182,18 @@ func lockConfig() (unlock func(), err error) {
 	if err != nil {
 		return func() {}, nil
 	}
-	fd := int(f.Fd())
 	deadline := time.Now().Add(configLockWait)
 	for {
-		err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+		// tryLockFile and unlockFile are flock on Unix and LockFileEx on
+		// Windows (config_lock_unix.go, config_lock_windows.go).
+		busy, err := tryLockFile(f)
 		switch {
-		case err == nil:
+		case err == nil && !busy:
 			return func() {
-				_ = syscall.Flock(fd, syscall.LOCK_UN)
+				_ = unlockFile(f)
 				f.Close()
 			}, nil
-		case !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR):
+		case err != nil:
 			f.Close()
 			return func() {}, nil
 		case time.Now().After(deadline):
@@ -456,7 +460,6 @@ Deployment:
   operators      Strimzi operators on this cluster
   versions       Strimzi and Kafka versions this cluster can run
   migrate        Cross-version Kafka migration with MirrorMaker 2
-  operator       Run the Kates Environment Operator
   clean          Remove every Kates-managed release and namespace
 
 Flags:
@@ -551,6 +554,9 @@ var rootCmd = &cobra.Command{
 		if outputMode == "" {
 			outputMode = "table"
 		}
+		// The one place the -o json contract is switched on: from here,
+		// notes go to stderr and banners print nothing (output/render.go).
+		output.JSONMode(outputMode == "json")
 		if !plainOutput {
 			if envPlain := os.Getenv("KATES_PLAIN"); envPlain == "true" || envPlain == "1" {
 				plainOutput = true
@@ -584,6 +590,7 @@ var rootCmd = &cobra.Command{
 			Insecure: ctx.Insecure,
 		}
 		apiClient = client.NewWithOptions(opts)
+		contextErr = ctxErr
 		if ctxErr != nil {
 			// Commands that never call the API, kates ctx set among them,
 			// still run; every API call reports the missing context.
@@ -658,6 +665,9 @@ func isLoopbackHost(host string) bool {
 }
 
 func Execute() {
+	// Every init has run by now, so the built-ins are all registered and a
+	// plugin cannot take one's name.
+	registerPlugins()
 	ctx, stop := interruptContext(os.Args[1:])
 	defer stop()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {

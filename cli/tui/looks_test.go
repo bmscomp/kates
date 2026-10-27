@@ -37,8 +37,10 @@ func tuiAt(t *testing.T, w, h int) tea.Model {
 	t.Helper()
 	var m tea.Model = New(nil)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: w, Height: h})
-	info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: 2,
-		Brokers: []client.BrokerNode{{ID: 0, Host: "kafka", Port: 9092}, {ID: 1, Host: "kafka", Port: 9092}}}
+	info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: client.IntOf(2), Brokers: []client.BrokerNode{
+		{ID: client.IntOf(0), Host: "kafka", Port: client.IntOf(9092)},
+		{ID: client.IntOf(1), Host: "kafka", Port: client.IntOf(9092)},
+	}}
 	m, _ = m.Update(brokersLoadedMsg{info: info})
 	m, _ = m.Update(topicsLoadedMsg{topics: []client.KafkaTopic{{Name: "orders"}, {Name: "a-topic-name-longer-than-the-list-is-wide"}}})
 	return m

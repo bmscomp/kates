@@ -73,7 +73,7 @@ func TestApply_CtrlCStopsTheApplyAndCancelsTheRun(t *testing.T) {
 	}
 	var got applyResult
 	decodeStdout(t, stdout, &got)
-	want := applyResult{File: file, Waited: true, Interrupted: true, Scenarios: []applyScenarioResult{
+	want := applyResult{File: file, Waited: true, Interrupted: true, SLA: applySLAMode{Checked: true, Scope: "report"}, Scenarios: []applyScenarioResult{
 		{Name: "first", Type: "LOAD", RunID: "run-1", Status: "CANCELLED", Error: "interrupted; the run was cancelled"},
 	}}
 	if !reflect.DeepEqual(got, want) {
