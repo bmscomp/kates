@@ -623,11 +623,11 @@ func highlightLag(lag string) string {
 	return warnBadge(lag)
 }
 
-func formatMs(ts interface{}) string {
-	if ts == nil {
+func formatMs(ts client.Int) string {
+	if ts.IsZero() {
 		return "-"
 	}
-	ms := fmt.Sprintf("%v", ts)
+	ms := ts.String()
 	if len(ms) >= 13 {
 		return ms[:10] + "…"
 	}

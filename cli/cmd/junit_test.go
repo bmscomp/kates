@@ -17,12 +17,12 @@ func TestWriteJUnitXML_TimesAndErrors(t *testing.T) {
 	report := &client.DisruptionReport{
 		PlanName: "leader-cascade",
 		StepReports: []client.StepReport{
-			{StepName: "kill-leader", DisruptionType: "POD_DELETE", TimeToAllReady: "1500ms",
+			{StepName: "kill-leader", DisruptionType: "POD_DELETE", TimeToAllReady: client.DurationOf(`"1500ms"`),
 				ChaosOutcome: &client.ChaosOutcome{Verdict: "PASS"}},
-			{StepName: "partition", DisruptionType: "NETWORK_PARTITION", TimeToAllReady: "PT2S",
+			{StepName: "partition", DisruptionType: "NETWORK_PARTITION", TimeToAllReady: client.DurationOf(`"PT2S"`),
 				ChaosOutcome: &client.ChaosOutcome{Verdict: "FAIL", FailureReason: "probe failed"}},
-			{StepName: "no-verdict", DisruptionType: "CPU_STRESS", TimeToAllReady: 3.0},
-			{StepName: "unreadable", DisruptionType: "DISK_FILL", TimeToAllReady: "N/A",
+			{StepName: "no-verdict", DisruptionType: "CPU_STRESS", TimeToAllReady: client.DurationOf(`3.0`)},
+			{StepName: "unreadable", DisruptionType: "DISK_FILL", TimeToAllReady: client.DurationOf(`"N/A"`),
 				ChaosOutcome: &client.ChaosOutcome{Verdict: "PASS"}},
 		},
 	}
@@ -54,22 +54,23 @@ func TestWriteJUnitXML_TimesAndErrors(t *testing.T) {
 
 func TestBackendMillis(t *testing.T) {
 	for _, tc := range []struct {
-		in     interface{}
+		in     string
 		millis int64
 		ok     bool
 	}{
-		{"1500ms", 1500, true},
-		{"PT2S", 2000, true},
-		{"PT1.5S", 1500, true},
-		{3.0, 3000, true},
-		{0.25, 250, true},
-		{"N/A", 0, false},
-		{nil, 0, false},
-		{"", 0, false},
+		{`"1500ms"`, 1500, true},
+		{`"PT2S"`, 2000, true},
+		{`"PT1.5S"`, 1500, true},
+		{`3.0`, 3000, true},
+		{`0.25`, 250, true},
+		{`"-5ms"`, 0, false},
+		{`"N/A"`, 0, false},
+		{`null`, 0, false},
+		{`""`, 0, false},
 	} {
-		millis, ok := backendMillis(tc.in)
+		millis, ok := backendMillis(client.DurationOf(tc.in))
 		if millis != tc.millis || ok != tc.ok {
-			t.Errorf("backendMillis(%v) = %d, %v; want %d, %v", tc.in, millis, ok, tc.millis, tc.ok)
+			t.Errorf("backendMillis(%s) = %d, %v; want %d, %v", tc.in, millis, ok, tc.millis, tc.ok)
 		}
 	}
 }

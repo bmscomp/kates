@@ -2,9 +2,7 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
-	"strconv"
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -20,6 +18,7 @@ func registerMCPClusterTools(s *mcp.Server, deps *mcpDeps) {
 	registerMCPClusterOverview(s, deps)
 	registerMCPClusterTopology(s, deps)
 	registerMCPConsumerGroupLag(s, deps)
+	registerMCPClusterLists(s, deps)
 	registerMCPClusterPrompts(s)
 }
 
@@ -119,7 +118,7 @@ func mcpClusterOverview(ctx context.Context, call *mcpCall, _ mcpNoInput) (mcpCl
 	info := call.ClusterInfo()
 	out := mcpClusterOverviewOut{
 		ClusterID:   info.ClusterID,
-		BrokerCount: mcpInt(info.BrokerCount),
+		BrokerCount: info.BrokerCount.Int(),
 	}
 	if info.Controller != nil {
 		b := mcpBrokerFrom(*info.Controller)
@@ -192,9 +191,9 @@ func mcpFitOverview(call *mcpCall, out *mcpClusterOverviewOut) {
 
 func mcpBrokerFrom(n client.BrokerNode) mcpBroker {
 	return mcpBroker{
-		ID:   mcpInt(n.ID),
+		ID:   n.ID.Int(),
 		Host: mcpSanitizeLine(n.Host, 255),
-		Port: mcpInt(n.Port),
+		Port: n.Port.Int(),
 		Rack: mcpSanitizeLine(n.Rack, 64),
 	}
 }
@@ -212,17 +211,15 @@ func mcpHealthFrom(call *mcpCall, r *client.ClusterHealthReport) mcpClusterHealt
 	}
 	problems := make([]mcpPartitionProblem, 0, len(r.PartitionHealth.Problems))
 	for _, p := range r.PartitionHealth.Problems {
-		topic, _ := p["topic"].(string)
-		issue, _ := p["issue"].(string)
 		problems = append(problems, mcpPartitionProblem{
 			// Kafka limits topic names to letters, digits, '.', '_' and '-',
 			// so a topic name cannot carry prose; it is cleaned, not fenced,
 			// so an agent can pass it back as an argument.
-			Topic:     mcpSanitizeLine(topic, 249),
-			Partition: mcpInt(p["partition"]),
-			Issue:     mcpSanitizeLine(issue, 32),
-			ISR:       mcpInt(p["isr"]),
-			Replicas:  mcpInt(p["replicas"]),
+			Topic:     mcpSanitizeLine(p.Topic, 249),
+			Partition: p.Partition.Int(),
+			Issue:     mcpSanitizeLine(p.Issue, 32),
+			ISR:       p.ISR.Int(),
+			Replicas:  p.Replicas.Int(),
 		})
 	}
 	// The backend lists problems in the order it walks a map of topics, with
@@ -292,28 +289,11 @@ func mcpAlertRulesFrom(call *mcpCall, r *client.ClusterAlertsResponse, err error
 	}
 }
 
-// mcpInt reads a JSON number the client decoded into interface{} (the
-// cluster info types keep ids and ports untyped). Anything else is 0.
-func mcpInt(v interface{}) int {
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	case json.Number:
-		i, _ := n.Int64()
-		return int(i)
-	case string:
-		i, _ := strconv.Atoi(n)
-		return i
-	}
-	return 0
-}
-
 // The caveats only the cluster tools use.
 const (
 	mcpCaveatTopologyUnreadLooksEmpty mcpCaveatID = "topology-unread-looks-empty"
 	mcpCaveatGroupLagCommitted        mcpCaveatID = "group-lag-from-committed-offsets"
+	mcpCaveatTopicListCached          mcpCaveatID = "topic-list-cached"
 )
 
 // mcpCaveatsCluster holds the caveats only this group's tools use (see mcpCaveats in
@@ -321,7 +301,8 @@ const (
 // mcpCaveatIDsCluster in the group's test file.
 var mcpCaveatsCluster = []mcpCaveat{
 	{
-		ID: mcpCaveatTopologyUnreadLooksEmpty,
+		ID:    mcpCaveatTopologyUnreadLooksEmpty,
+		Short: "Node pools and pods are read by cluster name and stop at the first failed read: empty or short lists are not proof of missing nodes.",
 		Text: "Node pools and controllers come from the Strimzi KafkaNodePool resources, and their pods, labelled " +
 			"with the cluster name the backend is configured with (kates.topology.kafka-cluster, default krafter; the " +
 			"kates chart sets it from kafka.clusterName) in its namespace (kates.topology.kafka-namespace, default " +
@@ -337,11 +318,24 @@ var mcpCaveatsCluster = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatGroupLagCommitted,
+		ID:    mcpCaveatGroupLagCommitted,
+		Short: "Lag counts from committed offsets: partitions never committed are missing and uncommitted progress counts as lag.",
 		Text: "Consumer group lag is each partition's latest offset minus the group's committed offset, both read " +
 			"when asked. Only partitions with a committed offset are listed, so a partition the group reads but has " +
 			"never committed is missing; progress a consumer has made but not yet committed counts as lag; and a " +
 			"committed offset past the latest one shows as lag 0.",
 		Refs: []string{mcpJava + "service/ConsumerGroupService.java:79-111"},
+	},
+	{
+		ID:    mcpCaveatTopicListCached,
+		Short: "The topic list is cached for 30 seconds: a topic created or deleted since may be missing or still listed.",
+		Text: "The backend keeps the topic list for 30 seconds and does not clear it early, so a topic created in the " +
+			"last 30 seconds can be missing from it and one deleted in that time can still be listed. Kafka's internal " +
+			"topics, whose names start __, are never listed.",
+		Refs: []string{
+			mcpAnchoredRef(mcpJava+"service/TopicService.java:32", "CACHE_TTL_MS = 30_000"),
+			mcpAnchoredRef(mcpJava+"service/TopicService.java:102-116", "public Set<String> listTopics()", "client.listTopics()"),
+			mcpJava + "api/ClusterResource.java:75-105",
+		},
 	},
 }

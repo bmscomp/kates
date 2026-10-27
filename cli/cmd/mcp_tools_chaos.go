@@ -55,6 +55,7 @@ func registerMCPChaosTools(s *mcp.Server, deps *mcpDeps) {
 		Name:        "disruption_report",
 		Title:       "Disruption report",
 		Description: mcpDisruptionReportDescription,
+		InputSchema: mcpDisruptionReportInputSchema(),
 	}, mcpDisruptionReportTool, mcpCaveatChaosTimesApproximate, mcpCaveatRecoveryFromInjection, mcpCaveatPrometheusUnreachable)
 
 	addReadResourceTemplate(s, deps, &mcp.ResourceTemplate{
@@ -102,7 +103,8 @@ const (
 // code it cites.
 var mcpCaveatsChaos = []mcpCaveat{
 	{
-		ID: mcpCaveatDryRunControllersUncounted,
+		ID:    mcpCaveatDryRunControllersUncounted,
+		Short: "The dry run's blast radius counts brokers only: hitting KRaft controllers does not make wouldSucceed false.",
 		Text: "The dry run lists every pod a step would hit, KRaft controllers included, but its blast-radius check " +
 			"counts only brokers: a controller a step hits adds nothing to the affected-broker count or to " +
 			"maxAffectedBrokers, so a plan that takes down a majority of the controller quorum can still get " +
@@ -121,7 +123,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatDryRunRBACFailsOpen,
+		ID:    mcpCaveatDryRunRBACFailsOpen,
+		Short: "The dry run's RBAC check fails open and checks only Kates's own service account.",
 		Text: "The dry run's RBAC check asks only whether Kates's own service account may delete or patch pods, " +
 			"create NetworkPolicies or scale node pools, and only for the fault types that need one of those; every " +
 			"other type, and any check that fails with an error, counts as permitted, and a denied check is a step " +
@@ -140,7 +143,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatDryRunRandomPick,
+		ID:    mcpCaveatDryRunRandomPick,
+		Short: "A step with no target hits a pod picked at random when it runs, possibly a controller.",
 		Text: "A step with no targetPod, no targetBrokerId, no targetAll and no partition leader to aim at (no " +
 			"targetTopic, or one whose leader could not be looked up) hits one pod picked at random when it runs, " +
 			"among every pod its targetLabel matches; the default label, strimzi.io/component-type=kafka, matches " +
@@ -156,7 +160,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatDryRunOtherNamespace,
+		ID:    mcpCaveatDryRunOtherNamespace,
+		Short: "A step in the Kates API's own namespace is previewed as hitting nothing but acts there when it runs.",
 		Text: "The safety guard refuses a step in any namespace but the one the dry run reads Kafka pods from " +
 			"(kates.chaos.kafka.namespace, kafka by default; the kates chart sets it from networkPolicy.kafka.namespace) " +
 			"and the Kates API's own. A step in the Kates API's " +
@@ -179,7 +184,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatChaosProviderNotReported,
+		ID:    mcpCaveatChaosProviderNotReported,
+		Short: "The provider list does not say which provider injects faults; a fallback to noop injects nothing.",
 		Text: "The provider list names every registered chaos provider and whether it is available, not which one " +
 			"injects faults. That is kates.chaos.provider, litmus-crd by default; when it names a provider that is " +
 			"unknown or was unavailable when the backend started, the backend falls back to noop, which injects " +
@@ -195,7 +201,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatChaosStepSkipped,
+		ID:    mcpCaveatChaosStepSkipped,
+		Short: "A Skipped step injected no fault; its metrics describe an undisturbed cluster.",
 		Text: "A step whose chaos verdict is Skipped injected no fault: the noop provider ran it, because " +
 			"kates.chaos.provider selects noop or names a provider that was unavailable when the backend started. " +
 			"Its metrics, and the recovery times an older Kates API still measured for it, describe an undisturbed " +
@@ -212,7 +219,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatImpactScoreMisreads,
+		ID:    mcpCaveatImpactScoreMisreads,
+		Short: "The impact score misreads latency and throughput; judge them from the summary and impactDeltas.",
 		Text: "The impact score's latency and throughput dimensions misread their inputs. maxP99LatencySpike is the " +
 			"largest per-step change in produce p99 in percent, which the scorer grades as milliseconds. " +
 			"avgThroughputDegradation is the average per-step change in the messages-in rate in percent, negative " +
@@ -226,7 +234,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatRecoveryFromInjection,
+		ID:    mcpCaveatRecoveryFromInjection,
+		Short: "Recovery times count from when the provider reported the fault going in, which includes provider start-up time.",
 		Text: "A step's recovery times (time to first and to all pods ready, time to full ISR, time to lag recovery) " +
 			"count from the moment the chaos provider reported the fault going in: after the step's delayBeforeSec, " +
 			"before the provider changed the cluster. On the default litmus-crd provider that moment comes before it " +
@@ -266,7 +275,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatISRNotSampled,
+		ID:    mcpCaveatISRNotSampled,
+		Short: "A step with isr.measured false was not sampled; its replication score of 100 is not measured.",
 		Text: "A step whose ISR tracker took no sample of its topic (the topic does not exist, or every poll failed) " +
 			"is shown with isr.measured false. The backend stores it as a minimum ISR of 0 over 0 partitions with no " +
 			"time to full ISR, and its impact score reads that as the ISR dropping to 0 and never recovering: the " +
@@ -280,7 +290,8 @@ var mcpCaveatsChaos = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatDisruptionRunningStale,
+		ID:    mcpCaveatDisruptionRunningStale,
+		Short: "A RUNNING report may belong to a plan whose backend stopped mid-plan; it never finishes.",
 		Text: "A report that says RUNNING belongs to a plan still in progress, or to one whose backend process " +
 			"stopped mid-plan and has not started again: such a plan never finishes. When the backend starts, it " +
 			"marks each report created before then that still says RUNNING as INTERRUPTED, in the report and in " +
@@ -552,16 +563,9 @@ func mcpTimelineEvent(e client.PodEvent) string {
 
 // mcpTimelineDuration renders a duration the timeline endpoint formatted
 // itself ("1234ms" or "N/A").
-func mcpTimelineDuration(v interface{}) string {
-	s, ok := v.(string)
-	if !ok {
-		if v == nil {
-			return "not measured"
-		}
-		s = fmt.Sprint(v)
-	}
-	if d := client.ParseBackendDuration(s); d.Set {
-		return strconv.FormatInt(d.Millis, 10) + " ms"
+func mcpTimelineDuration(d client.Duration) string {
+	if ms, ok := d.Millis(); ok {
+		return strconv.FormatInt(ms, 10) + " ms"
 	}
 	return "not measured"
 }

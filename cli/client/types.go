@@ -32,16 +32,16 @@ type TestConfig struct {
 // ClusterInfo from GET /api/cluster/info
 type ClusterInfo struct {
 	ClusterID   string       `json:"clusterId"`
-	BrokerCount interface{}  `json:"brokerCount"`
+	BrokerCount Int          `json:"brokerCount"`
 	Controller  *BrokerNode  `json:"controller,omitempty"`
 	Brokers     []BrokerNode `json:"brokers,omitempty"`
 }
 
 type BrokerNode struct {
-	ID   interface{} `json:"id"`
-	Host string      `json:"host"`
-	Port interface{} `json:"port"`
-	Rack string      `json:"rack"`
+	ID   Int    `json:"id"`
+	Host string `json:"host"`
+	Port Int    `json:"port"`
+	Rack string `json:"rack"`
 }
 
 type ClusterTopology struct {
@@ -661,9 +661,9 @@ func (r *ClusterHealthReport) ActiveController() (id int, ok bool) {
 }
 
 type PartitionHealthReport struct {
-	UnderReplicated int                      `json:"underReplicated"`
-	Offline         int                      `json:"offline"`
-	Problems        []map[string]interface{} `json:"problems,omitempty"`
+	UnderReplicated int                `json:"underReplicated"`
+	Offline         int                `json:"offline"`
+	Problems        []PartitionProblem `json:"problems,omitempty"`
 }
 
 // DisruptionAccepted is the 202 body from POST /api/disruptions — the plan was
@@ -695,9 +695,9 @@ type StepReport struct {
 	DisruptionType        string             `json:"disruptionType"`
 	ChaosOutcome          *ChaosOutcome      `json:"chaosOutcome,omitempty"`
 	PodTimeline           []PodEvent         `json:"podTimeline,omitempty"`
-	TimeToFirstReady      interface{}        `json:"timeToFirstReady,omitempty"`
-	TimeToAllReady        interface{}        `json:"timeToAllReady,omitempty"`
-	StrimziRecoveryTime   interface{}        `json:"strimziRecoveryTime,omitempty"`
+	TimeToFirstReady      Duration           `json:"timeToFirstReady,omitzero"`
+	TimeToAllReady        Duration           `json:"timeToAllReady,omitzero"`
+	StrimziRecoveryTime   Duration           `json:"strimziRecoveryTime,omitzero"`
 	PreDisruptionMetrics  *ReportSummary     `json:"preDisruptionMetrics,omitempty"`
 	PostDisruptionMetrics *ReportSummary     `json:"postDisruptionMetrics,omitempty"`
 	ImpactDeltas          map[string]float64 `json:"impactDeltas,omitempty"`
@@ -718,14 +718,14 @@ type PodEvent struct {
 }
 
 type DisruptionSummary struct {
-	TotalSteps               int         `json:"totalSteps"`
-	PassedSteps              int         `json:"passedSteps"`
-	WorstRecovery            interface{} `json:"worstRecovery,omitempty"`
-	AvgThroughputDegradation float64     `json:"avgThroughputDegradation"`
-	MaxP99LatencySpike       float64     `json:"maxP99LatencySpike"`
-	SlaViolated              bool        `json:"slaViolated"`
-	WorstIsrRecovery         interface{} `json:"worstIsrRecovery,omitempty"`
-	PeakConsumerLag          int64       `json:"peakConsumerLag,omitempty"`
+	TotalSteps               int      `json:"totalSteps"`
+	PassedSteps              int      `json:"passedSteps"`
+	WorstRecovery            Duration `json:"worstRecovery,omitzero"`
+	AvgThroughputDegradation float64  `json:"avgThroughputDegradation"`
+	MaxP99LatencySpike       float64  `json:"maxP99LatencySpike"`
+	SlaViolated              bool     `json:"slaViolated"`
+	WorstIsrRecovery         Duration `json:"worstIsrRecovery,omitzero"`
+	PeakConsumerLag          int64    `json:"peakConsumerLag,omitempty"`
 }
 
 type DisruptionTypeInfo struct {
@@ -734,19 +734,19 @@ type DisruptionTypeInfo struct {
 }
 
 type DisruptionTimeline struct {
-	Step             string      `json:"step"`
-	Type             string      `json:"type"`
-	Events           []PodEvent  `json:"events"`
-	TimeToFirstReady interface{} `json:"timeToFirstReady"`
-	TimeToAllReady   interface{} `json:"timeToAllReady"`
+	Step             string     `json:"step"`
+	Type             string     `json:"type"`
+	Events           []PodEvent `json:"events"`
+	TimeToFirstReady Duration   `json:"timeToFirstReady"`
+	TimeToAllReady   Duration   `json:"timeToAllReady"`
 }
 
 type IsrMetrics struct {
-	TimeToFullIsr       interface{} `json:"timeToFullIsr,omitempty"`
-	MinIsrDepth         int         `json:"minIsrDepth"`
-	UnderReplicatedPeak int         `json:"underReplicatedPeakCount"`
-	TotalPartitions     int         `json:"totalPartitions"`
-	Timeline            []IsrEntry  `json:"timeline,omitempty"`
+	TimeToFullIsr       Duration   `json:"timeToFullIsr,omitzero"`
+	MinIsrDepth         int        `json:"minIsrDepth"`
+	UnderReplicatedPeak int        `json:"underReplicatedPeakCount"`
+	TotalPartitions     int        `json:"totalPartitions"`
+	Timeline            []IsrEntry `json:"timeline,omitempty"`
 }
 
 type IsrEntry struct {
@@ -759,10 +759,10 @@ type IsrEntry struct {
 }
 
 type LagMetrics struct {
-	BaselineLag       int64       `json:"baselineLag"`
-	PeakLag           int64       `json:"peakLag"`
-	TimeToLagRecovery interface{} `json:"timeToLagRecovery,omitempty"`
-	Timeline          []LagEntry  `json:"timeline,omitempty"`
+	BaselineLag       int64      `json:"baselineLag"`
+	PeakLag           int64      `json:"peakLag"`
+	TimeToLagRecovery Duration   `json:"timeToLagRecovery,omitzero"`
+	Timeline          []LagEntry `json:"timeline,omitempty"`
 }
 
 type LagEntry struct {
@@ -839,36 +839,36 @@ type WebhookRegistration struct {
 
 // KafkaTopic from GET /api/kafka/topics
 type KafkaTopic struct {
-	Name              string      `json:"name"`
-	Internal          bool        `json:"internal"`
-	Partitions        int         `json:"partitions"`
-	ReplicationFactor int         `json:"replicationFactor"`
-	UnderReplicated   interface{} `json:"underReplicated"`
+	Name              string `json:"name"`
+	Internal          bool   `json:"internal"`
+	Partitions        int    `json:"partitions"`
+	ReplicationFactor int    `json:"replicationFactor"`
+	UnderReplicated   Int    `json:"underReplicated"`
 }
 
 // KafkaBrokerDetail is embedded in the cluster describe response
 type KafkaBrokerDetail struct {
-	ID   interface{} `json:"id"`
+	ID   Int         `json:"id"`
 	Host string      `json:"host"`
-	Port interface{} `json:"port"`
+	Port Int         `json:"port"`
 	Rack interface{} `json:"rack"`
 }
 
 // KafkaRecord from GET /api/kafka/consume/:topic
 type KafkaRecord struct {
-	Offset    interface{} `json:"offset"`
-	Partition interface{} `json:"partition"`
-	Timestamp interface{} `json:"timestamp"`
+	Offset    Int         `json:"offset"`
+	Partition Int         `json:"partition"`
+	Timestamp Int         `json:"timestamp"`
 	Key       interface{} `json:"key"`
 	Value     interface{} `json:"value"`
 }
 
 // ProduceMeta from POST /api/kafka/produce/:topic
 type ProduceMeta struct {
-	Topic     string      `json:"topic"`
-	Partition interface{} `json:"partition"`
-	Offset    interface{} `json:"offset"`
-	Timestamp interface{} `json:"timestamp"`
+	Topic     string `json:"topic"`
+	Partition Int    `json:"partition"`
+	Offset    Int    `json:"offset"`
+	Timestamp Int    `json:"timestamp"`
 }
 
 type CreateTopicRequest struct {

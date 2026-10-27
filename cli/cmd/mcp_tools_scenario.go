@@ -1231,7 +1231,8 @@ const (
 
 var mcpCaveatsScenario = []mcpCaveat{
 	{
-		ID: mcpCaveatAgentEnvelopeProposed,
+		ID:    mcpCaveatAgentEnvelopeProposed,
+		Short: "The agent envelope is proposed, not enforced: the Kates API applies no rate, volume or duration limit.",
 		Text: "The agent envelope draft_scenario checks is the one the Kates MCP plan proposes for runs an agent " +
 			"starts (§5.4-§5.5), with a rate cap of 20,000 records/s chosen by this server because the plan names " +
 			"none. Nothing enforces it today: POST /api/tests checks the type, the ranges and formats of fields, and " +
@@ -1249,7 +1250,8 @@ var mcpCaveatsScenario = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatScenarioShippedDefaults,
+		ID:    mcpCaveatScenarioShippedDefaults,
+		Short: "Defaults are the ones Kates ships; the cluster that runs the scenario may set others.",
 		Text: "draft_scenario reads nothing from the cluster. It fills what a scenario leaves out with the per-type " +
 			"defaults Kates ships (a LOAD run: up to 1,000,000 records of 1024 bytes within 10 minutes, at an unlimited " +
 			"rate); " +
@@ -1266,7 +1268,8 @@ var mcpCaveatsScenario = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatScenarioValidateGrading,
+		ID:    mcpCaveatScenarioValidateGrading,
+		Short: "A validate block is graded only by kates test apply --wait (not with --no-sla), and several limits apply only to integrity results.",
 		Text: "A validate block is graded only by kates test apply --wait, after the run, and not with --no-sla: " +
 			"against the run as a whole (the producers' latency and summed throughput, a consumer's row left out), " +
 			"or against each task row with --sla-scope task or perTask: true in the block. validateSLAs never checks " +

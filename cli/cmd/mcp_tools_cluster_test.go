@@ -297,4 +297,5 @@ func TestMCPClusterOverviewNeverTooLarge(t *testing.T) {
 var mcpCaveatIDsCluster = []mcpCaveatID{
 	mcpCaveatTopologyUnreadLooksEmpty,
 	mcpCaveatGroupLagCommitted,
+	mcpCaveatTopicListCached,
 }

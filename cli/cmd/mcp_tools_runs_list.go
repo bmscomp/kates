@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"net/http"
 	"regexp"
@@ -98,9 +97,9 @@ var mcpRunNotCarried = []string{
 }
 
 const (
-	mcpRunsDefaultPageSize = 10
-	mcpRunsMaxPageSize     = 25
-	mcpRunsMaxPage         = 10_000
+	mcpRunsDefaultLimit = 10
+	mcpRunsMaxLimit     = 25
+	mcpRunsMaxOffset    = 250_000
 	// With both filters the backend applies only the type (TestResource.java:
 	// 249-261), so the status is filtered here over the newest runs of the
 	// type, read in the backend's largest pages (size is capped at 200).
@@ -120,17 +119,17 @@ const (
 type mcpListRunsIn struct {
 	Type   string `json:"type,omitempty" jsonschema:"only runs of this test type"`
 	Status string `json:"status,omitempty" jsonschema:"only runs stored in this status; a cancelled run is stored as FAILED"`
-	Page   int    `json:"page,omitempty" jsonschema:"page number, from 0 (default 0)"`
-	Size   int    `json:"size,omitempty" jsonschema:"runs per page, 1 to 25 (default 10)"`
+	Offset int    `json:"offset,omitempty" jsonschema:"the first run to return, counted from 0 (default 0); pass nextOffset from the previous result for the next page"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"most runs to return, 1 to 25 (default 10)"`
 }
 
 type mcpListRunsOut struct {
 	Filters    mcpListRunsFilters `json:"filters"`
-	Page       int                `json:"page"`
-	Size       int                `json:"size"`
+	Offset     int                `json:"offset"`
+	Limit      int                `json:"limit"`
 	Total      int64              `json:"total" jsonschema:"runs matching the filters; a lower bound when totalExact is false"`
 	TotalExact bool               `json:"totalExact" jsonschema:"false when both filters were given and the runs read did not cover every run of the type"`
-	HasMore    bool               `json:"hasMore" jsonschema:"true when the next page has runs"`
+	NextOffset *int               `json:"nextOffset,omitempty" jsonschema:"pass as offset for the next page; absent on the last page"`
 	Scanned    int                `json:"scanned,omitempty" jsonschema:"with both filters: how many runs of the type were read to filter by status"`
 	Runs       []mcpRunRow        `json:"runs"`
 }
@@ -158,8 +157,7 @@ func mcpListRunsInputSchema() *jsonschema.Schema {
 	return mcpInputSchema[mcpListRunsIn]("list_runs", func(s *jsonschema.Schema) {
 		s.Properties["type"].Enum = mcpAnys(mcpTestTypes)
 		s.Properties["status"].Enum = mcpAnys(mcpRunStatuses)
-		mcpBounds(s.Properties["page"], 0, mcpRunsMaxPage)
-		mcpBounds(s.Properties["size"], 1, mcpRunsMaxPageSize)
+		mcpPageSchema(s, mcpRunsMaxOffset, mcpRunsMaxLimit)
 	})
 }
 
@@ -171,41 +169,46 @@ func mcpListRuns(ctx context.Context, call *mcpCall, in mcpListRunsIn) (mcpListR
 	if in.Status != "" && !slices.Contains(mcpRunStatuses, in.Status) {
 		return out, mcpInvalidArgument("status must be one of "+strings.Join(mcpRunStatuses, ", ")+".", in.Status)
 	}
-	if in.Page < 0 || in.Page > mcpRunsMaxPage {
-		return out, mcpInvalidArgument(fmt.Sprintf("page must be from 0 to %d.", mcpRunsMaxPage), fmt.Sprint(in.Page))
+	limit, err := mcpPageArgs(in.Offset, in.Limit, mcpRunsMaxOffset, mcpRunsDefaultLimit, mcpRunsMaxLimit)
+	if err != nil {
+		return out, err
 	}
-	size := in.Size
-	if size == 0 {
-		size = mcpRunsDefaultPageSize
-	}
-	if size < 1 || size > mcpRunsMaxPageSize {
-		return out, mcpInvalidArgument(fmt.Sprintf("size must be from 1 to %d.", mcpRunsMaxPageSize), fmt.Sprint(in.Size))
-	}
-	out = mcpListRunsOut{Filters: mcpListRunsFilters{Type: in.Type, Status: in.Status}, Page: in.Page, Size: size}
+	out = mcpListRunsOut{Filters: mcpListRunsFilters{Type: in.Type, Status: in.Status}, Offset: in.Offset, Limit: limit}
 
 	var rows []client.MCPRun
+	hasMore := false
 	if in.Type != "" && in.Status != "" {
-		scan, err := mcpScanRunsByStatus(ctx, call, in.Type, in.Status, in.Page, size)
+		scan, err := mcpScanRunsByStatus(ctx, call, in.Type, in.Status, in.Offset, limit)
 		if err != nil {
 			return out, err
 		}
-		rows, out.Total, out.TotalExact, out.HasMore, out.Scanned = scan.rows, scan.total, scan.exact, scan.hasMore, scan.scanned
+		rows, out.Total, out.TotalExact, hasMore, out.Scanned = scan.rows, scan.total, scan.exact, scan.hasMore, scan.scanned
 	} else {
-		p, err := call.Client().MCPRunsPage(ctx, in.Type, in.Status, in.Page, size)
+		items, total, err := mcpBackendRange(in.Offset, limit, func(page, size int) ([]client.MCPRun, int64, error) {
+			p, err := call.Client().MCPRunsPage(ctx, in.Type, in.Status, page, size)
+			if err != nil {
+				return nil, 0, err
+			}
+			if p == nil {
+				return nil, 0, mcpRunEmptyAnswer()
+			}
+			return p.Items, p.Total, nil
+		})
 		if err != nil {
 			return out, err
 		}
-		if p == nil {
-			return out, mcpRunEmptyAnswer()
-		}
-		rows, out.Total, out.TotalExact = p.Items, p.Total, true
-		out.HasMore = int64(in.Page+1)*int64(size) < p.Total
+		rows, out.Total, out.TotalExact = items, total, true
+		hasMore = int64(in.Offset+len(rows)) < total
 	}
 	out.Runs = make([]mcpRunRow, 0, len(rows))
 	for _, r := range rows {
 		out.Runs = append(out.Runs, mcpRunRowFrom(call, r))
 	}
-	out.Runs = mcpCap(call, out.Runs, size)
+	out.Runs = mcpCap(call, out.Runs, limit)
+	if hasMore && len(out.Runs) > 0 {
+		next := in.Offset + len(out.Runs)
+		out.NextOffset = &next
+	}
 	mcpRunRowsCaveats(call, out.Runs)
 	return out, nil
 }
@@ -222,9 +225,9 @@ type mcpRunScan struct {
 // type, read in large pages, filtered by status here, until the requested
 // page and one more match are found, the type runs out, or mcpRunsMaxScan
 // runs were read.
-func mcpScanRunsByStatus(ctx context.Context, call *mcpCall, typ, status string, page, size int) (mcpRunScan, error) {
+func mcpScanRunsByStatus(ctx context.Context, call *mcpCall, typ, status string, offset, limit int) (mcpRunScan, error) {
 	var scan mcpRunScan
-	start, end := page*size, (page+1)*size
+	start, end := offset, offset+limit
 	var matches []client.MCPRun
 	for p := 0; scan.scanned < mcpRunsMaxScan; p++ {
 		pg, err := call.Client().MCPRunsPage(ctx, typ, "", p, mcpRunsScanPageSize)
@@ -1006,7 +1009,8 @@ const (
 // mcpCaveatsRuns.
 var mcpCaveatsRunsList = []mcpCaveat{
 	{
-		ID: mcpCaveatSummaryAveragesStartedTasks,
+		ID:    mcpCaveatSummaryAveragesStartedTasks,
+		Short: "A run's summary averages its started tasks' rates; percentiles are the worst task's and errorRate counts failed tasks.",
 		Text: "A run's summary is built from its tasks rather than measured over the run as a whole: throughput is " +
 			"the mean of the rates of the tasks that have started (a LOAD run's producer and consumer alike; not the " +
 			"sum over STRESS producers), and peak is the fastest task. A task that has not started is PENDING with " +
@@ -1032,7 +1036,8 @@ var mcpCaveatsRunsList = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatIntegrityFromStoredResult,
+		ID:    mcpCaveatIntegrityFromStoredResult,
+		Short: "Integrity results exist only after the read-back and only for runs stored since the API kept them; RPO only for resilience runs.",
 		Text: "An INTEGRITY run's integrity result is made when its consumer has read the records back, after " +
 			"the run's producing, so a run still under way has none yet. A run stored before the Kates API kept " +
 			"that result has none at all: get_run shows no integrity, its report has no Data Integrity section, " +
@@ -1056,7 +1061,8 @@ var mcpCaveatsRunsList = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatCancelStoredAsFailed,
+		ID:    mcpCaveatCancelStoredAsFailed,
+		Short: "A cancelled run is stored as FAILED; a task error \"Cancelled by user\" tells them apart.",
 		Text: "A cancelled run is stored as FAILED: there is no CANCELLED status, so cancel saves FAILED, answers " +
 			"FAILED with reason cancelled, and gives each task that had not finished the error \"Cancelled by user\". " +
 			"A FAILED run may therefore have been cancelled rather than have failed. That task error says which, " +
@@ -1071,7 +1077,8 @@ var mcpCaveatsRunsList = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatScenarioPhasesInTurn,
+		ID:    mcpCaveatScenarioPhasesInTurn,
+		Short: "A scenario's phase specs are not stored, and an older Kates API starts every phase at once.",
 		Text: "A scenario run stores its base spec merged with the type's defaults, and as requestedSpec the base " +
 			"spec as the scenario sent it. Each phase resolves its own spec from the base spec as sent and its own " +
 			"fields, without the type's defaults, and those specs are not stored: the spec shown is not what every " +

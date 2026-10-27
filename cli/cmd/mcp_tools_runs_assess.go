@@ -724,6 +724,7 @@ func mcpAssessAdvisorFrom(call *mcpCall, rs []client.MCPAdvisorRecommendation, e
 const mcpDiagnoseRunText = `Diagnose Kates test run %[1]s on the Kafka cluster this server is pinned to.
 
 1. Call get_run with run_id %[1]s. Note the type, status, effective spec, each task's status and error, the summary, and for an INTEGRITY run its integrity verdict, lost records, RTO and RPO.
+   If it is still PENDING, RUNNING or STOPPING, do not poll it in a loop: this server allows 60 calls a minute across every tool, and each read of an active run makes the backend poll it. Read it again no sooner than every 30 seconds, and stop once its durationMs has passed since it started; or report what you have and say when to look again.
 2. If the run is DONE or FAILED, call assess_run with run_id %[1]s. Note the regression verdict and whether the baseline had the same spec, whether each metric is below, within or above the noise band of earlier runs with the same spec (and how many runs the band has), broker skew, and the advisor's rules.
 3. Read the caveats in both results; read the kates://caveats resource for their sources if one matters to your conclusion.
 
@@ -776,7 +777,8 @@ const (
 // mcpCaveatsRuns.
 var mcpCaveatsRunsAssess = []mcpCaveat{
 	{
-		ID: mcpCaveatBrokerSkewProjected,
+		ID:    mcpCaveatBrokerSkewProjected,
+		Short: "Per-broker figures split the run's throughput by leader share when the report was built; they are not measured per broker.",
 		Text: "Per-broker figures in a run report are not measured per broker. When the backend first builds the " +
 			"report it reads the partition leaders of the run's topic from the cluster (a finished run's report is " +
 			"then cached, up to 200 reports), splits the run's throughput by each broker's share of those leaders, " +
@@ -789,7 +791,8 @@ var mcpCaveatsRunsAssess = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatRegressionOneBaseline,
+		ID:    mcpCaveatRegressionOneBaseline,
+		Short: "The regression check compares with one baseline run on fixed thresholds, whatever its spec.",
 		Text: "The regression check compares the run with the one baseline run set for its test type, whatever that " +
 			"run's spec, and flags a regression on fixed thresholds: average throughput down more than 10%, p99 up " +
 			"more than 20%, or errorRate up more than 0.001. It knows nothing of how much runs vary; the noise " +
@@ -797,7 +800,8 @@ var mcpCaveatsRunsAssess = []mcpCaveat{
 		Refs: []string{mcpJava + "service/BaselineService.java:67-135,148-158"},
 	},
 	{
-		ID: mcpCaveatAdvisorRulesOfThumb,
+		ID:    mcpCaveatAdvisorRulesOfThumb,
+		Short: "Advisor recommendations are fixed rules of thumb; the gains they mention were never measured.",
 		Text: "Advisor recommendations are fixed rules of thumb applied to the stored merged spec, the mean of the " +
 			"tasks' throughput and the p99 of the run's summary; the gains they mention were never measured. Two " +
 			"rules compare against the broker count of the cluster now, not when the run ran.",

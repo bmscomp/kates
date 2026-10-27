@@ -388,7 +388,7 @@ func mcpSecurityEmpty(what string) error {
 // mcpSecurityPaged returns the page of items the caller asked for, shrunk
 // until the result fits: set puts a page into out. It marks the call
 // truncated when items remain after the page. An offset past the last item
-// is refused, as cluster_topology refuses from_partition past the last
+// is refused, as cluster_topology refuses an offset past the last
 // partition: an empty page there would read as "no more problems".
 func mcpSecurityPaged[T any](call *mcpCall, out *mcpSecurityEvidenceOut, items []T, in mcpSecurityEvidenceIn, set func([]T)) error {
 	matched := len(items)
@@ -917,7 +917,8 @@ const (
 // in mcpCaveatIDsSecurity in the group's test file.
 var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 	{
-		ID: mcpCaveatSecurityConfigReadSilent,
+		ID:    mcpCaveatSecurityConfigReadSilent,
+		Short: "When Kafka does not answer the config or ACL read, the checks run on empty data and do not say so.",
 		Text: "The audit, pentest, TLS and certificate checks read the configuration of the first broker the " +
 			"backend lists (the config consistency check reads every broker's; compliance and drift run the audit). " +
 			"When Kafka does not answer that read, or the ACL read, the " +
@@ -932,7 +933,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityTLSConfigOnly,
+		ID:    mcpCaveatSecurityTLSConfigOnly,
+		Short: "TLS and certificate checks read broker-wide ssl.* settings only and never open a certificate.",
 		Text: "The TLS and certificate checks read the broker-wide ssl.* settings of the first broker listed, never " +
 			"its listeners or listener.name.<listener>.* settings, so they say nothing about whether a given listener " +
 			"is encrypted (see security-broker-wide-keys). A missing setting counts as the secure default the check " +
@@ -945,7 +947,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityBrokerWideKeys,
+		ID:    mcpCaveatSecurityBrokerWideKeys,
+		Short: "Listener checks read listener protocols, but TLS checks read only broker-wide keys and can miss per-listener TLS.",
 		Text: "The audit's SASL Authentication, SASL Mechanism Strength, No Plaintext Listeners and Listener Protocol " +
 			"Map checks and the pentest's metadata-leak and unencrypted checks take each listener's protocol from " +
 			"listeners and listener.security.protocol.map (a listener the map does not name has the protocol of its " +
@@ -978,7 +981,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityDriftNewChecks,
+		ID:    mcpCaveatSecurityDriftNewChecks,
+		Short: "Drift counts a check missing from the baseline as IMPROVED, even a FAIL; without a baseline there is no drift.",
 		Text: "Drift compares a fresh audit with the saved baseline by check name. A check the baseline lacks is " +
 			"compared with UNKNOWN and counted IMPROVED whatever its status, FAIL included, and a check the baseline " +
 			"has but the fresh audit lacks is not listed. Without a saved baseline there is no drift to report, and " +
@@ -991,7 +995,8 @@ var mcpCaveatsSecurity = mcpJoinCaveats([]mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityComplianceByCategory,
+		ID:    mcpCaveatSecurityComplianceByCategory,
+		Short: "Compliance relabels audit checks by category; it is not an assessment against the frameworks.",
 		Text: "The compliance mapping relabels the audit's checks and is not an assessment against the frameworks: " +
 			"CIS ids are the ones the checks carry, SOC2 and PCI-DSS controls are assigned by check category alone " +
 			"(auth, authz and transport for SOC2; transport, auth and limits for PCI-DSS), and the percentage is the " +

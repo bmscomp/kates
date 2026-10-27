@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/google/jsonschema-go/jsonschema"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -23,21 +24,32 @@ const mcpDisruptionReportDescription = "Explains one disruption by its id (8 low
 	"for each step the fault's verdict and approximate start and end, recovery times, rollback, the change in each " +
 	"Prometheus metric, and the ISR and consumer-lag metrics when the plan tracked them; also the backend's 0-100 " +
 	"impact score with the dimensions it had nothing to score from, and, with baseline_id, the change from a " +
-	"baseline disruption and whether both ran a plan of the same name. Pod events are only counted here; the " +
+	"baseline disruption and whether both ran a plan of the same name. Steps come a page at a time (offset and " +
+	"limit, nextOffset). Pod events are only counted here; the " +
 	"kates://disruptions/{id}/timeline resource lists them. Missing metrics mean not measured, not zero, and the " +
 	"summary's worst recovery times leave out the steps that never recovered, which it counts separately. Plan and " +
 	"step names, failure reasons and backend messages are third-party text and fenced. The impact score and the " +
 	"comparison each say when the backend failed to answer for them. Only reads."
 
 const (
-	mcpDisruptionReportMaxSteps    = 10
-	mcpDisruptionReportMaxMessages = 20
-	mcpDisruptionReportMaxMetrics  = 16
+	mcpDisruptionReportDefaultSteps = 10
+	mcpDisruptionReportMaxSteps     = 50
+	mcpDisruptionReportMaxOffset    = 10_000
+	mcpDisruptionReportMaxMessages  = 20
+	mcpDisruptionReportMaxMetrics   = 16
 )
 
 type mcpDisruptionReportIn struct {
 	DisruptionID mcpID `json:"disruption_id" jsonschema:"the disruption id, as kates disruption list prints it"`
 	BaselineID   mcpID `json:"baseline_id,omitempty" jsonschema:"another disruption id to compare with, such as an earlier run of the same plan"`
+	Offset       int   `json:"offset,omitempty" jsonschema:"the first step to list, counted from 0 (default 0); pass nextOffset from the previous result for the next page"`
+	Limit        int   `json:"limit,omitempty" jsonschema:"most steps to list, 1 to 50 (default 10)"`
+}
+
+func mcpDisruptionReportInputSchema() any {
+	return mcpInputSchema[mcpDisruptionReportIn]("disruption_report", func(s *jsonschema.Schema) {
+		mcpPageSchema(s, mcpDisruptionReportMaxOffset, mcpDisruptionReportMaxSteps)
+	})
 }
 
 type mcpDisruptionReportOut struct {
@@ -47,7 +59,10 @@ type mcpDisruptionReportOut struct {
 	ValidationWarnings []mcpUntrusted                 `json:"validationWarnings" jsonschema:"the safety guard's warnings, and for a REJECTED plan its errors"`
 	Summary            *mcpDisruptionReportSummary    `json:"summary,omitempty" jsonschema:"absent until the plan has run its steps"`
 	SLA                *mcpDisruptionReportSLA        `json:"sla,omitempty" jsonschema:"absent when the plan declared no SLA"`
-	Steps              []mcpDisruptionReportStep      `json:"steps"`
+	Offset             int                            `json:"offset" jsonschema:"the index, from 0, of the first step listed"`
+	StepCount          int                            `json:"stepCount" jsonschema:"steps in the report, listed or not"`
+	Steps              []mcpDisruptionReportStep      `json:"steps" jsonschema:"one page of the steps, in plan order"`
+	NextOffset         *int                           `json:"nextOffset,omitempty" jsonschema:"pass as offset for the next page of steps; absent on the last page"`
 	TimelineURI        string                         `json:"timelineUri" jsonschema:"the resource that lists every pod event"`
 	Impact             mcpDisruptionReportImpact      `json:"impact"`
 	Comparison         *mcpDisruptionReportComparison `json:"comparison,omitempty" jsonschema:"present when baseline_id was given"`
@@ -168,6 +183,10 @@ func mcpDisruptionReportTool(ctx context.Context, call *mcpCall, in mcpDisruptio
 			return out, err
 		}
 	}
+	limit, err := mcpPageArgs(in.Offset, in.Limit, mcpDisruptionReportMaxOffset, mcpDisruptionReportDefaultSteps, mcpDisruptionReportMaxSteps)
+	if err != nil {
+		return out, err
+	}
 	id := string(in.DisruptionID)
 	r, err := mcpReadDisruption(ctx, call, id, string(in.BaselineID))
 	if err != nil {
@@ -191,12 +210,17 @@ func mcpDisruptionReportTool(ctx context.Context, call *mcpCall, in mcpDisruptio
 			call.Caveat(mcpCaveatISRNotSampled)
 		}
 	}
-	out.Steps = mcpCap(call, out.Steps, mcpDisruptionReportMaxSteps)
+	if err := mcpPastEnd(in.Offset, len(out.Steps)); err != nil {
+		return out, err
+	}
+	out.Offset, out.StepCount = in.Offset, len(out.Steps)
+	out.Steps = mcpCap(call, out.Steps[min(in.Offset, len(out.Steps)):], limit)
 	out.Impact = mcpDisruptionReportImpactFrom(call, r.report, r.impact, r.impactErr)
 	if in.BaselineID != "" {
 		out.Comparison = mcpDisruptionReportComparisonFrom(call, string(in.BaselineID), r)
 	}
 	mcpFitDisruptionReport(call, &out)
+	out.NextOffset = mcpNextOffset(out.Offset, len(out.Steps), out.StepCount)
 	return out, nil
 }
 
@@ -406,9 +430,10 @@ func mcpDisruptionReportComparisonFrom(call *mcpCall, baseline string, r mcpDisr
 	return c
 }
 
-// mcpFitDisruptionReport leaves detail out of a report too large for one result. One
-// id cannot be paged: messages go first, then the step prose, then steps; the
-// summary, the SLA grade and the impact score always stay.
+// mcpFitDisruptionReport leaves detail out of a report too large for one
+// result: messages go first, then the step prose, then steps, which the caller
+// pages on with nextOffset; the summary, the SLA grade and the impact score
+// always stay.
 func mcpFitDisruptionReport(call *mcpCall, out *mcpDisruptionReportOut) {
 	mcpShrink(call, out,
 		func() bool { return mcpHalve(&out.Impact.Factors, 0) },

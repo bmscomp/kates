@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -80,7 +80,7 @@ var chaosShowCmd = &cobra.Command{
 			s := report.Summary
 			output.SubHeader("Summary")
 			output.KeyValue("Steps", fmt.Sprintf("%d/%d passed", s.PassedSteps, s.TotalSteps))
-			if s.WorstRecovery != nil {
+			if !s.WorstRecovery.IsZero() {
 				output.KeyValue("Worst Recovery", fmt.Sprintf("%v", s.WorstRecovery))
 			}
 			output.KeyValue("Throughput Impact", fmt.Sprintf("%+.1f%%", s.AvgThroughputDegradation))

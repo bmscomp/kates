@@ -2567,19 +2567,35 @@ The API key grants every endpoint. An agent that can also run shell commands can
 
 #### What the Server Exposes
 
-Twelve tools, all read-only:
+Fourteen tools, all read-only:
 
-| Area | Tools |
-|------|-------|
-| Cluster | `cluster_overview` (start here: clusterId, brokers, partition health, the KRaft quorum, alert rules), `cluster_topology` (node pools, controllers, brokers; with a topic, its partitions), `consumer_group_lag` (one group's lag by topic, partition and leader) |
-| Kates activity | `kates_activity` (tests not yet finished, runs, disruption reports and audit rows since a time) |
-| Test runs | `list_runs`, `get_run` (effective spec, the request's own spec fields, tasks, summary and an INTEGRITY run's integrity result), `assess_run` (regression, a noise band over earlier runs with the same spec, broker skew, advisor rules) |
-| Chaos | `list_chaos_catalog` (disruption types, playbooks, templates, chaos providers), `preview_disruption` (the Kates API's dry run of a playbook or an ad-hoc plan), `disruption_report` (one disruption, with an optional baseline) |
-| Security and scenarios | `security_evidence` (the security checks, as a lab posture and drift check), `draft_scenario` (checks a `kates test apply` scenario file and saves nothing) |
+<!-- mcp-tools -->
+| Tool | Area | What it returns | Paged |
+|------|------|-----------------|-------|
+| `cluster_overview` | Cluster | Start here: clusterId, brokers, partition health, the KRaft quorum, alert rules | No |
+| `cluster_topology` | Cluster | Node pools, controllers, brokers; with a topic, its partitions | Partitions |
+| `list_topics` | Cluster | Topic names, in name order | Yes |
+| `list_consumer_groups` | Cluster | Consumer groups and their state, in id order | Yes |
+| `consumer_group_lag` | Cluster | One group's lag by topic, partition and leader | Partitions |
+| `kates_activity` | Kates activity | Tests not yet finished, runs, disruption reports and audit rows since a time | Each list |
+| `list_runs` | Test runs | Runs, newest first, by type and status | Yes |
+| `get_run` | Test runs | Effective spec, the request's own spec fields, tasks, summary and an INTEGRITY run's integrity result | No |
+| `assess_run` | Test runs | Regression, a noise band over earlier runs with the same spec, broker skew, advisor rules | No |
+| `list_chaos_catalog` | Chaos | Disruption types, playbooks, templates, chaos providers | No |
+| `preview_disruption` | Chaos | The Kates API's dry run of a playbook or an ad-hoc plan | No |
+| `disruption_report` | Chaos | One disruption, with an optional baseline | Steps |
+| `security_evidence` | Security | The security checks, as a lab posture and drift check | Detail sections |
+| `draft_scenario` | Scenarios | Checks a `kates test apply` scenario file and saves nothing | No |
+<!-- /mcp-tools -->
+
+Every paged tool takes `offset`, the first item counted from 0, and `limit`, the most items to return, and its result carries `nextOffset` while more items remain. Pass that value as `offset` for the next page. `list_runs` took `page` and `size`, and `cluster_topology` took `from_partition` and returned `nextFromPartition`, before they moved to this vocabulary; the old names are refused.
+
+`tools/list` gives each tool a short summary and the outline of its result, and stays under 80,000 bytes so that it does not crowd the agent's context on every turn. The long description of a tool and the meaning of each result field are in the resource `kates://docs/mcp/<tool>`, and `kates://docs/mcp` lists them all.
 
 Resources, which Claude Code offers as `@` mentions:
 
-- `kates://caveats` — every caveat the tools can attach, with the source files each was checked against
+- `kates://caveats` — the full text of every caveat the tools can attach, with the source files each was checked against
+- `kates://docs/mcp` and `kates://docs/mcp/{tool}` — each tool's full description, its arguments, the caveats it always carries and every field of its result
 - `kates://runs/{id}/report.md` — a run's Markdown report
 - `kates://disruptions/{id}/timeline` — a disruption's steps and pod events
 - `kates://playbooks/{name}` — a built-in playbook's resolved plan
@@ -2592,7 +2608,7 @@ What the server never does: start or cancel a test; run a disruption, playbook o
 
 #### Reading the Results
 
-Every tool result carries the pinned cluster (`cluster.id` and `cluster.label`), the tier (`observe`, the only one so far), the result itself under `data`, `truncated`, which is true when a list was cut to fit, and `caveats`: the limits of the data the result rests on, such as a summary that averages tasks or alert rules that are definitions rather than firing alerts. The `kates://caveats` resource lists every caveat, and the server's instructions tell the agent to read them before drawing conclusions.
+Every tool result carries the pinned cluster (`cluster.id` and `cluster.label`), the tier (`observe`, the only one so far), the result itself under `data`, `truncated`, which is true when a list was cut to fit, and `caveats`: the limits of the data the result rests on, such as a summary that averages tasks or alert rules that are definitions rather than firing alerts. Each caveat in a result is an id and a one-line summary. The `kates://caveats` resource holds the full text of every caveat, and the server's instructions tell the agent to read them before drawing conclusions.
 
 Text that a third party controls — alert rule annotations, Kates API error messages, scenario and plan names, report Markdown, advisor text — arrives inside fences:
 
@@ -2618,7 +2634,7 @@ A failed call returns an error with a fixed code, a message, the fenced detail a
 | `KATES_RESULT_TOO_LARGE` | The result would not fit; ask for a smaller page |
 | `KATES_INTERNAL` | A bug in `kates mcp` |
 
-Results stay under 48,000 bytes, below Claude Code's default limit on tool output; lists are paged, or cut with `truncated` set.
+Results stay under 48,000 bytes, below Claude Code's default limit on tool output; lists are paged, or cut with `truncated` set. The caveats do not count against that budget, so a result is never cut because caveats apply to it.
 
 #### Client Setup
 

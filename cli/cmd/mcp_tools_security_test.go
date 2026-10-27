@@ -386,7 +386,7 @@ func TestMCPSecurityEvidencePosturePages(t *testing.T) {
 	}
 
 	// An offset past the last item is refused, as cluster_topology refuses a
-	// from_partition past the last partition: an empty page there read as
+	// an offset past the last partition: an empty page there read as
 	// "no more problems".
 	for _, offset := range []int{30, 31, 1000} {
 		e := h.callErr("security_evidence", map[string]any{"section": "posture", "offset": offset, "limit": 12})

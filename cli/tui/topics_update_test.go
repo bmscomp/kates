@@ -100,11 +100,11 @@ func TestTopicsConsumeKeepsTheLast100Records(t *testing.T) {
 	for i := range 12 {
 		recs := make([]client.KafkaRecord, 10)
 		for j := range recs {
-			recs[j] = client.KafkaRecord{Offset: i*10 + j, Value: strings.Repeat("x", 60)}
+			recs[j] = client.KafkaRecord{Offset: client.IntOf(int64(i*10 + j)), Value: strings.Repeat("x", 60)}
 		}
 		m, _ = m.Update(consumeResultMsg{records: recs})
 	}
-	if len(m.records) != 100 || m.records[0].Offset != 20 {
+	if len(m.records) != 100 || m.records[0].Offset.Int() != 20 {
 		t.Errorf("%d records, first offset %v; want the last 100", len(m.records), m.records[0].Offset)
 	}
 	if view := plain(m.viewConsume()); !strings.Contains(view, "...") {

@@ -230,8 +230,8 @@ func TestMCPClusterTopologyTopic(t *testing.T) {
 	for _, p := range tp.Partitions {
 		parts = append(parts, p.Partition)
 	}
-	if fmt.Sprint(parts) != "[0 1 2 3 4 5]" || tp.NextFromPartition != nil || tp.FromPartition != 0 {
-		t.Errorf("partitions %v next %v, want all six in order and no next page", parts, tp.NextFromPartition)
+	if fmt.Sprint(parts) != "[0 1 2 3 4 5]" || tp.NextOffset != nil || tp.Offset != 0 {
+		t.Errorf("partitions %v next %v, want all six in order and no next page", parts, tp.NextOffset)
 	}
 	if p := tp.Partitions[1]; p.Leader != -1 || len(p.ISR) != 0 || p.ISR == nil || !p.UnderReplicated {
 		t.Errorf("partition 1 = %+v, want leaderless with an empty ISR", p)
@@ -309,21 +309,21 @@ func TestMCPClusterTopologyPages(t *testing.T) {
 
 	page := func(from int) (mcpEnvelope, *mcpTopicLayout) {
 		t.Helper()
-		env := h.callOK("cluster_topology", map[string]any{"topic": "events", "from_partition": from})
+		env := h.callOK("cluster_topology", map[string]any{"topic": "events", "offset": from})
 		return env, mcpData[mcpClusterTopologyOut](t, env).Topic
 	}
 	seen := 0
 	for from, i := 0, 0; ; i++ {
 		env, tp := page(from)
-		if tp.FromPartition != from || tp.Partitions[0].Partition != from {
-			t.Fatalf("page %d starts at %d (fromPartition %d), want %d", i, tp.Partitions[0].Partition, tp.FromPartition, from)
+		if tp.Offset != from || tp.Partitions[0].Partition != from {
+			t.Fatalf("page %d starts at %d (offset %d), want %d", i, tp.Partitions[0].Partition, tp.Offset, from)
 		}
 		// The summaries cover the whole topic on every page.
 		if tp.PartitionCount != 250 || len(tp.Leaders) != 3 || tp.Leaders[0].Leaders != 84 {
 			t.Errorf("page %d: summaries %d %v", i, tp.PartitionCount, tp.Leaders)
 		}
 		seen += len(tp.Partitions)
-		if tp.NextFromPartition == nil {
+		if tp.NextOffset == nil {
 			if env.Truncated {
 				t.Error("the last page cut nothing, truncated must be false")
 			}
@@ -332,7 +332,7 @@ func TestMCPClusterTopologyPages(t *testing.T) {
 		if !env.Truncated || len(tp.Partitions) != mcpTopologyPartitionsPage {
 			t.Errorf("page %d: truncated=%v with %d partitions", i, env.Truncated, len(tp.Partitions))
 		}
-		from = *tp.NextFromPartition
+		from = *tp.NextOffset
 	}
 	if seen != 250 {
 		t.Errorf("the pages list %d partitions, want 250", seen)
@@ -342,9 +342,9 @@ func TestMCPClusterTopologyPages(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{"past the last partition", map[string]any{"topic": "events", "from_partition": 250}},
-		{"negative", map[string]any{"topic": "events", "from_partition": -1}},
-		{"without a topic", map[string]any{"from_partition": 5}},
+		{"past the last partition", map[string]any{"topic": "events", "offset": 250}},
+		{"negative", map[string]any{"topic": "events", "offset": -1}},
+		{"without a topic", map[string]any{"offset": 5}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if e := h.callErr("cluster_topology", tc.args); e.Error.Code != mcpErrInvalidArgument || e.Error.Retryable {
@@ -764,15 +764,15 @@ func TestMCPClusterTopologyLargestResult(t *testing.T) {
 	h := newMCPHarness(t, fb)
 	fb.ResetLog()
 
-	res := h.call("cluster_topology", map[string]any{"topic": "events", "from_partition": 1000})
-	env := h.callOK("cluster_topology", map[string]any{"topic": "events", "from_partition": 1000})
+	res := h.call("cluster_topology", map[string]any{"topic": "events", "offset": 1000})
+	env := h.callOK("cluster_topology", map[string]any{"topic": "events", "offset": 1000})
 	got := mcpData[mcpClusterTopologyOut](t, env)
 	tp := got.Topic
-	if !env.Truncated || tp.NextFromPartition == nil {
-		t.Fatalf("truncated=%v next=%v, want a cut page with a next one", env.Truncated, tp.NextFromPartition)
+	if !env.Truncated || tp.NextOffset == nil {
+		t.Fatalf("truncated=%v next=%v, want a cut page with a next one", env.Truncated, tp.NextOffset)
 	}
-	if n := len(tp.Partitions); n == 0 || tp.Partitions[0].Partition != 1000 || *tp.NextFromPartition != 1000+n {
-		t.Errorf("page of %d from %d, next %d", n, tp.Partitions[0].Partition, *tp.NextFromPartition)
+	if n := len(tp.Partitions); n == 0 || tp.Partitions[0].Partition != 1000 || *tp.NextOffset != 1000+n {
+		t.Errorf("page of %d from %d, next %d", n, tp.Partitions[0].Partition, *tp.NextOffset)
 	}
 	if tp.PartitionCount != 3000 || len(tp.Leaders) != 3 {
 		t.Errorf("summaries were cut: %d partitions, leaders %v", tp.PartitionCount, tp.Leaders)

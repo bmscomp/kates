@@ -33,15 +33,22 @@ const (
 	mcpCaveatControllerDescribed   mcpCaveatID = "controller-from-describe-cluster"
 )
 
-// mcpCaveat is one thing the data behind a tool cannot show. Refs are paths
-// relative to the repository root, with the lines the text was checked
-// against; they are for the people maintaining this list, and appear only in
-// the kates://caveats resource, not in every result.
+// mcpCaveat is one thing the data behind a tool cannot show. Short is the one
+// sentence a result carries; Text is the whole of it, which only the
+// kates://caveats resource shows, so that a result does not carry the same
+// paragraphs on every call. Refs are paths relative to the repository root,
+// with the lines the text was checked against; they are for the people
+// maintaining this list, and appear only in kates://caveats.
 type mcpCaveat struct {
-	ID   mcpCaveatID
-	Text string
-	Refs []string
+	ID    mcpCaveatID
+	Short string
+	Text  string
+	Refs  []string
 }
+
+// mcpCaveatShortMax bounds a caveat's Short, which every result it applies
+// to carries.
+const mcpCaveatShortMax = 160
 
 const mcpJava = "kates/src/main/java/com/bmscomp/kates/"
 
@@ -65,13 +72,15 @@ func mcpAnchoredRef(ref string, anchors ...string) string {
 // definitions), the text says what the code does.
 var mcpCaveatsCore = []mcpCaveat{
 	{
-		ID: mcpCaveatLoadSingleProducer,
+		ID:    mcpCaveatLoadSingleProducer,
+		Short: "A LOAD run is one producer and one consumer whatever numProducers says; only STRESS runs parallel producers.",
 		Text: "A LOAD run is one producer and one consumer, whatever numProducers and numConsumers say, " +
 			"so it cannot show how the cluster behaves under parallel clients. STRESS starts one producer per numProducers.",
 		Refs: []string{mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1656-1665", "case LOAD ->", "case STRESS ->")},
 	},
 	{
-		ID: mcpCaveatReaperDeadline,
+		ID:    mcpCaveatReaperDeadline,
+		Short: "A run still active past its deadline is marked FAILED by a reaper; an older Kates API fails every run 30 minutes after creation.",
 		Text: "A run still PENDING, RUNNING or STOPPING past its deadline is marked FAILED by a reaper that checks " +
 			"every 60 seconds. The deadline counts from the run's creation, so time spent waiting to start counts. A " +
 			"current Kates API sets it when it creates the run: how long the run is set to last, at most " +
@@ -98,7 +107,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatMergedSpecOnly,
+		ID:    mcpCaveatMergedSpecOnly,
+		Short: "spec is the request merged with the type's defaults; requestedSpec holds what the request set, and is absent for older runs.",
 		Text: "A run's spec is the request merged with its test type's defaults. A field the type has a default " +
 			"for shows the value the run used; targetThroughput, consumerGroup, fetchMinBytes, fetchMaxWaitMs and " +
 			"the enable options appear only when the request set them, so enableIdempotence false there means the " +
@@ -126,14 +136,16 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatPentestConfigOnly,
+		ID:    mcpCaveatPentestConfigOnly,
+		Short: "The security pentest attacks nothing: it reads one broker's configuration and the ACL list.",
 		Text: "The security \"pentest\" attacks nothing. Its six checks read the configuration of the first broker " +
 			"listed and the ACL list; an ACL list it cannot read is reported as PROTECTED.",
 		Refs: []string{mcpAnchoredRef(mcpJava+"service/SecurityPentestService.java:40-67,102-206",
 			"public Map<String, Object> pentest(String testName)", "private Map<String, Object> pentestResult(")},
 	},
 	{
-		ID: mcpCaveatCVEFixedList,
+		ID:    mcpCaveatCVEFixedList,
+		Short: "The CVE check never learns the Kafka version, so every CVE on its fixed list reads PATCHED.",
 		Text: "The CVE check compares against a fixed list of seven Apache Kafka CVEs, the newest from 2024. It never " +
 			"learns the Kafka version: it reads kafkaVersion from the cluster description, which does not carry one, " +
 			"so the version is \"unknown\", the comparison fails, and every CVE is reported PATCHED with grade PASS.",
@@ -144,7 +156,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatSecurityTrendInMemory,
+		ID:    mcpCaveatSecurityTrendInMemory,
+		Short: "The security grade trend is an in-memory list in the backend pod; every posture read, this one included, adds to it.",
 		Text: "The security grade trend is an in-memory list of the last 100 audits in the backend pod, lost on " +
 			"restart. Each read of GET /api/security/audit appends one entry, an agent's posture read included; the " +
 			"audits that compliance, baseline, drift and gate run internally do not (an older backend appended those " +
@@ -156,7 +169,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatTuningOneMeasurement,
+		ID:    mcpCaveatTuningOneMeasurement,
+		Short: "A TUNE_* run measures one configuration and compares none.",
 		Text: "A TUNE_* run executes one produce task with the spec's single configuration: it measures one setting " +
 			"and compares none.",
 		Refs: []string{
@@ -165,7 +179,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatTrendsMixSpecs,
+		ID:    mcpCaveatTrendsMixSpecs,
+		Short: "A trend takes every DONE run of the type in its window, whatever its spec.",
 		Text: "GET /api/trends selects runs by test type, date and status only: a trend takes every DONE run of " +
 			"that type in its window, whatever its spec (partitions, record size, throughput).",
 		Refs: []string{
@@ -177,7 +192,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatMinISRBrokerLevel,
+		ID:    mcpCaveatMinISRBrokerLevel,
+		Short: "This older backend leaves out a min.insync.replicas set at broker level; its absence does not mean 1.",
 		Text: "This Kates backend's topic detail left min.insync.replicas out: an older backend keeps only topic-level " +
 			"and default config entries, so a value set at broker level, which is where the kafka-cluster chart sets " +
 			"it (2), is missing from a topic's configs. Its absence does not mean 1. A current backend reports the " +
@@ -188,7 +204,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatPrometheusUnreachable,
+		ID:    mcpCaveatPrometheusUnreachable,
+		Short: "Kafka metrics come from Prometheus and are missing when it cannot be reached: missing means not measured, not zero.",
 		Text: "Kafka metrics in disruption reports come from Prometheus at kates.prometheus.url. The kates chart sets it " +
 			"to the Service of the monitoring stack kates deploy installs (monitoring-kube-prometheus-prometheus in " +
 			"namespace monitoring), and kates deploy to the namespace it uses. The metrics are missing when Prometheus " +
@@ -215,7 +232,8 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatChaosTimesApproximate,
+		ID:    mcpCaveatChaosTimesApproximate,
+		Short: "Fault start, end and duration are approximate by several seconds on the litmus-crd provider.",
 		Text: "On the default litmus-crd chaos provider the start time is taken before the ChaosEngine is created and " +
 			"the end is found by polling every 5 seconds, so fault start, end and duration are approximate by several seconds.",
 		Refs: []string{
@@ -226,19 +244,22 @@ var mcpCaveatsCore = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatAlertRulesNotFiring,
+		ID:    mcpCaveatAlertRulesNotFiring,
+		Short: "Alert rules are definitions, not firing alerts; an unreadable list looks empty.",
 		Text: "Cluster alerts are the alert rules defined in PrometheusRule resources in the Kafka namespace, limited " +
 			"to critical and warning severities and a fixed list of Kafka alert names. They are definitions, not alerts " +
 			"that are firing. When the rules cannot be read the list is empty, which looks the same as having none.",
 		Refs: []string{mcpJava + "service/ClusterAlertsService.java:22-49,58-109"},
 	},
 	{
-		ID:   mcpCaveatClusterDataCached,
-		Text: "The backend caches cluster info and the partition health check for 30 seconds, so those figures can be up to 30 seconds old.",
-		Refs: []string{mcpJava + "service/ClusterHealthService.java:45,72-89,233-236,371-372"},
+		ID:    mcpCaveatClusterDataCached,
+		Short: "Cluster info and the partition health check can be up to 30 seconds old.",
+		Text:  "The backend caches cluster info and the partition health check for 30 seconds, so those figures can be up to 30 seconds old.",
+		Refs:  []string{mcpJava + "service/ClusterHealthService.java:45,72-89,233-236,371-372"},
 	},
 	{
-		ID: mcpCaveatControllerDescribed,
+		ID:    mcpCaveatControllerDescribed,
+		Short: "The controller field is an arbitrary live broker on KRaft; the active controller is the quorum leader.",
 		Text: "cluster_overview's controller and health.controllerId, and the controller flag on assess_run's " +
 			"brokers, come from Kafka's DescribeCluster answer. A KRaft broker answers it with an arbitrary live " +
 			"broker rather than the active controller, so that broker can change between calls and says nothing " +
@@ -306,11 +327,11 @@ var mcpCaveatIndex = func() map[mcpCaveatID]mcpCaveat {
 	return m
 }()
 
-// mcpCaveatRef is how a caveat appears in a result: its id and text. The
-// source refs stay in kates://caveats.
+// mcpCaveatRef is how a caveat appears in a result: its id and its one-line
+// summary. The full text and the source refs stay in kates://caveats.
 type mcpCaveatRef struct {
-	ID   string `json:"id" jsonschema:"caveat id; kates://caveats lists every caveat with its sources"`
-	Text string `json:"text"`
+	ID   string `json:"id" jsonschema:"caveat id; kates://caveats has the full text of every caveat with its sources"`
+	Text string `json:"text" jsonschema:"one-line summary; read the full text in kates://caveats before relying on the data it names"`
 }
 
 const mcpCaveatsURI = "kates://caveats"
@@ -320,10 +341,10 @@ func mcpCaveatsMarkdown() string {
 	var b strings.Builder
 	b.WriteString("# Kates caveats\n\n")
 	b.WriteString("What the data behind the Kates tools cannot show. A tool result lists the ids of the caveats " +
-		"that apply to it. Each entry names the source files it was checked against, as paths relative to the " +
-		"Kates repository root.\n")
+		"that apply to it, each with a one-line summary; this is the full text. Each entry names the source files " +
+		"it was checked against, as paths relative to the Kates repository root.\n")
 	for _, c := range mcpCaveats {
-		fmt.Fprintf(&b, "\n## %s\n\n%s\n\nSources:\n", c.ID, c.Text)
+		fmt.Fprintf(&b, "\n## %s\n\n%s\n\n%s\n\nSources:\n", c.ID, c.Short, c.Text)
 		for _, r := range c.Refs {
 			fmt.Fprintf(&b, "- `%s`\n", r)
 		}
@@ -336,7 +357,7 @@ func registerMCPCaveatsResource(s *mcp.Server, deps *mcpDeps) {
 		URI:         mcpCaveatsURI,
 		Name:        "caveats",
 		Title:       "Kates caveats",
-		Description: "What the data behind the Kates tools cannot show, with the source files behind each caveat.",
+		Description: "The full text of every caveat a result names by id and summary, with the source files behind each.",
 		MIMEType:    "text/markdown",
 	}, mcpCaveatsMarkdown())
 }

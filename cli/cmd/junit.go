@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -55,25 +54,16 @@ type junitError struct {
 	Content string `xml:",chardata"`
 }
 
-// backendMillis reads a duration the backend sent in one of its forms,
-// "1234ms", "PT1.5S" or a number of seconds, as milliseconds. ok is false for
-// a value it cannot read, N/A among them.
-func backendMillis(v interface{}) (millis int64, ok bool) {
-	var d client.BackendDuration
-	switch t := v.(type) {
-	case string:
-		d = client.ParseBackendDuration(t)
-	case float64:
-		d = client.ParseBackendDuration(fmt.Sprintf("%v", t))
-	case json.Number:
-		d = client.ParseBackendDuration(t.String())
-	case int:
-		d = client.BackendDuration{Millis: int64(t) * 1000, Set: true}
-	}
-	if !d.Set || d.Millis < 0 {
+// backendMillis is a step's duration in milliseconds, read when the report
+// was decoded from any of the backend's forms ("1234ms", "PT1.5S" or a
+// number of seconds). ok is false for a value it cannot read, N/A among
+// them, and for a negative one.
+func backendMillis(d client.Duration) (millis int64, ok bool) {
+	millis, ok = d.Millis()
+	if !ok || millis < 0 {
 		return 0, false
 	}
-	return d.Millis, true
+	return millis, true
 }
 
 // junitSeconds is the decimal seconds a JUnit time attribute holds.

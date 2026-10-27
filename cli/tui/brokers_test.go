@@ -13,9 +13,9 @@ import (
 // indexed past the end and the dashboard died with the broker.
 func TestBrokersRefreshWithFewerBrokers(t *testing.T) {
 	brokers := func(n int) *client.ClusterInfo {
-		info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: n}
+		info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: client.IntOf(int64(n))}
 		for i := range n {
-			info.Brokers = append(info.Brokers, client.BrokerNode{ID: i, Host: "kafka", Port: 9092})
+			info.Brokers = append(info.Brokers, client.BrokerNode{ID: client.IntOf(int64(i)), Host: "kafka", Port: client.IntOf(9092)})
 		}
 		return info
 	}
@@ -62,8 +62,8 @@ func TestBrokersRefreshKeyWorksWithoutData(t *testing.T) {
 
 // Broker 0 answered DescribeCluster; broker 1 leads the KRaft quorum.
 func TestBrokersMarkTheKRaftLeader(t *testing.T) {
-	info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: 2, Controller: &client.BrokerNode{ID: 0},
-		Brokers: []client.BrokerNode{{ID: 0, Host: "kafka-0", Port: 9092}, {ID: 1, Host: "kafka-1", Port: 9092}}}
+	info := &client.ClusterInfo{ClusterID: "c1", BrokerCount: client.IntOf(2), Controller: &client.BrokerNode{ID: client.IntOf(0)},
+		Brokers: []client.BrokerNode{{ID: client.IntOf(0), Host: "kafka-0", Port: client.IntOf(9092)}, {ID: client.IntOf(1), Host: "kafka-1", Port: client.IntOf(9092)}}}
 	check := &client.ClusterHealthReport{ControllerID: 0,
 		KraftQuorum: &client.KraftQuorumHealth{LeaderID: 1, Voters: 3, HasLeader: true}}
 	m := brokersModel{width: 120, height: 40}

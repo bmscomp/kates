@@ -201,7 +201,7 @@ func TestMCPListRuns(t *testing.T) {
 	if paths := mcpPaths(fb.Requests()); fmt.Sprint(paths) != "[GET /api/cluster/info GET /api/tests?page=0&size=10]" {
 		t.Errorf("requests = %v", paths)
 	}
-	if got.Total != 4 || !got.TotalExact || got.HasMore || got.Page != 0 || got.Size != 10 || len(got.Runs) != 4 {
+	if got.Total != 4 || !got.TotalExact || got.NextOffset != nil || got.Offset != 0 || got.Limit != 10 || len(got.Runs) != 4 {
 		t.Fatalf("page = %+v", got)
 	}
 	r := got.Runs[0]
@@ -231,21 +231,21 @@ func TestMCPListRunsOneFilter(t *testing.T) {
 	h := newMCPHarness(t, fb)
 
 	mcpResetLog(t, fb)
-	got := mcpData[mcpListRunsOut](t, h.callOK("list_runs", map[string]any{"type": "LOAD", "size": 2}))
+	got := mcpData[mcpListRunsOut](t, h.callOK("list_runs", map[string]any{"type": "LOAD", "limit": 2}))
 	if last := mcpPaths(fb.Requests())[1]; last != "GET /api/tests?page=0&size=2&type=LOAD" {
 		t.Errorf("request = %s", last)
 	}
-	if got.Total != 3 || !got.HasMore || len(got.Runs) != 2 || got.Runs[1].ID != "0000000c" {
+	if got.Total != 3 || got.NextOffset == nil || *got.NextOffset != 2 || len(got.Runs) != 2 || got.Runs[1].ID != "0000000c" {
 		t.Errorf("type page = %+v", got)
 	}
 
 	mcpResetLog(t, fb)
-	env := h.callOK("list_runs", map[string]any{"status": "DONE", "page": 1, "size": 1})
+	env := h.callOK("list_runs", map[string]any{"status": "DONE", "offset": 1, "limit": 1})
 	got = mcpData[mcpListRunsOut](t, env)
 	if last := mcpPaths(fb.Requests())[1]; last != "GET /api/tests?page=1&size=1&status=DONE" {
 		t.Errorf("request = %s", last)
 	}
-	if got.Total != 2 || got.HasMore || len(got.Runs) != 1 || got.Runs[0].ID != "0000000d" {
+	if got.Total != 2 || got.NextOffset != nil || len(got.Runs) != 1 || got.Runs[0].ID != "0000000d" {
 		t.Errorf("status page = %+v", got)
 	}
 	mcpNoCaveat(t, env, mcpCaveatReaperDeadline)
@@ -270,7 +270,7 @@ func TestMCPListRunsBothFilters(t *testing.T) {
 	// The first page stops reading once it has its rows and one more: the
 	// total is then a lower bound.
 	mcpResetLog(t, fb)
-	got := mcpData[mcpListRunsOut](t, h.callOK("list_runs", map[string]any{"type": "LOAD", "status": "FAILED", "size": 2}))
+	got := mcpData[mcpListRunsOut](t, h.callOK("list_runs", map[string]any{"type": "LOAD", "status": "FAILED", "limit": 2}))
 	paths := mcpPaths(fb.Requests())[1:]
 	want := []string{
 		"GET /api/tests?page=0&size=200&type=LOAD",
@@ -279,7 +279,7 @@ func TestMCPListRunsBothFilters(t *testing.T) {
 	if fmt.Sprint(paths) != fmt.Sprint(want) {
 		t.Errorf("requests = %v, want %v", paths, want)
 	}
-	if got.Total != 4 || got.TotalExact || !got.HasMore || got.Scanned != 400 || len(got.Runs) != 2 ||
+	if got.Total != 4 || got.TotalExact || got.NextOffset == nil || got.Scanned != 400 || len(got.Runs) != 2 ||
 		got.Runs[0].ID != "00000007" || got.Runs[1].ID != "0000006b" {
 		t.Errorf("page = %+v", got)
 	}
@@ -287,17 +287,17 @@ func TestMCPListRunsBothFilters(t *testing.T) {
 	// The last page reads every run of the type: the total is exact and
 	// nothing follows.
 	mcpResetLog(t, fb)
-	got = mcpData[mcpListRunsOut](t, h.callOK("list_runs", map[string]any{"type": "LOAD", "status": "FAILED", "size": 2, "page": 2}))
+	got = mcpData[mcpListRunsOut](t, h.callOK("list_runs", map[string]any{"type": "LOAD", "status": "FAILED", "limit": 2, "offset": 4}))
 	if n := len(fb.Requests()); n != 4 {
 		t.Errorf("%d requests, want the pin check and three pages", n)
 	}
-	if got.Total != 5 || !got.TotalExact || got.HasMore || got.Scanned != 450 || len(got.Runs) != 1 || got.Runs[0].ID != "00000197" {
+	if got.Total != 5 || !got.TotalExact || got.NextOffset != nil || got.Scanned != 450 || len(got.Runs) != 1 || got.Runs[0].ID != "00000197" {
 		t.Errorf("last page = %+v", got)
 	}
 
 	// A page past the matches is empty, not an error.
-	got = mcpData[mcpListRunsOut](t, h.callOK("list_runs", map[string]any{"type": "LOAD", "status": "FAILED", "size": 2, "page": 9}))
-	if len(got.Runs) != 0 || got.Runs == nil || got.HasMore {
+	got = mcpData[mcpListRunsOut](t, h.callOK("list_runs", map[string]any{"type": "LOAD", "status": "FAILED", "limit": 2, "offset": 18}))
+	if len(got.Runs) != 0 || got.Runs == nil || got.NextOffset != nil {
 		t.Errorf("page past the end = %+v", got)
 	}
 	assertReadOnly(t, fb.Requests())
@@ -319,12 +319,12 @@ func TestMCPListRunsBothFiltersStopEarlyAndAtTheCap(t *testing.T) {
 	// Enough matches on the first page: one read, and the total is a lower
 	// bound.
 	mcpResetLog(t, fb)
-	env := h.callOK("list_runs", map[string]any{"type": "LOAD", "status": "RUNNING", "size": 2})
+	env := h.callOK("list_runs", map[string]any{"type": "LOAD", "status": "RUNNING", "limit": 2})
 	got := mcpData[mcpListRunsOut](t, env)
 	if n := len(fb.Requests()); n != 2 {
 		t.Errorf("%d requests, want the pin check and one page", n)
 	}
-	if got.TotalExact || !got.HasMore || got.Total != 3 || env.Truncated {
+	if got.TotalExact || got.NextOffset == nil || got.Total != 3 || env.Truncated {
 		t.Errorf("early stop = %+v truncated=%v", got, env.Truncated)
 	}
 
@@ -335,7 +335,7 @@ func TestMCPListRunsBothFiltersStopEarlyAndAtTheCap(t *testing.T) {
 	if n := len(fb.Requests()); n != 6 {
 		t.Errorf("%d requests, want the pin check and five pages", n)
 	}
-	if got.TotalExact || got.HasMore || got.Total != 0 || got.Scanned != 1000 || !env.Truncated {
+	if got.TotalExact || got.NextOffset != nil || got.Total != 0 || got.Scanned != 1000 || !env.Truncated {
 		t.Errorf("capped scan = %+v truncated=%v", got, env.Truncated)
 	}
 	assertReadOnly(t, fb.Requests())
@@ -347,7 +347,7 @@ func TestMCPListRunsEmpty(t *testing.T) {
 	h := newMCPHarness(t, fb)
 	env := h.callOK("list_runs", map[string]any{"type": "SPIKE"})
 	got := mcpData[mcpListRunsOut](t, env)
-	if got.Runs == nil || len(got.Runs) != 0 || got.Total != 0 || got.HasMore || !got.TotalExact {
+	if got.Runs == nil || len(got.Runs) != 0 || got.Total != 0 || got.NextOffset != nil || !got.TotalExact {
 		t.Errorf("empty = %+v", got)
 	}
 	assertReadOnly(t, fb.Requests())
@@ -362,10 +362,11 @@ func TestMCPListRunsArguments(t *testing.T) {
 		{"type": "load"},
 		{"type": "LOAD&status=DONE"},
 		{"status": "CANCELLED"},
-		{"size": 26},
-		{"size": 0.5},
-		{"page": -1},
-		{"page": mcpRunsMaxPage + 1},
+		{"limit": 26},
+		{"limit": 0.5},
+		{"offset": -1},
+		{"offset": mcpRunsMaxOffset + 1},
+		{"page": 1},
 		{"extra": true},
 	} {
 		if e := h.callErr("list_runs", args); e.Error.Code != mcpErrInvalidArgument {
@@ -380,8 +381,8 @@ func TestMCPListRunsArguments(t *testing.T) {
 	if _, err := mcpListRuns(context.Background(), nil, mcpListRunsIn{Type: "load"}); !mcpIsCode(err, mcpErrInvalidArgument) {
 		t.Errorf("handler accepted a bad type: %v", err)
 	}
-	if _, err := mcpListRuns(context.Background(), nil, mcpListRunsIn{Size: 99}); !mcpIsCode(err, mcpErrInvalidArgument) {
-		t.Errorf("handler accepted a bad size: %v", err)
+	if _, err := mcpListRuns(context.Background(), nil, mcpListRunsIn{Limit: 99}); !mcpIsCode(err, mcpErrInvalidArgument) {
+		t.Errorf("handler accepted a bad limit: %v", err)
 	}
 	assertReadOnly(t, fb.Requests())
 }
@@ -2026,7 +2027,8 @@ func TestMCPDiagnoseRunPrompt(t *testing.T) {
 				t.Fatalf("messages = %+v", res.Messages)
 			}
 			text := res.Messages[0].Content.(*mcp.TextContent).Text
-			for _, want := range []string{"get_run with run_id 0a1b2c3d", "assess_run with run_id 0a1b2c3d", "kates://caveats", "untrusted", "only reads"} {
+			for _, want := range []string{"get_run with run_id 0a1b2c3d", "assess_run with run_id 0a1b2c3d", "kates://caveats", "untrusted", "only reads",
+				fmt.Sprintf("allows %d calls a minute", mcpDefaultLimits.CallsPerMinute), "no sooner than every 30 seconds"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("the prompt lacks %q:\n%s", want, text)
 				}

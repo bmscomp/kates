@@ -177,9 +177,24 @@ func TestMCPEveryToolIsGuarded(t *testing.T) {
 // TestMCPUntrustedFieldsAreMarked: every fenced field in an output schema
 // tells the model it is third-party text, even when the field has its own
 // description.
+//
+// tools/list shows the mark (title and note) without the field's own
+// description, which the full schema behind kates://docs/mcp/<tool> keeps
+// after the note.
 func TestMCPUntrustedFieldsAreMarked(t *testing.T) {
 	h := newMCPHarness(t, newMCPFakeBackend(t, "cluster-a"))
-	raw, err := json.Marshal(h.tools["cluster_overview"].OutputSchema)
+	for _, full := range []bool{false, true} {
+		schema := any(h.tools["cluster_overview"].OutputSchema)
+		if full {
+			schema = h.deps.toolDocs["cluster_overview"].Out
+		}
+		mcpCheckAlertRuleMarks(t, schema, full)
+	}
+}
+
+func mcpCheckAlertRuleMarks(t *testing.T, outputSchema any, full bool) {
+	t.Helper()
+	raw, err := json.Marshal(outputSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,8 +228,8 @@ func TestMCPUntrustedFieldsAreMarked(t *testing.T) {
 			t.Errorf("alert rule field %s is not marked untrusted: %+v", field, p)
 		}
 	}
-	if !strings.Contains(props["expr"].Description, "PromQL") {
-		t.Errorf("the field's own description must follow the note: %q", props["expr"].Description)
+	if full != strings.Contains(props["expr"].Description, "PromQL") {
+		t.Errorf("full=%v: the field's own description must follow the note in the full schema only: %q", full, props["expr"].Description)
 	}
 	for _, field := range []string{"severity", "source"} {
 		if strings.HasPrefix(props[field].Description, mcpUntrustedNote) {

@@ -244,6 +244,13 @@ var mcpIdentifierFields = map[string]bool{
 	// GET /api/whoami names it, cleaned and bounded.
 	"mcpActivityAuditRow.Target": true,
 	"mcpActivityAuditRow.Actor":  true,
+
+	// A topic name or consumer group id in a list: passed through when it has
+	// the shape of a Kafka topic name, which holds no prose, else fenced
+	// (mcpPlainOrFenced). A group's state is Kafka's fixed vocabulary.
+	"mcpListTopicsOut.Topics": true,
+	"mcpGroupItem.Group":      true,
+	"mcpGroupItem.State":      true,
 }
 
 // mcpOutputStringFields walks every type reachable from the registered

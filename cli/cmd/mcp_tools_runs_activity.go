@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"time"
 
@@ -30,7 +29,8 @@ func registerMCPKatesActivity(s *mcp.Server, deps *mcpDeps) {
 			"disruption, its id; rows older than the Kates API's recording of actors name no one. Disruptions appear only when Kates wrote a report " +
 			"row. since is an RFC 3339 time, a duration back from now such as 30m or 2h, or a clock time such " +
 			"as 13:30 (its latest occurrence, in the server's time zone); the default is 1h. Each list holds " +
-			"at most limit items; count and complete say when a list is cut. Plan names and audit details " +
+			"at most limit items from offset on, with nextOffset when it has more; count and complete say when a " +
+			"list is cut. Plan names and audit details " +
 			"are fenced. Only reads.",
 	}, mcpKatesActivity, mcpCaveatAuditActorRecorded, mcpCaveatActivityDisruptionRows)
 }
@@ -41,15 +41,19 @@ const (
 	mcpActivityPageSize     = 50
 	mcpActivityMaxPages     = 4
 	mcpActivityDefaultSince = "1h"
+	// mcpActivityMaxOffset keeps offset+limit within one backend page of 200.
+	mcpActivityMaxOffset = 170
 )
 
 type mcpActivityIn struct {
-	Since string `json:"since,omitempty" jsonschema:"an RFC 3339 time, a duration back from now such as 30m or 2h, or a clock time HH:MM or HH:MM:SS, meaning its latest occurrence in the server's time zone (default 1h)"`
-	Limit int    `json:"limit,omitempty" jsonschema:"most items in each list, 1 to 30 (default 15)"`
+	Since  string `json:"since,omitempty" jsonschema:"an RFC 3339 time, a duration back from now such as 30m or 2h, or a clock time HH:MM or HH:MM:SS, meaning its latest occurrence in the server's time zone (default 1h)"`
+	Offset int    `json:"offset,omitempty" jsonschema:"the first item of each list to return, counted from 0 (default 0); pass the list's nextOffset from the previous result for its next page"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"most items in each list, 1 to 30 (default 15)"`
 }
 
 type mcpActivityOut struct {
 	Since        string                 `json:"since" jsonschema:"the start of the window, in UTC"`
+	Offset       int                    `json:"offset" jsonschema:"where each list's page starts"`
 	RunningTests mcpActivityRuns        `json:"runningTests" jsonschema:"test runs stored as PENDING, RUNNING or STOPPING, whatever their age"`
 	TestsSince   mcpActivityRuns        `json:"testsSince" jsonschema:"test runs created since then, newest first"`
 	Disruptions  mcpActivityDisruptions `json:"disruptions"`
@@ -57,11 +61,13 @@ type mcpActivityOut struct {
 }
 
 type mcpActivityRuns struct {
-	Available bool         `json:"available" jsonschema:"false when the runs could not be read"`
-	ErrorCode mcpErrorCode `json:"errorCode,omitempty"`
-	Count     int64        `json:"count" jsonschema:"runs found; can exceed the runs listed"`
-	Complete  bool         `json:"complete" jsonschema:"false when reading stopped before every such run was seen"`
-	Runs      []mcpRunRow  `json:"runs"`
+	Available  bool         `json:"available" jsonschema:"false when the runs could not be read"`
+	ErrorCode  mcpErrorCode `json:"errorCode,omitempty"`
+	Count      int64        `json:"count" jsonschema:"runs found; can exceed the runs listed"`
+	Complete   bool         `json:"complete" jsonschema:"false when reading stopped before every such run was seen"`
+	Runs       []mcpRunRow  `json:"runs"`
+	NextOffset *int         `json:"nextOffset,omitempty" jsonschema:"pass as offset for this list's next page; absent on its last page"`
+	all        int
 }
 
 type mcpActivityDisruptions struct {
@@ -71,6 +77,9 @@ type mcpActivityDisruptions struct {
 	Complete        bool                       `json:"complete" jsonschema:"false when reading stopped before the start of the window"`
 	StoredAsRunning []mcpActivityDisruptionRow `json:"storedAsRunning" jsonschema:"reports stored as RUNNING among those read, whatever their age: plans still in progress, or stopped with the backend process and not yet marked INTERRUPTED. This does not mean a fault is injected now (caveat activity-disruption-rows)"`
 	Since           []mcpActivityDisruptionRow `json:"since" jsonschema:"reports written since then, newest first"`
+	NextOffset      *int                       `json:"nextOffset,omitempty" jsonschema:"pass as offset for the next page of storedAsRunning and since; absent when neither has more"`
+	allRunning      int
+	allSince        int
 }
 
 type mcpActivityDisruptionRow struct {
@@ -82,10 +91,11 @@ type mcpActivityDisruptionRow struct {
 }
 
 type mcpActivityAudit struct {
-	Available bool                  `json:"available" jsonschema:"false when the audit rows could not be read"`
-	ErrorCode mcpErrorCode          `json:"errorCode,omitempty"`
-	Total     int                   `json:"total" jsonschema:"rows since then that the backend read, at most 500"`
-	Rows      []mcpActivityAuditRow `json:"rows" jsonschema:"newest first"`
+	Available  bool                  `json:"available" jsonschema:"false when the audit rows could not be read"`
+	ErrorCode  mcpErrorCode          `json:"errorCode,omitempty"`
+	Total      int                   `json:"total" jsonschema:"rows since then that the backend read, at most 500"`
+	Rows       []mcpActivityAuditRow `json:"rows" jsonschema:"newest first"`
+	NextOffset *int                  `json:"nextOffset,omitempty" jsonschema:"pass as offset for the next page of rows; absent on the last page"`
 }
 
 type mcpActivityAuditRow struct {
@@ -101,7 +111,7 @@ type mcpActivityAuditRow struct {
 
 func mcpActivityInputSchema() *jsonschema.Schema {
 	return mcpInputSchema[mcpActivityIn]("kates_activity", func(s *jsonschema.Schema) {
-		mcpBounds(s.Properties["limit"], 1, mcpActivityMaxLimit)
+		mcpPageSchema(s, mcpActivityMaxOffset, mcpActivityMaxLimit)
 	})
 }
 
@@ -113,31 +123,30 @@ func mcpKatesActivity(ctx context.Context, call *mcpCall, in mcpActivityIn) (mcp
 	if err != nil {
 		return out, err
 	}
-	limit := in.Limit
-	if limit == 0 {
-		limit = mcpActivityDefaultLimit
+	limit, err := mcpPageArgs(in.Offset, in.Limit, mcpActivityMaxOffset, mcpActivityDefaultLimit, mcpActivityMaxLimit)
+	if err != nil {
+		return out, err
 	}
-	if limit < 1 || limit > mcpActivityMaxLimit {
-		return out, mcpInvalidArgument(fmt.Sprintf("limit must be from 1 to %d.", mcpActivityMaxLimit), fmt.Sprint(in.Limit))
-	}
+	pg := mcpActivityPage{offset: in.Offset, limit: limit}
 	out.Since = since.Format(time.RFC3339Nano)
+	out.Offset = in.Offset
 
 	var errs [4]error
 	g, gctx := errgroup.WithContext(ctx)
 	call.Go(g, func() error {
-		out.RunningTests, errs[0] = mcpActivityRunning(gctx, call, limit)
+		out.RunningTests, errs[0] = mcpActivityRunning(gctx, call, pg)
 		return nil
 	})
 	call.Go(g, func() error {
-		out.TestsSince, errs[1] = mcpActivityTestsSince(gctx, call, since, limit)
+		out.TestsSince, errs[1] = mcpActivityTestsSince(gctx, call, since, pg)
 		return nil
 	})
 	call.Go(g, func() error {
-		out.Disruptions, errs[2] = mcpActivityDisruptionsSince(gctx, call, since, limit)
+		out.Disruptions, errs[2] = mcpActivityDisruptionsSince(gctx, call, since, pg)
 		return nil
 	})
 	call.Go(g, func() error {
-		out.Audit, errs[3] = mcpActivityAuditSince(gctx, call, since, limit)
+		out.Audit, errs[3] = mcpActivityAuditSince(gctx, call, since, pg)
 		return nil
 	})
 	// Each list records its own failure, so the group fails only when one of
@@ -163,7 +172,36 @@ func mcpKatesActivity(ctx context.Context, call *mcpCall, in mcpActivityIn) (mcp
 		return mcpHalveLongest(0, mcpShrinkOf(&out.RunningTests.Runs), mcpShrinkOf(&out.TestsSince.Runs),
 			mcpShrinkOf(&out.Disruptions.Since), mcpShrinkOf(&out.Disruptions.StoredAsRunning), mcpShrinkOf(&out.Audit.Rows))
 	})
+	mcpActivityNextOffsets(&out)
 	return out, nil
+}
+
+// mcpActivityPage is the page of each list a call asked for.
+type mcpActivityPage struct{ offset, limit int }
+
+// mcpActivityCut returns items' page, never nil.
+func mcpActivityCut[T any](call *mcpCall, items []T, pg mcpActivityPage) []T {
+	return mcpCap(call, items[min(pg.offset, len(items)):], pg.limit)
+}
+
+// mcpActivityNextOffsets sets each list's nextOffset from what it lists once
+// the result fits, so a list the size cap cut pages on from where it stops.
+func mcpActivityNextOffsets(out *mcpActivityOut) {
+	o := out.Offset
+	out.RunningTests.NextOffset = mcpNextOffset(o, len(out.RunningTests.Runs), out.RunningTests.all)
+	out.TestsSince.NextOffset = mcpNextOffset(o, len(out.TestsSince.Runs), out.TestsSince.all)
+	d := &out.Disruptions
+	running := mcpNextOffset(o, len(d.StoredAsRunning), d.allRunning)
+	since := mcpNextOffset(o, len(d.Since), d.allSince)
+	switch {
+	case running == nil:
+		d.NextOffset = since
+	case since == nil || *running < *since:
+		d.NextOffset = running
+	default:
+		d.NextOffset = since
+	}
+	out.Audit.NextOffset = mcpNextOffset(o, len(out.Audit.Rows), out.Audit.Total)
 }
 
 // mcpActivitySince reads since: an RFC 3339 time, a positive duration back
@@ -204,12 +242,12 @@ func mcpActivitySince(s string, now time.Time) (time.Time, error) {
 
 // mcpActivityRunning lists the runs stored as PENDING, RUNNING or STOPPING.
 // The backend filters by one status at a time.
-func mcpActivityRunning(ctx context.Context, call *mcpCall, limit int) (mcpActivityRuns, error) {
+func mcpActivityRunning(ctx context.Context, call *mcpCall, pg mcpActivityPage) (mcpActivityRuns, error) {
 	out := mcpActivityRuns{Runs: []mcpRunRow{}}
 	var rows []client.MCPRun
 	complete := true
 	for _, status := range []string{"RUNNING", "PENDING", "STOPPING"} {
-		p, err := call.Client().MCPRunsPage(ctx, "", status, 0, limit)
+		p, err := call.Client().MCPRunsPage(ctx, "", status, 0, pg.offset+pg.limit)
 		if err != nil {
 			out.ErrorCode = call.deps.classify(err).Code
 			return out, err
@@ -234,14 +272,15 @@ func mcpActivityRunning(ctx context.Context, call *mcpCall, limit int) (mcpActiv
 	for _, r := range rows {
 		out.Runs = append(out.Runs, mcpRunRowFrom(call, r))
 	}
-	out.Runs = mcpCap(call, out.Runs, limit)
+	out.all = int(out.Count)
+	out.Runs = mcpActivityCut(call, out.Runs, pg)
 	out.Available, out.Complete = true, complete
 	return out, nil
 }
 
 // mcpActivityTestsSince reads runs newest first until one was created before
 // since.
-func mcpActivityTestsSince(ctx context.Context, call *mcpCall, since time.Time, limit int) (mcpActivityRuns, error) {
+func mcpActivityTestsSince(ctx context.Context, call *mcpCall, since time.Time, page mcpActivityPage) (mcpActivityRuns, error) {
 	out := mcpActivityRuns{Runs: []mcpRunRow{}}
 	for p := 0; p < mcpActivityMaxPages; p++ {
 		pg, err := call.Client().MCPRunsPage(ctx, "", "", p, mcpActivityPageSize)
@@ -273,7 +312,8 @@ func mcpActivityTestsSince(ctx context.Context, call *mcpCall, since time.Time, 
 	if !out.Complete {
 		call.MarkTruncated()
 	}
-	out.Runs = mcpCap(call, out.Runs, limit)
+	out.all = len(out.Runs)
+	out.Runs = mcpActivityCut(call, out.Runs, page)
 	out.Available = true
 	return out, nil
 }
@@ -285,7 +325,7 @@ func mcpActivityTestsSince(ctx context.Context, call *mcpCall, since time.Time, 
 // before it ended and has not started again to mark it INTERRUPTED
 // (DisruptionLauncher.java:95-123, DisruptionReportRepository.java:35-43,
 // DisruptionOrphanReconciler.java:171-222).
-func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.Time, limit int) (mcpActivityDisruptions, error) {
+func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.Time, page mcpActivityPage) (mcpActivityDisruptions, error) {
 	out := mcpActivityDisruptions{StoredAsRunning: []mcpActivityDisruptionRow{}, Since: []mcpActivityDisruptionRow{}}
 	for p := 0; p < mcpActivityMaxPages; p++ {
 		pg, err := call.Client().MCPActivityDisruptions(ctx, p, mcpActivityPageSize)
@@ -332,27 +372,33 @@ func mcpActivityDisruptionsSince(ctx context.Context, call *mcpCall, since time.
 	if !out.Complete {
 		call.MarkTruncated()
 	}
-	out.Since = mcpCap(call, out.Since, limit)
-	out.StoredAsRunning = mcpCap(call, out.StoredAsRunning, limit)
+	out.allSince, out.allRunning = len(out.Since), len(out.StoredAsRunning)
+	out.Since = mcpActivityCut(call, out.Since, page)
+	out.StoredAsRunning = mcpActivityCut(call, out.StoredAsRunning, page)
 	out.Available = true
 	return out, nil
 }
 
-func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, limit int) (mcpActivityAudit, error) {
+func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, page mcpActivityPage) (mcpActivityAudit, error) {
 	out := mcpActivityAudit{Rows: []mcpActivityAuditRow{}}
 	// A UTC "Z" instant: the backend ignores a since it cannot parse and
 	// returns every row (AuditService.java:110-115).
-	pg, err := call.Client().MCPActivityAudit(ctx, since.UTC().Format(time.RFC3339Nano), 0, limit)
+	items, total, err := mcpBackendRange(page.offset, page.limit, func(p, size int) ([]client.AuditEntry, int64, error) {
+		pg, err := call.Client().MCPActivityAudit(ctx, since.UTC().Format(time.RFC3339Nano), p, size)
+		if err != nil {
+			return nil, 0, err
+		}
+		if pg == nil {
+			return nil, 0, mcpRunEmptyAnswer()
+		}
+		return pg.Items, int64(pg.Total), nil
+	})
 	if err != nil {
 		out.ErrorCode = call.deps.classify(err).Code
 		return out, err
 	}
-	if pg == nil {
-		out.ErrorCode = mcpErrBackend
-		return out, mcpRunEmptyAnswer()
-	}
-	out.Total = pg.Total
-	for _, a := range pg.Items {
+	out.Total = int(total)
+	for _, a := range items {
 		out.Rows = append(out.Rows, mcpActivityAuditRow{
 			ID:            a.ID,
 			Action:        mcpSanitizeLine(a.Action, 32),
@@ -364,10 +410,10 @@ func mcpActivityAuditSince(ctx context.Context, call *mcpCall, since time.Time, 
 			Timestamp:     mcpSanitizeLine(a.Timestamp, 40),
 		})
 	}
-	if pg.Total > len(out.Rows) {
+	if out.Total > page.offset+len(out.Rows) {
 		call.MarkTruncated()
 	}
-	out.Rows = mcpCap(call, out.Rows, limit)
+	out.Rows = mcpCap(call, out.Rows, page.limit)
 	out.Available = true
 	return out, nil
 }
@@ -398,7 +444,8 @@ const (
 // mcpCaveatsRuns.
 var mcpCaveatsRunsActivity = []mcpCaveat{
 	{
-		ID: mcpCaveatAuditActorRecorded,
+		ID:    mcpCaveatAuditActorRecorded,
+		Short: "An audit row names the API key's principal; older rows name no one, and runs record no owner of their own.",
 		Text: "An audit row names who made a change: actor is the principal of the API key used, and " +
 			"principalType says whether a person (human), an agent or a schedule (system, actor system:scheduler) " +
 			"acted. Every REST and gRPC call that changes something leaves a row, a refused or failed one too, " +
@@ -425,7 +472,8 @@ var mcpCaveatsRunsActivity = []mcpCaveat{
 		},
 	},
 	{
-		ID: mcpCaveatActivityDisruptionRows,
+		ID:    mcpCaveatActivityDisruptionRows,
+		Short: "Disruptions are known only from report rows, some written only when they finish: a fault in progress can be missing.",
 		Text: "Disruptions are known only from the report rows Kates writes. A plan or playbook started through " +
 			"the API gets a RUNNING row when it starts, and the row takes the plan's outcome when the plan ends, " +
 			"keeping the time it started. A row stored as RUNNING is therefore a plan still in progress, whose " +

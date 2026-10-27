@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -23,7 +22,7 @@ const mcpConsumerGroupLagDescription = "How far one consumer group is behind on 
 	"call: leadership may have moved since the lag built up, for example after a broker restart or a disruption, " +
 	"so lag shown on a broker is not proof that broker caused it. Leaders are looked up for the topics with the " +
 	"most lag, up to 20; narrow with topic for the rest. The group id must be given exactly (ids are " +
-	"case-sensitive); this server cannot list groups, and it returns the id fenced as third-party text. Only reads."
+	"case-sensitive; list_consumer_groups lists them); it returns the id fenced as third-party text. Only reads."
 
 const (
 	// mcpLagDefaultLimit and mcpLagMaxLimit bound the partition list.
@@ -40,6 +39,9 @@ const (
 	// mcpLagMaxCommittedTopics bounds the topics listed when a topic filter
 	// matches none of the group's committed offsets.
 	mcpLagMaxCommittedTopics = 50
+	// mcpLagMaxOffset bounds offset: far more partitions than one group
+	// commits on.
+	mcpLagMaxOffset = 1_000_000
 	// mcpConsumerGroupMaxRunes bounds a group id argument. Kafka sets no
 	// limit; a longer id is refused rather than cut, which would ask for
 	// another group.
@@ -56,15 +58,16 @@ func registerMCPConsumerGroupLag(s *mcp.Server, deps *mcpDeps) {
 			one, most := 1, mcpConsumerGroupMaxRunes
 			p["group"].MinLength, p["group"].MaxLength = &one, &most
 			p["topic"].Pattern = mcpKafkaTopicPattern
-			mcpBounds(p["limit"], 1, mcpLagMaxLimit)
+			mcpPageSchema(s, mcpLagMaxOffset, mcpLagMaxLimit)
 		}),
 	}, mcpConsumerGroupLag, mcpCaveatGroupLagCommitted)
 }
 
 type mcpConsumerGroupLagIn struct {
-	Group string `json:"group" jsonschema:"the consumer group id, exactly as Kafka knows it"`
-	Topic string `json:"topic,omitempty" jsonschema:"only this topic's partitions"`
-	Limit int    `json:"limit,omitempty" jsonschema:"most partitions to list, largest lag first: 1 to 100 (default 50). partitionCount and totalLag always cover every partition; byLeader and leaderUnknown together cover every partition unless the result is truncated; topics lists the 50 topics with the most lag at most"`
+	Group  string `json:"group" jsonschema:"the consumer group id, exactly as Kafka knows it"`
+	Topic  string `json:"topic,omitempty" jsonschema:"only this topic's partitions"`
+	Offset int    `json:"offset,omitempty" jsonschema:"the first partition to list, counted from 0 in the order of most lag (default 0); pass nextOffset from the previous result for the next page"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"most partitions to list, largest lag first: 1 to 100 (default 50). partitionCount and totalLag always cover every partition; byLeader and leaderUnknown together cover every partition unless the result is truncated; topics lists the 50 topics with the most lag at most"`
 }
 
 // The group id in the result is the argument, fenced: plan §4.1 and §5.8 treat
@@ -85,7 +88,9 @@ type mcpConsumerGroupLagOut struct {
 	ByLeader        []mcpLagByLeader  `json:"byLeader" jsonschema:"lag by the broker leading each partition now, largest first; leadership may have moved since the lag built up. Leader -1 means the partition has no leader"`
 	LeaderUnknown   *mcpLagTotal      `json:"leaderUnknown,omitempty" jsonschema:"partitions whose leader was not looked up or could not be read; topics[].leaderLookup says which"`
 	Topics          []mcpLagTopic     `json:"topics" jsonschema:"lag by topic, largest first"`
+	Offset          int               `json:"offset" jsonschema:"where partitions starts in the list of every partition, largest lag first"`
 	Partitions      []mcpLagPartition `json:"partitions" jsonschema:"partitions, largest lag first, up to limit"`
+	NextOffset      *int              `json:"nextOffset,omitempty" jsonschema:"pass as offset for the next page of partitions; absent on the last page"`
 }
 
 type mcpLagByLeader struct {
@@ -152,12 +157,9 @@ func mcpConsumerGroupLag(ctx context.Context, call *mcpCall, in mcpConsumerGroup
 			return out, err
 		}
 	}
-	limit := in.Limit
-	switch {
-	case limit == 0:
-		limit = mcpLagDefaultLimit
-	case limit < 1 || limit > mcpLagMaxLimit:
-		return out, mcpInvalidArgument("limit must be between 1 and 100.", strconv.Itoa(in.Limit))
+	limit, err := mcpPageArgs(in.Offset, in.Limit, mcpLagMaxOffset, mcpLagDefaultLimit, mcpLagMaxLimit)
+	if err != nil {
+		return out, err
 	}
 
 	g, err := call.Client().ConsumerGroupDetail(ctx, in.Group)
@@ -231,9 +233,14 @@ func mcpConsumerGroupLag(ctx context.Context, call *mcpCall, in mcpConsumerGroup
 		}
 		return a.Partition < b.Partition
 	})
-	out.Partitions = mcpCap(call, parts, limit)
+	if err := mcpPastEnd(in.Offset, len(parts)); err != nil {
+		return out, err
+	}
+	out.Offset = in.Offset
+	out.Partitions = mcpCap(call, parts[min(in.Offset, len(parts)):], limit)
 	out.Topics = mcpCap(call, topics, mcpLagMaxTopics)
 	mcpFitLag(call, &out)
+	out.NextOffset = mcpNextOffset(in.Offset, len(out.Partitions), len(parts))
 	return out, nil
 }
 

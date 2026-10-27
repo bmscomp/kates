@@ -106,9 +106,9 @@ var clusterWatchCmd = &cobra.Command{
 				pRows := make([][]string, 0, len(ph.Problems))
 				for _, p := range ph.Problems {
 					pRows = append(pRows, []string{
-						fmt.Sprintf("%v", p["topic"]),
-						fmt.Sprintf("%v", p["partition"]),
-						output.ErrorStyle.Render(fmt.Sprintf("%v", p["issue"])),
+						p.Topic,
+						p.Partition.String(),
+						output.ErrorStyle.Render(p.Issue),
 					})
 				}
 				output.Table([]string{"Topic", "Partition", "Issue"}, pRows)

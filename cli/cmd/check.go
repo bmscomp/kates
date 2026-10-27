@@ -62,9 +62,9 @@ var clusterCheckCmd = &cobra.Command{
 				output.SubHeader("Problems")
 				pRows := make([][]string, 0, len(ph.Problems))
 				for _, p := range ph.Problems {
-					topic := fmt.Sprintf("%v", p["topic"])
-					partition := fmt.Sprintf("%v", p["partition"])
-					issue := fmt.Sprintf("%v", p["issue"])
+					topic := p.Topic
+					partition := p.Partition.String()
+					issue := p.Issue
 					pRows = append(pRows, []string{topic, partition, output.ErrorStyle.Render(issue)})
 				}
 				output.Table([]string{"Topic", "Partition", "Issue"}, pRows)

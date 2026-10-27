@@ -1,0 +1,114 @@
+{
+  "name": "list_topics",
+  "title": "Topics",
+  "description": "The cluster's topic names, in name order, paged. Only reads. Full description and every result field: kates://docs/mcp/list_topics.",
+  "annotations": {
+    "idempotentHint": false,
+    "openWorldHint": false,
+    "readOnlyHint": true,
+    "title": "Topics"
+  },
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "description": "most items to return, 1 to 200 (default 100 topics or 50 groups)",
+        "maximum": 200,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "offset": {
+        "description": "the first item to return, counted from 0 (default 0); pass nextOffset from the previous result for the next page",
+        "maximum": 1000000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "type": "object"
+  },
+  "outputSchema": {
+    "properties": {
+      "caveats": {
+        "items": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "text"
+          ],
+          "type": "object"
+        },
+        "type": [
+          "null",
+          "array"
+        ]
+      },
+      "cluster": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "data": {
+        "properties": {
+          "nextOffset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "offset",
+          "topics"
+        ],
+        "type": "object"
+      },
+      "tier": {
+        "type": "string"
+      },
+      "truncated": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "cluster",
+      "tier",
+      "caveats",
+      "truncated",
+      "data"
+    ],
+    "type": "object"
+  }
+}
