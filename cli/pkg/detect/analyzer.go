@@ -2,7 +2,6 @@ package detect
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -89,7 +88,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	// row, so --fail-on-warning never exits 1 over something no report shows.
 	addWarn := func(desc, detail string) {
 		v.Warns++
-		addCheck(desc, true, detail)
+		v.Checks = append(v.Checks, CheckResult{Description: desc, Status: true, Warn: true, Detail: detail})
 	}
 
 	addCheck("Kubernetes version ≥ 1.25", report.K8sMinor >= 25, report.K8sVersion)
@@ -97,8 +96,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 
 	// Treat absence of Strimzi CRDs as a warning rather than a fatal failure since they are deployed automatically by Kates.
 	if !report.Strimzi.CRDsPresent {
-		v.Warns++
-		addCheck("Strimzi CRDs installed", true, "not present (will be installed by Kates)")
+		addWarn("Strimzi CRDs installed", "not present (will be installed by Kates)")
 	} else {
 		addCheck("Strimzi CRDs installed", true, "present")
 	}
@@ -149,8 +147,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 
 	// Treat absence of Prometheus monitoring CRD as a warning rather than a fatal failure since they are deployed automatically by Kates.
 	if !report.Monitoring.PodMonitorCRD {
-		v.Warns++
-		addCheck("Prometheus monitoring", true, "PodMonitor CRD not present (will be installed by Kates)")
+		addWarn("Prometheus monitoring", "PodMonitor CRD not present (will be installed by Kates)")
 	} else {
 		addCheck("Prometheus monitoring", true, "PodMonitor CRD present")
 	}
@@ -173,15 +170,13 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 		}
 
 		if hasFailure {
-			v.Warns++
-			addCheck("AZ network latency (cross-zone)", true, "some zone probes failed")
+			addWarn("AZ network latency (cross-zone)", "some zone probes failed")
 		} else if maxCrossAzAvg == 0.0 {
 			addCheck("AZ network latency (cross-zone)", true, "no cross-zone routes")
 		} else if maxCrossAzAvg > 15.0 {
 			addCheck("AZ network latency (cross-zone)", false, fmt.Sprintf("incompatible: max %.2fms (>15ms)", maxCrossAzAvg))
 		} else if maxCrossAzAvg > 5.0 {
-			v.Warns++
-			addCheck("AZ network latency (cross-zone)", true, fmt.Sprintf("warning: max %.2fms (5-15ms)", maxCrossAzAvg))
+			addWarn("AZ network latency (cross-zone)", fmt.Sprintf("warning: max %.2fms (5-15ms)", maxCrossAzAvg))
 		} else {
 			addCheck("AZ network latency (cross-zone)", true, fmt.Sprintf("optimal: max %.2fms (<5ms)", maxCrossAzAvg))
 		}
@@ -210,18 +205,15 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 		if healthStatus == "Healthy" {
 			addCheck("Strimzi Operator health", true, "healthy")
 		} else if healthStatus == "Degraded" {
-			v.Warns++
-			addCheck("Strimzi Operator health", true, "warning: operator degraded")
+			addWarn("Strimzi Operator health", "warning: operator degraded")
 		} else {
-			v.Warns++
-			addCheck("Strimzi Operator health", true, "warning: operator unhealthy")
+			addWarn("Strimzi Operator health", "warning: operator unhealthy")
 		}
 	}
 
 	// Capacity budget audit
 	if report.Strimzi.CapacityStatus != "" && report.Strimzi.CapacityStatus != "Sufficient" {
-		v.Warns++
-		addCheck("Strimzi Kafka capacity", true, report.Strimzi.CapacityStatus)
+		addWarn("Strimzi Kafka capacity", report.Strimzi.CapacityStatus)
 	} else if report.Strimzi.CapacityStatus == "Sufficient" {
 		addCheck("Strimzi Kafka capacity", true, "sufficient resources allocated")
 	}
@@ -242,8 +234,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 		addCheck("Kyverno NetworkPolicy safe", true, fmt.Sprintf("%d enforced policies, explicit selectors used", enforced))
 
 		if report.Admission.Kyverno.Constraints.ResourceLimitsRequired {
-			v.Warns++
-			addCheck("Resource limits required", true, "Kyverno enforces — verify values.yaml limits")
+			addWarn("Resource limits required", "Kyverno enforces — verify values.yaml limits")
 		}
 	}
 
@@ -279,12 +270,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 	// TLS Certificate validity audit check
 	certPass := true
 	certDetail := "all certificates valid"
-	expiringSoon := 0
-	for _, c := range report.Security.ExpiringCerts {
-		if c.DaysLeft < 30 {
-			expiringSoon++
-		}
-	}
+	expiringSoon := len(expiringCerts(report.Security.ExpiringCerts))
 	if expiringSoon > 0 {
 		certPass = false
 		certDetail = fmt.Sprintf("%d certificate(s) expiring in < 30 days", expiringSoon)
@@ -297,32 +283,28 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 
 		// Connect JVM health check
 		if report.Ecosystem.KafkaConnect.HeapXmx != "" && report.Ecosystem.KafkaConnect.MemLimitMi > 0 {
-			heapMi := parseHeapMi(report.Ecosystem.KafkaConnect.HeapXmx)
+			heapMi := parseJVMHeapMiB(report.Ecosystem.KafkaConnect.HeapXmx)
 			limitMi := report.Ecosystem.KafkaConnect.MemLimitMi
 			ratio := float64(heapMi) / float64(limitMi) * 100
 			if ratio > 75 {
 				addCheck("Connect JVM heap ratio", false, fmt.Sprintf("%.0f%% of limit — risks OOMKill, reduce -Xmx", ratio))
 			} else if ratio > 50 {
-				v.Warns++
-				addCheck("Connect JVM heap ratio", true, fmt.Sprintf("%.0f%% of limit — limited off-heap space", ratio))
+				addWarn("Connect JVM heap ratio", fmt.Sprintf("%.0f%% of limit — limited off-heap space", ratio))
 			} else {
 				addCheck("Connect JVM heap ratio", true, fmt.Sprintf("%.0f%% of limit — healthy", ratio))
 			}
 		}
 
 		if !report.Ecosystem.KafkaConnect.TLSEnabled {
-			v.Warns++
-			addCheck("Connect TLS", true, "disabled — traffic is plaintext")
+			addWarn("Connect TLS", "disabled — traffic is plaintext")
 		}
 
 		if !report.Ecosystem.KafkaConnect.PDBConfigured {
-			v.Warns++
-			addCheck("Connect PDB", true, "not configured — upgrades may cause downtime")
+			addWarn("Connect PDB", "not configured — upgrades may cause downtime")
 		}
 
 		if !report.Ecosystem.SchemaRegistry.Installed {
-			v.Warns++
-			addCheck("Schema Registry for CDC", true, "warning: not found (Debezium Avro requires it)")
+			addWarn("Schema Registry for CDC", "warning: not found (Debezium Avro requires it)")
 		} else {
 			addCheck("Schema Registry for CDC", report.Ecosystem.SchemaRegistry.Available, "available")
 		}
@@ -330,8 +312,7 @@ func (a *Analyzer) calculateVerdict(report *DetectReport) {
 		if report.Ecosystem.Database.Installed {
 			addCheck("Database CDC source", report.Ecosystem.Database.Accessible, "available in "+report.Ecosystem.Database.Namespace)
 		} else {
-			v.Warns++
-			addCheck("Database CDC source", true, "warning: PostgreSQL not detected in cluster")
+			addWarn("Database CDC source", "warning: PostgreSQL not detected in cluster")
 		}
 	}
 
@@ -352,19 +333,4 @@ func defaultStorageClass(classes []SCInfo) (sc *SCInfo, isDefault bool) {
 		return &classes[0], false
 	}
 	return nil, false
-}
-
-// parseHeapMi converts a JVM heap string like "768m" or "2g" to MiB.
-func parseHeapMi(heap string) int {
-	heap = strings.TrimSpace(strings.ToLower(heap))
-	if strings.HasSuffix(heap, "m") {
-		v, _ := strconv.Atoi(strings.TrimSuffix(heap, "m"))
-		return v
-	}
-	if strings.HasSuffix(heap, "g") {
-		v, _ := strconv.Atoi(strings.TrimSuffix(heap, "g"))
-		return v * 1024
-	}
-	v, _ := strconv.Atoi(heap)
-	return v
 }

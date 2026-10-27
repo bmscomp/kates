@@ -345,7 +345,9 @@ type CapacityBudget struct {
 type CheckResult struct {
 	Description string
 	Status      bool
-	Detail      string
+	// Warn marks a passing check that counts as a warning.
+	Warn   bool `json:",omitempty"`
+	Detail string
 }
 
 type Verdict struct {

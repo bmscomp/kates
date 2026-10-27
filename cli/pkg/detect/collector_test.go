@@ -186,7 +186,7 @@ func TestParseNodes_MemoryUnits(t *testing.T) {
 	  {"metadata": {"name": "plain"}, "status": {"allocatable": {"cpu": "4", "memory": "17179869184"}}}
 	]}`, "kubectl", "get", "nodes", "-o", "json")
 
-	nodes, err := NewCollector(m).parseNodes()
+	nodes, err := NewCollector(m).parseNodes(context.Background())
 	if err != nil {
 		t.Fatalf("parseNodes: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestGetStrimziStatus_FindsTheOperatorBesideAnErrorLogLevel(t *testing.T) {
 	   "status":{"readyReplicas":1,"replicas":1}}]}`,
 		"kubectl", "get", "deployment", "-A", "-o", "json")
 
-	info := NewCollector(m).getStrimziStatus()
+	info := NewCollector(m).getStrimziStatus(context.Background())
 	if !info.Running || info.Namespace != "strimzi-system" || info.Image != "quay.io/strimzi/operator:0.48.0" {
 		t.Errorf("Running %v in %q with image %q, want the operator in strimzi-system", info.Running, info.Namespace, info.Image)
 	}
@@ -446,7 +446,7 @@ func TestCheckKafkaCapacity(t *testing.T) {
 				Nodes:    tt.nodes,
 				Workload: tt.workload,
 			}
-			got := c.checkKafkaCapacity(report, tt.reservePct)
+			got := c.checkKafkaCapacity(context.Background(), report, tt.reservePct)
 			if got != tt.want {
 				t.Errorf("checkKafkaCapacity() = %q, want %q", got, tt.want)
 			}
@@ -517,7 +517,7 @@ func TestGetNetworkStatus_ServiceCIDRFromTheAPIServerCommand(t *testing.T) {
 			m := NewMockExecutor()
 			m.Set(tt.command, "kubectl", "get", "pod", "-n", "kube-system", "-l", "component=kube-apiserver",
 				"-o", "jsonpath={.items[0].spec.containers[0].command}")
-			if got := NewCollector(m).getNetworkStatus().ServiceCIDR; got != tt.want {
+			if got := NewCollector(m).getNetworkStatus(context.Background()).ServiceCIDR; got != tt.want {
 				t.Errorf("ServiceCIDR = %q, want %q", got, tt.want)
 			}
 		})
@@ -547,7 +547,7 @@ func TestGetNetworkStatus_PrefersCoreDNSClusterDomain(t *testing.T) {
 		"--request-timeout=10s", "-o", "jsonpath={.items[0].metadata.name}")
 	m.Set("search default.svc.cluster.local svc.cluster.local cluster.local", "kubectl", "exec", "--request-timeout=10s", "-n", "kates", "misleading-pod", "--", "cat", "/etc/resolv.conf")
 
-	got := NewCollector(m).getNetworkStatus().ClusterDomain
+	got := NewCollector(m).getNetworkStatus(context.Background()).ClusterDomain
 	if got != "taz-tls-int-1.local" {
 		t.Fatalf("ClusterDomain = %q, want taz-tls-int-1.local", got)
 	}
@@ -563,7 +563,7 @@ func TestGetNetworkStatus_ReadsResolvConfFromAKatesPod(t *testing.T) {
 	m.Set("search kates.svc.taz-tls-int-1.local svc.taz-tls-int-1.local taz-tls-int-1.local\nnameserver 10.96.0.10",
 		"kubectl", "exec", "--request-timeout=10s", "-n", "kates", "kates-backend-0", "--", "cat", "/etc/resolv.conf")
 
-	if got := NewCollector(m).getNetworkStatus().ClusterDomain; got != "taz-tls-int-1.local" {
+	if got := NewCollector(m).getNetworkStatus(context.Background()).ClusterDomain; got != "taz-tls-int-1.local" {
 		t.Fatalf("ClusterDomain = %q, want taz-tls-int-1.local", got)
 	}
 	for _, call := range m.Calls() {
@@ -579,7 +579,7 @@ func TestGetNetworkStatus_ReadsResolvConfFromAKatesPod(t *testing.T) {
 	roMock.Responses = m.Responses
 	ro := NewCollector(roMock)
 	ro.ReadOnly = true
-	if got := ro.getNetworkStatus().ClusterDomain; got != "cluster.local" {
+	if got := ro.getNetworkStatus(context.Background()).ClusterDomain; got != "cluster.local" {
 		t.Errorf("read-only ClusterDomain = %q, want the cluster.local default", got)
 	}
 	if containsCall(roMock.Calls(), "kubectl exec") || containsCall(roMock.Calls(), "kubectl run") {
@@ -828,32 +828,13 @@ func TestGetWorkloadPressure_SumsMemoryBeforeRounding(t *testing.T) {
 	m.Set(`{"items":[`+strings.Join(pods, ",")+`]}`,
 		"kubectl", "get", "pods", "-A", "-o", "json", "--field-selector=status.phase=Running")
 
-	wp := NewCollector(m).getWorkloadPressure()
+	wp := NewCollector(m).getWorkloadPressure(context.Background())
 	if wp.TotalPods != 100 || wp.TotalMemRequests != 50 {
 		t.Errorf("%d pods requesting %d GiB, want 100 pods requesting 50 GiB", wp.TotalPods, wp.TotalMemRequests)
 	}
 	for _, node := range wp.PerNode {
 		if node.MemRequested != 25 {
 			t.Errorf("%s requests %d GiB, want 25", node.Name, node.MemRequested)
-		}
-	}
-}
-
-func TestMemoryMiB(t *testing.T) {
-	for quantity, want := range map[string]float64{
-		"256Mi":     256,
-		"2Gi":       2048,
-		"0.5Gi":     512,
-		"524288Ki":  512,
-		"268435456": 256,
-		"1Ti":       1 << 20,
-		"1G":        1e9 / (1 << 20),
-		"500M":      500e6 / (1 << 20),
-		"":          0,
-		"lots":      0,
-	} {
-		if got := memoryMiB(quantity); got != want {
-			t.Errorf("memoryMiB(%q) = %v, want %v", quantity, got, want)
 		}
 	}
 }

@@ -4,24 +4,13 @@ import (
 	"strings"
 )
 
-// ProbeStorageClass estimates storage performance based on the provisioner type
-// and StorageClass name rather than spawning benchmark pods.
-//
-// The previous implementation created an ephemeral PVC + pod running dd, but it
-// reliably deadlocked on Kind (WaitForFirstConsumer + ephemeral PVC = no node
-// hint for the provisioner) and left orphan pods on failure. Since we only need
-// a rough "is this disk fast enough for Kafka?" signal, provisioner-based
-// heuristics are both faster and more reliable.
-func (c *Collector) ProbeStorageClass(scName string) (int, float64, error) {
-	// Look up provisioner from already-fetched SC data isn't available here,
-	// so query it directly (fast, no pods).
-	provOut, _ := c.exec.Exec("kubectl", "get", "storageclass", scName,
-		"-o", "jsonpath={.provisioner}")
-	provisioner := strings.TrimSpace(provOut)
-
-	iops, latency := estimateIOPS(provisioner, scName)
-	return iops, latency, nil
-}
+// Storage performance is estimated from the provisioner type and the
+// StorageClass name rather than measured by benchmark pods. An earlier
+// version created an ephemeral PVC and a pod running dd, but it reliably
+// deadlocked on Kind (WaitForFirstConsumer + ephemeral PVC = no node hint for
+// the provisioner) and left orphan pods on failure. Since a rough "is this
+// disk fast enough for Kafka?" is all that is needed, provisioner-based
+// heuristics are both faster and more reliable; --bench-storage measures.
 
 // estimateIOPS returns conservative IOPS and latency estimates based on the
 // provisioner and StorageClass name. These are floor estimates — real hardware

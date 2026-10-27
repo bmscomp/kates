@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -42,6 +43,52 @@ type Collector struct {
 	// kates auto set them to the user's namespace labels.
 	NamespaceLabels map[string]string
 	OnProgress      func(string)
+	// CallTimeout bounds each command the collector runs; 0 means
+	// DefaultCallTimeout. The probes that wait on pods give their own,
+	// longer, bounds.
+	CallTimeout time.Duration
+
+	// depFetch is `kubectl get deployment -A -o json`, fetched once per
+	// Collect: the Strimzi, network and admission probes all read it.
+	depMu    sync.Mutex
+	depFetch func() (string, error)
+}
+
+// run runs a command under ctx and the collector's per-call timeout.
+func (c *Collector) run(ctx context.Context, name string, args ...string) (string, error) {
+	timeout := c.CallTimeout
+	if timeout <= 0 {
+		timeout = DefaultCallTimeout
+	}
+	return execContext(ctx, c.exec, timeout, name, args...)
+}
+
+// runFor runs a command under ctx for at most timeout, for the calls that
+// wait on a pod (kubectl wait, logs -f, an image pull) and need longer than
+// the per-call default.
+func (c *Collector) runFor(ctx context.Context, timeout time.Duration, name string, args ...string) (string, error) {
+	return execContext(ctx, c.exec, timeout, name, args...)
+}
+
+// cleanup deletes a probe namespace. It runs even when ctx was cancelled
+// (Ctrl-C is exactly when the namespace must still go), bounded by the
+// per-call timeout.
+func (c *Collector) cleanup(ctx context.Context, ns string) {
+	_, _ = c.run(context.WithoutCancel(ctx), "kubectl", "delete", "ns", ns, "--wait=false")
+}
+
+// deployments is every Deployment in the cluster as JSON, fetched on first
+// use and shared by every probe of the same Collect.
+func (c *Collector) deployments(ctx context.Context) (string, error) {
+	c.depMu.Lock()
+	if c.depFetch == nil {
+		c.depFetch = sync.OnceValues(func() (string, error) {
+			return c.run(ctx, "kubectl", "get", "deployment", "-A", "-o", "json")
+		})
+	}
+	fetch := c.depFetch
+	c.depMu.Unlock()
+	return fetch()
 }
 
 func NewCollector(exec CommandExecutor) *Collector {
@@ -56,13 +103,18 @@ func (c *Collector) progress(msg string) {
 
 // Preflight checks if required binaries are installed and cluster is reachable.
 func (c *Collector) Preflight() error {
+	return c.PreflightContext(context.Background())
+}
+
+// PreflightContext is Preflight under ctx.
+func (c *Collector) PreflightContext(ctx context.Context) error {
 	if _, err := c.exec.LookPath("kubectl"); err != nil {
 		return fmt.Errorf("kubectl is not installed or not in PATH")
 	}
 	if _, err := c.exec.LookPath("helm"); err != nil {
 		return fmt.Errorf("helm is not installed or not in PATH")
 	}
-	if _, err := c.exec.Exec("kubectl", "cluster-info"); err != nil {
+	if _, err := c.run(ctx, "kubectl", "cluster-info"); err != nil {
 		return fmt.Errorf("Kubernetes cluster is unreachable")
 	}
 	return nil
@@ -71,30 +123,35 @@ func (c *Collector) Preflight() error {
 // Collect runs all introspection queries concurrently and returns a raw report state.
 func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 	report := &DetectReport{}
-	g, _ := errgroup.WithContext(ctx)
+	// gctx ends when ctx does, or when a probe the report cannot do without
+	// (the node list) fails: the other probes' kubectl calls stop with it.
+	g, gctx := errgroup.WithContext(ctx)
+	c.depMu.Lock()
+	c.depFetch = nil
+	c.depMu.Unlock()
 
 	// Context & Server (Sequential since they are very fast and needed for provider)
-	report.Context = c.getContext()
-	report.Server = c.getServer()
+	report.Context = c.getContext(ctx)
+	report.Server = c.getServer(ctx)
 
 	// Concurrent fetching
 	var gitVersion string
 	var apiVersions []string
 	g.Go(func() error {
-		report.K8sVersion, report.K8sMinor, gitVersion = c.getK8sVersion()
+		report.K8sVersion, report.K8sMinor, gitVersion = c.getK8sVersion(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		out, _ := c.exec.Exec("kubectl", "api-versions")
+		out, _ := c.run(gctx, "kubectl", "api-versions")
 		apiVersions = strings.Fields(out)
 		return nil
 	})
 	g.Go(func() error {
-		report.HelmVersion, report.HelmMajor = c.getHelmVersion()
+		report.HelmVersion, report.HelmMajor = c.getHelmVersion(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		nodes, err := c.parseNodes()
+		nodes, err := c.parseNodes(gctx)
 		if err != nil {
 			return err
 		}
@@ -103,61 +160,70 @@ func (c *Collector) Collect(ctx context.Context) (*DetectReport, error) {
 		return nil
 	})
 	g.Go(func() error {
-		report.Storage = c.getStorageClasses()
+		report.Storage = c.getStorageClasses(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.StorageAudit = c.getStorageAudit()
+		report.StorageAudit = c.getStorageAudit(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.ExistingKafka = c.getExistingKafkaResources()
+		report.ExistingKafka = c.getExistingKafkaResources(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.Strimzi = c.getStrimziStatus()
+		report.Strimzi = c.getStrimziStatus(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.Monitoring = c.getMonitoringStatus()
+		report.Monitoring = c.getMonitoringStatus(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.Network = c.getNetworkStatus()
+		report.Network = c.getNetworkStatus(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.Admission = c.getAdmissionStatus()
+		report.Admission = c.getAdmissionStatus(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.NetPolAudit = c.getNetworkPolicyAudit()
+		report.NetPolAudit = c.getNetworkPolicyAudit(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.Workload = c.getWorkloadPressure()
+		report.Workload = c.getWorkloadPressure(gctx)
 		return nil
 	})
 	g.Go(func() error {
-		report.Ecosystem = c.getEcosystemStatus()
+		report.Ecosystem = c.getEcosystemStatus(gctx)
 		return nil
 	})
 
-	err := g.Wait()
-	if err != nil {
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-
 	report.Provider, report.ProviderBasis = platformOf(gitVersion, apiVersions, report.Nodes, report.Context)
-	report.Workload = hydrateWorkloadPressure(report.Nodes, report.Workload)
+	return c.finishCollect(ctx, report)
+}
 
+// finishCollect is the stages that need the first one's results: the write
+// probes, the capacity check and the security audit. Interrupted (ctx
+// ended), every call returns early and the report is hollow, so it says so
+// rather than hand it on to be graded.
+func (c *Collector) finishCollect(ctx context.Context, report *DetectReport) (*DetectReport, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	report.Workload = hydrateWorkloadPressure(report.Nodes, report.Workload)
 	if !c.ReadOnly {
 		c.runWriteProbes(ctx, report)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
-
-	report.Strimzi.CapacityStatus = c.checkKafkaCapacity(report, 0.30)
-	report.Security = c.getSecurityAudit(report.Admission)
-
+	report.Strimzi.CapacityStatus = c.checkKafkaCapacity(ctx, report, 0.30)
+	report.Security = c.getSecurityAudit(ctx, report.Admission)
 	return report, nil
 }
 
@@ -195,19 +261,19 @@ func (c *Collector) runWriteProbes(ctx context.Context, report *DetectReport) {
 	_ = g2.Wait()
 }
 
-func (c *Collector) getContext() string {
+func (c *Collector) getContext(ctx context.Context) string {
 	if c.KubeContext != "" {
 		return c.KubeContext
 	}
-	out, _ := c.exec.Exec("kubectl", "config", "current-context")
+	out, _ := c.run(ctx, "kubectl", "config", "current-context")
 	if out == "" {
 		return "unknown"
 	}
 	return out
 }
 
-func (c *Collector) getServer() string {
-	out, _ := c.exec.Exec("kubectl", "config", "view", "--minify", "-o", "jsonpath={.clusters[0].cluster.server}")
+func (c *Collector) getServer(ctx context.Context) string {
+	out, _ := c.run(ctx, "kubectl", "config", "view", "--minify", "-o", "jsonpath={.clusters[0].cluster.server}")
 	if out == "" {
 		return "unknown"
 	}
@@ -259,9 +325,10 @@ func platformOf(gitVersion string, apiVersions []string, nodes []NodeInfo, kubeC
 // read. version is the server's gitVersion.
 func Platform(exec CommandExecutor, kubeContext string) (provider, basis, version string) {
 	c := &Collector{exec: exec}
-	_, _, version = c.getK8sVersion()
-	out, _ := exec.Exec("kubectl", "api-versions")
-	nodes, _ := c.parseNodes()
+	ctx := context.Background()
+	_, _, version = c.getK8sVersion(ctx)
+	out, _ := c.run(ctx, "kubectl", "api-versions")
+	nodes, _ := c.parseNodes(ctx)
 	provider, basis = platformOf(version, strings.Fields(out), nodes, kubeContext)
 	return provider, basis, version
 }
@@ -283,8 +350,8 @@ func providerFromContext(ctx string) string {
 	return "generic"
 }
 
-func (c *Collector) getK8sVersion() (version string, minor int, gitVersion string) {
-	out, err := c.exec.Exec("kubectl", "version", "-o", "json")
+func (c *Collector) getK8sVersion(ctx context.Context) (version string, minor int, gitVersion string) {
+	out, err := c.run(ctx, "kubectl", "version", "-o", "json")
 	if err != nil {
 		return "unknown", 0, ""
 	}
@@ -301,8 +368,8 @@ func (c *Collector) getK8sVersion() (version string, minor int, gitVersion strin
 	return fmt.Sprintf("%s.%s", data.ServerVersion.Major, data.ServerVersion.Minor), minor, data.ServerVersion.GitVersion
 }
 
-func (c *Collector) getHelmVersion() (string, int) {
-	out, _ := c.exec.Exec("helm", "version", "--short")
+func (c *Collector) getHelmVersion(ctx context.Context) (string, int) {
+	out, _ := c.run(ctx, "helm", "version", "--short")
 	out = strings.TrimPrefix(out, "v")
 	out = strings.Split(out, "+")[0]
 	majorStr := strings.Split(out, ".")[0]
@@ -313,8 +380,8 @@ func (c *Collector) getHelmVersion() (string, int) {
 	return "v" + out, major
 }
 
-func (c *Collector) parseNodes() ([]NodeInfo, error) {
-	out, err := c.exec.Exec("kubectl", "get", "nodes", "-o", "json")
+func (c *Collector) parseNodes(ctx context.Context) ([]NodeInfo, error) {
+	out, err := c.run(ctx, "kubectl", "get", "nodes", "-o", "json")
 	if err != nil {
 		return nil, err
 	}
@@ -366,17 +433,11 @@ func (c *Collector) parseNodes() ([]NodeInfo, error) {
 			roleStr = strings.Join(roles, ",")
 		}
 
-		cpuStr := n.Status.Allocatable.CPU
-		cpu, _ := strconv.Atoi(cpuStr)
-		if strings.HasSuffix(cpuStr, "m") {
-			cpu, _ = strconv.Atoi(strings.TrimSuffix(cpuStr, "m"))
-		} else {
-			cpu *= 1000
-		}
+		cpu := parseCPUMilli(n.Status.Allocatable.CPU)
 
 		// Allocatable memory comes in whatever unit the kubelet reports (Ki on
-		// most nodes, Mi or Gi on some); memoryMiB reads them all.
-		memGi := int(memoryMiB(n.Status.Allocatable.Memory) / 1024)
+		// most nodes, Mi or Gi on some); parseMemoryMiB reads them all.
+		memGi := int(parseMemoryMiB(n.Status.Allocatable.Memory) / 1024)
 
 		nodes = append(nodes, NodeInfo{
 			Name:     n.Metadata.Name,
@@ -416,8 +477,8 @@ func (c *Collector) groupNodesByZone(nodes []NodeInfo) []ZoneInfo {
 	return zones
 }
 
-func (c *Collector) getStorageClasses() []SCInfo {
-	out, err := c.exec.Exec("kubectl", "get", "sc", "-o", "json")
+func (c *Collector) getStorageClasses(ctx context.Context) []SCInfo {
+	out, err := c.run(ctx, "kubectl", "get", "sc", "-o", "json")
 	if err != nil {
 		return nil
 	}
@@ -442,13 +503,9 @@ func (c *Collector) getStorageClasses() []SCInfo {
 		if sc.AllowVolumeExpansion != nil {
 			allowExpand = *sc.AllowVolumeExpansion
 		}
-		// Probe the storage class performance
-		iops, latency, err := c.ProbeStorageClass(sc.Metadata.Name)
-		if err != nil {
-			// If probing fails, we just record 0
-			iops = 0
-			latency = 0.0
-		}
+		// Estimated from the provisioner this list already holds; the
+		// --bench-storage probe replaces it with a measurement.
+		iops, latency := estimateIOPS(sc.Provisioner, sc.Metadata.Name)
 
 		scs = append(scs, SCInfo{
 			Name:           sc.Metadata.Name,
@@ -464,11 +521,11 @@ func (c *Collector) getStorageClasses() []SCInfo {
 	return scs
 }
 
-func (c *Collector) getStorageAudit() StorageAudit {
+func (c *Collector) getStorageAudit(ctx context.Context) StorageAudit {
 	audit := StorageAudit{}
 
 	// PV inventory
-	pvOut, _ := c.exec.Exec("kubectl", "get", "pv", "-o", "json")
+	pvOut, _ := c.run(ctx, "kubectl", "get", "pv", "-o", "json")
 	var pvData struct {
 		Items []struct {
 			Spec struct {
@@ -500,7 +557,7 @@ func (c *Collector) getStorageAudit() StorageAudit {
 	}
 
 	// CSI drivers
-	csiOut, _ := c.exec.Exec("kubectl", "get", "csidrivers", "-o", "jsonpath={.items[*].metadata.name}")
+	csiOut, _ := c.run(ctx, "kubectl", "get", "csidrivers", "-o", "jsonpath={.items[*].metadata.name}")
 	if csiOut != "" {
 		audit.CSIDrivers = strings.Fields(csiOut)
 	}
@@ -508,9 +565,9 @@ func (c *Collector) getStorageAudit() StorageAudit {
 	return audit
 }
 
-func (c *Collector) getExistingKafkaResources() KafkaResources {
+func (c *Collector) getExistingKafkaResources(ctx context.Context) KafkaResources {
 	countLines := func(args ...string) int {
-		out, _ := c.exec.Exec(args[0], args[1:]...)
+		out, _ := c.run(ctx, args[0], args[1:]...)
 		if out == "" {
 			return 0
 		}
@@ -523,13 +580,13 @@ func (c *Collector) getExistingKafkaResources() KafkaResources {
 		KafkaUsers:     countLines("kubectl", "get", "kafkausers", "-n", "kafka", "--no-headers"),
 	}
 
-	pvcOut, _ := c.exec.Exec("kubectl", "get", "pvc", "-n", "kafka", "--no-headers")
+	pvcOut, _ := c.run(ctx, "kubectl", "get", "pvc", "-n", "kafka", "--no-headers")
 	if pvcOut != "" {
 		res.PVCs = len(strings.Split(pvcOut, "\n"))
 		res.BoundPVCs = strings.Count(pvcOut, "Bound")
 	}
 
-	helmOut, _ := c.exec.Exec("helm", "list", "-n", "kafka", "-o", "json")
+	helmOut, _ := c.run(ctx, "helm", "list", "-n", "kafka", "-o", "json")
 	var helmData []struct {
 		Name     string `json:"name"`
 		Revision string `json:"revision"`
@@ -543,7 +600,7 @@ func (c *Collector) getExistingKafkaResources() KafkaResources {
 
 	// Kafka cluster health introspection
 	if res.KafkaClusters > 0 {
-		kafkaOut, _ := c.exec.Exec("kubectl", "get", "kafka", "-n", "kafka", "-o", "json")
+		kafkaOut, _ := c.run(ctx, "kubectl", "get", "kafka", "-n", "kafka", "-o", "json")
 		var kData struct {
 			Items []struct {
 				Metadata struct {
@@ -598,7 +655,7 @@ func (c *Collector) getExistingKafkaResources() KafkaResources {
 	return res
 }
 
-func (c *Collector) getStrimziStatus() StrimziInfo {
+func (c *Collector) getStrimziStatus(ctx context.Context) StrimziInfo {
 	info := StrimziInfo{}
 
 	// Check CRDs - split into required core CRDs and optional helper CRDs
@@ -613,7 +670,7 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 
 	var missingCRDs []string
 	for _, crd := range requiredCRDs {
-		out, _ := c.exec.Exec("kubectl", "get", "crd", crd, "--no-headers")
+		out, _ := c.run(ctx, "kubectl", "get", "crd", crd, "--no-headers")
 		if out == "" || strings.Contains(out, "NotFound") || strings.Contains(out, "error") {
 			missingCRDs = append(missingCRDs, crd)
 		}
@@ -621,7 +678,7 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 
 	// We still check optional CRDs to be thorough, but their absence does not count as a failure
 	for _, crd := range optionalCRDs {
-		_, _ = c.exec.Exec("kubectl", "get", "crd", crd, "--no-headers")
+		_, _ = c.run(ctx, "kubectl", "get", "crd", crd, "--no-headers")
 	}
 
 	info.CRDsPresent = len(missingCRDs) == 0
@@ -630,10 +687,10 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 	// Find the deployment for strimzi operator (with permission-friendly namespace fallback).
 	// A refusal is an error from kubectl; the JSON of every deployment in the
 	// cluster may say "error" anywhere, a --log-level=error argument included.
-	depOut, err := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	depOut, err := c.deployments(ctx)
 	if err != nil || depOut == "" {
 		// Fallback: check in the kafka namespace
-		depOut, _ = c.exec.Exec("kubectl", "get", "deployment", "-n", "kafka", "-o", "json")
+		depOut, _ = c.run(ctx, "kubectl", "get", "deployment", "-n", "kafka", "-o", "json")
 	}
 
 	var depData struct {
@@ -675,7 +732,7 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 
 	// Auditing Strimzi Operator pods and warning logs
 	if info.Running {
-		podOut, _ := c.exec.Exec("kubectl", "get", "pods", "-n", info.Namespace, "-l", "name=strimzi-cluster-operator", "-o", "json")
+		podOut, _ := c.run(ctx, "kubectl", "get", "pods", "-n", info.Namespace, "-l", "name=strimzi-cluster-operator", "-o", "json")
 		var podData struct {
 			Items []struct {
 				Metadata struct {
@@ -710,7 +767,7 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 			}
 
 			// Fetch logs
-			logs, _ := c.exec.Exec("kubectl", "logs", "-n", info.Namespace, pod.Metadata.Name, "--tail=100", "--since=15m")
+			logs, _ := c.run(ctx, "kubectl", "logs", "-n", info.Namespace, pod.Metadata.Name, "--tail=100", "--since=15m")
 			var warningLogs []string
 			for _, line := range strings.Split(logs, "\n") {
 				lineLower := strings.ToLower(line)
@@ -745,11 +802,11 @@ func (c *Collector) getStrimziStatus() StrimziInfo {
 	return info
 }
 
-func (c *Collector) getEcosystemStatus() EcosystemInfo {
+func (c *Collector) getEcosystemStatus(ctx context.Context) EcosystemInfo {
 	info := EcosystemInfo{}
 
 	// Kafka Connect Status
-	kcOut, _ := c.exec.Exec("kubectl", "get", "kafkaconnect", "-A", "-o", "json")
+	kcOut, _ := c.run(ctx, "kubectl", "get", "kafkaconnect", "-A", "-o", "json")
 	var kcData struct {
 		Items []struct {
 			Metadata struct {
@@ -843,11 +900,11 @@ func (c *Collector) getEcosystemStatus() EcosystemInfo {
 		// Resource limits/requests
 		if kc.Spec.Resources != nil {
 			if kc.Spec.Resources.Limits != nil {
-				info.KafkaConnect.MemLimitMi = parseResourceToMi(kc.Spec.Resources.Limits.Memory)
-				info.KafkaConnect.CPULimitM = parseResourceToCPUMilli(kc.Spec.Resources.Limits.CPU)
+				info.KafkaConnect.MemLimitMi = int(parseMemoryMiB(kc.Spec.Resources.Limits.Memory))
+				info.KafkaConnect.CPULimitM = parseCPUMilli(kc.Spec.Resources.Limits.CPU)
 			}
 			if kc.Spec.Resources.Requests != nil {
-				info.KafkaConnect.CPURequestM = parseResourceToCPUMilli(kc.Spec.Resources.Requests.CPU)
+				info.KafkaConnect.CPURequestM = parseCPUMilli(kc.Spec.Resources.Requests.CPU)
 			}
 		}
 
@@ -867,13 +924,13 @@ func (c *Collector) getEcosystemStatus() EcosystemInfo {
 		}
 
 		// Check deployment for ready replicas
-		depOut, _ := c.exec.Exec("kubectl", "get", "deployment", fmt.Sprintf("%s-connect", info.KafkaConnect.Name), "-n", info.KafkaConnect.Namespace, "-o", "jsonpath={.status.readyReplicas}")
+		depOut, _ := c.run(ctx, "kubectl", "get", "deployment", fmt.Sprintf("%s-connect", info.KafkaConnect.Name), "-n", info.KafkaConnect.Namespace, "-o", "jsonpath={.status.readyReplicas}")
 		if depOut != "" {
 			info.KafkaConnect.ReadyReplicas, _ = strconv.Atoi(depOut)
 		}
 
 		// Connectors
-		kctorOut, _ := c.exec.Exec("kubectl", "get", "kafkaconnectors", "-n", info.KafkaConnect.Namespace, "-o", "json")
+		kctorOut, _ := c.run(ctx, "kubectl", "get", "kafkaconnectors", "-n", info.KafkaConnect.Namespace, "-o", "json")
 		var kctorData struct {
 			Items []struct {
 				Metadata struct {
@@ -914,7 +971,7 @@ func (c *Collector) getEcosystemStatus() EcosystemInfo {
 	}
 
 	// Schema Registry Status
-	srOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-l", "app.kubernetes.io/name=apicurio-registry", "-o", "json")
+	srOut, _ := c.run(ctx, "kubectl", "get", "deployment", "-A", "-l", "app.kubernetes.io/name=apicurio-registry", "-o", "json")
 	var srData struct {
 		Items []struct {
 			Metadata struct {
@@ -934,7 +991,7 @@ func (c *Collector) getEcosystemStatus() EcosystemInfo {
 	}
 
 	// Database CDC Status
-	dbOut, _ := c.exec.Exec("kubectl", "get", "statefulset,deployment", "-A", "-l", "app.kubernetes.io/name=postgresql", "-o", "json")
+	dbOut, _ := c.run(ctx, "kubectl", "get", "statefulset,deployment", "-A", "-l", "app.kubernetes.io/name=postgresql", "-o", "json")
 	var dbData struct {
 		Items []struct {
 			Metadata struct {
@@ -957,7 +1014,7 @@ func (c *Collector) getEcosystemStatus() EcosystemInfo {
 	return info
 }
 
-func (c *Collector) checkKafkaCapacity(report *DetectReport, reservePct float64) string {
+func (c *Collector) checkKafkaCapacity(ctx context.Context, report *DetectReport, reservePct float64) string {
 	var totalCPU, totalMem int
 	for _, n := range report.Nodes {
 		totalCPU += n.CPU
@@ -1024,7 +1081,7 @@ const (
 // Pod Security labels stay off: the probes' pods are plain busybox, fio and
 // iperf3 pods that a restricted namespace refuses.
 // The executor has no stdin, so the manifest goes through a file.
-func (c *Collector) createProbeNamespace(ns, runID string) error {
+func (c *Collector) createProbeNamespace(ctx context.Context, ns, runID string) error {
 	labels := map[string]string{}
 	for key, value := range c.NamespaceLabels {
 		if !strings.HasPrefix(key, "pod-security.kubernetes.io/") {
@@ -1038,7 +1095,7 @@ func (c *Collector) createProbeNamespace(ns, runID string) error {
 		return err
 	}
 	defer os.Remove(path)
-	_, err = c.exec.Exec("kubectl", "create", "-f", path)
+	_, err = c.run(ctx, "kubectl", "create", "-f", path)
 	return err
 }
 
@@ -1088,7 +1145,7 @@ func (c *Collector) checkSecretCreation(ctx context.Context) SecretCreationAudit
 	runID := strconv.FormatInt(time.Now().UnixNano(), 36)
 	ns := fmt.Sprintf("kates-detect-secrets-%s", runID)
 
-	if err := c.createProbeNamespace(ns, runID); err != nil {
+	if err := c.createProbeNamespace(ctx, ns, runID); err != nil {
 		audit.NamespaceCreated = false
 		audit.SecretCreated = false
 		audit.ErrorMsg = fmt.Sprintf("failed to create namespace: %v", err)
@@ -1098,12 +1155,12 @@ func (c *Collector) checkSecretCreation(ctx context.Context) SecretCreationAudit
 
 	// Defer cleanup of namespace (double-layer cleanup)
 	defer func() {
-		c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+		c.cleanup(ctx, ns)
 	}()
 
 	// Try to create the secret. A refusal (an admission webhook's included)
 	// is on kubectl's stderr, which the executor returns in the error.
-	_, err := c.exec.Exec("kubectl", "create", "secret", "generic", "kates-detect-test-sec",
+	_, err := c.run(ctx, "kubectl", "create", "secret", "generic", "kates-detect-test-sec",
 		"--from-literal=test-key=test-val", "-n", ns)
 
 	if err != nil {
@@ -1177,14 +1234,14 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 	ns := fmt.Sprintf("kates-detect-latency-%s", runID)
 
 	c.progress("Auditing inter-AZ network latency: setting up temporary namespace...")
-	if err := c.createProbeNamespace(ns, runID); err != nil {
+	if err := c.createProbeNamespace(ctx, ns, runID); err != nil {
 		return nil
 	}
 
 	// Defer cleanup of namespace (double-layer cleanup)
 	defer func() {
 		c.progress("Auditing inter-AZ network latency: cleaning up resources...")
-		c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+		c.cleanup(ctx, ns)
 	}()
 
 	c.progress("Auditing inter-AZ network latency: creating prober pods...")
@@ -1198,7 +1255,7 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 
 		g.Go(func() error {
 			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"busybox","image":"`+probeImage("busybox:1.37")+`","command":["sleep","3600"]}]}}`, nodeName)
-			_, runErr := c.exec.Exec("kubectl", "run", podName, "--image="+probeImage("busybox:1.37"), "-n", ns,
+			_, runErr := c.run(ctx, "kubectl", "run", podName, "--image="+probeImage("busybox:1.37"), "-n", ns,
 				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
 				"--overrides", overrides, "--restart=Never")
 			return runErr
@@ -1212,14 +1269,14 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 
 	c.progress("Auditing inter-AZ network latency: waiting for prober pods to be Ready...")
 	// Wait for all pods to be ready
-	_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
+	_, waitErr := c.runFor(ctx, 45*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
 	if waitErr != nil {
 		// Pods failed to become ready (e.g. image pull backoff)
 		return nil
 	}
 
 	// Fetch Pod IPs
-	podListOut, err := c.exec.Exec("kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
+	podListOut, err := c.run(ctx, "kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
 	if err != nil {
 		return nil
 	}
@@ -1261,7 +1318,7 @@ func (c *Collector) getAZLatency(ctx context.Context, nodes []NodeInfo) []Latenc
 			}
 
 			pingGroup.Go(func() error {
-				pingOut, pingErr := c.exec.Exec("kubectl", "exec", "-n", ns, srcPod, "--", "ping", "-c", "5", dstIP)
+				pingOut, pingErr := c.run(ctx, "kubectl", "exec", "-n", ns, srcPod, "--", "ping", "-c", "5", dstIP)
 				minMs, avgMs, maxMs, jitterMs, ok := parsePingOutput(pingOut)
 
 				resultsChan <- LatencyResult{
@@ -1328,18 +1385,18 @@ func parsePingOutput(pingOut string) (min, avg, max, jitter float64, success boo
 	return
 }
 
-func (c *Collector) getMonitoringStatus() MonitoringInfo {
+func (c *Collector) getMonitoringStatus(ctx context.Context) MonitoringInfo {
 	info := MonitoringInfo{}
-	if out, _ := c.exec.Exec("kubectl", "get", "crd", "podmonitors.monitoring.coreos.com"); !strings.Contains(out, "NotFound") && out != "" {
+	if out, _ := c.run(ctx, "kubectl", "get", "crd", "podmonitors.monitoring.coreos.com"); !strings.Contains(out, "NotFound") && out != "" {
 		info.PodMonitorCRD = true
 	}
-	if out, _ := c.exec.Exec("kubectl", "get", "crd", "prometheusrules.monitoring.coreos.com"); !strings.Contains(out, "NotFound") && out != "" {
+	if out, _ := c.run(ctx, "kubectl", "get", "crd", "prometheusrules.monitoring.coreos.com"); !strings.Contains(out, "NotFound") && out != "" {
 		info.PrometheusRuleCRD = true
 	}
-	if out, _ := c.exec.Exec("kubectl", "get", "deployment", "-n", "monitoring", "-l", "app.kubernetes.io/name=grafana", "--no-headers"); out != "" {
+	if out, _ := c.run(ctx, "kubectl", "get", "deployment", "-n", "monitoring", "-l", "app.kubernetes.io/name=grafana", "--no-headers"); out != "" {
 		info.GrafanaDeployed = true
 	}
-	label, _ := c.exec.Exec("kubectl", "get", "podmonitors", "-A", "-o", "jsonpath={.items[0].metadata.labels.release}")
+	label, _ := c.run(ctx, "kubectl", "get", "podmonitors", "-A", "-o", "jsonpath={.items[0].metadata.labels.release}")
 	if label != "" {
 		info.ReleaseLabel = label
 	} else {
@@ -1411,21 +1468,21 @@ func parseResolvConfClusterDomain(resolvContent string) string {
 	return ""
 }
 
-func (c *Collector) getNetworkStatus() NetworkInfo {
+func (c *Collector) getNetworkStatus(ctx context.Context) NetworkInfo {
 	info := NetworkInfo{CNI: "unknown"}
-	if out, _ := c.exec.Exec("kubectl", "get", "pods", "-n", "kube-system", "-l", "k8s-app=calico-node", "--no-headers"); out != "" {
+	if out, _ := c.run(ctx, "kubectl", "get", "pods", "-n", "kube-system", "-l", "k8s-app=calico-node", "--no-headers"); out != "" {
 		info.CNI = "Calico"
-	} else if out, _ := c.exec.Exec("kubectl", "get", "pods", "-n", "kube-system", "-l", "k8s-app=cilium", "--no-headers"); out != "" {
+	} else if out, _ := c.run(ctx, "kubectl", "get", "pods", "-n", "kube-system", "-l", "k8s-app=cilium", "--no-headers"); out != "" {
 		info.CNI = "Cilium"
-	} else if out, _ := c.exec.Exec("kubectl", "get", "pods", "-n", "kube-system", "-l", "app=kindnet", "--no-headers"); out != "" {
+	} else if out, _ := c.run(ctx, "kubectl", "get", "pods", "-n", "kube-system", "-l", "app=kindnet", "--no-headers"); out != "" {
 		info.CNI = "kindnet"
-	} else if out, _ := c.exec.Exec("kubectl", "get", "ds", "-n", "kube-system", "kindnet", "--no-headers"); out != "" {
+	} else if out, _ := c.run(ctx, "kubectl", "get", "ds", "-n", "kube-system", "kindnet", "--no-headers"); out != "" {
 		info.CNI = "kindnet"
-	} else if out, _ := c.exec.Exec("kubectl", "get", "ds", "-n", "kube-system", "-l", "app=flannel", "--no-headers"); out != "" {
+	} else if out, _ := c.run(ctx, "kubectl", "get", "ds", "-n", "kube-system", "-l", "app=flannel", "--no-headers"); out != "" {
 		info.CNI = "Flannel"
 	}
 
-	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	depOut, _ := c.deployments(ctx)
 	var depData struct {
 		Items []struct {
 			Metadata struct {
@@ -1445,14 +1502,14 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 		}
 	}
 
-	info.PodCIDR, _ = c.exec.Exec("kubectl", "get", "nodes", "-o", "jsonpath={.items[0].spec.podCIDR}")
+	info.PodCIDR, _ = c.run(ctx, "kubectl", "get", "nodes", "-o", "jsonpath={.items[0].spec.podCIDR}")
 	if info.PodCIDR == "" {
 		info.PodCIDR = "unknown"
 	}
 
 	// Detect cluster DNS domain using robust pod-based extraction
 	info.ClusterDomain = "cluster.local"
-	if corefile, _ := c.exec.Exec("kubectl", "get", "configmap", "-n", "kube-system", "coredns", "-o", "jsonpath={.data.Corefile}"); corefile != "" {
+	if corefile, _ := c.run(ctx, "kubectl", "get", "configmap", "-n", "kube-system", "coredns", "-o", "jsonpath={.data.Corefile}"); corefile != "" {
 		if domain := parseCoreDNSClusterDomain(corefile); domain != "" {
 			info.ClusterDomain = domain
 		}
@@ -1463,16 +1520,16 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 	// Running pod on the cluster, and the exec is bounded. A read-only
 	// collection execs into nothing and keeps the cluster.local default.
 	if info.ClusterDomain == "cluster.local" && !c.ReadOnly {
-		podOut, _ := c.exec.Exec("kubectl", "get", "pods", "-n", resolvConfNamespace, "--field-selector=status.phase=Running",
+		podOut, _ := c.run(ctx, "kubectl", "get", "pods", "-n", resolvConfNamespace, "--field-selector=status.phase=Running",
 			"--request-timeout="+resolvConfTimeout, "-o", "jsonpath={.items[0].metadata.name}")
 		var resolvContent string
 		if pod := strings.TrimSpace(podOut); pod != "" {
-			resolvContent, _ = c.exec.Exec("kubectl", "exec", "--request-timeout="+resolvConfTimeout, "-n", resolvConfNamespace, pod, "--", "cat", "/etc/resolv.conf")
+			resolvContent, _ = c.run(ctx, "kubectl", "exec", "--request-timeout="+resolvConfTimeout, "-n", resolvConfNamespace, pod, "--", "cat", "/etc/resolv.conf")
 		}
 
 		// No pod of ours yet (a first deploy): a temporary one.
 		if resolvContent == "" {
-			resolvContent, _ = c.exec.Exec("kubectl", "run", "--rm", "-i", "--image="+probeImage("busybox:1.36"), "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
+			resolvContent, _ = c.runFor(ctx, 90*time.Second, "kubectl", "run", "--rm", "-i", "--image="+probeImage("busybox:1.36"), "dns-detect", "--restart=Never", "--", "cat", "/etc/resolv.conf")
 		}
 
 		if domain := parseResolvConfClusterDomain(resolvContent); domain != "" {
@@ -1482,7 +1539,7 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 
 	// The service CIDR is a flag on the API server's command line, where the
 	// API server runs as a pod (kubeadm, kind).
-	apiserverCmd, _ := c.exec.Exec("kubectl", "get", "pod", "-n", "kube-system", "-l", "component=kube-apiserver",
+	apiserverCmd, _ := c.run(ctx, "kubectl", "get", "pod", "-n", "kube-system", "-l", "component=kube-apiserver",
 		"-o", "jsonpath={.items[0].spec.containers[0].command}")
 	info.ServiceCIDR = "unknown"
 	if m := serviceCIDRFlag.FindStringSubmatch(apiserverCmd); m != nil {
@@ -1492,11 +1549,11 @@ func (c *Collector) getNetworkStatus() NetworkInfo {
 	return info
 }
 
-func (c *Collector) getAdmissionStatus() AdmissionInfo {
+func (c *Collector) getAdmissionStatus(ctx context.Context) AdmissionInfo {
 	info := AdmissionInfo{}
 
 	// Detect Kyverno and Gatekeeper deployments
-	depOut, _ := c.exec.Exec("kubectl", "get", "deployment", "-A", "-o", "json")
+	depOut, _ := c.deployments(ctx)
 	var depData struct {
 		Items []struct {
 			Metadata struct {
@@ -1536,19 +1593,19 @@ func (c *Collector) getAdmissionStatus() AdmissionInfo {
 
 	// Deep Kyverno ClusterPolicy parsing
 	if info.Kyverno.Installed {
-		c.parseKyvernoPolicies(&info)
+		c.parseKyvernoPolicies(ctx, &info)
 	}
 
 	// OPA Gatekeeper constraints
 	if info.Gatekeeper.Installed {
-		c.parseGatekeeperConstraints(&info)
+		c.parseGatekeeperConstraints(ctx, &info)
 	}
 
 	return info
 }
 
-func (c *Collector) parseKyvernoPolicies(info *AdmissionInfo) {
-	polOut, _ := c.exec.Exec("kubectl", "get", "clusterpolicy", "-o", "json")
+func (c *Collector) parseKyvernoPolicies(ctx context.Context, info *AdmissionInfo) {
+	polOut, _ := c.run(ctx, "kubectl", "get", "clusterpolicy", "-o", "json")
 	var polData struct {
 		Items []json.RawMessage `json:"items"`
 	}
@@ -1670,8 +1727,8 @@ func (c *Collector) parseKyvernoPolicies(info *AdmissionInfo) {
 	}
 }
 
-func (c *Collector) parseGatekeeperConstraints(info *AdmissionInfo) {
-	conOut, _ := c.exec.Exec("kubectl", "get", "constraints", "-o", "json")
+func (c *Collector) parseGatekeeperConstraints(ctx context.Context, info *AdmissionInfo) {
+	conOut, _ := c.run(ctx, "kubectl", "get", "constraints", "-o", "json")
 	var conData struct {
 		Items []struct {
 			Metadata struct {
@@ -1698,10 +1755,10 @@ func (c *Collector) parseGatekeeperConstraints(info *AdmissionInfo) {
 	}
 }
 
-func (c *Collector) getNetworkPolicyAudit() NetworkPolicyAudit {
+func (c *Collector) getNetworkPolicyAudit(ctx context.Context) NetworkPolicyAudit {
 	audit := NetworkPolicyAudit{}
 
-	out, err := c.exec.Exec("kubectl", "get", "networkpolicy", "-n", "kafka", "-o", "json")
+	out, err := c.run(ctx, "kubectl", "get", "networkpolicy", "-n", "kafka", "-o", "json")
 	if err != nil {
 		return audit
 	}
@@ -1774,10 +1831,10 @@ func (c *Collector) getNetworkPolicyAudit() NetworkPolicyAudit {
 }
 
 // getWorkloadPressure collects resource consumption from all running pods.
-func (c *Collector) getWorkloadPressure() WorkloadPressure {
+func (c *Collector) getWorkloadPressure(ctx context.Context) WorkloadPressure {
 	wp := WorkloadPressure{}
 
-	out, err := c.exec.Exec("kubectl", "get", "pods", "-A",
+	out, err := c.run(ctx, "kubectl", "get", "pods", "-A",
 		"-o", "json", "--field-selector=status.phase=Running")
 	if err != nil {
 		return wp
@@ -1817,17 +1874,8 @@ func (c *Collector) getWorkloadPressure() WorkloadPressure {
 			wp.KafkaNamespacePods++
 		}
 		for _, c := range pod.Spec.Containers {
-			cpuStr := c.Resources.Requests.CPU
-			memMiB := memoryMiB(c.Resources.Requests.Memory)
-
-			// Parse CPU
-			cpuM := 0
-			if strings.HasSuffix(cpuStr, "m") {
-				cpuM, _ = strconv.Atoi(strings.TrimSuffix(cpuStr, "m"))
-			} else if cpuStr != "" {
-				cores, _ := strconv.Atoi(cpuStr)
-				cpuM = cores * 1000
-			}
+			cpuM := parseCPUMilli(c.Resources.Requests.CPU)
+			memMiB := parseMemoryMiB(c.Resources.Requests.Memory)
 
 			wp.TotalCPURequests += cpuM
 			totalMemMiB += memMiB
@@ -1849,33 +1897,6 @@ func (c *Collector) getWorkloadPressure() WorkloadPressure {
 	})
 
 	return wp
-}
-
-// memUnits are the Kubernetes memory quantity suffixes, in bytes. "Mi" and "M"
-// cannot both match: a binary suffix ends in "i".
-var memUnits = []struct {
-	suffix string
-	bytes  float64
-}{
-	{"Ki", 1 << 10}, {"Mi", 1 << 20}, {"Gi", 1 << 30}, {"Ti", 1 << 40},
-	{"k", 1e3}, {"M", 1e6}, {"G", 1e9}, {"T", 1e12},
-}
-
-// memoryMiB reads a memory request as MiB: a number of bytes, with or without
-// one of memUnits. Anything else, a missing request included, reads as 0.
-func memoryMiB(quantity string) float64 {
-	bytes := 1.0
-	for _, u := range memUnits {
-		if n, ok := strings.CutSuffix(quantity, u.suffix); ok {
-			quantity, bytes = n, u.bytes
-			break
-		}
-	}
-	n, err := strconv.ParseFloat(quantity, 64)
-	if err != nil {
-		return 0
-	}
-	return n * bytes / (1 << 20)
 }
 
 func hydrateWorkloadPressure(nodes []NodeInfo, wp WorkloadPressure) WorkloadPressure {
@@ -2007,14 +2028,14 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 	ns := fmt.Sprintf("kates-detect-bench-%s", runID)
 
 	c.progress("Storage benchmarking: setting up temporary namespace...")
-	if err := c.createProbeNamespace(ns, runID); err != nil {
+	if err := c.createProbeNamespace(ctx, ns, runID); err != nil {
 		return
 	}
 
 	// Setup double-layer cleanup
 	defer func() {
 		c.progress("Storage benchmarking: cleaning up ephemeral resources...")
-		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+		c.cleanup(ctx, ns)
 	}()
 
 	// The bench script reaches the pod through a ConfigMap, not a shell
@@ -2024,7 +2045,7 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 		return
 	}
 	defer os.Remove(scriptPath)
-	if _, err := c.exec.Exec("kubectl", "create", "configmap", storageBenchScriptName, "-n", ns, "--from-file=bench.sh="+scriptPath); err != nil {
+	if _, err := c.run(ctx, "kubectl", "create", "configmap", storageBenchScriptName, "-n", ns, "--from-file=bench.sh="+scriptPath); err != nil {
 		c.progress("Storage benchmarking: failed to create the bench script ConfigMap, falling back to heuristics...")
 		return
 	}
@@ -2041,7 +2062,7 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 		if err != nil {
 			return
 		}
-		_, pvcErr := c.exec.Exec("kubectl", "apply", "-f", pvcPath)
+		_, pvcErr := c.run(ctx, "kubectl", "apply", "-f", pvcPath)
 		os.Remove(pvcPath)
 		if pvcErr != nil {
 			c.progress(fmt.Sprintf("Storage benchmarking: failed to provision PVC on %q, falling back to heuristics...", scName))
@@ -2053,7 +2074,7 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 		podOverrides := fmt.Sprintf(`{"spec":{"nodeName":%q,"volumes":[{"name":"bench-volume","persistentVolumeClaim":{"claimName":%q}},{"name":"bench-script","configMap":{"name":%q}}],"containers":[{"name":"fio-bench","image":%q,"volumeMounts":[{"name":"bench-volume","mountPath":"/data"},{"name":"bench-script","mountPath":"/scripts"}],"command":["sh","/scripts/bench.sh"]}]}}`,
 			nodeName, pvcName, storageBenchScriptName, probeImage("alpine:3.19"))
 
-		_, runErr := c.exec.Exec("kubectl", "run", podName,
+		_, runErr := c.run(ctx, "kubectl", "run", podName,
 			"--image="+probeImage("alpine:3.19"), "-n", ns,
 			"--overrides", podOverrides,
 			"--restart=Never")
@@ -2064,7 +2085,7 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 
 		c.progress(fmt.Sprintf("Storage benchmarking: waiting for FIO pod to be ready on %q...", scName))
 		// 3. Wait for the pod to become Ready (timeout 60s)
-		_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=60s")
+		_, waitErr := c.runFor(ctx, 90*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=60s")
 		if waitErr != nil {
 			c.progress(fmt.Sprintf("Storage benchmarking: pod failed to become ready on %q, falling back to heuristics...", scName))
 			continue // fallback remains unchanged
@@ -2073,11 +2094,11 @@ func (c *Collector) runLiveStorageBench(ctx context.Context, report *DetectRepor
 		c.progress(fmt.Sprintf("Storage benchmarking: executing 15s random I/O benchmark on %q...", scName))
 		// 4. Wait for the run to end, bounded (the fio run is 15 s plus the
 		// package install), then read the logs once: `logs -f` had no bound.
-		if _, doneErr := c.exec.Exec("kubectl", "wait", "--for=jsonpath={.status.phase}=Succeeded", "pod/"+podName, "-n", ns, "--timeout="+storageBenchTimeout); doneErr != nil {
+		if _, doneErr := c.runFor(ctx, 150*time.Second, "kubectl", "wait", "--for=jsonpath={.status.phase}=Succeeded", "pod/"+podName, "-n", ns, "--timeout="+storageBenchTimeout); doneErr != nil {
 			c.progress(fmt.Sprintf("Storage benchmarking: benchmark did not finish within %s on %q, falling back to heuristics...", storageBenchTimeout, scName))
 			continue // fallback remains unchanged
 		}
-		logOut, logErr := c.exec.Exec("kubectl", "logs", podName, "-n", ns)
+		logOut, logErr := c.run(ctx, "kubectl", "logs", podName, "-n", ns)
 		if logErr != nil {
 			c.progress(fmt.Sprintf("Storage benchmarking: failed to capture benchmark logs on %q, falling back to heuristics...", scName))
 			continue // fallback remains unchanged
@@ -2154,13 +2175,13 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 	ns := fmt.Sprintf("kates-detect-bandwidth-%s", runID)
 
 	c.progress("Auditing inter-AZ network bandwidth: setting up temporary namespace...")
-	if err := c.createProbeNamespace(ns, runID); err != nil {
+	if err := c.createProbeNamespace(ctx, ns, runID); err != nil {
 		return
 	}
 
 	defer func() {
 		c.progress("Auditing inter-AZ network bandwidth: cleaning up ephemeral resources...")
-		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+		c.cleanup(ctx, ns)
 	}()
 
 	c.progress("Auditing inter-AZ network bandwidth: creating iperf3 prober pods...")
@@ -2176,7 +2197,7 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 
 		g.Go(func() error {
 			overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"`+probeImage("alpine:3.19")+`","command":["sleep","3600"]}]}}`, nodeName)
-			_, runErr := c.exec.Exec("kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
+			_, runErr := c.run(ctx, "kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
 				"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
 				"--overrides", overrides, "--restart=Never")
 			return runErr
@@ -2189,7 +2210,7 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 	}
 
 	c.progress("Auditing inter-AZ network bandwidth: waiting for prober pods to be Ready...")
-	_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
+	_, waitErr := c.runFor(ctx, 45*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod", "-n", ns, "-l", "kates-detect-experimental=true", "--timeout=30s")
 	if waitErr != nil {
 		c.progress("Auditing inter-AZ network bandwidth: pods failed to become ready, falling back gracefully...")
 		return
@@ -2200,7 +2221,7 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 	for _, podName := range podNames {
 		podName := podName
 		gInstall.Go(func() error {
-			_, installErr := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "iperf3")
+			_, installErr := c.runFor(ctx, 90*time.Second, "kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "iperf3")
 			return installErr
 		})
 	}
@@ -2210,7 +2231,7 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 	}
 
 	// Fetch Pod IPs
-	podListOut, err := c.exec.Exec("kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
+	podListOut, err := c.run(ctx, "kubectl", "get", "pods", "-n", ns, "-l", "kates-detect-experimental=true", "-o", "json")
 	if err != nil {
 		return
 	}
@@ -2253,7 +2274,7 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 			c.progress(fmt.Sprintf("Auditing inter-AZ network bandwidth: sweeping %s -> %s...", srcZone, dstZone))
 
 			// Start server on destination pod (runs exactly once and terminates using -1)
-			_, srvErr := c.exec.Exec("kubectl", "exec", "-n", ns, dstPod, "--", "sh", "-c", "iperf3 -s -p 5201 -1 >/dev/null 2>&1 &")
+			_, srvErr := c.run(ctx, "kubectl", "exec", "-n", ns, dstPod, "--", "sh", "-c", "iperf3 -s -p 5201 -1 >/dev/null 2>&1 &")
 			if srvErr != nil {
 				results = append(results, BandwidthResult{
 					SourceZone: srcZone,
@@ -2267,7 +2288,7 @@ func (c *Collector) runAZBandwidthBench(ctx context.Context, report *DetectRepor
 			time.Sleep(1000 * time.Millisecond)
 
 			// Run client on source pod (runs 5 seconds)
-			clientOut, clientErr := c.exec.Exec("kubectl", "exec", "-n", ns, srcPod, "--", "iperf3", "-c", dstIP, "-p", "5201", "-t", "5", "-J")
+			clientOut, clientErr := c.run(ctx, "kubectl", "exec", "-n", ns, srcPod, "--", "iperf3", "-c", dstIP, "-p", "5201", "-t", "5", "-J")
 
 			var iperfData iperfOutput
 			var success bool
@@ -2313,13 +2334,13 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 	ns := fmt.Sprintf("kates-detect-dns-%s", runID)
 
 	c.progress("Auditing CoreDNS performance: setting up temporary namespace...")
-	if err := c.createProbeNamespace(ns, runID); err != nil {
+	if err := c.createProbeNamespace(ctx, ns, runID); err != nil {
 		return
 	}
 
 	defer func() {
 		c.progress("Auditing CoreDNS performance: cleaning up ephemeral resources...")
-		_, _ = c.exec.Exec("kubectl", "delete", "ns", ns, "--wait=false")
+		c.cleanup(ctx, ns)
 	}()
 
 	c.progress("Auditing CoreDNS performance: creating prober pod...")
@@ -2327,7 +2348,7 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 	nodeName := report.Nodes[0].Name
 	podName := "dns-prober"
 	overrides := fmt.Sprintf(`{"spec":{"nodeName":"%s","containers":[{"name":"alpine","image":"`+probeImage("alpine:3.19")+`","command":["sleep","3600"]}]}}`, nodeName)
-	_, runErr := c.exec.Exec("kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
+	_, runErr := c.run(ctx, "kubectl", "run", podName, "--image="+probeImage("alpine:3.19"), "-n", ns,
 		"--labels", fmt.Sprintf("kates-detect-experimental=true,kates-detect-run=%s", runID),
 		"--overrides", overrides, "--restart=Never")
 	if runErr != nil {
@@ -2336,14 +2357,14 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 	}
 
 	c.progress("Auditing CoreDNS performance: waiting for prober pod to be Ready...")
-	_, waitErr := c.exec.Exec("kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=30s")
+	_, waitErr := c.runFor(ctx, 45*time.Second, "kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "-n", ns, "--timeout=30s")
 	if waitErr != nil {
 		c.progress("Auditing CoreDNS performance: prober pod failed to become ready, falling back gracefully...")
 		return
 	}
 
 	c.progress("Auditing CoreDNS performance: installing bind-tools...")
-	_, installErr := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "bind-tools")
+	_, installErr := c.runFor(ctx, 90*time.Second, "kubectl", "exec", "-n", ns, podName, "--", "apk", "add", "--no-cache", "bind-tools")
 	if installErr != nil {
 		c.progress("Auditing CoreDNS performance: failed to install bind-tools, falling back gracefully...")
 		return
@@ -2372,7 +2393,7 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 		gInt, _ := errgroup.WithContext(ctx)
 		for i := 0; i < 20; i++ {
 			gInt.Go(func() error {
-				out, err := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", internalName)
+				out, err := c.run(ctx, "kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", internalName)
 				if err == nil {
 					if ms, ok := parseDigOutput(out); ok {
 						internalChan <- ms
@@ -2391,7 +2412,7 @@ func (c *Collector) runDNSResolutionProbe(ctx context.Context, report *DetectRep
 		gExt, _ := errgroup.WithContext(ctx)
 		for i := 0; i < 20; i++ {
 			gExt.Go(func() error {
-				out, err := c.exec.Exec("kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", "google.com")
+				out, err := c.run(ctx, "kubectl", "exec", "-n", ns, podName, "--", "dig", "+tries=1", "+timeout=2", "google.com")
 				if err == nil {
 					if ms, ok := parseDigOutput(out); ok {
 						externalChan <- ms
@@ -2471,14 +2492,14 @@ func computeDNSProbeResult(queryType string, times []float64, totalRun int) DNSP
 	}
 }
 
-func (c *Collector) getSecurityAudit(adm AdmissionInfo) SecurityAudit {
+func (c *Collector) getSecurityAudit(ctx context.Context, adm AdmissionInfo) SecurityAudit {
 	audit := SecurityAudit{
 		PSALabelEnforced: "none",
 		KyvernoEnforced:  adm.Kyverno.Installed,
 	}
 
 	// 1. Fetch "kafka" namespace labels
-	nsOut, err := c.exec.Exec("kubectl", "get", "ns", "kafka", "-o", "json")
+	nsOut, err := c.run(ctx, "kubectl", "get", "ns", "kafka", "-o", "json")
 	if err == nil {
 		var nsData struct {
 			Metadata struct {
@@ -2495,7 +2516,7 @@ func (c *Collector) getSecurityAudit(adm AdmissionInfo) SecurityAudit {
 	// 2. Check RBAC permissions (permissionsOk)
 	hasRbac := true
 	for _, res := range []string{"deployments", "statefulsets", "configmaps", "secrets", "services", "persistentvolumeclaims"} {
-		if check, _ := c.exec.Exec("kubectl", "auth", "can-i", "create", res, "-n", "kafka"); !strings.Contains(check, "yes") {
+		if check, _ := c.run(ctx, "kubectl", "auth", "can-i", "create", res, "-n", "kafka"); !strings.Contains(check, "yes") {
 			hasRbac = false
 			break
 		}
@@ -2503,7 +2524,7 @@ func (c *Collector) getSecurityAudit(adm AdmissionInfo) SecurityAudit {
 	audit.PermissionsOk = hasRbac
 
 	// 3. Scan for TLS secrets and verify expiration
-	secOut, err := c.exec.Exec("kubectl", "get", "secrets", "-n", "kafka", "-o", "json")
+	secOut, err := c.run(ctx, "kubectl", "get", "secrets", "-n", "kafka", "-o", "json")
 	if err == nil {
 		var secData struct {
 			Items []struct {
@@ -2541,7 +2562,7 @@ func (c *Collector) getSecurityAudit(adm AdmissionInfo) SecurityAudit {
 	}
 
 	// 4. Audit roles inside target namespace for excessive privileges
-	rolesOut, err := c.exec.Exec("kubectl", "get", "roles", "-n", "kafka", "-o", "json")
+	rolesOut, err := c.run(ctx, "kubectl", "get", "roles", "-n", "kafka", "-o", "json")
 	if err == nil {
 		var rolesData struct {
 			Items []struct {
@@ -2587,37 +2608,4 @@ func (c *Collector) getSecurityAudit(adm AdmissionInfo) SecurityAudit {
 	}
 
 	return audit
-}
-
-// parseResourceToMi converts a Kubernetes memory resource string (e.g. "1Gi", "512Mi", "2G") to MiB.
-func parseResourceToMi(mem string) int {
-	mem = strings.TrimSpace(mem)
-	if strings.HasSuffix(mem, "Gi") {
-		v, _ := strconv.Atoi(strings.TrimSuffix(mem, "Gi"))
-		return v * 1024
-	}
-	if strings.HasSuffix(mem, "Mi") {
-		v, _ := strconv.Atoi(strings.TrimSuffix(mem, "Mi"))
-		return v
-	}
-	if strings.HasSuffix(mem, "G") {
-		v, _ := strconv.Atoi(strings.TrimSuffix(mem, "G"))
-		return v * 1000 // G = 10^9 bytes ≈ 953 MiB, but close enough
-	}
-	if strings.HasSuffix(mem, "M") {
-		v, _ := strconv.Atoi(strings.TrimSuffix(mem, "M"))
-		return v
-	}
-	return 0
-}
-
-// parseResourceToCPUMilli converts a Kubernetes CPU resource string (e.g. "1", "500m", "2000m") to millicores.
-func parseResourceToCPUMilli(cpu string) int {
-	cpu = strings.TrimSpace(cpu)
-	if strings.HasSuffix(cpu, "m") {
-		v, _ := strconv.Atoi(strings.TrimSuffix(cpu, "m"))
-		return v
-	}
-	v, _ := strconv.Atoi(cpu)
-	return v * 1000
 }

@@ -230,13 +230,11 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 	}
 
 	// TLS certificate expiration remediation hints
-	expiringCount := 0
+	soon := expiringCerts(report.Security.ExpiringCerts)
+	expiringCount := len(soon)
 	var certCmds []string
-	for _, c := range report.Security.ExpiringCerts {
-		if c.DaysLeft < 30 {
-			expiringCount++
-			certCmds = append(certCmds, fmt.Sprintf("# Cert '%s' (%s) expires in %d days", c.SecretName, c.Subject, c.DaysLeft))
-		}
+	for _, c := range soon {
+		certCmds = append(certCmds, fmt.Sprintf("# Cert '%s' (%s) expires in %d days", c.SecretName, c.Subject, c.DaysLeft))
 	}
 	if expiringCount > 0 {
 		certCmds = append(certCmds,
@@ -252,11 +250,4 @@ func GenerateRemediation(report *DetectReport) []Remediation {
 	}
 
 	return hints
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

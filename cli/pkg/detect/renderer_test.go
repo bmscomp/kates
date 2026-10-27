@@ -183,11 +183,11 @@ func TestRenderHTML(t *testing.T) {
 	if !strings.Contains(htmlStr, "Kates Preflight Audit Report") {
 		t.Error("expected html to contain title")
 	}
-	if !strings.Contains(htmlStr, "Wildcard RBAC Audit") {
-		t.Error("expected html to contain Wildcard RBAC Audit section")
+	if !strings.Contains(htmlStr, "Wildcard RBAC") {
+		t.Error("expected html to contain the Wildcard RBAC fact")
 	}
-	if !strings.Contains(htmlStr, "TLS Secret Expiration") {
-		t.Error("expected html to contain TLS Secret Expiration section")
+	if !strings.Contains(htmlStr, "TLS certificates") {
+		t.Error("expected html to contain the TLS certificates fact")
 	}
 	if !strings.Contains(htmlStr, "zone-a") {
 		t.Error("expected html to contain zone-a in matrix")
