@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -35,7 +34,9 @@ it passed. The exit code is the same.`,
   kates gate --min-grade A --timeout 300
   kates gate --min-grade B -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		// Ctrl-C cancels this context (see interrupt.go), and the run it
+		// started with it: a gate killed in CI used to leave the test running.
+		ctx := commandContext(cmd)
 		jsonOut := outputMode == "json"
 
 		minOrdinal := gradeOrdinal(gateMinGrade)
@@ -56,14 +57,18 @@ it passed. The exit code is the same.`,
 		}
 		run, err := apiClient.CreateTest(ctx, req)
 		if err != nil {
+			if ctx.Err() != nil {
+				return errInterrupted
+			}
 			return cmdErr("Failed to create test: " + err.Error())
 		}
+		id := run.ID
 
 		if !jsonOut {
-			output.Success(fmt.Sprintf("Test started: %s", truncID(run.ID)))
+			output.Success(fmt.Sprintf("Test started: %s", truncID(id)))
 		}
 
-		res := gateResult{RunID: run.ID, TestType: gateType, Records: gateRecords, Status: run.Status, MinGrade: gateMinGrade}
+		res := gateResult{RunID: id, TestType: gateType, Records: gateRecords, Status: run.Status, MinGrade: gateMinGrade}
 		// fail ends the gate without a grade. Under -o json the result still
 		// goes to stdout, so a script that sees exit 1 learns which run it was
 		// and how far it got; the message goes to stderr either way.
@@ -77,9 +82,14 @@ it passed. The exit code is the same.`,
 
 		deadline := time.Now().Add(time.Duration(gateTimeout) * time.Second)
 		for {
-			time.Sleep(testPollInterval)
-			run, err = apiClient.GetTest(ctx, run.ID)
+			if !sleepCtx(ctx, testPollInterval) {
+				return stopStartedRun(id)
+			}
+			run, err = apiClient.GetTest(ctx, id)
 			if err != nil {
+				if ctx.Err() != nil {
+					return stopStartedRun(id)
+				}
 				return fail("Failed to poll test: " + err.Error())
 			}
 			res.Status = run.Status
@@ -88,7 +98,11 @@ it passed. The exit code is the same.`,
 				break
 			}
 			if time.Now().After(deadline) {
-				return fail(fmt.Sprintf("Timeout after %ds — test still %s", gateTimeout, run.Status))
+				// A run the gate gave up on is cancelled, not left to load
+				// the cluster while the next pipeline step starts.
+				cancelled, note := cancelStartedRun(id)
+				res.Status = cancelled
+				return fail(fmt.Sprintf("Timeout after %ds — test still %s; %s", gateTimeout, run.Status, note))
 			}
 		}
 
@@ -96,7 +110,7 @@ it passed. The exit code is the same.`,
 			return fail("Test FAILED")
 		}
 
-		report, err := apiClient.ReportSummary(ctx, run.ID)
+		report, err := apiClient.ReportSummary(ctx, id)
 		if err != nil || report == nil {
 			return fail("Failed to fetch report for grading")
 		}
@@ -198,5 +212,6 @@ func init() {
 	gateCmd.Flags().IntVar(&gateRecords, "records", 50000, "Number of records")
 	gateCmd.Flags().StringVar(&gateBackend, "backend", "", "Benchmark backend")
 	gateCmd.Flags().IntVar(&gateTimeout, "timeout", 180, "Timeout in seconds")
+	interruptible(gateCmd)
 	rootCmd.AddCommand(gateCmd)
 }

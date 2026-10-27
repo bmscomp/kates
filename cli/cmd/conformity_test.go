@@ -210,6 +210,25 @@ func TestConformityJUnitPassesAnUnknownWarnRule(t *testing.T) {
 	}
 }
 
+// A result with no rule id (a malformed report) used to panic the JUnit
+// writer on the empty split; it goes under an "unknown" section.
+func TestConformityJUnitEmptyRuleID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "conformity.xml")
+	report := &client.ConformityReport{Verdict: "FAIL", Results: []client.ConformityResult{
+		{Rule: "", Status: "FAIL", Severity: "fail", Detail: "no rule id"},
+	}}
+	if err := writeConformityJUnit(report, path, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `<testsuite name="conformity.unknown" tests="1" failures="1"`) {
+		t.Errorf("JUnit lacks the unknown section:\n%s", data)
+	}
+}
+
 func TestConformityCheckExitCodes(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

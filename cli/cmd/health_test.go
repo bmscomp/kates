@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -94,5 +96,55 @@ func TestStatusCmd(t *testing.T) {
 	}
 	if !strings.Contains(out, "Kafka ✓") {
 		t.Errorf("expected output to contain Kafka ✓, got: %s", out)
+	}
+}
+
+// An API that cannot be reached is an error, not a line and exit 0; -o json
+// prints the result with status "unreachable".
+func TestStatusCmd_Unreachable(t *testing.T) {
+	ts, buf := setupTest(t, "GET", "", 200, `{}`)
+	ts.Close() // nothing listens any more
+	apiClient.MaxRetries = 1
+
+	err := statusCmd.RunE(statusCmd, nil)
+	if _, ok := err.(*silentErr); !ok {
+		t.Fatalf("err = %v (%T), want a silentErr, which exits 1", err, err)
+	}
+	if out := stripAnsi(buf.String()); !strings.Contains(out, "unreachable") {
+		t.Errorf("output lacks unreachable: %s", out)
+	}
+
+	buf.Reset()
+	outputMode = "json"
+	defer func() { outputMode = "table" }()
+	err = statusCmd.RunE(statusCmd, nil)
+	var exit *exitError
+	if !errors.As(err, &exit) || exit.code != 1 {
+		t.Fatalf("err = %v (%T), want exit 1", err, err)
+	}
+	var got statusResult
+	if jerr := json.Unmarshal(buf.Bytes(), &got); jerr != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", jerr, buf.String())
+	}
+	if got.Status != "unreachable" || got.Error == "" || got.URL != ts.URL {
+		t.Errorf("status -o json = %+v, want status unreachable with the error and the URL %s", got, ts.URL)
+	}
+}
+
+func TestStatusCmd_JSON(t *testing.T) {
+	ts, buf := setupTest(t, "GET", "", 200, `{"status":"UP","kafka":{"status":"UP"},"tests":{"LOAD":{}}}`)
+	defer ts.Close()
+	outputMode = "json"
+	defer func() { outputMode = "table" }()
+
+	if err := statusCmd.RunE(statusCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got statusResult
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, buf.String())
+	}
+	if got.Status != "UP" || got.Kafka != "UP" || got.Configs != 1 || got.URL != ts.URL {
+		t.Errorf("status -o json = %+v", got)
 	}
 }

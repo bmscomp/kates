@@ -648,6 +648,9 @@ func isLoopbackHost(host string) bool {
 }
 
 func Execute() {
+	// Every init has run by now, so the built-ins are all registered and a
+	// plugin cannot take one's name.
+	registerPlugins()
 	ctx, stop := interruptContext(os.Args[1:])
 	defer stop()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {

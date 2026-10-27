@@ -121,7 +121,8 @@ func (m pollModel) Init() tea.Cmd {
 }
 
 func (m pollModel) tickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+	// pollInterval, not a fixed 2 s: --interval set it and the TUI ignored it.
+	return tea.Tick(pollInterval, func(t time.Time) tea.Msg {
 		return pollTickMsg(t)
 	})
 }
@@ -355,7 +356,7 @@ func (m pollModel) View() string {
 			))
 		} else {
 			b.WriteString(fmt.Sprintf("\n  %s\n",
-				output.DimStyle.Render("Polling every 2s · q to detach"),
+				output.DimStyle.Render(fmt.Sprintf("Polling every %s · q to detach", pollInterval.Truncate(time.Millisecond))),
 			))
 		}
 	}

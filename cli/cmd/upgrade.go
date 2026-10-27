@@ -410,25 +410,46 @@ func needsSudoForPath(dir string) bool {
 	return false
 }
 
+// installBinary puts src at dst by writing dst.tmp beside it and renaming it
+// over dst. dst is usually the kates that is running this very command, and
+// Linux refuses to write a running executable in place (ETXTBSY); a rename
+// replaces the directory entry and leaves the running file alone.
 func installBinary(src, dst string, useSudo bool) error {
 	os.MkdirAll(filepath.Dir(dst), 0755)
+	tmp := dst + ".tmp"
 
 	if useSudo {
-		cmd := exec.Command("sudo", "cp", src, dst)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("install failed (sudo cp): %w\n  Try: kates upgrade --install-dir ~/.local/bin", err)
+		sudo := func(args ...string) error {
+			cmd := exec.Command("sudo", args...)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			return cmd.Run()
 		}
-	} else {
-		data, err := os.ReadFile(src)
-		if err != nil {
-			return fmt.Errorf("read built binary: %w", err)
+		if err := sudo("install", "-m", "0755", src, tmp); err != nil {
+			return fmt.Errorf("install failed (sudo install): %w\n  Try: kates upgrade --install-dir ~/.local/bin", err)
 		}
-		if err := os.WriteFile(dst, data, 0755); err != nil {
-			return fmt.Errorf("write to %s: %w", dst, err)
+		if err := sudo("mv", "-f", tmp, dst); err != nil {
+			_ = sudo("rm", "-f", tmp)
+			return fmt.Errorf("install failed (sudo mv): %w\n  Try: kates upgrade --install-dir ~/.local/bin", err)
 		}
+		return nil
+	}
+
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read built binary: %w", err)
+	}
+	if err := os.WriteFile(tmp, data, 0755); err != nil {
+		return fmt.Errorf("write to %s: %w", tmp, err)
+	}
+	if err := os.Chmod(tmp, 0755); err != nil { // WriteFile's mode is cut by the umask
+		os.Remove(tmp)
+		return fmt.Errorf("chmod %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("replace %s: %w", dst, err)
 	}
 	return nil
 }

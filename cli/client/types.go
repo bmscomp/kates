@@ -541,27 +541,27 @@ type RerunTestRequest struct {
 // it, the one scenario files and --throughput send, and the backend takes it
 // as the rate when a request sets no throughput.
 type TestSpec struct {
-	Records            int    `json:"numRecords,omitempty"`
-	ParallelProducers  int    `json:"numProducers,omitempty"`
-	RecordSizeBytes    int    `json:"recordSize,omitempty"`
-	DurationMs         int    `json:"durationMs,omitempty"`
-	Topic              string `json:"topic,omitempty"`
-	Acks               string `json:"acks,omitempty"`
-	BatchSize          *int   `json:"batchSize,omitempty"`
-	LingerMs           *int   `json:"lingerMs,omitempty"`
-	CompressionType    string `json:"compressionType,omitempty"`
-	NumConsumers       int    `json:"numConsumers,omitempty"`
-	ReplicationFactor  int    `json:"replicationFactor,omitempty"`
-	Partitions         int    `json:"partitions,omitempty"`
-	MinInsyncReplicas  int    `json:"minInsyncReplicas,omitempty"`
-	ConsumerGroup      string `json:"consumerGroup,omitempty"`
-	Throughput         int    `json:"throughput,omitempty"`
-	TargetThroughput   int    `json:"targetThroughput,omitempty"`
-	FetchMinBytes      int    `json:"fetchMinBytes,omitempty"`
-	FetchMaxWaitMs     *int   `json:"fetchMaxWaitMs,omitempty"`
-	EnableIdempotence  *bool  `json:"enableIdempotence,omitempty"`
-	EnableTransactions *bool  `json:"enableTransactions,omitempty"`
-	EnableCrc          *bool  `json:"enableCrc,omitempty"`
+	Records            int    `json:"numRecords,omitempty" yaml:"numRecords,omitempty"`
+	ParallelProducers  int    `json:"numProducers,omitempty" yaml:"numProducers,omitempty"`
+	RecordSizeBytes    int    `json:"recordSize,omitempty" yaml:"recordSize,omitempty"`
+	DurationMs         int    `json:"durationMs,omitempty" yaml:"durationMs,omitempty"`
+	Topic              string `json:"topic,omitempty" yaml:"topic,omitempty"`
+	Acks               string `json:"acks,omitempty" yaml:"acks,omitempty"`
+	BatchSize          *int   `json:"batchSize,omitempty" yaml:"batchSize,omitempty"`
+	LingerMs           *int   `json:"lingerMs,omitempty" yaml:"lingerMs,omitempty"`
+	CompressionType    string `json:"compressionType,omitempty" yaml:"compressionType,omitempty"`
+	NumConsumers       int    `json:"numConsumers,omitempty" yaml:"numConsumers,omitempty"`
+	ReplicationFactor  int    `json:"replicationFactor,omitempty" yaml:"replicationFactor,omitempty"`
+	Partitions         int    `json:"partitions,omitempty" yaml:"partitions,omitempty"`
+	MinInsyncReplicas  int    `json:"minInsyncReplicas,omitempty" yaml:"minInsyncReplicas,omitempty"`
+	ConsumerGroup      string `json:"consumerGroup,omitempty" yaml:"consumerGroup,omitempty"`
+	Throughput         int    `json:"throughput,omitempty" yaml:"throughput,omitempty"`
+	TargetThroughput   int    `json:"targetThroughput,omitempty" yaml:"targetThroughput,omitempty"`
+	FetchMinBytes      int    `json:"fetchMinBytes,omitempty" yaml:"fetchMinBytes,omitempty"`
+	FetchMaxWaitMs     *int   `json:"fetchMaxWaitMs,omitempty" yaml:"fetchMaxWaitMs,omitempty"`
+	EnableIdempotence  *bool  `json:"enableIdempotence,omitempty" yaml:"enableIdempotence,omitempty"`
+	EnableTransactions *bool  `json:"enableTransactions,omitempty" yaml:"enableTransactions,omitempty"`
+	EnableCrc          *bool  `json:"enableCrc,omitempty" yaml:"enableCrc,omitempty"`
 }
 
 // TopicDetail from GET /api/cluster/topics/{name}

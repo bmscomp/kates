@@ -73,7 +73,7 @@ func newRunsBackend(t *testing.T) *runsBackend {
 func (b *runsBackend) resetFlags() {
 	outputMode = "table"
 	gateMinGrade, gateType, gateRecords, gateBackend, gateTimeout = "C", "LOAD", 50000, "", 180
-	benchRecords = 50000
+	benchRecords, benchTimeout = 50000, defaultBenchTimeout
 	applyFile, applyWait = "", false
 	advisorApply = false
 }
@@ -509,7 +509,9 @@ func TestBenchmark_LostRun(t *testing.T) {
 	b := newRunsBackend(t)
 	b.stuck["LOAD"] = true
 
-	stdout := commandStdout(t, func() error { return runCommandLine(t, "benchmark", "--records", "1000", "-o", "json") })
+	stdout := commandStdout(t, func() error {
+		return runCommandLine(t, "benchmark", "--records", "1000", "--timeout", "50ms", "-o", "json")
+	})
 	var got benchmarkResult
 	decodeStdout(t, stdout, &got)
 	if created := b.createdTypes(); !reflect.DeepEqual(created, []string{"LOAD"}) {
@@ -536,7 +538,9 @@ func TestBenchmark_LostRun(t *testing.T) {
 	}
 
 	b.resetFlags()
-	table := stripAnsi(string(commandStdout(t, func() error { return runCommandLine(t, "benchmark", "--records", "1000") })))
+	table := stripAnsi(string(commandStdout(t, func() error {
+		return runCommandLine(t, "benchmark", "--records", "1000", "--timeout", "50ms")
+	})))
 	for _, row := range [][]string{{"LOAD", "ERROR", "—", "—", "—"}, {"STRESS", "SKIPPED"}, {"SPIKE", "SKIPPED"}} {
 		if !tableHasRow(table, row) {
 			t.Errorf("table lacks row %q:\n%s", row, table)

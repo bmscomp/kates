@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,7 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var benchRecords int
+var (
+	benchRecords int
+	benchTimeout string
+)
 
 var benchmarkCmd = &cobra.Command{
 	Use:     "benchmark",
@@ -21,17 +25,26 @@ var benchmarkCmd = &cobra.Command{
 	Long: `Run a LOAD, a STRESS and a SPIKE test one after another and grade each
 from its peak throughput and p99 latency, then give an overall grade.
 
-A run that reports no final status in time shows as ERROR: it may still be
-going, so the battery stops there and the tests after it show as SKIPPED.
+A run that reports no final status within --timeout, or whose status cannot
+be read three times in a row, shows as ERROR: it may still be going, so the
+battery stops there and the tests after it show as SKIPPED.
 
 With -o json it prints only the scorecard, as JSON, when the battery ends.`,
 	Example: `  kates benchmark
   kates benchmark --records 100000
+  kates benchmark --timeout 10m
   kates benchmark -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		// Ctrl-C cancels this context (see interrupt.go), and the run the
+		// battery is waiting for with it.
+		ctx := commandContext(cmd)
 		jsonOut := outputMode == "json"
 		types := []string{"LOAD", "STRESS", "SPIKE"}
+
+		timeout, err := parseBenchTimeout(benchTimeout)
+		if err != nil {
+			return cmdErr(err.Error())
+		}
 
 		if !jsonOut {
 			output.Banner("Kates Benchmark", "Full performance battery")
@@ -71,13 +84,16 @@ With -o json it prints only the scorecard, as JSON, when the battery ends.`,
 				output.Hint(fmt.Sprintf("  Running %s → %s", tt, truncID(run.ID)))
 			}
 
-			final := waitForCompletion(ctx, run.ID)
-			if final == nil {
+			final, err := waitForCompletion(ctx, run.ID, timeout)
+			if ctx.Err() != nil {
+				return stopStartedRun(run.ID)
+			}
+			if err != nil {
 				// The outcome is unknown, not a failure, as test apply reports
 				// a run it lost track of. It used to read FAILED, and the next
 				// test started on top of a run that may still put load on the
 				// cluster.
-				msg := fmt.Sprintf("no final status after %s; the run may still be going", benchmarkPolls*testPollInterval)
+				msg := err.Error() + "; the run may still be going"
 				if !jsonOut {
 					output.Error(fmt.Sprintf("  %s: %s", tt, msg))
 				}
@@ -144,9 +160,28 @@ type benchmarkTest struct {
 	Error                   string   `json:"error,omitempty"`
 }
 
-// benchmarkPolls is how many times benchmark asks for a run's status before
-// it gives up on the run.
-const benchmarkPolls = 120
+// benchmarkPollFailures is how many GetTest errors in a row end a phase. One
+// error used to be skipped without a word, so an API that had gone away was
+// polled, in vain, for the whole six minutes.
+const benchmarkPollFailures = 3
+
+// defaultBenchTimeout bounds the wait for each phase's run. The old cap was
+// hidden: 120 polls of 3 s, which no flag could lengthen for a slow cluster.
+const defaultBenchTimeout = "30m"
+
+// parseBenchTimeout reads --timeout as a duration such as 10m, or a plain
+// number of seconds as kates gate takes it.
+func parseBenchTimeout(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if secs, err := strconv.Atoi(s); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("--timeout %q is not a duration such as 10m, or a number of seconds", s)
+	}
+	return d, nil
+}
 
 // scoreBenchmarkRun turns a finished run into its scorecard row. Only a run
 // that finished DONE with throughput is graded.
@@ -257,22 +292,44 @@ func gradeColor(grade string) string {
 // Tests shorten it.
 var testPollInterval = 3 * time.Second
 
-func waitForCompletion(ctx context.Context, id string) *client.TestRun {
-	for i := 0; i < benchmarkPolls; i++ {
-		time.Sleep(testPollInterval)
+// waitForCompletion polls run id until it is DONE or FAILED and returns it.
+// It returns an error when timeout passes first, when benchmarkPollFailures
+// polls in a row fail (with the last error), or when ctx ends, which the
+// caller tells apart with ctx.Err().
+func waitForCompletion(ctx context.Context, id string, timeout time.Duration) (*client.TestRun, error) {
+	deadline := time.Now().Add(timeout)
+	failures := 0
+	var lastErr error
+	for {
+		if !sleepCtx(ctx, testPollInterval) {
+			return nil, ctx.Err()
+		}
 		run, err := apiClient.GetTest(ctx, id)
 		if err != nil {
-			continue
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			failures++
+			lastErr = err
+			if failures >= benchmarkPollFailures {
+				return nil, fmt.Errorf("could not read the run's status %d times in a row: %w", failures, lastErr)
+			}
+		} else {
+			failures = 0
+			status := strings.ToUpper(run.Status)
+			if status == "DONE" || status == "FAILED" {
+				return run, nil
+			}
 		}
-		status := strings.ToUpper(run.Status)
-		if status == "DONE" || status == "FAILED" {
-			return run
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("no final status after %s", timeout)
 		}
 	}
-	return nil
 }
 
 func init() {
 	benchmarkCmd.Flags().IntVar(&benchRecords, "records", 50000, "Records per test phase")
+	benchmarkCmd.Flags().StringVar(&benchTimeout, "timeout", defaultBenchTimeout, "How long to wait for each phase's run: a duration such as 10m, or seconds")
+	interruptible(benchmarkCmd)
 	rootCmd.AddCommand(benchmarkCmd)
 }

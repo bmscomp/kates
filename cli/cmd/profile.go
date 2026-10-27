@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -68,10 +69,21 @@ var profileSaveCmd = &cobra.Command{
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, runID := args[0], args[1]
+		if err := validProfileName(name); err != nil {
+			return cmdErr(err.Error())
+		}
 
 		run, err := apiClient.GetTest(context.Background(), runID)
 		if err != nil {
 			return err
+		}
+		// A profile is a baseline: one saved from a run still going, or one
+		// that measured nothing, asserted every later run against zeros.
+		if strings.ToUpper(run.Status) != "DONE" {
+			return cmdErr(fmt.Sprintf("Run %s is %s, not DONE: only a finished run can be saved as a profile", truncID(runID), run.Status))
+		}
+		if len(run.Results) == 0 {
+			return cmdErr(fmt.Sprintf("Run %s has no results to save as a profile", truncID(runID)))
 		}
 
 		profile := PerformanceProfile{
@@ -210,6 +222,15 @@ if throughput regression exceeds the threshold.`,
 		}
 		p99 := latencyOf(run.Results).P99Ms
 
+		// A zero baseline cannot be regressed against: the deltas below would
+		// be ±Inf or NaN, which compared as no regression and passed.
+		if profile.Throughput <= 0 {
+			return cmdErr(fmt.Sprintf("Profile %q has no throughput to assert against; save it again from a finished run", profile.Name))
+		}
+		if profile.P99Ms <= 0 {
+			return cmdErr(fmt.Sprintf("Profile %q has no P99 latency to assert against; save it again from a run that measured latency", profile.Name))
+		}
+
 		throughputDelta := ((throughput - profile.Throughput) / profile.Throughput) * 100
 		p99Delta := ((p99 - profile.P99Ms) / profile.P99Ms) * 100
 
@@ -263,7 +284,22 @@ func profileDir() string {
 	return filepath.Join(home, ".kates", "profiles")
 }
 
+// profileNamePattern is what a profile name may hold: the name becomes a file
+// name under ~/.kates/profiles, so "../x" or a "/" would name a file elsewhere.
+var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// validProfileName refuses a name that is not a plain file name.
+func validProfileName(name string) error {
+	if !profileNamePattern.MatchString(name) || name == "." || name == ".." {
+		return fmt.Errorf("invalid profile name %q: use letters, digits, '.', '_' and '-'", name)
+	}
+	return nil
+}
+
 func saveProfile(p PerformanceProfile) error {
+	if err := validProfileName(p.Name); err != nil {
+		return err
+	}
 	dir := profileDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -276,6 +312,9 @@ func saveProfile(p PerformanceProfile) error {
 }
 
 func loadProfile(name string) (*PerformanceProfile, error) {
+	if err := validProfileName(name); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(filepath.Join(profileDir(), name+".json"))
 	if err != nil {
 		return nil, fmt.Errorf("profile %q not found", name)

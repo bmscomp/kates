@@ -11,10 +11,28 @@ import (
 )
 
 type checkResult struct {
-	Name        string
-	Passed      bool
-	Detail      string
-	Remediation string
+	Name        string `json:"name"`
+	Passed      bool   `json:"passed"`
+	Detail      string `json:"detail"`
+	Remediation string `json:"remediation"`
+}
+
+// optionalCheck reports whether a failed check is a warning rather than a
+// failure: Kyverno is recommended, not required.
+func optionalCheck(c checkResult) bool {
+	return strings.Contains(c.Name, "Kyverno")
+}
+
+// doctorResult is what the command returns once the checks are rendered: nil
+// when every required check passed, else exit 1. It used to return nil with a
+// failing cluster, so a CI step running kates doctor never failed.
+func doctorResult(checks []checkResult) error {
+	for _, c := range checks {
+		if !c.Passed && !optionalCheck(c) {
+			return &exitError{code: 1}
+		}
+	}
+	return nil
 }
 
 var doctorCmd = &cobra.Command{
@@ -27,14 +45,17 @@ var doctorCmd = &cobra.Command{
 		kc := kubectl.New("")
 		var checks []checkResult
 
-		output.Banner("Kates Doctor", "Pre-flight cluster readiness")
-		fmt.Println()
+		// Under -o json stdout is the JSON and nothing else.
+		if outputMode != "json" {
+			output.Banner("Kates Doctor", "Pre-flight cluster readiness")
+			fmt.Println()
+		}
 
 		health, err := apiClient.Health(ctx)
 		if err != nil {
 			checks = append(checks, checkResult{"API Reachable", false, err.Error(), "Ensure kubeconfig is valid and API server is reachable."})
 			renderChecks(checks)
-			return nil
+			return doctorResult(checks)
 		}
 		checks = append(checks, checkResult{"API Reachable", true, "Connected", ""})
 
@@ -139,7 +160,7 @@ var doctorCmd = &cobra.Command{
 		}
 
 		renderChecks(checks)
-		return nil
+		return doctorResult(checks)
 	},
 }
 
@@ -153,7 +174,7 @@ func renderChecks(checks []checkResult) {
 			status := "PASS"
 			if !c.Passed {
 				status = "FAILED"
-				if strings.Contains(c.Name, "Kyverno") {
+				if optionalCheck(c) {
 					status = "WARN" // Kyverno is optional but recommended
 				}
 			} else {

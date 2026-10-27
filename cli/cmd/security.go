@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -331,12 +332,14 @@ func gradeStyle(grade string) string {
 	}
 }
 
-// truncate shortens a string to max characters, appending "…" if needed.
+// truncate shortens a string to max columns, ending it with "…" when it had
+// to cut. It counts display width, not bytes: slicing bytes cut a multi-byte
+// character in two and printed a broken rune.
 func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
+	if max <= 0 {
+		return ""
 	}
-	return s[:max-1] + "…"
+	return runewidth.Truncate(s, max, "…")
 }
 
 // severityRank maps severity strings to sort-friendly integers (lower = more severe).

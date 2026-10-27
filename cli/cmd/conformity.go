@@ -360,7 +360,12 @@ func conformityJoin(values []any) string {
 func writeConformityJUnit(r *client.ConformityReport, path string, took time.Duration) error {
 	bySection := map[string]*junitTestSuite{}
 	for _, res := range r.Results {
-		section := strings.FieldsFunc(res.Rule, func(c rune) bool { return c == '.' || c == '[' })[0]
+		// A rule with no id (a malformed report) has no section; indexing
+		// the empty split panicked.
+		section := "unknown"
+		if parts := strings.FieldsFunc(res.Rule, func(c rune) bool { return c == '.' || c == '[' }); len(parts) > 0 {
+			section = parts[0]
+		}
 		suite := bySection[section]
 		if suite == nil {
 			suite = &junitTestSuite{Name: "conformity." + section, Time: fmt.Sprintf("%.3f", took.Seconds())}
@@ -376,7 +381,7 @@ func writeConformityJUnit(r *client.ConformityReport, path string, took time.Dur
 			if res.Severity == "warn" {
 				tc.SystemOut = "UNKNOWN (warn): " + res.Detail
 			} else {
-				tc.Error = &junitFailure{Message: res.Detail, Type: "unknown"}
+				tc.Error = &junitError{Message: res.Detail, Type: "unknown"}
 				suite.Errors++
 			}
 		case "WAIVED":

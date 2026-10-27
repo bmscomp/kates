@@ -5,16 +5,30 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/spf13/cobra"
 )
 
+// completionTimeout bounds an API call made while completing a command line.
+// A completer that waited on the client's own timeouts blocked the shell for
+// as long as a blackholed host took to fail; past this, the completer gives
+// its fallback list and the shell goes on.
+const completionTimeout = 2 * time.Second
+
+// completionContext is the context an API call from a completer runs with.
+func completionContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(commandContext(cmd), completionTimeout)
+}
+
 func completeRunIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	result, err := apiClient.ListTests(context.Background(), "", "", 0, 20)
+	ctx, cancel := completionContext(cmd)
+	defer cancel()
+	result, err := apiClient.ListTests(ctx, "", "", 0, 20)
 	if err != nil || result == nil || len(result.Content) == 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -30,7 +44,9 @@ func completeDoneRunIDs(cmd *cobra.Command, args []string, toComplete string) ([
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	result, err := apiClient.ListTests(context.Background(), "", "DONE", 0, 20)
+	ctx, cancel := completionContext(cmd)
+	defer cancel()
+	result, err := apiClient.ListTests(ctx, "", "DONE", 0, 20)
 	if err != nil || result == nil || len(result.Content) == 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -46,7 +62,9 @@ func completeTopicNames(cmd *cobra.Command, args []string, toComplete string) ([
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	topics, err := apiClient.KafkaTopics(context.Background())
+	ctx, cancel := completionContext(cmd)
+	defer cancel()
+	topics, err := apiClient.KafkaTopics(ctx)
 	if err != nil || len(topics) == 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -61,7 +79,9 @@ func completeGroupIDs(cmd *cobra.Command, args []string, toComplete string) ([]s
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	groups, err := apiClient.KafkaGroups(context.Background())
+	ctx, cancel := completionContext(cmd)
+	defer cancel()
+	groups, err := apiClient.KafkaGroups(ctx)
 	if err != nil || len(groups) == 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -114,7 +134,9 @@ func completeThemeNames(cmd *cobra.Command, args []string, toComplete string) ([
 }
 
 func completeTestTypes(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	types, err := apiClient.TestTypes(context.Background())
+	ctx, cancel := completionContext(cmd)
+	defer cancel()
+	types, err := apiClient.TestTypes(ctx)
 	if err == nil && len(types) > 0 {
 		return types, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -126,7 +148,9 @@ func registerTestCompletions() {
 		return completeTestTypes(cmd, args, toComplete)
 	})
 	testCreateCmd.RegisterFlagCompletionFunc("backend", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		backends, err := apiClient.Backends(context.Background())
+		ctx, cancel := completionContext(cmd)
+		defer cancel()
+		backends, err := apiClient.Backends(ctx)
 		if err == nil && len(backends) > 0 {
 			return backends, cobra.ShellCompDirectiveNoFileComp
 		}
