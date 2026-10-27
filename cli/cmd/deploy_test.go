@@ -3,11 +3,13 @@ package cmd
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bmscomp/kates/cli/pkg/kafkaversion"
 	"github.com/bmscomp/kates/cli/pkg/strimzi"
@@ -1003,5 +1005,39 @@ func TestRunDeploy_PinsEveryCallToTheChosenCluster(t *testing.T) {
 	}
 	if t.Failed() {
 		t.Logf("calls:\n%s", joined)
+	}
+}
+
+// Two commands run outside --verbose overlap. runExecDefault used to hold
+// execMutex across cmd.Run(), so the goroutines of the deploy groups queued
+// behind whichever helm install held it.
+func TestRunExecDefault_NonVerboseCommandsRunConcurrently(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep is not on PATH")
+	}
+	origVerbose := deployVerbose
+	t.Cleanup(func() { deployVerbose = origVerbose })
+	deployVerbose = false
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = runExecDefault(context.Background(), "sleep", "0.3")
+		}(i)
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	for _, err := range errs {
+		if err != nil {
+			t.Fatalf("sleep 0.3: %v", err)
+		}
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("two concurrent sleep 0.3 took %s, so they ran one after the other", elapsed)
 	}
 }

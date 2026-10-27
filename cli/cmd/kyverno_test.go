@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/spf13/cobra"
 )
 
 func TestKyvernoDetectRecommendations(t *testing.T) {
@@ -48,6 +52,80 @@ func TestKyvernoDetectCLI(t *testing.T) {
 	outStr := buf.String()
 	if !strings.Contains(outStr, "Kyverno Policy Detection") {
 		t.Errorf("Expected banner 'Kyverno Policy Detection', got:\n%s", outStr)
+	}
+}
+
+// fakeKyvernoKubectl answers every kubectl call with err, or with JSON/output
+// when err is nil, and records what it was asked.
+type fakeKyvernoKubectl struct {
+	err   error
+	json  string
+	calls []string
+}
+
+func (f *fakeKyvernoKubectl) record(args ...string) {
+	f.calls = append(f.calls, strings.Join(args, " "))
+}
+
+func (f *fakeKyvernoKubectl) Run(_ context.Context, args ...string) (string, error) {
+	f.record(args...)
+	return "", f.err
+}
+
+func (f *fakeKyvernoKubectl) Output(_ context.Context, args ...string) ([]byte, error) {
+	f.record(args...)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return []byte(f.json), nil
+}
+
+func (f *fakeKyvernoKubectl) JSON(_ context.Context, result interface{}, args ...string) error {
+	f.record(args...)
+	if f.err != nil {
+		return f.err
+	}
+	return json.Unmarshal([]byte(f.json), result)
+}
+
+func (f *fakeKyvernoKubectl) CRDExists(context.Context, string) bool { return true }
+
+// A kubectl failure exits 1. The four commands used to print it and return
+// nil, so a script saw a clean exit.
+func TestKyvernoCommands_KubectlFailureExitsNonZero(t *testing.T) {
+	orig := newKyvernoKubectlFn
+	t.Cleanup(func() { newKyvernoKubectlFn = orig })
+
+	for _, tt := range []struct {
+		cmd  *cobra.Command
+		args []string
+		want string // the kubectl call the fake must see
+	}{
+		{kyvernoStatusCmd, nil, "get clusterpolicies"},
+		{kyvernoViolationsCmd, nil, "get policyreport -o json -A"},
+		{kyvernoEnforceCmd, []string{"pss"}, `patch clusterpolicy pss --type=merge -p {"spec":{"validationFailureAction":"Enforce"}}`},
+		{kyvernoAuditCmd, []string{"pss"}, `patch clusterpolicy pss --type=merge -p {"spec":{"validationFailureAction":"Audit"}}`},
+	} {
+		fake := &fakeKyvernoKubectl{err: errors.New("kubectl get: exit status 1\nUnable to connect to the server")}
+		newKyvernoKubectlFn = func() kyvernoKubectl { return fake }
+
+		_, stderr, err := commandOutput(t, func() error { return tt.cmd.RunE(tt.cmd, tt.args) })
+		if _, ok := err.(*silentErr); !ok {
+			t.Errorf("kyverno %s: err = %v (%T), want a silentErr", tt.cmd.Name(), err, err)
+		}
+		if !strings.Contains(stderr, "Unable to connect") {
+			t.Errorf("kyverno %s: stderr %q does not say why", tt.cmd.Name(), stderr)
+		}
+		if len(fake.calls) == 0 || fake.calls[0] != tt.want {
+			t.Errorf("kyverno %s: kubectl calls %q, want first %q", tt.cmd.Name(), fake.calls, tt.want)
+		}
+	}
+
+	// And success still exits 0.
+	fake := &fakeKyvernoKubectl{}
+	newKyvernoKubectlFn = func() kyvernoKubectl { return fake }
+	if _, _, err := commandOutput(t, func() error { return kyvernoEnforceCmd.RunE(kyvernoEnforceCmd, []string{"pss"}) }); err != nil {
+		t.Errorf("kyverno enforce: err = %v, want nil", err)
 	}
 }
 

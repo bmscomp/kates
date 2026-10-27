@@ -585,11 +585,11 @@ var execMutex sync.Mutex
 func runExecDefault(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 
-	// Prevent interwoven output lines for parallel commands
-	execMutex.Lock()
-	defer execMutex.Unlock()
-
 	if deployVerbose {
+		// Verbose streams to the terminal, so commands take turns: the lock
+		// keeps the output lines of parallel commands from interweaving.
+		execMutex.Lock()
+		defer execMutex.Unlock()
 		// Show the command being run
 		dl.Printf("    %s\n", output.DimStyle.Render("$ "+name+" "+strings.Join(args, " ")))
 		cmd.Stdout = os.Stdout
@@ -597,7 +597,10 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 		return cmd.Run()
 	}
 
-	// Non-verbose: capture output, show stderr only on error
+	// Non-verbose: capture output, show stderr only on error. The command
+	// runs outside the lock; its output goes to buffers of its own, so
+	// nothing interweaves. It used to run under the lock, which made the
+	// deploy groups' goroutines queue behind one ten-minute helm install.
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -608,7 +611,9 @@ func runExecDefault(ctx context.Context, name string, args ...string) error {
 			errMsg = strings.TrimSpace(outBuf.String())
 		}
 		if errMsg != "" {
+			execMutex.Lock()
 			dl.Printf("    %s\n", output.ErrorStyle.Render(errMsg))
+			execMutex.Unlock()
 			return fmt.Errorf("%w: %s", err, errMsg)
 		}
 		return err

@@ -1358,6 +1358,40 @@ func deployGroupB(dc *deployContext) error {
 	return nil
 }
 
+// copySecretPassword copies the password of Secret name from fromNS into a
+// Secret of the same name in toNS, for a KafkaUser's credential that a
+// workload in another namespace reads. found is false when the Secret has no
+// password yet, which the caller reports as the KafkaUser not being ready.
+func copySecretPassword(ctx context.Context, name, fromNS, toNS string) (found bool, err error) {
+	pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", name,
+		"-n", fromNS, "-o", "jsonpath={.data.password}")
+	if pwErr != nil || len(bytes.TrimSpace(pwBytes)) == 0 {
+		return false, nil
+	}
+	return true, applySecretCopy(ctx, name, fromNS, toNS, []string{"password: " + string(bytes.TrimSpace(pwBytes))})
+}
+
+// applySecretCopy writes Secret name into toNS with the given base64 data
+// entries ("key: value"), copied from the Secret of that name in fromNS.
+// The apply used to be fire-and-forget: a refused apply surfaced only as
+// the consumer's pod stuck in CreateContainerConfigError until its
+// readiness wait timed out, minutes later and with no word of the cause.
+func applySecretCopy(ctx context.Context, name, fromNS, toNS string, data []string) error {
+	secretYaml := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: %s
+  namespace: %s
+type: Opaque
+data:
+  %s
+`, name, toNS, strings.Join(data, "\n  "))
+	if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml); err != nil {
+		return fmt.Errorf("Secret %s could not be copied from %s to %s: %w", name, fromNS, toNS, err)
+	}
+	return nil
+}
+
 // deployKafkaConnectStack handles all Kafka Connect related deployments:
 // namespace setup, secret copying, Helm install, readiness wait, and CDC connectors.
 func deployKafkaConnectStack(dc *deployContext) error {
@@ -1411,21 +1445,14 @@ func deployKafkaConnectStack(dc *deployContext) error {
 		}
 
 		if len(pwBytes) > 0 {
-			var dataLines strings.Builder
-			dataLines.WriteString(fmt.Sprintf("  password: %s\n", string(pwBytes)))
+			data := []string{"password: " + string(pwBytes)}
 			if len(jaasBytes) > 0 {
-				dataLines.WriteString(fmt.Sprintf("  sasl.jaas.config: %s\n", string(jaasBytes)))
+				data = append(data, "sasl.jaas.config: "+string(jaasBytes))
 			}
-
-			connectSecretYaml := fmt.Sprintf(`apiVersion: v1
-kind: Secret
-metadata:
-  name: kates-connect
-  namespace: %s
-type: Opaque
-data:
-%s`, connectNS, dataLines.String())
-			runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, connectSecretYaml)
+			if err := applySecretCopy(ctx, "kates-connect", kafkaNS, connectNS, data); err != nil {
+				dl.Printf("    ✗ %v\n", err)
+				return err
+			}
 		} else {
 			dl.Printf("    ⚠  Secret 'kates-connect' not found in namespace %s after waiting — KafkaUser may not be ready\n", kafkaNS)
 		}
@@ -1441,7 +1468,11 @@ type: Opaque
 stringData:
   password: debezium
   username: debezium`, connectNS)
-	runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml)
+	if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml); err != nil {
+		err = fmt.Errorf("Secret connect-pg-credentials could not be created in %s: %w", connectNS, err)
+		dl.Printf("    ✗ %v\n", err)
+		return err
+	}
 
 	connectDeployed := releaseKept(ctx, "connect-cluster", connectNS)
 	if connectDeployed && !isTesting {
@@ -1703,21 +1734,13 @@ func deployGroupC(dc *deployContext) error {
 			}
 
 			// The KafkaUser was already waited on in Group B — just read the Secret.
-			pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-backend",
-				"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-
-			if pwErr == nil && len(pwBytes) > 0 {
-				dl.Println("    - Copying Kafka SASL credentials to app namespace...")
-				secretYaml := fmt.Sprintf(`apiVersion: v1
-kind: Secret
-metadata:
-  name: kates-backend
-  namespace: %s
-type: Opaque
-data:
-  password: %s`, appNS, string(pwBytes))
-				runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
-			} else {
+			dl.Println("    - Copying Kafka SASL credentials to app namespace...")
+			found, err := copySecretPassword(ctx, "kates-backend", kafkaNS, appNS)
+			if err != nil {
+				dl.Printf("    ✗ %v\n", err)
+				return err
+			}
+			if !found {
 				dl.Printf("    ⚠  Secret 'kates-backend' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
 			}
 		}
@@ -1789,19 +1812,13 @@ data:
 				}
 
 				dl.Println("    - Copying kafka-ui SASL credentials to UI namespace...")
-				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kafka-ui",
-					"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-				if pwErr == nil && len(pwBytes) > 0 {
-					secretYaml := fmt.Sprintf(`apiVersion: v1
-kind: Secret
-metadata:
-  name: kafka-ui
-  namespace: %s
-type: Opaque
-data:
-  password: %s`, kafkaUINS, string(pwBytes))
-					runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
-				} else {
+				found, err := copySecretPassword(ctx, "kafka-ui", kafkaNS, kafkaUINS)
+				if err != nil {
+					dl.Printf("    ✗ %v\n", err)
+					dl.FinishComponent("kafka-ui", false)
+					return err
+				}
+				if !found {
 					dl.Printf("    ⚠  Secret 'kafka-ui' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
 				}
 			}
@@ -1852,19 +1869,13 @@ data:
 					return err
 				}
 				dl.Println("    - Copying kates-mm2 SASL credentials to the MirrorMaker 2 namespace...")
-				pwBytes, pwErr := runExecOutputFn(ctx, "kubectl", "get", "secret", "kates-mm2",
-					"-n", kafkaNS, "-o", "jsonpath={.data.password}")
-				if pwErr == nil && len(pwBytes) > 0 {
-					secretYaml := fmt.Sprintf(`apiVersion: v1
-kind: Secret
-metadata:
-  name: kates-mm2
-  namespace: %s
-type: Opaque
-data:
-  password: %s`, mm2NS, string(pwBytes))
-					runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml)
-				} else {
+				found, err := copySecretPassword(ctx, "kates-mm2", kafkaNS, mm2NS)
+				if err != nil {
+					dl.Printf("    ✗ %v\n", err)
+					dl.FinishComponent("mirror-maker2", false)
+					return err
+				}
+				if !found {
 					dl.Printf("    ⚠  Secret 'kates-mm2' not found in namespace %s — KafkaUser may not be ready\n", kafkaNS)
 				}
 			}

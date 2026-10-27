@@ -562,6 +562,33 @@ func TestClean_StopsOnlyForwardsIntoDeletedNamespaces(t *testing.T) {
 	}
 }
 
+// A release that will not uninstall is a failed clean: the command lists it
+// and exits 1. It used to print "cleaned successfully" and exit 0 over it.
+func TestClean_FailedUninstallExitsNonZero(t *testing.T) {
+	f := newCleanFixture(t)
+	cleanForce = true
+	outputFn := cleanRunOutputFn
+	cleanRunOutputFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "helm" && args[0] == "uninstall" {
+			f.record(name, args)
+			return []byte("Error: uninstallation completed with 1 error(s): timed out waiting for the condition"), fmt.Errorf("exit status 1")
+		}
+		return outputFn(ctx, name, args...)
+	}
+
+	stdout, stderr, err := commandOutput(t, func() error { return runClean(cleanCmd, nil) })
+	if _, ok := err.(*silentErr); !ok {
+		t.Fatalf("err = %v (%T), want a silentErr: a failed step exits 1", err, err)
+	}
+	out := stripAnsi(string(stdout))
+	if !strings.Contains(out, "helm release kates in kates-single-test") || strings.Contains(out, "cleaned successfully") {
+		t.Errorf("stdout should list the failed release and claim no success:\n%s", out)
+	}
+	if !strings.Contains(stderr, "could not be removed") {
+		t.Errorf("stderr = %q, want the failure summary", stderr)
+	}
+}
+
 func TestParsePortForward(t *testing.T) {
 	for _, tt := range []struct {
 		cmdLine string

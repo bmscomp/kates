@@ -159,7 +159,11 @@ It uses Helm to apply the exact configuration needed.`,
 		time.Sleep(3 * time.Second) // wait for admission controller to process CRs
 
 		statusOut, _ := kc.Output(ctx, "get", "clusterpolicies", "--no-headers")
-		count := len(strings.Split(strings.TrimSpace(string(statusOut)), "\n"))
+		// One line per policy; strings.Split counted empty output as one.
+		count := 0
+		if lines := strings.TrimSpace(string(statusOut)); lines != "" {
+			count = len(strings.Split(lines, "\n"))
+		}
 
 		output.Success(fmt.Sprintf("%d policies are now active in %s mode.", count, kyvernoApplyMode))
 		output.Hint("Run 'kates kyverno status' for details.")

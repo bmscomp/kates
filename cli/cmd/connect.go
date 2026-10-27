@@ -344,7 +344,10 @@ var connectScaleCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		kc := kubectl.New(connectNamespace)
 		ctx := context.Background()
-		patch := fmt.Sprintf(`{"spec":{"replicas":%s}}`, args[0])
+		patch, err := connectScalePatch(args[0])
+		if err != nil {
+			return err
+		}
 		// Find the KafkaConnect resource name
 		nameOut, err := kc.Output(ctx, "get", "kafkaconnect", "-n", connectNamespace, "-o", "jsonpath={.items[0].metadata.name}")
 		if err != nil {
@@ -361,6 +364,21 @@ var connectScaleCmd = &cobra.Command{
 		fmt.Printf("Kafka Connect %s scaled to %s replicas.\n", name, args[0])
 		return nil
 	},
+}
+
+// connectScalePatch is the merge patch that sets a KafkaConnect's replicas to
+// arg. The argument used to be pasted into the JSON as typed, so anything
+// that was not a number went to the API server as is.
+func connectScalePatch(arg string) (string, error) {
+	replicas, err := strconv.Atoi(strings.TrimSpace(arg))
+	if err != nil || replicas < 0 {
+		return "", fmt.Errorf("replicas must be a non-negative integer, got %q", arg)
+	}
+	patch, err := json.Marshal(map[string]any{"spec": map[string]any{"replicas": replicas}})
+	if err != nil {
+		return "", err
+	}
+	return string(patch), nil
 }
 
 func init() {

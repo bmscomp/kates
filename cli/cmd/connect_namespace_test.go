@@ -87,6 +87,32 @@ func TestConnectFindsItsNamespaceWhenItRuns(t *testing.T) {
 	}
 }
 
+// connect scale's argument is a replica count, checked before it goes into
+// the patch. It used to be pasted into the JSON as typed.
+func TestConnectScalePatch(t *testing.T) {
+	for _, tt := range []struct {
+		arg  string
+		want string // "" when the argument is refused
+	}{
+		{"3", `{"spec":{"replicas":3}}`},
+		{" 0 ", `{"spec":{"replicas":0}}`},
+		{"-1", ""},
+		{"three", ""},
+		{`3},"metadata":{"labels":{"x":"y"}}`, ""},
+		{"", ""},
+	} {
+		got, err := connectScalePatch(tt.arg)
+		switch {
+		case tt.want == "" && err == nil:
+			t.Errorf("connectScalePatch(%q) = %q, want an error", tt.arg, got)
+		case tt.want == "" && !strings.Contains(err.Error(), "replicas must be a non-negative integer"):
+			t.Errorf("connectScalePatch(%q) error = %q, want it to say what a replica count is", tt.arg, err)
+		case tt.want != "" && (err != nil || got != tt.want):
+			t.Errorf("connectScalePatch(%q) = %q, %v; want %q", tt.arg, got, err, tt.want)
+		}
+	}
+}
+
 func TestConnectNamespaceFlagSkipsTheLookup(t *testing.T) {
 	calls := runKates(t, "kafka", "connect", "status", "-n", "chosen")
 	joined := strings.Join(calls, "\n")

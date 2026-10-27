@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/bmscomp/kates/cli/output"
 	"os"
@@ -545,6 +546,18 @@ func runClean(cmd *cobra.Command, args []string) error {
 	okStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
 	errStyle := lipgloss.NewStyle().Foreground(clrRed)
 
+	// The steps that did not go through. Each is printed where it fails and
+	// listed again at the end, which then exits 1: clean used to print
+	// "cleaned successfully" and exit 0 over a release that would not
+	// uninstall or a CRD batch kubectl refused.
+	var failed []string
+	var failedMu sync.Mutex
+	fail := func(what string) {
+		failedMu.Lock()
+		defer failedMu.Unlock()
+		failed = append(failed, what)
+	}
+
 	// Filter operator CRD types actually present in cluster
 	var activeCRDTypes []string
 	for _, crdType := range operatorCRDTypes {
@@ -634,6 +647,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 				label := fmt.Sprintf("  Uninstalling %-16s from %s", rel.Name, rel.Namespace)
 				if err != nil {
 					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), errStyle.Render("  ✖ "+strings.TrimSpace(string(out))))
+					fail(fmt.Sprintf("helm release %s in %s", rel.Name, rel.Namespace))
 				} else {
 					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), okStyle.Render("  ✔"))
 				}
@@ -645,8 +659,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// ── 4. Delete cluster-scoped resources ──
 	for _, cr := range clusterResources {
 		dCtx, dCancel := context.WithTimeout(ctx, 10*time.Second)
-		cleanRun(dCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found")
+		err := cleanRun(dCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found")
 		dCancel()
+		if err != nil {
+			fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render("  Deleting "+cr.Kind+" "+cr.Name), errStyle.Render("  ✖ "+err.Error()))
+			fail(cr.Kind + " " + cr.Name)
+		}
 	}
 
 	// ── 5. Delete namespaces ──
@@ -662,15 +680,23 @@ func runClean(cmd *cobra.Command, args []string) error {
 				defer nsWg.Done()
 				nCtx, nCancel := context.WithTimeout(ctx, 3*time.Minute)
 				err := cleanRun(nCtx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found")
+				timedOut := errors.Is(nCtx.Err(), context.DeadlineExceeded)
 				nCancel()
 
 				printMutex.Lock()
 				defer printMutex.Unlock()
 				label := fmt.Sprintf("  Deleting namespace %s", namespace)
-				if err != nil {
-					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ still terminating"))
-				} else {
+				switch {
+				case err == nil:
 					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), okStyle.Render("  ✔"))
+				case timedOut:
+					// The delete was accepted and the namespace is still
+					// winding down after three minutes, which finishes on its
+					// own; not a failure.
+					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ still terminating"))
+				default:
+					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), errStyle.Render("  ✖ "+err.Error()))
+					fail("namespace " + namespace)
 				}
 			}(ns)
 		}
@@ -691,7 +717,8 @@ func runClean(cmd *cobra.Command, args []string) error {
 		cCancel()
 
 		if err != nil {
-			fmt.Println(errStyle.Render("  ✖"))
+			fmt.Println(errStyle.Render("  ✖ " + err.Error()))
+			fail(fmt.Sprintf("%d CRDs", len(existingCRDs)))
 		} else {
 			fmt.Println(okStyle.Render("  ✔"))
 		}
@@ -701,6 +728,17 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	elapsed := time.Since(startTime).Round(time.Second)
+
+	if len(failed) > 0 {
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
+			Render(fmt.Sprintf("  Not removed after %s:", elapsed)))
+		for _, f := range failed {
+			fmt.Printf("  %s %s\n", lipgloss.NewStyle().Foreground(clrRed).Render("✖"),
+				lipgloss.NewStyle().Foreground(clrText).Render(f))
+		}
+		fmt.Println()
+		return cmdErr(fmt.Sprintf("%s could not be removed from %s; see above", plural(len(failed), "step", "steps"), kubeContext))
+	}
 
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
 		Render(fmt.Sprintf("  ✅ Cluster cleaned successfully in %s.", elapsed)))

@@ -749,6 +749,56 @@ func TestDeployKafkaConnectStackReconcilesExistingReleaseWhenKafkaConnectNotRead
 	}
 }
 
+// A Secret copy kubectl refuses fails the deploy there and then, naming the
+// Secret and the namespaces. The apply's error used to be dropped, and the
+// deploy went on to wait on a workload that could never start.
+func TestDeployKafkaConnectStackFailsWhenTheSecretCopyIsRefused(t *testing.T) {
+	origHelm, origOutput, origStdin, origCombined, origDeployed := runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn
+	t.Cleanup(func() {
+		runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn = origHelm, origOutput, origStdin, origCombined, origDeployed
+	})
+
+	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if strings.Contains(name+" "+strings.Join(args, " "), "get secret kates-connect") {
+			return []byte(base64.StdEncoding.EncodeToString([]byte("pw"))), nil
+		}
+		return nil, nil
+	}
+	runExecCombinedFn = func(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+	var helmCalls []string
+	runHelmFn = func(_ context.Context, args ...string) error {
+		helmCalls = append(helmCalls, strings.Join(args, " "))
+		return nil
+	}
+	runExecStdinFn = func(_ context.Context, name string, args []string, stdinData string) error {
+		if strings.Contains(stdinData, "name: kates-connect") {
+			return errors.New(`exit status 1: secrets "kates-connect" is forbidden: User "deployer" cannot create resource "secrets" in the namespace "connect-blue"`)
+		}
+		return nil
+	}
+
+	err := deployKafkaConnectStack(&deployContext{
+		ctx:          context.Background(),
+		ns:           resolvedNamespaces{kafka: "kafka", connect: "connect-blue"},
+		report:       &detect.DetectReport{Network: detect.NetworkInfo{ClusterDomain: "cluster.local"}},
+		chartOverlay: func(dir string) string { return dir + "/values-generic.yaml" },
+		advanceStep:  func() {},
+		primary:      primaryCluster{Name: "krafter", Namespace: "kafka"},
+	})
+	if err == nil {
+		t.Fatal("deployKafkaConnectStack returned nil over a refused Secret copy")
+	}
+	for _, want := range []string{"Secret kates-connect could not be copied from kafka to connect-blue", "is forbidden"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+	if len(helmCalls) != 0 {
+		t.Errorf("helm ran after the failed copy: %v", helmCalls)
+	}
+}
+
 func TestDeployGroupBReconcilesKafkaWhenReleaseExistsButCRNotReady(t *testing.T) {
 	origHelm, origOutput, origDeployed := runHelmFn, runExecOutputFn, isHelmReleaseDeployedFn
 	t.Cleanup(func() {

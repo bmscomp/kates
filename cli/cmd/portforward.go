@@ -104,8 +104,7 @@ Examples:
   kates ports --kafka-ns kafka   # custom kafka namespace`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		runPorts(ctx)
-		return nil
+		return runPorts(ctx)
 	},
 }
 
@@ -120,7 +119,10 @@ func init() {
 
 // ──────────────────────────────────────────────────────────────────────────────
 
-func runPorts(ctx context.Context) {
+// runPorts forwards every Kates service it finds. It returns an error, and so
+// exits 1, when a forward could not be established; it used to say so and
+// exit 0, which a script could not tell from success.
+func runPorts(ctx context.Context) error {
 	// ── 0. Clean up existing port forwards to prevent bind conflicts ────────────
 	fmt.Printf("\n    %s Cleaning up existing port-forwards...\n", output.DimStyle.Render("🧹"))
 
@@ -138,7 +140,8 @@ func runPorts(ctx context.Context) {
 		}
 	}
 
-	_ = exec.Command("pkill", "-f", "kubectl port-forward").Run()
+	stopOwnPortForwards()
+	// The ports of the forwards just stopped take a moment to come free.
 	time.Sleep(1000 * time.Millisecond)
 
 	// ── 1. Discover services ─────────────────────────────────────────────────
@@ -149,7 +152,7 @@ func runPorts(ctx context.Context) {
 	specs := matchSpecs(discovered)
 	if len(specs) == 0 {
 		fmt.Printf("    %s No Kates services found in the cluster\n\n", output.ErrorStyle.Render("✖"))
-		return
+		return nil
 	}
 
 	boldStyle := lipgloss.NewStyle().Bold(true)
@@ -267,10 +270,31 @@ func runPorts(ctx context.Context) {
 	if allOk {
 		fmt.Printf("    %s %s\n", okStyle.Render("✓"), boldStyle.Render("Port forwards established successfully!"))
 		fmt.Printf("      %s\n\n", output.DimStyle.Render("They are running in the background. You can continue typing commands in this terminal."))
-	} else {
-		fmt.Printf("    %s %s\n", errStyle.Render("⚠"), boldStyle.Render("Some port forwards failed to establish."))
-		fmt.Printf("      %s\n\n", output.DimStyle.Render("Check that the pods are ready, then run 'kates ports' again."))
+		return nil
 	}
+	fmt.Printf("    %s %s\n", errStyle.Render("⚠"), boldStyle.Render("Some port forwards failed to establish."))
+	fmt.Printf("      %s\n\n", output.DimStyle.Render("Check that the pods are ready, then run 'kates ports' again."))
+	// The table above says which; this sets the exit code and says so on stderr.
+	return cmdErr("some port forwards failed to establish")
+}
+
+// stopOwnPortForwards stops the kubectl port-forwards kates ports started on
+// an earlier run, so this run can bind the same local ports: forwards into
+// the cluster it is about to forward from (portsKubeContext, or kubectl's
+// current context when it is empty) and into a namespace kates forwards.
+// This used to be `pkill -f "kubectl port-forward"`, which ended every
+// forward on the machine, including ones to other clusters that kates did
+// not start.
+func stopOwnPortForwards() int {
+	ours := map[string]bool{"": true}
+	for _, ns := range []string{portsAppNS, portsKafkaNS, portsMonitoringNS} {
+		ours[ns] = true
+	}
+	return stopPortForwards(func(p portForwardProc) bool {
+		// A forward with no --context reads the current context, which is
+		// what kates ports itself starts.
+		return ours[p.Namespace] && (p.Context == "" || p.Context == portsKubeContext)
+	})
 }
 
 var startPortForwardFn = startDetachedPortForward
@@ -1008,12 +1032,13 @@ func matchSpecs(discovered map[string]bool) []portForwardSpec {
 // ── Legacy bridge ────────────────────────────────────────────────────────────
 // RunPortForwards is called by `deploy --port-forward`. It delegates to the
 // same discovery + forward logic as `kates ports`, from the cluster the deploy
-// went to.
+// went to. A forward that fails is reported by runPorts and does not fail the
+// deploy, which has already succeeded.
 func RunPortForwards(ctx context.Context, kubeContext, kafkaNS, appNS, jaegerNS string) {
 	portsKubeContext = kubeContext
 	portsKafkaNS = kafkaNS
 	portsAppNS = appNS
 	portsMonitoringNS = jaegerNS
 	portsAll = true
-	runPorts(ctx)
+	_ = runPorts(ctx)
 }
