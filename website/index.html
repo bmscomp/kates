@@ -519,18 +519,16 @@ kates gate --min-grade C --records 100000</code></pre>
             <button type="button" class="good"><span class="k-idx">5</span> Graded</button>
           </div>
           <p class="arch-step"></p>
-          <div class="arch-tui-foot">
-            <figcaption aria-live="polite">The CLI never touches Kafka directly: the API inside the cluster runs the load, drives the faults, grades the result and keeps the history.</figcaption>
-            <div class="arch-keyhints" aria-hidden="true">
-              <span><b>1–5</b> phase</span>
-              <span class="sep">│</span>
-              <span><b>hover</b> inspect node</span>
-              <span class="sep">│</span>
-              <span><b>T</b> next look</span>
-              <span class="sep">│</span>
-              <span><b>C</b> next colors</span>
-            </div>
+          <div class="arch-keyhints" aria-hidden="true">
+            <span><b>1–5</b> phase</span>
+            <span class="sep">│</span>
+            <span><b>hover</b> inspect node</span>
+            <span class="sep">│</span>
+            <span><b>T</b> next look</span>
+            <span class="sep">│</span>
+            <span><b>C</b> next colors</span>
           </div>
+          <figcaption aria-live="polite">The CLI never touches Kafka directly: the API inside the cluster runs the load, drives the faults, grades the result and keeps the history.</figcaption>
         </figure>
 
         <figure class="kz" data-phase="0" data-tui-design="grid">
@@ -569,16 +567,14 @@ kates gate --min-grade C --records 100000</code></pre>
             <span>ISR p1 <i></i><i class="hit"></i><i></i></span>
             <span>ISR p2 <i></i><i class="hit"></i><i></i></span>
           </div>
-          <div class="arch-tui-foot">
-            <figcaption><b>Healthy.</b> ISR back to 3, preferred leader restored. Recovered in 6.4 s, 0 records lost.</figcaption>
-            <div class="arch-keyhints" aria-hidden="true">
-              <span><b>★</b> partition leader</span>
-              <span class="sep">│</span>
-              <span><b>T</b> next look</span>
-              <span class="sep">│</span>
-              <span><b>C</b> next colors</span>
-            </div>
+          <div class="arch-keyhints" aria-hidden="true">
+            <span><b>★</b> partition leader</span>
+            <span class="sep">│</span>
+            <span><b>T</b> next look</span>
+            <span class="sep">│</span>
+            <span><b>C</b> next colors</span>
           </div>
+          <figcaption><b>Healthy.</b> ISR back to 3, preferred leader restored. Recovered in 6.4 s, 0 records lost.</figcaption>
         </figure>
 
         <div class="screens">

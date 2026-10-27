@@ -465,21 +465,26 @@ h3 { font-size: 1.2rem; font-weight: 600; }
 .arch[data-phase="3"] .arch-step { color: var(--tui-warn); }
 .arch[data-phase="4"] .arch-step { color: var(--tui-ok); }
 
-.arch-tui-foot {
-  margin-top: 8px;
+.arch-keyhints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--tui-win-border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--tui-muted);
 }
-.arch figcaption { color: var(--tui-muted); font-size: 0.82rem; margin: 0; text-align: left; }
-.arch-keyhints { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: 0.8rem; color: var(--tui-muted); }
 .arch-keyhints b { color: var(--tui-focus); font-weight: 600; }
-.arch[data-tui-design="panels"] .arch-keyhints b { color: #bd93f9; }
+.arch[data-tui-design="panels"] .arch-keyhints b,
+.kz[data-tui-design="panels"] .arch-keyhints b { color: #bd93f9; }
 .arch-keyhints .sep { color: var(--tui-border); }
+.arch figcaption, .kz figcaption {
+  color: var(--tui-muted);
+  font-size: 0.83rem;
+  margin: 6px 0 0;
+  text-align: left;
+}
 
 .arch .node { cursor: pointer; outline: none; transform-box: fill-box; }
 .arch .node:focus-visible .pane-bg { stroke-width: 2.5; stroke: var(--tui-accent); }
