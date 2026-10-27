@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +19,11 @@ import (
 
 func init() {
 	isTesting = true
+	// The waits read a clock that jumps forward on every poll, so a wait that
+	// never becomes ready reaches its timeout in milliseconds instead of
+	// minutes, and a test can assert on the timeout. Every wait used to be
+	// skipped under isTesting, so none was ever exercised.
+	deployClock = newFakeClock()
 	// These tests exercise deploy orchestration and assume a cluster already
 	// exists. The cluster gate is a real precondition of runDeploy, but its own
 	// behavior (picking, the kind offer, the blocked states) is covered directly
@@ -110,6 +117,20 @@ func stubClusterRead(_ context.Context, name string, args ...string) ([]byte, er
 	// CRD establishment checks look for "True".
 	case strings.Contains(joined, "get crd") && strings.Contains(joined, "Established"):
 		return []byte("True"), nil
+	// The readiness waits: every pod Running, every KafkaUser and
+	// KafkaConnector Ready.
+	case strings.Contains(joined, "get pods") && strings.Contains(joined, "{.status.phase}"):
+		return []byte("Running,"), nil
+	case strings.Contains(joined, "get kafkauser") || strings.Contains(joined, "get kafkaconnector -n"):
+		return []byte("True,"), nil
+	// The Kafka Connect CR as this deploy would render it, so an existing
+	// release reads as up to date.
+	case strings.Contains(joined, "get kafkaconnect connect-cluster") && strings.Contains(joined, "-o json"):
+		kafkaNS := resolveNamespaces().kafka
+		return []byte(fmt.Sprintf(`{"spec":{"bootstrapServers":"%s-kafka-bootstrap.%s.svc.cluster.local:9092",
+			"config":{"schema.registry.url":"http://registry"},
+			"template":{"pod":{"dnsConfig":{"searches":["%s.svc.cluster.local"]}}}},
+			"status":{"conditions":[{"type":"Ready","status":"True"}]}}`, deployKafkaName, kafkaNS, kafkaNS)), nil
 	case strings.Contains(joined, "get kafka") && strings.Contains(joined, "jsonpath={.status.conditions"):
 		return []byte("True"), nil
 	case strings.Contains(joined, "get kafkaconnect connect-cluster") && strings.Contains(joined, "jsonpath={.status.conditions"):
@@ -124,6 +145,36 @@ func stubClusterRead(_ context.Context, name string, args ...string) ([]byte, er
 	default:
 		return []byte(""), nil
 	}
+}
+
+// fakeClock is a deployClocker whose time moves only when something waits
+// on it: After and Sleep advance it by their duration and return at once.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Sleep(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+func (c *fakeClock) After(d time.Duration) <-chan time.Time {
+	c.Sleep(d)
+	ch := make(chan time.Time, 1)
+	ch <- c.Now()
+	return ch
 }
 
 type MockExecutor struct{}
@@ -831,7 +882,7 @@ func TestDeployDryRun_WritesNothingToTheCluster(t *testing.T) {
 
 	introspection := detectExec.commands()
 	// A dry run introspects the cluster the gate chose, by name.
-	if len(introspection) == 0 || !sliceContains(introspection, "kubectl get nodes -o json --context=test-context") {
+	if len(introspection) == 0 || !slices.Contains(introspection, "kubectl get nodes -o json --context=test-context") {
 		t.Fatalf("introspection never ran, so nothing was checked; commands: %v", introspection)
 	}
 	for _, c := range writes {
@@ -987,7 +1038,7 @@ func TestRunDeploy_PinsEveryCallToTheChosenCluster(t *testing.T) {
 	}
 	joined := strings.Join(all, "\n")
 	for _, want := range []string{
-		"helm status",                            // the release lookups
+		"helm list",                              // the release lookups
 		"kubectl apply --server-side",            // local Strimzi CRD apply
 		"--set crdUpgrade.enabled=false",         // no in-cluster GitHub-fetch hook
 		"helm upgrade --install monitoring",      // monitoring

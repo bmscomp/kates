@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -165,67 +167,6 @@ func TestSyncActiveContextKey(t *testing.T) {
 				t.Errorf("report shows part of a key:\n%s", out)
 			}
 		})
-	}
-}
-
-func TestEnsureKubernetesNoProxy(t *testing.T) {
-	tests := []struct {
-		name          string
-		inputNoProxy  string
-		clusterDomain string
-		want          string
-	}{
-		{
-			name:          "adds kubernetes service names and loopback entries",
-			inputNoProxy:  "example.com,localhost",
-			clusterDomain: "cluster.local",
-			want:          "example.com,localhost,127.0.0.1,::1,kubernetes,kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.cluster.local",
-		},
-		{
-			name:          "keeps existing entries and avoids case-insensitive duplicates",
-			inputNoProxy:  "LOCALHOST,kubernetes.default.svc.cluster.local",
-			clusterDomain: "cluster.local",
-			want:          "LOCALHOST,kubernetes.default.svc.cluster.local,127.0.0.1,::1,kubernetes,kubernetes.default,kubernetes.default.svc",
-		},
-		{
-			name:          "uses cluster.local when domain is empty",
-			inputNoProxy:  "",
-			clusterDomain: "",
-			want:          "localhost,127.0.0.1,::1,kubernetes,kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.cluster.local",
-		},
-		{
-			name:          "respects non-default cluster domain",
-			inputNoProxy:  "",
-			clusterDomain: "corp.internal",
-			want:          "localhost,127.0.0.1,::1,kubernetes,kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.corp.internal",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ensureKubernetesNoProxy(tt.inputNoProxy, tt.clusterDomain)
-			if got != tt.want {
-				t.Fatalf("ensureKubernetesNoProxy(%q, %q) = %q, want %q", tt.inputNoProxy, tt.clusterDomain, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDetectDeployProxySettingsLoopbackHandling(t *testing.T) {
-	for _, key := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"} {
-		t.Setenv(key, "")
-	}
-	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9000")
-	t.Setenv("HTTPS_PROXY", "http://localhost:9000")
-
-	remote := detectDeployProxySettings(false)
-	if remote.http != "" || remote.https != "" {
-		t.Fatalf("remote cluster must not receive developer loopback proxy URLs: %+v", remote)
-	}
-
-	kind := detectDeployProxySettings(true)
-	if kind.http != "http://host.docker.internal:9000" || kind.https != "http://host.docker.internal:9000" {
-		t.Fatalf("kind cluster proxy URLs were not rewritten: %+v", kind)
 	}
 }
 
@@ -450,7 +391,7 @@ func TestDeployGroupAAppliesLocalStrimziCRDsAndDisablesHook(t *testing.T) {
 		return nil
 	}
 
-	err := deployGroupA(&deployContext{
+	err := runComponentIDs(&deployContext{
 		ctx: context.Background(),
 		report: &detect.DetectReport{
 			Network: detect.NetworkInfo{ClusterDomain: "cluster.test"},
@@ -463,12 +404,12 @@ func TestDeployGroupAAppliesLocalStrimziCRDsAndDisablesHook(t *testing.T) {
 			ChartPath:      chartPath,
 			ChartDir:       "/cache/wrapper/1.2.0",
 		},
-	})
+	}, "strimzi")
 	if err != nil {
-		t.Fatalf("deployGroupA returned error: %v", err)
+		t.Fatalf("strimzi component returned error: %v", err)
 	}
 
-	if !sliceContains(stdinCalls, "kubectl apply --server-side --force-conflicts -f -") {
+	if !slices.Contains(stdinCalls, "kubectl apply --server-side --force-conflicts -f -") {
 		t.Fatalf("local Strimzi CRD apply did not run; calls = %v", stdinCalls)
 	}
 	if len(helmCalls) != 1 {
@@ -530,7 +471,7 @@ func TestPrometheusOperatorCRDsAvailable(t *testing.T) {
 		t.Fatal("expected Prometheus Operator CRDs to be available")
 	}
 	wantArgs := []string{"get", "crd"}
-	wantArgs = append(wantArgs, prometheusOperatorCRDNames...)
+	wantArgs = append(wantArgs, prometheusOperatorCRDNames()...)
 	if want := "kubectl " + strings.Join(wantArgs, " "); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
@@ -649,14 +590,14 @@ func TestKafkaConnectNeedsReconcile(t *testing.T) {
 }
 
 func TestDeployKafkaConnectStackReconcilesExistingReleaseWhenKafkaConnectNotReady(t *testing.T) {
-	origHelm, origOutput, origStdin, origCombined, origDeployed, origTesting := runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn, isTesting
-	origDBNS, origHA, origMonitoring := deployDbNS, deployHA, deployWithMonitoring
+	origHelm, origOutput, origStdin, origCombined, origDeployed := runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn
+	origDBNS, origHA, origMonitoring, origConnect := deployDbNS, deployHA, deployWithMonitoring, deployWithKafkaConnect
 	t.Cleanup(func() {
-		runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn, isTesting = origHelm, origOutput, origStdin, origCombined, origDeployed, origTesting
-		deployDbNS, deployHA, deployWithMonitoring = origDBNS, origHA, origMonitoring
+		runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn = origHelm, origOutput, origStdin, origCombined, origDeployed
+		deployDbNS, deployHA, deployWithMonitoring, deployWithKafkaConnect = origDBNS, origHA, origMonitoring, origConnect
 	})
 
-	isTesting = false
+	deployWithKafkaConnect = true
 	deployDbNS = "database"
 	deployHA = true
 	deployWithMonitoring = true
@@ -704,7 +645,7 @@ func TestDeployKafkaConnectStackReconcilesExistingReleaseWhenKafkaConnectNotRead
 		return nil
 	}
 
-	err := deployKafkaConnectStack(&deployContext{
+	err := runComponentIDs(&deployContext{
 		ctx: context.Background(),
 		ns:  resolvedNamespaces{kafka: "kafka", connect: "connect-blue"},
 		report: &detect.DetectReport{
@@ -714,9 +655,9 @@ func TestDeployKafkaConnectStackReconcilesExistingReleaseWhenKafkaConnectNotRead
 		advanceStep:  func() {},
 		versions:     &versionPlan{KafkaVersion: "4.3.1"},
 		primary:      primaryCluster{Name: "krafter", Namespace: "kafka"},
-	})
+	}, "kafka-connect", "kafka-connector")
 	if err != nil {
-		t.Fatalf("deployKafkaConnectStack returned error: %v", err)
+		t.Fatalf("Kafka Connect components returned error: %v", err)
 	}
 
 	if !sliceContainsPrefix(helmCalls, "dependency update --skip-refresh charts/connect-cluster") {
@@ -751,51 +692,68 @@ func TestDeployKafkaConnectStackReconcilesExistingReleaseWhenKafkaConnectNotRead
 
 // A Secret copy kubectl refuses fails the deploy there and then, naming the
 // Secret and the namespaces. The apply's error used to be dropped, and the
-// deploy went on to wait on a workload that could never start.
-func TestDeployKafkaConnectStackFailsWhenTheSecretCopyIsRefused(t *testing.T) {
-	origHelm, origOutput, origStdin, origCombined, origDeployed := runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn
-	t.Cleanup(func() {
-		runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn = origHelm, origOutput, origStdin, origCombined, origDeployed
-	})
+// deploy went on to wait on a workload that could never start. The scheduler
+// owns every copy, so each consumer of a KafkaUser credential fails the same
+// way: Kafka Connect, the backend, Kafka UI and MirrorMaker 2.
+func TestDeployFailsWhenTheSecretCopyIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		id, secret, namespace string
+		enable                func()
+	}{
+		{"kafka-connect", "kates-connect", "connect-blue", func() { deployWithKafkaConnect = true }},
+		{"kates", "kates-backend", "app-blue", func() {}},
+		{"kafka-ui", "kafka-ui", "ui-blue", func() { deployWithKafkaUI = true }},
+		{"mirror-maker2", "kates-mm2", "mm2-blue", func() { deployWithMirrorMaker2 = true }},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			origHelm, origOutput, origStdin, origCombined, origDeployed, origDL := runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn, dl
+			t.Cleanup(func() {
+				runHelmFn, runExecOutputFn, runExecStdinFn, runExecCombinedFn, isHelmReleaseDeployedFn, dl = origHelm, origOutput, origStdin, origCombined, origDeployed, origDL
+			})
+			setDeployFlags(t, tc.enable)
+			dl = &DashboardController{}
 
-	isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
-	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
-		if strings.Contains(name+" "+strings.Join(args, " "), "get secret kates-connect") {
-			return []byte(base64.StdEncoding.EncodeToString([]byte("pw"))), nil
-		}
-		return nil, nil
-	}
-	runExecCombinedFn = func(context.Context, string, ...string) ([]byte, error) { return nil, nil }
-	var helmCalls []string
-	runHelmFn = func(_ context.Context, args ...string) error {
-		helmCalls = append(helmCalls, strings.Join(args, " "))
-		return nil
-	}
-	runExecStdinFn = func(_ context.Context, name string, args []string, stdinData string) error {
-		if strings.Contains(stdinData, "name: kates-connect") {
-			return errors.New(`exit status 1: secrets "kates-connect" is forbidden: User "deployer" cannot create resource "secrets" in the namespace "connect-blue"`)
-		}
-		return nil
-	}
+			isHelmReleaseDeployedFn = func(context.Context, string, string) bool { return false }
+			runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
+				if strings.Contains(name+" "+strings.Join(args, " "), "get secret "+tc.secret) {
+					return []byte(base64.StdEncoding.EncodeToString([]byte("pw"))), nil
+				}
+				return nil, nil
+			}
+			runExecCombinedFn = func(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+			var helmCalls []string
+			runHelmFn = func(_ context.Context, args ...string) error {
+				helmCalls = append(helmCalls, strings.Join(args, " "))
+				return nil
+			}
+			runExecStdinFn = func(_ context.Context, name string, args []string, stdinData string) error {
+				if strings.Contains(stdinData, "name: "+tc.secret) {
+					return fmt.Errorf(`exit status 1: secrets %q is forbidden: User "deployer" cannot create resource "secrets" in the namespace %q`, tc.secret, tc.namespace)
+				}
+				return nil
+			}
 
-	err := deployKafkaConnectStack(&deployContext{
-		ctx:          context.Background(),
-		ns:           resolvedNamespaces{kafka: "kafka", connect: "connect-blue"},
-		report:       &detect.DetectReport{Network: detect.NetworkInfo{ClusterDomain: "cluster.local"}},
-		chartOverlay: func(dir string) string { return dir + "/values-generic.yaml" },
-		advanceStep:  func() {},
-		primary:      primaryCluster{Name: "krafter", Namespace: "kafka"},
-	})
-	if err == nil {
-		t.Fatal("deployKafkaConnectStack returned nil over a refused Secret copy")
-	}
-	for _, want := range []string{"secret kates-connect could not be copied from kafka to connect-blue", "is forbidden"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q lacks %q", err, want)
-		}
-	}
-	if len(helmCalls) != 0 {
-		t.Errorf("helm ran after the failed copy: %v", helmCalls)
+			err := runComponentIDs(&deployContext{
+				ctx:          context.Background(),
+				ns:           resolvedNamespaces{kafka: "kafka", connect: tc.namespace, app: tc.namespace, kafkaUI: tc.namespace, mm2: tc.namespace},
+				report:       &detect.DetectReport{Network: detect.NetworkInfo{ClusterDomain: "cluster.local"}},
+				chartOverlay: func(dir string) string { return dir + "/values-generic.yaml" },
+				fileExists:   func(string) bool { return false },
+				advanceStep:  func() {},
+				primary:      primaryCluster{Name: "krafter", Namespace: "kafka"},
+			}, tc.id)
+			if err == nil {
+				t.Fatalf("%s: nil error over a refused Secret copy", tc.id)
+			}
+			for _, want := range []string{fmt.Sprintf("secret %s could not be copied from kafka to %s", tc.secret, tc.namespace), "is forbidden"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q lacks %q", err, want)
+				}
+			}
+			if len(helmCalls) != 0 {
+				t.Errorf("helm ran after the failed copy: %v", helmCalls)
+			}
+		})
 	}
 }
 
@@ -815,10 +773,14 @@ func TestDeployGroupBReconcilesKafkaWhenReleaseExistsButCRNotReady(t *testing.T)
 	}
 	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		got := name + " " + strings.Join(args, " ")
-		if got != `kubectl get kafka krafter -n kafka -o jsonpath={.status.conditions[?(@.type=="Ready")].status}` {
-			t.Fatalf("unexpected read command: %q", got)
+		switch {
+		case got == `kubectl get kafka krafter -n kafka -o jsonpath={.status.conditions[?(@.type=="Ready")].status}`:
+			return []byte("False"), nil
+		case strings.HasPrefix(got, "kubectl get pods -n kafka"):
+			return []byte("Running,"), nil // the readiness wait after the reconcile
 		}
-		return []byte("False"), nil
+		t.Fatalf("unexpected read command: %q", got)
+		return nil, nil
 	}
 
 	var helmCalls []string
@@ -827,7 +789,7 @@ func TestDeployGroupBReconcilesKafkaWhenReleaseExistsButCRNotReady(t *testing.T)
 		return nil
 	}
 
-	err := deployGroupB(&deployContext{
+	err := runComponentIDs(&deployContext{
 		ctx:        context.Background(),
 		ns:         resolvedNamespaces{kafka: "kafka", connect: "connect", jaeger: "monitoring"},
 		valuesFile: ".build/values-detected.yaml",
@@ -840,9 +802,9 @@ func TestDeployGroupBReconcilesKafkaWhenReleaseExistsButCRNotReady(t *testing.T)
 			Name:      "krafter",
 			Namespace: "kafka",
 		},
-	})
+	}, "kafka")
 	if err != nil {
-		t.Fatalf("deployGroupB returned error: %v", err)
+		t.Fatalf("kafka component returned error: %v", err)
 	}
 
 	if !sliceContainsPrefix(helmCalls, "dependency update charts/kafka-cluster") {
@@ -893,6 +855,19 @@ func writeTestFile(t *testing.T, path, data string) {
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+// runComponentIDs runs the named components of the pipeline (by id, or by
+// name for a bookkeeping step) under the scheduler, ignoring their
+// dependencies on components outside the set.
+func runComponentIDs(dc *deployContext, ids ...string) error {
+	var picked []component
+	for _, c := range deployComponents(dc) {
+		if slices.Contains(ids, c.id) || slices.Contains(ids, c.name) {
+			picked = append(picked, c)
+		}
+	}
+	return runComponents(dc.ctx, dc, picked)
 }
 
 func sliceContainsPrefix(values []string, prefix string) bool {

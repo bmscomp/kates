@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -486,15 +487,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			if err := ensureDeployNamespaces(ctx, dc); err != nil {
 				return err
 			}
-			if err := deployGroupA(dc); err != nil {
-				return err
-			}
-
-			if err := deployGroupB(dc); err != nil {
-				return err
-			}
-
-			if err := deployGroupC(dc); err != nil {
+			if err := runDeployComponents(dc); err != nil {
 				return err
 			}
 
@@ -677,19 +670,17 @@ func runHelmDefault(ctx context.Context, args ...string) error {
 }
 
 func isHelmReleaseDeployedDefault(ctx context.Context, release, namespace string) bool {
-	// Check that the release exists AND is in "deployed" status.
-	// helm status exits 0 even for failed releases, so we must inspect
-	// the actual status to avoid skipping re-installation of broken releases.
+	// The release must exist AND be in "deployed" status: a failed or
+	// half-applied release is reinstalled, not skipped. helm list reads the
+	// status with the rest of the row; helm status exited 0 for a failed
+	// release too.
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := runExecOutputFn(checkCtx, "helm", "status", release, "-n", namespace, "-o", "json")
+	releases, err := helmReleases(checkCtx, runExecOutputFn, namespace)
 	if err != nil {
 		return false
 	}
-	// Look for "status":"deployed" in the JSON output.
-	// Helm may output with or without spaces after colons, so check both.
-	s := string(out)
-	return strings.Contains(s, `"status":"deployed"`) || strings.Contains(s, `"status": "deployed"`)
+	return slices.ContainsFunc(releases, func(r helmRelease) bool { return r.Name == release && r.Deployed() })
 }
 
 // cleanupStaleClusterResource removes a cluster-scoped resource that a Helm
@@ -741,13 +732,4 @@ func helmReleaseExists(ctx context.Context, release, namespace string) (bool, er
 	default:
 		return false, fmt.Errorf("%w: %s", err, firstLine(strings.TrimSpace(string(out))))
 	}
-}
-
-func sliceContains(s []string, v string) bool {
-	for _, item := range s {
-		if item == v {
-			return true
-		}
-	}
-	return false
 }

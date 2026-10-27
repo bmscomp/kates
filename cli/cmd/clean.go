@@ -2,10 +2,8 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/bmscomp/kates/cli/output"
 	"os"
 	"os/exec"
 	"slices"
@@ -13,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/components"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -64,15 +64,53 @@ func init() {
 	rootCmd.AddCommand(cleanCmd)
 }
 
-// helmRelease pairs a release name with its namespace.
-type helmRelease struct {
-	Name      string
-	Namespace string
+// cleanPlacements are the placements clean tears down: the single topology's,
+// the isolated one's, or both when --topology is empty.
+func cleanPlacements() []components.Placement {
+	var placements []components.Placement
+	if cleanTopology == "single" || cleanTopology == "" {
+		placements = append(placements, components.SinglePlacement(cleanNamespace, cleanNamespace, deployKafkaName))
+	}
+	if cleanTopology == "isolated" || cleanTopology == "" {
+		placements = append(placements, components.Placement{
+			Kafka: cleanKafkaNS, Connect: cleanConnectNS, Database: cleanDbNS, App: cleanAppNS,
+			Chaos: cleanChaosNS, Monitoring: cleanMonitoringNS, KafkaUI: cleanKafkaUINS, MM2: cleanMM2NS,
+			KafkaName: deployKafkaName,
+		})
+	}
+	return placements
 }
 
-type helmReleaseJSON struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
+// cleanTargets is what the component table says the stack occupies under the
+// placements: every release (operators last, listed once), and every
+// namespace (operators' own last, listed once).
+func cleanTargets(placements []components.Placement) (releases []components.Release, namespaces []string) {
+	var operators []components.Release
+	for _, p := range placements {
+		for _, r := range components.Releases(p) {
+			switch c := releaseComponent(r.Name, p); {
+			case c.Operator && !slices.Contains(operators, r):
+				operators = append(operators, r)
+			case !c.Operator && !slices.Contains(releases, r):
+				releases = append(releases, r)
+			}
+		}
+		for _, ns := range components.Namespaces(p) {
+			if !slices.Contains(namespaces, ns) {
+				namespaces = append(namespaces, ns)
+			}
+		}
+	}
+	return append(releases, operators...), namespaces
+}
+
+// releaseComponent is the table's component for a release name under p.
+func releaseComponent(release string, p components.Placement) components.Component {
+	if release == p.KafkaName {
+		release = components.KafkaRelease
+	}
+	c, _ := components.ByRelease(release)
+	return c
 }
 
 var (
@@ -113,14 +151,44 @@ func cleanRunOutput(ctx context.Context, name string, args ...string) ([]byte, e
 	return cleanRunOutputFn(ctx, name, args...)
 }
 
-func runClean(cmd *cobra.Command, args []string) error {
-	startTime := time.Now()
-	// ── Banner ──
+// clusterObject is a cluster-scoped resource the stack makes by name.
+type clusterObject struct{ Kind, Name string }
+
+// cleanPlan is what one kates clean found and will remove: filled by
+// discoverClean, narrowed by keepForOthers, shown by printCleanPlan and
+// carried out by the clean steps.
+type cleanPlan struct {
+	kubeContext string
+	// What the component table says the stack occupies.
+	releases   []components.Release
+	namespaces []string
+	crds       []string
+	// What the cluster holds of it.
+	installed    []components.Release
+	helmList     []helmRelease
+	helmListed   bool
+	existingNS   []string
+	existingCRDs []string
+	// presentCRDs are the stack's CRDs on the cluster, kept groups'
+	// included: step 1 deletes custom resources inside the namespaces being
+	// deleted, of every kind present.
+	presentCRDs      []string
+	clusterResources []clusterObject
+	kept             []keptItem
+}
+
+// printCleanBanner prints the command's banner.
+func printCleanBanner() {
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
 		Render("⎈ Kates Clean — Teardown"))
 	fmt.Println(lipgloss.NewStyle().Foreground(clrDim).
 		Render(strings.Repeat("─", 35)))
+}
+
+func runClean(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
+	printCleanBanner()
 
 	// ── The cluster ──
 	// Every call below names this context. Read once and pinned, the context
@@ -134,150 +202,18 @@ func runClean(cmd *cobra.Command, args []string) error {
 	defer pinCleanContext(kubeContext)()
 	fmt.Printf("    Cluster: %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(kubeContext))
 
-	// Operator CRD resource types that may carry finalizers or webhooks,
-	// deleted and stripped of finalizers in each namespace being deleted.
-	// Namespaced kinds only: kubectl ignores -n for a cluster-scoped kind, so
-	// `kubectl delete clusterissuers --all -n kates` deleted every
-	// ClusterIssuer on the cluster, and every ClusterPolicy likewise. The
-	// stack's own ClusterPolicies go with their Helm releases.
-	operatorCRDTypes := []string{
-		// Strimzi
-		"kafkas.kafka.strimzi.io",
-		"kafkatopics.kafka.strimzi.io",
-		"kafkausers.kafka.strimzi.io",
-		"kafkaconnects.kafka.strimzi.io",
-		"kafkaconnectors.kafka.strimzi.io",
-		"kafkamirrormaker2s.kafka.strimzi.io",
-		"kafkabridges.kafka.strimzi.io",
-		// Litmus Chaos
-		"chaosengines.litmuschaos.io",
-		"chaosexperiments.litmuschaos.io",
-		"chaosresults.litmuschaos.io",
-		// Cert-Manager
-		"certificates.cert-manager.io",
-		"issuers.cert-manager.io",
-		// Kyverno
-		"policies.kyverno.io",
-	}
-
-	// CustomResourceDefinitions (CRDs) deployed by the Kates stack.
-	allCRDs := []string{
-		// Strimzi CRDs
-		"kafkabridges.kafka.strimzi.io",
-		"kafkaconnectors.kafka.strimzi.io",
-		"kafkaconnects.kafka.strimzi.io",
-		"kafkamirrormaker2s.kafka.strimzi.io",
-		"kafkanodepools.kafka.strimzi.io",
-		"kafkarebalances.kafka.strimzi.io",
-		"kafkas.kafka.strimzi.io",
-		"kafkatopics.kafka.strimzi.io",
-		"kafkausers.kafka.strimzi.io",
-		"strimzipodsets.core.strimzi.io",
-
-		// Litmus Chaos CRDs
-		"chaosengines.litmuschaos.io",
-		"chaosexperiments.litmuschaos.io",
-		"chaosresults.litmuschaos.io",
-
-		// Monitoring (Prometheus) CRDs
-		"alertmanagerconfigs.monitoring.coreos.com",
-		"alertmanagers.monitoring.coreos.com",
-		"podmonitors.monitoring.coreos.com",
-		"probes.monitoring.coreos.com",
-		"prometheusagents.monitoring.coreos.com",
-		"prometheuses.monitoring.coreos.com",
-		"prometheusrules.monitoring.coreos.com",
-		"scrapeconfigs.monitoring.coreos.com",
-		"servicemonitors.monitoring.coreos.com",
-		"thanosrulers.monitoring.coreos.com",
-
-		// Cert-Manager CRDs
-		"certificaterequests.cert-manager.io",
-		"certificates.cert-manager.io",
-		"challenges.acme.cert-manager.io",
-		"clusterissuers.cert-manager.io",
-		"issuers.cert-manager.io",
-		"orders.acme.cert-manager.io",
-
-		// Kyverno CRDs
-		"admissionreports.kyverno.io",
-		"backgroundscanreports.kyverno.io",
-		"clusteradmissionreports.kyverno.io",
-		"clusterbackgroundscanreports.kyverno.io",
-		"cleanuppolicies.kyverno.io",
-		"clustercleanuppolicies.kyverno.io",
-		"clusterpolicies.kyverno.io",
-		"policies.kyverno.io",
-		"policyexceptions.kyverno.io",
-		"updaterequests.kyverno.io",
-	}
-
-	var appReleases []helmRelease
-	var coreReleases []helmRelease
-	var managedNamespaces []string
-	var strimziNS []string
-
-	if cleanTopology == "single" || cleanTopology == "" {
-		appReleases = append(appReleases,
-			helmRelease{"chaos", cleanNamespace},
-			helmRelease{"kates", cleanNamespace},
-			helmRelease{"apicurio", cleanNamespace},
-			helmRelease{"connect-cluster", cleanNamespace},
-			helmRelease{"mm2", cleanNamespace},
-			helmRelease{"kafka-ui", cleanNamespace},
-		)
-		coreReleases = append(coreReleases,
-			helmRelease{"jaeger", cleanNamespace},
-			helmRelease{deployKafkaName, cleanNamespace},
-			helmRelease{"monitoring", cleanNamespace},
-			helmRelease{"postgresql", cleanNamespace},
-		)
-		managedNamespaces = append(managedNamespaces, cleanNamespace)
-		strimziNS = append(strimziNS, cleanNamespace)
-	}
-
-	if cleanTopology == "isolated" || cleanTopology == "" {
-		appReleases = append(appReleases,
-			helmRelease{"chaos", cleanChaosNS},
-			helmRelease{"kates", cleanAppNS},
-			helmRelease{"apicurio", cleanKafkaNS},
-			helmRelease{"connect-cluster", cleanConnectNS},
-			helmRelease{"mm2", cleanMM2NS},
-			helmRelease{"kafka-ui", cleanKafkaUINS},
-		)
-		coreReleases = append(coreReleases,
-			helmRelease{"jaeger", cleanMonitoringNS},
-			helmRelease{deployKafkaName, cleanKafkaNS},
-			helmRelease{"monitoring", cleanMonitoringNS},
-			helmRelease{"postgresql", cleanDbNS},
-		)
-		managedNamespaces = append(managedNamespaces,
-			cleanKafkaNS, cleanConnectNS, cleanAppNS, cleanChaosNS, cleanMonitoringNS, cleanDbNS,
-		)
-		if cleanMM2NS != "" && cleanMM2NS != cleanKafkaNS {
-			managedNamespaces = append(managedNamespaces, cleanMM2NS)
-		}
-		if cleanKafkaUINS != "" && !slices.Contains(managedNamespaces, cleanKafkaUINS) {
-			managedNamespaces = append(managedNamespaces, cleanKafkaUINS)
-		}
-		strimziNS = append(strimziNS, cleanKafkaNS)
-	}
-
-	operatorReleases := []helmRelease{
-		{"cert-manager", "cert-manager"},
-		{"kyverno", "kyverno"},
-		{"strimzi-operator", "strimzi-operator"},
-	}
-
-	allReleases := append(append(appReleases, coreReleases...), operatorReleases...)
-
-	managedNamespaces = append(managedNamespaces,
-		"strimzi-operator", "cert-manager", "kyverno",
-	)
-
-	clusterResources := []struct{ Kind, Name string }{
-		{"clusterrole", "kates"}, {"clusterrolebinding", "kates"},
-		{"clusterrole", "litmus"}, {"clusterrolebinding", "litmus"},
+	// The component table says what the stack occupies: the releases, the
+	// namespaces and the CRDs.
+	releases, namespaces := cleanTargets(cleanPlacements())
+	p := &cleanPlan{
+		kubeContext: kubeContext,
+		releases:    releases,
+		namespaces:  namespaces,
+		crds:        components.CRDs(),
+		clusterResources: []clusterObject{
+			{"clusterrole", "kates"}, {"clusterrolebinding", "kates"},
+			{"clusterrole", "litmus"}, {"clusterrolebinding", "litmus"},
+		},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -286,234 +222,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// ── Discovery ──
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Foreground(clrText).Render("  Scanning cluster..."))
+	discoverClean(ctx, p)
+	keepForOthers(ctx, p)
 
-	var installed []helmRelease
-	var helmList []helmReleaseJSON
-	helmListed := false
-	helmOut, helmErr := cleanRunOutput(ctx, "helm", "list", "-A", "-o", "json")
-	if helmErr == nil {
-		var list []helmReleaseJSON
-		if err := json.Unmarshal(helmOut, &list); err == nil {
-			helmList, helmListed = list, true
-			for _, r := range allReleases {
-				for _, l := range list {
-					if l.Name == r.Name && l.Namespace == r.Namespace {
-						installed = append(installed, r)
-						break
-					}
-				}
-			}
-		}
-	} else {
-		// Fallback to sequential scanning
-		for _, r := range allReleases {
-			c, cn := context.WithTimeout(ctx, 3*time.Second)
-			if cleanRun(c, "helm", "status", r.Name, "-n", r.Namespace) == nil {
-				installed = append(installed, r)
-			}
-			cn()
-		}
-	}
-
-	var existingNS []string
-	nsOut, nsErr := cleanRunOutput(ctx, "kubectl", "get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}")
-	if nsErr == nil {
-		nsList := strings.Fields(strings.TrimSpace(string(nsOut)))
-		for _, ns := range managedNamespaces {
-			for _, ens := range nsList {
-				if ens == ns {
-					existingNS = append(existingNS, ns)
-					break
-				}
-			}
-		}
-	} else {
-		// Fallback to sequential scanning
-		for _, ns := range managedNamespaces {
-			c, cn := context.WithTimeout(ctx, 3*time.Second)
-			if cleanRun(c, "kubectl", "get", "namespace", ns) == nil {
-				existingNS = append(existingNS, ns)
-			}
-			cn()
-		}
-	}
-
-	var existingCRDs []string
-	crdOut, crdErr := cleanRunOutput(ctx, "kubectl", "get", "crd", "-o", "jsonpath={.items[*].metadata.name}")
-	if crdErr == nil {
-		crdList := strings.Fields(strings.TrimSpace(string(crdOut)))
-		for _, crd := range allCRDs {
-			for _, ecrd := range crdList {
-				if ecrd == crd {
-					existingCRDs = append(existingCRDs, crd)
-					break
-				}
-			}
-		}
-	} else {
-		// Fallback to sequential scanning
-		for _, crd := range allCRDs {
-			c, cn := context.WithTimeout(ctx, 3*time.Second)
-			if cleanRun(c, "kubectl", "get", "crd", crd) == nil {
-				existingCRDs = append(existingCRDs, crd)
-			}
-			cn()
-		}
-	}
-
-	// ── What stays for others ──
-	// Step 1 below deletes custom resources inside the namespaces being
-	// deleted, of every kind present, kept groups' included.
-	presentCRDs := append([]string(nil), existingCRDs...)
-	var kept []keptItem
-	operatorNS := map[string]bool{}
-	for _, r := range operatorReleases {
-		operatorNS[r.Namespace] = true
-	}
-
-	// A namespace with a Helm release kates does not install is someone
-	// else's too: deleting it would delete that release's objects.
-	var nsGoing []string
-	for _, ns := range existingNS {
-		switch {
-		case !helmListed:
-			kept = append(kept, keptItem{"namespace " + ns, "could not list Helm releases to see what else is in it"})
-		default:
-			if foreign := foreignReleases(helmList, ns, allReleases); len(foreign) > 0 {
-				kept = append(kept, keptItem{"namespace " + ns, "it also holds " + plural(len(foreign), "release", "releases") + " kates does not install: " + strings.Join(foreign, ", ")})
-				continue
-			}
-			nsGoing = append(nsGoing, ns)
-		}
-	}
-	existingNS = nsGoing
-
-	// An operator, its namespace and its CRDs stay while something outside
-	// the stack uses them.
-	deleting := map[string]bool{}
-	for _, ns := range existingNS {
-		if !operatorNS[ns] {
-			deleting[ns] = true
-		}
-	}
-	present := map[string]bool{}
-	for _, crd := range existingCRDs {
-		present[crd] = true
-	}
-	for _, g := range cleanCRDGroups() {
-		why := groupInUse(ctx, g, present, deleting)
-		if why == "" {
-			continue
-		}
-		what := g.Name + " CRDs"
-		drop := map[string]bool{}
-		for _, crd := range g.CRDs {
-			drop[crd] = true
-		}
-		existingCRDs = slices.DeleteFunc(existingCRDs, func(crd string) bool { return drop[crd] })
-		if op := g.Operator; op != nil {
-			what = g.Name + " operator, its namespace and its CRDs"
-			installed = slices.DeleteFunc(installed, func(r helmRelease) bool { return r == *op })
-			existingNS = slices.DeleteFunc(existingNS, func(ns string) bool { return ns == op.Namespace })
-		}
-		kept = append(kept, keptItem{what, why})
-	}
-
-	// ClusterRoles go by name, unless a release outside the stack installed
-	// them.
-	going := map[string]bool{}
-	for _, ns := range existingNS {
-		going[ns] = true
-	}
-	var clusterGoing []struct{ Kind, Name string }
-	for _, cr := range clusterResources {
-		owner, exists, err := clusterObjectOwner(ctx, cr.Kind, cr.Name)
-		switch {
-		case err != nil:
-			kept = append(kept, keptItem{cr.Kind + " " + cr.Name, "could not read it to see what installed it"})
-		case !exists:
-		case owner == "" || going[owner]:
-			clusterGoing = append(clusterGoing, cr)
-		default:
-			kept = append(kept, keptItem{cr.Kind + " " + cr.Name, "installed by a Helm release in " + owner})
-		}
-	}
-	clusterResources = clusterGoing
-
-	printKept := func() {
-		if len(kept) == 0 {
-			return
-		}
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Kept:"))
-		for _, k := range kept {
-			fmt.Printf("  %s %s %s\n", lipgloss.NewStyle().Foreground(clrGreen).Render("•"),
-				lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(k.What),
-				lipgloss.NewStyle().Foreground(clrDim).Render("— "+k.Why))
-		}
-	}
-
-	if len(installed) == 0 && len(existingNS) == 0 && len(existingCRDs) == 0 && len(clusterResources) == 0 {
-		printKept()
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Bold(true).
-			Render("  ✓ Nothing to remove."))
-		fmt.Println()
+	if !printCleanPlan(p) {
 		return nil
 	}
-
-	// ── Show what will be removed ──
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrOrange).
-		Render("  The following resources will be removed:"))
-
-	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(clrText)
-	dimStyle := lipgloss.NewStyle().Foreground(clrDim)
-	bulletStyle := lipgloss.NewStyle().Foreground(clrRed)
-
-	if len(installed) > 0 {
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Helm Releases:"))
-		for _, r := range installed {
-			fmt.Printf("  %s %s %s\n",
-				bulletStyle.Render("✖"),
-				nameStyle.Render(fmt.Sprintf("%-20s", r.Name)),
-				dimStyle.Render(fmt.Sprintf("→ %s", r.Namespace)),
-			)
-		}
-	}
-
-	if len(existingNS) > 0 {
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Namespaces:"))
-		for _, ns := range existingNS {
-			fmt.Printf("  %s %s\n",
-				bulletStyle.Render("✖"),
-				nameStyle.Render(ns),
-			)
-		}
-	}
-
-	if len(existingCRDs) > 0 {
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  CustomResourceDefinitions (CRDs):"))
-		for _, crd := range existingCRDs {
-			fmt.Printf("  %s %s\n",
-				bulletStyle.Render("✖"),
-				nameStyle.Render(crd),
-			)
-		}
-	}
-
-	if len(clusterResources) > 0 {
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Cluster-scoped:"))
-		for _, cr := range clusterResources {
-			fmt.Printf("  %s %s\n", bulletStyle.Render("✖"), nameStyle.Render(cr.Kind+" "+cr.Name))
-		}
-	}
-	printKept()
-	fmt.Println()
 
 	// ── Confirmation ──
 	// Nothing above changed anything, so declining leaves the machine and
@@ -533,13 +247,13 @@ func runClean(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// ── Port-forwards into the namespaces about to go ──
-	if len(existingNS) > 0 {
+	if len(p.existingNS) > 0 {
 		deleting := map[string]bool{}
-		for _, ns := range existingNS {
+		for _, ns := range p.existingNS {
 			deleting[ns] = true
 		}
-		stopped := stopPortForwards(func(p portForwardProc) bool {
-			return deleting[p.Namespace] && (p.Context == "" || p.Context == kubeContext)
+		stopped := stopPortForwards(func(pf portForwardProc) bool {
+			return deleting[pf.Namespace] && (pf.Context == "" || pf.Context == kubeContext)
 		})
 		if stopped > 0 {
 			fmt.Printf("    %s Stopped %s into these namespaces\n",
@@ -547,36 +261,314 @@ func runClean(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	okStyle := lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
-	errStyle := lipgloss.NewStyle().Foreground(clrRed)
+	failed := runCleanSteps(ctx, p)
 
-	// The steps that did not go through. Each is printed where it fails and
-	// listed again at the end, which then exits 1: clean used to print
-	// "cleaned successfully" and exit 0 over a release that would not
-	// uninstall or a CRD batch kubectl refused.
-	var failed []string
-	var failedMu sync.Mutex
-	fail := func(what string) {
-		failedMu.Lock()
-		defer failedMu.Unlock()
-		failed = append(failed, what)
+	// ── Done ──
+	fmt.Println()
+
+	elapsed := time.Since(startTime).Round(time.Second)
+
+	if len(failed) > 0 {
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
+			Render(fmt.Sprintf("  Not removed after %s:", elapsed)))
+		for _, f := range failed {
+			fmt.Printf("  %s %s\n", lipgloss.NewStyle().Foreground(clrRed).Render("✖"),
+				lipgloss.NewStyle().Foreground(clrText).Render(f))
+		}
+		fmt.Println()
+		return cmdErr(fmt.Sprintf("%s could not be removed from %s; see above", plural(len(failed), "step", "steps"), kubeContext))
 	}
 
-	// Filter operator CRD types actually present in cluster
-	var activeCRDTypes []string
-	for _, crdType := range operatorCRDTypes {
-		for _, ecrd := range presentCRDs {
-			if ecrd == crdType {
-				activeCRDTypes = append(activeCRDTypes, crdType)
-				break
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
+		Render(fmt.Sprintf("  ✅ Cluster cleaned successfully in %s.", elapsed)))
+	fmt.Println()
+	return nil
+}
+
+// discoverClean reads which of the stack's releases, namespaces and CRDs the
+// cluster holds. Each list is read in one call, or one object at a time when
+// that fails.
+func discoverClean(ctx context.Context, p *cleanPlan) {
+	helmList, helmErr := helmReleases(ctx, cleanRunOutputFn, "")
+	p.helmList, p.helmListed = helmList, helmErr == nil
+	if p.helmListed {
+		for _, r := range p.releases {
+			if slices.ContainsFunc(helmList, func(l helmRelease) bool { return l.Name == r.Name && l.Namespace == r.Namespace }) {
+				p.installed = append(p.installed, r)
 			}
+		}
+	} else {
+		// Fallback to sequential scanning
+		for _, r := range p.releases {
+			c, cn := context.WithTimeout(ctx, 3*time.Second)
+			if cleanRun(c, "helm", "status", r.Name, "-n", r.Namespace) == nil {
+				p.installed = append(p.installed, r)
+			}
+			cn()
 		}
 	}
 
+	p.existingNS = cleanPresent(ctx, p.namespaces,
+		[]string{"get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}"},
+		func(ns string) []string { return []string{"get", "namespace", ns} })
+	p.existingCRDs = cleanPresent(ctx, p.crds,
+		[]string{"get", "crd", "-o", "jsonpath={.items[*].metadata.name}"},
+		func(crd string) []string { return []string{"get", "crd", crd} })
+	p.presentCRDs = append([]string(nil), p.existingCRDs...)
+}
+
+// cleanPresent returns which of wanted the cluster holds: from one kubectl
+// list (listArgs, printing names), or one kubectl get per name when the list
+// fails.
+func cleanPresent(ctx context.Context, wanted []string, listArgs []string, getArgs func(string) []string) []string {
+	var present []string
+	out, err := cleanRunOutput(ctx, "kubectl", listArgs...)
+	if err == nil {
+		have := strings.Fields(strings.TrimSpace(string(out)))
+		for _, name := range wanted {
+			if slices.Contains(have, name) {
+				present = append(present, name)
+			}
+		}
+		return present
+	}
+	// Fallback to sequential scanning
+	for _, name := range wanted {
+		c, cn := context.WithTimeout(ctx, 3*time.Second)
+		if cleanRun(c, "kubectl", getArgs(name)...) == nil {
+			present = append(present, name)
+		}
+		cn()
+	}
+	return present
+}
+
+// keepForOthers takes out of the plan what something outside the stack still
+// uses (clean_shared.go), and records why.
+func keepForOthers(ctx context.Context, p *cleanPlan) {
+	operatorNS := map[string]bool{}
+	for _, r := range p.releases {
+		if c, ok := components.ByRelease(r.Name); ok && c.Operator {
+			operatorNS[r.Namespace] = true
+		}
+	}
+
+	// A namespace with a Helm release kates does not install is someone
+	// else's too: deleting it would delete that release's objects.
+	var nsGoing []string
+	for _, ns := range p.existingNS {
+		switch {
+		case !p.helmListed:
+			p.kept = append(p.kept, keptItem{"namespace " + ns, "could not list Helm releases to see what else is in it"})
+		default:
+			if foreign := foreignReleases(p.helmList, ns, p.releases); len(foreign) > 0 {
+				p.kept = append(p.kept, keptItem{"namespace " + ns, "it also holds " + plural(len(foreign), "release", "releases") + " kates does not install: " + strings.Join(foreign, ", ")})
+				continue
+			}
+			nsGoing = append(nsGoing, ns)
+		}
+	}
+	p.existingNS = nsGoing
+
+	// An operator, its namespace and its CRDs stay while something outside
+	// the stack uses them.
+	deleting := map[string]bool{}
+	for _, ns := range p.existingNS {
+		if !operatorNS[ns] {
+			deleting[ns] = true
+		}
+	}
+	present := map[string]bool{}
+	for _, crd := range p.existingCRDs {
+		present[crd] = true
+	}
+	for _, g := range cleanCRDGroups() {
+		why := groupInUse(ctx, g, present, deleting)
+		if why == "" {
+			continue
+		}
+		what := g.Name + " CRDs"
+		drop := map[string]bool{}
+		for _, crd := range g.CRDs {
+			drop[crd] = true
+		}
+		p.existingCRDs = slices.DeleteFunc(p.existingCRDs, func(crd string) bool { return drop[crd] })
+		if op := g.Owner; op != nil {
+			what = g.Name + " operator, its namespace and its CRDs"
+			p.installed = slices.DeleteFunc(p.installed, func(r components.Release) bool { return r == *op })
+			p.existingNS = slices.DeleteFunc(p.existingNS, func(ns string) bool { return ns == op.Namespace })
+		}
+		p.kept = append(p.kept, keptItem{what, why})
+	}
+
+	// ClusterRoles go by name, unless a release outside the stack installed
+	// them.
+	going := map[string]bool{}
+	for _, ns := range p.existingNS {
+		going[ns] = true
+	}
+	var clusterGoing []clusterObject
+	for _, cr := range p.clusterResources {
+		owner, exists, err := clusterObjectOwner(ctx, cr.Kind, cr.Name)
+		switch {
+		case err != nil:
+			p.kept = append(p.kept, keptItem{cr.Kind + " " + cr.Name, "could not read it to see what installed it"})
+		case !exists:
+		case owner == "" || going[owner]:
+			clusterGoing = append(clusterGoing, cr)
+		default:
+			p.kept = append(p.kept, keptItem{cr.Kind + " " + cr.Name, "installed by a Helm release in " + owner})
+		}
+	}
+	p.clusterResources = clusterGoing
+}
+
+// printCleanPlan lists what will be removed and what is kept, and returns
+// false when there is nothing to remove.
+func printCleanPlan(p *cleanPlan) bool {
+	printKept := func() {
+		if len(p.kept) == 0 {
+			return
+		}
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("  Kept:"))
+		for _, k := range p.kept {
+			fmt.Printf("  %s %s %s\n", lipgloss.NewStyle().Foreground(clrGreen).Render("•"),
+				lipgloss.NewStyle().Bold(true).Foreground(clrText).Render(k.What),
+				lipgloss.NewStyle().Foreground(clrDim).Render("— "+k.Why))
+		}
+	}
+
+	if len(p.installed) == 0 && len(p.existingNS) == 0 && len(p.existingCRDs) == 0 && len(p.clusterResources) == 0 {
+		printKept()
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Foreground(clrGreen).Bold(true).
+			Render("  ✓ Nothing to remove."))
+		fmt.Println()
+		return false
+	}
+
+	// ── Show what will be removed ──
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrOrange).
+		Render("  The following resources will be removed:"))
+
+	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(clrText)
+	dimStyle := lipgloss.NewStyle().Foreground(clrDim)
+	bulletStyle := lipgloss.NewStyle().Foreground(clrRed)
+	section := func(title string, lines []string) {
+		if len(lines) == 0 {
+			return
+		}
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render(title))
+		for _, line := range lines {
+			fmt.Printf("  %s %s\n", bulletStyle.Render("✖"), line)
+		}
+	}
+
+	var releases, cluster []string
+	for _, r := range p.installed {
+		releases = append(releases, nameStyle.Render(fmt.Sprintf("%-20s", r.Name))+" "+dimStyle.Render(fmt.Sprintf("→ %s", r.Namespace)))
+	}
+	for _, cr := range p.clusterResources {
+		cluster = append(cluster, nameStyle.Render(cr.Kind+" "+cr.Name))
+	}
+	styled := func(names []string) []string {
+		out := make([]string, len(names))
+		for i, n := range names {
+			out[i] = nameStyle.Render(n)
+		}
+		return out
+	}
+	section("  Helm Releases:", releases)
+	section("  Namespaces:", styled(p.existingNS))
+	section("  CustomResourceDefinitions (CRDs):", styled(p.existingCRDs))
+	section("  Cluster-scoped:", cluster)
+	printKept()
+	fmt.Println()
+	return true
+}
+
+// cleanFailures collects the steps that did not go through. Each is printed
+// where it fails and listed again at the end, which then exits 1: clean used
+// to print "cleaned successfully" and exit 0 over a release that would not
+// uninstall or a CRD batch kubectl refused.
+type cleanFailures struct {
+	mu   sync.Mutex
+	list []string
+}
+
+func (f *cleanFailures) add(what string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.list = append(f.list, what)
+}
+
+var (
+	cleanOKStyle   = lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
+	cleanErrStyle  = lipgloss.NewStyle().Foreground(clrRed)
+	cleanStepStyle = lipgloss.NewStyle().Foreground(clrCyan).Bold(true)
+	cleanTextStyle = lipgloss.NewStyle().Foreground(clrText)
+)
+
+// runCleanSteps carries the plan out and returns the steps that failed.
+func runCleanSteps(ctx context.Context, p *cleanPlan) []string {
+	var failed cleanFailures
+
+	// Filter operator CRD types actually present in cluster
+	var activeCRDTypes []string
+	for _, crdType := range components.NamespacedCRDs() {
+		if slices.Contains(p.presentCRDs, crdType) {
+			activeCRDTypes = append(activeCRDTypes, crdType)
+		}
+	}
+
+	cleanOperatorCRs(ctx, activeCRDTypes, p.existingNS)
+	cleanUninstallReleases(ctx, p.installed, &failed)
+
+	// ── 4. Delete cluster-scoped resources ──
+	for _, cr := range p.clusterResources {
+		dCtx, dCancel := context.WithTimeout(ctx, 10*time.Second)
+		err := cleanRun(dCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found")
+		dCancel()
+		if err != nil {
+			fmt.Printf("%s%s\n", cleanTextStyle.Render("  Deleting "+cr.Kind+" "+cr.Name), cleanErrStyle.Render("  ✖ "+err.Error()))
+			failed.add(cr.Kind + " " + cr.Name)
+		}
+	}
+
+	cleanDeleteNamespaces(ctx, p.existingNS, &failed)
+
+	// ── 6. Delete CustomResourceDefinitions (CRDs) ──
+	if len(p.existingCRDs) > 0 {
+		fmt.Println()
+		fmt.Println(cleanStepStyle.Render("  Step 5: Deleting CustomResourceDefinitions (CRDs) in batch..."))
+		label := fmt.Sprintf("  Deleting %d CRDs", len(p.existingCRDs))
+		fmt.Print(cleanTextStyle.Render(label))
+
+		args := append([]string{"delete", "crd", "--ignore-not-found"}, p.existingCRDs...)
+		cCtx, cCancel := context.WithTimeout(ctx, 1*time.Minute)
+		err := cleanRun(cCtx, "kubectl", args...)
+		cCancel()
+
+		if err != nil {
+			fmt.Println(cleanErrStyle.Render("  ✖ " + err.Error()))
+			failed.add(fmt.Sprintf("%d CRDs", len(p.existingCRDs)))
+		} else {
+			fmt.Println(cleanOKStyle.Render("  ✔"))
+		}
+	}
+	return failed.list
+}
+
+// cleanOperatorCRs is steps 1 and 2: delete the operators' custom resources
+// in the namespaces going, while the operators still run, then strip the
+// finalizers of any that are stuck.
+func cleanOperatorCRs(ctx context.Context, activeCRDTypes, existingNS []string) {
 	// ── 1. Delete Operator CRs FIRST (while operators are still running) ──
 	if len(activeCRDTypes) > 0 && len(existingNS) > 0 {
-		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-			Render("  Step 1: Removing operator custom resources..."))
+		fmt.Println(cleanStepStyle.Render("  Step 1: Removing operator custom resources..."))
 		var crWg sync.WaitGroup
 		for _, crdType := range activeCRDTypes {
 			for _, ns := range existingNS {
@@ -596,8 +588,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// ── 2. Strip orphaned finalizers on any remaining stuck resources ──
 	if len(activeCRDTypes) > 0 && len(existingNS) > 0 {
-		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-			Render("  Step 2: Stripping orphaned finalizers..."))
+		fmt.Println(cleanStepStyle.Render("  Step 2: Stripping orphaned finalizers..."))
 		var finWg sync.WaitGroup
 		for _, crdType := range activeCRDTypes {
 			for _, ns := range existingNS {
@@ -630,124 +621,74 @@ func runClean(cmd *cobra.Command, args []string) error {
 		}
 		finWg.Wait()
 	}
+}
 
-	// ── 3. Uninstall Helm releases (apps → core → operators) ──
-	if len(installed) > 0 {
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-			Render("  Step 3: Uninstalling Helm releases..."))
-		var helmWg sync.WaitGroup
-		var printMutex sync.Mutex
-		for _, r := range installed {
-			helmWg.Add(1)
-			go func(rel helmRelease) {
-				defer helmWg.Done()
-				uCtx, uCancel := context.WithTimeout(ctx, 2*time.Minute)
-				out, err := cleanRunOutput(uCtx, "helm", "uninstall", rel.Name, "-n", rel.Namespace)
-				uCancel()
-
-				printMutex.Lock()
-				defer printMutex.Unlock()
-				label := fmt.Sprintf("  Uninstalling %-16s from %s", rel.Name, rel.Namespace)
-				if err != nil {
-					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), errStyle.Render("  ✖ "+strings.TrimSpace(string(out))))
-					fail(fmt.Sprintf("helm release %s in %s", rel.Name, rel.Namespace))
-				} else {
-					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), okStyle.Render("  ✔"))
-				}
-			}(r)
-		}
-		helmWg.Wait()
+// cleanUninstallReleases is step 3: the releases, all at once.
+func cleanUninstallReleases(ctx context.Context, installed []components.Release, failed *cleanFailures) {
+	if len(installed) == 0 {
+		return
 	}
-
-	// ── 4. Delete cluster-scoped resources ──
-	for _, cr := range clusterResources {
-		dCtx, dCancel := context.WithTimeout(ctx, 10*time.Second)
-		err := cleanRun(dCtx, "kubectl", "delete", cr.Kind, cr.Name, "--ignore-not-found")
-		dCancel()
-		if err != nil {
-			fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render("  Deleting "+cr.Kind+" "+cr.Name), errStyle.Render("  ✖ "+err.Error()))
-			fail(cr.Kind + " " + cr.Name)
-		}
-	}
-
-	// ── 5. Delete namespaces ──
-	if len(existingNS) > 0 {
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-			Render("  Step 4: Deleting namespaces..."))
-		var nsWg sync.WaitGroup
-		var printMutex sync.Mutex
-		for _, ns := range existingNS {
-			nsWg.Add(1)
-			go func(namespace string) {
-				defer nsWg.Done()
-				nCtx, nCancel := context.WithTimeout(ctx, 3*time.Minute)
-				err := cleanRun(nCtx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found")
-				timedOut := errors.Is(nCtx.Err(), context.DeadlineExceeded)
-				nCancel()
-
-				printMutex.Lock()
-				defer printMutex.Unlock()
-				label := fmt.Sprintf("  Deleting namespace %s", namespace)
-				switch {
-				case err == nil:
-					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), okStyle.Render("  ✔"))
-				case timedOut:
-					// The delete was accepted and the namespace is still
-					// winding down after three minutes, which finishes on its
-					// own; not a failure.
-					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ still terminating"))
-				default:
-					fmt.Printf("%s%s\n", lipgloss.NewStyle().Foreground(clrText).Render(label), errStyle.Render("  ✖ "+err.Error()))
-					fail("namespace " + namespace)
-				}
-			}(ns)
-		}
-		nsWg.Wait()
-	}
-
-	// ── 6. Delete CustomResourceDefinitions (CRDs) ──
-	if len(existingCRDs) > 0 {
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Foreground(clrCyan).Bold(true).
-			Render("  Step 5: Deleting CustomResourceDefinitions (CRDs) in batch..."))
-		label := fmt.Sprintf("  Deleting %d CRDs", len(existingCRDs))
-		fmt.Print(lipgloss.NewStyle().Foreground(clrText).Render(label))
-
-		args := append([]string{"delete", "crd", "--ignore-not-found"}, existingCRDs...)
-		cCtx, cCancel := context.WithTimeout(ctx, 1*time.Minute)
-		err := cleanRun(cCtx, "kubectl", args...)
-		cCancel()
-
-		if err != nil {
-			fmt.Println(errStyle.Render("  ✖ " + err.Error()))
-			fail(fmt.Sprintf("%d CRDs", len(existingCRDs)))
-		} else {
-			fmt.Println(okStyle.Render("  ✔"))
-		}
-	}
-
-	// ── Done ──
 	fmt.Println()
+	fmt.Println(cleanStepStyle.Render("  Step 3: Uninstalling Helm releases..."))
+	var helmWg sync.WaitGroup
+	var printMutex sync.Mutex
+	for _, r := range installed {
+		helmWg.Add(1)
+		go func(rel components.Release) {
+			defer helmWg.Done()
+			uCtx, uCancel := context.WithTimeout(ctx, 2*time.Minute)
+			out, err := cleanRunOutput(uCtx, "helm", "uninstall", rel.Name, "-n", rel.Namespace)
+			uCancel()
 
-	elapsed := time.Since(startTime).Round(time.Second)
-
-	if len(failed) > 0 {
-		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrRed).
-			Render(fmt.Sprintf("  Not removed after %s:", elapsed)))
-		for _, f := range failed {
-			fmt.Printf("  %s %s\n", lipgloss.NewStyle().Foreground(clrRed).Render("✖"),
-				lipgloss.NewStyle().Foreground(clrText).Render(f))
-		}
-		fmt.Println()
-		return cmdErr(fmt.Sprintf("%s could not be removed from %s; see above", plural(len(failed), "step", "steps"), kubeContext))
+			printMutex.Lock()
+			defer printMutex.Unlock()
+			label := fmt.Sprintf("  Uninstalling %-16s from %s", rel.Name, rel.Namespace)
+			if err != nil {
+				fmt.Printf("%s%s\n", cleanTextStyle.Render(label), cleanErrStyle.Render("  ✖ "+strings.TrimSpace(string(out))))
+				failed.add(fmt.Sprintf("helm release %s in %s", rel.Name, rel.Namespace))
+			} else {
+				fmt.Printf("%s%s\n", cleanTextStyle.Render(label), cleanOKStyle.Render("  ✔"))
+			}
+		}(r)
 	}
+	helmWg.Wait()
+}
 
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrGreen).
-		Render(fmt.Sprintf("  ✅ Cluster cleaned successfully in %s.", elapsed)))
+// cleanDeleteNamespaces is step 4: the namespaces, all at once. A delete the
+// API accepted that is still winding down after three minutes finishes on
+// its own; it is not a failure.
+func cleanDeleteNamespaces(ctx context.Context, existingNS []string, failed *cleanFailures) {
+	if len(existingNS) == 0 {
+		return
+	}
 	fmt.Println()
-	return nil
+	fmt.Println(cleanStepStyle.Render("  Step 4: Deleting namespaces..."))
+	var nsWg sync.WaitGroup
+	var printMutex sync.Mutex
+	for _, ns := range existingNS {
+		nsWg.Add(1)
+		go func(namespace string) {
+			defer nsWg.Done()
+			nCtx, nCancel := context.WithTimeout(ctx, 3*time.Minute)
+			err := cleanRun(nCtx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found")
+			timedOut := errors.Is(nCtx.Err(), context.DeadlineExceeded)
+			nCancel()
+
+			printMutex.Lock()
+			defer printMutex.Unlock()
+			label := fmt.Sprintf("  Deleting namespace %s", namespace)
+			switch {
+			case err == nil:
+				fmt.Printf("%s%s\n", cleanTextStyle.Render(label), cleanOKStyle.Render("  ✔"))
+			case timedOut:
+				fmt.Printf("%s%s\n", cleanTextStyle.Render(label), lipgloss.NewStyle().Foreground(clrOrange).Render("  ⚠ still terminating"))
+			default:
+				fmt.Printf("%s%s\n", cleanTextStyle.Render(label), cleanErrStyle.Render("  ✖ "+err.Error()))
+				failed.add("namespace " + namespace)
+			}
+		}(ns)
+	}
+	nsWg.Wait()
 }
 
 // cleanKubeContext returns kubectl's current context, the cluster kates clean

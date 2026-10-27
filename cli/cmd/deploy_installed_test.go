@@ -56,7 +56,9 @@ func TestDeployedReleases_FallsBackToTheEntriesNamespaces(t *testing.T) {
 		case strings.Contains(joined, " -A "):
 			return nil, errors.New("forbidden: cannot list secrets at the cluster scope")
 		case strings.Contains(joined, "-n team "):
-			return []byte(`[{"name":"kafka-ui","namespace":"team","chart":"kafka-ui-0.3.0"}]`), nil
+			// A release of another name is not one of ours.
+			return []byte(`[{"name":"kafka-ui","namespace":"team","chart":"kafka-ui-0.3.0","status":"deployed"},
+				{"name":"orders","namespace":"team","chart":"orders-1.0.0","status":"deployed"}]`), nil
 		}
 		return []byte("[]"), nil
 	}
@@ -66,9 +68,9 @@ func TestDeployedReleases_FallsBackToTheEntriesNamespaces(t *testing.T) {
 		t.Errorf("got %+v, want the kafka-ui row from team", got)
 	}
 	want := []string{
-		"list -A --deployed --filter ^(kafka-ui|kates|mm2)$ -o json",
-		"list -n team --deployed --filter ^(kafka-ui|kates|mm2)$ -o json",
-		"list -n other --deployed --filter ^(kafka-ui|kates|mm2)$ -o json",
+		"list -A --deployed -o json",
+		"list -n team --deployed -o json",
+		"list -n other --deployed -o json",
 	}
 	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
 		t.Errorf("calls:\n%s\nwant:\n%s", strings.Join(calls, "\n"), strings.Join(want, "\n"))
@@ -214,9 +216,9 @@ func TestInstalledHints(t *testing.T) {
 	t.Cleanup(func() { runExecOutputFn = orig })
 	runExecOutputFn = func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		if slices.Contains(args, "-A") {
-			return []byte(`[{"name":"kafka-ui","namespace":"kafka","chart":"kafka-ui-0.3.2"},
-				{"name":"kafka-ui","namespace":"team","chart":"kafka-ui-0.3.0"},
-				{"name":"cert-manager","namespace":"cert-manager","chart":"cert-manager-v1.13.3"}]`), nil
+			return []byte(`[{"name":"kafka-ui","namespace":"kafka","chart":"kafka-ui-0.3.2","status":"deployed"},
+				{"name":"kafka-ui","namespace":"team","chart":"kafka-ui-0.3.0","status":"deployed"},
+				{"name":"cert-manager","namespace":"cert-manager","chart":"cert-manager-v1.13.3","status":"deployed"}]`), nil
 		}
 		return nil, errors.New("unexpected")
 	}

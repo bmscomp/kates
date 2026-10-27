@@ -26,9 +26,10 @@ import (
 // Order matters as much as the flags. Helm decides at render time whether the
 // API exists and never revisits a release when a CRD turns up later, so the
 // monitoring chart (which carries the CRDs) is installed before anything that
-// renders against them: Kafka in deployGroupB, everything in Group C after
-// it. Kyverno is the exception — it is an operator and installs in Group A —
-// and gets its ServiceMonitors switched on once monitoring is in.
+// renders against them: Kafka and every component after it install `after:
+// monitoring` (deploy_components.go). Kyverno is the exception — it is an
+// operator and installs before monitoring — and gets its ServiceMonitors
+// switched on once monitoring is in.
 
 // scrapeValues lists, per chart, the values that connect it to Prometheus:
 // the scrape itself (a PodMonitor or ServiceMonitor, plus for MirrorMaker 2
@@ -83,13 +84,13 @@ func (dc *deployContext) prometheusArgs() []string {
 
 // wireKyvernoScrape switches on the ServiceMonitors of the two Kyverno
 // controllers the kyverno-security board reads (admission requests, review
-// latency, policy results). Kyverno is installed in Group A, before the
-// monitoring CRDs exist, so its own install cannot render them; this is the
+// latency, policy results). Kyverno is installed with the operators, before
+// the monitoring CRDs exist, so its own install cannot render them; this is the
 // upgrade that does, once they do. Only for a Kyverno this run installed: an
 // existing release is left as it is, like every other one, and
 // dashboards/USING.md has the upgrade line for retrofitting.
 func wireKyvernoScrape(dc *deployContext) error {
-	if !dc.kyvernoInstalled || !deployWithMonitoring {
+	if !dc.installedThisRun("kyverno") || !deployWithMonitoring {
 		return nil
 	}
 	ctx := dc.ctx

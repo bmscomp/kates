@@ -20,10 +20,10 @@ var (
 // dl.StartComponent/FinishComponent — the caller (deploy.go) is responsible
 // for managing the dashboard component lifecycle.
 func waitComponentReadySilent(ctx context.Context, namespace, selector string, timeout time.Duration) error {
-	start := time.Now()
+	start := deployClock.Now()
 	deadline := start.Add(timeout)
 	lastBeat := start
-	for time.Now().Before(deadline) {
+	for deployClock.Now().Before(deadline) {
 		out, err := runExecOutputFn(ctx, "kubectl", "get", "pods", "-n", namespace, "-l", selector, "-o", "jsonpath={range .items[*]}{.status.phase}{','}{end}")
 		var phases []string
 		if err == nil {
@@ -36,15 +36,15 @@ func waitComponentReadySilent(ctx context.Context, namespace, selector string, t
 		// With no dashboard (CI, a pipe) nothing else says the deploy is
 		// alive: a line every 30 s shows the pod counts moving, where the
 		// log used to go quiet for up to fifteen minutes.
-		if !dl.live() && time.Since(lastBeat) >= silentHeartbeat {
-			lastBeat = time.Now()
-			dl.Printf("    %s\n", podHeartbeat(namespace, selector, phases, time.Since(start)))
+		if !dl.live() && deployClock.Now().Sub(lastBeat) >= silentHeartbeat {
+			lastBeat = deployClock.Now()
+			dl.Printf("    %s\n", podHeartbeat(namespace, selector, phases, deployClock.Now().Sub(start)))
 		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(silentPollInterval):
+		case <-deployClock.After(silentPollInterval):
 		}
 	}
 	return fmt.Errorf("timeout waiting for pods (selector=%s) to become ready", selector)
@@ -100,8 +100,8 @@ func podHeartbeat(namespace, selector string, phases []string, elapsed time.Dura
 // waitCustomResourceReadySilent polls custom resources matching a label selector
 // until all have Ready=True condition or the timeout expires.
 func waitCustomResourceReadySilent(ctx context.Context, kind, namespace, selector string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	deadline := deployClock.Now().Add(timeout)
+	for deployClock.Now().Before(deadline) {
 		out, err := runExecOutputFn(ctx, "kubectl", "get", kind, "-n", namespace, "-l", selector, "-o", "jsonpath={range .items[*]}{.status.conditions[?(@.type==\"Ready\")].status}{','}{end}")
 		if err == nil {
 			statuses := strings.Split(strings.TrimSpace(string(out)), ",")
@@ -122,15 +122,15 @@ func waitCustomResourceReadySilent(ctx context.Context, kind, namespace, selecto
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(silentPollInterval):
+		case <-deployClock.After(silentPollInterval):
 		}
 	}
 	return fmt.Errorf("timeout waiting for %s to become ready", kind)
 }
 
 func waitNamedCustomResourceReadySilent(ctx context.Context, kind, namespace, name string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	deadline := deployClock.Now().Add(timeout)
+	for deployClock.Now().Before(deadline) {
 		out, err := runExecOutputFn(ctx, "kubectl", "get", kind, name, "-n", namespace, "-o", `jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
 		if err == nil && strings.Contains(string(out), "True") {
 			return nil
@@ -138,7 +138,7 @@ func waitNamedCustomResourceReadySilent(ctx context.Context, kind, namespace, na
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(silentPollInterval):
+		case <-deployClock.After(silentPollInterval):
 		}
 	}
 	return fmt.Errorf("timeout waiting for %s/%s to become ready", kind, name)

@@ -2,16 +2,16 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/bmscomp/kates/cli/pkg/components"
+	"github.com/bmscomp/kates/cli/pkg/strimzi"
 	"github.com/charmbracelet/huh"
 	"gopkg.in/yaml.v3"
 )
@@ -31,22 +31,46 @@ func releaseKept(ctx context.Context, release, namespace string) bool {
 	return !deployUpgradeReleases[release] && isHelmReleaseDeployedFn(ctx, release, namespace)
 }
 
-// upgradableCharts are the releases the list offers to upgrade, and the chart
-// each installs from. Kates is always upgraded, and PostgreSQL never is.
-var upgradableCharts = map[string]string{
-	"connect-cluster": "charts/connect-cluster",
-	"monitoring":      "charts/monitoring",
-	"apicurio":        "charts/apicurio-registry",
-	"kafka-ui":        "charts/kafka-ui",
-	"mm2":             "charts/mirror-maker2",
+// upgradableReleases are the releases the list offers to upgrade; the chart
+// each installs from comes from the component table. Kates is always
+// upgraded, and PostgreSQL never is.
+var upgradableReleases = []string{"connect-cluster", "monitoring", "apicurio", "kafka-ui", "mm2"}
+
+// upgradableCharts maps each upgradable release to its chart directory.
+var upgradableCharts = func() map[string]string {
+	charts := map[string]string{}
+	for _, release := range upgradableReleases {
+		c, ok := components.ByRelease(release)
+		if !ok {
+			panic("upgradable release " + release + " is not in the component table")
+		}
+		charts[release] = c.Chart
+	}
+	return charts
+}()
+
+// helmRelease is a row of helm list -o json.
+type helmRelease = strimzi.Release
+
+// outputRunner is a function with the shape of runExecOutputFn or
+// cleanRunOutputFn: the seams the deploy and clean tests stub.
+type outputRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+// helmReleases reads the Helm releases in namespace, or in every namespace
+// when it is empty, through run. It is the one way the commands read helm
+// list: the release lookups, the installed-component review, clean's
+// discovery and the Strimzi operator discovery each parsed the output on
+// their own before, and their notions of "installed" had drifted (one took
+// helm status exiting 0 for deployed).
+func helmReleases(ctx context.Context, run outputRunner, namespace string, extra ...string) ([]helmRelease, error) {
+	return strimzi.ListReleases(ctx, strimzi.RunnerFunc(func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := run(ctx, name, args...)
+		return string(out), err
+	}), namespace, extra...)
 }
 
 // deployedRelease is a release helm list shows as deployed.
-type deployedRelease struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Chart     string `json:"chart"` // "kafka-ui-0.3.1"
-}
+type deployedRelease = helmRelease
 
 // deployedReleases reads which of the entries' releases are deployed, in any
 // namespace, with one helm list -A. An account that may not list every
@@ -54,7 +78,7 @@ type deployedRelease struct {
 func deployedReleases(ctx context.Context, entries []DeploySummaryEntry) []deployedRelease {
 	var names, namespaces []string
 	for _, e := range entries {
-		names = append(names, regexp.QuoteMeta(e.Release))
+		names = append(names, e.Release)
 		if !slices.Contains(namespaces, e.Namespace) {
 			namespaces = append(namespaces, e.Namespace)
 		}
@@ -62,26 +86,27 @@ func deployedReleases(ctx context.Context, entries []DeploySummaryEntry) []deplo
 	if len(names) == 0 {
 		return nil
 	}
-	filter := "^(" + strings.Join(names, "|") + ")$"
-	list := func(ctx context.Context, scope ...string) ([]deployedRelease, error) {
-		out, err := runExecOutputFn(ctx, "helm", append(append([]string{"list"}, scope...), "--deployed", "--filter", filter, "-o", "json")...)
-		if err != nil {
-			return nil, err
+	// Helm keeps the deployed ones (--deployed); the names are ours to pick.
+	ours := func(rows []helmRelease) []deployedRelease {
+		var out []deployedRelease
+		for _, r := range rows {
+			if slices.Contains(names, r.Name) {
+				out = append(out, r)
+			}
 		}
-		var rows []deployedRelease
-		return rows, json.Unmarshal(out, &rows)
+		return out
 	}
-	// -A decodes every release on the cluster before it filters: on a big
-	// one it may time out, and the namespaces still need their share of ctx.
+	// -A decodes every release on the cluster: on a big one it may time out,
+	// and the namespaces still need their share of ctx.
 	allCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if rows, err := list(allCtx, "-A"); err == nil {
-		return rows
+	if rows, err := helmReleases(allCtx, runExecOutputFn, "", "--deployed"); err == nil {
+		return ours(rows)
 	}
 	var rows []deployedRelease
 	for _, ns := range namespaces {
-		r, _ := list(ctx, "-n", ns)
-		rows = append(rows, r...)
+		r, _ := helmReleases(ctx, runExecOutputFn, ns, "--deployed")
+		rows = append(rows, ours(r)...)
 	}
 	return rows
 }
@@ -123,36 +148,35 @@ func describeInstalled(e DeploySummaryEntry, chart, dir string) string {
 	return fmt.Sprintf("%s %s → %s in %s (%s)", e.Name, have, ours, e.Namespace, verb)
 }
 
+// wizardOptions are the component table's IDs the wizard offers as options.
+var wizardOptions = []string{"strimzi", "kafka-connect", "kafka-ui", "mirror-maker2", "chaos", "monitoring", "cert-manager", "kyverno"}
+
 // installedHints is, per wizard component option, the releases of it already
 // deployed in any namespace ("kafka-ui-0.3.2 in kafka"). It is read before
 // the namespaces are chosen, so the component list can show them.
 func installedHints(ctx context.Context) map[string]string {
-	ns := resolveNamespaces()
-	options := []struct{ option, release, namespace string }{
-		{"strimzi", "strimzi-operator", "strimzi-operator"},
-		{"kafka-connect", "connect-cluster", ns.connect},
-		{"kafka-ui", "kafka-ui", ns.kafkaUI},
-		{"mirror-maker2", "mm2", ns.mm2},
-		{"chaos", "chaos", ns.chaos},
-		{"monitoring", "monitoring", ns.jaeger},
-		{"cert-manager", "cert-manager", "cert-manager"},
-		{"kyverno", "kyverno", "kyverno"},
-	}
-	entries := make([]DeploySummaryEntry, len(options))
-	for i, o := range options {
-		entries[i] = DeploySummaryEntry{Release: o.release, Namespace: o.namespace}
+	placement := deployPlacement(resolveNamespaces())
+	var entries []DeploySummaryEntry
+	optionOf := map[string]string{} // release → option
+	for _, id := range wizardOptions {
+		c, ok := components.ByID(id)
+		if !ok {
+			continue
+		}
+		optionOf[c.ReleaseName(placement)] = id
+		entries = append(entries, DeploySummaryEntry{Release: c.ReleaseName(placement), Namespace: c.Namespace(placement)})
 	}
 	hints := map[string]string{}
 	for _, r := range deployedReleases(ctx, entries) {
-		i := slices.IndexFunc(options, func(o struct{ option, release, namespace string }) bool { return o.release == r.Name })
-		if i < 0 {
+		option, ok := optionOf[r.Name]
+		if !ok {
 			continue
 		}
 		hint := r.Chart + " in " + r.Namespace
-		if prev := hints[options[i].option]; prev != "" {
+		if prev := hints[option]; prev != "" {
 			hint = prev + ", " + hint
 		}
-		hints[options[i].option] = hint
+		hints[option] = hint
 	}
 	return hints
 }
@@ -167,11 +191,11 @@ type installedRow struct {
 	upgradable bool
 }
 
-// keptChartDirs are the charts of installed releases deploy keeps and does
-// not offer to upgrade: upgrading the Kafka cluster's chart rolls its brokers,
-// and cert-manager and Kyverno are the whole cluster's. The Kafka release is
+// keptReleases are the installed releases deploy keeps and does not offer to
+// upgrade: upgrading the Kafka cluster's chart rolls its brokers, and
+// cert-manager and Kyverno are the whole cluster's. The Kafka release is
 // named by --kafka-name, so it is matched separately.
-var keptChartDirs = map[string]string{"chaos": "charts/kates-chaos"}
+var keptReleases = []string{"chaos"}
 
 // shippedChart is the chart this deploy installs for a kept release
 // ("kafka-cluster-1.0.18"), or "" when it cannot be read.
@@ -179,11 +203,14 @@ func shippedChart(release string) string {
 	if i := slices.IndexFunc(thirdPartyCharts, func(c thirdPartyChart) bool { return c.name == release }); i >= 0 {
 		return thirdPartyCharts[i].name + "-" + thirdPartyCharts[i].version
 	}
-	dir, ok := keptChartDirs[release]
-	if release == deployKafkaName {
-		dir, ok = kafkaChartDir, true
-	}
-	if !ok {
+	var dir string
+	switch {
+	case release == deployKafkaName:
+		dir = kafkaChartDir
+	case slices.Contains(keptReleases, release):
+		c, _ := components.ByRelease(release)
+		dir = c.Chart
+	default:
 		return ""
 	}
 	name, version, err := localChart(chartRootPath(dir))
@@ -194,7 +221,7 @@ func shippedChart(release string) string {
 }
 
 // reconciledWhenBroken are the upgradable releases deploy upgrades even when
-// kept, once it finds them broken (deployGroupB, deployKafkaConnect); what it
+// kept, once it finds them broken (the kafka and kafka-connect components); what it
 // checks needs the introspection the review comes before.
 var reconciledWhenBroken = map[string]bool{"connect-cluster": true, "monitoring": true}
 
@@ -225,7 +252,7 @@ func installedRows(ctx context.Context, entries []DeploySummaryEntry, deployed [
 		case e.Release == "postgresql":
 			rows = append(rows, installedRow{release: e.Release, text: fmt.Sprintf("%s %s in %s: kept (its data would need migrating to another chart or PostgreSQL major version; one an older kates installed from bitnami/postgresql stays as it is)", e.Name, chart, e.Namespace)})
 		case e.Release == deployKafkaName && !isKafkaClusterReady(ctx, e.Namespace, e.Release):
-			// deployGroupB reapplies a release whose Kafka is not Ready.
+			// The kafka component reapplies a release whose Kafka is not Ready.
 			ours := shippedChart(e.Release)
 			if ours == "" {
 				ours = "this deploy's chart"

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/bmscomp/kates/cli/pkg/components"
 )
 
 func init() {
@@ -61,7 +63,7 @@ func TestCleanCommand_SingleTopology(t *testing.T) {
 			return out, nil
 		}
 		if name == "helm" && args[0] == "list" {
-			return []byte(`[{"name":"chaos","namespace":"kates-single-test"},{"name":"kates","namespace":"kates-single-test"},{"name":"apicurio","namespace":"kates-single-test"},{"name":"jaeger","namespace":"kates-single-test"},{"name":"krafter","namespace":"kates-single-test"},{"name":"monitoring","namespace":"kates-single-test"},{"name":"postgresql","namespace":"kates-single-test"}]`), nil
+			return []byte(`[{"name":"chaos","namespace":"kates-single-test"},{"name":"kates","namespace":"kates-single-test"},{"name":"apicurio","namespace":"kates-single-test"},{"name":"krafter","namespace":"kates-single-test"},{"name":"monitoring","namespace":"kates-single-test"},{"name":"postgresql","namespace":"kates-single-test"}]`), nil
 		}
 		if name == "kubectl" && args[0] == "get" && args[1] == "namespaces" {
 			return []byte("kates-single-test"), nil
@@ -586,6 +588,70 @@ func TestClean_FailedUninstallExitsNonZero(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "could not be removed") {
 		t.Errorf("stderr = %q, want the failure summary", stderr)
+	}
+}
+
+// The component table drives clean: every release deploy's plan installs is
+// one clean uninstalls, in the namespace deploy put it, and every CRD group
+// the table lists is deleted when nothing outside the stack uses it. The
+// lists used to live in four places and drift.
+func TestClean_FollowsTheComponentTable(t *testing.T) {
+	f := newCleanFixture(t)
+	cleanForce = true
+	cleanTopology = "isolated"
+	cleanKafkaNS, cleanConnectNS, cleanDbNS, cleanAppNS = "kafka", "connect", "database", "kates"
+	cleanChaosNS, cleanMonitoringNS, cleanMM2NS = "litmus", "monitoring", "kafka"
+
+	// Deploy's plan, with every component on.
+	setDeployFlags(t, func() {
+		deployTopology, deployWithSchemaRegistry = "isolated", "apicurio"
+		deployWithChaos, deployWithMonitoring, deployWithCertManager = true, true, true
+		deployWithKyverno, deployWithStrimzi, deployWithKafkaConnect = true, true, true
+		deployWithKafkaUI, deployWithMirrorMaker2 = true, true
+	})
+	origNS := []string{deployKafkaNS, deployConnectNS, deployDbNS, deployAppNS, deployChaosNS, deployMonitoringNS, deployKafkaUINS, deployMM2NS}
+	t.Cleanup(func() {
+		deployKafkaNS, deployConnectNS, deployDbNS, deployAppNS = origNS[0], origNS[1], origNS[2], origNS[3]
+		deployChaosNS, deployMonitoringNS, deployKafkaUINS, deployMM2NS = origNS[4], origNS[5], origNS[6], origNS[7]
+	})
+	deployKafkaNS, deployConnectNS, deployDbNS, deployAppNS = "kafka", "connect", "database", "kates"
+	deployChaosNS, deployMonitoringNS, deployKafkaUINS, deployMM2NS = "litmus", "monitoring", "kafka", "kafka"
+	plan := buildSharedEntries(resolveNamespaces())
+	if len(plan) != 12 {
+		t.Fatalf("the plan has %d releases, want every one of the 12", len(plan))
+	}
+
+	// The cluster holds exactly what deploy installed.
+	var rows, namespaces []string
+	for _, e := range plan {
+		rows = append(rows, fmt.Sprintf(`{"name":%q,"namespace":%q,"status":"deployed"}`, e.Release, e.Namespace))
+		namespaces = append(namespaces, e.Namespace)
+	}
+	f.helmList = "[" + strings.Join(rows, ",") + "]"
+	f.namespaces = strings.Join(namespaces, " ")
+	f.crds = strings.Join(components.CRDs(), " ")
+
+	stdout := commandStdout(t, func() error { return runClean(cleanCmd, nil) })
+
+	for _, e := range plan {
+		if !f.ran("helm uninstall " + e.Release + " -n " + e.Namespace) {
+			t.Errorf("%s in %s is in deploy's plan but clean did not uninstall it", e.Release, e.Namespace)
+		}
+	}
+	for _, ns := range namespaces {
+		if !f.ran("delete namespace " + ns) {
+			t.Errorf("namespace %s is deploy's but clean did not delete it", ns)
+		}
+	}
+	for _, g := range components.Groups() {
+		for _, crd := range g.CRDs {
+			if !f.ran("delete crd", crd) {
+				t.Errorf("CRD %s (%s) is in the table but clean did not delete it", crd, g.Name)
+			}
+		}
+	}
+	if strings.Contains(string(stdout), "Kept:") {
+		t.Errorf("a stack-only cluster kept something:\n%s", stdout)
 	}
 }
 
