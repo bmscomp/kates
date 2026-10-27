@@ -300,7 +300,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Schedule Commands](#schedule-commands) | `schedule list`, `get`, `create`, `delete` | How do you run the same test on a cron schedule? | Kates API |
 | [Observability & Monitoring](#observability--monitoring) | `dashboard`, `top` | What is running right now, and how is it doing? | Kates API |
 | [Interactive Lab](#interactive-lab) | `lab` | Which settings work best, when you try them one run at a time? | Kates API |
-| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `charts pull`, `charts push`, `clean`, `detect`, `ports`, `auto`, `operator`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
+| [Deployment & Lifecycle](#deployment--lifecycle) | `deploy`, `deploy status`, `charts pull`, `charts push`, `clean`, `detect`, `ports`, `auto`, `init`, `upgrade` | How do you install the stack, reach it, check it and remove it, and set up or upgrade the CLI? | Mostly Kubernetes, through `kubectl` and `helm`; `init` and `upgrade` work on local files |
 | [Versions and Operators](#versions-and-operators) | `versions`, `operators list` | Which Strimzi operators and Kafka versions can run on this cluster? | Kubernetes, through `kubectl` and `helm` |
 | [Migration Commands](#migration-commands) | `migrate pairs`, `plan`, `up`, `status`, `verify`, `cutover`, `rollback`, `down`, `run` | Do an older Kafka's records and consumer offsets survive a MirrorMaker 2 move onto the primary? | Kubernetes, through `kubectl` and `helm`; when a source has no upstream image, `up` and `run` build one with `docker` and, on a Kind cluster, load it there, unless you pass `--skip-build` |
 | [Security Commands](#security-commands) | `security audit`, `tls-inspect`, `auth-test`, `pentest`, `compliance`, `baseline`, `drift`, `gate`, `certs`, `cve`, `secrets`, `netpol`, `acl-map`, `config-diff`, `trend` | How secure is the cluster, and has its security posture drifted? | Kates API; `security netpol` uses `kubectl`, and `security audit` also asks it about Kyverno |
@@ -315,7 +315,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Badge Generation](#badge-generation) | `badge` | What badge shows the latest run's grade, P99 or throughput? | Kates API |
 | [Webhook Notifications](#webhook-notifications) | `webhook list`, `add`, `remove` | Which URLs hear about it when a test finishes? | Kates API |
 | [MCP Server for AI Agents](#mcp-server-for-ai-agents) | `mcp` | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
-| [Developer & Help Commands](#developer--help-commands) | `docs`, `tldr`, `changelog` | How does a command work, and what does the Kates API's audit log record? | Nothing for `docs` and `tldr`; `changelog` reads audit events from the Kates API |
+| [Developer & Help Commands](#developer--help-commands) | `docs`, `tldr`, `changelog`, `plugin` | How does a command work, what does the Kates API's audit log record, and how do you add a command of your own? | Nothing for `docs` and `tldr`; `changelog` reads audit events from the Kates API; a plugin gets the context's URL and API key |
 
 Contexts, profiles and snapshots are files in your home directory, so they stay on the machine that made them. To move your contexts to another machine, print them with `kates ctx export --reveal`, keys in clear, and load the file there with `kates ctx import --file`.
 
@@ -368,6 +368,15 @@ Expected output:
 
 If the API is unreachable — or rejects the API key — the line shows the context name, the URL the command used, and `unreachable` instead, and the command exits `1`. With `-o json` it prints one object instead of the line: `context`, `url`, `status`, `kafka`, `configs`, `runningTests`, `doneTests` and `failedTests`, plus an `error` when it could not reach the API.
 
+`--watch` (`-w`) keeps polling, every `--interval` seconds (default 5), until you press Ctrl-C:
+
+```bash
+kates status --watch
+kates status --watch --interval 2 -o json >> status.ndjson
+```
+
+In a terminal the line is redrawn on a cleared screen at each poll. Anywhere else, such as a pipe, a file or a CI log, a line is printed only when the status changes, with the time in front of it, so the log holds the changes and nothing else. Under `-o json` each change is one compact object on its own line (NDJSON), the same object `kates status -o json` prints. An API that stops answering is a change like any other: the watch prints its `unreachable` line and goes on polling. Ctrl-C ends the watch with exit `0`, whatever the last status was, since stopping a watch is not a failure; an `--interval` under 1 exits `2`.
+
 #### version
 
 Show CLI and runtime version information (CLI version, commit, build date, Go runtime), plus the Kates API's status and its default benchmark backend when the Kates API answers.
@@ -389,6 +398,13 @@ kates check
 ```
 
 It exits `1` when a check other than Kyverno's fails, and `0` when every check passes or only Kyverno's warn. With `-o json` it prints only the checks, as an array of `name`, `passed`, `detail` and `remediation`, with the same exit code.
+
+Two flags shape the checklist:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--timeout` | `2m` | Time limit for the whole checklist, a duration such as `30s` or a number of seconds. A check still waiting when it runs out fails with `timed out` in its detail, and the checks after it fail at once, so `kates doctor` ends in about that time against an API that does not answer. A value that is not a duration exits `2`. |
+| `--kyverno` | `true` | `--kyverno=false` leaves the four Kyverno checks out and runs no `kubectl`, for a cluster that does not use Kyverno. |
 
 Expected output:
 
@@ -1522,14 +1538,6 @@ kates auto
 
 `--labels-file` (default: `.labels` in the current directory) and `KATES_NAMESPACE_LABELS` label the namespace it installs into, as [Namespace Labels](12-deployment.md#namespace-labels) describes for `kates deploy`.
 
-#### operator
-
-Run the Kates Environment Operator.
-
-```bash
-kates operator
-```
-
 #### init
 
 Initialize a new Kates workspace with config, scenarios, and CI gate.
@@ -2623,6 +2631,29 @@ kates changelog --since 2025-01-01 --until 2025-01-31
 | `--since` | Start date for changelog range |
 | `--until` | End date for changelog range |
 
+#### plugin
+
+A plugin is an executable named `kates-<name>`, in `~/.kates/plugins/` or on your `PATH`; `kates <name>` runs it, and `kates plugin list` lists the ones found. The first found wins, the plugin directory before the `PATH`. A plugin named like a built-in command or one of its aliases is skipped with a warning on stderr, so a file on the `PATH` cannot take over `kates version`.
+
+```bash
+kates plugin list
+kates --context prod my-report --since 7d
+```
+
+Kates reads its own global flags (`--context`, `--url`, `--api-key`, `-o` and `--plain`) when they come before the plugin's name, and passes every argument after the name to the plugin untouched, `-o` and `--help` included. It then resolves the context as it would for one of its own commands, and runs the plugin with the result in these environment variables:
+
+| Variable | Value |
+|----------|-------|
+| `KATES_URL` | The Kates API URL: `--url`, else `KATES_URL`, else the context's, with the same local port fallback the CLI uses |
+| `KATES_API_KEY` | The API key: `--api-key`, else `KATES_API_KEY`, else the context's. Unset when there is none, as when `--url` points at a server other than the context's, which never receives the context's key |
+| `KATES_CONTEXT` | The name of the context in use |
+| `KATES_OUTPUT` | `table` or `json`: `-o`, else `KATES_OUTPUT`, else the context's output setting |
+| `KATES_PLAIN` | `1` under `--plain` or `KATES_PLAIN=1`, else unset; `NO_COLOR=1` comes with it unless `NO_COLOR` is already set |
+
+The resolved values replace whatever the plugin would have inherited, so `kates -o table my-report` gives it `KATES_OUTPUT=table` even with `KATES_OUTPUT=json` exported: the plugin sees what a Kates command would have used. Every other variable, `NO_COLOR` and `TERM` among them, passes through unchanged. Kates never prints the API key. A context that cannot be resolved, a `--context` name the config does not have or a config file Kates cannot read, stops the plugin from running, and Kates exits `1` with the reason.
+
+The plugin runs on Kates' own stdin, stdout and stderr, and its exit code is Kates' exit code: a plugin that exits `3` makes `kates <name>` exit `3`, with nothing added to what the plugin printed.
+
 ---
 
 ## Output Modes
@@ -2657,7 +2688,8 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 Consequences worth knowing in scripts:
 
 - `kates test create --wait` and `kates test watch` exit `1` when the test itself fails — not just when the request fails.
-- `test apply --wait`, `test create --wait`, `replay --wait`, `gate`, `benchmark` and `flow run` cancel the run they are waiting for when interrupted, and exit `130`. `kates detect` stops its probes and exits `130` too. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. Every other command ends on the first Ctrl-C and leaves anything it started running.
+- `test apply --wait`, `test create --wait`, `replay --wait`, `gate`, `benchmark` and `flow run` cancel the run they are waiting for when interrupted, and exit `130`. `kates detect` stops its probes and exits `130` too. `disruption run` and `disruption playbook run` exit `130` too, but their plan keeps running, since the Kates API cannot cancel one. `kates status --watch` ends with exit `0` on Ctrl-C, since it starts nothing and stopping it is what you asked for. Every other command ends on the first Ctrl-C and leaves anything it started running.
+- A plugin's exit code is passed through as Kates' own; see [plugin](#plugin).
 - `kates cluster alerts` exits `1` wherever a critical alert rule is defined, firing or not, which on a default install means always — see its section above.
 - A declined confirmation exits `1` in `deploy`, `clean`, `kafka delete-topic`, `kyverno apply` and `migrate`. A script that forgot `--yes` fails loudly instead of reporting success for work it did not do.
 - Those confirmations are never answered implicitly. With no terminal attached, the command fails and tells you to pass `--yes`, rather than assuming either answer.

@@ -27,6 +27,10 @@ var (
 	apiClient        *client.Client
 	activeContext    string
 	apiURLOverridden bool
+	// contextErr is why the pre-run could not resolve the context: a name the
+	// config does not have, or a config it could not load. Every API call
+	// fails with it; a plugin is not started with it (see runPlugin).
+	contextErr error
 )
 
 type Context struct {
@@ -451,7 +455,6 @@ Deployment:
   operators      Strimzi operators on this cluster
   versions       Strimzi and Kafka versions this cluster can run
   migrate        Cross-version Kafka migration with MirrorMaker 2
-  operator       Run the Kates Environment Operator
   clean          Remove every Kates-managed release and namespace
 
 Flags:
@@ -577,6 +580,7 @@ var rootCmd = &cobra.Command{
 			Insecure: ctx.Insecure,
 		}
 		apiClient = client.NewWithOptions(opts)
+		contextErr = ctxErr
 		if ctxErr != nil {
 			// Commands that never call the API, kates ctx set among them,
 			// still run; every API call reports the missing context.

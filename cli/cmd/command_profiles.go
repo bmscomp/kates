@@ -57,7 +57,6 @@ var commandProfiles = map[string][]string{
 	"lab":           {"performance"},
 	"mcp":           nil,
 	"migrate":       {"deploy", "integrity"},
-	"operator":      {"deploy"},
 	"operators":     {"deploy"},
 	"plugin":        nil,
 	"ports":         nil,

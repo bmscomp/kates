@@ -26,7 +26,10 @@ func TestHelperRunKates(t *testing.T) {
 	if home := os.Getenv("KATES_TEST_HOME"); home != "" {
 		os.Setenv("HOME", home)
 	}
-	rootCmd.SetArgs(strings.Fields(os.Getenv("KATES_TEST_ARGS")))
+	args := strings.Fields(os.Getenv("KATES_TEST_ARGS"))
+	// Execute and the plugin commands read os.Args, as they do in kates.
+	os.Args = append([]string{"kates"}, args...)
+	rootCmd.SetArgs(args)
 	Execute()
 	os.Exit(0)
 }

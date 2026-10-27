@@ -113,7 +113,6 @@ RULES: tuple[Rule, ...] = (
     _r("auto", "change", dry_run_ok=True),
     _r("deploy", "change", dry_run_ok=True),
     _r("clean", "change"),
-    _r("operator", "change"),
     _r("migrate", "change", reads_after=("plan", "status", "pairs")),
     _r("init", "change"),
     _r("ports", "change"),
