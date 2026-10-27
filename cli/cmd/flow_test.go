@@ -102,15 +102,17 @@ func TestFlowGateFailure(t *testing.T) {
 	}
 }
 
-// Grades compare in upper case, and a grade neither side knows fails: both
-// used to rank as 0, so "" met a gate of D.
+// Grades compare in upper case on the API's scale, and a grade neither side
+// knows fails: both used to rank as 0, so "" met a gate of D. The A+ and B-
+// forms an older flow ranked are not grades the API gives, so a gate that
+// names one fails too, rather than never being met.
 func TestCheckGrade(t *testing.T) {
 	for _, tc := range []struct {
 		actual, minimum string
 		want            bool
 	}{
-		{"A", "B", true}, {"b", "B", true}, {"B", "a", false}, {"a+", "A", true},
-		{"", "D", false}, {"X", "F", false}, {"A", "ZZ", false}, {"", "", false},
+		{"A", "B", true}, {"b", "B", true}, {"B", "a", false}, {"a+", "A", false}, {"A", "B-", false},
+		{"", "D", false}, {"X", "F", false}, {"A", "ZZ", false}, {"", "", false}, {"-", "F", false},
 	} {
 		if got := checkGrade(tc.actual, tc.minimum); got != tc.want {
 			t.Errorf("checkGrade(%q, %q) = %v, want %v", tc.actual, tc.minimum, got, tc.want)

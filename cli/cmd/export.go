@@ -19,6 +19,8 @@ var (
 var testExportCmd = &cobra.Command{
 	Use:   "export <id>",
 	Short: "Export test results to a file (CSV or JSON)",
+	Long: `Write a run's results as CSV or JSON to <id>.<format> in the current
+directory, or to the file -f names.`,
 	Example: `  kates test export 69acdf31
   kates test export 69acdf31 --format json
   kates test export 69acdf31 -f results.csv`,
@@ -65,6 +67,10 @@ var testExportCmd = &cobra.Command{
 }
 
 func writeExportFile(path string, data []byte) error {
+	if path == "-" {
+		_, err := os.Stdout.Write(data)
+		return err
+	}
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
 		os.MkdirAll(dir, 0755)
@@ -74,6 +80,6 @@ func writeExportFile(path string, data []byte) error {
 
 func init() {
 	testExportCmd.Flags().StringVar(&testExportFormat, "format", "csv", "Export format: csv or json")
-	testExportCmd.Flags().StringVarP(&testExportFile, "file", "f", "", "Output file path (default: <id>.<format>)")
+	addOutputFileFlag(testExportCmd, &testExportFile)
 	testCmd.AddCommand(testExportCmd)
 }

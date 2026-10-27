@@ -72,7 +72,7 @@ func newRunsBackend(t *testing.T) *runsBackend {
 // JSON again.
 func (b *runsBackend) resetFlags() {
 	outputMode = "table"
-	gateMinGrade, gateType, gateRecords, gateBackend, gateTimeout = "C", "LOAD", 50000, "", 180
+	gateMinGrade, gateType, gateRecords, gateBackend, gateTimeout = "C", "LOAD", 50000, "", defaultGateTimeout
 	benchRecords, benchTimeout = 50000, defaultBenchTimeout
 	applyFile, applyWait = "", false
 	advisorApply = ""

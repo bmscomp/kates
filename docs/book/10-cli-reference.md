@@ -923,6 +923,7 @@ kates report export <id> --format junit
 kates report export <id> --format md
 kates report export <id> --format heatmap > heatmap.json
 kates report export <id> --format heatmap-csv > heatmap.csv
+kates report export <id> --format junit -f results.xml
 ```
 
 | Format | Description |
@@ -934,7 +935,12 @@ kates report export <id> --format heatmap-csv > heatmap.csv
 | `heatmap` | Latency heatmap as JSON |
 | `heatmap-csv` | Latency heatmap as CSV |
 
-When run in a terminal, the export is written to an auto-named file (e.g. `kates-report-<id>.csv`); when piped or redirected, it goes to stdout. For the full report as JSON, use the global output flag instead: `kates report show <id> -o json`. The `junit` format needs a finished run: until the run is `DONE` or `FAILED` the Kates API answers `409 Conflict`, and the command fails rather than write a suite that reads as passed.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format` | `csv` | One of the formats above |
+| `-f`, `--file` | | Write to this file instead of the command's default; `-` writes to stdout |
+
+With `-f` the export goes to that file. Without it, in a terminal it goes to an auto-named file (e.g. `kates-report-<id>.csv`) in the current directory; piped, redirected or with `--plain`, it goes to stdout, for every format including `html`. For the full report as JSON, use the global output flag instead: `kates report show <id> -o json`. The `junit` format needs a finished run: until the run is `DONE` or `FAILED` the Kates API answers `409 Conflict`, and the command fails rather than write a suite that reads as passed.
 
 #### report diff
 
@@ -2068,8 +2074,18 @@ Run a LOAD, a STRESS and a SPIKE test one after another, grade each from its pea
 ```bash
 kates benchmark
 kates bench
+kates benchmark --records 100000 --timeout 10m
 kates benchmark -o json
 ```
+
+The two flags are the ones `kates gate` shares:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--records` | 50000 | Number of records each test run sends |
+| `--timeout` | `30m` | How long to wait for each phase's run: a duration such as `10m`, or a number of seconds |
+
+Each test scores from 0 to 100: 50 × min(throughput / 50,000, 1) for throughput plus max(0, 50 − 5 × P99 ms) for latency. A score of 90 or more is an A, 80 a B, 70 a C, 60 a D and anything less an F; the overall grade averages the scores. `kates benchmark --help` prints the same formula.
 
 With `-o json` it prints only the scorecard, once the battery ends: per test its `runId`, `status`, peak throughput, highest P99, `score` and `grade`, and the `overallGrade`. A metric no phase reported is `null`, as the table's `—` is. The scorecard takes each test's status from its run, so a run that finished `FAILED` shows as `FAILED` whether or not one of its phases carried an error message. A test that could not be created shows as `FAILED`. A run with no final status when `--timeout` passes (default `30m`; a duration such as `10m`, or a number of seconds), or whose status could not be read three polls in a row, shows as `ERROR`, because it may still be going; the battery stops there, and the tests after it show as `SKIPPED`. The command exits `0` in every one of these cases. Ctrl-C cancels the run it is waiting for and exits `130`.
 
@@ -2140,7 +2156,17 @@ With `-o json` stdout carries only the result, once the test exists: the `runId`
 | `--type` | `LOAD` | Test type to run |
 | `--records` | 50000 | Number of records |
 | `--backend` | | Benchmark backend |
-| `--timeout` | 180 | Seconds to wait for the run; when they pass, the run is cancelled and the gate fails |
+| `--timeout` | `180` | How long to wait for the run: a duration such as `10m`, or a number of seconds as before; when it passes, the run is cancelled and the gate fails |
+
+The grade comes from the run's average throughput and P99, and a run must clear both numbers of a rung; `kates gate --help` prints the same ladder.
+
+| Grade | Throughput | P99 |
+|-------|-----------|-----|
+| A | ≥ 50,000 rec/s | < 5 ms |
+| B | ≥ 30,000 rec/s | < 20 ms |
+| C | ≥ 15,000 rec/s | < 50 ms |
+| D | ≥ 5,000 rec/s | < 200 ms |
+| F | anything below D | |
 
 #### test baseline
 

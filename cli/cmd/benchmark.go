@@ -1,15 +1,13 @@
 package cmd
 
 import (
-	"context"
+	"errors"
 	"fmt"
-	"math"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/grade"
 	"github.com/spf13/cobra"
 )
 
@@ -24,6 +22,11 @@ var benchmarkCmd = &cobra.Command{
 	Short:   "Run a full test battery (LOAD → STRESS → SPIKE) with a letter-grade scorecard",
 	Long: `Run a LOAD, a STRESS and a SPIKE test one after another and grade each
 from its peak throughput and p99 latency, then give an overall grade.
+
+Each test scores from 0 to 100, half for throughput and half for latency, and
+the score gives its grade; the overall grade averages the scores:
+
+` + grade.BenchmarkThresholds() + `
 
 A run that reports no final status within --timeout, or whose status cannot
 be read three times in a row, shows as ERROR: it may still be going, so the
@@ -41,7 +44,7 @@ With -o json it prints only the scorecard, as JSON, when the battery ends.`,
 		jsonOut := outputMode == "json"
 		types := []string{"LOAD", "STRESS", "SPIKE"}
 
-		timeout, err := parseBenchTimeout(benchTimeout)
+		timeout, err := parseTimeoutFlag(benchTimeout)
 		if err != nil {
 			return cmdErr(err.Error())
 		}
@@ -84,15 +87,23 @@ With -o json it prints only the scorecard, as JSON, when the battery ends.`,
 				output.Hint(fmt.Sprintf("  Running %s → %s", tt, truncID(run.ID)))
 			}
 
-			final, err := waitForCompletion(ctx, run.ID, timeout)
-			if ctx.Err() != nil {
-				return stopStartedRun(run.ID)
+			final, err := followRun(ctx, run.ID, followOpts{
+				interval:     testPollInterval,
+				deadline:     time.Now().Add(timeout),
+				maxErrors:    benchmarkPollFailures,
+				cancelOnStop: stopStartedRun,
+			})
+			if errors.Is(err, errInterrupted) {
+				return err
 			}
 			if err != nil {
 				// The outcome is unknown, not a failure, as test apply reports
 				// a run it lost track of. It used to read FAILED, and the next
 				// test started on top of a run that may still put load on the
 				// cluster.
+				if errors.Is(err, errFollowDeadline) {
+					err = fmt.Errorf("no final status after %s", timeout)
+				}
 				msg := err.Error() + "; the run may still be going"
 				if !jsonOut {
 					output.Error(fmt.Sprintf("  %s: %s", tt, msg))
@@ -126,7 +137,7 @@ With -o json it prints only the scorecard, as JSON, when the battery ends.`,
 			}
 		}
 		if scored > 0 {
-			res.OverallGrade = letterGrade(totalScore / float64(scored))
+			res.OverallGrade = grade.FromScore(totalScore / float64(scored)).String()
 		}
 
 		output.Render(jsonOut, res, func() { renderBenchmark(res) })
@@ -163,25 +174,11 @@ type benchmarkTest struct {
 // benchmarkPollFailures is how many GetTest errors in a row end a phase. One
 // error used to be skipped without a word, so an API that had gone away was
 // polled, in vain, for the whole six minutes.
-const benchmarkPollFailures = 3
+const benchmarkPollFailures = followMaxErrors
 
 // defaultBenchTimeout bounds the wait for each phase's run. The old cap was
 // hidden: 120 polls of 3 s, which no flag could lengthen for a slow cluster.
 const defaultBenchTimeout = "30m"
-
-// parseBenchTimeout reads --timeout as a duration such as 10m, or a plain
-// number of seconds as kates gate takes it.
-func parseBenchTimeout(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if secs, err := strconv.Atoi(s); err == nil && secs > 0 {
-		return time.Duration(secs) * time.Second, nil
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("--timeout %q is not a duration such as 10m, or a number of seconds", s)
-	}
-	return d, nil
-}
 
 // scoreBenchmarkRun turns a finished run into its scorecard row. Only a run
 // that finished DONE with throughput is graded.
@@ -206,9 +203,9 @@ func scoreBenchmarkRun(testType string, run *client.TestRun) benchmarkTest {
 	}
 
 	if run.Status == "DONE" && peak > 0 {
-		score := gradeScore(peak, maxP99)
+		score := grade.BenchmarkScore(peak, maxP99)
 		bt.Score = &score
-		bt.Grade = letterGrade(score)
+		bt.Grade = grade.FromScore(score).String()
 	}
 	return bt
 }
@@ -251,84 +248,26 @@ func renderBenchmark(res benchmarkResult) {
 	}
 }
 
-func gradeScore(throughput, p99 float64) float64 {
-	tScore := math.Min(throughput/50000.0, 1.0) * 50
-	lScore := 50.0
-	if p99 > 0 {
-		lScore = math.Max(0, 50.0-(p99*5.0))
-	}
-	return tScore + lScore
-}
-
-func letterGrade(score float64) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
-}
-
-func gradeColor(grade string) string {
-	switch grade {
+func gradeColor(g string) string {
+	switch g {
 	case "A":
-		return output.SuccessStyle.Bold(true).Render("★ " + grade)
+		return output.SuccessStyle.Bold(true).Render("★ " + g)
 	case "B":
-		return output.SuccessStyle.Render(grade)
+		return output.SuccessStyle.Render(g)
 	case "C":
-		return output.WarningStyle.Render(grade)
+		return output.WarningStyle.Render(g)
 	default:
-		return output.ErrorStyle.Render(grade)
+		return output.ErrorStyle.Render(g)
 	}
 }
 
-// testPollInterval is how often gate and benchmark ask for a run's status.
-// Tests shorten it.
+// testPollInterval is how often gate, benchmark and flow ask for a run's
+// status. Tests shorten it.
 var testPollInterval = 3 * time.Second
 
-// waitForCompletion polls run id until its status is terminal and returns it.
-// It returns an error when timeout passes first, when benchmarkPollFailures
-// polls in a row fail (with the last error), or when ctx ends, which the
-// caller tells apart with ctx.Err().
-func waitForCompletion(ctx context.Context, id string, timeout time.Duration) (*client.TestRun, error) {
-	deadline := time.Now().Add(timeout)
-	failures := 0
-	var lastErr error
-	for {
-		if !sleepCtx(ctx, testPollInterval) {
-			return nil, ctx.Err()
-		}
-		run, err := apiClient.GetTest(ctx, id)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			failures++
-			lastErr = err
-			if failures >= benchmarkPollFailures {
-				return nil, fmt.Errorf("could not read the run's status %d times in a row: %w", failures, lastErr)
-			}
-		} else {
-			failures = 0
-			if terminalRunStatus(run.Status) {
-				return run, nil
-			}
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("no final status after %s", timeout)
-		}
-	}
-}
-
 func init() {
-	benchmarkCmd.Flags().IntVar(&benchRecords, "records", 50000, "Records per test phase")
-	benchmarkCmd.Flags().StringVar(&benchTimeout, "timeout", defaultBenchTimeout, "How long to wait for each phase's run: a duration such as 10m, or seconds")
+	addRecordsFlag(benchmarkCmd, &benchRecords, 50000)
+	addTimeoutFlag(benchmarkCmd, &benchTimeout, defaultBenchTimeout)
 	interruptible(benchmarkCmd)
 	rootCmd.AddCommand(benchmarkCmd)
 }

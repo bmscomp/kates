@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/grade"
 	"github.com/spf13/cobra"
 )
 
@@ -117,23 +118,35 @@ var securityGateCmd = &cobra.Command{
 	Example: `  kates security gate --min-grade B
   kates security gate --min-grade A -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apiClient.SecurityGate(context.Background(), secGateMinGrade)
+		// The API ranks a grade it does not know as 0, below F, so a gate
+		// of "b" or "AA" passed whatever the audit found.
+		minGrade, err := grade.Parse(secGateMinGrade)
+		if err != nil {
+			return cmdErr("Invalid grade: " + err.Error())
+		}
+		result, err := apiClient.SecurityGate(context.Background(), minGrade.String())
 		if err != nil {
 			return cmdErr("Security gate failed: " + err.Error())
-		}
-
-		if outputMode == "json" {
-			output.JSON(result)
-			passed, _ := result["passed"].(bool)
-			if !passed {
-				return &silentErr{msg: "security gate failed"}
-			}
-			return nil
 		}
 
 		passed, _ := result["passed"].(bool)
 		currentGrade := fmt.Sprintf("%v", result["currentGrade"])
 		requiredGrade := fmt.Sprintf("%v", result["requiredGrade"])
+		// The verdict is the API's; the CLI checks it against the one scale
+		// so that a grade the API sends but cannot rank, such as "-" for an
+		// audit that ran no check, fails the gate here rather than passing.
+		if current, err := grade.Parse(currentGrade); err != nil || !grade.AtLeast(current, minGrade) {
+			passed = false
+			result["passed"] = false
+		}
+
+		if outputMode == "json" {
+			output.JSON(result)
+			if !passed {
+				return &silentErr{msg: "security gate failed"}
+			}
+			return nil
+		}
 
 		if passed {
 			output.Banner("Security Gate", output.SuccessStyle.Render("PASSED")+"  │  "+gradeStyle(currentGrade)+" ≥ "+gradeStyle(requiredGrade))

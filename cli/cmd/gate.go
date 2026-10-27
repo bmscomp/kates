@@ -1,12 +1,13 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/grade"
 	"github.com/spf13/cobra"
 )
 
@@ -15,8 +16,12 @@ var (
 	gateType     string
 	gateRecords  int
 	gateBackend  string
-	gateTimeout  int
+	gateTimeout  string
 )
+
+// defaultGateTimeout bounds the wait for the gate's run; it used to be an
+// integer count of seconds, which --timeout still accepts.
+const defaultGateTimeout = "180"
 
 var gateCmd = &cobra.Command{
 	Use:     "gate",
@@ -26,12 +31,21 @@ var gateCmd = &cobra.Command{
 Exits with code 0 if the grade meets or exceeds the threshold, or code 1 if it fails.
 Designed for CI/CD pipelines where you want to block deploys on performance regression.
 
+The grade comes from the run's average throughput and P99 latency; a run must
+clear both numbers of a rung to earn it:
+
+` + grade.GateThresholds() + `
+
+When --timeout passes with the run still going, the run is cancelled and the
+gate fails. --timeout takes a duration such as 10m, or a number of seconds as
+it always has.
+
 With -o json it prints only the result, as JSON, once the test exists: the run
 ID, its status, the throughput and p99 it was graded on, the grade and whether
 it passed. The exit code is the same.`,
 	Example: `  kates gate --min-grade B
   kates gate --min-grade C --type STRESS --records 100000
-  kates gate --min-grade A --timeout 300
+  kates gate --min-grade A --timeout 5m
   kates gate --min-grade B -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Ctrl-C cancels this context (see interrupt.go), and the run it
@@ -39,9 +53,13 @@ it passed. The exit code is the same.`,
 		ctx := commandContext(cmd)
 		jsonOut := outputMode == "json"
 
-		minOrdinal := gradeOrdinal(gateMinGrade)
-		if minOrdinal < 0 {
-			return cmdErr("Invalid grade: " + gateMinGrade + " (use A, B, C, D, or F)")
+		minGrade, err := grade.Parse(gateMinGrade)
+		if err != nil {
+			return cmdErr("Invalid grade: " + err.Error())
+		}
+		timeout, err := parseTimeoutFlag(gateTimeout)
+		if err != nil {
+			return cmdErr(err.Error())
 		}
 
 		if !jsonOut {
@@ -80,33 +98,28 @@ it passed. The exit code is the same.`,
 			return cmdErr(msg)
 		}
 
-		deadline := time.Now().Add(time.Duration(gateTimeout) * time.Second)
-		for {
-			if !sleepCtx(ctx, testPollInterval) {
-				return stopStartedRun(id)
-			}
-			run, err = apiClient.GetTest(ctx, id)
-			if err != nil {
-				if ctx.Err() != nil {
-					return stopStartedRun(id)
-				}
-				return fail("Failed to poll test: " + err.Error())
-			}
-			res.Status = run.Status
-			if terminalRunStatus(run.Status) {
-				break
-			}
-			if time.Now().After(deadline) {
-				// A run the gate gave up on is cancelled, not left to load
-				// the cluster while the next pipeline step starts.
-				cancelled, note := cancelStartedRun(id)
-				res.Status = cancelled
-				return fail(fmt.Sprintf("Timeout after %ds — test still %s; %s", gateTimeout, run.Status, note))
-			}
+		run, err = followRun(ctx, id, followOpts{
+			interval:     testPollInterval,
+			deadline:     time.Now().Add(timeout),
+			onPoll:       func(r *client.TestRun) { res.Status = r.Status },
+			cancelOnStop: stopStartedRun,
+		})
+		switch {
+		case errors.Is(err, errInterrupted):
+			return err
+		case errors.Is(err, errFollowDeadline):
+			// A run the gate gave up on is cancelled, not left to load the
+			// cluster while the next pipeline step starts.
+			still := res.Status
+			cancelled, note := cancelStartedRun(id)
+			res.Status = cancelled
+			return fail(fmt.Sprintf("Timeout after %s — test still %s; %s", timeout, still, note))
+		case err != nil:
+			return fail("Failed to poll test: " + err.Error())
 		}
 
-		if isFailedStatus(strings.ToUpper(run.Status)) {
-			return fail("Test " + strings.ToUpper(run.Status))
+		if isFailedStatus(run.Status) {
+			return fail("Test " + output.Printable(run.Status))
 		}
 
 		report, err := apiClient.ReportSummary(ctx, id)
@@ -123,8 +136,9 @@ it passed. The exit code is the same.`,
 			return fail("P99 latency not measured: the run recorded no latency, so it cannot be graded")
 		}
 		res.P99LatencyMs = &p99
-		res.Grade = computeGateGrade(report)
-		res.Passed = gradeOrdinal(res.Grade) >= minOrdinal
+		got := grade.ForGate(throughput, p99)
+		res.Grade = got.String()
+		res.Passed = grade.AtLeast(got, minGrade)
 
 		if jsonOut {
 			output.JSON(res)
@@ -170,47 +184,12 @@ type gateResult struct {
 	Error                  string   `json:"error,omitempty"`
 }
 
-func gradeOrdinal(g string) int {
-	switch strings.ToUpper(g) {
-	case "A":
-		return 5
-	case "B":
-		return 4
-	case "C":
-		return 3
-	case "D":
-		return 2
-	case "F":
-		return 1
-	default:
-		return -1
-	}
-}
-
-func computeGateGrade(s *client.ReportSummary) string {
-	throughput := s.AvgThroughputRecPerSec
-	p99 := s.P99LatencyMs
-
-	switch {
-	case throughput >= 50000 && p99 < 5:
-		return "A"
-	case throughput >= 30000 && p99 < 20:
-		return "B"
-	case throughput >= 15000 && p99 < 50:
-		return "C"
-	case throughput >= 5000 && p99 < 200:
-		return "D"
-	default:
-		return "F"
-	}
-}
-
 func init() {
-	gateCmd.Flags().StringVar(&gateMinGrade, "min-grade", "C", "Minimum passing grade (A, B, C, D, F)")
+	gateCmd.Flags().StringVar(&gateMinGrade, "min-grade", "C", "Minimum passing grade ("+grade.Letters+")")
 	gateCmd.Flags().StringVar(&gateType, "type", "LOAD", "Test type to run")
-	gateCmd.Flags().IntVar(&gateRecords, "records", 50000, "Number of records")
+	addRecordsFlag(gateCmd, &gateRecords, 50000)
 	gateCmd.Flags().StringVar(&gateBackend, "backend", "", "Benchmark backend")
-	gateCmd.Flags().IntVar(&gateTimeout, "timeout", 180, "Timeout in seconds")
+	addTimeoutFlag(gateCmd, &gateTimeout, defaultGateTimeout)
 	interruptible(gateCmd)
 	rootCmd.AddCommand(gateCmd)
 }

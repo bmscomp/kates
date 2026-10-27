@@ -2,8 +2,8 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -409,20 +409,16 @@ var testCreateCmd = &cobra.Command{
 			// json + --wait previously returned HERE, before waiting at all —
 			// the flag was silently ignored. Follow silently, then emit the
 			// FINAL state, which is the object a json consumer actually wants.
-			status, err := pollUntilDonePlain(ctx, result.ID, io.Discard)
-			if stoppedWaiting(ctx, err) {
-				return stopStartedRun(result.ID)
+			final, err := followRun(ctx, result.ID, followOpts{cancelOnStop: stopStartedRun})
+			if errors.Is(err, errInterrupted) {
+				return err
 			}
 			if err != nil {
 				return cmdErr("Lost track of test " + truncID(result.ID) + ": " + err.Error())
 			}
-			final, gerr := apiClient.GetTest(context.Background(), result.ID)
-			if gerr != nil {
-				return cmdErr("Failed to fetch final state: " + gerr.Error())
-			}
 			output.JSON(final)
-			if isFailedStatus(status) {
-				return cmdErr("test " + truncID(result.ID) + " finished " + status)
+			if isFailedStatus(final.Status) {
+				return cmdErr("test " + truncID(result.ID) + " finished " + strings.ToUpper(final.Status))
 			}
 			return nil
 		}
@@ -672,12 +668,12 @@ func init() {
 
 	testCreateCmd.Flags().StringVar(&createType, "type", "LOAD", "Test type")
 	testCreateCmd.Flags().StringVar(&createBackend, "backend", "", "Benchmark backend")
-	testCreateCmd.Flags().IntVar(&createRecords, "records", 0, "Number of records to send")
+	addRecordsFlag(testCreateCmd, &createRecords, 0)
 	testCreateCmd.Flags().IntVar(&createProducers, "producers", 0, "Number of parallel producers")
 	testCreateCmd.Flags().IntVar(&createRecordSize, "record-size", 0, "Record size in bytes")
 	testCreateCmd.Flags().IntVar(&createDuration, "duration", 0, "Duration in seconds")
 	testCreateCmd.Flags().StringVar(&createTopic, "topic", "", "Kafka topic name")
-	testCreateCmd.Flags().BoolVar(&createWait, "wait", false, "Wait for test to complete and print results; Ctrl-C cancels it")
+	addWaitFlag(testCreateCmd, &createWait, false)
 	testCreateCmd.Flags().StringVar(&createAcks, "acks", "", "Producer acks: 0, 1, or all (default: all)")
 	testCreateCmd.Flags().IntVar(&createBatchSize, "batch-size", 0, "Producer batch size in bytes (default: 65536)")
 	testCreateCmd.Flags().IntVar(&createLingerMs, "linger-ms", 0, "Producer linger time in ms (default: 5)")

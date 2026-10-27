@@ -641,7 +641,13 @@ type waitModel struct {
 	spin   spinner.Model
 	status string
 	result *client.TestRun
-	err    error
+	// failures counts the polls that failed in a row, lastErr the latest;
+	// followMaxErrors of them end the wait, as they end followRun, and each
+	// one waits longer than the last (nextPollDelay). One error used to end
+	// the wait.
+	failures int
+	lastErr  error
+	err      error
 }
 
 type waitResultMsg struct {
@@ -658,8 +664,9 @@ func (m waitModel) Init() tea.Cmd {
 var applyPollInterval = 2 * time.Second
 
 func (m waitModel) fetchTest() tea.Cmd {
+	delay := nextPollDelay(applyPollInterval, m.failures, m.lastErr)
 	return func() tea.Msg {
-		time.Sleep(applyPollInterval)
+		time.Sleep(delay)
 		res, err := apiClient.GetTest(m.ctx, m.id)
 		return waitResultMsg{test: res, err: err}
 	}
@@ -674,9 +681,15 @@ func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case waitResultMsg:
 		if msg.err != nil {
-			m.err = msg.err
-			return m, tea.Quit
+			m.failures++
+			m.lastErr = msg.err
+			if m.failures >= followMaxErrors {
+				m.err = fmt.Errorf("connection lost: could not read the run's status %d times in a row: %w", m.failures, msg.err)
+				return m, tea.Quit
+			}
+			return m, m.fetchTest()
 		}
+		m.failures, m.lastErr = 0, nil
 		m.result = msg.test
 		m.status = strings.ToUpper(msg.test.Status)
 		if terminalRunStatus(m.status) {
@@ -693,10 +706,10 @@ func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m waitModel) View() string {
 	if m.result != nil {
-		if m.status == "DONE" || m.status == "COMPLETED" {
+		if succeededRunStatus(m.status) {
 			return fmt.Sprintf("  %s %s → %s\n", output.SuccessStyle.Render("✓"), output.LightStyle.Render(m.name), output.StatusBadge(m.status))
 		}
-		if m.status == "FAILED" || m.status == "ERROR" {
+		if isFailedStatus(m.status) {
 			return fmt.Sprintf("  %s %s → %s\n", output.ErrorStyle.Render("✖"), output.LightStyle.Render(m.name), output.StatusBadge(m.status))
 		}
 	}
@@ -733,7 +746,7 @@ func waitForTest(ctx context.Context, id, name string) (*client.TestRun, error) 
 	if wm.err != nil {
 		return nil, wm.err
 	}
-	if wm.result == nil {
+	if wm.result == nil || !terminalRunStatus(wm.result.Status) {
 		// Bubble Tea quits by itself on SIGTERM, with no result and no
 		// error; apply then read the status of a nil run and panicked.
 		return nil, errStoppedWaiting
@@ -747,30 +760,21 @@ func waitForTest(ctx context.Context, id, name string) (*client.TestRun, error) 
 // the result and nothing else.
 func waitForTestPlain(ctx context.Context, id, name string, progress io.Writer) (*client.TestRun, error) {
 	last := ""
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(applyPollInterval):
-		}
-		run, err := apiClient.GetTest(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		status := strings.ToUpper(run.Status)
-		if progress != nil && status != last {
-			fmt.Fprintf(progress, "  %s (%s): %s\n", name, id, status)
-			last = status
-		}
-		if terminalRunStatus(status) {
-			return run, nil
-		}
-	}
+	return followRun(ctx, id, followOpts{
+		interval: applyPollInterval,
+		onPoll: func(run *client.TestRun) {
+			status := strings.ToUpper(run.Status)
+			if progress != nil && status != last {
+				fmt.Fprintf(progress, "  %s (%s): %s\n", name, id, status)
+				last = status
+			}
+		},
+	})
 }
 
 func init() {
 	testApplyCmd.Flags().StringVarP(&applyFile, "file", "f", "", "Path to scenario YAML/JSON file (required)")
-	testApplyCmd.Flags().BoolVar(&applyWait, "wait", false, "Wait for each test to complete before starting the next; Ctrl-C cancels the running one and stops")
+	addWaitFlag(testApplyCmd, &applyWait, false)
 	interruptible(testApplyCmd)
 	testCmd.AddCommand(testApplyCmd)
 }

@@ -94,10 +94,14 @@ type pollModel struct {
 	noData         bool
 	staleRetries   int
 	connRetries    int
-	lastErr        error
-	repairErr      error
-	summary        *client.ReportSummary
-	err            error
+	// retryAt is when the next poll may go after a failed one: the ticks
+	// before it only redraw, so a failing API is polled on the same backoff
+	// followRun uses (nextPollDelay) rather than on every tick.
+	retryAt   time.Time
+	lastErr   error
+	repairErr error
+	summary   *client.ReportSummary
+	err       error
 }
 
 func newPollModel(ctx context.Context, id string) pollModel {
@@ -154,6 +158,9 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.done || m.failed {
 			return m, nil
 		}
+		if time.Time(msg).Before(m.retryAt) {
+			return m, m.tickCmd()
+		}
 		return m, tea.Batch(m.fetchTest(), m.tickCmd())
 
 	case pollResultMsg:
@@ -169,13 +176,15 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.connRetries++
 			m.lastErr = pollErrorWithRepair(msg.err, m.repairErr)
-			if m.connRetries > maxConnRetries {
-				m.err = fmt.Errorf("connection lost after %d retries: %w", maxConnRetries, m.lastErr)
+			if m.connRetries >= maxConnRetries {
+				m.err = fmt.Errorf("connection lost: could not read the run's status %d times in a row: %w", m.connRetries, m.lastErr)
 				return m, tea.Quit
 			}
+			m.retryAt = time.Now().Add(nextPollDelay(pollInterval, m.connRetries, m.lastErr))
 			return m, nil
 		}
 		m.connRetries = 0
+		m.retryAt = time.Time{}
 		m.lastErr = nil
 		m.repairErr = nil
 		test := msg.test
@@ -202,8 +211,8 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.totalRecords = float64(test.Spec.Records)
 		}
 
-		switch m.lastStatus {
-		case "DONE", "COMPLETED":
+		switch {
+		case succeededRunStatus(m.lastStatus):
 			if isStaleResult(test.Results) && m.staleRetries < maxStaleRetries {
 				m.staleRetries++
 				return m, nil
@@ -211,7 +220,7 @@ func (m pollModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.done = true
 			m.noData = isStaleResult(test.Results)
 			return m, m.fetchSummary()
-		case "FAILED", "ERROR":
+		case isFailedStatus(m.lastStatus):
 			m.failed = true
 			return m, tea.Quit
 		}
@@ -411,11 +420,6 @@ var (
 	pollInterval              = 2 * time.Second
 )
 
-// isFailedStatus reports whether a terminal test status means failure.
-func isFailedStatus(status string) bool {
-	return status == "FAILED" || status == "ERROR" || status == "CANCELLED"
-}
-
 // pollUntilDone follows a test until it reaches a terminal state and returns
 // the final status ("COMPLETED", "FAILED", …). A non-nil error means we lost
 // the ability to follow (connection lost, UI failure) — the test's real
@@ -467,41 +471,15 @@ func lastPolledStatus(m tea.Model) string {
 // change, append-only, no escape codes — the format CI logs can rely on.
 func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, error) {
 	lastStatus := ""
-	retries := 0
 	var repairErr error
-	for {
-		test, err := pollGetTestFn(ctx, id)
-		if err != nil {
-			// A poll cut off by the stop is not a lost connection. One that
-			// answered is still reported: a run that finished as the stop
-			// came has nothing left to stop.
-			if ctx.Err() != nil {
-				return lastStatus, errStoppedWaiting
+	run, err := followRun(ctx, id, followOpts{
+		interval:  pollInterval,
+		maxErrors: maxConnRetries,
+		onPoll: func(test *client.TestRun) {
+			status := strings.ToUpper(test.Status)
+			if status == lastStatus {
+				return
 			}
-			repaired, nextRepairErr := tryRepairPollingConnection(ctx, err, retries)
-			if repaired {
-				retries = 0
-				repairErr = nil
-				continue
-			}
-			if nextRepairErr != nil {
-				repairErr = nextRepairErr
-			}
-			err = pollErrorWithRepair(err, repairErr)
-			retries++
-			if retries > maxConnRetries {
-				return "", fmt.Errorf("connection lost after %d retries: %w", maxConnRetries, err)
-			}
-			if !sleepCtx(ctx, pollInterval) {
-				return lastStatus, errStoppedWaiting
-			}
-			continue
-		}
-		retries = 0
-		repairErr = nil
-
-		status := strings.ToUpper(test.Status)
-		if status != lastStatus {
 			var sent float64
 			var throughput float64
 			for _, r := range test.Results {
@@ -513,15 +491,28 @@ func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, er
 			fmt.Fprintf(w, "%s  test=%s  status=%s  records=%.0f  throughput=%.0f rec/s\n",
 				time.Now().Format(time.RFC3339), truncID(id), status, sent, throughput)
 			lastStatus = status
-		}
-
-		if terminalRunStatus(status) {
-			return status, nil
-		}
-		if !sleepCtx(ctx, pollInterval) {
-			return lastStatus, errStoppedWaiting
-		}
+		},
+		onError: func(ctx context.Context, err error) (bool, error) {
+			repaired, nextRepairErr := tryRepairPollingConnection(ctx, err, 0)
+			if repaired {
+				repairErr = nil
+				return true, nil
+			}
+			if nextRepairErr != nil {
+				repairErr = nextRepairErr
+			}
+			return false, pollErrorWithRepair(err, repairErr)
+		},
+	})
+	if errors.Is(err, errStoppedWaiting) {
+		// A poll that answered before the stop is still reported: a run that
+		// finished as the stop came has nothing left to stop.
+		return lastStatus, err
 	}
+	if err != nil {
+		return "", err
+	}
+	return strings.ToUpper(run.Status), nil
 }
 
 func tryRepairPollingConnection(ctx context.Context, pollErr error, _ int) (bool, error) {

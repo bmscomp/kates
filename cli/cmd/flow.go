@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/grade"
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -101,10 +103,17 @@ stops and reports the failure.`,
 var flowRunCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Execute a flow pipeline from a YAML file",
+	Long: `Run the steps of a flow file in order. A test step starts a run and, with
+--wait (the default), follows it to its end and judges its gate; --wait=false
+starts the run and moves on. A gate's minGrade is one of ` + grade.Letters + `, the
+grade the Kates API gives the run's SLA verdict.
+
+Ctrl-C while a test step waits cancels its run and exits 130.`,
 	Example: `  kates flow run -f release-qual.yaml
   kates flow run -f flow.yaml --wait=false
   kates flow run -f flow.yaml --dry-run`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := commandContext(cmd)
 		data, err := os.ReadFile(flowFile)
 		if err != nil {
 			return fmt.Errorf("cannot read flow file: %w", err)
@@ -166,16 +175,19 @@ var flowRunCmd = &cobra.Command{
 					result.Detail = "expect: not implemented in this version"
 					break
 				}
-				testID, grade, summary, err := runFlowTest(step, flowWait)
+				testID, runGrade, summary, err := runFlowTest(ctx, step, flowWait)
+				if errors.Is(err, errInterrupted) {
+					return err
+				}
 				result.TestID = testID
-				result.Grade = grade
+				result.Grade = runGrade
 				if err != nil {
 					result.Status = "FAILED"
 					result.Detail = err.Error()
 				} else if !flowWait {
 					result.Status = "PASSED"
 					result.Detail = "started; not waited for (--wait=false)"
-				} else if detail := flowGateFailure(step.Gate, grade, summary); detail != "" {
+				} else if detail := flowGateFailure(step.Gate, runGrade, summary); detail != "" {
 					result.Status = "GATE_FAILED"
 					result.Detail = detail
 				} else {
@@ -188,7 +200,9 @@ var flowRunCmd = &cobra.Command{
 					dur = time.Duration(step.Records) * time.Second
 				}
 				fmt.Printf("     %s\n", flowDimStyle.Render(fmt.Sprintf("waiting %s…", dur)))
-				time.Sleep(dur)
+				if !sleepCtx(ctx, dur) {
+					return errInterrupted
+				}
 				result.Status = "PASSED"
 
 			case "expect", "webhook", "notify":
@@ -247,11 +261,19 @@ func flowTestRequest(step FlowStep) *client.CreateTestRequest {
 	return req
 }
 
+// flowStepTimeout bounds the wait for a test step's run, as the old loop of
+// 180 polls of 2 s did.
+const flowStepTimeout = 6 * time.Minute
+
 // runFlowTest starts a test step's run and, when wait is set, follows it to
 // its end and returns its grade and report summary, which the gates judge.
-func runFlowTest(step FlowStep, wait bool) (testID, grade string, summary *client.ReportSummary, err error) {
-	run, err := apiClient.CreateTest(context.Background(), flowTestRequest(step))
+// A wait that ctx ends cancels the run and returns errInterrupted.
+func runFlowTest(ctx context.Context, step FlowStep, wait bool) (testID, runGrade string, summary *client.ReportSummary, err error) {
+	run, err := apiClient.CreateTest(ctx, flowTestRequest(step))
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", "", nil, errInterrupted
+		}
 		return "", "", nil, err
 	}
 	testID = run.ID
@@ -259,29 +281,30 @@ func runFlowTest(step FlowStep, wait bool) (testID, grade string, summary *clien
 		return testID, "", nil, nil
 	}
 
-	for i := 0; i < 180; i++ {
-		time.Sleep(2 * time.Second)
-		updated, err := apiClient.GetTest(context.Background(), run.ID)
-		if err != nil {
-			continue
-		}
-		status := strings.ToUpper(updated.Status)
-		if !terminalRunStatus(status) {
-			continue
-		}
-		if isFailedStatus(status) {
-			return testID, "F", nil, fmt.Errorf("test failed")
-		}
-		report, err := apiClient.Report(context.Background(), run.ID)
-		if err == nil {
-			summary = report.Summary
-			if report.OverallSlaVerdict != nil {
-				grade = report.OverallSlaVerdict.Grade
-			}
-		}
-		return testID, grade, summary, nil
+	final, err := followRun(ctx, run.ID, followOpts{
+		interval:     testPollInterval,
+		deadline:     time.Now().Add(flowStepTimeout),
+		cancelOnStop: stopStartedRun,
+	})
+	switch {
+	case errors.Is(err, errInterrupted):
+		return testID, "", nil, err
+	case errors.Is(err, errFollowDeadline):
+		return testID, "", nil, fmt.Errorf("timeout waiting for test")
+	case err != nil:
+		return testID, "", nil, err
 	}
-	return testID, "", nil, fmt.Errorf("timeout waiting for test")
+	if isFailedStatus(final.Status) {
+		return testID, "F", nil, fmt.Errorf("test failed")
+	}
+	report, err := apiClient.Report(ctx, run.ID)
+	if err == nil {
+		summary = report.Summary
+		if report.OverallSlaVerdict != nil {
+			runGrade = report.OverallSlaVerdict.Grade
+		}
+	}
+	return testID, runGrade, summary, nil
 }
 
 // flowGateFailure judges a finished run against its step's gate and returns
@@ -320,15 +343,14 @@ func flowGateFailure(gate *FlowGate, grade string, s *client.ReportSummary) stri
 	return ""
 }
 
-// flowGradeOrder ranks the grades a gate may name. A grade not in it, the
-// backend's or the gate's, fails the gate: both used to rank as 0, so an
-// unknown grade met a gate of D and a gate on an unknown grade passed A.
-var flowGradeOrder = map[string]int{"A+": 9, "A": 8, "A-": 7, "B+": 6, "B": 5, "B-": 4, "C+": 3, "C": 2, "C-": 1, "D": 0, "F": -1}
-
+// checkGrade reports whether actual meets minimum on the API's scale. A grade
+// not on it, the API's or the gate's, fails the gate: both used to rank as
+// 0, so an unknown grade met a gate of D and a gate on an unknown grade
+// passed A.
 func checkGrade(actual, minimum string) bool {
-	a, okA := flowGradeOrder[strings.ToUpper(strings.TrimSpace(actual))]
-	m, okM := flowGradeOrder[strings.ToUpper(strings.TrimSpace(minimum))]
-	return okA && okM && a >= m
+	a, errA := grade.Parse(actual)
+	m, errM := grade.Parse(minimum)
+	return errA == nil && errM == nil && grade.AtLeast(a, m)
 }
 
 // flowGateSummary names a gate's thresholds for the dry run.
@@ -405,9 +427,10 @@ func printFlowSummary(name string, results []FlowResult) {
 
 func init() {
 	flowRunCmd.Flags().StringVarP(&flowFile, "file", "f", "", "Path to flow pipeline YAML (required)")
-	flowRunCmd.Flags().BoolVar(&flowWait, "wait", true, "Wait for each test step's run to finish and judge its gate; --wait=false starts the run and moves on")
+	addWaitFlag(flowRunCmd, &flowWait, true)
 	flowRunCmd.Flags().BoolVar(&flowDry, "dry-run", false, "Validate pipeline without executing")
 	flowRunCmd.MarkFlagRequired("file")
+	interruptible(flowRunCmd)
 	flowCmd.AddCommand(flowRunCmd)
 	rootCmd.AddCommand(flowCmd)
 }
