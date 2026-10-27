@@ -115,10 +115,10 @@ func renderManPage(e DocEntry, width int) string {
 	var b strings.Builder
 
 	b.WriteString(manSectionStyle.Render("NAME") + "\n")
-	b.WriteString(fmt.Sprintf("    kates %s — %s\n", manCmdStyle.Render(e.Name), e.Short))
+	fmt.Fprintf(&b, "    kates %s — %s\n", manCmdStyle.Render(e.Name), e.Short)
 
 	b.WriteString("\n" + manSectionStyle.Render("SYNOPSIS") + "\n")
-	b.WriteString(fmt.Sprintf("    %s\n", manCmdStyle.Render(e.Synopsis)))
+	fmt.Fprintf(&b, "    %s\n", manCmdStyle.Render(e.Synopsis))
 
 	if e.Description != "" {
 		b.WriteString("\n" + manSectionStyle.Render("DESCRIPTION") + "\n")
@@ -142,8 +142,8 @@ func renderManPage(e DocEntry, width int) string {
 			if f.Default != "" {
 				defStr = manDefaultStyle.Render(fmt.Sprintf(" (default: %s)", f.Default))
 			}
-			b.WriteString(fmt.Sprintf("    %s%s%s\n", nameStr, typeStr, defStr))
-			b.WriteString(fmt.Sprintf("        %s\n", f.Desc))
+			fmt.Fprintf(&b, "    %s%s%s\n", nameStr, typeStr, defStr)
+			fmt.Fprintf(&b, "        %s\n", f.Desc)
 		}
 	}
 
@@ -194,7 +194,7 @@ func renderDocsIndex(width int) string {
 		b.WriteString("\n" + manCategoryStyle.Render("  "+cat) + "\n")
 		for _, e := range entries {
 			cmd := manCmdStyle.Width(30).Render(e.Name)
-			b.WriteString(fmt.Sprintf("    %s %s\n", cmd, manDimStyle.Render(e.Short)))
+			fmt.Fprintf(&b, "    %s %s\n", cmd, manDimStyle.Render(e.Short))
 		}
 	}
 

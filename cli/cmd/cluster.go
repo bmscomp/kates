@@ -137,7 +137,7 @@ var clusterTopologyCmd = &cobra.Command{
 		}
 
 		// Strimzi
-		if s := result.Strimzi; s != nil && len(s) > 0 {
+		if s := result.Strimzi; len(s) > 0 {
 			output.SubHeader("Strimzi Operator")
 			if v, ok := s["version"].(string); ok {
 				output.KeyValue("Version", v)

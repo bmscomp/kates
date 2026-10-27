@@ -287,12 +287,13 @@ var kafkaGroupCmd = &cobra.Command{
 		}
 		totalLag := fmt.Sprintf("%v", detail["totalLag"])
 
-		stateLabel := state
-		if state == "STABLE" {
+		var stateLabel string
+		switch state {
+		case "STABLE":
 			stateLabel = healthyBadge("● STABLE")
-		} else if state == "EMPTY" {
+		case "EMPTY":
 			stateLabel = output.DimStyle.Render("○ EMPTY")
-		} else {
+		default:
 			stateLabel = warnBadge("⚠ " + state)
 		}
 

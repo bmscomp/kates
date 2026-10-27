@@ -33,7 +33,7 @@ func TestMigrateUpPhasesAndHelmArgv(t *testing.T) {
 
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild = true
-	if err := runMigrateUp(nil, flags); err != nil {
+	if err := runMigrateUp(context.Background(), flags); err != nil {
 		t.Fatalf("up: %v\n%s", err, out.String())
 	}
 
@@ -175,7 +175,7 @@ func TestMigrateUpFanIn(t *testing.T) {
 
 	flags := newPairFlags("2.8.2", "3.9.1")
 	flags.SkipBuild = true
-	if err := runMigrateUp(nil, flags); err != nil {
+	if err := runMigrateUp(context.Background(), flags); err != nil {
 		t.Fatalf("up: %v\n%s", err, out.String())
 	}
 	// One namespace, one release and one Helm test per source, then the one
@@ -261,7 +261,7 @@ func TestMigrateUpNotOnKindSkipsTheKindOverlay(t *testing.T) {
 	flags.SkipBuild = true
 	flags.ValuesMirror = "my-mirror.yaml"
 	flags.ValuesSource = "my-source.yaml"
-	if err := runMigrateUp(nil, flags); err != nil {
+	if err := runMigrateUp(context.Background(), flags); err != nil {
 		t.Fatalf("up: %v", err)
 	}
 	if !f.hasLine("helm upgrade --install mm2-m282-430 charts/mirror-maker2 -n kafka -f charts/mirror-maker2/values-migrate-2x.yaml -f .build/migrate/m282-430/mirror-values.yaml -f my-mirror.yaml --timeout 10m") {
@@ -284,7 +284,7 @@ func TestMigrateUpSASLWritesTheCredentialOnStdin(t *testing.T) {
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild = true
 	flags.SASL = true
-	if err := runMigrateUp(nil, flags); err != nil {
+	if err := runMigrateUp(context.Background(), flags); err != nil {
 		t.Fatalf("up: %v", err)
 	}
 	// The prerequisites' client pod is applied in kafka too.
@@ -339,7 +339,7 @@ func TestMigrateUpFailsFastOnPrerequisites(t *testing.T) {
 
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild = true
-	err := runMigrateUp(nil, flags)
+	err := runMigrateUp(context.Background(), flags)
 	if err == nil {
 		t.Fatal("want a failure")
 	}
@@ -363,7 +363,7 @@ func TestMigrateUpRefusesOverlappingLab(t *testing.T) {
 
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild = true
-	err := runMigrateUp(nil, flags)
+	err := runMigrateUp(context.Background(), flags)
 	if err == nil || !strings.Contains(err.Error(), "--topics") || !strings.Contains(err.Error(), "lab other") {
 		t.Fatalf("want the overlap refusal naming --topics, got %v", err)
 	}
@@ -507,7 +507,7 @@ func TestMigrateUpBuildsTheImageForABuiltLine(t *testing.T) {
 	f.on("kind load docker-image ghcr.io/bmscomp/kates-legacy-kafka:2.8.2 --name panda", "")
 	captureOutput(t, "table")
 
-	if err := runMigrateUp(nil, newPairFlags("2.8.2")); err != nil {
+	if err := runMigrateUp(context.Background(), newPairFlags("2.8.2")); err != nil {
 		t.Fatalf("up: %v", err)
 	}
 	build := f.find("docker build")

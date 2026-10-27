@@ -767,20 +767,17 @@ const (
 	maxConsecutivePollFailures = 5
 )
 
-// awaitDisruption polls a report until it reaches a terminal status.
+// awaitDisruptionFrom polls a report until it reaches a terminal status.
 //
 // Poll errors are not all equal, and treating them as equal is how this used to
 // hide real failures: a 401, a 403 or a permanent 404 would be swallowed on
 // every attempt for the full 20 minutes and then surface as "timed out … it may
 // still be running", which is both wrong and unactionable. Permanent errors now
 // fail immediately; transient ones are tolerated in a bounded run.
-func (c *Client) awaitDisruption(ctx context.Context, id string) (*DisruptionRunResponse, error) {
-	return c.awaitDisruptionFrom(ctx, id, "")
-}
-
-// awaitDisruptionFrom skips the first poll when the accept response already
-// carried a terminal status — there is nothing to wait for, and a five-second
-// sleep before reporting it is just latency.
+//
+// It skips the first poll when the accept response already carried a terminal
+// status — there is nothing to wait for, and a five-second sleep before
+// reporting it is just latency.
 func (c *Client) awaitDisruptionFrom(ctx context.Context, id, acceptedStatus string) (*DisruptionRunResponse, error) {
 	if isTerminalDisruptionStatus(acceptedStatus) {
 		report, err := c.DisruptionStatus(ctx, id)
@@ -797,13 +794,12 @@ func (c *Client) awaitDisruptionFrom(ctx context.Context, id, acceptedStatus str
 
 	for {
 		report, err := c.DisruptionStatus(ctx, id)
-		switch {
-		case err == nil:
+		if err == nil {
 			consecutiveFailures = 0
 			if report != nil && isTerminalDisruptionStatus(report.Status) {
 				return &DisruptionRunResponse{ID: id, Report: *report}, nil
 			}
-		default:
+		} else {
 			var httpErr *HTTPError
 			if errors.As(err, &httpErr) && !httpErr.Retryable() {
 				return nil, fmt.Errorf("polling disruption %s: %w", id, err)

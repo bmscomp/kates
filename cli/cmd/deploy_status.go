@@ -677,7 +677,7 @@ func (m interactiveStatusModel) View() string {
 	prevGroup := ""
 	for i, c := range m.components {
 		if c.Group != prevGroup {
-			b.WriteString(fmt.Sprintf("\n  %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render(componentGroupNames[c.Group])))
+			fmt.Fprintf(&b, "\n  %s\n", lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render(componentGroupNames[c.Group]))
 			prevGroup = c.Group
 		}
 
@@ -692,11 +692,12 @@ func (m interactiveStatusModel) View() string {
 		if m.done[i] {
 			st := m.statuses[i]
 			healthStyle := lipgloss.NewStyle().Foreground(clrDim)
-			if st.Health == "Healthy" {
+			switch st.Health {
+			case "Healthy":
 				healthStyle = lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
-			} else if st.Health == "Degraded" {
+			case "Degraded":
 				healthStyle = lipgloss.NewStyle().Foreground(clrRed).Bold(true)
-			} else if st.Health == "Unknown" {
+			case "Unknown":
 				healthStyle = lipgloss.NewStyle().Foreground(clrOrange).Bold(true)
 			}
 			statusStr = healthStyle.Render(fmt.Sprintf("[%s]", st.Health))
@@ -710,7 +711,7 @@ func (m interactiveStatusModel) View() string {
 		if pad < 1 {
 			pad = 1
 		}
-		b.WriteString(fmt.Sprintf("    %s%s%s\n", nameStyle.Render(compName), strings.Repeat(" ", pad), statusStr))
+		fmt.Fprintf(&b, "    %s%s%s\n", nameStyle.Render(compName), strings.Repeat(" ", pad), statusStr)
 	}
 
 	b.WriteString("\n")
@@ -846,11 +847,12 @@ func printStatusRow(s ComponentStatus) {
 	helmCol := helmStyle.Render(s.HelmStatus) + strings.Repeat(" ", helmPad)
 
 	healthStyle := lipgloss.NewStyle().Foreground(clrDim)
-	if s.Health == "Healthy" {
+	switch s.Health {
+	case "Healthy":
 		healthStyle = lipgloss.NewStyle().Foreground(clrGreen).Bold(true)
-	} else if s.Health == "Degraded" {
+	case "Degraded":
 		healthStyle = lipgloss.NewStyle().Foreground(clrRed).Bold(true)
-	} else if s.Health == "Unknown" {
+	case "Unknown":
 		healthStyle = lipgloss.NewStyle().Foreground(clrOrange).Bold(true)
 	}
 	healthPad := 12 - visualWidth(s.Health)

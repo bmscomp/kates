@@ -287,10 +287,6 @@ var testGetCmd = &cobra.Command{
 			output.Hint("  kubectl logs -n kates -l app=kates --tail=50")
 			output.Hint("  kates doctor")
 		} else {
-			effectiveStatus := strings.ToUpper(result.Status)
-			if effectiveStatus == "DONE" || effectiveStatus == "COMPLETED" {
-				effectiveStatus = "FAILED"
-			}
 			output.SubHeader("Diagnosis")
 			output.Error(fmt.Sprintf("Test finished with status %s but produced no results", strings.ToUpper(result.Status)))
 			fmt.Println()

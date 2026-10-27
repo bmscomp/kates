@@ -337,8 +337,8 @@ func (m topicsModel) viewDetail() string {
 			if ur, _ := pm["underReplicated"].(bool); ur {
 				health = warnStyle.Render(glyphs().Warn)
 			}
-			b.WriteString(fmt.Sprintf("  %-6v%-8v%-15v%-15v%s\n",
-				pm["partition"], pm["leader"], pm["replicas"], pm["isr"], health))
+			fmt.Fprintf(&b, "  %-6v%-8v%-15v%-15v%s\n",
+				pm["partition"], pm["leader"], pm["replicas"], pm["isr"], health)
 		}
 	}
 
@@ -383,7 +383,7 @@ func (m topicsModel) viewConsume() string {
 			if len(val) > 50 {
 				val = val[:47] + "..."
 			}
-			b.WriteString(fmt.Sprintf("  %-6v%-8v%-19s%s\n", r.Partition, r.Offset, key, val))
+			fmt.Fprintf(&b, "  %-6v%-8v%-19s%s\n", r.Partition, r.Offset, key, val)
 		}
 	}
 

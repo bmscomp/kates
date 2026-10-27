@@ -478,7 +478,7 @@ func resolveOperatorChart(ctx context.Context, r strimzi.Runner, o versionOption
 			return cached, "cache", false, nil
 		}
 		if o.Offline || r == nil {
-			return "", "", false, fmt.Errorf("Strimzi %s is not in the cache (%s) and the network is off", requested, cacheDir)
+			return "", "", false, fmt.Errorf("the Strimzi %s chart is not in the cache (%s) and the network is off", requested, cacheDir)
 		}
 		p, err := strimzi.PullChart(ctx, r, cacheDir, requested)
 		if err != nil {
@@ -607,7 +607,7 @@ func (vp *versionPlan) compareInstalled(ctx context.Context, r strimzi.Runner, o
 		// Reaching this means the older version was asked for by name:
 		// resolution keeps a newer installed operator when no version was
 		// requested (step 2b), so a default can no longer refuse itself.
-		return fmt.Errorf("Strimzi %s is installed and %s was requested: Strimzi does not support downgrading the operator.\n  Ways forward:\n    - keep the installed operator: kates deploy (with no --strimzi-version)\n    - go back to %s:               kates clean, then deploy again",
+		return fmt.Errorf("the installed operator is Strimzi %s and %s was requested: Strimzi does not support downgrading the operator.\n  Ways forward:\n    - keep the installed operator: kates deploy (with no --strimzi-version)\n    - go back to %s:               kates clean, then deploy again",
 			primary.Version, vp.StrimziVersion, vp.StrimziVersion)
 	}
 	vp.OperatorAction = "upgrade"

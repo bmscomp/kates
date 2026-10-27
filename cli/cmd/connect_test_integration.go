@@ -182,66 +182,57 @@ func (m cdcModel) View() string {
 
 		if completed {
 			// Phase completed
-			b.WriteString(fmt.Sprintf("  %s %-24s %s\n",
+			fmt.Fprintf(&b, "  %s %-24s %s\n",
 				output.SuccessStyle.Render("✓"),
 				label,
-				output.DimStyle.Render(fmt.Sprintf("%dms", duration)),
-			))
+				output.DimStyle.Render(fmt.Sprintf("%dms", duration)))
 		} else if phase == m.currentPhase {
 			// Currently running
-			b.WriteString(fmt.Sprintf("  %s %-24s %s\n",
+			fmt.Fprintf(&b, "  %s %-24s %s\n",
 				output.AccentStyle.Render("●"),
 				output.AccentStyle.Render(label),
-				output.DimStyle.Render("..."),
-			))
+				output.DimStyle.Render("..."))
 		} else {
 			// Pending
-			b.WriteString(fmt.Sprintf("  %s %s\n",
+			fmt.Fprintf(&b, "  %s %s\n",
 				output.DimStyle.Render("○"),
-				output.DimStyle.Render(label),
-			))
+				output.DimStyle.Render(label))
 		}
 	}
 
 	b.WriteString("\n")
 
 	elapsedStr := m.elapsed.Truncate(time.Second).String()
-	b.WriteString(fmt.Sprintf("  %s %s\n",
+	fmt.Fprintf(&b, "  %s %s\n",
 		output.DimStyle.Render("Elapsed:"),
-		elapsedStr,
-	))
+		elapsedStr)
 
 	if m.done {
 		totalMs := int64(0)
 		for _, d := range m.phases {
 			totalMs += d
 		}
-		b.WriteString(fmt.Sprintf("\n  %s\n",
-			output.SuccessStyle.Render(fmt.Sprintf("✓ CDC integration test passed (%dms total)", totalMs)),
-		))
+		fmt.Fprintf(&b, "\n  %s\n",
+			output.SuccessStyle.Render(fmt.Sprintf("✓ CDC integration test passed (%dms total)", totalMs)))
 	}
 
 	if m.failed {
-		b.WriteString(fmt.Sprintf("\n  %s\n",
-			output.ErrorStyle.Render("✖ CDC integration test failed"),
-		))
+		fmt.Fprintf(&b, "\n  %s\n",
+			output.ErrorStyle.Render("✖ CDC integration test failed"))
 		if m.errMsg != "" {
-			b.WriteString(fmt.Sprintf("  %s %s\n",
+			fmt.Fprintf(&b, "  %s %s\n",
 				output.DimStyle.Render("Error:"),
-				m.errMsg,
-			))
+				m.errMsg)
 		}
 	}
 
 	if !m.done && !m.failed {
 		if m.connRetries > 0 {
-			b.WriteString(fmt.Sprintf("  %s\n",
-				output.WarningStyle.Render(fmt.Sprintf("⚠ Connection error (retry %d/10)...", m.connRetries)),
-			))
+			fmt.Fprintf(&b, "  %s\n",
+				output.WarningStyle.Render(fmt.Sprintf("⚠ Connection error (retry %d/10)...", m.connRetries)))
 		} else {
-			b.WriteString(fmt.Sprintf("  %s\n",
-				output.DimStyle.Render("Polling every 2s · q to detach"),
-			))
+			fmt.Fprintf(&b, "  %s\n",
+				output.DimStyle.Render("Polling every 2s · q to detach"))
 		}
 	}
 

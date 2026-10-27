@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -206,7 +207,7 @@ func TestMigratePlanCommandJSON(t *testing.T) {
 	out := captureOutput(t, "json")
 
 	flags := newPairFlags("4.1.2")
-	if err := runMigratePlan(nil, flags); err != nil {
+	if err := runMigratePlan(context.Background(), flags); err != nil {
 		t.Fatalf("plan: %v", err)
 	}
 	var doc migratePlan
@@ -240,10 +241,10 @@ func TestMigratePlanStrimziSourceIsPlanOnly(t *testing.T) {
 	captureOutput(t, "table")
 
 	flags := newPairFlags("4.2.1")
-	if err := runMigratePlan(nil, flags); err != nil {
+	if err := runMigratePlan(context.Background(), flags); err != nil {
 		t.Fatalf("plan --from 4.2.1 must describe the Strimzi source: %v", err)
 	}
-	err := runMigrateUp(nil, flags)
+	err := runMigrateUp(context.Background(), flags)
 	if err == nil || !strings.Contains(err.Error(), "not yet implemented in this version") || !strings.Contains(err.Error(), "--source-provider legacy") {
 		t.Fatalf("up --from 4.2.1 must refuse with the way out, got %v", err)
 	}
@@ -310,7 +311,7 @@ func TestMigratePlanFanInRefusalsBeforeTheCluster(t *testing.T) {
 
 	// The same version twice: one alias, which the chart would refuse at
 	// render time. The CLI refuses first, naming both --from values.
-	err := runMigratePlan(nil, newPairFlags("2.8.2", "2.8.2"))
+	err := runMigratePlan(context.Background(), newPairFlags("2.8.2", "2.8.2"))
 	if err == nil || !strings.Contains(err.Error(), `--from 2.8.2 and --from 2.8.2 both derive the source alias "src282"`) {
 		t.Fatalf("duplicate alias: %v", err)
 	}
@@ -318,13 +319,13 @@ func TestMigratePlanFanInRefusalsBeforeTheCluster(t *testing.T) {
 	// target topic.
 	flags := newPairFlags("2.8.2", "3.9.1")
 	flags.Topics = "orders"
-	err = runMigratePlan(nil, flags)
+	err = runMigratePlan(context.Background(), flags)
 	if err == nil || !strings.Contains(err.Error(), `--from 2.8.2 and --from 3.9.1 would both mirror topic "orders"`) {
 		t.Fatalf("identity fan-in: %v", err)
 	}
 	// The default policy keeps them apart, so the same flags are fine.
 	flags.Policy = migrate.PolicyDefault
-	if err := runMigratePlan(nil, flags); err != nil {
+	if err := runMigratePlan(context.Background(), flags); err != nil {
 		t.Fatalf("default policy fan-in: %v", err)
 	}
 	// Nothing was created for any of the three.
@@ -345,10 +346,10 @@ func TestMigratePlanFanInWithAStrimziSourceStaysPlanOnly(t *testing.T) {
 	// 4.2.1 is in the primary's window, so it is a Strimzi source: plan
 	// describes the pair, up refuses it — the mixture does not widen it.
 	flags := newPairFlags("2.8.2", "4.2.1")
-	if err := runMigratePlan(nil, flags); err != nil {
+	if err := runMigratePlan(context.Background(), flags); err != nil {
 		t.Fatalf("plan must describe a mixed fan-in: %v", err)
 	}
-	err := runMigrateUp(nil, flags)
+	err := runMigrateUp(context.Background(), flags)
 	if err == nil || !strings.Contains(err.Error(), "not yet implemented in this version") {
 		t.Fatalf("up must refuse the Strimzi leg, got %v", err)
 	}
@@ -403,7 +404,7 @@ func TestMigratePlanPrintsEverySourceAndTheOffsetSyncs(t *testing.T) {
 
 	flags := newPairFlags("2.8.2", "3.9.1")
 	flags.ReadOnlySource = true
-	if err := runMigratePlan(nil, flags); err != nil {
+	if err := runMigratePlan(context.Background(), flags); err != nil {
 		t.Fatalf("plan: %v", err)
 	}
 	text := stripAnsi(out.String())

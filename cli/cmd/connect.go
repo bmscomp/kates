@@ -300,9 +300,10 @@ var connectConfigCmd = &cobra.Command{
 		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
 		format := "jsonpath={.spec.config}"
-		if outputMode == "json" {
+		switch outputMode {
+		case "json":
 			format = "-o=json"
-		} else if outputMode == "yaml" {
+		case "yaml":
 			format = "-o=yaml"
 		}
 		cmdArgs := []string{"get", "kafkaconnector", args[0]}

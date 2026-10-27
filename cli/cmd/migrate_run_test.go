@@ -106,7 +106,7 @@ func TestMigrateRunGreen(t *testing.T) {
 
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild = true
-	if err := runMigrateRun(nil, flags); err != nil {
+	if err := runMigrateRun(context.Background(), flags); err != nil {
 		t.Fatalf("run: %v\n%s", err, out.String())
 	}
 	doc := parseReport(t, out.String())
@@ -248,7 +248,7 @@ func TestMigrateRunFanInReportsEveryLeg(t *testing.T) {
 
 	flags := newPairFlags("2.8.2", "3.9.1")
 	flags.SkipBuild = true
-	if err := runMigrateRun(nil, flags); err != nil {
+	if err := runMigrateRun(context.Background(), flags); err != nil {
 		t.Fatalf("run: %v\n%s", err, out.String())
 	}
 	doc := parseReport(t, out.String())
@@ -317,7 +317,7 @@ func TestMigrateRunReadOnlySourceHeaderAndValues(t *testing.T) {
 	// teardown removes them with the lab.
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild, flags.ReadOnlySource, flags.Keep = true, true, true
-	if err := runMigrateRun(nil, flags); err != nil {
+	if err := runMigrateRun(context.Background(), flags); err != nil {
 		t.Fatalf("run --read-only-source: %v\n%s", err, out.String())
 	}
 	doc := parseReport(t, out.String())
@@ -346,7 +346,7 @@ func TestMigrateRunFailedRowExitsOne(t *testing.T) {
 
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild = true
-	err := runMigrateRun(nil, flags)
+	err := runMigrateRun(context.Background(), flags)
 	if err == nil {
 		t.Fatal("a failed row must make run fail")
 	}
@@ -388,7 +388,7 @@ func TestMigrateRunKeepLeavesTheLab(t *testing.T) {
 
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild, flags.Keep = true, true
-	if err := runMigrateRun(nil, flags); err != nil {
+	if err := runMigrateRun(context.Background(), flags); err != nil {
 		t.Fatalf("run --keep: %v\n%s", err, out.String())
 	}
 	if f.hasLine("helm uninstall") || f.hasLine("kubectl delete namespace") {
@@ -453,7 +453,7 @@ func TestMigrateRunStopsWhenTheTopicNeverAppears(t *testing.T) {
 
 	flags := newPairFlags("2.8.2")
 	flags.SkipBuild = true
-	if err := runMigrateRun(nil, flags); err == nil {
+	if err := runMigrateRun(context.Background(), flags); err == nil {
 		t.Fatal("run must fail when the replicated topic never appears")
 	}
 	doc := parseReport(t, out.String())
@@ -483,7 +483,7 @@ func TestMigrateVerifyAgainstTheLab(t *testing.T) {
 	out := captureOutput(t, "json")
 
 	flags := &migrateLabFlags{Name: "m282-430", Timeout: 600, Messages: 200, TargetCluster: "krafter", TargetNamespace: "kafka"}
-	if err := runMigrateVerify(nil, flags); err != nil {
+	if err := runMigrateVerify(context.Background(), flags); err != nil {
 		t.Fatalf("verify: %v\n%s", err, out.String())
 	}
 	doc := parseReport(t, out.String())

@@ -9,6 +9,8 @@ import (
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var (
@@ -97,8 +99,11 @@ Groups events by category with statistics.`,
 			return nil
 		}
 
+		// NoLower keeps strings.Title's behaviour: only first letters change,
+		// so an upper-case event type such as TEST_RUN prints as it came.
+		title := cases.Title(language.English, cases.NoLower)
 		for cat, s := range categories {
-			fmt.Printf("  %s (%d events)\n", clSecStyle.Render(strings.Title(cat)), s.count)
+			fmt.Printf("  %s (%d events)\n", clSecStyle.Render(title.String(cat)), s.count)
 			for action, count := range s.types {
 				badge := clDimStyle.Render("·")
 				switch strings.ToUpper(action) {

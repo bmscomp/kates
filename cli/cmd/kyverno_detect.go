@@ -184,14 +184,15 @@ func renderRecommendations(recs []policyRec, existing map[string]string) {
 	rows := [][]string{}
 	for _, rec := range recs {
 		status := "NOT INSTALLED"
-		if rec.Name == "Pod Security Standards" {
+		switch rec.Name {
+		case "Pod Security Standards":
 			if ready, ok := existing["kates-pod-security-standards"]; ok {
 				status = "ACTIVE"
 				if ready != "true" {
 					status = "DEGRADED"
 				}
 			}
-		} else if rec.Name == "Kafka Topic Standards" {
+		case "Kafka Topic Standards":
 			if ready, ok := existing["kates-kafka-standards"]; ok {
 				status = "ACTIVE"
 				if ready != "true" {
@@ -243,11 +244,12 @@ func buildApplyCommand(recs []policyRec) string {
 
 	for _, rec := range recs {
 		if rec.Recommended {
-			if rec.HelmFlag == "kyvernoPolicy.networkPolicyGeneration.enabled" {
+			switch rec.HelmFlag {
+			case "kyvernoPolicy.networkPolicyGeneration.enabled":
 				flags["--with-netpol"] = true
-			} else if rec.HelmFlag == "kyvernoPolicy.cosign.enabled" {
+			case "kyvernoPolicy.cosign.enabled":
 				flags["--with-cosign"] = true
-			} else if rec.HelmFlag == "kyvernoPolicy.kafka.enabled" {
+			case "kyvernoPolicy.kafka.enabled":
 				flags["--with-kafka"] = true
 			}
 		}

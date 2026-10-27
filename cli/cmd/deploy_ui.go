@@ -278,7 +278,7 @@ func componentChip(e DeploySummaryEntry, nameW, nsW int, group string, opt gridO
 
 	// The status mark is the leftmost thing in the chip, because "is this new"
 	// is the question the preview exists to answer.
-	mark := " "
+	var mark string
 	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(waveColor(group))
 	nsStyle := lipgloss.NewStyle().Foreground(clrDim)
 

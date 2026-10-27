@@ -501,7 +501,7 @@ func deriveSources(l *Lab, specs []SourceSpec) ([]*Source, error) {
 			return nil, fmt.Errorf("source alias %q derived from --from %s is not a Kafka alias: lowercase letters, digits and dashes, no dots (a dot is MirrorMaker's own separator)", alias, spec.From)
 		}
 		if other, ok := aliases[alias]; ok {
-			return nil, fmt.Errorf("--from %s and --from %s both derive the source alias %q: an alias names the replicated topic prefix, the offset-syncs topic and the checkpoints topic, so two sources sharing one interleave into a single set of target topics without any error. Name each source version once, and run a second lab (--name) for a repeat.",
+			return nil, fmt.Errorf("--from %s and --from %s both derive the source alias %q: an alias names the replicated topic prefix, the offset-syncs topic and the checkpoints topic, so two sources sharing one interleave into a single set of target topics without any error. Name each source version once, and run a second lab (--name) for a repeat",
 				other, spec.From, alias)
 		}
 		aliases[alias] = spec.From

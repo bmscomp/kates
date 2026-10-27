@@ -218,9 +218,9 @@ func (m groupsModel) viewDetail() string {
 			if !ok {
 				continue
 			}
-			b.WriteString(fmt.Sprintf("  %-17v%-6v%-11v%-11v%s\n",
+			fmt.Fprintf(&b, "  %-17v%-6v%-11v%-11v%s\n",
 				om["topic"], om["partition"], om["currentOffset"], om["endOffset"],
-				lagLabel(fmt.Sprintf("%v", om["lag"]))))
+				lagLabel(fmt.Sprintf("%v", om["lag"])))
 		}
 	}
 

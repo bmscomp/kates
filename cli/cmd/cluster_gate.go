@@ -102,13 +102,13 @@ func resolveCluster() (string, error) {
 
 	case cluster.NeedKind:
 		printNoCluster(decision)
-		return "", fmt.Errorf("Docker is running but kind is not installed.\n" +
+		return "", fmt.Errorf("kind is not installed (Docker is running).\n" +
 			"  Install it:  brew install kind   (or see https://kind.sigs.k8s.io/docs/user/quick-start/#installation)\n" +
 			"  Then re-run: kates deploy")
 
 	case cluster.NeedDockerRunning:
 		printNoCluster(decision)
-		return "", fmt.Errorf("Docker is installed but the daemon is not running.\n" +
+		return "", fmt.Errorf("the Docker daemon is not running (Docker is installed).\n" +
 			"  Start Docker Desktop (or `sudo systemctl start docker`), then re-run: kates deploy")
 
 	default: // NeedDocker
@@ -215,7 +215,7 @@ func offerKind(d cluster.Decision) (string, error) {
 			"would offer to create a local %d-zone kind cluster (skipped: --dry-run)",
 			len(cluster.KindZones))))
 		return "", fmt.Errorf("no reachable Kubernetes cluster to plan against.\n" +
-			"  Re-run without --dry-run to create a local kind cluster.")
+			"  Re-run without --dry-run to create a local kind cluster")
 	}
 
 	if !interactiveFn() {

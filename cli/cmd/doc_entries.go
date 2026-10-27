@@ -43,7 +43,7 @@ func init() {
 	for i, r := range raw {
 		flags := make([]DocFlag, len(r.Flags))
 		for j, f := range r.Flags {
-			flags[j] = DocFlag{Name: f.Name, Short: f.Short, Type: f.Type, Default: f.Default, Desc: f.Desc}
+			flags[j] = DocFlag(f)
 		}
 		docEntries[i] = DocEntry{
 			Name:        r.Name,

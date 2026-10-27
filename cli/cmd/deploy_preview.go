@@ -47,8 +47,8 @@ func renderDeployPreview(entries []DeploySummaryEntry, existingReleases map[stri
 	fmt.Println("  " + uiRule())
 
 	namespaces := namespaceList(willCreate)
-	switch {
-	case deployCount == 0:
+	switch deployCount {
+	case 0:
 		fmt.Printf("  %s Nothing to do — every component is already deployed.\n",
 			lipgloss.NewStyle().Foreground(clrGreen).Render(g.Check))
 	default:

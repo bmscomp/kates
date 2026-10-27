@@ -572,17 +572,6 @@ func toIntPtr(v interface{}) *int {
 	return nil
 }
 
-func toBool(v interface{}) bool {
-	switch b := v.(type) {
-	case bool:
-		return b
-	case string:
-		return b == "true"
-	default:
-		return false
-	}
-}
-
 // toBoolPtr reads a key the file sets as true or false, so that false is sent
 // too. Anything else is nil and sends nothing: yes, on, or a bare key used to
 // become an explicit false, which turned CRC checks or the producer's

@@ -959,12 +959,11 @@ func (m LabModel) viewDiff(width int) string {
 	var sb strings.Builder
 	sb.WriteString(detailTitleStyle.Render(fmt.Sprintf("Diff: #%d vs #%d", a.Number, b.Number)) + "\n\n")
 
-	sb.WriteString(fmt.Sprintf("  %-*s %-*s %-*s %-*s\n",
+	fmt.Fprintf(&sb, "  %-*s %-*s %-*s %-*s\n",
 		colW, dimStyle.Render("Metric"),
 		colW, dimStyle.Render(fmt.Sprintf("#%d", a.Number)),
 		colW, dimStyle.Render(fmt.Sprintf("#%d", b.Number)),
-		colW, dimStyle.Render("Change"),
-	))
+		colW, dimStyle.Render("Change"))
 	sepW := width - 4
 	if sepW < 10 {
 		sepW = 10
@@ -979,12 +978,11 @@ func (m LabModel) viewDiff(width int) string {
 		}
 		changeStr := diffChange(pct, higherIsBetter)
 
-		sb.WriteString(fmt.Sprintf("  %-*s %-*s %-*s %s\n",
+		fmt.Fprintf(&sb, "  %-*s %-*s %-*s %s\n",
 			colW, label,
 			colW, fmtLabNum(aVal)+unit,
 			colW, fmtLabNum(bVal)+unit,
-			changeStr,
-		))
+			changeStr)
 	}
 
 	writeDiffRow("Throughput", a.Throughput, b.Throughput, " rec/s", true)
@@ -1288,9 +1286,9 @@ func (m LabModel) exportCSV() (string, error) {
 	sb.WriteString("\n")
 
 	for _, iter := range m.iterations {
-		sb.WriteString(fmt.Sprintf("%d,%.2f,%.2f,%.2f,%.2f,%s,%s",
+		fmt.Fprintf(&sb, "%d,%.2f,%.2f,%.2f,%.2f,%s,%s",
 			iter.Number, iter.Throughput, iter.P99Ms, iter.AvgMs, iter.ErrorRate,
-			stripAnsi(iter.Delta), iter.TestID))
+			stripAnsi(iter.Delta), iter.TestID)
 		for _, p := range m.params {
 			val := ""
 			if iter.Params != nil {
@@ -1482,13 +1480,6 @@ func truncID(id string) string {
 func padRight(s string, w int) string {
 	for len(s) < w {
 		s += " "
-	}
-	return s
-}
-
-func padLeft(s string, w int) string {
-	for len(s) < w {
-		s = " " + s
 	}
 	return s
 }

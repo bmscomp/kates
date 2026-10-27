@@ -64,9 +64,10 @@ var clusterWatchCmd = &cobra.Command{
 			output.ClearFrame(IsInteractive())
 
 			statusLabel := output.SuccessStyle.Render("● HEALTHY")
-			if report.Status == "WARNING" {
+			switch report.Status {
+			case "WARNING":
 				statusLabel = output.WarningStyle.Render("▲ WARNING")
-			} else if report.Status == "CRITICAL" {
+			case "CRITICAL":
 				statusLabel = output.ErrorStyle.Render("✖ CRITICAL")
 			}
 

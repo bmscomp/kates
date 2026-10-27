@@ -241,10 +241,10 @@ func readSecretKey(ctx context.Context, namespace, name, key string) (string, er
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(out))
 	if err != nil {
-		return "", fmt.Errorf("Secret %s/%s key %s is not base64", namespace, name, key)
+		return "", fmt.Errorf("secret %s/%s key %s is not base64", namespace, name, key)
 	}
 	if len(raw) == 0 {
-		return "", fmt.Errorf("Secret %s/%s has no %s", namespace, name, key)
+		return "", fmt.Errorf("secret %s/%s has no %s", namespace, name, key)
 	}
 	return string(raw), nil
 }

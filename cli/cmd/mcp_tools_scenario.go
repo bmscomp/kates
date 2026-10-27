@@ -1281,7 +1281,7 @@ var mcpCaveatsScenario = []mcpCaveat{
 			mcpAnchoredRef("cli/cmd/apply_sla.go:39-52,120-162",
 				"func gradeScenario(run *client.TestRun, v *ValidationSpec, scope string) *applySLAResult {",
 				"func validateSLAsAggregate(run *client.TestRun, v *ValidationSpec) []string {"),
-			mcpAnchoredRef("cli/cmd/apply.go:29-43,282-307,429-437,643-695,718-740",
+			mcpAnchoredRef("cli/cmd/apply.go:29-43,282-307,429-437,632-684,707-729",
 				"type ValidationSpec struct {", `yaml:"maxCrcFailures,omitempty"`, `yaml:"perTask,omitempty"`,
 				"if !applyWait {", "gradeScenario(final, scenario.Validate",
 				"} else if r.SLA != nil {", `"✓ SLA Pass"`,

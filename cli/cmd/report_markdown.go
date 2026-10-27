@@ -11,26 +11,26 @@ func renderMarkdownReport(id string, r *client.Report) string {
 	var b strings.Builder
 
 	b.WriteString("# Kates Performance Report\n\n")
-	b.WriteString(fmt.Sprintf("**Test ID**: `%s`\n\n", id))
+	fmt.Fprintf(&b, "**Test ID**: `%s`\n\n", id)
 
 	if s := r.Summary; s != nil {
 		b.WriteString("## Throughput\n\n")
 		b.WriteString("| Metric | Value |\n|---|---|\n")
-		b.WriteString(fmt.Sprintf("| Total Records | %s |\n", fmtNum(s.TotalRecords)))
-		b.WriteString(fmt.Sprintf("| Avg Throughput | %s rec/s |\n", fmtNum(s.AvgThroughputRecPerSec)))
-		b.WriteString(fmt.Sprintf("| Peak Throughput | %s rec/s |\n", fmtNum(s.PeakThroughputRecPerSec)))
-		b.WriteString(fmt.Sprintf("| Avg MB/s | %s |\n", fmtFloat(s.AvgThroughputMBPerSec, 2)))
+		fmt.Fprintf(&b, "| Total Records | %s |\n", fmtNum(s.TotalRecords))
+		fmt.Fprintf(&b, "| Avg Throughput | %s rec/s |\n", fmtNum(s.AvgThroughputRecPerSec))
+		fmt.Fprintf(&b, "| Peak Throughput | %s rec/s |\n", fmtNum(s.PeakThroughputRecPerSec))
+		fmt.Fprintf(&b, "| Avg MB/s | %s |\n", fmtFloat(s.AvgThroughputMBPerSec, 2))
 
 		b.WriteString("\n## Latency Distribution\n\n")
 		b.WriteString("| Percentile | Value (ms) |\n|---|---|\n")
-		b.WriteString(fmt.Sprintf("| Average | %.2f |\n", s.AvgLatencyMs))
-		b.WriteString(fmt.Sprintf("| P50 | %.2f |\n", s.P50LatencyMs))
-		b.WriteString(fmt.Sprintf("| P95 | %.2f |\n", s.P95LatencyMs))
-		b.WriteString(fmt.Sprintf("| P99 | %.2f |\n", s.P99LatencyMs))
-		b.WriteString(fmt.Sprintf("| Max | %.2f |\n", s.MaxLatencyMs))
+		fmt.Fprintf(&b, "| Average | %.2f |\n", s.AvgLatencyMs)
+		fmt.Fprintf(&b, "| P50 | %.2f |\n", s.P50LatencyMs)
+		fmt.Fprintf(&b, "| P95 | %.2f |\n", s.P95LatencyMs)
+		fmt.Fprintf(&b, "| P99 | %.2f |\n", s.P99LatencyMs)
+		fmt.Fprintf(&b, "| Max | %.2f |\n", s.MaxLatencyMs)
 
 		b.WriteString("\n## Reliability\n\n")
-		b.WriteString(fmt.Sprintf("- **Error Rate**: %.4f%%\n", s.ErrorRate*100))
+		fmt.Fprintf(&b, "- **Error Rate**: %.4f%%\n", s.ErrorRate*100)
 	}
 
 	if v := r.OverallSlaVerdict; v != nil {
@@ -75,7 +75,7 @@ func renderMarkdownPhases(b *strings.Builder, r *client.Report) {
 				sla = "✖"
 			}
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s rec/s | %.2f | %.4f%% |\n",
-			strings.ReplaceAll(p.Name, "|", `\|`), sla, fmtNum(m.TotalRecords), fmtFloat(m.AvgThroughputRecPerSec, 1), m.P99LatencyMs, m.ErrorRate*100))
+		fmt.Fprintf(b, "| %s | %s | %s | %s rec/s | %.2f | %.4f%% |\n",
+			strings.ReplaceAll(p.Name, "|", `\|`), sla, fmtNum(m.TotalRecords), fmtFloat(m.AvgThroughputRecPerSec, 1), m.P99LatencyMs, m.ErrorRate*100)
 	}
 }

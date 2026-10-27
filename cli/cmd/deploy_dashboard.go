@@ -134,7 +134,6 @@ type deployDashboardModel struct {
 
 	currentStep int
 	totalSteps  int
-	err         error
 
 	width     int
 	height    int
@@ -266,14 +265,15 @@ func pollAllWorkloads(ctx context.Context, components []pollTarget, read func(ct
 						kind: item.Kind,
 						name: item.Metadata.Name,
 					}
-					if item.Kind == "DaemonSet" {
+					switch item.Kind {
+					case "DaemonSet":
 						if item.Status.DesiredNumber != nil {
 							stat.expected = *item.Status.DesiredNumber
 						}
 						if item.Status.NumberReady != nil {
 							stat.ready = *item.Status.NumberReady
 						}
-					} else if item.Kind == "StrimziPodSet" {
+					case "StrimziPodSet":
 						if item.Status.Pods != nil {
 							stat.expected = *item.Status.Pods
 						} else {
@@ -282,7 +282,7 @@ func pollAllWorkloads(ctx context.Context, components []pollTarget, read func(ct
 						if item.Status.ReadyPods != nil {
 							stat.ready = *item.Status.ReadyPods
 						}
-					} else {
+					default:
 						if item.Spec.Replicas != nil {
 							stat.expected = *item.Spec.Replicas
 						} else {

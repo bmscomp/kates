@@ -254,16 +254,16 @@ func parseChartVersion(chartYAML []byte) (string, error) {
 		AppVersion string `yaml:"appVersion"`
 	}
 	if err := yaml.Unmarshal(chartYAML, &meta); err != nil {
-		return "", fmt.Errorf("Chart.yaml: %w", err)
+		return "", fmt.Errorf("chart metadata (Chart.yaml): %w", err)
 	}
 	if meta.Name != ChartName {
-		return "", fmt.Errorf("Chart.yaml: not a %s chart (name: %q)", ChartName, meta.Name)
+		return "", fmt.Errorf("chart metadata (Chart.yaml): not a %s chart (name: %q)", ChartName, meta.Name)
 	}
 	if meta.Version == "" {
-		return "", errors.New("Chart.yaml: no version")
+		return "", errors.New("chart metadata (Chart.yaml): no version")
 	}
 	if meta.AppVersion != "" && meta.AppVersion != meta.Version {
-		return "", fmt.Errorf("Chart.yaml: version %s and appVersion %s disagree", meta.Version, meta.AppVersion)
+		return "", fmt.Errorf("chart metadata (Chart.yaml): version %s and appVersion %s disagree", meta.Version, meta.AppVersion)
 	}
 	return meta.Version, nil
 }

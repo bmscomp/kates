@@ -22,7 +22,7 @@ func TestMigrateImageBuildLoad(t *testing.T) {
 	captureOutput(t, "table")
 
 	opts := migrateImageOptions{Version: "2.8.2", Scala: "2.13", OSRelease: "jammy", Registry: "ghcr.io/bmscomp", Load: true, KindCluster: "panda"}
-	if err := runMigrateImageBuild(nil, opts); err != nil {
+	if err := runMigrateImageBuild(context.Background(), opts); err != nil {
 		t.Fatalf("image build: %v", err)
 	}
 	want := "docker build --build-arg KAFKA_VERSION=2.8.2 --build-arg SCALA_VERSION=2.13 --build-arg JRE_VERSION=11 --build-arg UBUNTU_RELEASE=jammy -f Dockerfile.legacy-kafka -t ghcr.io/bmscomp/kates-legacy-kafka:2.8.2 ."
@@ -45,7 +45,7 @@ func TestMigrateImageBuildPushAndJRE(t *testing.T) {
 	captureOutput(t, "table")
 
 	opts := migrateImageOptions{Version: "3.5.2", Platform: "linux/amd64,linux/arm64", Registry: "ghcr.io/bmscomp", Push: true}
-	if err := runMigrateImageBuild(nil, opts); err != nil {
+	if err := runMigrateImageBuild(context.Background(), opts); err != nil {
 		t.Fatalf("image build --push: %v", err)
 	}
 	if !f.hasLine("docker buildx build --build-arg KAFKA_VERSION=3.5.2 --build-arg SCALA_VERSION=2.13 --build-arg JRE_VERSION=17 --build-arg UBUNTU_RELEASE=jammy -f Dockerfile.legacy-kafka -t ghcr.io/bmscomp/kates-legacy-kafka:3.5.2 --platform linux/amd64,linux/arm64 --push .") {
@@ -61,7 +61,7 @@ func TestMigrateImageBuildRefusals(t *testing.T) {
 	f := newFakeProc(t)
 	captureOutput(t, "table")
 
-	err := runMigrateImageBuild(nil, migrateImageOptions{Version: "2.8.2", Load: true, Push: true})
+	err := runMigrateImageBuild(context.Background(), migrateImageOptions{Version: "2.8.2", Load: true, Push: true})
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("--load with --push must be refused, got %v", err)
 	}
@@ -72,7 +72,7 @@ func TestMigrateImageBuildRefusals(t *testing.T) {
 	f.on("docker --version", "Docker version 27")
 	f.on("docker build", "")
 	f.on("docker run --rm --entrypoint ls ghcr.io/bmscomp/kates-legacy-kafka:2.8.2 /opt/kafka/libs/", "kafka_2.13-2.8.1.jar")
-	err = runMigrateImageBuild(nil, migrateImageOptions{Version: "2.8.2"})
+	err = runMigrateImageBuild(context.Background(), migrateImageOptions{Version: "2.8.2"})
 	if err == nil || !strings.Contains(err.Error(), `image reports Kafka "2.8.1", expected 2.8.2`) {
 		t.Fatalf("a wrong jar version must fail the build, got %v", err)
 	}
@@ -97,7 +97,7 @@ func TestMigrateTargetOffsetsAndTopics(t *testing.T) {
 	out := captureOutput(t, "table")
 
 	opts := migrateTargetOptions{Namespace: "kafka", Cluster: "krafter", User: "kates-mm2", Partitions: true, Timeout: 300}
-	if err := runMigrateTarget(nil, opts, "offsets", "kates.orders"); err != nil {
+	if err := runMigrateTarget(context.Background(), opts, "offsets", "kates.orders"); err != nil {
 		t.Fatalf("target offsets: %v", err)
 	}
 	text := out.String()
@@ -119,7 +119,7 @@ func TestMigrateTargetOffsetsAndTopics(t *testing.T) {
 
 	out.Reset()
 	outputMode = "json"
-	if err := runMigrateTarget(nil, opts, "topics", ""); err != nil {
+	if err := runMigrateTarget(context.Background(), opts, "topics", ""); err != nil {
 		t.Fatalf("target topics: %v", err)
 	}
 	var doc map[string][]string
@@ -142,7 +142,7 @@ func TestMigrateSourceDeployAndRemove(t *testing.T) {
 	captureOutput(t, "table")
 
 	flags := &migrateSourceFlags{Version: "3.9.1", Provider: "auto", Namespace: "kafka-old", Release: "old", Topics: "kates.orders", Yes: true, Timeout: 600, Registry: "ghcr.io/bmscomp", TargetCluster: "krafter", TargetNS: "kafka", SkipBuild: true}
-	if err := runMigrateSourceDeploy(nil, flags); err != nil {
+	if err := runMigrateSourceDeploy(context.Background(), flags); err != nil {
 		t.Fatalf("source deploy: %v", err)
 	}
 	if f.hasLine("docker") {
@@ -164,7 +164,7 @@ func TestMigrateSourceDeployAndRemove(t *testing.T) {
 	f.on("helm uninstall old -n kafka-old", "")
 	f.on("kubectl -n kafka delete secret -l kates.io/lab=m391-430,kates.io/lab-role=mirror --ignore-not-found", "")
 	rm := &migrateSourceFlags{Name: "old", Yes: true, Timeout: 600, TargetNS: "kafka"}
-	if err := runMigrateSourceRemove(nil, rm); err != nil {
+	if err := runMigrateSourceRemove(context.Background(), rm); err != nil {
 		t.Fatalf("source remove: %v", err)
 	}
 	if !f.hasLine("helm uninstall old -n kafka-old") || f.hasLine("kubectl delete namespace") {
@@ -184,7 +184,7 @@ func TestMigrateMirrorDeployDryRunFromSource(t *testing.T) {
 	out := captureOutput(t, "table")
 
 	flags := &migrateMirrorFlags{From: "m282-430-src", Policy: "default", Topics: "kates.orders", Namespace: "kafka", TargetCluster: "krafter", DryRun: true, Timeout: 600, SourceMechanism: "plain"}
-	if err := runMigrateMirrorDeploy(nil, flags); err != nil {
+	if err := runMigrateMirrorDeploy(context.Background(), flags); err != nil {
 		t.Fatalf("mirror deploy --dry-run: %v", err)
 	}
 	text := stripAnsi(out.String())
@@ -256,13 +256,13 @@ func TestMigrateMirrorCutoverAndRollbackByRelease(t *testing.T) {
 	captureOutput(t, "table")
 
 	flags := &migrateMirrorFlags{Release: "mm2", Namespace: "kafka", Yes: true, Timeout: 600}
-	if err := runMigrateMirrorCutover(nil, flags, false); err != nil {
+	if err := runMigrateMirrorCutover(context.Background(), flags, false); err != nil {
 		t.Fatalf("mirror cutover: %v", err)
 	}
 	if state != "STOPPED" {
 		t.Fatal("the cutover overlay was not applied")
 	}
-	if err := runMigrateMirrorCutover(nil, flags, true); err != nil {
+	if err := runMigrateMirrorCutover(context.Background(), flags, true); err != nil {
 		t.Fatalf("mirror rollback: %v", err)
 	}
 	if state != "RUNNING" {
@@ -270,7 +270,7 @@ func TestMigrateMirrorCutoverAndRollbackByRelease(t *testing.T) {
 	}
 	// Both need consent.
 	flags.Yes = false
-	if err := runMigrateMirrorCutover(nil, flags, false); err == nil || !strings.Contains(err.Error(), "--yes") {
+	if err := runMigrateMirrorCutover(context.Background(), flags, false); err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("cutover without consent must refuse, got %v", err)
 	}
 }

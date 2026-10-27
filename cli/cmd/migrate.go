@@ -353,7 +353,7 @@ func (e *migrateEnv) readTarget(ctx context.Context) error {
 		}
 		parsed, err := kafkaversion.Parse(v)
 		if err != nil {
-			return fmt.Errorf("Kafka %s/%s states version %q: %w", t.Namespace, t.Cluster, v, err)
+			return fmt.Errorf("the Kafka resource %s/%s states version %q: %w", t.Namespace, t.Cluster, v, err)
 		}
 		t.Version = parsed
 		break
@@ -667,10 +667,15 @@ type resolvedSource struct {
 // "not yet implemented" answer it has on its own — plan describes it, up
 // refuses it — rather than being widened silently by the company it keeps.
 func resolveMigrateSource(env *migrateEnv, f *migratePairFlags, from kafkaversion.Version, res *migrateResolution) (resolvedSource, error) {
-	provider, mode, err := kafkaversion.ProviderFor(from, env.Window)
-	if err != nil {
+	if _, _, err := kafkaversion.ProviderFor(from, env.Window); err != nil {
 		return resolvedSource{}, fmt.Errorf("--from %s refused: %w", from, err)
 	}
+	// Every branch below decides the provider and mode itself; ProviderFor
+	// is only the floor check.
+	var (
+		provider kafkaversion.Provider
+		mode     kafkaversion.LegacyMode
+	)
 	out := resolvedSource{From: from}
 	category, other := classifyFrom(from, env)
 	out.Operator = other

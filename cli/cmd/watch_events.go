@@ -19,10 +19,6 @@ var (
 	watchInfoStyle = lipgloss.NewStyle().
 			Foreground(theme.Info)
 
-	watchWarnStyle = lipgloss.NewStyle().
-			Foreground(theme.Warning).
-			Bold(true)
-
 	watchErrStyle = lipgloss.NewStyle().
 			Foreground(theme.Error).
 			Bold(true)

@@ -104,7 +104,7 @@ func TestMigrateDownTouchesOnlyTheLabelledLab(t *testing.T) {
 
 	migrateDownName, migrateDownYes, migrateDownTimeout = "m282-430", true, 600
 	t.Cleanup(func() { migrateDownName, migrateDownYes = "", false })
-	if err := runMigrateDown(nil); err != nil {
+	if err := runMigrateDown(context.Background()); err != nil {
 		t.Fatalf("down: %v", err)
 	}
 	for _, want := range []string{
@@ -251,7 +251,7 @@ func TestMigrateDownLeavesAForeignNamespace(t *testing.T) {
 
 	migrateDownName, migrateDownYes = "m282-430", true
 	t.Cleanup(func() { migrateDownName, migrateDownYes = "", false })
-	if err := runMigrateDown(nil); err != nil {
+	if err := runMigrateDown(context.Background()); err != nil {
 		t.Fatalf("down: %v", err)
 	}
 	if f.hasLine("kubectl delete namespace") {
@@ -270,7 +270,7 @@ func TestMigrateDownNeedsANameWithSeveralLabs(t *testing.T) {
 
 	migrateDownName, migrateDownYes = "", true
 	t.Cleanup(func() { migrateDownYes = false })
-	err := runMigrateDown(nil)
+	err := runMigrateDown(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "pass --name") || !strings.Contains(err.Error(), "m282-430, m391-430") {
 		t.Fatalf("want the ambiguity refusal, got %v", err)
 	}
@@ -289,7 +289,7 @@ func TestMigrateDownRefusesWithoutConsent(t *testing.T) {
 
 	migrateDownName, migrateDownYes = "m282-430", false
 	t.Cleanup(func() { migrateDownName = "" })
-	err := runMigrateDown(nil)
+	err := runMigrateDown(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("without a terminal down must refuse and name --yes, got %v", err)
 	}
@@ -309,7 +309,7 @@ func TestMigrateStatusJSON(t *testing.T) {
 	out := captureOutput(t, "json")
 
 	migrateStatusName, migrateStatusOffsets, migrateStatusWatch = "", false, false
-	if err := runMigrateStatus(nil); err != nil {
+	if err := runMigrateStatus(context.Background()); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	var st labStatus
@@ -376,7 +376,7 @@ func TestMigrateDownAndStatusAcrossSeveralSources(t *testing.T) {
 
 	// status finds both legs by the lab label alone.
 	migrateStatusName, migrateStatusOffsets, migrateStatusWatch = "", false, false
-	if err := runMigrateStatus(nil); err != nil {
+	if err := runMigrateStatus(context.Background()); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	var st labStatus
@@ -396,7 +396,7 @@ func TestMigrateDownAndStatusAcrossSeveralSources(t *testing.T) {
 	// down removes both sources and both namespaces.
 	migrateDownName, migrateDownYes, migrateDownTimeout = lab, true, 600
 	t.Cleanup(func() { migrateDownName, migrateDownYes = "", false })
-	if err := runMigrateDown(nil); err != nil {
+	if err := runMigrateDown(context.Background()); err != nil {
 		t.Fatalf("down: %v", err)
 	}
 	for _, want := range []string{

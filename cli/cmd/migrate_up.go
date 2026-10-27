@@ -219,7 +219,7 @@ func (r *labRun) phasePrerequisites(ctx context.Context, s *migrate.State) error
 	name, err := defaultRunner.Run(ctx, "kubectl", "-n", l.TargetNamespace, "get", "secret", migrate.TargetUser, "--ignore-not-found", "-o", "jsonpath={.metadata.name}")
 	if err != nil || strings.TrimSpace(name) == "" {
 		rep.Fail(migrate.RowTargetCredentials, fmt.Sprintf("secret %s not found in %s", migrate.TargetUser, l.TargetNamespace))
-		return fmt.Errorf("Secret %s not found in %s. The kafka-cluster chart provisions the KafkaUser %q", migrate.TargetUser, l.TargetNamespace, migrate.TargetUser)
+		return fmt.Errorf("secret %s not found in %s. The kafka-cluster chart provisions the KafkaUser %q", migrate.TargetUser, l.TargetNamespace, migrate.TargetUser)
 	}
 	rep.Pass(migrate.RowTargetCredentials, "secret "+migrate.TargetUser)
 	written, err := r.refuseOverlappingLab(ctx)
