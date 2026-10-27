@@ -66,16 +66,25 @@
   var steps = ['Steady load: measuring the baseline', 'Injecting broker-pod-kill through LitmusChaos',
     'Broker down: ISR shrinks, P99 climbs', 'Broker back: recovery time measured', 'Run graded A and stored; the CLI exits 0'];
   var btns = arch.querySelectorAll('.arch-tl button'), bar = arch.querySelector('.arch-tl-bar span'), step = arch.querySelector('.arch-step');
-  var designBtns = arch.querySelectorAll('[data-set-design]'), winTitle = document.getElementById('arch-wintitle');
+  var kzFig = document.querySelector('.kz');
+  var designBtns = document.querySelectorAll('[data-set-design]');
+  var winTitle = document.getElementById('arch-wintitle'), kzWinTitle = document.getElementById('kz-wintitle');
   var designOrder = ['grid', 'panels', 'chips'];
   var designTitles = {
     grid: 'kates architecture — grid look, C → aurora',
     panels: 'kates architecture — T → panels, C → dracula',
     chips: 'kates architecture — classic look, C → chips / aurora'
   };
+  var kzDesignTitles = {
+    grid: 'kates kafka tui — grid look, C → aurora',
+    panels: 'kates kafka tui — T → panels, C → dracula',
+    chips: 'kates kafka tui — classic look, C → chips / aurora'
+  };
   function setDesign(name) {
     arch.setAttribute('data-tui-design', name);
+    if (kzFig) kzFig.setAttribute('data-tui-design', name);
     if (winTitle && designTitles[name]) winTitle.textContent = designTitles[name];
+    if (kzWinTitle && kzDesignTitles[name]) kzWinTitle.textContent = kzDesignTitles[name];
     designBtns.forEach(function (b) {
       b.setAttribute('aria-pressed', b.getAttribute('data-set-design') === name ? 'true' : 'false');
     });
@@ -84,7 +93,7 @@
     b.addEventListener('click', function () { setDesign(b.getAttribute('data-set-design')); });
   });
   document.addEventListener('keydown', function (e) {
-    if (arch.classList.contains('paused')) return;
+    if (arch.classList.contains('paused') && (!kzFig || kzFig.classList.contains('paused'))) return;
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     if (e.key === 'T' || e.key === 'C') {
       var cur = arch.getAttribute('data-tui-design') || 'grid';
