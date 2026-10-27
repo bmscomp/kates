@@ -1,5 +1,5 @@
 name: "Kates Quality Gate"
-description: "Run an Apache Kafka performance test and enforce an A–F SLA grade gate in CI/CD"
+description: "Gate CI on Apache Kafka performance: run a Kates test and fail the job below a minimum A–F grade"
 author: "bmscomp"
 branding:
   icon: "shield"

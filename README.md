@@ -22,7 +22,7 @@ You find out how a Kafka cluster handles a broker failure on the day a broker fa
 
 Performance tests work against any Kafka cluster the Kates API can reach; fault injection targets Strimzi-managed brokers, by default the cluster `krafter` in namespace `kafka`. Kates has three parts: the `kates` CLI (Go), the Kates API (Quarkus) that runs the tests and faults and keeps the results in PostgreSQL, and the signed Helm charts that install Kafka and everything around it.
 
-**[The book](https://bmscomp.github.io/kates/)** · [Why Kates](#why-kates) · [Quick start](#quick-start) · [CLI at a glance](#cli-at-a-glance) · [Architecture](#architecture) · [Documentation](#documentation) · [Helm charts](#helm-charts) · [Building from source](#building-from-source) · [Contributing](#contributing)
+**[The book](https://bmscomp.github.io/kates/)** · [Why Kates](#why-kates) · [Quick start](#quick-start) · [CLI at a glance](#cli-at-a-glance) · [GitHub Action](#github-action) · [Architecture](#architecture) · [Documentation](#documentation) · [Helm charts](#helm-charts) · [Building from source](#building-from-source) · [Contributing](#contributing)
 
 <p align="center">
   <img src="docs/assets/demo.gif" width="900" alt="Animated terminal demo of kates health, kates test create --type LOAD --records 100000 --wait, kates gate --min-grade C, and kates security audit running against a live Kafka cluster" />
@@ -167,6 +167,39 @@ kates mcp --context ports --allow-cluster <clusterId>       # Read-only MCP serv
 `kates gate` grades average throughput and p99 latency against fixed bands, the same for every test type. The SLA verdict in `kates report show` checks only thresholds stored with the run, and runs from `kates test create` carry none; to check thresholds, put them in a scenario's `validate:` block and run it with `kates test apply`.
 
 `kates ctx` points the CLI at other Kates instances. Contexts are Kates API profiles kept in `~/.kates.yaml`, not Kubernetes contexts; each takes a URL and an `--api-key`, and `kates ctx show` lists them. `kates <command> --help` documents every command.
+
+## GitHub Action
+
+This repository is also a GitHub Action, **Kates Quality Gate**. It installs the `kates` CLI on the runner, runs `kates gate` against your Kates API, and fails the step when the grade is below `min-grade`. The grade, throughput, p99 latency and run ID go to the job summary and to the step's outputs.
+
+```yaml
+- name: Kafka performance gate
+  id: gate
+  uses: bmscomp/kates@v1.31.0
+  with:
+    api-url: ${{ vars.KATES_URL }}
+    api-key: ${{ secrets.KATES_API_KEY }}
+    min-grade: B
+    records: 100000
+
+- if: always()
+  run: echo "Grade ${{ steps.gate.outputs.grade }}, passed ${{ steps.gate.outputs.passed }}"
+```
+
+| Input | Default | What it sets |
+|---|---|---|
+| `api-url` | `http://localhost:8080` | The Kates API the runner calls |
+| `api-key` | none | API key, from Secret `kates-api-key` |
+| `min-grade` | `C` | Lowest passing grade, `A` to `F` |
+| `type` | `LOAD` | Workload: `LOAD`, `STRESS`, `SPIKE`, `ENDURANCE`, `VOLUME`, `CAPACITY`, `ROUND_TRIP` or `INTEGRITY` |
+| `records` | `50000` | Records to produce |
+| `backend` | the API's default | `native` or `trogdor` |
+| `timeout` | `180` | Seconds to wait for the run |
+| `version` | `latest` | CLI release to install; a `kates` already on the `PATH` is used instead |
+
+Outputs: `run-id`, `grade`, and `passed` (`true` or `false`).
+
+The runner has to reach the Kates API. The default `http://localhost:8080` suits a self-hosted runner beside the cluster after `kates ports`; a GitHub-hosted runner needs the API exposed to it. The action runs on Linux and macOS runners, amd64 or arm64, and needs `curl`, `tar` and `python3`. Pin a release tag such as `v1.31.0`; there is no moving `v1` tag.
 
 ## Other clusters
 
