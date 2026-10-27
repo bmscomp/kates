@@ -413,7 +413,7 @@ var (
 
 // isFailedStatus reports whether a terminal test status means failure.
 func isFailedStatus(status string) bool {
-	return status == "FAILED" || status == "ERROR"
+	return status == "FAILED" || status == "ERROR" || status == "CANCELLED"
 }
 
 // pollUntilDone follows a test until it reaches a terminal state and returns
@@ -515,8 +515,7 @@ func pollUntilDonePlain(ctx context.Context, id string, w io.Writer) (string, er
 			lastStatus = status
 		}
 
-		switch status {
-		case "DONE", "COMPLETED", "FAILED", "ERROR":
+		if terminalRunStatus(status) {
 			return status, nil
 		}
 		if !sleepCtx(ctx, pollInterval) {

@@ -266,19 +266,20 @@ func runFlowTest(step FlowStep, wait bool) (testID, grade string, summary *clien
 			continue
 		}
 		status := strings.ToUpper(updated.Status)
-		if status == "DONE" || status == "COMPLETED" {
-			report, err := apiClient.Report(context.Background(), run.ID)
-			if err == nil {
-				summary = report.Summary
-				if report.OverallSlaVerdict != nil {
-					grade = report.OverallSlaVerdict.Grade
-				}
-			}
-			return testID, grade, summary, nil
+		if !terminalRunStatus(status) {
+			continue
 		}
-		if status == "FAILED" || status == "ERROR" {
+		if isFailedStatus(status) {
 			return testID, "F", nil, fmt.Errorf("test failed")
 		}
+		report, err := apiClient.Report(context.Background(), run.ID)
+		if err == nil {
+			summary = report.Summary
+			if report.OverallSlaVerdict != nil {
+				grade = report.OverallSlaVerdict.Grade
+			}
+		}
+		return testID, grade, summary, nil
 	}
 	return testID, "", nil, fmt.Errorf("timeout waiting for test")
 }

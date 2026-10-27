@@ -196,6 +196,15 @@ func mcpMarkUntrusted(s *jsonschema.Schema) {
 	mcpMarkUntrusted(s.AdditionalProperties)
 }
 
+// mcpToolOutputTypes maps each tool addReadTool registered to its Out type:
+// the Go side of its output schema, which TestMCPUnfencedStringsAreIdentifiers
+// walks to check that every plain string a result can carry is an identifier
+// the backend minted, and everything a third party can write is mcpUntrusted.
+var (
+	mcpToolOutputsMu   sync.Mutex
+	mcpToolOutputTypes = map[string]reflect.Type{}
+)
+
 // mcpReadHandler is what a read tool implements. It reads through call.Client,
 // fences third-party text with call.Fence, and notes caveats and truncation on
 // call; the guard does the rest.
@@ -236,6 +245,9 @@ func addReadTool[In, Out any](s *mcp.Server, d *mcpDeps, tool *mcp.Tool, h mcpRe
 	t.OutputSchema = out
 	t.Annotations = roAnnotations(t.Title)
 	d.guarded[t.Name] = true
+	mcpToolOutputsMu.Lock()
+	mcpToolOutputTypes[t.Name] = reflect.TypeFor[Out]()
+	mcpToolOutputsMu.Unlock()
 
 	static := append([]mcpCaveatID(nil), caveats...)
 	name := t.Name

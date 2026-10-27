@@ -93,7 +93,7 @@ func TestMCPClusterOverviewFencesAlertText(t *testing.T) {
 		t.Fatalf("rules = %+v", got.AlertRules.Rules)
 	}
 	r := got.AlertRules.Rules[0]
-	for field, v := range map[string]mcpUntrusted{"group": r.Group, "for": r.For, "expr": r.Expr, "summary": r.Summary, "description": r.Description} {
+	for field, v := range map[string]mcpUntrusted{"name": r.Name, "group": r.Group, "for": r.For, "expr": r.Expr, "summary": r.Summary, "description": r.Description} {
 		if !mcpFenced(h, v) {
 			t.Errorf("%s is not fenced: %q", field, v)
 		}
@@ -105,7 +105,10 @@ func TestMCPClusterOverviewFencesAlertText(t *testing.T) {
 	if n := strings.Count(d, mcpFenceClosePrefix); n != 1 {
 		t.Errorf("description has %d closing markers, want 1: %q", n, d)
 	}
-	if r.Source != "kafka-rules" || r.Name != "KafkaOfflinePartitions" || r.Severity != "critical" {
+	// The rule's name is what whoever wrote the PrometheusRule chose, so it
+	// is fenced like its annotations; the severity, which the backend maps to
+	// critical or warning, and the source, a resource name, are cleaned only.
+	if r.Source != "kafka-rules" || !strings.Contains(string(r.Name), "KafkaOfflinePartitions") || r.Severity != "critical" {
 		t.Errorf("identifiers = %q %q %q", r.Name, r.Severity, r.Source)
 	}
 	if got.AlertRules.Critical != 1 || got.AlertRules.RulesScanned != 40 {

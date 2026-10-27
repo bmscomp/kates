@@ -93,8 +93,7 @@ it passed. The exit code is the same.`,
 				return fail("Failed to poll test: " + err.Error())
 			}
 			res.Status = run.Status
-			status := strings.ToUpper(run.Status)
-			if status == "DONE" || status == "FAILED" {
+			if terminalRunStatus(run.Status) {
 				break
 			}
 			if time.Now().After(deadline) {
@@ -106,8 +105,8 @@ it passed. The exit code is the same.`,
 			}
 		}
 
-		if strings.ToUpper(run.Status) == "FAILED" {
-			return fail("Test FAILED")
+		if isFailedStatus(strings.ToUpper(run.Status)) {
+			return fail("Test " + strings.ToUpper(run.Status))
 		}
 
 		report, err := apiClient.ReportSummary(ctx, id)

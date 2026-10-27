@@ -679,7 +679,7 @@ func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.result = msg.test
 		m.status = strings.ToUpper(msg.test.Status)
-		if m.status == "DONE" || m.status == "COMPLETED" || m.status == "FAILED" || m.status == "ERROR" {
+		if terminalRunStatus(m.status) {
 			return m, tea.Quit
 		}
 		return m, m.fetchTest()
@@ -762,8 +762,7 @@ func waitForTestPlain(ctx context.Context, id, name string, progress io.Writer) 
 			fmt.Fprintf(progress, "  %s (%s): %s\n", name, id, status)
 			last = status
 		}
-		switch status {
-		case "DONE", "COMPLETED", "FAILED", "ERROR":
+		if terminalRunStatus(status) {
 			return run, nil
 		}
 	}

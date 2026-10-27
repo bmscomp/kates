@@ -558,9 +558,9 @@ func TestMCPPreviewNeverTooLarge(t *testing.T) {
 }
 
 func TestMCPControllerIndex(t *testing.T) {
-	topo := &client.ClusterTopology{
-		Cluster: &client.TopoClusterInfo{Name: "krafter", Namespace: "kafka-prod"},
-		NodePools: []client.NodePoolInfo{
+	topo := &client.MCPClusterTopology{
+		Cluster: &client.MCPTopologyCluster{Name: "krafter", Namespace: "kafka-prod"},
+		NodePools: []client.MCPNodePool{
 			{Name: "brokers", Role: "broker", Replicas: 3},
 			{Name: "brokers-az1", Role: "broker", Replicas: 1},
 			{Name: "dual", Role: "controller,broker", Replicas: 2},

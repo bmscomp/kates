@@ -35,125 +35,7 @@ var securityAuditCmd = &cobra.Command{
 			return cmdErr("Security audit failed: " + err.Error())
 		}
 
-		// Inject Kyverno checks
-		checks, _ := result["checks"].([]interface{})
-		crdOut, _ := exec.Command("kubectl", "get", "crd", "clusterpolicies.kyverno.io", "--no-headers").Output()
-		if len(crdOut) > 0 {
-			checks = append(checks, map[string]interface{}{
-				"category":   "policy",
-				"name":       "Kyverno Admission Controller",
-				"status":     "PASS",
-				"detail":     "Kyverno is installed and protecting the cluster",
-				"severity":   "HIGH",
-				"compliance": "CIS 5.1",
-			})
-
-			polOut, _ := exec.Command("kubectl", "get", "clusterpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}={.spec.validationFailureAction}{\"\\n\"}{end}").Output()
-			policies := strings.Split(strings.TrimSpace(string(polOut)), "\n")
-			activeCount, enforceCount := 0, 0
-			for _, p := range policies {
-				if p == "" {
-					continue
-				}
-				activeCount++
-				if strings.Contains(p, "Enforce") {
-					enforceCount++
-				}
-			}
-
-			if activeCount > 0 {
-				checks = append(checks, map[string]interface{}{
-					"category":   "policy",
-					"name":       "Active ClusterPolicies",
-					"status":     "PASS",
-					"detail":     fmt.Sprintf("%d active policies detected", activeCount),
-					"severity":   "HIGH",
-					"compliance": "CIS 5.2",
-				})
-			} else {
-				checks = append(checks, map[string]interface{}{
-					"category":   "policy",
-					"name":       "Active ClusterPolicies",
-					"status":     "FAIL",
-					"detail":     "No policies are active",
-					"severity":   "HIGH",
-					"compliance": "CIS 5.2",
-					"fix":        "Run 'kates kyverno apply' to deploy recommended policies.",
-				})
-			}
-
-			if enforceCount > 0 {
-				checks = append(checks, map[string]interface{}{
-					"category":   "policy",
-					"name":       "Policy Enforcement",
-					"status":     "PASS",
-					"detail":     fmt.Sprintf("%d policies are in Enforce mode", enforceCount),
-					"severity":   "MEDIUM",
-					"compliance": "CIS 5.3",
-				})
-			} else {
-				checks = append(checks, map[string]interface{}{
-					"category":   "policy",
-					"name":       "Policy Enforcement",
-					"status":     "WARN",
-					"detail":     "Policies are in Audit mode only",
-					"severity":   "MEDIUM",
-					"compliance": "CIS 5.3",
-					"fix":        "Test workloads and run 'kates kyverno enforce <policy>' when ready.",
-				})
-			}
-			// Detect workload violations and penalize grade
-			polRepOut, err := exec.Command("kubectl", "get", "clusterpolicyreports,policyreports", "-A", "-o", "jsonpath={range .items[*].results[?(@.result=='fail')]}{.policy}/{.rule} on {.resources[*].kind} {.resources[*].name}: {.message}{\"\\n\"}{end}").Output()
-			if err == nil {
-				outStr := strings.TrimSpace(string(polRepOut))
-				if len(outStr) > 0 {
-					failures := strings.Split(outStr, "\n")
-
-					// Downgrade grade dynamically
-					gradeStr := fmt.Sprintf("%v", result["grade"])
-					if gradeStr == "A" {
-						result["grade"] = "B"
-					} else if gradeStr == "B" {
-						result["grade"] = "C"
-					} else if gradeStr == "C" {
-						result["grade"] = "D"
-					} else if gradeStr == "D" {
-						result["grade"] = "F"
-					}
-
-					checks = append(checks, map[string]interface{}{
-						"category":   "policy",
-						"name":       "Workload Policy Violations",
-						"status":     "FAIL",
-						"detail":     fmt.Sprintf("%d workload violations detected", len(failures)),
-						"severity":   "HIGH",
-						"compliance": "CIS 5.4",
-						"fix":        "Fix resource configurations. Example: " + failures[0],
-					})
-				} else {
-					checks = append(checks, map[string]interface{}{
-						"category":   "policy",
-						"name":       "Workload Policy Violations",
-						"status":     "PASS",
-						"detail":     "No workload violations detected",
-						"severity":   "HIGH",
-						"compliance": "CIS 5.4",
-					})
-				}
-			}
-
-		} else {
-			checks = append(checks, map[string]interface{}{
-				"category":   "policy",
-				"name":       "Kyverno Admission Controller",
-				"status":     "FAIL",
-				"detail":     "Kyverno is not installed",
-				"severity":   "HIGH",
-				"compliance": "CIS 5.1",
-				"fix":        "Run 'kates kyverno apply' to install Kyverno and recommended policies.",
-			})
-		}
-		result["checks"] = checks
+		injectKyvernoChecks(result)
 
 		if outputMode == "json" {
 			output.JSON(result)
@@ -169,7 +51,7 @@ var securityAuditCmd = &cobra.Command{
 			return nil
 		}
 
-		checks, _ = result["checks"].([]interface{})
+		checks, _ := result["checks"].([]interface{})
 		if len(checks) > 0 {
 			detailWidth := output.ColumnWidth(62, 30)
 
@@ -299,6 +181,129 @@ var (
 	auditExportFile string
 	auditVerbose    bool
 )
+
+// policyCheck is one Kyverno check in the shape of the backend's audit checks.
+func policyCheck(name, status, detail, severity, cis, fix string) map[string]interface{} {
+	check := map[string]interface{}{
+		"category":   "policy",
+		"name":       name,
+		"status":     status,
+		"detail":     detail,
+		"severity":   severity,
+		"compliance": cis,
+	}
+	if fix != "" {
+		check["fix"] = fix
+	}
+	return check
+}
+
+// injectKyvernoChecks appends the Kyverno policy checks to the backend's
+// audit result and recomputes its summary. The backend audits Kafka; whether
+// an admission controller guards the cluster is read from Kubernetes here,
+// through runKubectl, so a test can script kubectl like the rest of the
+// security commands do. The probes used to run through exec.Command and the
+// summary stayed the backend's, so the table listed more checks than the
+// summary counted, and so did every export.
+func injectKyvernoChecks(result map[string]interface{}) {
+	checks, _ := result["checks"].([]interface{})
+	crdOut, crdErr := runKubectl("get", "crd", "clusterpolicies.kyverno.io", "--no-headers")
+	if crdErr != nil || crdOut == "" {
+		checks = append(checks, policyCheck("Kyverno Admission Controller", "FAIL",
+			"Kyverno is not installed", "HIGH", "CIS 5.1",
+			"Run 'kates kyverno apply' to install Kyverno and recommended policies."))
+		result["checks"] = checks
+		recomputeAuditSummary(result)
+		return
+	}
+	checks = append(checks, policyCheck("Kyverno Admission Controller", "PASS",
+		"Kyverno is installed and protecting the cluster", "HIGH", "CIS 5.1", ""))
+
+	polOut, err := runKubectl("get", "clusterpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}={.spec.validationFailureAction}{\"\\n\"}{end}")
+	if err != nil {
+		polOut = ""
+	}
+	activeCount, enforceCount := 0, 0
+	for _, p := range strings.Split(polOut, "\n") {
+		if p == "" {
+			continue
+		}
+		activeCount++
+		if strings.Contains(p, "Enforce") {
+			enforceCount++
+		}
+	}
+	if activeCount > 0 {
+		checks = append(checks, policyCheck("Active ClusterPolicies", "PASS",
+			fmt.Sprintf("%d active policies detected", activeCount), "HIGH", "CIS 5.2", ""))
+	} else {
+		checks = append(checks, policyCheck("Active ClusterPolicies", "FAIL",
+			"No policies are active", "HIGH", "CIS 5.2",
+			"Run 'kates kyverno apply' to deploy recommended policies."))
+	}
+	if enforceCount > 0 {
+		checks = append(checks, policyCheck("Policy Enforcement", "PASS",
+			fmt.Sprintf("%d policies are in Enforce mode", enforceCount), "MEDIUM", "CIS 5.3", ""))
+	} else {
+		checks = append(checks, policyCheck("Policy Enforcement", "WARN",
+			"Policies are in Audit mode only", "MEDIUM", "CIS 5.3",
+			"Test workloads and run 'kates kyverno enforce <policy>' when ready."))
+	}
+
+	// Workload violations cost one grade.
+	polRepOut, err := runKubectl("get", "clusterpolicyreports,policyreports", "-A", "-o", "jsonpath={range .items[*].results[?(@.result=='fail')]}{.policy}/{.rule} on {.resources[*].kind} {.resources[*].name}: {.message}{\"\\n\"}{end}")
+	if err == nil {
+		if polRepOut != "" {
+			failures := strings.Split(polRepOut, "\n")
+			switch fmt.Sprintf("%v", result["grade"]) {
+			case "A":
+				result["grade"] = "B"
+			case "B":
+				result["grade"] = "C"
+			case "C":
+				result["grade"] = "D"
+			case "D":
+				result["grade"] = "F"
+			}
+			checks = append(checks, policyCheck("Workload Policy Violations", "FAIL",
+				fmt.Sprintf("%d workload violations detected", len(failures)), "HIGH", "CIS 5.4",
+				"Fix resource configurations. Example: "+failures[0]))
+		} else {
+			checks = append(checks, policyCheck("Workload Policy Violations", "PASS",
+				"No workload violations detected", "HIGH", "CIS 5.4", ""))
+		}
+	}
+	result["checks"] = checks
+	recomputeAuditSummary(result)
+}
+
+// recomputeAuditSummary counts the result's checks into its summary's total,
+// passed, warnings and failures, keeping whatever else the backend put there.
+func recomputeAuditSummary(result map[string]interface{}) {
+	checks, _ := result["checks"].([]interface{})
+	summary, _ := result["summary"].(map[string]interface{})
+	if summary == nil {
+		summary = map[string]interface{}{}
+	}
+	total, passed, warnings, failures := 0, 0, 0, 0
+	for _, c := range checks {
+		check, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		total++
+		switch strings.ToUpper(fmt.Sprintf("%v", check["status"])) {
+		case "PASS":
+			passed++
+		case "WARN":
+			warnings++
+		case "FAIL":
+			failures++
+		}
+	}
+	summary["total"], summary["passed"], summary["warnings"], summary["failures"] = total, passed, warnings, failures
+	result["summary"] = summary
+}
 
 // statusIcon returns a styled status icon for table display.
 func statusIcon(status string) string {

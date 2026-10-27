@@ -105,9 +105,9 @@ type mcpAlertRules struct {
 }
 
 type mcpAlertRule struct {
-	Name        string       `json:"name"`
+	Name        mcpUntrusted `json:"name" jsonschema:"the rule's name, as whoever wrote the PrometheusRule chose it"`
 	Severity    string       `json:"severity" jsonschema:"critical or warning"`
-	Source      string       `json:"source" jsonschema:"the PrometheusRule resource that defines the rule"`
+	Source      string       `json:"source" jsonschema:"the name of the PrometheusRule resource that defines the rule"`
 	Group       mcpUntrusted `json:"group,omitempty" jsonschema:"the rule group"`
 	For         mcpUntrusted `json:"for,omitempty" jsonschema:"how long the condition must hold before the rule fires"`
 	Expr        mcpUntrusted `json:"expr,omitempty" jsonschema:"the PromQL condition"`
@@ -279,7 +279,12 @@ func mcpAlertRulesFrom(call *mcpCall, r *client.ClusterAlertsResponse, err error
 	rules := make([]mcpAlertRule, 0, len(r.Alerts))
 	for _, a := range r.Alerts {
 		rules = append(rules, mcpAlertRule{
-			Name:        mcpSanitizeLine(a.Name, 128),
+			// The name is whatever the rule's author wrote, so it is fenced
+			// like the annotations. The source is a Kubernetes resource name,
+			// cleaned and bounded: fencing it too put the largest realistic
+			// overview (every chart rule on a degraded cluster) over the
+			// result cap, and the fit then dropped every rule's PromQL.
+			Name:        call.FenceN(a.Name, 128),
 			Severity:    mcpSanitizeLine(a.Severity, 16),
 			Source:      mcpSanitizeLine(a.Source, 253),
 			Group:       call.FenceN(a.Group, 200),

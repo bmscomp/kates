@@ -515,7 +515,7 @@ func mcpPreviewArgs(in mcpPreviewIn) (mcpPreviewOut, []byte, error) {
 type mcpPreviewReads struct {
 	sent    []byte
 	dry     *client.DryRunResult
-	topo    *client.ClusterTopology
+	topo    *client.MCPClusterTopology
 	topoErr error
 }
 
@@ -526,8 +526,11 @@ type mcpPreviewReads struct {
 func mcpRunPreview(ctx context.Context, call *mcpCall, in mcpPreviewIn, adHoc []byte) (mcpPreviewReads, error) {
 	var r mcpPreviewReads
 	g, gctx := errgroup.WithContext(ctx)
+	// MCPClusterTopology decodes only the sections the index reads, so a
+	// type change in one of the other twenty sections of the endpoint cannot
+	// fail the decode and silently drop the controller and quorum warnings.
 	call.Go(g, func() error {
-		r.topo, r.topoErr = call.Client().ClusterTopology(gctx)
+		r.topo, r.topoErr = call.Client().MCPClusterTopology(gctx)
 		return nil
 	})
 	call.Go(g, func() error {
@@ -839,7 +842,7 @@ type mcpKRaftControllerIndex struct {
 	namespace string          // the Kafka namespace the topology reads, "kafka" when unknown
 }
 
-func mcpKRaftControllersFrom(call *mcpCall, topo *client.ClusterTopology, err error) mcpKRaftControllerIndex {
+func mcpKRaftControllersFrom(call *mcpCall, topo *client.MCPClusterTopology, err error) mcpKRaftControllerIndex {
 	x := mcpKRaftControllerIndex{namespace: mcpDefaultFaultNamespace, nodePods: map[string]bool{}}
 	switch {
 	case err != nil:

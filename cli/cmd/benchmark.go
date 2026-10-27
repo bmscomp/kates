@@ -292,7 +292,7 @@ func gradeColor(grade string) string {
 // Tests shorten it.
 var testPollInterval = 3 * time.Second
 
-// waitForCompletion polls run id until it is DONE or FAILED and returns it.
+// waitForCompletion polls run id until its status is terminal and returns it.
 // It returns an error when timeout passes first, when benchmarkPollFailures
 // polls in a row fail (with the last error), or when ctx ends, which the
 // caller tells apart with ctx.Err().
@@ -316,8 +316,7 @@ func waitForCompletion(ctx context.Context, id string, timeout time.Duration) (*
 			}
 		} else {
 			failures = 0
-			status := strings.ToUpper(run.Status)
-			if status == "DONE" || status == "FAILED" {
+			if terminalRunStatus(run.Status) {
 				return run, nil
 			}
 		}

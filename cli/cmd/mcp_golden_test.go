@@ -207,7 +207,7 @@ func TestMCPUntrustedFieldsAreMarked(t *testing.T) {
 		t.Fatal(err)
 	}
 	props := schema.Properties.Data.Properties.AlertRules.Properties.Rules.Items.Properties
-	for _, field := range []string{"group", "for", "expr", "summary", "description"} {
+	for _, field := range []string{"name", "group", "for", "expr", "summary", "description"} {
 		p := props[field]
 		if p.Title != mcpUntrustedTitle || !strings.HasPrefix(p.Description, mcpUntrustedNote) {
 			t.Errorf("alert rule field %s is not marked untrusted: %+v", field, p)
@@ -216,7 +216,9 @@ func TestMCPUntrustedFieldsAreMarked(t *testing.T) {
 	if !strings.Contains(props["expr"].Description, "PromQL") {
 		t.Errorf("the field's own description must follow the note: %q", props["expr"].Description)
 	}
-	if strings.HasPrefix(props["name"].Description, mcpUntrustedNote) {
-		t.Error("name is cleaned, not fenced, and must not be marked untrusted")
+	for _, field := range []string{"severity", "source"} {
+		if strings.HasPrefix(props[field].Description, mcpUntrustedNote) {
+			t.Errorf("%s is cleaned, not fenced, and must not be marked untrusted", field)
+		}
 	}
 }
