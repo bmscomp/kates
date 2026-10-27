@@ -116,6 +116,9 @@ var profileListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all saved performance profiles",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		profiles, err := loadAllProfiles()
 		if err != nil {
 			return err
@@ -162,6 +165,9 @@ var profileCompareCmd = &cobra.Command{
 	Short: "Compare two performance profiles side by side",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		p1, err := loadProfile(args[0])
 		if err != nil {
 			return fmt.Errorf("profile %q: %w", args[0], err)
@@ -203,6 +209,9 @@ if throughput regression exceeds the threshold.`,
 	Example: `  kates profile assert production-v3.2 abc123 --max-regression 10`,
 	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		profile, err := loadProfile(args[0])
 		if err != nil {
 			return err

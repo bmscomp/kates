@@ -22,6 +22,9 @@ var themeListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List the built-in themes",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		fmt.Println()
 		output.Header("Themes")
 		fmt.Println()
@@ -49,6 +52,9 @@ var themePreviewCmd = &cobra.Command{
 	Short: "Preview a theme on sample output",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		name, p, err := lookupTheme(args[0])
 		if err != nil {
 			return err

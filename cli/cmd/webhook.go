@@ -17,6 +17,9 @@ var webhookListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List registered webhooks",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		ctx := context.Background()
 		hooks, err := apiClient.ListWebhooks(ctx)
 		if err != nil {

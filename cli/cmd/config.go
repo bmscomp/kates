@@ -30,11 +30,49 @@ comes from your kubeconfig — kates deploy detects and lets you choose it, and
 kubectl config use-context changes it.`,
 }
 
+// ctxShowResult is what kates ctx show prints under -o json. API keys are
+// masked as in the table, with maskAPIKey.
+type ctxShowResult struct {
+	ConfigFile     string         `json:"configFile"`
+	CurrentContext string         `json:"currentContext"`
+	Contexts       []ctxShowEntry `json:"contexts"`
+}
+
+type ctxShowEntry struct {
+	Name     string   `json:"name"`
+	Current  bool     `json:"current"`
+	URL      string   `json:"url"`
+	Output   string   `json:"output"`
+	APIKey   string   `json:"apiKey,omitempty"`
+	Profiles []string `json:"profiles,omitempty"`
+}
+
 var ctxShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show all contexts and current selection",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg := loadConfig()
+		if outputMode == "json" {
+			res := ctxShowResult{ConfigFile: configPath(), CurrentContext: cfg.CurrentContext, Contexts: []ctxShowEntry{}}
+			names := make([]string, 0, len(cfg.Contexts))
+			for name := range cfg.Contexts {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				ctx := cfg.Contexts[name]
+				e := ctxShowEntry{Name: name, Current: name == cfg.CurrentContext, URL: ctx.URL, Output: ctx.Output, Profiles: ctx.Profiles}
+				if e.Output == "" {
+					e.Output = "table"
+				}
+				if ctx.APIKey != "" {
+					e.APIKey = maskAPIKey(ctx.APIKey)
+				}
+				res.Contexts = append(res.Contexts, e)
+			}
+			output.JSON(res)
+			return
+		}
 		output.Header("Kates Contexts")
 		output.KeyValue("Config File", configPath())
 		output.KeyValue("Active Context", cfg.CurrentContext)
@@ -269,6 +307,10 @@ var ctxCurrentCmd = &cobra.Command{
 		name, ctx, err := resolveContext(cfg)
 		if err != nil {
 			return cmdErr(err.Error())
+		}
+		if outputMode == "json" {
+			output.JSON(map[string]string{"context": name, "url": ctx.URL})
+			return nil
 		}
 		output.Success(fmt.Sprintf("%s → %s", name, ctx.URL))
 		return nil

@@ -2625,7 +2625,7 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 |------|---------|
 | `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
 | `1` | The operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), or a confirmation was declined or could not be asked |
-| `2` | `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`) |
+| `2` | Kates could not tell, so neither yes nor no: `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`); a command with no JSON form was run with `-o json` (`webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary`, `test flame`), which prints nothing on stdout and says so on stderr |
 | `130` | Ctrl-C or SIGTERM stopped a command that starts work and waits for it, after it cancelled the test it started |
 
 Consequences worth knowing in scripts:

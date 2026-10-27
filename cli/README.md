@@ -89,6 +89,28 @@ bash build.sh
 
 Produces binaries in `dist/` for darwin/linux × amd64/arm64.
 
+### Lint as CI does
+
+CI (`.github/workflows/lint.yml`) runs golangci-lint at the version pinned in
+`versions.env` (`GOLANGCI_LINT_VERSION`, v2.14.0) and reports only the issues
+new since the PR's base: the backlog in `.golangci.yml` is paid down file by
+file, not gated at once. golangci-lint refuses a module whose Go version is
+newer than the Go it was built with, and this module's `go.mod` names
+`toolchain go1.27.3`, so a binary from Homebrew or a release built with an
+older Go stops with "the Go language version used to build golangci-lint is
+lower than the targeted Go version". Build it with the module's toolchain:
+
+```bash
+GOTOOLCHAIN=go1.27.3 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+cd cli && golangci-lint run --new-from-merge-base=main ./...
+```
+
+`make check` at the repository root runs the same command when golangci-lint
+is on PATH. Drop `--new-from-merge-base` to see the whole backlog, or
+`--enable-only errcheck ./cmd/...` for one linter's. A binary built with an
+older Go (1.26) runs only if the `toolchain` line is removed from `go.mod` for
+the run: `sed -i '/^toolchain /d' go.mod`, lint, then `git checkout go.mod`.
+
 ## Global Flags
 
 | Flag | Description |

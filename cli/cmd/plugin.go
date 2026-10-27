@@ -20,12 +20,15 @@ var pluginCmd = &cobra.Command{
 var pluginListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List discovered plugins",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		plugins := discoverPlugins()
 		if len(plugins) == 0 {
 			output.Hint("No plugins found.")
 			output.Hint("Place executables named kates-<name> in ~/.kates/plugins/ or on your PATH.")
-			return
+			return nil
 		}
 		output.Header(fmt.Sprintf("Plugins (%d)", len(plugins)))
 		rows := make([][]string, 0, len(plugins))
@@ -33,6 +36,7 @@ var pluginListCmd = &cobra.Command{
 			rows = append(rows, []string{p.name, p.path})
 		}
 		output.Table([]string{"Name", "Path"}, rows)
+		return nil
 	},
 }
 

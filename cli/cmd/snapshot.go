@@ -101,6 +101,9 @@ var snapshotListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all saved snapshots",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		snaps, err := loadAllSnapshots()
 		if err != nil {
 			return err
@@ -142,6 +145,9 @@ var snapshotDiffCmd = &cobra.Command{
 	Short: "Compare two snapshots",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		s1, err := loadSnapshot(args[0])
 		if err != nil {
 			return err

@@ -35,6 +35,9 @@ Groups events by category with statistics.`,
 	Example: `  kates changelog --since 2024-01-01 --until 2024-01-31
   kates changelog --since 2024-06-01`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if outputMode == "json" {
+			return noJSONForm(cmd)
+		}
 		// Before the request: a bad date used to be ignored, so --until 2024-13-01
 		// quietly listed everything up to now.
 		untilTime, err := parseChangelogUntil(changelogUntil)

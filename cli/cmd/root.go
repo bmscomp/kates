@@ -546,6 +546,9 @@ var rootCmd = &cobra.Command{
 		if outputMode == "" {
 			outputMode = "table"
 		}
+		// The one place the -o json contract is switched on: from here,
+		// notes go to stderr and banners print nothing (output/render.go).
+		output.JSONMode(outputMode == "json")
 		if !plainOutput {
 			if envPlain := os.Getenv("KATES_PLAIN"); envPlain == "true" || envPlain == "1" {
 				plainOutput = true
