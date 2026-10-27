@@ -350,163 +350,17 @@ func MirrorValues(l *Lab, m MirrorInputs) (string, error) {
 	if l == nil {
 		return "", errors.New("lab is required")
 	}
-	d := l.MirrorInputs()
-	if m.SourceBootstrap == "" {
-		m.SourceBootstrap = d.SourceBootstrap
-	}
-	if m.SourceVersion == (kafkaversion.Version{}) {
-		m.SourceVersion = d.SourceVersion
-	}
-	if m.SourceAuth == "" {
-		m.SourceAuth = d.SourceAuth
-	}
-	// The lab's own credential fills whatever the caller left empty, as long
-	// as the caller did not switch to another kind of authentication.
-	if m.SourceAuth == d.SourceAuth {
-		if m.SourceMechanism == "" {
-			m.SourceMechanism = d.SourceMechanism
-		}
-		if m.SourceUser == "" {
-			m.SourceUser = d.SourceUser
-		}
-		if m.SourceSecret == "" {
-			m.SourceSecret = d.SourceSecret
-		}
-		if m.SourceCASecret == "" {
-			m.SourceCASecret = d.SourceCASecret
-			m.SourceCASecretNamespace = d.SourceCASecretNamespace
-		}
-	}
-	if m.TargetCluster == "" {
-		m.TargetCluster = d.TargetCluster
-	}
-	if m.TargetNamespace == "" {
-		m.TargetNamespace = d.TargetNamespace
-	}
-	if m.TargetSecret == "" {
-		m.TargetSecret = TargetUser
-	}
-	if m.KafkaVersion == "" {
-		m.KafkaVersion = d.KafkaVersion
-	}
-	if m.StrimziVersion == "" {
-		m.StrimziVersion = d.StrimziVersion
-	}
-	if m.TestTopic == "" {
-		m.TestTopic = DefaultTestTopic
-	}
-
-	if m.TargetBrokerCount < 0 || m.TargetRF < 0 {
-		return "", errors.New("target broker count and replication factor cannot be negative")
-	}
-	if m.TargetRF == 0 {
-		switch {
-		case m.TargetBrokerCount >= 3:
-			m.TargetRF = 3
-		case m.TargetBrokerCount > 0:
-			m.TargetRF = m.TargetBrokerCount
-		default:
-			m.TargetRF = 1
-		}
-	}
-	if m.TargetBrokerCount > 0 && m.TargetRF > m.TargetBrokerCount {
-		return "", fmt.Errorf("replication factor %d exceeds the target's %d broker(s)", m.TargetRF, m.TargetBrokerCount)
+	fillMirrorInputs(l, &m)
+	if err := sizeMirrorReplication(&m); err != nil {
+		return "", err
 	}
 	if len(l.Topics) == 0 {
 		return "", errors.New("no topics to mirror")
 	}
-
-	// One entry per source: the first from the inputs (which a caller may
-	// have overridden), the rest as the lab derived them.
-	sources := l.Sources()
-	inputs := make([]sourceInputs, 0, len(sources))
-	first := sourceInputs{
-		Alias:           sources[0].Alias,
-		Bootstrap:       m.SourceBootstrap,
-		Version:         m.SourceVersion,
-		Auth:            m.SourceAuth,
-		Mechanism:       m.SourceMechanism,
-		User:            m.SourceUser,
-		Secret:          m.SourceSecret,
-		SecretNamespace: m.SourceSecretNamespace,
-		CASecret:        m.SourceCASecret,
-		CANamespace:     m.SourceCASecretNamespace,
-		Topics:          sources[0].Topics,
+	mirrors, synced, err := mirrorEntries(mirrorSourceInputs(l, m), m)
+	if err != nil {
+		return "", err
 	}
-	if m.HelmTests {
-		first.Topics = append(append([]string(nil), first.Topics...), m.TestTopic)
-	}
-	inputs = append(inputs, first)
-	for _, s := range sources[1:] {
-		in := sourceInputs{
-			Alias: s.Alias, Bootstrap: s.Bootstrap, Version: s.From,
-			Auth: s.Auth(), Mechanism: s.Mechanism(),
-			User: s.User, Secret: s.Secret, CASecret: s.CASecret, Topics: s.Topics,
-		}
-		if s.CASecret != "" {
-			in.CANamespace = s.Namespace
-		}
-		inputs = append(inputs, in)
-	}
-
-	var mirrors []mirror
-	var synced []syncedSecret
-	for _, in := range inputs {
-		auth, tls, err := sourceAuthValues(in, m)
-		if err != nil {
-			return "", err
-		}
-		if len(in.Topics) == 0 {
-			return "", fmt.Errorf("source %s has no topics to mirror", in.Alias)
-		}
-		if !strings.Contains(in.Bootstrap, ":") {
-			return "", fmt.Errorf("source bootstrap %q: want host:port", in.Bootstrap)
-		}
-		if in.Version.Less(kafkaversion.MinMirrorSource) {
-			return "", fmt.Errorf("source version %s is %w", in.Version, kafkaversion.ErrBelowMirrorFloor)
-		}
-		mirrors = append(mirrors, mirror{
-			Source: mirrorSource{
-				Alias:            in.Alias,
-				BootstrapServers: in.Bootstrap,
-				KafkaVersion:     in.Version.String(),
-				TLS:              tls,
-				Authentication:   auth,
-			},
-			Topics:         append([]string(nil), in.Topics...),
-			GroupsPattern:  ".*",
-			ReadOnlySource: m.ReadOnlySource,
-			SourceConnector: connector{
-				TasksMax: 2,
-				State:    "running",
-				Config: map[string]any{
-					"replication.factor":                    m.TargetRF,
-					"offset-syncs.topic.replication.factor": m.TargetRF,
-					"sync.topic.acls.enabled":               "false",
-					"sync.topic.configs.enabled":            "true",
-					"refresh.topics.interval.seconds":       20,
-				},
-			},
-			CheckpointConnector: connector{
-				TasksMax: 1,
-				State:    "running",
-				Config: map[string]any{
-					"checkpoints.topic.replication.factor": m.TargetRF,
-					"sync.group.offsets.enabled":           "true",
-					"sync.group.offsets.interval.seconds":  10,
-					"emit.checkpoints.interval.seconds":    10,
-					"refresh.groups.interval.seconds":      20,
-				},
-			},
-		})
-		if in.SecretNamespace != "" && in.SecretNamespace != m.TargetNamespace && in.Auth != SourceAuthNone {
-			synced = append(synced, syncedSecret{Name: in.Secret, FromNamespace: in.SecretNamespace})
-		}
-		if tls != nil && in.CANamespace != "" && in.CANamespace != m.TargetNamespace {
-			synced = append(synced, syncedSecret{Name: in.CASecret, FromNamespace: in.CANamespace})
-		}
-	}
-
 	v := mirrorValues{
 		ExtraLabels:    l.RoleLabels(RoleMirror),
 		Version:        m.KafkaVersion,
@@ -558,6 +412,183 @@ func MirrorValues(l *Lab, m MirrorInputs) (string, error) {
 		v.NetworkPolicy = &networkPolicy{StrimziOperatorNamespace: m.OperatorNamespace}
 	}
 	return marshalValues(v)
+}
+
+// fillMirrorInputs fills what the caller left empty in m from the lab's own
+// inputs and the package defaults.
+func fillMirrorInputs(l *Lab, m *MirrorInputs) {
+	d := l.MirrorInputs()
+	if m.SourceBootstrap == "" {
+		m.SourceBootstrap = d.SourceBootstrap
+	}
+	if m.SourceVersion == (kafkaversion.Version{}) {
+		m.SourceVersion = d.SourceVersion
+	}
+	if m.SourceAuth == "" {
+		m.SourceAuth = d.SourceAuth
+	}
+	// The lab's own credential fills whatever the caller left empty, as long
+	// as the caller did not switch to another kind of authentication.
+	if m.SourceAuth == d.SourceAuth {
+		if m.SourceMechanism == "" {
+			m.SourceMechanism = d.SourceMechanism
+		}
+		if m.SourceUser == "" {
+			m.SourceUser = d.SourceUser
+		}
+		if m.SourceSecret == "" {
+			m.SourceSecret = d.SourceSecret
+		}
+		if m.SourceCASecret == "" {
+			m.SourceCASecret = d.SourceCASecret
+			m.SourceCASecretNamespace = d.SourceCASecretNamespace
+		}
+	}
+	if m.TargetCluster == "" {
+		m.TargetCluster = d.TargetCluster
+	}
+	if m.TargetNamespace == "" {
+		m.TargetNamespace = d.TargetNamespace
+	}
+	if m.TargetSecret == "" {
+		m.TargetSecret = TargetUser
+	}
+	if m.KafkaVersion == "" {
+		m.KafkaVersion = d.KafkaVersion
+	}
+	if m.StrimziVersion == "" {
+		m.StrimziVersion = d.StrimziVersion
+	}
+	if m.TestTopic == "" {
+		m.TestTopic = DefaultTestTopic
+	}
+}
+
+// sizeMirrorReplication checks the target's broker count and replication
+// factor and, when no factor was given, sizes it from the broker count.
+func sizeMirrorReplication(m *MirrorInputs) error {
+	if m.TargetBrokerCount < 0 || m.TargetRF < 0 {
+		return errors.New("target broker count and replication factor cannot be negative")
+	}
+	if m.TargetRF == 0 {
+		switch {
+		case m.TargetBrokerCount >= 3:
+			m.TargetRF = 3
+		case m.TargetBrokerCount > 0:
+			m.TargetRF = m.TargetBrokerCount
+		default:
+			m.TargetRF = 1
+		}
+	}
+	if m.TargetBrokerCount > 0 && m.TargetRF > m.TargetBrokerCount {
+		return fmt.Errorf("replication factor %d exceeds the target's %d broker(s)", m.TargetRF, m.TargetBrokerCount)
+	}
+	return nil
+}
+
+// mirrorSourceInputs lists the sources the mirror reads, in order.
+func mirrorSourceInputs(l *Lab, m MirrorInputs) []sourceInputs {
+	// One entry per source: the first from the inputs (which a caller may
+	// have overridden), the rest as the lab derived them.
+	sources := l.Sources()
+	inputs := make([]sourceInputs, 0, len(sources))
+	first := sourceInputs{
+		Alias:           sources[0].Alias,
+		Bootstrap:       m.SourceBootstrap,
+		Version:         m.SourceVersion,
+		Auth:            m.SourceAuth,
+		Mechanism:       m.SourceMechanism,
+		User:            m.SourceUser,
+		Secret:          m.SourceSecret,
+		SecretNamespace: m.SourceSecretNamespace,
+		CASecret:        m.SourceCASecret,
+		CANamespace:     m.SourceCASecretNamespace,
+		Topics:          sources[0].Topics,
+	}
+	if m.HelmTests {
+		first.Topics = append(append([]string(nil), first.Topics...), m.TestTopic)
+	}
+	inputs = append(inputs, first)
+	for _, s := range sources[1:] {
+		in := sourceInputs{
+			Alias: s.Alias, Bootstrap: s.Bootstrap, Version: s.From,
+			Auth: s.Auth(), Mechanism: s.Mechanism(),
+			User: s.User, Secret: s.Secret, CASecret: s.CASecret, Topics: s.Topics,
+		}
+		if s.CASecret != "" {
+			in.CANamespace = s.Namespace
+		}
+		inputs = append(inputs, in)
+	}
+	return inputs
+}
+
+// mirrorEntries builds one mirrors entry per source, and the Secrets the
+// chart must sync into the mirror's namespace for them.
+func mirrorEntries(inputs []sourceInputs, m MirrorInputs) ([]mirror, []syncedSecret, error) {
+	var mirrors []mirror
+	var synced []syncedSecret
+	for _, in := range inputs {
+		auth, tls, err := sourceAuthValues(in, m)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(in.Topics) == 0 {
+			return nil, nil, fmt.Errorf("source %s has no topics to mirror", in.Alias)
+		}
+		if !strings.Contains(in.Bootstrap, ":") {
+			return nil, nil, fmt.Errorf("source bootstrap %q: want host:port", in.Bootstrap)
+		}
+		if in.Version.Less(kafkaversion.MinMirrorSource) {
+			return nil, nil, fmt.Errorf("source version %s is %w", in.Version, kafkaversion.ErrBelowMirrorFloor)
+		}
+		mirrors = append(mirrors, mirrorEntry(in, m, auth, tls))
+		if in.SecretNamespace != "" && in.SecretNamespace != m.TargetNamespace && in.Auth != SourceAuthNone {
+			synced = append(synced, syncedSecret{Name: in.Secret, FromNamespace: in.SecretNamespace})
+		}
+		if tls != nil && in.CANamespace != "" && in.CANamespace != m.TargetNamespace {
+			synced = append(synced, syncedSecret{Name: in.CASecret, FromNamespace: in.CANamespace})
+		}
+	}
+	return mirrors, synced, nil
+}
+
+// mirrorEntry is the mirrors entry for one source.
+func mirrorEntry(in sourceInputs, m MirrorInputs, auth authentication, tls *tlsValues) mirror {
+	return mirror{
+		Source: mirrorSource{
+			Alias:            in.Alias,
+			BootstrapServers: in.Bootstrap,
+			KafkaVersion:     in.Version.String(),
+			TLS:              tls,
+			Authentication:   auth,
+		},
+		Topics:         append([]string(nil), in.Topics...),
+		GroupsPattern:  ".*",
+		ReadOnlySource: m.ReadOnlySource,
+		SourceConnector: connector{
+			TasksMax: 2,
+			State:    "running",
+			Config: map[string]any{
+				"replication.factor":                    m.TargetRF,
+				"offset-syncs.topic.replication.factor": m.TargetRF,
+				"sync.topic.acls.enabled":               "false",
+				"sync.topic.configs.enabled":            "true",
+				"refresh.topics.interval.seconds":       20,
+			},
+		},
+		CheckpointConnector: connector{
+			TasksMax: 1,
+			State:    "running",
+			Config: map[string]any{
+				"checkpoints.topic.replication.factor": m.TargetRF,
+				"sync.group.offsets.enabled":           "true",
+				"sync.group.offsets.interval.seconds":  10,
+				"emit.checkpoints.interval.seconds":    10,
+				"refresh.groups.interval.seconds":      20,
+			},
+		},
+	}
 }
 
 // The values types below mirror charts/legacy-kafka/values.schema.json.

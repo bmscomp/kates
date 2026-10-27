@@ -399,19 +399,39 @@ func TestMCPDisruptionTimelineResourceCapsEvents(t *testing.T) {
 // TestMCPDisruptionTimelineResourceFitsLongEvents: long event lines stop
 // the listing before the guard's body cap would cut one mid-line, and the
 // resource says what it left out.
+//
+// The reply holds what the renderer can reach: the first step carries the
+// event cap's worth of long lines, far more than fit, and every later step a
+// few, which are left out and counted once the budget is spent. With 300
+// long events on each of 160 steps the reply was ~29 MB, and encoding and
+// decoding it alone outran the harness's 5 s call deadline under -race on a
+// slow machine. The production deadline applies here as well, since this
+// test is about the size budget, not about time.
 func TestMCPDisruptionTimelineResourceFitsLongEvents(t *testing.T) {
 	fb := newMCPFakeBackend(t, "cluster-a")
-	events := make([]map[string]any, 0, 300)
-	for i := 0; i < 300; i++ {
-		events = append(events, map[string]any{"timestamp": fmt.Sprintf("2026-09-25T12:%02d:%02dZ", i/60, i%60),
-			"podName": "krafter-brokers-" + strings.Repeat("3", 200), "eventType": "MODIFIED", "phase": "Running", "message": strings.Repeat("m", 300)})
+	longEvents := func(n int) []map[string]any {
+		events := make([]map[string]any, 0, n)
+		for i := 0; i < n; i++ {
+			events = append(events, map[string]any{"timestamp": fmt.Sprintf("2026-09-25T12:%02d:%02dZ", i/60, i%60),
+				"podName": "krafter-brokers-" + strings.Repeat("3", 200), "eventType": "MODIFIED", "phase": "Running", "message": strings.Repeat("m", 300)})
+		}
+		return events
+	}
+	step := func(i int) map[string]any {
+		events := longEvents(3)
+		if i == 0 {
+			events = longEvents(mcpTimelineMaxEvents)
+		}
+		return map[string]any{"step": fmt.Sprintf("s%02d", i), "type": "POD_KILL", "timeToFirstReady": "1ms", "timeToAllReady": "2ms", "events": events}
 	}
 	var steps []map[string]any
 	for i := 0; i < 40; i++ {
-		steps = append(steps, map[string]any{"step": fmt.Sprintf("s%02d", i), "type": "POD_KILL", "timeToFirstReady": "1ms", "timeToAllReady": "2ms", "events": events})
+		steps = append(steps, step(i))
 	}
 	fb.JSON("GET", "/api/disruptions/0a1b2c3d/timeline", http.StatusOK, steps)
-	h := newMCPHarness(t, fb)
+	limits := mcpTestLimits
+	limits.CallTimeout = mcpDefaultLimits.CallTimeout
+	h := newMCPHarness(t, fb, withMCPLimits(limits))
 	res, err := h.session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "kates://disruptions/0a1b2c3d/timeline"})
 	if err != nil {
 		t.Fatal(err)
@@ -422,12 +442,16 @@ func TestMCPDisruptionTimelineResourceFitsLongEvents(t *testing.T) {
 			t.Errorf("the timeline lacks %q", want)
 		}
 	}
+	if n := strings.Count(text, " MODIFIED"); n == 0 || n >= mcpTimelineMaxEvents {
+		t.Errorf("%d events listed: the long lines, not the event cap, should have stopped the listing", n)
+	}
 	if strings.Contains(text, "more characters]") {
 		t.Error("the guard cut the body: the timeline outgrew its budget")
 	}
 	// Past the budget, whole steps go and are counted.
-	steps = append(steps, steps...)
-	steps = append(steps, steps...)
+	for i := 40; i < 160; i++ {
+		steps = append(steps, step(i))
+	}
 	fb.JSON("GET", "/api/disruptions/0a1b2c3d/timeline", http.StatusOK, steps)
 	res, err = h.session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "kates://disruptions/0a1b2c3d/timeline"})
 	if err != nil {

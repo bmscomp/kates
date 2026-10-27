@@ -15,7 +15,7 @@ func TestAudit(t *testing.T) {
 	}
 	c, srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"page": 0, "size": 50, "total": 2, "count": 2, "items": items,
 		})
 	})
@@ -54,7 +54,7 @@ func TestAudit_WithFilter(t *testing.T) {
 			t.Errorf("actor = %q, want claude-on-lab", r.URL.Query().Get("actor"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"page":0,"size":10,"total":0,"count":0,"items":[]}`))
+		_, _ = w.Write([]byte(`{"page":0,"size":10,"total":0,"count":0,"items":[]}`))
 	})
 	defer srv.Close()
 
@@ -70,7 +70,7 @@ func TestAudit_WithFilter(t *testing.T) {
 func TestAudit_Empty(t *testing.T) {
 	c, srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"page":0,"size":50,"total":0,"count":0,"items":[]}`))
+		_, _ = w.Write([]byte(`{"page":0,"size":50,"total":0,"count":0,"items":[]}`))
 	})
 	defer srv.Close()
 

@@ -27,7 +27,7 @@ func setupTest(t *testing.T, expectedMethod, expectedPath string, statusCode int
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		w.Write([]byte(responseBody))
+		_, _ = w.Write([]byte(responseBody))
 	}))
 
 	// Override the global apiClient used by Cobra commands

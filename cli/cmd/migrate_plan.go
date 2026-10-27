@@ -296,6 +296,16 @@ func printMigratePlan(p *migratePlan) {
 	output.KeyValue("scope", p.Scope)
 	output.KeyValue("cluster", map[bool]string{true: "kind (values-kind.yaml applied first)", false: "generic"}[p.Kind])
 
+	printMigratePlanSources(p)
+	printMigratePlanTarget(p)
+	printMigratePlanMirror(p)
+	printMigratePlanTail(p)
+	fmt.Fprintln(output.Out)
+	output.Hint("Nothing was created.")
+}
+
+// printMigratePlanSources prints one section per source.
+func printMigratePlanSources(p *migratePlan) {
 	for _, src := range p.Sources {
 		title := "source"
 		if len(p.Sources) > 1 {
@@ -326,7 +336,10 @@ func printMigratePlan(p *migratePlan) {
 		output.KeyValue("auth", auth)
 		output.KeyValue("corpus topics", strings.Join(src.Topics, ", "))
 	}
+}
 
+// printMigratePlanTarget prints the target section.
+func printMigratePlanTarget(p *migratePlan) {
 	output.SubHeader("target")
 	where := "an additional cluster created by up"
 	if p.Target.Primary {
@@ -346,7 +359,10 @@ func printMigratePlan(p *migratePlan) {
 		secret = p.Target.Secret + " (missing — the kafka-cluster chart provisions the KafkaUser)"
 	}
 	output.KeyValue("credential", secret)
+}
 
+// printMigratePlanMirror prints the mirror section.
+func printMigratePlanMirror(p *migratePlan) {
 	output.SubHeader("mirror")
 	output.KeyValue("release", p.Lab.MirrorRelease+" in "+p.Lab.MirrorNamespace+"  "+chartRef("mirror-maker2"))
 	output.KeyValue("CR", p.Lab.MirrorCR)
@@ -371,7 +387,11 @@ func printMigratePlan(p *migratePlan) {
 	output.KeyValue("workers", fmt.Sprintf("Kafka %s (Strimzi %s), replication factor %d", p.Mirror.Version, p.Mirror.StrimziVersion, p.Mirror.ReplicationRF))
 	output.KeyValue("client image", p.ClientImg)
 	output.KeyValue("corpus", fmt.Sprintf("%d records to %s", p.Corpus.Messages, strings.Join(p.Corpus.Topics, ", ")))
+}
 
+// printMigratePlanTail prints the offset-syncs, values, helm, notes,
+// warnings and not-yet sections.
+func printMigratePlanTail(p *migratePlan) {
 	output.SubHeader("offset-syncs")
 	output.KeyValue("location", p.OffsetSyncs.Location)
 	if p.OffsetSyncs.ReadOnlySource {
@@ -409,8 +429,6 @@ func printMigratePlan(p *migratePlan) {
 			output.Warn(n)
 		}
 	}
-	fmt.Fprintln(output.Out)
-	output.Hint("Nothing was created.")
 }
 
 // runMigratePlan is `kates migrate plan`.

@@ -206,47 +206,9 @@ func runMigrateMirrorDeploy(ctx context.Context, f *migrateMirrorFlags) error {
 		Policy: f.Policy, Topics: splitTopics(f.Topics), StrimziVersion: env.StrimziVersion, Scope: env.Scope,
 		ReadOnlySource: f.ReadOnlySource,
 	}
-	var bootstrap, sourceUser, sourceSecret, mechanism string
-	var namespace string
-	if f.From != "" {
-		src, err := findLegacySource(ctx, f.From, "")
-		if err != nil {
-			return err
-		}
-		if src.Version == (kafkaversion.Version{}) {
-			return fmt.Errorf("source %s states no Kafka version (kates.io/kafka-version on its bootstrap Service)", src.Release)
-		}
-		opts.From = src.Version
-		if opts.Name == "" {
-			opts.Name = src.Lab
-		}
-		bootstrap, namespace = src.Bootstrap, src.Namespace
-		if src.SASL {
-			opts.SASL = true
-			sourceUser, mechanism = migrate.LegacySASLUser, migrate.MechanismPlain
-			sourceSecret = src.Release + "-" + migrate.LegacySASLUser
-		}
-		if f.SourceSecret != "" {
-			sourceSecret = f.SourceSecret
-		}
-		if f.SourceUser != "" {
-			sourceUser = f.SourceUser
-		}
-	} else {
-		if f.SourceVersion == "" {
-			return errors.New("--from-bootstrap needs --source-version")
-		}
-		v, err := kafkaversion.Parse(f.SourceVersion)
-		if err != nil {
-			return fmt.Errorf("--source-version: %w", err)
-		}
-		opts.From, bootstrap = v, f.FromBootstrap
-		if f.SourceSecret != "" {
-			if f.SourceUser == "" {
-				return errors.New("--source-secret needs --source-user")
-			}
-			opts.SASL, sourceUser, sourceSecret, mechanism = true, f.SourceUser, f.SourceSecret, f.SourceMechanism
-		}
+	conn, err := resolveMirrorDeploySource(ctx, f, &opts)
+	if err != nil {
+		return err
 	}
 	if opts.SASL {
 		opts.SourcePassword = "external" // the Secret already exists; the lab never writes it
@@ -257,12 +219,12 @@ func runMigrateMirrorDeploy(ctx context.Context, f *migrateMirrorFlags) error {
 		return err
 	}
 	l.SourcePassword = ""
-	l.SourceBootstrap = bootstrap
-	if namespace != "" {
-		l.SourceNamespace = namespace
+	l.SourceBootstrap = conn.bootstrap
+	if conn.namespace != "" {
+		l.SourceNamespace = conn.namespace
 	}
-	if sourceUser != "" {
-		l.SourceUser, l.SourceSecret = sourceUser, sourceSecret
+	if conn.user != "" {
+		l.SourceUser, l.SourceSecret = conn.user, conn.secret
 	}
 	if f.Release != "" {
 		l.MirrorRelease, l.MirrorCR, l.GroupID = f.Release, f.Release+"-mirror-maker2", f.Release
@@ -272,8 +234,8 @@ func runMigrateMirrorDeploy(ctx context.Context, f *migrateMirrorFlags) error {
 	inputs := l.MirrorInputs()
 	inputs.TargetBrokerCount = env.Target.Brokers
 	inputs.OperatorNamespace = env.OperatorNamespace
-	if mechanism != "" {
-		inputs.SourceMechanism = mechanism
+	if conn.mechanism != "" {
+		inputs.SourceMechanism = conn.mechanism
 	}
 	values, err := migrate.MirrorValues(l, inputs)
 	if err != nil {
@@ -287,6 +249,67 @@ func runMigrateMirrorDeploy(ctx context.Context, f *migrateMirrorFlags) error {
 		fmt.Fprint(output.Out, values)
 		return nil
 	}
+	return installMirrorLab(ctx, env, l, f)
+}
+
+// mirrorSourceConn is how mirror deploy reaches its source: the address,
+// the namespace a named source lives in, and the SASL credential.
+type mirrorSourceConn struct {
+	bootstrap, namespace    string
+	user, secret, mechanism string
+}
+
+// resolveMirrorDeploySource reads the source from --from (a legacy source
+// kates deployed) or --from-bootstrap (any cluster), setting the source's
+// version, the lab name and SASL on opts.
+func resolveMirrorDeploySource(ctx context.Context, f *migrateMirrorFlags, opts *migrate.Options) (mirrorSourceConn, error) {
+	var conn mirrorSourceConn
+	if f.From == "" {
+		if f.SourceVersion == "" {
+			return conn, errors.New("--from-bootstrap needs --source-version")
+		}
+		v, err := kafkaversion.Parse(f.SourceVersion)
+		if err != nil {
+			return conn, fmt.Errorf("--source-version: %w", err)
+		}
+		opts.From, conn.bootstrap = v, f.FromBootstrap
+		if f.SourceSecret != "" {
+			if f.SourceUser == "" {
+				return conn, errors.New("--source-secret needs --source-user")
+			}
+			opts.SASL, conn.user, conn.secret, conn.mechanism = true, f.SourceUser, f.SourceSecret, f.SourceMechanism
+		}
+		return conn, nil
+	}
+	src, err := findLegacySource(ctx, f.From, "")
+	if err != nil {
+		return conn, err
+	}
+	if src.Version == (kafkaversion.Version{}) {
+		return conn, fmt.Errorf("source %s states no Kafka version (kates.io/kafka-version on its bootstrap Service)", src.Release)
+	}
+	opts.From = src.Version
+	if opts.Name == "" {
+		opts.Name = src.Lab
+	}
+	conn.bootstrap, conn.namespace = src.Bootstrap, src.Namespace
+	if src.SASL {
+		opts.SASL = true
+		conn.user, conn.mechanism = migrate.LegacySASLUser, migrate.MechanismPlain
+		conn.secret = src.Release + "-" + migrate.LegacySASLUser
+	}
+	if f.SourceSecret != "" {
+		conn.secret = f.SourceSecret
+	}
+	if f.SourceUser != "" {
+		conn.user = f.SourceUser
+	}
+	return conn, nil
+}
+
+// installMirrorLab applies up's refusals, confirms and runs the mirror
+// phase for mirror deploy, then prints the report.
+func installMirrorLab(ctx context.Context, env *migrateEnv, l *migrate.Lab, f *migrateMirrorFlags) error {
 	res := &migrateResolution{Env: env, Lab: l, Opts: l.Options, SourceOperator: "external"}
 	pf := &migratePairFlags{Timeout: f.Timeout, ValuesMirror: f.Values}
 	r := newLabRun(res, pf)

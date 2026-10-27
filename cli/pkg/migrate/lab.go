@@ -335,57 +335,8 @@ func New(o Options) (*Lab, error) {
 	if o.Name == "" {
 		o.Name = DefaultNameFor(sourceVersions(specs), o.To)
 	}
-	if !labName.MatchString(o.Name) || len(o.Name) > maxNameLen {
-		return nil, fmt.Errorf("lab name %q must be lowercase letters, digits and dashes, at most %d characters", o.Name, maxNameLen)
-	}
-	switch o.Policy {
-	case "":
-		o.Policy = PolicyIdentity
-	case PolicyIdentity, PolicyDefault:
-	default:
-		return nil, fmt.Errorf("policy %q: want %s or %s", o.Policy, PolicyIdentity, PolicyDefault)
-	}
-	switch o.Scope {
-	case "":
-		o.Scope = ScopeCluster
-	case ScopeCluster, ScopeNamespace:
-	default:
-		return nil, fmt.Errorf("operator scope %q: want %s or %s", o.Scope, ScopeCluster, ScopeNamespace)
-	}
-	seen := map[string]bool{}
-	for _, t := range o.Topics {
-		if !topicName.MatchString(t) || t == "." || t == ".." {
-			return nil, fmt.Errorf("topic %q is not a valid Kafka topic name", t)
-		}
-		if seen[t] {
-			return nil, fmt.Errorf("topic %q is listed twice", t)
-		}
-		seen[t] = true
-	}
-	switch {
-	case o.Messages == 0:
-		o.Messages = DefaultMessages
-	case o.Messages < 0:
-		return nil, fmt.Errorf("messages %d: want a positive count", o.Messages)
-	}
-	if o.TargetCluster == "" {
-		if o.TargetIsPrimary {
-			o.TargetCluster = DefaultTargetCluster
-		} else {
-			o.TargetCluster = o.Name + "-tgt"
-		}
-	}
-	if o.TargetNamespace == "" {
-		if o.TargetIsPrimary {
-			o.TargetNamespace = DefaultTargetNamespace
-		} else {
-			o.TargetNamespace = "kafka-" + o.Name + "-tgt"
-		}
-	}
-	for _, n := range []struct{ what, v string }{{"target cluster", o.TargetCluster}, {"target namespace", o.TargetNamespace}} {
-		if !labName.MatchString(n.v) || len(n.v) > 63 {
-			return nil, fmt.Errorf("%s %q is not a DNS label", n.what, n.v)
-		}
+	if err := normaliseOptions(&o); err != nil {
+		return nil, err
 	}
 
 	l := &Lab{Options: o}
@@ -417,6 +368,65 @@ func New(o Options) (*Lab, error) {
 		l.Topics = append(l.Topics, s.Topics...)
 	}
 	return l, nil
+}
+
+// normaliseOptions validates and defaults the lab-wide options of o once
+// its sources and name are settled: the name, policy, scope, topics,
+// corpus size and the target's cluster and namespace.
+func normaliseOptions(o *Options) error {
+	if !labName.MatchString(o.Name) || len(o.Name) > maxNameLen {
+		return fmt.Errorf("lab name %q must be lowercase letters, digits and dashes, at most %d characters", o.Name, maxNameLen)
+	}
+	switch o.Policy {
+	case "":
+		o.Policy = PolicyIdentity
+	case PolicyIdentity, PolicyDefault:
+	default:
+		return fmt.Errorf("policy %q: want %s or %s", o.Policy, PolicyIdentity, PolicyDefault)
+	}
+	switch o.Scope {
+	case "":
+		o.Scope = ScopeCluster
+	case ScopeCluster, ScopeNamespace:
+	default:
+		return fmt.Errorf("operator scope %q: want %s or %s", o.Scope, ScopeCluster, ScopeNamespace)
+	}
+	seen := map[string]bool{}
+	for _, t := range o.Topics {
+		if !topicName.MatchString(t) || t == "." || t == ".." {
+			return fmt.Errorf("topic %q is not a valid Kafka topic name", t)
+		}
+		if seen[t] {
+			return fmt.Errorf("topic %q is listed twice", t)
+		}
+		seen[t] = true
+	}
+	switch {
+	case o.Messages == 0:
+		o.Messages = DefaultMessages
+	case o.Messages < 0:
+		return fmt.Errorf("messages %d: want a positive count", o.Messages)
+	}
+	if o.TargetCluster == "" {
+		if o.TargetIsPrimary {
+			o.TargetCluster = DefaultTargetCluster
+		} else {
+			o.TargetCluster = o.Name + "-tgt"
+		}
+	}
+	if o.TargetNamespace == "" {
+		if o.TargetIsPrimary {
+			o.TargetNamespace = DefaultTargetNamespace
+		} else {
+			o.TargetNamespace = "kafka-" + o.Name + "-tgt"
+		}
+	}
+	for _, n := range []struct{ what, v string }{{"target cluster", o.TargetCluster}, {"target namespace", o.TargetNamespace}} {
+		if !labName.MatchString(n.v) || len(n.v) > 63 {
+			return fmt.Errorf("%s %q is not a DNS label", n.what, n.v)
+		}
+	}
+	return nil
 }
 
 // normaliseSources validates and defaults every source of o — the one From

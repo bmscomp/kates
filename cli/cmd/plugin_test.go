@@ -41,8 +41,12 @@ func TestDiscoverPlugins_FindsKatesPrefix(t *testing.T) {
 
 	t.Setenv("HOME", dir)
 	pluginDir := filepath.Join(dir, ".kates", "plugins")
-	os.MkdirAll(pluginDir, 0755)
-	os.WriteFile(filepath.Join(pluginDir, "kates-hello"), []byte("#!/bin/sh\necho hello"), 0755)
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "kates-hello"), []byte("#!/bin/sh\necho hello"), 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	plugins := discoverPlugins()
 	found := false
@@ -63,8 +67,12 @@ func TestDiscoverPlugins_IgnoresNonExecutable(t *testing.T) {
 
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, ".kates", "plugins")
-	os.MkdirAll(pluginDir, 0755)
-	os.WriteFile(filepath.Join(pluginDir, "kates-noperm"), []byte("#!/bin/sh"), 0644)
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "kates-noperm"), []byte("#!/bin/sh"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("HOME", dir)
 
 	plugins := discoverPlugins()

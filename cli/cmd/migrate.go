@@ -508,6 +508,47 @@ func splitTopics(s string) []string {
 // scope and the way out. With several --from values every source is
 // resolved by the same rules and the lab fans them into one release.
 func resolveMigratePair(env *migrateEnv, f *migratePairFlags) (*migrateResolution, error) {
+	froms, err := parseMigratePairFlags(f)
+	if err != nil {
+		return nil, err
+	}
+	from := froms[0]
+
+	res := &migrateResolution{Env: env}
+
+	// The source.
+	resolved := make([]resolvedSource, 0, len(froms))
+	for _, v := range froms {
+		r, err := resolveMigrateSource(env, f, v, res)
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, r)
+	}
+	res.SourceOperator = resolved[0].OperatorLine
+	res.Sources = resolved
+
+	// The target.
+	to, targetIsPrimary, err := resolveMigrateTargetVersion(env, f, res)
+	if err != nil {
+		return nil, err
+	}
+	if !from.Less(to) {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("--from %s is not older than --to %s — MirrorMaker does not care about direction, only the user does", from, to))
+	}
+
+	opts := migratePairOptions(env, f, resolved, to, targetIsPrimary)
+	lab, err := migrate.New(opts)
+	if err != nil {
+		return nil, err
+	}
+	res.Opts, res.Lab = lab.Options, lab
+	return res, nil
+}
+
+// parseMigratePairFlags checks the flag combinations resolveMigratePair
+// accepts and parses every --from value, in order.
+func parseMigratePairFlags(f *migratePairFlags) ([]kafkaversion.Version, error) {
 	if len(f.From) == 0 && f.SourceVersion != "" {
 		f.From = []string{f.SourceVersion}
 	}
@@ -522,7 +563,6 @@ func resolveMigratePair(env *migrateEnv, f *migratePairFlags) (*migrateResolutio
 		}
 		froms = append(froms, v)
 	}
-	from := froms[0]
 	if f.SASL && f.Plaintext {
 		return nil, errors.New("--sasl and --plaintext are mutually exclusive")
 	}
@@ -531,35 +571,29 @@ func resolveMigratePair(env *migrateEnv, f *migratePairFlags) (*migrateResolutio
 	default:
 		return nil, fmt.Errorf("--source-provider %q: want auto, strimzi or legacy", f.SourceProvider)
 	}
+	return froms, nil
+}
 
-	res := &migrateResolution{Env: env}
+// migrateToOutsideWindowHint is the way out of a --to the primary operator
+// cannot run.
+const migrateToOutsideWindowHint = "  A newer target needs a newer operator: kates deploy --strimzi-version <v> (kates versions strimzi lists them);\n" +
+	"  an older one is a source, not a target."
 
-	// The source.
-	resolved := make([]resolvedSource, 0, len(froms))
-	for _, v := range froms {
-		r, err := resolveMigrateSource(env, f, v, res)
-		if err != nil {
-			return nil, err
-		}
-		resolved = append(resolved, r)
-	}
-	provider, mode, other := resolved[0].Provider, resolved[0].Mode, resolved[0].Operator
-	res.SourceOperator = resolved[0].OperatorLine
-	res.Sources = resolved
-
-	// The target.
+// resolveMigrateTargetVersion derives the target's Kafka version from --to
+// and the primary, and whether the target is the primary itself. An
+// additional target is recorded on res as not yet implemented.
+func resolveMigrateTargetVersion(env *migrateEnv, f *migratePairFlags, res *migrateResolution) (kafkaversion.Version, bool, error) {
 	to := env.Target.Version
 	targetIsPrimary := true
 	if f.To != "" {
 		parsed, err := kafkaversion.Parse(f.To)
 		if err != nil {
-			return nil, fmt.Errorf("--to: %w", err)
+			return kafkaversion.Version{}, false, fmt.Errorf("--to: %w", err)
 		}
 		if parsed != env.Target.Version {
 			if !env.Window.Supports(parsed) {
-				return nil, fmt.Errorf("--to %s is not in the primary operator's window (Strimzi %s supports: %s).\n"+
-					"  A newer target needs a newer operator: kates deploy --strimzi-version <v> (kates versions strimzi lists them);\n"+
-					"  an older one is a source, not a target.", parsed, env.StrimziVersion, env.Window)
+				return kafkaversion.Version{}, false, fmt.Errorf("--to %s is not in the primary operator's window (Strimzi %s supports: %s).\n%s",
+					parsed, env.StrimziVersion, env.Window, migrateToOutsideWindowHint)
 			}
 			targetIsPrimary = false
 			res.TargetAdditional = true
@@ -568,18 +602,22 @@ func resolveMigratePair(env *migrateEnv, f *migratePairFlags) (*migrateResolutio
 		to = parsed
 	}
 	if to == (kafkaversion.Version{}) {
-		return nil, errors.New("the target's Kafka version is unknown: pass --to, or deploy the primary first")
+		return kafkaversion.Version{}, false, errors.New("the target's Kafka version is unknown: pass --to, or deploy the primary first")
 	}
-	if !from.Less(to) {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("--from %s is not older than --to %s — MirrorMaker does not care about direction, only the user does", from, to))
-	}
+	return to, targetIsPrimary, nil
+}
 
+// migratePairOptions builds the lab options from the flags, the environment
+// and the resolved sources: the first source is the lab's own, the rest are
+// fanned in through AlsoFrom.
+func migratePairOptions(env *migrateEnv, f *migratePairFlags, resolved []resolvedSource, to kafkaversion.Version, targetIsPrimary bool) migrate.Options {
+	first := resolved[0]
 	opts := migrate.Options{
 		Name:                 f.Name,
-		From:                 from,
+		From:                 first.From,
 		To:                   to,
-		SourceProvider:       provider,
-		SourceMode:           mode,
+		SourceProvider:       first.Provider,
+		SourceMode:           first.Mode,
 		SourceStrimziVersion: f.SourceStrimziVersion,
 		TargetIsPrimary:      targetIsPrimary,
 		Policy:               f.Policy,
@@ -594,8 +632,8 @@ func resolveMigratePair(env *migrateEnv, f *migratePairFlags) (*migrateResolutio
 	if targetIsPrimary {
 		opts.TargetCluster, opts.TargetNamespace = env.Target.Cluster, env.Target.Namespace
 	}
-	if provider == kafkaversion.ProviderStrimzi && f.SourceStrimziVersion == "" && other != nil {
-		opts.SourceStrimziVersion = other.Version
+	if first.Provider == kafkaversion.ProviderStrimzi && f.SourceStrimziVersion == "" && first.Operator != nil {
+		opts.SourceStrimziVersion = first.Operator.Version
 	}
 	for _, r := range resolved[1:] {
 		spec := migrate.SourceSpec{From: r.From, Provider: r.Provider, Mode: r.Mode}
@@ -608,12 +646,7 @@ func resolveMigratePair(env *migrateEnv, f *migratePairFlags) (*migrateResolutio
 		opts.AlsoFrom = append(opts.AlsoFrom, spec)
 	}
 	opts.ImageMirror = imageRegistry()
-	lab, err := migrate.New(opts)
-	if err != nil {
-		return nil, err
-	}
-	res.Opts, res.Lab = lab.Options, lab
-	return res, nil
+	return opts
 }
 
 // resolvedSource is one --from resolved against the environment: who runs

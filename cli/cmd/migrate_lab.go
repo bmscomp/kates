@@ -197,10 +197,34 @@ func discoverLab(ctx context.Context, name string) (*labDiscovery, error) {
 		}
 		byLab[lab] = append(byLab[lab], it)
 	}
+	name, err = pickLabName(byLab, name)
+	if err != nil {
+		return nil, err
+	}
+	d := &labDiscovery{Name: name}
+	var found []*labSource
+	for _, it := range byLab[name] {
+		if src := d.addItem(it); src != nil {
+			found = append(found, src)
+		}
+	}
+	d.Sources = orderLabSources(found, d.legs)
+	for _, src := range d.Sources {
+		if src.Namespace != "" {
+			src.NamespaceOwned = namespaceHasLabel(ctx, src.Namespace, migrate.LabelLab, name)
+		}
+	}
+	d.adoptFirstSource()
+	return d, nil
+}
+
+// pickLabName settles which lab a discovery describes: the one named, which
+// must exist, or the single lab on the cluster when name is empty.
+func pickLabName(byLab map[string][]labItem, name string) (string, error) {
 	if name == "" {
 		switch len(byLab) {
 		case 0:
-			return nil, errors.New("no migration lab found (no resource labelled " + migrate.LabelLab + ") — kates migrate up creates one")
+			return "", errors.New("no migration lab found (no resource labelled " + migrate.LabelLab + ") — kates migrate up creates one")
 		case 1:
 			for n := range byLab {
 				name = n
@@ -211,80 +235,82 @@ func discoverLab(ctx context.Context, name string) (*labDiscovery, error) {
 				names = append(names, n)
 			}
 			sort.Strings(names)
-			return nil, fmt.Errorf("%d migration labs found (%s) — pass --name", len(byLab), strings.Join(names, ", "))
+			return "", fmt.Errorf("%d migration labs found (%s) — pass --name", len(byLab), strings.Join(names, ", "))
 		}
 	}
 	if len(byLab[name]) == 0 {
-		return nil, fmt.Errorf("no migration lab named %q (no resource labelled %s=%s)", name, migrate.LabelLab, name)
+		return "", fmt.Errorf("no migration lab named %q (no resource labelled %s=%s)", name, migrate.LabelLab, name)
 	}
-	d := &labDiscovery{Name: name}
-	var found []*labSource
-	for _, it := range byLab[name] {
-		res := &labResource{
-			Kind: it.Kind, Name: it.Metadata.Name, Namespace: it.Metadata.Namespace,
-			Release: it.Metadata.Labels["app.kubernetes.io/instance"],
-			Role:    it.Metadata.Labels[migrate.LabelRole],
-			Labels:  it.Metadata.Labels,
-		}
-		if res.Release == "" {
-			res.Release = it.Metadata.Annotations["meta.helm.sh/release-name"]
-		}
-		switch strings.ToLower(it.Kind) {
-		case "kafkamirrormaker2":
-			d.Mirror = res
-			d.MirrorRelease, d.MirrorNamespace, d.MirrorCR = res.Release, res.Namespace, res.Name
-			d.readMirrorSpec(it.Spec, it.Metadata.Annotations[migrate.AnnotationLabTopics])
-		case "statefulset":
-			if it.Metadata.Labels["app.kubernetes.io/component"] != "broker" {
-				continue // the ZooKeeper StatefulSet carries the same labels
-			}
-			src := &labSource{
-				Resource: res, Release: res.Release, Namespace: res.Namespace,
-				Provider: kafkaversion.ProviderLegacy,
-				Mode:     it.Metadata.Labels["kates.io/kafka-mode"],
-				Alias:    it.Metadata.Labels[migrate.LabelSourceAlias],
-			}
-			if v, err := kafkaversion.Parse(it.Metadata.Labels["app.kubernetes.io/version"]); err == nil {
-				src.Version = v
-			}
-			found = append(found, src)
-		case "kafka":
-			switch res.Role {
-			case migrate.RoleTarget:
-				d.Target = res
-			default:
-				src := &labSource{
-					Resource: res, Release: res.Release, Namespace: res.Namespace,
-					Provider: kafkaversion.ProviderStrimzi,
-					Alias:    it.Metadata.Labels[migrate.LabelSourceAlias],
-				}
-				if v, err := kafkaversion.Parse(specKafkaVersion(it.Spec)); err == nil {
-					src.Version = v
-				}
-				found = append(found, src)
-			}
-		}
+	return name, nil
+}
+
+// addItem records one labelled resource of the lab on d: the mirror and the
+// target directly, a source workload as the returned labSource (nil for
+// anything that is not one).
+func (d *labDiscovery) addItem(it labItem) *labSource {
+	res := &labResource{
+		Kind: it.Kind, Name: it.Metadata.Name, Namespace: it.Metadata.Namespace,
+		Release: it.Metadata.Labels["app.kubernetes.io/instance"],
+		Role:    it.Metadata.Labels[migrate.LabelRole],
+		Labels:  it.Metadata.Labels,
 	}
-	d.Sources = orderLabSources(found, d.legs)
-	for _, src := range d.Sources {
-		if src.Namespace != "" {
-			src.NamespaceOwned = namespaceHasLabel(ctx, src.Namespace, migrate.LabelLab, name)
-		}
+	if res.Release == "" {
+		res.Release = it.Metadata.Annotations["meta.helm.sh/release-name"]
 	}
-	if len(d.Sources) > 0 {
-		first := d.Sources[0]
-		d.Source = first.Resource
-		d.SourceRelease, d.SourceNamespace = first.Release, first.Namespace
-		d.SourceProvider, d.SourceVersion, d.SourceMode = first.Provider, first.Version, first.Mode
-		if first.Bootstrap != "" {
-			d.SourceBootstrap = first.Bootstrap
+	switch strings.ToLower(it.Kind) {
+	case "kafkamirrormaker2":
+		d.Mirror = res
+		d.MirrorRelease, d.MirrorNamespace, d.MirrorCR = res.Release, res.Namespace, res.Name
+		d.readMirrorSpec(it.Spec, it.Metadata.Annotations[migrate.AnnotationLabTopics])
+	case "statefulset":
+		if it.Metadata.Labels["app.kubernetes.io/component"] != "broker" {
+			return nil // the ZooKeeper StatefulSet carries the same labels
 		}
-		if first.Alias != "" {
-			d.SourceAlias = first.Alias
+		src := &labSource{
+			Resource: res, Release: res.Release, Namespace: res.Namespace,
+			Provider: kafkaversion.ProviderLegacy,
+			Mode:     it.Metadata.Labels["kates.io/kafka-mode"],
+			Alias:    it.Metadata.Labels[migrate.LabelSourceAlias],
 		}
-		d.SourceNamespaceOwned = first.NamespaceOwned
+		if v, err := kafkaversion.Parse(it.Metadata.Labels["app.kubernetes.io/version"]); err == nil {
+			src.Version = v
+		}
+		return src
+	case "kafka":
+		if res.Role == migrate.RoleTarget {
+			d.Target = res
+			return nil
+		}
+		src := &labSource{
+			Resource: res, Release: res.Release, Namespace: res.Namespace,
+			Provider: kafkaversion.ProviderStrimzi,
+			Alias:    it.Metadata.Labels[migrate.LabelSourceAlias],
+		}
+		if v, err := kafkaversion.Parse(specKafkaVersion(it.Spec)); err == nil {
+			src.Version = v
+		}
+		return src
 	}
-	return d, nil
+	return nil
+}
+
+// adoptFirstSource copies the first ordered source onto the discovery's
+// single-source fields, which the one-source commands read.
+func (d *labDiscovery) adoptFirstSource() {
+	if len(d.Sources) == 0 {
+		return
+	}
+	first := d.Sources[0]
+	d.Source = first.Resource
+	d.SourceRelease, d.SourceNamespace = first.Release, first.Namespace
+	d.SourceProvider, d.SourceVersion, d.SourceMode = first.Provider, first.Version, first.Mode
+	if first.Bootstrap != "" {
+		d.SourceBootstrap = first.Bootstrap
+	}
+	if first.Alias != "" {
+		d.SourceAlias = first.Alias
+	}
+	d.SourceNamespaceOwned = first.NamespaceOwned
 }
 
 // orderLabSources matches the source workloads to the mirror's legs — by
@@ -561,6 +587,36 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 	if provider == "" {
 		provider = kafkaversion.ProviderLegacy
 	}
+	opts, err := labOptionsFromDiscovery(d, env, provider)
+	if err != nil {
+		return nil, err
+	}
+	l, err := migrate.New(opts)
+	if err != nil {
+		return nil, fmt.Errorf("lab %s: %w", d.Name, err)
+	}
+	l.SourcePassword = ""
+	applyDiscoveredSource(l, d, provider)
+	applyDiscoveredExtras(l, d)
+	l.Topics = nil
+	for _, s := range l.Sources() {
+		l.Topics = append(l.Topics, s.Topics...)
+	}
+	return l, nil
+}
+
+// firstLabSource is the discovery's first ordered source, nil when it has
+// none.
+func (d *labDiscovery) firstLabSource() *labSource {
+	if len(d.Sources) > 0 {
+		return d.Sources[0]
+	}
+	return nil
+}
+
+// labOptionsFromDiscovery is the migrate.Options New rebuilds a discovered
+// lab from.
+func labOptionsFromDiscovery(d *labDiscovery, env *migrateEnv, provider kafkaversion.Provider) (migrate.Options, error) {
 	opts := migrate.Options{
 		Name:            d.Name,
 		From:            d.SourceVersion,
@@ -578,7 +634,7 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 	// the lab's to derive — each leg's topics come back off the CR below.
 	for _, src := range d.Sources[1:] {
 		if src.Version == (kafkaversion.Version{}) {
-			return nil, fmt.Errorf("lab %s: the Kafka version of source %s is unknown (no app.kubernetes.io/version on its StatefulSet)", d.Name, src.Alias)
+			return migrate.Options{}, fmt.Errorf("lab %s: the Kafka version of source %s is unknown (no app.kubernetes.io/version on its StatefulSet)", d.Name, src.Alias)
 		}
 		spec := migrate.SourceSpec{From: src.Version, Provider: src.Provider}
 		if spec.Provider == "" {
@@ -595,10 +651,7 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 	// The CR's authentication block for the source says whether the mirror
 	// reads it over SASL; a CR that lists no clusters is judged by the legacy
 	// chart's SASL port, 9094.
-	var first *labSource
-	if len(d.Sources) > 0 {
-		first = d.Sources[0]
-	}
+	first := d.firstLabSource()
 	sourceSASL := strings.HasSuffix(d.SourceBootstrap, ":9094")
 	if first != nil && first.Auth.Known {
 		sourceSASL = first.Auth.SASL
@@ -608,11 +661,12 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 		opts.SourcePassword = "existing" // the Secret exists; the lab never rewrites it
 	}
 	opts.ImageMirror = imageRegistry()
-	l, err := migrate.New(opts)
-	if err != nil {
-		return nil, fmt.Errorf("lab %s: %w", d.Name, err)
-	}
-	l.SourcePassword = ""
+	return opts, nil
+}
+
+// applyDiscoveredSource overwrites what New derived for the first source
+// and the mirror with what the cluster says they are.
+func applyDiscoveredSource(l *migrate.Lab, d *labDiscovery, provider kafkaversion.Provider) {
 	if d.SourceRelease != "" {
 		l.SourceRelease = d.SourceRelease
 		l.SourceCluster = d.SourceRelease
@@ -621,6 +675,7 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 		}
 	}
 	// The credential the CR really uses, when it names one.
+	first := d.firstLabSource()
 	if first != nil && first.Auth.Secret != "" {
 		l.SourceSecret = first.Auth.Secret
 		if first.Auth.User != "" {
@@ -643,49 +698,50 @@ func labFromDiscovery(d *labDiscovery, env *migrateEnv) (*migrate.Lab, error) {
 	if d.SourceAlias != "" {
 		l.SourceAlias = d.SourceAlias
 	}
-	if len(d.Sources) > 0 && len(d.Sources[0].Topics) > 0 {
-		l.SourceTopics = d.Sources[0].Topics
+	if first != nil && len(first.Topics) > 0 {
+		l.SourceTopics = first.Topics
 	}
-	// The lab's further sources are what the cluster says they are, not what
-	// New derived: the cluster is the record.
+}
+
+// applyDiscoveredExtras makes the lab's further sources what the cluster
+// says they are, not what New derived: the cluster is the record.
+func applyDiscoveredExtras(l *migrate.Lab, d *labDiscovery) {
 	for i, extra := range l.ExtraSources {
 		if i+1 >= len(d.Sources) {
 			break
 		}
-		src := d.Sources[i+1]
-		if src.Alias != "" {
-			extra.Alias = src.Alias
-		}
-		if src.Release != "" {
-			extra.Release, extra.Cluster = src.Release, src.Release
-			if extra.SASL && extra.Provider == kafkaversion.ProviderLegacy {
-				extra.Secret = extra.Release + "-" + migrate.LegacySASLUser
-			}
-		}
-		if src.Namespace != "" {
-			extra.Namespace = src.Namespace
-		}
-		if src.Bootstrap != "" {
-			extra.Bootstrap = src.Bootstrap
-			extra.SASL = src.usesSASL()
-			if extra.SASL && extra.Provider == kafkaversion.ProviderLegacy {
-				extra.User = migrate.LegacySASLUser
-				extra.Secret = extra.Release + "-" + migrate.LegacySASLUser
-			}
-			if src.Auth.Secret != "" {
-				extra.User, extra.Secret = src.Auth.User, src.Auth.Secret
-			}
-		}
-		if len(src.Topics) > 0 {
-			extra.Topics = src.Topics
-		}
-		extra.Password = ""
+		applyDiscoveredExtra(extra, d.Sources[i+1])
 	}
-	l.Topics = nil
-	for _, s := range l.Sources() {
-		l.Topics = append(l.Topics, s.Topics...)
+}
+
+func applyDiscoveredExtra(extra *migrate.Source, src *labSource) {
+	if src.Alias != "" {
+		extra.Alias = src.Alias
 	}
-	return l, nil
+	if src.Release != "" {
+		extra.Release, extra.Cluster = src.Release, src.Release
+		if extra.SASL && extra.Provider == kafkaversion.ProviderLegacy {
+			extra.Secret = extra.Release + "-" + migrate.LegacySASLUser
+		}
+	}
+	if src.Namespace != "" {
+		extra.Namespace = src.Namespace
+	}
+	if src.Bootstrap != "" {
+		extra.Bootstrap = src.Bootstrap
+		extra.SASL = src.usesSASL()
+		if extra.SASL && extra.Provider == kafkaversion.ProviderLegacy {
+			extra.User = migrate.LegacySASLUser
+			extra.Secret = extra.Release + "-" + migrate.LegacySASLUser
+		}
+		if src.Auth.Secret != "" {
+			extra.User, extra.Secret = src.Auth.User, src.Auth.Secret
+		}
+	}
+	if len(src.Topics) > 0 {
+		extra.Topics = src.Topics
+	}
+	extra.Password = ""
 }
 
 // ── status ───────────────────────────────────────────────────────────────

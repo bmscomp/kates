@@ -183,56 +183,76 @@ func runMigrateTarget(ctx context.Context, o migrateTargetOptions, sub, arg stri
 	}
 	switch sub {
 	case "offsets":
-		per, sum, err := podrun.ParseTopicOffsets(out, arg)
-		if err != nil {
-			if errors.Is(err, podrun.ErrNoOffsets) {
-				return fmt.Errorf("no offsets returned for %s on %s — does the topic exist, and can %s read it?", arg, c.bootstrap, o.User)
-			}
-			return err
-		}
-		if outputMode == "json" {
-			output.JSON(map[string]any{"topic": arg, "partitions": per, "endOffsets": sum})
-			return nil
-		}
-		if o.Partitions {
-			parts := make([]int, 0, len(per))
-			for p := range per {
-				parts = append(parts, p)
-			}
-			sort.Ints(parts)
-			for _, p := range parts {
-				fmt.Fprintf(output.Out, "%s:%d:%d\n", arg, p, per[p])
-			}
-		}
-		fmt.Fprintf(output.Out, "%s end offsets: %d\n", arg, sum)
+		return printTargetOffsets(c, o, arg, out)
 	case "group":
-		rows := podrun.ParseGroupDescribe(out)
-		if outputMode == "json" {
-			output.JSON(map[string]any{"group": arg, "partitions": rows})
-			return nil
-		}
-		if len(rows) == 0 {
-			migrateHint(strings.TrimSpace(out))
-			return nil
-		}
-		table := make([][]string, 0, len(rows))
-		for _, r := range rows {
-			table = append(table, []string{r.Topic, strconv.Itoa(r.Partition), offsetCell(r.CurrentOffset), offsetCell(r.LogEndOffset), offsetCell(r.Lag)})
-		}
-		output.Table([]string{"TOPIC", "PARTITION", "CURRENT-OFFSET", "LOG-END-OFFSET", "LAG"}, table)
+		printTargetGroup(arg, out)
+		return nil
 	default:
-		names := strings.Fields(out)
-		sort.Strings(names)
-		if outputMode == "json" {
-			output.JSON(map[string]any{sub: names})
-			return nil
+		return printTargetNames(c, o, sub, out)
+	}
+}
+
+// printTargetOffsets prints `target offsets`: the topic's end offsets,
+// summed, and per partition with --partitions.
+func printTargetOffsets(c *targetClient, o migrateTargetOptions, topic, out string) error {
+	per, sum, err := podrun.ParseTopicOffsets(out, topic)
+	if err != nil {
+		if errors.Is(err, podrun.ErrNoOffsets) {
+			return fmt.Errorf("no offsets returned for %s on %s — does the topic exist, and can %s read it?", topic, c.bootstrap, o.User)
 		}
-		if len(names) == 0 {
-			return fmt.Errorf("no output from the broker at %s as %s", c.bootstrap, o.User)
+		return err
+	}
+	if outputMode == "json" {
+		output.JSON(map[string]any{"topic": topic, "partitions": per, "endOffsets": sum})
+		return nil
+	}
+	if o.Partitions {
+		parts := make([]int, 0, len(per))
+		for p := range per {
+			parts = append(parts, p)
 		}
-		for _, n := range names {
-			fmt.Fprintln(output.Out, n)
+		sort.Ints(parts)
+		for _, p := range parts {
+			fmt.Fprintf(output.Out, "%s:%d:%d\n", topic, p, per[p])
 		}
+	}
+	fmt.Fprintf(output.Out, "%s end offsets: %d\n", topic, sum)
+	return nil
+}
+
+// printTargetGroup prints `target group`: the group's offsets and lag per
+// partition, or the tool's own words when it lists none.
+func printTargetGroup(group, out string) {
+	rows := podrun.ParseGroupDescribe(out)
+	if outputMode == "json" {
+		output.JSON(map[string]any{"group": group, "partitions": rows})
+		return
+	}
+	if len(rows) == 0 {
+		migrateHint(strings.TrimSpace(out))
+		return
+	}
+	table := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		table = append(table, []string{r.Topic, strconv.Itoa(r.Partition), offsetCell(r.CurrentOffset), offsetCell(r.LogEndOffset), offsetCell(r.Lag)})
+	}
+	output.Table([]string{"TOPIC", "PARTITION", "CURRENT-OFFSET", "LOG-END-OFFSET", "LAG"}, table)
+}
+
+// printTargetNames prints `target topics` and `target groups`: the names,
+// sorted.
+func printTargetNames(c *targetClient, o migrateTargetOptions, sub, out string) error {
+	names := strings.Fields(out)
+	sort.Strings(names)
+	if outputMode == "json" {
+		output.JSON(map[string]any{sub: names})
+		return nil
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("no output from the broker at %s as %s", c.bootstrap, o.User)
+	}
+	for _, n := range names {
+		fmt.Fprintln(output.Out, n)
 	}
 	return nil
 }

@@ -33,7 +33,7 @@ func jsonHandler(t *testing.T, wantMethod, wantPath string, response interface{}
 			t.Errorf("path = %s, want prefix %s", r.URL.Path, wantPath)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -252,7 +252,7 @@ func TestBrokerConfigs(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/api/cluster/brokers/0/configs") {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode([]BrokerConfig{
+		_ = json.NewEncoder(w).Encode([]BrokerConfig{
 			{Name: "min.insync.replicas", Value: "2", Source: "STATIC_BROKER_CONFIG", ReadOnly: true},
 			{Name: "log.dirs", Value: "/var/lib/kafka", Source: "STATIC_BROKER_CONFIG", ReadOnly: true},
 		})
@@ -322,7 +322,7 @@ func TestListTests(t *testing.T) {
 		if r.URL.Query().Get("type") != "LOAD" {
 			t.Errorf("type = %s", r.URL.Query().Get("type"))
 		}
-		json.NewEncoder(w).Encode(PagedTests{
+		_ = json.NewEncoder(w).Encode(PagedTests{
 			Content:    []TestRun{{ID: "run-1", TestType: "LOAD", Status: "DONE"}},
 			Page:       0,
 			Size:       10,
@@ -347,7 +347,7 @@ func TestListTests_WithStatusFilter(t *testing.T) {
 		if r.URL.Query().Get("status") != "RUNNING" {
 			t.Errorf("status = %s", r.URL.Query().Get("status"))
 		}
-		json.NewEncoder(w).Encode(PagedTests{})
+		_ = json.NewEncoder(w).Encode(PagedTests{})
 	})
 	_, err := c.ListTests(context.Background(), "", "RUNNING", 0, 20)
 	if err != nil {
@@ -381,11 +381,13 @@ func TestCreateTest(t *testing.T) {
 			t.Errorf("Content-Type = %q", r.Header.Get("Content-Type"))
 		}
 		var req CreateTestRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
 		if req.TestType != "LOAD" {
 			t.Errorf("TestType = %q", req.TestType)
 		}
-		json.NewEncoder(w).Encode(TestRun{ID: "new-run", TestType: "LOAD", Status: "PENDING"})
+		_ = json.NewEncoder(w).Encode(TestRun{ID: "new-run", TestType: "LOAD", Status: "PENDING"})
 	})
 	resp, err := c.CreateTest(context.Background(), &CreateTestRequest{
 		TestType: "LOAD",
@@ -656,7 +658,7 @@ func TestCompare(t *testing.T) {
 		if got := r.URL.Query().Get("ids"); got != "a,b" {
 			t.Errorf("ids = %q, want %q (raw query %s)", got, "a,b", r.URL.RawQuery)
 		}
-		w.Write([]byte(`{"comparison": "data"}`))
+		_, _ = w.Write([]byte(`{"comparison": "data"}`))
 	})
 	raw, err := c.Compare(context.Background(), "a,b")
 	if err != nil {
@@ -673,7 +675,7 @@ func TestExportCSV(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/report/csv") {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		w.Write([]byte(csvData))
+		_, _ = w.Write([]byte(csvData))
 	})
 	resp, err := c.ExportCSV(context.Background(), "run-1")
 	if err != nil {
@@ -690,7 +692,7 @@ func TestExportJUnit(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/report/junit") {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		w.Write([]byte(junitXML))
+		_, _ = w.Write([]byte(junitXML))
 	})
 	resp, err := c.ExportJUnit(context.Background(), "run-1")
 	if err != nil {
@@ -736,11 +738,13 @@ func TestCreateSchedule(t *testing.T) {
 			t.Errorf("method = %s", r.Method)
 		}
 		var req CreateScheduleRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
 		if req.Name != "weekly" {
 			t.Errorf("Name = %q", req.Name)
 		}
-		json.NewEncoder(w).Encode(Schedule{ID: "s2", Name: "weekly", Enabled: true})
+		_ = json.NewEncoder(w).Encode(Schedule{ID: "s2", Name: "weekly", Enabled: true})
 	})
 	resp, err := c.CreateSchedule(context.Background(), &CreateScheduleRequest{
 		Name: "weekly", CronExpression: "0 0 * * 0", Enabled: true,
@@ -758,7 +762,7 @@ func TestUpdateSchedule(t *testing.T) {
 		if r.Method != "PUT" {
 			t.Errorf("method = %s, want PUT", r.Method)
 		}
-		json.NewEncoder(w).Encode(Schedule{ID: "s1", Name: "updated", Enabled: false})
+		_ = json.NewEncoder(w).Encode(Schedule{ID: "s1", Name: "updated", Enabled: false})
 	})
 	resp, err := c.UpdateSchedule(context.Background(), "s1", &CreateScheduleRequest{
 		Name: "updated", CronExpression: "0 3 * * *", Enabled: false,
@@ -805,7 +809,7 @@ func TestTrends(t *testing.T) {
 		if q.Get("phase") != "" {
 			t.Errorf("phase should be empty, got %s", q.Get("phase"))
 		}
-		json.NewEncoder(w).Encode(TrendResponse{
+		_ = json.NewEncoder(w).Encode(TrendResponse{
 			Baseline:    10.5,
 			DataPoints:  []DataPoint{{RunID: "r1", Value: 11.0}},
 			Regressions: []Regression{{RunID: "r2", Value: 25.0, Baseline: 10.5, DeviationPercent: 138}},
@@ -832,7 +836,7 @@ func TestTrends_WithPhase(t *testing.T) {
 		if q.Get("phase") != "spike" {
 			t.Errorf("phase = %q, want spike", q.Get("phase"))
 		}
-		json.NewEncoder(w).Encode(TrendResponse{
+		_ = json.NewEncoder(w).Encode(TrendResponse{
 			Phase:      "spike",
 			Baseline:   8.0,
 			DataPoints: []DataPoint{{RunID: "r1", Value: 9.5}},
@@ -859,7 +863,7 @@ func TestTrendPhases(t *testing.T) {
 		if q.Get("type") != "ENDURANCE" {
 			t.Errorf("type = %s", q.Get("type"))
 		}
-		json.NewEncoder(w).Encode([]string{"warmup", "sustained", "cooldown"})
+		_ = json.NewEncoder(w).Encode([]string{"warmup", "sustained", "cooldown"})
 	})
 	phases, err := c.TrendPhases(context.Background(), "ENDURANCE", 30)
 	if err != nil {
@@ -878,7 +882,7 @@ func TestTrendBreakdown(t *testing.T) {
 		if !strings.HasPrefix(r.URL.Path, "/api/trends/breakdown") {
 			t.Errorf("path = %s, want /api/trends/breakdown", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode(PhaseTrendResponse{
+		_ = json.NewEncoder(w).Encode(PhaseTrendResponse{
 			TestType: "SPIKE",
 			Metric:   "p99LatencyMs",
 			Phases: []PhaseTrend{
@@ -907,7 +911,7 @@ func TestReportBrokers(t *testing.T) {
 		if r.URL.Path != "/api/tests/abc123/report/brokers" {
 			t.Errorf("path = %s, want /api/tests/abc123/report/brokers", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode([]BrokerMetricsResponse{
+		_ = json.NewEncoder(w).Encode([]BrokerMetricsResponse{
 			{
 				BrokerID:                  0,
 				Host:                      "broker-0",
@@ -987,7 +991,7 @@ func TestReportSnapshot(t *testing.T) {
 		if r.URL.Path != "/api/tests/abc123/report/snapshot" {
 			t.Errorf("path = %s, want /api/tests/abc123/report/snapshot", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode(ClusterSnapshotResponse{
+		_ = json.NewEncoder(w).Encode(ClusterSnapshotResponse{
 			ClusterID:    "test-cluster-123",
 			BrokerCount:  3,
 			ControllerID: 0,
@@ -1032,7 +1036,7 @@ func TestBrokerTrend(t *testing.T) {
 		if q.Get("type") != "LOAD" {
 			t.Errorf("type = %s, want LOAD", q.Get("type"))
 		}
-		json.NewEncoder(w).Encode(BrokerTrendResponse{
+		_ = json.NewEncoder(w).Encode(BrokerTrendResponse{
 			BrokerID: 1,
 			TestType: "LOAD",
 			Metric:   "avgThroughputRecPerSec",
@@ -1068,7 +1072,7 @@ func TestResilience(t *testing.T) {
 		if r.Method != "POST" {
 			t.Errorf("method = %s", r.Method)
 		}
-		json.NewEncoder(w).Encode(ResilienceResult{
+		_ = json.NewEncoder(w).Encode(ResilienceResult{
 			Status: "COMPLETED",
 			ChaosOutcome: &ChaosOutcome{
 				ExperimentName: "pod-kill", Verdict: "Pass", ChaosDuration: json.Number("60"),
@@ -1183,7 +1187,7 @@ func TestPostWithTimeout_DeadlineReplacesClientTimeout(t *testing.T) {
 func TestHTTPError_4xx(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(APIError{Status: 404, Error: "Not Found", Message: "test not found"})
+		_ = json.NewEncoder(w).Encode(APIError{Status: 404, Error: "Not Found", Message: "test not found"})
 	})
 	_, err := c.Health(context.Background())
 	if err == nil {
@@ -1197,7 +1201,7 @@ func TestHTTPError_4xx(t *testing.T) {
 func TestHTTPError_4xx_PlainText(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("bad request body"))
+		_, _ = w.Write([]byte("bad request body"))
 	})
 	_, err := c.Health(context.Background())
 	if err == nil {
@@ -1213,7 +1217,7 @@ func TestHTTPError_5xx_NoRetry(t *testing.T) {
 	c, _ := testServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("server error"))
+		_, _ = w.Write([]byte("server error"))
 	})
 	c.MaxRetries = 1
 	_, err := c.Health(context.Background())
@@ -1306,7 +1310,9 @@ func TestKafkaCreateTopic(t *testing.T) {
 			t.Errorf("path = %s, want /api/kafka/topics", r.URL.Path)
 		}
 		var req CreateTopicRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
 		if req.Name != "my-new-topic" {
 			t.Errorf("Name = %q", req.Name)
 		}
@@ -1314,7 +1320,7 @@ func TestKafkaCreateTopic(t *testing.T) {
 			t.Errorf("Partitions = %d", req.Partitions)
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"name": "my-new-topic", "partitions": 6, "replicationFactor": 3,
 		})
 	})
@@ -1338,11 +1344,13 @@ func TestKafkaAlterTopic(t *testing.T) {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		var req AlterTopicRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
 		if req.Configs["retention.ms"] != "172800000" {
 			t.Errorf("retention.ms = %q", req.Configs["retention.ms"])
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"name": "my-topic", "partitions": 3,
 		})
 	})
@@ -1381,7 +1389,7 @@ func TestBaselineSet(t *testing.T) {
 		if r.URL.Path != "/api/tests/baselines/LOAD" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode(BaselineEntry{
+		_ = json.NewEncoder(w).Encode(BaselineEntry{
 			TestType: "LOAD", RunID: "abc123", SetAt: "2025-01-01T00:00:00Z",
 		})
 	})
@@ -1402,7 +1410,7 @@ func TestBaselineGet(t *testing.T) {
 		if r.URL.Path != "/api/tests/baselines/STRESS" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode(BaselineEntry{
+		_ = json.NewEncoder(w).Encode(BaselineEntry{
 			TestType: "STRESS", RunID: "def456", SetAt: "2025-02-01T00:00:00Z",
 		})
 	})
@@ -1420,7 +1428,7 @@ func TestBaselineList(t *testing.T) {
 		if r.URL.Path != "/api/tests/baselines" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode([]BaselineEntry{
+		_ = json.NewEncoder(w).Encode([]BaselineEntry{
 			{TestType: "LOAD", RunID: "r1"},
 			{TestType: "STRESS", RunID: "r2"},
 		})
@@ -1456,7 +1464,7 @@ func TestReportRegression(t *testing.T) {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		delta := 15.5
-		json.NewEncoder(w).Encode(RegressionReport{
+		_ = json.NewEncoder(w).Encode(RegressionReport{
 			RunID:              "abc123",
 			BaselineID:         "base1",
 			TestType:           "LOAD",
@@ -1487,7 +1495,7 @@ func TestTuningTypes(t *testing.T) {
 		if r.URL.Path != "/api/tests/tuning/types" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode([]TuningTypeInfo{
+		_ = json.NewEncoder(w).Encode([]TuningTypeInfo{
 			{Type: "TUNE_COMPRESSION", Parameter: "compression.type", Steps: 5, Description: "Benchmarks codecs"},
 			{Type: "TUNE_BATCHING", Parameter: "batch.size × linger.ms", Steps: 6, Description: "Sweeps batching"},
 		})

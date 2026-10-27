@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -61,166 +63,193 @@ const helmListJSON = `[
 {"name":"kafka","namespace":"kafka","revision":"1","status":"deployed","chart":"kafka-cluster-0.9.0","app_version":"4.3.0"}
 ]`
 
+// operatorView is what TestInstalledOperators asserts of one Operator: every
+// field, the window as a string and whether kates owns it.
+type operatorView struct {
+	Namespace, Name, Version, Image, Scope string
+	Watches                                []string
+	Window                                 string
+	Release, AppVersion                    string
+	HelmRelease, HelmChart                 string
+	Foreign                                bool
+}
+
+func viewOperators(ops []Operator) []operatorView {
+	out := make([]operatorView, 0, len(ops))
+	for _, o := range ops {
+		out = append(out, operatorView{
+			Namespace: o.Namespace, Name: o.Name, Version: o.Version, Image: o.Image, Scope: o.Scope,
+			Watches: o.Watches, Window: o.Window.String(),
+			Release: o.Release, AppVersion: o.AppVersion,
+			HelmRelease: o.HelmRelease, HelmChart: o.HelmChart,
+			Foreign: o.IsForeign(),
+		})
+	}
+	return out
+}
+
+const (
+	listOperatorPods  = "kubectl get pods -A -l strimzi.io/kind=cluster-operator -o json"
+	helmListAll       = "helm list -A -o json"
+	getPrimaryDeploy  = "kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json"
+	getLegacy41Deploy = "kubectl get deployment -n kafka-legacy41 strimzi-cluster-operator -o json"
+	getVendorDeploy   = "kubectl get deployment -n vendor-ops strimzi-cluster-operator -o json"
+)
+
+// installedCase is one cluster InstalledOperators reads: what each command
+// prints or fails with, and what it must report.
+type installedCase struct {
+	name    string
+	outputs map[string]string
+	errs    map[string]error
+	// wantErr is a substring the error must contain; anyErr accepts any error.
+	wantErr string
+	anyErr  bool
+	// wantCalls, when set, is the exact command sequence.
+	wantCalls []string
+	want      []operatorView
+	wantShape ScopeShape
+}
+
+func installedOperatorCases() []installedCase {
+	primaryPod := operatorPod("strimzi-operator", "strimzi-cluster-operator", "5d8f9c7b6", "abcde")
+	primaryDeploy := operatorDeployment("strimzi-operator", "strimzi-cluster-operator", "quay.io/strimzi/operator:1.1.0", `"value": "*"`, imagesEnv110)
+	primary := operatorView{
+		Namespace: "strimzi-operator", Name: "strimzi-cluster-operator", Version: "1.1.0",
+		Image: "quay.io/strimzi/operator:1.1.0", Scope: ScopeCluster, Watches: []string{"*"},
+		Window: "4.2.0 4.2.1 4.3.0",
+	}
+	kated := primary
+	kated.Release, kated.AppVersion = "strimzi-operator", "1.1.0"
+	kated.HelmRelease, kated.HelmChart = "strimzi-operator", "strimzi-operator-0.1.0"
+	foreign := primary
+	foreign.Foreign = true
+	upstream := primary
+	upstream.Version, upstream.Image, upstream.Window = "0.48.0", "quay.io/strimzi/operator:0.48.0", "4.1.0 4.1.1 4.1.2 4.2.0"
+	upstream.HelmRelease, upstream.HelmChart, upstream.Foreign = "strimzi-operator", "strimzi-kafka-operator-0.48.0", true
+	return []installedCase{
+		{
+			name: "cluster-wide primary, co-located additional, foreign",
+			outputs: map[string]string{
+				listOperatorPods: podList(
+					primaryPod,
+					operatorPod("kafka-legacy41", "strimzi-cluster-operator", "7f6d5c4b3", "zzzzz"),
+					operatorPod("vendor-ops", "strimzi-cluster-operator", "1a2b3c4d5", "qqqqq"),
+				),
+				getPrimaryDeploy:  primaryDeploy,
+				getLegacy41Deploy: operatorDeployment("kafka-legacy41", "strimzi-cluster-operator", "quay.io/strimzi/operator:1.0.1", `"valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.namespace"}}`, imagesEnv101),
+				getVendorDeploy:   operatorDeployment("vendor-ops", "strimzi-cluster-operator", "registry.vendor.example:5000/strimzi/operator:1.0.0", `"value": "team-a, team-b,"`, imagesEnv101),
+				helmListAll:       helmListJSON,
+			},
+			wantCalls: []string{listOperatorPods, getPrimaryDeploy, getLegacy41Deploy, getVendorDeploy, helmListAll},
+			want: []operatorView{
+				{
+					Namespace: "kafka-legacy41", Name: "strimzi-cluster-operator", Version: "1.0.1",
+					Image: "quay.io/strimzi/operator:1.0.1", Scope: ScopeNamespaces, Watches: []string{"kafka-legacy41"},
+					Window: "4.1.0 4.1.1 4.1.2 4.2.0", Release: "strimzi-operator", AppVersion: "1.0.1",
+					HelmRelease: "strimzi-operator", HelmChart: "strimzi-operator-0.1.0",
+				},
+				kated,
+				{
+					Namespace: "vendor-ops", Name: "strimzi-cluster-operator", Version: "1.0.0",
+					Image: "registry.vendor.example:5000/strimzi/operator:1.0.0", Scope: ScopeNamespaces, Watches: []string{"team-a", "team-b"},
+					Window: "4.1.0 4.1.1 4.1.2 4.2.0", Foreign: true,
+				},
+			},
+			wantShape: ShapeMixed,
+		},
+		{
+			name:      "no operator",
+			outputs:   map[string]string{listOperatorPods: podList()},
+			wantCalls: []string{listOperatorPods},
+			want:      []operatorView{},
+			wantShape: ShapeNone,
+		},
+		{
+			name: "upstream Helm release is discoverable but still foreign to kates",
+			outputs: map[string]string{
+				listOperatorPods: podList(primaryPod),
+				getPrimaryDeploy: operatorDeployment("strimzi-operator", "strimzi-cluster-operator", "quay.io/strimzi/operator:0.48.0", `"value": "*"`, imagesEnv101),
+				helmListAll:      `[{"name":"strimzi-operator","namespace":"strimzi-operator","chart":"strimzi-kafka-operator-0.48.0","app_version":"0.48.0"}]`,
+			},
+			want: []operatorView{upstream},
+		},
+		{
+			name: "rolling update: two pods, one Deployment",
+			outputs: map[string]string{
+				listOperatorPods: podList(primaryPod, operatorPod("strimzi-operator", "strimzi-cluster-operator", "6e9a0d8c7", "fghij")),
+				getPrimaryDeploy: primaryDeploy,
+				helmListAll:      `[]`,
+			},
+			want:      []operatorView{foreign},
+			wantShape: ShapeCluster,
+		},
+		{
+			name: "pods without a ReplicaSet owner are ignored",
+			outputs: map[string]string{
+				listOperatorPods: podList(`{"metadata": {"name": "bare", "namespace": "x", "labels": {"strimzi.io/kind": "cluster-operator"}}}`),
+			},
+			want: []operatorView{},
+		},
+		{
+			name:    "pods error",
+			errs:    map[string]error{listOperatorPods: errors.New("kubectl: connection refused")},
+			wantErr: "connection refused",
+		},
+		{
+			name:    "bad pod json",
+			outputs: map[string]string{listOperatorPods: `{"items": [`},
+			anyErr:  true,
+		},
+		{
+			name:    "deployment error",
+			outputs: map[string]string{listOperatorPods: podList(primaryPod)},
+			errs:    map[string]error{getPrimaryDeploy: errors.New("not found")},
+			wantErr: "strimzi-operator/strimzi-cluster-operator",
+		},
+		{
+			name:    "helm error",
+			outputs: map[string]string{listOperatorPods: podList(primaryPod), getPrimaryDeploy: primaryDeploy},
+			errs:    map[string]error{helmListAll: errors.New("helm: boom")},
+			wantErr: "boom",
+		},
+		{
+			name:    "bad helm json",
+			outputs: map[string]string{listOperatorPods: podList(primaryPod), getPrimaryDeploy: primaryDeploy, helmListAll: `nope`},
+			anyErr:  true,
+		},
+	}
+}
+
 func TestInstalledOperators(t *testing.T) {
-	ctx := context.Background()
-	listPods := "kubectl get pods -A -l strimzi.io/kind=cluster-operator -o json"
-	helmList := "helm list -A -o json"
-
-	t.Run("cluster-wide primary, co-located additional, foreign", func(t *testing.T) {
-		r := newFakeRunner(t)
-		r.outputs[listPods] = podList(
-			operatorPod("strimzi-operator", "strimzi-cluster-operator", "5d8f9c7b6", "abcde"),
-			operatorPod("kafka-legacy41", "strimzi-cluster-operator", "7f6d5c4b3", "zzzzz"),
-			operatorPod("vendor-ops", "strimzi-cluster-operator", "1a2b3c4d5", "qqqqq"),
-		)
-		r.outputs["kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json"] =
-			operatorDeployment("strimzi-operator", "strimzi-cluster-operator", "quay.io/strimzi/operator:1.1.0", `"value": "*"`, imagesEnv110)
-		r.outputs["kubectl get deployment -n kafka-legacy41 strimzi-cluster-operator -o json"] =
-			operatorDeployment("kafka-legacy41", "strimzi-cluster-operator", "quay.io/strimzi/operator:1.0.1", `"valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.namespace"}}`, imagesEnv101)
-		r.outputs["kubectl get deployment -n vendor-ops strimzi-cluster-operator -o json"] =
-			operatorDeployment("vendor-ops", "strimzi-cluster-operator", "registry.vendor.example:5000/strimzi/operator:1.0.0", `"value": "team-a, team-b,"`, imagesEnv101)
-		r.outputs[helmList] = helmListJSON
-
-		ops, err := InstalledOperators(ctx, r)
-		if err != nil {
-			t.Fatalf("InstalledOperators: %v", err)
-		}
-		r.assertCalls(
-			listPods,
-			"kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json",
-			"kubectl get deployment -n kafka-legacy41 strimzi-cluster-operator -o json",
-			"kubectl get deployment -n vendor-ops strimzi-cluster-operator -o json",
-			helmList,
-		)
-		if len(ops) != 3 {
-			t.Fatalf("ops = %+v", ops)
-		}
-		legacy, primary, vendor := ops[0], ops[1], ops[2]
-
-		if primary.Namespace != "strimzi-operator" || primary.Name != "strimzi-cluster-operator" || primary.Version != "1.1.0" ||
-			primary.Image != "quay.io/strimzi/operator:1.1.0" || primary.Scope != ScopeCluster || !slices.Equal(primary.Watches, []string{"*"}) ||
-			primary.Window.String() != "4.2.0 4.2.1 4.3.0" || primary.Release != "strimzi-operator" || primary.AppVersion != "1.1.0" || primary.IsForeign() {
-			t.Errorf("primary = %+v", primary)
-		}
-		if legacy.Namespace != "kafka-legacy41" || legacy.Version != "1.0.1" || legacy.Scope != ScopeNamespaces ||
-			!slices.Equal(legacy.Watches, []string{"kafka-legacy41"}) || legacy.Window.String() != "4.1.0 4.1.1 4.1.2 4.2.0" ||
-			legacy.Release != "strimzi-operator" || legacy.AppVersion != "1.0.1" {
-			t.Errorf("legacy = %+v", legacy)
-		}
-		if vendor.Namespace != "vendor-ops" || vendor.Version != "1.0.0" || vendor.Scope != ScopeNamespaces ||
-			!slices.Equal(vendor.Watches, []string{"team-a", "team-b"}) || !vendor.IsForeign() || vendor.AppVersion != "" {
-			t.Errorf("vendor = %+v", vendor)
-		}
-		if got := Shape(ops); got != ShapeMixed {
-			t.Errorf("Shape = %q", got)
-		}
-	})
-
-	t.Run("no operator", func(t *testing.T) {
-		r := newFakeRunner(t)
-		r.outputs[listPods] = podList()
-		ops, err := InstalledOperators(ctx, r)
-		if err != nil {
-			t.Fatalf("InstalledOperators: %v", err)
-		}
-		if len(ops) != 0 {
-			t.Errorf("ops = %+v", ops)
-		}
-		r.assertCalls(listPods)
-		if got := Shape(ops); got != ShapeNone {
-			t.Errorf("Shape = %q", got)
-		}
-	})
-
-	t.Run("upstream Helm release is discoverable but still foreign to kates", func(t *testing.T) {
-		r := newFakeRunner(t)
-		r.outputs[listPods] = podList(operatorPod("strimzi-operator", "strimzi-cluster-operator", "5d8f9c7b6", "abcde"))
-		r.outputs["kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json"] =
-			operatorDeployment("strimzi-operator", "strimzi-cluster-operator", "quay.io/strimzi/operator:0.48.0", `"value": "*"`, imagesEnv101)
-		r.outputs[helmList] = `[{"name":"strimzi-operator","namespace":"strimzi-operator","chart":"strimzi-kafka-operator-0.48.0","app_version":"0.48.0"}]`
-
-		ops, err := InstalledOperators(ctx, r)
-		if err != nil {
-			t.Fatalf("InstalledOperators: %v", err)
-		}
-		if len(ops) != 1 {
-			t.Fatalf("ops = %+v", ops)
-		}
-		op := ops[0]
-		if !op.IsForeign() || op.Release != "" || op.AppVersion != "" {
-			t.Errorf("upstream chart must not be reported as kates-owned: %+v", op)
-		}
-		if op.HelmRelease != "strimzi-operator" || op.HelmChart != "strimzi-kafka-operator-0.48.0" {
-			t.Errorf("upstream Helm owner not recorded: %+v", op)
-		}
-	})
-
-	t.Run("rolling update: two pods, one Deployment", func(t *testing.T) {
-		r := newFakeRunner(t)
-		r.outputs[listPods] = podList(
-			operatorPod("strimzi-operator", "strimzi-cluster-operator", "5d8f9c7b6", "abcde"),
-			operatorPod("strimzi-operator", "strimzi-cluster-operator", "6e9a0d8c7", "fghij"),
-		)
-		r.outputs["kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json"] =
-			operatorDeployment("strimzi-operator", "strimzi-cluster-operator", "quay.io/strimzi/operator:1.1.0", `"value": "*"`, imagesEnv110)
-		r.outputs[helmList] = `[]`
-		ops, err := InstalledOperators(ctx, r)
-		if err != nil {
-			t.Fatalf("InstalledOperators: %v", err)
-		}
-		if len(ops) != 1 || !ops[0].IsForeign() {
-			t.Errorf("ops = %+v", ops)
-		}
-		if got := Shape(ops); got != ShapeCluster {
-			t.Errorf("Shape = %q", got)
-		}
-	})
-
-	t.Run("pods without a ReplicaSet owner are ignored", func(t *testing.T) {
-		r := newFakeRunner(t)
-		bare := `{"metadata": {"name": "bare", "namespace": "x", "labels": {"strimzi.io/kind": "cluster-operator"}}}`
-		r.outputs[listPods] = podList(bare)
-		ops, err := InstalledOperators(ctx, r)
-		if err != nil || len(ops) != 0 {
-			t.Fatalf("ops = %+v, err = %v", ops, err)
-		}
-	})
-
-	t.Run("errors", func(t *testing.T) {
-		r := newFakeRunner(t)
-		r.errors[listPods] = errors.New("kubectl: connection refused")
-		if _, err := InstalledOperators(ctx, r); err == nil || !strings.Contains(err.Error(), "connection refused") {
-			t.Errorf("pods error = %v", err)
-		}
-
-		r = newFakeRunner(t)
-		r.outputs[listPods] = `{"items": [`
-		if _, err := InstalledOperators(ctx, r); err == nil {
-			t.Error("bad pod json: want error")
-		}
-
-		r = newFakeRunner(t)
-		r.outputs[listPods] = podList(operatorPod("strimzi-operator", "strimzi-cluster-operator", "5d8f9c7b6", "abcde"))
-		r.errors["kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json"] = errors.New("not found")
-		if _, err := InstalledOperators(ctx, r); err == nil || !strings.Contains(err.Error(), "strimzi-operator/strimzi-cluster-operator") {
-			t.Errorf("deployment error = %v", err)
-		}
-
-		r = newFakeRunner(t)
-		r.outputs[listPods] = podList(operatorPod("strimzi-operator", "strimzi-cluster-operator", "5d8f9c7b6", "abcde"))
-		r.outputs["kubectl get deployment -n strimzi-operator strimzi-cluster-operator -o json"] =
-			operatorDeployment("strimzi-operator", "strimzi-cluster-operator", "quay.io/strimzi/operator:1.1.0", `"value": "*"`, imagesEnv110)
-		r.errors[helmList] = errors.New("helm: boom")
-		if _, err := InstalledOperators(ctx, r); err == nil || !strings.Contains(err.Error(), "boom") {
-			t.Errorf("helm error = %v", err)
-		}
-
-		r.errors = map[string]error{}
-		r.outputs[helmList] = `nope`
-		if _, err := InstalledOperators(ctx, r); err == nil {
-			t.Error("bad helm json: want error")
-		}
-	})
+	for _, tt := range installedOperatorCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newFakeRunner(t)
+			maps.Copy(r.outputs, tt.outputs)
+			maps.Copy(r.errors, tt.errs)
+			ops, err := InstalledOperators(context.Background(), r)
+			if tt.anyErr || tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("InstalledOperators error = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("InstalledOperators: %v", err)
+			}
+			if tt.wantCalls != nil {
+				r.assertCalls(tt.wantCalls...)
+			}
+			if got := viewOperators(ops); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ops =\n%+v\nwant\n%+v", got, tt.want)
+			}
+			if tt.wantShape != "" {
+				if got := Shape(ops); got != tt.wantShape {
+					t.Errorf("Shape = %q, want %q", got, tt.wantShape)
+				}
+			}
+		})
+	}
 }
 
 func TestResourceInstances(t *testing.T) {
