@@ -66,6 +66,32 @@
   var steps = ['Steady load: measuring the baseline', 'Injecting broker-pod-kill through LitmusChaos',
     'Broker down: ISR shrinks, P99 climbs', 'Broker back: recovery time measured', 'Run graded A and stored; the CLI exits 0'];
   var btns = arch.querySelectorAll('.arch-tl button'), bar = arch.querySelector('.arch-tl-bar span'), step = arch.querySelector('.arch-step');
+  var designBtns = arch.querySelectorAll('[data-set-design]'), winTitle = document.getElementById('arch-wintitle');
+  var designOrder = ['grid', 'panels', 'chips'];
+  var designTitles = {
+    grid: 'kates architecture — grid look, C → aurora',
+    panels: 'kates architecture — T → panels, C → dracula',
+    chips: 'kates architecture — classic look, C → chips / aurora'
+  };
+  function setDesign(name) {
+    arch.setAttribute('data-tui-design', name);
+    if (winTitle && designTitles[name]) winTitle.textContent = designTitles[name];
+    designBtns.forEach(function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-set-design') === name ? 'true' : 'false');
+    });
+  }
+  designBtns.forEach(function (b) {
+    b.addEventListener('click', function () { setDesign(b.getAttribute('data-set-design')); });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (arch.classList.contains('paused')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.key === 'T' || e.key === 'C') {
+      var cur = arch.getAttribute('data-tui-design') || 'grid';
+      var idx = (designOrder.indexOf(cur) + 1) % designOrder.length;
+      setDesign(designOrder[idx]);
+    }
+  });
   var clip = arch.querySelector('#p99-clip rect'), head = arch.querySelector('.p99-head'), val = arch.querySelector('.p99');
   var X0 = 784, W = 132;
   function ms(p) { // illustrative P99 in ms, matching the hero terminal: 17.8 baseline, 41.2 with a broker down

@@ -42,7 +42,7 @@ img { max-width: 100%; height: auto; display: block; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code, pre { font-family: var(--mono); }
-p code, li code, td code, th code, h2 code {
+p code, li code, td code, th code, h2 code, figcaption code {
   font-size: 0.85em;
   background: var(--accent-soft);
   color: #a9cff6;
@@ -177,71 +177,306 @@ h3 { font-size: 1.2rem; font-weight: 600; }
 .checks li { padding-left: 28px; position: relative; }
 .checks li::before { content: "✓"; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
 
-/* ---------- architecture ---------- */
-.arch { margin: 0 0 56px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; --fault: #d64545; }
-.arch svg { display: block; width: 100%; height: auto; font-family: var(--sans); color: var(--muted); }
+/* ---------- architecture (Kates TUI styles) ---------- */
+.arch {
+  margin: 0 0 56px;
+  background: var(--tui-bg);
+  border: 1px solid var(--tui-win-border);
+  border-radius: 12px;
+  padding: 0 24px 20px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(10, 14, 26, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  font-family: var(--mono);
+  color: var(--tui-text);
+  /* Default tokens = Design 1: Grid · Aurora (kates dashboard style) */
+  --tui-bg: #0b0d14;
+  --tui-win-bar: #151924;
+  --tui-win-border: #262c3d;
+  --tui-pane: #0b0d14;
+  --tui-pane-focus: #0e1320;
+  --tui-border: #334155;
+  --tui-focus: #818cf8;
+  --tui-title: #c4b5fd;
+  --tui-heading: #e6edf3;
+  --tui-text: #cbd5e1;
+  --tui-muted: #7d899f;
+  --tui-accent: #2dd4bf;
+  --tui-accent-soft: rgba(45, 212, 191, 0.14);
+  --tui-ok: #4ade80;
+  --tui-warn: #fbbf24;
+  --tui-fault: #fb7185;
+  --tui-stripe: transparent;
+}
+
+/* Design 2: Panels · Dracula (kates lab style — filled slate panes with horizontal row rules) */
+.arch[data-tui-design="panels"] {
+  --tui-bg: #0b0d14;
+  --tui-win-bar: #161822;
+  --tui-win-border: #2c2f42;
+  --tui-pane: #343746;
+  --tui-pane-focus: #383b4c;
+  --tui-border: #6272a4;
+  --tui-focus: #bd93f9;
+  --tui-title: #8be9fd;
+  --tui-heading: #f8f8f2;
+  --tui-text: #e2e4f0;
+  --tui-muted: #9ea8c7;
+  --tui-accent: #bd93f9;
+  --tui-accent-soft: rgba(189, 147, 249, 0.18);
+  --tui-ok: #50fa7b;
+  --tui-warn: #f1fa8c;
+  --tui-fault: #ff5555;
+  --tui-stripe: rgba(18, 20, 30, 0.42);
+}
+
+/* Design 3: Classic · Chips (kates ctx / classic look — solid banner & filled pill badges) */
+.arch[data-tui-design="chips"] {
+  --tui-bg: #0b0d14;
+  --tui-win-bar: #151924;
+  --tui-win-border: #262c3d;
+  --tui-pane: #101420;
+  --tui-pane-focus: #131a2b;
+  --tui-border: #28344e;
+  --tui-focus: #60a5fa;
+  --tui-title: #0b0d14;
+  --tui-heading: #f8fafc;
+  --tui-text: #cbd5e1;
+  --tui-muted: #7d899f;
+  --tui-accent: #60a5fa;
+  --tui-accent-soft: rgba(96, 165, 250, 0.18);
+  --tui-ok: #4ade80;
+  --tui-warn: #fbbf24;
+  --tui-fault: #f87171;
+  --tui-stripe: transparent;
+}
+
+/* macOS terminal titlebar + design switcher */
+.arch-winbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -24px 16px;
+  padding: 10px 16px;
+  background: var(--tui-win-bar);
+  border-bottom: 1px solid var(--tui-win-border);
+  flex-wrap: wrap;
+}
+.arch-dots { display: inline-flex; gap: 7px; align-items: center; }
+.arch-dots span { width: 12px; height: 12px; border-radius: 50%; }
+.arch-dots span:nth-child(1) { background: #ff5f57; }
+.arch-dots span:nth-child(2) { background: #febc2e; }
+.arch-dots span:nth-child(3) { background: #28c840; }
+.arch-wintitle {
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  color: var(--tui-muted);
+  text-align: center;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arch-designs { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.arch-designs button {
+  font: 500 11.5px var(--mono);
+  color: var(--tui-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--tui-win-border);
+  border-radius: 6px;
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.arch-designs button:hover { color: var(--tui-heading); border-color: var(--tui-focus); }
+.arch-designs button[aria-pressed="true"] {
+  color: #0b0d14;
+  background: var(--tui-focus);
+  border-color: var(--tui-focus);
+  font-weight: 600;
+}
+
+/* TUI Screen Header Bar (matches kates lab / kates dashboard header) */
+.arch-tui-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--tui-border);
+  font-size: 0.86rem;
+  color: var(--tui-heading);
+  background: transparent;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.arch-tui-head b { color: var(--tui-title); font-weight: 700; }
+.arch-tui-head .sep { color: var(--tui-muted); }
+.arch-tui-head .url { color: var(--tui-text); }
+.arch[data-tui-design="panels"] .arch-tui-head {
+  border-color: var(--tui-focus);
+  background: var(--tui-pane);
+  border-radius: 4px;
+}
+.arch[data-tui-design="panels"] .arch-tui-head b { color: var(--tui-focus); }
+.arch[data-tui-design="chips"] .arch-tui-head {
+  background: #d8b4fe;
+  border-color: #d8b4fe;
+  color: #0b0d14;
+  font-weight: 600;
+}
+.arch[data-tui-design="chips"] .arch-tui-head b,
+.arch[data-tui-design="chips"] .arch-tui-head .sep,
+.arch[data-tui-design="chips"] .arch-tui-head .url { color: #0b0d14; }
+
+.arch svg { display: block; width: 100%; height: auto; font-family: var(--mono); color: var(--tui-muted); }
 .arch .arch-v { display: none; }
 /* below this the wide layout's labels get too small, so a vertical layout takes over */
 @media (max-width: 820px) {
-  .arch { padding: 12px; }
+  .arch { padding: 0 12px 14px; }
+  .arch-winbar { margin: 0 -12px 12px; }
   .arch .arch-h { display: none; }
   .arch .arch-v { display: block; max-width: 420px; margin: 0 auto; }
 }
-.arch .box rect { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1.5; }
-.arch .box-cli rect, .arch .box-api rect { stroke: var(--accent); fill: var(--accent-soft); }
-.arch .cluster { fill: none; stroke: var(--border-strong); stroke-dasharray: 6 6; }
-.arch .t-title { fill: var(--heading); font-size: 17px; font-weight: 600; }
-.arch .t-sub { fill: var(--muted); font-size: 13px; }
-.arch .t-code { fill: var(--accent); font-size: 12px; font-family: var(--mono); }
-.arch .t-cluster { fill: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; }
-.arch .edge { fill: none; stroke: var(--accent); stroke-width: 1.8; }
-.arch .fault .edge, .arch .fault .pkt { stroke: var(--fault); }
-.arch marker path { fill: var(--accent); }
-.arch .mk-fault path { fill: var(--fault); }
-.arch .pkt { fill: none; stroke: var(--accent); stroke-width: 7; stroke-linecap: round; stroke-dasharray: 0.01 0.99; stroke-dashoffset: 1; animation: arch-flow var(--t, 2s) linear infinite; filter: drop-shadow(0 0 3px var(--accent)); }
-.arch .fault .pkt { filter: drop-shadow(0 0 4px var(--fault)); }
-.arch .chip rect { fill: var(--surface); stroke: var(--border-strong); }
-.arch .chip text { fill: var(--muted); font-size: 11px; }
-.arch .fault .chip text { fill: var(--fault); }
-.arch .broker { fill: var(--ok); transition: fill 0.3s, opacity 0.3s; }
-.arch .spark { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-dasharray: 1; animation: arch-spark 6s ease-in-out infinite; }
+
+.arch .tui-stripe-line { stroke: var(--tui-stripe); stroke-width: 1; }
+.arch .pane-stripes { pointer-events: none; opacity: 0; }
+.arch[data-tui-design="panels"] .pane-stripes { opacity: 1; }
+
+.arch .box .pane-bg {
+  fill: var(--tui-pane);
+  stroke: var(--tui-border);
+  stroke-width: 1.4;
+  transition: stroke 0.2s, fill 0.2s;
+}
+.arch .box-cli .pane-bg, .arch .box-api .pane-bg {
+  stroke: var(--tui-focus);
+  fill: var(--tui-pane-focus);
+}
+/* Grid look: sharp corners + title embedded in top border */
+.arch[data-tui-design="grid"] .box .pane-bg,
+.arch[data-tui-design="grid"] .cluster { rx: 0; }
+.arch[data-tui-design="grid"] .t-title { opacity: 0; }
+.arch[data-tui-design="grid"] .title-cut { fill: var(--tui-bg); stroke: none; }
+.arch[data-tui-design="grid"] .t-border-title { fill: var(--tui-title); font-size: 13.5px; font-weight: 700; }
+
+/* Panels look: rounded filled panes, centered cyan title inside pane */
+.arch[data-tui-design="panels"] .box .pane-bg { rx: 4px; }
+.arch[data-tui-design="panels"] .title-cut,
+.arch[data-tui-design="panels"] .t-border-title { opacity: 0; }
+
+/* Chips look: filled pill badge on top border of each node */
+.arch[data-tui-design="chips"] .t-title { opacity: 0; }
+.arch[data-tui-design="chips"] .title-cut { fill: var(--tui-accent); rx: 4px; }
+.arch[data-tui-design="chips"] .box-cli .title-cut,
+.arch[data-tui-design="chips"] .box-api .title-cut { fill: #d8b4fe; }
+.arch[data-tui-design="chips"] .t-border-title { fill: #0b0d14; font-size: 12.5px; font-weight: 700; }
+
+.arch .cluster { fill: none; stroke: var(--tui-border); stroke-dasharray: 5 5; stroke-width: 1.2; }
+.arch .cluster-tag { fill: var(--tui-bg); }
+.arch .t-title { fill: var(--tui-title); font-size: 15.5px; font-weight: 700; }
+.arch .t-sub { fill: var(--tui-muted); font-size: 12px; }
+.arch .t-code { fill: var(--tui-accent); font-size: 11.5px; font-family: var(--mono); }
+.arch .t-cluster { fill: var(--tui-title); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.arch .edge { fill: none; stroke: var(--tui-accent); stroke-width: 1.8; }
+.arch .fault .edge, .arch .fault .pkt { stroke: var(--tui-fault); }
+.arch marker path { fill: var(--tui-accent); }
+.arch .mk-fault path { fill: var(--tui-fault); }
+.arch .pkt { fill: none; stroke: var(--tui-accent); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 0.01 0.99; stroke-dashoffset: 1; animation: arch-flow var(--t, 2s) linear infinite; filter: drop-shadow(0 0 4px var(--tui-accent)); }
+.arch .fault .pkt { filter: drop-shadow(0 0 5px var(--tui-fault)); }
+.arch .chip rect { fill: #151926; stroke: var(--tui-border); stroke-width: 1.2; }
+.arch .chip text { fill: var(--tui-heading); font-size: 10.5px; font-family: var(--mono); }
+.arch .fault .chip rect { stroke: var(--tui-fault); }
+.arch .fault .chip text { fill: var(--tui-fault); }
+.arch .broker { fill: var(--tui-ok); transition: fill 0.3s, opacity 0.3s; }
+.arch .spark { fill: none; stroke: var(--tui-accent); stroke-width: 2; stroke-linejoin: round; stroke-dasharray: 1; animation: arch-spark 6s ease-in-out infinite; }
 .arch .t-small { font-size: 11px; }
 /* the story: site.js sets data-phase 0-4 (baseline, inject, broker down, recovery, graded) on the figure */
 .arch [data-ph] { visibility: hidden; }
 .arch[data-phase="1"] [data-ph="1"], .arch[data-phase="4"] [data-ph="4"] { visibility: visible; }
-.arch .fault .edge { stroke-opacity: 0.3; }
+.arch .fault .edge { stroke-opacity: 0.32; }
 .arch[data-phase="1"] .fault .edge, .arch[data-phase="2"] .fault .edge { stroke-opacity: 1; }
-.arch .ok .edge { stroke: var(--ok); stroke-dasharray: 5 4; }
-.arch .ok .pkt { stroke: var(--ok); filter: drop-shadow(0 0 4px var(--ok)); }
-.arch .mk-ok path { fill: var(--ok); }
-.arch[data-phase="1"] .litmus-hit, .arch[data-phase="2"] .kafka-hit { stroke: var(--fault); stroke-width: 2.5; }
-.arch[data-phase="3"] .kafka-hit { stroke: var(--warn); }
-.arch[data-phase="2"] .broker.hit { fill: var(--fault); opacity: 0.3; }
-.arch[data-phase="3"] .broker.hit { fill: var(--warn); animation: arch-blink 0.5s infinite alternate; }
+.arch .ok .edge { stroke: var(--tui-ok); stroke-dasharray: 5 4; }
+.arch .ok .pkt { stroke: var(--tui-ok); filter: drop-shadow(0 0 4px var(--tui-ok)); }
+.arch .mk-ok path { fill: var(--tui-ok); }
+.arch[data-phase="1"] .litmus-hit, .arch[data-phase="2"] .kafka-hit { stroke: var(--tui-fault) !important; stroke-width: 2.2; }
+.arch[data-phase="3"] .kafka-hit { stroke: var(--tui-warn) !important; }
+.arch[data-phase="2"] .broker.hit { fill: var(--tui-fault); opacity: 0.35; }
+.arch[data-phase="3"] .broker.hit { fill: var(--tui-warn); animation: arch-blink 0.5s infinite alternate; }
 .arch .stamp { transform-box: fill-box; transform-origin: center; transform: scale(2.2) rotate(-14deg); transition: transform 0.35s cubic-bezier(.3, 1.6, .5, 1); }
 .arch[data-phase="4"] .stamp { transform: rotate(-10deg); }
-.arch .stamp circle { fill: var(--ok); }
-.arch .stamp text { fill: var(--surface); font-weight: 800; font-size: 20px; }
-.arch .p99 { font-size: 26px; font-weight: 700; fill: var(--heading); transition: fill 0.3s; }
-.arch[data-phase="2"] .p99 { fill: var(--fault); }
-.arch[data-phase="3"] .p99 { fill: var(--warn); }
-.arch .p99-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
-.arch .p99-area { fill: var(--accent-soft); }
-.arch .p99-head { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
-.arch .band { fill: var(--fault); fill-opacity: 0.07; }
-.arch .grid { stroke: var(--border); stroke-dasharray: 2 4; }
-.arch-tl { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 14px; padding-top: 10px; position: relative; }
-.arch-tl-bar { position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
-.arch-tl-bar span { display: block; height: 100%; width: 0; background: var(--accent); }
-.arch-tl button { font: 500 13px var(--sans); color: var(--muted); background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px; cursor: pointer; transition: color 0.2s, border-color 0.2s, background 0.2s; }
-.arch-tl button[aria-pressed="true"] { color: var(--heading); border-color: var(--accent); background: var(--accent-soft); }
-.arch-tl button.bad[aria-pressed="true"] { color: var(--fault); border-color: var(--fault); }
-.arch-tl button.good[aria-pressed="true"] { color: var(--ok); border-color: var(--ok); }
-.arch-step { text-align: center; font-weight: 600; color: var(--heading); margin: 12px 0 0; min-height: 1.65em; }
-.arch[data-phase="1"] .arch-step, .arch[data-phase="2"] .arch-step { color: var(--fault); }
-.arch[data-phase="3"] .arch-step, .arch[data-phase="4"] .arch-step { color: var(--ok); }
-.arch .node { cursor: default; outline: none; transform-box: fill-box; }
-.arch .node:focus-visible rect { stroke-width: 3; stroke: var(--accent); }
+.arch .stamp circle { fill: var(--tui-ok); }
+.arch .stamp text { fill: #0b0d14; font-weight: 800; font-size: 18px; }
+.arch .p99 { font-size: 23px; font-weight: 700; fill: var(--tui-ok); transition: fill 0.3s; }
+.arch[data-phase="2"] .p99 { fill: var(--tui-fault); }
+.arch[data-phase="3"] .p99 { fill: var(--tui-warn); }
+.arch .p99-line { fill: none; stroke: var(--tui-accent); stroke-width: 2.2; stroke-linejoin: round; }
+.arch .p99-area { fill: var(--tui-accent-soft); }
+.arch .p99-head { fill: var(--tui-accent); stroke: var(--tui-bg); stroke-width: 2; }
+.arch .band { fill: var(--tui-fault); fill-opacity: 0.12; }
+.arch .grid { stroke: var(--tui-border); stroke-dasharray: 2 4; }
+
+.arch-tl { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 14px; padding-top: 12px; position: relative; }
+.arch-tl-bar { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: #1e2436; border-radius: 3px; overflow: hidden; }
+.arch-tl-bar span { display: block; height: 100%; width: 0; background: var(--tui-accent); }
+.arch-tl button {
+  font: 500 12.5px var(--mono);
+  color: var(--tui-muted);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--tui-border);
+  border-radius: 4px;
+  padding: 7px 6px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.arch-tl button .k-idx { color: var(--tui-focus); font-weight: 700; margin-right: 4px; }
+.arch-tl button[aria-pressed="true"] {
+  color: var(--tui-heading);
+  border-color: var(--tui-accent);
+  background: var(--tui-accent-soft);
+  font-weight: 600;
+}
+.arch-tl button.bad[aria-pressed="true"] { color: var(--tui-fault); border-color: var(--tui-fault); background: rgba(251, 113, 133, 0.14); }
+.arch-tl button.good[aria-pressed="true"] { color: var(--tui-ok); border-color: var(--tui-ok); background: rgba(74, 222, 128, 0.14); }
+/* In Chips look, the active timeline phase looks like the solid selection bar in kates ctx profiles set */
+.arch[data-tui-design="chips"] .arch-tl button[aria-pressed="true"] {
+  background: var(--tui-focus);
+  border-color: var(--tui-focus);
+  color: #0b0d14;
+}
+.arch[data-tui-design="chips"] .arch-tl button[aria-pressed="true"] .k-idx { color: #0b0d14; }
+
+.arch-step {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--tui-ok);
+  margin: 12px 0 0;
+  min-height: 1.65em;
+}
+.arch-step::before { content: "▸ "; }
+.arch[data-phase="1"] .arch-step, .arch[data-phase="2"] .arch-step { color: var(--tui-fault); }
+.arch[data-phase="3"] .arch-step { color: var(--tui-warn); }
+.arch[data-phase="4"] .arch-step { color: var(--tui-ok); }
+
+.arch-tui-foot {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--tui-win-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.arch figcaption { color: var(--tui-muted); font-size: 0.82rem; margin: 0; text-align: left; }
+.arch-keyhints { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: 0.8rem; color: var(--tui-muted); }
+.arch-keyhints b { color: var(--tui-focus); font-weight: 600; }
+.arch[data-tui-design="panels"] .arch-keyhints b { color: #bd93f9; }
+.arch-keyhints .sep { color: var(--tui-border); }
+
+.arch .node { cursor: pointer; outline: none; transform-box: fill-box; }
+.arch .node:focus-visible .pane-bg { stroke-width: 2.5; stroke: var(--tui-accent); }
 /* dimming sits on the link group and the box contents, apart from the entrance transitions */
 .arch .node > *, .arch .link { transition: opacity 0.2s; }
 .arch.focus .node:not(.on) > *, .arch.focus .link:not(.on) { opacity: 0.18; }
@@ -261,7 +496,6 @@ h3 { font-size: 1.2rem; font-weight: 600; }
   .arch .pkt, .kz-lane i { display: none; }
   .arch .broker.hit, .arch .spark, .kz * { animation: none !important; stroke-dashoffset: 0; }
 }
-.arch figcaption { color: var(--muted); font-size: 0.92rem; margin-top: 14px; text-align: center; }
 /* inside Kafka: site.js sets data-phase 0-4 on the figure */
 .kz { margin: 0 0 56px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; --fault: #d64545; }
 .kz h3 { margin-bottom: 16px; }
@@ -317,10 +551,11 @@ h3 { font-size: 1.2rem; font-weight: 600; }
   .kz-parts { flex-direction: column; gap: 4px; }
   .kz-parts span { flex: none; }
 }
-.screens { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.screens { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 .screens figure { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .screens img { width: 100%; }
 .screens figcaption { padding: 12px 16px; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--border); }
+.screens figcaption b { color: var(--heading); }
 
 /* ---------- compare ---------- */
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
@@ -386,7 +621,7 @@ h1 { font-weight: 600; } h2 { font-weight: 600; }
 .nav { background: rgba(247, 245, 239, 0.88); }
 .hero-glow { background: radial-gradient(60% 50% at 20% 30%, rgba(26, 91, 204, 0.12), transparent 70%); }
 .btn-primary { color: #fff; } .btn-primary:hover { background: #2f6fdc; }
-p code, li code, td code, th code, h2 code { color: #143f8f; }
+p code, li code, td code, th code, h2 code, figcaption code { color: #143f8f; }
 .cta { background: radial-gradient(60% 80% at 50% 0%, rgba(26, 91, 204, 0.1), transparent 70%); }
 .footer { background: #102a66; border-top-color: #102a66; }
 .footer-links a, .footer-brand p, .footer-legal, .footer-links h4 { color: #c3cce0; }
