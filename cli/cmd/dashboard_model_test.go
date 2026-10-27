@@ -11,7 +11,9 @@ import (
 
 	"github.com/bmscomp/kates/cli/client"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/bmscomp/kates/cli/pkg/theme"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // fakeDashAPI answers the dashboard's three calls. With hang set, each call
@@ -103,8 +105,8 @@ func TestDashModelTicksAtTheInterval(t *testing.T) {
 	}
 
 	view := stripAnsi(m.View())
-	for _, want := range []string{"Kates Dashboard", "System Health", "kafka:9092", "Active Tests", "abcdef12",
-		"Throughput", "Current: 2.0K rec/s", "Cluster Detail", "HEALTHY", "Refreshing every 3s", "q or Ctrl+C to quit"} {
+	for _, want := range []string{"Kates Dashboard", "Cluster", "kafka:9092", "Tests", "Active Tests", "abcdef12",
+		"Throughput", "2.0K rec/s", "HEALTHY", "Refreshing every 3s", "next look", "q quit"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("want %q in:\n%s", want, view)
 		}
@@ -233,7 +235,7 @@ func TestDashboardFramesAreASCIIInPlainMode(t *testing.T) {
 	s := fetchDashSnapshot(context.Background(), &fakeDashAPI{runs: []client.TestRun{
 		runningRun(10), {ID: "done1", TestType: "LOAD", Status: "DONE"}}}, time.Second)
 	h := dashHistory{throughput: []float64{1, 2, 3}, latency: []float64{3, 2, 1}}
-	frame := stripAnsi(renderDashFrame(s, h, 120) + dashFooter(0, time.Second, "Ctrl+C to stop") +
+	frame := stripAnsi(renderDashFrame(s, h, 120, 0) + dashFooter(0, time.Second, "Ctrl+C to stop") +
 		dashSummaryContent(nil, errors.New("x"), 10))
 	// The panel borders (output.Panel) and the spinner (spinnerFrame) are
 	// drawn outside this file; every mark the dashboard draws itself is
@@ -243,9 +245,40 @@ func TestDashboardFramesAreASCIIInPlainMode(t *testing.T) {
 			t.Errorf("%q in a plain frame:\n%s", mark, frame)
 		}
 	}
-	for _, want := range []string{"Kates Dashboard  |", "(up)", "(down)", "> ", "* LOAD", "+ "} {
+	for _, want := range []string{"Kates Dashboard  |", "(up)", "(down)", "* LOAD", "+ "} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("want %q in the plain frame:\n%s", want, frame)
+		}
+	}
+}
+
+// The frame takes the screen it is given, in every look: no line wider than
+// the terminal, no more lines than it has, the header at the top.
+func TestDashboardFillsTheScreenInEveryLook(t *testing.T) {
+	prev := theme.CurrentLook().Name
+	t.Cleanup(func() { _ = theme.UseLook(prev) })
+	api := &fakeDashAPI{runs: []client.TestRun{runningRun(2000), runningRun(3000),
+		{ID: "done1", TestType: "LOAD", Status: "DONE"}, {ID: "fail1", TestType: "STRESS", Status: "FAILED"}}}
+	s := fetchDashSnapshot(context.Background(), api, time.Second)
+	for _, name := range theme.LookNames() {
+		_ = theme.UseLook(name)
+		for _, size := range [][2]int{{80, 24}, {110, 32}, {160, 45}} {
+			m := newDashModel(context.Background(), api, time.Second)
+			next, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+			next, _ = next.Update(dashSnapshotMsg(s))
+			lines := strings.Split(next.View(), "\n")
+			if len(lines) > size[1] {
+				t.Errorf("%s %v: %d lines", name, size, len(lines))
+			}
+			// A boxed title bar has its text on its second line.
+			if top := stripAnsi(strings.Join(lines[:3], "\n")); !strings.Contains(top, "Kates Dashboard") {
+				t.Errorf("%s %v: the header is not at the top:\n%s", name, size, top)
+			}
+			for i, l := range lines {
+				if w := lipgloss.Width(l); w > size[0] {
+					t.Errorf("%s %v: line %d is %d wide", name, size, i, w)
+				}
+			}
 		}
 	}
 }

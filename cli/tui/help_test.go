@@ -57,11 +57,11 @@ func helpScreens(t *testing.T) map[string][]string {
 	m.iterations = []labIteration{{Number: 1}, {Number: 2}}
 	m.lastError = errors.New("boom")
 	m.view = labHistory
-	lab = append(lab, m.renderHelp(m.helpBindings(), 80))
+	lab = append(lab, HelpLines(m.helpBindings(), 80))
 	m.view = labPinSelect
-	lab = append(lab, m.renderHelp(m.helpBindings(), 80))
+	lab = append(lab, HelpLines(m.helpBindings(), 80))
 	m.running = true
-	lab = append(lab, m.renderHelp(m.helpBindings(), 80))
+	lab = append(lab, HelpLines(m.helpBindings(), 80))
 	for i := range lab {
 		lab[i] = plain(lab[i])
 	}
@@ -135,13 +135,13 @@ func TestEachViewSaysWhatEscDoes(t *testing.T) {
 	}
 	lab := NewLab(nil, "")
 	lab.view = labHistory
-	mustContain(t, plain(lab.renderHelp(lab.helpBindings(), 300)), "esc back to the results")
+	mustContain(t, plain(HelpLines(lab.helpBindings(), 300)), "esc back to the results")
 }
 
 // w/W and l/L are different keys; the help names the case.
 func TestLabHelpNamesTheCaseOfCaseSensitivePairs(t *testing.T) {
 	m := NewLab(nil, "")
-	help := plain(m.renderHelp(m.helpBindings(), 400))
+	help := plain(HelpLines(m.helpBindings(), 400))
 	mustContain(t, help, "w (lower-case) save session", "W (shift+w) warmup", "L (shift+l) load session", "/l (lower-case) next value")
 
 	for k, wantField := range map[string]string{"w": "Save", "W": "Warmup", "l": "Right", "L": "Load"} {
@@ -159,14 +159,14 @@ func TestLabHelpNamesTheCaseOfCaseSensitivePairs(t *testing.T) {
 
 func TestLabHelpFollowsTheState(t *testing.T) {
 	m := NewLab(nil, "")
-	help := plain(m.renderHelp(m.helpBindings(), 400))
+	help := plain(HelpLines(m.helpBindings(), 400))
 	for _, absent := range []string{"c compare", "r retry", "esc", "x cancel"} {
 		if strings.Contains(help, absent) {
 			t.Errorf("a fresh lab offers %q:\n%s", absent, help)
 		}
 	}
 	m.running = true
-	help = plain(m.renderHelp(m.helpBindings(), 400))
+	help = plain(HelpLines(m.helpBindings(), 400))
 	mustContain(t, help, "x cancel the run", "ctrl+c quit (cancels the run)")
 	if strings.Contains(help, "enter") {
 		t.Errorf("a running lab offers enter:\n%s", help)

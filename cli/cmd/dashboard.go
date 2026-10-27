@@ -114,99 +114,79 @@ func glyphOr(utf, ascii string) string {
 	return utf
 }
 
-// renderDashFrame is one dashboard frame for a terminal width columns wide,
-// every panel but the refresh line.
-func renderDashFrame(s dashSnapshot, h dashHistory, width int) string {
-	panelW := (width / 2) - 2
-	if panelW < 38 {
-		panelW = 38
-	}
-	var b strings.Builder
-	row := func(left, right string) {
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right) + "\n\n")
-	}
+// renderDashFrame is one dashboard frame, width columns wide, drawn as the
+// lab draws its screen: a title bar, then the Cluster and Tests panes over
+// the Active and Recent run panes. With height above 0 the frame takes that
+// many rows and the run panes get what the others leave; at 0 every pane
+// takes the rows it needs.
+func renderDashFrame(s dashSnapshot, h dashHistory, width, height int) string {
+	width = max(width, 60)
+	leftW := (width - 3) / 2
+	rightW := width - 3 - leftW
 
-	titleBar := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(output.HeaderColor).
-		Background(output.Surface).
-		Width(width).
-		Padding(0, 1).
-		Render(fmt.Sprintf(
-			"  Kates Dashboard  %s  %s",
-			output.DimStyle.Render(glyphOr("│", "|")),
-			s.at.Format("15:04:05"),
-		))
-	b.WriteString(titleBar + "\n\n")
+	header := tui.ScreenHeader("Kates Dashboard",
+		"  "+glyphOr("·", "|")+"  updated "+s.at.Format("15:04:05"), width-2)
 
-	row(output.Panel("System Health", dashHealthContent(s.health, s.healthErr), panelW),
-		output.Panel("Test Summary", dashSummaryContent(s.paged, s.listErr, panelW-6), panelW))
+	system := dashHealthContent(s.health, s.healthErr) + "\n" + dashClusterContent(s.check, s.checkErr)
+	tests := dashSummaryContent(s.paged, s.listErr, rightW-6) + "\n" +
+		dashTrendLine("Throughput "+glyphOr("↗", "(up)"), h.throughput, true, " rec/s", rightW-34) + "\n" +
+		dashTrendLine("P99        "+glyphOr("↘", "(down)"), h.latency, false, " ms", rightW-34)
+	topH := max(tui.PaneHeight(system), tui.PaneHeight(tests))
 
-	activeContent, recentContent, _, _ := dashRunsContent(s.paged, s.listErr)
-	row(output.Panel("Active Tests", activeContent, panelW),
-		output.Panel("Recent Completed", recentContent, panelW))
-
-	if len(h.throughput) > 1 || len(h.latency) > 1 {
-		row(output.Panel("Throughput "+glyphOr("↗", "(up)"), dashSparkContent(h.throughput, true, " rec/s"), panelW),
-			output.Panel("P99 Latency "+glyphOr("↘", "(down)"), dashSparkContent(h.latency, false, " ms"), panelW))
+	active, recent, _, _ := dashRunsContent(s.paged, s.listErr)
+	runsH := max(tui.PaneHeight(active), tui.PaneHeight(recent))
+	if height > 0 {
+		// header, the blank under it, and the status and help lines
+		runsH = max(height-lipgloss.Height(header)-1-topH-dashFooterRows, 5)
 	}
 
-	row(output.Panel("Cluster Detail", dashClusterContent(s.check, s.checkErr), panelW),
-		output.Panel("Quick Commands", dashQuickContent(), panelW))
-	return b.String()
+	return header + "\n\n" +
+		tui.JoinPanes(tui.Pane("Cluster", system, leftW, topH, true), tui.Pane("Tests", tests, rightW, topH, false)) + "\n" +
+		tui.JoinPanes(tui.Pane("Active Tests", active, leftW, runsH, false), tui.Pane("Recent Completed", recent, rightW, runsH, false)) + "\n"
 }
 
-// dashHealthContent is the System Health panel.
+// dashFooterRows is the rows under a full-screen frame: the status line and
+// one line of help.
+const dashFooterRows = 2
+
+// dashHealthContent is the API's own health: its status and engine, Kafka as
+// it sees it, and the test configs it loaded.
 func dashHealthContent(health *client.HealthResponse, err error) string {
-	var b strings.Builder
 	if err != nil || health == nil {
-		b.WriteString(output.ErrorStyle.Render("  " + output.Glyphs().Cross + " API unreachable"))
-		return b.String()
+		return output.ErrorStyle.Render("  " + output.Glyphs().Cross + " API unreachable")
 	}
-	line := func(label, value string) {
-		fmt.Fprintf(&b, "  %-10s %s\n", output.DimStyle.Render(label), value)
+	// Pad the plain label, then style it: padding a styled string pads nothing.
+	row := func(label, value string) string {
+		return "  " + output.DimStyle.Render(fmt.Sprintf("%-10s", label)) + " " + value
 	}
-	line("API", output.StatusBadge(health.Status))
-	if kafka := health.Kafka; kafka != nil {
-		line("Kafka", output.StatusBadge(kafka.Status))
-		line("Brokers", output.LightStyle.Render(kafka.BootstrapServers))
-	}
+	api := output.StatusBadge(health.Status)
 	if eng := health.Engine; eng != nil {
-		line("Engine", output.AccentStyle.Render(eng.ActiveBackend))
+		api += "  " + output.AccentStyle.Render(eng.ActiveBackend+" engine")
 	}
-	fmt.Fprintf(&b, "  %-10s %s",
-		output.DimStyle.Render("Configs"),
-		output.LightStyle.Render(fmt.Sprintf("%d test configs loaded", len(health.Tests))))
-	return b.String()
+	rows := []string{row("API", api)}
+	if kafka := health.Kafka; kafka != nil {
+		rows = append(rows, row("Kafka", output.StatusBadge(kafka.Status)+"  "+output.LightStyle.Render(kafka.BootstrapServers)))
+	}
+	rows = append(rows, row("Configs", output.LightStyle.Render(fmt.Sprintf("%d test configs loaded", len(health.Tests)))))
+	return strings.Join(rows, "\n")
 }
 
-// dashSparkContent is a sparkline panel's body: the line and its latest
-// value, or a note until there are two points.
-func dashSparkContent(values []float64, higherIsBetter bool, unit string) string {
+// dashTrendLine is one sparkline of the Tests pane: its label, the last
+// points that fit in room columns, and the latest value.
+func dashTrendLine(label string, values []float64, higherIsBetter bool, unit string, room int) string {
+	label = "  " + output.DimStyle.Render(label) + "  "
 	if len(values) <= 1 {
-		return output.DimStyle.Render("  Collecting data...")
+		return label + output.DimStyle.Render("collecting"+output.Glyphs().Arrow)
+	}
+	if room = max(room, 8); len(values) > room {
+		values = values[len(values)-room:]
 	}
 	latest := values[len(values)-1]
 	value := output.SuccessStyle.Render(fmtNum(latest))
 	if !higherIsBetter {
 		value = output.WarningStyle.Render(fmtFloat(latest, 1))
 	}
-	return fmt.Sprintf("  %s\n  Current: %s%s", output.SparklineColored(values, higherIsBetter), value, unit)
-}
-
-// dashQuickContent is the Quick Commands panel.
-func dashQuickContent() string {
-	arrow := output.DimStyle.Render(output.Glyphs().Arrow)
-	lines := []string{
-		"kates test create --type LOAD",
-		"kates benchmark",
-		"kates gate --min-grade B",
-		"kates test cleanup",
-	}
-	for i, l := range lines {
-		lines[i] = fmt.Sprintf("  %s  %s", arrow, l)
-	}
-	return strings.Join(lines, "\n")
+	return label + output.SparklineColored(values, higherIsBetter) + "  " + value + unit
 }
 
 // dashFooter is the refresh line under a frame.
@@ -223,7 +203,7 @@ func runDashboardFrames(ctx context.Context, api dashAPI, interval time.Duration
 		output.ClearFrame(false)
 		s := fetchDashSnapshot(ctx, api, dashCallTimeout)
 		h.observe(s)
-		fmt.Fprint(output.Out, renderDashFrame(s, h, termWidth())+dashFooter(tick, interval, "Ctrl+C to stop"))
+		fmt.Fprint(output.Out, renderDashFrame(s, h, termWidth(), 0)+dashFooter(tick, interval, "Ctrl+C to stop"))
 		select {
 		case <-ctx.Done():
 			return nil
@@ -259,7 +239,7 @@ type dashTickMsg struct{}
 
 var (
 	dashQuitKey = key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit"))
-	dashLookKey = key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "next look"))
+	dashLookKey = key.NewBinding(key.WithKeys("T"), key.WithHelp("T (shift+t)", "next look"))
 )
 
 func newDashModel(ctx context.Context, api dashAPI, interval time.Duration) dashModel {
@@ -318,7 +298,9 @@ func (m dashModel) View() string {
 	if width == 0 {
 		width = termWidth()
 	}
-	view := renderDashFrame(*m.snap, m.hist, width) + dashFooter(m.frames-1, m.interval, "T next look · q or Ctrl+C to quit")
+	status := fmt.Sprintf("  %s Refreshing every %ds", spinnerFrame(m.frames-1), int(m.interval/time.Second))
+	view := renderDashFrame(*m.snap, m.hist, width, m.height) + status +
+		tui.HelpLines([]key.Binding{dashLookKey, dashQuitKey}, width)
 	return theme.Screen(view, m.width, m.height)
 }
 
@@ -326,14 +308,16 @@ func (m dashModel) View() string {
 // return is unknown, not empty, so every count reads — rather than 0.
 func dashSummaryContent(paged *client.PagedTests, err error, ruleWidth int) string {
 	unknown := output.DimStyle.Render(fmt.Sprintf("%3s", glyphOr("—", "-")))
-	running, pending, done, total := unknown, unknown, unknown, unknown
-	failed := output.DimStyle.Render(glyphOr("—", "-"))
+	running, pending, done, failed, total := unknown, unknown, unknown, unknown, unknown
 	if err == nil && paged != nil {
 		counts := CountStatuses(paged.Content)
 		running = output.AccentStyle.Bold(true).Render(fmt.Sprintf("%3d", counts.Running))
 		pending = output.WarningStyle.Render(fmt.Sprintf("%3d", counts.Pending))
 		done = output.SuccessStyle.Render(fmt.Sprintf("%3d", counts.Done))
-		failed = coloredCount(counts.Failed)
+		failed = output.DimStyle.Render(fmt.Sprintf("%3d", counts.Failed))
+		if counts.Failed > 0 {
+			failed = output.ErrorStyle.Render(fmt.Sprintf("%3d", counts.Failed))
+		}
 		total = output.LightStyle.Bold(true).Render(fmt.Sprintf("%3d", paged.TotalItems))
 	}
 
@@ -385,10 +369,12 @@ func dashRunsContent(paged *client.PagedTests, err error) (active, recent string
 		}
 		activeCount++
 
-		line := fmt.Sprintf("  %s %-12s %s",
+		// Pad the plain type, then style it; the columns run from most to
+		// least telling, so a narrow pane cuts the least.
+		line := fmt.Sprintf("  %s %s %s",
 			output.AccentStyle.Render(g.DotOn),
-			output.LightStyle.Bold(true).Render(t.TestType),
-			output.DimStyle.Render(truncID(t.ID)),
+			output.LightStyle.Bold(true).Render(fmt.Sprintf("%-9s", t.TestType)),
+			output.DimStyle.Render(shortID(t.ID)),
 		)
 		if status != "RUNNING" {
 			line += "  " + output.DimStyle.Render(strings.ToLower(status))
@@ -397,10 +383,10 @@ func dashRunsContent(paged *client.PagedTests, err error) (active, recent string
 			r := t.Results[len(t.Results)-1]
 			latestThroughput += r.ThroughputRecordsPerSec
 			latestLatency = r.P99LatencyMs
-			line += fmt.Sprintf("  "+glyphOr("│", "|")+" %s rec  %s  %s p99",
-				output.LightStyle.Render(fmtNum(r.RecordsSent)),
-				output.SuccessStyle.Render(fmtNum(r.ThroughputRecordsPerSec)+" rec/s"),
-				output.WarningStyle.Render(fmtFloat(r.P99LatencyMs, 1)+" ms"),
+			line += fmt.Sprintf("  %s  %s  %s",
+				output.SuccessStyle.Render(fmt.Sprintf("%12s", fmtNum(r.ThroughputRecordsPerSec)+" rec/s")),
+				output.WarningStyle.Render(fmt.Sprintf("%8s", fmtFloat(r.P99LatencyMs, 1)+" ms")),
+				output.DimStyle.Render(fmtNum(r.RecordsSent)+" rec"),
 			)
 		}
 		activeContent.WriteString(line + "\n")
@@ -426,18 +412,39 @@ func dashRunsContent(paged *client.PagedTests, err error) (active, recent string
 		case "FAILED", "ERROR":
 			icon = output.ErrorStyle.Render(g.Cross)
 		}
-		fmt.Fprintf(recentContent, "  %s %-12s %s  %s  %s\n",
+		fmt.Fprintf(recentContent, "  %s %s %s  %s  %s\n",
 			icon,
-			output.LightStyle.Render(t.TestType),
-			output.DimStyle.Render(truncID(t.ID)),
+			output.LightStyle.Render(fmt.Sprintf("%-9s", t.TestType)),
+			output.DimStyle.Render(shortID(t.ID)),
+			output.DimStyle.Render(dashWhen(t.CreatedAt)),
 			output.StatusBadge(status),
-			output.DimStyle.Render(formatTime(t.CreatedAt)),
 		)
 	}
 	if recentCount == 0 {
 		recentContent.WriteString(output.DimStyle.Render("  No completed tests"))
 	}
 	return activeContent.String(), recentContent.String(), latestThroughput, latestLatency
+}
+
+// shortID is a run id's first 8 characters, enough to tell runs apart and
+// to find one with kates test get.
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+// dashWhen is when a run was created: the time today, the date before.
+func dashWhen(createdAt string) string {
+	at, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return formatTime(createdAt)
+	}
+	if at = at.Local(); at.Format(time.DateOnly) == time.Now().Format(time.DateOnly) {
+		return at.Format("15:04")
+	}
+	return at.Format("Jan 02")
 }
 
 // dashClusterContent is the Cluster Detail panel. Its verdict is the check's

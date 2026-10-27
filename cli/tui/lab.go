@@ -604,14 +604,11 @@ func (m LabModel) View() string {
 	if w >= 100 && m.apiURL != "" {
 		rest += "  " + g.To + "  " + m.apiURL
 	}
-	header := labHeaderStyle.Width(w - 2).Render("  Kates Lab" + rest)
-	if l := theme.CurrentLook(); !l.Classic() {
-		headerW := w - 2
-		if l.FrameAll && w >= 80 {
-			headerW = w // as wide as the framed panes below it
-		}
-		header = theme.TitleBar("Kates Lab", rest, headerW)
+	headerW := w - 2
+	if l := theme.CurrentLook(); l.FrameAll && w >= 80 {
+		headerW = w // as wide as the framed panes below it
 	}
+	header := ScreenHeader("Kates Lab", rest, headerW)
 
 	var body string
 
@@ -662,26 +659,9 @@ func (m LabModel) View() string {
 		}
 	}
 
-	help := m.renderHelp(m.helpBindings(), w)
+	help := HelpLines(m.helpBindings(), w)
 
 	return theme.Screen(header+"\n\n"+body+statusBar+help, m.width, m.height)
-}
-
-// renderHelp is the lab's help for bindings, wrapped to maxWidth, one
-// indented line each.
-func (m LabModel) renderHelp(bindings []key.Binding, maxWidth int) string {
-	lines := lookHelp(bindings, maxWidth-4)
-	if lines == nil {
-		sep := "  " + glyphs().Dot + "  "
-		for _, l := range wrapHelp(helpEntries(bindings), sep, maxWidth-4) {
-			lines = append(lines, dimStyle.Render(l))
-		}
-	}
-	var sb strings.Builder
-	for _, l := range lines {
-		sb.WriteString("\n  " + l)
-	}
-	return sb.String()
 }
 
 // helpBindings are the keys that act on the screen as it is.
