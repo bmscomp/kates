@@ -410,16 +410,16 @@ func mcpDisruptionReportComparisonFrom(call *mcpCall, baseline string, r mcpDisr
 // id cannot be paged: messages go first, then the step prose, then steps; the
 // summary, the SLA grade and the impact score always stay.
 func mcpFitDisruptionReport(call *mcpCall, out *mcpDisruptionReportOut) {
-	mcpChaosShrinkToFit(call, out,
-		func() bool { return mcpChaosHalve(&out.Impact.Factors, 0) },
-		func() bool { return out.SLA != nil && mcpChaosHalve(&out.SLA.Unevaluated, 0) },
-		func() bool { return mcpChaosHalve(&out.ValidationWarnings, 0) },
-		func() bool { return out.SLA != nil && mcpChaosHalve(&out.SLA.Violations, 0) },
+	mcpShrink(call, out,
+		func() bool { return mcpHalve(&out.Impact.Factors, 0) },
+		func() bool { return out.SLA != nil && mcpHalve(&out.SLA.Unevaluated, 0) },
+		func() bool { return mcpHalve(&out.ValidationWarnings, 0) },
+		func() bool { return out.SLA != nil && mcpHalve(&out.SLA.Violations, 0) },
 		func() bool {
-			return mcpChaosClear(out.Steps, func(s *mcpDisruptionReportStep) *mcpUntrusted { return &s.RollbackReason }) ||
-				mcpChaosClear(out.Steps, func(s *mcpDisruptionReportStep) *mcpUntrusted { return &s.FailureReason })
+			return mcpClearEach(out.Steps, func(s *mcpDisruptionReportStep) *mcpUntrusted { return &s.RollbackReason }) ||
+				mcpClearEach(out.Steps, func(s *mcpDisruptionReportStep) *mcpUntrusted { return &s.FailureReason })
 		},
-		func() bool { return mcpChaosHalve(&out.Steps, 1) },
+		func() bool { return mcpHalve(&out.Steps, 1) },
 	)
 }
 

@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -38,46 +37,14 @@ const (
 	mcpTopologyLeaderSummaries = 200
 )
 
-// mcpKafkaTopicPattern is Kafka's rule for topic names: 1 to 249 of these
-// characters (org.apache.kafka.common.internals.Topic, kafka-clients 3.9.2).
-// "." and ".." match it and are refused separately.
-const mcpKafkaTopicPattern = `^[a-zA-Z0-9._-]{1,249}$`
-
-var mcpKafkaTopicRE = regexp.MustCompile(mcpKafkaTopicPattern)
-
-// mcpValidateKafkaTopic refuses anything Kafka would not accept as a topic name,
-// so a topic argument can carry neither prose nor a path.
-func mcpValidateKafkaTopic(field, topic string) error {
-	if !mcpKafkaTopicRE.MatchString(topic) || topic == "." || topic == ".." {
-		return mcpInvalidArgument(field+" must be a Kafka topic name: 1 to 249 letters, digits, '.', '_' or '-', "+
-			"and not \".\" or \"..\".", topic)
-	}
-	return nil
-}
-
-// mcpClusterInputSchema is the input schema addReadTool would infer for In, with
-// edit applied: the constraints a struct tag cannot carry (a pattern, bounds),
-// so that the SDK refuses a bad argument before any Kates code runs. The
-// handler checks the same things again.
-func mcpClusterInputSchema[In any](name string, edit func(props map[string]*jsonschema.Schema)) *jsonschema.Schema {
-	s, err := mcpSchemaFor[In]()
-	if err != nil {
-		panic(fmt.Sprintf("kates mcp: tool %q input schema: %v", name, err))
-	}
-	edit(s.Properties)
-	return s
-}
-
-func mcpClusterFloat(f float64) *float64 { return &f }
-
 func registerMCPClusterTopology(s *mcp.Server, deps *mcpDeps) {
 	addReadTool(s, deps, &mcp.Tool{
 		Name:        "cluster_topology",
 		Title:       "Cluster topology",
 		Description: mcpClusterTopologyDescription,
-		InputSchema: mcpClusterInputSchema[mcpClusterTopologyIn]("cluster_topology", func(p map[string]*jsonschema.Schema) {
-			p["topic"].Pattern = mcpKafkaTopicPattern
-			p["from_partition"].Minimum = mcpClusterFloat(0)
+		InputSchema: mcpInputSchema[mcpClusterTopologyIn]("cluster_topology", func(s *jsonschema.Schema) {
+			s.Properties["topic"].Pattern = mcpKafkaTopicPattern
+			mcpAtLeast(s.Properties["from_partition"], 0)
 		}),
 	}, mcpClusterTopology, mcpCaveatClusterDataCached)
 }
@@ -575,42 +542,27 @@ const mcpTopologyMinPage = 10
 // goes first, down to mcpTopologyMinPage, since the caller pages on with
 // nextFromPartition; after that the longest list is halved until it fits.
 func mcpFitTopology(call *mcpCall, out *mcpClusterTopologyOut) {
-	type list struct {
-		n   int
-		cut func(n int)
-	}
-	cutPage := func(t *mcpTopicLayout, n int) {
+	t := out.Topic
+	cutPage := func(n int) {
 		next := t.Partitions[n].Partition
 		t.Partitions, t.NextFromPartition = t.Partitions[:n], &next
 	}
-	for !call.Fits(out) {
-		call.MarkTruncated()
-		t := out.Topic
-		if t != nil && len(t.Partitions) > mcpTopologyMinPage {
-			cutPage(t, len(t.Partitions)/2)
-			continue
-		}
-		lists := []list{
-			{len(out.Brokers), func(n int) { out.Brokers = out.Brokers[:n] }},
-			{len(out.Controllers), func(n int) { out.Controllers = out.Controllers[:n] }},
-			{len(out.NodePools), func(n int) { out.NodePools = out.NodePools[:n] }},
-		}
-		if t != nil {
-			lists = append(lists,
-				list{len(t.Leaders), func(n int) { t.Leaders = t.Leaders[:n] }},
-				list{len(t.Partitions), func(n int) { cutPage(t, n) }})
-		}
-		longest := 0
-		for i, l := range lists {
-			if l.n > lists[longest].n {
-				longest = i
+	mcpShrink(call, out,
+		func() bool {
+			if t == nil || len(t.Partitions) <= mcpTopologyMinPage {
+				return false
 			}
-		}
-		if lists[longest].n <= 1 {
-			return // nothing left to cut; the guard refuses the result
-		}
-		lists[longest].cut(lists[longest].n / 2)
-	}
+			cutPage(len(t.Partitions) / 2)
+			return true
+		},
+		func() bool {
+			lists := []mcpShrinkList{mcpShrinkOf(&out.Brokers), mcpShrinkOf(&out.Controllers), mcpShrinkOf(&out.NodePools)}
+			if t != nil {
+				lists = append(lists, mcpShrinkOf(&t.Leaders), mcpShrinkList{n: len(t.Partitions), cut: cutPage})
+			}
+			return mcpHalveLongest(1, lists...)
+		},
+	)
 }
 
 // Paging through the topic list to tell a missing topic from a failed read.

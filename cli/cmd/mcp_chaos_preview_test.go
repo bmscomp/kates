@@ -393,6 +393,21 @@ func TestMCPPreviewBackendErrors(t *testing.T) {
 	}
 }
 
+// A 405 says the backend is older than the CLI, and the detail keeps the
+// client's explanation of it, not only the backend's "HTTP 405".
+func TestMCPPreviewPlaybookPlan405KeepsTheExplanation(t *testing.T) {
+	fb := mcpChaosBackend(t)
+	fb.JSON("GET", "/api/disruptions/playbooks/az-failure", http.StatusMethodNotAllowed, map[string]any{"status": 405, "error": "Method Not Allowed", "message": "HTTP 405"})
+	h := newMCPHarness(t, fb)
+	e := h.callErr("preview_disruption", map[string]any{"playbook": "az-failure"})
+	if !strings.Contains(e.Error.Message, "HTTP 405") || !strings.Contains(e.Error.Message, "older") {
+		t.Errorf("message %q does not name the 405 and an older backend", e.Error.Message)
+	}
+	if !strings.Contains(string(e.Error.Detail), "cannot return a playbook's plan") {
+		t.Errorf("detail %q lost the client's explanation", e.Error.Detail)
+	}
+}
+
 func TestMCPPreviewWithoutTopology(t *testing.T) {
 	tests := []struct {
 		name   string

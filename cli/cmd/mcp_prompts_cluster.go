@@ -39,23 +39,30 @@ func registerMCPClusterPrompts(s *mcp.Server) {
 	}, mcpDidKatesCauseThis)
 }
 
-// mcpClusterPromptArgError is the JSON-RPC error for arguments a prompt
-// refuses. The message is fixed text: prompts/get has no fenced detail to put
-// a value in.
-func mcpClusterPromptArgError(message string) error {
+// mcpPromptArgError is how every prompt refuses its arguments: the JSON-RPC
+// invalid-params error with fixed text. prompts/get has no fenced detail to
+// put a value in, and arguments come from the person who picked the prompt,
+// so none is echoed; each is checked before it is put into the text.
+func mcpPromptArgError(message string) error {
 	return &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: message}
 }
 
-func mcpDidKatesCauseThis(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-	var args map[string]string
-	if req != nil && req.Params != nil {
-		args = req.Params.Arguments
+// mcpPromptArgs is a prompts/get request's arguments, nil (every argument
+// reads as "") when the request carries no params.
+func mcpPromptArgs(req *mcp.GetPromptRequest) map[string]string {
+	if req == nil || req.Params == nil {
+		return nil
 	}
+	return req.Params.Arguments
+}
+
+func mcpDidKatesCauseThis(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	args := mcpPromptArgs(req)
 	for name := range args {
 		switch name {
 		case "since", "topic", "group":
 		default:
-			return nil, mcpClusterPromptArgError(mcpPromptDidKatesCauseThis + " takes since, topic and group, nothing else.")
+			return nil, mcpPromptArgError(mcpPromptDidKatesCauseThis + " takes since, topic and group, nothing else.")
 		}
 	}
 	// The arguments are the user's, but whatever fills them in, the text that
@@ -64,16 +71,16 @@ func mcpDidKatesCauseThis(_ context.Context, req *mcp.GetPromptRequest) (*mcp.Ge
 	since := strings.TrimSpace(mcpSanitizeLine(args["since"], 0))
 	switch {
 	case since == "":
-		return nil, mcpClusterPromptArgError("since is required: when the problem began, such as 2026-09-25T14:02:00Z.")
+		return nil, mcpPromptArgError("since is required: when the problem began, such as 2026-09-25T14:02:00Z.")
 	case utf8.RuneCountInString(since) > mcpClusterPromptSinceMaxRunes:
-		return nil, mcpClusterPromptArgError("since must be a time of at most 64 characters, such as 2026-09-25T14:02:00Z.")
+		return nil, mcpPromptArgError("since must be a time of at most 64 characters, such as 2026-09-25T14:02:00Z.")
 	}
 	topic, group := args["topic"], args["group"]
 	if topic != "" && mcpValidateKafkaTopic("topic", topic) != nil {
-		return nil, mcpClusterPromptArgError("topic must be a Kafka topic name: 1 to 249 letters, digits, '.', '_' or '-'.")
+		return nil, mcpPromptArgError("topic must be a Kafka topic name: 1 to 249 letters, digits, '.', '_' or '-'.")
 	}
 	if group != "" && mcpValidateConsumerGroup("group", group) != nil {
-		return nil, mcpClusterPromptArgError("group must be a consumer group id of 1 to 255 characters, without control " +
+		return nil, mcpPromptArgError("group must be a consumer group id of 1 to 255 characters, without control " +
 			"characters, line breaks, « or », backslashes, or a part between slashes that is empty, \".\" or \"..\" " +
 			"before any ';'.")
 	}

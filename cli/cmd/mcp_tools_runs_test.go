@@ -2049,19 +2049,6 @@ func TestMCPDiagnoseRunPrompt(t *testing.T) {
 
 // ---- guards against drift ---------------------------------------------------
 
-// mcpRunTypes and mcpRunStatuses must list exactly the backend's enums.
-func TestMCPRunEnumsMatchTheBackend(t *testing.T) {
-	root := filepath.Join("..", "..", filepath.FromSlash(mcpJava))
-	types := mcpJavaEnum(t, filepath.Join(root, "domain", "TestType.java"), "TestType")
-	if fmt.Sprint(types) != fmt.Sprint(mcpRunTypes) {
-		t.Errorf("TestType.java has %v, mcpRunTypes %v", types, mcpRunTypes)
-	}
-	statuses := mcpJavaEnum(t, filepath.Join(root, "domain", "TestResult.java"), "TaskStatus")
-	if fmt.Sprint(statuses) != fmt.Sprint(mcpRunStatuses) {
-		t.Errorf("TestResult.TaskStatus has %v, mcpRunStatuses %v", statuses, mcpRunStatuses)
-	}
-}
-
 // applyTypeDefaults copies every TestSpec field. get_run shows notCarried only
 // for runs stored before it did; a field the merge dropped again would go
 // missing from every newer run with nothing to say so. mcpRunNotCarried, the

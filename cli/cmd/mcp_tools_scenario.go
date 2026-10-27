@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gopkg.in/yaml.v3"
 )
@@ -95,12 +96,6 @@ var mcpScnEnvRefused = map[string]string{
 	"INTEGRATION_CDC":  "INTEGRATION_CDC connects to the first PostgreSQL Service it finds, in any namespace",
 }
 
-// mcpScnTestTypes is the backend's TestType enum (domain/TestType.java).
-var mcpScnTestTypes = []string{
-	"LOAD", "STRESS", "SPIKE", "ENDURANCE", "VOLUME", "CAPACITY", "ROUND_TRIP", "INTEGRITY",
-	"TUNE_REPLICATION", "TUNE_ACKS", "TUNE_BATCHING", "TUNE_COMPRESSION", "TUNE_PARTITIONS", "INTEGRATION_CDC",
-}
-
 // mcpScnTypeDefaults are the defaults applyTypeDefaults fills in for the fields
 // the envelope reads, and the acks the producer options are checked against.
 // They are the ones Kates ships: the @ConfigProperty
@@ -150,21 +145,18 @@ type mcpDraftScenarioIn struct {
 }
 
 func mcpDraftScenarioInputSchema() any {
-	s, err := mcpSchemaFor[mcpDraftScenarioIn]()
-	if err != nil {
-		panic(fmt.Sprintf("kates mcp: draft_scenario input schema: %v", err))
-	}
-	names := make([]any, 0, len(builtinScenarios))
-	for _, m := range builtinScenarios {
-		names = append(names, m.name)
-	}
-	s.Properties["template"].Enum = names
-	maxYAML, maxName, maxSpec, maxValidate := mcpDraftMaxYAMLBytes, 200, 30, 20
-	s.Properties["yaml"].MaxLength = &maxYAML
-	s.Properties["name"].MaxLength = &maxName
-	s.Properties["spec_overrides"].MaxProperties = &maxSpec
-	s.Properties["validate_overrides"].MaxProperties = &maxValidate
-	return s
+	return mcpInputSchema[mcpDraftScenarioIn]("draft_scenario", func(s *jsonschema.Schema) {
+		names := make([]any, 0, len(builtinScenarios))
+		for _, m := range builtinScenarios {
+			names = append(names, m.name)
+		}
+		s.Properties["template"].Enum = names
+		maxYAML, maxName, maxSpec, maxValidate := mcpDraftMaxYAMLBytes, 200, 30, 20
+		s.Properties["yaml"].MaxLength = &maxYAML
+		s.Properties["name"].MaxLength = &maxName
+		s.Properties["spec_overrides"].MaxProperties = &maxSpec
+		s.Properties["validate_overrides"].MaxProperties = &maxValidate
+	})
 }
 
 // Finding levels.
@@ -298,18 +290,26 @@ func mcpDraftScenario(_ context.Context, call *mcpCall, in mcpDraftScenarioIn) (
 // the caller already holds, then warnings from the end. Invalid and
 // outside_envelope findings, which the verdict rests on, are always kept.
 func mcpScnFit(call *mcpCall, out *mcpDraftScenarioOut, echoIsInput bool) error {
-	for !call.Fits(out) {
-		last := len(out.Findings) - 1
-		switch {
-		case echoIsInput && !out.YAMLOmitted:
+	fits := mcpShrink(call, out,
+		func() bool {
+			if !echoIsInput || out.YAMLOmitted {
+				return false
+			}
 			out.YAML, out.YAMLOmitted = "", true
-		case last >= 0 && out.Findings[last].Level == mcpScnWarning:
+			return true
+		},
+		func() bool {
+			last := len(out.Findings) - 1
+			if last < 0 || out.Findings[last].Level != mcpScnWarning {
+				return false
+			}
 			out.Findings = out.Findings[:last]
-		default:
-			return mcpInvalidArgument("The findings for this scenario file would not fit one result, even without its "+
-				"warnings; draft a shorter file, one scenario at a time.", "")
-		}
-		call.MarkTruncated()
+			return true
+		},
+	)
+	if !fits {
+		return mcpInvalidArgument("The findings for this scenario file would not fit one result, even without its "+
+			"warnings; draft a shorter file, one scenario at a time.", "")
 	}
 	return nil
 }
@@ -796,14 +796,14 @@ func mcpScnDisplayRequest(req *client.CreateTestRequest) client.CreateTestReques
 // reports whether the type is one it knows.
 func mcpScnCheckTypeAndBackend(i int, req *client.CreateTestRequest, fs *mcpScnFindings) bool {
 	known := false
-	for _, t := range mcpScnTestTypes {
+	for _, t := range mcpTestTypes {
 		known = known || t == req.TestType
 	}
 	switch {
 	case req.TestType == "":
 		fs.add(i, mcpScnInvalid, "type", "type is missing; the backend refuses a test without one")
 	case !known:
-		fs.add(i, mcpScnInvalid, "type", "the backend has no test type "+strconv.Quote(req.TestType)+" (it has "+strings.Join(mcpScnTestTypes, ", ")+")")
+		fs.add(i, mcpScnInvalid, "type", "the backend has no test type "+strconv.Quote(req.TestType)+" (it has "+strings.Join(mcpTestTypes, ", ")+")")
 	}
 	switch req.Backend {
 	case "", "native", "trogdor":
@@ -830,11 +830,8 @@ type mcpScnSpecKey struct {
 }
 
 var (
-	mcpScnTopicRE       = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,249}$`)
-	mcpScnAcksRE        = regexp.MustCompile(`^(all|-1|0|1)$`)
-	mcpScnCompressionRE = regexp.MustCompile(`^(none|gzip|snappy|lz4|zstd)$`)
-	mcpScnGroupRE       = regexp.MustCompile(`^(?s).{0,255}$`)
-	mcpScnNotBlankRE    = regexp.MustCompile(`\S`)
+	mcpScnGroupRE    = regexp.MustCompile(`^(?s).{0,255}$`)
+	mcpScnNotBlankRE = regexp.MustCompile(`\S`)
 )
 
 var mcpScnSpecKeys = map[string]mcpScnSpecKey{
@@ -842,11 +839,11 @@ var mcpScnSpecKeys = map[string]mcpScnSpecKey{
 	"parallelProducers":  {wire: "numProducers", kind: 'i', min: 1, max: 100},
 	"recordSizeBytes":    {wire: "recordSize", kind: 'i', min: 1, max: 104_857_600},
 	"durationSeconds":    {wire: "durationMs", kind: 'i', scale: 1000, min: 1_000, max: 86_400_000},
-	"topic":              {wire: "topic", kind: 's', pattern: mcpScnTopicRE},
-	"acks":               {wire: "acks", kind: 's', pattern: mcpScnAcksRE},
+	"topic":              {wire: "topic", kind: 's', pattern: mcpKafkaTopicRE},
+	"acks":               {wire: "acks", kind: 's', pattern: mcpAcksRE},
 	"batchSize":          {wire: "batchSize", kind: 'i', min: 0, max: 134_217_728, sendsZero: true},
 	"lingerMs":           {wire: "lingerMs", kind: 'i', min: 0, max: 300_000, sendsZero: true},
-	"compressionType":    {wire: "compressionType", kind: 's', pattern: mcpScnCompressionRE},
+	"compressionType":    {wire: "compressionType", kind: 's', pattern: mcpCompressionRE},
 	"numConsumers":       {wire: "numConsumers", kind: 'i', min: 0, max: 100},
 	"replicationFactor":  {wire: "replicationFactor", kind: 'i', min: 1, max: 10},
 	"partitions":         {wire: "partitions", kind: 'i', min: 1, max: 10_000},

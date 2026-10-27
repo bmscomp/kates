@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/bmscomp/kates/cli/client"
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -104,28 +104,19 @@ type mcpSecurityEvidenceIn struct {
 }
 
 func mcpSecurityEvidenceInputSchema() any {
-	s, err := mcpSchemaFor[mcpSecurityEvidenceIn]()
-	if err != nil {
-		panic(fmt.Sprintf("kates mcp: security_evidence input schema: %v", err))
-	}
-	sections := make([]any, 0, len(mcpSecuritySections))
-	for _, v := range mcpSecuritySections {
-		sections = append(sections, v)
-	}
-	// No "default": go-sdk v1.8 applies schema defaults to the arguments,
-	// and panics on a call that sends none (a nil map), which would end the
-	// server. The handler treats a missing section as summary.
-	s.Properties["section"].Enum = sections
-	frameworks := make([]any, 0, len(mcpComplianceFrameworks))
-	for _, f := range mcpComplianceFrameworks {
-		frameworks = append(frameworks, f.key)
-	}
-	s.Properties["framework"].Enum = frameworks
-	zero, one, maxLimit := 0.0, 1.0, float64(mcpSecMaxLimit)
-	s.Properties["offset"].Minimum = &zero
-	s.Properties["limit"].Minimum = &one
-	s.Properties["limit"].Maximum = &maxLimit
-	return s
+	return mcpInputSchema[mcpSecurityEvidenceIn]("security_evidence", func(s *jsonschema.Schema) {
+		// No "default": go-sdk v1.8 applies schema defaults to the arguments,
+		// and panics on a call that sends none (a nil map), which would end the
+		// server. The handler treats a missing section as summary.
+		s.Properties["section"].Enum = mcpAnys(mcpSecuritySections)
+		frameworks := make([]any, 0, len(mcpComplianceFrameworks))
+		for _, f := range mcpComplianceFrameworks {
+			frameworks = append(frameworks, f.key)
+		}
+		s.Properties["framework"].Enum = frameworks
+		mcpAtLeast(s.Properties["offset"], 0)
+		mcpBounds(s.Properties["limit"], 1, mcpSecMaxLimit)
+	})
 }
 
 type mcpSecurityEvidenceOut struct {
@@ -863,14 +854,12 @@ func registerMCPSecurityPrompt(s *mcp.Server) {
 
 func mcpSecurityPostureCheckPrompt(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	var framework mcpComplianceFrameworkName
-	if req != nil && req.Params != nil {
-		if v := strings.ToLower(strings.TrimSpace(req.Params.Arguments["framework"])); v != "" {
-			f, ok := mcpFrameworkByKey(v)
-			if !ok {
-				return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "framework must be cis, soc2 or pci"}
-			}
-			framework = f
+	if v := strings.ToLower(strings.TrimSpace(mcpPromptArgs(req)["framework"])); v != "" {
+		f, ok := mcpFrameworkByKey(v)
+		if !ok {
+			return nil, mcpPromptArgError("framework must be cis, soc2 or pci")
 		}
+		framework = f
 	}
 	return &mcp.GetPromptResult{
 		Description: "Lab security posture and drift check, not audit evidence",

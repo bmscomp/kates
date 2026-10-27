@@ -112,6 +112,13 @@ var (
 	mcpChaosGroupRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,255}$`)
 )
 
+// mcpPreviewTopicPattern is mcpKafkaTopicPattern as preview_disruption's
+// published input schema spells it (A-Z before a-z). The two match the same
+// names (TestMCPPreviewTopicPatternIsKafkas); the schema keeps its spelling
+// so that the tool list does not change. The handler matches with
+// mcpKafkaTopicRE.
+const mcpPreviewTopicPattern = `^[A-Za-z0-9._-]{1,249}$`
+
 type mcpPreviewIn struct {
 	Playbook string        `json:"playbook,omitempty" jsonschema:"a playbook name from list_chaos_catalog; give this or plan, not both"`
 	Plan     *mcpAdHocPlan `json:"plan,omitempty" jsonschema:"an ad-hoc plan; give this or playbook, not both"`
@@ -154,10 +161,10 @@ type mcpAdHocStep struct {
 // number of steps and the range of every number. The SDK refuses arguments
 // outside it before the tool runs, and the tool checks again.
 func mcpPreviewInputSchema() *jsonschema.Schema {
-	s, err := mcpSchemaFor[mcpPreviewIn]()
-	if err != nil {
-		panic(fmt.Sprintf("kates mcp: preview_disruption input schema: %v", err))
-	}
+	return mcpInputSchema[mcpPreviewIn]("preview_disruption", mcpPreviewSchemaEdit)
+}
+
+func mcpPreviewSchemaEdit(s *jsonschema.Schema) {
 	prop := func(parent *jsonschema.Schema, name string) *jsonschema.Schema {
 		p := parent.Properties[name]
 		if p == nil {
@@ -168,7 +175,7 @@ func mcpPreviewInputSchema() *jsonschema.Schema {
 	prop(s, "playbook").Pattern = mcpPlaybookNameRE.String()
 	plan := prop(s, "plan")
 	prop(plan, "name").Pattern = mcpChaosStepNameRE.String()
-	prop(plan, "isrTrackingTopic").Pattern = mcpChaosTopicRE.String()
+	prop(plan, "isrTrackingTopic").Pattern = mcpPreviewTopicPattern
 	prop(plan, "lagTrackingGroupId").Pattern = mcpChaosGroupRE.String()
 	steps := prop(plan, "steps")
 	minSteps, maxSteps := 1, mcpAdHocMaxSteps
@@ -179,7 +186,7 @@ func mcpPreviewInputSchema() *jsonschema.Schema {
 	}
 	prop(step, "name").Pattern = mcpChaosStepNameRE.String()
 	prop(step, "targetPod").Pattern = mcpChaosPodRE.String()
-	prop(step, "targetTopic").Pattern = mcpChaosTopicRE.String()
+	prop(step, "targetTopic").Pattern = mcpPreviewTopicPattern
 	types := prop(step, "disruptionType")
 	for _, t := range mcpAdHocTypes {
 		types.Enum = append(types.Enum, t)
@@ -191,11 +198,8 @@ func mcpPreviewInputSchema() *jsonschema.Schema {
 	slices.Sort(names)
 	for _, name := range names {
 		b := mcpAdHocBounds[name]
-		lo, hi := float64(b.Min), float64(b.Max)
-		p := prop(step, name)
-		p.Minimum, p.Maximum = &lo, &hi
+		mcpBounds(prop(step, name), float64(b.Min), float64(b.Max))
 	}
-	return s
 }
 
 // The plan JSON sent for an ad-hoc plan. Only what the step sets, and the
@@ -245,7 +249,7 @@ func mcpBuildAdHocPlan(p *mcpAdHocPlan) (mcpPlanWire, error) {
 	if !mcpChaosStepNameRE.MatchString(plan.Name) {
 		return plan, mcpInvalidArgument("plan.name must be lowercase letters, digits and dashes, at most 63 characters.", plan.Name)
 	}
-	if p.ISRTrackingTopic != "" && !mcpChaosTopicRE.MatchString(p.ISRTrackingTopic) {
+	if p.ISRTrackingTopic != "" && !mcpKafkaTopicRE.MatchString(p.ISRTrackingTopic) {
 		return plan, mcpInvalidArgument("plan.isrTrackingTopic must be a Kafka topic name.", p.ISRTrackingTopic)
 	}
 	if p.LagTrackingGroupID != "" && !mcpChaosGroupRE.MatchString(p.LagTrackingGroupID) {
@@ -339,7 +343,7 @@ func mcpCheckAdHocTargets(at string, s *mcpAdHocStep) error {
 	}
 	if s.TargetTopic != "" {
 		targets++
-		if !mcpChaosTopicRE.MatchString(s.TargetTopic) {
+		if !mcpKafkaTopicRE.MatchString(s.TargetTopic) {
 			return mcpInvalidArgument(at+".targetTopic must be a Kafka topic name.", s.TargetTopic)
 		}
 	}
@@ -636,26 +640,26 @@ func mcpInOtherNamespace(ds client.StepPreview, fs *mcpFaultSpecView, ctrl *mcpK
 // never below one entry, so a plan outside the rules never reads as within
 // them.
 func mcpFitPreview(call *mcpCall, out *mcpPreviewOut) {
-	mcpChaosShrinkToFit(call, out,
+	mcpShrink(call, out,
 		func() bool {
-			return mcpChaosHalveEach(out.Steps, func(s *mcpPreviewStep) *[]mcpUntrusted { return &s.Warnings }, 0)
+			return mcpHalveEach(out.Steps, func(s *mcpPreviewStep) *[]mcpUntrusted { return &s.Warnings }, 0)
 		},
-		func() bool { return mcpChaosHalve(&out.Warnings, 0) },
+		func() bool { return mcpHalve(&out.Warnings, 0) },
 		func() bool {
 			cleared := out.Description != ""
 			out.Description = ""
 			return cleared
 		},
 		func() bool {
-			return mcpChaosHalveEach(out.Steps, func(s *mcpPreviewStep) *[]string { return &s.AffectedPods }, 1)
+			return mcpHalveEach(out.Steps, func(s *mcpPreviewStep) *[]string { return &s.AffectedPods }, 1)
 		},
 		func() bool {
-			return mcpChaosHalveEach(out.Steps, func(s *mcpPreviewStep) *[]string { return &s.KRaftControllers }, 1)
+			return mcpHalveEach(out.Steps, func(s *mcpPreviewStep) *[]string { return &s.KRaftControllers }, 1)
 		},
-		func() bool { return mcpChaosHalve(&out.KRaftControllers.Touched, 1) },
-		func() bool { return mcpChaosHalve(&out.Steps, 1) },
-		func() bool { return mcpChaosHalve(&out.OutsideAgentLimits, 1) },
-		func() bool { return mcpChaosHalve(&out.Errors, 1) },
+		func() bool { return mcpHalve(&out.KRaftControllers.Touched, 1) },
+		func() bool { return mcpHalve(&out.Steps, 1) },
+		func() bool { return mcpHalve(&out.OutsideAgentLimits, 1) },
+		func() bool { return mcpHalve(&out.Errors, 1) },
 	)
 }
 

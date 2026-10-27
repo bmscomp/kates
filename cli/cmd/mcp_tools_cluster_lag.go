@@ -51,11 +51,12 @@ func registerMCPConsumerGroupLag(s *mcp.Server, deps *mcpDeps) {
 		Name:        "consumer_group_lag",
 		Title:       "Consumer group lag",
 		Description: mcpConsumerGroupLagDescription,
-		InputSchema: mcpClusterInputSchema[mcpConsumerGroupLagIn]("consumer_group_lag", func(p map[string]*jsonschema.Schema) {
+		InputSchema: mcpInputSchema[mcpConsumerGroupLagIn]("consumer_group_lag", func(s *jsonschema.Schema) {
+			p := s.Properties
 			one, most := 1, mcpConsumerGroupMaxRunes
 			p["group"].MinLength, p["group"].MaxLength = &one, &most
 			p["topic"].Pattern = mcpKafkaTopicPattern
-			p["limit"].Minimum, p["limit"].Maximum = mcpClusterFloat(1), mcpClusterFloat(mcpLagMaxLimit)
+			mcpBounds(p["limit"], 1, mcpLagMaxLimit)
 		}),
 	}, mcpConsumerGroupLag, mcpCaveatGroupLagCommitted)
 }
@@ -361,20 +362,8 @@ func mcpLagByLeaders(call *mcpCall, parts []mcpLagPartition) ([]mcpLagByLeader, 
 // mcpFitLag halves the longest list until the result fits one call. The
 // totals and the unknown-leader count stay whole.
 func mcpFitLag(call *mcpCall, out *mcpConsumerGroupLagOut) {
-	for !call.Fits(out) {
-		call.MarkTruncated()
-		p, t, l, c := len(out.Partitions), len(out.Topics), len(out.ByLeader), len(out.CommittedTopics)
-		switch {
-		case p <= 1 && t <= 1 && l <= 1 && c <= 1:
-			return // nothing left to cut; the guard refuses the result
-		case p >= t && p >= l && p >= c:
-			out.Partitions = out.Partitions[:p/2]
-		case t >= l && t >= c:
-			out.Topics = out.Topics[:t/2]
-		case l >= c:
-			out.ByLeader = out.ByLeader[:l/2]
-		default:
-			out.CommittedTopics = out.CommittedTopics[:c/2]
-		}
-	}
+	mcpShrink(call, out, func() bool {
+		return mcpHalveLongest(1, mcpShrinkOf(&out.Partitions), mcpShrinkOf(&out.Topics),
+			mcpShrinkOf(&out.ByLeader), mcpShrinkOf(&out.CommittedTopics))
+	})
 }

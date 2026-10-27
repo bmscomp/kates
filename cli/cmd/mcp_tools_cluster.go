@@ -174,31 +174,20 @@ func mcpClusterOverview(ctx context.Context, call *mcpCall, _ mcpNoInput) (mcpCl
 // groups; after that the longest list is halved until the result fits. Counts
 // are never cut.
 func mcpFitOverview(call *mcpCall, out *mcpClusterOverviewOut) {
-	drops := []func(r *mcpAlertRule){
-		func(r *mcpAlertRule) { r.Expr = "" },
-		func(r *mcpAlertRule) { r.Description = "" },
-		func(r *mcpAlertRule) { r.Summary, r.Group = "", "" },
-	}
-	for step := 0; !call.Fits(out); step++ {
-		call.MarkTruncated()
-		if step < len(drops) {
-			for i := range out.AlertRules.Rules {
-				drops[step](&out.AlertRules.Rules[i])
-			}
-			continue
-		}
-		b, p, r := len(out.Brokers), len(out.Health.Problems), len(out.AlertRules.Rules)
-		switch {
-		case b == 0 && p == 0 && r == 0:
-			return // nothing left to leave out; the guard refuses the result
-		case b >= p && b >= r:
-			out.Brokers = out.Brokers[:b/2]
-		case p >= r:
-			out.Health.Problems = out.Health.Problems[:p/2]
-		default:
-			out.AlertRules.Rules = out.AlertRules.Rules[:r/2]
-		}
-	}
+	rules := &out.AlertRules.Rules
+	mcpShrink(call, out,
+		func() bool { return mcpClearEach(*rules, func(r *mcpAlertRule) *mcpUntrusted { return &r.Expr }) },
+		func() bool {
+			return mcpClearEach(*rules, func(r *mcpAlertRule) *mcpUntrusted { return &r.Description })
+		},
+		func() bool {
+			summary := mcpClearEach(*rules, func(r *mcpAlertRule) *mcpUntrusted { return &r.Summary })
+			return mcpClearEach(*rules, func(r *mcpAlertRule) *mcpUntrusted { return &r.Group }) || summary
+		},
+		func() bool {
+			return mcpHalveLongest(0, mcpShrinkOf(&out.Brokers), mcpShrinkOf(&out.Health.Problems), mcpShrinkOf(rules))
+		},
+	)
 }
 
 func mcpBrokerFrom(n client.BrokerNode) mcpBroker {

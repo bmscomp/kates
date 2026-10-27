@@ -885,7 +885,7 @@ func mcpClassifyError(err error, callTimeout time.Duration) *mcpToolError {
 	}
 	var he *client.HTTPError
 	if errors.As(err, &he) {
-		return mcpClassifyStatus(he)
+		return mcpClassifyStatus(he, err)
 	}
 	var ue *url.Error
 	if errors.As(err, &ue) {
@@ -910,9 +910,13 @@ func mcpClassifyError(err error, callTimeout time.Duration) *mcpToolError {
 	return &mcpToolError{Code: mcpErrBackend, Message: "The request to the Kates API failed.", Detail: mcpErrorText(err), cause: err}
 }
 
-func mcpClassifyStatus(he *client.HTTPError) *mcpToolError {
+// mcpClassifyStatus maps an HTTP error to a tool error. err is the error the
+// handler returned, he the HTTPError inside it: when err wraps he with an
+// explanation (client.PlaybookPlan says why a 405 means an older backend),
+// the detail keeps the whole text, not only the backend's answer.
+func mcpClassifyStatus(he *client.HTTPError, err error) *mcpToolError {
 	s := he.StatusCode
-	te := &mcpToolError{Detail: he.Error(), Retryable: he.Retryable(), cause: he}
+	te := &mcpToolError{Detail: mcpErrorText(err), Retryable: he.Retryable(), cause: err}
 	switch s {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		te.Code = mcpErrInvalidArgument
@@ -926,6 +930,11 @@ func mcpClassifyStatus(he *client.HTTPError) *mcpToolError {
 	case http.StatusNotFound:
 		te.Code = mcpErrNotFound
 		te.Message = "The Kates API has no such item (HTTP 404)."
+	case http.StatusMethodNotAllowed:
+		// The path exists but not for GET: a backend older than this CLI,
+		// which serves the path for another method only.
+		te.Code = mcpErrBackend
+		te.Message = "The Kates API does not support this read (HTTP 405). The backend may be older than this CLI."
 	case http.StatusTooManyRequests:
 		// The backend's 429 carries Retry-After, but cli/client does not
 		// pass headers on; a fixed hint is the honest fallback.
