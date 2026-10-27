@@ -34,7 +34,7 @@ several are.`,
   kates kyverno apply --mode Enforce --yes --with-netpol
   kates kyverno apply --topology single --namespace team`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := newKyvernoKubectlFn()
+		kc := newKubectl("")
 		ctx := context.Background()
 
 		output.Banner("Kyverno Policy Application", "Deploying Cluster Policies")

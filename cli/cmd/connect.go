@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bmscomp/kates/cli/internal/kubectl"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
@@ -46,9 +45,9 @@ var connectStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Connect cluster status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
-		out, err := kc.Output(ctx, "get", "kafkaconnect", "-n", connectNamespace)
+		out, err := kc.Output(ctx, "get", "kafkaconnect")
 		if err != nil {
 			return fmt.Errorf("failed to get kafkaconnect: %w", err)
 		}
@@ -63,10 +62,10 @@ var connectConnectorsCmd = &cobra.Command{
 	Use:   "connectors",
 	Short: "List all KafkaConnector CRs",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
 
-		out, err := kc.Output(ctx, "get", "kafkaconnector", "-n", connectNamespace, "-o", "json")
+		out, err := kc.Output(ctx, "get", "kafkaconnector", "-o", "json")
 		if err != nil {
 			return fmt.Errorf("failed to get kafkaconnector: %w", err)
 		}
@@ -74,7 +73,7 @@ var connectConnectorsCmd = &cobra.Command{
 		var list kafkaConnectorList
 		if err := json.Unmarshal(out, &list); err != nil {
 			// Keep old behavior as fallback when JSON parsing fails.
-			fallback, fbErr := kc.Output(ctx, "get", "kafkaconnector", "-n", connectNamespace)
+			fallback, fbErr := kc.Output(ctx, "get", "kafkaconnector")
 			if fbErr != nil {
 				return fmt.Errorf("failed to parse connector output (%v) and fallback list failed: %w", err, fbErr)
 			}
@@ -132,9 +131,9 @@ var connectConnectorCmd = &cobra.Command{
 	Short: "Describe a connector",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
-		argsCmd := []string{"get", "kafkaconnector", args[0], "-n", connectNamespace}
+		argsCmd := []string{"get", "kafkaconnector", args[0]}
 		if outputMode != "json" {
 			argsCmd = append(argsCmd, "-o", "yaml")
 		} else {
@@ -156,11 +155,11 @@ var connectTasksCmd = &cobra.Command{
 	Short: "Show task-level status for a connector",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
 
 		var connector kafkaConnector
-		if err := kc.JSON(ctx, &connector, "get", "kafkaconnector", args[0], "-n", connectNamespace); err != nil {
+		if err := kc.JSON(ctx, &connector, "get", "kafkaconnector", args[0]); err != nil {
 			return fmt.Errorf("failed to get tasks for connector %s: %w", args[0], err)
 		}
 
@@ -192,9 +191,9 @@ var connectRestartCmd = &cobra.Command{
 	Short: "Restart a connector",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
-		_, err := kc.Run(ctx, "annotate", "kafkaconnector", args[0], "-n", connectNamespace, "strimzi.io/restart=true", "--overwrite")
+		_, err := kc.Run(ctx, "annotate", "kafkaconnector", args[0], "strimzi.io/restart=true", "--overwrite")
 		if err != nil {
 			return fmt.Errorf("failed to restart connector %s: %w", args[0], err)
 		}
@@ -208,9 +207,9 @@ var connectPauseCmd = &cobra.Command{
 	Short: "Pause a connector",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
-		_, err := kc.Run(ctx, "patch", "kafkaconnector", args[0], "-n", connectNamespace, "--type=merge", "-p", `{"spec":{"state":"paused"}}`)
+		_, err := kc.Run(ctx, "patch", "kafkaconnector", args[0], "--type=merge", "-p", `{"spec":{"state":"paused"}}`)
 		if err != nil {
 			return fmt.Errorf("failed to pause connector %s: %w", args[0], err)
 		}
@@ -224,9 +223,9 @@ var connectResumeCmd = &cobra.Command{
 	Short: "Resume a connector",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
-		_, err := kc.Run(ctx, "patch", "kafkaconnector", args[0], "-n", connectNamespace, "--type=merge", "-p", `{"spec":{"state":"running"}}`)
+		_, err := kc.Run(ctx, "patch", "kafkaconnector", args[0], "--type=merge", "-p", `{"spec":{"state":"running"}}`)
 		if err != nil {
 			return fmt.Errorf("failed to resume connector %s: %w", args[0], err)
 		}
@@ -239,9 +238,9 @@ var connectPluginsCmd = &cobra.Command{
 	Use:   "plugins",
 	Short: "List installed connector plugins",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
-		out, err := kc.Output(ctx, "get", "kafkaconnect", "-n", connectNamespace, "-o", "jsonpath={.items[0].status.connectorPlugins}")
+		out, err := kc.Output(ctx, "get", "kafkaconnect", "-o", "jsonpath={.items[0].status.connectorPlugins}")
 		if err != nil {
 			return fmt.Errorf("failed to get plugins (ensure a KafkaConnect cluster is running): %w", err)
 		}
@@ -281,10 +280,10 @@ var connectRestartTaskCmd = &cobra.Command{
 	Short: "Restart a specific connector task",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
 		annotation := fmt.Sprintf("strimzi.io/restart-task=%s", args[1])
-		_, err := kc.Run(ctx, "annotate", "kafkaconnector", args[0], "-n", connectNamespace, annotation, "--overwrite")
+		_, err := kc.Run(ctx, "annotate", "kafkaconnector", args[0], annotation, "--overwrite")
 		if err != nil {
 			return fmt.Errorf("failed to restart task %s on connector %s: %w", args[1], args[0], err)
 		}
@@ -298,7 +297,7 @@ var connectConfigCmd = &cobra.Command{
 	Short: "Show connector configuration",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
 		format := "jsonpath={.spec.config}"
 		if outputMode == "json" {
@@ -306,7 +305,7 @@ var connectConfigCmd = &cobra.Command{
 		} else if outputMode == "yaml" {
 			format = "-o=yaml"
 		}
-		cmdArgs := []string{"get", "kafkaconnector", args[0], "-n", connectNamespace}
+		cmdArgs := []string{"get", "kafkaconnector", args[0]}
 		if strings.HasPrefix(format, "jsonpath") {
 			cmdArgs = append(cmdArgs, "-o", format)
 		} else {
@@ -326,9 +325,9 @@ var connectDeleteCmd = &cobra.Command{
 	Short: "Delete a connector",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
-		_, err := kc.Run(ctx, "delete", "kafkaconnector", args[0], "-n", connectNamespace)
+		_, err := kc.Run(ctx, "delete", "kafkaconnector", args[0])
 		if err != nil {
 			return fmt.Errorf("failed to delete connector %s: %w", args[0], err)
 		}
@@ -342,14 +341,14 @@ var connectScaleCmd = &cobra.Command{
 	Short: "Scale Kafka Connect workers",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := kubectl.New(connectNamespace)
+		kc := newKubectl(connectNamespace)
 		ctx := context.Background()
 		patch, err := connectScalePatch(args[0])
 		if err != nil {
 			return err
 		}
 		// Find the KafkaConnect resource name
-		nameOut, err := kc.Output(ctx, "get", "kafkaconnect", "-n", connectNamespace, "-o", "jsonpath={.items[0].metadata.name}")
+		nameOut, err := kc.Output(ctx, "get", "kafkaconnect", "-o", "jsonpath={.items[0].metadata.name}")
 		if err != nil {
 			return fmt.Errorf("failed to find KafkaConnect resource: %w", err)
 		}
@@ -357,7 +356,7 @@ var connectScaleCmd = &cobra.Command{
 		if name == "" {
 			return fmt.Errorf("no KafkaConnect resource found in namespace %s", connectNamespace)
 		}
-		_, patchErr := kc.Run(ctx, "patch", "kafkaconnect", name, "-n", connectNamespace, "--type=merge", "-p", patch)
+		_, patchErr := kc.Run(ctx, "patch", "kafkaconnect", name, "--type=merge", "-p", patch)
 		if patchErr != nil {
 			return fmt.Errorf("failed to scale connect: %w", patchErr)
 		}
@@ -416,7 +415,7 @@ func detectConnectNamespace(ctx context.Context) string {
 	// Auto-detect from cluster: find the namespace of any KafkaConnect CR
 	lookup, cancel := context.WithTimeout(ctx, connectNamespaceLookupTimeout)
 	defer cancel()
-	kc := kubectl.New("")
+	kc := newKubectl("")
 	out, err := kc.Output(lookup, "get", "kafkaconnect", "-A",
 		"-o", "jsonpath={.items[0].metadata.namespace}")
 	if err == nil {

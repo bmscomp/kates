@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/bmscomp/kates/cli/internal/helm"
+	"github.com/bmscomp/kates/cli/internal/proc"
 	"github.com/bmscomp/kates/cli/pkg/theme"
 )
 
@@ -139,12 +142,6 @@ type k8sWorkload struct {
 	} `json:"status"`
 }
 
-type helmStatusRelease struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Status    string `json:"status"`
-}
-
 type componentSpec struct {
 	Group     string
 	Icon      string
@@ -261,26 +258,21 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 
 // ── V1 Existing Logic (Retained for default sequential flow) ──
 
-// loadHelmReleaseIndex reads every release on the cluster, by name. It goes
-// through runExecOutputFn like the rest of deploy's cluster reads, so a test
-// can hand it a cluster and the call is pinned to the deploy's context.
-func loadHelmReleaseIndex(ctx context.Context) map[string][]helmStatusRelease {
+// loadHelmReleaseIndex reads every release on the cluster, by name, or nil
+// when helm could not say. It goes through commandRunner like the rest of
+// status's cluster reads, so a test can hand it a cluster and the call is
+// pinned to the deploy's context. helm.List includes failed and pending
+// releases (-a), so the table says so rather than "missing".
+func loadHelmReleaseIndex(ctx context.Context) map[string][]helm.Release {
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	// -a: a failed or pending release is still a release, and the table
-	// should say so rather than "missing".
-	out, err := runExecOutputFn(checkCtx, "helm", "list", "-A", "-a", "-o", "json")
-	if err != nil || len(out) == 0 {
+	releases, err := newHelm("").List(checkCtx)
+	if err != nil || len(releases) == 0 {
 		return nil
 	}
 
-	var releases []helmStatusRelease
-	if err := json.Unmarshal(out, &releases); err != nil {
-		return nil
-	}
-
-	index := make(map[string][]helmStatusRelease, len(releases))
+	index := make(map[string][]helm.Release, len(releases))
 	for _, rel := range releases {
 		index[rel.Name] = append(index[rel.Name], rel)
 	}
@@ -291,7 +283,7 @@ func loadHelmReleaseIndex(ctx context.Context) map[string][]helmStatusRelease {
 // same-named release in another namespace is reported as "elsewhere (ns)",
 // not adopted: the table used to switch to it, so the health of a second
 // tenant's Kafka UI showed up under this deploy's namespace.
-func lookupHelmRelease(index map[string][]helmStatusRelease, release, namespace string) (status, resolvedNamespace string, ok bool) {
+func lookupHelmRelease(index map[string][]helm.Release, release, namespace string) (status, resolvedNamespace string, ok bool) {
 	if index == nil {
 		return "", namespace, false
 	}
@@ -314,7 +306,7 @@ func lookupHelmRelease(index map[string][]helmStatusRelease, release, namespace 
 	return "elsewhere (" + strings.Join(elsewhere, ", ") + ")", namespace, true
 }
 
-func getHelmStatusWithNamespace(ctx context.Context, index map[string][]helmStatusRelease, release, namespace string) (status, resolvedNamespace string) {
+func getHelmStatusWithNamespace(ctx context.Context, index map[string][]helm.Release, release, namespace string) (status, resolvedNamespace string) {
 	if st, ns, ok := lookupHelmRelease(index, release, namespace); ok {
 		return st, ns
 	}
@@ -322,24 +314,22 @@ func getHelmStatusWithNamespace(ctx context.Context, index map[string][]helmStat
 }
 
 // getHelmStatus is the release's real status (deployed, failed,
-// pending-install, ...), or "missing". helm status exits 0 for a failed
-// release, so the exit code alone used to report every release as deployed.
+// pending-install, ...), "missing" when helm does not have it or could not be
+// asked, and "unknown" when helm answered with something that is not a
+// status. helm status exits 0 for a failed release, so the exit code alone
+// used to report every release as deployed.
 func getHelmStatus(ctx context.Context, release, namespace string) string {
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	out, err := runExecOutputFn(checkCtx, "helm", "status", release, "-n", namespace, "-o", "json")
-	if err != nil {
+	status, err := newHelm(namespace).Status(checkCtx, release)
+	var failed *proc.Error
+	switch {
+	case errors.Is(err, helm.ErrNotFound) || errors.As(err, &failed):
 		return "missing"
-	}
-	var rel struct {
-		Info struct {
-			Status string `json:"status"`
-		} `json:"info"`
-	}
-	if json.Unmarshal(out, &rel) != nil || rel.Info.Status == "" {
+	case err != nil || status == "":
 		return "unknown"
 	}
-	return strings.ToLower(rel.Info.Status)
+	return status
 }
 
 // notDeployedDetails is the DETAILS cell of a release that is not deployed
@@ -394,11 +384,12 @@ func getHealthStatus(ctx context.Context, kind, resource, namespace string) (str
 func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (string, string, interface{}) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	kc := newKubectl(namespace)
 
 	if kind == "pod" {
-		args := append([]string{"get", "pods", "-n", namespace}, strings.Split(resource, " ")...)
+		args := append([]string{"get", "pods"}, strings.Split(resource, " ")...)
 		args = append(args, "-o", "json")
-		out, err := runExecOutputFn(checkCtx, "kubectl", args...)
+		out, err := kc.Output(checkCtx, args...)
 		if err != nil {
 			return "Unknown", "Failed to query pods: " + err.Error(), nil
 		}
@@ -411,7 +402,7 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 		// Combined output: on failure it holds kubectl's own words, and
 		// "NotFound" and "the server doesn't have a resource type" are
 		// different problems the reader can act on.
-		out, err := runExecCombinedFn(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "json")
+		out, err := kc.Combined(checkCtx, "get", kind, resource, "-o", "json")
 		if err != nil {
 			msg := strings.TrimSpace(string(out))
 			if msg == "" {
@@ -422,7 +413,7 @@ func getHealthStatusV2(ctx context.Context, kind, resource, namespace string) (s
 		health, details, raw := parseKafkaHealth(out, kind)
 		return health, details, raw
 	} else if kind == "statefulset" || kind == "deployment" {
-		out, err := runExecOutputFn(checkCtx, "kubectl", "get", kind, resource, "-n", namespace, "-o", "json")
+		out, err := kc.Output(checkCtx, "get", kind, resource, "-o", "json")
 		if err != nil {
 			return "Unknown", "Resource not found: " + err.Error(), nil
 		}

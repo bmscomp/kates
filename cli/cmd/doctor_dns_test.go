@@ -2,19 +2,13 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
-
-	"github.com/bmscomp/kates/cli/internal/kubectl"
 )
 
 // doctor dns --fix used to patch searches: ["<kafka domain>"], which replaced
 // the list and dropped every search domain the resource already had.
 func TestPatchDeploymentDNS_AppendsToCurrentSearches(t *testing.T) {
-	origOut, origRun := dnsKubectlOutputFn, dnsKubectlRunFn
-	t.Cleanup(func() { dnsKubectlOutputFn, dnsKubectlRunFn = origOut, origRun })
-
 	for _, tt := range []struct {
 		name    string
 		current string // what kubectl prints for the jsonpath
@@ -26,25 +20,16 @@ func TestPatchDeploymentDNS_AppendsToCurrentSearches(t *testing.T) {
 		{"already present", `["kafka.svc.cluster.local"]`, `["kafka.svc.cluster.local"]`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotArgs []string
-			dnsKubectlOutputFn = func(_ context.Context, _ *kubectl.Client, args ...string) ([]byte, error) {
-				if args[0] != "get" || args[1] != "deployment" || args[2] != "kates" {
-					t.Errorf("read %v, want get deployment kates", args)
-				}
-				return []byte(tt.current), nil
-			}
-			dnsKubectlRunFn = func(_ context.Context, _ *kubectl.Client, args ...string) (string, error) {
-				gotArgs = args
-				return "", nil
-			}
+			f := stubRunner(t).On("kubectl get deployment kates", tt.current)
 
-			if err := patchDeploymentDNS(context.Background(), kubectl.New(""), "kates", "kates", "kafka.svc.cluster.local"); err != nil {
+			if err := patchDeploymentDNS(context.Background(), newKubectl(""), "kates", "kates", "kafka.svc.cluster.local"); err != nil {
 				t.Fatal(err)
 			}
-			if len(gotArgs) == 0 || gotArgs[0] != "patch" {
-				t.Fatalf("kubectl %v, want a patch", gotArgs)
+			calls := f.Calls()
+			if len(calls) != 2 || calls[1].Args[0] != "patch" {
+				t.Fatalf("kubectl %q, want a read then a patch", f.Lines())
 			}
-			patch := gotArgs[len(gotArgs)-1]
+			patch := calls[1].Args[len(calls[1].Args)-1]
 			want := `{"spec":{"template":{"spec":{"dnsConfig":{"searches":` + tt.want + `}}}}}`
 			if patch != want {
 				t.Errorf("patch = %s\nwant    %s", patch, want)
@@ -54,24 +39,19 @@ func TestPatchDeploymentDNS_AppendsToCurrentSearches(t *testing.T) {
 }
 
 func TestPatchKafkaConnectDNS_AppendsToCurrentSearches(t *testing.T) {
-	origOut, origRun := dnsKubectlOutputFn, dnsKubectlRunFn
-	t.Cleanup(func() { dnsKubectlOutputFn, dnsKubectlRunFn = origOut, origRun })
+	f := stubRunner(t).On("kubectl get kafkaconnect", `["schema.svc.cluster.local"]`)
 
-	dnsKubectlOutputFn = func(_ context.Context, _ *kubectl.Client, args ...string) ([]byte, error) {
-		if !strings.Contains(strings.Join(args, " "), "spec.template.pod.dnsConfig.searches") {
-			t.Errorf("read %v, want the KafkaConnect pod template's searches", args)
-		}
-		return []byte(`["schema.svc.cluster.local"]`), nil
-	}
-	var patch string
-	dnsKubectlRunFn = func(_ context.Context, _ *kubectl.Client, args ...string) (string, error) {
-		patch = args[len(args)-1]
-		return "", nil
-	}
-
-	if err := patchKafkaConnectDNS(context.Background(), kubectl.New(""), "connect-cluster", "connect", "kafka.svc.cluster.local"); err != nil {
+	if err := patchKafkaConnectDNS(context.Background(), newKubectl(""), "connect-cluster", "connect", "kafka.svc.cluster.local"); err != nil {
 		t.Fatal(err)
 	}
+	calls := f.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("kubectl %q, want a read then a patch", f.Lines())
+	}
+	if !strings.Contains(calls[0].String(), "spec.template.pod.dnsConfig.searches") {
+		t.Errorf("read %q, want the KafkaConnect pod template's searches", calls[0])
+	}
+	patch := calls[1].Args[len(calls[1].Args)-1]
 	want := `{"spec":{"template":{"pod":{"dnsConfig":{"searches":["schema.svc.cluster.local","kafka.svc.cluster.local"]}}}}}`
 	if patch != want {
 		t.Errorf("patch = %s\nwant    %s", patch, want)
@@ -80,19 +60,39 @@ func TestPatchKafkaConnectDNS_AppendsToCurrentSearches(t *testing.T) {
 
 // A read that fails stops the patch: patching blind is what dropped entries.
 func TestPatchDeploymentDNS_ReadFailureStopsThePatch(t *testing.T) {
-	origOut, origRun := dnsKubectlOutputFn, dnsKubectlRunFn
-	t.Cleanup(func() { dnsKubectlOutputFn, dnsKubectlRunFn = origOut, origRun })
-
-	dnsKubectlOutputFn = func(context.Context, *kubectl.Client, ...string) ([]byte, error) {
-		return nil, errors.New("forbidden")
-	}
+	f := stubRunner(t).Fail("kubectl get", "Error from server (Forbidden): forbidden")
+	err := patchDeploymentDNS(context.Background(), newKubectl(""), "kates", "kates", "kafka.svc.cluster.local")
 	patched := false
-	dnsKubectlRunFn = func(context.Context, *kubectl.Client, ...string) (string, error) {
-		patched = true
-		return "", nil
+	for _, c := range f.Calls() {
+		if c.Args[0] == "patch" {
+			patched = true
+		}
 	}
-	err := patchDeploymentDNS(context.Background(), kubectl.New(""), "kates", "kates", "kafka.svc.cluster.local")
 	if err == nil || patched {
 		t.Errorf("err = %v, patched = %t; want an error and no patch", err, patched)
+	}
+}
+
+// The checks report a missing domain, and treat a resource that is not there
+// as nothing to fix.
+func TestCheckDNS(t *testing.T) {
+	ctx := context.Background()
+	stubRunner(t).
+		On("kubectl get deployment kates", `["kafka.svc.cluster.local"]`).
+		On("kubectl get kafkaconnect connect-cluster", ``).
+		Fail("kubectl get deployment missing", `Error from server (NotFound): deployments.apps "missing" not found`)
+	kc := newKubectl("")
+
+	if checkDeploymentDNS(ctx, kc, "kates", "kates", "kafka.svc.cluster.local") {
+		t.Error("a deployment that has the search domain was reported as needing it")
+	}
+	if !checkDeploymentDNS(ctx, kc, "kates", "kates", "kafka-prod.svc.cluster.local") {
+		t.Error("a deployment without the search domain was not reported")
+	}
+	if checkDeploymentDNS(ctx, kc, "missing", "kates", "kafka.svc.cluster.local") {
+		t.Error("a deployment that does not exist was reported as needing a patch")
+	}
+	if !checkKafkaConnectDNS(ctx, kc, "connect-cluster", "connect", "kafka.svc.cluster.local") {
+		t.Error("a KafkaConnect with no dnsConfig was not reported")
 	}
 }

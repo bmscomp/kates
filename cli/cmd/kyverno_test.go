@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,6 +13,7 @@ import (
 )
 
 func TestKyvernoDetectRecommendations(t *testing.T) {
+	stubRunner(t)
 	existing := map[string]string{
 		"kates-pod-security-standards": "true",
 		"custom-org-policy":            "false",
@@ -39,9 +40,36 @@ func TestKyvernoDetectRecommendations(t *testing.T) {
 	}
 }
 
+// Recommendations follow what the cluster shows: GHCR images bring the
+// registry and Cosign policies, Strimzi topics the Kafka standards, and a
+// -dev namespace the exceptions.
+func TestKyvernoDetectRecommendationsFromTheCluster(t *testing.T) {
+	stubRunner(t).
+		On("kubectl get pods -A", "ghcr.io/bmscomp/kates:1.31 quay.io/strimzi/kafka:0.45").
+		On("kubectl get netpol -A", "kafka deny-all").
+		On("kubectl get ns", "default kafka team-dev").
+		On("kubectl get crd kafkatopics.kafka.strimzi.io", "kafkatopics.kafka.strimzi.io")
+
+	var names []string
+	for _, r := range generateRecommendations(nil) {
+		names = append(names, r.Name)
+	}
+	for _, want := range []string{"Image Registry Restriction", "Cosign Image Verification", "Policy Exceptions", "Kafka Topic Standards"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("recommendations %q lack %q", names, want)
+		}
+	}
+	if slices.Contains(names, "NetworkPolicy Generation") {
+		t.Errorf("recommendations %q include NetworkPolicy Generation although policies exist", names)
+	}
+}
+
 func TestKyvernoDetectCLI(t *testing.T) {
 	buf := output.ResetForTesting()
 	defer func() { output.Out = os.Stdout }()
+	stubRunner(t).
+		On("kubectl get crd clusterpolicies.kyverno.io", "clusterpolicies.kyverno.io").
+		On("kubectl get clusterpolicies", "kates-pod-security-standards=true\nthird-party=false\n")
 
 	cmd := kyvernoDetectCmd
 	err := cmd.RunE(cmd, []string{})
@@ -53,61 +81,30 @@ func TestKyvernoDetectCLI(t *testing.T) {
 	if !strings.Contains(outStr, "Kyverno Policy Detection") {
 		t.Errorf("Expected banner 'Kyverno Policy Detection', got:\n%s", outStr)
 	}
-}
-
-// fakeKyvernoKubectl answers every kubectl call with err, or with JSON/output
-// when err is nil, and records what it was asked.
-type fakeKyvernoKubectl struct {
-	err   error
-	json  string
-	calls []string
-}
-
-func (f *fakeKyvernoKubectl) record(args ...string) {
-	f.calls = append(f.calls, strings.Join(args, " "))
-}
-
-func (f *fakeKyvernoKubectl) Run(_ context.Context, args ...string) (string, error) {
-	f.record(args...)
-	return "", f.err
-}
-
-func (f *fakeKyvernoKubectl) Output(_ context.Context, args ...string) ([]byte, error) {
-	f.record(args...)
-	if f.err != nil {
-		return nil, f.err
+	if !strings.Contains(outStr, "Kyverno Admission Controller is installed") {
+		t.Errorf("an installed Kyverno was not reported:\n%s", outStr)
 	}
-	return []byte(f.json), nil
-}
-
-func (f *fakeKyvernoKubectl) JSON(_ context.Context, result interface{}, args ...string) error {
-	f.record(args...)
-	if f.err != nil {
-		return f.err
+	if !strings.Contains(outStr, "Third-Party Policies Detected") || !strings.Contains(outStr, "third-party") {
+		t.Errorf("the third-party policy was not listed:\n%s", outStr)
 	}
-	return json.Unmarshal([]byte(f.json), result)
 }
-
-func (f *fakeKyvernoKubectl) CRDExists(context.Context, string) bool { return true }
 
 // A kubectl failure exits 1. The four commands used to print it and return
 // nil, so a script saw a clean exit.
 func TestKyvernoCommands_KubectlFailureExitsNonZero(t *testing.T) {
-	orig := newKyvernoKubectlFn
-	t.Cleanup(func() { newKyvernoKubectlFn = orig })
-
 	for _, tt := range []struct {
 		cmd  *cobra.Command
 		args []string
 		want string // the kubectl call the fake must see
 	}{
-		{kyvernoStatusCmd, nil, "get clusterpolicies"},
-		{kyvernoViolationsCmd, nil, "get policyreport -o json -A"},
-		{kyvernoEnforceCmd, []string{"pss"}, `patch clusterpolicy pss --type=merge -p {"spec":{"validationFailureAction":"Enforce"}}`},
-		{kyvernoAuditCmd, []string{"pss"}, `patch clusterpolicy pss --type=merge -p {"spec":{"validationFailureAction":"Audit"}}`},
+		{kyvernoStatusCmd, nil, "kubectl get clusterpolicies -o json"},
+		{kyvernoViolationsCmd, nil, "kubectl get policyreport -o json -A"},
+		{kyvernoEnforceCmd, []string{"pss"}, `kubectl patch clusterpolicy pss --type=merge -p {"spec":{"validationFailureAction":"Enforce"}}`},
+		{kyvernoAuditCmd, []string{"pss"}, `kubectl patch clusterpolicy pss --type=merge -p {"spec":{"validationFailureAction":"Audit"}}`},
 	} {
-		fake := &fakeKyvernoKubectl{err: errors.New("kubectl get: exit status 1\nUnable to connect to the server")}
-		newKyvernoKubectlFn = func() kyvernoKubectl { return fake }
+		fake := stubRunner(t).
+			On("kubectl get crd", "clusterpolicies.kyverno.io").
+			Fail("kubectl", "Unable to connect to the server")
 
 		_, stderr, err := commandOutput(t, func() error { return tt.cmd.RunE(tt.cmd, tt.args) })
 		if _, ok := err.(*silentErr); !ok {
@@ -116,16 +113,37 @@ func TestKyvernoCommands_KubectlFailureExitsNonZero(t *testing.T) {
 		if !strings.Contains(stderr, "Unable to connect") {
 			t.Errorf("kyverno %s: stderr %q does not say why", tt.cmd.Name(), stderr)
 		}
-		if len(fake.calls) == 0 || fake.calls[0] != tt.want {
-			t.Errorf("kyverno %s: kubectl calls %q, want first %q", tt.cmd.Name(), fake.calls, tt.want)
+		if !slices.Contains(fake.Lines(), tt.want) {
+			t.Errorf("kyverno %s: kubectl calls %q, want %q among them", tt.cmd.Name(), fake.Lines(), tt.want)
 		}
 	}
 
 	// And success still exits 0.
-	fake := &fakeKyvernoKubectl{}
-	newKyvernoKubectlFn = func() kyvernoKubectl { return fake }
+	stubRunner(t)
 	if _, _, err := commandOutput(t, func() error { return kyvernoEnforceCmd.RunE(kyvernoEnforceCmd, []string{"pss"}) }); err != nil {
 		t.Errorf("kyverno enforce: err = %v, want nil", err)
+	}
+}
+
+// kyverno status reads the policies as JSON and the reports as a table.
+func TestKyvernoStatus(t *testing.T) {
+	stubRunner(t).
+		On("kubectl get crd", "clusterpolicies.kyverno.io").
+		On("kubectl get clusterpolicies -o json", `{"items":[{"metadata":{"name":"kates-pod-security-standards"},
+			"spec":{"validationFailureAction":"Enforce","rules":[{"name":"a","validate":{}},{"name":"b","validate":{}},{"name":"c","mutate":{}}]},
+			"status":{"ready":true}}]}`).
+		On("kubectl get policyreport -A --no-headers",
+			"kafka   polr-ns-kafka   kyverno   1m   7   2   0   0   0\nkates   polr-ns-kates   kyverno   1m   3   0   0   0   0\n")
+
+	stdout, stderr, err := commandOutput(t, func() error { return kyvernoStatusCmd.RunE(kyvernoStatusCmd, nil) })
+	if err != nil {
+		t.Fatalf("kyverno status: %v", err)
+	}
+	all := string(stdout) + stderr
+	for _, want := range []string{"kates-pod-security-standards", "Enforce", "1 policies active — 2 validate rules, 1 mutate rules", "2 violations detected across 1 namespace(s)"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("kyverno status output lacks %q:\n%s", want, all)
+		}
 	}
 }
 
@@ -151,14 +169,15 @@ func TestKyvernoApplyBuildCommand(t *testing.T) {
 // empty). helm calls through the write seams are recorded in helmCalls.
 func kyvernoApplyCluster(t *testing.T, installedNS string, dryRunOut string, dryRunErr error) (helmCalls *[]string) {
 	t.Helper()
-	origK, origOut, origComb, origHelm := newKyvernoKubectlFn, runExecOutputFn, runExecCombinedFn, runHelmFn
+	origOut, origComb, origHelm := runExecOutputFn, runExecCombinedFn, runHelmFn
 	prevDry, prevMode, prevYes := kyvernoApplyDryRun, kyvernoApplyMode, kyvernoApplyYes
 	t.Cleanup(func() {
-		newKyvernoKubectlFn, runExecOutputFn, runExecCombinedFn, runHelmFn = origK, origOut, origComb, origHelm
+		runExecOutputFn, runExecCombinedFn, runHelmFn = origOut, origComb, origHelm
 		kyvernoApplyDryRun, kyvernoApplyMode, kyvernoApplyYes = prevDry, prevMode, prevYes
 	})
 	kyvernoApplyMode = "Audit"
-	newKyvernoKubectlFn = func() kyvernoKubectl { return &fakeKyvernoKubectl{} }
+	// kubectl: the ClusterPolicy CRD is there, and every read is empty.
+	stubRunner(t)
 	var calls []string
 	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "helm" && args[0] == "list" {

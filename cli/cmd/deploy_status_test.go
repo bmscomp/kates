@@ -4,34 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/bmscomp/kates/cli/internal/helm"
+	"github.com/bmscomp/kates/cli/internal/proc"
 )
 
 // statusCluster answers deploy status's reads for a cluster where the kates
 // release failed, a kafka-ui release lives in another namespace, and the
 // Strimzi operator is healthy. Everything else is not found.
-func statusCluster(t *testing.T) {
+func statusCluster(t *testing.T) *proc.Fake {
 	t.Helper()
-	origOut, origComb := runExecOutputFn, runExecCombinedFn
-	t.Cleanup(func() { runExecOutputFn, runExecCombinedFn = origOut, origComb })
-	read := func(_ context.Context, name string, args ...string) ([]byte, error) {
-		joined := name + " " + strings.Join(args, " ")
-		switch {
-		case joined == "helm list -A -a -o json":
-			return []byte(`[{"name":"kates","namespace":"kates-test-ns","status":"failed"},
-				{"name":"kafka-ui","namespace":"other-ui","status":"deployed"},
-				{"name":"strimzi-operator","namespace":"strimzi-operator","status":"deployed"}]`), nil
-		case strings.HasPrefix(joined, "kubectl get pods -n strimzi-operator"):
-			return []byte(`{"items":[{"metadata":{"name":"op-1"},"status":{"phase":"Running","containerStatuses":[{"name":"c","ready":true,"state":{"running":{}}}]}}]}`), nil
-		}
-		return []byte("Error from server (NotFound): not found"), errors.New("exit status 1")
-	}
-	runExecOutputFn, runExecCombinedFn = read, read
+	return stubRunner(t).
+		On("helm list -A -a -o json", `[{"name":"kates","namespace":"kates-test-ns","status":"failed"},
+			{"name":"kafka-ui","namespace":"other-ui","status":"deployed"},
+			{"name":"strimzi-operator","namespace":"strimzi-operator","status":"deployed"}]`).
+		Handle("kubectl get pods", func(c proc.Call) ([]byte, error) {
+			if slices.Contains(c.Args, "strimzi-operator") {
+				return []byte(`{"items":[{"metadata":{"name":"op-1"},"status":{"phase":"Running","containerStatuses":[{"name":"c","ready":true,"state":{"running":{}}}]}}]}`), nil
+			}
+			return nil, &proc.Error{Name: c.Name, Args: c.Args, Stderr: "Error from server (NotFound): not found", Err: errNotFoundExit}
+		}).
+		Fail("helm", "Error: release: not found").
+		Fail("kubectl", "Error from server (NotFound): not found")
 }
 
+// errNotFoundExit stands in for kubectl's exit status in a Handle reply.
+var errNotFoundExit = errors.New("exit status 1")
+
 func TestDeployStatusCommand(t *testing.T) {
-	statusCluster(t)
+	fake := statusCluster(t)
 	prevTopology, prevNS, prevMM2 := deployTopology, deployNamespace, deployMM2NS
 	t.Cleanup(func() { deployTopology, deployNamespace, deployMM2NS = prevTopology, prevNS, prevMM2 })
 	deployTopology = "single"
@@ -73,6 +77,24 @@ func TestDeployStatusCommand(t *testing.T) {
 	if !strings.Contains(rows["MirrorMaker 2"], "kates-test-ns") || deployMM2NS != "mm2-flag-value" {
 		t.Errorf("deploy status must not mutate deployMM2NS (now %q): %q", deployMM2NS, rows["MirrorMaker 2"])
 	}
+	// The index is read once, first; a release it lacks is asked for alone,
+	// in its namespace; only the deployed operator has its health checked.
+	lines := fake.Lines()
+	if len(lines) == 0 || lines[0] != "helm list -A -a -o json" {
+		t.Errorf("the release index was not read first: %q", lines)
+	}
+	if !slices.Contains(lines, "helm -n kyverno status kyverno -o json") {
+		t.Errorf("a release the index lacks was not asked for alone: %q", lines)
+	}
+	var kubectlCalls []string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "kubectl ") {
+			kubectlCalls = append(kubectlCalls, l)
+		}
+	}
+	if want := []string{"kubectl get pods -l name=strimzi-cluster-operator -o json -n strimzi-operator"}; !slices.Equal(kubectlCalls, want) {
+		t.Errorf("kubectl calls %q, want %q only", kubectlCalls, want)
+	}
 
 	// The JSON view runs the same lookups.
 	deployStatusOutput = "json"
@@ -96,28 +118,55 @@ func TestDeployStatusCommand(t *testing.T) {
 
 // helm status exits 0 for a failed release; the status comes from its JSON.
 func TestGetHelmStatus_ReadsTheReleaseStatus(t *testing.T) {
-	orig := runExecOutputFn
-	t.Cleanup(func() { runExecOutputFn = orig })
-	var calls []string
-	runExecOutputFn = func(_ context.Context, name string, args ...string) ([]byte, error) {
-		calls = append(calls, name+" "+strings.Join(args, " "))
-		switch args[1] {
-		case "broken":
-			return []byte(`{"name":"broken","info":{"status":"failed"}}`), nil
-		case "half":
-			return []byte(`{"name":"half","info":{"status":"pending-upgrade"}}`), nil
-		}
-		return nil, errors.New("exit status 1")
-	}
-	for release, want := range map[string]string{"broken": "failed", "half": "pending-upgrade", "none": "missing"} {
+	fake := stubRunner(t).
+		On("helm -n ns status broken", `{"name":"broken","info":{"status":"failed"}}`).
+		On("helm -n ns status half", `{"name":"half","info":{"status":"pending-upgrade"}}`).
+		On("helm -n ns status garbled", `<html>`).
+		Fail("helm -n ns status unreachable", "Error: Kubernetes cluster unreachable").
+		Fail("helm", "Error: release: not found")
+	for release, want := range map[string]string{
+		"broken": "failed", "half": "pending-upgrade", "none": "missing",
+		"unreachable": "missing", "garbled": "unknown",
+	} {
 		if got := getHelmStatus(context.Background(), release, "ns"); got != want {
 			t.Errorf("%s: status %q, want %q", release, got, want)
 		}
 	}
-	for _, c := range calls {
-		if !strings.HasPrefix(c, "helm status ") || !strings.HasSuffix(c, "-n ns -o json") {
+	for _, c := range fake.Lines() {
+		if !strings.HasPrefix(c, "helm -n ns status ") || !strings.HasSuffix(c, " -o json") {
 			t.Errorf("unexpected helm call %q", c)
 		}
+	}
+}
+
+// The health check says what kubectl said: a Strimzi resource that is absent
+// reads "NotFound", not a bare exit status.
+func TestGetHealthStatusV2ReportsKubectlsWords(t *testing.T) {
+	stubRunner(t).
+		Handle("kubectl get kafkas.kafka.strimzi.io krafter", func(c proc.Call) ([]byte, error) {
+			out := `Error from server (NotFound): kafkas.kafka.strimzi.io "krafter" not found`
+			return []byte(out + "\n"), &proc.Error{Name: c.Name, Args: c.Args, Stderr: out, Err: errNotFoundExit}
+		}).
+		On("kubectl get kafkaconnects.kafka.strimzi.io", `{"status":{"conditions":[{"type":"Ready","status":"True"}]}}`).
+		On("kubectl get statefulset postgresql", `{"spec":{"replicas":1},"status":{"replicas":1,"readyReplicas":0}}`).
+		Fail("kubectl", "Unable to connect to the server")
+	ctx := context.Background()
+
+	health, details, _ := getHealthStatusV2(ctx, "kafkas.kafka.strimzi.io", "krafter", "kafka")
+	if health != "Unknown" || details != `Error from server (NotFound): kafkas.kafka.strimzi.io "krafter" not found` {
+		t.Errorf("absent Kafka = %q, %q", health, details)
+	}
+	if health, details, _ := getHealthStatusV2(ctx, "kafkaconnects.kafka.strimzi.io", "connect-cluster", "connect"); health != "Healthy" {
+		t.Errorf("ready Connect = %q, %q", health, details)
+	}
+	if health, details, _ := getHealthStatusV2(ctx, "statefulset", "postgresql", "database"); health != "Degraded" || details != "0/1 replicas ready" {
+		t.Errorf("statefulset = %q, %q", health, details)
+	}
+	if health, details, _ := getHealthStatusV2(ctx, "pod", "-l app=x", "kafka"); health != "Unknown" || !strings.Contains(details, "Unable to connect") {
+		t.Errorf("unreachable pods = %q, %q", health, details)
+	}
+	if health, details, _ := getHealthStatusV2(ctx, "service", "x", "kafka"); health != "Unknown" || details != "no health check for kind service" {
+		t.Errorf("unknown kind = %q, %q", health, details)
 	}
 }
 
@@ -353,7 +402,7 @@ func TestParseWorkloadHealth(t *testing.T) {
 }
 
 func TestLookupHelmRelease(t *testing.T) {
-	index := map[string][]helmStatusRelease{
+	index := map[string][]helm.Release{
 		"monitoring": {
 			{Name: "monitoring", Namespace: "monitoring", Status: "deployed"},
 		},

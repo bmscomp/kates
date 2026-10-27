@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -324,7 +323,8 @@ func runNetPolAudit(ctx context.Context, ns string) []networkCheck {
 	defer cancel()
 
 	// List NetworkPolicies
-	out, err := exec.CommandContext(checkCtx, "kubectl", "get", "networkpolicy", "-n", ns, "-o", "json").Output()
+	kc := newKubectl(ns)
+	out, err := kc.Output(checkCtx, "get", "networkpolicy", "-o", "json")
 	if err != nil {
 		return []networkCheck{{
 			Category: "netpol",
@@ -358,8 +358,8 @@ func runNetPolAudit(ctx context.Context, ns string) []networkCheck {
 		policyName := fmt.Sprintf("%s/%s", item.Metadata.Namespace, item.Metadata.Name)
 
 		// Fetch the raw YAML/JSON to check for kubernetes.io/metadata.name usage
-		polOut, polErr := exec.CommandContext(checkCtx, "kubectl", "get", "networkpolicy",
-			item.Metadata.Name, "-n", item.Metadata.Namespace, "-o", "json").Output()
+		polOut, polErr := kc.Output(checkCtx, "get", "networkpolicy",
+			item.Metadata.Name, "-n", item.Metadata.Namespace, "-o", "json")
 		if polErr != nil {
 			results = append(results, networkCheck{
 				Category: "netpol",
@@ -393,25 +393,15 @@ func runNetPolAudit(ctx context.Context, ns string) []networkCheck {
 
 // ─── Ephemeral pod runner ───────────────────────────────────
 
-// runKubectlCombinedFn runs kubectl and returns its combined output.
-// Overridden in tests, which have no cluster.
-var runKubectlCombinedFn = func(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, "kubectl", args...).CombinedOutput()
-}
-
 func runEphemeralPod(ctx context.Context, podName, namespace, shellCmd string) (string, error) {
 	runCtx, cancel := context.WithTimeout(ctx, doctorProbeTimeout)
 	defer cancel()
 
-	args := []string{
+	out, err := newKubectl(namespace).Combined(runCtx,
 		"run", "--rm", "-i", "--restart=Never",
 		"--image=busybox:1.36",
 		podName,
-		"-n", namespace,
-		"--", "sh", "-c", shellCmd,
-	}
-
-	out, err := runKubectlCombinedFn(runCtx, args...)
+		"--", "sh", "-c", shellCmd)
 	if err != nil {
 		// A non-zero exit is a probe that did not run: the shell commands end
 		// in `|| echo *_FAIL`, so they exit 0 themselves. Output on a failed
@@ -475,9 +465,9 @@ func detectClusterDomain(ctx context.Context) string {
 	defer cancel()
 
 	podName := doctorPodName()
-	out, err := exec.CommandContext(detectCtx, "kubectl", "run", "--rm", "-i", "--restart=Never",
-		"--image=busybox:1.36", podName, "-n", "default",
-		"--", "cat", "/etc/resolv.conf").CombinedOutput()
+	out, err := newKubectl("default").Combined(detectCtx, "run", "--rm", "-i", "--restart=Never",
+		"--image=busybox:1.36", podName,
+		"--", "cat", "/etc/resolv.conf")
 	if err != nil || len(out) == 0 {
 		return domain
 	}

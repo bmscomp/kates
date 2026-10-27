@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bmscomp/kates/cli/internal/kubectl"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
@@ -37,19 +36,6 @@ type policyReportItem struct {
 	Results   []policyReportResult `json:"results"`
 }
 
-// kyvernoKubectl is what the kyverno commands need of kubectl.Client, so a
-// test can stand in for it: the client itself has no seam, and the commands
-// used to be testable only against a real cluster.
-type kyvernoKubectl interface {
-	Run(ctx context.Context, args ...string) (string, error)
-	Output(ctx context.Context, args ...string) ([]byte, error)
-	JSON(ctx context.Context, result interface{}, args ...string) error
-	CRDExists(ctx context.Context, crdName string) bool
-}
-
-// newKyvernoKubectlFn makes the kubectl the four commands run; tests replace it.
-var newKyvernoKubectlFn = func() kyvernoKubectl { return kubectl.New("") }
-
 // ── Root command ─────────────────────────────────────────────────────────────
 
 var kyvernoCmd = &cobra.Command{
@@ -78,7 +64,7 @@ var kyvernoStatusCmd = &cobra.Command{
 	Short:   "Show all Kyverno ClusterPolicies with status and rule counts",
 	Example: "  kates kyverno status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := newKyvernoKubectlFn()
+		kc := newKubectl("")
 		ctx := context.Background()
 
 		output.Banner("Kyverno Policy Status", "Cluster-wide admission policies")
@@ -208,7 +194,7 @@ var kyvernoViolationsCmd = &cobra.Command{
 	Example: `  kates kyverno violations
   kates kyverno violations --namespace kafka`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := newKyvernoKubectlFn()
+		kc := newKubectl("")
 		ctx := context.Background()
 
 		output.Banner("Kyverno Violations", "Policy audit report")
@@ -302,7 +288,7 @@ var kyvernoEnforceCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	Example: "  kates kyverno enforce kates-pod-security-standards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := newKyvernoKubectlFn()
+		kc := newKubectl("")
 		ctx := context.Background()
 		policyName := args[0]
 		patchJSON := `{"spec":{"validationFailureAction":"Enforce"}}`
@@ -327,7 +313,7 @@ var kyvernoAuditCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 	Example: "  kates kyverno audit kates-pod-security-standards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		kc := newKyvernoKubectlFn()
+		kc := newKubectl("")
 		ctx := context.Background()
 		policyName := args[0]
 		patchJSON := `{"spec":{"validationFailureAction":"Audit"}}`

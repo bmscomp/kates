@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bmscomp/kates/cli/internal/kubectl"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
@@ -62,12 +61,12 @@ var kyvernoDetectCmd = &cobra.Command{
 }
 
 func checkKyvernoInstalled() bool {
-	kc := kubectl.New("")
+	kc := newKubectl("")
 	return kc.CRDExists(context.Background(), "clusterpolicies.kyverno.io")
 }
 
 func discoverExistingPolicies() map[string]string {
-	kc := kubectl.New("")
+	kc := newKubectl("")
 	ctx := context.Background()
 	out, err := kc.Output(ctx, "get", "clusterpolicies", "-o", `jsonpath={range .items[*]}{.metadata.name}={.status.ready}{"\n"}{end}`)
 	policies := make(map[string]string)
@@ -89,7 +88,7 @@ func discoverExistingPolicies() map[string]string {
 }
 
 func generateRecommendations(existing map[string]string) []policyRec {
-	kc := kubectl.New("")
+	kc := newKubectl("")
 	ctx := context.Background()
 
 	recs := []policyRec{

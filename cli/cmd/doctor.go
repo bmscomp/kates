@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bmscomp/kates/cli/internal/kubectl"
 	"github.com/bmscomp/kates/cli/output"
 	"github.com/spf13/cobra"
 )
@@ -42,7 +41,7 @@ var doctorCmd = &cobra.Command{
 	Example: "  kates doctor",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		kc := kubectl.New("")
+		kc := newKubectl("")
 		var checks []checkResult
 
 		// Under -o json stdout is the JSON and nothing else.
