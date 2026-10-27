@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"gopkg.in/yaml.v3"
 )
 
@@ -344,10 +345,11 @@ func Fill(s string, bg lipgloss.TerminalColor) string {
 	}
 	// Both spellings of a reset: lipgloss writes the long one, its wrapping
 	// the short one.
-	again := strings.NewReplacer("\x1b[0m", "\x1b[0m"+seq, "\x1b[m", "\x1b[m"+seq)
+	reset, short := termenv.CSI+termenv.ResetSeq+"m", termenv.CSI+"m"
+	again := strings.NewReplacer(reset, reset+seq, short, short+seq)
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
-		lines[i] = seq + again.Replace(ln) + "\x1b[0m"
+		lines[i] = seq + again.Replace(ln) + reset
 	}
 	return strings.Join(lines, "\n")
 }
