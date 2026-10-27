@@ -332,7 +332,7 @@ func TestApply_RunsAFileOfOneScenario(t *testing.T) {
 			_, _ = io.WriteString(w, `{"id":"run-1","testType":"LOAD","status":"PENDING"}`)
 		}))
 		apiClient = client.New(ts.URL)
-		output.ResetForTesting()
+		buf := output.ResetForTesting()
 		applyFile, applyWait = path, false
 
 		err := testApplyCmd.RunE(testApplyCmd, nil)
@@ -340,8 +340,8 @@ func TestApply_RunsAFileOfOneScenario(t *testing.T) {
 		applyFile = ""
 
 		if tt.name == "none.yaml" {
-			if err == nil || !strings.Contains(err.Error(), "No scenarios found in file: it needs a scenarios list, or one scenario with a type") || len(posted) != 0 {
-				t.Errorf("%s: err = %v, posted %q", tt.name, err, posted)
+			if exitCode(err) != 2 || !strings.Contains(buf.String(), "no scenarios found: it needs a scenarios list, or one scenario with a type") || len(posted) != 0 {
+				t.Errorf("%s: err = %v, posted %q\n%s", tt.name, err, posted, buf)
 			}
 			continue
 		}
@@ -442,14 +442,14 @@ func TestApply_RefusesAFlagThatIsNotABoolean(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++ }))
 	defer ts.Close()
 	apiClient = client.New(ts.URL)
-	output.ResetForTesting()
+	buf := output.ResetForTesting()
 	applyFile, applyWait = path, false
 	defer func() { applyFile = "" }()
 
 	err := testApplyCmd.RunE(testApplyCmd, nil)
 
-	if err == nil || !strings.Contains(err.Error(), "scenario 2 (second): spec.enableCrc is yes") {
-		t.Errorf("err = %v", err)
+	if exitCode(err) != 2 || !strings.Contains(buf.String(), "s.yaml:7:18: error: scenarios[1].spec.enableCrc: spec.enableCrc is yes") {
+		t.Errorf("err = %v\n%s", err, buf)
 	}
 	if requests != 0 {
 		t.Errorf("%d requests reached the backend", requests)
@@ -469,9 +469,15 @@ func TestScenarioSpecProblems_ANumberKeyThatIsNotANumber(t *testing.T) {
 		!slices.Contains(problems, "spec.lingerMs is empty; write a number") {
 		t.Errorf("problems = %q", problems)
 	}
-	sf.Scenarios[0].Spec = map[string]any{"records": 5000000, "lingerMs": 0, "durationSeconds": 1.5}
+	sf.Scenarios[0].Spec = map[string]any{"records": 5000000, "lingerMs": 0, "durationSeconds": 2.0}
 	if problems := scenarioSpecProblems(sf.Scenarios[0]); len(problems) != 0 {
 		t.Errorf("numbers, 0 among them, are fine: %q", problems)
+	}
+	// A fraction was cut off without a word: 1.5 seconds ran for 1.
+	sf.Scenarios[0].Spec = map[string]any{"durationSeconds": 1.5}
+	if problems := scenarioSpecProblems(sf.Scenarios[0]); !slices.Equal(problems,
+		[]string{"spec.durationSeconds is 1.5, which would be sent as 1; write a whole number"}) {
+		t.Errorf("problems = %q", problems)
 	}
 }
 
@@ -487,14 +493,14 @@ func TestApply_RefusesANumberThatIsNotANumber(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++ }))
 	defer ts.Close()
 	apiClient = client.New(ts.URL)
-	output.ResetForTesting()
+	buf := output.ResetForTesting()
 	applyFile, applyWait = path, false
 	defer func() { applyFile = "" }()
 
 	err := testApplyCmd.RunE(testApplyCmd, nil)
 
-	if err == nil || !strings.Contains(err.Error(), `scenario 2 (second): spec.records is "5000000"; write a number`) {
-		t.Errorf("err = %v", err)
+	if exitCode(err) != 2 || !strings.Contains(buf.String(), `scenarios[1].spec.records: spec.records is "5000000"; write a number`) {
+		t.Errorf("err = %v\n%s", err, buf)
 	}
 	if requests != 0 {
 		t.Errorf("%d requests reached the backend", requests)

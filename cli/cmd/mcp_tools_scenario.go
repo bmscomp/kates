@@ -1151,7 +1151,7 @@ func mcpScnCheckTopic(i int, e *mcpDraftEffective, fs *mcpScnFindings) {
 var (
 	mcpScnValidateFields = []string{
 		"maxP99LatencyMs", "maxAvgLatencyMs", "minThroughputRecPerSec", "maxErrorRate",
-		"maxDataLossPercent", "maxRtoMs", "maxRpoMs", "maxOutOfOrder", "maxCrcFailures",
+		"maxDataLossPercent", "maxRtoMs", "maxRpoMs", "maxOutOfOrder", "maxCrcFailures", "perTask",
 	}
 	mcpScnValidateKeys = func() map[string]bool {
 		m := make(map[string]bool, len(mcpScnValidateFields))
@@ -1189,6 +1189,8 @@ func mcpScnCheckValidate(i int, req *client.CreateTestRequest, raw map[string]an
 		case !mcpScnValidateKeys[k] && fs.caseVariant(i, "validate.", k, mcpScnValidateFields):
 		case !mcpScnValidateKeys[k]:
 			fs.add(i, mcpScnWarning, field, "kates test apply drops "+field+" when it reads the file")
+		case k == "perTask":
+			// Not a gate: it grades the others per task row.
 		case k == "maxErrorRate":
 			fs.add(i, mcpScnWarning, field, "validateSLAs never checks maxErrorRate")
 		case !integrity && (k == "maxRtoMs" || k == "maxRpoMs"):
@@ -1241,9 +1243,9 @@ var mcpCaveatsScenario = []mcpCaveat{
 			mcpJava + "domain/TestSpec.java:34-113",
 			mcpAnchoredRef(mcpJava+"engine/TestOrchestrator.java:1372-1447",
 				"Map<String, String> inapplicableFields(", "the trogdor backend cannot run a transactional producer"),
-			mcpAnchoredRef("cli/cmd/apply.go:177-251",
-				"for i, scenario := range sf.Scenarios {", "apiClient.CreateTest(ctx, req)",
-				"unevaluableSLAs(finalResult, scenario.Validate)"),
+			mcpAnchoredRef("cli/cmd/apply.go:238-307",
+				"for i, scenario := range sf.Scenarios {", "apiClient.CreateTest(a.ctx, scenarioToRequest(scenario))",
+				"gradeScenario(final, scenario.Validate"),
 		},
 	},
 	{
@@ -1265,15 +1267,20 @@ var mcpCaveatsScenario = []mcpCaveat{
 	},
 	{
 		ID: mcpCaveatScenarioValidateGrading,
-		Text: "A validate block is graded only by kates test apply --wait, after the run. validateSLAs never checks " +
+		Text: "A validate block is graded only by kates test apply --wait, after the run, and not with --no-sla: " +
+			"against the run as a whole (the producers' latency and summed throughput, a consumer's row left out), " +
+			"or against each task row with --sla-scope task or perTask: true in the block. validateSLAs never checks " +
 			"maxErrorRate. maxDataLossPercent, maxOutOfOrder and maxCrcFailures (held at 0 when absent), maxRtoMs and " +
 			"maxRpoMs apply only to results with integrity data, which only INTEGRITY runs on the native backend " +
 			"produce, and RPO is measured only when a resilience run marks a fault, so a scenario run never has one. " +
 			"Keys ValidationSpec does not name, such as maxDuplicatePercent, are dropped when the file is read.",
 		Refs: []string{
-			mcpAnchoredRef("cli/cmd/apply.go:29-39,217-250,339-351,538-593,610-635",
-				"type ValidationSpec struct {", `yaml:"maxCrcFailures,omitempty"`,
-				"if !applyWait {", "nonNil(validateSLAs(finalResult, scenario.Validate))",
+			mcpAnchoredRef("cli/cmd/apply_sla.go:39-52,120-162",
+				"func gradeScenario(run *client.TestRun, v *ValidationSpec, scope string) *applySLAResult {",
+				"func validateSLAsAggregate(run *client.TestRun, v *ValidationSpec) []string {"),
+			mcpAnchoredRef("cli/cmd/apply.go:29-43,282-307,429-437,643-695,718-740",
+				"type ValidationSpec struct {", `yaml:"maxCrcFailures,omitempty"`, `yaml:"perTask,omitempty"`,
+				"if !applyWait {", "gradeScenario(final, scenario.Validate",
 				"} else if r.SLA != nil {", `"✓ SLA Pass"`,
 				"func validateSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"crcFail=%d > %d"`,
 				"func unevaluableSLAs(run *client.TestRun, v *ValidationSpec) []string {", `"maxRpoMs (RPO not measured)"`),

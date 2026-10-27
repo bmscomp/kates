@@ -75,6 +75,7 @@ func (b *runsBackend) resetFlags() {
 	gateMinGrade, gateType, gateRecords, gateBackend, gateTimeout = "C", "LOAD", 50000, "", defaultGateTimeout
 	benchRecords, benchTimeout = 50000, defaultBenchTimeout
 	applyFile, applyWait = "", false
+	applyNoSLA, applySLAScope, applyJUnit = false, "", ""
 	advisorApply = ""
 }
 
@@ -622,11 +623,11 @@ func TestApply_JSON(t *testing.T) {
 	}
 	var got applyResult
 	decodeStdout(t, stdout, &got)
-	want := applyResult{File: file, Waited: true, Scenarios: []applyScenarioResult{
+	want := applyResult{File: file, Waited: true, SLA: applySLAMode{Checked: true, Scope: "report"}, Scenarios: []applyScenarioResult{
 		{Name: "fast", Type: "LOAD", RunID: "run-1", Status: "DONE", SLA: &applySLAResult{
-			Violations: []string{}, NotEvaluable: []string{"maxRtoMs (RTO not measured)"}}},
+			Scope: "report", Violations: []string{}, NotEvaluable: []string{"maxRtoMs (RTO not measured)"}}},
 		{Name: "slow", Type: "STRESS", RunID: "run-2", Status: "DONE", SLA: &applySLAResult{
-			Violations: []string{"p99=210ms > 50ms"}}},
+			Scope: "report", Violations: []string{"p99=210ms > 50ms"}}},
 		{Name: "ungated", Type: "SPIKE", RunID: "run-3", Status: "DONE"},
 	}}
 	if !reflect.DeepEqual(got, want) {

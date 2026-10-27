@@ -118,6 +118,10 @@ Ctrl-C while a test step waits cancels its run and exits 130.`,
 		if err != nil {
 			return fmt.Errorf("cannot read flow file: %w", err)
 		}
+		// The whole file is checked before the first step runs.
+		if err := lintBeforeFlow(flowFile, data); err != nil {
+			return err
+		}
 
 		data = []byte(os.ExpandEnv(string(data)))
 

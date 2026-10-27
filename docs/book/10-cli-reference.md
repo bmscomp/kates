@@ -291,7 +291,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Health, Status & Diagnostics](#health-status--diagnostics) | `health`, `status`, `version`, `doctor` | Is the Kates API up, does it reach Kafka, and is the cluster ready to test? | Kates API; `doctor` also asks `kubectl` about Kyverno, and `doctor dns` and `doctor network` work through `kubectl` alone |
 | [Cluster Commands](#cluster-commands) | `cluster info`, `check`, `topology`, `alerts`, `watch`, `topics`, `groups`, `broker configs` | What does the Kafka cluster look like, and is it healthy? | Kates API |
 | [Conformity](#conformity) | `conformity check`, `lint`, `fmt` | Is the cluster still built the way a reference file declares? | Kates API for `check`; `lint` and `fmt` work on local files |
-| [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test scaffold` uses only templates built into the CLI |
+| [Test Commands](#test-commands) | `test list`, `create`, `get`, `delete`, `watch`, `apply`, `lint`, `scaffold` | How do you start a performance test, follow it and find it again? | Kates API; `test lint` works on local files, and `test scaffold` uses only templates built into the CLI |
 | [Report Commands](#report-commands) | `report show`, `summary`, `export`, `diff`, `compare`, `brokers` | What did a run measure, and how does it compare with another run? | Kates API |
 | [Trend Analysis](#trend-analysis) | `trend` | How has one metric moved across a test type's runs over recent days? | Kates API |
 | [Disruption Commands](#disruption-commands) | `disruption run`, `list`, `status`, `timeline`, `types`, `kafka-metrics`, `watch`, `playbook list`, `playbook show`, `playbook run` | What happens to the cluster when a fault hits it, and how fast does it recover? | Kates API |
@@ -311,7 +311,7 @@ Find your question in the table below, then follow its link to the family's comm
 | [Profile Commands](#profile-commands) | `profile save`, `list`, `compare`, `assert` | Does a new run still perform like one you saved earlier? | Kates API for `save` and `assert`; profiles are files in `~/.kates/profiles` |
 | [Cost Estimation](#cost-estimation) | `cost estimate` | Roughly what would a workload cost to run with a cloud provider? | Nothing: the CLI computes the estimate itself |
 | [Snapshot Commands](#snapshot-commands) | `snapshot create`, `list`, `diff` | What changed in the cluster's brokers, topics and groups between two moments? | Kates API for `create`; snapshots are files in `~/.kates/snapshots` |
-| [Flow Pipelines](#flow-pipelines) | `flow run` | How do you run several tests in a row from one YAML file? | Kates API, for a pipeline read from a local file |
+| [Flow Pipelines](#flow-pipelines) | `flow run`, `lint` | How do you run several tests in a row from one YAML file? | Kates API, for a pipeline read from a local file; `flow lint` works on local files |
 | [Badge Generation](#badge-generation) | `badge` | What badge shows the latest run's grade, P99 or throughput? | Kates API |
 | [Webhook Notifications](#webhook-notifications) | `webhook list`, `add`, `remove` | Which URLs hear about it when a test finishes? | Kates API |
 | [MCP Server for AI Agents](#mcp-server-for-ai-agents) | `mcp` | How does an AI agent read test runs, disruptions, security posture and cluster state? | Kates API, which the command serves to the agent over stdin and stdout |
@@ -844,13 +844,46 @@ Live-stream test progress to the terminal. Stopping it, with `q` or Ctrl-C, leav
 kates test apply -f scenario.yaml
 kates test apply -f scenario.yaml --wait
 kates test apply -f scenario.yaml --wait -o json
+kates test apply -f scenario.yaml --wait --sla-scope task
+kates test apply -f scenario.yaml --wait --no-sla
+kates test apply -f scenario.yaml --wait --output-junit kates-apply.xml
 ```
 
-Apply a YAML or JSON scenario file: a `scenarios` list, or the fields of one scenario at its top level. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax and the exit codes. A file whose `enableIdempotence`, `enableTransactions` or `enableCrc` holds anything but `true` or `false` is refused before any of its tests starts, with an error naming the scenario and the key.
+Apply a YAML or JSON scenario file: a `scenarios` list, or the fields of one scenario at its top level. Each scenario can carry SLA gates in a `validate` block, which the CLI checks only with `--wait` — see [Scenario Files & SLA Gates](13-scenario-files.md) for the syntax. Before the first scenario starts, the CLI checks the whole file as `kates test lint` does and prints what it finds to stderr. A file with an error, such as a misspelled key, an unknown type, or an `enableCrc` that holds anything but `true` or `false`, exits 2, and none of its scenarios starts.
 
-In a terminal, `--wait` shows a spinner while each run goes. Without one (a pipe, a CI job, an agent's shell) or with `--plain`, it prints a plain line to stderr each time a run's status changes, such as `quick (3f8a2c1e): RUNNING`. With `-o json` stdout carries only the summary as JSON: each scenario's `name`, `type`, `runId`, `status` and `error`, and with `--wait`, for a scenario with a `validate` block, an `sla` object with its `violations` and the gates that were `notEvaluable`. A scenario that failed to submit has no `runId`. The exit code is the same in every mode.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-f`, `--file` | | The scenario file. Required |
+| `--wait` | `false` | Wait for each run to finish before starting the next, and check its gates; Ctrl-C cancels the run and exits 130 |
+| `--sla-scope` | `report` | What a `validate` block is checked against: `report`, the run as a whole as its report sums it up (the producers' latency, their throughput added up, a consumer's row left out), or `task`, each task row on its own. A block with `perTask: true` is checked per task whatever the flag says. Needs `--wait` |
+| `--no-sla` | `false` | Wait for the runs but check no gate, so the exit code says only how they ended. Needs `--wait`, and does not go with `--sla-scope` |
+| `--output-junit` | | Also write a JUnit XML report to this file, one test case per scenario. `--junit` is the same flag. Needs `--wait` |
+
+A flag that needs `--wait` without it, `--no-sla` with `--sla-scope`, a scope other than `report` or `task`, and `--output-junit -` all exit 2 before anything starts.
+
+In a terminal, `--wait` shows a spinner while each run goes. Without one (a pipe, a CI job, an agent's shell) or with `--plain`, it prints a plain line to stderr each time a run's status changes, such as `quick (3f8a2c1e): RUNNING`. With `-o json` stdout carries only the summary as JSON: an `sla` object with whether the gates were `checked` and, when they were, the `scope`; then each scenario's `name`, `type`, `runId`, `status` and `error`, and for a graded scenario with a `validate` block, an `sla` object with its `scope`, its `violations` and the gates that were `notEvaluable`. Without `--wait`, or with `--no-sla`, the summary reads `"sla": {"checked": false}` and no scenario has an `sla` object. A scenario that failed to submit has no `runId`. The exit code is the same in every mode: `0` when every run finished and no gate was violated, `1` when a scenario failed to submit, ended `FAILED` or `ERROR`, or violated a gate, `2` for a file with an error or flags that don't go together, and `130` when interrupted.
+
+The JUnit report holds one test suite, timed by the apply's wall clock, and one test case per scenario, timed from its submission to its end. Violated gates are a `<failure>` of type `sla_violation`, and a run that ended `FAILED` a `<failure>` of type `run_failed`. A scenario that failed to submit is an `<error>` of type `submit_error`, and one the CLI lost track of an `<error>` of type `wait_error`. The scenario Ctrl-C stopped, and those never started after it, are `<skipped>`. Gates that could not be evaluated go in the test case's output.
 
 Ctrl-C while `--wait` waits, or `q` in the spinner, stops the apply. The run it is waiting for is cancelled, as `kates test cancel` would cancel it, and the scenarios after it are not started. The summary shows that scenario as `CANCELLED`, or as `INTERRUPTED` with the command to cancel it when the cancel failed, the JSON summary carries `"interrupted": true`, and the CLI exits 130. A CI job that is cancelled stops the apply the same way, through the SIGTERM it sends.
+
+#### test lint
+
+Check scenario files offline, as `kates test apply` reads them: no Kates API and no cluster. It checks the YAML or JSON syntax, the `scenarios` list or the one scenario at the top level, every key against the ones `kates test apply` reads, each `type` and `backend`, each `spec` value, and each `validate` gate. A misspelled key is an error, named with the key it is closest to. So is a value apply could not send as written: a quoted number, a unit such as `10m`, `yes` for `true`, or a fraction such as `durationSeconds: 1.5` that would be cut to a whole number. A gate that checks nothing, `maxErrorRate` or a `0` that turns a gate off, is a warning. Each finding is a line `file:line:col: severity: path: message [code]`, with the source line under it, as `kates conformity lint` prints its own.
+
+```text
+s.yaml:4:3: error: spec.record: unknown field (did you mean "records"?) [unknown-field]
+  4 |   record: 100000
+    |   ^
+```
+
+```bash
+kates test lint scenario.yaml
+kates test lint scenarios/*.yaml
+kates test lint -o json scenarios/*.yaml
+```
+
+`-o json` lists the findings instead, each with its `file`, `line`, `col`, `severity`, `code`, `path` and `message`. It exits `0` when no file has an error (warnings are printed), `1` when one does, and `2` when a file cannot be read. For a flow file, use [`kates flow lint`](#flow-lint).
 
 #### test scaffold
 
@@ -869,7 +902,7 @@ kates test scaffold export --all           # export every template
 |----------|------|--------------|
 | `quick-load` | LOAD | 50k records of 1 KiB through one producer and one consumer; gates on P99 ≤ 100 ms and at least 5,000 rec/s |
 | `production-load` | LOAD | Up to 1M records of 2 KiB with `acks=all`, lz4 and 12 partitions for at most 300 s, through one producer and one consumer; gates on P99 ≤ 50 ms, average ≤ 10 ms and at least 50,000 rec/s |
-| `stress-test` | STRESS | 16 producers, each sending up to 5M records of 512 B with `acks=1` and snappy to 24 partitions; gates each producer on P99 ≤ 200 ms and at least 100,000 rec/s |
+| `stress-test` | STRESS | 16 producers, each sending up to 5M records of 512 B with `acks=1` and snappy to 24 partitions; gates the run on P99 ≤ 200 ms and on at least 100,000 rec/s from the 16 producers together |
 | `endurance-soak` | ENDURANCE | 10M records of 1 KiB at 5,000 rec/s through one producer and one consumer; gates on P99 ≤ 100 ms and average ≤ 20 ms. The records take about 33 minutes, so the run ends on its record count, well inside its `durationSeconds` of 3,600 |
 | `exactly-once` | ROUND_TRIP | 100k records of 256 B with `acks=all` through one idempotent, transactional producer at 10,000 rec/s; gates on P99 ≤ 200 ms. A ROUND_TRIP run makes no integrity check, so the template sets no loss, ordering or CRC gate; `integrity-tx` sets all three |
 | `integrity-tx` | INTEGRITY | 200k records of 512 B with `acks=all` and zstd through one producer and one consumer — CRC-checked, idempotent and transactional, read with `read_committed`; gates on zero loss, zero out-of-order, zero CRC failures and P99 ≤ 150 ms |
@@ -2388,7 +2421,7 @@ kates snapshot diff pre-upgrade post-upgrade
 
 ### Flow Pipelines
 
-A flow is a YAML file of steps that `kates flow run` runs in order; no step reads another's result. A step's `action` is one of three. `test` starts a test of the step's `type`, LOAD when it has none, and fails when the run fails or hasn't finished after about six minutes. `wait` pauses for as many seconds as the step's `records` field gives, 10 when it gives none. `webhook` and `notify` print that a notification went out and pass, but send nothing. The flow skips any other action as unknown, so a step can't run a disruption or compare reports. A step that does not pass, a skipped one included, stops the flow unless it sets `onFail: continue`; either way `kates flow run` exits 1 at the end.
+A flow is a YAML file of steps that `kates flow run` runs in order; no step reads another's result. A step's `action` is one of three. `test` starts a test of the step's `type`, LOAD when it has none, and fails when the run fails or hasn't finished after about six minutes. `wait` pauses for as many seconds as the step's `records` field gives, 10 when it gives none. `expect`, `webhook` and `notify` are not implemented, and a step that uses one fails. The flow skips any other action as unknown, so a step can't run a disruption or compare reports; `kates flow lint` reports both as errors. A step that does not pass, a skipped one included, stops the flow unless it sets `onFail: continue`; either way `kates flow run` exits 1 at the end.
 
 A `test` step's `gate.minGrade` is the only threshold a flow checks, and any value above D fails the step: the flow reads the grade from the run's report, which carries none. A flow injects no fault; run one with `kates disruption run` or `kates resilience run`, as [Chaos Engineering in Practice](07-chaos-practice.md) explains.
 
@@ -2413,7 +2446,20 @@ kates flow run -f pipeline.yaml
 | `-f` | Path to flow pipeline YAML file |
 | `--wait` | Wait for each test step to finish (default); `--wait=false` starts the run and moves on |
 
-A test step's `spec` takes the request's own field names (`numRecords`, `recordSize`, `numProducers`, …), as a scenario file does. Its `gate` may set `minGrade`, `maxP99`, `minThroughput` and `maxErrorRate`; a run that misses one is `GATE_FAILED` with the metric named. Grades compare case-insensitively, and an unknown grade fails the gate. `expect`, and the `webhook` and `notify` actions, are not implemented: a step that uses them fails rather than reporting success.
+A test step's `spec` takes the request's own field names (`numRecords`, `recordSize`, `numProducers`, …), not a scenario file's. Its `gate` may set `minGrade`, `maxP99`, `minThroughput` and `maxErrorRate`; a run that misses one is `GATE_FAILED` with the metric named. Grades compare case-insensitively, and an unknown grade fails the gate. `expect`, and the `webhook` and `notify` actions, are not implemented: a step that uses them fails rather than reporting success.
+
+Before the first step, `kates flow run` checks the whole file as `kates flow lint` does and prints what it finds to stderr. On an error it exits 2 and runs no step.
+
+#### flow lint
+
+Check flow files offline, after expanding environment variables as `kates flow run` does: YAML syntax, every key against the ones `flow run` reads, each step's `action`, each test step's `type`, `gate` and `spec`, and `onFail`. A misspelled key is an error, named with the key it is closest to, and so are an unknown or unimplemented action, a grade off the scale, a whole number written as `1.5` and an `onFail` other than `continue` or `stop`. A key a `wait` step does not read, such as `gate`, is a warning. Findings print as `kates test lint` prints them, and `-o json` lists them.
+
+```bash
+kates flow lint release-qual.yaml
+kates flow lint -o json flows/*.yaml
+```
+
+It exits `0` when no file has an error (warnings are printed), `1` when one does, and `2` when a file cannot be read.
 
 ---
 
@@ -2707,7 +2753,7 @@ For most commands the exit code is a contract: `0` means the thing you asked for
 |------|---------|
 | `0` | The requested operation completed — a `--wait` test finished successfully, a deploy applied, a deletion was confirmed and performed |
 | `1` | The operation failed, a followed test finished `FAILED`, the connection was lost mid-follow (outcome unknown), or a confirmation was declined or could not be asked |
-| `2` | Kates could not tell, so neither yes nor no: `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`); a command with no JSON form was run with `-o json` (`webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary`, `test flame`), which prints nothing on stdout and says so on stderr |
+| `2` | Kates could not tell, so neither yes nor no: `kates conformity check` could not tell whether a rule holds, or could not run the check; `kates detect --fail-on-error` found failing compatibility checks or could not inspect the cluster; `kates auto` could not inspect a cluster it reached (an unreachable cluster exits `1`); `kates test apply` and `kates flow run` found an error in their file, or `test apply` was given flags that don't go together, and started nothing; `test lint`, `flow lint` and `conformity lint` could not read a file; a command with no JSON form was run with `-o json` (`webhook list`, `theme list`, `plugin list`, `profile list`, `snapshot list`, `changelog`, `test compare`, `test summary`, `test flame`), which prints nothing on stdout and says so on stderr |
 | `130` | Ctrl-C or SIGTERM stopped a command that starts work and waits for it, after it cancelled the test it started |
 
 Consequences worth knowing in scripts:

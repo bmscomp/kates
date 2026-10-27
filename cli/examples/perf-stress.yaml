@@ -6,8 +6,8 @@
 #
 # A STRESS run starts parallelProducers producers, and each one sends `records`
 # records at up to targetThroughput msg/s: a step's rate is parallelProducers ×
-# targetThroughput. kates test apply --wait checks each gate against every
-# producer.
+# targetThroughput. kates test apply --wait checks each gate against the run as
+# a whole: the highest p99 of the producers, and their rates added up.
 #
 # Usage:  kates test apply -f cli/examples/perf-stress.yaml --wait
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,4 +86,4 @@ scenarios:
       lingerMs: 10
       compressionType: snappy
     validate:
-      minThroughputRecPerSec: 834   # per producer, 6 × 834 ≈ 5k msg/s: fail only if below that even uncapped
+      minThroughputRecPerSec: 5000  # the 6 producers together: fail only if below 5k msg/s even uncapped

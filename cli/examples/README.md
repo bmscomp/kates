@@ -35,9 +35,11 @@ file's `testRequest` uses; a scenario file names them `records`,
 duration in seconds as `durationSeconds`. A STRESS or CAPACITY run starts
 `parallelProducers` producers, and every other type starts one. `records` and
 `targetThroughput` hold for each producer, and no type reads `numConsumers`.
-With `--wait`, each `validate` gate is checked against every task of the run:
-each producer of a STRESS or CAPACITY run, a LOAD run's producer and its
-consumer. `TestShippedScenariosSetOnlyWhatTheirRunsRead` (`cli/cmd`) fails an
+With `--wait`, each `validate` gate is checked against the run as a whole: the
+latency of its producers (a consumer's row is left out), their throughput added
+up, so a STRESS or CAPACITY gate holds all the producers together, and the
+integrity of the rows that report it. `--sla-scope task`, or `perTask: true` in
+a `validate` block, checks every task instead, consumers included. `TestShippedScenariosSetOnlyWhatTheirRunsRead` (`cli/cmd`) fails an
 example that sets a key `kates test apply` doesn't read, or a count its type
 doesn't read.
 
