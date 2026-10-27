@@ -16,7 +16,7 @@ func TestGate_CancelledContextStopsTheRun(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	gateCmd.SetContext(ctx)
-	t.Cleanup(func() { gateCmd.SetContext(nil) })
+	t.Cleanup(func() { gateCmd.SetContext(context.Background()) })
 	time.AfterFunc(30*time.Millisecond, cancel)
 
 	_, stderr, err := commandOutput(t, func() error { return runCommandLine(t, "gate", "--records", "1000") })

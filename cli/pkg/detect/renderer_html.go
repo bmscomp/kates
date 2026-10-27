@@ -317,7 +317,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 	if provider == "" {
 		provider = "unknown"
 	}
-	b.WriteString(fmt.Sprintf(`
+	fmt.Fprintf(&b, `
   <div class="header-card">
     <h1>Cluster Compatibility Report</h1>
     <p>Automated preflight infrastructure auditor for 3-AZ Kafka deployments</p>
@@ -328,7 +328,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
       <div><strong>Server Host:</strong> %s</div>
     </div>
   </div>
-`, esc(report.K8sVersion), esc(report.K8sVersion), esc(strings.ToUpper(provider)), esc(report.Context), esc(report.Server)))
+`, esc(report.K8sVersion), esc(report.K8sVersion), esc(strings.ToUpper(provider)), esc(report.Context), esc(report.Server))
 
 	// ── 2. VERDICT BANNER ──
 	verdictClass := "verdict-pass"
@@ -341,11 +341,11 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 		verdictText = fmt.Sprintf("⚠ COMPATIBLE WITH WARNINGS: %d potential operational warnings detected.", report.Verdict.Warns)
 	}
 
-	b.WriteString(fmt.Sprintf(`
+	fmt.Fprintf(&b, `
   <div class="verdict-banner %s">
     %s
   </div>
-`, verdictClass, verdictText))
+`, verdictClass, verdictText)
 
 	// ── 3. DOUBLE-COLUMN STATS ──
 	b.WriteString(`  <div class="grid-2">`)
@@ -384,7 +384,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 		}
 	}
 
-	b.WriteString(fmt.Sprintf(`
+	fmt.Fprintf(&b, `
     <div class="card">
       <h2>Sizing Advisor Profile</h2>
       <div style="background-color:rgba(88,166,255,0.05); padding:1rem; border-radius:8px; border:1px dashed var(--border-color); margin-bottom:1.5rem">
@@ -413,7 +413,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
         </div>
       </div>
     </div>
-`, esc(profileName), profileDesc, report.Budget.NeedCPU, report.Budget.TotalCPU, pctCPU, pctCPU, report.Budget.NeedMem, report.Budget.TotalMem, pctMem, pctMem))
+`, esc(profileName), profileDesc, report.Budget.NeedCPU, report.Budget.TotalCPU, pctCPU, pctCPU, report.Budget.NeedMem, report.Budget.TotalMem, pctMem, pctMem)
 
 	// Column B: Security & Isolation Audit
 	enforcedLabel := report.Security.PSALabelEnforced
@@ -437,7 +437,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 		rbacStatus = "⚠️ Wildcard roles detected"
 	}
 
-	b.WriteString(fmt.Sprintf(`
+	fmt.Fprintf(&b, `
     <div class="card">
       <h2>Security & Isolation Standards</h2>
       <table style="margin-top:0">
@@ -467,7 +467,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
     </div>
 `, esc(enforcedLabel), report.Security.KyvernoEnforced, report.Security.PermissionsOk,
 		selectColor(!report.Security.HasExcessivePrivileges), rbacStatus,
-		selectColor(certAlerts == 0), certStatus))
+		selectColor(certAlerts == 0), certStatus)
 
 	b.WriteString(`  </div>`) // End grid-2
 
@@ -493,7 +493,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 			dataStatus = "fail"
 		}
 
-		b.WriteString(fmt.Sprintf(`
+		fmt.Fprintf(&b, `
       <div class="%s" data-status="%s">
         <div>
           <div class="check-title">%s</div>
@@ -501,7 +501,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
         </div>
         <span class="status-badge %s">%s</span>
       </div>
-`, itemClass, dataStatus, esc(c.Description), esc(c.Detail), badgeClass, badgeText))
+`, itemClass, dataStatus, esc(c.Description), esc(c.Detail), badgeClass, badgeText)
 	}
 
 	b.WriteString(`
@@ -536,7 +536,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 		sort.Strings(zonesList)
 
 		for _, z := range zonesList {
-			b.WriteString(fmt.Sprintf("          <th style=\"text-align:center\">%s</th>\n", esc(z)))
+			fmt.Fprintf(&b, "          <th style=\"text-align:center\">%s</th>\n", esc(z))
 		}
 		b.WriteString(`        </tr>
       </thead>
@@ -544,7 +544,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 `)
 
 		for _, src := range zonesList {
-			b.WriteString(fmt.Sprintf("        <tr>\n          <td><strong>%s</strong></td>\n", esc(src)))
+			fmt.Fprintf(&b, "        <tr>\n          <td><strong>%s</strong></td>\n", esc(src))
 			for _, dst := range zonesList {
 				latVal := "—"
 				if r, ok := latency[[2]string{src, dst}]; ok {
@@ -554,7 +554,7 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 						latVal = "FAIL"
 					}
 				}
-				b.WriteString(fmt.Sprintf("          <td class=\"matrix-cell\">%s</td>\n", latVal))
+				fmt.Fprintf(&b, "          <td class=\"matrix-cell\">%s</td>\n", latVal)
 			}
 			b.WriteString("        </tr>\n")
 		}
@@ -577,13 +577,13 @@ func RenderHTML(report *DetectReport, w io.Writer) error {
 			if h.Severity == "critical" {
 				criticalClass = "critical"
 			}
-			b.WriteString(fmt.Sprintf(`
+			fmt.Fprintf(&b, `
     <div class="remediation-block %s">
       <div class="remediation-title">%s</div>
       <div class="remediation-summary">%s</div>
       <pre>%s</pre>
     </div>
-`, criticalClass, esc(h.Check), esc(h.Summary), esc(strings.Join(h.Commands, "\n"))))
+`, criticalClass, esc(h.Check), esc(h.Summary), esc(strings.Join(h.Commands, "\n")))
 		}
 		b.WriteString(`  </div>`)
 	}

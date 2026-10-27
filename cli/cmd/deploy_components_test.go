@@ -789,7 +789,7 @@ func TestDeployKafkaConnectStackFailsWhenTheSecretCopyIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("deployKafkaConnectStack returned nil over a refused Secret copy")
 	}
-	for _, want := range []string{"Secret kates-connect could not be copied from kafka to connect-blue", "is forbidden"} {
+	for _, want := range []string{"secret kates-connect could not be copied from kafka to connect-blue", "is forbidden"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}

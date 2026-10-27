@@ -22,7 +22,7 @@ Build, `go vet` and the full test suite pass on main. The code is unusually well
 | `exec.Command` call sites in `cmd/` | 14 files | Outside the five exec seams, so untestable and not pinned to the deploy's kube-context |
 | Package-level `var` in `cmd/` | 381 | Flags bound to shared globals; one global (`deployKafkaName`) is bound by five commands |
 | Commands without an `Example:` | 90 files | |
-| `golangci-lint` | cannot run on the pinned Go toolchain | The linter binary is built with Go 1.25, the module says 1.27.3; CI's `--new-from-merge-base` job is therefore silent. Pin a golangci-lint built with Go ≥ 1.27 (v2.15+) in `versions.env` |
+| `golangci-lint` | runs in CI with `--new-from-merge-base=main`, so only new issues are reported | The whole-tree backlog (errcheck, staticcheck, funlen) is not gated; a locally installed v2.14.0 built with Go 1.25 refuses the module's Go 1.27, so contributors need the CI's build of it to reproduce findings |
 
 ## 2. Findings
 
@@ -213,7 +213,7 @@ Small, verified, each with a test. All on `cli/`; none changes a command's flags
 | 3.9 | Flags | `cmd/flags.go` with the shared sets (`--records`, `--timeout`, `--wait`, output file `-f`) and a test that a flag name means one thing everywhere; `report export` gets `-f` and one writer honouring `IsInteractive()`. `deployKafkaName`-style shared globals become per-command fields. | M |
 | 3.10 | TUI | `scrollWindow(cursor, count, height)` shared by topics/produce/groups; a `bubbles/key` keymap per model from which `help.go` is generated; glyphs through `output.Glyphs()`; `cmd/dashboard.go` becomes a Bubble Tea model with a ticking command and a timeout per API call; `LabModel.Update` split per state. | M |
 | 3.11 | MCP | `mcp_ident.go` with the shared regexes, type lists, `mcpBounds` and a generic input-schema builder; one `mcpSection` embed and one `mcpShrink` helper replacing six fit loops; `mcp_tools_runs.go` split into list/get, assess, activity. | M |
-| 3.12 | Lint | Pin a golangci-lint built with Go ≥ 1.27 in `versions.env`; make the funlen waiver list per function (`//nolint:funlen // reason`) rather than per file so new code in `deploy_components.go` is covered; add `errcheck` on `cmd/` once 3.5 lands. | S |
+| 3.12 | Lint | Document which golangci-lint build reproduces CI locally (the pinned v2.14.0 must be built with Go ≥ 1.27); make the funlen waiver list per function (`//nolint:funlen // reason`) rather than per file so new code in `deploy_components.go` is covered; add `errcheck` on `cmd/` once 3.5 lands. | S |
 | 3.13 | Tests | `internal/helm` and `internal/kubectl` to ≥ 70 % through the fake runner; `deploy_test.go` gains failure-path tests (readiness timeout, secret copy refused, dependency update failed, Group A concurrency); `kyverno_test.go` uses the fake; `client` retry tests (5xx then 2xx, cancel during backoff, non-GET never retried); `tui` tests for `tui.go`, `groups.go`, `produce.go`, `toosmall.go`; `pkg/detect` tests for escaping, Unicode in PDF, zone determinism, `yaml_parser`, `RenderValuesFromBase`. Target: `cmd` 70 %, `tui` 60 %, `internal/helm` 70 %. | L |
 
 ### Wave 4 — new capability

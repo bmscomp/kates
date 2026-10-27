@@ -1387,7 +1387,7 @@ data:
   %s
 `, name, toNS, strings.Join(data, "\n  "))
 	if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, secretYaml); err != nil {
-		return fmt.Errorf("Secret %s could not be copied from %s to %s: %w", name, fromNS, toNS, err)
+		return fmt.Errorf("secret %s could not be copied from %s to %s: %w", name, fromNS, toNS, err)
 	}
 	return nil
 }
@@ -1469,7 +1469,7 @@ stringData:
   password: debezium
   username: debezium`, connectNS)
 	if err := runExecStdinFn(ctx, "kubectl", []string{"apply", "-f", "-"}, pgSecretYaml); err != nil {
-		err = fmt.Errorf("Secret connect-pg-credentials could not be created in %s: %w", connectNS, err)
+		err = fmt.Errorf("secret connect-pg-credentials could not be created in %s: %w", connectNS, err)
 		dl.Printf("    ✗ %v\n", err)
 		return err
 	}

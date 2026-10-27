@@ -47,13 +47,13 @@ func exportAuditReport(result map[string]interface{}, filePath string) error {
 	var sb strings.Builder
 	if ext == ".md" {
 		sb.WriteString("# Kafka Security Audit Report\n\n")
-		sb.WriteString(fmt.Sprintf("**Grade: %s** | Generated: %s\n\n", mdCell(grade), mdCell(result["timestamp"])))
+		fmt.Fprintf(&sb, "**Grade: %s** | Generated: %s\n\n", mdCell(grade), mdCell(result["timestamp"]))
 		if summary != nil {
-			sb.WriteString(fmt.Sprintf("| Metric | Count |\n|--------|-------|\n"))
-			sb.WriteString(fmt.Sprintf("| Total | %v |\n", summary["total"]))
-			sb.WriteString(fmt.Sprintf("| Passed | %v |\n", summary["passed"]))
-			sb.WriteString(fmt.Sprintf("| Warnings | %v |\n", summary["warnings"]))
-			sb.WriteString(fmt.Sprintf("| Failures | %v |\n\n", summary["failures"]))
+			fmt.Fprintf(&sb, "| Metric | Count |\n|--------|-------|\n")
+			fmt.Fprintf(&sb, "| Total | %v |\n", summary["total"])
+			fmt.Fprintf(&sb, "| Passed | %v |\n", summary["passed"])
+			fmt.Fprintf(&sb, "| Warnings | %v |\n", summary["warnings"])
+			fmt.Fprintf(&sb, "| Failures | %v |\n\n", summary["failures"])
 		}
 		sb.WriteString("| Status | CIS | Check | Severity | Detail |\n")
 		sb.WriteString("|--------|-----|-------|----------|--------|\n")
@@ -69,19 +69,19 @@ func exportAuditReport(result map[string]interface{}, filePath string) error {
 			} else if status == "WARN" {
 				icon = "⚠"
 			}
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
-				icon, mdCell(chk["compliance"]), mdCell(chk["name"]), mdCell(chk["severity"]), mdCell(chk["detail"])))
+			fmt.Fprintf(&sb, "| %s | %s | %s | %s | %s |\n",
+				icon, mdCell(chk["compliance"]), mdCell(chk["name"]), mdCell(chk["severity"]), mdCell(chk["detail"]))
 		}
 		return os.WriteFile(filePath, []byte(sb.String()), 0644)
 	}
 
 	if ext == ".txt" {
-		sb.WriteString(fmt.Sprintf("KAFKA SECURITY AUDIT REPORT\n"))
-		sb.WriteString(fmt.Sprintf("Grade: %s\n", grade))
-		sb.WriteString(fmt.Sprintf("Generated: %v\n\n", result["timestamp"]))
+		fmt.Fprintf(&sb, "KAFKA SECURITY AUDIT REPORT\n")
+		fmt.Fprintf(&sb, "Grade: %s\n", grade)
+		fmt.Fprintf(&sb, "Generated: %v\n\n", result["timestamp"])
 		if summary != nil {
-			sb.WriteString(fmt.Sprintf("Total: %v  |  Passed: %v  |  Warnings: %v  |  Failures: %v\n\n",
-				summary["total"], summary["passed"], summary["warnings"], summary["failures"]))
+			fmt.Fprintf(&sb, "Total: %v  |  Passed: %v  |  Warnings: %v  |  Failures: %v\n\n",
+				summary["total"], summary["passed"], summary["warnings"], summary["failures"])
 		}
 		for _, c := range checks {
 			chk, ok := c.(map[string]interface{})
@@ -95,8 +95,8 @@ func exportAuditReport(result map[string]interface{}, filePath string) error {
 			} else if status == "WARN" {
 				icon = "[WARN]"
 			}
-			sb.WriteString(fmt.Sprintf("  %s  %-8v  %-28v  %-8v  %v\n",
-				icon, chk["compliance"], chk["name"], chk["severity"], chk["detail"]))
+			fmt.Fprintf(&sb, "  %s  %-8v  %-28v  %-8v  %v\n",
+				icon, chk["compliance"], chk["name"], chk["severity"], chk["detail"])
 		}
 		sb.WriteString("\nREMEDIATION\n")
 		for _, c := range checks {
@@ -105,7 +105,7 @@ func exportAuditReport(result map[string]interface{}, filePath string) error {
 				continue
 			}
 			if fmt.Sprintf("%v", chk["status"]) != "PASS" {
-				sb.WriteString(fmt.Sprintf("  - %v: %v\n", chk["name"], chk["fix"]))
+				fmt.Fprintf(&sb, "  - %v: %v\n", chk["name"], chk["fix"])
 			}
 		}
 		return os.WriteFile(filePath, []byte(sb.String()), 0644)
@@ -134,16 +134,16 @@ footer{text-align:center;color:#64748b;margin-top:2rem;font-size:.8rem}
 </style></head><body><div class="container">
 `)
 
-	sb.WriteString(fmt.Sprintf("<h1>Kafka Security Audit Report</h1>\n"))
+	fmt.Fprintf(&sb, "<h1>Kafka Security Audit Report</h1>\n")
 	gradeClass := "grade-" + strings.ToLower(htmlCell(grade))
-	sb.WriteString(fmt.Sprintf(`<div class="grade %s">Grade: %s</div>`, gradeClass, htmlCell(grade)))
+	fmt.Fprintf(&sb, `<div class="grade %s">Grade: %s</div>`, gradeClass, htmlCell(grade))
 
 	if summary != nil {
 		sb.WriteString(`<div class="summary">`)
-		sb.WriteString(fmt.Sprintf(`<div class="card"><h3>Total</h3><div class="num">%s</div></div>`, htmlCell(summary["total"])))
-		sb.WriteString(fmt.Sprintf(`<div class="card"><h3>Passed</h3><div class="num pass">%s</div></div>`, htmlCell(summary["passed"])))
-		sb.WriteString(fmt.Sprintf(`<div class="card"><h3>Warnings</h3><div class="num warn">%s</div></div>`, htmlCell(summary["warnings"])))
-		sb.WriteString(fmt.Sprintf(`<div class="card"><h3>Failures</h3><div class="num fail">%s</div></div>`, htmlCell(summary["failures"])))
+		fmt.Fprintf(&sb, `<div class="card"><h3>Total</h3><div class="num">%s</div></div>`, htmlCell(summary["total"]))
+		fmt.Fprintf(&sb, `<div class="card"><h3>Passed</h3><div class="num pass">%s</div></div>`, htmlCell(summary["passed"]))
+		fmt.Fprintf(&sb, `<div class="card"><h3>Warnings</h3><div class="num warn">%s</div></div>`, htmlCell(summary["warnings"]))
+		fmt.Fprintf(&sb, `<div class="card"><h3>Failures</h3><div class="num fail">%s</div></div>`, htmlCell(summary["failures"]))
 		sb.WriteString(`</div>`)
 	}
 
@@ -163,8 +163,8 @@ footer{text-align:center;color:#64748b;margin-top:2rem;font-size:.8rem}
 			statusClass = "status-warn"
 			icon = "⚠"
 		}
-		sb.WriteString(fmt.Sprintf(`<tr><td class="%s">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
-			statusClass, icon, htmlCell(chk["compliance"]), htmlCell(chk["name"]), htmlCell(chk["severity"]), htmlCell(chk["detail"]), htmlCell(chk["fix"])))
+		fmt.Fprintf(&sb, `<tr><td class="%s">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+			statusClass, icon, htmlCell(chk["compliance"]), htmlCell(chk["name"]), htmlCell(chk["severity"]), htmlCell(chk["detail"]), htmlCell(chk["fix"]))
 	}
 	sb.WriteString("</tbody></table>\n")
 	fmt.Fprintf(&sb, `<footer>Generated by <a href="https://github.com/bmscomp/kates" target="_blank" rel="noopener noreferrer" style="color:#a78bfa;text-decoration:none">Kates</a> (<code>kates security audit</code>) — %s</footer>`, htmlCell(result["timestamp"]))
