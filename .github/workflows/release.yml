@@ -16,6 +16,8 @@ on:
   push:
     tags:
       - "v*"
+      # The major tags (v1) that the job below moves are not releases.
+      - "!v[0-9]"
 
 permissions:
   contents: write # softprops/action-gh-release, update-charts commits
@@ -243,6 +245,18 @@ jobs:
           files: |
             dist/kates-*.tar.gz
             dist/checksums.txt
+
+      # `uses: bmscomp/kates@v1` follows the newest v1.x.y release, the way
+      # Actions users pin. Pre-release tags (v1.2.0-rc1) leave it alone.
+      - name: Move the major tag
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          major="${TAG%%.*}"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${major}" -f sha="${GITHUB_SHA}" -F force=true \
+            || gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${major}" -f sha="${GITHUB_SHA}"
 
   homebrew:
     name: Update Homebrew Tap
