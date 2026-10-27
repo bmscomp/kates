@@ -362,7 +362,7 @@ func TestMCPKatesActivityTargetFencedUnlessID(t *testing.T) {
 			t.Errorf("row %d: target %q is not fenced, and it is not an id", row.ID, row.Target)
 		}
 	}
-	if strings.ContainsAny(rows[1].Target, "\x1b‮​") || strings.Count(rows[1].Target, mcpFenceClosePrefix) != 1 {
+	if strings.ContainsAny(rows[1].Target, "\x1b\u202e\u200b") || strings.Count(rows[1].Target, mcpFenceClosePrefix) != 1 {
 		t.Errorf("target not sanitised: %q", rows[1].Target)
 	}
 	if !strings.Contains(rows[1].Target, "/api/tests?note=") {

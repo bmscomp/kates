@@ -199,7 +199,7 @@ func TestKyvernoApplyDryRun(t *testing.T) {
 	}
 
 	// A render error is the point of a dry run: it fails the command.
-	calls = kyvernoApplyCluster(t, "team-kates", "Error: values don't meet the specifications of the schema", errors.New("exit status 1"))
+	_ = kyvernoApplyCluster(t, "team-kates", "Error: values don't meet the specifications of the schema", errors.New("exit status 1"))
 	kyvernoApplyDryRun = true
 	_, stderr, err := commandOutput(t, func() error { return kyvernoApplyCmd.RunE(kyvernoApplyCmd, nil) })
 	if _, ok := err.(*silentErr); !ok || !strings.Contains(stderr, "schema") {
