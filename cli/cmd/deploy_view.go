@@ -447,5 +447,39 @@ func ThemeKates() *huh.Theme {
 	t.Group.Title = t.Focused.Title
 	t.Group.Description = t.Focused.Description
 
+	lookForm(t)
 	return t
+}
+
+// lookForm redraws a form in the current look: the bar beside the focused
+// field, the highlighted option and the buttons. The bar keeps to the left
+// side, as huh draws it, so a form is as wide in every look.
+func lookForm(t *huh.Theme) {
+	l := theme.CurrentLook()
+	if l.Classic() {
+		return
+	}
+	t.Focused.Base = t.Focused.Base.BorderStyle(*l.Border)
+	if l.Focus != nil {
+		t.Focused.Base = t.Focused.Base.BorderForeground(l.Focus)
+	}
+	t.Focused.Card = t.Focused.Base
+	t.Focused.SelectedOption = theme.PickStyle(t.Focused.SelectedOption)
+	t.Focused.FocusedButton = theme.PickStyle(t.Focused.FocusedButton)
+	t.Focused.Next = t.Focused.FocusedButton
+	switch l.Name {
+	case theme.Minimal:
+		t.Focused.BlurredButton = t.Focused.BlurredButton.UnsetBackground().Foreground(theme.Muted)
+	case theme.Commander:
+		t.Focused.BlurredButton = t.Focused.BlurredButton.Foreground(theme.CommanderKey).Background(theme.CommanderInk)
+	default:
+		t.Focused.BlurredButton = t.Focused.BlurredButton.Background(theme.PaneFill)
+	}
+
+	blurred := t.Blurred.Base
+	t.Blurred = t.Focused
+	t.Blurred.Base, t.Blurred.Card = blurred, blurred
+	t.Blurred.Title = t.Blurred.Title.Foreground(theme.Muted)
+	t.Blurred.NextIndicator = lipgloss.NewStyle()
+	t.Blurred.PrevIndicator = lipgloss.NewStyle()
 }

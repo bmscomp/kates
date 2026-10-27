@@ -57,7 +57,7 @@ var heatBlocks = []string{"░", "▒", "▓", "█"}
 
 // heatGradient is a cold-to-hot intensity ramp built from theme tokens:
 // faint separators up through the error red at peak latency.
-var heatGradient = []lipgloss.AdaptiveColor{
+var heatGradient = []lipgloss.TerminalColor{
 	theme.Subtle,
 	theme.Muted,
 	theme.Accent,

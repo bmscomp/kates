@@ -84,20 +84,20 @@ func TestDashboardRowsShareOneWidth(t *testing.T) {
 		m = dashUpdate(t, m, tea.WindowSizeMsg{Width: w, Height: 40})
 		m = dashUpdate(t, m, logMsg{text: "a log line"})
 
-		view := m.View()
-		var topBorders []int
-		for _, line := range strings.Split(view, "\n") {
+		lines := strings.Split(m.View(), "\n")
+		header := ansi.StringWidth(lines[0])
+		panes := -1
+		for _, line := range lines {
 			if strings.Contains(line, "╭") {
-				topBorders = append(topBorders, ansi.StringWidth(line))
+				panes = ansi.StringWidth(line)
+				break
 			}
 		}
-		// Two top-border lines: the header box, and the joined panes row.
-		if len(topBorders) < 2 {
-			t.Fatalf("width %d: found %d top-border lines, want 2", w, len(topBorders))
+		if panes < 0 {
+			t.Fatalf("width %d: no panes row:\n%s", w, strings.Join(lines, "\n"))
 		}
-		if topBorders[0] != topBorders[1] {
-			t.Errorf("width %d: header renders %d cols, panes row %d — right edges misaligned",
-				w, topBorders[0], topBorders[1])
+		if header != panes {
+			t.Errorf("width %d: header renders %d cols, panes row %d — right edges misaligned", w, header, panes)
 		}
 	}
 }

@@ -42,6 +42,7 @@ var dashboardCmd = &cobra.Command{
 		m := newDashModel(ctx, apiClient, interval)
 		theme.FullScreen()
 		_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+		output.KeepHint()
 		return err
 	},
 }
@@ -238,8 +239,9 @@ type dashSnapshotMsg dashSnapshot
 type dashTickMsg struct{}
 
 var (
-	dashQuitKey = key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit"))
-	dashLookKey = key.NewBinding(key.WithKeys("T"), key.WithHelp("T (shift+t)", "next look"))
+	dashQuitKey   = key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit"))
+	dashLookKey   = key.NewBinding(key.WithKeys("T"), key.WithHelp("T (shift+t)", "next look"))
+	dashColorsKey = key.NewBinding(key.WithKeys("C"), key.WithHelp("C (shift+c)", "next colors"))
 )
 
 func newDashModel(ctx context.Context, api dashAPI, interval time.Duration) dashModel {
@@ -269,6 +271,8 @@ func (m dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, dashLookKey):
 			theme.NextLook()
+		case key.Matches(msg, dashColorsKey):
+			theme.NextPalette()
 		}
 	case dashSnapshotMsg:
 		s := dashSnapshot(msg)
@@ -300,7 +304,7 @@ func (m dashModel) View() string {
 	}
 	status := fmt.Sprintf("  %s Refreshing every %ds", spinnerFrame(m.frames-1), int(m.interval/time.Second))
 	view := renderDashFrame(*m.snap, m.hist, width, m.height) + status +
-		tui.HelpLines([]key.Binding{dashLookKey, dashQuitKey}, width)
+		tui.HelpLines([]key.Binding{dashLookKey, dashColorsKey, dashQuitKey}, width)
 	return theme.Screen(view, m.width, m.height)
 }
 

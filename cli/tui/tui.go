@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bmscomp/kates/cli/client"
+	"github.com/bmscomp/kates/cli/output"
 	"github.com/bmscomp/kates/cli/pkg/theme"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -54,6 +55,7 @@ func Run(c *client.Client) error {
 	theme.FullScreen()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
+	output.KeepHint()
 	return err
 }
 
@@ -132,6 +134,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, k.Look):
 		theme.NextLook()
+		return m, nil
+	case key.Matches(msg, k.Colors):
+		theme.NextPalette()
 		return m, nil
 	case key.Matches(msg, topicsKeys().Filter) && m.active == tabTopics && m.topics.view == topicsList:
 		m.filtering = true
@@ -216,7 +221,7 @@ func (m Model) helpBindings() []key.Binding {
 			return view
 		}
 	}
-	return append(view, k.NextTab, k.PrevTab, k.JumpTab, k.Look, k.Quit)
+	return append(view, k.NextTab, k.PrevTab, k.JumpTab, k.Look, k.Colors, k.Quit)
 }
 
 func (m Model) View() string {

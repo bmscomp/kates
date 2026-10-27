@@ -2,10 +2,10 @@
 // All color values are expressed as lipgloss.AdaptiveColor pairs so the terminal
 // renderer automatically selects the correct shade based on the background.
 //
-// The tokens come from one named Palette, chosen once at start-up (see
-// Selected): KATES_THEME, else `theme:` in ~/.kates.yaml, else "default".
-// Styles across the CLI are built from these variables when their packages
-// initialise, so the choice cannot change mid-process.
+// The tokens come from one named Palette, chosen at start-up (see Selected):
+// KATES_THEME, else `theme:` in ~/.kates.yaml, else "default". Each token
+// points into the active palette rather than copying it, so UsePalette
+// recolors every style already built from the tokens.
 //
 // Usage:
 //
@@ -21,64 +21,71 @@ func adaptive(light, dark string) lipgloss.AdaptiveColor {
 	return lipgloss.AdaptiveColor{Light: light, Dark: dark}
 }
 
-// Active is the palette this process renders with.
-var Active = Palettes[Selected()]
+// Color is a token: it draws with its role's color in the active palette,
+// whichever palette is active when it renders.
+type Color struct{ *lipgloss.AdaptiveColor }
+
+// Active is the palette this process renders with now; activeName names it.
+var (
+	Active     = Palettes[Selected()]
+	activeName = Selected()
+)
 
 // ─── Core semantic roles ─────────────────────────────────────────────────────
 
 var (
 	// Accent is the primary interactive color — used for banners, focused
 	// borders, and active selectors.
-	Accent = Active.Accent
+	Accent = Color{&Active.Accent}
 
 	// Text is primary body text — must have high contrast on both backgrounds.
-	Text = Active.Text
+	Text = Color{&Active.Text}
 
 	// Muted is secondary / de-emphasized text (descriptions, hints, dim labels).
-	Muted = Active.Muted
+	Muted = Color{&Active.Muted}
 
 	// Subtle is used for borders and separator lines.
-	Subtle = Active.Subtle
+	Subtle = Color{&Active.Subtle}
 
 	// Surface is the background color for panels and status bars.
-	Surface = Active.Surface
+	Surface = Color{&Active.Surface}
 )
 
 // ─── Status / semantic ───────────────────────────────────────────────────────
 
 var (
 	// Success indicates a passing / healthy / completed state.
-	Success = Active.Success
+	Success = Color{&Active.Success}
 
 	// Warning indicates a degraded or cautionary state.
-	Warning = Active.Warning
+	Warning = Color{&Active.Warning}
 
 	// Error indicates a failure or critical state.
-	Error = Active.Error
+	Error = Color{&Active.Error}
 
 	// Info is used for informational highlights (step headers, teal accents).
-	Info = Active.Info
+	Info = Color{&Active.Info}
 )
 
 // ─── Hierarchy ───────────────────────────────────────────────────────────────
 
 var (
 	// Primary is used for top-level headings and phase labels.
-	Primary = Active.Primary
+	Primary = Color{&Active.Primary}
 
 	// Secondary is used for sub-headings, key labels, and section titles.
-	Secondary = Active.Secondary
+	Secondary = Color{&Active.Secondary}
 
 	// Highlight is the selected-item foreground color in lists and multi-selects.
-	Highlight = Active.Highlight
+	Highlight = Color{&Active.Highlight}
 )
 
 // ─── Fixed / context-independent ─────────────────────────────────────────────
 
 var (
 	// OnColor is used as foreground on colored backgrounds (e.g. badges).
-	OnColor = Active.OnColor
+	OnColor = Color{&Active.OnColor}
 
 	// OnDark is the foreground for dark/filled button backgrounds.
-	OnDark = Active.OnDark
+	OnDark = Color{&Active.OnDark}
 )

@@ -504,6 +504,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		final, err := p.Run()
 		// The window is gone: what the deploy still says goes to the terminal.
 		dl.closed.Store(true)
+		output.KeepHint()
 		if m, ok := final.(deployDashboardModel); ok && m.interrupted {
 			output.Warn("Deploy window closed; the deploy goes on and prints below. Ctrl-C again stops kates, which can leave a Helm release half-applied.")
 		}
