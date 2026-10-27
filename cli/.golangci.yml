@@ -1,22 +1,19 @@
 # golangci-lint configuration for the Kates CLI (v2 schema)
 # https://golangci-lint.run/usage/configuration/
 #
-# CI runs this with --new-from-merge-base so only issues introduced by a PR are
-# reported: the codebase carries a backlog (errcheck/staticcheck/funlen) that
-# is paid down file by file rather than gated all at once. cli/README.md
-# (Development) says how to run the same check locally.
-#
-# errcheck is not enabled yet: on current code it reports 46 findings in
-# cli/cmd alone (golangci-lint v2.14.0, --enable-only errcheck ./cmd/...),
-# most of them Close and Fprint* results in the exec and deploy code that
-# plan item 3.5 moves onto one runner. It is enabled for cli/cmd once that
-# count is zero (plan item 3.12).
+# CI lints the whole tree with this file and fails on any finding: the
+# backlog that waves 1-5 of plans/cli-enhancement.md paid down is at zero, so
+# there is no waiver list and no --new-from-rev. A function over the funlen
+# or gocyclo limit is split, an error is handled or discarded with `_ =` and
+# a reason, and a //nolint needs a reason a reviewer accepts. cli/README.md
+# (Lint as CI does) says how to run the same check locally.
 version: "2"
 run:
   timeout: 5m
   tests: true
 linters:
   enable:
+    - errcheck
     - funlen
     - gocyclo
   settings:
@@ -32,68 +29,11 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
-    # funlen waivers, one per file whose functions are still over the limit,
-    # each naming the function and the plan item (plans/cli-enhancement.md)
-    # whose refactor removes it. A waiver covers the whole file, so a new
-    # over-long function in one of these files is not caught: delete the
-    # waiver as soon as the named function is under the limit. The waivers
-    # for clean.go, security.go, cluster.go, deploy_status.go, kafka.go, connect.go,
-    # test.go, disruption.go and kyverno.go are gone: nothing in them is over
-    # the limit any more. Files not listed here (deploy_components.go,
-    # migrate*.go, report_html.go, security_export.go, detect.go, auto.go,
-    # advisor.go, doctor_dns.go, deploy_plan.go, deploy_picker.go,
-    # deploy_versions.go) carry findings that --new-from-merge-base leaves
-    # alone until the lines change; they are not waived so new code in them
-    # is held to the limit.
+    # Tests may be long: a table of cases is clearer in one function.
     rules:
       - linters:
           - funlen
         path: _test\.go
-      # getEcosystemStatus (196 lines), getSecurityAudit (111),
-      # getStrimziStatus (gocyclo 35) and parseKyvernoPolicies (gocyclo 36)
-      # predate wave 3; item 3.8 only threaded a context through them, which
-      # puts their signature lines in the diff. Splitting them into one probe
-      # per function is the remaining part of item 3.8.
-      - linters:
-          - funlen
-          - gocyclo
-        path: pkg/detect/collector\.go
-      # runDeploy (157 statements): item 3.6 reduces it to resolution and
-      # reporting over a component table.
-      - linters:
-          - funlen
-        path: deploy\.go
-      # runHelmTests (79 statements) and exportHelmTestPDF (77): item 3.8
-      # renders every report from one document, PDF as a view of it.
-      - linters:
-          - funlen
-        path: helm_test_cmd\.go
-      # runDoctorNetwork (140 lines): item 2.3 runs one probe per function,
-      # in parallel, with a timeout each.
-      - linters:
-          - funlen
-        path: doctor_network\.go
-      # runPorts (75 statements): item 3.5 puts the port-forward processes
-      # behind the shared process runner.
-      - linters:
-          - funlen
-        path: portforward\.go
-      # watchModel.Update (62 statements) and View (130 lines): item 3.10
-      # gives the TUI models a shared keymap and scroll window.
-      - linters:
-          - funlen
-        path: watch\.go
-      # dashboardModel.Update (88 statements) and componentsContent (73):
-      # item 3.10, with the deploy dashboard split per state.
-      - linters:
-          - funlen
-        path: deploy_dashboard\.go
-      # runUpgrade (82 statements): no wave item names it; split it into
-      # resolve, build and install when upgrade is next touched (review
-      # 01-core lists it first among the funlen offenders).
-      - linters:
-          - funlen
-        path: upgrade\.go
     paths:
       - third_party$
       - builtin$

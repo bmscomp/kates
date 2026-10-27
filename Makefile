@@ -136,7 +136,7 @@ check: check-help check-versions check-chart-tests ## Run every cheap CI gate lo
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck -x -S warning -e SC2317,SC2034,SC2155 scripts/*.sh kates-ci.sh && echo "OK: shellcheck"; else echo "⚠️  shellcheck not installed — skipping"; fi
 	@if command -v hadolint >/dev/null 2>&1; then hadolint --failure-threshold error kates/Dockerfile kates/Dockerfile.native Dockerfile.connect Dockerfile.legacy-kafka tester/Dockerfile && echo "OK: hadolint"; else echo "⚠️  hadolint not installed — skipping"; fi
 	@if command -v yamllint >/dev/null 2>&1; then yamllint -c .yamllint.yaml .github config charts && echo "OK: yamllint"; else echo "⚠️  yamllint not installed — skipping"; fi
-	@if command -v golangci-lint >/dev/null 2>&1; then (cd cli && go vet ./... && golangci-lint run --new-from-merge-base=main ./...) && echo "OK: go vet, golangci-lint (new issues)"; else echo "⚠️  golangci-lint not installed — skipping"; fi
+	@if command -v golangci-lint >/dev/null 2>&1; then (cd cli && go vet ./... && golangci-lint run ./...) && echo "OK: go vet, golangci-lint"; else echo "⚠️  golangci-lint not installed — skipping"; fi
 	@(cd kates && ./mvnw -B -ntp -q spotless:check) && echo "OK: spotless"
 	@./scripts/check-versions.sh --workflows
 	@python3 scripts/chart_bumps.py

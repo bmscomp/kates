@@ -112,14 +112,22 @@ var schemaKeywords = map[string]bool{
 // API's reader does; a test fails on a pattern without one.
 var patternMessages = map[string]string{
 	`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`: "must be a DNS label: up to 63 lower-case letters, digits and -",
-	`^[A-Za-z0-9_-]{22}$`:                  "must be a Kafka cluster id: 22 letters, digits, - or _",
+
+	`^[A-Za-z0-9_-]{22}$`: "must be a Kafka cluster id: 22 letters, digits, - or _",
+
 	`^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$`: "must be a Kubernetes label key, such as topology.kubernetes.io/zone",
-	`^[0-9]+(\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$`:                             "expected a quantity such as 8Gi, 500m or 2",
-	`^v?[0-9]+(\.[0-9]+){0,3}$`:                                                         `expected a version such as "4.2.0"`,
-	`^[a-z0-9]{1,11}$`:                                                                  "must be a Strimzi listener name: up to 11 lower-case letters and digits",
-	`^[a-z][A-Za-z]*(\.[a-z][A-Za-z]*|\[[^\]]+\])*$`:                                    "must be a rule id, such as brokers.count or kafka.config[min.insync.replicas]",
-	`^[a-z0-9]+([._-][a-z0-9]+)*$`:                                                      "must be a broker config name, such as min.insync.replicas",
-	`^[a-zA-Z0-9._-]{1,249}$`:                                                           "must be the start of a topic name: up to 249 letters, digits, ., _ and -",
+
+	`^[0-9]+(\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$`: "expected a quantity such as 8Gi, 500m or 2",
+
+	`^v?[0-9]+(\.[0-9]+){0,3}$`: `expected a version such as "4.2.0"`,
+
+	`^[a-z0-9]{1,11}$`: "must be a Strimzi listener name: up to 11 lower-case letters and digits",
+
+	`^[a-z][A-Za-z]*(\.[a-z][A-Za-z]*|\[[^\]]+\])*$`: "must be a rule id, such as brokers.count or kafka.config[min.insync.replicas]",
+
+	`^[a-z0-9]+([._-][a-z0-9]+)*$`: "must be a broker config name, such as min.insync.replicas",
+
+	`^[a-zA-Z0-9._-]{1,249}$`: "must be the start of a topic name: up to 249 letters, digits, ., _ and -",
 }
 
 var (
