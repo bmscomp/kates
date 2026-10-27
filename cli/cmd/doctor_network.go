@@ -88,85 +88,8 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 
 	var checks []networkCheck
 
-	dnsTargets := []struct {
-		host string
-		desc string
-		ns   string
-	}{
-		{
-			host: fmt.Sprintf("%s-kafka-bootstrap.%s.svc.%s", deployKafkaName, doctorKafkaNS, clusterDomain),
-			desc: "Kafka Bootstrap",
-			ns:   doctorAppNS,
-		},
-		{
-			host: fmt.Sprintf("connect-cluster-connect-api.%s.svc.%s", doctorConnectNS, clusterDomain),
-			desc: "Connect REST API",
-			ns:   doctorAppNS,
-		},
-		{
-			host: fmt.Sprintf("apicurio-apicurio-registry.%s.svc.%s", doctorKafkaNS, clusterDomain),
-			desc: "Schema Registry",
-			ns:   doctorAppNS,
-		},
-	}
-
-	tcpTargets := []struct {
-		host string
-		port string
-		desc string
-		ns   string
-	}{
-		{
-			host: fmt.Sprintf("%s-kafka-bootstrap.%s.svc.%s", deployKafkaName, doctorKafkaNS, clusterDomain),
-			port: "9092",
-			desc: "Kafka Plain",
-			ns:   doctorAppNS,
-		},
-		{
-			host: fmt.Sprintf("%s-kafka-bootstrap.%s.svc.%s", deployKafkaName, doctorKafkaNS, clusterDomain),
-			port: "9093",
-			desc: "Kafka TLS",
-			ns:   doctorAppNS,
-		},
-		{
-			host: fmt.Sprintf("connect-cluster-connect-api.%s.svc.%s", doctorConnectNS, clusterDomain),
-			port: "8083",
-			desc: "Connect REST API",
-			ns:   doctorAppNS,
-		},
-		{
-			host: fmt.Sprintf("apicurio-apicurio-registry.%s.svc.%s", doctorKafkaNS, clusterDomain),
-			port: "80",
-			desc: "Schema Registry",
-			ns:   doctorAppNS,
-		},
-		{
-			host: fmt.Sprintf("postgresql.%s.svc.%s", doctorDbNS, clusterDomain),
-			port: "5432",
-			desc: "PostgreSQL",
-			ns:   doctorAppNS,
-		},
-	}
-
-	// The probes run at once, each under its own deadline (doctorProbeTimeout).
-	// They used to run one after another under the one 120 s context, so a
-	// slow image pull on the first left the last ones no time at all.
-	dnsResults := make([]networkCheck, len(dnsTargets))
-	tcpResults := make([]networkCheck, len(tcpTargets))
-	g, gctx := errgroup.WithContext(ctx)
-	for i, t := range dnsTargets {
-		g.Go(func() error {
-			dnsResults[i] = runDNSCheck(gctx, t.host, t.ns)
-			return nil
-		})
-	}
-	for i, t := range tcpTargets {
-		g.Go(func() error {
-			tcpResults[i] = runTCPCheck(gctx, t.host, t.port, t.desc, t.ns)
-			return nil
-		})
-	}
-	_ = g.Wait() // a probe that fails is a failed check, never an error
+	dnsTargets, tcpTargets := networkProbeTargets(clusterDomain)
+	dnsResults, tcpResults := runNetworkProbes(ctx, dnsTargets, tcpTargets)
 
 	// ── Phase 1: DNS Resolution ──
 	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("📡 DNS Resolution"))
@@ -201,8 +124,71 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 	// ── Summary ──
 	fmt.Println()
 	fmt.Println(separator)
+	printNetworkSummary(checks)
+	fmt.Println()
 
-	passed, warnings, failed := 0, 0, 0
+	return nil
+}
+
+// networkProbeTarget is one probe: a host, a port for a TCP probe, what it
+// is, and the namespace the probe pod runs in.
+type networkProbeTarget struct {
+	host string
+	port string
+	desc string
+	ns   string
+}
+
+// networkProbeTargets is the DNS and TCP probes for the namespaces the flags
+// name, in clusterDomain.
+func networkProbeTargets(clusterDomain string) (dns, tcp []networkProbeTarget) {
+	bootstrap := fmt.Sprintf("%s-kafka-bootstrap.%s.svc.%s", deployKafkaName, doctorKafkaNS, clusterDomain)
+	connectAPI := fmt.Sprintf("connect-cluster-connect-api.%s.svc.%s", doctorConnectNS, clusterDomain)
+	registry := fmt.Sprintf("apicurio-apicurio-registry.%s.svc.%s", doctorKafkaNS, clusterDomain)
+	postgres := fmt.Sprintf("postgresql.%s.svc.%s", doctorDbNS, clusterDomain)
+
+	dns = []networkProbeTarget{
+		{host: bootstrap, desc: "Kafka Bootstrap", ns: doctorAppNS},
+		{host: connectAPI, desc: "Connect REST API", ns: doctorAppNS},
+		{host: registry, desc: "Schema Registry", ns: doctorAppNS},
+	}
+	tcp = []networkProbeTarget{
+		{host: bootstrap, port: "9092", desc: "Kafka Plain", ns: doctorAppNS},
+		{host: bootstrap, port: "9093", desc: "Kafka TLS", ns: doctorAppNS},
+		{host: connectAPI, port: "8083", desc: "Connect REST API", ns: doctorAppNS},
+		{host: registry, port: "80", desc: "Schema Registry", ns: doctorAppNS},
+		{host: postgres, port: "5432", desc: "PostgreSQL", ns: doctorAppNS},
+	}
+	return dns, tcp
+}
+
+// runNetworkProbes runs the probes at once, each under its own deadline
+// (doctorProbeTimeout). They used to run one after another under the one
+// 120 s context, so a slow image pull on the first left the last ones no
+// time at all. The results are in the targets' order.
+func runNetworkProbes(ctx context.Context, dnsTargets, tcpTargets []networkProbeTarget) (dnsResults, tcpResults []networkCheck) {
+	dnsResults = make([]networkCheck, len(dnsTargets))
+	tcpResults = make([]networkCheck, len(tcpTargets))
+	g, gctx := errgroup.WithContext(ctx)
+	for i, t := range dnsTargets {
+		g.Go(func() error {
+			dnsResults[i] = runDNSCheck(gctx, t.host, t.ns)
+			return nil
+		})
+	}
+	for i, t := range tcpTargets {
+		g.Go(func() error {
+			tcpResults[i] = runTCPCheck(gctx, t.host, t.port, t.desc, t.ns)
+			return nil
+		})
+	}
+	_ = g.Wait() // a probe that fails is a failed check, never an error
+	return dnsResults, tcpResults
+}
+
+// networkSummary is the summary line's text, and the counts that colour it.
+func networkSummary(checks []networkCheck) (line string, warnings, failed int) {
+	passed := 0
 	for _, c := range checks {
 		switch c.Status {
 		case "pass":
@@ -213,26 +199,25 @@ func runDoctorNetwork(cmd *cobra.Command, args []string) error {
 			failed++
 		}
 	}
-	total := len(checks)
-	summaryParts := []string{fmt.Sprintf("%d/%d checks passed", passed, total)}
+	summaryParts := []string{fmt.Sprintf("%d/%d checks passed", passed, len(checks))}
 	if warnings > 0 {
 		summaryParts = append(summaryParts, fmt.Sprintf("%d warning(s)", warnings))
 	}
 	if failed > 0 {
 		summaryParts = append(summaryParts, fmt.Sprintf("%d failed", failed))
 	}
+	return "📊 Summary: " + strings.Join(summaryParts, ", "), warnings, failed
+}
 
+func printNetworkSummary(checks []networkCheck) {
+	line, warnings, failed := networkSummary(checks)
 	summaryStyle := lipgloss.NewStyle().Bold(true).Foreground(clrGreen)
 	if failed > 0 {
 		summaryStyle = lipgloss.NewStyle().Bold(true).Foreground(clrRed)
 	} else if warnings > 0 {
 		summaryStyle = lipgloss.NewStyle().Bold(true).Foreground(clrOrange)
 	}
-
-	fmt.Println(summaryStyle.Render("📊 Summary: " + strings.Join(summaryParts, ", ")))
-	fmt.Println()
-
-	return nil
+	fmt.Println(summaryStyle.Render(line))
 }
 
 // ─── DNS Check ──────────────────────────────────────────────

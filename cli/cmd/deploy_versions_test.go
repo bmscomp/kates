@@ -90,25 +90,14 @@ dependencies:
     version: %s
     repository: oci://quay.io/strimzi-helm
 `, pin, pin)
-	if err := os.WriteFile(filepath.Join(op, "Chart.yaml"), []byte(chartYAML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(op, "values.yaml"), []byte("strimziVersion: \""+pin+"\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(op, "templates", "NOTES.txt"), []byte("notes\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(op, "Chart.yaml"), chartYAML)
+	writeTestFile(t, filepath.Join(op, "values.yaml"), "strimziVersion: \""+pin+"\"\n")
+	writeTestFile(t, filepath.Join(op, "templates", "NOTES.txt"), "notes\n")
 	writeOperatorTgz(t, filepath.Join(op, "charts", "strimzi-kafka-operator-"+pin+".tgz"), pin,
 		[]string{"4.2.0", "4.2.1", "4.3.0"}, []string{"v1"}, "v1")
 
 	kc := filepath.Join(root, kafkaChartDir)
-	if err := os.MkdirAll(kc, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(kc, "Chart.yaml"), []byte(fmt.Sprintf("apiVersion: v2\nname: kafka-cluster\nversion: 0.4.0\nannotations:\n  kates.io/kafka-floor: \"%s\"\n", floor)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeTestFile(t, filepath.Join(kc, "Chart.yaml"), fmt.Sprintf("apiVersion: v2\nname: kafka-cluster\nversion: 0.4.0\nannotations:\n  kates.io/kafka-floor: \"%s\"\n", floor))
 	return root
 }
 

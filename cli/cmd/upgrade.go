@@ -79,26 +79,7 @@ func runUpgrade() error {
 	}
 
 	// ── 5. Display plan ──────────────────────────────────────────────────────
-	fmt.Println()
-	fmt.Println("    ╭─ Kates Upgrade ────────────────────────────────────────────────────────────╮")
-	upgradeRow("Source", srcDir)
-	upgradeRow("Branch", gitBranch+gitDirty)
-	upgradeRow("Commit", gitCommit)
-	installNote := installPath
-	if upgradeInstallDir == "" {
-		if found, lerr := exec.LookPath("kates"); lerr == nil && filepath.Dir(found) == installDir {
-			installNote += "  (where `kates` resolves)"
-		}
-	}
-	upgradeRow("Install", installNote)
-	if needsSudo {
-		upgradeRow("Sudo", "required")
-	}
-	if oldVersion != "" {
-		upgradeRow("Current", oldVersion)
-	}
-	fmt.Println("    ╰────────────────────────────────────────────────────────────────────────────╯")
-	fmt.Println()
+	printUpgradePlan(srcDir, gitBranch+gitDirty, gitCommit, installDir, installPath, needsSudo, oldVersion)
 
 	if upgradeDryRun {
 		fmt.Println("    ⏸  Dry run — no changes made")
@@ -113,58 +94,10 @@ func runUpgrade() error {
 	}
 
 	// ── 6. Build ─────────────────────────────────────────────────────────────
-	buildDate := time.Now().UTC().Format(time.RFC3339)
-	ldflags := fmt.Sprintf("-s -w -X github.com/bmscomp/kates/cli/cmd.Version=%s -X github.com/bmscomp/kates/cli/cmd.Commit=%s -X github.com/bmscomp/kates/cli/cmd.BuildDate=%s",
-		gitBranch+"-"+gitCommit, gitCommit, buildDate)
-
-	tmpBin := filepath.Join(srcDir, "dist", "kates")
-	os.MkdirAll(filepath.Join(srcDir, "dist"), 0755)
-
-	buildCmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", tmpBin, ".")
-	buildCmd.Dir = srcDir
-	// Capture stderr for error reporting but don't print live
-	// (go build is noisy only on failure)
-	var buildStderr strings.Builder
-	buildCmd.Stderr = &buildStderr
-
-	// Spinner with elapsed time
-	spinFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	buildStart := time.Now()
-	done := make(chan struct{})
-	go func() {
-		i := 0
-		for {
-			select {
-			case <-done:
-				return
-			default:
-				elapsed := time.Since(buildStart).Round(time.Second)
-				fmt.Printf("\r    %s  Building from source... %s", spinFrames[i%len(spinFrames)], elapsed)
-				i++
-				time.Sleep(150 * time.Millisecond)
-			}
-		}
-	}()
-
-	buildErr := buildCmd.Run()
-	close(done)
-	// Clear the spinner line
-	fmt.Printf("\r%s\r", strings.Repeat(" ", 60))
-
-	if buildErr != nil {
-		fmt.Println("    ❌ Build failed")
-		if errOut := buildStderr.String(); errOut != "" {
-			fmt.Fprint(os.Stderr, errOut)
-		}
-		return fmt.Errorf("build failed: %w", buildErr)
+	tmpBin, err := buildUpgradeBinary(srcDir, gitBranch, gitCommit)
+	if err != nil {
+		return err
 	}
-
-	// Verify the binary exists and is executable
-	info, err := os.Stat(tmpBin)
-	if err != nil || info.IsDir() {
-		return fmt.Errorf("build produced no binary at %s", tmpBin)
-	}
-	fmt.Printf("    ✅ Built  %s  (%s)\n", filepath.Base(tmpBin), humanSize(info.Size()))
 
 	// ── 7. Install ───────────────────────────────────────────────────────────
 	if err := guardForeignSymlink(installPath); err != nil {
@@ -201,6 +134,99 @@ func runUpgrade() error {
 	printPathShadowWarning(installPath)
 
 	return nil
+}
+
+// printUpgradePlan is the box upgrade shows before it builds anything.
+func printUpgradePlan(srcDir, branch, commit, installDir, installPath string, needsSudo bool, oldVersion string) {
+	fmt.Println()
+	fmt.Println("    ╭─ Kates Upgrade ────────────────────────────────────────────────────────────╮")
+	upgradeRow("Source", srcDir)
+	upgradeRow("Branch", branch)
+	upgradeRow("Commit", commit)
+	installNote := installPath
+	if upgradeInstallDir == "" {
+		if found, lerr := exec.LookPath("kates"); lerr == nil && filepath.Dir(found) == installDir {
+			installNote += "  (where `kates` resolves)"
+		}
+	}
+	upgradeRow("Install", installNote)
+	if needsSudo {
+		upgradeRow("Sudo", "required")
+	}
+	if oldVersion != "" {
+		upgradeRow("Current", oldVersion)
+	}
+	fmt.Println("    ╰────────────────────────────────────────────────────────────────────────────╯")
+	fmt.Println()
+}
+
+// upgradeLdflags stamps the version, commit and build date into the binary.
+func upgradeLdflags(branch, commit, buildDate string) string {
+	return fmt.Sprintf("-s -w -X github.com/bmscomp/kates/cli/cmd.Version=%s -X github.com/bmscomp/kates/cli/cmd.Commit=%s -X github.com/bmscomp/kates/cli/cmd.BuildDate=%s",
+		branch+"-"+commit, commit, buildDate)
+}
+
+// buildUpgradeBinary builds the CLI in srcDir into dist/kates, under a
+// spinner, and returns the binary's path.
+func buildUpgradeBinary(srcDir, gitBranch, gitCommit string) (string, error) {
+	buildDate := time.Now().UTC().Format(time.RFC3339)
+	ldflags := upgradeLdflags(gitBranch, gitCommit, buildDate)
+
+	tmpBin := filepath.Join(srcDir, "dist", "kates")
+	if err := os.MkdirAll(filepath.Join(srcDir, "dist"), 0755); err != nil {
+		return "", fmt.Errorf("create the build directory: %w", err)
+	}
+
+	buildCmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", tmpBin, ".")
+	buildCmd.Dir = srcDir
+	// Capture stderr for error reporting but don't print live
+	// (go build is noisy only on failure)
+	var buildStderr strings.Builder
+	buildCmd.Stderr = &buildStderr
+
+	if buildErr := runWithSpinner(buildCmd, "Building from source..."); buildErr != nil {
+		fmt.Println("    ❌ Build failed")
+		if errOut := buildStderr.String(); errOut != "" {
+			fmt.Fprint(os.Stderr, errOut)
+		}
+		return "", fmt.Errorf("build failed: %w", buildErr)
+	}
+
+	// Verify the binary exists and is executable
+	info, err := os.Stat(tmpBin)
+	if err != nil || info.IsDir() {
+		return "", fmt.Errorf("build produced no binary at %s", tmpBin)
+	}
+	fmt.Printf("    ✅ Built  %s  (%s)\n", filepath.Base(tmpBin), humanSize(info.Size()))
+	return tmpBin, nil
+}
+
+// runWithSpinner runs cmd with a spinner and the elapsed time beside label,
+// and clears the spinner line when it ends.
+func runWithSpinner(cmd *exec.Cmd, label string) error {
+	spinFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	buildStart := time.Now()
+	done := make(chan struct{})
+	go func() {
+		i := 0
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				elapsed := time.Since(buildStart).Round(time.Second)
+				fmt.Printf("\r    %s  %s %s", spinFrames[i%len(spinFrames)], label, elapsed)
+				i++
+				time.Sleep(150 * time.Millisecond)
+			}
+		}
+	}()
+
+	err := cmd.Run()
+	close(done)
+	// Clear the spinner line
+	fmt.Printf("\r%s\r", strings.Repeat(" ", 60))
+	return err
 }
 
 // pathShadow describes a kates on PATH that is not the one just installed.
@@ -415,7 +441,11 @@ func needsSudoForPath(dir string) bool {
 // Linux refuses to write a running executable in place (ETXTBSY); a rename
 // replaces the directory entry and leaves the running file alone.
 func installBinary(src, dst string, useSudo bool) error {
-	os.MkdirAll(filepath.Dir(dst), 0755)
+	// Under sudo the directory may be one only root can create; sudo install
+	// below then reports the failure, so this one only counts without sudo.
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil && !useSudo {
+		return fmt.Errorf("create %s: %w", filepath.Dir(dst), err)
+	}
 	tmp := dst + ".tmp"
 
 	if useSudo {
@@ -462,7 +492,9 @@ func macOSSign(path string, useSudo bool) {
 		}
 		cmd := exec.Command(name, args...)
 		cmd.Stdin = os.Stdin
-		cmd.Run() // best-effort, ignore errors
+		// Best-effort: xattr fails when the attribute is absent, and an
+		// unsigned binary still runs locally on most setups.
+		_ = cmd.Run()
 	}
 
 	run("xattr", "-dr", "com.apple.provenance", path)

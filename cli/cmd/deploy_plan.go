@@ -17,7 +17,45 @@ import (
 // Form 2: namespace configuration) and updates the global deploy* flag variables.
 func runInteractiveForms() error {
 	var picked []string
+	if err := runComponentForm(&picked); err != nil {
+		return err
+	}
 
+	// ── Form 2: Namespace configuration ──────────────────────────────────
+	// Built after Form 1 completes so that `picked` is fully populated.
+	// This avoids a huh library issue where MultiSelect values from a
+	// previous group aren't reliably available in WithHideFunc closures
+	// of subsequent groups within the same form.
+	if err := runNamespaceForm(picked); err != nil {
+		return err
+	}
+
+	applyPickedComponents(picked)
+
+	// ── Form: Versions and scope ─────────────────────────────────────────
+	// The Kafka options are a function of the operator chosen above them:
+	// pick 1.0.1 and the list is its window, pick 1.1.0 and it is 1.1.0's.
+	// Nothing here is a table in Go — the options come from the charts.
+	// After the namespaces: the installed operator it offers to keep is the
+	// one watching the Kafka namespace chosen there.
+	if err := runVersionPickerForm(); err != nil {
+		return err
+	}
+
+	// ── Form: Already installed ──────────────────────────────────────────
+	if err := runInstalledReleasesForm(); err != nil {
+		return err
+	}
+
+	// ── Review ───────────────────────────────────────────────────────────
+	// Everything chosen, in one screen, before a single Helm call: the
+	// versions as they will resolve, the components, the namespaces.
+	return runDeployReviewForm()
+}
+
+// runComponentForm is Form 1: the topology, the schema registry, HA and
+// the components, which it stores in picked.
+func runComponentForm(picked *[]string) error {
 	// What is already installed, beside each component it belongs to.
 	hintCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	hints := installedHints(hintCtx)
@@ -59,13 +97,13 @@ func runInteractiveForms() error {
 			Title("Select Components").
 			Description("Space toggles, enter confirms. Kafka and the Kates backend are always deployed. After · is what is installed now.").
 			Options(componentOptions...).
-			Value(&picked),
+			Value(picked),
 	}
 	if len(leftOut) > 0 {
 		componentFields = append(componentFields, huh.NewNote().Title("Not installed admin-less").Description(describeLeftOut(leftOut)))
 	}
 
-	form1 := huh.NewForm(
+	return huh.NewForm(
 		// ── Group 1: What to deploy ──────────────────────────────────────────
 		huh.NewGroup(
 			huh.NewSelect[string]().
@@ -97,17 +135,13 @@ func runInteractiveForms() error {
 		// multi-select squeezed under three other fields could hide its
 		// last entries until the cursor reached them.
 		huh.NewGroup(componentFields...),
-	).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
+	).WithTheme(ThemeKates()).WithAccessible(accessibleUI()).Run()
+}
 
-	if err := form1.Run(); err != nil {
-		return err
-	}
-
-	// ── Form 2: Namespace configuration ──────────────────────────────────
-	// Built after Form 1 completes so that `picked` is fully populated.
-	// This avoids a huh library issue where MultiSelect values from a
-	// previous group aren't reliably available in WithHideFunc closures
-	// of subsequent groups within the same form.
+// runNamespaceForm is Form 2: the namespaces for the topology and the
+// components picked. Single and admin-less asks for the one namespace;
+// single otherwise asks nothing.
+func runNamespaceForm(picked []string) error {
 	if deployTopology == "single" && deployAdminless {
 		form2 := huh.NewForm(huh.NewGroup(
 			huh.NewInput().
@@ -115,71 +149,78 @@ func runInteractiveForms() error {
 				Description("An existing namespace this account may write to; everything goes there").
 				Value(&deployNamespace),
 		)).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
-		if err := form2.Run(); err != nil {
-			return err
-		}
+		return form2.Run()
 	}
-	if deployTopology != "single" {
-		// Two pages at most: the namespaces every deploy needs, then the
-		// chosen components'. A huh group scrolls to the focused field, so
-		// the second page fits any terminal however many components are on.
-		nsGroups := []*huh.Group{huh.NewGroup(
-			huh.NewInput().
-				Title("Kafka Namespace").
-				Description("Namespace for Strimzi operator and Kafka cluster").
-				Value(&deployKafkaNS),
-			huh.NewInput().
-				Title("Kates App Namespace").
-				Description("Namespace for the Kates backend service").
-				Value(&deployAppNS),
-		)}
-
-		var optional []huh.Field
-		if slices.Contains(picked, "monitoring") && !deployAdminless {
-			optional = append(optional, huh.NewInput().
-				Title("Monitoring Namespace").
-				Description("Namespace for the Prometheus and Grafana stack").
-				Value(&deployMonitoringNS))
-		}
-		if slices.Contains(picked, "chaos") {
-			optional = append(optional, huh.NewInput().
-				Title("Chaos Namespace").
-				Description("Namespace for Litmus Chaos engine").
-				Value(&deployChaosNS))
-		}
-		if slices.Contains(picked, "kafka-connect") {
-			optional = append(optional,
-				huh.NewInput().
-					Title("Kafka Connect Namespace").
-					Description("Namespace for Kafka Connect cluster (separate from Kafka)").
-					Value(&deployConnectNS),
-				huh.NewInput().
-					Title("Database Namespace").
-					Description("Namespace for PostgreSQL CDC database").
-					Value(&deployDbNS))
-		}
-		if slices.Contains(picked, "mirror-maker2") {
-			optional = append(optional, huh.NewInput().
-				Title("MirrorMaker 2 Namespace").
-				Description("Namespace for the loopback mirror (the Kafka namespace is the simplest: the kates-mm2 credential lives there)").
-				Value(&deployMM2NS))
-		}
-		if slices.Contains(picked, "kafka-ui") {
-			optional = append(optional, huh.NewInput().
-				Title("Kafka UI Namespace").
-				Description("Namespace for the Kafka UI dashboard").
-				Value(&deployKafkaUINS))
-		}
-		if len(optional) > 0 {
-			nsGroups = append(nsGroups, huh.NewGroup(optional...))
-		}
-
-		form2 := huh.NewForm(nsGroups...).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
-		if err := form2.Run(); err != nil {
-			return err
-		}
+	if deployTopology == "single" {
+		return nil
+	}
+	// Two pages at most: the namespaces every deploy needs, then the
+	// chosen components'. A huh group scrolls to the focused field, so
+	// the second page fits any terminal however many components are on.
+	nsGroups := []*huh.Group{huh.NewGroup(
+		huh.NewInput().
+			Title("Kafka Namespace").
+			Description("Namespace for Strimzi operator and Kafka cluster").
+			Value(&deployKafkaNS),
+		huh.NewInput().
+			Title("Kates App Namespace").
+			Description("Namespace for the Kates backend service").
+			Value(&deployAppNS),
+	)}
+	if optional := componentNamespaceFields(picked); len(optional) > 0 {
+		nsGroups = append(nsGroups, huh.NewGroup(optional...))
 	}
 
+	form2 := huh.NewForm(nsGroups...).WithTheme(ThemeKates()).WithAccessible(accessibleUI())
+	return form2.Run()
+}
+
+// componentNamespaceFields is a namespace input for each picked component
+// that has a namespace of its own.
+func componentNamespaceFields(picked []string) []huh.Field {
+	var optional []huh.Field
+	if slices.Contains(picked, "monitoring") && !deployAdminless {
+		optional = append(optional, huh.NewInput().
+			Title("Monitoring Namespace").
+			Description("Namespace for the Prometheus and Grafana stack").
+			Value(&deployMonitoringNS))
+	}
+	if slices.Contains(picked, "chaos") {
+		optional = append(optional, huh.NewInput().
+			Title("Chaos Namespace").
+			Description("Namespace for Litmus Chaos engine").
+			Value(&deployChaosNS))
+	}
+	if slices.Contains(picked, "kafka-connect") {
+		optional = append(optional,
+			huh.NewInput().
+				Title("Kafka Connect Namespace").
+				Description("Namespace for Kafka Connect cluster (separate from Kafka)").
+				Value(&deployConnectNS),
+			huh.NewInput().
+				Title("Database Namespace").
+				Description("Namespace for PostgreSQL CDC database").
+				Value(&deployDbNS))
+	}
+	if slices.Contains(picked, "mirror-maker2") {
+		optional = append(optional, huh.NewInput().
+			Title("MirrorMaker 2 Namespace").
+			Description("Namespace for the loopback mirror (the Kafka namespace is the simplest: the kates-mm2 credential lives there)").
+			Value(&deployMM2NS))
+	}
+	if slices.Contains(picked, "kafka-ui") {
+		optional = append(optional, huh.NewInput().
+			Title("Kafka UI Namespace").
+			Description("Namespace for the Kafka UI dashboard").
+			Value(&deployKafkaUINS))
+	}
+	return optional
+}
+
+// applyPickedComponents sets the deployWith* flags from the components
+// picked in Form 1: exactly those are on. Monitoring admin-less is the scrape
+// of the cluster's Prometheus rather than the stack.
+func applyPickedComponents(picked []string) {
 	deployWithKafkaConnect = false
 	deployWithChaos = false
 	deployWithMonitoring = false
@@ -214,26 +255,6 @@ func runInteractiveForms() error {
 			deployWithKyverno = true
 		}
 	}
-
-	// ── Form: Versions and scope ─────────────────────────────────────────
-	// The Kafka options are a function of the operator chosen above them:
-	// pick 1.0.1 and the list is its window, pick 1.1.0 and it is 1.1.0's.
-	// Nothing here is a table in Go — the options come from the charts.
-	// After the namespaces: the installed operator it offers to keep is the
-	// one watching the Kafka namespace chosen there.
-	if err := runVersionPickerForm(); err != nil {
-		return err
-	}
-
-	// ── Form: Already installed ──────────────────────────────────────────
-	if err := runInstalledReleasesForm(); err != nil {
-		return err
-	}
-
-	// ── Review ───────────────────────────────────────────────────────────
-	// Everything chosen, in one screen, before a single Helm call: the
-	// versions as they will resolve, the components, the namespaces.
-	return runDeployReviewForm()
 }
 
 // printTopologyResolution prints the resolved namespace topology (Phase 1).

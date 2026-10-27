@@ -341,116 +341,23 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-
-		// 6 for header/footer (progress bar + padding)
-		viewHeight := msg.Height - 6
-		if viewHeight < 5 {
-			viewHeight = 5
-		}
-
-		// Components pane is responsive
-		compWidth := msg.Width * 55 / 100
-		if compWidth > 70 {
-			compWidth = 70
-		}
-		if compWidth < 50 {
-			compWidth = 50
-		}
-		m.compWidth = compWidth - 2
-
-		// One row width for the whole dashboard: header and panes must end at
-		// the same column. The header renders at msg.Width-2 total (content
-		// width + its border), while the old pane math produced msg.Width-4 —
-		// so the panes row sat 2-4 columns short of the header's right edge.
-		rowWidth := msg.Width - 2
-		logsWidth := rowWidth - compWidth // rendered log pane incl. its border
-		if logsWidth < 20 {
-			logsWidth = 20
-		}
-
-		m.componentsViewport.Width = compWidth - 2
-		m.componentsViewport.Height = viewHeight - 2
-
-		m.logsViewport.Width = logsWidth - 2
-		m.logsViewport.Height = viewHeight - 2
-		// Stored lines were truncated for the old width; rebuild for the new.
-		m.logsViewport.SetContent(m.buildLogContent())
+		m.resize(msg)
 
 	case tea.KeyMsg:
-		// The too-small card offers q; otherwise q is a viewport key.
-		if msg.String() == "ctrl+c" || (msg.String() == "q" && tui.TooSmall(m.width, m.height)) {
-			// Closes the window only. Helm may be mid-install, so the deploy
-			// goes on, printing to the terminal (runDeploy); the terminal is
-			// no longer raw, so a second Ctrl-C ends kates.
-			m.cancel() // stops the poller
-			m.interrupted = true
-			return m, tea.Quit
-		}
-		if msg.String() == "tab" {
-			m.focusedPane = (m.focusedPane + 1) % 2
-			return m, nil
-		}
-		switch msg.String() {
-		case "T":
-			theme.NextLook()
-			return m, nil
-		case "C":
-			theme.NextPalette()
-			return m, nil
-		}
-
-		var cmd tea.Cmd
-		if m.focusedPane == 0 {
-			m.componentsViewport, cmd = m.componentsViewport.Update(msg)
-			m.scrolled = true
-		} else {
-			m.logsViewport, cmd = m.logsViewport.Update(msg)
+		cmd, done := m.handleKey(msg)
+		if done {
+			return m, cmd
 		}
 		cmds = append(cmds, cmd)
 
 	case logMsg:
-		lines := strings.Split(strings.TrimSpace(msg.text), "\n")
-		for _, l := range lines {
-			if l != "" {
-				m.logs = append(m.logs, sanitizeLogLine(l))
-			}
-		}
-		if len(m.logs) > 100 {
-			m.logs = m.logs[len(m.logs)-100:]
-		}
-		m.logsViewport.SetContent(m.buildLogContent())
-		if m.logsViewport.AtBottom() || len(m.logs) < m.logsViewport.Height {
-			m.logsViewport.GotoBottom()
-		}
+		m.appendLogs(msg.text)
 
 	case compStatusMsg:
-		if c, ok := m.compMap[msg.id]; ok {
-			c.Active = msg.active
-			if msg.active && !msg.done {
-				c.Timeout = msg.timeout
-				c.StartTime = time.Now()
-			}
-			if msg.done {
-				c.Done = true
-				c.Success = msg.success
-			}
-		}
+		m.applyCompStatus(msg)
 
 	case progressMsg:
-		m.currentStep = msg.current
-		if msg.total > 0 {
-			m.totalSteps = msg.total
-		}
-		if m.currentStep > m.totalSteps {
-			m.currentStep = m.totalSteps // Clamp
-		}
-		pct := 0.0
-		if m.totalSteps > 0 {
-			pct = float64(m.currentStep) / float64(m.totalSteps)
-		}
-		cmds = append(cmds, m.progressBar.SetPercent(pct))
+		cmds = append(cmds, m.applyProgress(msg))
 
 	case progress.FrameMsg:
 		progressModel, cmd := m.progressBar.Update(msg)
@@ -468,15 +375,7 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }))
 
 	case tickMsg:
-		// Only the components that have started have workloads to show. The
-		// poll gets copies: it runs while Update goes on writing these.
-		var started []pollTarget
-		for _, c := range m.components {
-			if c.Active || c.Done {
-				started = append(started, pollTarget{id: c.ID, targets: slices.Clone(c.Targets)})
-			}
-		}
-		cmds = append(cmds, pollAllWorkloads(m.ctx, started, m.read))
+		cmds = append(cmds, pollAllWorkloads(m.ctx, m.startedTargets(), m.read))
 	}
 
 	var cmd tea.Cmd
@@ -492,6 +391,136 @@ func (m deployDashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// dashboardPaneWidths is the components pane's width and the logs pane's
+// width, each including its border, for a terminal width columns wide.
+func dashboardPaneWidths(width int) (compWidth, logsWidth int) {
+	// Components pane is responsive
+	compWidth = min(max(width*55/100, 50), 70)
+
+	// One row width for the whole dashboard: header and panes must end at
+	// the same column. The header renders at width-2 total (content
+	// width + its border), while the old pane math produced width-4 —
+	// so the panes row sat 2-4 columns short of the header's right edge.
+	rowWidth := width - 2
+	logsWidth = max(rowWidth-compWidth, 20)
+	return compWidth, logsWidth
+}
+
+// resize lays the panes out for a new window size.
+func (m *deployDashboardModel) resize(msg tea.WindowSizeMsg) {
+	m.width = msg.Width
+	m.height = msg.Height
+
+	// 6 for header/footer (progress bar + padding)
+	viewHeight := max(msg.Height-6, 5)
+
+	compWidth, logsWidth := dashboardPaneWidths(msg.Width)
+	m.compWidth = compWidth - 2
+
+	m.componentsViewport.Width = compWidth - 2
+	m.componentsViewport.Height = viewHeight - 2
+
+	m.logsViewport.Width = logsWidth - 2
+	m.logsViewport.Height = viewHeight - 2
+	// Stored lines were truncated for the old width; rebuild for the new.
+	m.logsViewport.SetContent(m.buildLogContent())
+}
+
+// handleKey handles a key. done says Update returns cmd at once, without
+// the spinner and components refresh every other message gets.
+func (m *deployDashboardModel) handleKey(msg tea.KeyMsg) (cmd tea.Cmd, done bool) {
+	// The too-small card offers q; otherwise q is a viewport key.
+	if msg.String() == "ctrl+c" || (msg.String() == "q" && tui.TooSmall(m.width, m.height)) {
+		// Closes the window only. Helm may be mid-install, so the deploy
+		// goes on, printing to the terminal (runDeploy); the terminal is
+		// no longer raw, so a second Ctrl-C ends kates.
+		m.cancel() // stops the poller
+		m.interrupted = true
+		return tea.Quit, true
+	}
+	switch msg.String() {
+	case "tab":
+		m.focusedPane = (m.focusedPane + 1) % 2
+		return nil, true
+	case "T":
+		theme.NextLook()
+		return nil, true
+	case "C":
+		theme.NextPalette()
+		return nil, true
+	}
+
+	if m.focusedPane == 0 {
+		m.componentsViewport, cmd = m.componentsViewport.Update(msg)
+		m.scrolled = true
+	} else {
+		m.logsViewport, cmd = m.logsViewport.Update(msg)
+	}
+	return cmd, false
+}
+
+// appendLogs adds a log message's non-empty lines to the ring of the last
+// 100, following the bottom unless the pane was scrolled up.
+func (m *deployDashboardModel) appendLogs(text string) {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for _, l := range lines {
+		if l != "" {
+			m.logs = append(m.logs, sanitizeLogLine(l))
+		}
+	}
+	if len(m.logs) > 100 {
+		m.logs = m.logs[len(m.logs)-100:]
+	}
+	m.logsViewport.SetContent(m.buildLogContent())
+	if m.logsViewport.AtBottom() || len(m.logs) < m.logsViewport.Height {
+		m.logsViewport.GotoBottom()
+	}
+}
+
+func (m *deployDashboardModel) applyCompStatus(msg compStatusMsg) {
+	c, ok := m.compMap[msg.id]
+	if !ok {
+		return
+	}
+	c.Active = msg.active
+	if msg.active && !msg.done {
+		c.Timeout = msg.timeout
+		c.StartTime = time.Now()
+	}
+	if msg.done {
+		c.Done = true
+		c.Success = msg.success
+	}
+}
+
+func (m *deployDashboardModel) applyProgress(msg progressMsg) tea.Cmd {
+	m.currentStep = msg.current
+	if msg.total > 0 {
+		m.totalSteps = msg.total
+	}
+	if m.currentStep > m.totalSteps {
+		m.currentStep = m.totalSteps // Clamp
+	}
+	pct := 0.0
+	if m.totalSteps > 0 {
+		pct = float64(m.currentStep) / float64(m.totalSteps)
+	}
+	return m.progressBar.SetPercent(pct)
+}
+
+// startedTargets is what the poller reads: only the components that have
+// started have workloads to show. The poll gets copies: it runs while
+// Update goes on writing these.
+func (m deployDashboardModel) startedTargets() []pollTarget {
+	var started []pollTarget
+	for _, c := range m.components {
+		if c.Active || c.Done {
+			started = append(started, pollTarget{id: c.ID, targets: slices.Clone(c.Targets)})
+		}
+	}
+	return started
 }
 
 // componentsContent is the components pane, and the line the first component
@@ -513,97 +542,19 @@ func (m deployDashboardModel) componentsContent() (string, int) {
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			b.WriteString(fmt.Sprintf("%s\n", lipgloss.NewStyle().Bold(true).Foreground(theme.Accent).Render("── "+label)))
+			fmt.Fprintf(&b, "%s\n", lipgloss.NewStyle().Bold(true).Foreground(theme.Accent).Render("── "+label))
 		}
 
 		if c.Active && activeLine < 0 {
 			activeLine = strings.Count(b.String(), "\n")
 		}
 
-		// A pending component is named too: the pane is the plan as well as
-		// the progress.
-		icon, statusText, name := output.DimStyle.Render("◯"), output.DimStyle.Render("Pending"), output.DimStyle.Render(c.Name)
-		switch {
-		case c.Done && c.Success:
-			icon, statusText = output.SuccessStyle.Render("✔"), output.AccentStyle.Render("Ready")
-		case c.Done:
-			icon, statusText = output.ErrorStyle.Render("✖"), output.ErrorStyle.Render("Failed")
-		case c.Active:
-			icon, statusText = m.spinner.View(), output.DimStyle.Render("Deploying...")
-		}
-		if c.Active || c.Done {
-			name = lipgloss.NewStyle().Bold(true).Render(c.Name)
-		}
-
-		nsStr := ""
-		if len(c.Targets) > 0 {
-			nsStr = " [" + c.Targets[0].Namespace + "]"
-		}
-		leftPart := fmt.Sprintf("%s %s%s", icon, name, output.DimStyle.Render(nsStr))
-		rightPart := statusText
-		// We just use m.compWidth for total width
-		spaces := m.compWidth - lipgloss.Width(leftPart) - lipgloss.Width(rightPart)
-		if spaces < 1 {
-			spaces = 1
-		}
-		fmt.Fprintf(&b, "%s%s%s\n", leftPart, strings.Repeat(" ", spaces), rightPart)
-
-		// Render timeout bar if active
+		b.WriteString(m.componentLine(c))
 		if c.Active && !c.Done && c.Timeout > 0 {
-			elapsed := time.Since(c.StartTime)
-			if elapsed > c.Timeout {
-				elapsed = c.Timeout
-			}
-
-			tLeft := fmt.Sprintf("  %s", output.DimStyle.Render("Timeout"))
-
-			// Format mm:ss
-			eM := int(elapsed.Minutes())
-			eS := int(elapsed.Seconds()) % 60
-			tM := int(c.Timeout.Minutes())
-			tS := int(c.Timeout.Seconds()) % 60
-
-			tRight := fmt.Sprintf("[%s] %02d:%02d / %02d:%02d",
-				renderProgressBar(int(elapsed.Seconds()), int(c.Timeout.Seconds()), 15, false, true),
-				eM, eS, tM, tS)
-
-			tSpaces := m.compWidth - lipgloss.Width(tLeft) - lipgloss.Width(tRight)
-			if tSpaces < 1 {
-				tSpaces = 1
-			}
-			fmt.Fprintf(&b, "%s%s%s\n", tLeft, strings.Repeat(" ", tSpaces), output.DimStyle.Render(tRight))
+			b.WriteString(m.timeoutLine(c))
 		}
-
 		for _, w := range c.Workloads {
-			name := w.name
-			maxNameLen := (m.compWidth - 4) * 45 / 100
-			if maxNameLen < 18 {
-				maxNameLen = 18
-			}
-			if len(name) > maxNameLen {
-				name = name[:maxNameLen-3] + "..."
-			}
-			barReady := w.ready
-			barTotal := w.expected
-			if barTotal == 0 {
-				barTotal = 1
-				barReady = 1
-			}
-
-			// From the ready count: the first pod's phase, read before, put
-			// a healthy workload in amber as "Running".
-			status := output.AccentStyle.Render("Ready")
-			if w.ready < w.expected {
-				status = output.WarningStyle.Render("Waiting")
-			}
-
-			wLeft := fmt.Sprintf("  %s", output.DimStyle.Render(name)) // removed one space
-			wRight := fmt.Sprintf("[%s] %2d/%-2d %s", renderProgressBar(barReady, barTotal, 10, false, false), w.ready, w.expected, status)
-			wSpaces := m.compWidth - lipgloss.Width(wLeft) - lipgloss.Width(wRight)
-			if wSpaces < 1 {
-				wSpaces = 1
-			}
-			fmt.Fprintf(&b, "%s%s%s\n", wLeft, strings.Repeat(" ", wSpaces), wRight)
+			b.WriteString(m.workloadLine(w))
 		}
 
 		if isLastInGroup {
@@ -614,6 +565,81 @@ func (m deployDashboardModel) componentsContent() (string, int) {
 	}
 
 	return b.String(), activeLine
+}
+
+// paneLine is left and right on one line of the components pane, the right
+// part flush with its edge.
+func (m deployDashboardModel) paneLine(left, right string) string {
+	// We just use m.compWidth for total width
+	spaces := max(m.compWidth-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	return left + strings.Repeat(" ", spaces) + right + "\n"
+}
+
+// componentLine is a component's status line. A pending component is named
+// too: the pane is the plan as well as the progress.
+func (m deployDashboardModel) componentLine(c *componentStat) string {
+	icon, statusText, name := output.DimStyle.Render("◯"), output.DimStyle.Render("Pending"), output.DimStyle.Render(c.Name)
+	switch {
+	case c.Done && c.Success:
+		icon, statusText = output.SuccessStyle.Render("✔"), output.AccentStyle.Render("Ready")
+	case c.Done:
+		icon, statusText = output.ErrorStyle.Render("✖"), output.ErrorStyle.Render("Failed")
+	case c.Active:
+		icon, statusText = m.spinner.View(), output.DimStyle.Render("Deploying...")
+	}
+	if c.Active || c.Done {
+		name = lipgloss.NewStyle().Bold(true).Render(c.Name)
+	}
+
+	nsStr := ""
+	if len(c.Targets) > 0 {
+		nsStr = " [" + c.Targets[0].Namespace + "]"
+	}
+	return m.paneLine(fmt.Sprintf("%s %s%s", icon, name, output.DimStyle.Render(nsStr)), statusText)
+}
+
+// timeoutLine is the timeout bar of a component being deployed.
+func (m deployDashboardModel) timeoutLine(c *componentStat) string {
+	elapsed := min(time.Since(c.StartTime), c.Timeout)
+
+	tLeft := fmt.Sprintf("  %s", output.DimStyle.Render("Timeout"))
+
+	// Format mm:ss
+	eM := int(elapsed.Minutes())
+	eS := int(elapsed.Seconds()) % 60
+	tM := int(c.Timeout.Minutes())
+	tS := int(c.Timeout.Seconds()) % 60
+
+	tRight := fmt.Sprintf("[%s] %02d:%02d / %02d:%02d",
+		renderProgressBar(int(elapsed.Seconds()), int(c.Timeout.Seconds()), 15, false, true),
+		eM, eS, tM, tS)
+	return m.paneLine(tLeft, output.DimStyle.Render(tRight))
+}
+
+// workloadLine is one workload of a component, with its ready count.
+func (m deployDashboardModel) workloadLine(w workloadStat) string {
+	name := w.name
+	maxNameLen := max((m.compWidth-4)*45/100, 18)
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen-3] + "..."
+	}
+	barReady := w.ready
+	barTotal := w.expected
+	if barTotal == 0 {
+		barTotal = 1
+		barReady = 1
+	}
+
+	// From the ready count: the first pod's phase, read before, put
+	// a healthy workload in amber as "Running".
+	status := output.AccentStyle.Render("Ready")
+	if w.ready < w.expected {
+		status = output.WarningStyle.Render("Waiting")
+	}
+
+	wLeft := fmt.Sprintf("  %s", output.DimStyle.Render(name)) // removed one space
+	wRight := fmt.Sprintf("[%s] %2d/%-2d %s", renderProgressBar(barReady, barTotal, 10, false, false), w.ready, w.expected, status)
+	return m.paneLine(wLeft, wRight)
 }
 
 func (m deployDashboardModel) View() string {

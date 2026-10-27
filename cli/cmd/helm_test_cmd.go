@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-pdf/fpdf"
 	"github.com/bmscomp/kates/cli/internal/helm"
 	"github.com/bmscomp/kates/cli/output"
+	"github.com/go-pdf/fpdf"
 	"github.com/spf13/cobra"
 )
 
@@ -125,44 +125,9 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 	ns := helmTestNamespace
 	output.Banner("Helm Test Suite", fmt.Sprintf("Cluster: %s │ Namespace: %s", cluster, ns))
 
-	// 3. Discover releases
-	var releases []HelmRelease
-	if helmTestRelease != "" {
-		// Explicit release override — fabricate a release entry
-		releases = []HelmRelease{{
-			Name:      helmTestRelease,
-			Namespace: ns,
-			Chart:     "(override)",
-		}}
-	} else {
-		releases = discoverHelmReleases(ns)
-	}
-
-	// 4. Parse arguments (component and passthrough args)
-	var component string
-	var extraArgs []string
-	if len(args) > 0 {
-		if !strings.HasPrefix(args[0], "-") {
-			component = strings.ToLower(args[0])
-			extraArgs = args[1:]
-		} else {
-			extraArgs = args
-		}
-	}
-
-	// 5. Optional component filter
-	if component != "" {
-		releases = filterByComponent(releases, component)
-		// If filtering for 'connect' and no releases found, try auto-detecting the connect namespace
-		if len(releases) == 0 && component == "connect" {
-			detectedNS := detectConnectNamespace(cmd.Context())
-			if detectedNS != ns {
-				connectReleases := discoverHelmReleases(detectedNS)
-				connectReleases = filterByComponent(connectReleases, component)
-				releases = append(releases, connectReleases...)
-			}
-		}
-	}
+	// 3–5. Discover releases, filtered to the component asked for
+	component, extraArgs := splitHelmTestArgs(args)
+	releases := selectHelmReleases(cmd.Context(), ns, component)
 
 	// 6. Discovery section
 	output.SubHeader("Discovering Releases")
@@ -171,16 +136,7 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 		output.Hint("Install with: helm install krafter ./charts/kafka-cluster -n " + ns)
 		return nil
 	}
-	for _, r := range releases {
-		status := output.SuccessStyle.Render("● deployed")
-		if r.Status != "" && strings.ToLower(r.Status) != "deployed" {
-			status = output.WarningStyle.Render("◈ " + r.Status)
-		}
-		fmt.Fprintf(output.Out, "  %s  %-30s %s\n",
-			status,
-			output.AccentStyle.Render(r.Name),
-			output.DimStyle.Render(r.Chart))
-	}
+	printDiscoveredReleases(releases)
 
 	// 7. Run tests per release
 	var results []HelmTestResult
@@ -191,69 +147,11 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 
 		result := runSingleHelmTest(rel, extraArgs)
 		results = append(results, result)
-
-		// Per-hook display
-		for _, hook := range result.Hooks {
-			icon := output.SuccessStyle.Render("✓ Passed")
-			if hook.Phase == "Failed" {
-				icon = output.ErrorStyle.Render("✗ Failed")
-			} else if hook.Phase == "Running" {
-				icon = output.AccentStyle.Render("◉ Running")
-			}
-			dur := fmt.Sprintf("%6.1fs", hook.Duration.Seconds())
-			fmt.Fprintf(output.Out, "  ● %-42s %s  %s\n",
-				hook.Name, icon, output.DimStyle.Render(dur))
-
-			// Show logs on failure (always) or if verbose
-			if hook.Logs != "" && (hook.Phase == "Failed" || helmTestVerbose) {
-				displayHookLogs(hook)
-			}
-		}
-
-		if result.Status == "failed" {
-			// Diagnostic hints
-			for _, hook := range result.Hooks {
-				if hook.Phase == "Failed" {
-					hints := helmTestHints(hook.Name, hook.Logs)
-					if len(hints) > 0 {
-						fmt.Fprintln(output.Out)
-						output.SubHeader("Diagnostics")
-						for _, h := range hints {
-							output.Hint("  💡 " + h)
-						}
-					}
-				}
-			}
-		}
-
-		if result.Error != "" {
-			// Extract just the Error: line if it exists to avoid dumping the whole log again
-			lines := strings.Split(result.Error, "\n")
-			for _, l := range lines {
-				if strings.HasPrefix(l, "Error:") || strings.Contains(l, "unable to get pod logs") {
-					output.Error(l)
-				}
-			}
-		}
+		displayHelmTestResult(result)
 	}
 
 	// 7. Build suite result
-	suite := HelmTestSuiteResult{
-		Timestamp: time.Now(),
-		Cluster:   cluster,
-		Results:   results,
-		Duration:  time.Since(suiteStart),
-	}
-	for _, r := range results {
-		switch r.Status {
-		case "passed":
-			suite.Passed++
-		case "failed":
-			suite.Failed++
-		case "skipped":
-			suite.Skipped++
-		}
-	}
+	suite := newHelmTestSuite(cluster, results, time.Since(suiteStart))
 
 	// 8. Summary banner
 	displaySuiteSummary(suite)
@@ -276,6 +174,138 @@ func runHelmTests(cmd *cobra.Command, args []string) error {
 		return cmdErr(fmt.Sprintf("%d release(s) had test failures", suite.Failed))
 	}
 	return nil
+}
+
+// splitHelmTestArgs splits the arguments into the component, when the first
+// one is not a flag, and the arguments passed through to helm test.
+func splitHelmTestArgs(args []string) (component string, extraArgs []string) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return "", args
+	}
+	return strings.ToLower(args[0]), args[1:]
+}
+
+// selectHelmReleases is the releases to test in ns: --release's alone, or
+// the discovered ones, filtered to component when one is named.
+func selectHelmReleases(ctx context.Context, ns, component string) []HelmRelease {
+	var releases []HelmRelease
+	if helmTestRelease != "" {
+		// Explicit release override — fabricate a release entry
+		releases = []HelmRelease{{
+			Name:      helmTestRelease,
+			Namespace: ns,
+			Chart:     "(override)",
+		}}
+	} else {
+		releases = discoverHelmReleases(ns)
+	}
+
+	if component == "" {
+		return releases
+	}
+	releases = filterByComponent(releases, component)
+	// If filtering for 'connect' and no releases found, try auto-detecting the connect namespace
+	if len(releases) == 0 && component == "connect" {
+		detectedNS := detectConnectNamespace(ctx)
+		if detectedNS != ns {
+			connectReleases := discoverHelmReleases(detectedNS)
+			connectReleases = filterByComponent(connectReleases, component)
+			releases = append(releases, connectReleases...)
+		}
+	}
+	return releases
+}
+
+func printDiscoveredReleases(releases []HelmRelease) {
+	for _, r := range releases {
+		status := output.SuccessStyle.Render("● deployed")
+		if r.Status != "" && strings.ToLower(r.Status) != "deployed" {
+			status = output.WarningStyle.Render("◈ " + r.Status)
+		}
+		fmt.Fprintf(output.Out, "  %s  %-30s %s\n",
+			status,
+			output.AccentStyle.Render(r.Name),
+			output.DimStyle.Render(r.Chart))
+	}
+}
+
+// displayHelmTestResult prints one release's hooks, the diagnostics of the
+// ones that failed, and the error lines of a failed run.
+func displayHelmTestResult(result HelmTestResult) {
+	// Per-hook display
+	for _, hook := range result.Hooks {
+		icon := output.SuccessStyle.Render("✓ Passed")
+		switch hook.Phase {
+		case "Failed":
+			icon = output.ErrorStyle.Render("✗ Failed")
+		case "Running":
+			icon = output.AccentStyle.Render("◉ Running")
+		}
+		dur := fmt.Sprintf("%6.1fs", hook.Duration.Seconds())
+		fmt.Fprintf(output.Out, "  ● %-42s %s  %s\n",
+			hook.Name, icon, output.DimStyle.Render(dur))
+
+		// Show logs on failure (always) or if verbose
+		if hook.Logs != "" && (hook.Phase == "Failed" || helmTestVerbose) {
+			displayHookLogs(hook)
+		}
+	}
+
+	if result.Status == "failed" {
+		displayHelmTestDiagnostics(result.Hooks)
+	}
+
+	if result.Error != "" {
+		// Extract just the Error: line if it exists to avoid dumping the whole log again
+		lines := strings.Split(result.Error, "\n")
+		for _, l := range lines {
+			if strings.HasPrefix(l, "Error:") || strings.Contains(l, "unable to get pod logs") {
+				output.Error(l)
+			}
+		}
+	}
+}
+
+// displayHelmTestDiagnostics prints the hints for each failed hook.
+func displayHelmTestDiagnostics(hooks []HelmTestHook) {
+	for _, hook := range hooks {
+		if hook.Phase != "Failed" {
+			continue
+		}
+		hints := helmTestHints(hook.Name, hook.Logs)
+		if len(hints) == 0 {
+			continue
+		}
+		fmt.Fprintln(output.Out)
+		output.SubHeader("Diagnostics")
+		for _, h := range hints {
+			output.Hint("  💡 " + h)
+		}
+	}
+}
+
+// newHelmTestSuite is the suite result of results, counted by status.
+func newHelmTestSuite(cluster string, results []HelmTestResult, elapsed time.Duration) HelmTestSuiteResult {
+	suite := HelmTestSuiteResult{
+		Timestamp: time.Now(),
+		Cluster:   cluster,
+		Results:   results,
+		Duration:  elapsed,
+	}
+	for _, r := range results {
+		switch r.Status {
+		case "passed":
+			suite.Passed++
+		case "failed":
+			suite.Failed++
+		case "skipped":
+			suite.Skipped++
+		}
+	}
+	return suite
 }
 
 // ---------------------------------------------------------------------------
@@ -742,7 +772,24 @@ func exportHelmTestPDF(suite HelmTestSuiteResult, filename string) error {
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetAutoPageBreak(true, 15)
 
-	// Title page
+	pdfHelmTestTitle(pdf, suite)
+	pdfHelmTestSummary(pdf, suite)
+
+	// Per-release results
+	for _, r := range suite.Results {
+		pdfHelmTestRelease(pdf, r)
+	}
+
+	// Footer
+	pdf.SetFont("Helvetica", "I", 8)
+	pdf.SetTextColor(150, 150, 150)
+	pdf.CellFormat(0, 6, fmt.Sprintf("Generated by kates test helm — %s", suite.Timestamp.Format(time.RFC3339)), "", 1, "C", false, 0, "")
+
+	return pdf.OutputFileAndClose(filename)
+}
+
+// pdfHelmTestTitle is the report's title block.
+func pdfHelmTestTitle(pdf *fpdf.Fpdf, suite HelmTestSuiteResult) {
 	pdf.AddPage()
 	pdf.SetFont("Helvetica", "B", 24)
 	pdf.SetTextColor(100, 80, 200)
@@ -753,21 +800,27 @@ func exportHelmTestPDF(suite HelmTestSuiteResult, filename string) error {
 	pdf.CellFormat(0, 7, fmt.Sprintf("Generated: %s", suite.Timestamp.Format(time.RFC3339)), "", 1, "L", false, 0, "")
 	pdf.CellFormat(0, 7, fmt.Sprintf("Duration: %.1fs", suite.Duration.Seconds()), "", 1, "L", false, 0, "")
 	pdf.Ln(6)
+}
 
-	// Summary
+// pdfTableHeader is a table's header row, in the report's header colours.
+func pdfTableHeader(pdf *fpdf.Fpdf, fontSize float64, widths []float64, headers []string) {
+	pdf.SetFont("Helvetica", "B", fontSize)
+	pdf.SetFillColor(30, 41, 59)
+	pdf.SetTextColor(196, 181, 253)
+	for i, h := range headers {
+		pdf.CellFormat(widths[i], 7, h, "1", 0, "L", true, 0, "")
+	}
+	pdf.Ln(-1)
+}
+
+// pdfHelmTestSummary is the passed, failed and skipped counts.
+func pdfHelmTestSummary(pdf *fpdf.Fpdf, suite HelmTestSuiteResult) {
 	pdf.SetFont("Helvetica", "B", 14)
 	pdf.SetTextColor(60, 60, 60)
 	pdf.CellFormat(0, 10, "Summary", "", 1, "L", false, 0, "")
 
 	colWidths := []float64{60, 30}
-	summaryHeaders := []string{"Metric", "Count"}
-	pdf.SetFont("Helvetica", "B", 9)
-	pdf.SetFillColor(30, 41, 59)
-	pdf.SetTextColor(196, 181, 253)
-	for i, h := range summaryHeaders {
-		pdf.CellFormat(colWidths[i], 7, h, "1", 0, "L", true, 0, "")
-	}
-	pdf.Ln(-1)
+	pdfTableHeader(pdf, 9, colWidths, []string{"Metric", "Count"})
 
 	pdf.SetFont("Helvetica", "", 9)
 	pdf.SetTextColor(60, 60, 60)
@@ -783,71 +836,63 @@ func exportHelmTestPDF(suite HelmTestSuiteResult, filename string) error {
 		pdf.Ln(-1)
 	}
 	pdf.Ln(6)
+}
 
-	// Per-release results
-	for _, r := range suite.Results {
-		pdf.SetFont("Helvetica", "B", 12)
-		pdf.SetTextColor(100, 80, 200)
-		statusIcon := "[PASS]"
-		if r.Status == "failed" {
-			statusIcon = "[FAIL]"
-		} else if r.Status == "skipped" {
-			statusIcon = "[SKIP]"
-		}
-		pdf.CellFormat(0, 8, fmt.Sprintf("%s %s (%s)", statusIcon, r.Release, r.Chart), "", 1, "L", false, 0, "")
+// pdfHelmTestRelease is one release: its status, its hooks and its error.
+func pdfHelmTestRelease(pdf *fpdf.Fpdf, r HelmTestResult) {
+	pdf.SetFont("Helvetica", "B", 12)
+	pdf.SetTextColor(100, 80, 200)
+	statusIcon := "[PASS]"
+	switch r.Status {
+	case "failed":
+		statusIcon = "[FAIL]"
+	case "skipped":
+		statusIcon = "[SKIP]"
+	}
+	pdf.CellFormat(0, 8, fmt.Sprintf("%s %s (%s)", statusIcon, r.Release, r.Chart), "", 1, "L", false, 0, "")
 
-		if len(r.Hooks) > 0 {
-			hookCols := []float64{80, 30, 30}
-			hookHeaders := []string{"Hook", "Phase", "Duration"}
-			pdf.SetFont("Helvetica", "B", 8)
-			pdf.SetFillColor(30, 41, 59)
-			pdf.SetTextColor(196, 181, 253)
-			for i, h := range hookHeaders {
-				pdf.CellFormat(hookCols[i], 7, h, "1", 0, "L", true, 0, "")
-			}
-			pdf.Ln(-1)
-
-			pdf.SetFont("Helvetica", "", 8)
-			for _, h := range r.Hooks {
-				switch h.Phase {
-				case "Succeeded":
-					pdf.SetTextColor(16, 185, 129)
-				case "Failed":
-					pdf.SetTextColor(239, 68, 68)
-				default:
-					pdf.SetTextColor(60, 60, 60)
-				}
-				hookName := h.Name
-				if len(hookName) > 45 {
-					hookName = hookName[:44] + "..."
-				}
-				pdf.CellFormat(hookCols[0], 6, hookName, "1", 0, "L", false, 0, "")
-				pdf.CellFormat(hookCols[1], 6, h.Phase, "1", 0, "L", false, 0, "")
-				pdf.SetTextColor(60, 60, 60)
-				pdf.CellFormat(hookCols[2], 6, fmt.Sprintf("%.1fs", h.Duration.Seconds()), "1", 0, "L", false, 0, "")
-				pdf.Ln(-1)
-			}
-		}
-
-		if r.Error != "" {
-			pdf.Ln(2)
-			pdf.SetFont("Helvetica", "", 8)
-			pdf.SetTextColor(239, 68, 68)
-			errText := r.Error
-			if len(errText) > 200 {
-				errText = errText[:197] + "..."
-			}
-			pdf.MultiCell(0, 5, "Error: "+errText, "", "L", false)
-		}
-		pdf.Ln(4)
+	if len(r.Hooks) > 0 {
+		pdfHelmTestHooks(pdf, r.Hooks)
 	}
 
-	// Footer
-	pdf.SetFont("Helvetica", "I", 8)
-	pdf.SetTextColor(150, 150, 150)
-	pdf.CellFormat(0, 6, fmt.Sprintf("Generated by kates test helm — %s", suite.Timestamp.Format(time.RFC3339)), "", 1, "C", false, 0, "")
+	if r.Error != "" {
+		pdf.Ln(2)
+		pdf.SetFont("Helvetica", "", 8)
+		pdf.SetTextColor(239, 68, 68)
+		errText := r.Error
+		if len(errText) > 200 {
+			errText = errText[:197] + "..."
+		}
+		pdf.MultiCell(0, 5, "Error: "+errText, "", "L", false)
+	}
+	pdf.Ln(4)
+}
 
-	return pdf.OutputFileAndClose(filename)
+// pdfHelmTestHooks is a release's hooks table, each phase in its colour.
+func pdfHelmTestHooks(pdf *fpdf.Fpdf, hooks []HelmTestHook) {
+	hookCols := []float64{80, 30, 30}
+	pdfTableHeader(pdf, 8, hookCols, []string{"Hook", "Phase", "Duration"})
+
+	pdf.SetFont("Helvetica", "", 8)
+	for _, h := range hooks {
+		switch h.Phase {
+		case "Succeeded":
+			pdf.SetTextColor(16, 185, 129)
+		case "Failed":
+			pdf.SetTextColor(239, 68, 68)
+		default:
+			pdf.SetTextColor(60, 60, 60)
+		}
+		hookName := h.Name
+		if len(hookName) > 45 {
+			hookName = hookName[:44] + "..."
+		}
+		pdf.CellFormat(hookCols[0], 6, hookName, "1", 0, "L", false, 0, "")
+		pdf.CellFormat(hookCols[1], 6, h.Phase, "1", 0, "L", false, 0, "")
+		pdf.SetTextColor(60, 60, 60)
+		pdf.CellFormat(hookCols[2], 6, fmt.Sprintf("%.1fs", h.Duration.Seconds()), "1", 0, "L", false, 0, "")
+		pdf.Ln(-1)
+	}
 }
 
 // ---------------------------------------------------------------------------

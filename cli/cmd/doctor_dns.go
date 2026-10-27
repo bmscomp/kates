@@ -50,8 +50,6 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(clrText)
 	separator := lipgloss.NewStyle().Foreground(clrDim).Render(strings.Repeat("━", 50))
-	success := lipgloss.NewStyle().Foreground(clrGreen).Render("✅")
-	warning := lipgloss.NewStyle().Foreground(clrOrange).Render("⚠️ ")
 	fail := lipgloss.NewStyle().Foreground(clrRed).Render("❌")
 	info := lipgloss.NewStyle().Foreground(clrCyan).Render("ℹ️ ")
 
@@ -76,12 +74,59 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	resolvContent := string(resolvConfOut)
+	searches, ndots := parseResolvConf(string(resolvConfOut))
 
-	var searches []string
-	var ndots string
+	fmt.Printf("  %s Default Search Domains: %s\n", info, strings.Join(searches, ", "))
+	if ndots != "" {
+		fmt.Printf("  %s Default ndots: %s\n", info, ndots)
+	}
 
-	for _, line := range strings.Split(resolvContent, "\n") {
+	clusterDomain := clusterDomainFromSearches(searches)
+
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("🔍 Deployment Audit & Adaptation"))
+
+	requiredKafkaSearch := fmt.Sprintf("%s.svc.%s", doctorKafkaNS, clusterDomain)
+
+	// We need to check if connect and kates are in a different namespace than kafka
+	components := []dnsAuditComponent{
+		{label: "kates backend", patchName: "kates deployment", ns: doctorAppNS,
+			check: func(ctx context.Context, kc *kubectl.Client, ns, required string) bool {
+				return checkDeploymentDNS(ctx, kc, "kates", ns, required)
+			},
+			patch: func(ctx context.Context, kc *kubectl.Client, ns, required string) error {
+				return patchDeploymentDNS(ctx, kc, "kates", ns, required)
+			}},
+		{label: "connect-cluster", patchName: "connect-cluster", ns: doctorConnectNS,
+			check: func(ctx context.Context, kc *kubectl.Client, ns, required string) bool {
+				return checkKafkaConnectDNS(ctx, kc, "connect-cluster", ns, required)
+			},
+			patch: func(ctx context.Context, kc *kubectl.Client, ns, required string) error {
+				return patchKafkaConnectDNS(ctx, kc, "connect-cluster", ns, required)
+			}},
+	}
+	var fixCount int
+	for _, c := range components {
+		if auditComponentDNS(ctx, kc, c, requiredKafkaSearch) {
+			fixCount++
+		}
+	}
+	checkCount := len(components)
+
+	fmt.Println(separator)
+	if doctorDnsFix {
+		fmt.Printf("📊 Summary: Audited %d components. Applied %d fixes.\n", checkCount, fixCount)
+	} else {
+		fmt.Printf("📊 Summary: Audited %d components. Run with --fix to apply missing adaptations.\n", checkCount)
+	}
+
+	return nil
+}
+
+// parseResolvConf reads the search domains and the ndots option from a
+// resolv.conf.
+func parseResolvConf(content string) (searches []string, ndots string) {
+	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "search ") {
 			searches = strings.Fields(line)[1:]
@@ -95,84 +140,59 @@ func runDoctorDns(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+	return searches, ndots
+}
 
-	fmt.Printf("  %s Default Search Domains: %s\n", info, strings.Join(searches, ", "))
-	if ndots != "" {
-		fmt.Printf("  %s Default ndots: %s\n", info, ndots)
-	}
-
+// clusterDomainFromSearches is the cluster's DNS domain: the last search
+// domain that is neither a namespace's svc domain nor "default", else
+// cluster.local.
+func clusterDomainFromSearches(searches []string) string {
 	clusterDomain := "cluster.local"
 	for _, s := range searches {
 		if !strings.Contains(s, "svc.") && s != "default" {
 			clusterDomain = s
 		}
 	}
+	return clusterDomain
+}
 
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(clrCyan).Render("🔍 Deployment Audit & Adaptation"))
+// dnsAuditComponent is a workload doctor dns audits: its label, the name a
+// patch reports, its namespace, and how to check and patch its search
+// domains.
+type dnsAuditComponent struct {
+	label     string
+	patchName string
+	ns        string
+	check     func(ctx context.Context, kc *kubectl.Client, ns, required string) bool
+	patch     func(ctx context.Context, kc *kubectl.Client, ns, required string) error
+}
 
-	requiredKafkaSearch := fmt.Sprintf("%s.svc.%s", doctorKafkaNS, clusterDomain)
+// auditComponentDNS checks one component's search domains and, with --fix,
+// patches a missing one in. It reports whether it applied a fix.
+func auditComponentDNS(ctx context.Context, kc *kubectl.Client, c dnsAuditComponent, required string) bool {
+	success := lipgloss.NewStyle().Foreground(clrGreen).Render("✅")
+	warning := lipgloss.NewStyle().Foreground(clrOrange).Render("⚠️ ")
+	fail := lipgloss.NewStyle().Foreground(clrRed).Render("❌")
 
-	// We need to check if connect and kates are in a different namespace than kafka
-	var fixCount int
-	var checkCount int
-
-	// Check Kates backend Deployment
-	checkCount++
-	if doctorAppNS != doctorKafkaNS {
-		katesPatchNeeded := checkDeploymentDNS(ctx, kc, "kates", doctorAppNS, requiredKafkaSearch)
-		if katesPatchNeeded {
-			if doctorDnsFix {
-				fmt.Printf("  %s kates backend (namespace: %s) is missing DNS search domain.\n", warning, doctorAppNS)
-				err := patchDeploymentDNS(ctx, kc, "kates", doctorAppNS, requiredKafkaSearch)
-				if err != nil {
-					fmt.Printf("     %s Failed to patch kates deployment: %v\n", fail, err)
-				} else {
-					fmt.Printf("     %s Successfully patched kates deployment.\n", success)
-					fixCount++
-				}
-			} else {
-				fmt.Printf("  %s kates backend (namespace: %s) is missing DNS search domain (run with --fix to resolve).\n", warning, doctorAppNS)
-			}
-		} else {
-			fmt.Printf("  %s kates backend (namespace: %s) has correct DNS search domain.\n", success, doctorAppNS)
-		}
-	} else {
-		fmt.Printf("  %s kates backend is in the same namespace as Kafka, no DNS search domain adaptation needed.\n", success)
+	if c.ns == doctorKafkaNS {
+		fmt.Printf("  %s %s is in the same namespace as Kafka, no DNS search domain adaptation needed.\n", success, c.label)
+		return false
 	}
-
-	// Check KafkaConnect CR
-	checkCount++
-	if doctorConnectNS != doctorKafkaNS {
-		connectPatchNeeded := checkKafkaConnectDNS(ctx, kc, "connect-cluster", doctorConnectNS, requiredKafkaSearch)
-		if connectPatchNeeded {
-			if doctorDnsFix {
-				fmt.Printf("  %s connect-cluster (namespace: %s) is missing DNS search domain.\n", warning, doctorConnectNS)
-				err := patchKafkaConnectDNS(ctx, kc, "connect-cluster", doctorConnectNS, requiredKafkaSearch)
-				if err != nil {
-					fmt.Printf("     %s Failed to patch connect-cluster: %v\n", fail, err)
-				} else {
-					fmt.Printf("     %s Successfully patched connect-cluster.\n", success)
-					fixCount++
-				}
-			} else {
-				fmt.Printf("  %s connect-cluster (namespace: %s) is missing DNS search domain (run with --fix to resolve).\n", warning, doctorConnectNS)
-			}
-		} else {
-			fmt.Printf("  %s connect-cluster (namespace: %s) has correct DNS search domain.\n", success, doctorConnectNS)
-		}
-	} else {
-		fmt.Printf("  %s connect-cluster is in the same namespace as Kafka, no DNS search domain adaptation needed.\n", success)
+	if !c.check(ctx, kc, c.ns, required) {
+		fmt.Printf("  %s %s (namespace: %s) has correct DNS search domain.\n", success, c.label, c.ns)
+		return false
 	}
-
-	fmt.Println(separator)
-	if doctorDnsFix {
-		fmt.Printf("📊 Summary: Audited %d components. Applied %d fixes.\n", checkCount, fixCount)
-	} else {
-		fmt.Printf("📊 Summary: Audited %d components. Run with --fix to apply missing adaptations.\n", checkCount)
+	if !doctorDnsFix {
+		fmt.Printf("  %s %s (namespace: %s) is missing DNS search domain (run with --fix to resolve).\n", warning, c.label, c.ns)
+		return false
 	}
-
-	return nil
+	fmt.Printf("  %s %s (namespace: %s) is missing DNS search domain.\n", warning, c.label, c.ns)
+	if err := c.patch(ctx, kc, c.ns, required); err != nil {
+		fmt.Printf("     %s Failed to patch %s: %v\n", fail, c.patchName, err)
+		return false
+	}
+	fmt.Printf("     %s Successfully patched %s.\n", success, c.patchName)
+	return true
 }
 
 func checkDeploymentDNS(ctx context.Context, kc *kubectl.Client, name, ns, requiredSearch string) bool {

@@ -158,37 +158,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := applyUpgradeFlag(deployUpgrade); err != nil {
-		return err
-	}
-
-	// Before the gate, which may build a kind cluster: a newer release's
-	// charts need the newer kates.
-	warnIfNewerRelease(context.Background())
-
-	// Before the gate too, so a run with no charts to install stops before it
-	// builds a cluster; and before the wizard, whose version screen reads the
-	// operator chart.
-	if err := resolveChartRoot(context.Background(), deployCheckout, false, deployChartDirs()...); err != nil {
-		return err
-	}
-
-	// ── Target cluster ───────────────────────────────────────────────────
-	// This runs FIRST, before the banner and the wizard. There is no point
-	// asking eight questions about a deployment and only then discovering
-	// there is nowhere to deploy it. When nothing is reachable this offers to
-	// build the local 3-zone kind cluster; when several are reachable it asks
-	// rather than guessing.
-	target, err := resolveClusterFn()
+	target, err := prepareDeployTarget()
 	if err != nil {
-		return err
-	}
-	// The chosen cluster becomes kubectl's current context, for the commands
-	// the user runs next. The deploy's own kubectl and helm calls name it
-	// instead of reading the current context, so a context switched elsewhere
-	// mid-deploy cannot split the stack across two clusters
-	// (deploy_kubecontext.go).
-	if err := useTargetContext(target); err != nil {
 		return err
 	}
 	defer pinKubeContext(target)()
@@ -200,52 +171,203 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// defaults.
 	wizard := (deployInteractive || cmd.Flags().NFlag() == 0) && IsInteractive()
 
-	// ── Profile ──────────────────────────────────────────────────────────
-	// Full for a cluster admin, who the wizard also lets pick admin-less.
-	// Anyone else is offered the admin-less stack (deploy_adminless.go)
-	// rather than walked into a refusal halfway through.
-	// The platform line comes first, before the first question.
-	account := "admin-less profile (--adminless)"
-	if !deployAdminless {
-		admin, ok := clusterAdminFn(context.Background())
-		switch {
-		case ok && admin:
-			account = "cluster admin"
-		case ok:
-			account = "not cluster admin"
-		default:
-			account = "cluster admin not confirmed"
-		}
-		printPlatform(target, account)
-		if ok && admin && wizard {
-			if err := profileFormFn(); err != nil {
-				return err
-			}
-		}
-		if ok && !admin {
-			suggestion := adminlessSuggestion(target)
-			if deployYes || !IsInteractive() {
-				return errors.New(suggestion)
-			}
-			output.Warn(suggestion)
-			yes, err := confirmFn("Install the admin-less stack instead?")
-			if err != nil {
-				return err
-			}
-			if !yes {
-				return errors.New("deploy cancelled: the full profile needs cluster admin")
-			}
-			deployAdminless = true
-		}
-	} else {
-		printPlatform(target, account)
+	if err := resolveDeployProfile(cmd, target, wizard); err != nil {
+		return err
 	}
-	if deployAdminless {
-		if err := applyAdminlessProfile(context.Background(), cmd); err != nil {
+	if err := configureDeploySelection(cmd, wizard); err != nil {
+		return err
+	}
+
+	// Offline, the nodes have no registry to pull from: the bundle's images
+	// go in before any pod, the pre-flight probes' included. A dry run loads
+	// nothing.
+	if !deployDryRun {
+		if err := loadBundleImages(context.Background(), target, quickDetectKind()); err != nil {
 			return err
 		}
 	}
 
+	executor := defaultExecutor
+	report, err := introspectDeployCluster(executor, target, namespaceLabels)
+	if err != nil {
+		return err
+	}
+
+	vp, primary, err := resolveDeployVersions()
+	if err != nil {
+		return err
+	}
+
+	valuesFile, errorLog, err := deployFiles()
+	if err != nil {
+		return err
+	}
+	if err := writeDeployValues(executor, valuesFile, report, primary.Name); err != nil {
+		return err
+	}
+
+	// Resolve namespaces before building entries
+	ns := resolveNamespaces()
+
+	// ── Build shared component registry (single source of truth) ──
+	sharedEntries := buildSharedEntries(ns)
+
+	// ── Dry-run: show preview and exit ──
+	if deployDryRun {
+		return runDeployDryRun(sharedEntries, namespaceLabels, namespaceLabelSources)
+	}
+
+	// An operator upgrade or a scope change rolls things; say so and ask.
+	if deployWithStrimzi {
+		if err := vp.confirmOperatorChange(); err != nil {
+			return err
+		}
+	}
+
+	// Record each component's outcome BEFORE the pipeline runs, from the same
+	// predicate the skip logic uses: a release that already exists gets skipped
+	// ("already present"), one that does not gets deployed. Status was never
+	// recorded at all before this — the summary's table read the empty string
+	// as "Skipped" while its footer counted the same empty string as
+	// "deployed", producing eight Skipped rows above "8 components deployed
+	// successfully!".
+	markEntryStatuses(sharedEntries, func(release, namespace string) bool {
+		return releaseKept(context.Background(), release, namespace)
+	})
+
+	// 4. Execution Plan (Helm)
+	PrintPhaseHeader(nextDeployPhase(), "Executing Deployment Pipeline")
+
+	// Create context
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dc := newDeployContext(ctx, ns, valuesFile, report, vp, primary)
+	res := runDeployPipeline(dc, sharedEntries, deployStartTime)
+	if res.dashboardErr != nil {
+		// The dashboard failed: the deploy's own error, when it has one, is
+		// the more consequential.
+		if res.err != nil {
+			return res.err
+		}
+		return res.dashboardErr
+	}
+
+	if res.err != nil {
+		saveDeployError(errorLog, res.err)
+	}
+
+	if res.err == nil && len(res.entries) > 0 {
+		finishDeploy(ctx, target, ns, res.entries, res.elapsed)
+	}
+
+	return res.err
+}
+
+// prepareDeployTarget runs what comes before any question: the --upgrade
+// flag, the release notice, the chart root and the target cluster, which
+// becomes kubectl's current context. The caller pins that context.
+func prepareDeployTarget() (string, error) {
+	if err := applyUpgradeFlag(deployUpgrade); err != nil {
+		return "", err
+	}
+
+	// Before the gate, which may build a kind cluster: a newer release's
+	// charts need the newer kates.
+	warnIfNewerRelease(context.Background())
+
+	// Before the gate too, so a run with no charts to install stops before it
+	// builds a cluster; and before the wizard, whose version screen reads the
+	// operator chart.
+	if err := resolveChartRoot(context.Background(), deployCheckout, false, deployChartDirs()...); err != nil {
+		return "", err
+	}
+
+	// ── Target cluster ───────────────────────────────────────────────────
+	// This runs FIRST, before the banner and the wizard. There is no point
+	// asking eight questions about a deployment and only then discovering
+	// there is nowhere to deploy it. When nothing is reachable this offers to
+	// build the local 3-zone kind cluster; when several are reachable it asks
+	// rather than guessing.
+	target, err := resolveClusterFn()
+	if err != nil {
+		return "", err
+	}
+	// The chosen cluster becomes kubectl's current context, for the commands
+	// the user runs next. The deploy's own kubectl and helm calls name it
+	// instead of reading the current context, so a context switched elsewhere
+	// mid-deploy cannot split the stack across two clusters
+	// (deploy_kubecontext.go).
+	if err := useTargetContext(target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+// resolveDeployProfile settles the profile. Full for a cluster admin, who
+// the wizard also lets pick admin-less. Anyone else is offered the
+// admin-less stack (deploy_adminless.go) rather than walked into a refusal
+// halfway through. The platform line comes first, before the first question.
+func resolveDeployProfile(cmd *cobra.Command, target string, wizard bool) error {
+	if deployAdminless {
+		printPlatform(target, "admin-less profile (--adminless)")
+	} else if err := resolveFullProfile(target, wizard); err != nil {
+		return err
+	}
+	if deployAdminless {
+		return applyAdminlessProfile(context.Background(), cmd)
+	}
+	return nil
+}
+
+// resolveFullProfile asks whether the account is a cluster admin. One that
+// is not is offered the admin-less profile, and taking it sets
+// deployAdminless.
+func resolveFullProfile(target string, wizard bool) error {
+	admin, ok := clusterAdminFn(context.Background())
+	printPlatform(target, accountLabel(admin, ok))
+	if ok && admin && wizard {
+		if err := profileFormFn(); err != nil {
+			return err
+		}
+	}
+	if !ok || admin {
+		return nil
+	}
+	suggestion := adminlessSuggestion(target)
+	if deployYes || !IsInteractive() {
+		return errors.New(suggestion)
+	}
+	output.Warn(suggestion)
+	yes, err := confirmFn("Install the admin-less stack instead?")
+	if err != nil {
+		return err
+	}
+	if !yes {
+		return errors.New("deploy cancelled: the full profile needs cluster admin")
+	}
+	deployAdminless = true
+	return nil
+}
+
+// accountLabel names the account on the platform line from the cluster-admin
+// check: admin is its answer, ok whether it got one.
+func accountLabel(admin, ok bool) string {
+	switch {
+	case ok && admin:
+		return "cluster admin"
+	case ok:
+		return "not cluster admin"
+	default:
+		return "cluster admin not confirmed"
+	}
+}
+
+// configureDeploySelection runs the wizard when there is one, then checks
+// what it chose: --upgrade against the components, the admin-less
+// prerequisites and the chart bundle. It ends by printing the topology and
+// the component selection.
+func configureDeploySelection(cmd *cobra.Command, wizard bool) error {
 	// ── Interactive Forms ────────────────────────────────────────────────
 	// Admin-less, they offer only the namespaced components and run before
 	// the prerequisites check so it checks the namespaces chosen here.
@@ -283,79 +405,76 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// Component Selection
 	printComponentSelection()
+	return nil
+}
 
-	// Offline, the nodes have no registry to pull from: the bundle's images
-	// go in before any pod, the pre-flight probes' included. A dry run loads
-	// nothing.
-	if !deployDryRun {
-		if err := loadBundleImages(context.Background(), target, quickDetectKind()); err != nil {
-			return err
-		}
-	}
-
-	executor := defaultExecutor
-	var report *detect.DetectReport
+// introspectDeployCluster runs the pre-flight and the introspection that
+// sizes the values file. Admin-less it runs neither.
+func introspectDeployCluster(executor detect.CommandExecutor, target string, namespaceLabels map[string]string) (*detect.DetectReport, error) {
 	if deployAdminless {
 		// Introspection reads nodes and kube-system, and its probes create
 		// namespaces and pods: nothing a namespace account may do. The charts'
 		// own defaults stand in for what it would have sized.
 		// shortcut: assumes the cluster.local DNS domain; read it from a pod in the namespace if a cluster needs another.
-		report = &detect.DetectReport{Context: target, Provider: "unknown"}
+		report := &detect.DetectReport{Context: target, Provider: "unknown"}
 		report.Network.ClusterDomain = "cluster.local"
-	} else {
-		PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")
-		collector := detect.NewCollector(executor)
-		// Introspection is not read-only on its own: it creates a namespace and a
-		// Secret to audit Secret creation, prober pods to measure inter-AZ
-		// latency, and a dns-detect pod when no running pod can be read. The
-		// preview uses none of that, so a dry run collects without it.
-		collector.ReadOnly = deployDryRun || deployNoWriteProbes
-		collector.KubeContext = target
-		collector.NamespaceLabels = namespaceLabels
-		if err := collector.Preflight(); err != nil {
-			output.Error(fmt.Sprintf("Preflight failed: %v", err))
-			return err
-		}
+		return report, nil
+	}
+	PrintPhaseHeader(nextDeployPhase(), "Running Cluster Introspection (Pre-flight)")
+	collector := detect.NewCollector(executor)
+	// Introspection is not read-only on its own: it creates a namespace and a
+	// Secret to audit Secret creation, prober pods to measure inter-AZ
+	// latency, and a dns-detect pod when no running pod can be read. The
+	// preview uses none of that, so a dry run collects without it.
+	collector.ReadOnly = deployDryRun || deployNoWriteProbes
+	collector.KubeContext = target
+	collector.NamespaceLabels = namespaceLabels
+	if err := collector.Preflight(); err != nil {
+		output.Error(fmt.Sprintf("Preflight failed: %v", err))
+		return nil, err
+	}
 
-		// ── Kind storage bootstrap ────────────────────────────────────────────────
-		// Create zone-specific StorageClasses (local-storage-alpha, etc.) BEFORE
-		// collector.Collect() runs. This ensures detect's matchStorageClass() finds
-		// them and writes the correct storageClass names into values-detected.yaml,
-		// so no hardcoded pool overrides are needed in values-kind.yaml.
-		// A dry run must not write StorageClasses into the cluster, so it skips
-		// this, as it skips the introspection probes that create things.
-		if quickDetectKind() && !deployDryRun {
-			PrintPhaseItem("Kind cluster detected — bootstrapping zone StorageClasses...")
-			if err := setupKindStorageClasses(context.Background()); err != nil {
-				output.Warn(fmt.Sprintf("StorageClass bootstrap warning: %v", err))
-			}
-		}
-
-		if report, err = collector.Collect(context.Background()); err != nil {
-			output.Error(fmt.Sprintf("Introspection failed: %v", err))
-			return err
+	// ── Kind storage bootstrap ────────────────────────────────────────────────
+	// Create zone-specific StorageClasses (local-storage-alpha, etc.) BEFORE
+	// collector.Collect() runs. This ensures detect's matchStorageClass() finds
+	// them and writes the correct storageClass names into values-detected.yaml,
+	// so no hardcoded pool overrides are needed in values-kind.yaml.
+	// A dry run must not write StorageClasses into the cluster, so it skips
+	// this, as it skips the introspection probes that create things.
+	if quickDetectKind() && !deployDryRun {
+		PrintPhaseItem("Kind cluster detected — bootstrapping zone StorageClasses...")
+		if err := setupKindStorageClasses(context.Background()); err != nil {
+			output.Warn(fmt.Sprintf("StorageClass bootstrap warning: %v", err))
 		}
 	}
 
-	// ── Versions and scope ───────────────────────────────────────────────
-	// Resolved before any Helm call: the operator version, its chart, the
-	// Kafka window it supports, the Kafka version (asked for or the newest),
-	// the metadata version, and what the installed operator allows. A
-	// refusal here costs seconds; the same refusal from Strimzi would come
-	// after a ten-minute Helm timeout.
+	report, err := collector.Collect(context.Background())
+	if err != nil {
+		output.Error(fmt.Sprintf("Introspection failed: %v", err))
+		return nil, err
+	}
+	return report, nil
+}
+
+// resolveDeployVersions resolves versions and scope before any Helm call:
+// the operator version, its chart, the Kafka window it supports, the Kafka
+// version (asked for or the newest), the metadata version, and what the
+// installed operator allows. A refusal here costs seconds; the same refusal
+// from Strimzi would come after a ten-minute Helm timeout.
+func resolveDeployVersions() (*versionPlan, primaryCluster, error) {
 	PrintPhaseHeader(nextDeployPhase(), "Resolving Versions")
 	PrintPhaseItem("Charts: " + chartSource())
 	vp, err := resolveVersionPlanFn(context.Background(), defaultRunner, deployVersionOptions())
 	if err != nil {
-		return err
+		return nil, primaryCluster{}, err
 	}
 	vp.describe(PrintPhaseItem)
-	primary := primaryCluster{Name: deployKafkaName, Namespace: resolveNamespaces().kafka, Version: vp.kafka}
+	return vp, primaryCluster{Name: deployKafkaName, Namespace: resolveNamespaces().kafka, Version: vp.kafka}, nil
+}
 
-	valuesFile, errorLog, err := deployFiles()
-	if err != nil {
-		return err
-	}
+// writeDeployValues writes the values file the introspection sized.
+// Admin-less, nothing was introspected, so the file stays empty.
+func writeDeployValues(executor detect.CommandExecutor, valuesFile string, report *detect.DetectReport, kafkaName string) (err error) {
 	if err := os.MkdirAll(filepath.Dir(valuesFile), 0o755); err != nil {
 		return fmt.Errorf("failed to create values file: %v", err)
 	}
@@ -364,118 +483,106 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create values file: %v", err)
 	}
-	defer f.Close()
-
-	// Admin-less, nothing was introspected, so the file stays empty.
-	if !deployAdminless {
-		analyzer := detect.NewAnalyzer(executor)
-		analyzer.Analyze(report, detect.ParsedReqs{})
-
-		PrintPhaseItem("Generating " + valuesFile + "...")
-		if err := detect.RenderValuesWithReserve(report, primary.Name, 0.30, f); err != nil {
-			return fmt.Errorf("failed to write values file: %v", err)
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("failed to write values file: %v", cerr)
 		}
+	}()
+
+	if deployAdminless {
+		return nil
 	}
+	analyzer := detect.NewAnalyzer(executor)
+	analyzer.Analyze(report, detect.ParsedReqs{})
 
-	// Detect cluster type once — used by every Helm call below to pick the
-	// right values overlay (values-kind.yaml vs values-generic.yaml).
-	isKind := report.Network.CNI == "kindnet" || report.Provider == "kind"
-
-	// chartOverlay returns the path to the appropriate environment values file
-	// for a given chart directory. Falls back to generic when the file doesn't
-	// exist for that chart (e.g. kafka-cluster has no values-generic.yaml).
-	chartOverlay := func(chartDir string) string {
-		if isKind {
-			return chartDir + "/values-kind.yaml"
-		}
-		return chartDir + "/values-generic.yaml"
+	PrintPhaseItem("Generating " + valuesFile + "...")
+	if err := detect.RenderValuesWithReserve(report, kafkaName, 0.30, f); err != nil {
+		return fmt.Errorf("failed to write values file: %v", err)
 	}
+	return nil
+}
 
-	fileExists := func(path string) bool {
-		_, err := os.Stat(path)
-		return err == nil
-	}
-
-	// Resolve namespaces before building entries
-	ns := resolveNamespaces()
-
-	// ── Build shared component registry (single source of truth) ──
-	sharedEntries := buildSharedEntries(ns)
-
-	// ── Dry-run: show preview and exit ──
-	if deployDryRun {
-		return runDeployDryRun(sharedEntries, namespaceLabels, namespaceLabelSources)
-	}
-
-	// An operator upgrade or a scope change rolls things; say so and ask.
-	if deployWithStrimzi {
-		if err := vp.confirmOperatorChange(); err != nil {
-			return err
-		}
-	}
-
-	// Record each component's outcome BEFORE the pipeline runs, from the same
-	// predicate the skip logic uses: a release that already exists gets skipped
-	// ("already present"), one that does not gets deployed. Status was never
-	// recorded at all before this — the summary's table read the empty string
-	// as "Skipped" while its footer counted the same empty string as
-	// "deployed", producing eight Skipped rows above "8 components deployed
-	// successfully!".
-	markEntryStatuses(sharedEntries, func(release, namespace string) bool {
-		return releaseKept(context.Background(), release, namespace)
-	})
-
-	// 4. Execution Plan (Helm)
-	PrintPhaseHeader(nextDeployPhase(), "Executing Deployment Pipeline")
-
-	totalSteps := countDeploySteps()
-
-	// Create context
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// ---------------------------------------------------------
-	// DEPLOYMENT DASHBOARD (BUBBLE TEA)
-	// ---------------------------------------------------------
-	dashboard := NewDeployDashboard(ctx, totalSteps)
-	registerDashboardComponents(&dashboard, ns)
-
-	// Only build a bubbletea program where one can actually render. With p=nil
-	// the DashboardController falls back to plain fmt printing — that fallback
-	// existed all along; the wiring just never used it. Previously a piped or
-	// headless deploy launched an alt-screen program into the pipe, dumping
-	// escape sequences into logs.
-	var p *tea.Program
-	if isTesting {
-		p = tea.NewProgram(dashboard, tea.WithoutRenderer(), tea.WithInput(nil))
-	} else if IsInteractive() && !accessibleUI() {
-		theme.FullScreen()
-		p = tea.NewProgram(dashboard, tea.WithAltScreen())
-	}
-	dl = &DashboardController{p: p}
-
-	var step int32
-	advanceStep := func() {
-		current := atomic.AddInt32(&step, 1)
-		dl.UpdateProgress(int(current), totalSteps)
-	}
-
-	dc := &deployContext{
+// newDeployContext is what the pipeline's steps share. advanceStep is set
+// by runDeployPipeline, which knows the step count.
+func newDeployContext(ctx context.Context, ns resolvedNamespaces, valuesFile string, report *detect.DetectReport, vp *versionPlan, primary primaryCluster) *deployContext {
+	isKind := isKindReport(report)
+	return &deployContext{
 		ctx:          ctx,
 		ns:           ns,
 		valuesFile:   valuesFile,
 		isKind:       isKind,
 		report:       report,
-		chartOverlay: chartOverlay,
-		fileExists:   fileExists,
-		advanceStep:  advanceStep,
+		chartOverlay: func(chartDir string) string { return chartOverlayFor(isKind, chartDir) },
+		fileExists:   fileExistsOnDisk,
 		versions:     vp,
 		primary:      primary,
 	}
+}
 
-	var deployErr error
-	var finalEntries []DeploySummaryEntry
-	var deployElapsed time.Duration
+// isKindReport detects the cluster type once: every Helm call uses it to
+// pick the values overlay (values-kind.yaml or values-generic.yaml).
+func isKindReport(report *detect.DetectReport) bool {
+	return report.Network.CNI == "kindnet" || report.Provider == "kind"
+}
+
+// chartOverlayFor returns the path to the environment values file for a
+// chart directory. Falls back to generic when the cluster is not kind.
+func chartOverlayFor(isKind bool, chartDir string) string {
+	if isKind {
+		return chartDir + "/values-kind.yaml"
+	}
+	return chartDir + "/values-generic.yaml"
+}
+
+func fileExistsOnDisk(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// newDeployProgram builds a bubbletea program only where one can actually
+// render. With nil the DashboardController falls back to plain fmt printing
+// — that fallback existed all along; the wiring just never used it.
+// Previously a piped or headless deploy launched an alt-screen program into
+// the pipe, dumping escape sequences into logs.
+func newDeployProgram(dashboard deployDashboardModel) *tea.Program {
+	if isTesting {
+		return tea.NewProgram(dashboard, tea.WithoutRenderer(), tea.WithInput(nil))
+	}
+	if IsInteractive() && !accessibleUI() {
+		theme.FullScreen()
+		return tea.NewProgram(dashboard, tea.WithAltScreen())
+	}
+	return nil
+}
+
+// deployPipelineResult is what runDeployPipeline hands back: the summary
+// entries and elapsed time of a deploy that succeeded, the deploy's error,
+// and the dashboard's own error when its program failed.
+type deployPipelineResult struct {
+	entries      []DeploySummaryEntry
+	elapsed      time.Duration
+	err          error
+	dashboardErr error
+}
+
+// runDeployPipeline runs the namespaces and the components under the
+// deployment dashboard (Bubble Tea). It sets dc.advanceStep.
+func runDeployPipeline(dc *deployContext, sharedEntries []DeploySummaryEntry, start time.Time) deployPipelineResult {
+	totalSteps := countDeploySteps()
+
+	dashboard := NewDeployDashboard(dc.ctx, totalSteps)
+	registerDashboardComponents(&dashboard, dc.ns)
+
+	p := newDeployProgram(dashboard)
+	dl = &DashboardController{p: p}
+
+	var step int32
+	dc.advanceStep = func() {
+		current := atomic.AddInt32(&step, 1)
+		dl.UpdateProgress(int(current), totalSteps)
+	}
+
+	var res deployPipelineResult
 	doneCh := make(chan struct{})
 	go func() {
 		defer close(doneCh)
@@ -485,8 +592,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			}
 		}()
 
-		deployErr = func() error {
-			if err := ensureDeployNamespaces(ctx, dc); err != nil {
+		res.err = func() error {
+			if err := ensureDeployNamespaces(dc.ctx, dc); err != nil {
 				return err
 			}
 			if err := runDeployComponents(dc); err != nil {
@@ -494,8 +601,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			}
 
 			// Use shared entries for summary (single source of truth)
-			finalEntries = sharedEntries
-			deployElapsed = time.Since(deployStartTime)
+			res.entries = sharedEntries
+			res.elapsed = time.Since(start)
 			return nil
 		}()
 	}()
@@ -512,38 +619,33 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			// The dashboard is cosmetic; the deploy goroutine is real work.
 			// Returning here used to orphan it mid-helm — the process exited
 			// while installs were in flight, leaving releases half-applied.
-			// Wait it out, then report the more consequential error.
+			// Wait it out; the caller reports the more consequential error.
 			<-doneCh
-			if deployErr != nil {
-				return deployErr
-			}
-			return err
+			res.dashboardErr = err
+			return res
 		}
 	}
 
 	<-doneCh // Wait for deployment goroutine to fully exit
+	return res
+}
 
-	if deployErr != nil {
-		saveDeployError(errorLog, deployErr)
+// finishDeploy renders the summary of a deploy that succeeded, stores the
+// API key in the active context and, with --port-forward, forwards the ports.
+func finishDeploy(ctx context.Context, target string, ns resolvedNamespaces, entries []DeploySummaryEntry, elapsed time.Duration) {
+	RenderDeployDashboard(ctx, entries, elapsed)
+	// Said again here, where the deploy ends, so it isn't lost above the dashboard.
+	if deployAdminless && len(adminlessConformityMissing) > 0 {
+		output.Warn(conformityRoleHandoff(ns, adminlessConformityMissing))
 	}
 
-	if deployErr == nil && len(finalEntries) > 0 {
-		RenderDeployDashboard(ctx, finalEntries, deployElapsed)
-		// Said again here, where the deploy ends, so it isn't lost above the dashboard.
-		if deployAdminless && len(adminlessConformityMissing) > 0 {
-			output.Warn(conformityRoleHandoff(ns, adminlessConformityMissing))
-		}
+	// Store the key from Secret kates-api-key in the active context,
+	// unless that context holds a key kates did not put there.
+	updateActiveContextAPIKey(ctx, ns.app)
 
-		// Store the key from Secret kates-api-key in the active context,
-		// unless that context holds a key kates did not put there.
-		updateActiveContextAPIKey(ctx, ns.app)
-
-		if deployPortForward {
-			RunPortForwards(ctx, target, ns.kafka, ns.app, ns.jaeger)
-		}
+	if deployPortForward {
+		RunPortForwards(ctx, target, ns.kafka, ns.app, ns.jaeger)
 	}
-
-	return deployErr
 }
 
 // Helpers
@@ -628,8 +730,10 @@ func runExecStdinDefault(ctx context.Context, name string, args []string, stdinD
 	}
 
 	go func() {
-		defer stdin.Close()
-		stdin.Write([]byte(stdinData))
+		// A failed write or close ends the child's input early; the child
+		// then fails on what it read, and cmd.Run reports that below.
+		defer func() { _ = stdin.Close() }()
+		_, _ = io.WriteString(stdin, stdinData)
 	}()
 
 	execMutex.Lock()

@@ -126,20 +126,7 @@ func runPorts(ctx context.Context) error {
 	// ── 0. Clean up existing port forwards to prevent bind conflicts ────────────
 	fmt.Printf("\n    %s Cleaning up existing port-forwards...\n", output.DimStyle.Render("🧹"))
 
-	myPid := os.Getpid()
-	if out, err := exec.Command("pgrep", "-f", "ports").Output(); err == nil {
-		for _, pidStr := range strings.Fields(string(out)) {
-			var pid int
-			if _, err := fmt.Sscanf(pidStr, "%d", &pid); err == nil && pid != myPid {
-				if cmdOut, err := exec.Command("ps", "-p", pidStr, "-o", "command=").Output(); err == nil {
-					if isKatesPortsCommand(string(cmdOut)) {
-						_ = stopProcessFn(pid)
-					}
-				}
-			}
-		}
-	}
-
+	stopOtherPortsCommands()
 	stopOwnPortForwards()
 	// The ports of the forwards just stopped take a moment to come free.
 	time.Sleep(1000 * time.Millisecond)
@@ -158,6 +145,77 @@ func runPorts(ctx context.Context) error {
 	boldStyle := lipgloss.NewStyle().Bold(true)
 
 	// ── 2. Display table ─────────────────────────────────────────────────────
+	printPortsTable(specs)
+
+	// A port another program listens on cannot be forwarded, yet connecting
+	// to it succeeds, so the check below would call it active and the API
+	// key would go to that program. Such ports are left out.
+	taken := takenLocalPorts(specs, 2*time.Second)
+
+	// ── 3. Start all forwards in the background ──────────────────────────────
+	fmt.Printf("\n    %s Establishing port-forwards in the background...\n", boldStyle.Render("⚡"))
+
+	for _, spec := range specs {
+		if taken[spec.Local] {
+			continue
+		}
+		_ = startPortForwardFn(spec)
+	}
+
+	// Verify reachability
+	fmt.Printf("    %s Verifying connections...\n", output.DimStyle.Render("⇄"))
+	time.Sleep(300 * time.Millisecond)
+
+	v := verifyPortForwards(specs, taken)
+
+	// Point the "ports" context at the forwarded API and make it current, so
+	// follow-up commands (health, resilience, tests) work without manual
+	// ctx/api-key edits.
+	if v.apiActive {
+		endpoint := fmt.Sprintf("http://127.0.0.1:%d", v.apiLocalPort)
+		printPortsSync(os.Stdout, syncPortsContext(ctx, v.apiNS, endpoint))
+	} else if v.apiPortTaken != 0 {
+		printAPIPortTaken(os.Stdout, v.apiPortTaken)
+	}
+
+	fmt.Println()
+	if v.allOk {
+		okStyle := lipgloss.NewStyle().Foreground(theme.Success).Bold(true)
+		fmt.Printf("    %s %s\n", okStyle.Render("✓"), boldStyle.Render("Port forwards established successfully!"))
+		fmt.Printf("      %s\n\n", output.DimStyle.Render("They are running in the background. You can continue typing commands in this terminal."))
+		return nil
+	}
+	errStyle := lipgloss.NewStyle().Foreground(theme.Error).Bold(true)
+	fmt.Printf("    %s %s\n", errStyle.Render("⚠"), boldStyle.Render("Some port forwards failed to establish."))
+	fmt.Printf("      %s\n\n", output.DimStyle.Render("Check that the pods are ready, then run 'kates ports' again."))
+	// The table above says which; this sets the exit code and says so on stderr.
+	return cmdErr("some port forwards failed to establish")
+}
+
+// stopOtherPortsCommands stops the other kates ports processes on this
+// machine, whose forwards would hold the local ports this run binds.
+func stopOtherPortsCommands() {
+	myPid := os.Getpid()
+	out, err := exec.Command("pgrep", "-f", "ports").Output()
+	if err != nil {
+		return
+	}
+	for _, pidStr := range strings.Fields(string(out)) {
+		var pid int
+		if _, err := fmt.Sscanf(pidStr, "%d", &pid); err != nil || pid == myPid {
+			continue
+		}
+		if cmdOut, err := exec.Command("ps", "-p", pidStr, "-o", "command=").Output(); err == nil {
+			if isKatesPortsCommand(string(cmdOut)) {
+				_ = stopProcessFn(pid)
+			}
+		}
+	}
+}
+
+// printPortsTable lists the forwards about to start.
+func printPortsTable(specs []portForwardSpec) {
+	boldStyle := lipgloss.NewStyle().Bold(true)
 	fmt.Printf("\n    %s Port Forwarding %s\n", boldStyle.Render("⇄"), output.DimStyle.Render(fmt.Sprintf("(%d services)", len(specs))))
 	fmt.Printf("    %s\n", output.DimStyle.Render("────────────────────────────────────────────────────────────────"))
 	fmt.Printf("    %s  %s  %s  %s\n",
@@ -181,101 +239,63 @@ func runPorts(ctx context.Context) error {
 	}
 
 	fmt.Printf("    %s\n", output.DimStyle.Render("────────────────────────────────────────────────────────────────"))
+}
 
-	// A port another program listens on cannot be forwarded, yet connecting
-	// to it succeeds, so the check below would call it active and the API
-	// key would go to that program. Such ports are left out.
-	taken := takenLocalPorts(specs, 2*time.Second)
+// portsVerification is what verifyPortForwards found: whether every forward
+// is up, and where the Kates API forward is, or the local port in use that
+// kept it from starting.
+type portsVerification struct {
+	allOk        bool
+	apiActive    bool
+	apiNS        string
+	apiLocalPort int
+	apiPortTaken int
+}
 
-	// ── 3. Start all forwards in the background ──────────────────────────────
-	fmt.Printf("\n    %s Establishing port-forwards in the background...\n", boldStyle.Render("⚡"))
-
-	for _, spec := range specs {
-		if taken[spec.Local] {
-			continue
-		}
-		_ = startPortForwardFn(spec)
-	}
-
-	// Verify reachability
-	fmt.Printf("    %s Verifying connections...\n", output.DimStyle.Render("⇄"))
-	time.Sleep(300 * time.Millisecond)
-
+// verifyPortForwards waits up to 1.5s for each forward's local port to
+// answer and prints a status line for each.
+func verifyPortForwards(specs []portForwardSpec, taken map[int]bool) portsVerification {
 	okStyle := lipgloss.NewStyle().Foreground(theme.Success).Bold(true)
 	errStyle := lipgloss.NewStyle().Foreground(theme.Error).Bold(true)
 
-	allOk := true
-	katesAPIForwardActive := false
-	katesAPINS := ""
-	katesAPILocalPort := 0
-	katesAPIPortTaken := 0
+	v := portsVerification{allOk: true}
 	for _, spec := range specs {
 		if taken[spec.Local] {
-			allOk = false
+			v.allOk = false
 			if spec.Label == katesAPILabel {
-				katesAPIPortTaken = spec.Local
+				v.apiPortTaken = spec.Local
 			}
-			fmt.Printf("    %s  %-26s  localhost:%-5d  %s\n",
-				errStyle.Render("✖"),
-				spec.Label,
-				spec.Local,
-				output.ErrorStyle.Render("[IN USE]"),
-			)
+			printForwardStatus(errStyle.Render("✖"), spec, output.ErrorStyle.Render("[IN USE]"))
 			continue
 		}
-		addr := fmt.Sprintf("127.0.0.1:%d", spec.Local)
-		success := false
-		for i := 0; i < 15; i++ {
-			if isPortReachable(addr) {
-				success = true
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
+		if !waitPortReachable(fmt.Sprintf("127.0.0.1:%d", spec.Local)) {
+			v.allOk = false
+			printForwardStatus(errStyle.Render("✖"), spec, output.ErrorStyle.Render("[FAILED]"))
+			continue
 		}
-
-		if success {
-			if spec.Label == katesAPILabel {
-				katesAPIForwardActive = true
-				katesAPINS = spec.Namespace
-				katesAPILocalPort = spec.Local
-			}
-			fmt.Printf("    %s  %-26s  localhost:%-5d  %s\n",
-				okStyle.Render("✔"),
-				spec.Label,
-				spec.Local,
-				output.SuccessStyle.Render("[ACTIVE]"),
-			)
-		} else {
-			allOk = false
-			fmt.Printf("    %s  %-26s  localhost:%-5d  %s\n",
-				errStyle.Render("✖"),
-				spec.Label,
-				spec.Local,
-				output.ErrorStyle.Render("[FAILED]"),
-			)
+		if spec.Label == katesAPILabel {
+			v.apiActive = true
+			v.apiNS = spec.Namespace
+			v.apiLocalPort = spec.Local
 		}
+		printForwardStatus(okStyle.Render("✔"), spec, output.SuccessStyle.Render("[ACTIVE]"))
 	}
+	return v
+}
 
-	// Point the "ports" context at the forwarded API and make it current, so
-	// follow-up commands (health, resilience, tests) work without manual
-	// ctx/api-key edits.
-	if katesAPIForwardActive {
-		endpoint := fmt.Sprintf("http://127.0.0.1:%d", katesAPILocalPort)
-		printPortsSync(os.Stdout, syncPortsContext(ctx, katesAPINS, endpoint))
-	} else if katesAPIPortTaken != 0 {
-		printAPIPortTaken(os.Stdout, katesAPIPortTaken)
+// waitPortReachable polls addr 15 times, 100ms apart.
+func waitPortReachable(addr string) bool {
+	for i := 0; i < 15; i++ {
+		if isPortReachable(addr) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
+	return false
+}
 
-	fmt.Println()
-	if allOk {
-		fmt.Printf("    %s %s\n", okStyle.Render("✓"), boldStyle.Render("Port forwards established successfully!"))
-		fmt.Printf("      %s\n\n", output.DimStyle.Render("They are running in the background. You can continue typing commands in this terminal."))
-		return nil
-	}
-	fmt.Printf("    %s %s\n", errStyle.Render("⚠"), boldStyle.Render("Some port forwards failed to establish."))
-	fmt.Printf("      %s\n\n", output.DimStyle.Render("Check that the pods are ready, then run 'kates ports' again."))
-	// The table above says which; this sets the exit code and says so on stderr.
-	return cmdErr("some port forwards failed to establish")
+func printForwardStatus(mark string, spec portForwardSpec, status string) {
+	fmt.Printf("    %s  %-26s  localhost:%-5d  %s\n", mark, spec.Label, spec.Local, status)
 }
 
 // stopOwnPortForwards stops the kubectl port-forwards kates ports started on

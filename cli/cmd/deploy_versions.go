@@ -208,14 +208,8 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 	vp := &versionPlan{}
 
 	// 1. Scope.
-	switch o.Scope {
-	case "", scopeCluster:
-		vp.Scope = scopeCluster
-	case scopeNamespace:
-		vp.Scope = scopeNamespace
-		vp.Watch = o.watchList()
-	default:
-		return nil, fmt.Errorf("--operator-scope must be %q or %q, got %q", scopeCluster, scopeNamespace, o.Scope)
+	if err := vp.resolveScope(o); err != nil {
+		return nil, err
 	}
 
 	// 2. Operator version.
@@ -230,23 +224,75 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 			return nil, err
 		}
 	}
-	requested := strings.TrimSpace(o.StrimziVersion)
+	requested, err := vp.chooseOperatorVersion(ctx, r, o, pin)
+	if err != nil {
+		return nil, err
+	}
 
-	// 2b. What the cluster already runs outranks the pin.
-	//
-	// The pin is a default, and a default that refuses to deploy is a bug. A
-	// cluster running a NEWER operator than this platform release was tested
-	// with is an ordinary state — someone ran --strimzi-version latest, or the
-	// checkout is older than the cluster — and `kates deploy` with no version
-	// flag should keep what is there rather than propose a downgrade nobody
-	// asked for and then refuse its own proposal.
-	//
-	// An explicit --strimzi-version or --strimzi-chart is a request rather
-	// than a default, so it is left alone: it reaches the downgrade rail in
-	// compareInstalled and is refused there, with the reason.
+	// 3. Operator chart.
+	if err := vp.loadOperatorChart(ctx, r, o, requested, pin, cacheDir); err != nil {
+		return nil, err
+	}
+
+	// 4. Window and API: the floor.
+	floor, err := vp.checkOperatorFloor(o, pin)
+	if err != nil {
+		return nil, err
+	}
+
+	// 5. Kafka version.
+	if err := vp.chooseKafkaVersion(ctx, r, o, floor); err != nil {
+		return nil, err
+	}
+
+	// 6. Installed operators.
+	vp.OperatorAction = "install"
+	if r != nil {
+		if err := vp.checkInstalledOperators(ctx, r, o); err != nil {
+			return nil, err
+		}
+	}
+
+	// 7. Derived settings: the chart directory helm installs from.
+	if err := vp.resolveChartDir(o, cacheDir); err != nil {
+		return nil, err
+	}
+	return vp, nil
+}
+
+// resolveScope is step 1: the operator scope, and the namespaces a
+// namespace-scoped operator watches.
+func (vp *versionPlan) resolveScope(o versionOptions) error {
+	switch o.Scope {
+	case "", scopeCluster:
+		vp.Scope = scopeCluster
+	case scopeNamespace:
+		vp.Scope = scopeNamespace
+		vp.Watch = o.watchList()
+	default:
+		return fmt.Errorf("--operator-scope must be %q or %q, got %q", scopeCluster, scopeNamespace, o.Scope)
+	}
+	return nil
+}
+
+// chooseOperatorVersion is step 2b: the operator version to resolve, from
+// the flag and from what the cluster already runs, which outranks the pin.
+//
+// The pin is a default, and a default that refuses to deploy is a bug. A
+// cluster running a NEWER operator than this platform release was tested
+// with is an ordinary state — someone ran --strimzi-version latest, or the
+// checkout is older than the cluster — and `kates deploy` with no version
+// flag should keep what is there rather than propose a downgrade nobody
+// asked for and then refuse its own proposal.
+//
+// An explicit --strimzi-version or --strimzi-chart is a request rather
+// than a default, so it is left alone: it reaches the downgrade rail in
+// compareInstalled and is refused there, with the reason.
+func (vp *versionPlan) chooseOperatorVersion(ctx context.Context, r strimzi.Runner, o versionOptions, pin string) (string, error) {
+	requested := strings.TrimSpace(o.StrimziVersion)
 	if r != nil {
 		if err := vp.readInstalled(ctx, r, o); err != nil {
-			return nil, err
+			return "", err
 		}
 	}
 	if !o.FollowInstalled && requested == "" && o.StrimziChart == "" && vp.primaryOp != nil {
@@ -258,26 +304,38 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 	// Admin-less, this deploy never touches the operator, older than the pin
 	// or not: the Kafka resources must fit the one that runs, at its scope.
 	if o.FollowInstalled && vp.primaryOp != nil {
-		requested, vp.Scope, vp.Watch = vp.primaryOp.Version, scopeCluster, nil
-		if vp.primaryOp.Scope == strimzi.ScopeNamespaces {
-			vp.Scope, vp.Watch = scopeNamespace, o.watchList()
-		}
-		if requested != pin {
-			vp.Notes = append(vp.Notes, fmt.Sprintf("admin-less: Kafka follows the installed Strimzi %s, which only a cluster admin can change", requested))
-		}
-		if older, cerr := compareVersions(requested, pin); cerr == nil && older < 0 {
-			vp.Notes = append(vp.Notes, fmt.Sprintf("Strimzi %s is available (this platform's pin): ask a cluster admin to upgrade the operator, then deploy again for its newer Kafka versions", pin))
-		}
+		requested = vp.followInstalledOperator(o, pin)
 	}
+	return requested, nil
+}
 
-	// 3. Operator chart.
+// followInstalledOperator takes the installed operator's version and scope,
+// for an admin-less deploy, and notes what only a cluster admin can change.
+func (vp *versionPlan) followInstalledOperator(o versionOptions, pin string) string {
+	requested := vp.primaryOp.Version
+	vp.Scope, vp.Watch = scopeCluster, nil
+	if vp.primaryOp.Scope == strimzi.ScopeNamespaces {
+		vp.Scope, vp.Watch = scopeNamespace, o.watchList()
+	}
+	if requested != pin {
+		vp.Notes = append(vp.Notes, fmt.Sprintf("admin-less: Kafka follows the installed Strimzi %s, which only a cluster admin can change", requested))
+	}
+	if older, cerr := compareVersions(requested, pin); cerr == nil && older < 0 {
+		vp.Notes = append(vp.Notes, fmt.Sprintf("Strimzi %s is available (this platform's pin): ask a cluster admin to upgrade the operator, then deploy again for its newer Kafka versions", pin))
+	}
+	return requested
+}
+
+// loadOperatorChart is step 3: the operator chart for the requested
+// version, read.
+func (vp *versionPlan) loadOperatorChart(ctx context.Context, r strimzi.Runner, o versionOptions, requested, pin, cacheDir string) error {
 	path, source, pinned, err := resolveOperatorChart(ctx, r, o, requested, pin, cacheDir)
 	if err != nil {
 		if vp.Adopted {
-			return nil, fmt.Errorf("Strimzi %s is installed, which is newer than this platform's pin (%s), so deploy keeps it — but its chart could not be read: %w\n  Ways forward:\n    - fetch it once:                 helm pull oci://quay.io/strimzi-helm/%s --version %s\n    - or deploy against the pin:     kates clean, then kates deploy (an operator downgrade needs the teardown)",
+			return fmt.Errorf("the installed Strimzi %s is newer than this platform's pin (%s), so deploy keeps it — but its chart could not be read: %w\n  Ways forward:\n    - fetch it once:                 helm pull oci://quay.io/strimzi-helm/%s --version %s\n    - or deploy against the pin:     kates clean, then kates deploy (an operator downgrade needs the teardown)",
 				vp.primaryOp.Version, pin, err, strimzi.ChartName, vp.primaryOp.Version)
 		}
-		return nil, err
+		return err
 	}
 	vp.ChartPath, vp.StrimziSource, vp.Pinned = path, source, pinned
 	if vp.Adopted {
@@ -285,23 +343,28 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 	}
 	chart, err := strimzi.ReadChart(vp.ChartPath)
 	if err != nil {
-		return nil, fmt.Errorf("reading the operator chart %s: %w", vp.ChartPath, err)
+		return fmt.Errorf("reading the operator chart %s: %w", vp.ChartPath, err)
 	}
 	vp.chart = chart
 	vp.StrimziVersion = chart.Version
 	vp.Window = chart.Window.Strings()
 	if vp.Pinned && chart.Version != pin {
-		return nil, fmt.Errorf("the fetched operator chart is %s but the pin is %s: run `helm dependency build %s`", chart.Version, pin, operatorChartDir)
+		return fmt.Errorf("the fetched operator chart is %s but the pin is %s: run `helm dependency build %s`", chart.Version, pin, operatorChartDir)
 	}
+	return nil
+}
 
-	// 4. Window and API: the floor.
+// checkOperatorFloor is step 4: the operator must run the platform's Kafka
+// floor, which it returns. An operator newer than the pin gets a note.
+func (vp *versionPlan) checkOperatorFloor(o versionOptions, pin string) (kafkaversion.Version, error) {
+	chart := vp.chart
 	floor, err := kafkaFloor(o.RepoRoot)
 	if err != nil {
-		return nil, err
+		return kafkaversion.Version{}, err
 	}
 	vp.KafkaFloor = floor.String()
 	if fc := strimzi.CheckPrimaryFloor(chart, floor); !fc.OK {
-		return nil, fmt.Errorf("Strimzi %s cannot run this platform's primary cluster: %s", chart.Version, fc.Reason)
+		return kafkaversion.Version{}, fmt.Errorf("the Strimzi %s operator cannot run this platform's primary cluster: %s", chart.Version, fc.Reason)
 	}
 	if cmp, _ := compareVersions(chart.Version, pin); cmp > 0 {
 		if vp.Adopted {
@@ -310,8 +373,13 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 			vp.Notes = append(vp.Notes, fmt.Sprintf("Strimzi %s is newer than the version this platform release was tested with (%s)", chart.Version, pin))
 		}
 	}
+	return floor, nil
+}
 
-	// 5. Kafka version.
+// chooseKafkaVersion is step 5: the Kafka version asked for, or the newest
+// in the window, and its metadata version.
+func (vp *versionPlan) chooseKafkaVersion(ctx context.Context, r strimzi.Runner, o versionOptions, floor kafkaversion.Version) error {
+	chart := vp.chart
 	if o.KafkaVersion == "" || o.KafkaVersion == "latest" {
 		newest, _ := chart.Window.Newest()
 		vp.kafka = newest
@@ -324,45 +392,47 @@ func resolveVersionPlan(ctx context.Context, r strimzi.Runner, o versionOptions)
 	} else {
 		v, err := kafkaversion.Parse(o.KafkaVersion)
 		if err != nil {
-			return nil, fmt.Errorf("--kafka-version %q: expected x.y.z or latest", o.KafkaVersion)
+			return fmt.Errorf("--kafka-version %q: expected x.y.z or latest", o.KafkaVersion)
 		}
 		if !chart.Window.Supports(v) {
-			return nil, unsupportedKafkaError(v, chart, vp.Scope, o)
+			return unsupportedKafkaError(v, chart, vp.Scope, o)
 		}
 		if floor != (kafkaversion.Version{}) && v.Less(floor) {
-			return nil, fmt.Errorf("Kafka %s is below this platform's floor %s (%s) — the primary's configuration needs share groups; run it as an additional cluster instead: kates clusters add --version %s", v, floor, kafkaFloorKey, v)
+			return fmt.Errorf("the requested Kafka %s is below this platform's floor %s (%s) — the primary's configuration needs share groups; run it as an additional cluster instead: kates clusters add --version %s", v, floor, kafkaFloorKey, v)
 		}
 		vp.kafka = v
 	}
 	vp.KafkaVersion = vp.kafka.String()
 	vp.Metadata = kafkaversion.MetadataFor(vp.kafka, chart.Window)
+	return nil
+}
 
-	// 6. Installed operators.
-	vp.OperatorAction = "install"
-	if r != nil {
-		if err := vp.compareInstalled(ctx, r, o); err != nil {
-			return nil, err
-		}
-		// A chart-only read (the wizard, kates versions) refuses kubectl, so
-		// this check would fail it and hide the Kafka version; deploy runs it.
-		if _, chartOnly := r.(chartOnlyRunner); !chartOnly {
-			if err := vp.checkStrimziCRDStorage(ctx, r); err != nil {
-				return nil, err
-			}
-		}
+// checkInstalledOperators is step 6: the rails that judge the plan against
+// the operators on the cluster.
+func (vp *versionPlan) checkInstalledOperators(ctx context.Context, r strimzi.Runner, o versionOptions) error {
+	if err := vp.compareInstalled(ctx, r, o); err != nil {
+		return err
 	}
+	// A chart-only read (the wizard, kates versions) refuses kubectl, so
+	// this check would fail it and hide the Kafka version; deploy runs it.
+	if _, chartOnly := r.(chartOnlyRunner); chartOnly {
+		return nil
+	}
+	return vp.checkStrimziCRDStorage(ctx, r)
+}
 
-	// 7. Derived settings: the chart directory helm installs from.
+// resolveChartDir is step 7: the chart directory helm installs from.
+func (vp *versionPlan) resolveChartDir(o versionOptions, cacheDir string) error {
 	if vp.Pinned {
 		vp.ChartDir = filepath.Join(o.RepoRoot, operatorChartDir)
-	} else {
-		dir, err := strimzi.WrapperFor(o.RepoRoot, cacheDir, chart.Version, vp.ChartPath)
-		if err != nil {
-			return nil, fmt.Errorf("preparing the operator chart for %s: %w", chart.Version, err)
-		}
-		vp.ChartDir = dir
+		return nil
 	}
-	return vp, nil
+	dir, err := strimzi.WrapperFor(o.RepoRoot, cacheDir, vp.chart.Version, vp.ChartPath)
+	if err != nil {
+		return fmt.Errorf("preparing the operator chart for %s: %w", vp.chart.Version, err)
+	}
+	vp.ChartDir = dir
+	return nil
 }
 
 // resolveOperatorChart finds the tarball for the operator version being

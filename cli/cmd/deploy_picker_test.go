@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/bmscomp/kates/cli/pkg/strimzi"
+	"github.com/charmbracelet/huh"
 )
 
 func catalogueOf(versions ...string) []strimzi.CatalogueEntry {
@@ -69,5 +72,59 @@ func TestRecentCatalogueEntriesShortCatalogue(t *testing.T) {
 	got := recentCatalogueEntries(catalogueOf("1.2.0", "1.1.0"), map[string]bool{}, operatorPickerLimit)
 	if len(got) != 2 {
 		t.Fatalf("offered %d releases, want both", len(got))
+	}
+}
+
+// optionLabels flattens the picker's options to "value=label" for comparing.
+func optionLabels(opts []huh.Option[string]) []string {
+	out := make([]string, 0, len(opts))
+	for _, o := range opts {
+		out = append(out, o.Value+"="+o.Key)
+	}
+	return out
+}
+
+// With no operator installed, the pin leads, then the catalogue newest first,
+// each marked against the pin and the v1 storage line.
+func TestOperatorPickerOptionsWithoutInstalledOperator(t *testing.T) {
+	opts, desc := operatorPickerOptions("1.0.1", nil, catalogueOf("1.1.0", "1.0.1", "0.49.0"))
+	want := []string{
+		"1.0.1=1.0.1  (pinned — tested with this release)",
+		"1.1.0=1.1.0  (newer than pinned — untested)",
+		"0.49.0=0.49.0  (stores v1beta2)",
+	}
+	if got := optionLabels(opts); !slices.Equal(got, want) {
+		t.Fatalf("options:\n got %q\nwant %q", got, want)
+	}
+	if strings.Contains(desc, "Installed:") {
+		t.Fatalf("description names an installed operator when there is none: %q", desc)
+	}
+}
+
+// An installed operator newer than the pin leads, the pin and anything older
+// than the installed one are left out (Strimzi cannot downgrade), and a newer
+// release is offered as an upgrade from it.
+func TestOperatorPickerOptionsInstalledNewerThanThePin(t *testing.T) {
+	installed := &strimzi.Operator{Namespace: "strimzi", Version: "1.1.0", Scope: strimzi.ScopeCluster}
+	opts, desc := operatorPickerOptions("1.0.1", installed, catalogueOf("1.2.0", "1.1.0", "1.0.1"))
+	want := []string{
+		"1.1.0=1.1.0  (installed — keep)",
+		"1.2.0=1.2.0  (newer than pinned — untested)  (upgrade from 1.1.0)",
+	}
+	if got := optionLabels(opts); !slices.Equal(got, want) {
+		t.Fatalf("options:\n got %q\nwant %q", got, want)
+	}
+	if !strings.Contains(desc, "Installed: Strimzi 1.1.0 in namespace strimzi, cluster-wide") {
+		t.Fatalf("description does not name the installed operator: %q", desc)
+	}
+}
+
+// The installed operator at the pin is offered once, marked as both.
+func TestOperatorPickerOptionsInstalledAtThePin(t *testing.T) {
+	installed := &strimzi.Operator{Namespace: "strimzi", Version: "1.0.1", Scope: strimzi.ScopeCluster}
+	opts, _ := operatorPickerOptions("1.0.1", installed, nil)
+	want := []string{"1.0.1=1.0.1  (installed, pinned — keep)"}
+	if got := optionLabels(opts); !slices.Equal(got, want) {
+		t.Fatalf("options:\n got %q\nwant %q", got, want)
 	}
 }

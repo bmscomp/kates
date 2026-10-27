@@ -66,84 +66,14 @@ func runVersionPickerForm() error {
 		deployKafkaVersion = "latest"
 	}
 
-	// Operator options: the pin first, then the newest published releases
-	// (with a short deadline — a picker must not hang on the network).
-	//
-	// Bounded on purpose. The catalogue carries every chart Strimzi ever
-	// published, and a select that long buries the choice anyone actually
-	// wants below a scroll. operatorPickerLimit releases is about a year of
-	// Strimzi; older than that is a migration rather than a deploy, since it
-	// falls outside the Kafka window this platform's primary needs and would
-	// only be refused later in resolution.
-	//
-	// The installed operator leads: keeping it is the safe answer, a newer
-	// release upgrades it, and an older one is left out.
-	var opOptions []huh.Option[string]
-	seen := map[string]bool{}
-	opDesc := fmt.Sprintf("The %d newest published releases; the Kafka window follows from this choice. --strimzi-version takes any other.", operatorPickerLimit)
-	if installed != nil {
-		label := installed.Version + "  (installed — keep)"
-		if installed.Version == pin {
-			label = installed.Version + "  (installed, pinned — keep)"
-		}
-		opOptions = append(opOptions, huh.NewOption(label, installed.Version))
-		seen[installed.Version] = true
-		opDesc += "\nInstalled: " + describeStrimziOperator(*installed) + ". Older releases are left out: Strimzi cannot downgrade, so going back needs kates clean first."
-	}
-	if !seen[pin] && !olderThan(pin, installed) {
-		opOptions = append(opOptions, huh.NewOption(againstInstalled(pin, pin+"  (pinned — tested with this release)", installed), pin))
-		seen[pin] = true
-	}
-	if cacheDir, cerr := strimzi.DefaultCacheDir(); cerr == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		defer cancel()
-		if cat, ferr := strimzi.FetchCatalogue(ctx, defaultRunner, cacheDir, false); ferr == nil {
-			for _, e := range recentCatalogueEntries(cat.Entries, seen, operatorPickerLimit) {
-				if olderThan(e.Version, installed) {
-					break // newest first: the rest are older too
-				}
-				label := e.Version
-				if cmp, _ := compareVersions(e.Version, pin); cmp > 0 {
-					label += "  (newer than pinned — untested)"
-				} else if old, _ := compareVersions(e.Version, strimziV1); old < 0 {
-					label += "  (stores v1beta2)"
-				}
-				seen[e.Version] = true
-				opOptions = append(opOptions, huh.NewOption(againstInstalled(e.Version, label, installed), e.Version))
-			}
-		}
-	}
-
-	// Kafka options follow the operator: read (pull if needed) the chart of
-	// the selected version and list its window, newest first.
-	kafkaOptions := func() []huh.Option[string] {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		vp, err := resolveVersionPlanChartOnly(ctx, defaultRunner, versionOptions{
-			RepoRoot: chartRoot, StrimziVersion: deployStrimziVersion, Scope: deployOperatorScope,
-		})
-		if err != nil {
-			return []huh.Option[string]{huh.NewOption("latest  (could not read the window: "+firstLine(err.Error())+")", "latest")}
-		}
-		newest, _ := vp.chart.Window.Newest()
-		opts := []huh.Option[string]{huh.NewOption(fmt.Sprintf("%s  (newest supported by Strimzi %s)", newest, vp.StrimziVersion), "latest")}
-		for i := len(vp.chart.Window) - 2; i >= 0 && len(opts) < kafkaPickerLimit; i-- {
-			v := vp.chart.Window[i]
-			label := v.String()
-			if fl, ferr := kafkaFloor(chartRoot); ferr == nil && fl != (kafkaversion.Version{}) && v.Less(fl) {
-				label += "  (below this platform's floor — additional clusters only)"
-			}
-			opts = append(opts, huh.NewOption(label, v.String()))
-		}
-		return opts
-	}
+	opOptions, opDesc := operatorPickerOptions(pin, installed, pickerCatalogue())
 
 	kafkaSelect := huh.NewSelect[string]().
 		Title("Kafka version for the primary cluster").
 		DescriptionFunc(func() string {
 			return fmt.Sprintf("The %d newest Strimzi %s can run. Older ones are additional clusters (kates migrate up --from …), or --kafka-version.", kafkaPickerLimit, deployStrimziVersion)
 		}, &deployStrimziVersion).
-		OptionsFunc(kafkaOptions, &deployStrimziVersion).
+		OptionsFunc(pickerKafkaOptions, &deployStrimziVersion).
 		Value(&deployKafkaVersion)
 	fields := []huh.Field{
 		huh.NewSelect[string]().
@@ -181,6 +111,93 @@ func runVersionPickerForm() error {
 		deployStrimziVersion = "" // the pin is the default; keep the flag empty so "pinned" is reported
 	}
 	return nil
+}
+
+// pickerCatalogue reads the Strimzi catalogue for the operator picker, with
+// a short deadline — a picker must not hang on the network. It returns nil
+// when the catalogue cannot be read.
+func pickerCatalogue() []strimzi.CatalogueEntry {
+	cacheDir, err := strimzi.DefaultCacheDir()
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cat, err := strimzi.FetchCatalogue(ctx, defaultRunner, cacheDir, false)
+	if err != nil {
+		return nil
+	}
+	return cat.Entries
+}
+
+// operatorPickerOptions is the operator select's options and description:
+// the pin first, then the newest published releases from catalogue.
+//
+// Bounded on purpose. The catalogue carries every chart Strimzi ever
+// published, and a select that long buries the choice anyone actually
+// wants below a scroll. operatorPickerLimit releases is about a year of
+// Strimzi; older than that is a migration rather than a deploy, since it
+// falls outside the Kafka window this platform's primary needs and would
+// only be refused later in resolution.
+//
+// The installed operator leads: keeping it is the safe answer, a newer
+// release upgrades it, and an older one is left out.
+func operatorPickerOptions(pin string, installed *strimzi.Operator, catalogue []strimzi.CatalogueEntry) ([]huh.Option[string], string) {
+	var opOptions []huh.Option[string]
+	seen := map[string]bool{}
+	opDesc := fmt.Sprintf("The %d newest published releases; the Kafka window follows from this choice. --strimzi-version takes any other.", operatorPickerLimit)
+	if installed != nil {
+		label := installed.Version + "  (installed — keep)"
+		if installed.Version == pin {
+			label = installed.Version + "  (installed, pinned — keep)"
+		}
+		opOptions = append(opOptions, huh.NewOption(label, installed.Version))
+		seen[installed.Version] = true
+		opDesc += "\nInstalled: " + describeStrimziOperator(*installed) + ". Older releases are left out: Strimzi cannot downgrade, so going back needs kates clean first."
+	}
+	if !seen[pin] && !olderThan(pin, installed) {
+		opOptions = append(opOptions, huh.NewOption(againstInstalled(pin, pin+"  (pinned — tested with this release)", installed), pin))
+		seen[pin] = true
+	}
+	for _, e := range recentCatalogueEntries(catalogue, seen, operatorPickerLimit) {
+		if olderThan(e.Version, installed) {
+			break // newest first: the rest are older too
+		}
+		label := e.Version
+		if cmp, _ := compareVersions(e.Version, pin); cmp > 0 {
+			label += "  (newer than pinned — untested)"
+		} else if old, _ := compareVersions(e.Version, strimziV1); old < 0 {
+			label += "  (stores v1beta2)"
+		}
+		seen[e.Version] = true
+		opOptions = append(opOptions, huh.NewOption(againstInstalled(e.Version, label, installed), e.Version))
+	}
+	return opOptions, opDesc
+}
+
+// pickerKafkaOptions is the Kafka select's options, which follow the
+// operator: read (pull if needed) the chart of the selected version and list
+// its window, newest first.
+func pickerKafkaOptions() []huh.Option[string] {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	vp, err := resolveVersionPlanChartOnly(ctx, defaultRunner, versionOptions{
+		RepoRoot: chartRoot, StrimziVersion: deployStrimziVersion, Scope: deployOperatorScope,
+	})
+	if err != nil {
+		return []huh.Option[string]{huh.NewOption("latest  (could not read the window: "+firstLine(err.Error())+")", "latest")}
+	}
+	newest, _ := vp.chart.Window.Newest()
+	opts := []huh.Option[string]{huh.NewOption(fmt.Sprintf("%s  (newest supported by Strimzi %s)", newest, vp.StrimziVersion), "latest")}
+	for i := len(vp.chart.Window) - 2; i >= 0 && len(opts) < kafkaPickerLimit; i-- {
+		v := vp.chart.Window[i]
+		label := v.String()
+		if fl, ferr := kafkaFloor(chartRoot); ferr == nil && fl != (kafkaversion.Version{}) && v.Less(fl) {
+			label += "  (below this platform's floor — additional clusters only)"
+		}
+		opts = append(opts, huh.NewOption(label, v.String()))
+	}
+	return opts
 }
 
 // installedPrimaryOperator is the Strimzi operator watching the Kafka
